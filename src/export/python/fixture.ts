@@ -116,6 +116,15 @@ export function everythingGraph(): CodaGraph {
       params: { rows: 'preType', columns: 'postType', value: 'weight', agg: 'sum' } },
     { id: 'norm', type: 'core.normalize', col: 11, params: { mode: 'row' } },
 
+    /*
+     * Twice, and that is not redundancy: the emitter branches on the input's *kind*, because a
+     * navis NeuronList slices as `nl[i:i+1]` where a frame needs `.iloc`. One on each side, or
+     * the golden file records only the half that happens to be a DataFrame.
+     */
+    { id: 'pick', type: 'core.selectOne', col: 5, row: 1, params: { selected: 3, live: false } },
+    { id: 'pickSkel', type: 'core.selectOne', col: 3, row: 10,
+      params: { selected: 0, live: true } },
+
     { id: 'upload', type: 'core.uploadTable', col: 3, row: 3,
       params: { fileName: 'annotations.csv', idColumn: 'root_id', textColumns: ['cluster'] } },
     { id: 'url', type: 'core.tableFromUrl', col: 3, row: 4,
@@ -189,6 +198,8 @@ export function everythingGraph(): CodaGraph {
     ['filter', 'out', 'sort', 'in'],
     ['sort', 'out', 'sample', 'in'],
     ['sample', 'out', 'group', 'in'],
+    ['sort', 'out', 'pick', 'in'],
+    ['skel', 'skeletons', 'pickSkel', 'in'],
     ['group', 'out', 'select', 'in'],
     ['select', 'out', 'join', 'left'],
     ['group', 'out', 'join', 'right'],

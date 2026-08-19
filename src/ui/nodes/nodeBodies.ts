@@ -27,6 +27,7 @@ import { DownloadBody } from './DownloadBody'
 import { IdsFromLabelBody } from './IdsFromLabelBody'
 import { InputIdsBody } from './InputIdsBody'
 import { PathsBody } from './PathsBody'
+import { SelectOneBody } from './SelectOneBody'
 import { UploadBody } from './UploadBody'
 
 export interface NodeBodyProps {
@@ -119,6 +120,13 @@ export const NODE_BODIES: Record<string, NodeBodyEntry> = {
    * twenty rows of it do not belong on a canvas.
    */
   'core.uploadTable': { Component: UploadBody, width: 300, expandable: true },
+  /*
+   * Wide enough for the pager and the commit button to share one line — `‹ › 5 / 271  DNp01
+   * [Use this]` wrapped onto two lines reads as two controls rather than one. Not `expandable`:
+   * the whole widget is a row of buttons and a checkbox, so an overlay of it is whitespace, and
+   * what is worth looking at full size is whatever the Item port is wired to.
+   */
+  'core.selectOne': { Component: SelectOneBody, width: 300 },
 }
 
 export function nodeBody(type: string): NodeBodyEntry | undefined {

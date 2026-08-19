@@ -34,6 +34,7 @@ export { pivotNode } from './table/pivot'
 export { normalizeNode } from './table/normalize'
 export { uploadTableNode } from './table/upload'
 export { tableFromUrlNode } from './table/fromUrl'
+export { selectOneNode } from './transform/selectOne'
 export { buildNetworkNode } from './analysis/buildNetwork'
 
 export { tableViewNode } from './output/table'

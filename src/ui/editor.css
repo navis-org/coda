@@ -5002,6 +5002,13 @@ details[open] > summary.tile__label {
   flex-direction: column;
   gap: 6px;
   min-width: 0;
+  /*
+   * The same inset `.coda-node__params` takes, and for the same reason: `.coda-node::before` is
+   * a coloured state bar down the card's left edge, so a body starting at 0 has its first few
+   * pixels painted over — "ID column" reads as "D column" and "IDs" as "Ds". A custom body
+   * replaces the param band, so it has to replace its padding too.
+   */
+  padding: 4px 8px 6px calc(8px + var(--state-bar));
 }
 .list-body__fields {
   display: flex;
@@ -5047,6 +5054,52 @@ details[open] > summary.tile__label {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* ---------------------------------------------------------------------------
+ * Select One card
+ *
+ * Shares `.list-body` with the two paste-target cards — the fields and the foot line are the
+ * same object — and adds only the pager row above them.
+ * ------------------------------------------------------------------------- */
+
+.step-body__pager {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.step-body__btn {
+  padding: 0 6px;
+  line-height: 18px;
+  font-size: 13px;
+}
+/*
+ * Tabular figures, so the position does not jitter sideways as the digits change under a held
+ * arrow key — the number is a millimetre from the button being pressed.
+ */
+.step-body__position {
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.step-body__name {
+  font-size: 10px;
+  color: var(--text-primary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.step-body__spacer {
+  flex: 1;
+  min-width: 0;
+}
+.step-body__commit {
+  flex: none;
+  font-size: 10px;
+  padding: 1px 6px;
 }
 
 /* ---------------------------------------------------------------------------

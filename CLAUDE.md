@@ -334,6 +334,8 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `nodes/output/datasetSummary.test.ts`    | that a chart setting stales nothing while `Status` does, and that it emits no ports at all                                        |
 | `ui/viewers/datasetSummary.test.tsx`     | the card: absent tiles vs dashed ones, why an empty one is empty, the caption naming its population, ring-vs-bars, and paging |
 | `ui/useNeuronIndex.test.tsx`             | one load across two widgets, a late mount with no spinner flash, and a reload reaching every subscriber                            |
+| `nodes/transform/selectOne.test.ts`      | stepping free vs committing stale, an index past the end emitting nothing, and one skeleton re-measuring its bounds                |
+| `ui/nodes/selectOneBody.test.tsx`        | the pager card: not-run vs not-wired, the Live label counted once, and the gap between what is shown and what is emitted           |
 
 ## Exporting a notebook
 
@@ -2450,6 +2452,108 @@ somebody to inspect a file that is perfectly fine.
 on how this app is served, which is not knowable at edit time — the same call `Find Neurons` makes
 about `limit: 0`. A scheme that cannot be fetched at all (`file:`, `javascript:`) is refused by one
 rule rather than by a list of special cases.
+
+## Select One: stepping through a collection
+
+`core.selectOne`, `Add ▸ Transform ▸ Select One`. Forward and back through a table's rows, a
+skeleton set or a mesh set, emitting the element you are looking at. The manual counterpart to
+the `For each` in the TODO list — that would apply a sub-workflow to every element and collect
+the results; this walks the same collection by hand. `Explore → Select One → Skeletons → 3D` is
+the shape it exists for: one neuron of a result at a time, without editing a filter for each.
+
+**Two indices, because browsing and deciding are different acts.** `index` is what the card is
+showing and is presentational; `selected` is what the port carries and is not. That is Profile's
+pager/pin split exactly, and it is here for the same reason: on a chain with an expensive node in
+it, an arrow button that fires a full pass per press — and with auto-run on, fires it
+_automatically_ — is not a browsing surface, it is a way to spend ten minutes of queries on a
+gesture.
+
+**`Live` is the opt-out, and it is presentational too.** Off, the arrows move `index` alone and
+`Use this` commits. On, they move both, so the output follows the arrows — which is what anybody
+wants on a cheap chain and exactly what they do not want on a costly one. The flag changes
+nothing about what `evaluate` returns: `evaluate` reads `selected` and has no opinion on how it
+got there. So it stays out of the provenance key, and toggling the mode invalidates nothing —
+the same call `Download` makes about every one of its params. `selectOne.test.ts` asserts all
+three flags through the scheduler _and_ on the params, because dropping one fails no type check
+and the symptom (a graph going stale whenever somebody browses) reads as a scheduler bug.
+
+**The choice is a position, not an identity, and that is a trade rather than an oversight.** An
+index works on everything — a `groupBy` roll-up with no id column, an uploaded CSV of embeddings,
+a mesh set — where the id-keyed selection `rowIds.ts` provides (Scatter's and Profile's) survives
+an upstream re-sort but needs a column naming each element. What it costs is that reordering
+upstream re-points the output. What it must not cost is a _silent_ wrong answer, which is why an
+index past the end emits the **empty collection** rather than clamping to the last element: an
+upstream filter that shrank the collection has not moved the choice, it has removed it, and
+clamping would answer with a different neuron under the same number. Emptiness is a state every
+downstream node already handles; a different neuron wearing the same index is not. The card says
+so in words, naming the position and the length — "emitting nothing" alone reads as a broken node.
+
+**`any` in, `any` out.** The type system cannot say "a table, skeletons or meshes", so the port
+says `any` and the refusal is a validation question — the same call `out.profile` makes about
+needing a `bodyId`. The output type is the input type untouched, so one row of a Neurons table is
+still Neurons with the same columns and nothing downstream loses a column picker.
+
+### What an iterable is
+
+`nodes/lib/iterables.ts`, headless. Three value kinds are collections of independently meaningful
+things: a table is rows, a `SkeletonsValue` is neurons, a `MeshesValue` is neurons.
+
+**A `PointsValue` is deliberately not one.** It is the same shape — positions plus one attribute
+row each — and stepping through it one synapse at a time is not a gesture anybody makes. That is
+a judgement about the data rather than about the type, which is why the exclusion is a named list
+rather than something falling out of a structural test.
+
+**Taking one element preserves the kind and the schema**, which is what lets `inferOutputs` be a
+pass-through. Only the counts change. The one thing that must **not** pass through is `bounds`:
+they are a roll-up over the geometry, exactly as `degreeIn`/`degreeOut` are roll-ups over a
+network's links, and a single skeleton still claiming the box of the twenty it came from frames a
+3D viewer on empty space around it — which reads as a broken renderer rather than as a selection.
+Same rule and same reason as `filterNetwork` recomputing its degrees. `detail` _is_ carried
+through, because the level of detail is a fact about the fetch and taking one neuron out does not
+re-fetch it.
+
+`isIterableKind` is exported and used by both the node's `validate` and the card's foot line —
+one list rather than one per caller, because two copies is how a node starts refusing a kind its
+own card still offers to step through. `any` counts as steppable there: unknown is not a refusal,
+the same distinction `columnSchemaFor` draws between an absent schema and an empty one.
+
+### The card, and two things jsdom could not see
+
+`SelectOneBody` is the pager, the commit button and the node's one non-advanced param. The foot
+line is the whole of the design's honesty: with `Live` off, what is on screen and what is on the
+port are two different elements for as long as somebody is browsing, so it always states which
+element is being emitted.
+
+Both of the following were found by pointing a real browser at it, and both are now pinned by
+`selectOneBody.test.tsx` — which is the point, since neither throws:
+
+- **"Connect a table" appeared on a card that was plainly wired.** Whether something is
+  _connected_ is a fact about the graph and comes off the inferred **type**, which exists the
+  moment the link is drawn; what is _on the wire_ is a fact about the last run and is absent
+  until there has been one. Reading the second for the first sends somebody to fix a link that is
+  already there — the same failure the exporter's unwired/blocked split exists to avoid. It now
+  says `Not run yet.`
+- **The Live checkbox was labelled twice.** `ParamField`'s checkbox draws its own label under the
+  default `node` variant, and the generic card suppresses the row's label in **CSS**
+  (`.param--wide .param__label { display: none }`) — so a body rendering both got "Live Live".
+  The fix is `variant="inspector"`, which is what `ParamRows` already does and documents;
+  borrowing the CSS half instead would drop the one boolean row out of the label column every
+  other field in these bodies shares. jsdom applies no CSS, so the label **count** has to be
+  asserted rather than looked at.
+
+**One pre-existing bug came with it.** `.list-body` carried no padding, so all three cards using
+it had their first few pixels painted over by `.coda-node::before`, the state bar down the card's
+left edge — "ID column" read as "D column" on Input IDs and had done since it was written. It now
+takes the same `calc(8px + var(--state-bar))` inset `.coda-node__params` does: a custom body
+replaces the param band, so it has to replace its padding too.
+
+**The Python emitter slices, never indexes.** `df.iloc[[i]]` and `nl[i]` both raise past the end
+and both hand back a Series / a single neuron rather than a collection of one — where Coda emits
+an empty collection of the same kind, and emits a collection either way. `[i:i+1]` is the one
+spelling reproducing both, in pandas and in navis alike; the emitter branches on `ctx.inputType`
+because a `NeuronList` takes it directly where a frame needs `.iloc`. The fixture carries **two**
+Select One nodes for exactly that reason, or the golden file records only the half that happens
+to be a DataFrame.
 
 ## Stack Tables: the vertical Join
 

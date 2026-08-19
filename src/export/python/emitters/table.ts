@@ -1,6 +1,11 @@
 /**
  * The table transforms, in pandas.
  *
+ * With one exception, noted where it sits: `Select One` steps through geometry as well as rows,
+ * so its emitter branches on the input's kind and slices a navis `NeuronList` where pandas is
+ * not what is being carried. It lives here because it is a transform and because a module of
+ * one emitter is worse than a sentence saying why this one is not pandas.
+ *
  * These are the emitters where a faithful translation is genuinely reachable, so the standard
  * here is higher than elsewhere: where Coda's semantics differ from pandas' default, the cell
  * says so in code rather than in a comment. Three of those differences cost a row count if
@@ -362,4 +367,34 @@ registerEmitter('core.normalize', (ctx) => {
     default:
       return ctx.todo(`Unknown normalize mode "${mode}".`)
   }
+})
+
+// ---------------------------------------------------------------------------
+// Select One
+// ---------------------------------------------------------------------------
+
+registerEmitter('core.selectOne', (ctx) => {
+  const src = ctx.wired('in')
+  const out = ctx.output('item')
+
+  /*
+   * A *slice*, never `iloc[[i]]` or `nl[i]`. Both of those raise on an index past the end and
+   * both hand back a Series / a single neuron rather than a collection of one — where Coda
+   * emits an empty collection of the same kind, and emits a collection either way. `[i:i+1]`
+   * is the one spelling that reproduces both, in pandas and in navis alike.
+   */
+  const index = Math.floor(Number(ctx.params.selected ?? 0))
+  const from = Number.isFinite(index) && index > 0 ? index : 0
+  // A negative index would slice from the end in Python and emit nothing in Coda. Only
+  // reachable by hand-editing the file, and an empty slice is what the canvas would show.
+  const empty = !Number.isFinite(index) || index < 0
+
+  const kind = ctx.inputType('in')?.kind
+  if (kind === 'skeletons' || kind === 'meshes') {
+    ctx.require('navis')
+    return [`${out} = ${src}[${empty ? '0:0' : `${from}:${from + 1}`}]`]
+  }
+
+  ctx.require('pandas')
+  return [`${out} = ${src}.iloc[${empty ? '0:0' : `${from}:${from + 1}`}]`]
 })
