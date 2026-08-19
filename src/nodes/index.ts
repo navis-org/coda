@@ -29,6 +29,7 @@ export { joinNode } from './table/join'
 export { pivotNode } from './table/pivot'
 export { normalizeNode } from './table/normalize'
 export { uploadTableNode } from './table/upload'
+export { tableFromUrlNode } from './table/fromUrl'
 export { buildNetworkNode } from './analysis/buildNetwork'
 
 export { tableViewNode } from './output/table'

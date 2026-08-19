@@ -172,6 +172,28 @@ bundled corepack, so pnpm was installed with `npm i -g pnpm`.
   is the product of two independently-resolved columns needs a ceiling checked before
   allocation**, because neither picker knows what the other did.
 
+- **A multi-column picker used to drop what it could not yet see, and the first Run differed from
+  the second.** `resolveColumns` filtered the stored names against the available ones, and an
+  input carrying *no schema at all* produced an empty list — which then went into the provenance
+  key and into `ctx.columns`.
+
+  `Pivot → Select` with two of eight wide columns picked emitted **all eight** on the first run
+  after a reload, because empty means "everything" to the Select node. The store then re-inferred
+  against the schema the pivot had just published, the key changed, the node went stale, and a
+  second Run gave the right answer. Same "runs twice, answers differently" signature as the
+  dataset-listing bug in invariant 2, and the same root cause: a degraded answer that nothing
+  distinguished from a real one.
+
+  The fix is the singular's rule 2 in the form that fits the plural: **a schema this picker cannot
+  see is not a schema without these columns in it.** `resolveColumns` now returns the stored list
+  untouched when `columnSchemaFor` answers `undefined`, and still drops a column a *known* schema
+  lacks — which is what keeps `validateColumnParams`' "Missing column(s)" true and stops a name
+  the table cannot honour reaching `evaluate`. That distinction is the entire reason
+  `columnSchemaFor` answers `undefined` separately from an empty schema.
+
+  It is also what makes `Text columns` safe on both import nodes, whose schema is empty before the
+  first run by construction.
+
 - **Module init order.** `graphStore.ts` imports `../nodes` for its side effect, because it
   resolves node types the moment it loads the autosaved graph. Without that import,
   ordering in `main.tsx` becomes load-bearing and a bad order silently drops every node.
@@ -288,7 +310,7 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `ui/viewers/scatterDraw.test.ts`         | marker geometry, the colour+shape batching, and the exported SVG                                                                 |
 | `ui/viewers/scatterViewer.test.tsx`      | the scatter caption: every admission it makes, and which legend keys stand down in a card                                        |
 | `nodes/output/scatter.test.ts`           | the tap, id-vs-row-index selection, and that `Max points` stales nothing                                                         |
-| `core/columnParams.test.ts`              | what a column picker may complain about: unknown-vs-empty schema, and what `optional` changes                                    |
+| `core/columnParams.test.ts`              | what a column picker may complain about: unknown-vs-empty schema, what `optional` changes, and a plural keeping an unseen list |
 | `nodes/output/barChart.test.ts`          | the tap, that an unpicked column is a warning and not a refusal, and the stack-by-itself catch                                   |
 | `nodes/table/pivot.test.ts`              | the two outputs describing one pivot, and the wide schema arriving only by observation                                           |
 | `nodes/table/sample.test.ts`             | the four sampling modes, a draw reproduced from its seed, and the seed costing nothing in the other three                        |
@@ -296,6 +318,7 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `data/uploads.test.ts`                   | the store against real IndexedDB: content addressing incl. a separator collision, a write that rejects, and the peek's one read |
 | `nodes/table/upload.test.ts`             | the node: the schema arriving by peek, the bodyId rename, what a graph opened elsewhere says, and the filename costing nothing  |
 | `ui/nodes/uploadBody.test.tsx`           | the card's four states — and that 'looking' is never printed as 'not here' — plus the size ceiling refusing before it reads     |
+| `nodes/table/fromUrl.test.ts`            | the fetch: deferred by the auto pass, Refresh as the only re-fetch, the schema keyed by URL, and what each refusal blames      |
 
 ## Auto-run
 
@@ -1809,7 +1832,7 @@ came from because `joinTables` keys on `String(cell)`. And a column label collid
 row field's name is suffixed (`type`, `type_2`) rather than dropped, the same call
 `joinedColumns` makes.
 
-## Upload Table: somebody else's data
+## Upload Table and Table from URL: somebody else's data
 
 `core.uploadTable`, added from `Add ▸ Utility ▸ Upload Table`. A CSV of annotations, custom cell
 types or an embedding, brought in from the user's own machine — the one node here with no inputs
@@ -1964,6 +1987,53 @@ Same reasoning as `out.neuroglancer`.
 nothing can tell whether another graph on the shelf still references them — and content addressing
 means re-importing the same file reuses the entry rather than adding one. A "manage uploads"
 surface is the answer when there is one; silently deleting somebody's data on a node delete is not.
+
+### The URL variant
+
+`core.tableFromUrl`, `Add ▸ Utility ▸ Table from URL`. The same CSV, fetched rather than picked.
+It shares the parser and the shaping pair, so the two nodes cannot drift on what a delimiter, an
+ID column or a text column means, and differs in exactly one property: **a URL is reproducible
+and an upload is not.** So this one needs no storage at all — the graph carries the address, and
+a colleague opening the file re-fetches it. What it gives up is working on a file that only
+exists on somebody's disk, behind a login, or on a host sending no CORS headers. Neither node
+supersedes the other, which is why both exist.
+
+**`expensive`, which is invariant 6 in its plainest form.** The URL is a text field. Marked
+`cheap` it would fire a request per keystroke, at whatever host was half-typed.
+
+**`refresh` is not decoration.** A file at a URL can change under a fixed set of params, which is
+exactly the hidden mutable state invariant 4 requires an explicit nonce for — the Dataset node's
+own `refresh` is the precedent. Without it, re-running against an updated file hands back the old
+table from cache with nothing to say so.
+
+**The schema is remembered per URL, in a module map, rather than observed.** `observesOutputSchema`
+is the obvious fit — the shape is decided by a remote server that inference may not call — and it
+is *almost* right. What rules it out is `Text columns`: a `columns` param finds its options
+through `schemaFrom`, which is handed the node's inputs and params and deliberately **not**
+`ctx.observed`. Widening it to see the observed schema would have inference resolving that param
+against a schema the _scheduler_ cannot see when it computes the provenance key and resolves
+`ctx.columns` — invariant 5's exact desynchronisation. A map keyed by URL is readable from all
+four callers at once. Same lifetime as an observed schema (empty before the first run and after a
+reload), same announcement idiom, and session-scoped on purpose: what a server returned is not a
+fact about the document, and persisting it would let a saved graph claim columns nobody fetched.
+
+**A cross-origin refusal and a dead host are the same `TypeError`**, because that is all a browser
+gives — the constraint `data/precomputed/transport.ts` works around by trying and remembering.
+So the message names *both*: the fix for one is nothing like the fix for the other, and saying
+only "network error" sends somebody to check their wifi over a header their server never sent.
+No proxy is offered, deliberately: `deploymentProxy` in `vite.config.ts` exists under a rule
+refusing anything but https to a public host, and a general-purpose fetch proxy is an SSRF hole
+aimed at whoever is running the dev server.
+
+**`Content-Length` is checked before the body is read**, and the parsed length again after,
+because a chunked response declares nothing. **A 200 that parses to no rows quotes what arrived** —
+overwhelmingly a login redirect or a permissions page served as HTML, where "no rows" alone sends
+somebody to inspect a file that is perfectly fine.
+
+**`validate` warns about `http` rather than refusing it.** Whether it is actually blocked depends
+on how this app is served, which is not knowable at edit time — the same call `Find Neurons` makes
+about `limit: 0`. A scheme that cannot be fetched at all (`file:`, `javascript:`) is refused by one
+rule rather than by a list of special cases.
 
 ## Connectivity: hops and direction
 

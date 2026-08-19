@@ -449,14 +449,35 @@ export function resolveColumn(
   return available[0]
 }
 
+/**
+ * The plural, and it has the singular's rule 2 in the one form that fits it.
+ *
+ * A schema this picker cannot even *see* is not a schema without these columns in it — it is a
+ * schema that has not arrived. `core.pivot` publishes none until it has run and none again after
+ * a reload, and Raw Cypher never declares one at all; dropping the stored names there answers a
+ * question nobody asked with a list nobody chose, and it does so **in the provenance key**.
+ *
+ * What that cost, before this: `Pivot → Select` with two of eight wide columns picked emitted
+ * *all eight* on the first run after a reload, because the resolved list was empty and empty
+ * means "everything" to the Select node. The store then re-inferred against the schema the pivot
+ * had just published, the key changed, the node went stale, and a second Run gave the right
+ * answer — the "runs twice, answers differently" signature that also produced the dataset-listing
+ * bug in invariant 2.
+ *
+ * Note the two cases stay distinct, which is the whole reason `columnSchemaFor` answers
+ * `undefined` separately from an empty schema. A schema that *is* known and lacks a column still
+ * drops it: that is a column genuinely gone, `validateColumnParams` reports it, and keeping it
+ * would send a name into `evaluate` that the table cannot honour.
+ */
 export function resolveColumns(
   param: ColumnsParam,
   params: ParamValues,
   inputs: Readonly<Record<string, CodaType | undefined>>,
 ): string[] {
-  const available = availableColumns(param, inputs, params)
   const stored = params[param.id]
   if (!Array.isArray(stored)) return []
+  if (!columnSchemaFor(param, inputs, params)) return stored
+  const available = availableColumns(param, inputs, params)
   return stored.filter((name) => available.includes(name))
 }
 

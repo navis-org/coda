@@ -182,13 +182,14 @@ async function read<T>(store: string, key: string, fallback: T): Promise<T> {
 const learnedListeners = new Set<() => void>()
 
 /**
- * Announce that an upload's schema is now peekable.
+ * Announce that a locally-held table's schema is now peekable.
  *
  * Not a data-changed event: nothing here invalidates a cached result. It says only that
- * inference ran against "I do not know yet" and can now do better. Fired once per id, when its
- * meta lands.
+ * inference ran against "I do not know yet" and can now do better. Fired once per id when an
+ * upload's meta lands, and by `core.tableFromUrl` when a fetch fills its own schema mirror —
+ * exported for that second caller, which holds the same kind of fact in a different place.
  */
-function reportUploadLearned(): void {
+export function reportUploadLearned(): void {
   revision++
   for (const listener of learnedListeners) listener()
 }

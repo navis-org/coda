@@ -14,7 +14,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { NodeDefinition, ParamDef } from './node'
-import { makeInferContext, resolveColumn, validateColumnParams } from './node'
+import { makeInferContext, resolveColumn, resolveColumns, validateColumnParams } from './node'
 import type { CodaType, TableSchema } from './types'
 import { T, column, tableSchema } from './types'
 
@@ -52,6 +52,42 @@ function issues(
 
 const picker = (extra: Partial<ParamDef> = {}): ParamDef =>
   ({ id: 'col', kind: 'column', label: 'Column', from: 'in', default: '', ...extra }) as ParamDef
+
+describe('resolveColumns against a schema that has not arrived', () => {
+  const picker: ParamDef = {
+    id: 'columns',
+    kind: 'columns',
+    label: 'Columns',
+    from: 'in',
+    default: [],
+  }
+  const stored = { columns: ['type', 'pre'] }
+
+  it('keeps what was chosen when the port carries no schema at all', () => {
+    // `core.pivot` publishes none until it has run and none again after a reload; Raw Cypher
+    // never declares one. Dropping the names there answers a question nobody asked — and does
+    // it inside the provenance key, which is what made the first run differ from the second.
+    expect(resolveColumns(picker as never, stored, { in: T.table(undefined) })).toEqual([
+      'type',
+      'pre',
+    ])
+    // Unconnected is the same claim: nothing is known, so nothing is contradicted.
+    expect(resolveColumns(picker as never, stored, {})).toEqual(['type', 'pre'])
+  })
+
+  it('still drops a column a known schema does not have', () => {
+    // The distinction `columnSchemaFor` exists to draw. This column really is gone: the check
+    // reports it, and keeping it would send a name into `evaluate` the table cannot honour.
+    expect(resolveColumns(picker as never, { columns: ['type', 'gone'] }, { in: T.table(SCHEMA) })).toEqual(
+      ['type'],
+    )
+  })
+
+  it('resolves to nothing when nothing was chosen, whatever the schema', () => {
+    expect(resolveColumns(picker as never, {}, { in: T.table(undefined) })).toEqual([])
+    expect(resolveColumns(picker as never, { columns: [] }, { in: T.table(SCHEMA) })).toEqual([])
+  })
+})
 
 describe('an input that says nothing', () => {
   it('is silent when the port is unconnected', () => {
