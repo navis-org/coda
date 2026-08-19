@@ -115,6 +115,24 @@ describe('Start page', () => {
       // A target="_blank" without this hands the opened page a handle on this one.
       expect(repo.getAttribute('rel')).toContain('noopener')
     })
+
+    /*
+     * "Docs" is the field guide, not the repository's docs folder: it is the
+     * document somebody on the welcome screen actually wants. A second vite entry
+     * is not a route, so nothing else would catch this link going missing.
+     */
+    it('points Docs at the field guide, through BASE_URL rather than an absolute path', () => {
+      render(<StartPage />)
+      const guide = screen.getByRole('link', { name: 'Docs' })
+      /*
+       * Against BASE_URL rather than a literal: `base` is './' in the build, so a
+       * hardcoded '/tutorial.html' would resolve to the domain root and 404 under
+       * the subpath GitHub Pages serves this from. (Vitest leaves BASE_URL at '/',
+       * so the literal cannot be asserted here — the composition is the point.)
+       */
+      expect(guide.getAttribute('href')).toBe(`${import.meta.env.BASE_URL}tutorial.html`)
+      expect(guide.getAttribute('rel')).toContain('noopener')
+    })
   })
 
   describe('picking something', () => {
@@ -232,6 +250,17 @@ describe('Start page', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Help' }))
       fireEvent.click(screen.getByRole('button', { name: /Show Welcome Dialog/ }))
       await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy())
+    })
+
+    it('offers the field guide beside it, as a link so a tab can be opened', async () => {
+      act(() => useGraphStore.getState().closeStartPage())
+      render(<App />)
+
+      fireEvent.click(screen.getByRole('button', { name: 'Help' }))
+      const guide = await screen.findByRole('link', { name: /Field Guide/ })
+      expect(guide.getAttribute('href')).toBe(`${import.meta.env.BASE_URL}tutorial.html`)
+      // A button here would lose the graph on the canvas; a link opens a tab.
+      expect(guide.tagName).toBe('A')
     })
 
     it('reopens from the palette, and that command is disabled while it is open', () => {

@@ -1,0 +1,753 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Coda Field Guide</title>
+    <meta
+      name="description"
+      content="A scroll-through introduction to Coda: nodes, wires, fetching data, viewers and saving workflows."
+    />
+    <link rel="icon" href="./logo.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f9f9f7" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#171716" />
+  </head>
+  <body>
+<!-- ==========================================================================
+     Hero
+     ========================================================================== -->
+<header class="hero">
+  <div class="hero__dots" aria-hidden="true"></div>
+  <div class="shell hero__inner">
+    <div class="hero__brand">
+      <svg width="22" height="22" viewBox="0 0 64 64" fill="currentColor" aria-hidden="true">
+        <path fill-rule="evenodd" d="M32 12a18 20 0 1 0 0 40 18 20 0 1 0 0-40Zm0 3.6a12.24 16.4 0 1 1 0 32.8 12.24 16.4 0 1 1 0-32.8Z"/>
+        <rect x="30" y="5" width="4" height="54" rx="2"/>
+        <rect x="7" y="30" width="50" height="4" rx="2"/>
+      </svg>
+      <span>Coda &middot; Field guide</span>
+      <span class="hero__tag">Alpha</span>
+    </div>
+
+    <h1>Next Generation Connectomics Analysis <em>in the Browser</em></h1>
+
+    <p class="hero__sub">
+      A browser-based node editor for connectome data. Wire up the steps &mdash; query, traverse,
+      filter, aggregate, plot &mdash; and each one shows its result where it sits.
+    </p>
+
+    <div class="hero__meta">
+      <span>hemibrain &middot; MANC &middot; optic&#8209;lobe &middot; male&#8209;CNS</span>
+      <span>no install, no notebook</span>
+      <span>~10 minutes</span>
+    </div>
+
+    <div class="scrollcue"><span class="scrollcue__line"></span>Scroll &mdash; the graph builds itself</div>
+  </div>
+</header>
+
+<!-- ==========================================================================
+     The build. One canvas, five chapters, one node added per chapter.
+     The pipeline is a real one: which central-brain cells do lobula columnar
+     neurons drive, ranked by synapse count.
+     ========================================================================== -->
+<main class="shell build" id="build">
+
+  <div class="build__stage">
+    <div class="stage" id="stage" data-beat="0" data-pending="true">
+
+      <div class="stage__bar">
+        <strong>LC outputs by partner type</strong>
+        <span class="stage__spacer"></span>
+        <span class="stage__run" id="stagerun">&#9654; Run 1</span>
+      </div>
+
+      <div class="world" id="world">
+        <svg class="wires" id="wires" viewBox="0 0 1300 440" aria-hidden="true"></svg>
+
+        <!-- 1 · Dataset ------------------------------------------------------ -->
+        <div class="node" data-cat="dataset" data-from="1" data-key="ds" data-state="ok"
+             style="left:20px; top:168px; width:150px;">
+          <svg class="ring" aria-hidden="true"><rect pathLength="1"/></svg>
+          <div class="node__head"><span class="node__title">Hemibrain</span><span class="node__play">&#9654;</span></div>
+          <div class="node__ports">
+            <div class="port">
+              <span class="port__in"></span>
+              <span class="port__out">Dataset<i class="sock sock--out" data-fam="dataset" data-shape="square" id="s-ds-out"></i></span>
+            </div>
+          </div>
+          <div class="node__params">
+            <div class="prow"><span>Version</span><b class="is-picker">Latest (v1.2.1)</b></div>
+          </div>
+          <div class="node__foot"><span>hemibrain:v1.2.1</span></div>
+        </div>
+
+        <!-- 2 · Find Neurons ------------------------------------------------- -->
+        <div class="node" data-cat="query" data-from="0" data-key="find" data-state="blocked"
+             style="left:228px; top:136px; width:170px;">
+          <svg class="ring" aria-hidden="true"><rect pathLength="1"/></svg>
+          <div class="node__head"><span class="node__title">Find Neurons</span><span class="node__play">&#9654;</span></div>
+          <div class="node__ports">
+            <div class="port">
+              <span class="port__in">Dataset<i class="sock sock--in" data-fam="dataset" data-shape="square" id="s-find-in"></i></span>
+              <span class="port__out">Neurons<i class="sock sock--out" data-fam="table" data-shape="circle" id="s-find-out"></i></span>
+            </div>
+          </div>
+          <div class="node__params">
+            <div class="prow"><span>Type</span><b>^LC\d+$</b></div>
+            <div class="prow"><span>Status</span><b class="is-picker">Traced</b></div>
+          </div>
+          <div class="node__foot"><span data-foot="find">&mdash; &middot; no Dataset connected</span></div>
+        </div>
+
+        <!-- 3 · Connectivity ------------------------------------------------- -->
+        <div class="node" data-cat="query" data-from="1" data-key="conn" data-state="ok"
+             style="left:456px; top:136px; width:176px;">
+          <svg class="ring" aria-hidden="true"><rect pathLength="1"/></svg>
+          <div class="node__head"><span class="node__title">Connectivity</span><span class="node__play">&#9654;</span></div>
+          <div class="node__ports">
+            <div class="port">
+              <span class="port__in">Dataset<i class="sock sock--in" data-fam="dataset" data-shape="square" id="s-conn-in-ds"></i></span>
+              <span class="port__out">Table<i class="sock sock--out" data-fam="table" data-shape="ring" id="s-conn-out"></i></span>
+            </div>
+            <div class="port">
+              <span class="port__in">Neurons<i class="sock sock--in" data-fam="table" data-shape="circle" id="s-conn-in-n"></i></span>
+              <span class="port__out"></span>
+            </div>
+          </div>
+          <div class="node__params">
+            <div class="prow"><span>Direction</span><b class="is-picker">downstream</b></div>
+            <div class="prow"><span>Hops</span><b>1</b></div>
+          </div>
+          <div class="node__foot"><span data-foot="conn">&mdash; &middot; not run yet</span></div>
+        </div>
+
+        <!-- 4 · Filter ------------------------------------------------------- -->
+        <div class="node" data-cat="transform" data-from="3" data-key="filt" data-state="ok"
+             style="left:690px; top:162px; width:150px;">
+          <div class="node__head"><span class="node__title">Filter</span><span class="node__play">&#9654;</span></div>
+          <div class="node__ports">
+            <div class="port">
+              <span class="port__in">Table<i class="sock sock--in" data-fam="table" data-shape="ring" id="s-filt-in"></i></span>
+              <span class="port__out">Table<i class="sock sock--out" data-fam="table" data-shape="ring" id="s-filt-out"></i></span>
+            </div>
+          </div>
+          <div class="node__params">
+            <div class="prow"><span>Column</span><b class="is-picker">weight</b></div>
+            <div class="prow"><span>Keep</span><b>&ge; 10</b></div>
+          </div>
+          <div class="node__foot"><span>6,431 rows</span></div>
+        </div>
+
+        <!-- 5 · Group By ----------------------------------------------------- -->
+        <div class="node" data-cat="transform" data-from="3" data-key="grp" data-state="ok"
+             style="left:896px; top:144px; width:162px;">
+          <div class="node__head"><span class="node__title">Group By</span><span class="node__play">&#9654;</span></div>
+          <div class="node__ports">
+            <div class="port">
+              <span class="port__in">Table<i class="sock sock--in" data-fam="table" data-shape="ring" id="s-grp-in"></i></span>
+              <span class="port__out">Table<i class="sock sock--out" data-fam="table" data-shape="ring" id="s-grp-out"></i></span>
+            </div>
+          </div>
+          <div class="node__params">
+            <div class="prow"><span>Group by</span><b class="is-picker">postType</b></div>
+            <div class="prow"><span>Aggregate</span><b class="is-picker">sum(weight)</b></div>
+          </div>
+          <div class="node__foot"><span>214 rows</span></div>
+        </div>
+
+        <!-- 6 · Bar Chart ---------------------------------------------------- -->
+        <div class="node" data-cat="visualisation" data-from="4" data-key="chart" data-state="ok"
+             style="left:1104px; top:112px; width:186px;">
+          <div class="node__head"><span class="node__title">Bar Chart</span><span class="node__play">&#9654;</span></div>
+          <div class="node__ports">
+            <div class="port">
+              <span class="port__in">Table<i class="sock sock--in" data-fam="table" data-shape="ring" id="s-chart-in"></i></span>
+              <span class="port__out">Table<i class="sock sock--out" data-fam="table" data-shape="ring"></i></span>
+            </div>
+          </div>
+          <div class="mini">
+            <i style="--h:88%; --i:0"></i><i style="--h:61%; --i:1"></i><i style="--h:50%; --i:2"></i><i style="--h:37%; --i:3"></i><i style="--h:26%; --i:4"></i>
+          </div>
+          <div class="mini-axis"><span>DNp01</span><span>DNp02</span><span>DNp04</span><span>DNp03</span><span>DNp11</span></div>
+          <div class="node__foot"><span>214 bars &middot; sum(weight)</span></div>
+        </div>
+
+        <!-- Anatomy callouts, chapter 1 only -->
+        <div class="callout" data-side="l" style="left:48px; top:142px; width:150px; --lead:30px;">what this step does</div>
+        <div class="callout" data-side="r" style="left:428px; top:142px; --lead:30px;">Run &mdash; this node only</div>
+        <div class="callout" data-side="l" style="left:48px; top:171px; width:150px; --lead:30px;">inputs</div>
+        <div class="callout" data-side="r" style="left:428px; top:171px; --lead:30px;">outputs</div>
+        <div class="callout" data-side="r" style="left:428px; top:213px; --lead:30px;">parameters</div>
+        <div class="callout" data-side="l" style="left:48px; top:253px; width:150px; --lead:30px;">last result</div>
+      </div>
+
+      <!--
+        Chapter 3. The toolbar is chrome rather than part of the world, so the
+        camera cannot reach it: this draws the cluster the Run button sits in
+        over a dimmed canvas instead.
+      -->
+      <div class="detail" aria-hidden="true">
+        <div class="detail__bar">
+          <span class="tb">Clear Results</span>
+          <span class="tb">+ Add <b>Tab</b></span>
+          <span class="tb">Commands <b>Space</b></span>
+          <label class="tb tb--check"><i></i> Auto-run</label>
+          <span class="tb tb--run" data-ring="">&#9654; Run 2 <b>&#8679;R</b></span>
+        </div>
+        <span class="detail__cap">the whole graph &mdash; everything stale, in order</span>
+        <span class="detail__or">or</span>
+        <div class="detail__node">
+          <span>Connectivity</span>
+          <span class="tb tb--play" data-ring="">&#9654;</span>
+        </div>
+        <span class="detail__cap">one node, and only what it depends on</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="beats">
+
+    <article class="beat" data-beat="0">
+      <span class="beat__n">Chapter 1</span>
+      <h2>A node is one step</h2>
+      <p>
+        Every step is a card. <code>Find&nbsp;Neurons</code> runs one query: match a type pattern
+        against a dataset. Here, traced lobula columnar cells &mdash; <code>^LC\d+$</code>.
+      </p>
+      <p>
+        Four regions, the same on every card. Inputs left, outputs right, parameters between them,
+        the last result along the bottom. <strong>&#9654;</strong> in the header runs this node and
+        whatever it depends on, nothing else.
+      </p>
+      <p>
+        The stripe down the left edge is run state. Grey here: the
+        <span class="ty ty--dataset">Dataset</span> input is empty, so there is nothing to run yet.
+      </p>
+    </article>
+
+    <article class="beat" data-beat="1">
+      <span class="beat__n">Chapter 2</span>
+      <h2>Sockets are typed</h2>
+      <p>
+        A link carries a typed value, not a file. Each socket declares what it accepts, so a link
+        that cannot work is refused as you drag it &mdash; with the reason, at edit time.
+      </p>
+      <div class="fig">
+        <div class="legend">
+          <div class="legend__row"><span class="swatch"><i class="sock" data-fam="dataset" data-shape="square"></i></span> <b class="ty ty--dataset">Dataset</b> &mdash; a connectome at a version</div>
+          <div class="legend__row"><span class="swatch"><i class="sock" data-fam="table" data-shape="circle"></i></span> <b class="ty ty--table">Neurons</b> &mdash; a table guaranteed to carry <code>bodyId</code></div>
+          <div class="legend__row"><span class="swatch"><i class="sock" data-fam="table" data-shape="ring"></i></span> <b class="ty ty--table">Table</b> &mdash; any rows and columns</div>
+          <div class="legend__row"><span class="swatch"><i class="sock" data-fam="matrix" data-shape="diamond"></i></span> <b class="ty ty--matrix">Matrix</b> &mdash; rows &times; columns of numbers</div>
+        </div>
+        <p class="fig__cap">
+          Colour, shape and label &mdash; three channels. Only three hues clear an all-pairs
+          colourblind check when any two may sit adjacent, so <b>shape carries the rest</b>.
+        </p>
+      </div>
+      <p>
+        Types also carry their <strong>column schema</strong>. <code>Connectivity</code> publishes
+        <code>preType</code>, <code>postType</code>, <code>weight</code> and the rest the moment it
+        is wired, so every column dropdown downstream is populated before a row is fetched.
+      </p>
+    </article>
+
+    <article class="beat" data-beat="2">
+      <span class="beat__n">Chapter 3</span>
+      <h2>Execution model</h2>
+      <p>
+        Cost is declared per node. <strong>Cheap</strong> ones &mdash; <code>Filter</code>,
+        <code>Sort</code>, <code>Group&nbsp;By</code> &mdash; re-run about 180&nbsp;ms after you stop
+        editing. <strong>Expensive</strong> ones hit a backend and go <em>stale</em> instead: a
+        reactive editor pointed at a shared production Neo4j would fire a query per keystroke.
+      </p>
+      <p>
+        <strong>Run</strong> (<kbd>&#8679;R</kbd>) executes everything stale, in dependency order.
+        <strong>&#9654;</strong> on a card executes that node and only its upstream. Both report
+        progress as a gold ring round the card.
+      </p>
+      <p>
+        <strong>Auto-run</strong> opts out of the split entirely: every edit re-runs the whole graph,
+        expensive nodes included, debounced so a burst of edits sends one query. Off by default and
+        remembered, so an expensive workflow stays on manual.
+      </p>
+      <p>
+        Freshness is a <strong>provenance key</strong> &mdash;
+        <code>hash(type, params, upstream keys)</code> &mdash; not a comparison of data. Undo an edit
+        and the old cached results are valid again, with no re-query.
+      </p>
+    </article>
+
+    <article class="beat" data-beat="3">
+      <span class="beat__n">Chapter 4</span>
+      <h2>A node for every question</h2>
+      <p>
+        <code>Filter</code> cuts weights under ten, <code>Group&nbsp;By</code> sums onto
+        <code>postType</code>: 18,206 rows down to 214. Alongside them
+        <code>Join</code>, <code>Pivot</code>, <code>Sample</code>, <code>Stack</code>,
+        <code>Paths</code>, <code>Adjacency</code>, <code>ROI&nbsp;Counts</code>,
+        <code>Build&nbsp;Network</code>, <code>Skeletons</code>, <code>Meshes</code>.
+      </p>
+      <p>
+        <kbd>Tab</kbd> opens the browser. Search, category chips, and a <strong>port signature</strong>
+        on every row, so you can see what a node takes and returns before inserting it.
+      </p>
+      <div class="surface" style="margin-top:.35rem">
+        <div class="surface__bar"><strong>Add a node</strong><span>Tab</span></div>
+        <div class="explore__search">
+          <span style="color:var(--text-muted)">&#9906;</span>
+          <span class="q">netw</span><span class="caret"></span>
+          <span class="explore__count">3 of 41</span>
+        </div>
+        <div class="browser__chips">
+          <span class="cchip" data-on="true">All</span><span class="cchip">Dataset</span><span class="cchip">Query</span><span class="cchip">Transform</span><span class="cchip">Analysis</span><span class="cchip">Output</span>
+        </div>
+        <div class="brow">
+          <span class="brow__thumb" style="--c:var(--cat-analysis)"><i></i></span>
+          <span class="brow__main"><span class="brow__name">Build Network</span><span class="brow__sig">Table &rarr; Network &middot; cheap</span></span>
+        </div>
+        <div class="brow">
+          <span class="brow__thumb" style="--c:var(--cat-visualisation)"><i></i></span>
+          <span class="brow__main"><span class="brow__name">Network</span><span class="brow__sig">Network + Layout &rarr; Network, Selected</span></span>
+        </div>
+        <div class="brow">
+          <span class="brow__thumb" style="--c:var(--cat-query)"><i></i></span>
+          <span class="brow__main"><span class="brow__name">Connectivity</span><span class="brow__sig">Dataset + Neurons &rarr; Table &middot; needs Run</span></span>
+        </div>
+      </div>
+      <p class="fig__cap">
+        <kbd>Space</kbd> is the same set as a compact palette, plus every command. Drag a wire into
+        empty canvas and the list narrows to what accepts it &mdash; then wires up your pick.
+      </p>
+    </article>
+
+    <article class="beat" data-beat="4">
+      <span class="beat__n">Chapter 5</span>
+      <h2>Viewers are interactive</h2>
+      <p>
+        <code>Bar&nbsp;Chart</code> draws the table and passes <em>the same table on</em>, so a viewer
+        drops into the middle of a chain without breaking it. <code>Table</code>,
+        <code>Heatmap</code>, <code>Scatter&nbsp;Plot</code>, <code>Network</code>,
+        <code>3D&nbsp;Viewer</code> and an embedded neuroglancer all behave this way.
+      </p>
+      <p>
+        Several also emit a selection. Lasso points in <code>Scatter&nbsp;Plot</code>, click nodes in
+        <code>Network</code>: the picked rows leave by a <b class="ty ty--table">Selected</b> output
+        and wire onward like anything else.
+      </p>
+      <div class="surface" style="margin-top:.35rem">
+        <div class="surface__bar"><strong>Scatter Plot</strong><span>pre &times; post &middot; colour by class</span></div>
+        <div class="plot">
+          <svg viewBox="0 0 320 176" role="img" aria-label="Scatter plot with a lassoed group of points highlighted">
+            <g class="plot__grid"><path d="M40 8V152M40 152H312M40 116H312M40 80H312M40 44H312"/></g>
+            <g class="plot__axis"><path d="M40 152H312M40 8V152"/></g>
+            <path class="plot__lasso" d="M196 26 244 18 288 44 280 84 232 96 194 70Z"/>
+            <g class="plot__pt">
+              <circle cx="58" cy="140" r="3"/><circle cx="70" cy="132" r="3"/><circle cx="66" cy="146" r="3"/>
+              <circle cx="84" cy="126" r="3"/><circle cx="92" cy="138" r="3"/><circle cx="102" cy="118" r="3"/>
+              <circle cx="112" cy="130" r="3"/><circle cx="120" cy="110" r="3"/><circle cx="128" cy="124" r="3"/>
+              <circle cx="138" cy="104" r="3"/><circle cx="146" cy="118" r="3"/><circle cx="154" cy="96" r="3"/>
+              <circle cx="162" cy="112" r="3"/><circle cx="170" cy="88" r="3"/><circle cx="178" cy="102" r="3"/>
+              <circle cx="186" cy="120" r="3"/><circle cx="196" cy="94" r="3"/><circle cx="206" cy="110" r="3"/>
+              <circle cx="216" cy="128" r="3"/><circle cx="228" cy="116" r="3"/><circle cx="240" cy="132" r="3"/>
+              <circle cx="252" cy="120" r="3"/><circle cx="266" cy="138" r="3"/><circle cx="284" cy="126" r="3"/>
+              <circle cx="296" cy="144" r="3"/><circle cx="88" cy="150" r="3"/><circle cx="132" cy="142" r="3"/>
+              <circle cx="176" cy="136" r="3"/>
+            </g>
+            <g class="plot__pt" data-picked="true">
+              <circle cx="212" cy="42" r="3.4"/><circle cx="224" cy="34" r="3.4"/><circle cx="238" cy="46" r="3.4"/>
+              <circle cx="250" cy="30" r="3.4"/><circle cx="246" cy="62" r="3.4"/><circle cx="262" cy="52" r="3.4"/>
+              <circle cx="228" cy="66" r="3.4"/><circle cx="266" cy="72" r="3.4"/><circle cx="272" cy="40" r="3.4"/>
+              <circle cx="210" cy="58" r="3.4"/>
+            </g>
+            <text class="plot__lab" x="40" y="166">0</text>
+            <text class="plot__lab" x="292" y="166">4,000 pre</text>
+            <text class="plot__lab" x="6" y="16">post</text>
+          </svg>
+        </div>
+        <div class="node__foot" style="border-top:1px solid var(--border)"><span>1,704 points &middot; 10 selected</span><span>&#8679;drag to lasso</span></div>
+      </div>
+      <p class="fig__cap">
+        A selection is an ordinary param: it lands in the saved file and in every downstream
+        provenance key. Picking by eye is a step, not a detour out of the pipeline.
+      </p>
+    </article>
+
+    <article class="beat" data-beat="5">
+      <span class="beat__n">Chapter 6</span>
+      <h2>Save it, send it</h2>
+      <p>
+        The graph <em>is</em> the method: every step, every parameter, the exact dataset version.
+        <strong>Save&nbsp;&#9656;&nbsp;Download</strong> writes it as a <code>.coda.json</code>
+        &mdash; plain JSON, so it belongs in a repository or a supplement.
+      </p>
+      <p>
+        Results are not in the file; it stores the recipe. Whoever opens it gets this pipeline
+        exactly as you left it, presses Run, and can move a threshold to see what changes.
+      </p>
+    </article>
+
+  </div>
+</main>
+
+<!-- ==========================================================================
+     Chapter 7 · Explore feeding Profile
+     ========================================================================== -->
+<section class="chapter">
+  <div class="shell">
+    <div class="chapter__head rise">
+      <span class="beat__n">Chapter 7</span>
+      <h2>Browsing a connectome</h2>
+      <p class="lede">
+        <code>Find&nbsp;Neurons</code> needs a pattern up front. <code>Explore</code> does not.
+      </p>
+    </div>
+
+    <div class="stack" style="margin-bottom: clamp(1.75rem, 4vh, 2.75rem);">
+      <div class="split">
+        <div class="point rise">
+          <h3><code>Explore</code> enables fuzzy search</h3>
+          <p>
+            The dataset&rsquo;s whole neuron table is downloaded once and searched locally &mdash;
+            male&#8209;CNS is 165,122 traced cells &times; 20 properties, ~7&nbsp;MB gzipped, about
+            five seconds, after which a scan costs ~6&nbsp;ms and the server nothing. Bare terms
+            match any field; <code>!x</code> excludes, <code>class==sensory</code> compares,
+            <code>post&gt;1000</code> is numeric, <code>type~^LC[0-9]+$</code> is a regex. Terms are
+            ANDed. A query with no hits retries as a subsequence match and says so.
+          </p>
+        </div>
+        <div class="point rise" data-delay="1">
+          <h3>Select neurons of interest and they flow downstream</h3>
+          <p>
+            Three outputs. <b class="ty ty--table">Hits</b> is everything matching the query,
+            <b class="ty ty--table">Selected</b> only the ticked rows, and
+            <b class="ty ty--table">All</b> the index untouched &mdash; the whole
+            neuron&#8209;by&#8209;property table, ready for a <code>Group&nbsp;By</code> or a chart
+            with no second query.
+          </p>
+        </div>
+      </div>
+      <div class="point rise" data-delay="2" style="max-width:var(--measure)">
+        <h3><code>Profile</code> provides neuron-level summaries</h3>
+        <p>
+          Identity, transmitter, synapse totals, strongest partners, the per&#8209;ROI split and the
+          morphology &mdash; one neuron at a time. Page through a collection freely; pin one and it
+          leaves by <b class="ty ty--table">Current</b>.
+        </p>
+      </div>
+    </div>
+
+    <!-- The two widgets as they sit on a canvas: one feeding the other. -->
+    <div class="pipe rise" data-delay="1">
+      <div class="surface">
+        <div class="surface__bar"><strong>Explore</strong><span>hemibrain:v1.2.1</span></div>
+        <div class="explore__search">
+          <span style="color:var(--text-muted)">&#9906;</span>
+          <span class="q">LC4</span><span class="caret"></span>
+          <span class="explore__count">68 hits</span>
+        </div>
+
+        <div class="explore__rows">
+          <div class="row" data-picked="true">
+            <span class="row__tick">&#10003;</span>
+            <span class="row__thumb"><svg viewBox="0 0 46 38" width="46" height="38" aria-hidden="true"><g fill="none" stroke="var(--text-secondary)" stroke-width="1.1" stroke-linecap="round"><polyline points="8,32 14,24 20,16 26,10"/><polyline points="14,24 9,19"/><polyline points="20,16 26,18"/><polyline points="26,10 32,6"/><polyline points="26,10 31,13"/></g><circle cx="8" cy="32" r="2.6" fill="var(--text-secondary)"/></svg></span>
+            <span class="row__main">
+              <span class="row__name">LC4 <span class="row__id">1722342154</span></span>
+              <span class="row__chips"><i class="chip" data-slot="1">visual projection</i><i class="chip" data-slot="5">soma R</i><i class="chip" data-slot="3">Traced</i><i class="chip" data-slot="4">acetylcholine</i></span>
+            </span>
+          </div>
+          <div class="row" data-picked="true">
+            <span class="row__tick">&#10003;</span>
+            <span class="row__thumb"><svg viewBox="0 0 46 38" width="46" height="38" aria-hidden="true"><g fill="none" stroke="var(--text-secondary)" stroke-width="1.1" stroke-linecap="round"><polyline points="9,31 15,23 22,17 29,12"/><polyline points="15,23 11,17"/><polyline points="22,17 27,21"/><polyline points="29,12 35,9"/></g><circle cx="9" cy="31" r="2.6" fill="var(--text-secondary)"/></svg></span>
+            <span class="row__main">
+              <span class="row__name">LC4 <span class="row__id">1691981778</span></span>
+              <span class="row__chips"><i class="chip" data-slot="1">visual projection</i><i class="chip" data-slot="5">soma R</i><i class="chip" data-slot="3">Traced</i><i class="chip" data-slot="4">acetylcholine</i></span>
+            </span>
+          </div>
+          <div class="row">
+            <span class="row__tick">&#10003;</span>
+            <span class="row__thumb"><svg viewBox="0 0 46 38" width="46" height="38" aria-hidden="true"><g fill="none" stroke="var(--text-secondary)" stroke-width="1.1" stroke-linecap="round"><polyline points="10,30 16,22 23,18 30,11"/><polyline points="16,22 12,26"/><polyline points="23,18 28,22"/><polyline points="30,11 36,12"/></g><circle cx="10" cy="30" r="2.6" fill="var(--text-secondary)"/></svg></span>
+            <span class="row__main">
+              <span class="row__name">LC4 <span class="row__id">1660633120</span></span>
+              <span class="row__chips"><i class="chip" data-slot="1">visual projection</i><i class="chip" data-slot="5">soma L</i><i class="chip" data-slot="3">Traced</i><i class="chip" data-slot="4">acetylcholine</i></span>
+            </span>
+          </div>
+          <div class="row">
+            <span class="row__tick">&#10003;</span>
+            <span class="row__thumb"><svg viewBox="0 0 46 38" width="46" height="38" aria-hidden="true"><g fill="none" stroke="var(--text-secondary)" stroke-width="1.1" stroke-linecap="round"><polyline points="8,33 15,25 21,15 28,9"/><polyline points="21,15 16,12"/><polyline points="28,9 34,11"/></g><circle cx="8" cy="33" r="2.6" fill="var(--text-secondary)"/></svg></span>
+            <span class="row__main">
+              <span class="row__name">LC4 <span class="row__id">1629482093</span></span>
+              <span class="row__chips"><i class="chip" data-slot="1">visual projection</i><i class="chip" data-slot="5">soma L</i><i class="chip" data-slot="3">Traced</i><i class="chip" data-slot="4">acetylcholine</i></span>
+            </span>
+          </div>
+        </div>
+
+        <div class="explore__ports">
+          <div class="explore__port"><b><i class="sock" data-fam="table" data-shape="circle"></i>Hits</b><span>68 rows</span></div>
+          <div class="explore__port" data-wired="true"><b><i class="sock" data-fam="table" data-shape="circle"></i>Selected</b><span>2 rows</span></div>
+          <div class="explore__port"><b><i class="sock" data-fam="table" data-shape="circle"></i>All</b><span>the whole index</span></div>
+        </div>
+      </div>
+
+      <div class="pipe__link" aria-hidden="true">
+        <em>Selected</em>
+        <svg viewBox="0 0 78 74" width="78" height="74">
+          <path d="M0 37H64"/>
+          <polygon class="head" points="63,31.5 75,37 63,42.5"/>
+        </svg>
+      </div>
+
+      <div class="surface">
+        <div class="surface__bar">
+          <i class="sock" data-fam="table" data-shape="circle" style="position:static;transform:none"></i>
+          <strong>Profile</strong><span>2 of 2 &nbsp;&#8249;&nbsp;&#8250;</span>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:1px; background:var(--border);">
+          <div style="background:var(--surface-2); padding:11px 13px; display:grid; gap:3px;">
+            <span style="font-family:var(--font-mono); font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--text-muted)">Identity</span>
+            <b style="font-size:15px; letter-spacing:-.02em">LC4</b>
+            <span style="font-family:var(--font-mono); font-size:11px; color:var(--text-muted)">1722342154 &middot; soma R</span>
+          </div>
+          <div style="background:var(--surface-2); padding:11px 13px; display:grid; gap:3px;">
+            <span style="font-family:var(--font-mono); font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--text-muted)">Synapses</span>
+            <b style="font-size:15px; letter-spacing:-.02em; font-variant-numeric:tabular-nums">1,043 <span style="font-size:11px; color:var(--text-muted); font-weight:400">pre</span> &middot; 2,388 <span style="font-size:11px; color:var(--text-muted); font-weight:400">post</span></b>
+            <span style="font-family:var(--font-mono); font-size:11px; color:var(--text-muted)">acetylcholine</span>
+          </div>
+          <div style="background:var(--surface-2); padding:11px 13px; display:grid; gap:5px;">
+            <span style="font-family:var(--font-mono); font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--text-muted)">Top outputs</span>
+            <span style="font-family:var(--font-mono); font-size:11px; display:flex; justify-content:space-between"><span>DNp01</span><span style="color:var(--text-muted)">148</span></span>
+            <span style="font-family:var(--font-mono); font-size:11px; display:flex; justify-content:space-between"><span>DNp02</span><span style="color:var(--text-muted)">96</span></span>
+            <span style="font-family:var(--font-mono); font-size:11px; display:flex; justify-content:space-between"><span>DNp04</span><span style="color:var(--text-muted)">71</span></span>
+          </div>
+          <div style="background:var(--surface-2); padding:11px 13px; display:grid; gap:5px;">
+            <span style="font-family:var(--font-mono); font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--text-muted)">By region</span>
+            <span style="font-family:var(--font-mono); font-size:11px; display:flex; justify-content:space-between"><span>PVLP(R)</span><span style="color:var(--text-muted)">61%</span></span>
+            <span style="font-family:var(--font-mono); font-size:11px; display:flex; justify-content:space-between"><span>LO(R)</span><span style="color:var(--text-muted)">33%</span></span>
+            <span style="font-family:var(--font-mono); font-size:11px; display:flex; justify-content:space-between"><span>PLP(R)</span><span style="color:var(--text-muted)">6%</span></span>
+          </div>
+        </div>
+        <div class="node__foot" style="border-top:1px solid var(--border)"><span>Current &rarr; the pinned neuron</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==========================================================================
+     Chapter 8 · Live data
+     ========================================================================== -->
+<section class="chapter">
+  <div class="shell">
+    <div class="chapter__head rise">
+      <span class="beat__n">Chapter 8</span>
+      <h2>Point it at a real connectome</h2>
+      <p class="lede">
+        Coda ships with a synthetic connectome generated in the browser, so every example runs with
+        no account and no network. Real data takes one more step.
+      </p>
+    </div>
+
+    <div class="split">
+      <div class="stack">
+        <div class="point rise">
+          <h3>Paste a token once</h3>
+          <p>
+            Sign in at <strong>neuprint.janelia.org</strong> and copy your auth token from the
+            account menu. In Coda: <strong>Sources</strong> in the toolbar, paste, Test.
+          </p>
+        </div>
+        <div class="point rise" data-delay="1">
+          <h3>It stays in this browser</h3>
+          <p>
+            Held in local storage, never written into a saved workflow &mdash; so a
+            <code>.coda.json</code> you send a colleague carries the analysis and not your
+            credentials.
+          </p>
+        </div>
+        <div class="point rise" data-delay="2">
+          <h3>One node per dataset</h3>
+          <p>
+            No backend to choose. <strong>Add &#9656; Dataset &#9656; Hemibrain</strong> arrives
+            pointed somewhere and asks only for a version, defaulting to the newest release the
+            server reports &mdash; named in full, so a shared workflow never leaves anyone guessing
+            which one it used.
+          </p>
+        </div>
+        <div class="point rise" data-delay="3">
+          <h3>Credit comes attached</h3>
+          <p>
+            Every published dataset node arrives with a <code>Description</code> card wired to it:
+            what the dataset covers and the papers its authors ask you to cite, as neuPrint
+            publishes it. An ordinary node &mdash; delete it if you would rather not have it.
+          </p>
+        </div>
+      </div>
+
+      <div class="stack">
+        <div class="surface rise" data-delay="1">
+          <div class="surface__bar"><strong>Sources</strong><span>neuPrint</span></div>
+          <div class="field">
+            <label for="tok">Token</label>
+            <div class="input" id="tok" data-filled="true">eyJhbGciOiJSUzI1NiIsImtpZCI6IjNkZTgw&hellip;</div>
+          </div>
+          <div class="btnrow">
+            <span class="btn-m" data-primary="true">Test</span>
+            <span class="btn-m">Forget</span>
+          </div>
+          <div class="ok-line"><span class="dot-ok"></span>connected &middot; 6 datasets</div>
+          <div class="dsgrid">
+            <div class="dscard"><b>Hemibrain</b><span>v1.2.1</span></div>
+            <div class="dscard"><b>MANC</b><span>v1.2.3</span></div>
+            <div class="dscard"><b>Optic Lobe</b><span>v1.1</span></div>
+            <div class="dscard"><b>MaleCNS</b><span>v1.0</span></div>
+          </div>
+        </div>
+        <p class="fig__cap rise" data-delay="2" style="max-width:30rem">
+          Live queries need Coda running from your own machine: neuPrint sends no CORS headers, so
+          the browser is blocked before the request leaves &mdash; the dev server proxies it. The
+          synthetic connectome and every bundled example work either way.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==========================================================================
+     Chapter 9 · Getting around
+     ========================================================================== -->
+<section class="chapter">
+  <div class="shell">
+    <div class="chapter__head rise">
+      <span class="beat__n">Chapter 9</span>
+      <h2>Getting around the canvas</h2>
+      <p class="lede">
+        Two keys do almost everything: <kbd>Space</kbd> for commands and nodes by name,
+        <kbd>Tab</kbd> for the browser.
+      </p>
+    </div>
+
+    <div class="split">
+      <div class="stack">
+        <div class="rise">
+          <div class="keys">
+            <div class="keyrow"><kbd>Space</kbd><span>Commands and nodes, fuzzy&#8209;searched</span></div>
+            <div class="keyrow"><kbd>Tab</kbd><span>Browse all nodes, with previews</span></div>
+            <div class="keyrow"><kbd>&#8679;R</kbd><span>Run everything that is stale</span></div>
+            <div class="keyrow"><kbd>I</kbd><span>Show or hide the inspector</span></div>
+            <div class="keyrow"><kbd>H</kbd><span>Collapse the selected cards</span></div>
+            <div class="keyrow"><kbd>M</kbd><span>Mute the selection</span></div>
+            <div class="keyrow"><kbd>&#8984;D</kbd><span>Duplicate the selection</span></div>
+            <div class="keyrow"><kbd>&#8984;Z</kbd><span>Undo &mdash; including a drag, back to where it began</span></div>
+          </div>
+        </div>
+        <p class="fig__cap rise" data-delay="1" style="max-width:32rem">
+          Initials work in the palette: <b>ra</b> &rarr; Run All, <b>gb</b> &rarr; Group By.
+        </p>
+      </div>
+
+      <div class="stack">
+        <div class="gestures rise" data-delay="1">
+          <div class="gesture">
+            <svg width="34" height="26" viewBox="0 0 34 26" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><path d="M4 13h26M4 13l4-4M4 13l4 4M30 13l-4-4M30 13l-4 4"/></svg>
+            <span><strong>Drag</strong> pans. Panning is the common gesture, so it is the bare one.</span>
+          </div>
+          <div class="gesture">
+            <svg width="34" height="26" viewBox="0 0 34 26" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5" y="5" width="24" height="16" rx="2" stroke-dasharray="3 3"/></svg>
+            <span><strong>&#8679; + drag</strong> draws a selection box.</span>
+          </div>
+          <div class="gesture">
+            <svg width="34" height="26" viewBox="0 0 34 26" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><circle cx="17" cy="13" r="7"/><path d="M17 9v8M13 13h8"/></svg>
+            <span><strong>Scroll</strong> zooms. <strong>Double&#8209;click</strong> empty canvas adds a node there.</span>
+          </div>
+          <div class="gesture">
+            <svg width="34" height="26" viewBox="0 0 34 26" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><circle cx="6" cy="13" r="3" fill="currentColor" stroke="none"/><path d="M9 13c6 0 6-7 12-7"/><circle cx="24" cy="6" r="3"/><path d="M9 14c5 3 8 5 14 5"/></svg>
+            <span><strong>Drag a wire into empty space</strong> for a list filtered to what accepts it &mdash; your pick arrives wired.</span>
+          </div>
+          <div class="gesture">
+            <svg width="34" height="26" viewBox="0 0 34 26" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><path d="M4 18c8 0 10-10 18-10"/><path d="M20 4l4 4-4 4" stroke-linejoin="round"/></svg>
+            <span><strong>Drag either end of a wire off its socket</strong> to re-route; right&#8209;click it for a menu. A drop on a socket that refuses snaps back rather than cutting the link.</span>
+          </div>
+          <div class="gesture">
+            <svg width="34" height="26" viewBox="0 0 34 26" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="4" y="6" width="26" height="14" rx="2"/><path d="M4 11h26" stroke-width="1.2"/></svg>
+            <span>The corner controls <strong>auto-arrange</strong> the graph left to right, once or continuously.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==========================================================================
+     Chapter 10 · Keeping it
+     ========================================================================== -->
+<section class="chapter">
+  <div class="shell">
+    <div class="chapter__head rise">
+      <span class="beat__n">Chapter 10</span>
+      <h2>Where a workflow goes</h2>
+      <p class="lede">Two places, and only one of them is durable.</p>
+    </div>
+
+    <div class="cards2 rise">
+      <div class="savecard" data-durable="true">
+        <span class="savecard__tag">Save &#9656; Download &middot; durable</span>
+        <h3>A <code>.coda.json</code> file</h3>
+        <p>
+          The real artefact. Plain JSON &mdash; it goes in a repository, a supplement, an email, and
+          reproduces the pipeline wherever it lands. Results are not in it: the recipe, not the meal.
+        </p>
+      </div>
+      <div class="savecard">
+        <span class="savecard__tag">Save &#9656; In this browser &middot; convenient</span>
+        <h3>The browser shelf</h3>
+        <p>
+          A named copy on this machine, listed under Open and on the start page. Good for picking up
+          where you left off.
+        </p>
+        <p>
+          <strong>Not a backup.</strong> Per browser and per profile, not synced, empty in a private
+          window, and cleared with the site data. Anything you would be sorry to lose, download.
+        </p>
+      </div>
+    </div>
+
+    <p class="fig__cap rise" data-delay="1" style="max-width:38rem; margin-top:1.25rem">
+      Data comes out separately: any viewer exports what it is showing &mdash; CSV from a table, SVG
+      or PNG from a chart &mdash; and a <b style="color:var(--text-primary)">Download</b> node at the
+      end of a chain writes its file on every run, so a pipeline re&#8209;run tomorrow refreshes its
+      own outputs.
+    </p>
+  </div>
+</section>
+
+<!-- ==========================================================================
+     Outro
+     ========================================================================== -->
+<section class="outro">
+  <div class="shell">
+    <h2 class="rise">Open it and add one node.</h2>
+    <p class="rise" data-delay="1">
+      Nothing to install, and the bundled examples run with no account. Start from one, take it
+      apart, point it at your own question.
+    </p>
+    <div class="outro__actions rise" data-delay="2">
+      <a class="cta" data-primary="true" href="https://navis-org.github.io/coda/" target="_blank" rel="noreferrer noopener">Open Coda</a>
+      <a class="cta" href="https://github.com/navis-org/coda" target="_blank" rel="noreferrer noopener">Source and docs</a>
+      <a class="cta" href="https://github.com/navis-org/coda/issues" target="_blank" rel="noreferrer noopener">Report something</a>
+    </div>
+    <p class="rise" data-delay="3" style="margin-top:2.25rem; font-size:.92rem;">
+      Coda is in alpha. Node parameters are still moving, and a workflow saved today may not open in
+      a later build.
+    </p>
+  </div>
+</section>
+
+<footer class="colophon">
+  <div class="shell">
+    Coda &mdash; connectome data analysis &middot; Fly Connectomics Group, Cambridge<br>
+    Connectome data published by the FlyEM project at Janelia Research Campus, via neuPrint.
+  </div>
+</footer>
+    <script type="module" src="/src/tutorial/main.ts"></script>
+  </body>
+</html>

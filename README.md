@@ -32,6 +32,11 @@ Requires Node ≥ 20 and pnpm. On a fresh machine: `brew install node && npm i -
 
 ### Start by looking around
 
+New to node graphs? The **[field guide](https://navis-org.github.io/coda/tutorial.html)** is a
+single scrolling page that builds a real pipeline as you read — nodes, wires, fetching data,
+Explore, the viewers, and saving your work. It is built with the app (`tutorial.html`), so it
+also opens from **?&nbsp;▾ ▸ Field Guide** in the toolbar and from the welcome screen.
+
 **New ▾** offers an empty canvas or a graph already pointed at a dataset, which builds
 `Dataset → Explore → Table`.
 

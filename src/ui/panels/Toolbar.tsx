@@ -130,17 +130,35 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
           says nothing about what it does until you press it. */}
       <Dropdown label="?" title="Help">
         {(close) => (
-          <button
-            type="button"
-            className="dropdown__item"
-            onClick={() => {
-              openStartPage()
-              close()
-            }}
-          >
-            <strong>Show Welcome Dialog</strong>
-            <span>What Coda is, and a few places to begin</span>
-          </button>
+          <>
+            <button
+              type="button"
+              className="dropdown__item"
+              onClick={() => {
+                openStartPage()
+                close()
+              }}
+            >
+              <strong>Show Welcome Dialog</strong>
+              <span>What Coda is, and a few places to begin</span>
+            </button>
+            {/*
+             * A link rather than a button, so it can be opened in a new tab the
+             * ordinary way — leaving the graph on the canvas untouched. Through
+             * `BASE_URL`, since `base` is './' and an absolute path would resolve
+             * to the domain root under a subpath deploy.
+             */}
+            <a
+              className="dropdown__item"
+              href={`${import.meta.env.BASE_URL}tutorial.html`}
+              target="_blank"
+              rel="noreferrer noopener"
+              onClick={close}
+            >
+              <strong>Field Guide</strong>
+              <span>Nodes, wires, queries and viewers, from the beginning</span>
+            </a>
+          </>
         )}
       </Dropdown>
 

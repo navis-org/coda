@@ -327,6 +327,7 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `ui/exportValue.test.ts`                 | SWC's 1-based ids and -1 roots, OBJ's 1-based faces, the JSON typed-array unpack, and the file cap |
 | `nodes/output/download.test.ts`          | the tap: identity pass-through, deferred by the auto pass, and settings re-running nothing         |
 | `ui/useDownloads.test.tsx`               | the side effect: written on an executing run, not on an unchanged one, and the auto-run warning    |
+| `ui/panels/startPage.test.tsx`           | (also) the field-guide links, in the welcome bar and the Help menu, composed against `BASE_URL`   |
 
 ## Auto-run
 
@@ -521,6 +522,76 @@ distinguishable against a laid-out page.
 The _worker wrapper_ remains uncovered: jsdom has no `Worker`, so tests take the bundled path.
 What was checked by hand is that `elk-worker.min.js` guards both its entry branches with `typeof`
 and calls no `importScripts`, so vite serving it as a module worker in dev is safe.
+
+## The tutorial page
+
+A second vite entry — `tutorial.html` at the root, `src/tutorial/{main.ts,tutorial.css}` — built
+into `dist/` alongside the app and published to GitHub Pages with it. Ten chapters. The first six
+share one pinned canvas that builds a real pipeline as you read — `Hemibrain → Find Neurons →
+Connectivity → Filter → Group By → Bar Chart` — then Explore/Profile, neuPrint, the keyboard and
+saving get their own set-pieces.
+
+**It imports nothing from the app but `theme.css`, and that one import is the whole design.** The
+page draws node cards, sockets, wires and a run ring in plain CSS rather than mounting React Flow —
+so a tutorial about what a Dataset socket looks like cannot disagree with the editor about it, while
+costing none of React, sigma or three. Verify with `pnpm build`: `tutorial-*.js` should stay around
+4 kB and `dist/tutorial.html` should reference no `main-*` chunk. If it ever does, something reached
+into `src/ui` beyond the stylesheet.
+
+**Naming both entries in `build.rollupOptions.input` is what keeps it.** Vite otherwise treats
+`index.html` as the only root and drops the second page silently — it builds green and 404s in
+production.
+
+**The palette is used semantically, never decoratively.** Green means Dataset, blue means
+Table/Neurons, orange means Matrix/Network, on the page exactly as on the canvas — including inline
+in running text (`.ty--dataset` and friends). That is the entire chromatic vocabulary; everything
+else is the warm neutral the canvas already is. Chips go through `--chip-1..8` rather than literal
+hex, so they re-resolve on a theme switch like the real ones.
+
+**Hidden-until-scrolled states are gated on a `js` class the script claims on `<html>`, and the
+script is wrapped in a try/catch that gives it back.** Found by running the page under jsdom, which
+has no `matchMedia`: the script threw on line one, and because `.rise` carried `opacity: 0`
+unconditionally, *every section of the page stayed invisible*. A static page is a fine failure; a
+blank one is not.
+
+**Chapter 3 is the one the camera cannot serve.** It is about the *execution model*, and Run,
+Auto-run and the per-node ▶ are toolbar and header chrome rather than things in the world the
+camera pans over. So that chapter dims the canvas and draws the toolbar cluster and a card header
+large over it, with a pulsing ring on the two controls. The frame is deliberately identical to
+chapter 2's, so the canvas does not move under the overlay.
+
+**The camera is given a box to fit, never a zoom level.** `FRAMES` names a world rectangle per
+chapter and `camera()` solves for scale, so the framing holds at any viewport instead of being
+tuned against one. `FRAMES_NARROW` is a genuinely different composition rather than the same one
+smaller — a phone stage is about a third of a desktop one, and the desktop frames put the card text
+under legibility there, so the narrow set holds fewer cards each and the anatomy callouts stand
+down. Chapter 6's wide shot is deliberately illegible: the cards are texture and the point is the
+shape of the chain.
+
+**Wire colours go through `style.stroke`, not `setAttribute('stroke', …)`.** A presentation
+attribute does not resolve `var()`, so the wires come out black with nothing failing.
+
+**Socket positions are walked through `offsetParent`, not measured.** The world carries a
+`scale()`, so a bounding rect would be in screen pixels and would change with the camera;
+`offsetLeft`/`offsetTop` stay in world units. Same distinction as the auto-layout note above, for
+the same reason.
+
+**The run ring is sized explicitly.** `inset: -6px` on an `<svg>` is over-constrained, so
+`right`/`bottom` are dropped and it renders at its 300×150 intrinsic size — the same trap
+`NodeRunRing.tsx` documents, hit again here.
+
+**Sticky becomes block flow under 980px.** A sticky grid item can only stick within its own row, so
+the stacked mobile layout would scroll the canvas away the moment the prose began.
+
+Three entry points, all through `import.meta.env.BASE_URL` since `base` is `'./'`: the start page's
+credits row, the toolbar's `? ▾`, and the README. **`Docs` on the welcome screen is this page**, not
+the repository's `docs/` folder — that folder is written for someone extending Coda, and the link is
+read by someone who has just opened it. `startPage.test.tsx` covers both in-app ones; a second vite
+entry has no route for anything else to catch going missing.
+
+The page itself has no test. jsdom does no layout, so the camera, the pinned stage and the wires
+are exactly the class of thing it cannot see; what was checked by hand is that it runs clean under
+jsdom across five viewport widths with every chapter resolving. Same standing as the WebGL viewers.
 
 ## Collapsible panels
 

@@ -27,7 +27,16 @@ import { datasetCards, exampleCards, workflowCards } from './startCards'
 
 const REPO_URL = 'https://github.com/navis-org/coda'
 const ISSUES_URL = `${REPO_URL}/issues`
-const DOCS_URL = `${REPO_URL}/tree/main/docs`
+/*
+ * The scroll-through introduction, built as a second entry alongside the app —
+ * and what "Docs" in the credits row points at, since it is the document
+ * somebody arriving here actually wants.
+ *
+ * Through `BASE_URL` for the same reason the backdrop is: `base` is './' so the
+ * build works from a subpath, where an absolute path resolves to the domain
+ * root and 404s on GitHub Pages.
+ */
+const TUTORIAL_URL = `${import.meta.env.BASE_URL}tutorial.html`
 
 export function StartPage() {
   const open = useGraphStore((s) => s.startPageOpen)
@@ -234,7 +243,7 @@ export function StartPage() {
                 issue
               </a>{' '}
               for bugs and feature requests ·{' '}
-              <a href={DOCS_URL} target="_blank" rel="noreferrer noopener">
+              <a href={TUTORIAL_URL} target="_blank" rel="noreferrer noopener">
                 Docs
               </a>
             </span>

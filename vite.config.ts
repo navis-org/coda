@@ -150,6 +150,21 @@ export default defineConfig({
   define: { __APP_VERSION__: JSON.stringify(version) },
   // Relative base so the built bundle works from a subpath (GitHub Pages) as well as root.
   base: './',
+  /*
+   * Two entries. `tutorial.html` is the scroll-through introduction — plain
+   * TypeScript and CSS, importing nothing from `src/ui` but `theme.css`, so it
+   * shares the editor's palette without pulling React, sigma or three into a
+   * document that draws none of them. Naming both here is what stops vite
+   * treating `index.html` as the only root and dropping the other one.
+   */
+  build: {
+    rollupOptions: {
+      input: {
+        main: fileURLToPath(new URL('./index.html', import.meta.url)),
+        tutorial: fileURLToPath(new URL('./tutorial.html', import.meta.url)),
+      },
+    },
+  },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),

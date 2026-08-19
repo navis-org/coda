@@ -2791,6 +2791,12 @@ select.field {
 .dropdown__item:hover {
   background: var(--accent-soft);
 }
+/* The Help menu's tutorial entry is a real link, so it opens in a tab the
+   ordinary way. It still has to read as a menu row rather than as body text. */
+a.dropdown__item {
+  color: inherit;
+  text-decoration: none;
+}
 .dropdown__item strong {
   display: block;
   font-size: 12px;
