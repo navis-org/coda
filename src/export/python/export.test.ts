@@ -17,7 +17,7 @@ import { addNode, emptyGraph } from '../../core/graph'
 import { allNodeDefs, requireNodeDef } from '../../core/registry'
 import '../../nodes'
 import { exportNotebook } from './exporter'
-import { everythingGraph } from './fixture'
+import { everythingGraph } from '../fixture'
 import { getEmitter } from './registry'
 import { serializeNotebook } from './notebook'
 

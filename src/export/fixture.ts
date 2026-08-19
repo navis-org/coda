@@ -1,6 +1,9 @@
 /**
  * The everything graph.
  *
+ * Shared by every exporter rather than copied per language: this is a *graph*, and a second
+ * copy is how two exporters end up being held to two different coverage bars.
+ *
  * One fixture wiring up every node type that emits, because the five bundled examples all run
  * on synthetic connectomes and are refused by design — so without this the golden files would
  * cover nothing. Built in code rather than checked in as JSON so it cannot drift from the node
@@ -11,9 +14,9 @@
  * exist to reach node types, not to answer a question.
  */
 
-import type { CodaGraph, GraphEdge, GraphNode } from '../../core/graph'
-import { addEdge, addNode, emptyGraph } from '../../core/graph'
-import type { ParamValues } from '../../core/node'
+import type { CodaGraph, GraphEdge, GraphNode } from '../core/graph'
+import { addEdge, addNode, emptyGraph } from '../core/graph'
+import type { ParamValues } from '../core/node'
 
 interface Spec {
   id: string
@@ -148,6 +151,8 @@ export function everythingGraph(): CodaGraph {
     { id: 'profile', type: 'out.profile', col: 3, row: 7, params: { selection: ['1001'] } },
     { id: 'summary', type: 'out.datasetSummary', col: 3, row: 8,
       params: { status: 'Traced', topTypes: 15 } },
+    { id: 'rois', type: 'out.rois', col: 3, row: 9,
+      params: { view: 'dorsal', explode: 40, colorBy: 'preCompleteness' } },
     { id: 'dl', type: 'out.download', col: 13,
       params: { filename: 'partners', format: 'csv' } },
 
@@ -191,6 +196,7 @@ export function everythingGraph(): CodaGraph {
     ['find', 'neurons', 'profile', 'neurons'],
     ['ds', 'dataset', 'profile', 'dataset'],
     ['ds', 'dataset', 'summary', 'dataset'],
+    ['ds', 'dataset', 'rois', 'dataset'],
     ['find', 'neurons', 'ng', 'neurons'],
     ['ds', 'dataset', 'ng', 'dataset'],
 

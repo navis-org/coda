@@ -10,7 +10,7 @@ import type { WorkflowSummary } from '../../store/library'
 import { findByName } from '../../store/library'
 import { useErrorCount, useGraphStore, useStaleCount } from '../../store/graphStore'
 import { pickGraphFile } from '../../store/persistence'
-import { downloadGraph, downloadNotebook } from '../export'
+import { downloadGraph, downloadNotebook, downloadRmd } from '../export'
 import { formatAgo, plural } from '../format'
 import { appElement, toggleFullscreen, useIsFullscreen } from '../fullscreen'
 import { SourcesPanel } from './SourcesPanel'
@@ -681,6 +681,22 @@ function SaveMenu({ close }: { close: () => void }) {
           >
             <strong>Export as Jupyter Notebook</strong>
             <span>A Jupyter notebook using neuprint-python, pandas and navis</span>
+          </button>
+        )}
+
+        {refusal ? null : (
+          <button
+            type="button"
+            className="dropdown__item"
+            onClick={() => {
+              void downloadRmd(graph, { appVersion: __APP_VERSION__ }).then((result) => {
+                if (result.ok) close()
+                else setRefusal(result)
+              })
+            }}
+          >
+            <strong>Export as R Markdown</strong>
+            <span>An .Rmd using neuprintr, dplyr and nat</span>
           </button>
         )}
       </div>

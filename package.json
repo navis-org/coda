@@ -12,11 +12,12 @@
   "scripts": {
     "build": "tsc -b && vite build",
     "dev": "vite",
-    "export:check": "vitest run src/export/python/export.test.ts && python3 scripts/check-export.py",
-    "export:golden": "UPDATE_GOLDEN=1 vitest run src/export/python/export.test.ts",
+    "export:check": "vitest run src/export && python3 scripts/check-export.py && Rscript scripts/check-export.R",
+    "export:golden": "UPDATE_GOLDEN=1 vitest run src/export",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
     "lint": "eslint .",
     "preview": "vite preview",
+    "probe:roimeshes": "node scripts/probe-roimeshes.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -b --noEmit"

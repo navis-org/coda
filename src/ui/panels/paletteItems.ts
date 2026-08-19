@@ -12,7 +12,7 @@ import { isAssignable } from '../../core/types'
 import { isAnnotation, nodeDefsByCategory } from '../../core/registry'
 import type { GraphState } from '../../store/graphStore'
 import { pickGraphFile } from '../../store/persistence'
-import { downloadGraph, downloadNotebook } from '../export'
+import { downloadGraph, downloadNotebook, downloadRmd } from '../export'
 import { canExportNotebook } from '../../export/canExport'
 import { appElement, toggleFullscreen } from '../fullscreen'
 import { EXAMPLES } from '../../examples'
@@ -276,6 +276,16 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
         : 'Download this graph as a Jupyter notebook (neuprint-python, pandas, navis)',
       disabled: exportRefusal !== undefined,
       perform: () => void downloadNotebook(store.graph, { appVersion: __APP_VERSION__ }),
+    },
+    {
+      id: 'cmd:export-rmd',
+      label: 'Export as R Markdown',
+      action: 'Graph',
+      hint: exportRefusal
+        ? `${exportRefusal.reason} — ${exportRefusal.fix}`
+        : 'Download this graph as an .Rmd (neuprintr, dplyr, nat)',
+      disabled: exportRefusal !== undefined,
+      perform: () => void downloadRmd(store.graph, { appVersion: __APP_VERSION__ }),
     },
 
     {

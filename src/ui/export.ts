@@ -161,6 +161,30 @@ export async function downloadNotebook(
   return { ok: true, warnings: result.warnings }
 }
 
+/**
+ * Save the working graph as an R Markdown document.
+ *
+ * The sibling of `downloadNotebook`, and lazy for the same measured reason — the R emitters are
+ * a second chunk of inert string-building nobody loads unless they ask for it. The refusal is
+ * checked first and comes from the same `canExportNotebook`, so the two formats cannot disagree
+ * about which graphs are exportable.
+ */
+export async function downloadRmd(
+  graph: CodaGraph,
+  options: { now?: string; appVersion?: string } = {},
+): Promise<{ ok: true; warnings: string[] } | ({ ok: false } & ExportRefusal)> {
+  const refusal = canExportNotebook(graph)
+  if (refusal) return { ok: false, ...refusal }
+
+  const { exportRmd } = await import('../export/r/exporter')
+  const result = exportRmd(graph, options)
+  if (!result.ok) return result
+
+  const blob = new Blob([result.source], { type: 'text/markdown' })
+  triggerDownload(blob, `${slugify(graph.meta?.name ?? '', 'untitled')}.Rmd`)
+  return { ok: true, warnings: result.warnings }
+}
+
 /** Filesystem-safe basename from a graph name and a node label. */
 export function exportBaseName(graphName: string | undefined, nodeLabel: string): string {
   const graph = slugify(graphName ?? '', '')
