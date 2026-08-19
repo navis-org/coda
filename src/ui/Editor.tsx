@@ -176,7 +176,17 @@ function EditorCanvas() {
           position: arrangeOverrides?.get(node.id) ?? node.position,
           data: dataFor(node),
           selected: selectedSet.has(node.id),
-          ...(size ? { width: size.width, height: size.height } : {}),
+          /*
+           * Width always, height only while the card is showing something. A collapsed card is
+           * a header, and pinning the wrapper to a 620px Profile box leaves it floating in the
+           * top-left of an empty rectangle — with `.coda-node::before` inset against the
+           * *wrapper*, so the state bar hangs 570px below it as a coloured line with nothing
+           * beside it. Letting the height go auto also makes the wrapper actually shrink, which
+           * is what re-measures the handles now that collapsing moves them.
+           */
+          ...(size
+            ? { width: size.width, ...(node.collapsed ? {} : { height: size.height }) }
+            : {}),
         }
       }),
     [graph.nodes, selectedSet, arrangeOverrides],

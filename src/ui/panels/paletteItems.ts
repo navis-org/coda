@@ -217,9 +217,11 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
     },
     {
       id: 'cmd:fold-params',
-      label: selectedNode?.paramsCollapsed ? 'Show Parameters' : 'Hide Parameters',
+      label: selectedNode?.paramsCollapsed
+        ? 'Show Parameters & Ports'
+        : 'Hide Parameters & Ports',
       action: 'Edit',
-      hint: 'Fold the parameter rows away, leaving the ports, the result and the header',
+      hint: 'Fold the parameter and port rows away, leaving the header, the body and the result',
       disabled: selection.length === 0,
       perform: () => store.toggleParamRows(selection),
     },

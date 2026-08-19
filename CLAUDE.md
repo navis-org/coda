@@ -268,6 +268,7 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `ui/viewers/neuroglancerViewer.test.tsx` | that a restyle navigates the frame rather than remounting it                                                                     |
 | `ui/nodes/nodeResize.test.tsx`           | handles outside the clipping card, resize not invalidating a result, gesture undo                                                |
 | `ui/nodes/paramFold.test.tsx`            | folding a card's param rows: the header button surviving the band, notes excepted, one undo step, and that it costs no run       |
+| `ui/nodes/collapsedPorts.test.tsx`       | collapse to a header: handles moved not removed, each still addressable, and the wrapper's width kept but not its height         |
 | `ui/nodes/hiddenParams.test.tsx`         | the `… N more` hint: both counts, the card with no band at all, what is not a change, and that it never closes an open inspector |
 | `nodes/lib/neuronSearch.test.ts`         | the Explore query language: parsing, matching, null rules, the fuzzy fallback, ranking, completion                               |
 | `data/cache.test.ts`                     | IndexedDB-less degradation, fingerprint/expiry invalidation, index dedupe                                                        |
@@ -324,10 +325,10 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `ui/nodes/inputIdsBody.test.tsx`         | the card: the counts, the ids named as missing, and that it claims nothing with no Dataset wired                                 |
 | `nodes/table/stack.test.ts`              | the union schema needing both sides, a real dtype clash refused at run time, and the source column                               |
 | `ui/fullscreen.test.tsx`                 | the ⛶ and `F`: what element is handed over, that a refusal leaves the button unpressed, and the manifest's relative scope        |
-| `ui/exportValue.test.ts`                 | SWC's 1-based ids and -1 roots, OBJ's 1-based faces, the JSON typed-array unpack, and the file cap |
-| `nodes/output/download.test.ts`          | the tap: identity pass-through, deferred by the auto pass, and settings re-running nothing         |
-| `ui/useDownloads.test.tsx`               | the side effect: written on an executing run, not on an unchanged one, and the auto-run warning    |
-| `ui/panels/startPage.test.tsx`           | (also) the field-guide links, in the welcome bar and the Help menu, composed against `BASE_URL`   |
+| `ui/exportValue.test.ts`                 | SWC's 1-based ids and -1 roots, OBJ's 1-based faces, the JSON typed-array unpack, and the file cap                               |
+| `nodes/output/download.test.ts`          | the tap: identity pass-through, deferred by the auto pass, and settings re-running nothing                                       |
+| `ui/useDownloads.test.tsx`               | the side effect: written on an executing run, not on an unchanged one, and the auto-run warning                                  |
+| `ui/panels/startPage.test.tsx`           | (also) the field-guide links, in the welcome bar and the Help menu, composed against `BASE_URL`                                  |
 
 ## Exporting a notebook
 
@@ -365,26 +366,26 @@ has an emitter or is named in `NO_EMITTER` with a reason.
 **The two surfaces refuse differently, and that is not an inconsistency.** A menu has room to
 answer back, so the Save menu lets the click through and replaces the item with a sentence
 naming what to change. The palette closes on pick, so there is nowhere to put that sentence
-afterwards — the row is `disabled` and the *hint* carries it, which is the idiom every other
+afterwards — the row is `disabled` and the _hint_ carries it, which is the idiom every other
 command there already follows. Getting this backwards would put a lit row in the palette that
 closes it and does nothing, and on a bundled example that is the usual state rather than an
 edge case.
 
 **A synthetic dataset is refused, and it is the only refusal.** Every other gap emits a TODO,
 because the surrounding cells are still worth having. A `dataset.mock.*` connectome is generated
-in the browser: no server, no token, no id that means anything outside the tab — so the *first*
+in the browser: no server, no token, no id that means anything outside the tab — so the _first_
 cell is the one with nothing behind it, and what would come out is a notebook nobody can fix
 without knowing which real dataset was meant. Note the consequence: **all five bundled examples
 are refused**, which is why the golden files are built on `fixture.ts` rather than on them.
 
 **The walk decides whether an input arrived; emitters never ask.** `ctx.wired(port)` returns a
-plain `string` because the walk refuses to call an emitter whose *required* ports are unwired or
+plain `string` because the walk refuses to call an emitter whose _required_ ports are unwired or
 blocked — and `ctx.input(port)` returns `string | undefined` for the ports declared
 `required: false`, where absence is a real case. That split removed ~25 hand-written
 `if (!ctx.input('in')) return ctx.todo('Nothing is wired…')` guards, each of which hardcoded a
 port id as a string. It is the same bug `ports.test.ts` exists for: the walk reads the ids off
 `def.inputs` and cannot mistype one, where an emitter did, for months. The two failures are also
-reported apart — *unwired* is a graph somebody has not finished, *blocked* is a node this
+reported apart — _unwired_ is a graph somebody has not finished, _blocked_ is a node this
 translation could not emit, and conflating them sends the reader to fix a wire that is already
 there.
 
@@ -392,7 +393,7 @@ there.
 the walk reads it to decide whether to bind the node's output variables. Without that, a node
 that could not be translated still bound its names and everything downstream emitted working
 code referring to variables nothing ever assigned. Blocking then cascades with the upstream
-node *named*, which mirrors the scheduler reaching `blocked` down exactly the same edge —
+node _named_, which mirrors the scheduler reaching `blocked` down exactly the same edge —
 "nothing is wired to this" would send somebody to the canvas to fix a wire that is already there.
 
 **One `Client` per dataset node, and every fetch names it.** neuprint-python has a global default
@@ -419,7 +420,7 @@ Three findings, each of which was a wrong answer before it was checked:
   `AttributeError` at runtime. Hence `import navis.interfaces.neuprint as neu`.
 
 Every signature the emitters produce was read off **neuprint-python 0.6.3** and **navis 2.0**
-by introspection, not recalled. Two that surprise: `fetch_neurons` returns a *pair* (neurons,
+by introspection, not recalled. Two that surprise: `fetch_neurons` returns a _pair_ (neurons,
 roi_counts), and there is no `fetch_mesh_neuron` in neuprint at all — meshes are navis's, which
 is also where the `lod` argument the `Detail` param maps onto lives.
 
@@ -434,7 +435,7 @@ runs every emitter against a context that records what it asks for and answers e
 checks the ids against the definition. It was written after `out.profile` was found reading an
 input called `in` on a node whose port is `neurons` — so it reported "nothing is wired to this
 Profile" for a node plainly wired on the canvas, and had done since it was written. It found four
-more the same day: `out.scatter` *wrote* `scatter_plot_table` while the walk bound
+more the same day: `out.scatter` _wrote_ `scatter_plot_table` while the walk bound
 `scatter_plot_out`, so anything downstream referenced a variable nothing assigns; `out.neuroglancer`
 bound a DataFrame to a port the graph types as a URL; and `out.viewer3d` was written as a
 pass-through when it has three optional geometry sockets and emits only the selection. None of
@@ -445,7 +446,7 @@ them as correct.
 viewer to a socket it has never had — `addEdge` takes the handle it is given — so the export
 said "nothing is wired", and the golden agreed. A fixture whose coverage is a claim rather than a
 fact is worse than no fixture, because it is what everything else is checked against. So
-`export.test.ts` now asserts that every fixture edge lands on a declared port *and* that the
+`export.test.ts` now asserts that every fixture edge lands on a declared port _and_ that the
 fixture reaches every emitting type. The second is what forced all six dataset families in
 rather than `hemibrain` alone: they share one generated emitter, but `mushroombody` carries no
 version in its dataset id and `neuron.dataset` reads its id from a param, and neither branch is
@@ -453,7 +454,7 @@ reachable through `hemibrain`.
 
 **A snapshot cannot tell whether the Python is valid**, which is exactly how the navis bug got
 in. `scripts/check-export.py` is the other half, in three passes: syntax, undefined names, and
-attribute resolution against the *real* installed libraries. The third is the one that earns the
+attribute resolution against the _real_ installed libraries. The third is the one that earns the
 script and the only one that can catch an import that does not expose what it looks like it
 exposes; it is skipped with a notice where the libraries are absent, and `--strict` turns that
 skip into a failure so a check that did not run cannot report success. Nothing is ever executed —
@@ -466,14 +467,14 @@ is otherwise well under one, and it is only ever worth paying when the exporter 
 ### Profile exports its metrics
 
 `out.profile` is the one viewer whose translation is worth more than a pass-through, because
-almost everything the card *shows* is an ordinary roll-up rather than a drawing.
+almost everything the card _shows_ is an ordinary roll-up rather than a drawing.
 `coda_profile(body_ids, client, min_weight, top_n)` returns the tiles as named frames —
 `summary`, `upstream_types`, `downstream_types`, `top_upstream`, `top_downstream`, `regions`,
 `hemispheres` — ported from `nodes/lib/profileStats.ts`.
 
 **It costs three requests however many neurons are asked for**, because `fetch_adjacencies` and
 `fetch_neurons` both take the whole id list. The widget pages one neuron at a time and pays
-three per neuron *viewed*, so the notebook can do the entire table for the price of the pinned
+three per neuron _viewed_, so the notebook can do the entire table for the price of the pinned
 one — the emitted call passes the pinned neuron because that is what the canvas was showing,
 and widening it is editing one argument. This is the one place the export is straightforwardly
 better than the thing it exports.
@@ -481,7 +482,7 @@ better than the thing it exports.
 Four rules came across with it, each of which produces a plausible wrong number rather than an
 error, and each was cross-checked against the TS rather than trusted: untyped partners keep
 their own bucket (merging them puts a fictitious type at the top of the list on male-CNS);
-synapses are summed *and* distinct partners counted, because forty synapses onto one neuron is
+synapses are summed _and_ distinct partners counted, because forty synapses onto one neuron is
 not forty onto forty; `roiInfo` nests, so regions are filtered to `fetch_primary_rois` before
 summing or the totals roughly double; and a null type sorts **last** on a tie, matching
 `collate`, which `na_position="last"` reproduces.
@@ -489,7 +490,7 @@ summing or the totals roughly double; and a null type sorts **last** on a tie, m
 ### Known gaps, all of them stated in the notebook
 
 - **`Paths` with `Collapse types` on has no equivalent, and this one is not laziness.** Coda
-  traverses the *type-collapsed* graph, which finds `LC4 → PLP1 → DNp01` even where no single
+  traverses the _type-collapsed_ graph, which finds `LC4 → PLP1 → DNp01` even where no single
   PLP1 neuron both receives from an LC4 and projects to a DNp01 — not recoverable by collapsing
   a neuron-level result afterwards, because the neuron-level search never returns either edge.
   Cypher cannot walk a derived graph without GDS, so neither `fetch_shortest_paths` nor
@@ -726,10 +727,10 @@ hex, so they re-resolve on a theme switch like the real ones.
 **Hidden-until-scrolled states are gated on a `js` class the script claims on `<html>`, and the
 script is wrapped in a try/catch that gives it back.** Found by running the page under jsdom, which
 has no `matchMedia`: the script threw on line one, and because `.rise` carried `opacity: 0`
-unconditionally, *every section of the page stayed invisible*. A static page is a fine failure; a
+unconditionally, _every section of the page stayed invisible_. A static page is a fine failure; a
 blank one is not.
 
-**Chapter 3 is the one the camera cannot serve.** It is about the *execution model*, and Run,
+**Chapter 3 is the one the camera cannot serve.** It is about the _execution model_, and Run,
 Auto-run and the per-node ▶ are toolbar and header chrome rather than things in the world the
 camera pans over. So that chapter dims the canvas and draws the toolbar cluster and a card header
 large over it, with a pulsing ring on the two controls. The frame is deliberately identical to
@@ -832,7 +833,7 @@ a preference restored at load would be refused, since a page load is not a gestu
 
 **`toggleFullscreen` compares against its own target, never against "is anything
 fullscreen".** That is what lets the two halves nest: the overlay's ⛶ pressed inside an
-already-fullscreen window shows the *panel* full size instead of dropping the window out, and
+already-fullscreen window shows the _panel_ full size instead of dropping the window out, and
 the Fullscreen API's element stack means leaving the panel lands back on the fullscreen app.
 The overlay's `close` and its Escape handler were both widened for the same reason — they used
 to ask "is anything fullscreen?", which was only ever equivalent because nothing else could be.
@@ -901,6 +902,72 @@ uncommitted frames of a drag or resize stash the graph as it was when the gestur
 that, history was recorded from the _last_ frame, so undoing a drag moved the node back one
 frame — and since the final two frames of a drag are usually identical, undo after moving a
 node appeared to do nothing at all.
+
+**Two controls put a card's sockets on its header.** Collapse (`▾`) keeps nothing else; the
+`☰` fold keeps the body and the footer, so a viewer's drawing gains both the param band and the
+port band — which is the whole reason the fold exists. There is no ports-only state any more:
+`collapsed` simply means more than it did. Wires converge near the title the way Blender's and
+ComfyUI's do.
+
+**The handles are moved, never removed, and that is the whole of it.** React Flow finds a node's
+anchors with `nodeElement.querySelectorAll('.source' | '.target')` and returns `null` when there
+are none, so unmounting the port rows leaves every wire on the card with nowhere to attach.
+`display: none` is worse rather than safer: the element stays findable and reports a zero-size
+rect, so each wire lands on the card's **top-left corner** looking deliberate. The band stays in
+the DOM and the stylesheet lays it over the header.
+
+**Over the header, not over the card.** `inset: 0` would be right only for a collapse, where the
+card _is_ its header; under a `☰` fold there is a preview and a footer beneath, and centring the
+sockets in those puts them halfway down a chart. So the band takes `--header-h`, declared on
+`.coda-node` and applied to the header as a `min-height` so the two cannot drift — `min-` rather
+than a fixed height because 28px is merely the header's natural size, and a control that grows
+should grow the header rather than be clipped by it.
+
+**Fanned, not overlapped, and three is the number that matters.** No node in the registry has
+more than three ports on a side (Paths 3→3, Explore 1→3, Adjacency 3→1, Viewer3D 3→1), so a
+`--port-pitch` of 8px puts three 11px discs down a ~28px header overlapping by 3. Every socket
+keeps a hit target, which is what lets a dragged link still choose an input and keeps the
+drag-off rewire anchors (`reconnectRadius: 14`) distinct. Exact overlap was the other option and
+loses both: the topmost handle takes every pointer event.
+
+**`pointer-events: none` on the band, never on the handles.** The band covers the header, which
+owns the drag, the run button and the chevron. React Flow puts pointer events back on each handle
+through its own `connectionindicator` class, so `none` costs the sockets nothing and omitting it
+costs the header everything.
+
+**This is the first thing in the app that moves a handle, which is why nothing needed
+`updateNodeInternals` before.** The ports band sits directly under the header and everything
+`collapsed` used to hide was _below_ it, so no collapse ever changed a socket's position. React
+Flow re-measures on `dimensionChanged || !handleBounds || force`, and the height change does
+trigger it — but that is the ResizeObserver's promise rather than ours, so the move is declared
+explicitly, on either state changing. Behind a mount-seeded ref: `updateNodeInternals` writes to
+React Flow's store, and firing it on mount would be one store write per card at load for
+measurements it is about to take anyway.
+
+**A collapsed card keeps its width and gives up its height.** `rfNodes` withholds `height` from a
+collapsed node so the wrapper hugs the header, and `[data-sized]` was split — it now means "the
+wrapper carries a width", with the box-filling half under `:not([data-collapsed])`. Both halves
+matter, and this was a live bug before the change: a collapsed Scatter left a header floating in
+the top-left of its 460×380 wrapper, with `.coda-node::before` inset against that _wrapper_, so
+the state bar hung 330px below the card as a coloured line with nothing beside it — the same
+failure `defaultSize` on a non-viewer causes. Measured after the fix: wrapper `width: 460px` and
+no height, box 460×52. Keeping the width is what stops a 560px card becoming a 232px one on its
+way to a title bar and moving every wire on it twice.
+
+**What it costs is the port labels.** Socket types are distinguished by colour _plus_ shape _plus_
+a visible label because only three chromatic families clear the all-pairs colourblind gate on this
+surface — so a folded card is carrying one channel fewer, with the socket's `title` as the only
+prose. A real trade, taken deliberately for a state somebody chooses and reverses.
+
+**This one _was_ looked at in a browser**, unlike most of the canvas — playwright against the dev
+server, folding and collapsing a Connectivity node and a boxed Scatter. Worth recording, because
+it settled something the CSS alone could not: **folded sockets are not clipped and expanded ones
+are.** Expanded, a handle's containing block is `.port-row` inside `.coda-node`'s
+`overflow: hidden`, so the discs render as half-circles flush with the border; the folded band is
+absolute against React Flow's wrapper, which is _outside_ that clip, so they come out whole. It
+reads fine — arguably better — but the two states genuinely differ, and anyone matching one to
+the other should know why. `collapsedPorts.test.tsx` still pins only the DOM and the
+declarations, since jsdom performs no layout.
 
 **Param rows fold away** (`GraphNode.paramsCollapsed`, the `☰` in the card header). A card is
 configured once and then read for the rest of the session, so the rows that set it up go on
@@ -2441,7 +2508,7 @@ about exactly that column. Note also that the pivot publishes no schema until it
 ## Download: a side effect in a reactive graph
 
 `out.download`, `Add ▸ Utility ▸ Download`. Write whatever arrives on the wire to a file. The one
-node here whose *purpose* is a side effect, and everything odd about it follows from that.
+node here whose _purpose_ is a side effect, and everything odd about it follows from that.
 
 **`evaluate` does not download.** It passes its input through and nothing else. Two reasons, and
 either alone would settle it: `src/nodes` is headless, so there is no `URL.createObjectURL` and no
@@ -2456,7 +2523,7 @@ not one anybody can leave on a canvas. It also makes the signal reliable: only `
 
 **The signal is `executed`, never the output value.** A node that did not re-run is not in that
 list, so a Run over an unchanged graph writes nothing — which is the whole of what bounds "on
-every run". Watching the value would fire on a cache *restore* too, writing a file for a graph
+every run". Watching the value would fire on a cache _restore_ too, writing a file for a graph
 nobody re-ran.
 
 **What it does not bound is auto-run.** With that on, every edit that changes the data upstream is
@@ -2466,7 +2533,7 @@ only live there: it depends on a **store** setting, which a node definition must
 
 **Every param is `presentational`, and that is the word used precisely.** `presentational` means
 "cannot change what `evaluate` returns", and `evaluate` returns its input unchanged whatever the
-filename, format or timestamp say — those decide what is *written*. Leaving them in the provenance
+filename, format or timestamp say — those decide what is _written_. Leaving them in the provenance
 key made renaming a file re-run the node and invalidate the entire graph downstream of it, which
 on an expensive pipeline is minutes of queries for a change to a string. The consequence, and it
 is asserted rather than left implicit: **changing a setting and pressing Run writes nothing**,
@@ -2482,7 +2549,7 @@ re-fire the last run's downloads — a file appearing because a panel was toggle
 
 A viewer is a **tap**: `out.scatter` passes its table on, never its picture, so nothing arriving on
 this node's input could be an image. `svg`/`png` therefore read the rendered chart belonging to
-whatever node *feeds* this one, found from `graph.edges` rather than from a param — the wire
+whatever node _feeds_ this one, found from `graph.edges` rather than from a param — the wire
 already names it.
 
 **Reading the DOM would not work, and that is why `exportRegistry.ts` exists.** The heatmap and the
@@ -2505,7 +2572,7 @@ mounted last and largest, and is the one anybody asking for a PNG means.
 ### Formats
 
 `ui/exportValue.ts`, and the rule is that **nothing is ever refused for want of a format**: a kind
-with no natural text form falls back to JSON. An *explicit* format the value cannot be written as
+with no natural text form falls back to JSON. An _explicit_ format the value cannot be written as
 plans nothing and is reported, because silently falling back would hide that the choice did not
 apply.
 
@@ -2514,14 +2581,14 @@ apply.
 - **Network → two CSVs**, nodes and links. One file cannot hold both without inventing a shape
   nothing reads; two is what the Network viewer's own button gives and what Gephi imports.
 - **Skeletons → SWC, Meshes → OBJ, one file per neuron.** A concatenated SWC has repeating ids and
-  parses as one impossible tree. `MAX_MORPHOLOGY_FILES` caps the set at 50 and the plan *reports*
+  parses as one impossible tree. `MAX_MORPHOLOGY_FILES` caps the set at 50 and the plan _reports_
   the cap: a browser stops honouring downloads past roughly that many with no error, which reads
   as the export having half-worked.
 - **Anything → JSON**, with typed arrays unpacked. `JSON.stringify` renders a `Float32Array` as an
   object keyed by index — valid, unreadable, several times larger — and every geometry value here
   is built out of them.
 
-Two format details that produce a *valid file that is wrong*, which is why both have tests:
+Two format details that produce a _valid file that is wrong_, which is why both have tests:
 
 - **SWC ids are 1-based and a root's parent is `-1`.** Coda stores parents as array indices, so
   every one shifts. A 0-based file parses in every tool and hangs the first point off nothing. The
@@ -2540,7 +2607,7 @@ the gesture and gets them blocked outright instead of asked about once.
 An `any` **output** is excluded from the palette's backwards link-drag, and the asymmetry with the
 input is the point. `any` on an input means "I accept whatever you have", which is a real answer to
 "what could this feed?" — Download genuinely takes anything. `any` on an output means "whatever I
-was given": a pass-through cannot *originate* a Dataset, so offering it when dragging back from a
+was given": a pass-through cannot _originate_ a Dataset, so offering it when dragging back from a
 Dataset socket answers the question with a node that needs the same question asked again behind it.
 
 ## Connectivity: hops and direction

@@ -10,14 +10,19 @@
  * text in the footer — so state is never communicated by colour alone.
  */
 
-import { Handle, NodeResizer, Position, useStore } from '@xyflow/react'
-import { memo, useMemo, useState } from 'react'
+import { Handle, NodeResizer, Position, useStore, useUpdateNodeInternals } from '@xyflow/react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 
 import type { GraphNode } from '../../core/graph'
 import type { InferenceResult, NodeIssue } from '../../core/inference'
 import type { NodeDefinition } from '../../core/node'
 import type { ParamDef, ParamValues } from '../../core/node'
-import { changedParams, configurableParams, hiddenParams, makeInferContext } from '../../core/node'
+import {
+  changedParams,
+  configurableParams,
+  hiddenParams,
+  makeInferContext,
+} from '../../core/node'
 import { getNodeDef } from '../../core/registry'
 import type { NodeRunState } from '../../core/scheduler'
 import type { CodaType } from '../../core/types'
@@ -149,6 +154,26 @@ function CodaNodeViewImpl({
     [dragNodeId, dragPortId, dragHandleType],
   )
 
+  /*
+   * Collapsing *or* folding moves the sockets onto the header, and React Flow caches each
+   * handle's position
+   * in the internal node. It re-measures when a card's measured size changes, which this does —
+   * but that is the ResizeObserver's promise rather than ours, and a wire still anchored where
+   * the port rows used to be is a confusing thing to debug. So the move is declared.
+   *
+   * Guarded by a mount-seeded ref rather than firing on every mount: `updateNodeInternals`
+   * writes to React Flow's store, and thirty of those on load is thirty store updates for
+   * measurements it is about to take anyway. Only an actual change needs declaring.
+   */
+  const updateNodeInternals = useUpdateNodeInternals()
+  const portsOnHeader = node.collapsed === true || node.paramsCollapsed === true
+  const wereOnHeader = useRef(portsOnHeader)
+  useEffect(() => {
+    if (wereOnHeader.current === portsOnHeader) return
+    wereOnHeader.current = portsOnHeader
+    updateNodeInternals(id)
+  }, [id, portsOnHeader, updateNodeInternals])
+
   const def = getNodeDef(node.type)
   const types = inference.nodes[id]
   const ctx = useMemo(
@@ -226,8 +251,16 @@ function CodaNodeViewImpl({
    * and a collapsed node is a title bar — stretching that means nothing either.
    */
   const resizable = isViewer(def) && !node.collapsed
-  /** True when the card fills an explicit box rather than sizing to its content. */
-  const sized = resizable && (node.size !== undefined || def.defaultSize !== undefined)
+  /**
+   * True when React Flow's wrapper carries an explicit width for this card, so the card fills it
+   * rather than taking `--node-width`.
+   *
+   * Asked without reference to `collapsed`, unlike `resizable`, because the wrapper keeps its
+   * width through a collapse — a card that jumped from 560 to 232 on its way to a title bar
+   * would move every wire on it twice. Only the *height* half of filling the box is dropped,
+   * which is what `[data-collapsed]` turns off in the stylesheet.
+   */
+  const sized = isViewer(def) && (node.size !== undefined || def.defaultSize !== undefined)
 
   /*
    * Whether there is a param band to fold, and whether it currently is folded.
@@ -246,9 +279,18 @@ function CodaNodeViewImpl({
    * does not draw: a node whose params are all `advanced`, and every node with a body of its
    * own, which renders its own controls instead of the generic rows.
    */
-  const foldableParams = !node.collapsed && visibleParams.length > 0
-  const folded = foldableParams && node.paramsCollapsed === true
-  const showParams = foldableParams && !folded
+  /*
+   * The `☰` fold takes the param rows *and* the port rows, leaving the header, the body and the
+   * footer — so on a viewer the drawing gets both bands back, which is the whole reason it
+   * exists. Offered wherever there is either kind of row to fold, not only where there are
+   * params: Neuroglancer's card is nine advanced params and two sockets, and the sockets are
+   * the only thing on it a fold can reclaim.
+   *
+   * Safe on any card because the button is in the *header*, which survives everything it hides.
+   */
+  const foldable = !node.collapsed && (visibleParams.length > 0 || rowCount > 0)
+  const folded = foldable && node.paramsCollapsed === true
+  const showParams = !node.collapsed && !folded && visibleParams.length > 0
   /*
    * The hint rides at the end of the band but is not gated on it: the cards that need it most
    * are the ones drawing *no* rows at all — Skeletons has a single param and it is advanced, so
@@ -288,6 +330,9 @@ function CodaNodeViewImpl({
         data-state={info.state}
         data-disabled={node.disabled || undefined}
         data-sized={sized || undefined}
+        data-collapsed={node.collapsed || undefined}
+        /* Both states put the sockets on the header; the stylesheet needs one name for that. */
+        data-ports-folded={node.collapsed || folded || undefined}
         /*
          * `--node-width` rather than `width`: the card's rule reads that custom property, so
          * overriding it here keeps one place deciding how a node is sized. The run ring is
@@ -388,17 +433,17 @@ function CodaNodeViewImpl({
           {/* Stays in the header rather than on the band it controls: folded, the band is not
             rendered at all, so a toggle living inside it would have nothing left to press —
             the same rule the minimap's corner button and the overlay's Style button follow. */}
-          {foldableParams && (
+          {foldable && (
             <button
               type="button"
               className="coda-node__fold nodrag"
-              aria-pressed={node.paramsCollapsed === true}
+              aria-pressed={folded}
               title={
-                node.paramsCollapsed
-                  ? 'Show the parameter rows'
-                  : 'Hide the parameter rows and give the space to the display'
+                folded
+                  ? 'Show the parameters and ports'
+                  : 'Hide the parameters and ports, giving the space to what is below them'
               }
-              aria-label={node.paramsCollapsed ? 'Show parameters' : 'Hide parameters'}
+              aria-label={folded ? 'Show parameters and ports' : 'Hide parameters and ports'}
               onClick={(e) => {
                 e.stopPropagation()
                 toggleParamRows([id])

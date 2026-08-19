@@ -259,6 +259,13 @@
   overflow: hidden;
   /* The state bar lives in this inset, so nothing else may claim it. */
   --state-bar: 3px;
+  /*
+   * The header's height, declared here because the folded socket band is laid over exactly it
+   * and the two must not drift. `min-height` rather than `height` on the header itself: 28px is
+   * its natural size (5+5 padding, a 17px button, a 1px border), so the two agree today, and if
+   * a control there ever grows the header grows with it instead of clipping.
+   */
+  --header-h: 28px;
 }
 
 .coda-node::before {
@@ -304,6 +311,7 @@
 .coda-node__header {
   display: flex;
   align-items: center;
+  min-height: var(--header-h);
   gap: 6px;
   padding: 5px 8px 5px calc(8px + var(--state-bar));
   background: color-mix(in srgb, var(--cat) 16%, var(--surface-2));
@@ -486,6 +494,44 @@
 
 .coda-node__ports {
   padding: 4px 0;
+}
+
+/*
+ * Folded, the sockets ride on the header. Both states that fold them set the attribute: the
+ * `☰` button, which keeps the body and the footer, and Collapse, which keeps neither.
+ *
+ * The band is laid over the header — `--header-h`, not `inset: 0`, because a `☰` fold leaves a
+ * preview and a footer underneath and centring the sockets in *those* would put them halfway
+ * down a chart. The rows shrink to a fixed pitch, so the handles fan down the header instead of
+ * stacking on one point. Three is the most any node in the registry has on a side, so at 8px
+ * they overlap by 3 and every one keeps a hit target: aiming a new link at a particular input
+ * still works, and the drag-off anchors that re-route a wire stay distinct.
+ *
+ * `pointer-events: none` on the band, never on the handles — React Flow puts `pointer-events`
+ * back on each handle itself through its own `connectionindicator` class, and a band that
+ * swallowed clicks would take the header's drag, its run button and its chevron with it.
+ */
+.coda-node[data-ports-folded] .coda-node__ports {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--header-h);
+  z-index: 2;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  pointer-events: none;
+  --port-pitch: 8px;
+}
+.coda-node[data-ports-folded] .port-row {
+  min-height: 0;
+  height: var(--port-pitch);
+}
+/* The label is what a port row is mostly made of; without it there is nothing to lay out. */
+.coda-node[data-ports-folded] .port-label {
+  display: none;
 }
 
 .port-row {
@@ -965,11 +1011,18 @@ select.field {
  */
 .coda-node[data-sized] {
   width: 100%;
+}
+/*
+ * Filling the box vertically is the expanded half of it. Collapsed, the wrapper is given no
+ * height at all (see `rfNodes`), so the card hugs its header and keeps the width it had — which
+ * is what stops a 560px Profile becoming a 232px bar and dragging every wire on it sideways.
+ */
+.coda-node[data-sized]:not([data-collapsed]) {
   height: 100%;
   display: flex;
   flex-direction: column;
 }
-.coda-node[data-sized] .coda-node__preview {
+.coda-node[data-sized]:not([data-collapsed]) .coda-node__preview {
   flex: 1;
   max-height: none;
   min-height: 0;

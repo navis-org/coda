@@ -22,9 +22,12 @@ export interface GraphNode {
   /** Collapsed nodes hide their body and show sockets only. */
   collapsed?: boolean
   /**
-   * Folds the param rows away on a viewer card, leaving the drawing beneath them the space
-   * they took. Distinct from `collapsed`, which hides the drawing as well — the point here is
-   * a widget that has been set up and now wants to be looked at.
+   * Folds the param rows *and* the port rows away, leaving the header, any body and the footer —
+   * so on a viewer the drawing gains both bands. Distinct from `collapsed`, which keeps none of
+   * those; the point here is a card that has been set up and now wants to be looked at.
+   *
+   * Named for the params alone because that is what it folded when it was written, and the name
+   * is in saved files. Read it as "the rows are folded".
    */
   paramsCollapsed?: boolean
   /** Muted nodes pass through / produce nothing, without being deleted. */

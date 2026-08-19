@@ -80,10 +80,10 @@ export function NodeContextMenu({ screenPosition, nodeId, onClose }: NodeContext
           <button
             type="button"
             className="context-menu__item"
-            title="Fold the parameter rows away, leaving the ports, the result and the header"
+            title="Fold the parameter and port rows away, leaving the header, the body and the result"
             onClick={act(() => store.toggleParamRows(targets))}
           >
-            {node.paramsCollapsed ? 'Show parameters' : 'Hide parameters'}
+            {node.paramsCollapsed ? 'Show parameters & ports' : 'Hide parameters & ports'}
           </button>
         </>
       )}
