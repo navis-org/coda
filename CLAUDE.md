@@ -323,6 +323,9 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `nodes/query/inputIds.test.ts`           | the node: no dataset means no query, the seam asked in numbers, no status filter, empty never all                                |
 | `ui/nodes/inputIdsBody.test.tsx`         | the card: the counts, the ids named as missing, and that it claims nothing with no Dataset wired                                 |
 | `nodes/table/stack.test.ts`              | the union schema needing both sides, a real dtype clash refused at run time, and the source column                               |
+| `ui/exportValue.test.ts`                 | SWC's 1-based ids and -1 roots, OBJ's 1-based faces, the JSON typed-array unpack, and the file cap |
+| `nodes/output/download.test.ts`          | the tap: identity pass-through, deferred by the auto pass, and settings re-running nothing         |
+| `ui/useDownloads.test.tsx`               | the side effect: written on an executing run, not on an unchanged one, and the auto-run warning    |
 
 ## Auto-run
 
@@ -2114,6 +2117,111 @@ Worth knowing that a genuine clash is reachable with nothing but built-in nodes,
 from an `i64`, so a pivot on `preId` stacked onto the connectivity table it came from disagrees
 about exactly that column. Note also that the pivot publishes no schema until it has run, so
 `validate` cannot see that clash at edit time and does not pretend to.
+
+## Download: a side effect in a reactive graph
+
+`out.download`, `Add ▸ Utility ▸ Download`. Write whatever arrives on the wire to a file. The one
+node here whose *purpose* is a side effect, and everything odd about it follows from that.
+
+**`evaluate` does not download.** It passes its input through and nothing else. Two reasons, and
+either alone would settle it: `src/nodes` is headless, so there is no `URL.createObjectURL` and no
+anchor to click; and a cache hit means `evaluate` never runs, so a download performed there would
+fire on the first Run and silently not on the second. `ui/useDownloads.ts` writes the file,
+watching `lastRun.executed`.
+
+**`expensive`, for a reason that has nothing to do with speed.** Nothing here is slow. But `cheap`
+nodes re-run on the 180ms pass after every edit, and a node that writes a file per keystroke is
+not one anybody can leave on a canvas. It also makes the signal reliable: only `runFull` records a
+`RunSummary`, so the driver has something to watch.
+
+**The signal is `executed`, never the output value.** A node that did not re-run is not in that
+list, so a Run over an unchanged graph writes nothing — which is the whole of what bounds "on
+every run". Watching the value would fire on a cache *restore* too, writing a file for a graph
+nobody re-ran.
+
+**What it does not bound is auto-run.** With that on, every edit that changes the data upstream is
+a full pass, and each writes a file. The card says so beside the checkbox, and that warning can
+only live there: it depends on a **store** setting, which a node definition must never read, so
+`validate` cannot express it.
+
+**Every param is `presentational`, and that is the word used precisely.** `presentational` means
+"cannot change what `evaluate` returns", and `evaluate` returns its input unchanged whatever the
+filename, format or timestamp say — those decide what is *written*. Leaving them in the provenance
+key made renaming a file re-run the node and invalidate the entire graph downstream of it, which
+on an expensive pipeline is minutes of queries for a change to a string. The consequence, and it
+is asserted rather than left implicit: **changing a setting and pressing Run writes nothing**,
+because nothing re-executed. The card's button is what covers that, and is the reason it exists
+beyond convenience.
+
+**The driver is mounted in `Editor`, not in the node's card.** A collapsed card unmounts its body,
+and a Download node that stopped writing when somebody tidied it away would be a bug nobody could
+reproduce on purpose. It carries the mount-seeded guard `paletteRequest` uses, or a remount would
+re-fire the last run's downloads — a file appearing because a panel was toggled.
+
+### Pictures come from a viewer, not from the wire
+
+A viewer is a **tap**: `out.scatter` passes its table on, never its picture, so nothing arriving on
+this node's input could be an image. `svg`/`png` therefore read the rendered chart belonging to
+whatever node *feeds* this one, found from `graph.edges` rather than from a param — the wire
+already names it.
+
+**Reading the DOM would not work, and that is why `exportRegistry.ts` exists.** The heatmap and the
+bar chart render a real `<svg>`, but the scatter draws to a canvas and the network to WebGL, and
+both **synthesise** an SVG on demand (`scatterDraw`, `networkToSvg` over sigma's post-reducer
+display data). Their picture has no element to query, so the viewer's own accessor is the only
+route.
+
+**The node id travels by context, not by prop**, which keeps this to two touch points instead of
+sixteen: `ValuePreview` is the single place that dispatches to a viewer and already knows the node,
+and `ViewerActions` is the single place every viewer converges on with its export source in hand.
+`ValuePreview` is wrapped rather than having a provider at each `return` — it dispatches through
+fourteen of them, and one missed would leave exactly one viewer unreachable with nothing failing to
+say which.
+
+The limit is real and the card states it: SVG and PNG work only while the upstream card is on
+screen and not collapsed. Last registration wins, which is the useful way round — the overlay is
+mounted last and largest, and is the one anybody asking for a PNG means.
+
+### Formats
+
+`ui/exportValue.ts`, and the rule is that **nothing is ever refused for want of a format**: a kind
+with no natural text form falls back to JSON. An *explicit* format the value cannot be written as
+plans nothing and is reported, because silently falling back would hide that the choice did not
+apply.
+
+- **Table, Matrix, Points → CSV.** A point cloud keeps its positions with its attributes, since
+  splitting them loses the row-for-row correspondence that makes it a point cloud.
+- **Network → two CSVs**, nodes and links. One file cannot hold both without inventing a shape
+  nothing reads; two is what the Network viewer's own button gives and what Gephi imports.
+- **Skeletons → SWC, Meshes → OBJ, one file per neuron.** A concatenated SWC has repeating ids and
+  parses as one impossible tree. `MAX_MORPHOLOGY_FILES` caps the set at 50 and the plan *reports*
+  the cap: a browser stops honouring downloads past roughly that many with no error, which reads
+  as the export having half-worked.
+- **Anything → JSON**, with typed arrays unpacked. `JSON.stringify` renders a `Float32Array` as an
+  object keyed by index — valid, unreadable, several times larger — and every geometry value here
+  is built out of them.
+
+Two format details that produce a *valid file that is wrong*, which is why both have tests:
+
+- **SWC ids are 1-based and a root's parent is `-1`.** Coda stores parents as array indices, so
+  every one shifts. A 0-based file parses in every tool and hangs the first point off nothing. The
+  structure identifier is written as `0` throughout rather than guessed — neuPrint publishes no
+  soma/axon/dendrite labelling, and marking the root as soma would be a claim about anatomy the
+  data does not support.
+- **OBJ face indices are 1-based.** A 0-based file loads with one corrupt triangle and a stray
+  vertex at the origin, which reads as a renderer bug rather than a bad export.
+
+`downloadFiles` writes a multi-file set in a plain loop rather than staggered: browsers gate
+multiple downloads from one gesture behind a permission prompt, and spacing them with timers loses
+the gesture and gets them blocked outright instead of asked about once.
+
+### One knock-on in the palette
+
+An `any` **output** is excluded from the palette's backwards link-drag, and the asymmetry with the
+input is the point. `any` on an input means "I accept whatever you have", which is a real answer to
+"what could this feed?" — Download genuinely takes anything. `any` on an output means "whatever I
+was given": a pass-through cannot *originate* a Dataset, so offering it when dragging back from a
+Dataset socket answers the question with a node that needs the same question asked again behind it.
 
 ## Connectivity: hops and direction
 

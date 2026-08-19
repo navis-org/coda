@@ -6,9 +6,10 @@
  * instead of opening a one-item menu.
  */
 
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useContext, useEffect, useRef, useState } from 'react'
 
 import { downloadCsv, downloadPng, downloadSvg } from '../export'
+import { ExportNodeContext, registerExportSource } from './exportRegistry'
 import { useDismissOnOutside } from '../useDismiss'
 import { errorMessage } from '../../core/errors'
 
@@ -48,6 +49,24 @@ export function ViewerActions({
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
+
+  /*
+   * Publish this viewer's export source so the Download node can reach its picture.
+   *
+   * Through a ref, because `source` is rebuilt on every render of the viewer above and
+   * registering the object itself would churn the map on every frame of a pan. The stable
+   * wrapper closes over the ref, so what the registry hands out is always current.
+   */
+  const nodeId = useContext(ExportNodeContext)
+  const sourceRef = useRef(source)
+  sourceRef.current = source
+  useEffect(() => {
+    if (!nodeId) return
+    return registerExportSource(nodeId, {
+      csv: () => sourceRef.current.csv?.(),
+      svg: () => sourceRef.current.svg?.() ?? null,
+    } as ExportSource)
+  }, [nodeId])
 
   const formats: Format[] = []
   if (source.csv) formats.push('csv')

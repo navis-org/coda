@@ -72,11 +72,22 @@ export function buildNodeItems(filter?: {
     for (const def of defs) {
       let portId: string | undefined
       if (filter) {
-        // Dragging from an output needs a compatible input on the new node, and vice versa.
+        /*
+         * Dragging from an output needs a compatible input on the new node, and vice versa.
+         *
+         * An `any` *output* is excluded from the second case, and the asymmetry is the point.
+         * `any` on an input means "I accept whatever you have", which is a real answer to
+         * "what could this feed?" — `out.download` genuinely takes anything. `any` on an
+         * output means "whatever I was given": a pass-through cannot *originate* a Dataset,
+         * so offering it when dragging back from a Dataset socket answers the question with a
+         * node that would need the same question asked again behind it.
+         */
         const ports =
           filter.from === 'source'
             ? (def.inputs ?? []).filter((p) => isAssignable(filter.type, p.type))
-            : (def.outputs ?? []).filter((p) => isAssignable(p.type, filter.type))
+            : (def.outputs ?? []).filter(
+                (p) => p.type.kind !== 'any' && isAssignable(p.type, filter.type),
+              )
         portId = ports[0]?.id
         if (!portId) continue
       } else {

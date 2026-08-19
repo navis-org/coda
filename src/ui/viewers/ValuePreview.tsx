@@ -20,6 +20,7 @@ import { HeatmapViewer } from './HeatmapViewer'
 import { LazyNetworkViewer, LazyViewer3D } from './LazyViewers'
 import { NeuroglancerViewer } from './NeuroglancerViewer'
 import { ProfileViewer } from './ProfileViewer'
+import { ExportNodeContext } from './exportRegistry'
 import { ScatterViewer } from './ScatterViewer'
 import type { LayoutName } from './networkLayout'
 import { TableViewer } from './TableViewer'
@@ -58,7 +59,22 @@ export interface ValuePreviewProps {
  * scale params) and falls back to the value's kind, so selecting any node in the graph
  * shows something useful in the inspector — not just the dedicated output nodes.
  */
-export function ValuePreview({
+/**
+ * Name the node every viewer below is drawing, so `ViewerActions` can publish its picture.
+ *
+ * A wrapper rather than a provider at each `return`: this component dispatches through fourteen
+ * of them, and one missed would leave exactly one viewer whose chart the Download node cannot
+ * reach — with nothing failing anywhere to say which.
+ */
+export function ValuePreview(props: ValuePreviewProps) {
+  return (
+    <ExportNodeContext.Provider value={props.node.id}>
+      <ValuePreviewInner {...props} />
+    </ExportNodeContext.Provider>
+  )
+}
+
+function ValuePreviewInner({
   node,
   value,
   ctx,

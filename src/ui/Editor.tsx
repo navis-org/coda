@@ -53,6 +53,7 @@ import type { PaletteItem } from './panels/paletteItems'
 import { buildCommandItems, buildNodeItems } from './panels/paletteItems'
 import { typeColorVar } from './socketStyle'
 import { useArrange } from './useArrange'
+import { useDownloads } from './useDownloads'
 
 /**
  * Framing for both fits: React Flow's own initial one and the one a load asks for. Shared so a
@@ -118,6 +119,10 @@ function EditorCanvas() {
 
   const { screenToFlowPosition, fitView } = useReactFlow()
   const { arrange, overrides: arrangeOverrides } = useArrange()
+  // Mounted here rather than from the Download node's own card: a collapsed card unmounts its
+  // body, and a Download node that stopped writing when somebody tidied it away would be a bug
+  // nobody could reproduce on purpose.
+  useDownloads()
   const wrapperRef = useRef<HTMLDivElement>(null)
   const pointerRef = useRef({ x: 0, y: 0 })
   const draggingRef = useRef(false)

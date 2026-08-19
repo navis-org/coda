@@ -103,6 +103,20 @@ export function downloadCsv(parts: string[], filename: string): void {
 }
 
 /**
+ * Write several files from one gesture, for the Download node.
+ *
+ * A network is two CSVs and a skeleton set is one SWC per neuron, so a single press routinely
+ * has to produce more than one file. They go out in a plain loop rather than staggered: browsers
+ * gate *multiple downloads from one user gesture* behind a permission prompt, and spacing them
+ * out with timers loses the gesture and gets them blocked outright instead of asked about once.
+ */
+export function downloadFiles(files: Array<{ name: string; parts: BlobPart[]; mime: string }>): void {
+  for (const file of files) {
+    triggerDownload(new Blob(file.parts, { type: file.mime }), file.name)
+  }
+}
+
+/**
  * Save the working graph as a file.
  *
  * Here rather than in `persistence.ts`, which is about *storing* a graph — the browser shelf,

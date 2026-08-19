@@ -23,6 +23,7 @@ import { DATASET_FAMILIES } from '../../nodes/lib/datasetFamilies'
 import { ExploreBody } from '../explore/ExploreBody'
 import { DatasetBody } from './DatasetBody'
 import { DescriptionBody } from './DescriptionBody'
+import { DownloadBody } from './DownloadBody'
 import { IdsFromLabelBody } from './IdsFromLabelBody'
 import { InputIdsBody } from './InputIdsBody'
 import { PathsBody } from './PathsBody'
@@ -78,6 +79,12 @@ export const NODE_BODIES: Record<string, NodeBodyEntry> = {
    * the readout is one line and the fields are two.
    */
   'neuron.inputIds': { Component: InputIdsBody, width: 300 },
+  /*
+   * Wide enough for a filename field and for the auto-run warning to read as a sentence — that
+   * line is the whole reason somebody does not end up with four hundred files. Not `expandable`:
+   * four fields, a button and a line of filenames gain nothing from a fullscreen panel.
+   */
+  'out.download': { Component: DownloadBody, width: 300 },
   // Every dataset node draws the same body; they differ only in the family table's data. Built
   // from that table rather than listed, so adding a dataset stays a one-line change there.
   ...Object.fromEntries(
