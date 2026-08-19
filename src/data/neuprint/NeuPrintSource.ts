@@ -36,6 +36,7 @@ import type {
   PathStepRequest,
   RawQueryRequest,
   RoiCountsRequest,
+  RoiSummaryRequest,
   SourceCapabilities,
   SourceSchemas,
   SynapseRequest,
@@ -44,13 +45,21 @@ import type {
 import {
   CANONICAL_SCHEMAS,
   PATH_STEP_SCHEMA,
+  ROI_CONNECTIVITY_SCHEMA,
   reportSourceLearned,
   throwIfAborted,
 } from '../source'
-import { loadCachedTable, neuronIndexKey } from '../neuronIndex'
+import { datasetSummaryKey, loadCachedTable, neuronIndexKey } from '../neuronIndex'
 import type { MeshSource } from '../precomputed'
 import { DEFAULT_TRIANGLE_BUDGET, fetchMeshes, openMeshSource } from '../precomputed'
-import { fetchDatasets, fetchSkeleton, runCypher } from './client'
+import {
+  fetchDatasets,
+  fetchRoiCompleteness,
+  fetchRoiConnectivity,
+  fetchSkeleton,
+  runCypher,
+} from './client'
+import { roiCompletenessFromResponse, roiConnectivityFromResponse } from './roiSummary'
 import {
   DEFAULT_SERVER,
   baseUrlForServer,
@@ -145,6 +154,11 @@ export class NeuPrintSource implements DataSource {
     // Every neuPrint dataset publishes a neuroglancer state at the nglayers endpoint — the
     // same document the mesh source is resolved from.
     viewerScene: true,
+    // The two `/api/cached/*` roll-ups. Published by every dataset the listing offers, though
+    // a dataset with no ROI hierarchy of its own answers with nothing in it — mushroombody
+    // returns zero rows and no pairs, which is a dataset that has no regions rather than a
+    // failure, and is reported as such.
+    roiSummary: true,
   }
   readonly schemas: SourceSchemas = CANONICAL_SCHEMAS
 
@@ -209,6 +223,22 @@ export class NeuPrintSource implements DataSource {
           ...(entry.description ? { description: entry.description } : {}),
           ...(version ? { version } : {}),
           rois: entry.ROIs ?? [],
+          /*
+           * The listing's `superLevelROIs` *is* `Meta.primaryRois`, checked set-for-set across
+           * every dataset the server offers — hemibrain 63, MANC 59, male-CNS 144, optic-lobe
+           * 89, fib19 and mushroombody 3 each, identical every time.
+           *
+           * Taking it here rather than waiting for discovery is what closes the window where a
+           * caller has the ROI list but not the subset that tiles the volume. Anything summing
+           * per-region counts has to filter to it, and until this it could only be learned from
+           * `Meta` — two more round trips later, and never at all if that query failed. The
+           * cost of being wrong is invisible: male-CNS publishes 5,619 regions against 144 that
+           * tile, so an unfiltered total is out by a factor of thirty-nine.
+           *
+           * Discovery still overwrites it, since `Meta` is the documented source and this is the
+           * same answer arriving sooner.
+           */
+          ...(entry.superLevelROIs?.length ? { primaryRois: entry.superLevelROIs } : {}),
           // Filled in by discovery; a status filter with one option is better than none.
           statuses: ['Traced'],
         }
@@ -217,7 +247,20 @@ export class NeuPrintSource implements DataSource {
 
     for (const info of infos) {
       const existing = this.states.get(info.id)
-      if (existing) existing.info = { ...info, statuses: existing.info.statuses }
+      /*
+       * Re-listing must not un-learn what discovery found. `listDatasets` re-fetches on every
+       * call — the Sources panel does exactly that — and a plain overwrite drops the statuses
+       * and the primary ROI list back to their listing-time values. The statuses have been
+       * carried across for that reason since they existed; `primaryRois` needs it for the same
+       * one, and silently more: nothing downstream can tell a missing primary list from a
+       * dataset whose regions genuinely all tile.
+       */
+      if (existing)
+        existing.info = {
+          ...info,
+          statuses: existing.info.statuses,
+          ...(existing.info.primaryRois ? { primaryRois: existing.info.primaryRois } : {}),
+        }
       else this.states.set(info.id, { info, scale: IDENTITY_SCALE })
     }
     this.ordered = infos.map((info) => this.states.get(info.id)!.info)
@@ -493,6 +536,58 @@ export class NeuPrintSource implements DataSource {
       this.options(req.signal),
     )
     return roiCountsFromCypher(response, req.rois)
+  }
+
+  /**
+   * Per-ROI traced-vs-total synapse counts.
+   *
+   * Discovery first, and it is load-bearing rather than defensive: the `primary` column is set
+   * from `Meta.primaryRois`, which only `runDiscovery` fetches. Answering before it lands would
+   * mark every row's summability *unknown* on a fresh session and known on the next call —
+   * exactly the "runs twice, answers differently" signature this codebase keeps tripping over.
+   *
+   * `discover` is idempotent and deduplicated, so the wait is paid once per dataset and is
+   * usually already over: a dataset node on the same graph has normally triggered it.
+   */
+  async fetchRoiCompleteness(req: RoiSummaryRequest): Promise<TableValue> {
+    await this.discover(req.datasetId, req.signal)
+    throwIfAborted(req.signal)
+    const primaryRois = this.states.get(req.datasetId)?.info.primaryRois
+
+    return loadCachedTable({
+      key: datasetSummaryKey('roi-completeness', this.id, req.datasetId),
+      /*
+       * The primary list is in the fingerprint, not just the key. It decides the `primary`
+       * column, and discovery can land *after* a first call has already cached a table whose
+       * every row says "not known yet" — a mismatch has to be a miss, or that table outlives
+       * the knowledge that would fix it and the summable rows never appear.
+       */
+      fingerprint: primaryRois ? primaryRois.join(',') : 'no-primary-rois',
+      fetch: async () => {
+        const response = await fetchRoiCompleteness(req.datasetId, this.options(req.signal))
+        return roiCompletenessFromResponse(response, { primaryRois })
+      },
+    })
+  }
+
+  /**
+   * Region-to-region connectivity, long form.
+   *
+   * No discovery needed — nothing here is per-dataset-schema, and the pairs name their own
+   * regions. Left as a plain fetch rather than made to match its sibling above, because a wait
+   * that buys nothing is a wait.
+   */
+  async fetchRoiConnectivity(req: RoiSummaryRequest): Promise<TableValue> {
+    return loadCachedTable({
+      key: datasetSummaryKey('roi-connectivity', this.id, req.datasetId),
+      // Nothing per-dataset decides this table's shape, so the schema's own column list is the
+      // whole of what could invalidate it.
+      fingerprint: ROI_CONNECTIVITY_SCHEMA.columns.map((c) => c.name).join(','),
+      fetch: async () => {
+        const response = await fetchRoiConnectivity(req.datasetId, this.options(req.signal))
+        return roiConnectivityFromResponse(response)
+      },
+    })
   }
 
   async rawQuery(req: RawQueryRequest): Promise<TableValue> {

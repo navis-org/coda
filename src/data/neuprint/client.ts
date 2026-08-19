@@ -144,6 +144,50 @@ export function datasetSegment(dataset: string): string {
   return encodeURIComponent(dataset).replace(/%3A/gi, ':')
 }
 
+/**
+ * A cached, whole-dataset summary endpoint.
+ *
+ * The dataset travels as a **query parameter**, and it is required rather than optional for a
+ * reason that costs nothing to honour and is very expensive to discover: omitting it does not
+ * fail. neuPrint answers 200 with a well-formed body describing whatever database the
+ * deployment happens to default to — `optic-lobe` on Janelia's — so a call that forgot the
+ * dataset returns plausible numbers about the wrong connectome. Same failure mode as a query
+ * that forgets its base URL, and the same answer: make it impossible to leave out.
+ *
+ * `URLSearchParams` is correct here, unlike in a path segment. `datasetSegment` exists because
+ * neuPrint's *router* matches a raw colon and 400s on `%3A`; in a query string both forms are
+ * accepted identically, which was checked rather than assumed.
+ */
+function cached<T>(endpoint: string, dataset: string, options?: RequestOptions): Promise<T> {
+  const query = new URLSearchParams({ dataset })
+  return get<T>(`/api/cached/${endpoint}?${query.toString()}`, options)
+}
+
+/** Per-ROI traced-vs-total synapse counts, in neuPrint's `{columns, data}` shape. */
+export function fetchRoiCompleteness(
+  dataset: string,
+  options?: RequestOptions,
+): Promise<CypherResponse> {
+  return cached<CypherResponse>('roicompleteness', dataset, options)
+}
+
+/**
+ * Region-to-region connectivity.
+ *
+ * Its own shape rather than `{columns, data}`: a name list plus a map keyed `"A=>B"`.
+ */
+export interface RoiConnectivityResponse {
+  roi_names?: string[]
+  weights?: Record<string, { count?: number; weight?: number }>
+}
+
+export function fetchRoiConnectivity(
+  dataset: string,
+  options?: RequestOptions,
+): Promise<RoiConnectivityResponse> {
+  return cached<RoiConnectivityResponse>('roiconnectivity', dataset, options)
+}
+
 /** SWC for one body, as `{columns: [rowId,x,y,z,radius,link], data}`. */
 export function fetchSkeleton(
   dataset: string,

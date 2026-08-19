@@ -30,7 +30,7 @@ import type { NodeBodyProps } from '../nodes/nodeBodies'
 import { formatNumber } from '../format'
 import { NeuronRow } from './NeuronRow'
 import { rowFields } from './rowFields'
-import { useNeuronIndex } from './useNeuronIndex'
+import { useNeuronIndex } from '../useNeuronIndex'
 
 /**
  * Long enough that a burst of typing is one search, short enough to feel live. The search

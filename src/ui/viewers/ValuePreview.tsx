@@ -19,6 +19,7 @@ import { BarChartViewer } from './BarChartViewer'
 import { HeatmapViewer } from './HeatmapViewer'
 import { LazyNetworkViewer, LazyViewer3D } from './LazyViewers'
 import { NeuroglancerViewer } from './NeuroglancerViewer'
+import { DatasetSummaryViewer } from './DatasetSummaryViewer'
 import { ProfileViewer } from './ProfileViewer'
 import { ExportNodeContext } from './exportRegistry'
 import { ScatterViewer } from './ScatterViewer'
@@ -92,6 +93,36 @@ function ValuePreviewInner({
     ...(baseName ? { baseName } : {}),
     ...(onExpand ? { onExpand } : {}),
     ...(onError ? { onError } : {}),
+  }
+
+  /*
+   * Above the `!value` guard, and that placement is the whole reason this node renders at all.
+   *
+   * Every other viewer here has an output port, so after a run it has a value and the guard is
+   * a "nothing yet" state it passes through once. This one has **no outputs**, so its value is
+   * undefined forever — below the guard its branch is unreachable and the card shows "No result
+   * yet" permanently, which is exactly what it did until a real browser was pointed at it. The
+   * jsdom test renders the viewer directly and cannot see this; `valuePreview` covers it now.
+   */
+  if (node.type === 'out.datasetSummary') {
+    // Drawn entirely from its *input*, like Profile and the neuroglancer frame — but unlike
+    // them it has nothing of its own it could ever be keyed on.
+    const dataset = inputValues?.dataset
+    return (
+      <DatasetSummaryViewer
+        sourceId={isDatasetValue(dataset) ? dataset.sourceId : undefined}
+        datasetId={isDatasetValue(dataset) ? dataset.datasetId : undefined}
+        status={String(node.params.status ?? '')}
+        attributes={ctx.columns('attributes')}
+        topTypes={Number(node.params.topTypes ?? 10)}
+        measure={node.params.completenessMeasure === 'pre' ? 'pre' : 'post'}
+        onMeasure={(measure) => onParamChange?.('completenessMeasure', measure)}
+        sort={node.params.completenessSort === 'label' ? 'label' : 'value'}
+        onSort={(sort) => onParamChange?.('completenessSort', sort)}
+        onReload={() => onParamChange?.('refresh', Number(node.params.refresh ?? 0) + 1)}
+        {...shared}
+      />
+    )
   }
 
   if (!value) {

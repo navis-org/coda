@@ -311,3 +311,101 @@ registerEmitter('dataset.description', (ctx) => {
       '`fetch_meta(client=...)` if you need it here.',
   )
 })
+
+// ---------------------------------------------------------------------------
+// Dataset Summary
+// ---------------------------------------------------------------------------
+
+/**
+ * The Dataset Summary is a dashboard, and dashboards do not translate — but almost everything
+ * it *shows* is an ordinary roll-up, so this is one of the few viewers whose export is worth
+ * more than a note.
+ *
+ * The one place it is deliberately different from the card: the notebook fetches the neuron
+ * table with `fetch_neurons(NeuronCriteria(...))` rather than reproducing Coda's cached index.
+ * `neuronIndex` is `findNeurons` with no filter at all, so the honest translation of "every
+ * neuron the dataset publishes" is a criteria object with nothing narrowing it — which is
+ * exactly what an empty `Status` means on the card, and what the emitted comment says.
+ */
+registerEmitter('out.datasetSummary', (ctx) => {
+  const c = ctx.wired('dataset')
+  const neurons = `${ctx.name}_neurons`
+  const status = String(ctx.params.status ?? '')
+  const topTypes = Number(ctx.params.topTypes ?? 20)
+  const chosen = (ctx.params.attributes as string[] | undefined) ?? []
+
+  ctx.require('neuprint', 'NeuronCriteria', 'fetch_neurons')
+  ctx.require('pandas')
+
+  const criteria = status
+    ? `NeuronCriteria(status=${pyStr(status)}, client=${c})`
+    : `NeuronCriteria(client=${c})`
+
+  const lines = [
+    ...(status
+      ? []
+      : ctx.note(
+          'No status filter, matching the card: the dataset index Coda counts is every ' +
+            ':Neuron the dataset publishes, not only the Traced ones.',
+        )),
+    `${neurons}, _ = fetch_neurons(${criteria}, client=${c})`,
+    ``,
+    `# How many neurons carry each value of an attribute. dropna=False would count the`,
+    `# missing ones as a category; the card reports them apart instead.`,
+  ]
+
+  /*
+   * The chosen list if there is one, else the same priority list `summaryAttributes` walks —
+   * transcribed rather than imported, because an emitter may not depend on a dataset's live
+   * schema and `.value_counts()` on a column pandas does not have raises. Guarded per column so
+   * a dataset lacking one prints nothing rather than stopping the cell.
+   */
+  const attributes = chosen.length > 0 ? chosen : SUMMARY_ATTRIBUTE_FALLBACK
+  lines.push(
+    `for _col in ${pyList(attributes)}:`,
+    `    if _col in ${neurons}.columns:`,
+    `        print(${neurons}[_col].value_counts().head(${Math.max(1, topTypes)}))`,
+  )
+
+  if (topTypes > 0) {
+    lines.push(
+      ``,
+      `${ctx.name}_top_types = ${neurons}['type'].value_counts().head(${topTypes})`,
+    )
+  }
+
+  lines.push(
+    ``,
+    `# Region completeness: traced synapses against the total present. The published list`,
+    `# nests, so it is filtered to the primary set before anything is totalled.`,
+    `${ctx.name}_regions = ${c}.fetch_roi_completeness()`,
+    `${ctx.name}_regions = ${ctx.name}_regions[`,
+    `    ${ctx.name}_regions['roi'].isin(${c}.primary_rois)`,
+    `].reset_index(drop=True)`,
+    `${ctx.name}_regions['preCompleteness'] = (`,
+    `    ${ctx.name}_regions['roipre'] / ${ctx.name}_regions['totalpre']`,
+    `).where(${ctx.name}_regions['totalpre'] > 0)`,
+  )
+
+  return lines
+})
+
+/**
+ * The default chart list, transcribed from `summaryAttributes`.
+ *
+ * A copy rather than an import, and the duplication is the lesser evil: that function filters
+ * against a *live* schema, which an emitter has no access to, and the generated cell guards
+ * every name with an `in .columns` check — so the cost of the two drifting is a chart missing
+ * from a notebook, not a traceback. Importing it would mean either shipping a schema into the
+ * exporter or emitting nothing at all.
+ */
+const SUMMARY_ATTRIBUTE_FALLBACK = [
+  'superclass',
+  'class',
+  'subclass',
+  'flow',
+  'somaSide',
+  'consensusNt',
+  'hemilineage',
+  'nerve',
+]

@@ -268,7 +268,7 @@ describe('tiles', () => {
         { bodyId: 1, type: 'CT1', consensusNt: 'gaba', ntGabaProb: 0.66 },
       ]),
     })
-    const tile = screen.getByText('Transmitter').closest('.profile__tile')
+    const tile = screen.getByText('Transmitter').closest('.tile')
     expect(tile).toBeTruthy()
     expect(within(tile as HTMLElement).getByText('gaba')).toBeTruthy()
   })
@@ -334,7 +334,7 @@ describe('card versus overlay', () => {
 describe('the 3D tile', () => {
   it('is 2x2 in the overlay, where it holds a live frame', () => {
     const { container } = view({ compact: false })
-    const tile = screen.getByText('3D').closest('.profile__tile')
+    const tile = screen.getByText('3D').closest('.tile')
     expect(tile?.getAttribute('data-span')).toBe('2')
     // Nothing else claims the extra tracks: a grid of 2x2 tiles is not a grid.
     expect(container.querySelectorAll('[data-span="2"]').length).toBe(1)
@@ -343,7 +343,7 @@ describe('the 3D tile', () => {
   it('is an ordinary tile on the card, where it holds a 104px image', () => {
     // Spanning 2x2 for a silhouette would be a tile of whitespace around a thumbnail.
     view({ compact: true })
-    expect(screen.getByText('Shape').closest('.profile__tile')?.hasAttribute('data-span')).toBe(
+    expect(screen.getByText('Shape').closest('.tile')?.hasAttribute('data-span')).toBe(
       false,
     )
   })
@@ -359,7 +359,7 @@ describe('the 3D tile rule', () => {
     // Read from source rather than a stylesheet object: vitest never applies the CSS. Path is
     // relative to the repo root, which is vitest's working directory.
     const css = readFileSync('src/ui/editor.css', 'utf8')
-    const start = css.indexOf(".profile__tile[data-span='2'] {")
+    const start = css.indexOf(".tile[data-span='2'] {")
     expect(start).toBeGreaterThan(-1)
     // Through the end of the following rule, which carries the height half.
     const end = css.indexOf('}', css.indexOf('> .viewer', start))

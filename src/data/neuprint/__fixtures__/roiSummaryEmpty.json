@@ -1,0 +1,17 @@
+{
+  "completeness": {
+    "columns": [
+      "roi",
+      "roipre",
+      "roipost",
+      "totalpre",
+      "totalpost"
+    ],
+    "data": [],
+    "debug": "MATCH (n:`mushroombody_Neuron`) WHERE (n.status = \"Traced\" OR n.status = \"Roughly traced\" OR n.status = \"Prelim Roughly traced\" OR n.status = \"final\" OR n.status = \"final (irrelevant)\" OR n.status = \"Finalized\" OR n.status = \"Leaves\") WITH apoc.convert.fromJsonMap(n.roiInfo) AS roiInfo WITH roiInfo AS roiInfo, keys(roiInfo) AS roiList UNWIND roiList AS roiName WITH roiName AS roiName, sum(roiInfo[roiName].pre) AS pre, sum(roiInfo[roiName].post) AS post MATCH (meta:`mushroombody_Meta`) WITH apoc.convert.fromJsonMap(meta.roiInfo) AS globInfo, roiName AS roiName, pre AS pre, post AS post RETURN roiName AS roi, pre AS roipre, post AS roipost, globInfo[roiName].pre AS totalpre, globInfo[roiName].post AS totalpost ORDER BY roiName"
+  },
+  "connectivity": {
+    "roi_names": [],
+    "weights": {}
+  }
+}

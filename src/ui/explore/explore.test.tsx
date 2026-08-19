@@ -35,6 +35,7 @@ import '../../nodes'
 import { clearStorage, installJsdomStubs } from '../../test/jsdomStubs'
 import { App } from '../../App'
 import { useGraphStore } from '../../store/graphStore'
+import { resetNeuronIndexState } from '../useNeuronIndex'
 import { ExploreBody } from './ExploreBody'
 import { NeuronThumbnail } from './NeuronThumbnail'
 import { NeuronRow } from './NeuronRow'
@@ -80,6 +81,10 @@ beforeEach(() => {
   clearStorage()
   resetCache()
   resetIndexLoads()
+  // The index state is module-level now, shared by every widget that asks for one — so it
+  // outlives a test unless it is dropped here, and a later case would silently assert against
+  // an earlier one's table.
+  resetNeuronIndexState()
   resetThumbnailCache()
   // The editor test at the bottom mounts the real App, where the start page would otherwise
   // open over it and answer `findByRole('dialog')` first.

@@ -13,7 +13,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { NUMERIC_DTYPES } from '../../core/types'
-import { cableLength } from '../../core/values'
+import { cableLength, getColumn } from '../../core/values'
 
 import { NeuPrintSource, THUMBNAIL_MAX_BYTES, meshProgressFraction } from './NeuPrintSource'
 import { datasetSegment, get } from './client'
@@ -24,6 +24,9 @@ import connectivityFixture from './__fixtures__/connectivity.json'
 import metaMancFixture from './__fixtures__/metaManc.json'
 import neuronsFixture from './__fixtures__/neurons.json'
 import roiInfoFixture from './__fixtures__/roiInfo.json'
+import roiCompletenessFixture from './__fixtures__/roiCompleteness.json'
+import roiConnectivityFixture from './__fixtures__/roiConnectivity.json'
+import roiSummaryEmptyFixture from './__fixtures__/roiSummaryEmpty.json'
 import sampleNeuronsFixture from './__fixtures__/sampleNeurons.json'
 import skeletonFixture from './__fixtures__/skeleton.json'
 import {
@@ -36,6 +39,7 @@ import {
   pathStepCypher,
   synapsesCypher,
 } from './cypher'
+import type { DatasetInfo } from '../source'
 import type { CypherResponse } from './decode'
 import {
   inferTableFromCypher,
@@ -44,10 +48,22 @@ import {
   tableFromCypher,
 } from './decode'
 import { CORE_NEURON_COLUMNS, MAX_EXTRA_COLUMNS, discoverNeuronSchema, schemasFor } from './schema'
+import type { RoiConnectivityResponse } from './client'
+import {
+  ROI_COMPLETENESS_COLUMNS,
+  roiCompletenessFromResponse,
+  roiConnectivityFromResponse,
+} from './roiSummary'
 
 const neurons = neuronsFixture as CypherResponse
 const connectivity = connectivityFixture as CypherResponse
 const roiInfo = roiInfoFixture as CypherResponse
+const roiCompleteness = roiCompletenessFixture as CypherResponse
+const roiConnectivity = roiConnectivityFixture as Required<RoiConnectivityResponse>
+const emptySummary = roiSummaryEmptyFixture as {
+  completeness: CypherResponse
+  connectivity: RoiConnectivityResponse
+}
 const skeleton = skeletonFixture as CypherResponse
 const sampleNeurons = sampleNeuronsFixture as CypherResponse
 const metaManc = metaMancFixture as CypherResponse
@@ -425,6 +441,185 @@ describe('roiInfo', () => {
         [2, 'y', 'not json'],
       ],
     })
+    expect(table.length).toBe(0)
+  })
+})
+
+describe('the primary ROI list', () => {
+  const original = globalThis.fetch
+
+  /** Answer the datasets listing and nothing else; discovery is a separate concern here. */
+  function stubListing(body: unknown) {
+    globalThis.fetch = (() =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        text: () => Promise.resolve(JSON.stringify(body)),
+        json: () => Promise.resolve(body),
+      } as Response)) as typeof fetch
+    return () => {
+      globalThis.fetch = original
+    }
+  }
+
+  beforeEach(() => {
+    setToken('test-token')
+  })
+  afterEach(() => {
+    globalThis.fetch = original
+    resetCredentials()
+  })
+  /*
+   * `superLevelROIs` in the listing *is* `Meta.primaryRois` — checked set-for-set against every
+   * dataset the server offers. Reading it here rather than waiting for discovery closes the
+   * window in which a caller holds the ROI list but not the subset that tiles the volume, and
+   * the cost of that window is invisible: male-CNS publishes 5,619 regions against 144 that
+   * tile, so anything summing per-region counts is out by a factor of thirty-nine.
+   */
+  it('comes from the listing, before discovery has run', async () => {
+    const source = new NeuPrintSource()
+    const restore = stubListing({
+      'demo:v1': { ROIs: ['A', 'A-1', 'B'], superLevelROIs: ['A', 'B'] },
+    })
+    try {
+      await source.listDatasets()
+      expect(source.peekDataset('demo:v1')?.rois).toEqual(['A', 'A-1', 'B'])
+      expect(source.peekDataset('demo:v1')?.primaryRois).toEqual(['A', 'B'])
+    } finally {
+      restore()
+    }
+  })
+
+  it('survives a second listing, so re-fetching cannot un-learn it', async () => {
+    // `listDatasets` re-fetches on every call and the Sources panel does exactly that. A plain
+    // overwrite drops what discovery found back to its listing-time value — the trap the
+    // statuses line has been guarding against since it existed.
+    const source = new NeuPrintSource()
+    const restore = stubListing({ 'demo:v1': { ROIs: ['A', 'B'] } })
+    try {
+      await source.listDatasets()
+      const state = source.peekDataset('demo:v1')
+      expect(state?.primaryRois).toBeUndefined()
+
+      // Stand in for discovery having learned it.
+      ;(source as unknown as { states: Map<string, { info: DatasetInfo }> }).states.get(
+        'demo:v1',
+      )!.info.primaryRois = ['A']
+
+      await source.listDatasets()
+      expect(source.peekDataset('demo:v1')?.primaryRois).toEqual(['A'])
+    } finally {
+      restore()
+    }
+  })
+})
+
+describe('ROI completeness', () => {
+  it('decodes the published columns positionally and derives both fractions', () => {
+    const table = roiCompletenessFromResponse(roiCompleteness)
+    expect(table.schema.columns.map((c) => c.name)).toEqual([
+      'roi',
+      'pre',
+      'post',
+      'totalPre',
+      'totalPost',
+      'preCompleteness',
+      'postCompleteness',
+      'primary',
+    ])
+    // The published order is roi, roipre, roipost, totalpre, totalpost — and the decode is
+    // positional, so a silent reordering upstream would swap traced with total. That reads as
+    // a dataset over 100% complete rather than as an error, which is why this is asserted
+    // against a real reply rather than against the comment describing it.
+    const row = getColumn(table, 'roi').indexOf('AL(R)')
+    expect(getColumn(table, 'pre')[row]).toBe(458714)
+    expect(getColumn(table, 'totalPre')[row]).toBe(501004)
+    expect(getColumn(table, 'preCompleteness')[row]).toBeCloseTo(458714 / 501004, 10)
+    expect(getColumn(table, 'postCompleteness')[row]).toBeCloseTo(1506452 / 2359442, 10)
+  })
+
+  it('marks only the primary ROIs summable, because the published list nests', () => {
+    // AL-D(R) and AL-DA1(R) are inside AL(R). Adding the column up as returned counts their
+    // synapses twice; `primary` is what a caller filters on before totalling anything.
+    const table = roiCompletenessFromResponse(roiCompleteness, {
+      primaryRois: ['AL(L)', 'AL(R)', 'EB', 'FB', 'LO(R)', 'ME(R)', 'PB'],
+    })
+    const roi = getColumn(table, 'roi')
+    const primary = getColumn(table, 'primary')
+    expect(primary[roi.indexOf('AL(R)')]).toBe(true)
+    expect(primary[roi.indexOf('AL-D(R)')]).toBe(false)
+    expect(primary[roi.indexOf('AL-DA1(R)')]).toBe(false)
+
+    const totalPre = getColumn(table, 'totalPre') as number[]
+    const summable = totalPre.reduce((sum, v, i) => (primary[i] === true ? sum + v : sum), 0)
+    expect(summable).toBeLessThan(totalPre.reduce((a, b) => a + b, 0))
+  })
+
+  it('says "not known yet" rather than "not primary" when no list has arrived', () => {
+    // Undefined and empty are different answers: null leaves a caller able to refuse to sum,
+    // where false would claim every region nests inside another one.
+    const unknown = roiCompletenessFromResponse(roiCompleteness)
+    expect(new Set(getColumn(unknown, 'primary'))).toEqual(new Set([null]))
+    const none = roiCompletenessFromResponse(roiCompleteness, { primaryRois: [] })
+    expect(new Set(getColumn(none, 'primary'))).toEqual(new Set([false]))
+  })
+
+  it('leaves completeness null where there is nothing to divide', () => {
+    // Never 0. A region with no synapses recorded has undefined completeness, and a confident
+    // empty bar is a claim about a region nobody has looked at.
+    const table = roiCompletenessFromResponse({
+      columns: ROI_COMPLETENESS_COLUMNS,
+      data: [['NEW(R)', 0, 0, 0, 0]],
+    })
+    expect(getColumn(table, 'preCompleteness')[0]).toBeNull()
+    expect(getColumn(table, 'postCompleteness')[0]).toBeNull()
+    expect(getColumn(table, 'pre')[0]).toBe(0)
+  })
+
+  it('reads a dataset with no regions as empty rather than as a failure', () => {
+    const table = roiCompletenessFromResponse(emptySummary.completeness)
+    expect(table.length).toBe(0)
+    expect(table.schema.columns).toHaveLength(8)
+  })
+})
+
+describe('ROI connectivity', () => {
+  it('decodes the "A=>B" map into one row per ordered pair', () => {
+    const table = roiConnectivityFromResponse(roiConnectivity)
+    expect(table.schema.columns.map((c) => c.name)).toEqual([
+      'source',
+      'target',
+      'count',
+      'weight',
+    ])
+    expect(table.length).toBe(Object.keys(roiConnectivity.weights).length)
+
+    const source = getColumn(table, 'source')
+    const target = getColumn(table, 'target')
+    const row = source.findIndex((s, i) => s === 'EB' && target[i] === 'FB')
+    expect(row).toBeGreaterThanOrEqual(0)
+    expect(getColumn(table, 'count')[row]).toBe(roiConnectivity.weights['EB=>FB']?.count)
+  })
+
+  it('splits on the first separator only', () => {
+    // No published ROI name contains "=>", but splitting on every occurrence would turn one
+    // that did into a silently dropped row rather than an obviously wrong one.
+    const table = roiConnectivityFromResponse({
+      weights: { 'A=>B=>C': { count: 3, weight: 1.5 } },
+    })
+    expect(getColumn(table, 'source')[0]).toBe('A')
+    expect(getColumn(table, 'target')[0]).toBe('B=>C')
+  })
+
+  it('drops a malformed key instead of emitting half a pair', () => {
+    const table = roiConnectivityFromResponse({
+      weights: { '=>B': { count: 1 }, 'A=>': { count: 1 }, AB: { count: 1 } },
+    })
+    expect(table.length).toBe(0)
+  })
+
+  it('reads a dataset with no regions as empty rather than as a failure', () => {
+    const table = roiConnectivityFromResponse(emptySummary.connectivity)
     expect(table.length).toBe(0)
   })
 })

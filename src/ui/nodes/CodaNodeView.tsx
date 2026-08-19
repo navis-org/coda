@@ -76,7 +76,13 @@ const MIN_NODE_HEIGHT = 160
  * Genuinely a list: nothing on the definition declares it, and it is not derivable from the
  * category the way `isViewer` is.
  */
-const SELF_DRAWING_NODE_TYPES = new Set(['out.viewer3d', 'out.neuroglancer', 'out.profile'])
+const SELF_DRAWING_NODE_TYPES = new Set([
+  'out.viewer3d',
+  'out.neuroglancer',
+  'out.profile',
+  // The only one with no outputs at all, so it could never draw from anything else.
+  'out.datasetSummary',
+])
 
 /**
  * Output nodes render their result inline; everything else shows a one-line summary.

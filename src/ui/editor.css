@@ -4325,7 +4325,7 @@ a.viewer-actions__btn {
  * two-column grid at 260px wide would put a bar chart in 110px. It collapses to one column on
  * its own and needs no breakpoint.
  */
-.profile__tiles {
+.tiles {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: 1px;
@@ -4336,12 +4336,12 @@ a.viewer-actions__btn {
   align-content: start;
 }
 
-.profile__tile {
+.tile {
   background: var(--surface-2);
   padding: 8px 9px 10px;
   min-width: 0;
 }
-.profile__tile[data-wide] {
+.tile[data-wide] {
   grid-column: 1 / -1;
 }
 
@@ -4360,7 +4360,7 @@ a.viewer-actions__btn {
  * A span wider than the grid is clamped by the auto-placement algorithm, so a narrow card
  * degrades to one column on its own and needs no breakpoint.
  */
-.profile__tile[data-span='2'] {
+.tile[data-span='2'] {
   grid-column: span 2;
   grid-row: span 2;
   /* Flex column so the frame takes whatever height the two rows resolve to, rather than
@@ -4369,12 +4369,12 @@ a.viewer-actions__btn {
   flex-direction: column;
   min-height: 0;
 }
-.profile__tile[data-span='2'] > .viewer {
+.tile[data-span='2'] > .viewer {
   flex: 1 1 auto;
   min-height: 440px;
 }
 
-.profile__tile-label {
+.tile__label {
   font-size: 9px;
   letter-spacing: 0.11em;
   text-transform: uppercase;
@@ -4386,15 +4386,15 @@ a.viewer-actions__btn {
   gap: 6px;
   min-width: 0;
 }
-summary.profile__tile-label {
+summary.tile__label {
   cursor: pointer;
   margin-bottom: 0;
 }
-details[open] > summary.profile__tile-label {
+details[open] > summary.tile__label {
   margin-bottom: 6px;
 }
 
-.profile__tile-qualifier {
+.tile__qualifier {
   letter-spacing: 0.02em;
   text-transform: none;
   font-weight: 400;
@@ -4402,14 +4402,14 @@ details[open] > summary.profile__tile-label {
   white-space: nowrap;
 }
 
-.profile__pending {
+.tile__pending {
   margin: 0;
   color: var(--text-muted);
   font-size: 10.5px;
   font-style: italic;
 }
 
-.profile__note {
+.tile__note {
   margin: 6px 0 0;
   color: var(--text-muted);
   font-size: 10px;
@@ -4423,7 +4423,7 @@ details[open] > summary.profile__tile-label {
   flex: 0 0 auto;
 }
 
-.profile__link {
+.tile__link {
   display: inline-block;
   margin-top: 6px;
   padding: 0;
@@ -4433,27 +4433,336 @@ details[open] > summary.profile__tile-label {
   font-size: 10.5px;
   cursor: pointer;
 }
-.profile__link:hover {
+.tile__link:hover {
   text-decoration: underline;
+}
+
+/*
+ * The Dataset Summary's reload.
+ *
+ * In the caption row rather than in a tile, because it is about the whole card: it re-downloads
+ * the neuron index, which every chart on the card and every other widget on that dataset reads.
+ * Styled as a quiet glyph next to the counts it will replace.
+ */
+.summary__reload {
+  margin-left: auto;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+.summary__reload:hover {
+  color: var(--text-primary);
+}
+
+/* --- donut --- */
+
+/*
+ * A ring plus a legend, side by side down to the narrowest tile.
+ *
+ * `minmax(0, …)` on both tracks rather than `auto`: a long category name in the legend would
+ * otherwise set the grid's intrinsic width and push the ring out of a 190px column.
+ */
+.tile__donut {
+  display: grid;
+  grid-template-columns: minmax(0, 64px) minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  margin-top: 6px;
+}
+.tile__donut-ring {
+  width: 100%;
+  height: auto;
+  /* The slices butt against each other, so a hairline of the tile's own surface between them is
+     the secondary encoding the palette's CVD gate assumes — same 2px rule the stacked bars use. */
+  overflow: visible;
+}
+.tile__donut-slice {
+  stroke-linecap: butt;
+  paint-order: stroke;
+}
+.tile__donut-total {
+  fill: var(--text-primary);
+  font-size: 6px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+}
+.tile__donut-keys {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.tile__donut-key {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  gap: 5px;
+  align-items: center;
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+.tile__donut-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+.tile__donut-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tile__donut-share {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+/* --- vertical columns --- */
+
+/*
+ * The box the page size is measured from.
+ *
+ * A wrapper rather than the chart itself, so the observed width cannot depend on how many
+ * columns are drawn — which is what the observation decides. Measuring the chart would be a
+ * feedback loop: more columns, different width, different count.
+ */
+.tile__columns-measure {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.tile__columns {
+  margin-top: 8px;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  min-width: 0;
+}
+
+/*
+ * Three bands — values, tracks, labels — each a flex row of equally-sized cells.
+ *
+ * The alternative, one flex column per bar with the three stacked inside it, cannot keep a
+ * shared baseline: the labels are vertical text of very different lengths, so a long name eats
+ * its own column's track and lifts that bar above its neighbours. Two regions 1% apart drew a
+ * centimetre apart. Here every track begins and ends on the same two lines whatever the labels
+ * do, which is also what makes `bottom: N%` on the mean line mean the same N% the bars are
+ * drawn to.
+ */
+.tile__columns-grid {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  padding-top: 12px;
+}
+.tile__columns-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  min-width: 0;
+}
+/*
+ * A definite height, not a `min-height`, and that is what makes the chart true.
+ *
+ * Every bar is a CSS percentage of this band, and a percentage height resolves against nothing
+ * when the ancestor's own height is content-driven — so with `min-height` the columns fell back
+ * to their content size and 98% drew very nearly as tall as 57%. A chart wrong by a plausible
+ * amount, caught in a browser; jsdom performs no layout and reports every element the same size,
+ * so no test here could have seen it.
+ */
+.tile__columns-band {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  width: 100%;
+  min-width: 0;
+  height: 128px;
+}
+
+/*
+ * Shrinks to fit, never stretches past `max-width`.
+ *
+ * `flex: 1 1 0` alone spreads six regions across a full-width tile as six slivers a thousand
+ * pixels apart, which reads as a broken chart rather than as a short one. Capping the cell keeps
+ * the bars a bar's width apart and lets the chart simply be narrower than its tile when there is
+ * little to draw.
+ *
+ * The cap only binds when there is *less* to draw than fits: a full page is sized from the
+ * measured width at `MIN_COLUMN_PX`, which is well under this, so those columns divide the width
+ * exactly rather than being capped and leaving a gap.
+ */
+.tile__column-cell {
+  flex: 1 1 0;
+  max-width: 58px;
+  min-width: 0;
+}
+.tile__column-value {
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.tile__column-track {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  height: 100%;
+}
+.tile__column-fill {
+  width: 100%;
+  max-width: 22px;
+  border-radius: 2px 2px 0 0;
+}
+/*
+ * Names run along the axis rather than under it, at a **fixed** height.
+ *
+ * An ROI name is six to sixteen characters and a column is a fraction of a tile, so horizontal
+ * labels either overlap or truncate to two letters — `LO(R)` and `LOP(R)` become the same word.
+ * The height is fixed rather than capped because it used to be `max-height`, which let each
+ * column reserve a different amount and pushed the long-labelled bars up; every cell now gives
+ * up the same strip, and a name too long for it ellipses.
+ */
+.tile__column-key {
+  display: block;
+  height: 58px;
+  margin-top: 3px;
+  font-size: 9px;
+  color: var(--text-secondary);
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * The mean line: the theme's maximum-contrast ink, and achromatic.
+ *
+ * `--text-primary` rather than `--text-muted`, which is `#898781` in *both* themes and was
+ * chosen so the rule would not compete with the bars. It did not compete; it disappeared —
+ * 4.9:1 against the dark surface is a fine number for body text and not for a 1px dash crossing
+ * a field of saturated colour. This resolves to `#0b0b0b` on light and `#ffffff` on dark, which
+ * is as far apart from the chart as the palette goes.
+ *
+ * Still achromatic, and that part was never the problem: a coloured rule over a categorical
+ * chart reads as another series. Black-on-light and white-on-dark is the one pair that cannot
+ * be mistaken for data, which is exactly why it is what the ink token holds.
+ *
+ * The dash is what keeps it a reference rather than a bar — a solid rule at full contrast would
+ * read as part of the drawing.
+ */
+.tile__columns-mean {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 1px dashed var(--text-primary);
+  pointer-events: none;
+  display: flex;
+  justify-content: flex-end;
+  padding-right: 2px;
+}
+/*
+ * The label sits *on* the bars, so it carries the tile's own surface behind it — without that,
+ * white-on-dark over a light green column is the one combination this palette cannot survive.
+ * Semibold because 8.5px mono at full contrast still reads thin against a busy background.
+ */
+.tile__columns-mean-label {
+  transform: translateY(-100%);
+  padding: 0 3px 1px;
+  border-radius: 2px;
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  background: var(--surface-2);
+  white-space: nowrap;
+}
+
+/* --- tile heading controls --- */
+
+.tile__action {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  /* The heading is uppercased and letter-spaced; a control inheriting that reads as a label. */
+  text-transform: none;
+  letter-spacing: 0;
+}
+.tile__pager {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+}
+.tile__page-btn {
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+}
+.tile__page-btn:hover:not(:disabled) {
+  color: var(--text-primary);
+}
+.tile__page-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.tile__page-count {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+.tile__measure {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-3);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 9px;
+  text-transform: none;
+  letter-spacing: 0;
+  padding: 1px 3px;
+  cursor: pointer;
 }
 
 /* --- key/value facts --- */
 
-.profile__facts {
+.tile__facts {
   margin: 0;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: 1px 10px;
 }
-.profile__fact {
+.tile__fact {
   display: contents;
 }
-.profile__facts dt {
+.tile__facts dt {
   color: var(--text-muted);
   font-size: 10px;
   white-space: nowrap;
 }
-.profile__facts dd {
+.tile__facts dd {
   margin: 0;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
@@ -4490,31 +4799,31 @@ details[open] > summary.profile__tile-label {
  * row whose height comes from its tallest sibling, and an auto-height iframe would collapse
  * to nothing.
  */
-.profile__tile .viewer {
+.tile .viewer {
   background: none;
   border-radius: 0;
   min-height: 230px;
 }
-.profile__tile .viewer .ng-frame {
+.tile .viewer .ng-frame {
   border-radius: var(--radius-sm);
   overflow: hidden;
 }
 
 /* --- bars --- */
 
-.profile__bars {
+.tile__bars {
   display: grid;
   gap: 3px;
 }
 
-.profile__bar {
+.tile__bar {
   display: grid;
   grid-template-columns: minmax(28px, 4.5em) minmax(0, 1fr) auto;
   gap: 6px;
   align-items: center;
 }
 
-.profile__bar-key {
+.tile__bar-key {
   font-family: var(--font-mono);
   font-size: 10px;
   color: var(--text-secondary);
@@ -4526,7 +4835,7 @@ details[open] > summary.profile__tile-label {
 /* Segments sit side by side in one track, so a region's in/out balance reads without a
    second chart. The 1px gap is the surface showing through, which is the secondary encoding
    the palette validation requires wherever two categorical fills touch. */
-.profile__bar-track {
+.tile__bar-track {
   display: flex;
   gap: 1px;
   height: 7px;
@@ -4535,14 +4844,14 @@ details[open] > summary.profile__tile-label {
   overflow: hidden;
 }
 
-.profile__bar-fill {
+.tile__bar-fill {
   display: block;
   height: 100%;
   min-width: 0;
   border-radius: 1px;
 }
 
-.profile__bar-value {
+.tile__bar-value {
   font-family: var(--font-mono);
   font-size: 9.5px;
   color: var(--text-secondary);
@@ -4552,7 +4861,7 @@ details[open] > summary.profile__tile-label {
   gap: 5px;
 }
 
-.profile__bar-detail {
+.tile__bar-detail {
   color: var(--text-muted);
 }
 

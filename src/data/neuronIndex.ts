@@ -93,6 +93,21 @@ export function neuronIndexKey(sourceId: string, datasetId: string): string {
   return `neuron-index:${sourceId}:${datasetId}`
 }
 
+/**
+ * Cache key for one of a dataset's precomputed roll-ups.
+ *
+ * Same store and same reasoning as the neuron index, at a much smaller scale: these are
+ * kilobytes rather than megabytes, so persistence is a nicety — what actually matters is the
+ * *in-flight deduplication* `loadCachedTable` brings, because a graph can easily hold an ROI
+ * node and two Summary cards pointed at one dataset and there is no reason for three requests.
+ *
+ * `kind` is in the key rather than a separate store because the two summaries have different
+ * shapes and a shared key would let one answer for the other.
+ */
+export function datasetSummaryKey(kind: string, sourceId: string, datasetId: string): string {
+  return `dataset-summary:${kind}:${sourceId}:${datasetId}`
+}
+
 /** Test seam: drop in-flight state between cases. */
 export function resetIndexLoads(): void {
   inFlight.clear()

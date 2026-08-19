@@ -262,6 +262,17 @@ export interface SourceCapabilities {
    * geometry in the browser and has no bucket for anyone else to read.
    */
   viewerScene: boolean
+  /**
+   * Whether the source can describe a dataset's *regions* without being asked about neurons —
+   * per-ROI traced-vs-total synapse counts, and region-to-region connectivity.
+   *
+   * Separate from `meshes` and from `fetchRoiCounts`, which both need a body id list. These
+   * are facts about the whole volume, which is why they can answer a dataset node with
+   * nothing else wired to it. A source without them makes the two ROI nodes refuse with a
+   * message rather than fall back to summing a per-neuron fetch, which would mean downloading
+   * the entire connectome to compute a figure the server already publishes.
+   */
+  roiSummary: boolean
 }
 
 export interface DataSource {
@@ -308,6 +319,22 @@ export interface DataSource {
   fetchPathStep?(req: PathStepRequest): Promise<TableValue>
   fetchAdjacency(req: AdjacencyRequest): Promise<MatrixValue>
   fetchRoiCounts(req: RoiCountsRequest): Promise<TableValue>
+
+  /**
+   * Per-ROI traced-vs-total synapse counts, to `ROI_COMPLETENESS_SCHEMA`.
+   *
+   * Optional and gated by `capabilities.roiSummary`. Asks nothing about neurons, so it
+   * answers a dataset node on its own.
+   */
+  fetchRoiCompleteness?(req: RoiSummaryRequest): Promise<TableValue>
+  /**
+   * Region-to-region connectivity, to `ROI_CONNECTIVITY_SCHEMA`.
+   *
+   * Long form — one row per ordered ROI pair — rather than a matrix, for the same reason
+   * `fetchRoiCounts` is long: the reshape needs a *measure* chosen, and which measure to draw
+   * is the node's question rather than the source's. Same call `roiCounts` makes.
+   */
+  fetchRoiConnectivity?(req: RoiSummaryRequest): Promise<TableValue>
 
   /**
    * Cheapest geometry for a single neuron, for a thumbnail.
@@ -370,6 +397,70 @@ export const PATH_STEP_SCHEMA: TableSchema = tableSchema(
   column('targetId', 'i64'),
   column('weight', 'f64', 'synapses'),
   column('pairs', 'i64'),
+)
+
+/**
+ * What either ROI summary needs: a dataset, and nothing else.
+ *
+ * Deliberately not carrying a `rois` filter, unlike `RoiCountsRequest`. Which regions are
+ * summable is decided *from the answer* — see `primary` below — and a filter applied before
+ * the rows exist would leave a caller unable to tell a region that was excluded from one the
+ * dataset never had.
+ */
+export interface RoiSummaryRequest {
+  datasetId: string
+  signal?: AbortSignal
+}
+
+/**
+ * Per-ROI synapse counts: how many belong to reconstructed neurons, against how many are
+ * there at all.
+ *
+ * Fixed rather than per-dataset, like `PATH_STEP_SCHEMA`: every source that can answer this
+ * answers it in exactly these terms, and there is nowhere for a richer one to put extra.
+ *
+ * Two columns carry the traps.
+ *
+ * **`primary` is the licence to sum.** A dataset's ROI list *nests* — hemibrain publishes
+ * `AL(R)` and `AL-DA1(R)` as separate rows, and male-CNS publishes 5,412 rows that are mostly
+ * medulla columns inside `ME(R)` — so adding the whole column up counts the same synapse
+ * several times. Summing hemibrain's raw rows gives 21.0M presynaptic sites against a true
+ * 9,428,400 over the 63 primary rows — a 2.2x overcount, and only the filtered figure agrees
+ * with `Meta.totalPreCount` (9,496,606). Only `Meta.primaryRois` names a set that tiles the
+ * volume, so the flag is set from
+ * it and everything that totals anything filters on it first. Exactly the trap `roiInfo` sets
+ * for the Profile widget's region bars, one level up.
+ *
+ * **The two fractions are null rather than zero where there is nothing to divide.** A region
+ * with no synapses at all has *undefined* completeness, and `0` there would draw a confident
+ * empty bar for a region nobody has looked at — the same reason `numeric()` exists in
+ * `ui/encoding.ts`.
+ */
+export const ROI_COMPLETENESS_SCHEMA: TableSchema = tableSchema(
+  column('roi', 'str'),
+  column('pre', 'i64', 'synapses'),
+  column('post', 'i64', 'synapses'),
+  column('totalPre', 'i64', 'synapses'),
+  column('totalPost', 'i64', 'synapses'),
+  column('preCompleteness', 'f64'),
+  column('postCompleteness', 'f64'),
+  column('primary', 'bool'),
+)
+
+/**
+ * Region-to-region connectivity, one row per ordered pair.
+ *
+ * `count` and `weight` are both published and they are **not** the same measure in different
+ * units: on hemibrain `AB(L)→BU(L)` reports `count: 13, weight: 3.11`, so weight is scaled or
+ * normalised rather than additive. Both are carried because both are what the server said;
+ * what a viewer should *label* the weight is a separate question, and until it is settled the
+ * node that draws a matrix from this defaults to `count`, which is unambiguous.
+ */
+export const ROI_CONNECTIVITY_SCHEMA: TableSchema = tableSchema(
+  column('source', 'str'),
+  column('target', 'str'),
+  column('count', 'i64'),
+  column('weight', 'f64'),
 )
 
 export const CANONICAL_SCHEMAS: SourceSchemas = {

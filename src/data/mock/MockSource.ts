@@ -30,13 +30,21 @@ import type {
   NeuronIndexRequest,
   PathStepRequest,
   RoiCountsRequest,
+  RoiSummaryRequest,
   SourceCapabilities,
   SourceSchemas,
   SynapseRequest,
 } from '../source'
-import { CANONICAL_SCHEMAS, PATH_STEP_SCHEMA, delay, throwIfAborted } from '../source'
+import {
+  CANONICAL_SCHEMAS,
+  PATH_STEP_SCHEMA,
+  ROI_COMPLETENESS_SCHEMA,
+  ROI_CONNECTIVITY_SCHEMA,
+  delay,
+  throwIfAborted,
+} from '../source'
 import { loadCachedTable, neuronIndexKey } from '../neuronIndex'
-import type { MockConnection } from './generate'
+import type { MockConnection, MockConnectome } from './generate'
 import { getConnectome, mockDatasetIds, mockDatasetMeta } from './generate'
 import { generateSkeleton, skeletonToTubeMesh, synapsePosition } from './morphology'
 
@@ -60,6 +68,13 @@ export class MockSource implements DataSource {
     // Synthetic geometry generated in the browser. There is no bucket for an external
     // viewer to read, so there is no scene to publish.
     viewerScene: false,
+    // Implemented rather than declined, though nothing here is fetched from anywhere. The
+    // generated connectome already carries per-ROI counts and a connection list, so both
+    // summaries are ordinary roll-ups over data that exists — and implementing them is what
+    // lets the bundled examples, the node tests and a token-less session exercise these paths
+    // at all. The capability flag is for a source that genuinely cannot, not a way of leaving
+    // the mock behind.
+    roiSummary: true,
   }
   readonly schemas: SourceSchemas = CANONICAL_SCHEMAS
 
@@ -83,6 +98,11 @@ export class MockSource implements DataSource {
         species: meta.species,
         version: meta.version,
         rois: meta.rois,
+        // The synthetic ROIs are flat — no region here contains another — so the whole list
+        // tiles and every one of them is summable. Stated rather than left undefined, because
+        // undefined means "not known yet" and would have anything that totals a per-ROI column
+        // refuse to, against a dataset where totalling is exactly right.
+        primaryRois: meta.rois,
         statuses: ['Traced', 'Anchor', 'Assign'],
         ...(connectome ? { neuronCount: connectome.neurons.length } : {}),
       }
@@ -361,6 +381,105 @@ export class MockSource implements DataSource {
     return tableFromRows(this.schemas.roiCounts, rows)
   }
 
+  /**
+   * Per-ROI traced-vs-total synapse counts.
+   *
+   * Everything in a generated connectome is by definition reconstructed, so a literal answer
+   * would be 100% everywhere — which draws a flat bar and tests nothing. Instead each region
+   * is given a stable "reconstructed fraction" derived from its own name, so the mock has the
+   * shape of real data (varied, between about half and nearly all) while staying
+   * deterministic: `evaluate` must be reproducible from its params alone (invariant 4), and a
+   * roll-up that reached for `Math.random` would invalidate its own cache entry on every run.
+   *
+   * The two fractions are computed back from the *rounded* totals rather than from the factor
+   * that produced them, so the columns agree with each other exactly — the same rule the
+   * `*Schema`/`*Table` pairs in `tableOps.ts` follow.
+   */
+  async fetchRoiCompleteness(req: RoiSummaryRequest): Promise<TableValue> {
+    await delay(this.latencyMs, req.signal)
+    const connectome = this.require(req.datasetId)
+
+    const pre = new Map<string, number>()
+    const post = new Map<string, number>()
+    for (const rc of connectome.roiCounts) {
+      pre.set(rc.roi, (pre.get(rc.roi) ?? 0) + rc.pre)
+      post.set(rc.roi, (post.get(rc.roi) ?? 0) + rc.post)
+    }
+
+    const rows = connectome.rois.map((roi) => {
+      const tracedPre = pre.get(roi) ?? 0
+      const tracedPost = post.get(roi) ?? 0
+      const reconstructed = mockReconstructedFraction(roi)
+      const totalPre = Math.round(tracedPre / reconstructed)
+      const totalPost = Math.round(tracedPost / reconstructed)
+      return {
+        roi,
+        pre: tracedPre,
+        post: tracedPost,
+        totalPre,
+        totalPost,
+        preCompleteness: totalPre > 0 ? tracedPre / totalPre : null,
+        postCompleteness: totalPost > 0 ? tracedPost / totalPost : null,
+        primary: true,
+      }
+    })
+
+    return tableFromRows(ROI_COMPLETENESS_SCHEMA, rows)
+  }
+
+  /**
+   * Region-to-region connectivity, long form.
+   *
+   * Each neuron is attributed to the single region it has most synapses in, and connections
+   * are rolled up over those. Attributing a connection's *synapses* across every region both
+   * neurons touch would be more faithful and costs `connections × rois²`, which on the larger
+   * synthetic dataset is not a thing to do on every run for a picture that reads the same.
+   *
+   * Note `weight` here is a synapse sum, while neuPrint's is normalised — measured on
+   * hemibrain, `AB(L)→BU(L)` reports `count: 13, weight: 3.11`, so the real one is not
+   * additive. The two are therefore *not* comparable, which is safe only because nothing reads
+   * the column's meaning: the node that draws a matrix defaults to `count` for exactly this
+   * reason. Do not build anything on `weight` agreeing across sources until the real one's
+   * definition is settled.
+   */
+  async fetchRoiConnectivity(req: RoiSummaryRequest): Promise<TableValue> {
+    await delay(this.latencyMs, req.signal)
+    const connectome = this.require(req.datasetId)
+    const home = mockHomeRois(connectome)
+
+    const pairs = new Map<string, Map<string, { count: number; weight: number }>>()
+    for (const c of connectome.connections) {
+      const from = home.get(c.pre)
+      const to = home.get(c.post)
+      if (!from || !to) continue
+      let row = pairs.get(from)
+      if (!row) {
+        row = new Map()
+        pairs.set(from, row)
+      }
+      const cell = row.get(to)
+      if (cell) {
+        cell.count += 1
+        cell.weight += c.weight
+      } else {
+        row.set(to, { count: 1, weight: c.weight })
+      }
+    }
+
+    // Sorted, so the row order is stable across runs — it reaches a provenance key by way of
+    // the node that consumes it, and a Map's insertion order follows the connection list.
+    const rows: Array<Record<string, CellValue>> = []
+    for (const from of [...pairs.keys()].sort()) {
+      const row = pairs.get(from)!
+      for (const to of [...row.keys()].sort()) {
+        const cell = row.get(to)!
+        rows.push({ source: from, target: to, count: cell.count, weight: cell.weight })
+      }
+    }
+
+    return tableFromRows(ROI_CONNECTIVITY_SCHEMA, rows)
+  }
+
   // --- morphology ----------------------------------------------------------
 
   async fetchSkeletons(req: GeometryRequest): Promise<SkeletonsValue> {
@@ -558,3 +677,48 @@ function compileRegex(pattern: string | undefined, field: string): RegExp | unde
   }
 }
 
+
+/**
+ * A stable "reconstructed fraction" for one region, derived from its name.
+ *
+ * FNV-1a over the name, mapped into 0.55–0.99. Deterministic and stateless, which is the
+ * point: `evaluate` has to be reproducible from its params alone (invariant 4), so a mock
+ * roll-up that reached for `Math.random` would hand back different numbers on every run and
+ * invalidate its own cache entry. Seeding a generator would work too and would have to be
+ * threaded through; a hash of the input needs nothing carried.
+ *
+ * The range is chosen to look like a real dataset rather than to flatter one: hemibrain
+ * measures 91% of presynaptic sites and 39% of postsynaptic ones reconstructed, so a spread
+ * this wide is the honest shape for a completeness bar to have.
+ */
+function mockReconstructedFraction(roi: string): number {
+  let hash = 0x811c9dc5
+  for (let i = 0; i < roi.length; i++) {
+    hash ^= roi.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193) >>> 0
+  }
+  return 0.55 + (hash % 4400) / 10_000
+}
+
+/**
+ * Each neuron's single home region — where it has the most synapses.
+ *
+ * Ties break on the region name rather than on whichever row came first, so the answer cannot
+ * depend on the order `roiCounts` happens to have been generated in. That order is stable
+ * today; relying on it would be a dependency nothing states and nothing checks.
+ */
+function mockHomeRois(connectome: MockConnectome): Map<number, string> {
+  const best = new Map<number, { roi: string; synapses: number }>()
+  for (const rc of connectome.roiCounts) {
+    const synapses = rc.pre + rc.post
+    const current = best.get(rc.bodyId)
+    if (
+      !current ||
+      synapses > current.synapses ||
+      (synapses === current.synapses && rc.roi < current.roi)
+    ) {
+      best.set(rc.bodyId, { roi: rc.roi, synapses })
+    }
+  }
+  return new Map([...best].map(([bodyId, { roi }]) => [bodyId, roi]))
+}

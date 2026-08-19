@@ -40,6 +40,7 @@ import { NeuronThumbnail } from '../explore/NeuronThumbnail'
 import { tableToCsvParts } from '../export'
 import { formatCell, formatCompact, formatNumber } from '../format'
 import { NeuroglancerProfileFrame } from './NeuroglancerProfileFrame'
+import { Bars, Facts, Loadable, Tile } from './Tiles'
 import { useNeuronProfile } from './useNeuronProfile'
 import type { ExportSource } from './ViewerActions'
 import { ViewerActions } from './ViewerActions'
@@ -227,7 +228,7 @@ export function ProfileViewer({
         />
       </div>
 
-      <div className="profile__tiles nowheel">
+      <div className="tiles nowheel">
         <Tile label="Identity">
           <Facts
             rows={[
@@ -258,7 +259,7 @@ export function ProfileViewer({
                   ]}
                 />
                 {onExpand && (
-                  <button type="button" className="profile__link" onClick={onExpand}>
+                  <button type="button" className="tile__link" onClick={onExpand}>
                     Open 3D ⤢
                   </button>
                 )}
@@ -369,7 +370,7 @@ export function ProfileViewer({
               * roughly double. Reporting that is the difference between a caveat and a lie.
               */}
             {data && !data.primaryRois && (
-              <p className="profile__note">
+              <p className="tile__note">
                 Includes nested regions — this dataset&rsquo;s primary region list has not
                 loaded, so the totals may double-count.
               </p>
@@ -404,90 +405,6 @@ export function ProfileViewer({
 // Tiles
 // ---------------------------------------------------------------------------
 
-function Tile({
-  label,
-  qualifier,
-  wide,
-  span,
-  collapsible,
-  children,
-}: {
-  label: string
-  qualifier?: string
-  /** Full width of the grid, however many columns it has. */
-  wide?: boolean
-  /**
-   * Tracks this tile covers, in both directions — `2` makes it 2×2.
-   *
-   * For content that a one-cell tile cannot hold rather than for emphasis. A grid column is
-   * ~190px, which is not a 3D viewer; it is barely neuroglancer's layer bar.
-   */
-  span?: 2
-  collapsible?: boolean
-  children: React.ReactNode
-}) {
-  const heading = (
-    <>
-      {label}
-      {qualifier && <span className="profile__tile-qualifier">{qualifier}</span>}
-    </>
-  )
-
-  if (collapsible) {
-    return (
-      <details className="profile__tile" data-wide={wide || undefined} data-span={span}>
-        <summary className="profile__tile-label">{heading}</summary>
-        {children}
-      </details>
-    )
-  }
-
-  return (
-    <section className="profile__tile" data-wide={wide || undefined} data-span={span}>
-      <h4 className="profile__tile-label">{heading}</h4>
-      {children}
-    </section>
-  )
-}
-
-/**
- * A tile's body while its data is in flight.
- *
- * The tile keeps its heading throughout, so the layout does not reflow as three requests land
- * — a grid that reshuffles on every page turn is far more distracting than a moment of
- * "loading".
- */
-function Loadable({
-  state,
-  empty,
-  children,
-}: {
-  state: 'none' | 'loading' | 'ready' | 'error'
-  empty?: boolean
-  children: React.ReactNode
-}) {
-  if (state === 'loading') return <p className="profile__pending">Loading…</p>
-  if (state === 'error') return <p className="profile__pending">Unavailable</p>
-  if (state === 'none') return <p className="profile__pending">No dataset</p>
-  if (empty) return <p className="profile__pending">None</p>
-  return <>{children}</>
-}
-
-function Facts({ rows }: { rows: Array<[string, CellValue | undefined]> }) {
-  const present = rows.filter(([, value]) => value !== null && value !== undefined && value !== '')
-  if (present.length === 0) return null
-  return (
-    <dl className="profile__facts">
-      {present.map(([key, value]) => (
-        <div key={key} className="profile__fact">
-          <dt>{key}</dt>
-          <dd title={String(value)}>{formatCell(value as CellValue)}</dd>
-        </div>
-      ))}
-    </dl>
-  )
-}
-
 /**
  * The classification chips.
  *
@@ -521,38 +438,6 @@ function Chips({
   )
 }
 
-interface BarRow {
-  key: string
-  title?: string
-  /** 0..1 of the tile's width. */
-  fraction: number
-  value: string
-  detail?: string
-}
-
-function Bars({ rows, color }: { rows: BarRow[]; color: string }) {
-  if (rows.length === 0) return null
-  return (
-    <div className="profile__bars">
-      {rows.map((row) => (
-        <div key={row.key} className="profile__bar" title={row.title ?? row.key}>
-          <span className="profile__bar-key">{row.key}</span>
-          <span className="profile__bar-track">
-            <span
-              className="profile__bar-fill"
-              style={{ width: `${Math.max(0, Math.min(1, row.fraction)) * 100}%`, background: color }}
-            />
-          </span>
-          <span className="profile__bar-value">
-            {row.value}
-            {row.detail && <span className="profile__bar-detail">{row.detail}</span>}
-          </span>
-        </div>
-      ))}
-    </div>
-  )
-}
-
 /**
  * Partner types as bars.
  *
@@ -581,29 +466,29 @@ function RegionBars({ rows }: { rows: RegionRow[] }) {
   const max = Math.max(...rows.map((r) => r.total), 1)
   const mode = currentMode()
   return (
-    <div className="profile__bars">
+    <div className="tile__bars">
       {rows.map((row) => (
         <div
           key={row.roi}
-          className="profile__bar"
+          className="tile__bar"
           title={`${row.roi} — ${formatNumber(row.post)} post, ${formatNumber(row.pre)} pre`}
         >
-          <span className="profile__bar-key">{row.roi}</span>
+          <span className="tile__bar-key">{row.roi}</span>
           {/* Two segments in one track, so a region's balance of inputs to outputs reads
               without a second chart. */}
-          <span className="profile__bar-track">
+          <span className="tile__bar-track">
             <span
-              className="profile__bar-fill"
+              className="tile__bar-fill"
               style={{ width: `${(row.post / max) * 100}%`, background: seriesColor(0, mode) }}
             />
             <span
-              className="profile__bar-fill"
+              className="tile__bar-fill"
               style={{ width: `${(row.pre / max) * 100}%`, background: seriesColor(1, mode) }}
             />
           </span>
-          <span className="profile__bar-value">
+          <span className="tile__bar-value">
             {formatCompact(row.post)}
-            <span className="profile__bar-detail">{formatCompact(row.pre)}</span>
+            <span className="tile__bar-detail">{formatCompact(row.pre)}</span>
           </span>
         </div>
       ))}
@@ -631,7 +516,7 @@ function PartnerList({
         </div>
       ))}
       {total > rows.length && (
-        <p className="profile__note">
+        <p className="tile__note">
           Showing the strongest {formatNumber(rows.length)} of {formatNumber(total)} partners.
         </p>
       )}

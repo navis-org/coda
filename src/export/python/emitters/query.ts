@@ -422,3 +422,79 @@ registerEmitter('neuron.synapses', (ctx) => {
     `)`,
   ]
 })
+
+// ---------------------------------------------------------------------------
+// ROI Completeness / ROI Connectivity
+// ---------------------------------------------------------------------------
+
+/*
+ * Both cached summaries are `Client` **methods**, not module-level functions.
+ *
+ * Read off neuprint-python 0.6.3 by introspection: `neuprint.fetch_roi_completeness` does not
+ * exist, while `Client.fetch_roi_completeness(format='pandas')` does — and neither takes a
+ * dataset argument, because the client already carries one. Same class of trap as
+ * `navis.interfaces.neuprint`: the obvious spelling is valid syntax, binds a name, and raises
+ * at run time. It also happens to fit the "one Client per dataset node, and every fetch names
+ * it" rule for free, since the call *is* on the client.
+ */
+
+registerEmitter('neuron.roiCompleteness', (ctx) => {
+  const c = ctx.wired('dataset')
+  const out = ctx.output('completeness')
+  const primaryOnly = ctx.params.primaryOnly !== false
+
+  return [
+    // Renamed to Coda's column names, so anything downstream — a Filter, a Bar Chart — emits
+    // the names its own params hold. The published ones are lowercase and unsuffixed.
+    `${out} = ${c}.fetch_roi_completeness().rename(`,
+    `    columns={`,
+    `        'roipre': 'pre',`,
+    `        'roipost': 'post',`,
+    `        'totalpre': 'totalPre',`,
+    `        'totalpost': 'totalPost',`,
+    `    }`,
+    `)`,
+    // `.where` leaves NaN where the condition fails, which is the pandas spelling of Coda's
+    // null. A plain division would give inf for a region with nothing in it.
+    `${out}['preCompleteness'] = (${out}['pre'] / ${out}['totalPre']).where(${out}['totalPre'] > 0)`,
+    `${out}['postCompleteness'] = (${out}['post'] / ${out}['totalPost']).where(${out}['totalPost'] > 0)`,
+    `${out}['primary'] = ${out}['roi'].isin(${c}.primary_rois)`,
+    ...(primaryOnly
+      ? [
+          ``,
+          `# The published list nests: a synapse in AL-DA1(R) is counted again in AL(R), and`,
+          `# hemibrain returns 229 rows of which 63 tile the volume. Totalling the full table`,
+          `# double counts -- 21.0M presynaptic sites against a true 9.43M.`,
+          `${out} = ${out}[${out}['primary']].reset_index(drop=True)`,
+        ]
+      : []),
+  ]
+})
+
+registerEmitter('neuron.roiConnectivity', (ctx) => {
+  const c = ctx.wired('dataset')
+  const links = ctx.output('links')
+  const matrix = ctx.output('matrix')
+  const measure = String(ctx.params.measure ?? 'count') === 'weight' ? 'weight' : 'count'
+  const rois = `_${matrix}_rois`
+
+  return [
+    // `fetch_roi_connectivity` already answers long — `from_roi, to_roi, count, weight` — so
+    // this is a rename rather than a reshape. Unlike its sibling above it needs no primary
+    // filter: the endpoint restricts itself to the primary set already, which was checked
+    // rather than assumed (hemibrain's roi_names is exactly its 63 primary ROIs).
+    `${links} = ${c}.fetch_roi_connectivity().rename(`,
+    `    columns={'from_roi': 'source', 'to_roi': 'target'}`,
+    `)`,
+    ``,
+    // Square over the union of both ends and sorted, matching the node: a region that only
+    // ever receives would otherwise be missing from one axis and the diagonal would stop
+    // meaning self-connection.
+    `${rois} = sorted(set(${links}['source']) | set(${links}['target']))`,
+    `${matrix} = (`,
+    `    ${links}`,
+    `    .pivot_table(index='source', columns='target', values=${pyStr(measure)}, fill_value=0)`,
+    `    .reindex(index=${rois}, columns=${rois}, fill_value=0)`,
+    `)`,
+  ]
+})

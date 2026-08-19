@@ -85,6 +85,12 @@ export function everythingGraph(): CodaGraph {
       params: { direction: 'both', hops: 3, minWeight: 10 } },
     { id: 'adj', type: 'neuron.adjacency', col: 2, row: 2, params: { groupByType: true } },
     { id: 'roi', type: 'neuron.roiCounts', col: 2, row: 3 },
+    // Both cached summaries, and `primaryOnly: false` on one of them deliberately: the filter
+    // is the default, so leaving it on everywhere would let the branch that skips it rot.
+    { id: 'roicomp', type: 'neuron.roiCompleteness', col: 2, row: 8,
+      params: { primaryOnly: false } },
+    { id: 'roiconn', type: 'neuron.roiConnectivity', col: 2, row: 9,
+      params: { measure: 'weight' } },
     { id: 'paths', type: 'neuron.paths', col: 2, row: 4,
       params: { maxHops: 3, minWeight: 10, topN: 20, collapseTypes: false } },
 
@@ -131,6 +137,8 @@ export function everythingGraph(): CodaGraph {
     { id: 'v3d', type: 'out.viewer3d', col: 3, row: 5 },
     { id: 'ng', type: 'out.neuroglancer', col: 3, row: 6 },
     { id: 'profile', type: 'out.profile', col: 3, row: 7, params: { selection: ['1001'] } },
+    { id: 'summary', type: 'out.datasetSummary', col: 3, row: 8,
+      params: { status: 'Traced', topTypes: 15 } },
     { id: 'dl', type: 'out.download', col: 13,
       params: { filename: 'partners', format: 'csv' } },
 
@@ -152,6 +160,8 @@ export function everythingGraph(): CodaGraph {
     ['ds', 'dataset', 'conn2', 'dataset'],
     ['ds', 'dataset', 'adj', 'dataset'],
     ['ds', 'dataset', 'roi', 'dataset'],
+    ['ds', 'dataset', 'roicomp', 'dataset'],
+    ['ds', 'dataset', 'roiconn', 'dataset'],
     ['ds', 'dataset', 'paths', 'dataset'],
     ['ds', 'dataset', 'skel', 'dataset'],
     ['ds', 'dataset', 'mesh', 'dataset'],
@@ -171,6 +181,7 @@ export function everythingGraph(): CodaGraph {
     ['find', 'neurons', 'scatter', 'in'],
     ['find', 'neurons', 'profile', 'neurons'],
     ['ds', 'dataset', 'profile', 'dataset'],
+    ['ds', 'dataset', 'summary', 'dataset'],
     ['find', 'neurons', 'ng', 'neurons'],
     ['ds', 'dataset', 'ng', 'dataset'],
 
