@@ -4626,3 +4626,114 @@ details[open] > summary.profile__tile-label {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* ---------------------------------------------------------------------------
+ * Upload Table card
+ * ------------------------------------------------------------------------- */
+
+.upload-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.upload-body__actions {
+  display: flex;
+  gap: 6px;
+}
+.upload-body__actions button {
+  flex: 1;
+}
+/*
+ * The real <input type="file"> is never shown — its native chrome cannot be styled to match a
+ * card and says "No file chosen" in whatever the browser's locale is. It stays in the DOM and
+ * takes the click from the button beside it, so keyboard and assistive access reach the same
+ * control rather than a div pretending to be one. `display: none` would make it unfocusable in
+ * some engines, hence the clip.
+ */
+.upload-body__file {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.upload-body__paste {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.upload-body__paste textarea {
+  resize: vertical;
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.upload-body__status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 3px 8px;
+  font-size: 10px;
+  color: var(--text-secondary);
+  min-width: 0;
+}
+.upload-body__status[data-state='empty'],
+.upload-body__status[data-state='loading'] {
+  color: var(--text-muted);
+}
+.upload-body__status strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+/*
+ * Warning-toned rather than error-toned, and the same `--status-stale` the node's own warning
+ * badge takes. Missing rows are a state to act on — pick the file again — not a failure of the
+ * workflow, which is exactly what somebody opening a shared graph needs to be told.
+ */
+.upload-body__absent {
+  color: var(--status-stale);
+  min-width: 0;
+}
+
+.upload-body__fields {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+/* "Text columns" is the longest label; wrapping it would misalign the field beside it. */
+.upload-body__field {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* Overlay only — the reason this body has an expand button at all. */
+.upload-body__schema {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.upload-body__schema th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+  padding: 2px 6px 2px 0;
+}
+.upload-body__schema td {
+  padding: 2px 6px 2px 0;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+.upload-body__schema td:last-child {
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}

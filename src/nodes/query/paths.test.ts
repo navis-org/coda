@@ -324,12 +324,12 @@ describe('Paths feeding a Network node', () => {
     const width = find('edgeSizeBy')
     expect(width?.kind).toBe('column')
     if (width?.kind !== 'column') throw new Error('edgeSizeBy is not a column param')
-    expect(availableColumns(width, inputs)).toContain('weight')
+    expect(availableColumns(width, inputs, {})).toContain('weight')
 
     // And the node half is unaffected, which is what says the whole input resolved rather
     // than the edge schema alone.
     const colour = find('nodeColorBy')
     if (colour?.kind !== 'column') throw new Error('nodeColorBy is not a column param')
-    expect(availableColumns(colour, inputs)).toContain('type')
+    expect(availableColumns(colour, inputs, {})).toContain('type')
   })
 })

@@ -158,9 +158,11 @@ export interface EnumParam extends ParamBase {
  * them.
  *
  * Almost every column param reads `attributeSchema` off the type at `from`, which is why this
- * is optional. The exception is a *dataset* socket: a dataset type carries a source id and a
- * dataset id, and turning those into a schema needs the data-source registry, which `src/core`
- * must not import. So the node supplies the lookup instead.
+ * is optional. Two kinds of node cannot: a *dataset* socket carries a source id and a dataset
+ * id, and turning those into a schema needs the data-source registry, which `src/core` must not
+ * import; and an *upload* holds its table outside the graph entirely, so the schema is found
+ * from the node's own params rather than from any port. Hence both arguments — the second is
+ * what lets a node with no inputs at all have a working column picker.
  *
  * Must stay synchronous and network-free for the same reason `inferOutputs` must: this runs on
  * every graph mutation. Returning a schema rather than a list of names is deliberate — the
@@ -168,6 +170,7 @@ export interface EnumParam extends ParamBase {
  */
 export type ColumnSchemaSource = (
   inputs: Readonly<Record<string, CodaType | undefined>>,
+  params: ParamValues,
 ) => TableSchema | undefined
 
 /** Single column reference, populated from the schema arriving at input `from`. */
@@ -436,7 +439,7 @@ export function resolveColumn(
   params: ParamValues,
   inputs: Readonly<Record<string, CodaType | undefined>>,
 ): string | undefined {
-  const available = availableColumns(param, inputs)
+  const available = availableColumns(param, inputs, params)
   const stored = params[param.id]
   const chosen = typeof stored === 'string' ? stored : ''
   if (chosen && available.includes(chosen)) return chosen
@@ -451,7 +454,7 @@ export function resolveColumns(
   params: ParamValues,
   inputs: Readonly<Record<string, CodaType | undefined>>,
 ): string[] {
-  const available = availableColumns(param, inputs)
+  const available = availableColumns(param, inputs, params)
   const stored = params[param.id]
   if (!Array.isArray(stored)) return []
   return stored.filter((name) => available.includes(name))
@@ -471,17 +474,19 @@ export function resolveColumns(
 export function columnSchemaFor(
   param: ColumnParam | ColumnsParam,
   inputs: Readonly<Record<string, CodaType | undefined>>,
+  params: ParamValues,
 ): TableSchema | undefined {
   return param.schemaFrom
-    ? param.schemaFrom(inputs)
+    ? param.schemaFrom(inputs, params)
     : attributeSchema(inputs[param.from], param.part ?? 'nodes')
 }
 
 export function availableColumns(
   param: ColumnParam | ColumnsParam,
   inputs: Readonly<Record<string, CodaType | undefined>>,
+  params: ParamValues,
 ): string[] {
-  const schema = columnSchemaFor(param, inputs)
+  const schema = columnSchemaFor(param, inputs, params)
   if (!schema) return []
   const cols = param.dtypes ? columnsOfType(schema, param.dtypes) : schema.columns
   return cols.map((c) => c.name)
@@ -511,8 +516,8 @@ export function validateColumnParams(def: NodeDefinition, ctx: InferContext): st
      * is most likely still correct, and inviting someone to re-pick from an empty list is
      * worse advice than silence.
      */
-    if (!columnSchemaFor(p, ctx.inputs)) continue
-    const available = availableColumns(p, ctx.inputs)
+    if (!columnSchemaFor(p, ctx.inputs, ctx.params)) continue
+    const available = availableColumns(p, ctx.inputs, ctx.params)
     if (available.length === 0) {
       // An optional picker is allowed to have nothing to offer — that is what optional means.
       // Reporting it puts a warning badge on a node whose control nobody has touched, which

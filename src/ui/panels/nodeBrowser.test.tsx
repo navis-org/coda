@@ -13,7 +13,12 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { App } from '../../App'
-import { allNodeDefs, listableNodeDefs, requireNodeDef } from '../../core/registry'
+import {
+  allNodeDefs,
+  listableNodeDefs,
+  nodeDefsByCategory,
+  requireNodeDef,
+} from '../../core/registry'
 import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import '../../nodes'
@@ -43,6 +48,17 @@ function open() {
   return { onPick, onClose, ...utils }
 }
 
+/**
+ * The node the browser lists last: bottom of the last category in registry order.
+ *
+ * Derived rather than named, because two tests here are about the *ends* of the list and a
+ * literal turns "someone added a utility node" into a failure that reads as a layout bug.
+ */
+const lastListedDef = () => {
+  const groups = nodeDefsByCategory()
+  return groups[groups.length - 1]!.defs.at(-1)!
+}
+
 const rowNames = () =>
   [...document.querySelectorAll('.node-row')].map(
     (row) => row.querySelector('.node-row__name')?.textContent,
@@ -55,9 +71,11 @@ describe('NodeBrowser layout', () => {
     // load, and must not be offered here. The gap between the two is the whole point.
     expect(rowNames()).toHaveLength(listableNodeDefs().length)
     expect(allNodeDefs().length).toBeGreaterThan(listableNodeDefs().length)
-    // Dataset first, utility last — the registry's category order.
+    // Dataset first, utility last — the registry's category order. Both ends are derived
+    // rather than named, so adding a node to either category is not a failing test.
     expect(rowNames()[0]).toBe('Custom neuPrint')
-    expect(rowNames().at(-1)).toBe('Text')
+    expect(lastListedDef().category).toBe('utility')
+    expect(rowNames().at(-1)).toBe(lastListedDef().label)
   })
 
   it('shows a search box, category chips with counts, and a footer', () => {
@@ -203,8 +221,8 @@ describe('NodeBrowser selection', () => {
     const input = screen.getByLabelText('Search nodes')
     fireEvent.keyDown(input, { key: 'ArrowUp' })
     fireEvent.keyDown(input, { key: 'Enter' })
-    // Wrapped to the last row of the last category.
-    expect(onPick.mock.calls[0]![0]).toBe('note.text')
+    // Wrapped to the last row of the last category, whichever node that currently is.
+    expect(onPick.mock.calls[0]![0]).toBe(lastListedDef().type)
   })
 
   it('resets the highlight when the result set changes', () => {

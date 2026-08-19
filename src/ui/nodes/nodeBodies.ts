@@ -25,6 +25,7 @@ import { DatasetBody } from './DatasetBody'
 import { DescriptionBody } from './DescriptionBody'
 import { IdsFromLabelBody } from './IdsFromLabelBody'
 import { PathsBody } from './PathsBody'
+import { UploadBody } from './UploadBody'
 
 export interface NodeBodyProps {
   node: GraphNode
@@ -96,6 +97,14 @@ export const NODE_BODIES: Record<string, NodeBodyEntry> = {
    * routes themselves are a table, and the Table node is what opens full size.
    */
   'neuron.paths': { Component: PathsBody, width: 260 },
+  /*
+   * Wider than a default card because the status line is a sentence — the "not in this browser"
+   * state has to be readable without a tooltip, since it is what a colleague opening a shared
+   * graph sees. `expandable`, and the overlay earns its button by adding the column/type
+   * listing: a file's schema is the thing you actually want to check after importing it, and
+   * twenty rows of it do not belong on a canvas.
+   */
+  'core.uploadTable': { Component: UploadBody, width: 300, expandable: true },
 }
 
 export function nodeBody(type: string): NodeBodyEntry | undefined {

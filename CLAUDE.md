@@ -292,6 +292,10 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `nodes/output/barChart.test.ts`          | the tap, that an unpicked column is a warning and not a refusal, and the stack-by-itself catch                                   |
 | `nodes/table/pivot.test.ts`              | the two outputs describing one pivot, and the wide schema arriving only by observation                                           |
 | `nodes/table/sample.test.ts`             | the four sampling modes, a draw reproduced from its seed, and the seed costing nothing in the other three                        |
+| `data/csv.test.ts`                       | reading somebody else's file: quoting, delimiter-by-consistency, header bias, and every value the parse refuses to widen        |
+| `data/uploads.test.ts`                   | the store against real IndexedDB: content addressing incl. a separator collision, a write that rejects, and the peek's one read |
+| `nodes/table/upload.test.ts`             | the node: the schema arriving by peek, the bodyId rename, what a graph opened elsewhere says, and the filename costing nothing  |
+| `ui/nodes/uploadBody.test.tsx`           | the card's four states — and that 'looking' is never printed as 'not here' — plus the size ceiling refusing before it reads     |
 
 ## Auto-run
 
@@ -1805,6 +1809,162 @@ came from because `joinTables` keys on `String(cell)`. And a column label collid
 row field's name is suffixed (`type`, `type_2`) rather than dropped, the same call
 `joinedColumns` makes.
 
+## Upload Table: somebody else's data
+
+`core.uploadTable`, added from `Add ▸ Utility ▸ Upload Table`. A CSV of annotations, custom cell
+types or an embedding, brought in from the user's own machine — the one node here with no inputs
+and no data source behind it. `src/data/uploads.ts` is the module to read first; everything below
+follows from the two decisions taken there.
+
+**The rows never enter the `.coda.json`.** The node stores a `dataId` and the filename it came
+from; the table itself lives in IndexedDB. Three constraints force it and each one alone would be
+enough: `stableStringify` re-hashes a string param on **every** graph edit (CLAUDE.md already
+flags a 110 kB Explore selection as a stutter risk, and a whole-dataset embedding is megabytes),
+the autosave is `localStorage` at a ~5 MB origin budget with `saveAutosave` swallowing quota
+failures by design, and a `ParamValue` is `number | string | boolean | string[]` — a table can
+only ride in a graph as text.
+
+**So a `.coda.json` sent to a colleague arrives without its rows, and that is the accepted cost.**
+It is not hidden: the card says which file is missing and offers to pick it again, and `evaluate`
+throws naming the file so everything downstream is `blocked` rather than quietly running on
+nothing. The message names the *file* and never the content hash, because a hash is not something
+anyone can act on.
+
+**Its own IndexedDB database, not `data/cache.ts`.** That module is a cache — expiry,
+fingerprint-as-miss, and a `cacheClear` that drops everything. A table somebody uploaded is not
+evictable; losing it to a cache clear is losing their data. Same call and same reasoning as
+`store/library.ts`, and it cannot live beside that one because `src/store` imports `src/nodes`, so
+a node reaching into the store would close a cycle. `src/data` is the layer nodes may import.
+
+**Writes reject, reads resolve**, inherited from `library.ts`. Everywhere else here a storage
+failure degrades silently, because failing to *remember* is not failing to compute; an upload
+inverts that, because there is nothing to recompute from once the `File` handle is gone. There is
+deliberately no in-memory fallback: something that survives until the tab reloads is not somewhere
+to put a file. The write waits for the transaction's `complete` rather than for its requests — a
+quota failure lets the `put` succeed and *then* aborts, so awaiting the request would report an
+import that was rolled back.
+
+**`dataId` is a content address, and that is what makes provenance work with no nonce.** It hashes
+the schema and every cell, so re-picking a file you already imported produces identical params and
+re-runs nothing, while a file differing in one value invalidates everything downstream. Two nodes
+given the same file share one stored copy. Note the separator: the hash walks a joined string, and
+without one a column holding `['ab', 'c']` and one holding `['a', 'bc']` both concatenate to
+`abc`, so two genuinely different imports would share an id and the second would silently resolve
+to the first one's rows. It is written as `'\u001f'` rather than typed, because a raw control
+character in a source file is invisible to every reader and to `grep` — this cost a debugging
+round trip when one arrived in the file by accident.
+
+**`fileName` is `presentational`, which looks wrong on a param that is not a viewer knob.** It
+cannot change a byte of what `evaluate` returns — `dataId` decides that, and two people importing
+one file under two names hold identical rows. Leaving it in the provenance key means renaming a
+file re-runs the node and stales everything after it for a reason nobody could see.
+
+### The peek, and why `ID column` is an enum
+
+The schema is not in the graph either, so `inferOutputs` — synchronous, and forbidden to fetch by
+invariant 2 — reads `peekUploadSchema`, which answers from an in-memory mirror and, the first time
+it cannot, starts the read that will fill it. Once per id, never once per peek, because inference
+runs on every keystroke. When it lands, `reportUploadLearned` fires and `graphStore` re-infers
+through the *same* `afterSourceLearned` handler the dataset listings use: this is not a
+data-changed event, must not schedule a run and must not autosave, all of which that handler
+already gets right for exactly the same reasons.
+
+So on a cold load the node publishes a bare `T.table()` for a moment — typed, so the wire still
+connects — and fills its columns in a millisecond or two.
+
+**That window is why `ID column` is an `enum` and not a `column` param.** An enum's stored value
+reaches the provenance key verbatim; a column param's is *resolved* against the available schema
+first. Resolved against an empty schema and then against a full one, the node would key one way
+before the peek landed and another way after — marking a node that had just run stale, and
+invalidating everything downstream of it, on every single reload. `resolveColumn`'s rule 2 keeps a
+chosen name and would have survived it; `resolveColumns` drops what it cannot find and would not.
+
+**A miss is announced too.** Without that the card sits on "looking for the stored rows" forever,
+and that is the one state that has to resolve into a sentence telling somebody to pick the file
+again.
+
+**The card's `useSyncExternalStore` snapshot is a revision counter, not the peeked value.** Both
+"still looking" and "not in this browser" peek to `undefined`, so a snapshot of the value is
+identical either side of the read landing and React never re-renders. Same idiom and same reason
+as the store's `runVersion`. A test drives this; it is not otherwise observable.
+
+### Reading the file
+
+`data/csv.ts`, headless, the counterpart to `ui/export.ts`'s CSV writing. Everything is decided
+from the text — delimiter, header, and each column's dtype — and there is **no options
+argument**, deliberately. The settings a caller might pass are exactly the ones that would have to
+be *stored* to be honoured on a later run, which puts them in the provenance key and makes the
+node's stored schema something that can drift from its stored rows. Detecting once at ingest and
+keeping the finished table means the two cannot disagree; the cost is that a file whose shape is
+undetectable has to be fixed rather than configured.
+
+- **The delimiter is judged on consistency, not on count.** Counting occurrences picks the comma
+  out of a tab-separated file whose text fields contain commas. A real delimited file splits every
+  row into the same number of fields, so the candidate producing one field count across the sample
+  wins. Semicolon and tab are not exotic: a spreadsheet saving "CSV" under a comma-decimal locale
+  writes semicolons, and `to_csv(sep=)` writes tabs.
+- **A header is text, and that is the whole rule.** The moment any field of row one parses as a
+  number, that row is data. Both obvious extra conditions are wrong: *blank* names cannot
+  disqualify it, because `to_csv()` with an index writes `,a,b` and every such export would be read
+  as headerless; *duplicated* names cannot either, because `uniqueNames` already suffixes them and
+  demoting the row instead puts the word "type" into the first row of the column it was naming. The
+  remaining ambiguity — an all-text file with no header — resolves *towards* a header, the same bias
+  `pandas.read_csv` takes.
+- **A blank cell is null, never zero.** `Number('')` is 0, which draws a dense stripe of data
+  nobody recorded along every axis downstream. Same trap `numeric()` in `encoding.ts` exists for.
+- **A value that would not survive a round trip stays text.** `007` and `0012` are how a
+  zero-padded code is written and reading them as 7 and 12 loses what made them identifiers; an id
+  past `Number.MAX_SAFE_INTEGER` comes back a different number. The load-bearing half is that this
+  vetoes the *numeric* reading and not merely the integral one — without that `007` fails the
+  integer test, passes the float test, and arrives as `7` anyway. Floats are exempt: `1.50` and
+  `1.5` are the same measurement, where an integer's digits are identity.
+- **One stray value keeps the whole column text.** A column that is 99% numeric with an `n/a` in
+  it is a text column with a convention in it, and reading the rest as numbers drops that row's
+  value silently.
+- **`0`/`1` are integers, never booleans.** A synapse count of 1 is not `true`, and nothing in the
+  text says which was meant.
+- **Ragged rows are padded and reported, never dropped.** A trailing comma is routine in a
+  hand-edited file, and losing the row silently is worse than a null in it. The count goes through
+  the card's error channel once, at import, rather than becoming a permanent badge — it is a fact
+  about the import, not about the node's configuration.
+
+**The ceiling is checked against `file.size` before a byte is read** (`MAX_UPLOAD_BYTES`, 50 MB),
+which is the same call `pivotTable` makes when it checks label cardinalities rather than the array
+it is about to allocate. By the time a table exists the tab has already stalled.
+
+### The two controls
+
+Both are applied *after* parsing and both are lossless, which is what lets them cost no re-parse
+and never disagree with the rows already stored. The pair lives in `tableOps.ts` as
+`uploadShapeSchema`/`uploadShapeTable`, with `uploadIsNeurons` shared between them so the schema
+half and the value half cannot disagree about the *kind* either.
+
+- **`ID column` renames the chosen column to `bodyId`**, and the output becomes Neurons. Nodes
+  address columns by name — `out.profile` validates on it, Connectivity and Skeletons read it — so
+  a file whose author wrote `root_id` cannot meet neuron data until it is renamed. A column that
+  merely already held the name is suffixed (`bodyId_2`), the same call `joinedColumns` makes. Only
+  `i64` and `str` columns are offered: a float is a measurement and a boolean is a flag, and
+  offering either invites a Neurons table whose body ids are neither.
+- **`Text columns` widens a column to `str`**, and never the reverse. Reading text as a number is
+  where data is lost, and the parser's round-trip rule has already kept anything ambiguous as
+  text — so this is for a column that is genuinely numeric and genuinely not a *quantity*, like a
+  cluster label or a layer index, which has no business offering itself to a size encoding or being
+  averaged. Null stays null: `String(null)` is the four-letter word "null", which would read as a
+  value everywhere downstream.
+
+`ColumnSchemaSource` grew a second argument for `Text columns` — see the Explore section, where it
+came from. A column picker on a node with **no inputs at all** has nowhere to read a schema from
+but the node's own params, which is what that argument supplies.
+
+**`cheap`, despite reading a database.** `evaluate` is one IndexedDB read of an already-parsed
+table and no parse at all, and there is no upstream, so it re-runs only when its own params change.
+Same reasoning as `out.neuroglancer`.
+
+**Known limit: nothing collects orphans.** Deleting the node leaves its rows in IndexedDB, because
+nothing can tell whether another graph on the shelf still references them — and content addressing
+means re-importing the same file reuses the entry rather than adding one. A "manage uploads"
+surface is the answer when there is one; silently deleting somebody's data on a node delete is not.
+
 ## Connectivity: hops and direction
 
 `Direction` offers `both`, and `Hops` traverses further than one synapse. Both changed what the
@@ -2225,6 +2385,13 @@ which `src/core` must not import. So the node supplies the lookup
 `dtypes` filter, the validation and the picker all keep working unchanged. Resolve it through
 `ctx.columns('chips')`, never `ctx.params.chips` — invariant 5 — which is also what drops a
 field the current dataset does not have instead of rendering a column of blanks.
+
+It takes the node's **params** as a second argument as well, which `Upload Table` is the reason
+for: that node has no inputs at all, so the only place its picker can find a schema is the upload
+its own params point at. Every call site already held the params, so the widening cost nothing —
+but note what it means, and it is the honest reading of the hatch's original purpose: `from` says
+which port must be *connected*, and `schemaFrom` says where the schema actually comes from. On a
+node with no ports those are simply different questions.
 
 **A row's chips are tinted by field, and the hue lives in CSS.** `rowFields.ts` assigns each
 chip candidate a categorical palette slot keyed to the _field_, so `class` is the same blue on

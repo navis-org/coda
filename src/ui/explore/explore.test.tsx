@@ -628,9 +628,9 @@ describe('the Tags param', () => {
     const def = requireNodeDef('neuron.explore')
     const param = def.params?.find((p) => p.id === 'chips')
     expect(param?.kind).toBe('columns')
-    expect(availableColumns(param as never, { dataset: T.dataset('mock', DATASET) })).toContain(
-      'status',
-    )
+    expect(
+      availableColumns(param as never, { dataset: T.dataset('mock', DATASET) }, {}),
+    ).toContain('status')
   })
 })
 

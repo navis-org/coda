@@ -40,6 +40,7 @@ import { isTableValue } from '../core/values'
 import { MockSource } from '../data/mock/MockSource'
 import { NeuPrintSource } from '../data/neuprint/NeuPrintSource'
 import { registerSource, requireSource, subscribeSourceLearned } from '../data/source'
+import { subscribeUploadLearned } from '../data/uploads'
 import { getExample } from '../examples'
 import type { StarterSpec } from '../examples/starters'
 import { buildStarter } from '../examples/starters'
@@ -528,6 +529,14 @@ export const useGraphStore = create<GraphState>((set, get) => {
    * teardown hook here would be a hook that only ever runs when the page is going away anyway.
    */
   subscribeSourceLearned(afterSourceLearned)
+  /*
+   * An upload's schema arrives the same way a dataset listing does — asynchronously, into
+   * something `inferOutputs` reads synchronously — so it needs the same re-inference and not a
+   * second mechanism. Deliberately the *same* handler: this is not a data-changed event, must
+   * not schedule a run and must not autosave, all of which `afterSourceLearned` already gets
+   * right for exactly the same reasons.
+   */
+  subscribeUploadLearned(afterSourceLearned)
 
   return {
     graph: initialGraph,

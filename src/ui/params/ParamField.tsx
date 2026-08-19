@@ -81,7 +81,7 @@ export function ParamField({ param, value, ctx, onChange, variant = 'node' }: Pa
     }
 
     case 'column': {
-      const columns = availableColumns(param, ctx.inputs)
+      const columns = availableColumns(param, ctx.inputs, ctx.params)
       const stored = typeof value === 'string' ? value : ''
       // An optional param shows exactly what is stored, including "none"; a required one
       // shows the resolver's fallback so the widget never displays an empty selection.
@@ -112,7 +112,7 @@ export function ParamField({ param, value, ctx, onChange, variant = 'node' }: Pa
     }
 
     case 'columns': {
-      const columns = availableColumns(param, ctx.inputs)
+      const columns = availableColumns(param, ctx.inputs, ctx.params)
       const selected = Array.isArray(value) ? value : []
       return (
         <ColumnsField

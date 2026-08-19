@@ -323,6 +323,108 @@ export function sampleTable(table: TableValue, spec: SampleSpec): TableValue {
 }
 
 // ---------------------------------------------------------------------------
+// Uploaded table shaping
+// ---------------------------------------------------------------------------
+
+/**
+ * The name a neuron table has to use.
+ *
+ * Nodes address columns by name — `out.profile` validates on it, `idColumn()` above defaults
+ * to it, Connectivity and Skeletons read it — so an uploaded file whose author called the
+ * column `root_id` cannot meet neuron data until it is renamed. That rename is the whole
+ * reason the upload node's ID column picker exists rather than merely tagging the type.
+ */
+const ID_COLUMN_NAME = 'bodyId'
+
+/**
+ * Whether a shaped upload carries a body id, and may therefore call itself Neurons.
+ *
+ * One predicate rather than the same condition written twice, because the schema half and the
+ * value half must agree about the *kind* as strictly as they agree about the columns: a table
+ * typed `neurons` whose values arrive as a plain table breaks every downstream node's bodyId
+ * guarantee only after a run.
+ */
+export function uploadIsNeurons(
+  schema: TableSchema | undefined,
+  idColumn: string,
+): boolean {
+  return Boolean(idColumn) && Boolean(findColumn(schema, idColumn))
+}
+
+/** Rename the chosen id column, evicting a different column already holding the name. */
+function renamedColumns(names: readonly string[], idColumn: string): string[] {
+  if (!idColumn || !names.includes(idColumn)) return [...names]
+  const taken = new Set(names.filter((n) => n !== idColumn))
+  return names.map((name) => {
+    if (name === idColumn) return ID_COLUMN_NAME
+    // The chosen column wins the name; a column that merely already had it is suffixed, the
+    // same call `joinedColumns` and the wide pivot make about a collision.
+    if (name !== ID_COLUMN_NAME) return name
+    let n = 2
+    while (taken.has(`${ID_COLUMN_NAME}_${n}`)) n++
+    return `${ID_COLUMN_NAME}_${n}`
+  })
+}
+
+/**
+ * What an upload's stored table looks like once the node's two controls are applied.
+ *
+ * Both are lossless by construction, which is what lets them be applied *after* parsing rather
+ * than during it — so changing either costs no re-parse and cannot disagree with the rows the
+ * uploads store already holds.
+ *
+ *  - `textColumns` widens a column to `str`. Widening only, and never the reverse: reading
+ *    text as a number is where data is lost, and the parser's round-trip rule has already kept
+ *    anything ambiguous as text. This is for a column that is genuinely numeric and genuinely
+ *    not a *quantity* — a cluster label, a layer index — which has no business offering itself
+ *    to a size encoding or being averaged.
+ *  - `idColumn` renames one column to `bodyId`. See `ID_COLUMN_NAME`.
+ */
+export function uploadShapeSchema(
+  schema: TableSchema | undefined,
+  idColumn: string,
+  textColumns: readonly string[],
+): TableSchema | undefined {
+  if (!schema) return undefined
+  const text = new Set(textColumns)
+  const names = renamedColumns(
+    schema.columns.map((c) => c.name),
+    idColumn,
+  )
+  return {
+    columns: schema.columns.map((c, i) =>
+      // The unit goes with the dtype: a count of synapses read as text is no longer a count.
+      text.has(c.name) ? column(names[i]!, 'str') : { ...c, name: names[i]! },
+    ),
+  }
+}
+
+export function uploadShapeTable(
+  table: TableValue,
+  idColumn: string,
+  textColumns: readonly string[],
+): TableValue {
+  const schema = uploadShapeSchema(table.schema, idColumn, textColumns)!
+  const text = new Set(textColumns)
+  const data: Record<string, ColumnData> = {}
+  for (let i = 0; i < table.schema.columns.length; i++) {
+    const from = table.schema.columns[i]!.name
+    const to = schema.columns[i]!.name
+    const source = getColumn(table, from)
+    // Null is absence and stays absence: `String(null)` is the four-letter word "null", which
+    // would read as a value everywhere downstream.
+    data[to] = text.has(from)
+      ? source.map((cell) => (cell === null ? null : String(cell)))
+      : source
+  }
+  return makeTable(
+    schema,
+    data,
+    uploadIsNeurons(table.schema, idColumn) ? 'neurons' : 'table',
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Select columns
 // ---------------------------------------------------------------------------
 

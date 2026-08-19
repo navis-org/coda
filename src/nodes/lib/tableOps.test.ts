@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { column, tableSchema } from '../../core/types'
+import { column, columnNames, tableSchema } from '../../core/types'
 import type { TableValue } from '../../core/values'
 import { makeMatrix, tableFromRows } from '../../core/values'
 import {
@@ -20,6 +20,9 @@ import {
   sampleTable,
   selectSchema,
   selectTable,
+  uploadIsNeurons,
+  uploadShapeSchema,
+  uploadShapeTable,
   sortTable,
 } from './tableOps'
 
@@ -162,6 +165,63 @@ describe('sample', () => {
     const out = sampleTable(conn(), spec({ mode: 'stride', step: 2 }))
     expectSchemaAgreement(sampleSchema(CONNECTIVITY), out)
     expect(out.data.bodyId).toEqual([1, 1, 2])
+  })
+})
+
+describe('upload shaping', () => {
+  const UPLOAD = tableSchema(
+    column('root_id', 'i64'),
+    column('cellType', 'str'),
+    column('cluster', 'i64'),
+  )
+  const upload = () =>
+    tableFromRows(UPLOAD, [
+      { root_id: 101, cellType: 'LC4', cluster: 3 },
+      { root_id: 102, cellType: 'LC6', cluster: null },
+    ])
+
+  it('renames the id column and agrees with its schema half', () => {
+    const declared = uploadShapeSchema(UPLOAD, 'root_id', [])
+    const out = uploadShapeTable(upload(), 'root_id', [])
+    expectSchemaAgreement(declared, out)
+    expect(out.data.bodyId).toEqual([101, 102])
+    expect(out.kind).toBe('neurons')
+  })
+
+  it('widens a chosen column to text, and agrees there too', () => {
+    const declared = uploadShapeSchema(UPLOAD, '', ['cluster'])
+    const out = uploadShapeTable(upload(), '', ['cluster'])
+    expectSchemaAgreement(declared, out)
+    // Null is absence and stays absence: `String(null)` is the four-letter word "null", which
+    // would read as a value in every picker and chart downstream.
+    expect(out.data.cluster).toEqual(['3', null])
+    expect(out.kind).toBe('table')
+  })
+
+  it('gives the chosen column the name, and suffixes the one that had it', () => {
+    const clash = tableSchema(column('root_id', 'i64'), column('bodyId', 'str'))
+    const declared = uploadShapeSchema(clash, 'root_id', [])
+    const out = uploadShapeTable(tableFromRows(clash, [{ root_id: 1, bodyId: 'x' }]), 'root_id', [])
+    expectSchemaAgreement(declared, out)
+    expect(columnNames(out.schema)).toEqual(['bodyId', 'bodyId_2'])
+    expect(out.data.bodyId).toEqual([1])
+    expect(out.data.bodyId_2).toEqual(['x'])
+  })
+
+  it('leaves the table alone when nothing is configured', () => {
+    const out = uploadShapeTable(upload(), '', [])
+    expect(out.schema).toEqual(UPLOAD)
+    expect(out.kind).toBe('table')
+  })
+
+  it('does not claim neurons-ness for a column that is not there', () => {
+    // The predicate both halves share: a schema half saying `neurons` over a value half that
+    // is a plain table breaks the bodyId guarantee downstream only after a run.
+    expect(uploadIsNeurons(UPLOAD, 'root_id')).toBe(true)
+    expect(uploadIsNeurons(UPLOAD, 'missing')).toBe(false)
+    expect(uploadIsNeurons(UPLOAD, '')).toBe(false)
+    expect(uploadIsNeurons(undefined, 'root_id')).toBe(false)
+    expect(uploadShapeTable(upload(), 'missing', []).kind).toBe('table')
   })
 })
 
