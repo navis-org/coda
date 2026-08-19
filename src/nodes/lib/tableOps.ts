@@ -215,6 +215,114 @@ export function sortTable(
 }
 
 // ---------------------------------------------------------------------------
+// Sample
+// ---------------------------------------------------------------------------
+
+export type SampleMode = 'head' | 'tail' | 'stride' | 'random'
+
+export const SAMPLE_OPTIONS: Array<{ value: SampleMode; label: string }> = [
+  { value: 'head', label: 'Top N' },
+  { value: 'tail', label: 'Bottom N' },
+  { value: 'stride', label: 'Every Nth' },
+  { value: 'random', label: 'Random' },
+]
+
+export interface SampleSpec {
+  mode: SampleMode
+  /** Rows to keep. Read by every mode but `stride`. */
+  count: number
+  /** Keep one row in `step`, starting with the first. `stride` only. */
+  step: number
+  /** Seeds the draw. `random` only. */
+  seed: number
+}
+
+/** Sampling takes rows away and never touches the columns. */
+export function sampleSchema(schema: TableSchema | undefined): TableSchema | undefined {
+  return schema
+}
+
+/**
+ * Seeded PRNG for the random draw.
+ *
+ * Deliberately a second copy of `mulberry32` rather than an import from `data/mock/generate`,
+ * which is the one other place this algorithm appears. The two are not the same concern: the
+ * mock's stream exists to give a synthetic connectome recognisable structure and may be
+ * retuned the day that structure needs to change, whereas this one is **provenance** — it is
+ * pinned by a seed the user chose, saved in their graph, and a change to it would silently
+ * resample every workflow that ever used this node. Nothing needs the two streams to agree,
+ * and sharing one function is what would let the mock's concerns reach this one.
+ */
+function seededRandom(seed: number): () => number {
+  let a = (Number.isFinite(seed) ? Math.floor(seed) : 0) >>> 0
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0
+    let t = a
+    t = Math.imul(t ^ (t >>> 15), t | 1)
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+/** A param arriving as NaN — an emptied number field — must not become NaN rows. */
+function wholeNumber(value: number, fallback: number): number {
+  return Number.isFinite(value) ? Math.floor(value) : fallback
+}
+
+/**
+ * `count` rows drawn without replacement, **in the input's own order**.
+ *
+ * Partial Fisher-Yates: `count` swaps rather than a full shuffle, unbiased at every draw, and
+ * the cost is in the size of the sample rather than the size of the table. The result is then
+ * sorted, because this node samples and does not shuffle — a random *subset* of a sorted table
+ * is still sorted, which is what makes it comparable to the three deterministic modes beside
+ * it and readable next to the table it came from. Shuffling is a different question and would
+ * be a different node.
+ */
+function randomRowIndices(length: number, count: number, seed: number): number[] {
+  const indices = Array.from({ length }, (_, i) => i)
+  const rand = seededRandom(seed)
+  for (let i = 0; i < count; i++) {
+    const j = i + Math.floor(rand() * (length - i))
+    const held = indices[i]!
+    indices[i] = indices[j]!
+    indices[j] = held
+  }
+  return indices.slice(0, count).sort((a, b) => a - b)
+}
+
+/**
+ * Which rows a sample keeps, as ascending indices.
+ *
+ * Split out from `sampleTable` for the same reason `sortedRowIndices` is: the interesting
+ * behaviour — the stride, the draw, and its determinism under a seed — is about row positions
+ * and is sharpest to test without a table wrapped round it.
+ */
+export function sampleRowIndices(length: number, spec: SampleSpec): number[] {
+  const rows = Math.max(0, wholeNumber(length, 0))
+
+  if (spec.mode === 'stride') {
+    const step = Math.max(1, wholeNumber(spec.step, 1))
+    const out: number[] = []
+    for (let i = 0; i < rows; i += step) out.push(i)
+    return out
+  }
+
+  // A sample larger than the table is every row, not an error: the count is a ceiling.
+  const count = Math.min(rows, Math.max(0, wholeNumber(spec.count, 0)))
+  if (spec.mode === 'tail') return Array.from({ length: count }, (_, i) => rows - count + i)
+  if (spec.mode === 'random') return randomRowIndices(rows, count, spec.seed)
+  return Array.from({ length: count }, (_, i) => i)
+}
+
+export function sampleTable(table: TableValue, spec: SampleSpec): TableValue {
+  const indices = sampleRowIndices(table.length, spec)
+  // Every index list here is strictly ascending, so a full-length one is the identity.
+  if (indices.length === table.length) return table
+  return selectRows(table, indices)
+}
+
+// ---------------------------------------------------------------------------
 // Select columns
 // ---------------------------------------------------------------------------
 

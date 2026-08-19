@@ -22,6 +22,7 @@ export { rawCypherNode } from './query/rawCypher'
 
 export { filterNode } from './table/filter'
 export { sortNode } from './table/sort'
+export { sampleNode } from './table/sample'
 export { groupByNode } from './table/groupBy'
 export { selectNode } from './table/select'
 export { joinNode } from './table/join'

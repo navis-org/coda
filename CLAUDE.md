@@ -291,6 +291,7 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `core/columnParams.test.ts`              | what a column picker may complain about: unknown-vs-empty schema, and what `optional` changes                                    |
 | `nodes/output/barChart.test.ts`          | the tap, that an unpicked column is a warning and not a refusal, and the stack-by-itself catch                                   |
 | `nodes/table/pivot.test.ts`              | the two outputs describing one pivot, and the wide schema arriving only by observation                                           |
+| `nodes/table/sample.test.ts`             | the four sampling modes, a draw reproduced from its seed, and the seed costing nothing in the other three                        |
 
 ## Auto-run
 

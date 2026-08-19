@@ -15,6 +15,9 @@ import {
   MAX_PIVOT_CELLS,
   MAX_PIVOT_COLUMNS,
   pivotTable,
+  sampleRowIndices,
+  sampleSchema,
+  sampleTable,
   selectSchema,
   selectTable,
   sortTable,
@@ -99,6 +102,66 @@ describe('sort', () => {
     ])
     expect(sortTable(table, 'weight', true, 0).data.bodyId).toEqual([3, 1, 2])
     expect(sortTable(table, 'weight', false, 0).data.bodyId).toEqual([1, 3, 2])
+  })
+})
+
+describe('sample', () => {
+  const spec = (over: Partial<Parameters<typeof sampleTable>[1]>) => ({
+    mode: 'head' as const,
+    count: 0,
+    step: 1,
+    seed: 1,
+    ...over,
+  })
+
+  it('takes from the top and from the bottom', () => {
+    expect(sampleTable(conn(), spec({ mode: 'head', count: 2 })).data.bodyId).toEqual([1, 1])
+    expect(sampleTable(conn(), spec({ mode: 'tail', count: 2 })).data.bodyId).toEqual([2, 3])
+  })
+
+  it('strides from the first row', () => {
+    expect(sampleRowIndices(7, spec({ mode: 'stride', step: 3 }))).toEqual([0, 3, 6])
+    expect(sampleRowIndices(7, spec({ mode: 'stride', step: 1 }))).toEqual([0, 1, 2, 3, 4, 5, 6])
+  })
+
+  it('treats the count as a ceiling rather than a demand', () => {
+    expect(sampleTable(conn(), spec({ mode: 'head', count: 99 })).length).toBe(6)
+    expect(sampleTable(conn(), spec({ mode: 'tail', count: 99 })).length).toBe(6)
+    expect(sampleTable(conn(), spec({ mode: 'random', count: 99 })).length).toBe(6)
+  })
+
+  it('keeps no rows and the schema when the count is zero', () => {
+    const out = sampleTable(conn(), spec({ mode: 'head', count: 0 }))
+    expect(out.length).toBe(0)
+    expect(out.schema).toEqual(CONNECTIVITY)
+  })
+
+  // The seed is the whole reason this mode is allowed to exist: cache keys are provenance,
+  // so a draw that varied per call would make the node's own result disagree with itself.
+  it('draws the same rows for a seed and different rows for another', () => {
+    const draw = (seed: number) => sampleRowIndices(200, spec({ mode: 'random', count: 20, seed }))
+    expect(draw(7)).toEqual(draw(7))
+    expect(draw(7)).not.toEqual(draw(8))
+  })
+
+  it('draws without replacement, in the input order', () => {
+    const drawn = sampleRowIndices(200, spec({ mode: 'random', count: 20, seed: 3 }))
+    expect(drawn).toHaveLength(20)
+    expect(new Set(drawn).size).toBe(20)
+    expect(drawn).toEqual([...drawn].sort((a, b) => a - b))
+    expect(Math.min(...drawn)).toBeGreaterThanOrEqual(0)
+    expect(Math.max(...drawn)).toBeLessThan(200)
+  })
+
+  it('survives an emptied number field rather than sampling NaN rows', () => {
+    expect(sampleTable(conn(), spec({ mode: 'head', count: NaN })).length).toBe(0)
+    expect(sampleTable(conn(), spec({ mode: 'stride', step: NaN })).length).toBe(6)
+  })
+
+  it('preserves the schema, and neurons-ness with it', () => {
+    const out = sampleTable(conn(), spec({ mode: 'stride', step: 2 }))
+    expectSchemaAgreement(sampleSchema(CONNECTIVITY), out)
+    expect(out.data.bodyId).toEqual([1, 1, 2])
   })
 })
 
