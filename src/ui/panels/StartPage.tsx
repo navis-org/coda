@@ -177,7 +177,20 @@ export function StartPage() {
             onCancel={() => setConfirming(undefined)}
           />
 
-          <div className="start__foot">
+        </div>
+
+        {/*
+         * The shortcuts and the credits live in the bar, not at the end of the scroll. That is
+         * what makes them visible at all: the decks are the scrolling part, so a row below them
+         * is only reached by someone who scrolled past the thing they opened the page for.
+         *
+         * Two rows rather than three, and the split is measured rather than chosen. The keys box
+         * and the actions come to ~700px of the bar's 972, so they share a line; the credits run
+         * ~850px and cannot join them without wrapping. The credits go last, where a colophon
+         * goes, which also leaves the keys above them in the order they were already in.
+         */}
+        <div className="start__bar">
+          <div className="start__bar-row">
             <div className="start__keys">
               <span>
                 <strong>Space</strong> commands
@@ -192,38 +205,40 @@ export function StartPage() {
                 <strong>drag</strong> pan · <strong>⇧drag</strong> box-select
               </span>
             </div>
-            <div className="start__links">
-              <span>
-                Developed by Fly Connectomics Group (Cambridge) · Source Code at{' '}
-                <a href={REPO_URL} target="_blank" rel="noreferrer noopener">
-                  github.com/navis-org/coda
-                </a>{' '}
-                · Open an{' '}
-                <a href={ISSUES_URL} target="_blank" rel="noreferrer noopener">
-                  issue
-                </a>{' '}
-                for bugs and feature requests ·{' '}
+            <span className="toolbar__spacer" />
+            <label className="start__dismiss">
+              <input
+                type="checkbox"
+                checked={dismissed}
+                onChange={(e) => setStartPageDismissed(e.target.checked)}
+              />
+              Don&rsquo;t show again
+            </label>
+            <button
+              type="button"
+              className="btn btn--primary"
+              ref={closeRef}
+              onClick={closeStartPage}
+            >
+              Close
+            </button>
+          </div>
+          <div className="start__links">
+            <span>
+              Developed by Fly Connectomics Group (Cambridge) · Source Code at{' '}
+              <a href={REPO_URL} target="_blank" rel="noreferrer noopener">
+                github.com/navis-org/coda
+              </a>{' '}
+              · Open an{' '}
+              <a href={ISSUES_URL} target="_blank" rel="noreferrer noopener">
+                issue
+              </a>{' '}
+              for bugs and feature requests ·{' '}
               <a href={DOCS_URL} target="_blank" rel="noreferrer noopener">
                 Docs
-              </a>{' '}
-              </span>
-            </div>
+              </a>
+            </span>
           </div>
-        </div>
-
-        <div className="start__bar">
-          <label className="start__dismiss">
-            <input
-              type="checkbox"
-              checked={dismissed}
-              onChange={(e) => setStartPageDismissed(e.target.checked)}
-            />
-            Don&rsquo;t show again
-          </label>
-          <span className="toolbar__spacer" />
-          <button type="button" className="btn btn--primary" ref={closeRef} onClick={closeStartPage}>
-            Close
-          </button>
         </div>
       </div>
     </div>

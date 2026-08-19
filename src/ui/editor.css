@@ -3743,11 +3743,18 @@ a.viewer-actions__btn {
 
 /* --- header -------------------------------------------------------------- */
 
+/*
+ * No measure cap on the header. `max-width: 62ch` here resolved against the inherited 13px
+ * body size — about 460px inside a 972px panel — so both paragraphs broke across two lines
+ * with two thirds of the header empty beside them. Each is a single sentence that fits on
+ * one line at the panel width; a measure is an argument about a paragraph, and there is no
+ * paragraph here. Below `min(1040px, 90vw)` they wrap on their own, which is the only place
+ * the cap was ever doing anything.
+ */
 .start__head {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  max-width: 62ch;
 }
 
 .start__brand {
@@ -4009,14 +4016,6 @@ a.viewer-actions__btn {
 
 /* --- footer -------------------------------------------------------------- */
 
-.start__foot {
-  margin-top: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding-top: 4px;
-}
-
 .start__keys {
   display: flex;
   flex-wrap: wrap;
@@ -4066,16 +4065,35 @@ a.viewer-actions__btn {
 
 /* --- the bar ------------------------------------------------------------- */
 
+/*
+ * Two rows: the shortcuts and the actions share the first, the credits take the second.
+ * See `StartPage.tsx` for why that split rather than one row or three.
+ */
 .start__bar {
   position: relative;
   z-index: 2;
   flex: none;
   display: flex;
-  align-items: center;
-  gap: 14px;
+  flex-direction: column;
+  gap: 9px;
   padding: 12px 34px;
   border-top: 1px solid var(--border);
   background: var(--surface-1);
+}
+
+/*
+ * The keys box is the only thing here allowed to give ground. It already wraps, so a narrow
+ * panel costs it a line; the checkbox and the button are the reason the bar exists and must
+ * not be squeezed into two lines of their own to make room for a hint.
+ */
+.start__bar-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.start__bar-row > .start__dismiss,
+.start__bar-row > .btn {
+  flex: none;
 }
 
 .start__dismiss {
