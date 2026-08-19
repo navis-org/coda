@@ -174,7 +174,7 @@ bundled corepack, so pnpm was installed with `npm i -g pnpm`.
 
 - **A multi-column picker used to drop what it could not yet see, and the first Run differed from
   the second.** `resolveColumns` filtered the stored names against the available ones, and an
-  input carrying *no schema at all* produced an empty list — which then went into the provenance
+  input carrying _no schema at all_ produced an empty list — which then went into the provenance
   key and into `ctx.columns`.
 
   `Pivot → Select` with two of eight wide columns picked emitted **all eight** on the first run
@@ -186,7 +186,7 @@ bundled corepack, so pnpm was installed with `npm i -g pnpm`.
 
   The fix is the singular's rule 2 in the form that fits the plural: **a schema this picker cannot
   see is not a schema without these columns in it.** `resolveColumns` now returns the stored list
-  untouched when `columnSchemaFor` answers `undefined`, and still drops a column a *known* schema
+  untouched when `columnSchemaFor` answers `undefined`, and still drops a column a _known_ schema
   lacks — which is what keeps `validateColumnParams`' "Missing column(s)" true and stops a name
   the table cannot honour reaching `evaluate`. That distinction is the entire reason
   `columnSchemaFor` answers `undefined` separately from an empty schema.
@@ -310,18 +310,19 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `ui/viewers/scatterDraw.test.ts`         | marker geometry, the colour+shape batching, and the exported SVG                                                                 |
 | `ui/viewers/scatterViewer.test.tsx`      | the scatter caption: every admission it makes, and which legend keys stand down in a card                                        |
 | `nodes/output/scatter.test.ts`           | the tap, id-vs-row-index selection, and that `Max points` stales nothing                                                         |
-| `core/columnParams.test.ts`              | what a column picker may complain about: unknown-vs-empty schema, what `optional` changes, and a plural keeping an unseen list |
+| `core/columnParams.test.ts`              | what a column picker may complain about: unknown-vs-empty schema, what `optional` changes, and a plural keeping an unseen list   |
 | `nodes/output/barChart.test.ts`          | the tap, that an unpicked column is a warning and not a refusal, and the stack-by-itself catch                                   |
 | `nodes/table/pivot.test.ts`              | the two outputs describing one pivot, and the wide schema arriving only by observation                                           |
 | `nodes/table/sample.test.ts`             | the four sampling modes, a draw reproduced from its seed, and the seed costing nothing in the other three                        |
-| `data/csv.test.ts`                       | reading somebody else's file: quoting, delimiter-by-consistency, header bias, and every value the parse refuses to widen        |
-| `data/uploads.test.ts`                   | the store against real IndexedDB: content addressing incl. a separator collision, a write that rejects, and the peek's one read |
-| `nodes/table/upload.test.ts`             | the node: the schema arriving by peek, the bodyId rename, what a graph opened elsewhere says, and the filename costing nothing  |
-| `ui/nodes/uploadBody.test.tsx`           | the card's four states — and that 'looking' is never printed as 'not here' — plus the size ceiling refusing before it reads     |
-| `nodes/table/fromUrl.test.ts`            | the fetch: deferred by the auto pass, Refresh as the only re-fetch, the schema keyed by URL, and what each refusal blames      |
-| `nodes/lib/idList.test.ts`               | reading pasted ids: every separator, and both refusals — a bad token and an id too big to be exact |
-| `nodes/query/inputIds.test.ts`           | the node: no dataset means no query, the seam asked in numbers, no status filter, empty never all  |
-| `ui/nodes/inputIdsBody.test.tsx`         | the card: the counts, the ids named as missing, and that it claims nothing with no Dataset wired   |
+| `data/csv.test.ts`                       | reading somebody else's file: quoting, delimiter-by-consistency, header bias, and every value the parse refuses to widen         |
+| `data/uploads.test.ts`                   | the store against real IndexedDB: content addressing incl. a separator collision, a write that rejects, and the peek's one read  |
+| `nodes/table/upload.test.ts`             | the node: the schema arriving by peek, the bodyId rename, what a graph opened elsewhere says, and the filename costing nothing   |
+| `ui/nodes/uploadBody.test.tsx`           | the card's four states — and that 'looking' is never printed as 'not here' — plus the size ceiling refusing before it reads      |
+| `nodes/table/fromUrl.test.ts`            | the fetch: deferred by the auto pass, Refresh as the only re-fetch, the schema keyed by URL, and what each refusal blames        |
+| `nodes/lib/idList.test.ts`               | reading pasted ids: every separator, and both refusals — a bad token and an id too big to be exact                               |
+| `nodes/query/inputIds.test.ts`           | the node: no dataset means no query, the seam asked in numbers, no status filter, empty never all                                |
+| `ui/nodes/inputIdsBody.test.tsx`         | the card: the counts, the ids named as missing, and that it claims nothing with no Dataset wired                                 |
+| `nodes/table/stack.test.ts`              | the union schema needing both sides, a real dtype clash refused at run time, and the source column                               |
 
 ## Auto-run
 
@@ -620,8 +621,8 @@ fold was declined: it is a second magic number for a case one drag of a corner a
 **A card says how much of itself is not on it** — `… 4 more (1 changed)`, right-aligned at the
 end of the param band, opening the inspector on that node when clicked. `advanced` params never
 reach the card and the inspector is closed by default, so a node with settings on it and one
-without looked identical. `hiddenParams` and `changedParams` in `core/node.ts` are the rule,
-headless.
+without looked identical. `configurableParams`, `hiddenParams` and `changedParams`
+in `core/node.ts` are the rule, headless.
 
 **Two counts answering two different questions.** _How many are hidden_ is a fact about the node
 type and never moves — it is the general indicator, and it is what tells someone there is
@@ -632,16 +633,33 @@ absent when nothing has been touched. (A first pass showed the marker **only** w
 been changed. Across the five bundled examples that lands on 4 nodes of 29 against 16 — quieter,
 and wrong for the question actually being asked, which is "what else is there".)
 
+**"More" becomes "hidden" when the hidden ones are all there are.** `… 9 hidden` on Neuroglancer,
+`… 1 hidden` on Skeletons — "more" is a claim about something else being on the card, and on
+those there is nothing. The question is asked of `activeParams` rather than of the rows that were
+drawn, because a node with a body of its own renders controls nothing here can enumerate:
+Explore's search box is on the card, so its five advanced params stay `more`.
+
 **Not gated on the band it sits at the end of.** The cards needing it most draw _no_ rows at all:
 `neuron.skeletons` has exactly one param and it is advanced, so an empty body was the whole of
 what the card said about itself. It does go away with a fold, which is the one case where
 something else on the card — the `☰` in its pressed state — is already saying there is more here.
 
-Two exclusions, each of which would otherwise be a false claim. **`visibleIf` first:** a param the
-current values have switched off is inapplicable rather than hidden, or the number moves as
-unrelated modes are chosen. **An absent value is not a change:** loading does not fill missing
+Three exclusions, each of which would otherwise be a false claim. **`visibleIf` first:** a param
+the current values have switched off is inapplicable rather than hidden, or the number moves as
+unrelated modes are chosen. **`ParamBase.internal` next:** a nonce or a pager is machinery a
+widget writes, not a setting — without it a dataset card announced `… 1 more` about its `refresh`
+counter, and turning a page in Profile had the card claim a parameter had been changed. It stays
+a real param, saved and reachable in the inspector, because the escape hatch is sanctioned; the
+flag only stops anything _advertising_ it. Note it is not a synonym for `advanced` — Explore's
+`Rows per page` sits beside `page` and is inspector-only for space, but it is somebody's
+preference and stays countable. **An absent value is not a change:** loading does not fill missing
 params with defaults, so a graph saved before a param existed has no key for it, and comparing
 that against the declared default reports a change on every older file.
+
+Both sides of the "are the hidden ones all there is" comparison come from `configurableParams`,
+or a node whose one other param were a nonce would say `more` while drawing nothing.
+`hiddenParams.test.tsx` asserts that every `refresh` in the registry carries the flag, since the
+next dataset-shaped node will grow one and nothing else would catch it.
 
 `align-self: flex-end` puts it under the _fields_ rather than the labels, since it is about what
 is missing from the right-hand column, and the tooltip **names** the params — marking the changed
@@ -1853,7 +1871,7 @@ only ride in a graph as text.
 **So a `.coda.json` sent to a colleague arrives without its rows, and that is the accepted cost.**
 It is not hidden: the card says which file is missing and offers to pick it again, and `evaluate`
 throws naming the file so everything downstream is `blocked` rather than quietly running on
-nothing. The message names the *file* and never the content hash, because a hash is not something
+nothing. The message names the _file_ and never the content hash, because a hash is not something
 anyone can act on.
 
 **Its own IndexedDB database, not `data/cache.ts`.** That module is a cache — expiry,
@@ -1863,11 +1881,11 @@ evictable; losing it to a cache clear is losing their data. Same call and same r
 a node reaching into the store would close a cycle. `src/data` is the layer nodes may import.
 
 **Writes reject, reads resolve**, inherited from `library.ts`. Everywhere else here a storage
-failure degrades silently, because failing to *remember* is not failing to compute; an upload
+failure degrades silently, because failing to _remember_ is not failing to compute; an upload
 inverts that, because there is nothing to recompute from once the `File` handle is gone. There is
 deliberately no in-memory fallback: something that survives until the tab reloads is not somewhere
 to put a file. The write waits for the transaction's `complete` rather than for its requests — a
-quota failure lets the `put` succeed and *then* aborts, so awaiting the request would report an
+quota failure lets the `put` succeed and _then_ aborts, so awaiting the request would report an
 import that was rolled back.
 
 **`dataId` is a content address, and that is what makes provenance work with no nonce.** It hashes
@@ -1891,7 +1909,7 @@ The schema is not in the graph either, so `inferOutputs` — synchronous, and fo
 invariant 2 — reads `peekUploadSchema`, which answers from an in-memory mirror and, the first time
 it cannot, starts the read that will fill it. Once per id, never once per peek, because inference
 runs on every keystroke. When it lands, `reportUploadLearned` fires and `graphStore` re-infers
-through the *same* `afterSourceLearned` handler the dataset listings use: this is not a
+through the _same_ `afterSourceLearned` handler the dataset listings use: this is not a
 data-changed event, must not schedule a run and must not autosave, all of which that handler
 already gets right for exactly the same reasons.
 
@@ -1899,7 +1917,7 @@ So on a cold load the node publishes a bare `T.table()` for a moment — typed, 
 connects — and fills its columns in a millisecond or two.
 
 **That window is why `ID column` is an `enum` and not a `column` param.** An enum's stored value
-reaches the provenance key verbatim; a column param's is *resolved* against the available schema
+reaches the provenance key verbatim; a column param's is _resolved_ against the available schema
 first. Resolved against an empty schema and then against a full one, the node would key one way
 before the peek landed and another way after — marking a node that had just run stale, and
 invalidating everything downstream of it, on every single reload. `resolveColumn`'s rule 2 keeps a
@@ -1919,7 +1937,7 @@ as the store's `runVersion`. A test drives this; it is not otherwise observable.
 `data/csv.ts`, headless, the counterpart to `ui/export.ts`'s CSV writing. Everything is decided
 from the text — delimiter, header, and each column's dtype — and there is **no options
 argument**, deliberately. The settings a caller might pass are exactly the ones that would have to
-be *stored* to be honoured on a later run, which puts them in the provenance key and makes the
+be _stored_ to be honoured on a later run, which puts them in the provenance key and makes the
 node's stored schema something that can drift from its stored rows. Detecting once at ingest and
 keeping the finished table means the two cannot disagree; the cost is that a file whose shape is
 undetectable has to be fixed rather than configured.
@@ -1930,18 +1948,18 @@ undetectable has to be fixed rather than configured.
   wins. Semicolon and tab are not exotic: a spreadsheet saving "CSV" under a comma-decimal locale
   writes semicolons, and `to_csv(sep=)` writes tabs.
 - **A header is text, and that is the whole rule.** The moment any field of row one parses as a
-  number, that row is data. Both obvious extra conditions are wrong: *blank* names cannot
+  number, that row is data. Both obvious extra conditions are wrong: _blank_ names cannot
   disqualify it, because `to_csv()` with an index writes `,a,b` and every such export would be read
-  as headerless; *duplicated* names cannot either, because `uniqueNames` already suffixes them and
+  as headerless; _duplicated_ names cannot either, because `uniqueNames` already suffixes them and
   demoting the row instead puts the word "type" into the first row of the column it was naming. The
-  remaining ambiguity — an all-text file with no header — resolves *towards* a header, the same bias
+  remaining ambiguity — an all-text file with no header — resolves _towards_ a header, the same bias
   `pandas.read_csv` takes.
 - **A blank cell is null, never zero.** `Number('')` is 0, which draws a dense stripe of data
   nobody recorded along every axis downstream. Same trap `numeric()` in `encoding.ts` exists for.
 - **A value that would not survive a round trip stays text.** `007` and `0012` are how a
   zero-padded code is written and reading them as 7 and 12 loses what made them identifiers; an id
   past `Number.MAX_SAFE_INTEGER` comes back a different number. The load-bearing half is that this
-  vetoes the *numeric* reading and not merely the integral one — without that `007` fails the
+  vetoes the _numeric_ reading and not merely the integral one — without that `007` fails the
   integer test, passes the float test, and arrives as `7` anyway. Floats are exempt: `1.50` and
   `1.5` are the same measurement, where an integer's digits are identity.
 - **One stray value keeps the whole column text.** A column that is 99% numeric with an `n/a` in
@@ -1960,10 +1978,10 @@ it is about to allocate. By the time a table exists the tab has already stalled.
 
 ### The two controls
 
-Both are applied *after* parsing and both are lossless, which is what lets them cost no re-parse
+Both are applied _after_ parsing and both are lossless, which is what lets them cost no re-parse
 and never disagree with the rows already stored. The pair lives in `tableOps.ts` as
 `uploadShapeSchema`/`uploadShapeTable`, with `uploadIsNeurons` shared between them so the schema
-half and the value half cannot disagree about the *kind* either.
+half and the value half cannot disagree about the _kind_ either.
 
 - **`ID column` renames the chosen column to `bodyId`**, and the output becomes Neurons. Nodes
   address columns by name — `out.profile` validates on it, Connectivity and Skeletons read it — so
@@ -1973,7 +1991,7 @@ half and the value half cannot disagree about the *kind* either.
   offering either invites a Neurons table whose body ids are neither.
 - **`Text columns` widens a column to `str`**, and never the reverse. Reading text as a number is
   where data is lost, and the parser's round-trip rule has already kept anything ambiguous as
-  text — so this is for a column that is genuinely numeric and genuinely not a *quantity*, like a
+  text — so this is for a column that is genuinely numeric and genuinely not a _quantity_, like a
   cluster label or a layer index, which has no business offering itself to a size encoding or being
   averaged. Null stays null: `String(null)` is the four-letter word "null", which would read as a
   value everywhere downstream.
@@ -2011,7 +2029,7 @@ table from cache with nothing to say so.
 
 **The schema is remembered per URL, in a module map, rather than observed.** `observesOutputSchema`
 is the obvious fit — the shape is decided by a remote server that inference may not call — and it
-is *almost* right. What rules it out is `Text columns`: a `columns` param finds its options
+is _almost_ right. What rules it out is `Text columns`: a `columns` param finds its options
 through `schemaFrom`, which is handed the node's inputs and params and deliberately **not**
 `ctx.observed`. Widening it to see the observed schema would have inference resolving that param
 against a schema the _scheduler_ cannot see when it computes the provenance key and resolves
@@ -2022,7 +2040,7 @@ fact about the document, and persisting it would let a saved graph claim columns
 
 **A cross-origin refusal and a dead host are the same `TypeError`**, because that is all a browser
 gives — the constraint `data/precomputed/transport.ts` works around by trying and remembering.
-So the message names *both*: the fix for one is nothing like the fix for the other, and saying
+So the message names _both_: the fix for one is nothing like the fix for the other, and saying
 only "network error" sends somebody to check their wifi over a header their server never sent.
 No proxy is offered, deliberately: `deploymentProxy` in `vite.config.ts` exists under a rule
 refusing anything but https to a public host, and a general-purpose fetch proxy is an SSRF hole
@@ -2037,6 +2055,65 @@ somebody to inspect a file that is perfectly fine.
 on how this app is served, which is not knowable at edit time — the same call `Find Neurons` makes
 about `limit: 0`. A scheme that cannot be fetched at all (`file:`, `javascript:`) is refused by one
 rule rather than by a list of special cases.
+
+## Stack Tables: the vertical Join
+
+`core.stack`, `Add ▸ Transform ▸ Stack Tables`. `Join` widens a table with columns from another;
+this lengthens one with rows from another. Two connectivity results from different seeds, a
+hand-curated list added to a query result, the same analysis run on two datasets.
+
+**Every column survives, and a gap is a null.** A column only one side carries is filled with null
+for the other's rows — which is what null already means here: not recorded. The tidier
+alternative, keeping only the columns both have, silently discards data that was wired in, and on
+two neuron tables from different datasets that can be most of the columns with nothing on screen
+saying so. Same call `Join` makes when it suffixes a colliding name rather than dropping it.
+
+**A dtype clash is refused, not reconciled.** `bodyId` as a number above and text below is two
+different columns wearing one name. Widening both to text keeps every value and removes the column
+from every numeric picker downstream; coercing text to a number loses values outright
+(`Number('n/a')`). Neither is a decision this node has grounds to make, so it names the column,
+both readings, and stops. `i64` and `f64` are the exception and merge to `f64` silently: those are
+the same kind of thing, and a count stacked onto a ratio is still a number.
+
+The clash is **returned rather than thrown** by `stackColumns`, because both halves need it and
+neither may throw — `inferOutputs` must not (invariant 2) and `validate` returns strings. Only
+`stackTables` refuses, on exactly that list.
+
+**A unit rides along only while both sides agree on it.** Nanometres stacked onto voxels is a
+column with no single unit, and carrying one of them would label the other's rows wrongly.
+
+**Rows keep input order and duplicates are kept** — `UNION ALL`, not `UNION`. Which of two
+identical rows to keep is a real question with its own answer, and it belongs in the node that
+asks it.
+
+**Unknown until _both_ sides are known.** The result's column set depends on both, so publishing
+the top's schema alone would advertise a table missing every column the bottom contributes, and a
+picker downstream would be configured against a shape that never arrives. A dtype clash still
+publishes the union using the top's reading — nothing is built from it, since `evaluate` refuses
+on the same list, and it keeps the other columns pickable while somebody fixes the one that
+clashes.
+
+**Neurons only when both inputs are.** A `neurons` kind is a claim that the ids are neurons of a
+dataset; a plain table that happens to carry a `bodyId` never made it. The type half and the value
+half decide it the same way.
+
+**Two inputs, chained for more**, exactly `Join`'s shape. Note the consequence for the source
+column: it distinguishes the two inputs of the stack that _added_ it, so three tables want either
+a distinct name per level or the labels set at each one.
+
+**The source column is off by default and refused on a collision.** Empty adds none; a name adds a
+`str` column holding `Top`/`Bottom`, or whatever the two labels say. Appended **last** rather than
+first — it is this node's annotation, not part of either table, and pushing every real column one
+place right on every stack reads as the data having moved. A name either input already uses is
+refused rather than suffixed: the point of the column is to say where a row came from, and quietly
+writing that into somebody's existing column is worse than untidy. The labels are `visibleIf` the
+column is named, so naming the inputs of a stack that is not labelling anything cannot stale it.
+
+Worth knowing that a genuine clash is reachable with nothing but built-in nodes, which is what
+`stack.test.ts` uses: `core.pivot`'s wide table types its label column `str` even when pivoted
+from an `i64`, so a pivot on `preId` stacked onto the connectivity table it came from disagrees
+about exactly that column. Note also that the pivot publishes no schema until it has run, so
+`validate` cannot see that clash at edit time and does not pretend to.
 
 ## Connectivity: hops and direction
 
@@ -2348,18 +2425,18 @@ control that was never added. `idsFromLabelBody.test.tsx` asserts the list.
 ## Input IDs: the ids themselves
 
 `neuron.inputIds`, `Add ▸ Query ▸ Input IDs`. Somebody has body ids from a paper, a spreadsheet
-or a colleague. `IDs from Label` resolves a *named* set; this takes the ids.
+or a colleague. `IDs from Label` resolves a _named_ set; this takes the ids.
 
 **The Dataset input is optional, and that is the whole design.** Unwired, the node emits the ids
 as a one-column `Neurons` table and touches no network — already enough for most of what a list
-of ids is *for*, since `Connectivity`, `Skeletons`, `Meshes`, `Synapses` and `ROI Counts` all
+of ids is _for_, since `Connectivity`, `Skeletons`, `Meshes`, `Synapses` and `ROI Counts` all
 reach their ids through `idColumn(table, 'bodyId')` and read nothing else off the row. Wired, it
 fetches the full neuron rows, which buys the columns every downstream picker wants and — the part
 worth having — the ability to say **which ids the dataset has never heard of**, which is how a
 mistyped id is caught and is otherwise uncatchable.
 
 **`expensive` either way, because `cost` is a static property of the definition.** A node that
-*can* issue a query must not be `cheap`: the ids are a text field, and `cheap` would fire a query
+_can_ issue a query must not be `cheap`: the ids are a text field, and `cheap` would fire a query
 per keystroke at a shared production Neo4j (invariant 6). So the unwired case pays a Run press it
 does not strictly need. That is the right direction to err and cheaper than the only alternative,
 which is two nodes doing one thing.
@@ -2367,7 +2444,7 @@ which is two nodes doing one thing.
 **No status filter, unlike every other query node here.** `Find Neurons` and `IDs from Label`
 both default to `Traced` so one label does not return two different counts in two nodes. Here
 that would be a quiet lie: an explicit list of ids is an explicit set, and dropping one for its
-status would remove a neuron somebody named *and then report it as missing from the dataset*.
+status would remove a neuron somebody named _and then report it as missing from the dataset_.
 Filtering belongs downstream where it is visible.
 
 **The advertised schema changes with the wiring**, one column without a Dataset and the dataset's
@@ -2389,25 +2466,25 @@ number and a token that is not one is a mistake somebody just made.
 **Separators are whitespace, comma, semicolon — plus brackets and quotes.** The list very often
 arrives as `[123, 456]` or `"123","456"`, copied out of a Python session or a JSON blob, and
 refusing that paste on a punctuation mark refuses the gesture rather than the content. They are
-separators and not *stripped* characters, which is what keeps `12a` one bad token rather than a
+separators and not _stripped_ characters, which is what keeps `12a` one bad token rather than a
 `12` with something quietly discarded after it.
 
 **A bad token refuses the whole list.** Skipping was considered and declined: a list of ids is a
 list of neurons somebody means to look at, and dropping one quietly answers a different question.
 The cost is real and accepted — pasting a spreadsheet column brings its header — so the message
-says *"If you pasted a column, delete its header line"* when the first token is a word, and only
+says _"If you pasted a column, delete its header line"_ when the first token is a word, and only
 then. A hint offered where it cannot be true is noise on top of an error.
 
 **An id past `Number.MAX_SAFE_INTEGER` is refused, naming it.** `CellValue` is a JS number, so an
-`i64` column is really a float64: `720575940379279312` is stored as a *different* integer and
+`i64` column is really a float64: `720575940379279312` is stored as a _different_ integer and
 would identify a different neuron, with nothing anywhere to say so. neuPrint's ids are nine to
 eleven digits and nowhere near it; FlyWire root ids are eighteen and well past. This costs nothing
 today and is the difference between a clear error and a wrong answer the day somebody pastes
 FlyWire ids into a Coda that has grown a FlyWire source.
 
 **The wired column drops what it cannot use instead of refusing**, and the asymmetry is
-deliberate. Typed text is *authored* — a bad token is a mistake somebody just made and can fix, so
-refusing helps. A wired column is *data*, and a node that refused to run because one upstream row
+deliberate. Typed text is _authored_ — a bad token is a mistake somebody just made and can fix, so
+refusing helps. A wired column is _data_, and a node that refused to run because one upstream row
 had a null id would be unusable, which is why `idColumn()` has always skipped them. The card
 counts what was skipped so the number is visible rather than the rows merely being absent.
 
@@ -2417,7 +2494,7 @@ unmatched report prints in, so a report and the list that produced it read again
 
 **The parse is a pure function returning a message rather than throwing**, which is what lets
 `validate` run it at edit time — so a refused list is reported while it is being typed — and lets
-`evaluate` raise the *same sentence*. A badge and an error describing one problem differently is
+`evaluate` raise the _same sentence_. A badge and an error describing one problem differently is
 how somebody concludes there are two.
 
 ### `FindNeuronsRequest.bodyIds`
@@ -2568,7 +2645,7 @@ It takes the node's **params** as a second argument as well, which `Upload Table
 for: that node has no inputs at all, so the only place its picker can find a schema is the upload
 its own params point at. Every call site already held the params, so the widening cost nothing —
 but note what it means, and it is the honest reading of the hatch's original purpose: `from` says
-which port must be *connected*, and `schemaFrom` says where the schema actually comes from. On a
+which port must be _connected_, and `schemaFrom` says where the schema actually comes from. On a
 node with no ports those are simply different questions.
 
 **A row's chips are tinted by field, and the hue lives in CSS.** `rowFields.ts` assigns each

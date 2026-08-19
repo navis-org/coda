@@ -80,9 +80,11 @@ export const profileNode = registerNode({
       default: 0,
       min: 0,
       // The whole point of the pin: paging is looking, not deciding, so it stays out of the
-      // provenance key and downstream results survive it.
+      // provenance key and downstream results survive it. The pager writes it, so it is also
+      // nothing anybody set — see `ParamBase.internal`.
       presentational: true,
       advanced: true,
+      internal: true,
     },
     {
       /*

@@ -36,6 +36,8 @@ const REFRESH_PARAM = {
   default: 0,
   min: 0,
   advanced: true,
+  // Machinery: the node body's reload button writes it. See `ParamBase.internal`.
+  internal: true,
 } as const
 
 /**

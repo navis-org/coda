@@ -137,6 +137,9 @@ export const exploreNode = registerNode({
       // mark the node stale — otherwise browsing a dataset invalidates the whole graph.
       presentational: true,
       advanced: true,
+      // ...and the widget's pager writes it, so it is nothing anybody set. `Rows per page`
+      // below is the opposite: inspector-only for space, but somebody's preference.
+      internal: true,
     },
     {
       id: 'pageSize',
@@ -167,6 +170,7 @@ export const exploreNode = registerNode({
       default: 0,
       min: 0,
       advanced: true,
+      internal: true,
     },
   ],
 

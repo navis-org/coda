@@ -447,6 +447,167 @@ export function selectTable(table: TableValue, names: string[]): TableValue {
 }
 
 // ---------------------------------------------------------------------------
+// Stack (vertical concatenation)
+// ---------------------------------------------------------------------------
+
+export interface StackOptions {
+  /** Column naming which input each row came from. Empty adds none. */
+  sourceColumn?: string
+  topLabel?: string
+  bottomLabel?: string
+}
+
+/** A column both tables have, under two dtypes that cannot be reconciled. */
+export interface DTypeConflict {
+  name: string
+  top: DType
+  bottom: DType
+}
+
+/**
+ * The dtype a column has after stacking, or undefined when the two cannot be reconciled.
+ *
+ * `i64` and `f64` widen to `f64` without comment: those are the same kind of thing, and a count
+ * stacked onto a ratio is still a number. Everything else is a genuine disagreement about what
+ * the column *is* — `bodyId` as a number in one table and text in the other is two different
+ * columns wearing one name, and merging them either way would be a decision this node has no
+ * grounds to make.
+ */
+function mergedDType(top: DType, bottom: DType): DType | undefined {
+  if (top === bottom) return top
+  if (isNumericDType(top) && isNumericDType(bottom)) return 'f64'
+  return undefined
+}
+
+/**
+ * The stacked column set: the top table's columns in order, then whatever the bottom adds.
+ *
+ * Conflicts are **returned rather than thrown**, because both halves need them and neither may
+ * throw: `inferOutputs` must never throw (invariant 2) and `validate` reports strings. Only
+ * `stackTables` refuses, and it refuses on exactly this list.
+ */
+export function stackColumns(
+  top: TableSchema,
+  bottom: TableSchema,
+  options: StackOptions = {},
+): { columns: ColumnSchema[]; conflicts: DTypeConflict[] } {
+  const conflicts: DTypeConflict[] = []
+  const columns: ColumnSchema[] = []
+
+  for (const col of top.columns) {
+    const other = findColumn(bottom, col.name)
+    if (!other) {
+      columns.push(col)
+      continue
+    }
+    const dtype = mergedDType(col.dtype, other.dtype)
+    if (!dtype) {
+      conflicts.push({ name: col.name, top: col.dtype, bottom: other.dtype })
+      // Keep the top's reading so the rest of the schema stays useful to look at. Nothing is
+      // ever built from it — `stackTables` refuses on the same list.
+      columns.push(col)
+      continue
+    }
+    // The unit rides along only while both agree on it: nanometres stacked onto voxels is a
+    // column with no single unit, and carrying one of them would label the other's rows wrongly.
+    columns.push(col.unit && col.unit === other.unit ? column(col.name, dtype, col.unit) : column(col.name, dtype))
+  }
+
+  for (const col of bottom.columns) {
+    if (!findColumn(top, col.name)) columns.push(col)
+  }
+
+  const source = options.sourceColumn?.trim()
+  // Appended last rather than first: it is this node's annotation, not part of either table, and
+  // pushing every real column one place right on every stack reads as the data having moved.
+  if (source) columns.push(column(source, 'str'))
+
+  return { columns, conflicts }
+}
+
+/**
+ * Schema in, schema out. Undefined when either side is unknown.
+ *
+ * Not "the half that is known": the result's column *set* depends on both, so publishing the
+ * top's schema alone would advertise a table missing every column the bottom contributes, and a
+ * picker downstream would be configured against a shape that never arrives.
+ */
+export function stackSchema(
+  top: TableSchema | undefined,
+  bottom: TableSchema | undefined,
+  options: StackOptions = {},
+): TableSchema | undefined {
+  if (!top || !bottom) return undefined
+  return { columns: stackColumns(top, bottom, options).columns }
+}
+
+/**
+ * Two tables end to end, keeping every column either of them has.
+ *
+ * A column only one side carries is filled with **null** for the other's rows, which is what
+ * null already means everywhere here: not recorded. That is the same call `Join` makes when it
+ * suffixes a colliding name rather than dropping it — quietly losing a column in a scientific
+ * pipeline is worse than an untidy result.
+ *
+ * Rows keep input order and duplicates are kept: this is `UNION ALL`, not `UNION`. Removing
+ * repeats is a separate question with its own answer (which row wins?) and belongs in a node
+ * that asks it.
+ */
+export function stackTables(
+  top: TableValue,
+  bottom: TableValue,
+  options: StackOptions = {},
+): TableValue {
+  const source = options.sourceColumn?.trim()
+  if (source && (findColumn(top.schema, source) || findColumn(bottom.schema, source))) {
+    throw new Error(
+      `Source column "${source}" already exists in one of the inputs. Pick a name neither ` +
+        `table uses, or clear the field.`,
+    )
+  }
+
+  const { columns, conflicts } = stackColumns(top.schema, bottom.schema, options)
+  if (conflicts.length > 0) {
+    const named = conflicts
+      .map((c) => `"${c.name}" is ${c.top} above and ${c.bottom} below`)
+      .join('; ')
+    throw new Error(
+      `Cannot stack: ${named}. One column cannot hold both — convert it upstream, or drop it ` +
+        `with a Select.`,
+    )
+  }
+
+  const total = top.length + bottom.length
+  const data: Record<string, ColumnData> = {}
+  for (const col of columns) {
+    if (col.name === source) continue
+    // Allocated once at full length rather than concatenated: two 165k-row neuron tables is
+    // 330k cells per column, and `[...a, ...b]` builds both spreads before joining them.
+    const out: ColumnData = new Array(total).fill(null)
+    const fromTop = top.data[col.name]
+    if (fromTop) for (let i = 0; i < top.length; i++) out[i] = fromTop[i] ?? null
+    const fromBottom = bottom.data[col.name]
+    if (fromBottom) for (let i = 0; i < bottom.length; i++) out[top.length + i] = fromBottom[i] ?? null
+    data[col.name] = out
+  }
+
+  if (source) {
+    const labels: ColumnData = new Array(total)
+    labels.fill(options.topLabel ?? 'Top', 0, top.length)
+    labels.fill(options.bottomLabel ?? 'Bottom', top.length, total)
+    data[source] = labels
+  }
+
+  /*
+   * Neurons only when *both* inputs are. A neuron table stacked onto a plain one that happens to
+   * carry a `bodyId` is not a neuron table: the plain one never claimed its ids were neurons of
+   * this dataset, and a `neurons` kind is exactly that claim.
+   */
+  const kind = top.kind === 'neurons' && bottom.kind === 'neurons' ? 'neurons' : 'table'
+  return makeTable({ columns }, data, kind)
+}
+
+// ---------------------------------------------------------------------------
 // Group by + aggregate
 // ---------------------------------------------------------------------------
 

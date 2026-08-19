@@ -61,6 +61,19 @@ interface ParamBase {
   help?: string
   /** Hide from the compact in-node body; show only in the inspector. */
   advanced?: boolean
+  /**
+   * Machinery rather than a setting: a value some widget writes, which nobody sets by hand.
+   *
+   * The nonces (`refresh`, bumped by a reload button — see invariant 4) and the pagers (`page`,
+   * written by a pager as you browse). It stays a real param, saved and reachable in the
+   * inspector, because the escape hatch is sanctioned; what the flag buys is that nothing
+   * *advertises* it. Without it a dataset card reads `… 1 more` about a nonce, and turning a
+   * page in Profile makes its card claim a parameter was changed.
+   *
+   * Not a synonym for `advanced`. `Rows per page` sits beside `page` and is inspector-only for
+   * space, but it is somebody's preference and stays countable.
+   */
+  internal?: boolean
   /** Conditional visibility, evaluated against the node's current params. */
   visibleIf?: (params: ParamValues) => boolean
   /**
@@ -361,13 +374,29 @@ export function findParam(def: NodeDefinition, paramId: string): ParamDef | unde
 }
 
 /**
+ * The params that apply to these values and are somebody's to set.
+ *
+ * Two subtractions, and both are about not counting something as a decision. `visibleIf` first:
+ * a param the current values have switched off is not a param this node has right now, and
+ * counting it makes a number move as unrelated modes are chosen. Then `internal`: a nonce or a
+ * pager is a value a widget writes, so counting it would have a dataset card advertise its
+ * refresh nonce and a Profile report a change every time somebody turned a page.
+ *
+ * The denominator for "are the hidden ones all there is", and the set `hiddenParams` filters.
+ */
+export function configurableParams(def: NodeDefinition, values: ParamValues): ParamDef[] {
+  return (def.params ?? []).filter(
+    (p) => p.internal !== true && (!p.visibleIf || p.visibleIf(values)),
+  )
+}
+
+/**
  * Params this node has that its card does not draw: the `advanced` ones, i.e. inspector-only.
  *
  * The card is the whole of what most people read, and a node's advanced params are invisible on
  * it — a Skeletons node has exactly one param and it is advanced, so the card shows an empty
- * body and no hint that there is anything to set. `visibleIf` is applied first: a param the
- * current values have switched off is inapplicable rather than hidden, and counting it would
- * have the number move as unrelated modes are chosen.
+ * body and no hint that there is anything to set. Taken from `configurableParams`, so neither a
+ * param the current values have switched off nor a nonce some button writes is counted.
  *
  * Deliberately **not** the rows the card is merely not drawing at this moment. A folded band
  * already has the header's `☰` in its pressed state saying so, and a node with a body of its own
@@ -375,9 +404,7 @@ export function findParam(def: NodeDefinition, paramId: string): ParamDef | unde
  * this function can tell about it.
  */
 export function hiddenParams(def: NodeDefinition, values: ParamValues): ParamDef[] {
-  return (def.params ?? []).filter(
-    (p) => p.advanced === true && (!p.visibleIf || p.visibleIf(values)),
-  )
+  return configurableParams(def, values).filter((p) => p.advanced === true)
 }
 
 /**

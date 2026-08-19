@@ -20,6 +20,9 @@ import {
   sampleTable,
   selectSchema,
   selectTable,
+  stackColumns,
+  stackSchema,
+  stackTables,
   uploadIsNeurons,
   uploadShapeSchema,
   uploadShapeTable,
@@ -222,6 +225,107 @@ describe('upload shaping', () => {
     expect(uploadIsNeurons(UPLOAD, '')).toBe(false)
     expect(uploadIsNeurons(undefined, 'root_id')).toBe(false)
     expect(uploadShapeTable(upload(), 'missing', []).kind).toBe('table')
+  })
+})
+
+describe('stack', () => {
+  const LEFT = tableSchema(column('bodyId', 'i64'), column('type', 'str'))
+  const RIGHT = tableSchema(column('bodyId', 'i64'), column('hemilineage', 'str'))
+  const left = () => tableFromRows(LEFT, [{ bodyId: 1, type: 'LC4' }])
+  const right = () => tableFromRows(RIGHT, [{ bodyId: 2, hemilineage: '0B' }])
+
+  it('puts the rows end to end and agrees with its schema half', () => {
+    const declared = stackSchema(LEFT, LEFT)
+    const out = stackTables(left(), left())
+    expectSchemaAgreement(declared, out)
+    expect(out.length).toBe(2)
+    expect(out.data.bodyId).toEqual([1, 1])
+  })
+
+  it('keeps every column, filling the gaps with null', () => {
+    // The whole design: a column only one side carries is *not recorded* for the other's rows,
+    // which is what null already means here. Dropping it would discard data that was wired in.
+    const declared = stackSchema(LEFT, RIGHT)
+    const out = stackTables(left(), right())
+    expectSchemaAgreement(declared, out)
+    expect(columnNames(out.schema)).toEqual(['bodyId', 'type', 'hemilineage'])
+    expect(out.data.type).toEqual(['LC4', null])
+    expect(out.data.hemilineage).toEqual([null, '0B'])
+  })
+
+  it('keeps duplicates and input order — UNION ALL, not UNION', () => {
+    const out = stackTables(left(), left())
+    expect(out.length).toBe(2)
+    const ordered = stackTables(right(), left())
+    expect(ordered.data.bodyId).toEqual([2, 1])
+  })
+
+  it('widens i64 onto f64 without comment', () => {
+    // The same kind of thing: a count stacked onto a ratio is still a number.
+    const floats = tableSchema(column('bodyId', 'i64'), column('score', 'f64'))
+    const ints = tableSchema(column('bodyId', 'i64'), column('score', 'i64'))
+    const merged = stackColumns(floats, ints)
+    expect(merged.conflicts).toEqual([])
+    expect(merged.columns.map((c) => `${c.name}:${c.dtype}`)).toEqual(['bodyId:i64', 'score:f64'])
+  })
+
+  it('reports a real dtype clash rather than throwing, so infer can read it', () => {
+    // Returned rather than thrown because `inferOutputs` may not throw (invariant 2) and
+    // `validate` returns strings. Only `stackTables` refuses, and on exactly this list.
+    const asText = tableSchema(column('bodyId', 'str'))
+    const clash = stackColumns(LEFT, asText)
+    expect(clash.conflicts).toEqual([{ name: 'bodyId', top: 'i64', bottom: 'str' }])
+    // The rest of the schema stays readable, which is what keeps the other pickers usable.
+    expect(columnNames({ columns: clash.columns })).toEqual(['bodyId', 'type'])
+  })
+
+  it('refuses to build a table over a dtype clash, naming both readings', () => {
+    const asText = tableFromRows(tableSchema(column('bodyId', 'str')), [{ bodyId: 'x' }])
+    expect(() => stackTables(left(), asText)).toThrow(/i64 above and str below/)
+  })
+
+  it('drops a unit the two sides do not agree on', () => {
+    // Nanometres stacked onto voxels is a column with no single unit, and carrying one of them
+    // would label the other's rows wrongly.
+    const nm = tableSchema(column('length', 'f64', 'nm'))
+    const voxels = tableSchema(column('length', 'f64', 'voxels'))
+    expect(stackColumns(nm, nm).columns[0]!.unit).toBe('nm')
+    expect(stackColumns(nm, voxels).columns[0]!.unit).toBeUndefined()
+  })
+
+  it('labels the rows when asked, appending the column last', () => {
+    const options = { sourceColumn: 'source', topLabel: 'A', bottomLabel: 'B' }
+    const declared = stackSchema(LEFT, RIGHT, options)
+    const out = stackTables(left(), right(), options)
+    expectSchemaAgreement(declared, out)
+    // Last rather than first: it is this node's annotation, not part of either table.
+    expect(columnNames(out.schema)).toEqual(['bodyId', 'type', 'hemilineage', 'source'])
+    expect(out.data.source).toEqual(['A', 'B'])
+  })
+
+  it('refuses a source column either input already uses', () => {
+    expect(() => stackTables(left(), right(), { sourceColumn: 'type' })).toThrow(/already exists/)
+  })
+
+  it('is Neurons only when both sides are', () => {
+    // A `neurons` kind is a claim about the ids; a plain table carrying a bodyId never made it.
+    const neurons = tableFromRows(LEFT, [{ bodyId: 1, type: 'LC4' }], 'neurons')
+    expect(stackTables(neurons, neurons).kind).toBe('neurons')
+    expect(stackTables(neurons, left()).kind).toBe('table')
+  })
+
+  it('knows nothing until both sides are known', () => {
+    // Publishing the top's schema alone would advertise a table missing every column the
+    // bottom contributes, and a picker downstream would be set up against a shape never built.
+    expect(stackSchema(LEFT, undefined)).toBeUndefined()
+    expect(stackSchema(undefined, RIGHT)).toBeUndefined()
+  })
+
+  it('stacks an empty table without inventing a row', () => {
+    const empty = tableFromRows(RIGHT, [])
+    const out = stackTables(left(), empty)
+    expect(out.length).toBe(1)
+    expect(out.data.hemilineage).toEqual([null])
   })
 })
 

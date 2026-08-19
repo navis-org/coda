@@ -17,7 +17,7 @@ import type { GraphNode } from '../../core/graph'
 import type { InferenceResult, NodeIssue } from '../../core/inference'
 import type { NodeDefinition } from '../../core/node'
 import type { ParamDef, ParamValues } from '../../core/node'
-import { changedParams, hiddenParams, makeInferContext } from '../../core/node'
+import { changedParams, configurableParams, hiddenParams, makeInferContext } from '../../core/node'
 import { getNodeDef } from '../../core/registry'
 import type { NodeRunState } from '../../core/scheduler'
 import type { CodaType } from '../../core/types'
@@ -161,6 +161,21 @@ function CodaNodeViewImpl({
    * five times what its neighbour does looks identical to it.
    */
   const hidden = useMemo(() => (def ? hiddenParams(def, node.params) : []), [def, node.params])
+  /*
+   * True when the inspector-only params are *all* this node has, which is what makes the hint
+   * say "hidden" rather than "more" — Neuroglancer's nine, Skeletons' one. "More" is a claim
+   * about something else being on the card, and on those cards there is nothing.
+   *
+   * Asked of the definition rather than of `visibleParams`, because a node with a body of its
+   * own draws no generic rows while its body renders controls all the same: Explore's search
+   * box is on the card, so its advanced params are "more". Both sides come from
+   * `configurableParams`, or a node whose only other param is a nonce would say "more" while
+   * drawing nothing.
+   */
+  const onlyHidden = useMemo(
+    () => def !== undefined && hidden.length === configurableParams(def, node.params).length,
+    [def, hidden, node.params],
+  )
   const hiddenChanged = useMemo(
     () => changedParams(hidden, node.params).length,
     [hidden, node.params],
@@ -501,10 +516,10 @@ function CodaNodeViewImpl({
               <button
                 type="button"
                 className="coda-node__more nodrag"
-                title={`${hidden.length} more in the inspector: ${hidden
+                title={`${hidden.length} ${onlyHidden ? 'hidden' : 'more'} in the inspector: ${hidden
                   .map((p) => (isChanged(p, node.params) ? `${p.label} (changed)` : p.label))
                   .join(', ')}. Click to open.`}
-                aria-label={`${hidden.length} more ${
+                aria-label={`${hidden.length} ${onlyHidden ? 'hidden' : 'more'} ${
                   hidden.length === 1 ? 'parameter' : 'parameters'
                 } in the inspector${hiddenChanged > 0 ? `, ${hiddenChanged} changed` : ''}`}
                 onClick={(e) => {
@@ -519,7 +534,7 @@ function CodaNodeViewImpl({
                   if (!store.panels.inspector) store.togglePanel('inspector')
                 }}
               >
-                … {hidden.length} more
+                … {hidden.length} {onlyHidden ? 'hidden' : 'more'}
                 {hiddenChanged > 0 && (
                   <span className="coda-node__more-set"> ({hiddenChanged} changed)</span>
                 )}

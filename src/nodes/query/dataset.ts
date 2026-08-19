@@ -48,6 +48,7 @@ export const datasetNode = registerNode({
       default: 0,
       min: 0,
       advanced: true,
+      internal: true,
     },
   ],
 

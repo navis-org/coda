@@ -18,7 +18,8 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { App } from '../../App'
 import type { NodeDefinition } from '../../core/node'
-import { changedParams, hiddenParams } from '../../core/node'
+import { changedParams, configurableParams, hiddenParams } from '../../core/node'
+import { allNodeDefs, requireNodeDef } from '../../core/registry'
 import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import { useGraphStore } from '../../store/graphStore'
@@ -92,6 +93,26 @@ describe('what counts as hidden', () => {
     expect(ids(hiddenParams(d, { mode: 'on' }))).toEqual(['ramp'])
   })
 
+  it('skips machinery nobody sets by hand', () => {
+    // A dataset node's only advanced param is the `refresh` nonce its reload button writes, so
+    // the card was announcing "… 1 more" about a counter. Both sides of the "is that all there
+    // is" comparison drop it, or a node whose one other param were a nonce would say "more"
+    // while drawing nothing.
+    const d = def([
+      { id: 'version', kind: 'string', label: 'Version', default: '' },
+      {
+        id: 'refresh',
+        kind: 'int',
+        label: 'Refresh',
+        default: 0,
+        advanced: true,
+        internal: true,
+      },
+    ])
+    expect(hiddenParams(d, { version: '', refresh: 3 })).toEqual([])
+    expect(ids(configurableParams(d, { version: '', refresh: 3 }))).toEqual(['version'])
+  })
+
   it('leaves the rows the card is merely not drawing to the fold', () => {
     // A folded band has the header's ☰ in its pressed state already saying so; counting those
     // here would be a second signal for a state the user just chose.
@@ -122,6 +143,28 @@ describe('what counts as changed', () => {
   })
 })
 
+describe('across the registry', () => {
+  it('marks every nonce, so the next one cannot ship un-flagged', () => {
+    // Six of them today — one shared by the dataset family, plus Explore, the old generic
+    // dataset node and Table from URL. Each is bumped by a button in a body and read by nobody,
+    // so a new one arriving without the flag would put "… 1 more" on a card about a counter.
+    const nonces = allNodeDefs().flatMap((d) =>
+      (d.params ?? []).filter((p) => p.id === 'refresh').map((p) => [d.type, p] as const),
+    )
+    expect(nonces.length).toBeGreaterThan(5)
+    expect(nonces.filter(([, p]) => p.internal !== true).map(([type]) => type)).toEqual([])
+  })
+
+  it('leaves the settings that merely sit beside them countable', () => {
+    // `Rows per page` is inspector-only for space and is somebody's preference — marking it
+    // internal because its neighbour `page` is would make the flag mean "advanced".
+    const explore = requireNodeDef('neuron.explore')
+    const byId = (id: string) => (explore.params ?? []).find((p) => p.id === id)
+    expect(byId('page')?.internal).toBe(true)
+    expect(byId('pageSize')?.internal).toBeUndefined()
+  })
+})
+
 describe('the hint on the card', () => {
   it('reports the count on a node whose advanced params are all at their defaults', async () => {
     // The general case, and the one the earlier changed-only version stayed silent for.
@@ -134,8 +177,39 @@ describe('the hint on the card', () => {
     // The morphology example raises Max neurons on both geometry nodes.
     render(<App />)
     const card = await cardFor(nodeIdOfType('neuron.skeletons'))
-    expect(hintOf(card)!.textContent).toBe('… 1 more (1 changed)')
+    expect(hintOf(card)!.textContent).toBe('… 1 hidden (1 changed)')
     expect(hintOf(card)!.getAttribute('title')).toContain('Max neurons (changed)')
+  })
+
+  it('says "hidden" rather than "more" when there is nothing else on the card', async () => {
+    // "More" is a claim about something else being there. Skeletons' only param is advanced,
+    // so the card draws nothing at all and "1 more" would be more than what?
+    render(<App />)
+    const skeletons = await cardFor(nodeIdOfType('neuron.skeletons'))
+    expect(skeletons.querySelectorAll('.coda-node__params .param')).toHaveLength(0)
+    expect(hintOf(skeletons)!.textContent).toContain('hidden')
+
+    // Find Neurons draws two rows above its four, so those four are genuinely *more*.
+    const find = await cardFor(nodeIdOfType('neuron.findNeurons'))
+    expect(find.querySelectorAll('.coda-node__params .param').length).toBeGreaterThan(0)
+    expect(hintOf(find)!.textContent).toContain('more')
+  })
+
+  it('asks the definition, not the card, so a node with a body still says "more"', () => {
+    // Explore renders a search box and a pager instead of the generic rows, so its two
+    // non-advanced params *are* on the card — nothing here can enumerate them, which is
+    // exactly why the question is asked of `configurableParams` rather than of what was drawn.
+    const explore = requireNodeDef('neuron.explore')
+    const values = Object.fromEntries((explore.params ?? []).map((p) => [p.id, p.default!]))
+    expect(hiddenParams(explore, values).length).toBeLessThan(
+      configurableParams(explore, values).length,
+    )
+
+    // Neuroglancer is the other end: every one of its params is inspector-only.
+    const ng = requireNodeDef('out.neuroglancer')
+    const ngValues = Object.fromEntries((ng.params ?? []).map((p) => [p.id, p.default!]))
+    expect(hiddenParams(ng, ngValues).length).toBe(configurableParams(ng, ngValues).length)
+    expect(hiddenParams(ng, ngValues).length).toBeGreaterThan(0)
   })
 
   it('renders on a card that draws no param rows at all', async () => {
@@ -165,6 +239,26 @@ describe('the hint on the card', () => {
     act(() => useGraphStore.getState().setParam(find, 'limit', 0))
     act(() => useGraphStore.getState().setParam(find, 'minSize', 0))
     await waitFor(() => expect(hintOf(card)!.textContent).toBe('… 4 more'))
+  })
+
+  it('stays away from a dataset card, whose one hidden param is a nonce', async () => {
+    // The reload button in the body writes `refresh`; nobody sets it, so nothing advertises it.
+    render(<App />)
+    const card = await cardFor(nodeIdOfType('dataset.mock.opticlobe'))
+    expect(hintOf(card)).toBeNull()
+  })
+
+  it('does not report a change when a pager writes its param', async () => {
+    // Profile's `page` is the pager's, not a setting — a card claiming a parameter was changed
+    // because somebody looked at the next neuron is the same noise, one node along.
+    render(<App />)
+    act(() => useGraphStore.getState().addNode('out.profile', { x: 400, y: 400 }))
+    const profile = nodeIdOfType('out.profile')
+    const card = await cardFor(profile)
+    const before = hintOf(card)?.textContent
+    act(() => useGraphStore.getState().setParam(profile, 'page', 4))
+    expect(hintOf(card)?.textContent).toBe(before)
+    expect(before ?? '').not.toContain('changed')
   })
 
   it('stays away from a node that has nothing hidden', async () => {
