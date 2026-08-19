@@ -13,11 +13,21 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useReactFlow } from '@xyflow/react'
 
-import type { MeasuredSizes, NodeSize } from '../layout/elkGraph'
+import type { MeasuredPorts, MeasuredSizes, NodeSize } from '../layout/elkGraph'
 import { arrangeScope, resolveSize } from '../layout/elkGraph'
 import { runLayout } from '../layout/engine'
 import type { XY } from '../layout/place'
-import { anchorTo, boundsOf, dodge, noteRects, structureKey } from '../layout/place'
+import {
+  anchorDelta,
+  anchorTo,
+  boundsOf,
+  dodge,
+  dodgeDelta,
+  noteRects,
+  routeKey,
+  structureKey,
+  translateRoutes,
+} from '../layout/place'
 import { useGraphStore } from '../store/graphStore'
 
 /** How long the cards take to glide to their new places. */
@@ -61,16 +71,34 @@ export interface ArrangeHandle {
    * eighteen inference passes to move some rectangles.
    */
   overrides: ReadonlyMap<string, XY> | null
+  /**
+   * The waypoints ELK bent each wire through, for the arrangement currently on the canvas.
+   *
+   * `null` whenever there is no arrangement to describe — before the first arrange, after a
+   * card was dragged, after a graph was opened. Only the edges that were actually bent appear;
+   * most wires are straight and simply have no entry.
+   */
+  routes: ReadonlyMap<string, readonly XY[]> | null
   busy: boolean
 }
 
 export function useArrange(): ArrangeHandle {
-  const { getNodes, getInternalNode } = useReactFlow()
+  const { getNodes, getInternalNode, getZoom } = useReactFlow()
   const autoLayout = useGraphStore((s) => s.autoLayout)
   const graph = useGraphStore((s) => s.graph)
 
   const [overrides, setOverrides] = useState<ReadonlyMap<string, XY> | null>(null)
   const [busy, setBusy] = useState(false)
+  /**
+   * The routes, together with the arrangement they describe.
+   *
+   * Held as a pair because a route on its own cannot be checked. Positions are outside
+   * `structureKey` on purpose — dragging a card must not ask auto-layout for a new arrangement —
+   * so nothing already here fires when a route goes stale, and there is no single event that
+   * means it either. `routeKey` is the whole answer: keep them while it matches, drop them when
+   * it does not. See `place.ts`.
+   */
+  const [held, setHeld] = useState<{ key: string; routes: Map<string, XY[]> } | null>(null)
   /** Supersedes an in-flight pass, so a burst of edits cannot land two arrangements at once. */
   const token = useRef(0)
   const frame = useRef<number | undefined>(undefined)
@@ -123,35 +151,124 @@ export function useArrange(): ArrangeHandle {
     return sizes
   }, [getNodes, getInternalNode])
 
-  const animate = useCallback((final: ReadonlyMap<string, XY>, from: Map<string, XY>) => {
-    const mine = token.current
-    const start = performance.now()
-    const step = () => {
-      if (token.current !== mine) return
-      const t = Math.min(1, (performance.now() - start) / ANIMATION_MS)
-      const eased = ease(t)
-      const at = new Map<string, XY>()
-      for (const [id, target] of final) {
-        const origin = from.get(id) ?? target
-        at.set(id, {
-          x: origin.x + (target.x - origin.x) * eased,
-          y: origin.y + (target.y - origin.y) * eased,
+  /**
+   * Where every socket sits inside its own card, in flow units.
+   *
+   * **Read from bounding rects, which is the opposite of what `measure` above does, and the
+   * exception is principled.** A rect is in screen pixels and moves with the camera, which is
+   * why sizes go through `offsetWidth`; but what is wanted here is a socket's offset *within* a
+   * card, and both rects sit inside the same transformed subtree, so dividing the difference by
+   * the zoom cancels the camera exactly. The offset walk that would avoid the division cannot be
+   * used: a handle is positioned with `top: 50%` and centred by a `transform`, and `offsetTop`
+   * is the pre-transform border-box top — so the correction differs by side (`translate(-50%)`
+   * on the left against `translate(50%)` on the right) and the diamond sockets add a `rotate`
+   * on top of it. A rect has already applied all three.
+   *
+   * **React Flow's own `handleBounds` would be the obvious source and is unusable here**, for
+   * exactly the reason `measure` cannot use `node.measured`: `parseHandles` returns
+   * `!userNode.measured ? undefined : …`, and this app never writes `measured` back into the
+   * document, so `adoptUserNodes` wipes the handle bounds on every graph edit and React Flow
+   * re-measures them asynchronously afterwards. Reading them synchronously during an arrange is
+   * reading whatever survived the last edit.
+   *
+   * Kept out of `measure()` deliberately. That one runs on every graph change to compute
+   * `structureKey`, and a rect per socket per card on each keystroke is a forced layout nobody
+   * asked for. This runs once per arrange.
+   */
+  const measurePorts = useCallback((): MeasuredPorts => {
+    const ports = new Map<string, Map<string, XY>>()
+    const zoom = getZoom()
+    // A degenerate zoom would divide the offsets into nonsense, and a pinned port at the wrong
+    // place is worse than no pinning at all — `toElkGraph` falls back to `FIXED_ORDER` per card.
+    if (!Number.isFinite(zoom) || zoom <= 0) return ports
+
+    for (const el of document.querySelectorAll<HTMLElement>('.react-flow__node[data-id]')) {
+      const id = el.dataset.id
+      if (!id) continue
+      const card = el.getBoundingClientRect()
+      if (card.width === 0 || card.height === 0) continue
+      const offsets = new Map<string, XY>()
+      for (const handle of el.querySelectorAll<HTMLElement>(
+        '.react-flow__handle[data-handleid]',
+      )) {
+        const portId = handle.dataset.handleid
+        if (!portId) continue
+        const box = handle.getBoundingClientRect()
+        offsets.set(portId, {
+          x: (box.left + box.width / 2 - card.left) / zoom,
+          y: (box.top + box.height / 2 - card.top) / zoom,
         })
       }
-      if (t < 1) {
-        setOverrides(at)
-        frame.current = requestAnimationFrame(step)
+      /*
+       * Two sockets at the same point is a measurement that says nothing, and under `FIXED_POS`
+       * it is worse than nothing: ELK routes both wires into one coordinate, so two links leave
+       * the card superimposed and the port order it was given is silently discarded. A real card
+       * never stacks its sockets — even a folded one fans them by `--port-pitch` — so exact
+       * agreement across every one of them means the rects were not describing this card.
+       *
+       * Which is precisely what a test environment produces: jsdom performs no layout and the
+       * stub answers one rect for every element, so every socket resolves to the card's centre.
+       * Same shape as the fallback-size trap the sizes above document, and the same answer —
+       * fall back per card rather than arrange against a number that was never measured.
+       */
+      const distinct = new Set([...offsets.values()].map((p) => `${p.x},${p.y}`))
+      if (offsets.size > 0 && (offsets.size === 1 || distinct.size > 1)) ports.set(id, offsets)
+    }
+    return ports
+  }, [getZoom])
+
+  /**
+   * Keep the routes, stamped with the arrangement they belong to.
+   *
+   * Called *after* `arrangeNodes` has committed, so the key is read off the graph the canvas is
+   * about to draw rather than off the one it was drawing. Computing it from `final` by hand
+   * would be a second, hand-rolled copy of what `routeKey` says an arrangement is, and the two
+   * would agree only until somebody added a field to one of them.
+   */
+  const publishRoutes = useCallback(
+    (routes: Map<string, XY[]>) => {
+      if (routes.size === 0) {
+        setHeld(null)
         return
       }
-      // Commit and drop the overrides together, so the frame that stops drawing the animation
-      // is the same one that starts drawing the document. Clearing first flashes the old
-      // positions for a frame.
-      useGraphStore.getState().arrangeNodes(final)
-      setOverrides(null)
-      setBusy(false)
-    }
-    frame.current = requestAnimationFrame(step)
-  }, [])
+      setHeld({ key: routeKey(useGraphStore.getState().graph, measure()), routes })
+    },
+    [measure],
+  )
+
+  const animate = useCallback(
+    (final: ReadonlyMap<string, XY>, from: Map<string, XY>, routes: Map<string, XY[]>) => {
+      const mine = token.current
+      const start = performance.now()
+      const step = () => {
+        if (token.current !== mine) return
+        const t = Math.min(1, (performance.now() - start) / ANIMATION_MS)
+        const eased = ease(t)
+        const at = new Map<string, XY>()
+        for (const [id, target] of final) {
+          const origin = from.get(id) ?? target
+          at.set(id, {
+            x: origin.x + (target.x - origin.x) * eased,
+            y: origin.y + (target.y - origin.y) * eased,
+          })
+        }
+        if (t < 1) {
+          setOverrides(at)
+          frame.current = requestAnimationFrame(step)
+          return
+        }
+        // Commit and drop the overrides together, so the frame that stops drawing the animation
+        // is the same one that starts drawing the document. Clearing first flashes the old
+        // positions for a frame.
+        useGraphStore.getState().arrangeNodes(final)
+        publishRoutes(routes)
+        setOverrides(null)
+        setBusy(false)
+      }
+      frame.current = requestAnimationFrame(step)
+    },
+    [publishRoutes],
+  )
 
   const arrange = useCallback(() => {
     const mine = ++token.current
@@ -170,23 +287,36 @@ export function useArrange(): ArrangeHandle {
     if (!before) return
 
     setBusy(true)
-    void runLayout(scope.nodes, scope.edges, state.layoutOptions, measured)
-      .then((raw) => {
+    void runLayout(scope.nodes, scope.edges, state.layoutOptions, measured, measurePorts())
+      .then(({ positions: raw, routes: rawRoutes }) => {
         if (token.current !== mine) return
         const anchored = anchorTo(raw, sizes, { x: before.x, y: before.y })
         // Notes are dodged even when only a selection is being arranged: a subgraph landing on
         // a note is the same collision, and the selection is not what decides that.
-        const final = dodge(anchored, sizes, noteRects(current, measured))
+        const obstacles = noteRects(current, measured)
+        const final = dodge(anchored, sizes, obstacles)
+
+        /*
+         * The routes take the *same* two shifts the positions did, read back off `place.ts`
+         * rather than re-derived here. ELK lays out from the origin and knows nothing about
+         * where the work already was, so a route left in raw coordinates would be a wire drawn
+         * across the canvas to wherever (0,0) happens to be — and being off by the anchor is not
+         * a subtle wrongness, it is the whole graph's width.
+         */
+        const shift = anchorDelta(raw, sizes, { x: before.x, y: before.y })
+        const cleared = dodgeDelta(anchored, sizes, obstacles)
+        const routes = translateRoutes(rawRoutes, shift.x + cleared.x, shift.y + cleared.y)
 
         const from = new Map<string, XY>(
           scope.nodes.map((node) => [node.id, { ...node.position }]),
         )
         if (prefersReducedMotion()) {
           useGraphStore.getState().arrangeNodes(final)
+          publishRoutes(routes)
           setBusy(false)
           return
         }
-        animate(final, from)
+        animate(final, from, routes)
       })
       .catch((error: unknown) => {
         if (token.current !== mine) return
@@ -196,7 +326,7 @@ export function useArrange(): ArrangeHandle {
           .getState()
           .setNotice(`Layout failed: ${error instanceof Error ? error.message : String(error)}`)
       })
-  }, [animate, measure])
+  }, [animate, measure, measurePorts, publishRoutes])
 
   useEffect(
     () => () => {
@@ -205,6 +335,25 @@ export function useArrange(): ArrangeHandle {
     },
     [],
   )
+
+  /**
+   * Drop the routes as soon as they stop describing the canvas.
+   *
+   * A route is a path through particular gaps between particular cards. Move one and the
+   * waypoints describe a picture that is no longer there — a wire heading confidently into empty
+   * space, which reads much worse than the curve it replaced, because a curve that goes through
+   * a card still plainly connects two sockets. Nothing re-routes on a drag: that is an ELK pass
+   * per pointer move, which is the cost the whole arrangement is debounced to avoid.
+   *
+   * Runs while an animation is in flight too, and harmlessly: the frames never reach the store,
+   * so `graph` does not change until the single commit at the end — which is also when the new
+   * routes are published, under the key that commit produces.
+   */
+  useEffect(() => {
+    if (!held) return
+    if (routeKey(graph, measure()) === held.key) return
+    setHeld(null)
+  }, [graph, held, measure])
 
   // --- auto mode ----------------------------------------------------------
 
@@ -296,5 +445,5 @@ export function useArrange(): ArrangeHandle {
     [],
   )
 
-  return { arrange, overrides, busy }
+  return { arrange, overrides, routes: held?.routes ?? null, busy }
 }

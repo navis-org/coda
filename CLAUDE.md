@@ -304,9 +304,12 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `nodes/lib/connectivityOps.test.ts`      | the traversal: the pre→post swap, the both-ends dedupe, no re-expansion, minWeight pruning                                       |
 | `nodes/query/connectivity.test.ts`       | the node: that it advertises the columns it builds, and that Hops reaches the source                                             |
 | `layout/layout.test.ts`                  | the ELK mapping and placement, the port convention and option keys against real ELK, and a network laid out by it                |
+| `layout/routing.test.ts`                 | edge routes: a wire bent past a card, pinned sockets honoured, a partial measurement declined, and what stales a route           |
+| `ui/edgeRoute.test.ts`                   | the wire's geometry: the fillet clamped to its own segment, and the ends staying on the sockets rather than on ELK's guess       |
+| `ui/edgeRouting.test.tsx`                | both routings drawn, the hit path following the detour, and which wires are marked as having followed a route                    |
 | `nodes/lib/pathOps.test.ts`              | the bidirectional search, the feed-forward prune, bottleneck ranking, and what truncation admits                                 |
 | `nodes/query/paths.test.ts`              | the node end to end, and that the collapse reaches the _source_ rather than relabelling after                                    |
-| `ui/panels/layoutControls.test.tsx`      | the three rail buttons, the bubble, and what does and does not clear the auto-layout toggle                                      |
+| `ui/panels/layoutControls.test.tsx`      | the four rail buttons, the bubble, what clears the auto-layout toggle, and routes dropping on a drag but not a param edit        |
 | `ui/viewers/scatterPlot.test.ts`         | the scales and the log drop, the point budget's stride, the trend in transformed space, and a lasso catching rows nothing drew   |
 | `ui/viewers/scatterDraw.test.ts`         | marker geometry, the colour+shape batching, and the exported SVG                                                                 |
 | `ui/viewers/scatterViewer.test.tsx`      | the scatter caption: every admission it makes, and which legend keys stand down in a card                                        |
@@ -767,6 +770,124 @@ distinguishable against a laid-out page.
 The _worker wrapper_ remains uncovered: jsdom has no `Worker`, so tests take the bundled path.
 What was checked by hand is that `elk-worker.min.js` guards both its entry branches with `typeof`
 and calls no `importScripts`, so vite serving it as a module worker in dev is safe.
+
+### Edge routing — wires that go around the cards
+
+A fourth button on the controls rail, between auto-layout and the options bubble, toggling
+**Curved ↔ Orthogonal** (`EdgeRouting` in `layout/options.ts`). Per-user in `localStorage` under
+the layout key, never in the document — a file you were sent must not restyle itself to somebody
+else's taste.
+
+**ELK has been computing these routes all along and they were being thrown away.** `runLayout`
+called `positionsFrom(laid)`, which reads `result.children`; the bend points are in
+`result.edges[].sections[].bendPoints` and were never read. `elk.edgeRouting` is still **never
+set** and should not be: layered produces orthogonal bend points regardless, and the two settings
+that would change them move the *nodes* as well — `POLYLINE` shifts every position and yields
+fractional x, `SPLINES` returns a variable-length control-point list that is a different
+rendering problem. So the layout half of this feature costs one extra function, `routesFrom`.
+
+**Sockets are pinned into ELK, and that is what makes a route usable.** A Coda card pairs input
+*i* and output *i* into one `.port-row`, so opposite sockets share a height; ELK spreads ports by
+its own `spacing.portPort` rule and has no constraint that can say otherwise. Handing it the
+measured offsets (`MeasuredPorts`, `FIXED_POS`) settles it at the layout end rather than by
+splicing real endpoints onto a computed middle. Measured: `FIXED_POS` honoured every offset
+exactly, still bent the edges that had to clear a card, and left node placement unchanged in x
+and *tidier* in y — row spread 0 against 9.5.
+
+Three things about that measurement, each of which was wrong first:
+
+- **Bounding rects, not `offsetTop`** — the reverse of the rule `measure()` follows for sizes,
+  and principled: a handle is positioned `top: 50%` and centred by a `transform`, so the offset
+  correction differs by side (`translate(-50%)` left against `translate(50%)` right) and the
+  diamond sockets add a `rotate`. A rect has applied all three, and dividing the card-relative
+  difference by the zoom cancels the camera exactly.
+- **React Flow's `handleBounds` is unusable**, for the reason `measure()` cannot use
+  `node.measured`: `parseHandles` returns `!userNode.measured ? undefined : …` and this app never
+  writes `measured` back, so `adoptUserNodes` wipes handle bounds on **every graph edit** and
+  React Flow re-measures asynchronously afterwards.
+- **A card is pinned only when every one of its sockets was measured, and only under a
+  horizontal direction.** `FIXED_POS` takes coordinates literally, so one unmeasured port lands
+  at (0,0) — the card's corner, on the wrong side — and ELK routes confidently into it. And ELK
+  honours explicit port positions under `FREE` too, so supplying them under `DOWN` reinstates
+  exactly the constraint that direction had lifted: the diagonal staircase came back at x-spread
+  319 against 39, with the option string still plainly reading `FREE`. Sockets that all resolve
+  to *one point* are also rejected — a real card never stacks them, so exact agreement means the
+  rects were not describing a card, which is what a jsdom stub produces.
+
+**Routes take the same anchor and dodge the positions take**, read back through `anchorDelta` /
+`dodgeDelta` rather than re-derived. ELK lays out from the origin, so a route left there is not
+subtly wrong — it is a wire drawn the whole width of the graph away from the nodes it joins.
+They are **not rounded**, unlike positions: a route is never serialised, and a socket sits at its
+card's rounded position plus a *fractional* offset, so a rounded waypoint disagrees by that
+fraction and the wire leaves at an angle. Measured at 0.39 units before the rounding came out.
+A residual of up to half a unit survives because the nodes round independently at each end;
+`CodaEdge` anchors the path on React Flow's sockets and lets only the middle be ELK's, so a wire
+is attached whatever the waypoints say.
+
+**Routes are held against `routeKey` and dropped the moment it stops matching.** That is
+`structureKey` plus every node's position, and the difference is the point: positions are outside
+`structureKey` on purpose, so a drag does not ask for a new arrangement — but a route is a path
+through particular gaps, so one card moving leaves the waypoints describing a picture that is not
+there. Nothing re-routes on a drag; that is an ELK pass per pointer move. Same idiom as
+`ui/viewers/layoutMemo.ts`, and for the same reason: there is no single event meaning "the
+arrangement is stale", only many that are.
+
+**A third mode was built and removed, and that is the most useful thing recorded here.**
+`routed` kept the bezier everywhere *except* on wires ELK had actually bent — a smaller change
+that leaves the canvas in its own visual language and touches only the wires that needed it. It
+reads well on paper. In the hand it did nothing: ELK produces bend points **only as a by-product
+of laying a graph out**, so on a canvas nobody had arranged there were no routes and the mode was
+byte-identical to `curved`. A button that does nothing until you press a *different* button
+first, which is exactly how it was reported.
+
+There is no fixing that inside ELK, and it was checked rather than assumed: `elk.fixed` honours
+given positions and returns **zero** routes; `elk.fixed` plus `ORTHOGONAL` throws; and every
+interactive layered strategy (`layering`, `crossingMinimization`, `cycleBreaking`,
+`nodePlacement`) still moves every card. Routing wires around cards that are *already placed* is
+an obstacle-routing problem ELK does not solve — it would be our own router, which is a real
+project and a separate decision.
+
+`orthogonal` has no such hole because it steps **every** wire: the ones ELK bent follow the gap it
+reserved, and the rest take a plain step path. So the control always does something visible,
+arranged or not. That is also the honest reading of the measurement — only 10 of 32 edges across
+the bundled examples carry bend points at all, so a mode keyed *solely* to those was always going
+to look like it had half worked.
+
+Note what the routes are *worth*, measured in a browser across all five examples: as the examples
+are hand-placed, 1–2 wires cross a card each; **arranging alone** clears every one of them in four
+of the five, because ELK's placement already reserves the channels. Routing fixes the fifth. A
+modest win on a tidy graph and a real one on a wide card or a long skip — which is the honest
+reason `orthogonal` is offered as a *drawing style* rather than as a fix for crossings.
+
+**`data-routed` on the path is for the tests, and it is not laziness.** Nothing about the path
+shape distinguishes an ELK route from a computed step: measured, `getSmoothStepPath` emits between
+0 and 4 corners depending only on where the sockets landed — no arrange gives `0,0,0,0,0,0,0`, an
+arrange `2,4,2,0,0,0,0` and a drag `2,2,2,2,4,0,0`, a plain step path outscoring a routed one. The
+only other discriminator is the punctuation the two generators happen to use, which would keep a
+genuine regression green the day either changed a space. Both route tests in
+`layoutControls.test.tsx` were verified by mutation — removing the staleness drop fails the drag
+test, making it unconditional fails that one *and* the param one.
+
+`CodaEdge` is the only registered `edgeTypes` entry and draws both. Registering it costs
+nothing that was relied on: React Flow's `EdgeWrapper` renders the component *and*
+`EdgeUpdateAnchors` as siblings inside a `<g>` carrying the click, right-click and focus
+handlers, so the drag-off rewire, `reconnectRadius`, the edge menu, selection and Delete are
+untouched — and `BaseEdge`'s `interactionWidth` copy follows the detour, so the hit target does
+not stay on the straight line the wire no longer takes. Under `orthogonal` a wire with no route
+falls to `getSmoothStepPath` rather than a fourth path builder, sharing `CORNER_RADIUS` so one
+canvas has one kind of corner.
+
+**No route reaches a wire under `curved`** — `Editor` withholds it rather than passing it with a
+flag saying to ignore it. The mode is a fact about the canvas and the route a fact about one
+wire; letting the component read both is how a wire ends up bent in the mode that says it is not.
+
+Verified in a real browser as well as headlessly, because this is exactly the class jsdom cannot
+see: both modes drawn, wires attaching to their sockets, corners filleting, a route going around
+the card the curve went through, and no console errors. It is also how the retired mode's hole was
+found — jsdom happily confirmed `routed` "worked", because every one of its tests arranged first.
+What has **not** been looked at is a route under a non-default algorithm: `mrtree` bends every
+edge, `force`/`stress` bend none and `radial` returns no `sections` at all, all of which read as
+"no route" and are covered headlessly.
 
 ## The tutorial page
 

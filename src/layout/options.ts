@@ -22,6 +22,39 @@ export type LayoutDirection = (typeof LAYOUT_DIRECTIONS)[number]
 export const LAYOUT_ALIGNMENTS = ['BRANDES_KOEPF', 'LINEAR_SEGMENTS', 'SIMPLE'] as const
 export type LayoutAlignment = (typeof LAYOUT_ALIGNMENTS)[number]
 
+/**
+ * How a wire is drawn between two sockets.
+ *
+ * - `curved`     — React Flow's bezier, for every wire. What the editor has always drawn.
+ * - `orthogonal` — right-angled steps throughout: ELK's bend points where it computed some, and
+ *                  a plain step path everywhere else.
+ *
+ * Not a layout option in ELK's sense. `elk.edgeRouting` is deliberately never set, because
+ * layered computes orthogonal bend points regardless and the two settings that would change them
+ * (`POLYLINE`, `SPLINES`) move the *nodes* as well — a different arrangement rather than a
+ * different drawing of one. This chooses what the canvas does with a route ELK already returned.
+ *
+ * **A third mode was built and removed, and the reason is the important part.** `routed` kept the
+ * bezier everywhere *except* on wires ELK had actually bent. It read well on paper and failed in
+ * the hand: ELK produces bend points only as a by-product of laying a graph out, so on a canvas
+ * nobody had arranged there were no routes at all and the mode was byte-identical to `curved` —
+ * a button that did nothing until you pressed a *different* button first. There is no fixing that
+ * within ELK: `elk.fixed` honours given positions and returns **zero** routes, and every
+ * interactive layered strategy moves the cards anyway. Routing wires around cards that are
+ * already placed is an obstacle-routing problem ELK does not solve.
+ *
+ * `orthogonal` has no such hole, because it steps *every* wire — the ones ELK bent follow the
+ * channel it reserved, and the rest take an ordinary step path. So the control always does
+ * something visible, whether or not anything has been arranged, which is the property the third
+ * mode could not have.
+ *
+ * That is also the honest reading of the measurement: across the five bundled examples only 10 of
+ * 32 edges come back with bend points at all, so a mode keyed *solely* to those was always going
+ * to look like it had half worked.
+ */
+export const EDGE_ROUTINGS = ['curved', 'orthogonal'] as const
+export type EdgeRouting = (typeof EDGE_ROUTINGS)[number]
+
 export interface LayoutOptions {
   algorithm: LayoutAlgorithm
   direction: LayoutDirection
@@ -32,10 +65,9 @@ export interface LayoutOptions {
   /**
    * How layered decides a node's position *along* a layer.
    *
-   * This is the control that was going to be "edge routing", and the swap is not cosmetic:
-   * only ELK's node positions are kept — React Flow draws its own bezier wires from the
-   * sockets — so `elk.edgeRouting` would be a control whose stated effect never appears on
-   * screen. Alignment changes how cards line up across layers, which is visible.
+   * This is where "edge routing" was going to live and no longer needs to: `EdgeRouting` is a
+   * separate control on the rail, and it sets no ELK option at all. Alignment changes how cards
+   * line up across layers, which is the thing this slot is actually good for.
    */
   alignment: LayoutAlignment
   /** Lay disconnected pieces out separately and pack them, rather than in one shared field. */
@@ -108,11 +140,25 @@ export function elkOptionsFor(options: LayoutOptions): ElkOptions {
  * leaving a card's right edge and entering the next one's left edge reads perfectly well when
  * the two are stacked. What would be lost by *not* doing it is the column somebody asked for
  * when they pressed the down arrow.
+ *
+ * **`pinned` upgrades `FIXED_ORDER` to `FIXED_POS`, and that is what makes a route usable.** ELK
+ * spreads a node's sockets by its own `spacing.portPort` rule — a three-output card came out at
+ * y 40/80/120 — while a Coda card pairs input *i* and output *i* into one `.port-row`, so
+ * opposite sockets share a height. ELK has no constraint that can say so, which means its route
+ * endpoints and the sockets React Flow draws from are structurally different numbers. Handing it
+ * the measured offsets instead settles it at the layout end rather than by splicing real
+ * endpoints onto a computed middle in the renderer.
+ *
+ * Measured on a four-card graph with a 3-in/3-out node: `FIXED_POS` honoured every offset
+ * exactly, still bent the two edges that had to clear a card, and left the node placement
+ * unchanged in x and *tidier* in y (row spread 0 against 9.5). Vertical directions stay `FREE`
+ * regardless — pinning sockets east and west is the staircase above, and the paragraph before
+ * this one is the measurement that says so.
  */
-export function elkNodeOptions(direction: LayoutDirection): ElkOptions {
+export function elkNodeOptions(direction: LayoutDirection, pinned = false): ElkOptions {
   const horizontal = direction === 'RIGHT' || direction === 'LEFT'
   return {
-    'elk.portConstraints': horizontal ? 'FIXED_ORDER' : 'FREE',
+    'elk.portConstraints': horizontal ? (pinned ? 'FIXED_POS' : 'FIXED_ORDER') : 'FREE',
     'elk.spacing.portPort': '12',
   }
 }

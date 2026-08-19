@@ -22,8 +22,8 @@
 import type { ELK, ElkNode } from 'elkjs/lib/elk-api'
 
 import type { LayoutOptions } from './options'
-import type { MeasuredSizes } from './elkGraph'
-import { positionsFrom, toElkGraph } from './elkGraph'
+import type { MeasuredPorts, MeasuredSizes } from './elkGraph'
+import { positionsFrom, routesFrom, toElkGraph } from './elkGraph'
 import type { XY } from './place'
 import type { GraphEdge, GraphNode } from '../core/graph'
 
@@ -74,14 +74,27 @@ export async function runElk(graph: ElkNode): Promise<ElkNode> {
   return elk.layout(graph)
 }
 
-/** Lay out a set of nodes and the edges among them, returning ELK's raw origin-based positions. */
+/**
+ * An arrangement: where the cards go, and the waypoints ELK bent each wire through.
+ *
+ * Both are in ELK's raw origin-based space, so `anchorDelta`/`dodgeDelta` move them together.
+ * `routes` holds only the edges that were actually bent — most are not — so an empty map is the
+ * ordinary answer for a tidy graph rather than a failure to read anything.
+ */
+export interface Arrangement {
+  positions: Map<string, XY>
+  routes: Map<string, XY[]>
+}
+
+/** Lay out a set of nodes and the edges among them, returning ELK's raw origin-based result. */
 export async function runLayout(
   nodes: readonly GraphNode[],
   edges: readonly GraphEdge[],
   options: LayoutOptions,
   measured?: MeasuredSizes,
-): Promise<Map<string, XY>> {
-  if (nodes.length === 0) return new Map()
-  const laid = await runElk(toElkGraph(nodes, edges, options, measured))
-  return positionsFrom(laid)
+  ports?: MeasuredPorts,
+): Promise<Arrangement> {
+  if (nodes.length === 0) return { positions: new Map(), routes: new Map() }
+  const laid = await runElk(toElkGraph(nodes, edges, options, measured, ports))
+  return { positions: positionsFrom(laid), routes: routesFrom(laid) }
 }

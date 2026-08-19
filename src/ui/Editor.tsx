@@ -45,6 +45,7 @@ import { useGraphStore } from '../store/graphStore'
 import type { CodaNodeData } from './nodes/CodaNodeView'
 import { CodaNodeView } from './nodes/CodaNodeView'
 import { NoteCard } from './nodes/NoteCard'
+import { CodaEdge } from './CodaEdge'
 import { CommandPalette } from './panels/CommandPalette'
 import { LayoutControls } from './panels/LayoutControls'
 import { EdgeContextMenu } from './panels/EdgeContextMenu'
@@ -80,6 +81,14 @@ const MINIMAP_SIZE = { width: 180, height: 120 }
  * every one of them on every scheduler tick.
  */
 const NODE_TYPES = { coda: CodaNodeView, note: NoteCard }
+
+/**
+ * One edge type for all three routings. Registered rather than left to React Flow's default
+ * bezier, which is what every wire was before routing existed — `CodaEdge` still draws exactly
+ * that whenever it has no route to follow, so `curved` is not a reimplementation of the old
+ * behaviour, it is the old behaviour reached through one more component.
+ */
+const EDGE_TYPES = { coda: CodaEdge }
 
 /** Keeps `data` object identity stable per GraphNode so memoised nodes don't re-render. */
 const dataCache = new WeakMap<GraphNode, CodaNodeData>()
@@ -120,7 +129,9 @@ function EditorCanvas() {
   const togglePanel = useGraphStore((s) => s.togglePanel)
 
   const { screenToFlowPosition, fitView } = useReactFlow()
-  const { arrange, overrides: arrangeOverrides } = useArrange()
+  const { arrange, overrides: arrangeOverrides, routes: arrangeRoutes } = useArrange()
+  // A primitive, so the snapshot identity check is satisfied — invariant 7.
+  const edgeRouting = useGraphStore((s) => s.edgeRouting)
   // Mounted here rather than from the Download node's own card: a collapsed card unmounts its
   // body, and a Download node that stopped writing when somebody tidied it away would be a bug
   // nobody could reproduce on purpose.
@@ -203,12 +214,22 @@ function EditorCanvas() {
       graph.edges.map((edge) => {
         const sourceType = inference.nodes[edge.source]?.outputs[edge.sourceHandle]
         const muted = disabledIds.has(edge.source)
+        /*
+         * A route reaches the wire only under `orthogonal`. `curved` withholds it rather than
+         * having the component check the mode: the mode is a fact about the canvas and the route
+         * a fact about one wire, and letting the edge read both is how a wire ends up bent in a
+         * mode that says it should not be.
+         */
+        const orthogonal = edgeRouting === 'orthogonal'
+        const route = orthogonal ? arrangeRoutes?.get(edge.id) : undefined
         return {
           id: edge.id,
+          type: 'coda',
           source: edge.source,
           sourceHandle: edge.sourceHandle,
           target: edge.target,
           targetHandle: edge.targetHandle,
+          data: { route, step: orthogonal },
           // Links wear the colour of the data flowing through them, as in Blender.
           style: {
             stroke: typeColorVar(sourceType),
@@ -217,7 +238,7 @@ function EditorCanvas() {
           },
         }
       }),
-    [graph.edges, disabledIds, inference],
+    [graph.edges, disabledIds, inference, edgeRouting, arrangeRoutes],
   )
 
   // --- change handlers ----------------------------------------------------
@@ -610,6 +631,7 @@ function EditorCanvas() {
         nodes={rfNodes}
         edges={rfEdges}
         nodeTypes={NODE_TYPES}
+        edgeTypes={EDGE_TYPES}
         onNodesChange={onNodesChange}
         onEdgesChange={(changes) => {
           const removed = changes

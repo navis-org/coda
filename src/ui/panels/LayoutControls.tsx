@@ -1,23 +1,30 @@
 /**
- * The three layout buttons on the canvas controls rail.
+ * The four layout buttons on the canvas controls rail.
  *
  * They live in the rail beside Zoom In / Zoom Out / Fit View rather than in the toolbar because
  * that is where the other things that move the *view* are, and because a control whose effect is
  * on the canvas belongs over the canvas. React Flow's `<Controls>` renders its children as
- * further `ControlButton`s, so this is three of those and a popover.
+ * further `ControlButton`s, so this is four of those and a popover.
  *
  *   ⌗  arrange now         one pass, undoable, selection-aware
  *   ⟳  auto-layout         a mode; a drag or an open turns it off
+ *   ⤳  wire routing        curved or orthogonal; see `EdgeRouting`
  *   ⚙  options             the bubble below
  *
- * The middle one is a toggle and says so with `aria-pressed` and an accent tint, because the
- * other two are verbs and nothing else in the rail holds state.
+ * Two kinds of control. Arrange is a verb and holds nothing; the other two are toggles and say
+ * so with `aria-pressed` and an accent tint. Routing briefly had a third position and could not
+ * honestly claim a pressed state then — that mode is gone, and `EdgeRouting` records why.
  */
 
 import { useCallback, useRef, useState } from 'react'
 import { ControlButton } from '@xyflow/react'
 
-import type { LayoutAlgorithm, LayoutAlignment, LayoutDirection } from '../../layout/options'
+import type {
+  EdgeRouting,
+  LayoutAlgorithm,
+  LayoutAlignment,
+  LayoutDirection,
+} from '../../layout/options'
 import {
   LAYOUT_ALGORITHMS,
   LAYOUT_ALIGNMENTS,
@@ -38,6 +45,21 @@ const ALIGNMENT_LABELS: Record<LayoutAlignment, string> = {
   BRANDES_KOEPF: 'Balanced',
   LINEAR_SEGMENTS: 'Linear segments',
   SIMPLE: 'Simple',
+}
+
+/**
+ * What each routing is called, and what it promises.
+ *
+ * The description is the second line of the button's tooltip and is the only place the trade is
+ * stated on screen: `routed` leaves most wires curved, which looks like the setting only half
+ * worked unless somebody has been told that a wire is bent exactly when ELK had to bend it.
+ */
+const ROUTING_LABELS: Record<EdgeRouting, { name: string; hint: string }> = {
+  curved: { name: 'Curved', hint: 'Every wire is a curve.' },
+  orthogonal: {
+    name: 'Orthogonal',
+    hint: 'Right-angled steps — wires the last arrange routed follow the gaps it left them.',
+  },
 }
 
 const DIRECTION_GLYPHS: Record<LayoutDirection, string> = {
@@ -75,6 +97,27 @@ function AutoLayoutIcon() {
   )
 }
 
+/**
+ * A wire doing what the current routing does to it — a curve, or a right-angled step.
+ *
+ * The drawing changes with the mode rather than only the tint, because a toggle whose two states
+ * differ by a background colour says nothing about *what* it toggles. The two cards stay put
+ * across both, so the only thing that moves is the wire.
+ */
+function RoutingIcon({ routing }: { routing: EdgeRouting }) {
+  return (
+    <svg className="layout-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+      <rect x="0.5" y="1.5" width="4" height="4" rx="1" />
+      <rect x="11.5" y="10.5" width="4" height="4" rx="1" />
+      {routing === 'curved' ? (
+        <path d="M4.5 3.5C9 3.5 7 12.5 11.5 12.5" strokeLinecap="round" />
+      ) : (
+        <path d="M4.5 3.5h3.5v9h3.5" strokeLinecap="round" strokeLinejoin="round" />
+      )}
+    </svg>
+  )
+}
+
 function OptionsIcon() {
   return (
     <svg className="layout-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
@@ -89,6 +132,8 @@ function OptionsIcon() {
 export function LayoutControls({ onArrange }: { onArrange: () => void }) {
   const autoLayout = useGraphStore((s) => s.autoLayout)
   const setAutoLayout = useGraphStore((s) => s.setAutoLayout)
+  const edgeRouting = useGraphStore((s) => s.edgeRouting)
+  const toggleEdgeRouting = useGraphStore((s) => s.toggleEdgeRouting)
   const options = useGraphStore((s) => s.layoutOptions)
   const setLayoutOptions = useGraphStore((s) => s.setLayoutOptions)
   // Primitives, not the whole selection array — this only asks whether the button is scoped.
@@ -100,6 +145,7 @@ export function LayoutControls({ onArrange }: { onArrange: () => void }) {
   useDismissOnOutside(bubbleRef, close, { onEscape: true, enabled: open })
 
   const layered = options.algorithm === 'layered'
+  const orthogonal = edgeRouting === 'orthogonal'
 
   return (
     <>
@@ -123,6 +169,23 @@ export function LayoutControls({ onArrange }: { onArrange: () => void }) {
         aria-label="Auto-layout"
       >
         <AutoLayoutIcon />
+      </ControlButton>
+
+      {/*
+       * Between the auto-layout toggle and the options bubble, because arranging is what makes it
+       * worth more than a restyle: a wire the last arrange routed follows the gap ELK left it,
+       * and everything else takes a plain step. It works with nothing arranged — that is the
+       * whole reason the third mode was dropped — but it is *better* next to the buttons that
+       * arrange, so it sits with them.
+       */}
+      <ControlButton
+        onClick={toggleEdgeRouting}
+        className={orthogonal ? 'layout-toggle--on' : undefined}
+        aria-pressed={orthogonal}
+        title={`Wires: ${ROUTING_LABELS[edgeRouting].name} — ${ROUTING_LABELS[edgeRouting].hint}`}
+        aria-label={`Wire routing: ${ROUTING_LABELS[edgeRouting].name}`}
+      >
+        <RoutingIcon routing={edgeRouting} />
       </ControlButton>
 
       <div className="layout-options" ref={bubbleRef}>

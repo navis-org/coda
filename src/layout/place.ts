@@ -96,13 +96,31 @@ export function anchorTo(
   sizes: ReadonlyMap<string, NodeSize>,
   anchor: XY,
 ): Map<string, XY> {
-  const bounds = union(rectsFor(positions, sizes))
-  if (!bounds) return new Map(positions)
-  const moved = translate(positions, anchor.x - bounds.x, anchor.y - bounds.y)
+  const { x: dx, y: dy } = anchorDelta(positions, sizes, anchor)
+  const moved = translate(positions, dx, dy)
   for (const [id, position] of moved) {
     moved.set(id, { x: Math.round(position.x), y: Math.round(position.y) })
   }
   return moved
+}
+
+/**
+ * The shift `anchorTo` applies, on its own.
+ *
+ * Exported because an arrangement is no longer only positions: ELK's edge routes are in the
+ * same coordinate space and have to travel with them, and a route that stayed at the origin
+ * while its nodes moved would be a wire drawn across the canvas to nowhere. Splitting the delta
+ * out is what lets both be moved by *provably* the same amount — the alternative, a second
+ * translate written beside this one, is exactly how the two would come to disagree.
+ */
+export function anchorDelta(
+  positions: ReadonlyMap<string, XY>,
+  sizes: ReadonlyMap<string, NodeSize>,
+  anchor: XY,
+): XY {
+  const bounds = union(rectsFor(positions, sizes))
+  if (!bounds) return { x: 0, y: 0 }
+  return { x: anchor.x - bounds.x, y: anchor.y - bounds.y }
 }
 
 /**
@@ -124,20 +142,69 @@ export function dodge(
   sizes: ReadonlyMap<string, NodeSize>,
   obstacles: readonly Rect[],
 ): Map<string, XY> {
+  const { y } = dodgeDelta(positions, sizes, obstacles)
+  return y === 0 ? new Map(positions) : translate(positions, 0, y)
+}
+
+/**
+ * The shift `dodge` applies, on its own — see `anchorDelta` for why the split exists.
+ *
+ * Accumulated rather than returned per pass, which is safe because every pass moves in the same
+ * direction: the loop only ever adds downward travel, so the sum is the same arrival the
+ * iteration reaches.
+ */
+export function dodgeDelta(
+  positions: ReadonlyMap<string, XY>,
+  sizes: ReadonlyMap<string, NodeSize>,
+  obstacles: readonly Rect[],
+): XY {
+  if (obstacles.length === 0) return { x: 0, y: 0 }
   let current = new Map(positions)
-  if (obstacles.length === 0) return current
+  let total = 0
 
   // Bounded by the obstacle count: each pass clears at least the lowest one it collided with,
   // and only ever moves down, so nothing already cleared can come back.
   for (let pass = 0; pass <= obstacles.length; pass++) {
     const bounds = union(rectsFor(current, sizes))
-    if (!bounds) return current
+    if (!bounds) break
     const hit = obstacles.filter((o) => overlaps(bounds, o))
-    if (hit.length === 0) return current
+    if (hit.length === 0) break
     const lowest = Math.max(...hit.map((o) => o.y + o.height))
-    current = translate(current, 0, Math.round(lowest + DODGE_GAP - bounds.y))
+    const step = Math.round(lowest + DODGE_GAP - bounds.y)
+    total += step
+    current = translate(current, 0, step)
   }
-  return current
+  return { x: 0, y: total }
+}
+
+/**
+ * Move a set of edge routes by the deltas `anchorDelta` and `dodgeDelta` returned.
+ *
+ * **Unrounded, unlike `anchorTo`.** Positions round because they are serialised into the
+ * document and sub-pixel coordinates in a saved file are noise; a route is never written
+ * anywhere, so rounding it buys nothing and costs accuracy at both ends — a socket sits at its
+ * card's rounded position plus a *fractional* offset, so a rounded waypoint disagrees with it
+ * by that fraction and the wire leaves at a slight angle before its first turn. Measured at
+ * 0.39 units on a real graph: invisible, and there is no reason to introduce it.
+ *
+ * A residual of up to half a unit survives regardless, because the *nodes* are rounded and a
+ * route spans two of them with independent roundings — no single delta makes both ends exact.
+ * It costs nothing: `CodaEdge` anchors the path on React Flow's socket coordinates and lets only
+ * the middle be ELK's, so a wire is attached to its sockets whatever the waypoints say.
+ */
+export function translateRoutes(
+  routes: ReadonlyMap<string, readonly XY[]>,
+  dx: number,
+  dy: number,
+): Map<string, XY[]> {
+  const moved = new Map<string, XY[]>()
+  for (const [id, points] of routes) {
+    moved.set(
+      id,
+      points.map((point) => ({ x: point.x + dx, y: point.y + dy })),
+    )
+  }
+  return moved
 }
 
 /** Rectangles for every annotation node — what `dodge` has to keep off. */
@@ -172,4 +239,27 @@ export function structureKey(graph: CodaGraph, measured?: MeasuredSizes): string
     .map((e) => `${e.source}.${e.sourceHandle}->${e.target}.${e.targetHandle}`)
     .join(',')
   return `${nodes}|${edges}`
+}
+
+/**
+ * What a set of edge routes still describes.
+ *
+ * `structureKey` plus every node's **position**, which is the whole difference and the whole
+ * point. An arrangement's positions can be edited without its structure changing — that is what
+ * dragging a card is — and positions are deliberately outside `structureKey` so a drag does not
+ * ask auto-layout for a new arrangement. But a route *is* a path through particular gaps between
+ * particular cards, so the moment one moves the waypoints describe a picture that is no longer
+ * on screen: a wire heading confidently into empty space, which reads far worse than the bezier
+ * it replaced. Nothing recomputes them, because recomputing means an ELK pass per pointer move.
+ *
+ * So routes are held against this key and dropped the instant it stops matching, which returns
+ * every wire to the curve. Same rule as `ui/viewers/layoutMemo.ts` — a settled layout is
+ * returned only while it still describes the graph — and the same reason for preferring it to a
+ * subscription: there is no single event meaning "the arrangement is stale", only many that are.
+ */
+export function routeKey(graph: CodaGraph, measured?: MeasuredSizes): string {
+  const positions = graph.nodes
+    .map((node) => `${node.id}@${Math.round(node.position.x)},${Math.round(node.position.y)}`)
+    .join(',')
+  return `${structureKey(graph, measured)}|${positions}`
 }

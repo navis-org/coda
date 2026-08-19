@@ -398,7 +398,7 @@ describe('structureKey', () => {
 describe('runLayout, against ELK itself', () => {
   it('lays a chain out left to right, in pipeline order', async () => {
     const graph = chain()
-    const positions = await runLayout(graph.nodes, graph.edges, DEFAULT_LAYOUT_OPTIONS)
+    const { positions } = await runLayout(graph.nodes, graph.edges, DEFAULT_LAYOUT_OPTIONS)
     expect(positions.size).toBe(4)
     const x = (id: string) => positions.get(id)!.x
     expect(x('ds')).toBeLessThan(x('find'))
@@ -408,7 +408,7 @@ describe('runLayout, against ELK itself', () => {
 
   it('honours the direction option', async () => {
     const graph = chain()
-    const down = await runLayout(graph.nodes, graph.edges, {
+    const { positions: down } = await runLayout(graph.nodes, graph.edges, {
       ...DEFAULT_LAYOUT_OPTIONS,
       direction: 'DOWN',
     })
@@ -427,7 +427,7 @@ describe('runLayout, against ELK itself', () => {
      * direction is what fixes it, and this is the number that says whether it still does.
      */
     const graph = chain()
-    const down = await runLayout(graph.nodes, graph.edges, {
+    const { positions: down } = await runLayout(graph.nodes, graph.edges, {
       ...DEFAULT_LAYOUT_OPTIONS,
       direction: 'DOWN',
     })
@@ -437,11 +437,11 @@ describe('runLayout, against ELK itself', () => {
 
   it('honours the spacing options', async () => {
     const graph = chain()
-    const tight = await runLayout(graph.nodes, graph.edges, {
+    const { positions: tight } = await runLayout(graph.nodes, graph.edges, {
       ...DEFAULT_LAYOUT_OPTIONS,
       layerSpacing: 20,
     })
-    const loose = await runLayout(graph.nodes, graph.edges, {
+    const { positions: loose } = await runLayout(graph.nodes, graph.edges, {
       ...DEFAULT_LAYOUT_OPTIONS,
       layerSpacing: 200,
     })
@@ -472,7 +472,10 @@ describe('runLayout, against ELK itself', () => {
   })
 
   it('returns nothing for nothing, without waking the engine', async () => {
-    expect(await runLayout([], [], DEFAULT_LAYOUT_OPTIONS)).toEqual(new Map())
+    expect(await runLayout([], [], DEFAULT_LAYOUT_OPTIONS)).toEqual({
+      positions: new Map(),
+      routes: new Map(),
+    })
   })
 })
 

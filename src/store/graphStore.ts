@@ -53,7 +53,8 @@ import {
   renameWorkflow,
   saveWorkflow,
 } from './library'
-import type { LayoutOptions } from '../layout/options'
+import type { EdgeRouting, LayoutOptions } from '../layout/options'
+import { EDGE_ROUTINGS } from '../layout/options'
 import type { PanelState, ThemePreference } from './persistence'
 import {
   applyTheme,
@@ -164,6 +165,26 @@ export interface GraphState {
   /** How the layout is computed. Per-user, in `localStorage`; see `persistence.ts`. */
   layoutOptions: LayoutOptions
   setLayoutOptions(patch: Partial<LayoutOptions>): void
+  /**
+   * How wires are drawn — see `EdgeRouting`. Per-user, in `localStorage`, and deliberately not
+   * in the document: it changes no position, no param and nothing any node computes.
+   *
+   * Note it does **not** trigger a layout pass. Every routing reads the arrangement already on
+   * the canvas, so switching to `routed` with nothing arranged yet draws exactly what `curved`
+   * did — there are no routes to use. Arranging is what produces them, which is why the two
+   * controls sit next to each other on the rail.
+   */
+  edgeRouting: EdgeRouting
+  /**
+   * Swap the routing. Two modes, so the rail's control is an ordinary toggle.
+   *
+   * Written as a step through `EDGE_ROUTINGS` rather than as a boolean flip, because the stored
+   * value is a named mode and `coerceEdgeRouting` validates against that same list — a boolean
+   * here would mean two representations of one setting, and they would disagree the first time a
+   * third mode came back. If one ever does, this stays correct and the *button* is what has to
+   * stop calling itself pressed.
+   */
+  toggleEdgeRouting(): void
   /**
    * Write arranged positions in as one undo step.
    *
@@ -567,7 +588,11 @@ export const useGraphStore = create<GraphState>((set, get) => {
 
     autoLayout: layoutPrefs.auto,
     setAutoLayout: (enabled) => {
-      saveLayoutPrefs({ auto: enabled, options: get().layoutOptions })
+      saveLayoutPrefs({
+        auto: enabled,
+        options: get().layoutOptions,
+        edgeRouting: get().edgeRouting,
+      })
       set({ autoLayout: enabled })
       // Nothing is arranged from here. The canvas owns the pass — it is the only thing holding
       // measured card sizes — and its effect is watching this flag, so flipping it is the whole
@@ -579,8 +604,20 @@ export const useGraphStore = create<GraphState>((set, get) => {
     layoutOptions: layoutPrefs.options,
     setLayoutOptions: (patch) => {
       const options = { ...get().layoutOptions, ...patch }
-      saveLayoutPrefs({ auto: get().autoLayout, options })
+      saveLayoutPrefs({ auto: get().autoLayout, options, edgeRouting: get().edgeRouting })
       set({ layoutOptions: options })
+    },
+
+    edgeRouting: layoutPrefs.edgeRouting,
+    toggleEdgeRouting: () => {
+      const at = EDGE_ROUTINGS.indexOf(get().edgeRouting)
+      // `indexOf` answers -1 for a value this build no longer has — `routed` is exactly that,
+      // and anyone who used it while it existed still has it in `localStorage`. -1 + 1 is 0,
+      // which lands on `curved`, so a retired mode degrades on the first press rather than
+      // sticking. (`coerceEdgeRouting` already catches it at load; this is the second line.)
+      const edgeRouting = EDGE_ROUTINGS[(at + 1) % EDGE_ROUTINGS.length] ?? 'curved'
+      saveLayoutPrefs({ auto: get().autoLayout, options: get().layoutOptions, edgeRouting })
+      set({ edgeRouting })
     },
 
     arrangeNodes: (positions) => {

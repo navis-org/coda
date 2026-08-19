@@ -8,8 +8,8 @@
 
 import type { CodaGraph } from '../core/graph'
 import { deserializeGraph, serializeGraph } from '../core/graph'
-import type { LayoutOptions } from '../layout/options'
-import { DEFAULT_LAYOUT_OPTIONS, coerceLayoutOptions } from '../layout/options'
+import type { EdgeRouting, LayoutOptions } from '../layout/options'
+import { DEFAULT_LAYOUT_OPTIONS, EDGE_ROUTINGS, coerceLayoutOptions } from '../layout/options'
 
 const AUTOSAVE_KEY = 'coda.autosave.v1'
 const THEME_KEY = 'coda.theme.v1'
@@ -183,19 +183,50 @@ export function saveAutoRun(enabled: boolean): void {
 export interface LayoutPrefs {
   auto: boolean
   options: LayoutOptions
+  /**
+   * How wires are drawn. Under the same key as the rest because it is one setting from the
+   * rail's point of view, and per-user for the same reason `options` is: how you like a graph
+   * drawn is a working preference, and writing it into the `.coda.json` would have a file you
+   * were sent silently restyle itself to somebody else's taste.
+   */
+  edgeRouting: EdgeRouting
+}
+
+/**
+ * `curved` throughout, which is what the editor drew before routing existed.
+ *
+ * Absent means curved, so a preference written before this key existed is not read as somebody
+ * having chosen a routing — the same call `loadPanels` makes about the style sidebar, inverted
+ * because there the useful default is the one an older file cannot have asked for.
+ */
+const DEFAULT_EDGE_ROUTING: EdgeRouting = 'curved'
+
+function coerceEdgeRouting(raw: unknown): EdgeRouting {
+  return typeof raw === 'string' && (EDGE_ROUTINGS as readonly string[]).includes(raw)
+    ? (raw as EdgeRouting)
+    : DEFAULT_EDGE_ROUTING
 }
 
 export function loadLayoutPrefs(): LayoutPrefs {
+  const fallback: LayoutPrefs = {
+    auto: false,
+    options: DEFAULT_LAYOUT_OPTIONS,
+    edgeRouting: DEFAULT_EDGE_ROUTING,
+  }
   try {
     const raw = localStorage.getItem(LAYOUT_KEY)
-    if (!raw) return { auto: false, options: DEFAULT_LAYOUT_OPTIONS }
+    if (!raw) return fallback
     const parsed: unknown = JSON.parse(raw)
     const held = (parsed ?? {}) as Record<string, unknown>
-    return { auto: held.auto === true, options: coerceLayoutOptions(held.options) }
+    return {
+      auto: held.auto === true,
+      options: coerceLayoutOptions(held.options),
+      edgeRouting: coerceEdgeRouting(held.edgeRouting),
+    }
   } catch {
     // Storage disabled, or a value from an older build. Off with stock options is the answer
     // that cannot surprise anyone.
-    return { auto: false, options: DEFAULT_LAYOUT_OPTIONS }
+    return fallback
   }
 }
 

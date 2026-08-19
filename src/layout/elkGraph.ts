@@ -13,6 +13,7 @@ import type { CodaGraph, GraphEdge, GraphNode } from '../core/graph'
 import { getNodeDef, isAnnotation } from '../core/registry'
 import type { LayoutOptions } from './options'
 import { elkNodeOptions, elkOptionsFor } from './options'
+import type { XY } from './place'
 
 /**
  * Port id inside the ELK graph.
@@ -40,6 +41,16 @@ export interface NodeSize {
  * what a headless caller — and every test here — gets instead.
  */
 export type MeasuredSizes = ReadonlyMap<string, NodeSize>
+
+/**
+ * Where each socket sits *within* its card, in flow units, keyed by node id and then port id.
+ *
+ * The same standing as `MeasuredSizes` and for the same reason: a socket's offset is decided by
+ * the header height, the param band, the preview and how many port rows precede it, none of
+ * which the document records. Absent for a node — a headless caller, a card not yet laid out —
+ * means ELK places that node's ports itself, which is what it has always done.
+ */
+export type MeasuredPorts = ReadonlyMap<string, ReadonlyMap<string, XY>>
 
 /** `--node-width` in `theme.css`, and a height that fits a header and two port rows. */
 export const FALLBACK_NODE_SIZE: NodeSize = { width: 232, height: 120 }
@@ -98,9 +109,19 @@ export function toElkGraph(
   edges: readonly GraphEdge[],
   options: LayoutOptions,
   measured?: MeasuredSizes,
+  ports?: MeasuredPorts,
 ): ElkNode {
   const included = new Set(nodes.map((n) => n.id))
-  const nodeOptions = elkNodeOptions(options.direction)
+  /*
+   * Sockets are only ever pinned under a horizontal direction, because that is the only place
+   * `elkNodeOptions` fixes them at all — a vertical direction takes `FREE`, which is the
+   * measured fix for the diagonal staircase. Supplying coordinates anyway is not the harmless
+   * redundancy it looks like: ELK honours an explicit port position under `FREE` too, so the
+   * offsets reinstate exactly the constraint the direction had just lifted, and a DOWN layout
+   * goes back to a staircase — x-spread 319 rather than 39, with the option string still
+   * plainly reading `FREE`.
+   */
+  const mayPin = options.direction === 'RIGHT' || options.direction === 'LEFT'
 
   const children: ElkNode[] = nodes.map((node) => {
     const def = getNodeDef(node.type)
@@ -108,27 +129,46 @@ export function toElkGraph(
     const outputs = def?.outputs ?? []
     const index = portIndices(inputs.length, outputs.length)
     const size = resolveSize(node, measured)
+    const offsets = ports?.get(node.id)
+
+    /*
+     * Pinned only when *every* socket on the card was measured. A partial answer is the worst
+     * of the three: `FIXED_POS` takes each port's `x`/`y` literally, so an unmeasured one
+     * silently lands at (0,0) — the card's top-left corner, on the wrong side — and ELK routes
+     * confidently into it. Falling back per node rather than per port keeps the two readings
+     * from being mixed on one card.
+     */
+    const pinned =
+      mayPin &&
+      offsets !== undefined &&
+      inputs.every((port) => offsets.has(port.id)) &&
+      outputs.every((port) => offsets.has(port.id))
+
+    const side = (
+      port: { id: string },
+      at: 'EAST' | 'WEST',
+      fallbackIndex: number | undefined,
+    ) => {
+      const offset = pinned ? offsets.get(port.id) : undefined
+      return {
+        id: elkPortId(node.id, port.id),
+        // Zero-sized, so the port *is* the socket's centre rather than a box hanging off it.
+        ...(offset ? { x: offset.x, y: offset.y, width: 0, height: 0 } : {}),
+        layoutOptions: {
+          'elk.port.side': at,
+          'elk.port.index': String(fallbackIndex),
+        },
+      }
+    }
 
     return {
       id: node.id,
       width: size.width,
       height: size.height,
-      layoutOptions: nodeOptions,
+      layoutOptions: elkNodeOptions(options.direction, pinned),
       ports: [
-        ...outputs.map((port, i) => ({
-          id: elkPortId(node.id, port.id),
-          layoutOptions: {
-            'elk.port.side': 'EAST',
-            'elk.port.index': String(index.outputs[i]),
-          },
-        })),
-        ...inputs.map((port, i) => ({
-          id: elkPortId(node.id, port.id),
-          layoutOptions: {
-            'elk.port.side': 'WEST',
-            'elk.port.index': String(index.inputs[i]),
-          },
-        })),
+        ...outputs.map((port, i) => side(port, 'EAST', index.outputs[i])),
+        ...inputs.map((port, i) => side(port, 'WEST', index.inputs[i])),
       ],
     }
   })
@@ -156,6 +196,38 @@ export function positionsFrom(result: ElkNode): Map<string, { x: number; y: numb
     positions.set(child.id, { x: child.x ?? 0, y: child.y ?? 0 })
   }
   return positions
+}
+
+/**
+ * The waypoints ELK bent an edge through, keyed by edge id. Empty entries are dropped.
+ *
+ * **These have always been in the result and were always discarded.** `elk.edgeRouting` is
+ * never set: layered computes orthogonal bend points regardless, and the two settings that
+ * would change them (`POLYLINE`, `SPLINES`) move the *nodes* as well, so they are a different
+ * arrangement rather than a different drawing of one. Reading `sections` is therefore free —
+ * the work was done and thrown away.
+ *
+ * Only the first section is read. Sections exist for hyperedges, which one source port and one
+ * target port cannot produce; a `sources`/`targets` pair of length one always yields exactly
+ * one. And only the bend points: the start and end are ELK's idea of where the sockets are,
+ * where React Flow's are the truth. Under `FIXED_POS` the two agree, and where they do not the
+ * edge component anchors on React Flow's and lets the middle be ELK's.
+ *
+ * An algorithm that routes nothing simply contributes nothing: `radial` returns no `sections`
+ * at all, and `force`/`stress` return sections with no bend points. Both read here as "no
+ * route", which is the same thing the canvas does with an edge it has never arranged.
+ */
+export function routesFrom(result: ElkNode): Map<string, XY[]> {
+  const routes = new Map<string, XY[]>()
+  for (const edge of result.edges ?? []) {
+    const bends = edge.sections?.[0]?.bendPoints
+    if (!bends || bends.length === 0) continue
+    routes.set(
+      edge.id,
+      bends.map((point) => ({ x: point.x, y: point.y })),
+    )
+  }
+  return routes
 }
 
 /**

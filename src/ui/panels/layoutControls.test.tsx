@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 /**
- * The three layout buttons, in the real editor.
+ * The four layout buttons, in the real editor.
  *
  * What is worth pinning here is not that a button renders but the *rules around the toggle*,
  * because every one of them is invisible to a type check and each would read as the feature
@@ -45,7 +45,11 @@ beforeEach(() => {
   act(() => {
     // The store is a module singleton, so state set by one case would otherwise decide the next
     // one's result by test order.
-    useGraphStore.setState({ autoLayout: false, layoutOptions: { ...DEFAULT_LAYOUT_OPTIONS } })
+    useGraphStore.setState({
+      autoLayout: false,
+      layoutOptions: { ...DEFAULT_LAYOUT_OPTIONS },
+      edgeRouting: 'curved',
+    })
     useGraphStore.getState().loadExample('partners')
     useGraphStore.getState().closeStartPage()
   })
@@ -57,13 +61,14 @@ const arrangeButton = () => screen.getByRole('button', { name: /Arrange/ })
 const autoButton = () => screen.getByRole('button', { name: 'Auto-layout' })
 const optionsButton = () => screen.getByRole('button', { name: 'Layout options' })
 const bubble = () => screen.queryByRole('group', { name: 'Layout options' })
+const routingButton = () => screen.getByRole('button', { name: /Wire routing/ })
 
 describe('the layout controls', () => {
-  it('adds three buttons to the canvas rail, beside zoom and fit', () => {
+  it('adds four buttons to the canvas rail, beside zoom and fit', () => {
     render(<App />)
     const rail = document.querySelector('.react-flow__controls')
     expect(rail).not.toBeNull()
-    for (const button of [arrangeButton(), autoButton(), optionsButton()]) {
+    for (const button of [arrangeButton(), autoButton(), routingButton(), optionsButton()]) {
       // In the rail rather than the toolbar: a control whose effect is on the canvas belongs
       // over the canvas, next to the other things that move the view.
       expect(rail?.contains(button)).toBe(true)
@@ -350,5 +355,211 @@ describe('the options bubble', () => {
     expect(screen.getByRole('button', { name: 'RIGHT' }).getAttribute('aria-pressed')).toBe(
       'false',
     )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Wire routing
+// ---------------------------------------------------------------------------
+
+describe('the wire routing button', () => {
+  it('toggles between the two modes and back', () => {
+    render(<App />)
+    expect(routingButton().getAttribute('aria-label')).toBe('Wire routing: Curved')
+
+    fireEvent.click(routingButton())
+    expect(routingButton().getAttribute('aria-label')).toBe('Wire routing: Orthogonal')
+
+    fireEvent.click(routingButton())
+    expect(routingButton().getAttribute('aria-label')).toBe('Wire routing: Curved')
+  })
+
+  it('claims a pressed state, which it may now that there are two positions', () => {
+    // It briefly had three and could not: `aria-pressed` on a control with three positions tells
+    // a screen reader it is either on or off, and that is the one thing a reader who cannot see
+    // the icon has no way to check. The name still carries the mode outright regardless.
+    render(<App />)
+    expect(routingButton().getAttribute('aria-pressed')).toBe('false')
+    fireEvent.click(routingButton())
+    expect(routingButton().getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('says what the mode does in its tooltip', () => {
+    render(<App />)
+    fireEvent.click(routingButton())
+    expect(routingButton().getAttribute('title')).toContain('Right-angled steps')
+  })
+
+  it('survives a reload, and both an older and a retired preference read as curved', () => {
+    render(<App />)
+    fireEvent.click(routingButton())
+    expect(loadLayoutPrefs().edgeRouting).toBe('orthogonal')
+
+    // A preference written before this key existed is not somebody having chosen a routing.
+    localStorage.setItem('coda.layout.v1', JSON.stringify({ auto: false }))
+    expect(loadLayoutPrefs().edgeRouting).toBe('curved')
+
+    // And `routed` is a mode this build no longer has, held by anyone who used it while it did.
+    // It has to degrade rather than reach the canvas as a string nothing matches.
+    localStorage.setItem(
+      'coda.layout.v1',
+      JSON.stringify({ auto: false, edgeRouting: 'routed' }),
+    )
+    expect(loadLayoutPrefs().edgeRouting).toBe('curved')
+  })
+
+  it('does not arrange, and does not stale the graph', () => {
+    /*
+     * Every routing draws the arrangement already on the canvas — there is nothing to compute.
+     * Pressing it must therefore not move a card and must not touch the document: a wire style
+     * is not provenance, and a graph going stale because somebody changed how a line is drawn
+     * would read as a scheduler bug.
+     */
+    render(<App />)
+    const before = useGraphStore.getState().graph
+    fireEvent.click(routingButton())
+    expect(useGraphStore.getState().graph).toBe(before)
+  })
+
+  it('is undone by nothing, because it never entered the history', () => {
+    render(<App />)
+    const depth = useGraphStore.getState().past.length
+    fireEvent.click(routingButton())
+    expect(useGraphStore.getState().past.length).toBe(depth)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Routes, end to end
+// ---------------------------------------------------------------------------
+
+describe('routes in the real editor', () => {
+  /**
+   * Every wire's drawn path, keyed by edge id.
+   *
+   * Keyed rather than listed because the assertions below are **identity comparisons**, and that
+   * is not a stylistic choice — it is the only discriminator that works. The obvious one,
+   * counting corners, does not: `getSmoothStepPath` produces anywhere between 0 and 4 of them
+   * depending on where the two sockets ended up, so a plain step path and an ELK-routed one
+   * overlap completely on that measure. Measured directly — no arrange gave `0,0,0,0,0,0,0`,
+   * after an arrange `2,4,2,0,0,0,0`, and after a drag `2,2,2,2,4,0,0`, which is a *plain* step
+   * path scoring higher than a routed one.
+   *
+   * What is unambiguous is this: an edge between two cards that did not move has one path while
+   * its route is held and a different one once it is dropped, because the fallback is computed
+   * from the sockets alone. So the question "are the routes still in use" is asked by moving
+   * something else and watching whether anything untouched redraws.
+   */
+  const pathsById = () => {
+    const map = new Map<string, string>()
+    for (const edge of document.querySelectorAll('.react-flow__edge[data-id]')) {
+      const id = (edge as HTMLElement).dataset.id
+      const d = edge.querySelector('.react-flow__edge-path')?.getAttribute('d')
+      if (id && d) map.set(id, d)
+    }
+    return map
+  }
+  const paths = () => [...pathsById().values()]
+
+  /**
+   * How many wires are drawn from ELK's waypoints rather than from a computed step.
+   *
+   * Read off `data-routed`, which `CodaEdge` sets on exactly that branch. Nothing about the path
+   * *shape* can answer this: measured, `getSmoothStepPath` emits between 0 and 4 corners
+   * depending only on where the sockets landed — no arrange gave `0,0,0,0,0,0,0`, an arrange
+   * `2,4,2,0,0,0,0`, and a drag `2,2,2,2,4,0,0`, a plain step path outscoring a routed one.
+   */
+  const routedCount = () =>
+    document.querySelectorAll('.react-flow__edge-path[data-routed]').length
+
+  /**
+   * Press Arrange and come back when the routes are actually on screen.
+   *
+   * **Not `await act(() => click())`.** The pass is asynchronous twice over — a dynamic import
+   * and an ELK round trip, then a 300ms `requestAnimationFrame` glide — and the frames
+   * deliberately never reach the store, so flushing microtasks returns mid-animation with the
+   * old paths still drawn. A baseline captured there is a baseline of *unrouted* wires, and the
+   * comparison below then passes for the wrong reason: it sees the routes arriving rather than
+   * leaving. That is exactly how the first version of this test went green with the staleness
+   * check deleted.
+   *
+   * The store's positions are the honest signal, since `arrangeNodes` commits once at the end of
+   * the glide and `publishRoutes` runs on the next line.
+   */
+  const arrangeAndSettle = async () => {
+    const positions = () =>
+      useGraphStore.getState().graph.nodes.map((n) => `${n.position.x},${n.position.y}`)
+    const start = positions()
+    fireEvent.click(arrangeButton())
+    await waitFor(() => expect(positions()).not.toEqual(start))
+    // One flush, so the routes published alongside that commit reach the DOM.
+    await act(async () => {
+      await Promise.resolve()
+    })
+  }
+
+  it('changes every wire the moment it is switched on, with nothing arranged', async () => {
+    /*
+     * The failure that retired the third mode. `routed` bent only the wires ELK had bent, so on a
+     * canvas nobody had arranged there were no routes and it was byte-identical to `curved` — a
+     * button that did nothing until you pressed a *different* button first, which is exactly how
+     * it was reported. `orthogonal` steps every wire, so it cannot have that hole.
+     */
+    render(<App />)
+    await waitFor(() => expect(paths().length).toBeGreaterThan(0))
+    expect(paths().every((d) => d.includes('C'))).toBe(true)
+
+    fireEvent.click(routingButton())
+    await waitFor(() => expect(paths().every((d) => !d.includes('C'))).toBe(true))
+  })
+
+  it('follows ELK’s waypoints after an arrange, and gives them up when a card moves', async () => {
+    render(<App />)
+    fireEvent.click(routingButton())
+    await arrangeAndSettle()
+    // `partners` has wires ELK has to bend — asserted rather than assumed, since everything
+    // below is about those going away and would pass trivially if there were none.
+    expect(routedCount()).toBeGreaterThan(0)
+
+    const nodes = useGraphStore.getState().graph.nodes.filter((n) => !isAnnotation(n.type))
+    const last = [...nodes].sort((a, b) => b.position.x - a.position.x)[0]!
+    await act(async () => {
+      useGraphStore
+        .getState()
+        .moveNodes([{ id: last.id, position: { x: last.position.x + 260, y: 420 } }], true)
+    })
+
+    // At least one wire nobody touched is drawn differently now: its waypoints are gone.
+    await waitFor(() => expect(routedCount()).toBe(0))
+    // The *mode* survives the drag — only the waypoints go, so every wire is still a step.
+    expect(paths().every((d) => !d.includes('C'))).toBe(true)
+  })
+
+  it('keeps them through a param edit, which moves nothing', async () => {
+    // Params are outside the arrangement and they change constantly. Dropping routes on one
+    // would leave routing alive only until the next keystroke. Nothing moved, so every wire —
+    // routed or not — has to redraw identically.
+    render(<App />)
+    fireEvent.click(routingButton())
+    await arrangeAndSettle()
+    // Non-vacuity: without this the test would pass on a canvas with no routes at all, which
+    // is exactly the state an over-eager drop produces — so it would green-light the bug.
+    const routed = routedCount()
+    expect(routed).toBeGreaterThan(0)
+    const before = pathsById()
+
+    const target = useGraphStore.getState().graph.nodes.find((n) => n.type === 'core.filter')
+    // Asserted rather than guarded: an `if (target)` around the rest would let this test go
+    // quietly vacuous the day the example is rewritten, while still reporting a pass.
+    expect(target).toBeDefined()
+
+    await act(async () => {
+      useGraphStore.getState().setParam(target!.id, 'expr', 'pre > 3')
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    // Every route still in use, and every wire drawn exactly where it was.
+    expect(routedCount()).toBe(routed)
+    const after = pathsById()
+    for (const [id, d] of before) expect(after.get(id)).toBe(d)
   })
 })
