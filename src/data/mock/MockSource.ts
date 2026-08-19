@@ -112,6 +112,10 @@ export class MockSource implements DataSource {
     const typeRe = compileRegex(req.typePattern, 'type')
     const instanceRe = compileRegex(req.instancePattern, 'instance')
     const labelTest = compileLabelMatch(req.labels)
+    // Present-and-empty means no neurons, matching the seam's documented rule and the Cypher
+    // builder's `IN []` — a mock that read it as "no filter" would let a node pass its tests
+    // here and return the whole dataset against the real source.
+    const wantedIds = req.bodyIds ? new Set(req.bodyIds) : undefined
     const statuses = req.statuses?.length ? new Set(req.statuses) : undefined
     const minSize = req.minSize ?? 0
 
@@ -128,6 +132,7 @@ export class MockSource implements DataSource {
       if (typeRe && !typeRe.test(n.type)) return false
       if (instanceRe && !instanceRe.test(n.instance)) return false
       if (labelTest && !labelTest(n as unknown as Record<string, unknown>)) return false
+      if (wantedIds && !wantedIds.has(n.bodyId)) return false
       if (statuses && !statuses.has(n.status)) return false
       if (n.size < minSize) return false
       if (roiBodies && !roiBodies.has(n.bodyId)) return false

@@ -63,7 +63,7 @@ async function open(params: Record<string, unknown> = {}) {
     useGraphStore.getState().loadGraph(graphWith(params))
   })
   return await waitFor(() => {
-    const body = document.querySelector('.labels-body')
+    const body = document.querySelector('.list-body')
     if (!body) throw new Error('no IDs from Label body rendered')
     return body as HTMLElement
   })
@@ -94,14 +94,14 @@ describe('IDs from Label card', () => {
     await run()
     await waitFor(() => expect(body.textContent).toMatch(/\d+ neurons/))
     expect(body.textContent).toContain('2/2 labels')
-    expect(body.querySelector('.labels-body__missing')).toBeNull()
+    expect(body.querySelector('.list-body__missing')).toBeNull()
   })
 
   it('names the labels that matched nothing', async () => {
     const body = await open({ labels: 'T4a, Nonexistent1, Nonexistent2' })
     await run()
-    await waitFor(() => expect(body.querySelector('.labels-body__missing')).toBeTruthy())
-    const missing = body.querySelector('.labels-body__missing')!
+    await waitFor(() => expect(body.querySelector('.list-body__missing')).toBeTruthy())
+    const missing = body.querySelector('.list-body__missing')!
     expect(missing.textContent).toContain('Nonexistent1')
     expect(missing.textContent).toContain('Nonexistent2')
     expect(body.textContent).toContain('1/3 labels')

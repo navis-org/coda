@@ -4575,13 +4575,20 @@ details[open] > summary.profile__tile-label {
  * IDs from Label
  * ------------------------------------------------------------------------ */
 
-.labels-body {
+/*
+ * The "typed list plus a readout" card, shared by `neuron.idsFromLabel` and `neuron.inputIds`.
+ *
+ * One block rather than two near-identical ones: the two cards are the same object — a paste
+ * target, the node's other fields, and a line underneath saying what the run did and did not
+ * find — and two copies is how the pair drifts on what that line looks like.
+ */
+.list-body {
   display: flex;
   flex-direction: column;
   gap: 6px;
   min-width: 0;
 }
-.labels-body__fields {
+.list-body__fields {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -4590,7 +4597,7 @@ details[open] > summary.profile__tile-label {
  * A wider label column than the dataset card's 58px: "Label column" is the longest label here
  * and wrapping it to two lines would misalign every field beside it.
  */
-.labels-body__field {
+.list-body__field {
   display: grid;
   grid-template-columns: 72px 1fr;
   align-items: center;
@@ -4598,12 +4605,12 @@ details[open] > summary.profile__tile-label {
   min-width: 0;
 }
 /* The Labels field is a paste target, so it gets rows rather than the one-line default. */
-.labels-body__field textarea {
+.list-body__field textarea {
   min-height: 42px;
   resize: vertical;
 }
 
-.labels-body__foot {
+.list-body__foot {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
@@ -4612,7 +4619,7 @@ details[open] > summary.profile__tile-label {
   color: var(--text-secondary);
   min-width: 0;
 }
-.labels-body__foot--empty {
+.list-body__foot--empty {
   color: var(--text-muted);
 }
 /*
@@ -4620,7 +4627,7 @@ details[open] > summary.profile__tile-label {
  * warning badge uses: a label matching nothing is a result worth reading, not a failure. The
  * whole list is in the title attribute, because the visible text is capped on the card.
  */
-.labels-body__missing {
+.list-body__missing {
   color: var(--status-stale);
   min-width: 0;
   overflow: hidden;

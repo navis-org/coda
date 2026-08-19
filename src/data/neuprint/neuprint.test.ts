@@ -254,6 +254,30 @@ describe('query building', () => {
     })
   })
 
+  describe('lookup by body id', () => {
+    it('builds a number list, never a string list', () => {
+      // The reason this is a field of its own rather than a `LabelMatch` on `bodyId`: that
+      // compiles to `n.bodyId IN ['123']`, and `123 IN ['123']` is false in Cypher — an empty
+      // result with no error anywhere to explain it.
+      const query = findNeuronsCypher({ datasetId: 'x', bodyIds: [1158187240, 10001] })
+      expect(query).toContain('n.bodyId IN [1158187240,10001]')
+      expect(query).not.toContain("'1158187240'")
+    })
+
+    it('matches nothing for an empty list, rather than dropping the clause', () => {
+      // Deliberately unlike the label clause above. Relying on a caller's guard is safe there
+      // because the node has one; a clause that would otherwise return the whole dataset is
+      // not something to leave to a future caller remembering.
+      const query = findNeuronsCypher({ datasetId: 'x', bodyIds: [] })
+      expect(query).toContain('n.bodyId IN []')
+    })
+
+    it('composes with the other filters', () => {
+      const query = findNeuronsCypher({ datasetId: 'x', bodyIds: [7], statuses: ['Traced'] })
+      expect(query).toContain("n.bodyId IN [7] AND n.status IN ['Traced']")
+    })
+  })
+
   it('appends dataset-specific properties to the standard seven', () => {
     const query = findNeuronsCypher({ datasetId: 'x' }, ['cellBodyFiber', 'somaRadius'])
     expect(query).toContain('n.`cellBodyFiber`, n.`somaRadius`')

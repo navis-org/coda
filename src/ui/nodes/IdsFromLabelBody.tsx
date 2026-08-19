@@ -73,10 +73,10 @@ export function IdsFromLabelBody({ node, ctx, compact, setParam }: NodeBodyProps
   )
 
   return (
-    <div className="labels-body nodrag">
-      <div className="labels-body__fields">
+    <div className="list-body nodrag">
+      <div className="list-body__fields">
         {fields.map((param) => (
-          <label key={param.id} className="labels-body__field">
+          <label key={param.id} className="list-body__field">
             <span className="param__label" title={param.help ?? param.label}>
               {param.label}
             </span>
@@ -91,13 +91,13 @@ export function IdsFromLabelBody({ node, ctx, compact, setParam }: NodeBodyProps
       </div>
 
       {!summary ? (
-        <div className="labels-body__foot labels-body__foot--empty">Not run yet.</div>
+        <div className="list-body__foot list-body__foot--empty">Not run yet.</div>
       ) : summary.asked === 0 ? (
-        <div className="labels-body__foot labels-body__foot--empty">
+        <div className="list-body__foot list-body__foot--empty">
           No labels yet — type some, or wire a table.
         </div>
       ) : (
-        <div className="labels-body__foot">
+        <div className="list-body__foot">
           <span title="Neurons carrying one of the labels">
             {formatNumber(summary.count)} neuron{summary.count === 1 ? '' : 's'}
           </span>
@@ -107,7 +107,7 @@ export function IdsFromLabelBody({ node, ctx, compact, setParam }: NodeBodyProps
           </span>
           {summary.missing.length > 0 && (
             <span
-              className="labels-body__missing"
+              className="list-body__missing"
               title={`No neuron carries: ${summary.missing.join(', ')}`}
             >
               ⚠ no match:{' '}

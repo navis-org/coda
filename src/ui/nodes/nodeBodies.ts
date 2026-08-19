@@ -24,6 +24,7 @@ import { ExploreBody } from '../explore/ExploreBody'
 import { DatasetBody } from './DatasetBody'
 import { DescriptionBody } from './DescriptionBody'
 import { IdsFromLabelBody } from './IdsFromLabelBody'
+import { InputIdsBody } from './InputIdsBody'
 import { PathsBody } from './PathsBody'
 import { UploadBody } from './UploadBody'
 
@@ -71,6 +72,12 @@ export const NODE_BODIES: Record<string, NodeBodyEntry> = {
    * an overlay of it would be whitespace, and its button would sit where a viewer's does.
    */
   'neuron.idsFromLabel': { Component: IdsFromLabelBody, width: 300 },
+  /*
+   * The same width as its sibling above, and for the same reason: the IDs field is a paste
+   * target, and a list of body ids wrapped into a 232px box is unreadable. Not `expandable` —
+   * the readout is one line and the fields are two.
+   */
+  'neuron.inputIds': { Component: InputIdsBody, width: 300 },
   // Every dataset node draws the same body; they differ only in the family table's data. Built
   // from that table rather than listed, so adding a dataset stays a one-line change there.
   ...Object.fromEntries(

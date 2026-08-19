@@ -319,6 +319,9 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `nodes/table/upload.test.ts`             | the node: the schema arriving by peek, the bodyId rename, what a graph opened elsewhere says, and the filename costing nothing  |
 | `ui/nodes/uploadBody.test.tsx`           | the card's four states — and that 'looking' is never printed as 'not here' — plus the size ceiling refusing before it reads     |
 | `nodes/table/fromUrl.test.ts`            | the fetch: deferred by the auto pass, Refresh as the only re-fetch, the schema keyed by URL, and what each refusal blames      |
+| `nodes/lib/idList.test.ts`               | reading pasted ids: every separator, and both refusals — a bad token and an id too big to be exact |
+| `nodes/query/inputIds.test.ts`           | the node: no dataset means no query, the seam asked in numbers, no status filter, empty never all  |
+| `ui/nodes/inputIdsBody.test.tsx`         | the card: the counts, the ids named as missing, and that it claims nothing with no Dataset wired   |
 
 ## Auto-run
 
@@ -2341,6 +2344,111 @@ something is wrong is a line nobody learns to look at.
 non-advanced set the card would have, in declaration order, rather than a chosen few — a control
 a body forgets is reachable only from the inspector, which on screen is indistinguishable from a
 control that was never added. `idsFromLabelBody.test.tsx` asserts the list.
+
+## Input IDs: the ids themselves
+
+`neuron.inputIds`, `Add ▸ Query ▸ Input IDs`. Somebody has body ids from a paper, a spreadsheet
+or a colleague. `IDs from Label` resolves a *named* set; this takes the ids.
+
+**The Dataset input is optional, and that is the whole design.** Unwired, the node emits the ids
+as a one-column `Neurons` table and touches no network — already enough for most of what a list
+of ids is *for*, since `Connectivity`, `Skeletons`, `Meshes`, `Synapses` and `ROI Counts` all
+reach their ids through `idColumn(table, 'bodyId')` and read nothing else off the row. Wired, it
+fetches the full neuron rows, which buys the columns every downstream picker wants and — the part
+worth having — the ability to say **which ids the dataset has never heard of**, which is how a
+mistyped id is caught and is otherwise uncatchable.
+
+**`expensive` either way, because `cost` is a static property of the definition.** A node that
+*can* issue a query must not be `cheap`: the ids are a text field, and `cheap` would fire a query
+per keystroke at a shared production Neo4j (invariant 6). So the unwired case pays a Run press it
+does not strictly need. That is the right direction to err and cheaper than the only alternative,
+which is two nodes doing one thing.
+
+**No status filter, unlike every other query node here.** `Find Neurons` and `IDs from Label`
+both default to `Traced` so one label does not return two different counts in two nodes. Here
+that would be a quiet lie: an explicit list of ids is an explicit set, and dropping one for its
+status would remove a neuron somebody named *and then report it as missing from the dataset*.
+Filtering belongs downstream where it is visible.
+
+**The advertised schema changes with the wiring**, one column without a Dataset and the dataset's
+whole neuron schema with one. That is the visible cost of an optional input and it is the honest
+shape — advertising a `type` column that nothing will ever fill breaks every picker downstream
+that believed it. Both branches are exactly what `evaluate` returns.
+
+**`tableFromRows` defaults to `kind: 'table'`, and this node's port says `neurons`.** Passing the
+kind explicitly is not decoration: a value whose kind disagrees with its port's declared type is
+a disagreement nothing type-checks, and `selectTable` — the one op in the tree that branches on
+`table.kind` — would take the wrong branch on a table this node had called neurons.
+
+### Parsing, and what it refuses
+
+`nodes/lib/idList.ts`, the sibling of `labelLookup.ts` and mostly refusals, which is exactly the
+difference between the two: a label is free text and anything is a valid one, where an id is a
+number and a token that is not one is a mistake somebody just made.
+
+**Separators are whitespace, comma, semicolon — plus brackets and quotes.** The list very often
+arrives as `[123, 456]` or `"123","456"`, copied out of a Python session or a JSON blob, and
+refusing that paste on a punctuation mark refuses the gesture rather than the content. They are
+separators and not *stripped* characters, which is what keeps `12a` one bad token rather than a
+`12` with something quietly discarded after it.
+
+**A bad token refuses the whole list.** Skipping was considered and declined: a list of ids is a
+list of neurons somebody means to look at, and dropping one quietly answers a different question.
+The cost is real and accepted — pasting a spreadsheet column brings its header — so the message
+says *"If you pasted a column, delete its header line"* when the first token is a word, and only
+then. A hint offered where it cannot be true is noise on top of an error.
+
+**An id past `Number.MAX_SAFE_INTEGER` is refused, naming it.** `CellValue` is a JS number, so an
+`i64` column is really a float64: `720575940379279312` is stored as a *different* integer and
+would identify a different neuron, with nothing anywhere to say so. neuPrint's ids are nine to
+eleven digits and nowhere near it; FlyWire root ids are eighteen and well past. This costs nothing
+today and is the difference between a clear error and a wrong answer the day somebody pastes
+FlyWire ids into a Coda that has grown a FlyWire source.
+
+**The wired column drops what it cannot use instead of refusing**, and the asymmetry is
+deliberate. Typed text is *authored* — a bad token is a mistake somebody just made and can fix, so
+refusing helps. A wired column is *data*, and a node that refused to run because one upstream row
+had a null id would be unusable, which is why `idColumn()` has always skipped them. The card
+counts what was skipped so the number is visible rather than the rows merely being absent.
+
+**Ids are deduplicated, first-occurrence order kept.** A neuron listed twice is one neuron, and a
+repeated row is double-counted by everything downstream that sums a weight. The order is what the
+unmatched report prints in, so a report and the list that produced it read against each other.
+
+**The parse is a pure function returning a message rather than throwing**, which is what lets
+`validate` run it at edit time — so a refused list is reported while it is being typed — and lets
+`evaluate` raise the *same sentence*. A badge and an error describing one problem differently is
+how somebody concludes there are two.
+
+### `FindNeuronsRequest.bodyIds`
+
+A new field at the source seam rather than a `LabelMatch` on `bodyId`, and the reason is not
+stylistic: `labelClause` compiles to a list of **string** literals, and `123 IN ['123']` is false
+in Cypher — an empty result, with no error anywhere to explain it. `bodyIds` goes through
+`numberList`.
+
+**Present-and-empty means no neurons, never "no filter".** Deliberately unlike the label clause
+beside it, which drops itself when empty and so reads an empty set as no filter at all; that is
+safe there only because the node guards it. Relying on a future caller's guard for a clause that
+would otherwise return the entire dataset is not a trade worth repeating, so this one compiles to
+`n.bodyId IN []`. `MockSource` reproduces the same rule, or a node would pass its tests against
+the mock and return the whole dataset against the real source.
+
+### The readout
+
+`InputIdsBody` shares a stylesheet block with `IdsFromLabelBody` — `.list-body`, renamed from
+`.labels-body` when the second one arrived. The two cards are the same object: a paste target,
+the node's other fields, and a line underneath saying what the run did and did not find. Two
+copies is how the pair drifts on what that line looks like.
+
+Derived from the run rather than reported by it, same as its sibling and for the same reason:
+there is no channel from `evaluate` to a node's badge that survives a result being restored from
+cache rather than recomputed, so a warning raised at run time would vanish while its result stayed
+on screen.
+
+**The miss is only reported with a Dataset wired.** Unwired the node hands back exactly the ids it
+was given, so every id matches by construction and a `0 not found` line would be a fact about
+nothing.
 
 ## Explore: the browsing widget
 

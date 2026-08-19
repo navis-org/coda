@@ -59,6 +59,10 @@ const lastListedDef = () => {
   return groups[groups.length - 1]!.defs.at(-1)!
 }
 
+/** The nodes the browser lists under one chip, in the order it lists them. */
+const defsIn = (category: string) =>
+  nodeDefsByCategory().find((g) => g.category === category)?.defs ?? []
+
 const rowNames = () =>
   [...document.querySelectorAll('.node-row')].map(
     (row) => row.querySelector('.node-row__name')?.textContent,
@@ -174,9 +178,11 @@ describe('NodeBrowser filtering', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: /Query/ }))
     expect(input.value).toBe('')
-    // Query covers Explore, the two finders, the label lookup, connectivity, paths, ROI
-    // counts, the three morphology fetchers and raw Cypher.
-    expect(rowNames()).toHaveLength(11)
+    // Exactly the Query category and nothing else. Counted from the registry rather than
+    // written down: the assertion is that the chip filters to one category, and a literal
+    // turns "somebody added a query node" into a failure that reads as a filtering bug.
+    expect(rowNames()).toHaveLength(defsIn('query').length)
+    expect(rowNames()).toEqual(defsIn('query').map((d) => d.label))
     expect(rowNames()).toContain('Cypher')
     expect(rowNames()).toContain('Explore')
     expect(rowNames()).toContain('IDs from Label')

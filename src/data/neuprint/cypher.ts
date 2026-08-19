@@ -116,6 +116,16 @@ export function findNeuronsCypher(req: FindNeuronsRequest, extraProperties: stri
   if (req.instancePattern) where.push(`n.instance =~ ${escapeString(req.instancePattern)}`)
   // Empty values matches nothing, so the caller is expected not to send one — see `LabelMatch`.
   if (req.labels && req.labels.values.length > 0) where.push(labelClause(req.labels))
+  /*
+   * `numberList`, never `stringList`: `bodyId` is an integer property, and `1 IN ['1']` is false
+   * in Cypher — a string list here returns an empty result with no error to explain it.
+   *
+   * Present-and-empty produces `IN []`, which matches nothing. Deliberately unlike the label
+   * clause above, which skips itself when empty and so reads an empty set as "no filter". That
+   * is safe there only because the node guards it; relying on a caller's guard for a clause that
+   * would otherwise return the entire dataset is not a trade worth repeating.
+   */
+  if (req.bodyIds) where.push(`n.bodyId IN ${numberList(req.bodyIds)}`)
   if (req.statuses?.length) where.push(`n.status IN ${stringList(req.statuses)}`)
   if (req.minSize && req.minSize > 0) where.push(`n.size >= ${Math.floor(req.minSize)}`)
   // A neuron carries one boolean property per ROI it innervates, so presence is the test.

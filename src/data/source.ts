@@ -97,6 +97,15 @@ export interface FindNeuronsRequest {
   instancePattern?: string
   /** Exact (or regex) match of one property against a set of labels. */
   labels?: LabelMatch
+  /**
+   * Exactly these neurons, by id.
+   *
+   * Not expressible through `labels`, which compiles to a list of *string* literals — against
+   * an integer property that matches nothing, silently. An empty array present means **no
+   * neurons**, never "no filter": an unconfigured node firing an unbounded `MATCH (n:Neuron)`
+   * at a shared production Neo4j is a hazard, not a default.
+   */
+  bodyIds?: readonly number[]
   statuses?: string[]
   minSize?: number
   /** ROI the neuron must innervate. */
