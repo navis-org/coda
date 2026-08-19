@@ -9,6 +9,7 @@
 
 import type {
   MatrixValue,
+  MeshGeometry,
   MeshesValue,
   PointsValue,
   SkeletonGeometry,
@@ -30,6 +31,7 @@ import type {
   NeuronIndexRequest,
   PathStepRequest,
   RoiCountsRequest,
+  RoiMeshRequest,
   RoiSummaryRequest,
   SourceCapabilities,
   SourceSchemas,
@@ -39,6 +41,7 @@ import {
   CANONICAL_SCHEMAS,
   PATH_STEP_SCHEMA,
   ROI_COMPLETENESS_SCHEMA,
+  ROI_MESH_SCHEMA,
   ROI_CONNECTIVITY_SCHEMA,
   delay,
   throwIfAborted,
@@ -46,7 +49,7 @@ import {
 import { loadCachedTable, neuronIndexKey } from '../neuronIndex'
 import type { MockConnection, MockConnectome } from './generate'
 import { getConnectome, mockDatasetIds, mockDatasetMeta } from './generate'
-import { generateSkeleton, skeletonToTubeMesh, synapsePosition } from './morphology'
+import { generateRoiMesh, generateSkeleton, skeletonToTubeMesh, synapsePosition } from './morphology'
 
 export interface MockSourceOptions {
   /** Simulated round-trip latency in ms. Set to 0 in tests. */
@@ -75,6 +78,7 @@ export class MockSource implements DataSource {
     // at all. The capability flag is for a source that genuinely cannot, not a way of leaving
     // the mock behind.
     roiSummary: true,
+    roiMeshes: true,
   }
   readonly schemas: SourceSchemas = CANONICAL_SCHEMAS
 
@@ -103,6 +107,7 @@ export class MockSource implements DataSource {
         // undefined means "not known yet" and would have anything that totals a per-ROI column
         // refuse to, against a dataset where totalling is exactly right.
         primaryRois: meta.rois,
+        roiSuper: mockRoiSuper(meta.rois),
         statuses: ['Traced', 'Anchor', 'Assign'],
         ...(connectome ? { neuronCount: connectome.neurons.length } : {}),
       }
@@ -480,6 +485,40 @@ export class MockSource implements DataSource {
     return tableFromRows(ROI_CONNECTIVITY_SCHEMA, rows)
   }
 
+  /**
+   * A shell per region.
+   *
+   * Every region the connectome names, because the mock's are all primary — `fetchRoiCompleteness`
+   * above says so for the same set. A real source has to filter, which is why `rois` is on the
+   * request at all.
+   *
+   * Progress is reported per region rather than once at the end. It costs nothing here, where
+   * the shells are generated in a loop, and it is the shape the real source needs: the run ring
+   * is the only thing that makes a sixty-request fetch tolerable, and only the source knows how
+   * many have landed.
+   */
+  async fetchRoiMeshes(req: RoiMeshRequest): Promise<MeshesValue> {
+    await delay(this.latencyMs, req.signal)
+    const connectome = this.require(req.datasetId)
+    const rois = req.rois ?? connectome.rois
+
+    const items: MeshGeometry[] = []
+    const rows: Array<Record<string, string | boolean>> = []
+    for (const roi of rois) {
+      throwIfAborted(req.signal)
+      items.push(generateRoiMesh(roi))
+      rows.push({ roi, primary: true })
+      req.onProgress?.(items.length / Math.max(1, rois.length), roi)
+    }
+
+    return {
+      kind: 'meshes',
+      items,
+      attributes: tableFromRows(ROI_MESH_SCHEMA, rows),
+      bounds: boundsOf(items.map((m) => m.positions)),
+    }
+  }
+
   // --- morphology ----------------------------------------------------------
 
   async fetchSkeletons(req: GeometryRequest): Promise<SkeletonsValue> {
@@ -721,4 +760,43 @@ function mockHomeRois(connectome: MockConnectome): Map<number, string> {
     }
   }
   return new Map([...best].map(([bodyId, { roi }]) => [bodyId, roi]))
+}
+
+/**
+ * A synthetic region hierarchy, so the grouping control is demonstrable with no token.
+ *
+ * neuPrint publishes `Meta.roiHierarchy` and the real source derives this from it; the mock has
+ * no such tree, so the groups are declared. They are the anatomy the mock's regions actually
+ * belong to — the mushroom body lobes really are one system — rather than arbitrary buckets,
+ * because a control demonstrated on nonsense teaches the wrong thing about what it is for.
+ *
+ * A region absent from the table has no group, which is the case that matters: hemibrain lists
+ * `AL(L)` and `GNG` directly under the dataset root, so "ungrouped" has to be a state the widget
+ * can draw rather than an oversight.
+ */
+const MOCK_ROI_GROUPS: Record<string, string> = {
+  'ME(R)': 'Optic lobe',
+  'LO(R)': 'Optic lobe',
+  'LOP(R)': 'Optic lobe',
+  'CA(R)': 'Mushroom body',
+  'PED(R)': 'Mushroom body',
+  'aL(R)': 'Mushroom body',
+  "a'L(R)": 'Mushroom body',
+  'bL(R)': 'Mushroom body',
+  "b'L(R)": 'Mushroom body',
+  'gL(R)': 'Mushroom body',
+  'PVLP(R)': 'Ventrolateral',
+  'PLP(R)': 'Ventrolateral',
+  'SLP(R)': 'Superior',
+  'SMP(R)': 'Superior',
+  // AL(R), LH(R) and AOTU(R) are deliberately ungrouped.
+}
+
+function mockRoiSuper(rois: readonly string[]): Record<string, string> {
+  const groups: Record<string, string> = {}
+  for (const roi of rois) {
+    const group = MOCK_ROI_GROUPS[roi]
+    if (group) groups[roi] = group
+  }
+  return groups
 }

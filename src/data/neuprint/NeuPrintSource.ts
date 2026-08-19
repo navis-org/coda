@@ -22,7 +22,15 @@ import type {
   SkeletonsValue,
   TableValue,
 } from '../../core/values'
-import { EMPTY_BOUNDS, boundsOf, cableLength, emptyTable, makeMatrix, makeTable } from '../../core/values'
+import {
+  EMPTY_BOUNDS,
+  boundsOf,
+  cableLength,
+  emptyTable,
+  makeMatrix,
+  makeTable,
+  tableFromRows,
+} from '../../core/values'
 import type {
   AdjacencyRequest,
   CoarseGeometry,
@@ -36,6 +44,7 @@ import type {
   PathStepRequest,
   RawQueryRequest,
   RoiCountsRequest,
+  RoiMeshRequest,
   RoiSummaryRequest,
   SourceCapabilities,
   SourceSchemas,
@@ -46,10 +55,13 @@ import {
   CANONICAL_SCHEMAS,
   PATH_STEP_SCHEMA,
   ROI_CONNECTIVITY_SCHEMA,
+  ROI_MESH_SCHEMA,
   reportSourceLearned,
   throwIfAborted,
 } from '../source'
 import { datasetSummaryKey, loadCachedTable, neuronIndexKey } from '../neuronIndex'
+import { fetchRoiMeshSet } from './roiMeshes'
+import { superRoisFrom } from './roiHierarchy'
 import type { MeshSource } from '../precomputed'
 import { DEFAULT_TRIANGLE_BUDGET, fetchMeshes, openMeshSource } from '../precomputed'
 import {
@@ -159,6 +171,7 @@ export class NeuPrintSource implements DataSource {
     // returns zero rows and no pairs, which is a dataset that has no regions rather than a
     // failure, and is reported as such.
     roiSummary: true,
+    roiMeshes: true,
   }
   readonly schemas: SourceSchemas = CANONICAL_SCHEMAS
 
@@ -260,6 +273,9 @@ export class NeuPrintSource implements DataSource {
           ...info,
           statuses: existing.info.statuses,
           ...(existing.info.primaryRois ? { primaryRois: existing.info.primaryRois } : {}),
+          // Same reason: `listDatasets` re-fetches on every call and the Sources panel does
+          // exactly that, so a merge that dropped this would un-learn it after discovery.
+          ...(existing.info.roiSuper ? { roiSuper: existing.info.roiSuper } : {}),
         }
       else this.states.set(info.id, { info, scale: IDENTITY_SCALE })
     }
@@ -350,6 +366,7 @@ export class NeuPrintSource implements DataSource {
 
     const declared = parseJsonMap(meta?.data?.[0]?.[0])
     // RETURN order: neuronProperties, primaryRois, superLevelRois, statusDefinitions,
+    // voxelSize, voxelUnits, roiHierarchy.
     // voxelSize, voxelUnits.
     state.scale = voxelScale(meta?.data?.[0]?.[4], meta?.data?.[0]?.[5])
 
@@ -364,6 +381,17 @@ export class NeuPrintSource implements DataSource {
      */
     const primaryRois = stringList(meta?.data?.[0]?.[1])
     if (primaryRois.length) state.info = { ...state.info, primaryRois }
+
+    /*
+     * The group above each primary region, where the dataset publishes a hierarchy.
+     *
+     * `m.roiHierarchy` is a JSON *string* in Neo4j — neuprint-python decodes it server-side with
+     * `apoc.convert.fromJsonMap`, which this does not depend on, so it arrives raw and is parsed
+     * here. Derived after `primaryRois` rather than beside it, because the tree alone cannot say
+     * which of its nodes are the ones that tile the volume.
+     */
+    const roiSuper = superRoisFrom(meta?.data?.[0]?.[6], primaryRois)
+    if (Object.keys(roiSuper).length) state.info = { ...state.info, roiSuper }
     const sampled = (sample?.data ?? [])
       .map((row) => row[0])
       .filter(
@@ -568,6 +596,57 @@ export class NeuPrintSource implements DataSource {
         return roiCompletenessFromResponse(response, { primaryRois })
       },
     })
+  }
+
+  /**
+   * The neuropil shells, one request per region.
+   *
+   * **Discovery first, and for the same reason `fetchRoiCompleteness` waits.** Two things come
+   * out of it that this cannot be right without: `Meta.primaryRois`, which decides *which*
+   * regions to ask for, and `Meta.voxelSize`, which decides what the coordinates mean. Answering
+   * before it lands would fetch the wrong set at the wrong scale and look entirely plausible —
+   * the shells would be internally consistent and eight times the size of every neuron.
+   *
+   * Uncached, deliberately. The result is tens of megabytes of geometry and the widget caches
+   * something else entirely: it flattens these into three planes of polyline, a few tens of
+   * kilobytes, and throws the meshes away. Caching them here would store the expensive form of a
+   * value nobody keeps.
+   */
+  async fetchRoiMeshes(req: RoiMeshRequest): Promise<MeshesValue> {
+    await this.discover(req.datasetId, req.signal)
+    throwIfAborted(req.signal)
+    const state = this.states.get(req.datasetId)
+    const info = state?.info
+
+    /*
+     * The primary set by default. hemibrain lists 230 regions of which 63 tile the volume and
+     * male-CNS 5,619 of which 144 — so asking for "the regions" unqualified would be thousands
+     * of multi-megabyte requests to draw every shell inside another one.
+     */
+    const rois = req.rois ?? info?.primaryRois ?? info?.rois ?? []
+    if (rois.length === 0) {
+      return { kind: 'meshes', items: [], attributes: emptyTable(ROI_MESH_SCHEMA), bounds: EMPTY_BOUNDS }
+    }
+
+    const result = await fetchRoiMeshSet(req.datasetId, rois, state?.scale ?? IDENTITY_SCALE, {
+      ...this.options(req.signal),
+      ...(req.onProgress ? { onProgress: req.onProgress } : {}),
+    })
+
+    const primary = new Set(info?.primaryRois ?? [])
+    const rows = result.items.map((item) => ({
+      roi: item.label ?? '',
+      // Unknown is not false: a dataset whose `Meta` never named a primary set should not have
+      // every region reported as nested inside another one.
+      primary: primary.size > 0 ? primary.has(item.label ?? '') : true,
+    }))
+
+    return {
+      kind: 'meshes',
+      items: result.items,
+      attributes: tableFromRows(ROI_MESH_SCHEMA, rows),
+      bounds: boundsOf(result.items.map((item) => item.positions)),
+    }
   }
 
   /**

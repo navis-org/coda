@@ -30,6 +30,23 @@ export default tseslint.config(
     },
   },
 
+  /*
+   * Maintenance scripts run under Node, not in a browser, so they get Node's globals rather
+   * than the browser set every other file here uses — and `no-console` is lifted, since
+   * printing to a terminal is the entire point of one.
+   */
+  {
+    files: ['scripts/**/*.{js,mjs}'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'module',
+      globals: globals.node,
+    },
+    rules: {
+      'no-console': 'off',
+    },
+  },
+
   {
     files: ['src/**/*.tsx'],
     plugins: { 'react-hooks': reactHooks },

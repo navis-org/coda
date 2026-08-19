@@ -391,6 +391,68 @@ registerEmitter('out.datasetSummary', (ctx) => {
 })
 
 /**
+ * The ROIs card draws neuropil shells; neuprint-python serves the same ones.
+ *
+ * `Client.fetch_roi_mesh(roi)` returns the OBJ **bytes** for one region and takes no dataset
+ * argument, which satisfies the one-client-per-dataset rule for free. Read off neuprint-python
+ * 0.6.3 by introspection rather than recalled — the same discipline that turned up
+ * `navis.interfaces.neuprint` not existing.
+ *
+ * Two things the generated cell has to say, both from the endpoint's own behaviour rather than
+ * from taste:
+ *
+ *  - **Some regions have no mesh, and that is correct.** Every one male-CNS refuses is an
+ *    `-unspecified` bucket — `CentralBrain-unspecified`, `VNC-unspecified` — which collects
+ *    synapses not assigned to a named neuropil and is not a shape. So the loop catches rather
+ *    than letting one 400 end the cell, and reports what it skipped.
+ *  - **The meshes are not measurements.** neuprint-python's own docstring says they are
+ *    "intended for visualization only… not suitable for quantitative analysis", so a volume
+ *    computed off one is an approximation of a decimated display surface. Worth stating in the
+ *    notebook, where the next obvious step is exactly that computation.
+ *
+ * No plotting is emitted. Drawing an OBJ needs trimesh or navis, and neither is in this
+ * notebook's dependency set — a generated file that fails on an import nobody asked for is
+ * worse than one that hands over the bytes and says what to do with them.
+ */
+registerEmitter('out.rois', (ctx) => {
+  const client = ctx.wired('dataset')
+  const meshes = `${ctx.name}_meshes`
+  const primaryOnly = ctx.params.primaryOnly !== false
+  const rois = primaryOnly ? `${client}.primary_rois` : `${client}.all_rois`
+
+  return [
+    ...ctx.note(
+      'Region meshes are OBJ bytes, one request each. neuPrint publishes them for ' +
+        'visualization only — they are decimated display surfaces, so a volume measured off ' +
+        'one is an approximation rather than a figure to quote.',
+    ),
+    ...(primaryOnly
+      ? [
+          `# The published region list nests, so this walks the primary set that tiles the`,
+          `# volume — the same default the card carries.`,
+        ]
+      : [`# Every published region, including the ones nested inside others.`]),
+    `${meshes} = {}`,
+    `_skipped = []`,
+    `for _roi in ${rois}:`,
+    `    try:`,
+    `        ${meshes}[_roi] = ${client}.fetch_roi_mesh(_roi)`,
+    `    except Exception:`,
+    `        # No mesh published for this one. On male-CNS every such region is an`,
+    `        # "-unspecified" bucket, which collects unassigned synapses and is not a shape.`,
+    `        _skipped.append(_roi)`,
+    ``,
+    `print(f"{len(${meshes})} region meshes"`,
+    `      f" · {sum(len(_m) for _m in ${meshes}.values()) / 1e6:.1f} MB of OBJ"`,
+    `      f" · {len(_skipped)} without one")`,
+    ``,
+    `# Each value is the contents of an .obj file. To look at one:`,
+    `#     open("ME(R).obj", "wb").write(${meshes}["ME(R)"])`,
+    `# or pass the bytes to trimesh / navis, neither of which this notebook imports.`,
+  ]
+})
+
+/**
  * The default chart list, transcribed from `summaryAttributes`.
  *
  * A copy rather than an import, and the duplication is the lesser evil: that function filters

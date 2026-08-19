@@ -13,7 +13,13 @@ import { boundsOf, skeletonPointCount } from '../../core/values'
 import { registerSource } from '../source'
 import { MockSource } from './MockSource'
 import { getConnectome } from './generate'
-import { generateSkeleton, roiCenter, skeletonToTubeMesh, synapsePosition } from './morphology'
+import {
+  generateRoiMesh,
+  generateSkeleton,
+  roiCenter,
+  skeletonToTubeMesh,
+  synapsePosition,
+} from './morphology'
 
 const source = new MockSource({ latencyMs: 0 })
 
@@ -195,5 +201,99 @@ describe('MockSource morphology', () => {
     expect(source.capabilities.skeletons).toBe(true)
     expect(source.capabilities.meshes).toBe(true)
     expect(source.capabilities.synapses).toBe(true)
+  })
+})
+
+/**
+ * Region shells.
+ *
+ * The ROIs widget draws these and nothing else, so what matters is that they are well-formed
+ * triangle meshes (the outline tracer fills faces — a shell with no faces projects to a dotty
+ * ring), that they are deterministic like every other synthetic thing here, and that they sit
+ * where the neurons do. The last one is the claim that would be quietly wrong: a shell placed
+ * from a different table than the arbors would draw a perfectly convincing brain with the
+ * neurons beside it rather than inside it.
+ */
+describe('mock region meshes', () => {
+  it('answers a dataset with one shell per region, named', async () => {
+    const connectome = getConnectome('hemibrain-mini')!
+    const meshes = await source.fetchRoiMeshes({ datasetId: 'hemibrain-mini' })
+
+    expect(meshes.kind).toBe('meshes')
+    expect(meshes.items).toHaveLength(connectome.rois.length)
+    expect(meshes.attributes.length).toBe(meshes.items.length)
+    // Identity is the region's name, in the item and in the attribute row, in the same order.
+    expect(meshes.items.map((m) => m.label)).toEqual(connectome.rois)
+    expect(meshes.attributes.data.roi).toEqual(connectome.rois)
+  })
+
+  it('builds valid triangle meshes', async () => {
+    const meshes = await source.fetchRoiMeshes({ datasetId: 'hemibrain-mini' })
+    for (const mesh of meshes.items) {
+      expect(mesh.positions.length % 3).toBe(0)
+      expect(mesh.indices.length % 3).toBe(0)
+      expect(mesh.indices.length).toBeGreaterThan(0)
+      const vertexCount = mesh.positions.length / 3
+      for (const index of mesh.indices) expect(index).toBeLessThan(vertexCount)
+      expect(Number.isFinite(mesh.positions[0])).toBe(true)
+    }
+  })
+
+  it('is deterministic, so a reload draws the same brain', () => {
+    const a = generateRoiMesh('CA(R)')
+    const b = generateRoiMesh('CA(R)')
+    expect(Array.from(a.positions)).toEqual(Array.from(b.positions))
+    // …and two regions are not the same solid moved.
+    const other = generateRoiMesh('PED(R)')
+    expect(Array.from(other.positions)).not.toEqual(Array.from(a.positions))
+  })
+
+  it('places each shell around its own region centre', () => {
+    for (const roi of ['CA(R)', 'AL(R)', 'LH(R)']) {
+      const mesh = generateRoiMesh(roi)
+      const bounds = boundsOf([mesh.positions])
+      const [cx, cy, cz] = roiCenter(roi)
+      expect(cx).toBeGreaterThan(bounds.min[0])
+      expect(cx).toBeLessThan(bounds.max[0])
+      expect(cy).toBeGreaterThan(bounds.min[1])
+      expect(cy).toBeLessThan(bounds.max[1])
+      expect(cz).toBeGreaterThan(bounds.min[2])
+      expect(cz).toBeLessThan(bounds.max[2])
+    }
+  })
+
+  it('encloses the neurons drawn beside it', async () => {
+    // The shells and the arbors are placed from the same ROI table, so a neuron's points should
+    // land inside the union of the regions it innervates. Not every point: an arbor is grown
+    // with jitter and the shells are not convex hulls of it. Most of them is the honest claim,
+    // and it is the one that fails if the two ever stop sharing a coordinate frame.
+    const meshes = await source.fetchRoiMeshes({ datasetId: 'hemibrain-mini' })
+    const union = boundsOf(meshes.items.map((m) => m.positions))
+
+    const connectome = getConnectome('hemibrain-mini')!
+    const bodyId = connectome.neurons[0]!.bodyId
+    const rois = connectome.roiCounts.filter((rc) => rc.bodyId === bodyId).map((rc) => rc.roi)
+    const skeleton = generateSkeleton(bodyId, rois)
+
+    let inside = 0
+    const points = skeleton.positions.length / 3
+    for (let i = 0; i < points; i++) {
+      const x = skeleton.positions[i * 3]!
+      const y = skeleton.positions[i * 3 + 1]!
+      const z = skeleton.positions[i * 3 + 2]!
+      if (
+        x >= union.min[0] && x <= union.max[0] &&
+        y >= union.min[1] && y <= union.max[1] &&
+        z >= union.min[2] && z <= union.max[2]
+      ) {
+        inside++
+      }
+    }
+    expect(inside / points).toBeGreaterThan(0.9)
+  })
+
+  it('advertises the capability, and a source without it offers no method', () => {
+    expect(source.capabilities.roiMeshes).toBe(true)
+    expect(typeof source.fetchRoiMeshes).toBe('function')
   })
 })

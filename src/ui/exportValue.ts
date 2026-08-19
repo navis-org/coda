@@ -95,11 +95,19 @@ export function skeletonToSwc(skeleton: SkeletonGeometry): string {
  * No normals and no material: the sources publish neither, and a `vn` computed here would be a
  * guess at smoothing that every viewer recomputes anyway.
  */
-export function meshToObj(mesh: { bodyId: number; positions: Float32Array; indices: Uint32Array }): string {
+export function meshToObj(mesh: {
+  bodyId: number
+  label?: string
+  positions: Float32Array
+  indices: Uint32Array
+}): string {
+  // A region mesh has a name and no body id; a neuron has the reverse. Naming the object after
+  // whichever it actually has is the difference between `o ME(R)` and `o body_3`.
+  const name = mesh.label ?? `body_${mesh.bodyId}`
   const lines: string[] = [
-    `# Coda export — bodyId ${mesh.bodyId}`,
+    `# Coda export — ${mesh.label ?? `bodyId ${mesh.bodyId}`}`,
     '# Coordinates are in nanometres.',
-    `o body_${mesh.bodyId}`,
+    `o ${name.replace(/\s+/g, '_')}`,
   ]
   for (let i = 0; i < mesh.positions.length; i += 3) {
     lines.push(`v ${mesh.positions[i]} ${mesh.positions[i + 1]} ${mesh.positions[i + 2]}`)
@@ -235,7 +243,24 @@ function skeletonFiles(value: SkeletonsValue, base: string): ExportFile[] {
 function meshFiles(value: MeshesValue, base: string): ExportFile[] {
   return value.items
     .slice(0, MAX_MORPHOLOGY_FILES)
-    .map((item) => ({ name: `${base}-${item.bodyId}.obj`, parts: [meshToObj(item)], mime: TEXT }))
+    .map((item) => ({
+      name: `${base}-${meshFileStem(item)}.obj`,
+      parts: [meshToObj(item)],
+      mime: TEXT,
+    }))
+}
+
+/**
+ * What one mesh's file is called.
+ *
+ * A region's name is the useful stem and is also somebody else's string: `a'L(R)` and `ME(R)`
+ * carry a quote, parens and a slash on other datasets, none of which belong in a filename on
+ * every platform this runs on. Anything outside the safe set becomes an underscore rather than
+ * being dropped, so two regions cannot collapse to one filename and silently overwrite.
+ */
+function meshFileStem(item: { bodyId: number; label?: string }): string {
+  if (!item.label) return String(item.bodyId)
+  return item.label.replace(/[^A-Za-z0-9._-]+/g, '_')
 }
 
 export interface ExportPlan {

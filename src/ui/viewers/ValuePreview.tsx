@@ -20,6 +20,9 @@ import { HeatmapViewer } from './HeatmapViewer'
 import { LazyNetworkViewer, LazyViewer3D } from './LazyViewers'
 import { NeuroglancerViewer } from './NeuroglancerViewer'
 import { DatasetSummaryViewer } from './DatasetSummaryViewer'
+import { RoisViewer } from './RoisViewer'
+import type { RoiColorMode, RoiLabelMode } from './RoisViewer'
+import type { RoiView } from './roiProjection'
 import { ProfileViewer } from './ProfileViewer'
 import { ExportNodeContext } from './exportRegistry'
 import { ScatterViewer } from './ScatterViewer'
@@ -120,6 +123,31 @@ function ValuePreviewInner({
         sort={node.params.completenessSort === 'label' ? 'label' : 'value'}
         onSort={(sort) => onParamChange?.('completenessSort', sort)}
         onReload={() => onParamChange?.('refresh', Number(node.params.refresh ?? 0) + 1)}
+        {...shared}
+      />
+    )
+  }
+
+  /*
+   * Above the `!value` guard too, and for the same reason: no outputs means no value, ever.
+   * `out.datasetSummary` shipped below it once and showed "No result yet" permanently, with a
+   * green suite, because every test rendered the viewer directly and so never reached here.
+   */
+  if (node.type === 'out.rois') {
+    const dataset = inputValues?.dataset
+    return (
+      <RoisViewer
+        sourceId={isDatasetValue(dataset) ? dataset.sourceId : undefined}
+        datasetId={isDatasetValue(dataset) ? dataset.datasetId : undefined}
+        view={roiView(node.params.view)}
+        explode={Number(node.params.explode ?? 0)}
+        colorBy={roiColorMode(node.params.colorBy)}
+        labels={roiLabelMode(node.params.labels)}
+        hemisphere={roiHemisphere(node.params.hemisphere)}
+        superRois={Array.isArray(node.params.superRois) ? (node.params.superRois as string[]) : []}
+        opacity={Number(node.params.opacity ?? 0.12)}
+        refresh={Number(node.params.refresh ?? 0)}
+        {...(onParamChange ? { onParamChange } : {})}
         {...shared}
       />
     )
@@ -386,4 +414,28 @@ function ValuePreviewInner({
       </div>
     </div>
   )
+}
+
+/*
+ * Params arrive as `ParamValue`, so every enum has to be narrowed back to its union somewhere.
+ * Here rather than in the viewer: a component that accepted a bare string would have to decide
+ * what an unrecognised one means, and the honest answer — the definition's default — is a fact
+ * about the node rather than about the drawing.
+ */
+function roiView(value: unknown): RoiView {
+  return value === 'dorsal' || value === 'lateral' ? value : 'frontal'
+}
+
+function roiColorMode(value: unknown): RoiColorMode {
+  return value === 'preCompleteness' || value === 'region' || value === 'side' || value === 'flat'
+    ? value
+    : 'postCompleteness'
+}
+
+function roiLabelMode(value: unknown): RoiLabelMode {
+  return value === 'all' || value === 'off' ? value : 'auto'
+}
+
+function roiHemisphere(value: unknown): 'both' | 'left' | 'right' {
+  return value === 'left' || value === 'right' ? value : 'both'
 }

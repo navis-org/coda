@@ -139,10 +139,11 @@ describe('NodeBrowser filtering', () => {
       'Network',
       'Neuroglancer',
       'Profile',
+      'ROIs',
       'Scatter Plot',
       'Table',
     ])
-    expect(screen.getByText('9 nodes')).toBeTruthy()
+    expect(screen.getByText('10 nodes')).toBeTruthy()
   })
 
   it('fuzzy-searches across every category, best match first', () => {

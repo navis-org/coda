@@ -29,6 +29,8 @@
  * volume bounds and is a later refinement.
  */
 
+import { fillTriangle } from '../raster'
+
 export interface Silhouette {
   /** Width and height in pixels. */
   size: number
@@ -107,58 +109,10 @@ export function rasteriseSilhouette(
     // Nearest is smallest z in image space, so invert for brightness.
     const depth = (a[2] + b[2] + c[2]) / 3
     const shade = Math.round(255 - (255 - DEPTH_FLOOR) * depth)
-    fillTriangle(coverage, size, a, b, c, shade)
+    fillTriangle(coverage, size, size, [a[0], a[1]], [b[0], b[1]], [c[0], c[1]], shade)
   }
 
   return result
-}
-
-/**
- * Scanline-free triangle fill: bounding box plus a barycentric inside test.
- *
- * Brightest-wins rather than accumulating, so overlapping branches do not saturate into a
- * white blob — the result reads as a surface, and a thin process crossing a thick one stays
- * visible.
- */
-function fillTriangle(
-  coverage: Uint8Array,
-  size: number,
-  a: [number, number, number],
-  b: [number, number, number],
-  c: [number, number, number],
-  shade: number,
-): void {
-  const minX = Math.max(0, Math.floor(Math.min(a[0], b[0], c[0])))
-  const maxX = Math.min(size - 1, Math.ceil(Math.max(a[0], b[0], c[0])))
-  const minY = Math.max(0, Math.floor(Math.min(a[1], b[1], c[1])))
-  const maxY = Math.min(size - 1, Math.ceil(Math.max(a[1], b[1], c[1])))
-  if (minX > maxX || minY > maxY) return
-
-  const area = (b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])
-  if (area === 0) {
-    // Degenerate after projection — an edge-on triangle. Still worth a mark, or a neuron
-    // viewed along a flat axis would lose whole branches.
-    markPixel(coverage, size, Math.round(a[0]), Math.round(a[1]), shade)
-    return
-  }
-
-  for (let y = minY; y <= maxY; y++) {
-    for (let x = minX; x <= maxX; x++) {
-      const px = x + 0.5
-      const py = y + 0.5
-      const w0 = ((b[0] - px) * (c[1] - py) - (c[0] - px) * (b[1] - py)) / area
-      const w1 = ((c[0] - px) * (a[1] - py) - (a[0] - px) * (c[1] - py)) / area
-      const w2 = 1 - w0 - w1
-      if (w0 < 0 || w1 < 0 || w2 < 0) continue
-      markPixel(coverage, size, x, y, shade)
-    }
-  }
-}
-
-function markPixel(coverage: Uint8Array, size: number, x: number, y: number, shade: number): void {
-  if (x < 0 || y < 0 || x >= size || y >= size) return
-  const at = y * size + x
-  if (coverage[at]! < shade) coverage[at] = shade
 }
 
 /**

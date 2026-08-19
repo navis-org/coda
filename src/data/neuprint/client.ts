@@ -31,10 +31,21 @@ export interface RequestOptions {
   token?: string | undefined
 }
 
+/**
+ * What to do with a successful body.
+ *
+ * Everything neuPrint serves is JSON except the region meshes, which are OBJ text. Threading a
+ * mode through here rather than writing a second transport is what keeps the token handling, the
+ * 401 channel and — the one that cost a debugging round trip — the empty-404-means-no-proxy tell
+ * in exactly one place.
+ */
+type BodyMode = 'json' | 'text'
+
 async function request<T>(
   path: string,
   init: RequestInit,
   options: RequestOptions = {},
+  mode: BodyMode = 'json',
 ): Promise<T> {
   const base = options.baseUrl ?? getBaseUrl()
   const token = options.token ?? getToken()
@@ -46,7 +57,7 @@ async function request<T>(
 
   const headers = new Headers(init.headers)
   headers.set('Authorization', `Bearer ${token}`)
-  headers.set('Accept', 'application/json')
+  headers.set('Accept', mode === 'text' ? '*/*' : 'application/json')
   if (init.body) headers.set('Content-Type', 'application/json')
 
   let response: Response
@@ -90,11 +101,16 @@ async function request<T>(
     }
     throw new NeuPrintError(`neuPrint returned ${response.status}: ${body}`, response.status)
   }
-  return (await response.json()) as T
+  return (mode === 'text' ? await response.text() : await response.json()) as T
 }
 
 export function get<T>(path: string, options?: RequestOptions): Promise<T> {
   return request<T>(path, { method: 'GET' }, options)
+}
+
+/** A GET whose body is not JSON. Region meshes are OBJ; nothing else here uses it. */
+export function getText(path: string, options?: RequestOptions): Promise<string> {
+  return request<string>(path, { method: 'GET' }, options, 'text')
 }
 
 /**

@@ -42,6 +42,110 @@ const ROI_CENTERS: Record<string, [number, number, number]> = {
 const DEFAULT_CENTER: [number, number, number] = [0, 0, 0]
 
 
+/**
+ * A synthetic neuropil shell for one region.
+ *
+ * The counterpart of `generateSkeleton`, and it exists for the same reason: without it the ROIs
+ * widget is a dead card on every bundled example and in every test that cannot reach a network,
+ * which is precisely the set of places anything here is actually verified.
+ *
+ * A UV sphere rather than a point cloud, because the outline tracer downstream fills *triangles*
+ * — a shell with no faces projects to a dotty ring rather than a region. Perturbed by a few
+ * seeded sinusoids so the result reads as an anatomical blob and not as a ball, and seeded off
+ * the region's name so a reload draws the same brain.
+ *
+ * Radii are scaled to enclose the arbors that `generateSkeleton` grows toward the same centre,
+ * so a neuron drawn beside its regions sits inside them rather than beside them.
+ */
+export function generateRoiMesh(roi: string, options: RoiMeshOptions = {}): MeshGeometry {
+  const rings = options.rings ?? 12
+  const segments = options.segments ?? 18
+  const rand = mulberry32(hashName(roi))
+
+  const [cx, cy, cz] = roiMeshCenter(roi)
+  // Anisotropic on purpose: three equal radii give a ball, and a row of balls reads as a
+  // diagram of something other than a brain.
+  const rx = 1500 + rand() * 1300
+  const ry = 1400 + rand() * 1200
+  const rz = 1300 + rand() * 1100
+  const phase: [number, number, number] = [rand() * TAU, rand() * TAU, rand() * TAU]
+  const freq: [number, number, number] = [2 + rand() * 2, 2 + rand() * 2.5, 3 + rand() * 2]
+
+  const positions: number[] = []
+  const indices: number[] = []
+
+  for (let i = 0; i <= rings; i++) {
+    const theta = (i / rings) * Math.PI
+    const sinTheta = Math.sin(theta)
+    const cosTheta = Math.cos(theta)
+    for (let j = 0; j <= segments; j++) {
+      const phi = (j / segments) * TAU
+      const dx = sinTheta * Math.cos(phi)
+      const dy = cosTheta
+      const dz = sinTheta * Math.sin(phi)
+      const n =
+        1 +
+        0.17 * Math.sin(freq[0] * dx + phase[0]) +
+        0.13 * Math.sin(freq[1] * dy + phase[1]) +
+        0.11 * Math.sin(freq[2] * dz + phase[2])
+      positions.push(cx + dx * rx * n, cy + dy * ry * n, cz + dz * rz * n)
+    }
+  }
+
+  const stride = segments + 1
+  for (let i = 0; i < rings; i++) {
+    for (let j = 0; j < segments; j++) {
+      const a = i * stride + j
+      const b = a + stride
+      // The pole rows collapse to a point, so one triangle of each quad is degenerate there
+      // and is skipped — a zero-area face is valid OBJ and a nuisance to every consumer.
+      if (i !== 0) indices.push(a, b, a + 1)
+      if (i !== rings - 1) indices.push(a + 1, b, b + 1)
+    }
+  }
+
+  return {
+    bodyId: 0,
+    label: roi,
+    positions: new Float32Array(positions),
+    indices: new Uint32Array(indices),
+  }
+}
+
+export interface RoiMeshOptions {
+  rings?: number
+  segments?: number
+}
+
+const TAU = Math.PI * 2
+
+/** FNV-1a, so a region's shape is stable across reloads and across processes. */
+function hashName(name: string): number {
+  let h = 2166136261
+  for (let i = 0; i < name.length; i++) {
+    h ^= name.charCodeAt(i)
+    h = Math.imul(h, 16777619)
+  }
+  return h >>> 0
+}
+
+/**
+ * Where a region's shell sits.
+ *
+ * `roiCenter` answers the origin for a name it does not know, which is right for a *skeleton* —
+ * one neuron drifting toward an unknown target is harmless — and wrong for a shell, because
+ * every unknown region would then be the same solid at the same place. Both mock connectomes
+ * name only regions the table knows, so the fallback is unreachable today; it exists so that
+ * adding a region to `generate.ts` and forgetting this table produces a visibly separate blob
+ * rather than a pile at the origin.
+ */
+function roiMeshCenter(roi: string): [number, number, number] {
+  const known = ROI_CENTERS[roi]
+  if (known) return known
+  const rand = mulberry32(hashName(roi) ^ 0x5f3a)
+  return [(rand() - 0.5) * 14000, (rand() - 0.5) * 8000, (rand() - 0.5) * 6000]
+}
+
 export function roiCenter(roi: string): [number, number, number] {
   return ROI_CENTERS[roi] ?? DEFAULT_CENTER
 }

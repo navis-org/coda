@@ -270,7 +270,7 @@ export function synapsesCypher(req: SynapseRequest): string {
  * properties".
  */
 export function metaCypher(): string {
-  return 'MATCH (m:Meta) RETURN m.neuronProperties, m.primaryRois, m.superLevelRois, m.statusDefinitions, m.voxelSize, m.voxelUnits LIMIT 1'
+  return 'MATCH (m:Meta) RETURN m.neuronProperties, m.primaryRois, m.superLevelRois, m.statusDefinitions, m.voxelSize, m.voxelUnits, m.roiHierarchy LIMIT 1'
 }
 
 /**

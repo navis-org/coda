@@ -86,6 +86,18 @@ export interface SkeletonsValue {
 
 export interface MeshGeometry {
   readonly bodyId: number
+  /**
+   * What this mesh is called, where a number is not what it is called.
+   *
+   * Every mesh here was a neuron until region meshes arrived, and a region has no body id —
+   * `ME(R)` is its name. `bodyId` stays required because everything that draws or exports a
+   * mesh set keys on it, and for a region it carries the item's ordinal, which is an index and
+   * not an identifier. Identity lives where it always has, in the attribute table's row.
+   *
+   * The one thing that genuinely needs the name is the export: without this, a set of region
+   * meshes writes itself out as `regions-3.obj`.
+   */
+  readonly label?: string
   /** xyz interleaved. */
   readonly positions: Float32Array
   /** Triangle indices into `positions`. */

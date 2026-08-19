@@ -5220,3 +5220,307 @@ details[open] > summary.tile__label {
 .download-body__go {
   width: 100%;
 }
+
+/* ---------------------------------------------------------------------------
+   ROIs — a dataset's neuropils, outlined.
+
+   The map is a plain <svg> rather than a canvas, which is what makes the export
+   vector for free: `ui/export.ts` clones the live element. Everything here is
+   layout and chrome; the geometry is `roiProjection.ts` and the colours are
+   resolved in JS as literal hex, which is the reason vector export keeps them.
+   --------------------------------------------------------------------------- */
+
+.rois {
+  display: grid;
+  grid-template-columns: 1fr 240px;
+  grid-template-rows: 1fr auto auto;
+  grid-template-areas: 'map rail' 'ctl ctl' 'cap cap';
+  min-height: 0;
+}
+
+/* A card has no room for a rail; the same component drops it via `compact`. */
+.rois:not(:has(.rois__rail)) {
+  grid-template-columns: 1fr;
+  grid-template-areas: 'map' 'ctl' 'cap';
+}
+
+.rois--empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  padding: 1.2rem;
+  text-align: center;
+}
+
+.rois__map {
+  grid-area: map;
+  position: relative; /* the actions overlay anchors to this, not to a distant ancestor */
+  min-width: 0;
+  min-height: 0;
+}
+
+/*
+ * A definite height, not `min-height`.
+ *
+ * The SVG scales to its box, and a box sized only by `min-height` collapses to its content —
+ * which for an <svg> with a viewBox is whatever the intrinsic ratio yields, so the picture ends
+ * up a fixed size regardless of the card. Dataset Summary's completeness columns shipped that
+ * bug once and drew 98% and 57% at nearly the same height.
+ */
+.rois__map svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.roi {
+  transition: opacity 90ms linear;
+  cursor: pointer;
+}
+
+.roi__label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  fill: var(--text-primary);
+  /* Haloed, so a name over a saturated fill stays legible without a box behind it. */
+  paint-order: stroke;
+  stroke: var(--surface-2);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+  text-anchor: middle;
+  pointer-events: none;
+}
+
+.rois__rail {
+  grid-area: rail;
+  border-left: 1px solid var(--border);
+  background: var(--surface-1);
+  padding: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.rois__name {
+  margin: 0 0 0.35rem;
+  font-family: var(--font-mono);
+  font-size: 0.98rem;
+  font-weight: 620;
+}
+
+.rois__ctl {
+  grid-area: ctl;
+  border-top: 1px solid var(--border);
+  background: var(--surface-3);
+  padding: 0.35rem 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.rois__slider {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.74rem;
+  color: var(--text-muted);
+}
+
+.rois__slider input {
+  width: 90px;
+  accent-color: var(--accent);
+}
+
+.rois__cap {
+  grid-area: cap;
+  border-top: 1px solid var(--border);
+  padding: 0.3rem 0.55rem;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.rois__cap .sep {
+  color: var(--border-strong);
+}
+
+/* An admission carries data, so it takes readable ink rather than the chrome grey. */
+.rois__cap .warn {
+  color: var(--text-secondary);
+}
+
+.rois__load {
+  appearance: none;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text-primary);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-ui);
+  font-size: 0.82rem;
+  padding: 0.4rem 0.8rem;
+  cursor: pointer;
+}
+
+.rois__load:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.rois__load:disabled {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.rois__note {
+  margin: 0;
+  max-width: 42ch;
+  font-size: 0.74rem;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.rois__progress {
+  width: min(280px, 80%);
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.rois__progress i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 120ms linear;
+}
+
+.rois__spacer {
+  flex: 1;
+}
+
+.rois__slider select {
+  font-family: var(--font-ui);
+  font-size: 0.74rem;
+  padding: 0.18rem 0.3rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-primary);
+}
+
+/*
+ * The colour key, over the map's top-right.
+ *
+ * Reuses `.colorbar` from the network legend rather than growing a second ramp: two viewers
+ * drawing their own is how two viewers end up disagreeing about what a ramp's ends look like.
+ */
+.rois__legend {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.15rem;
+  /* Never in the way of a region underneath it. */
+  pointer-events: none;
+}
+
+.rois__legend-title {
+  font-size: 0.66rem;
+  color: var(--text-secondary);
+}
+
+/*
+ * The region-group dropdown.
+ *
+ * A `<details>` rather than a `<select multiple>`: a multi-select needs modifier-clicks to add
+ * to a selection, which is a gesture nobody expects in a toolbar, and it cannot show a count of
+ * what is on. Native disclosure gives keyboard operation and Escape for free.
+ */
+.rois__groups {
+  position: relative;
+  font-size: 0.74rem;
+}
+
+.rois__groups > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 0.2rem 0.45rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-primary);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  white-space: nowrap;
+}
+
+.rois__groups > summary::-webkit-details-marker {
+  display: none;
+}
+
+.rois__groups > summary::after {
+  content: '▾';
+  color: var(--text-muted);
+}
+
+.rois__groups[open] > summary {
+  background: var(--surface-active);
+}
+
+/* How many groups are on, so a filtered map says so without being opened. */
+.rois__count {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  padding: 0 0.28rem;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--text-primary);
+}
+
+.rois__menu {
+  position: absolute;
+  z-index: 5;
+  /* Upwards: the control bar sits at the bottom of the card, so a menu below it is off-card. */
+  bottom: calc(100% + 4px);
+  left: 0;
+  min-width: 160px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 0.35rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-panel);
+}
+
+.rois__menu label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.16rem 0.25rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.rois__menu label:hover {
+  background: var(--surface-hover);
+}
+
+.rois__menu input {
+  accent-color: var(--accent);
+}

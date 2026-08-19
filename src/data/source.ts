@@ -48,6 +48,19 @@ export interface DatasetInfo {
    * callers are expected to say so rather than sum anyway.
    */
   primaryRois?: string[]
+  /**
+   * Which group each primary region sits in, where the source publishes a hierarchy.
+   *
+   * The level *above* the primary set — `EB`, `FB`, `NO` and `PB` are all `CX` — which is what
+   * lets a map of a hundred and forty-four regions be read a system at a time instead of hunted
+   * across. Keyed by region rather than listed by group because both surfaces need it that way:
+   * a filter asks "what is this one in", and the group list is the unique values.
+   *
+   * A region absent from this has no group, which is a real answer: hemibrain lists `AL(L)` and
+   * `GNG` directly under the dataset root. Undefined altogether means the source published no
+   * hierarchy, and the control that would filter by it is simply not offered.
+   */
+  roiSuper?: Record<string, string>
   /** Neuron statuses present in this dataset, for status filters. */
   statuses: string[]
   neuronCount?: number
@@ -273,6 +286,17 @@ export interface SourceCapabilities {
    * the entire connectome to compute a figure the server already publishes.
    */
   roiSummary: boolean
+  /**
+   * Whether the source publishes a *mesh* per region — the neuropil shells themselves.
+   *
+   * Separate from `roiSummary`, which is the numbers, because the two are published in
+   * different places and a source can plausibly have one without the other: neuPrint serves
+   * the summaries from a cached endpoint and the geometry from another, and mushroombody
+   * answers the first with zero rows. Separate from `meshes` for the reason `roiSummary` is
+   * separate from `fetchRoiCounts` — that one needs a body id list, and this is a fact about
+   * the volume, which is what lets it answer a dataset node with nothing else wired.
+   */
+  roiMeshes: boolean
 }
 
 export interface DataSource {
@@ -335,6 +359,23 @@ export interface DataSource {
    * is the node's question rather than the source's. Same call `roiCounts` makes.
    */
   fetchRoiConnectivity?(req: RoiSummaryRequest): Promise<TableValue>
+
+  /**
+   * One mesh per region, as an ordinary `MeshesValue`.
+   *
+   * Optional and gated by `capabilities.roiMeshes`. A `MeshesValue` rather than a new kind
+   * because that type already pairs geometry with one attribute row per item, which is exactly
+   * one row per region — so the region's name, whether it is primary, and anything else known
+   * about it ride in the attribute table, where every colour encoding already knows how to
+   * find them.
+   *
+   * Items carry `label` rather than a meaningful `bodyId`; see `MeshGeometry`.
+   *
+   * **Geometry is nanometres, like everything else here.** A source whose meshes arrive in
+   * voxels has to scale them, or the shells sit a whole factor away from the neurons anyone
+   * draws beside them — with nothing failing, because both sets are internally consistent.
+   */
+  fetchRoiMeshes?(req: RoiMeshRequest): Promise<MeshesValue>
 
   /**
    * Cheapest geometry for a single neuron, for a thumbnail.
@@ -413,6 +454,26 @@ export interface RoiSummaryRequest {
 }
 
 /**
+ * The neuropil shells of a dataset.
+ *
+ * `rois` omitted means the dataset's primary set — the one that tiles the volume — rather than
+ * every region it publishes. That default is the whole point: hemibrain lists 229 regions of
+ * which 63 tile, and male-CNS 5,619 of which 144, so asking for "the regions" without
+ * qualification and getting all of them would be thousands of requests for a picture in which
+ * every shell is drawn inside another one.
+ *
+ * `onProgress` is here for the same reason `GeometryRequest` has it: this is slow *per region*,
+ * and only the source knows how many have landed.
+ */
+export interface RoiMeshRequest {
+  datasetId: string
+  /** Which regions. Omitted means the dataset's primary set. */
+  rois?: string[]
+  onProgress?: (fraction: number, note?: string) => void
+  signal?: AbortSignal
+}
+
+/**
  * Per-ROI synapse counts: how many belong to reconstructed neurons, against how many are
  * there at all.
  *
@@ -461,6 +522,22 @@ export const ROI_CONNECTIVITY_SCHEMA: TableSchema = tableSchema(
   column('target', 'str'),
   column('count', 'i64'),
   column('weight', 'f64'),
+)
+
+/**
+ * What a source says about each region mesh it hands back, one row per item.
+ *
+ * Deliberately small. `roi` is the identity — `MeshGeometry.bodyId` is an ordinal for a region
+ * — and `primary` is the one qualifier a caller cannot work out for itself. Everything else the
+ * ROIs widget shows is either derived from the geometry (volume, surface area) or lives in the
+ * completeness table, and joining those in here would make one endpoint's answer depend on
+ * another's having landed.
+ *
+ * A source with more to say may add columns; nodes address columns by name.
+ */
+export const ROI_MESH_SCHEMA: TableSchema = tableSchema(
+  column('roi', 'str'),
+  column('primary', 'bool'),
 )
 
 export const CANONICAL_SCHEMAS: SourceSchemas = {

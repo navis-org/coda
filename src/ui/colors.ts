@@ -13,8 +13,9 @@
  *    from these ramps fails the normal-vision floor (best candidate: red, ΔE 7.1 vs
  *    orange). Hence three hues + achromatic gray, with socket *shape* and an
  *    always-visible socket label carrying identity. See theme.css.
- *  - Sequential: single blue hue, monotonic in lightness. Direction flips by mode so
- *    "near zero" always recedes toward the surface it's drawn on.
+ *  - Sequential: blue or red, each a single hue monotonic in lightness. Direction flips by
+ *    mode so "near zero" always recedes toward the surface it's drawn on. The two are never
+ *    shown at once - a viewer picks one per measure - so this is not an all-pairs case.
  *
  * If you swap these values, re-run the validator — do not reason about ΔE.
  */
@@ -144,15 +145,37 @@ function sampleRamp(ramp: string[], t: number): string {
 }
 
 /**
+ * Which hue a sequential ramp runs through.
+ *
+ * Two, and never more without re-running the validator. The point of a second one is not decoration:
+ * where a viewer switches between two measures of the same kind — presynaptic and postsynaptic
+ * completeness, which are otherwise identical pictures over different numbers — the hue is what
+ * says *which* is on screen, so a glance is not ambiguous the way two blues would be.
+ */
+export type SequentialHue = 'blue' | 'red'
+
+/**
  * Sequential colour for a normalised magnitude.
  *
  * Direction is mode-dependent on purpose: on a light surface low values take the
  * lightest step and recede into the page; on a dark surface they take the darkest step
  * instead. Flipping this is what stops a dark-mode heatmap from reading as a negative.
+ *
+ * The hue argument selects a ramp and changes nothing else — same clamp, same flip. A second
+ * function would have been a second copy of that flip, which is exactly the rule that makes a
+ * dark-mode ramp read as a negative when it drifts.
+ *
+ * **Red is a sequential ramp on the same terms as blue**, checked rather than assumed when it
+ * gained this second job: monotonic in lightness light-to-dark, luminance spanning 0.729 to 0.055
+ * against blue's 0.743 to 0.038, and a minimum step of 0.032 against blue's 0.018 — so its steps
+ * are if anything better separated. End contrasts against both surfaces match blue's within a
+ * tenth of a stop. It was already in the validated palette as the diverging scale's positive arm;
+ * what is new is using the whole of it.
  */
-export function sequentialColor(t: number, mode: Mode): string {
+export function sequentialColor(t: number, mode: Mode, hue: SequentialHue = 'blue'): string {
+  const ramp = hue === 'red' ? RED_RAMP : BLUE_RAMP
   const clamped = Math.max(0, Math.min(1, Number.isFinite(t) ? t : 0))
-  return mode === 'light' ? sampleRamp(BLUE_RAMP, clamped) : sampleRamp(BLUE_RAMP, 1 - clamped)
+  return mode === 'light' ? sampleRamp(ramp, clamped) : sampleRamp(ramp, 1 - clamped)
 }
 
 /**

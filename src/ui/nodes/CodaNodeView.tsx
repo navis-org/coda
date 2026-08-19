@@ -80,8 +80,9 @@ const SELF_DRAWING_NODE_TYPES = new Set([
   'out.viewer3d',
   'out.neuroglancer',
   'out.profile',
-  // The only one with no outputs at all, so it could never draw from anything else.
+  // The two with no outputs at all, so they could never draw from anything else.
   'out.datasetSummary',
+  'out.rois',
 ])
 
 /**
