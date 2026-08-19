@@ -2,7 +2,7 @@
   "name": "coda",
   "version": "0.1.0-alpha.2",
   "private": true,
-  "description": "Connectome Data Analysis — node-graph analysis pipelines for connectomic data",
+  "description": "Connectome Data Analysis \u2014 node-graph analysis pipelines for connectomic data",
   "license": "MIT",
   "type": "module",
   "packageManager": "pnpm@10.11.0",
@@ -10,14 +10,16 @@
     "node": ">=20"
   },
   "scripts": {
-    "dev": "vite",
     "build": "tsc -b && vite build",
+    "dev": "vite",
+    "export:check": "vitest run src/export/python/export.test.ts && python3 scripts/check-export.py",
+    "export:golden": "UPDATE_GOLDEN=1 vitest run src/export/python/export.test.ts",
+    "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
+    "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc -b --noEmit",
-    "lint": "eslint .",
-    "format": "prettier --write \"src/**/*.{ts,tsx,css}\""
+    "typecheck": "tsc -b --noEmit"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.8",

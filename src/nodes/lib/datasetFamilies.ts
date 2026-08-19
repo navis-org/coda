@@ -127,8 +127,24 @@ const MOCK_FAMILIES: DatasetFamily[] = [
 
 export const DATASET_FAMILIES: DatasetFamily[] = [...NEUPRINT_FAMILIES, ...MOCK_FAMILIES]
 
+/** Node types are `dataset.<family key>`. Never change it; it is in every saved file. */
+export const DATASET_NODE_PREFIX = 'dataset.'
+
 export function datasetFamily(key: string): DatasetFamily | undefined {
   return DATASET_FAMILIES.find((f) => f.key === key)
+}
+
+/**
+ * The family behind a `dataset.<key>` node type, or undefined for anything else.
+ *
+ * The `dataset.` prefix is constructed in four places (`nodes/dataset`, `nodeBodies`,
+ * `startCards`, the starters); this is the one place that reads it back, so it belongs beside
+ * the table rather than as string surgery in whichever module happens to need it.
+ */
+export function familyForNodeType(type: string): DatasetFamily | undefined {
+  return type.startsWith(DATASET_NODE_PREFIX)
+    ? datasetFamily(type.slice(DATASET_NODE_PREFIX.length))
+    : undefined
 }
 
 // ---------------------------------------------------------------------------

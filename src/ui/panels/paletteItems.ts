@@ -12,7 +12,8 @@ import { isAssignable } from '../../core/types'
 import { isAnnotation, nodeDefsByCategory } from '../../core/registry'
 import type { GraphState } from '../../store/graphStore'
 import { pickGraphFile } from '../../store/persistence'
-import { downloadGraph } from '../export'
+import { downloadGraph, downloadNotebook } from '../export'
+import { canExportNotebook } from '../../export/canExport'
 import { appElement, toggleFullscreen } from '../fullscreen'
 import { EXAMPLES } from '../../examples'
 import { plural } from '../format'
@@ -124,6 +125,10 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
    */
   const annotated = selectedNode !== undefined && isAnnotation(selectedNode.type)
   const computable = single !== undefined && !annotated
+  // Asked once, up front. `buildCommandItems` runs on every store change, so this deliberately
+  // comes from `canExport` rather than from the exporter — importing the latter to answer a
+  // question about a menu row would put every emitter in the main chunk.
+  const exportRefusal = canExportNotebook(store.graph)
 
   const items: PaletteItem[] = [
     {
@@ -251,6 +256,24 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
       action: 'Graph',
       hint: 'Download this graph as .coda.json',
       perform: () => downloadGraph(store.graph),
+    },
+    {
+      id: 'cmd:export-notebook',
+      label: 'Export as Jupyter Notebook',
+      action: 'Graph',
+      /*
+       * The refusal lands in `disabled` and the hint rather than in a message after the click,
+       * which is the one real difference from the same item in the Save menu. A menu has room
+       * to answer back; the palette closes on pick, so a lit row that did nothing would be the
+       * one place these flags stop being honest about live state — and on a bundled example,
+       * which is every synthetic graph anyone starts from, it is the *usual* state rather than
+       * an edge case.
+       */
+      hint: exportRefusal
+        ? `${exportRefusal.reason} — ${exportRefusal.fix}`
+        : 'Download this graph as a Jupyter notebook (neuprint-python, pandas, navis)',
+      disabled: exportRefusal !== undefined,
+      perform: () => void downloadNotebook(store.graph, { appVersion: __APP_VERSION__ }),
     },
 
     {

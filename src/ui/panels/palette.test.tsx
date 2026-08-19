@@ -12,6 +12,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { addNode, emptyGraph } from '../../core/graph'
 import { getNodeDef } from '../../core/registry'
 import { T } from '../../core/types'
 import { MockSource } from '../../data/mock/MockSource'
@@ -62,6 +63,40 @@ describe('buildCommandItems', () => {
       useGraphStore.getState().setParam('filter', 'value', '25')
     })
     expect(byId(commands(), 'cmd:undo').disabled).toBe(false)
+  })
+
+  /*
+   * The bundled examples all run on a synthetic connectome, so a lit "Export as Jupyter Notebook" on
+   * a fresh canvas would be a row that closes the palette and does nothing — and it is the
+   * *usual* state rather than an edge case, which is why it is asserted here rather than left
+   * to the exporter's own suite.
+   */
+  it('disables Export as Jupyter Notebook on a synthetic dataset, and says which node', () => {
+    const item = byId(commands(), 'cmd:export-notebook')
+    expect(item.disabled).toBe(true)
+    expect(item.hint).toContain('Optic Lobe (mini)')
+    expect(item.hint).toContain('swap in a real dataset')
+  })
+
+  it('enables Export as Jupyter Notebook once the dataset is a real one', () => {
+    act(() => {
+      let graph = emptyGraph('Real')
+      graph = addNode(graph, {
+        id: 'ds',
+        type: 'dataset.hemibrain',
+        position: { x: 0, y: 0 },
+        params: { version: 'v1.2.1' },
+      })
+      useGraphStore.getState().loadGraph(graph)
+    })
+    const item = byId(commands(), 'cmd:export-notebook')
+    expect(item.disabled).toBe(false)
+    expect(item.hint).toContain('Jupyter notebook')
+  })
+
+  it('disables Export as Jupyter Notebook on an empty canvas', () => {
+    act(() => useGraphStore.getState().newGraph())
+    expect(byId(commands(), 'cmd:export-notebook').disabled).toBe(true)
   })
 
   it('disables selection commands with nothing selected', () => {

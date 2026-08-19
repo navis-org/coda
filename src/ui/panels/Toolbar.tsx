@@ -10,7 +10,7 @@ import type { WorkflowSummary } from '../../store/library'
 import { findByName } from '../../store/library'
 import { useErrorCount, useGraphStore, useStaleCount } from '../../store/graphStore'
 import { pickGraphFile } from '../../store/persistence'
-import { downloadGraph } from '../export'
+import { downloadGraph, downloadNotebook } from '../export'
 import { formatAgo, plural } from '../format'
 import { appElement, toggleFullscreen, useIsFullscreen } from '../fullscreen'
 import { SourcesPanel } from './SourcesPanel'
@@ -578,6 +578,7 @@ function SaveMenu({ close }: { close: () => void }) {
   const library = useGraphStore((s) => s.library)
   const loaded = useGraphStore((s) => s.libraryLoaded)
   const [confirming, setConfirming] = useState(false)
+  const [refusal, setRefusal] = useState<{ reason: string; detail: string } | undefined>()
 
   const name = (graph.meta?.name ?? '').trim() || 'Untitled'
   const conflict = findByName(library, name)
@@ -623,6 +624,20 @@ function SaveMenu({ close }: { close: () => void }) {
         </button>
       )}
 
+      {/*
+        The caveat sits under the entry it is about, not at the foot of the menu, where it read
+        as a note on everything including the download beneath it. It closes that section, so it
+        hugs the rule below it — and it is a caveat rather than a hint, so it stands one step
+        quieter than the line under every item.
+
+        One sentence, and it stays one line: the advice that used to follow it is what the
+        download entry's own hint already says, and a second line here turned an aside into a
+        paragraph the eye stops at on the way to the rows.
+      */}
+      <div className="dropdown__note dropdown__note--caveat">
+        Browser storage is per-profile and is cleared with the site data.
+      </div>
+
       <div className="dropdown__group">
         <button
           type="button"
@@ -635,11 +650,39 @@ function SaveMenu({ close }: { close: () => void }) {
           <strong>Download .coda.json</strong>
           <span>A file you can share, back up, or open on another machine</span>
         </button>
-      </div>
 
-      <div className="dropdown__note">
-        Browser storage is per-profile and is cleared with the site data. Download the file for
-        anything you would be sorry to lose.
+        {/*
+          * The refusal is shown *in the menu* rather than as a dialog, and stays until the menu
+          * closes. A graph on a synthetic dataset cannot be exported at all, so the useful
+          * thing is a sentence naming what to change — a modal saying the same would put
+          * browser chrome in front of the canvas the user has to go and edit.
+          */}
+        {refusal ? (
+          <div className="dropdown__confirm">
+            <p>
+              Cannot export: {refusal.reason}. {refusal.detail}
+            </p>
+            <div>
+              <button type="button" className="btn" onClick={() => setRefusal(undefined)}>
+                OK
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="dropdown__item"
+            onClick={() => {
+              void downloadNotebook(graph, { appVersion: __APP_VERSION__ }).then((result) => {
+                if (result.ok) close()
+                else setRefusal(result)
+              })
+            }}
+          >
+            <strong>Export as Jupyter Notebook</strong>
+            <span>A Jupyter notebook using neuprint-python, pandas and navis</span>
+          </button>
+        )}
       </div>
     </>
   )

@@ -1,0 +1,53 @@
+# Validity of the generated notebooks.
+#
+# Split out from `deploy.yml` rather than added to it, and the path filter is the reason. The
+# strongest pass here resolves attribute chains against the **real** neuprint-python and navis
+# — which is what catches the class of bug nothing else can see, an import that does not expose
+# what it looks like it exposes — and that needs both installed. navis is a heavy install
+# against a deploy pipeline that is otherwise well under a minute, so it runs when the exporter
+# changes and not on every push.
+#
+# `deploy.yml` still runs `pnpm test`, which covers the golden files. What is here is the half
+# that needs a Python interpreter.
+name: Notebook export
+
+on:
+  push:
+    paths:
+      - 'src/export/**'
+      - 'scripts/check-export.py'
+      - '.github/workflows/export.yml'
+  pull_request:
+    paths:
+      - 'src/export/**'
+      - 'scripts/check-export.py'
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: pnpm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - run: pnpm install --frozen-lockfile
+
+      # The libraries the generated notebooks import. Nothing is executed — no token, no
+      # network — but they have to be importable for the attribute pass to mean anything,
+      # which is why this is `--strict`: a silent skip would report success for a check that
+      # did not run.
+      - run: pip install neuprint-python navis
+
+      # Regenerates the fixtures from the current emitters and compares them to the golden
+      # files, so a stale golden fails here rather than being papered over by the next step.
+      - run: pnpm vitest run src/export/python
+
+      - run: python3 scripts/check-export.py --strict

@@ -14,6 +14,8 @@
 
 import type { MatrixValue, TableValue } from '../core/values'
 import type { CodaGraph } from '../core/graph'
+import { canExportNotebook } from '../export/canExport'
+import type { ExportRefusal } from '../export/canExport'
 import { serializeGraph } from '../core/graph'
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
@@ -127,6 +129,36 @@ export function downloadFiles(files: Array<{ name: string; parts: BlobPart[]; mi
 export function downloadGraph(graph: CodaGraph): void {
   const blob = new Blob([serializeGraph(graph)], { type: 'application/json' })
   triggerDownload(blob, `${slugify(graph.meta?.name ?? '', 'untitled')}.coda.json`)
+}
+
+/**
+ * Save the working graph as a Jupyter notebook.
+ *
+ * **The exporter is loaded on demand, and that is the point of the `await import`.** Every
+ * emitter and every generated Python helper is inert string-building that only runs when
+ * somebody asks for a notebook; statically importing it put 54 kB (17.6 kB gzipped) into the
+ * main chunk, paid on first paint by everyone. Same doctrine as elkjs, three.js and sigma —
+ * verify with `pnpm build` that `python-*.js` stays its own chunk.
+ *
+ * Async as a consequence, and the refusal is checked *before* the import so a graph that
+ * cannot be exported never pays for the download either. Returns the refusal rather than
+ * throwing: the one case that refuses is not an error, and the caller has to put it in front
+ * of somebody as a sentence they can act on.
+ */
+export async function downloadNotebook(
+  graph: CodaGraph,
+  options: { now?: string; appVersion?: string } = {},
+): Promise<{ ok: true; warnings: string[] } | ({ ok: false } & ExportRefusal)> {
+  const refusal = canExportNotebook(graph)
+  if (refusal) return { ok: false, ...refusal }
+
+  const { exportNotebook, serializeNotebook } = await import('../export/python/exporter')
+  const result = exportNotebook(graph, options)
+  if (!result.ok) return result
+
+  const blob = new Blob([serializeNotebook(result.notebook)], { type: 'application/x-ipynb+json' })
+  triggerDownload(blob, `${slugify(graph.meta?.name ?? '', 'untitled')}.ipynb`)
+  return { ok: true, warnings: result.warnings }
 }
 
 /** Filesystem-safe basename from a graph name and a node label. */

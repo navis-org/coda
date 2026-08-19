@@ -329,6 +329,181 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `ui/useDownloads.test.tsx`               | the side effect: written on an executing run, not on an unchanged one, and the auto-run warning    |
 | `ui/panels/startPage.test.tsx`           | (also) the field-guide links, in the welcome bar and the Help menu, composed against `BASE_URL`   |
 
+## Exporting a notebook
+
+`Save ▸ Export as Jupyter Notebook`, or the palette's `Graph ▸ Export as Jupyter Notebook`, writes the graph as
+a `.ipynb` built on **neuprint-python, pandas and navis** and nothing else. `src/export/python/` is the whole of it; nothing in `src/core`,
+`src/data` or `src/nodes` knows it exists, because the exporter reads the graph and the graph
+never reads back.
+
+**The contract is a faithful starting point, not a bit-identical reproduction.** It runs, and
+for the common path it answers what the canvas answered — but it is meant to be read and
+edited, so where Coda and neuprint-python genuinely differ the cell says so in a `NOTE` rather
+than contorting itself. That choice is what keeps the tier-3 nodes (Connectivity's traversal,
+Explore's search) at one generated helper each instead of a Python port of `src/nodes/lib`.
+
+**The exporter is loaded on demand.** `downloadNotebook` does `await import('./python/exporter')`,
+because every emitter and every generated Python helper is inert string-building that only runs
+when somebody asks for a notebook — statically importing it put **54 kB (17.6 kB gzipped)** into
+the main chunk, paid on first paint by everyone. Same doctrine as elkjs, three.js and sigma;
+verify with `pnpm build` that `exporter-*.js` stays its own file.
+
+**`src/export/canExport.ts` is the light half, and it exists for that reason.** Whether a graph
+can be exported is asked by two surfaces, one of them (`buildCommandItems`) on **every store
+change** — so answering it must not reach the exporter. It is also the single statement of the
+refusal policy: `reason`, `detail` for the menu's paragraph and `fix` for the palette's one
+breadcrumb segment. Two lengths, one rule; the surfaces differ in room, not in what they consider
+unexportable.
+
+**Emitters live in their own registry, keyed by node type** (`registry.ts`), not on the
+`NodeDefinition`. Two reasons: a viewer's emitter can reach `src/ui`'s palette, and a node type
+with no emitter degrades to a TODO cell rather than failing to compile. The cost is real and is
+the thing to watch — an emitter can quietly stop agreeing with the `evaluate` it mirrors, and
+nothing type-checks the pair. `coverage.test.ts` is the tripwire: every registered type either
+has an emitter or is named in `NO_EMITTER` with a reason.
+
+**The two surfaces refuse differently, and that is not an inconsistency.** A menu has room to
+answer back, so the Save menu lets the click through and replaces the item with a sentence
+naming what to change. The palette closes on pick, so there is nowhere to put that sentence
+afterwards — the row is `disabled` and the *hint* carries it, which is the idiom every other
+command there already follows. Getting this backwards would put a lit row in the palette that
+closes it and does nothing, and on a bundled example that is the usual state rather than an
+edge case.
+
+**A synthetic dataset is refused, and it is the only refusal.** Every other gap emits a TODO,
+because the surrounding cells are still worth having. A `dataset.mock.*` connectome is generated
+in the browser: no server, no token, no id that means anything outside the tab — so the *first*
+cell is the one with nothing behind it, and what would come out is a notebook nobody can fix
+without knowing which real dataset was meant. Note the consequence: **all five bundled examples
+are refused**, which is why the golden files are built on `fixture.ts` rather than on them.
+
+**The walk decides whether an input arrived; emitters never ask.** `ctx.wired(port)` returns a
+plain `string` because the walk refuses to call an emitter whose *required* ports are unwired or
+blocked — and `ctx.input(port)` returns `string | undefined` for the ports declared
+`required: false`, where absence is a real case. That split removed ~25 hand-written
+`if (!ctx.input('in')) return ctx.todo('Nothing is wired…')` guards, each of which hardcoded a
+port id as a string. It is the same bug `ports.test.ts` exists for: the walk reads the ids off
+`def.inputs` and cannot mistype one, where an emitter did, for months. The two failures are also
+reported apart — *unwired* is a graph somebody has not finished, *blocked* is a node this
+translation could not emit, and conflating them sends the reader to fix a wire that is already
+there.
+
+**A TODO binds nothing.** `ctx.todo()` is the single channel for "no code came out of this", and
+the walk reads it to decide whether to bind the node's output variables. Without that, a node
+that could not be translated still bound its names and everything downstream emitted working
+code referring to variables nothing ever assigned. Blocking then cascades with the upstream
+node *named*, which mirrors the scheduler reaching `blocked` down exactly the same edge —
+"nothing is wired to this" would send somebody to the canvas to fix a wire that is already there.
+
+**One `Client` per dataset node, and every fetch names it.** neuprint-python has a global default
+client and every call would find it, which reads more tidily and is wrong the moment a graph
+carries two datasets: the second `Client(...)` silently becomes the default and every earlier
+query starts answering from the other connectome.
+
+### What was verified rather than assumed
+
+Three findings, each of which was a wrong answer before it was checked:
+
+- **`df.sample(random_state=n)` is the wrong sampler.** It is a Mersenne Twister; Coda's Sample
+  node is mulberry32. Same seed, entirely different rows — a notebook that silently disagreed
+  with the canvas while looking perfectly reasonable. `coda_sample_rows` is the generator
+  transcribed into 32-bit masks, and it was checked against the TS stream across five seeds
+  before being believed.
+- **`coda_search` was cross-checked against `runSearch`** over 23 queries covering the rules
+  that are easy to lose: a missing value satisfying `!=` and nothing else, unanchored regex,
+  negation, `1200` matching a body id but not a synapse count. Zero divergence. It is
+  deliberately **matching only** — no relevance ranking and no fuzzy fallback — and the
+  docstring says so, because both change which rows come back where a result is capped.
+- **`import navis` does not expose `navis.interfaces.neuprint`.** The package root does not
+  import `interfaces`, so the obvious spelling is valid syntax, a well-bound name, and an
+  `AttributeError` at runtime. Hence `import navis.interfaces.neuprint as neu`.
+
+Every signature the emitters produce was read off **neuprint-python 0.6.3** and **navis 2.0**
+by introspection, not recalled. Two that surprise: `fetch_neurons` returns a *pair* (neurons,
+roi_counts), and there is no `fetch_mesh_neuron` in neuprint at all — meshes are navis's, which
+is also where the `lod` argument the `Detail` param maps onto lives.
+
+### Testing, and the half golden files cannot do
+
+`export.test.ts` writes `__fixtures__/everything.ipynb` from `fixture.ts` — one graph wiring up
+every emitting type — and compares. Regenerate with `pnpm export:golden` and **read the diff**;
+that is the whole point of the format.
+
+**An emitter addresses its ports by string, and that is the registry's real cost.** `ports.test.ts`
+runs every emitter against a context that records what it asks for and answers everything, then
+checks the ids against the definition. It was written after `out.profile` was found reading an
+input called `in` on a node whose port is `neurons` — so it reported "nothing is wired to this
+Profile" for a node plainly wired on the canvas, and had done since it was written. It found four
+more the same day: `out.scatter` *wrote* `scatter_plot_table` while the walk bound
+`scatter_plot_out`, so anything downstream referenced a variable nothing assigns; `out.neuroglancer`
+bound a DataFrame to a port the graph types as a URL; and `out.viewer3d` was written as a
+pass-through when it has three optional geometry sockets and emits only the selection. None of
+these fail a type check, none produce invalid Python, and the golden file recorded every one of
+them as correct.
+
+**The fixture is checked too, and that is why they hid.** `everythingGraph` had wired the 3D
+viewer to a socket it has never had — `addEdge` takes the handle it is given — so the export
+said "nothing is wired", and the golden agreed. A fixture whose coverage is a claim rather than a
+fact is worse than no fixture, because it is what everything else is checked against. So
+`export.test.ts` now asserts that every fixture edge lands on a declared port *and* that the
+fixture reaches every emitting type. The second is what forced all six dataset families in
+rather than `hemibrain` alone: they share one generated emitter, but `mushroombody` carries no
+version in its dataset id and `neuron.dataset` reads its id from a param, and neither branch is
+reachable through `hemibrain`.
+
+**A snapshot cannot tell whether the Python is valid**, which is exactly how the navis bug got
+in. `scripts/check-export.py` is the other half, in three passes: syntax, undefined names, and
+attribute resolution against the *real* installed libraries. The third is the one that earns the
+script and the only one that can catch an import that does not expose what it looks like it
+exposes; it is skipped with a notice where the libraries are absent, and `--strict` turns that
+skip into a failure so a check that did not run cannot report success. Nothing is ever executed —
+that would need a token and a network.
+
+It runs in its own workflow (`.github/workflows/export.yml`) rather than in `deploy.yml`,
+path-filtered to `src/export/**`: `pip install navis` is minutes against a deploy pipeline that
+is otherwise well under one, and it is only ever worth paying when the exporter changes.
+
+### Profile exports its metrics
+
+`out.profile` is the one viewer whose translation is worth more than a pass-through, because
+almost everything the card *shows* is an ordinary roll-up rather than a drawing.
+`coda_profile(body_ids, client, min_weight, top_n)` returns the tiles as named frames —
+`summary`, `upstream_types`, `downstream_types`, `top_upstream`, `top_downstream`, `regions`,
+`hemispheres` — ported from `nodes/lib/profileStats.ts`.
+
+**It costs three requests however many neurons are asked for**, because `fetch_adjacencies` and
+`fetch_neurons` both take the whole id list. The widget pages one neuron at a time and pays
+three per neuron *viewed*, so the notebook can do the entire table for the price of the pinned
+one — the emitted call passes the pinned neuron because that is what the canvas was showing,
+and widening it is editing one argument. This is the one place the export is straightforwardly
+better than the thing it exports.
+
+Four rules came across with it, each of which produces a plausible wrong number rather than an
+error, and each was cross-checked against the TS rather than trusted: untyped partners keep
+their own bucket (merging them puts a fictitious type at the top of the list on male-CNS);
+synapses are summed *and* distinct partners counted, because forty synapses onto one neuron is
+not forty onto forty; `roiInfo` nests, so regions are filtered to `fetch_primary_rois` before
+summing or the totals roughly double; and a null type sorts **last** on a tie, matching
+`collate`, which `na_position="last"` reproduces.
+
+### Known gaps, all of them stated in the notebook
+
+- **`Paths` with `Collapse types` on has no equivalent, and this one is not laziness.** Coda
+  traverses the *type-collapsed* graph, which finds `LC4 → PLP1 → DNp01` even where no single
+  PLP1 neuron both receives from an LC4 and projects to a DNp01 — not recoverable by collapsing
+  a neuron-level result afterwards, because the neuron-level search never returns either edge.
+  Cypher cannot walk a derived graph without GDS, so neither `fetch_shortest_paths` nor
+  `fetch_paths` can express it. Neuron-level mode exports.
+- **The Network viewer hands over a `networkx` object with the layout commented out.**
+  ForceAtlas2 has no drop-in twin, `spring_layout` is a different algorithm, and the
+  hierarchical layouts need graphviz — a system package a generated notebook has no business
+  requiring. Three options are offered as comments.
+- **Upload Table names its file rather than carrying it.** The rows live in IndexedDB, so a
+  `.coda.json` already arrives without them; the notebook emits `pd.read_csv("<filename>")`,
+  which is the same accepted cost with the same honest statement of it.
+- **Neuroglancer** emits a note: the URL is built from a published scene, which is a fetch this
+  translation does not make.
+
 ## Auto-run
 
 A checkbox beside Run. On, every change re-runs the **whole** graph, expensive nodes included;

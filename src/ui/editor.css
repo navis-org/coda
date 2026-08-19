@@ -2838,6 +2838,35 @@ a.dropdown__item {
 .dropdown__note--error {
   color: var(--status-error);
 }
+/*
+ * A caveat attached to the entry above it, rather than a hint belonging to one. It closes its
+ * section, so the padding is asymmetric — nothing above, since the item's own 6px already
+ * separates them, and just enough below to sit against the rule the next group draws. The
+ * neighbouring `margin-top` goes with it, or the two would add up to a gap that reads as a
+ * paragraph of its own.
+ *
+ * Three steps quieter than `.dropdown__item span`, because it is the only line in the menu that
+ * is about none of the rows: 9.5px, italic, and mixed towards the surface rather than given a
+ * token of its own. That puts it near 2.7:1 on the light panel, under the small-text floor —
+ * the same trade `--text-muted` already makes for the hints at 3.05:1, taken one step further
+ * for a sentence nobody has to read to use the menu.
+ *
+ * `nowrap` is what actually keeps it to one line, and the size is what keeps that free. The
+ * menu is as wide as its longest row — the notebook hint, 307px in system-ui — and the sentence
+ * measures 291px italic at 9.5px, so it fits inside a width the menu already had. Sized by eye
+ * instead, a second line would come and go with the platform's metrics. Where they do differ
+ * the menu widens by a few pixels, which is the right way for this to fail.
+ */
+.dropdown__note--caveat {
+  padding: 0 8px 4px;
+  font-size: 9.5px;
+  font-style: italic;
+  white-space: nowrap;
+  color: color-mix(in srgb, var(--text-muted) 85%, var(--surface-1));
+}
+.dropdown__note--caveat + .dropdown__group {
+  margin-top: 0;
+}
 
 /* --- the workflow library, inside the Open and Save menus ------------------
  *
