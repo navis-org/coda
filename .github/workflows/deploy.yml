@@ -1,0 +1,61 @@
+# Build and publish the app to GitHub Pages.
+#
+# The site is static, so it is the editor without a backend: the mock source, every bundled
+# example and meshes for hemibrain/MANC/optic-lobe all work, while neuPrint queries do not —
+# nothing serves the `/neuprint` proxy there. See the CORS note in README.md.
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# One deployment at a time. Deliberately not `cancel-in-progress`: a half-replaced site is
+# worse than a queued run, and the whole pipeline is well under a minute.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # pnpm's version comes from `packageManager` in package.json, so it cannot drift from
+      # what the lockfile was written with.
+      - uses: pnpm/action-setup@v4
+
+      # Pinned to the version the suite is green on locally, and that pin is load-bearing:
+      # whether jsdom's `localStorage` is live depends on the Node version (see CLAUDE.md),
+      # and the tests' isolation assumes it is not.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm test
+      # `pnpm build` is `tsc -b && vite build`, so this covers typecheck too.
+      - run: pnpm build
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
