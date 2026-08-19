@@ -31,7 +31,7 @@ import type { InferenceResult } from '../core/inference'
 import { checkConnection, inferGraph } from '../core/inference'
 import type { ParamValue } from '../core/node'
 import { defaultParams } from '../core/node'
-import { getNodeDef, isAnnotation, isViewerType, requireNodeDef } from '../core/registry'
+import { getNodeDef, isAnnotation, requireNodeDef } from '../core/registry'
 import type { NodeRunInfo, RunSummary } from '../core/scheduler'
 import { Scheduler } from '../core/scheduler'
 import type { TableSchema } from '../core/types'
@@ -307,25 +307,6 @@ function liveNodes(graph: CodaGraph, ids: readonly string[]): Set<string> {
     ids.filter((id) => {
       const node = graph.nodes.find((n) => n.id === id)
       return node !== undefined && !isAnnotation(node.type)
-    }),
-  )
-}
-
-/**
- * The subset of `ids` whose param rows can be folded away.
- *
- * Viewers only, and the restriction is what keeps the state reachable. On a card with a
- * drawing under the rows, hiding them hands the space to the drawing and the header keeps a
- * button to bring them back; on a transform node the rows *are* the card, so the flag would
- * leave a header and a footer with no visible way to undo it — and `collapsed` already says
- * "hide this node's middle" for that case. Filtered here rather than at each caller, because
- * the palette acts on a whole selection and a mixed one must still do the right thing.
- */
-function viewerNodes(graph: CodaGraph, ids: readonly string[]): Set<string> {
-  return new Set(
-    ids.filter((id) => {
-      const node = graph.nodes.find((n) => n.id === id)
-      return node !== undefined && isViewerType(node.type)
     }),
   )
 }
@@ -863,12 +844,16 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     /*
-     * Folds a viewer's param rows away, giving the drawing the space. `autoRun: false` and no
-     * cache touched anywhere: this is a card-layout decision, and a graph that re-ran because
-     * somebody tidied a widget would be the same surprise a resize used to be.
+     * Folds the param rows away, giving the space to whatever is under them — a drawing on a
+     * viewer, nothing at all on a transform node, which then simply gets shorter. `autoRun:
+     * false` and no cache touched anywhere: this is a card-layout decision, and a graph that
+     * re-ran because somebody tidied a card would be the same surprise a resize used to be.
+     *
+     * `liveNodes` for the same reason mute and collapse use it: a text note draws its own card
+     * with no header and no param band, so the flag would be state nothing can see or undo.
      */
     toggleParamRows: (nodeIds) => {
-      const ids = viewerNodes(get().graph, nodeIds)
+      const ids = liveNodes(get().graph, nodeIds)
       if (ids.size === 0) return
       const graph = get().graph
       const anyShown = graph.nodes.some((n) => ids.has(n.id) && !n.paramsCollapsed)

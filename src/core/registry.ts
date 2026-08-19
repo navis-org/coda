@@ -4,7 +4,6 @@
  */
 
 import type { NodeCategory, NodeDefinition, ParamValues } from './node'
-import { isViewer } from './node'
 
 const definitions = new Map<string, NodeDefinition>()
 
@@ -38,17 +37,6 @@ export function requireNodeDef(type: string): NodeDefinition {
  */
 export function isAnnotation(type: string): boolean {
   return definitions.get(type)?.annotation === true
-}
-
-/**
- * `isViewer` by type id, for the callers holding a node rather than a definition.
- *
- * Same relationship `isAnnotation` has to `NodeDefinition.annotation`: one implementation of
- * the rule, two ways to reach it. An unregistered type is not a viewer.
- */
-export function isViewerType(type: string): boolean {
-  const def = definitions.get(type)
-  return def !== undefined && isViewer(def)
 }
 
 export function allNodeDefs(): NodeDefinition[] {

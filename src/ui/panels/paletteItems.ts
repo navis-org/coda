@@ -9,7 +9,7 @@
 
 import type { CodaType } from '../../core/types'
 import { isAssignable } from '../../core/types'
-import { isAnnotation, isViewerType, nodeDefsByCategory } from '../../core/registry'
+import { isAnnotation, nodeDefsByCategory } from '../../core/registry'
 import type { GraphState } from '../../store/graphStore'
 import { pickGraphFile } from '../../store/persistence'
 import { downloadGraph } from '../export'
@@ -49,12 +49,6 @@ export interface PaletteItem {
   portId?: string
   /** Command items only. */
   perform?: () => void
-}
-
-/** Is this selected node one whose param rows can be folded? See `toggleParamRows`. */
-function viewerSelected(store: GraphState, id: string): boolean {
-  const node = store.graph.nodes.find((n) => n.id === id)
-  return node !== undefined && isViewerType(node.type)
 }
 
 /** Composite haystack so "table filter" or "add group" find the right row. */
@@ -208,8 +202,8 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
       id: 'cmd:fold-params',
       label: selectedNode?.paramsCollapsed ? 'Show Parameters' : 'Hide Parameters',
       action: 'Edit',
-      hint: 'Fold a viewer\u2019s parameter rows away and give the space to the display',
-      disabled: !selection.some((id) => viewerSelected(store, id)),
+      hint: 'Fold the parameter rows away, leaving the ports, the result and the header',
+      disabled: selection.length === 0,
       perform: () => store.toggleParamRows(selection),
     },
     {

@@ -1,6 +1,6 @@
 import { useRef } from 'react'
 
-import { isAnnotation, isViewerType } from '../../core/registry'
+import { isAnnotation } from '../../core/registry'
 import { useGraphStore } from '../../store/graphStore'
 import { useDismissOnOutside } from '../useDismiss'
 
@@ -77,18 +77,14 @@ export function NodeContextMenu({ screenPosition, nodeId, onClose }: NodeContext
           >
             {node.collapsed ? 'Expand' : 'Collapse'} <kbd>H</kbd>
           </button>
-          {/* Viewers only — a node with no drawing under its params gains nothing by folding
-            them and has no button in its header to unfold them with. */}
-          {isViewerType(node.type) && (
-            <button
-              type="button"
-              className="context-menu__item"
-              title="Give the space the parameter rows take to the display"
-              onClick={act(() => store.toggleParamRows(targets))}
-            >
-              {node.paramsCollapsed ? 'Show parameters' : 'Hide parameters'}
-            </button>
-          )}
+          <button
+            type="button"
+            className="context-menu__item"
+            title="Fold the parameter rows away, leaving the ports, the result and the header"
+            onClick={act(() => store.toggleParamRows(targets))}
+          >
+            {node.paramsCollapsed ? 'Show parameters' : 'Hide parameters'}
+          </button>
         </>
       )}
       <button

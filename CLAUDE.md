@@ -123,7 +123,7 @@ bundled corepack, so pnpm was installed with `npm i -g pnpm`.
 - **A column picker used to substitute a different column, and it cost 9 GB.** `resolveColumn`
   answered "the first compatible column" whenever the stored one was not in the current schema.
   That reads as helpful and is not: a schema without a column is very often a schema that has
-  not *arrived*. neuPrint publishes only the canonical seven neuron properties until
+  not _arrived_. neuPrint publishes only the canonical seven neuron properties until
   per-dataset discovery lands, so on a fresh session every discovered property looks deleted.
 
   Reported live as Firefox holding 6-10 GB on one tab. A Pivot whose `Columns` named `somaSide`
@@ -136,9 +136,9 @@ bundled corepack, so pnpm was installed with `npm i -g pnpm`.
   that does not list it, and reaches `evaluate` to fail there naming the column. A loud failure
   about the column you picked beats a quiet success on one you did not — and it makes the
   singular resolver agree with `resolveColumns`, which has always merely dropped what it could
-  not find. A value still equal to the definition's *declared* default is a suggestion rather
+  not find. A value still equal to the definition's _declared_ default is a suggestion rather
   than a decision and does still fall back, which is what lets `out.scatter` open on `pre`/`post`
-  without failing on a table that has neither. `optional` answers *off* ahead of all of it.
+  without failing on a table that has neither. `optional` answers _off_ ahead of all of it.
 
   Note the knock-on in `validateColumnParams`: each branch now states what the resolver is
   actually about to do (`Missing column: x` when it is kept, `is gone — using "y"` only where a
@@ -147,7 +147,7 @@ bundled corepack, so pnpm was installed with `npm i -g pnpm`.
 - **Nothing was warming the schema, so the first Run behaved differently from the second.**
   The chain is: a dataset node on "Latest" reads its id from `peekDatasets()` → the id lets
   `schemasFromType` call `schemasFor(datasetId)` → that kicks off discovery →
-  `reportSourceLearned` re-infers. Both peeks answered "I don't know" *without finding out*, so
+  `reportSourceLearned` re-infers. Both peeks answered "I don't know" _without finding out_, so
   the chain never started: no listing meant no dataset id, which meant discovery never ran, and
   every column picker downstream sat on the canonical seven until the first Run fetched a
   listing as a side effect. That is why running twice fixed it and reloading brought it back.
@@ -245,7 +245,7 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `nodes/output/neuroglancer.test.ts`      | what lands in the link: segments, colour agreement with the 3D view, the limit                                                 |
 | `ui/viewers/neuroglancerViewer.test.tsx` | that a restyle navigates the frame rather than remounting it                                                                   |
 | `ui/nodes/nodeResize.test.tsx`           | handles outside the clipping card, resize not invalidating a result, gesture undo                                              |
-| `ui/nodes/paramFold.test.tsx`            | folding a viewer's param rows: the header button, viewers only, one undo step, and that it costs no run                        |
+| `ui/nodes/paramFold.test.tsx`            | folding a card's param rows: the header button surviving the band, notes excepted, one undo step, and that it costs no run     |
 | `nodes/lib/neuronSearch.test.ts`         | the Explore query language: parsing, matching, null rules, the fuzzy fallback, ranking, completion                             |
 | `data/cache.test.ts`                     | IndexedDB-less degradation, fingerprint/expiry invalidation, index dedupe                                                      |
 | `ui/explore/thumbnail.test.ts`           | silhouette projection/shading, and the data-driven row spec                                                                    |
@@ -546,42 +546,44 @@ that, history was recorded from the _last_ frame, so undoing a drag moved the no
 frame — and since the final two frames of a drag are usually identical, undo after moving a
 node appeared to do nothing at all.
 
-**A viewer's param rows fold away** (`GraphNode.paramsCollapsed`, the `☰` in the card header).
-A widget is configured once and then looked at for the rest of the session, so the rows that set
-it up go on spending the card's height on a decision already made — five of them on a bar chart,
-above the chart.
+**Param rows fold away** (`GraphNode.paramsCollapsed`, the `☰` in the card header). A card is
+configured once and then read for the rest of the session, so the rows that set it up go on
+spending its height on a decision already made — five of them on a bar chart, above the chart.
 
-**Viewers only, and that restriction is the design rather than a scope cut.** On a card with a
-drawing under the rows, folding hands the space to the drawing. On a transform node the rows _are_
-the card, so folding would leave a header and a footer with no visible way back — and `collapsed`
-already says "hide this node's middle" for that case. `isViewer` moved to `core/node.ts` for it,
-with `isViewerType` in the registry beside `isAnnotation`, because the _store_ has to ask the same
-question: `toggleParamRows` filters a mixed selection down to the viewers in it, so the flag can
-never land where nothing can undo it. `CodaNodeView` re-exports `isViewer` rather than keeping a
-second copy of the comparison.
+**Every card that draws a band, not only the viewers.** On a viewer the freed height goes to the
+drawing, which is the case this was built for; elsewhere the card simply gets shorter, which is
+worth having on its own — a settled pipeline is a row of decisions already made, and reading the
+graph then means reading the titles and the wires.
 
-**The button lives in the header, not on the band.** Folded, the band is not rendered at all, so a
-toggle inside it would have nothing left to press — the same rule the minimap's corner button and
-the overlay's Style button follow. Its glyph does not change with the state and does not need to:
-the rows are either on the card or they are not, which says it louder than a pair of arrows. The
-pressed style carries that fact for a pointer that has not moved yet and `aria-pressed` for a
-reader who cannot see the card at all.
+**The button lives in the header, and that is what makes the fold safe on a card with nothing
+under the rows.** It survives the band it hides, so there is always something to press — the same
+rule the minimap's corner button and the overlay's Style button follow, and the reason the
+viewers-only restriction this shipped with was dropped rather than worked around. Its glyph does
+not change with the state and does not need to: the rows are either on the card or they are not,
+which says it louder than a pair of arrows. The pressed style carries that fact for a pointer that
+has not moved yet, and `aria-pressed` for a reader who cannot see the card at all.
+
+**Distinct from `collapsed`, which is the neighbouring control.** Collapse takes the port labels,
+the footer's summary and any preview; a folded card still says what it is holding and what it is
+wired to. That difference is what stops the pair being one control wearing two glyphs.
 
 **It is in the document, like `collapsed` and `size`.** A workspace set up for reading has to
 reopen that way; absent means shown, so every graph saved before the flag existed looks exactly as
 it did. And it costs no run — not a param, not in the provenance key, committed with
-`autoRun: false` — because a graph going stale when somebody tidies a chart reads as a scheduler
-bug. Same standing a resize has.
+`autoRun: false` — because a graph going stale when somebody tidies a card reads as a scheduler
+bug. Same standing a resize has. `liveNodes` filters the selection for the same reason mute and
+collapse use it: a text note draws its own card with no header and no band.
+
+**No band, no button.** A node whose params are all `advanced` (`out.neuroglancer`, deliberately —
+a row of pickers above a 400px embed is what `advanced` was for there) and every node with a body
+of its own, which renders its own controls instead of the generic rows. The card computes this
+from `visibleParams.length`, so it is one rule rather than a list.
 
 **Where the space actually goes depends on `data-sized`.** A card with an explicit box — anything
 resized, plus Scatter, Profile and Neuroglancer by their `defaultSize` — gives the freed height to
 the preview, which is `flex: 1`. An untouched card with no `defaultSize` sizes to its content, so
 folding makes the card shorter and leaves the preview at its 210px cap. Raising that cap on the
 fold was declined: it is a second magic number for a case one drag of a corner already answers.
-
-A viewer whose params are all `advanced` draws no band and gets no button — `out.neuroglancer` is
-the one, and the deliberate one, since a row of pickers above a 400px embed is exactly what
-`advanced` was for there.
 
 There are **two** add-node surfaces, on purpose:
 
@@ -985,7 +987,7 @@ store tick rather than resetting a camera. A second copy is how two viewers drif
 `networkRebuild.test.tsx`: mock the one expensive call and count it.
 
 **Both those files clear their mock in a `beforeEach` with a block body, and that is not
-style.** `mockClear()` returns the mock for chaining, so a concise arrow *returns a function*
+style.** `mockClear()` returns the mock for chaining, so a concise arrow _returns a function_
 from the hook — which vitest reads as a teardown callback and duly invokes after every test,
 with no arguments. It lands in the real function as `options === undefined` and reads as a bug
 in the component under test.

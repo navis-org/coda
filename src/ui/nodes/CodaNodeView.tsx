@@ -15,7 +15,8 @@ import { memo, useMemo, useState } from 'react'
 
 import type { GraphNode } from '../../core/graph'
 import type { InferenceResult, NodeIssue } from '../../core/inference'
-import { isViewer, makeInferContext } from '../../core/node'
+import type { NodeDefinition } from '../../core/node'
+import { makeInferContext } from '../../core/node'
 import { getNodeDef } from '../../core/registry'
 import type { NodeRunState } from '../../core/scheduler'
 import type { CodaType } from '../../core/types'
@@ -29,14 +30,6 @@ import { socketStyle } from '../socketStyle'
 import { ValuePreview } from '../viewers/ValuePreview'
 import { nodeBody } from './nodeBodies'
 import { NodeRunRing } from './NodeRunRing'
-
-/**
- * Output nodes render their result inline; everything else shows a one-line summary.
- *
- * Re-exported rather than defined here: the store asks the same question (see
- * `toggleParamRows`) and `src/store` must not import the UI.
- */
-export { isViewer }
 
 export interface CodaNodeData {
   [key: string]: unknown
@@ -78,6 +71,18 @@ const MIN_NODE_HEIGHT = 160
  * category the way `isViewer` is.
  */
 const SELF_DRAWING_NODE_TYPES = new Set(['out.viewer3d', 'out.neuroglancer', 'out.profile'])
+
+/**
+ * Output nodes render their result inline; everything else shows a one-line summary.
+ *
+ * Read off the definition rather than kept as a second list of the same seven type ids. The
+ * hand-maintained one had nothing keeping it in step: a new viewer node would register, show
+ * up in the palette and the browser, and then silently render with no inline preview and no
+ * resize handles — no error, no failing typecheck, nothing to blame.
+ */
+export function isViewer(def: NodeDefinition): boolean {
+  return def.category === 'visualisation'
+}
 
 function CodaNodeViewImpl({
   id,
@@ -199,17 +204,24 @@ function CodaNodeViewImpl({
   const sized = resizable && (node.size !== undefined || def.defaultSize !== undefined)
 
   /*
-   * Whether the param rows can be folded away, and whether they currently are.
+   * Whether there is a param band to fold, and whether it currently is folded.
    *
-   * Viewers only: on a card with a drawing under them, folding hands the space to the drawing,
-   * which is the whole point — a widget is configured once and looked at for the rest of the
-   * session. On a transform node the rows *are* the card, and `collapsed` already covers "hide
-   * this node's middle". `showParams` still checks `visibleParams.length`, so a viewer whose
-   * params are all `advanced` never grows a button for a band it does not draw.
+   * Every card that draws one, not only the viewers. On a viewer the freed height goes to the
+   * drawing, which is the case this was built for; on a transform node the card simply gets
+   * shorter, which is worth having on its own — a settled pipeline is a row of decisions
+   * already made, and reading the graph then means reading the titles and the wires.
+   *
+   * That it is safe everywhere comes from where the button sits: it is in the *header*, so it
+   * survives the band it hides and there is always something to press. Distinct from
+   * `collapsed`, which also takes the ports' labels, the footer's summary and any preview —
+   * folded, a node still says what it is holding.
+   *
+   * The `visibleParams.length` check is what keeps a card from growing a button for a band it
+   * does not draw: a node whose params are all `advanced`, and every node with a body of its
+   * own, which renders its own controls instead of the generic rows.
    */
-  const foldableParams = isViewer(def) && !node.collapsed && visibleParams.length > 0
-  const showParams =
-    !node.collapsed && visibleParams.length > 0 && !(foldableParams && node.paramsCollapsed)
+  const foldableParams = !node.collapsed && visibleParams.length > 0
+  const showParams = foldableParams && !node.paramsCollapsed
 
   // The type being dragged, resolved once per render rather than per socket.
   const draggedType =

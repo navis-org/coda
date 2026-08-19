@@ -341,23 +341,6 @@ export interface NodeDefinition<P extends ParamValues = ParamValues> {
   evaluate(ctx: EvalContext<P>): Promise<Record<string, Value>> | Record<string, Value>
 }
 
-/**
- * Does this node draw its result on the card, i.e. is it a viewer?
- *
- * Read off the definition rather than kept as a list of the same handful of type ids. The
- * hand-maintained one had nothing keeping it in step: a new viewer node would register, show
- * up in the palette and the browser, and then silently render with no inline preview, no
- * resize handles and no way to fold its params away — no error, no failing typecheck, nothing
- * to blame.
- *
- * Headless because the *store* has to ask it too: hiding the param rows is a viewer-only
- * state, and a card with no drawing under them has nothing to gain and no button to bring
- * them back with.
- */
-export function isViewer(def: NodeDefinition): boolean {
-  return def.category === 'visualisation'
-}
-
 // ---------------------------------------------------------------------------
 // Param helpers
 // ---------------------------------------------------------------------------
