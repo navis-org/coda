@@ -1,0 +1,503 @@
+/**
+ * DataSource: the seam between nodes and whatever holds the connectome.
+ *
+ * Nodes never talk to neuPrint (or CAVE, or a file) directly — they take a DatasetValue,
+ * resolve it to a DataSource, and call these methods. Adding a backend means implementing
+ * this interface, not touching node code.
+ *
+ * Two design points worth defending:
+ *
+ * 1. `schemas` is static and synchronous. Column schemas must be known at *edit* time so
+ *    the type system can propagate them and column pickers can populate before anything
+ *    runs. A source that only learns its columns after a query cannot participate in
+ *    schema inference, which is most of what makes the editor pleasant.
+ *
+ * 2. `peekDataset` is a synchronous cache read that may return undefined. It's how
+ *    edit-time code (ROI enums, dataset labels) gets dataset metadata without an await.
+ *    Honest about the fact that the answer may not have arrived yet.
+ */
+
+import type { TableSchema } from '../core/types'
+import { column, tableSchema } from '../core/types'
+import type {
+  MatrixValue,
+  MeshesValue,
+  PointsValue,
+  SkeletonsValue,
+  TableValue,
+} from '../core/values'
+import type { NgScene } from './neuroglancer/scene'
+import type { NeuronIndexRequest } from './neuronIndex'
+
+export type { NeuronIndexRequest } from './neuronIndex'
+
+export interface DatasetInfo {
+  id: string
+  label: string
+  description?: string
+  species?: string
+  /** ROI names available for per-ROI queries, in a sensible display order. */
+  rois: string[]
+  /**
+   * The non-overlapping subset of `rois`, when the source knows it.
+   *
+   * Per-ROI synapse counts nest — a synapse in `LO(R)` is also counted in its parent `OL(R)`
+   * — so anything that *sums* ROI counts has to restrict itself to a set that tiles the
+   * volume, or it silently double counts and reports totals larger than the neuron has
+   * synapses. Undefined means "not known yet", which is a different answer from "empty" and
+   * callers are expected to say so rather than sum anyway.
+   */
+  primaryRois?: string[]
+  /** Neuron statuses present in this dataset, for status filters. */
+  statuses: string[]
+  neuronCount?: number
+  /** e.g. "v1.2.1" — surfaced so results are attributable to a dataset version. */
+  version?: string
+}
+
+export type ConnectionDirection = 'outputs' | 'inputs'
+
+/**
+ * Accept only neurons whose `field` carries one of `values`.
+ *
+ * Separate from `typePattern`/`instancePattern` rather than folded into them, for two reasons
+ * that pull the same way. It names the **property**, so it reaches whatever schema discovery
+ * found — `class`, `hemilineage`, `superclass` — where those two are hardcoded to the only two
+ * fields anyone had needed. And in its default (literal) form it compiles to an `IN` list,
+ * which neuPrint has indexed; the equivalent regex alternation expresses the same set and
+ * forces a scan of every `:Neuron` in the dataset.
+ *
+ * An empty `values` matches **nothing**, not everything. This is the opposite of the pattern
+ * fields above and is deliberate: a pattern is a filter that narrows a population, so empty
+ * means "do not narrow", while this is a lookup of a named set, so empty means there is
+ * nothing to look up. A source implementing this must not silently return the whole dataset.
+ */
+export interface LabelMatch {
+  /** Neuron property to test. Any column of the dataset's neuron schema. */
+  field: string
+  /** Labels to accept. Empty matches nothing. */
+  values: readonly string[]
+  /**
+   * Treat each value as a regex rather than as a literal.
+   *
+   * Literal is the default because a label is text somebody copied out of a result — `SMP001(a)`
+   * and `5-HT` carry regex metacharacters, and reading those as syntax turns a lookup into a
+   * different question with no error to say so. Under `regex`, each value is matched with the
+   * same anchored, whole-string semantics `typePattern` has, so the two agree.
+   */
+  regex?: boolean
+  ignoreCase?: boolean
+}
+
+export interface FindNeuronsRequest {
+  datasetId: string
+  /** Regex matched against neuron type. Empty means "any". */
+  typePattern?: string
+  /** Regex matched against instance name. */
+  instancePattern?: string
+  /** Exact (or regex) match of one property against a set of labels. */
+  labels?: LabelMatch
+  statuses?: string[]
+  minSize?: number
+  /** ROI the neuron must innervate. */
+  roi?: string
+  limit?: number
+  signal?: AbortSignal
+}
+
+export interface ConnectivityRequest {
+  datasetId: string
+  bodyIds: number[]
+  direction: ConnectionDirection
+  minWeight?: number
+  signal?: AbortSignal
+}
+
+/**
+ * One hop of a path traversal, over neurons or over cell types.
+ *
+ * Separate from `ConnectivityRequest` because the two answer different shapes and the
+ * difference is the whole point of the node that uses this. Connectivity answers
+ * *query-relative* per-neuron rows; a path step answers **already-aggregated edges between
+ * group keys**, which is what lets the traversal run on the type graph.
+ *
+ * That aggregation has to happen in the backend rather than here. A type-level hop on
+ * male-CNS touches every neuron of every frontier type — hundreds of thousands of synapse
+ * groups — and collapses to a few hundred type→type rows. Doing it client-side would mean
+ * downloading the former to compute the latter, per hop.
+ *
+ * The frontier arrives as two lists because a group key is a type *or* a body id: a neuron
+ * with no type cannot be collapsed into one, so it stands as its own node. Passing the two
+ * separately keeps both halves of the `WHERE` index-backed, where a
+ * `coalesce(n.type, toString(n.bodyId)) IN [...]` would force a label scan.
+ */
+export interface PathStepRequest {
+  datasetId: string
+  /** Frontier cell types. Empty (or absent) when the traversal is at neuron level. */
+  types?: string[]
+  /** Frontier body ids — every neuron when not collapsing, the untyped ones when collapsing. */
+  bodyIds?: number[]
+  direction: ConnectionDirection
+  /** Group by cell type before aggregating. False keeps one node per neuron. */
+  collapseTypes: boolean
+  /**
+   * Discard edges whose *aggregated* weight is below this.
+   *
+   * Applied after the grouping, deliberately: at type level the threshold is a statement about
+   * how much traffic runs between two populations, and applying it per synapse group first
+   * would drop the many weak connections that add up to a strong pathway.
+   */
+  minWeight?: number
+  signal?: AbortSignal
+}
+
+export interface AdjacencyRequest {
+  datasetId: string
+  sourceIds: number[]
+  targetIds: number[]
+  /** Aggregate per-neuron weights up to type level before building the matrix. */
+  groupByType?: boolean
+  signal?: AbortSignal
+}
+
+export interface RoiCountsRequest {
+  datasetId: string
+  bodyIds: number[]
+  rois?: string[]
+  signal?: AbortSignal
+}
+
+export interface GeometryRequest {
+  datasetId: string
+  bodyIds: number[]
+  /**
+   * Target triangle count for the whole set, for sources with levels of detail. The source
+   * picks the finest level that fits; a source with one level ignores it.
+   */
+  triangleBudget?: number
+  /**
+   * Called as work lands, with a 0..1 fraction and an optional phase note.
+   *
+   * Geometry fetches are the only things in Coda slow enough for a progress indicator to be
+   * worth anything, and they are slow *per body* — so the source has to report, because the
+   * node calling it only knows that one long await is outstanding.
+   */
+  onProgress?: (fraction: number, note?: string) => void
+  signal?: AbortSignal
+}
+
+export interface SynapseRequest extends GeometryRequest {
+  /** Restrict to synapses of this polarity. Undefined returns both. */
+  polarity?: 'pre' | 'post'
+  minWeight?: number
+}
+
+export interface RawQueryRequest {
+  datasetId: string
+  query: string
+  signal?: AbortSignal
+}
+
+export interface ViewerSceneRequest {
+  datasetId: string
+  signal?: AbortSignal
+}
+
+export interface CoarseGeometryRequest {
+  datasetId: string
+  bodyId: number
+  signal?: AbortSignal
+}
+
+/** The cheapest triangle mesh a source can produce for one neuron, in nanometres. */
+export interface CoarseGeometry {
+  /** xyz interleaved. */
+  positions: Float32Array
+  indices: Uint32Array
+}
+
+export interface SourceSchemas {
+  /** Output of findNeurons. Must include a `bodyId` column. */
+  neurons: TableSchema
+  /** Output of fetchConnectivity. */
+  connectivity: TableSchema
+  /** Output of fetchRoiCounts. */
+  roiCounts: TableSchema
+  /** Per-skeleton and per-mesh attributes — what 3D encodings colour by. */
+  morphology: TableSchema
+  /** Per-synapse attributes, one row per point. */
+  synapses: TableSchema
+}
+
+export interface SourceCapabilities {
+  rawQuery: boolean
+  skeletons: boolean
+  meshes: boolean
+  synapses: boolean
+  /**
+   * Whether the whole per-neuron attribute table can be fetched at once, which is what the
+   * Explore widget searches. A source without it can still be queried by pattern; it just
+   * cannot be browsed.
+   */
+  neuronIndex: boolean
+  /**
+   * Whether the source can answer one hop of a path traversal with the aggregation already
+   * done — see `PathStepRequest`. A source without it can still be queried for connectivity;
+   * the Paths node simply refuses rather than silently falling back to a client-side
+   * aggregation whose cost is the thing this exists to avoid.
+   */
+  paths: boolean
+  /**
+   * Whether the source publishes a neuroglancer scene for its datasets — the curated state
+   * an external viewer can be pointed at. Independent of `meshes`: the mock generates
+   * geometry in the browser and has no bucket for anyone else to read.
+   */
+  viewerScene: boolean
+}
+
+export interface DataSource {
+  readonly id: string
+  readonly label: string
+  readonly description?: string
+  readonly capabilities: SourceCapabilities
+  /** Default schemas, used before a dataset is chosen and by sources with one shape. */
+  readonly schemas: SourceSchemas
+  /**
+   * Schemas for one dataset, when they differ.
+   *
+   * neuPrint datasets do not share a neuron schema — hemibrain has `cellBodyFiber`, manc
+   * has `hemilineage` — so a single static shape would either lie or under-report. Must
+   * stay synchronous for the same reason `schemas` is: inference runs on every graph
+   * mutation and cannot await. A source that is still learning should return its default
+   * and start discovery in the background rather than block.
+   */
+  schemasFor?(datasetId: string): SourceSchemas
+
+  listDatasets(signal?: AbortSignal): Promise<DatasetInfo[]>
+  /** Cached, synchronous. Undefined until `listDatasets` has resolved at least once. */
+  peekDatasets(): DatasetInfo[] | undefined
+  peekDataset(datasetId: string): DatasetInfo | undefined
+
+  findNeurons(req: FindNeuronsRequest): Promise<TableValue>
+  /**
+   * Every neuron in a dataset with every scalar property, cached.
+   *
+   * Separate from `findNeurons` despite overlapping with `findNeurons({})` because the two
+   * have opposite economics: a find is a fresh query the user asked for, while this is a
+   * once-per-dataset bulk download whose whole point is to be reused. Implementations are
+   * expected to cache it and to deduplicate concurrent callers.
+   */
+  neuronIndex?(req: NeuronIndexRequest): Promise<TableValue>
+  fetchConnectivity(req: ConnectivityRequest): Promise<TableValue>
+  /**
+   * One hop of a path traversal, aggregated to `PATH_STEP_SCHEMA`.
+   *
+   * Optional, and gated by `capabilities.paths`. The result is an edge list between *group
+   * keys*, not between neurons — see `PathStepRequest` for why the grouping belongs on this
+   * side of the seam.
+   */
+  fetchPathStep?(req: PathStepRequest): Promise<TableValue>
+  fetchAdjacency(req: AdjacencyRequest): Promise<MatrixValue>
+  fetchRoiCounts(req: RoiCountsRequest): Promise<TableValue>
+
+  /**
+   * Cheapest geometry for a single neuron, for a thumbnail.
+   *
+   * Resolves `undefined` when the dataset has no *cheap* representation, and that refusal is
+   * the load-bearing part: a browsable list wants ~10 kB per row, and a dataset publishing
+   * only full-resolution meshes would hand back several megabytes each. Returning undefined
+   * says "draw a placeholder" rather than quietly downloading 25 neurons at full detail to
+   * fill one page of a list.
+   */
+  fetchCoarseGeometry?(req: CoarseGeometryRequest): Promise<CoarseGeometry | undefined>
+
+  /**
+   * The neuroglancer scene a dataset publishes, verbatim.
+   *
+   * Returned unedited on purpose — `neuroglancer/scene.ts` decides what to change, and it is
+   * the same decision for every backend. Resolves `undefined` when the dataset publishes
+   * none, which is a legitimate answer rather than an error: the mock has no bucket at all.
+   * Implementations are expected to cache the result, including the undefined, since this is
+   * called from a `cheap` node that re-runs on every restyle.
+   */
+  fetchViewerScene?(req: ViewerSceneRequest): Promise<NgScene | undefined>
+
+  /** Morphology. Optional: a source may expose connectivity without geometry. */
+  fetchSkeletons?(req: GeometryRequest): Promise<SkeletonsValue>
+  fetchMeshes?(req: GeometryRequest): Promise<MeshesValue>
+  fetchSynapses?(req: SynapseRequest): Promise<PointsValue>
+
+  rawQuery?(req: RawQueryRequest): Promise<TableValue>
+}
+
+// ---------------------------------------------------------------------------
+// Canonical schemas
+// ---------------------------------------------------------------------------
+
+/**
+ * Coda's canonical column names. Sources are expected to map onto these where the
+ * concept exists, and may add extra columns — nodes address columns by name, so a
+ * source with richer columns just gives you more to pick from.
+ */
+/**
+ * What one hop of a path traversal returns, whatever the source.
+ *
+ * Fixed rather than per-dataset, unlike the schemas above: this table is consumed by the
+ * traversal, never by a column picker, and every column is something the traversal needs to
+ * take its next step. A source with richer per-neuron columns has nowhere to put them here,
+ * because a row may stand for hundreds of neurons.
+ *
+ * `sourceId`/`targetId` are null exactly when the key names a *type*, which is what tells the
+ * caller whether to feed the key back as a type or as a body id. `pairs` is how many
+ * neuron→neuron connections were merged into the row — the honest denominator for a
+ * type-level weight, and 1 at neuron level.
+ */
+export const PATH_STEP_SCHEMA: TableSchema = tableSchema(
+  column('source', 'str'),
+  column('sourceType', 'str'),
+  column('sourceId', 'i64'),
+  column('target', 'str'),
+  column('targetType', 'str'),
+  column('targetId', 'i64'),
+  column('weight', 'f64', 'synapses'),
+  column('pairs', 'i64'),
+)
+
+export const CANONICAL_SCHEMAS: SourceSchemas = {
+  neurons: tableSchema(
+    column('bodyId', 'i64'),
+    column('type', 'str'),
+    column('instance', 'str'),
+    column('status', 'str'),
+    column('size', 'i64', 'voxels'),
+    column('pre', 'i64', 'synapses'),
+    column('post', 'i64', 'synapses'),
+  ),
+  connectivity: tableSchema(
+    column('bodyId', 'i64'),
+    column('bodyType', 'str'),
+    column('partnerId', 'i64'),
+    column('partnerType', 'str'),
+    column('weight', 'i64', 'synapses'),
+  ),
+  roiCounts: tableSchema(
+    column('bodyId', 'i64'),
+    column('type', 'str'),
+    column('roi', 'str'),
+    column('pre', 'i64', 'synapses'),
+    column('post', 'i64', 'synapses'),
+  ),
+  morphology: tableSchema(
+    column('bodyId', 'i64'),
+    column('type', 'str'),
+    column('instance', 'str'),
+    column('status', 'str'),
+    column('size', 'i64', 'voxels'),
+    column('points', 'i64'),
+    // Nanometres, not voxels: geometry is normalised to physical units so meshes and
+    // skeletons share a scene. See `neuprint/units.ts`.
+    column('cableLength', 'f64', 'nm'),
+  ),
+  synapses: tableSchema(
+    column('bodyId', 'i64'),
+    column('type', 'str'),
+    column('partnerId', 'i64'),
+    column('partnerType', 'str'),
+    column('polarity', 'str'),
+    column('weight', 'i64', 'synapses'),
+  ),
+}
+
+// ---------------------------------------------------------------------------
+// Source registry
+// ---------------------------------------------------------------------------
+
+const sources = new Map<string, DataSource>()
+
+export function registerSource(source: DataSource): DataSource {
+  sources.set(source.id, source)
+  return source
+}
+
+// ---------------------------------------------------------------------------
+// "A source learned something" — the signal that inference is now out of date
+// ---------------------------------------------------------------------------
+
+const learnedListeners = new Set<(sourceId: string) => void>()
+
+/**
+ * Announce that a source has filled in something `inferOutputs` reads *synchronously* — a
+ * dataset listing, a discovered schema.
+ *
+ * This exists because those two facts arrive asynchronously and inference must not await
+ * (invariant 2). So inference runs against whatever is cached, degrades, and is never asked
+ * again: nothing recomputes it when the answer finally lands. What that looked like was a
+ * dataset node whose `version` is "Latest" — the id comes from `peekDatasets()`, which is empty
+ * on a fresh session — inferring a Dataset type with *no dataset id*, so the Explore widget
+ * downstream said "Connect a Dataset to browse its neurons" beside a pipeline that had just run
+ * to completion. It recovered on any graph edit at all, which is the signature of stale
+ * inference rather than of a broken widget.
+ *
+ * A separate channel rather than a return value, for the same reason `reportAuthFailure` is
+ * one: the fact is learned deep inside a fetch that several unrelated callers may have started,
+ * and `src/data` cannot import the store to push it anywhere.
+ *
+ * Fire it only for things inference reads. It is not a data-changed event — nothing here
+ * invalidates a cached result.
+ */
+export function reportSourceLearned(sourceId: string): void {
+  for (const listener of learnedListeners) listener(sourceId)
+}
+
+/** Subscribe to `reportSourceLearned`. Returns an unsubscribe. */
+export function subscribeSourceLearned(listener: (sourceId: string) => void): () => void {
+  learnedListeners.add(listener)
+  return () => learnedListeners.delete(listener)
+}
+
+export function getSource(id: string): DataSource | undefined {
+  return sources.get(id)
+}
+
+export function requireSource(id: string): DataSource {
+  const source = sources.get(id)
+  if (!source) {
+    throw new Error(
+      `No data source "${id}" is registered. Available: ${[...sources.keys()].join(', ') || '(none)'}`,
+    )
+  }
+  return source
+}
+
+export function allSources(): DataSource[] {
+  return [...sources.values()]
+}
+
+/** Cooperative abort check for long synchronous loops inside a source. */
+export function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+}
+
+/** Await a delay that rejects on abort — used to simulate/absorb network latency. */
+export function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  if (ms <= 0) {
+    throwIfAborted(signal)
+    return Promise.resolve()
+  }
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    const onAbort = () => {
+      clearTimeout(timer)
+      reject(new DOMException('Aborted', 'AbortError'))
+    }
+    if (signal?.aborted) {
+      clearTimeout(timer)
+      reject(new DOMException('Aborted', 'AbortError'))
+      return
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}

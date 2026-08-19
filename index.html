@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Coda — Connectome Data Analysis</title>
+    <meta
+      name="description"
+      content="Node-graph analysis pipelines for connectomic data."
+    />
+
+    <!--
+      The mark is the musical coda sign — see docs/logo.md. Two files, because they fail
+      differently: logo.svg is the outline cut, which keeps its identity at 16px and so is the
+      favicon; icon.svg is the solid cut on a plate, which has more presence but reads as a
+      four-pointed star that small, so it is only ever used at touch-icon size.
+    -->
+    <link rel="icon" href="/logo.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f9f9f7" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#171716" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

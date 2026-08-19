@@ -1,0 +1,12 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.DS_Store
+.vite/
+.eslintcache
+*.local
+.env
+.env.*
+!.env.example
+_TODOs.md

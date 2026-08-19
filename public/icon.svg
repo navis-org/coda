@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Coda">
+  <title>Coda</title>
+  <!--
+    App icon / avatar: the solid cut of the mark on a plate. Same 0.90 silhouette as
+    logo.svg, but the ring is a filled mass with the cross cut out of it, which is how the
+    Bravura glyph is actually constructed.
+
+    Use this above about 24px only. At 16px the knockout eats the disc and the mark reads as a
+    four-pointed star rather than a coda — the favicon is logo.svg for that reason.
+
+    The cross is painted in the plate colour rather than masked: this file gets rasterised by
+    browsers and OSes for touch icons, and a flat paint survives that more reliably than a mask.
+  -->
+  <rect width="64" height="64" rx="14" fill="#1f1f1e"/>
+  <g transform="translate(32 32) scale(.88) translate(-32 -32)">
+    <ellipse cx="32" cy="32" rx="16.8" ry="18.7" fill="#3987e5"/>
+    <path d="M32 10V54M10 32H54" stroke="#1f1f1e" stroke-width="3.8"/>
+    <g stroke="#3987e5" stroke-width="3.8" stroke-linecap="round">
+      <path d="M32 8.2V10.7"/>
+      <path d="M32 53.3V55.8"/>
+      <path d="M10.6 32H12.6"/>
+      <path d="M51.4 32H53.4"/>
+    </g>
+  </g>
+</svg>

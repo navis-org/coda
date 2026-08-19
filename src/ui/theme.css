@@ -1,0 +1,481 @@
+/*
+ * Coda design tokens.
+ *
+ * Dark-first (it's a node editor that people stare at for hours) but every token has a
+ * light value, defined on bare `:root` so the light theme is the fallback and dark is a
+ * deliberate override under both `prefers-color-scheme` and an explicit `data-theme`.
+ *
+ * Chart/viewer colours come from the validated palette in `colors.ts`; the tokens here
+ * are UI chrome. Chart surfaces intentionally use the palette's own surface values
+ * (#fcfcfb / #1a1a19) so the validated contrast numbers actually hold on screen.
+ */
+
+:root {
+  color-scheme: light;
+
+  /* --- surfaces ---------------------------------------------------------- */
+  --canvas: #eceae5;
+  --canvas-dot: #cfcdc5;
+  --surface-1: #f9f9f7; /* panels */
+  --surface-2: #fcfcfb; /* nodes, chart surface */
+  --surface-3: #f0efec; /* recessed wells, table header */
+  --surface-hover: rgba(11, 11, 11, 0.045);
+  --surface-active: rgba(11, 11, 11, 0.08);
+
+  /* --- ink --------------------------------------------------------------- */
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #898781;
+  --text-inverse: #fcfcfb;
+
+  /* --- lines ------------------------------------------------------------- */
+  --border: rgba(11, 11, 11, 0.12);
+  --border-strong: #c3c2b7;
+  --grid: #e1e0d9;
+
+  /* --- accent (selection, focus, progress) ------------------------------- */
+  --accent: #2a78d6;
+  --accent-soft: rgba(42, 120, 214, 0.14);
+
+  /* --- socket families --------------------------------------------------
+   * Only three chromatic families plus achromatic gray. Eight hues cannot be told
+   * apart when any two may sit side by side (validated: all-pairs CVD ΔE fails past
+   * three slots on the dark surface), so shape + the always-visible socket label carry
+   * the rest of the identity. Skeleton/Mesh deliberately have no colour yet — nothing
+   * produces them, and inventing an unvalidated fourth hue now would be a lie.
+   */
+  --socket-table: #2a78d6; /* Table / Neurons — the dominant currency */
+  --socket-matrix: #eb6834;
+  --socket-dataset: #1baf7a;
+  --socket-scalar: #898781; /* number / string / boolean — recessive plumbing */
+  --socket-any: #898781;
+
+  /* --- categorical chip hues --------------------------------------------
+   * The eight validated categorical slots from `colors.ts`, mirrored here because the
+   * chips they colour live in a memoised row: a hue computed in JS would go stale on a
+   * theme switch, where a custom property re-resolves for free. `chips.test.ts` asserts
+   * the two copies still agree.
+   *
+   * These do NOT identify a chip on their own — eight hues cannot clear the all-pairs
+   * colourblind gate (same finding as the socket note above). Every chip carries its
+   * value as text; the hue only makes a column of them scannable.
+   */
+  --chip-1: #2a78d6;
+  --chip-2: #eb6834;
+  --chip-3: #1baf7a;
+  --chip-4: #eda100;
+  --chip-5: #e87ba4;
+  --chip-6: #008300;
+  --chip-7: #4a3aa7;
+  --chip-8: #e34948;
+
+  /* --- run status (fixed palette, never themed; always paired with a glyph) */
+  --status-ok: #0ca30c;
+  --status-stale: #fab219;
+  --status-running: #2a78d6;
+  --status-error: #d03b3b;
+  --status-muted: #898781;
+  /*
+   * The run outline. Gold, and per-mode because it has to: it is drawn on the *canvas*, and
+   * a bright gold that reads at 10:1 on the dark canvas is 1.5:1 on the light one — under the
+   * 3:1 floor for a non-text indicator, i.e. invisible. Computed, not eyeballed.
+   *   light  #a87400 on #eceae5 -> 3.4:1
+   *   dark   #fab219 on #121211 -> 10.2:1
+   * The dark value is the same hue as --status-stale, which is deliberate and safe: a stale
+   * node has a static left bar and no outline, while a running one has a moving outline. They
+   * never appear as the same mark.
+   */
+  --status-running-ring: #a87400;
+
+  /* --- node category header tints (decorative, low chroma) --------------- */
+  --cat-dataset: #1baf7a;
+  --cat-query: #2a78d6;
+  --cat-transform: #898781;
+  --cat-analysis: #4a3aa7;
+  --cat-visualisation: #eb6834;
+  --cat-utility: #898781;
+  /*
+   * The Text note — a framed box of prose, not a node.
+   *
+   * The paper barely separates from the canvas (1.13:1), so the *frame* is what says "a
+   * different kind of object". An achromatic grey, and one value serves both themes: #7d7b76
+   * clears the 3:1 non-text floor on all four surfaces it can meet — 3.98:1 on this paper,
+   * 3.52:1 on this canvas, 4.16:1 and 4.43:1 on the dark pair. That balance is why it is this
+   * grey rather than --text-muted, which is 2.99:1 on the light canvas and so fails exactly
+   * where a note dragged onto empty space lives.
+   *
+   * Only the paper is per-mode, since it tracks the canvas it sits on.
+   */
+  --note-surface: #faf8f1;
+  --note-border: #7d7b76;
+
+  /*
+   * How strongly the start page's backdrop image reads.
+   *
+   * Per-mode because it has to be: one image serves both themes (a JPEG cannot adapt), and a
+   * picture with enough presence on the dark canvas turns the light panel muddy. The scrim over
+   * it is opaque from the rails down either way, so this only governs the header band.
+   */
+  --start-image-opacity: 0.32;
+
+  /* --- metrics ----------------------------------------------------------- */
+  --node-width: 232px;
+  --radius: 6px;
+  --radius-sm: 4px;
+  --shadow-node: 0 1px 2px rgba(11, 11, 11, 0.1), 0 4px 12px rgba(11, 11, 11, 0.06);
+  --shadow-panel: 0 8px 32px rgba(11, 11, 11, 0.16);
+  --font-ui: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+}
+
+/* Dark values, declared once per scope so the toggle wins in both directions. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --canvas: #121211;
+    --canvas-dot: #2e2e2b;
+    --surface-1: #171716;
+    --surface-2: #1f1f1e;
+    --surface-3: #1a1a19;
+    --surface-hover: rgba(255, 255, 255, 0.06);
+    --surface-active: rgba(255, 255, 255, 0.1);
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #898781;
+    --text-inverse: #0b0b0b;
+    --border: rgba(255, 255, 255, 0.11);
+    --border-strong: #383835;
+    --grid: #2c2c2a;
+    /* Bright gold reads at 10.2:1 on this canvas; the light value would be 1.5:1. */
+    --status-running-ring: #fab219;
+    --accent: #3987e5;
+    --accent-soft: rgba(57, 135, 229, 0.2);
+    --socket-table: #3987e5;
+    --socket-matrix: #d95926;
+    --socket-dataset: #199e70;
+    --socket-scalar: #898781;
+    --socket-any: #898781;
+
+    /* --- categorical chip hues --------------------------------------------
+     * The eight validated categorical slots from `colors.ts`, mirrored here because the
+     * chips they colour live in a memoised row: a hue computed in JS would go stale on a
+     * theme switch, where a custom property re-resolves for free. `chips.test.ts` asserts
+     * the two copies still agree.
+     *
+     * These do NOT identify a chip on their own — eight hues cannot clear the all-pairs
+     * colourblind gate (same finding as the socket note above). Every chip carries its
+     * value as text; the hue only makes a column of them scannable.
+     */
+    --chip-1: #3987e5;
+    --chip-2: #d95926;
+    --chip-3: #199e70;
+    --chip-4: #c98500;
+    --chip-5: #d55181;
+    --chip-6: #008300;
+    --chip-7: #9085e9;
+    --chip-8: #e66767;
+    --cat-dataset: #199e70;
+    --cat-query: #3987e5;
+    --cat-transform: #898781;
+    --cat-analysis: #9085e9;
+    --cat-visualisation: #d95926;
+    --cat-utility: #898781;
+    /* The frame is achromatic and mode-independent; only the paper follows the canvas. */
+    --note-surface: #191918;
+    --start-image-opacity: 0.55;
+    --shadow-node: 0 1px 2px rgba(0, 0, 0, 0.5), 0 6px 18px rgba(0, 0, 0, 0.35);
+    --shadow-panel: 0 8px 32px rgba(0, 0, 0, 0.55);
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --canvas: #121211;
+  --canvas-dot: #2e2e2b;
+  --surface-1: #171716;
+  --surface-2: #1f1f1e;
+  --surface-3: #1a1a19;
+  --surface-hover: rgba(255, 255, 255, 0.06);
+  --surface-active: rgba(255, 255, 255, 0.1);
+  --text-primary: #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted: #898781;
+  --text-inverse: #0b0b0b;
+  --border: rgba(255, 255, 255, 0.11);
+  --border-strong: #383835;
+  --grid: #2c2c2a;
+  --status-running-ring: #fab219;
+  --accent: #3987e5;
+  --accent-soft: rgba(57, 135, 229, 0.2);
+  --socket-table: #3987e5;
+  --socket-matrix: #d95926;
+  --socket-dataset: #199e70;
+  --socket-scalar: #898781;
+  --socket-any: #898781;
+
+  /* --- categorical chip hues --------------------------------------------
+   * The eight validated categorical slots from `colors.ts`, mirrored here because the
+   * chips they colour live in a memoised row: a hue computed in JS would go stale on a
+   * theme switch, where a custom property re-resolves for free. `chips.test.ts` asserts
+   * the two copies still agree.
+   *
+   * These do NOT identify a chip on their own — eight hues cannot clear the all-pairs
+   * colourblind gate (same finding as the socket note above). Every chip carries its
+   * value as text; the hue only makes a column of them scannable.
+   */
+  --chip-1: #3987e5;
+  --chip-2: #d95926;
+  --chip-3: #199e70;
+  --chip-4: #c98500;
+  --chip-5: #d55181;
+  --chip-6: #008300;
+  --chip-7: #9085e9;
+  --chip-8: #e66767;
+  --cat-dataset: #199e70;
+  --cat-query: #3987e5;
+  --cat-transform: #898781;
+  --cat-analysis: #9085e9;
+  --cat-visualisation: #d95926;
+  --cat-utility: #898781;
+  /* The frame is achromatic and mode-independent; only the paper follows the canvas. */
+  --note-surface: #191918;
+  --start-image-opacity: 0.55;
+  --shadow-node: 0 1px 2px rgba(0, 0, 0, 0.5), 0 6px 18px rgba(0, 0, 0, 0.35);
+  --shadow-panel: 0 8px 32px rgba(0, 0, 0, 0.55);
+}
+
+/* --------------------------------------------------------------------------
+ * Base
+ * -------------------------------------------------------------------------- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-primary);
+  background: var(--canvas);
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Scrollbars: present but quiet. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 5px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* --------------------------------------------------------------------------
+ * App shell
+ * -------------------------------------------------------------------------- */
+
+.app {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    'toolbar toolbar'
+    'canvas inspector'
+    'status status';
+  height: 100%;
+}
+
+.toolbar {
+  grid-area: toolbar;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--border);
+  min-height: 42px;
+}
+
+.toolbar__brand {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-right: 6px;
+  user-select: none;
+}
+.toolbar__brand svg {
+  flex: none;
+  color: var(--text-primary);
+}
+/* The baseline row moved in here so the mark outside it centres on the name rather than on a
+   two-line block. A div, not a span: `.toolbar__brand span` below would otherwise match this
+   wrapper too and drag the name down to the descriptor's size and colour. */
+.toolbar__brandText {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.toolbar__brand strong {
+  font-size: 14px;
+  letter-spacing: 0.2px;
+}
+.toolbar__brand span {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.toolbar__spacer {
+  flex: 1;
+}
+
+.toolbar__name {
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 3px 6px;
+  min-width: 140px;
+  max-width: 260px;
+}
+.toolbar__name:hover {
+  border-color: var(--border);
+}
+.toolbar__name:focus {
+  border-color: var(--accent);
+  background: var(--surface-2);
+  color: var(--text-primary);
+}
+
+.canvas-area {
+  grid-area: canvas;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+}
+
+.inspector {
+  grid-area: inspector;
+  width: 320px;
+  background: var(--surface-1);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.statusbar {
+  grid-area: status;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 10px;
+  background: var(--surface-1);
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-secondary);
+  min-height: 28px;
+}
+
+/* --------------------------------------------------------------------------
+ * Buttons
+ * -------------------------------------------------------------------------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  font-size: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+}
+.btn:active:not(:disabled) {
+  background: var(--surface-active);
+}
+.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.btn--primary {
+  background: var(--accent);
+  border-color: transparent;
+  color: #fff;
+  font-weight: 550;
+}
+.btn--primary:hover:not(:disabled) {
+  background: var(--accent);
+  filter: brightness(1.08);
+}
+.btn--ghost {
+  background: transparent;
+  border-color: transparent;
+}
+.btn--ghost:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+.btn__kbd {
+  font-size: 10px;
+  opacity: 0.7;
+  font-family: var(--font-mono);
+}
+
+.badge-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  background: var(--surface-3);
+  color: var(--text-secondary);
+}
+.badge-count[data-tone='stale'] {
+  background: color-mix(in srgb, var(--status-stale) 22%, transparent);
+  color: var(--text-primary);
+}
+.badge-count[data-tone='error'] {
+  background: color-mix(in srgb, var(--status-error) 24%, transparent);
+  color: var(--text-primary);
+}

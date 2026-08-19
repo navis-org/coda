@@ -1,0 +1,79 @@
+/**
+ * One coordinate space for everything in a 3D scene: nanometres.
+ *
+ * The two geometry sources disagree natively. neuPrint returns skeleton nodes and synapse
+ * locations in **dataset voxels** — a hemibrain skeleton point is `(12926, 18152, 26752)` —
+ * while precomputed meshes come out in **physical nanometres** after their transform, which
+ * for the same neuron puts the surface around `(103408, 145216, 214016)`. Drawn together
+ * without conversion the mesh sits 8× away from the skeleton it should wrap.
+ *
+ * Nanometres win as the common space rather than voxels because they are the physical truth,
+ * they make `cableLength` a real length, and they let two datasets with different voxel sizes
+ * share a scene. The cost is that skeleton coordinates no longer match the numbers neuPrint
+ * returned, which is why this is a named, documented conversion instead of a stray `* 8`.
+ */
+
+/** Scale factors that take dataset voxels to nanometres, per axis. */
+export type VoxelScale = readonly [number, number, number]
+
+export const IDENTITY_SCALE: VoxelScale = [1, 1, 1]
+
+const TO_NANOMETRES: Record<string, number> = {
+  nanometers: 1,
+  nanometres: 1,
+  nm: 1,
+  micrometers: 1000,
+  micrometres: 1000,
+  microns: 1000,
+  um: 1000,
+  µm: 1000,
+}
+
+/**
+ * Read `Meta.voxelSize` / `Meta.voxelUnits` into a per-axis nm scale.
+ *
+ * Falls back to the identity rather than guessing: a dataset that does not say what its
+ * voxels measure is better left in its own units, where at least skeletons and synapses
+ * still agree with each other, than scaled by a number nobody checked.
+ */
+export function voxelScale(voxelSize: unknown, voxelUnits: unknown): VoxelScale {
+  if (!Array.isArray(voxelSize) || voxelSize.length < 3) return IDENTITY_SCALE
+  const unit = typeof voxelUnits === 'string' ? TO_NANOMETRES[voxelUnits.toLowerCase()] : undefined
+  if (unit === undefined) return IDENTITY_SCALE
+
+  const scale = [0, 1, 2].map((axis) => {
+    const size = Number(voxelSize[axis])
+    return Number.isFinite(size) && size > 0 ? size * unit : 1
+  }) as [number, number, number]
+  return scale
+}
+
+/** True when the scale would leave coordinates untouched — lets callers skip the work. */
+export function isIdentity(scale: VoxelScale): boolean {
+  return scale[0] === 1 && scale[1] === 1 && scale[2] === 1
+}
+
+/** Scale an interleaved xyz array in place. */
+export function scalePositions(positions: Float32Array, scale: VoxelScale): Float32Array {
+  if (isIdentity(scale)) return positions
+  for (let i = 0; i < positions.length; i += 3) {
+    positions[i] = positions[i]! * scale[0]
+    positions[i + 1] = positions[i + 1]! * scale[1]
+    positions[i + 2] = positions[i + 2]! * scale[2]
+  }
+  return positions
+}
+
+/**
+ * Scale radii by the mean axis scale.
+ *
+ * A radius is one number describing something spherical, so an anisotropic voxel has no
+ * exactly right answer. Every dataset in use here is isotropic (8×8×8 nm), which makes the
+ * mean exact; it stays approximate rather than wrong if that ever changes.
+ */
+export function scaleRadii(radii: Float32Array, scale: VoxelScale): Float32Array {
+  const mean = (scale[0] + scale[1] + scale[2]) / 3
+  if (mean === 1) return radii
+  for (let i = 0; i < radii.length; i++) radii[i] = radii[i]! * mean
+  return radii
+}

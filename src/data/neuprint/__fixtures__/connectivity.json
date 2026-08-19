@@ -1,0 +1,47 @@
+{
+  "columns": [
+    "n.bodyId",
+    "n.type",
+    "p.bodyId",
+    "p.type",
+    "w.weight"
+  ],
+  "data": [
+    [
+      1158187240,
+      "LC4",
+      1405231475,
+      "DNp04",
+      65
+    ],
+    [
+      1158187240,
+      "LC4",
+      1281324958,
+      "DNp11",
+      48
+    ],
+    [
+      1158187240,
+      "LC4",
+      1497973422,
+      "AMMC-A1",
+      39
+    ],
+    [
+      1158187240,
+      "LC4",
+      1753751888,
+      "PVLP024",
+      29
+    ],
+    [
+      1158187240,
+      "LC4",
+      5813070019,
+      "AMMC-A1",
+      27
+    ]
+  ],
+  "debug": "MATCH (n:`hemibrain_Neuron`)-[w:ConnectsTo]->(p) WHERE n.bodyId IN [1158187240]\nRETURN n.bodyId, n.type, p.bodyId, p.type, w.weight ORDER BY w.weight DESC LIMIT 5"
+}

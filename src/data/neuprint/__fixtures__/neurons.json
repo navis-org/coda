@@ -1,0 +1,60 @@
+{
+  "columns": [
+    "n.bodyId",
+    "n.type",
+    "n.instance",
+    "n.status",
+    "n.size",
+    "n.pre",
+    "n.post",
+    "n.`cellBodyFiber`",
+    "n.`somaRadius`"
+  ],
+  "data": [
+    [
+      1158187240,
+      "LC4",
+      "LC4",
+      "Traced",
+      773891626,
+      359,
+      1314,
+      null,
+      361.5
+    ],
+    [
+      1158864995,
+      "LC4",
+      "LC4",
+      "Traced",
+      781261807,
+      345,
+      804,
+      null,
+      341.5
+    ],
+    [
+      1189559257,
+      "LC4",
+      "LC4",
+      "Traced",
+      716704823,
+      330,
+      1101,
+      null,
+      351.5
+    ],
+    [
+      1218901359,
+      "LC4",
+      "LC4",
+      "Traced",
+      803528148,
+      324,
+      1375,
+      null,
+      366.5
+    ]
+  ],
+  "debug": "MATCH (n:`hemibrain_Neuron`) WHERE n.type =~ 'LC4' AND n.status IN ['Traced']\nRETURN n.bodyId, n.type, n.instance, n.status, n.size, n.pre, n.post, n.`cellBodyFiber`, n.`somaRadius`\nORDER BY n.bodyId LIMIT 4"
+}

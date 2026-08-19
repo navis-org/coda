@@ -1,0 +1,30 @@
+{
+  "_comment": "Real Draco fragment: hemibrain:v1.2.1 body 1158187240, LOD 3, fragment 0 (grid position 0,0,0). 129 bytes. Decoded live it yields 18 points and 8 faces, and with the transform below lands at x 10112..10752 nm.",
+  "base64": "RFJBQ08CAgEBAAAAEggACAEAA///fP8CVUAB/wAAAQAGAwAAAQEBAQAQF5EDOQ7hGDkOkQMPkQMHWnQe2XafqUCCoGoA4A8AAP8A/PgTAACAAP8PAAcKABAAAPgDAP4AAECAXyCAPwAA+Afw9y8AAEAAgAABAAAKAKATAAD//wAA",
+  "scale": [
+    2.0000305180437934,
+    2.0000305180437934,
+    2.0000305180437934
+  ],
+  "expect": {
+    "points": 18,
+    "faces": 8,
+    "bbox": {
+      "min": [
+        10112,
+        108928,
+        131136
+      ],
+      "max": [
+        10752,
+        109312,
+        131136
+      ]
+    }
+  },
+  "offset": [
+    64.0,
+    64.0,
+    64.0
+  ]
+}

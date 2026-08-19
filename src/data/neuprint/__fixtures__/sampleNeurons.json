@@ -1,0 +1,97 @@
+{
+  "columns": [
+    "n"
+  ],
+  "data": [
+    [
+      {
+        "AVLP(R)": true,
+        "INP": true,
+        "LH(R)": true,
+        "SCL(R)": true,
+        "VLNP(R)": true,
+        "bodyId": 1010248735,
+        "downstream": 0,
+        "mito": 1,
+        "post": 10,
+        "pre": 0,
+        "roiInfo": "{\"INP\": {\"post\": 2}, \"SCL(R)\": {\"post\": 2}, \"LH(R)\": {\"post\": 3}, \"VLNP(R)\": {\"post\": 5}, \"AVLP(R)\": {\"post\": 5}}",
+        "size": 1014700,
+        "status": "Orphan",
+        "statusLabel": "Orphan",
+        "upstream": 10
+      }
+    ],
+    [
+      {
+        "INP": true,
+        "SCL(R)": true,
+        "bodyId": 1010251713,
+        "downstream": 0,
+        "mito": 0,
+        "post": 10,
+        "pre": 0,
+        "roiInfo": "{\"INP\": {\"post\": 10}, \"SCL(R)\": {\"post\": 10}}",
+        "size": 294880,
+        "status": "Orphan",
+        "statusLabel": "Orphan",
+        "upstream": 10
+      }
+    ],
+    [
+      {
+        "CA(R)": true,
+        "CRE(-ROB,-RUB)(R)": true,
+        "CRE(R)": true,
+        "INP": true,
+        "MB(+ACA)(R)": true,
+        "MB(R)": true,
+        "PED(R)": true,
+        "a'1(R)": true,
+        "a'2(R)": true,
+        "a'3(R)": true,
+        "a'L(R)": true,
+        "b'1(R)": true,
+        "b'2(R)": true,
+        "b'L(R)": true,
+        "bodyId": 1001453586,
+        "cellBodyFiber": "PDL04",
+        "cropped": false,
+        "downstream": 818,
+        "g2(R)": true,
+        "g4(R)": true,
+        "g5(R)": true,
+        "gL(R)": true,
+        "instance": "KCa'b'-ap1_R",
+        "mito": 138,
+        "post": 500,
+        "pre": 226,
+        "roiInfo": "{\"MB(R)\": {\"pre\": 226, \"post\": 498, \"downstream\": 818, \"upstream\": 498, \"mito\": 116, \"dark\": 114, \"light\": 1, \"medium\": 1}, \"a'L(R)\": {\"pre\": 60, \"post\": 107, \"downstream\": 213, \"upstream\": 107, \"mito\": 25, \"dark\": 25}, \"a'3(R)\": {\"pre\": 20, \"post\": 40, \"downstream\": 76, \"upstream\": 40, \"mito\": 5, \"dark\": 5}, \"MB(+ACA)(R)\": {\"pre\": 226, \"post\": 498, \"downstream\": 818, \"upstream\": 498, \"mito\": 116, \"dark\": 114, \"light\": 1, \"medium\": 1}, \"a'2(R)\": {\"pre\": 15, \"post\": 29, \"downstream\": 56, \"upstream\": 29, \"mito\": 8, \"dark\": 8}, \"CA(R)\": {\"pre\": 2, \"post\": 64, \"downstream\": 6, \"upstream\": 64, \"mito\": 8, \"dark\": 8}, \"a'1(R)\": {\"pre\": 25, \"post\": 38, \"downstream\": 81, \"upstream\": 38, \"mito\": 12, \"dark\": 12}, \"gL(R)\": {\"pre\": 16, \"post\": 23, \"downstream\": 49, \"upstream\": 23, \"mito\": 10, \"dark\": 10}, \"g2(R)\": {\"pre\": 8, \"post\": 11, \"downstream\": 24, \"upstream\": 11, \"mito\": 6, \"dark\": 6}, \"b'L(R)\": {\"pre\": 144, \"post\": 290, \"downstream\": 537, \"upstream\": 290, \"mito\": 62, \"dark\": 61, \"light\": 1}, \"b'2(R)\": {\"pre\": 100, \"post\": 187, \"downstream\": 376, \"upstream\": 187, \"mito\": 41, \"dark\": 40, \"light\": 1}, \"b'1(R)\": {\"pre\": 44, \"post\": 103, \"downstream\": 161, \"upstream\": 103, \"mito\": 21, \"dark\": 21}, \"INP\": {\"post\": 2, \"upstream\": 2}, \"CRE(R)\": {\"post\": 2, \"upstream\": 2}, \"CRE(-ROB,-RUB)(R)\": {\"post\": 2, \"upstream\": 2}, \"PED(R)\": {\"pre\": 4, \"post\": 14, \"downstream\": 13, \"upstream\": 14, \"mito\": 10, \"dark\": 9, \"medium\": 1}, \"g4(R)\": {\"pre\": 6, \"post\": 10, \"downstream\": 17, \"upstream\": 10, \"mito\": 3, \"dark\": 3}, \"g5(R)\": {\"pre\": 2, \"post\": 2, \"downstream\": 8, \"upstream\": 2, \"mito\": 1, \"dark\": 1}}",
+        "size": 415416436,
+        "somaLocation": {
+          "coordinates": [
+            14204,
+            11010,
+            15800
+          ],
+          "crs": {
+            "name": "cartesian-3d",
+            "properties": {
+              "href": "http://spatialreference.org/ref/sr-org/9157/ogcwkt/",
+              "type": "ogcwkt"
+            },
+            "srid": 9157,
+            "type": "link"
+          },
+          "type": "Point"
+        },
+        "somaRadius": 236,
+        "status": "Traced",
+        "statusLabel": "Roughly traced",
+        "type": "KCa'b'-ap1",
+        "upstream": 500
+      }
+    ]
+  ],
+  "debug": "MATCH (n:`hemibrain_Neuron`) WITH n LIMIT 3 RETURN n"
+}

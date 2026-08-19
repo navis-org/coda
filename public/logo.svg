@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Coda">
+  <title>Coda</title>
+  <!--
+    The Coda mark: the musical coda sign, which is a ring crossed by two lines — and so is
+    also a graph node with four ports.
+
+    Geometry is taken from the Bravura reference music font (SMuFL U+E048), measured off the
+    outline rather than eyeballed: the ring there is 670 x 750 units (W/H 0.89) with a 2.9:1
+    calligraphic stroke, heavy at 3 and 9 o'clock and thin at 12 and 6. This is the "tempered"
+    cut — the true 0.89 oval rounded to 0.90, with the contrast pulled back to 1.6:1 so the
+    thin axis never falls below a pixel at favicon size. See docs/logo.md.
+
+    One colour by design. The blue flips per scheme only so it stays comfortable on both a
+    light and a dark browser chrome; if the media query is unsupported the light value is used.
+  -->
+  <style>
+    svg { color: #2a78d6 }
+    @media (prefers-color-scheme: dark) { svg { color: #3987e5 } }
+  </style>
+  <g fill="currentColor">
+    <!-- The ring: outer ellipse 18 x 20, inner 12.24 x 16.4. -->
+    <path fill-rule="evenodd" d="M32 12a18 20 0 1 0 0 40 18 20 0 1 0 0-40Zm0 3.6a12.24 16.4 0 1 1 0 32.8 12.24 16.4 0 1 1 0-32.8Z"/>
+    <rect x="30" y="5" width="4" height="54" rx="2"/>
+    <rect x="7" y="30" width="50" height="4" rx="2"/>
+  </g>
+</svg>

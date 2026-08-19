@@ -1,0 +1,59 @@
+import { registerNode } from '../../core/registry'
+import { T } from '../../core/types'
+import { isTableValue } from '../../core/values'
+import { requireDataset } from '../lib/datasetParam'
+import { idColumn } from '../lib/tableOps'
+
+/**
+ * Connection matrix between two neuron sets.
+ *
+ * Two inputs rather than one because the interesting question is almost always
+ * "A onto B", and forcing that through a single collection would lose the grouping.
+ */
+export const adjacencyNode = registerNode({
+  type: 'neuron.adjacency',
+  label: 'Adjacency',
+  category: 'query',
+  description: 'Synapse counts from one neuron set onto another, as a matrix.',
+  cost: 'expensive',
+  inputs: [
+    { id: 'dataset', label: 'Dataset', type: T.dataset() },
+    { id: 'sources', label: 'Sources', type: T.neurons() },
+    { id: 'targets', label: 'Targets', type: T.neurons() },
+  ],
+  outputs: [{ id: 'matrix', label: 'Matrix', type: T.matrix() }],
+  params: [
+    {
+      id: 'groupByType',
+      kind: 'boolean',
+      label: 'Group by type',
+      help: 'On: one row/column per neuron type, weights summed. Off: one per body id.',
+      default: true,
+    },
+  ],
+
+  evaluate: async (ctx) => {
+    const dataset = requireDataset(ctx.input('dataset'))
+    const source = ctx.resolveSource(dataset.sourceId)
+    const sources = ctx.input('sources')
+    const targets = ctx.input('targets')
+    if (!isTableValue(sources)) throw new Error('Sources input is not a table')
+    if (!isTableValue(targets)) throw new Error('Targets input is not a table')
+
+    const sourceIds = idColumn(sources, 'bodyId')
+    const targetIds = idColumn(targets, 'bodyId')
+    if (sourceIds.length === 0) throw new Error('Sources table has no bodyIds')
+    if (targetIds.length === 0) throw new Error('Targets table has no bodyIds')
+
+    ctx.progress(0.2, `${sourceIds.length} × ${targetIds.length}`)
+    const matrix = await source.fetchAdjacency({
+      datasetId: dataset.datasetId,
+      sourceIds,
+      targetIds,
+      groupByType: ctx.params.groupByType !== false,
+      signal: ctx.signal,
+    })
+
+    return { matrix }
+  },
+})

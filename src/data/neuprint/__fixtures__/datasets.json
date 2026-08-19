@@ -1,0 +1,66 @@
+{
+  "hemibrain:v1.2.1": {
+    "last-mod": "2020-12-05 21:53:59",
+    "uuid": "31597d95bd844060b0ccc928a1a8a0a4",
+    "ROIs": [
+      "CAN(R)",
+      "SCL(R)",
+      "AL-DM5(L)",
+      "SLP(R)",
+      "AL-DA2(R)",
+      "AOTU(R)",
+      "FBl5",
+      "AL-DM2(R)"
+    ],
+    "superLevelROIs": [
+      "ME(R)",
+      "AME(R)",
+      "LO(R)",
+      "LOP(R)"
+    ],
+    "info": "https://www.janelia.org/project-team/flyem/hemibrain",
+    "hidden": false,
+    "description": "A reconstructon of the female central complex and surrounding neuropils from the Janelia FlyEM Team Project and Google Connectomics.\nCovers roughly half of the brain, with ~22k fully reconstructed neurons and ~76k truncated neurons.\n\n- [Project overview](https://www.janelia.org/project-team/flyem/hemibrain)\n- Companion sites:\n    - [Base neuroglancer scene](https://neuroglancer-demo.appspot.com/#!gs://flyem-views/hemibrain/v1.2/base.json)\n    - [Clio](https://clio.janelia.org)\n- Citation: [Scheffer et al. (2020)](https://doi.org/10.7554/eLife.57443)\n"
+  },
+  "manc:v1.2.3": {
+    "last-mod": "2024-02-01 00:07:45.885983601-05:00 / 2024-08-31 00:00:00.000000000-05:00 (segment property update)",
+    "uuid": "7b5e8f7f805c4314bee37b75b4ff9292",
+    "ROIs": [
+      "AbNT",
+      "LegNp(T1)(R)",
+      "LegNp(T3)(R)",
+      "MesoAN(R)",
+      "Ov(L)",
+      "PrN(R)",
+      "VProN(R)",
+      "LTct"
+    ],
+    "superLevelROIs": [
+      "ADMN(L)",
+      "ADMN(R)",
+      "ANm",
+      "AbN1(L)"
+    ],
+    "info": "https://www.janelia.org/project-team/flyem/manc-connectome",
+    "hidden": false,
+    "description": "The MANC connectome from the Janelia FlyEM Team Project and the Cambridge Drosophila Connectomics Group, and Google Connectomics.\nThe male adult Drosophila nerve cord; 23k neurons.\n\n- [Project overview](https://www.janelia.org/project-team/flyem/manc-connectome)\n- Companion sites:\n    - [Base neuroglancer scene](https://neuroglancer-demo.appspot.com/#!gs://manc-seg-v1p2/manc-v1.2.3-neuprint-layers.json)\n    - [Clio](https://clio.janelia.org)\n- Citations\n    - [Takemura et al. (2024)](https://doi.org/10.7554/eLife.97769.1)\n    - [Marin et al. (2024)](https://doi.org/10.7554/eLife.97766.1)\n    - [Cheong et al. (2025)](https://doi.org/10.7554/eLife.96084.2)\n"
+  },
+  "mushroombody": {
+    "last-mod": "2017-05-12T10:32:04",
+    "uuid": "babdf6dbc23e44a69953a66e2260ff0a",
+    "ROIs": [
+      "alpha2",
+      "alpha3",
+      "alpha1",
+      "mushroombody"
+    ],
+    "superLevelROIs": [
+      "alpha1",
+      "alpha2",
+      "alpha3"
+    ],
+    "info": "N/A",
+    "hidden": false,
+    "description": "A reconstruction of the fly alpha lobe in the mushroom body, with 983 neurons.\n\n- Citation: [Takemura et al. (2017)](https://doi.org/10.7554/eLife.26975)\n"
+  }
+}

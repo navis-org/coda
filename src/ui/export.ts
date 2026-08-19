@@ -1,0 +1,203 @@
+/**
+ * Export helpers: data as CSV, charts as SVG or PNG.
+ *
+ * Two constraints shape this file:
+ *
+ *  - Tables can be large. CSV is assembled into chunked string parts handed straight to
+ *    `Blob`, rather than one giant concatenation, so a 500k-row export doesn't build a
+ *    30MB string in a single allocation.
+ *  - Exported SVG must stand alone. On screen the charts inherit `font-family` from a CSS
+ *    variable; a serialised copy has no stylesheet, so the resolved font is inlined. All
+ *    other colours are already literal hex (the viewers compute them in JS), which is what
+ *    makes vector export nearly free here.
+ */
+
+import type { MatrixValue, TableValue } from '../core/values'
+import type { CodaGraph } from '../core/graph'
+import { serializeGraph } from '../core/graph'
+
+const SVG_NS = 'http://www.w3.org/2000/svg'
+const CSV_CHUNK_ROWS = 2000
+
+/** RFC 4180: quote when the value contains a delimiter, quote or newline. */
+function csvCell(value: unknown): string {
+  if (value === null || value === undefined) return ''
+  const text = typeof value === 'string' ? value : String(value)
+  if (/[",\r\n]/.test(text)) return `"${text.replaceAll('"', '""')}"`
+  return text
+}
+
+export function tableToCsvParts(table: TableValue): string[] {
+  const columns = table.schema.columns
+  const parts: string[] = [`${columns.map((c) => csvCell(c.name)).join(',')}\n`]
+
+  let chunk: string[] = []
+  for (let row = 0; row < table.length; row++) {
+    const cells: string[] = []
+    for (const col of columns) cells.push(csvCell(table.data[col.name]?.[row] ?? null))
+    chunk.push(`${cells.join(',')}\n`)
+    if (chunk.length >= CSV_CHUNK_ROWS) {
+      parts.push(chunk.join(''))
+      chunk = []
+    }
+  }
+  if (chunk.length) parts.push(chunk.join(''))
+  return parts
+}
+
+export function tableToCsv(table: TableValue): string {
+  return tableToCsvParts(table).join('')
+}
+
+/**
+ * Matrices export wide: a corner cell, then one column per column label. That is the shape
+ * people paste into a spreadsheet or read back with `pandas.read_csv(index_col=0)`.
+ */
+export function matrixToCsv(matrix: MatrixValue): string {
+  const header = ['', ...matrix.colLabels].map(csvCell).join(',')
+  const cols = matrix.colLabels.length
+  const lines: string[] = [header]
+  for (let r = 0; r < matrix.rowLabels.length; r++) {
+    const cells: string[] = [csvCell(matrix.rowLabels[r])]
+    for (let c = 0; c < cols; c++) {
+      // `String` on a number gives full precision and no locale formatting — a thousands
+      // separator here would split the field and corrupt the file.
+      cells.push(String(matrix.values[r * cols + c] ?? 0))
+    }
+    lines.push(cells.join(','))
+  }
+  return `${lines.join('\n')}\n`
+}
+
+// ---------------------------------------------------------------------------
+// Download plumbing
+// ---------------------------------------------------------------------------
+
+/**
+ * Filesystem-safe slug. One copy: the graph download and the chart exports had the same two
+ * regexes side by side and differed only in what an empty result falls back to.
+ */
+export function slugify(text: string, fallback: string): string {
+  return (
+    text
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || fallback
+  )
+}
+
+function triggerDownload(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.append(link)
+  link.click()
+  link.remove()
+  // Revoke on the next tick — Safari needs the URL alive through the click handler.
+  setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+
+export function downloadCsv(parts: string[], filename: string): void {
+  triggerDownload(new Blob(parts, { type: 'text/csv;charset=utf-8' }), filename)
+}
+
+/**
+ * Save the working graph as a file.
+ *
+ * Here rather than in `persistence.ts`, which is about *storing* a graph — the browser shelf,
+ * the autosave, `localStorage`. This is a download, and it shares the Safari revoke-on-next-
+ * tick workaround and the slug with every other download in this file; the store cannot reach
+ * either without importing the UI layer, which it otherwise never does.
+ */
+export function downloadGraph(graph: CodaGraph): void {
+  const blob = new Blob([serializeGraph(graph)], { type: 'application/json' })
+  triggerDownload(blob, `${slugify(graph.meta?.name ?? '', 'untitled')}.coda.json`)
+}
+
+/** Filesystem-safe basename from a graph name and a node label. */
+export function exportBaseName(graphName: string | undefined, nodeLabel: string): string {
+  const graph = slugify(graphName ?? '', '')
+  const node = slugify(nodeLabel, 'output')
+  return graph ? `${graph}_${node}` : node
+}
+
+// ---------------------------------------------------------------------------
+// Chart export
+// ---------------------------------------------------------------------------
+
+/**
+ * Clone an on-screen `<svg>` into a standalone document string: namespaced, explicitly
+ * sized, and with the inherited font inlined.
+ */
+export function serializeSvg(svg: SVGSVGElement): string {
+  const clone = svg.cloneNode(true) as SVGSVGElement
+  clone.setAttribute('xmlns', SVG_NS)
+  clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink')
+
+  const width = svg.getAttribute('width') ?? String(svg.clientWidth || 800)
+  const height = svg.getAttribute('height') ?? String(svg.clientHeight || 400)
+  clone.setAttribute('width', width)
+  clone.setAttribute('height', height)
+  if (!clone.getAttribute('viewBox')) clone.setAttribute('viewBox', `0 0 ${width} ${height}`)
+
+  // The live chart gets its font from a CSS variable that won't travel with the file.
+  const font =
+    typeof getComputedStyle === 'function'
+      ? getComputedStyle(svg).fontFamily || 'sans-serif'
+      : 'sans-serif'
+  const style = document.createElementNS(SVG_NS, 'style')
+  style.textContent = `text{font-family:${font}}`
+  clone.insertBefore(style, clone.firstChild)
+
+  return new XMLSerializer().serializeToString(clone)
+}
+
+export function downloadSvg(svg: SVGSVGElement, filename: string): void {
+  const blob = new Blob([serializeSvg(svg)], { type: 'image/svg+xml;charset=utf-8' })
+  triggerDownload(blob, filename)
+}
+
+/**
+ * Rasterise the SVG through an offscreen canvas. `scale` 2 gives a retina-quality PNG.
+ * Rejects rather than downloading a blank file if the image fails to decode.
+ */
+export async function downloadPng(
+  svg: SVGSVGElement,
+  filename: string,
+  scale = 2,
+): Promise<void> {
+  const source = serializeSvg(svg)
+  const width = Number(svg.getAttribute('width')) || svg.clientWidth || 800
+  const height = Number(svg.getAttribute('height')) || svg.clientHeight || 400
+
+  const svgBlob = new Blob([source], { type: 'image/svg+xml;charset=utf-8' })
+  const url = URL.createObjectURL(svgBlob)
+
+  try {
+    const image = await loadImage(url)
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(width * scale))
+    canvas.height = Math.max(1, Math.round(height * scale))
+    const context = canvas.getContext('2d')
+    if (!context) throw new Error('Could not get a 2D canvas context')
+    context.scale(scale, scale)
+    context.drawImage(image, 0, 0, width, height)
+
+    const pngBlob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'))
+    if (!pngBlob) throw new Error('Canvas produced no PNG data')
+    triggerDownload(pngBlob, filename)
+  } finally {
+    URL.revokeObjectURL(url)
+  }
+}
+
+function loadImage(url: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image()
+    image.addEventListener('load', () => resolve(image))
+    image.addEventListener('error', () => reject(new Error('Could not rasterise the chart')))
+    image.src = url
+  })
+}
+

@@ -1,0 +1,15 @@
+{
+  "columns": [
+    "n.bodyId",
+    "n.type",
+    "n.roiInfo"
+  ],
+  "data": [
+    [
+      1158187240,
+      "LC4",
+      "{\"OL(R)\": {\"pre\": 63, \"post\": 1063, \"downstream\": 242, \"upstream\": 1063, \"mito\": 76, \"dark\": 64, \"medium\": 12}, \"LO(R)\": {\"pre\": 63, \"post\": 1063, \"downstream\": 242, \"upstream\": 1063, \"mito\": 76, \"dark\": 64, \"medium\": 12}, \"VLNP(R)\": {\"pre\": 295, \"post\": 248, \"downstream\": 1391, \"upstream\": 248, \"mito\": 25, \"dark\": 22, \"medium\": 3}, \"PLP(R)\": {\"pre\": 60, \"post\": 32, \"downstream\": 291, \"upstream\": 32, \"mito\": 4, \"dark\": 3, \"medium\": 1}, \"PVLP(R)\": {\"pre\": 235, \"post\": 216, \"downstream\": 1100, \"upstream\": 216, \"mito\": 21, \"dark\": 19, \"medium\": 2}, \"GF(R)\": {\"pre\": 1, \"downstream\": 2}}"
+    ]
+  ],
+  "debug": "MATCH (n:`hemibrain_Neuron`) WHERE n.bodyId IN [1158187240] RETURN n.bodyId, n.type, n.roiInfo"
+}
