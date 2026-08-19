@@ -358,6 +358,53 @@ export function findParam(def: NodeDefinition, paramId: string): ParamDef | unde
 }
 
 /**
+ * Params this node has that its card does not draw: the `advanced` ones, i.e. inspector-only.
+ *
+ * The card is the whole of what most people read, and a node's advanced params are invisible on
+ * it — a Skeletons node has exactly one param and it is advanced, so the card shows an empty
+ * body and no hint that there is anything to set. `visibleIf` is applied first: a param the
+ * current values have switched off is inapplicable rather than hidden, and counting it would
+ * have the number move as unrelated modes are chosen.
+ *
+ * Deliberately **not** the rows the card is merely not drawing at this moment. A folded band
+ * already has the header's `☰` in its pressed state saying so, and a node with a body of its own
+ * renders controls nothing here can enumerate — Explore's search box is on the card, whatever
+ * this function can tell about it.
+ */
+export function hiddenParams(def: NodeDefinition, values: ParamValues): ParamDef[] {
+  return (def.params ?? []).filter(
+    (p) => p.advanced === true && (!p.visibleIf || p.visibleIf(values)),
+  )
+}
+
+/**
+ * Of `params`, those carrying a value somebody chose.
+ *
+ * The second, quieter channel on the same readout: *how many* are hidden is a fact about the
+ * node type and never changes, so on its own it says nothing about this particular node. How
+ * many were **set** does — a default was never a decision, which is the same call
+ * `validateColumnParams` makes about an optional picker still holding the value its definition
+ * declared.
+ *
+ * An absent value is not a change. Loading does not fill missing params with defaults, so a
+ * graph saved before a param existed simply has no key for it; comparing that against the
+ * declared default would report a change on every older file.
+ */
+export function changedParams(params: readonly ParamDef[], values: ParamValues): ParamDef[] {
+  return params.filter((p) => differsFromDefault(values[p.id], p.default))
+}
+
+function differsFromDefault(value: ParamValue | undefined, fallback: ParamValue | undefined) {
+  if (value === undefined) return false
+  if (Array.isArray(value) || Array.isArray(fallback)) {
+    const a = Array.isArray(value) ? value : []
+    const b = Array.isArray(fallback) ? fallback : []
+    return a.length !== b.length || a.some((item, i) => item !== b[i])
+  }
+  return value !== fallback
+}
+
+/**
  * Resolve a `column` param.
  *
  * Three answers, in order, and the middle one is the whole of it:

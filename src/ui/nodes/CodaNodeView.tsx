@@ -16,7 +16,8 @@ import { memo, useMemo, useState } from 'react'
 import type { GraphNode } from '../../core/graph'
 import type { InferenceResult, NodeIssue } from '../../core/inference'
 import type { NodeDefinition } from '../../core/node'
-import { makeInferContext } from '../../core/node'
+import type { ParamDef, ParamValues } from '../../core/node'
+import { changedParams, hiddenParams, makeInferContext } from '../../core/node'
 import { getNodeDef } from '../../core/registry'
 import type { NodeRunState } from '../../core/scheduler'
 import type { CodaType } from '../../core/types'
@@ -154,6 +155,16 @@ function CodaNodeViewImpl({
     () => (def ? makeInferContext(def, node.params, types?.inputs ?? {}) : undefined),
     [def, node.params, types],
   )
+  /*
+   * The inspector-only params, and how many of them carry a value somebody chose. The card
+   * cannot draw either and the inspector is closed by default, so without this a node fetching
+   * five times what its neighbour does looks identical to it.
+   */
+  const hidden = useMemo(() => (def ? hiddenParams(def, node.params) : []), [def, node.params])
+  const hiddenChanged = useMemo(
+    () => changedParams(hidden, node.params).length,
+    [hidden, node.params],
+  )
 
   if (!def || !ctx) {
     return (
@@ -221,7 +232,15 @@ function CodaNodeViewImpl({
    * own, which renders its own controls instead of the generic rows.
    */
   const foldableParams = !node.collapsed && visibleParams.length > 0
-  const showParams = foldableParams && !node.paramsCollapsed
+  const folded = foldableParams && node.paramsCollapsed === true
+  const showParams = foldableParams && !folded
+  /*
+   * The hint rides at the end of the band but is not gated on it: the cards that need it most
+   * are the ones drawing *no* rows at all — Skeletons has a single param and it is advanced, so
+   * an empty body is all there was to go on. It does go away with a fold, which is the one case
+   * where something else on the card is already saying "there is more here".
+   */
+  const showHidden = !node.collapsed && !folded && hidden.length > 0
 
   // The type being dragged, resolved once per render rather than per socket.
   const draggedType =
@@ -453,24 +472,59 @@ function CodaNodeViewImpl({
           })}
         </div>
 
-        {showParams && (
+        {(showParams || showHidden) && (
           <div className="coda-node__params">
-            {visibleParams.map((param) => (
-              <div
-                key={param.id}
-                className={`param${param.kind === 'boolean' || param.kind === 'columns' ? ' param--wide' : ''}`}
+            {showParams &&
+              visibleParams.map((param) => (
+                <div
+                  key={param.id}
+                  className={`param${param.kind === 'boolean' || param.kind === 'columns' ? ' param--wide' : ''}`}
+                >
+                  <span className="param__label" title={param.help ?? param.label}>
+                    {param.label}
+                  </span>
+                  <ParamField
+                    param={param}
+                    value={node.params[param.id]}
+                    ctx={ctx}
+                    onChange={(value) => setParam(id, param.id, value)}
+                  />
+                </div>
+              ))}
+            {showHidden && (
+              /*
+               * Right-aligned and muted, in the register of a "…more" affordance rather than a
+               * warning: on most nodes this is a fact about the node *type* and nothing anybody
+               * did. The changed count is the half that is about this particular node, so it
+               * takes a step up in ink and nothing else.
+               */
+              <button
+                type="button"
+                className="coda-node__more nodrag"
+                title={`${hidden.length} more in the inspector: ${hidden
+                  .map((p) => (isChanged(p, node.params) ? `${p.label} (changed)` : p.label))
+                  .join(', ')}. Click to open.`}
+                aria-label={`${hidden.length} more ${
+                  hidden.length === 1 ? 'parameter' : 'parameters'
+                } in the inspector${hiddenChanged > 0 ? `, ${hiddenChanged} changed` : ''}`}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  /*
+                   * Read at click time rather than subscribed to: every card would re-render on
+                   * an unrelated inspector toggle, and `togglePanel` is the only setter there is
+                   * — so an open inspector must not be closed by a button that means "show me".
+                   */
+                  const store = useGraphStore.getState()
+                  store.setSelection([id])
+                  if (!store.panels.inspector) store.togglePanel('inspector')
+                }}
               >
-                <span className="param__label" title={param.help ?? param.label}>
-                  {param.label}
-                </span>
-                <ParamField
-                  param={param}
-                  value={node.params[param.id]}
-                  ctx={ctx}
-                  onChange={(value) => setParam(id, param.id, value)}
-                />
-              </div>
-            ))}
+                … {hidden.length} more
+                {hiddenChanged > 0 && (
+                  <span className="coda-node__more-set"> ({hiddenChanged} changed)</span>
+                )}
+              </button>
+            )}
           </div>
         )}
 
@@ -530,6 +584,11 @@ function CodaNodeViewImpl({
       </div>
     </>
   )
+}
+
+/** Whether this param holds something other than what its definition declared. */
+function isChanged(param: ParamDef, values: ParamValues): boolean {
+  return changedParams([param], values).length > 0
 }
 
 /** Resolve the type sitting at the far end of an in-flight connection drag. */

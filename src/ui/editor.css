@@ -606,6 +606,37 @@
   border-top: 1px solid var(--border);
 }
 
+/*
+ * "… 2 more (1 changed)" — the inspector-only params, at the end of the band.
+ *
+ * `align-self: flex-end` inside the band's column flex, so it sits under the *fields* rather
+ * than under the labels: it is about what is missing from the right-hand column. Quiet enough
+ * to scan past, in the register of a "…more" affordance rather than a warning, because on most
+ * nodes it reports a fact about the node type that nobody chose.
+ */
+.coda-node__more {
+  align-self: flex-end;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 9.5px;
+  line-height: 1.4;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.coda-node__more:hover {
+  color: var(--text-primary);
+}
+/* The half that is about this node rather than its type gets the one step of ink there is. */
+.coda-node__more-set {
+  color: var(--text-secondary);
+}
+.coda-node__more:hover .coda-node__more-set {
+  color: inherit;
+}
+
 .param {
   display: grid;
   grid-template-columns: 62px 1fr;
