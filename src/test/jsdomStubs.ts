@@ -289,6 +289,57 @@ export function installStorageStub(): void {
   Object.defineProperty(globalThis, 'localStorage', { value: storage, configurable: true })
 }
 
+/**
+ * A Fullscreen API, which jsdom implements no part of.
+ *
+ * Records what was asked of it, and — the half that cannot be driven any other way — lets a
+ * test *grant* fullscreen. Whether something is fullscreen is read off
+ * `document.fullscreenElement`, which a real browser writes and a request does not: it decides,
+ * announces the outcome with `fullscreenchange`, and may refuse. That ordering is the whole
+ * thing `ui/fullscreen.ts` is built around, so a stub that flipped the flag inside
+ * `requestFullscreen` would be testing a browser that does not exist.
+ *
+ * Opt in per suite, like `installStorageStub`: a global Fullscreen API would have every other
+ * component test running paths no browser grants them.
+ */
+export function installFullscreenStub(): {
+  /** Elements `requestFullscreen` was called on, in order. */
+  requests: Element[]
+  /** What was fullscreen at each `exitFullscreen` call — so a test can say *what* was exited. */
+  exits: (Element | null)[]
+  /** Put an element in (or `null` out of) fullscreen and announce it, as a browser would. */
+  setElement: (element: Element | null) => void
+} {
+  const requests: Element[] = []
+  const exits: (Element | null)[] = []
+
+  const setElement = (element: Element | null) => {
+    Object.defineProperty(document, 'fullscreenElement', {
+      configurable: true,
+      value: element,
+    })
+    document.dispatchEvent(new Event('fullscreenchange'))
+  }
+
+  Object.defineProperty(Element.prototype, 'requestFullscreen', {
+    configurable: true,
+    value: function (this: Element) {
+      requests.push(this)
+      return Promise.resolve()
+    },
+  })
+  Object.defineProperty(document, 'exitFullscreen', {
+    configurable: true,
+    value: () => {
+      exits.push(document.fullscreenElement)
+      return Promise.resolve()
+    },
+  })
+  Object.defineProperty(document, 'fullscreenElement', { configurable: true, value: null })
+
+  return { requests, exits, setElement }
+}
+
 /** Clear localStorage where the environment provides it; tolerate where it doesn't. */
 export function clearStorage(): void {
   try {

@@ -261,6 +261,17 @@ body,
   margin: 0;
 }
 
+/*
+ * The app in browser-fullscreen. The *root* is what goes fullscreen (see `ui/fullscreen.ts`),
+ * which is what keeps the layout identical — the UA stylesheet's `position: fixed` rule for a
+ * fullscreen element is `:fullscreen:not(:root)`. The one thing to state is the background:
+ * the UA paints a black `::backdrop` behind whatever is fullscreen, and `html` carries no
+ * background of its own here, only `body` does.
+ */
+html:fullscreen {
+  background: var(--canvas);
+}
+
 body {
   font-family: var(--font-ui);
   font-size: 13px;

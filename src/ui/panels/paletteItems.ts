@@ -13,6 +13,7 @@ import { isAnnotation, nodeDefsByCategory } from '../../core/registry'
 import type { GraphState } from '../../store/graphStore'
 import { pickGraphFile } from '../../store/persistence'
 import { downloadGraph } from '../export'
+import { appElement, toggleFullscreen } from '../fullscreen'
 import { EXAMPLES } from '../../examples'
 import { plural } from '../format'
 
@@ -280,6 +281,16 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
       action: 'View',
       hint: 'Zoom to show the whole graph',
       perform: fitView,
+    },
+    {
+      id: 'cmd:fullscreen',
+      action: 'View',
+      label: 'Toggle Fullscreen',
+      hint: "Fill the screen, hiding the browser's own tabs and address bar",
+      shortcut: 'F',
+      // No `disabled` state to compute: whether the browser will grant it is not knowable
+      // until it is asked, and a command greyed out on a guess is worse than one refused.
+      perform: () => void toggleFullscreen(appElement()),
     },
     {
       id: 'cmd:theme-dark',

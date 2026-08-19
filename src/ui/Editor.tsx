@@ -13,6 +13,7 @@
  *   right-click a link       its own menu, naming both ends
  *   M / H / ⌘D               mute / collapse / duplicate the selection
  *   ⇧R                       run everything stale
+ *   F                        real fullscreen, i.e. the browser's chrome gone
  */
 
 import {
@@ -51,6 +52,7 @@ import { NodeBrowser } from './panels/NodeBrowser'
 import { NodeContextMenu } from './panels/NodeContextMenu'
 import type { PaletteItem } from './panels/paletteItems'
 import { buildCommandItems, buildNodeItems } from './panels/paletteItems'
+import { appElement, toggleFullscreen } from './fullscreen'
 import { typeColorVar } from './socketStyle'
 import { useArrange } from './useArrange'
 import { useDownloads } from './useDownloads'
@@ -555,6 +557,15 @@ function EditorCanvas() {
       if (!mod && event.key.toLowerCase() === 'h' && selected.length > 0) {
         event.preventDefault()
         useGraphStore.getState().toggleCollapsed(selected)
+        return
+      }
+      // Unqualified for the same reason as `i`, and more so: what fullscreen is about is the
+      // window, which has nothing to do with what happens to be selected. The browser's own
+      // F11 does the same thing — this is the half that is discoverable from inside the app,
+      // and it pairs with the toolbar's ⛶.
+      if (!mod && !event.shiftKey && event.key.toLowerCase() === 'f') {
+        event.preventDefault()
+        void toggleFullscreen(appElement())
         return
       }
       // Unqualified, unlike `m` and `h`: showing the inspector is worth doing with nothing

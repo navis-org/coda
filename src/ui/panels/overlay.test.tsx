@@ -9,27 +9,27 @@
  */
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { App } from '../../App'
 import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import '../../nodes'
 import { useGraphStore } from '../../store/graphStore'
-import { clearStorage, installDownloadCapture, installJsdomStubs } from '../../test/jsdomStubs'
+import {
+  clearStorage,
+  installDownloadCapture,
+  installFullscreenStub,
+  installJsdomStubs,
+} from '../../test/jsdomStubs'
+
+/** jsdom implements no Fullscreen API at all. Shared with `ui/fullscreen.test.tsx`. */
+let fullscreen: ReturnType<typeof installFullscreenStub>
 
 beforeAll(() => {
   installJsdomStubs({ width: 900, height: 500 })
   registerSource(new MockSource({ latencyMs: 0 }))
-  // jsdom implements no Fullscreen API at all.
-  Object.defineProperty(Element.prototype, 'requestFullscreen', {
-    configurable: true,
-    value: vi.fn(() => Promise.resolve()),
-  })
-  Object.defineProperty(document, 'exitFullscreen', {
-    configurable: true,
-    value: vi.fn(() => Promise.resolve()),
-  })
+  fullscreen = installFullscreenStub()
 })
 
 beforeEach(() => {
@@ -102,10 +102,13 @@ describe('ViewerOverlay', () => {
     expect(useGraphStore.getState().expandedNodeId).toBe('view')
   })
 
-  it('hands the panel to the Fullscreen API on request', async () => {
+  it('hands the panel — not the document — to the Fullscreen API on request', async () => {
     const dialog = await openOverlay('partners', 'view')
+    fullscreen.requests.length = 0
     fireEvent.click(within(dialog).getByLabelText('Enter fullscreen'))
-    expect(Element.prototype.requestFullscreen).toHaveBeenCalled()
+    // The panel, specifically: the toolbar's ⛶ fullscreens the whole document, and the two
+    // share `toggleFullscreen`, so the target is the only thing separating them.
+    expect(fullscreen.requests).toEqual([dialog])
   })
 
   it('exposes the viewer params in the rail and applies them live', async () => {

@@ -12,6 +12,7 @@ import { useErrorCount, useGraphStore, useStaleCount } from '../../store/graphSt
 import { pickGraphFile } from '../../store/persistence'
 import { downloadGraph } from '../export'
 import { formatAgo, plural } from '../format'
+import { appElement, toggleFullscreen, useIsFullscreen } from '../fullscreen'
 import { SourcesPanel } from './SourcesPanel'
 import { useDismissOnOutside } from '../useDismiss'
 
@@ -47,6 +48,11 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
   // A primitive, not the panels object: the store is read through `useSyncExternalStore`, which
   // compares snapshots by identity, and `togglePanel` mints a fresh object each time.
   const inspectorOpen = useGraphStore((s) => s.panels.inspector)
+
+  const setNotice = useGraphStore((s) => s.setNotice)
+  // Read off `document.fullscreenElement`, never off the click: Escape and F11 both leave
+  // fullscreen without touching this button. See `ui/fullscreen.ts`.
+  const fullscreen = useIsFullscreen(appElement())
 
   const staleCount = useStaleCount()
   const errorCount = useErrorCount()
@@ -258,6 +264,33 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
           <span className="btn__kbd">⇧R</span>
         </button>
       )}
+
+      {/*
+        * Fullscreen keeps the toolbar and the status bar: what it reclaims is the browser's
+        * ~90px of tabs and address bar, not the app's own chrome. Run, Auto-run and the stale
+        * count are exactly what you want in view while a graph is running.
+        */}
+      <button
+        type="button"
+        className="btn btn--ghost"
+        aria-pressed={fullscreen}
+        onClick={() => {
+          // `fullscreen` is what distinguishes a refusal from an ordinary exit — both come
+          // back false, and only one of them is worth saying anything about.
+          const entering = !fullscreen
+          void toggleFullscreen(appElement()).then((now) => {
+            if (entering && !now) setNotice('This browser refused fullscreen')
+          })
+        }}
+        title={
+          fullscreen
+            ? 'Leave fullscreen (F)'
+            : "Fill the screen, hiding the browser's own tabs and address bar (F)"
+        }
+        aria-label={fullscreen ? 'Leave fullscreen' : 'Enter fullscreen'}
+      >
+        {fullscreen ? '⤡' : '⛶'}
+      </button>
 
       <button
         type="button"

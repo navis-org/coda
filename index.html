@@ -17,6 +17,22 @@
     -->
     <link rel="icon" href="/logo.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+    <!--
+      Installable, so Coda can be launched in its own window with no tabs and no address bar
+      at all — the persistent counterpart to the toolbar's ⛶, which is one session's worth.
+      `start_url` and `scope` inside the manifest are *relative*, which is what makes it work
+      under the `/coda/` subpath GitHub Pages serves from; an absolute `/` would scope the
+      installed app to the domain root, where nothing of ours lives.
+
+      Vite rewrites these absolute public paths against `base` ('./'), so the same is true of
+      the href here. There is deliberately no service worker: this app has no offline story —
+      every dataset it reads comes over the network — and a cache that outlived a deploy is
+      the classic way to strand somebody on a stale bundle.
+    -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Coda" />
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f9f9f7" />
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#171716" />
   </head>

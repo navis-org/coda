@@ -323,6 +323,7 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `nodes/query/inputIds.test.ts`           | the node: no dataset means no query, the seam asked in numbers, no status filter, empty never all                                |
 | `ui/nodes/inputIdsBody.test.tsx`         | the card: the counts, the ids named as missing, and that it claims nothing with no Dataset wired                                 |
 | `nodes/table/stack.test.ts`              | the union schema needing both sides, a real dtype clash refused at run time, and the source column                               |
+| `ui/fullscreen.test.tsx`                 | the ⛶ and `F`: what element is handed over, that a refusal leaves the button unpressed, and the manifest's relative scope        |
 | `ui/exportValue.test.ts`                 | SWC's 1-based ids and -1 roots, OBJ's 1-based faces, the JSON typed-array unpack, and the file cap |
 | `nodes/output/download.test.ts`          | the tap: identity pass-through, deferred by the auto pass, and settings re-running nothing         |
 | `ui/useDownloads.test.tsx`               | the side effect: written on an executing run, not on an unchanged one, and the auto-run warning    |
@@ -548,6 +549,79 @@ as a CSS variable inline so the toggle can clear it without a second copy of the
 `installStorageStub()` in `test/jsdomStubs.ts` is what makes any of the persistence testable —
 Node 26 shadows jsdom's `localStorage`, so by default every persistence path silently degrades
 and has no coverage. Opt in per suite: with storage present, autosaves leak between test files.
+
+## Fullscreen, and installing
+
+Two halves answering two different moments, and they compose rather than overlap: **⛶ / `F`**
+is one session's worth of "give me the canvas now", and the **web manifest** is "this is how I
+always use it". `src/ui/fullscreen.ts` is the whole of the first; `public/manifest.webmanifest`
+plus three lines of `index.html` is the second.
+
+**The app's own chrome stays.** What fullscreen reclaims is the browser's ~90px of tabs and
+address bar, not the toolbar and status bar — Run, Auto-run and the stale count are precisely
+what you want in view while a graph is running, and a mode that hid them would be a different
+feature (a presentation mode) wearing this one's name.
+
+**The root element is what goes fullscreen, and that is what keeps the layout identical.** The
+fullscreen UA stylesheet's `position: fixed` rule is `:fullscreen:not(:root)`, so the root is
+exempt: the page simply stops having a browser around it. Any wrapper `<div>` would be pulled
+out of flow and have to be sized back by hand. The one thing the root does need stating is a
+background — the UA paints a black `::backdrop` behind whatever is fullscreen, and `html`
+carries no background here, only `body` does. Hence the `html:fullscreen` rule in `theme.css`.
+
+**`document.fullscreenElement` is the only honest source of truth, and the button reads it
+back.** Escape, F11 and the browser's own window chrome all leave fullscreen without passing
+through anything in this app, so a boolean written where the toggle was clicked is wrong the
+first time somebody uses any of them — and a ⛶ latched on by its own click reads as the app
+having lost track of the window, which is exactly what it has done. `useIsFullscreen`
+subscribes to `fullscreenchange` and returns a **boolean**, not the element, so the snapshot
+is a primitive (invariant 7).
+
+**Entering is a request, not a command.** Browsers refuse outside a user gesture and refuse
+again under some kiosk and iframe policies, with no way to ask in advance — so
+`toggleFullscreen` returns whether we ended up fullscreen rather than throwing, and the two
+callers that can distinguish a refusal from an ordinary exit (they know which direction they
+were going) are the ones that put a notice up. It is also why fullscreen is **not persisted**:
+a preference restored at load would be refused, since a page load is not a gesture.
+
+**`toggleFullscreen` compares against its own target, never against "is anything
+fullscreen".** That is what lets the two halves nest: the overlay's ⛶ pressed inside an
+already-fullscreen window shows the *panel* full size instead of dropping the window out, and
+the Fullscreen API's element stack means leaving the panel lands back on the fullscreen app.
+The overlay's `close` and its Escape handler were both widened for the same reason — they used
+to ask "is anything fullscreen?", which was only ever equivalent because nothing else could be.
+Closing a viewer has no business dropping the whole window out of fullscreen.
+
+### The manifest
+
+**`start_url` and `scope` are relative, and that is the one thing here that fails silently.**
+They resolve against the manifest's own URL, so `"."` is `/coda/` on GitHub Pages and `/` on a
+dev server. An absolute `"/"` works perfectly in dev and scopes the installed app to the domain
+root in production, where somebody else's site lives. `vite` rewrites the `<link rel="manifest">`
+href against `base` (`'./'`) the same way it does the favicon, so the href in `index.html` stays
+in the usual `/manifest.webmanifest` form. `fullscreen.test.tsx` asserts the relative form,
+because nothing else would catch it before a deploy.
+
+**There is deliberately no service worker.** Chromium's installability criteria historically
+wanted one with a fetch handler, and Chrome is explicitly [walking that
+back](https://developer.chrome.com/blog/update-install-criteria) — sites answered it with empty
+fetch handlers, which is what a service worker here would be too. This app has no offline story
+to write: every dataset it reads comes over the network. A cache that outlived a deploy is the
+classic way to strand somebody on a stale bundle, and that is a real cost against a hypothetical
+install prompt. Both browsers that matter install from a menu item regardless of one.
+
+**The icons are `purpose: "any"`, not maskable.** Android's maskable safe zone is the middle
+80%, and the coda sign's cross arms reach ±65% of the half-width — declaring maskable would have
+the platform crop the tips off the mark. `icon-192.png` and `icon-512.png` are rasterised from
+`icon.svg` with `rsvg-convert -w N -h N`; the SVG is listed first, at `sizes: "any"`, for the
+platforms that take it.
+
+**No visual verification exists.** jsdom implements no part of the Fullscreen API, so what the
+suite checks is which element is handed over and how the button reads the answer back
+(`installFullscreenStub` grants fullscreen the way a browser does — by setting
+`document.fullscreenElement` and firing the event, never from inside `requestFullscreen`). The
+transition itself, and the installed window, have not been driven by anyone here. Same standing
+as the WebGL viewers.
 
 ## Canvas interaction
 

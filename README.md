@@ -250,8 +250,23 @@ Middle and right drag also pan. Scroll zooms.
 | `H`                               | Collapse selection                                                       |
 | `⌘D`                              | Duplicate selection                                                      |
 | `⌘Z` / `⇧⌘Z`                      | Undo / redo                                                              |
+| `I`                               | Show / hide the inspector                                                |
+| `F` / **⛶**                       | Fullscreen — the browser's tabs and address bar gone                     |
 | `⌫`                               | Delete selection                                                         |
 | right-click a node                | Run just that node, invalidate its cache, mute, delete                   |
+
+### Filling the screen
+
+`F`, or the **⛶** beside the theme toggle, hands the page to the browser's Fullscreen API —
+the same thing `F11` does, reachable from inside the app. Coda's own toolbar and status bar
+stay: what it reclaims is the browser's chrome, and the stale count and **Run** are exactly
+what you want in view while a graph is running. `Esc` leaves.
+
+For the permanent version, Coda ships a web manifest and can be **installed**: Chrome and Edge
+offer it from the ⋮ menu (_Cast, save and share ▸ Install page as app_, or an install icon in
+the address bar), Safari from _File ▸ Add to Dock_. An installed copy launches in its own
+window with no tabs and no address bar at all. It is the same app from the same origin, so it
+shares the token, the browser shelf and every cache with the tab.
 
 A running node is outlined by a pulsing **gold** stroke, just outside the card, that **grows
 around its perimeter** as the work progresses — a fifth of the way round while mesh manifests are read, the rest as the geometry

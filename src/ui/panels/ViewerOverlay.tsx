@@ -25,6 +25,7 @@ import { describeValue } from '../../core/values'
 import { useGraphStore } from '../../store/graphStore'
 import { exportBaseName } from '../export'
 import { formatDuration } from '../format'
+import { exitFullscreen, toggleFullscreen, useIsFullscreen } from '../fullscreen'
 import { nodeBody } from '../nodes/nodeBodies'
 import { ParamField } from '../params/ParamField'
 import { ParamRows } from '../params/ParamRows'
@@ -57,20 +58,25 @@ export function ViewerOverlay() {
   })
 
   const panelRef = useRef<HTMLDivElement>(null)
-  const [isFullscreen, setIsFullscreen] = useState(false)
   const [tabId, setTabId] = useState<string | undefined>(undefined)
+  const isFullscreen = useIsFullscreen(panelRef.current)
 
   const close = useCallback(() => {
-    if (document.fullscreenElement) void document.exitFullscreen().catch(() => {})
+    // Only *this panel's* fullscreen, never "whatever is fullscreen": the app itself can be
+    // fullscreen underneath, and closing a viewer has no business dropping the whole window
+    // out of it. The API keeps a stack, so leaving the panel lands back there.
+    if (document.fullscreenElement === panelRef.current) exitFullscreen()
     expandNode(undefined)
   }, [expandNode])
 
-  // Escape closes. The browser consumes Escape itself while in real fullscreen, which
+  // Escape closes. The browser consumes Escape itself while the *panel* is fullscreen, which
   // exits fullscreen first and leaves the overlay up — that's the behaviour people expect.
+  // A fullscreen *app* underneath is not that case: the overlay is an ordinary dialog on top
+  // of it, and Escape closes it like any other.
   useEffect(() => {
     if (!nodeId) return
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !document.fullscreenElement) {
+      if (event.key === 'Escape' && document.fullscreenElement !== panelRef.current) {
         event.stopPropagation()
         close()
       }
@@ -78,12 +84,6 @@ export function ViewerOverlay() {
     window.addEventListener('keydown', onKeyDown, true)
     return () => window.removeEventListener('keydown', onKeyDown, true)
   }, [nodeId, close])
-
-  useEffect(() => {
-    const onChange = () => setIsFullscreen(document.fullscreenElement === panelRef.current)
-    document.addEventListener('fullscreenchange', onChange)
-    return () => document.removeEventListener('fullscreenchange', onChange)
-  }, [])
 
   const node = nodeId ? graph.nodes.find((n) => n.id === nodeId) : undefined
   const def = node ? getNodeDef(node.type) : undefined
@@ -106,16 +106,12 @@ export function ViewerOverlay() {
   const activeTab = tabs.find((t) => t.id === tabId) ?? tabs[0]
   const baseName = exportBaseName(graph.meta?.name, node.title ?? def.label)
 
-  const toggleFullscreen = () => {
+  const onToggleFullscreen = () => {
     const panel = panelRef.current
     if (!panel) return
-    if (document.fullscreenElement) {
-      void document.exitFullscreen().catch(() => {})
-    } else {
-      void panel.requestFullscreen().catch(() => {
-        setNotice('This browser refused fullscreen for the viewer')
-      })
-    }
+    void toggleFullscreen(panel).then((now) => {
+      if (!isFullscreen && !now) setNotice('This browser refused fullscreen for the viewer')
+    })
   }
 
   return (
@@ -157,7 +153,7 @@ export function ViewerOverlay() {
           <button
             type="button"
             className="btn btn--ghost"
-            onClick={toggleFullscreen}
+            onClick={onToggleFullscreen}
             title={isFullscreen ? 'Leave fullscreen' : 'Fullscreen'}
             aria-label={isFullscreen ? 'Leave fullscreen' : 'Enter fullscreen'}
           >
