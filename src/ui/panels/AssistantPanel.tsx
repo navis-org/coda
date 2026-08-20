@@ -151,9 +151,9 @@ function Drawer({ takeFocus }: { takeFocus: boolean }) {
               </>
             ) : (
               <>
-                Pick a provider under <strong>Connections</strong> in the toolbar — Anthropic,
-                OpenAI, Gemini, or a model running locally under Ollama. Nothing else in Coda
-                needs one.
+                Pick a provider under <strong>Connections</strong> — the branch icon in the
+                toolbar — Anthropic, OpenAI, Gemini, or a model running locally under Ollama.
+                Nothing else in Coda needs one.
               </>
             )}
           </p>

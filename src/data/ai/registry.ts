@@ -30,7 +30,7 @@ export async function complete(request: CompletionRequest): Promise<CompletionRe
 
   const apiKey = request.apiKey ?? getKey(id)
   if (provider.needsKey && !apiKey) {
-    const message = `No ${provider.label} API key. Add one in Connections, in the toolbar.`
+    const message = `No ${provider.label} API key. Add one in Connections — the branch icon in the toolbar.`
     reportAuthFailure(message)
     throw new AiError(message, 401)
   }

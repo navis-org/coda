@@ -60,6 +60,18 @@ export interface CodaGraph {
     /** ISO 8601. */
     createdAt?: string
     modifiedAt?: string
+    /**
+     * The gist this workflow was last shared to, if it has been.
+     *
+     * In the document rather than beside it because that is what lets Share *update* the link
+     * somebody already has instead of littering a second gist every time it is pressed. A gist
+     * id is public by construction, so nothing private travels with it.
+     *
+     * `owner` is what makes it safe to carry: a graph you were *sent* names somebody else's
+     * gist, and sharing it must create your own rather than PATCH theirs and get a 404 with
+     * nothing to explain it. See `data/share/gist.ts`.
+     */
+    gist?: { id: string; owner?: string }
   }
 }
 
@@ -343,13 +355,21 @@ export function reconnectEdge(
 // Serialisation
 // ---------------------------------------------------------------------------
 
-export function serializeGraph(graph: CodaGraph): string {
+/**
+ * The document as JSON.
+ *
+ * Indented by default, because a `.coda.json` is a file people read and diff. `compact` is for
+ * the share link, where the indentation is dead weight — and where the obvious spelling,
+ * `JSON.stringify(JSON.parse(serializeGraph(g)))`, walks the whole document three times and
+ * holds a throwaway copy of it to undo work this function had just done.
+ */
+export function serializeGraph(graph: CodaGraph, options: { compact?: boolean } = {}): string {
   const out: CodaGraph = {
     ...graph,
     version: GRAPH_FORMAT_VERSION,
     meta: { ...graph.meta, modifiedAt: new Date().toISOString() },
   }
-  return JSON.stringify(out, null, 2)
+  return options.compact ? JSON.stringify(out) : JSON.stringify(out, null, 2)
 }
 
 /**
@@ -365,6 +385,31 @@ function validSize(raw: unknown): { width: number; height: number } | undefined 
   const h = Number(height)
   if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return undefined
   return { width: w, height: h }
+}
+
+/**
+ * A stored `meta` block, with anything malformed dropped.
+ *
+ * `meta` used to be a name and two timestamps that nothing did anything with but display, so
+ * passing it through whole was harmless. It is not any more: `meta.gist` names a gist that
+ * `updateGist` will PATCH with the user's token, and a `.coda.json` is a file people mail each
+ * other. So it goes through the same lenient-but-checked pass `validSize` gives a card size —
+ * known keys kept when they are the right shape, everything else dropped rather than trusted.
+ */
+function validMeta(raw: unknown): CodaGraph['meta'] | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const { name, description, createdAt, modifiedAt, gist } = raw as Record<string, unknown>
+  const text = (value: unknown) => (typeof value === 'string' ? value : undefined)
+  const id = typeof gist === 'object' && gist ? (gist as Record<string, unknown>) : undefined
+  const gistId = text(id?.['id'])
+  const gistOwner = text(id?.['owner'])
+  return {
+    ...(text(name) !== undefined ? { name: text(name) } : {}),
+    ...(text(description) !== undefined ? { description: text(description) } : {}),
+    ...(text(createdAt) !== undefined ? { createdAt: text(createdAt) } : {}),
+    ...(text(modifiedAt) !== undefined ? { modifiedAt: text(modifiedAt) } : {}),
+    ...(gistId ? { gist: { id: gistId, ...(gistOwner ? { owner: gistOwner } : {}) } } : {}),
+  }
 }
 
 export interface LoadResult {
@@ -447,7 +492,7 @@ export function deserializeGraph(json: string): LoadResult {
       nodes,
       edges,
       ...(obj.viewport ? { viewport: obj.viewport } : {}),
-      ...(obj.meta ? { meta: obj.meta } : {}),
+      ...(validMeta(obj.meta) ? { meta: validMeta(obj.meta) } : {}),
     },
     warnings,
   }

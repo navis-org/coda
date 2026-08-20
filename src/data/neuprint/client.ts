@@ -156,7 +156,8 @@ async function request<T>(
 ): Promise<T> {
   const token = options.token ?? getToken()
   if (!token) {
-    const message = 'No neuPrint token. Add one in Connections, in the toolbar.'
+    const message =
+      'No neuPrint token. Add one in Connections — the branch icon in the toolbar.'
     reportAuthFailure(message)
     throw new NeuPrintError(message, 401)
   }

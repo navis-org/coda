@@ -3534,6 +3534,206 @@ a.viewer-actions__btn {
   color: var(--status-warn);
 }
 
+/* --------------------------------------------------------------------------
+ * Share workflow
+ *
+ * The dialog borrows `.sources`' header, section bar, notes and result lines outright — it is
+ * the same kind of object (a modal about something outside the document) and a second set of
+ * near-identical rules is how two dialogs drift on what a note looks like. What is here is only
+ * what the sources panel has no equivalent of: the link row, and the advisories.
+ * -------------------------------------------------------------------------- */
+
+/*
+ * Hugs its content, unlike `.sources`.
+ *
+ * `.overlay__panel` is `height: 100%` because the panels that came before this one are scrolling
+ * bodies that want every pixel. This one is a link, a sentence and a few asides — left at full
+ * height it renders as a 640px card with four hundred of them empty below the text, which reads
+ * as content that failed to load. `max-height` still caps it, so a graph carrying several
+ * advisories scrolls rather than growing past the viewport.
+ */
+.share {
+  max-width: 620px;
+  height: auto;
+  max-height: 640px;
+}
+
+/* `flex: 0 1 auto`, against `.sources__body`'s `flex: 1`, for the same reason. */
+.share__body {
+  flex: 0 1 auto;
+  padding: 4px 14px 14px;
+}
+
+/* The header carries a rule; the segmented control needs air under it. */
+.share .sources__sections {
+  margin-top: 10px;
+}
+
+/*
+ * The link, and Copy beside it.
+ *
+ * A read-only input rather than a paragraph: it is selectable, it scrolls instead of wrapping a
+ * 56,000-character link across the whole dialog, and it is what somebody reaches for when the
+ * clipboard API is unavailable — which is every page not served from a secure origin.
+ */
+.share__link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 4px;
+}
+.share__link > .field {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.share__link > .btn {
+  flex: none;
+}
+
+.share__pending {
+  margin: 10px 0 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.share__size {
+  margin: 0 0 8px;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.share__controls {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 10px 0 2px;
+}
+.share__controls > .btn {
+  flex: none;
+}
+
+.share__check {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 1.45;
+}
+.share__check input {
+  margin-top: 2px;
+  flex: none;
+}
+/*
+ * "Secret" reads as "private" and is not — an unlisted gist is readable by anybody holding the
+ * link. The correction sits under the label rather than in a tooltip, because somebody about to
+ * tick this box is exactly the person who has to read it.
+ */
+.share__check em {
+  display: block;
+  font-style: normal;
+  font-size: 10px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+/*
+ * What the link does not carry.
+ *
+ * Toned as a standing fact rather than as a warning: nothing is going wrong, and an
+ * alarm-coloured note about an uploaded CSV reads as a failed share. The rule down the left is
+ * what marks them as a list of asides without spending a colour on it.
+ */
+.share__advisory {
+  margin: 8px 0 0;
+  padding-left: 9px;
+  border-left: 2px solid var(--border);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+/* A gist cannot be made without a token, so the panel says where to get one instead. */
+.share__blocked {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.share__blocked strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* --------------------------------------------------------------------------
+ * Opening a shared link
+ * -------------------------------------------------------------------------- */
+
+/*
+ * The transient "fetching" note. A toast rather than a modal: nothing is being asked, and a
+ * dialog that appears and vanishes on its own is a flash of chrome nobody can read.
+ */
+.share-gate {
+  position: fixed;
+  top: 46px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface-1);
+  box-shadow: var(--shadow-panel);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+/* Hugs its content, for the same reason `.share` does — see the note there. */
+.share-gate__panel {
+  max-width: 440px;
+  height: auto;
+  padding: 14px 16px;
+  gap: 0;
+}
+.share-gate__panel h2 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.share-gate__panel p {
+  margin: 0 0 8px;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+/* One rule for all three share surfaces — the block's own header warns about exactly this. */
+.share__advisory code,
+.share__blocked code,
+.share-gate__panel code {
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+.share-gate__panel code {
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--surface-2);
+  color: var(--text-primary);
+}
+.share-gate__quiet {
+  color: var(--text-muted) !important;
+}
+.share-gate__actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 12px;
+}
+
 /* Multiline param/text fields — Cypher, tokens. */
 .field--area {
   resize: vertical;

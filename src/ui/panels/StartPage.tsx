@@ -183,7 +183,7 @@ export function StartPage() {
 
           <Deck
             label="Datasets"
-            note="live neuPrint · add a token under Sources in the toolbar first"
+            note="live neuPrint · add a token under Connections, the branch icon in the toolbar"
             cards={datasets}
             confirming={confirming}
             onPick={pick}

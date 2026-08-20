@@ -60,7 +60,9 @@ import {
   splitSceneUrl,
 } from '../../data/neuroglancer/scene'
 import type { ColorSpec } from '../../nodes/lib/encodingParams'
+import { errorMessage } from '../../core/errors'
 import { describeLegend, resolveColor } from '../encoding'
+import { copyText } from '../export'
 import { ViewerActions } from './ViewerActions'
 import { plural } from '../format'
 
@@ -217,15 +219,7 @@ export function NeuroglancerViewer({
   const summary = !neurons ? 'dataset scene · no neurons connected' : plural(count, 'neuron')
 
   const copyLink = () => {
-    // Absent in jsdom, and on any page not served over a secure origin.
-    const clipboard = navigator.clipboard
-    if (!clipboard) {
-      onError?.('This browser has no clipboard access')
-      return
-    }
-    void clipboard
-      .writeText(url)
-      .catch(() => onError?.('This browser refused clipboard access'))
+    void copyText(url).catch((err: unknown) => onError?.(errorMessage(err)))
   }
 
   return (

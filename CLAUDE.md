@@ -1064,8 +1064,8 @@ fresh object, so a selector returning the whole thing changes identity on every 
 along the right edge of the canvas, which reads as a dead strip.
 
 Each panel has an affordance where you would look for it: the inspector has a toolbar toggle
-(and `I`, unqualified — unlike `m`/`h` it is worth pressing with nothing selected) plus a chevron
-in its own header; the minimap has a button in the corner it occupies. That button is rendered
+(the lens icon; and `I`, unqualified — unlike `m`/`h` it is worth pressing with nothing selected)
+plus a chevron in its own header; the minimap has a button in the corner it occupies. That button is rendered
 **outside `<ReactFlow>`** so it keeps its corner whether or not the map is mounted — a toggle
 that disappears when used cannot be undone.
 
@@ -1078,6 +1078,35 @@ as a CSS variable inline so the toggle can clear it without a second copy of the
 `installStorageStub()` in `test/jsdomStubs.ts` is what makes any of the persistence testable —
 Node 26 shadows jsdom's `localStorage`, so by default every persistence path silently degrades
 and has no coverage. Opt in per suite: with storage present, autosaves leak between test files.
+
+### The toolbar's icon cluster
+
+Four buttons carry an icon and no words — **Share** (a box with an arrow leaving it),
+**Connections** (a branch), **Assistant** (a robot head) and **Inspector** (a lens). They are in
+`src/ui/Icons.tsx`, drawn on the usual 24-unit grid with a 2-unit stroke and painting in
+`currentColor`, so each takes the ink of the button it sits in and follows its hover and pressed
+states. Same rule as `CodaMark`, and for the same reason: an accent-coloured icon here would be
+the same blue as a Table socket and read as a typed port rather than as chrome.
+
+**Every one keeps its name in `aria-label` and `title`.** An icon-only control with neither is a
+control only its author can use — and it is the one property nothing about the rendering would
+report, since the icon draws either way. `panels.test.tsx` asserts all four have a name, an
+`<svg>` and no text.
+
+**`aria-pressed` now carries what the glyph used to.** The inspector toggle drew `▐` against `▕`,
+which said open-or-closed in the mark itself; an icon that does not change with the state says it
+through the pressed style and the tooltip instead. Same trade `.coda-node__fold` records.
+
+**Four messages elsewhere had to learn the icon.** "Add one in Connections, in the toolbar" pointed
+at a button that no longer has the word "Connections" on it — so `client.ts`, `ai/registry.ts`, the
+assistant drawer and the start page's dataset rail all name **the branch icon** now. The start
+page's line was additionally stale from before: it still said *Sources*, which that button has not
+been called for some time. This is the standing cost of an icon-only control, and the thing to
+check when adding a fifth.
+
+**Share leads the cluster and is the odd one out** — a verb, where the other three are toggles or a
+dialog. It sat under `Save ▸` first; the menu entry is gone rather than duplicated, because two
+routes to one dialog is two places for the wording to drift.
 
 ## Fullscreen, and installing
 
@@ -4339,6 +4368,227 @@ Two traps in that plumbing, both hit:
 - **Weight the phases.** Reading mesh manifests is a few hundred bytes per body; the fragments
   behind them are megabytes. `meshProgressFraction` gives manifests the first fifth, so the
   bar does not reach the halfway mark in the first second and then appear to hang.
+
+## Sharing a workflow
+
+The **⧉ icon in the toolbar**, or the palette's `Graph ▸ Share Workflow…`: a link that opens
+this graph. Neuroglancer's model, which is what makes a neuroglancer view mailable with no server
+anywhere — the state goes after `#!`, and a fragment is the one part of a URL a browser never
+sends to anybody.
+
+**Two destinations, and the ordering is the design.** _In the link_ packs the graph into the
+fragment itself; _GitHub Gist_ uploads it and leaves a forty-character link. The packed form is
+the default and is strictly better right up to the point where it stops fitting: it cannot rot,
+cannot be deleted by its author, needs no account and works for a recipient who has never heard
+of any of this.
+
+The numbers are what settle it. Measured across the five bundled examples, **deflate + base64url
+is 1,540–2,004 characters** against 4,282–4,786 for the same graph as literal JSON — 2.8×, and
+the difference between a workflow that pastes anywhere and one that does not. The case that
+genuinely needs the gist is an Explore select-all: 10,000 body ids pack to **~56,000**, which
+mail and chat clients cut short.
+
+### The grammar
+
+`#!` and one payload, dispatched on what it starts with:
+
+| payload                | means                                            |
+| ---------------------- | ------------------------------------------------ |
+| `{…}`                  | the graph as literal JSON, percent-decoded first |
+| `c1.<base64url>`       | deflate-raw of the minified JSON, format 1       |
+| `gh://<user>/<gistId>` | a GitHub Gist, optionally `@<revision>`          |
+| `gs://<bucket>/<path>` | an object on Google Cloud Storage                |
+| `https://…`            | any JSON over https                              |
+
+Coda writes the second and third and reads all five. **The literal form is kept because a link
+you can read before opening is worth 2.8×** — it is what lets the docs print one, what makes a
+hand-edited link work, and what the AI assistant would emit. Decoding is attempted and its
+failure _ignored_, so a payload that was never encoded is not refused for containing a stray `%`.
+
+**`c1.` names the format, not the algorithm.** An unrecognised blob then fails with a sentence
+rather than an inflate error, and changing compressor later is a `c2` rather than a guess about
+what the bytes were. **`deflate-raw`, not `gzip`**: measured 24 characters shorter, which is
+exactly the gzip container — a header, a CRC and a length, none of which a URL wants.
+
+**An unknown scheme is named.** `Coda cannot open "ftp://" workflow links` — the fix for `http://`
+is a URL change and the fix for `file://` is to send the file, and a shared "bad link" helps with
+neither.
+
+**Base64 is chunked.** `String.fromCharCode(...bytes)` is the one-liner and blows the call stack
+well below the size an Explore selection reaches, with nothing in the failure naming the array
+that did it.
+
+**Both writer promises are caught in `through()`.** A corrupt payload fails on _both_ ends of the
+transform: the readable side rejects and is turned into a sentence, and the writable side rejects
+with the same thing a tick later with nobody listening — an unhandled `Z_BUF_ERROR` beside a
+message that had already explained itself properly. Found because a passing test printed a stack.
+
+### Reading a link, and the two questions
+
+`store/graphStore` reads `location.hash` **synchronously in its initialiser**, only to ask
+_whether_ there is a link, which is a regex. That answer withholds the start page, and it has to
+be settled in the tick the store is created: a link noticed an effect later means the welcome
+modal is already up over a workflow the recipient has not seen. `useShareLink` does the reading
+and the fetching an effect later.
+
+**The fragment is cleared once handled, including on a decline.** Left in place, a reload after
+ten minutes of editing silently reverts to the shared graph, which is the worst thing this
+feature could do. The link is not the store; the dialog regenerates it.
+
+Two confirmations, for two different questions, asked in the order that lets the first be
+answered without touching the network:
+
+1. **Fetch from this host?** — only for a bare `https://`, whose destination the recipient cannot
+   see. Shortening a link is exactly the act of hiding where it goes. `gh://` and `gs://` name a
+   known host _in the link itself_ and do not ask.
+2. **Replace what is on the canvas?** — only when there is something to replace. `loadGraph`
+   resets the history and the autosave is the only copy of what is about to go. Same shape as the
+   start page's card confirm, and `window.confirm` is avoided for the same reason.
+
+A fresh tab following a gist link answers neither, which is the common case.
+
+**What a shared graph runs is nothing, and that is a property rather than a promise.**
+`loadGraph` schedules the _cheap_ pass, so anything `cheap` executes without the recipient
+pressing anything — and `core.tableFromUrl`, the only node that fetches a URL written into the
+document, is `expensive`. It is expensive for its own reason (invariant 6: its URL is a text
+field, and `cheap` would fire a request per keystroke), but that reason is now smaller than the
+one that depends on it, so `store/shareLoad.test.ts` pins it. The rest follows from what already
+exists: `deserializeGraph` validates and drops, note and blurb markdown goes through an AST
+parser that cannot emit raw HTML, and no credential is ever inside a graph.
+
+### The gist half
+
+`api.github.com` is **fully CORS-open**, verified rather than assumed: the `POST /gists`
+preflight answers 204 with `Access-Control-Allow-Origin: *`, `Allow-Headers` including
+`Authorization`, `Content-Type` and `X-GitHub-Api-Version`, and `Allow-Methods` including POST.
+Reads carry ACAO too, and so do `gist.githubusercontent.com` raw URLs. So this works from the
+static GitHub Pages build, where the Cypher API cannot reach — the same finding shape as the AI
+providers.
+
+**Anonymous gists do not exist.** GitHub removed them in March 2018 and an unauthenticated POST
+is a 401. That is the whole reason a token is needed, and it is recorded so nobody re-checks it
+hoping otherwise. **Reading needs no token**, which is what makes a link work for a recipient who
+has never opened Connections.
+
+**A third section in Connections**, beside Data sources and AI assistant. The top level there is
+_what kind of connection_, and a GitHub token is a third kind — filing it under the sources would
+make it a fourth connectome. `gist` scope and nothing else; the panel links to a token page with
+that scope pre-selected, because the obvious thing to do when a page asks for a GitHub token is
+to tick everything.
+
+Four things that each produce a plausible wrong result:
+
+- **`public` is rejected on a PATCH.** A gist's visibility is fixed at creation, so sending it
+  anyway is a 422 on an otherwise perfectly good update. The secret checkbox is disabled once a
+  gist exists for the same reason.
+- **`truncated`.** The API stops inlining file content above 1 MB and hands back a `raw_url`.
+  Coda's graphs are far under it and a graph carrying a large selection is not obviously so — and
+  the failure mode is a _partial_ graph that parses, which is worse than one that does not.
+- **Which file.** A gist can hold several and people add notes to them, so the one ending
+  `.coda.json` wins; a single-file gist is taken as-is whatever it is called, so a link to
+  somebody's hand-written `workflow.json` still opens.
+- **One `GET /user` for concurrent askers.** The login cache is written when the answer _lands_,
+  so two callers a tick apart both miss it. Not hypothetical: `StrictMode` invokes the dialog's
+  effect twice, and that was observed live as two calls against a rate-limited API for one dialog
+  opening. Same in-flight-promise idiom as `loadCachedTable`.
+
+**`meta.gist` rides in the document**, which is what lets Share _update_ the link somebody
+already has instead of littering a gist every time it is pressed. A gist id is public by
+construction, so nothing private travels with it — and `owner` is what makes it safe: a graph you
+were _sent_ names somebody else's gist, and PATCHing that is a 404 with nothing to explain it, so
+Share offers Create instead. Note the chicken-and-egg that makes this work out on its own: the
+uploaded JSON predates the id, so a recipient's copy carries no `meta.gist` and re-sharing
+correctly creates their own.
+
+It is committed with `autoRun: false` — bookkeeping about a link is not an edit, and a workflow
+going stale because somebody copied its address would read as a scheduler bug. Same standing a
+resize has.
+
+### The advisories, and why this is a dialog
+
+A menu item that copied a link would be smaller and would be wrong: what a shared workflow does
+_not_ carry is not obvious, and the moment to say so is while the sender still has it in front of
+them and can attach the file or mention the token. `ui/shareAdvisories.ts` is the rule, pure and
+headless — `canExport.ts` in an advisory mood, and nothing here refuses a share, because unlike a
+notebook on a connectome that does not exist outside the tab, a link is worth having in every one
+of these cases.
+
+- **An upload names the _file_**, never the content hash, because the filename is the only part
+  of this anybody can act on. The rows are in IndexedDB by content address, exactly as a
+  `.coda.json` has always been.
+- **A real connectome names itself**, so the recipient is told they need their own token — and
+  told that only Run needs it. A synthetic dataset earns no advisory at all.
+- **A link over `LONG_LINK_CHARS` (8,000)** recommends the gist. Not a browser limit — Chrome
+  carries about two megabytes and a fragment never reaches a server — but mail wraps, chat clients
+  elide, and trackers linkify as far as they feel like.
+- **A localhost origin** says so, because a link built on a dev server opens nowhere else.
+
+**What does not travel**, and is not hidden: uploaded rows, both credentials, the panel and
+layout preferences (per-user, deliberately never in the document), and the camera — `loadGraph`
+bumps `fitRequest`, so a shared graph is framed by fit rather than by the sender's viewport,
+which is right when the recipient's window is a different size.
+
+### Small things the cleanup pass settled
+
+- **`serializeGraph` gained `{ compact: true }`.** The codec was spelling the minify pass as
+  `JSON.stringify(JSON.parse(serializeGraph(g)))` — three walks of the document and a throwaway
+  copy of it, to undo indentation the same call had just added.
+- **`deserializeGraph` validates `meta` now**, through a `validMeta` beside `validSize`. That
+  block was passed through whole, which was harmless while it held a name and two timestamps
+  nothing acted on. `meta.gist` names a gist `updateGist` will PATCH with the user's token, and a
+  `.coda.json` is a file people mail each other.
+- **`setGraphGist` does not go through `commit`.** `commit` runs `inferGraph`, refreshes every
+  node's state and pushes a history entry unconditionally; no node can read `meta.gist`, so all
+  of that was work for nothing on the largest graphs — and the new graph object it minted also
+  re-ran the whole deflate behind the dialog. It sets and autosaves, the narrower path
+  `afterSourceLearned` takes.
+- **The gist filename comes from the caller**, through the same `slugify` `Download .coda.json`
+  uses. Computing one user-facing name in two places is how the two come to disagree; they had
+  already, over a length cap.
+- **`copyText` lives in `ui/export.ts`**, shared with the neuroglancer link button. Its failure
+  goes to the notice channel — the share dialog was writing it into `GistState`, which rendered a
+  clipboard error in the gist result slot in *link* mode and, worse, overwrote `state: 'done'`,
+  taking the freshly created `gh://` link off the screen when a copy failed.
+- **`useDismissOnOutside` gained `outside`.** The share dialog had no Escape at all and the gate
+  hand-rolled a sixth private listener. The gate passes `outside: false`, which is the reason the
+  option exists: dismissing there discards a link somebody was sent, and on the replace prompt
+  the other answer discards the canvas — a stray backdrop click is not an answer to either.
+
+### What it costs, and why it is not lazy
+
+**+22.9 kB raw / +7.3 kB gzipped on the main chunk**, measured against the same build with the
+feature stashed out (930.75 → 953.63 kB). That is the codec, the resolver, the gist client, both
+dialogs and the advisories.
+
+**Splitting the dialog out was measured and declined.** `React.lazy` on `ShareDialog` yields a
+6.72 kB chunk and takes only **1.78 kB gzipped** off main, because the half that cannot move is
+the half that matters: `hasShareFragment` runs in the store's initialiser, the resolver and the
+gate run on any page load carrying a link, and the advisories are read as the dialog opens. This
+codebase's bar for a lazy boundary is the exporters at 17.6 kB gzipped and elkjs/three/sigma far
+above that; under two kilobytes buys a `Suspense` boundary and a second code path for nothing.
+Re-measure before adding to this — the number to beat is the one above, not the chunk size.
+
+### Two CSS notes, both found in a browser
+
+**Both panels set `height: auto`.** `.overlay__panel` is `height: 100%` because the panels that
+came before these are scrolling bodies wanting every pixel; the share dialog is a link, a sentence
+and a few asides, and at full height it rendered as a 640px card with four hundred of them empty
+below the text — which reads as content that failed to load. `max-height` still caps it. Same for
+`.share-gate__panel`. jsdom performs no layout, so this is exactly the class the suite cannot see.
+
+**Everything else is `.sources`'**: header, section bar, notes, field rows and result lines are
+reused outright rather than copied. They are the same kind of object — a modal about something
+outside the document — and a second set of near-identical rules is how two dialogs drift on what
+a note looks like.
+
+### What was checked in a real browser
+
+Headless Chrome over CDP against `pnpm dev`, because the codebase's standing lesson is that
+jsdom reports one stubbed size for everything: the round trip (the `LC outputs` example → a
+1,743-character link → a fresh tab restoring all seven nodes, the name, and an empty address bar,
+with no console errors), both confirmations, the unknown-scheme refusal, gist create and gist
+update with `api.github.com` stubbed in the page, and the two panel heights above. The link
+length matched the headless measurement exactly.
 
 ## The workflow library
 

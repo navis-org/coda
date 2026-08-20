@@ -260,6 +260,19 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
       perform: () => downloadGraph(store.graph),
     },
     {
+      id: 'cmd:share',
+      label: 'Share Workflow…',
+      action: 'Graph',
+      /*
+       * Never disabled, unlike the two exports below it. An empty canvas is a perfectly
+       * shareable graph — somebody sending a colleague a blank workspace on a particular
+       * dataset is a real thing to do — and the dialog says what a link does not carry rather
+       * than refusing to make one.
+       */
+      hint: 'Make a link that opens this graph — in the link itself, or via a gist',
+      perform: () => store.requestShare(),
+    },
+    {
       id: 'cmd:export-notebook',
       label: 'Export as Jupyter Notebook',
       action: 'Graph',

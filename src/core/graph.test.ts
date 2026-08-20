@@ -335,3 +335,74 @@ describe('serialisation', () => {
     expect(sizes['none']).toBeUndefined()
   })
 })
+
+describe('meta on load', () => {
+  /**
+   * `meta` used to be passed through whole, which was harmless while nothing acted on it. It is
+   * not now: `meta.gist` names a gist the Share dialog will PATCH with the user's token, and a
+   * `.coda.json` is a file people mail each other.
+   */
+  it('keeps a well-formed gist reference', () => {
+    const json = JSON.stringify({
+      version: 1,
+      nodes: [],
+      edges: [],
+      meta: { name: 'Sweep', gist: { id: 'abc123', owner: 'schlegelp' } },
+    })
+    expect(deserializeGraph(json).graph.meta).toEqual({
+      name: 'Sweep',
+      gist: { id: 'abc123', owner: 'schlegelp' },
+    })
+  })
+
+  it('drops a gist reference that is not one, rather than trusting the file', () => {
+    for (const gist of [42, 'abc', null, {}, { owner: 'x' }, { id: 7 }]) {
+      const json = JSON.stringify({
+        version: 1,
+        nodes: [],
+        edges: [],
+        meta: { name: 'n', gist },
+      })
+      expect(deserializeGraph(json).graph.meta?.gist).toBeUndefined()
+    }
+  })
+
+  it('drops an owner that is not text but keeps the id', () => {
+    const json = JSON.stringify({
+      version: 1,
+      nodes: [],
+      edges: [],
+      meta: { gist: { id: 'abc123', owner: 99 } },
+    })
+    expect(deserializeGraph(json).graph.meta?.gist).toEqual({ id: 'abc123' })
+  })
+
+  it('ignores keys it does not know, and a meta that is not an object', () => {
+    const withJunk = JSON.stringify({
+      version: 1,
+      nodes: [],
+      edges: [],
+      meta: { name: 'n', evil: { toString: 1 } },
+    })
+    expect(deserializeGraph(withJunk).graph.meta).toEqual({ name: 'n' })
+    const notObject = JSON.stringify({ version: 1, nodes: [], edges: [], meta: 'nope' })
+    expect(deserializeGraph(notObject).graph.meta).toBeUndefined()
+  })
+})
+
+describe('compact serialisation', () => {
+  it('is the same document without the indentation', () => {
+    const graph = emptyGraph('Sweep')
+    const pretty = serializeGraph(graph)
+    const compact = serializeGraph(graph, { compact: true })
+    expect(compact.length).toBeLessThan(pretty.length)
+    expect(compact).not.toContain('\n')
+    // Same document, modulo the `modifiedAt` stamp each call mints.
+    const strip = (json: string) => {
+      const parsed = JSON.parse(json) as { meta?: Record<string, unknown> }
+      delete parsed.meta?.['modifiedAt']
+      return parsed
+    }
+    expect(strip(compact)).toEqual(strip(pretty))
+  })
+})

@@ -6,21 +6,34 @@
  * per-machine, none belongs in a saved graph, so this is the app state that lives outside the
  * document.
  *
- * **Two levels of tab, and the split is the point.** A data source and an AI provider are not
- * the same kind of thing: one answers questions about a connectome, the other writes graphs,
- * and only one of them is reached through a proxy. Putting the API key in the source list
- * would file it as a fourth connectome. So the top level is *what kind of connection*, and
- * `SOURCE_TABS` stays the second level within Data sources — a backend is still added by
- * implementing `DataSource` and arriving as an entry.
+ * **Two levels of tab, and the split is the point.** A data source, an AI provider and a
+ * sharing token are not the same kind of thing: one answers questions about a connectome, one
+ * writes graphs, one publishes them, and only the first is reached through a proxy. Putting the
+ * API key in the source list would file it as a fourth connectome. So the top level is *what
+ * kind of connection*, and `SOURCE_TABS` stays the second level within Data sources — a backend
+ * is still added by implementing `DataSource` and arriving as an entry.
  *
- * It opens itself on an auth failure, on whichever half failed. A 401 surfaced only as red
+ * **`SECTIONS` is a table, not a set of ids to branch on.** Each entry carries its own body
+ * (`render`, the same shape `SOURCE_TABS` already used), its own auth-failure channel
+ * (`subscribe`) and, where it has a second level, which tab a failure opens (`authTab`). The
+ * third section arrived as an id union widened, an entry added, a hand-wired `subscribe` and a
+ * third arm of a `section.id === …` ternary — four edits, three of which fail silently when the
+ * id is mistyped. It is one entry now.
+ *
+ * It opens itself on an auth failure, on whichever section failed. A 401 surfaced only as red
  * text on a node is a dead end — the fix is a credential, and the field should be in front of
- * you when you learn that. There are two failure channels because there are two credential
- * stores; each names the section it is about, which is why nothing here has to guess from the
- * text of the failure.
+ * you when you learn that. One channel per credential store; each section names its own, which
+ * is why nothing here has to guess from the text of the failure.
+ *
+ * The wart this does *not* fix: `reportAuthFailure` still carries no source id, so `authTab`
+ * hardcodes that a data-source failure is neuPrint's. That is the thing to fix when a second
+ * credentialed backend arrives — the channel would grow an id, the way `reportSourceLearned`
+ * already carries one.
  */
 
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
+
+import { ConnectionsIcon } from '../Icons'
 
 import { fetchDatasets, forgetRoutes } from '../../data/neuprint/client'
 import {
@@ -46,6 +59,14 @@ import {
 } from '../../data/ai/credentials'
 import { PROVIDERS, providerFor, verify } from '../../data/ai/registry'
 import type { AiProvider, ModelOption } from '../../data/ai/types'
+import {
+  forgetGithubToken,
+  getGithubToken,
+  setGithubLogin,
+  setGithubToken,
+  subscribeGithubAuthFailure,
+} from '../../data/share/credentials'
+import { githubLogin } from '../../data/share/gist'
 import { getSource } from '../../data/source'
 import { useGraphStore } from '../../store/graphStore'
 import { errorMessage } from '../../core/errors'
@@ -88,7 +109,7 @@ const SOURCE_TABS: readonly [SourceTab, ...SourceTab[]] = [
   { id: 'mock', label: 'Mock connectome', render: () => <MockTab /> },
 ]
 
-type SectionId = 'data' | 'ai'
+type SectionId = 'data' | 'ai' | 'sharing'
 
 interface Section {
   id: SectionId
@@ -101,12 +122,44 @@ interface Section {
    * be vague about the only part anybody is asking about.
    */
   privacy: ReactNode
+  /**
+   * The section's own body, the same shape `SOURCE_TABS` already uses.
+   *
+   * A `render` member rather than a chain of `section.id === …` checks in the JSX: with the id
+   * chain, adding the third section meant widening the union, adding the entry, adding a
+   * subscription and adding a ternary arm — four edits, three of which fail silently if the id
+   * is typed wrong. `aria-label` comes off `label`, so a section's name is stated once.
+   */
+  render: (props: SectionProps) => ReactNode
+  /**
+   * The auth-failure channel that opens the dialog *on this section*.
+   *
+   * One per credential store, and each store knows which section it belongs to, so nothing here
+   * reads the text of a failure to work out where to go. Note the wart this does not fix:
+   * `reportAuthFailure` still carries no source id, so `authTab` below hardcodes which tab
+   * within Data sources a failure lands on.
+   */
+  subscribe: (onFailure: (message: string) => void) => () => void
+  /** For Data sources only: which tab a failure on this section's channel opens. */
+  authTab?: string
+}
+
+/** What a section body is handed. Every one ignores most of it; see `SourceTabProps`. */
+interface SectionProps extends SourceTabProps {
+  tabId: string
+  setTabId: (id: string) => void
+  onClose: () => void
 }
 
 const SECTIONS: readonly [Section, ...Section[]] = [
   {
     id: 'data',
     label: 'Data sources',
+    subscribe: subscribeAuthFailure,
+    authTab: 'neuprint',
+    render: ({ tabId, setTabId, ...tabProps }) => (
+      <DataSourceTabs {...{ tabId, setTabId }} {...tabProps} />
+    ),
     privacy: (
       <>
         <strong>Credentials stay in this browser.</strong> Tokens are held in this
@@ -120,6 +173,8 @@ const SECTIONS: readonly [Section, ...Section[]] = [
   {
     id: 'ai',
     label: 'AI assistant',
+    subscribe: subscribeAiAuthFailure,
+    render: ({ onClose }) => <AssistantTab onSaved={onClose} />,
     privacy: (
       <>
         <strong>Your key, your account, your bill.</strong> Keys are held in this
@@ -131,18 +186,23 @@ const SECTIONS: readonly [Section, ...Section[]] = [
       </>
     ),
   },
+  {
+    id: 'sharing',
+    label: 'Sharing',
+    subscribe: subscribeGithubAuthFailure,
+    render: ({ onClose }) => <SharingTab onSaved={onClose} />,
+    privacy: (
+      <>
+        <strong>Only needed to make a short link.</strong> The token is held in this
+        browser&rsquo;s local storage on this machine only, is never written into a saved graph
+        or an export, and is never sent to us — it goes straight from this page to
+        <code> api.github.com</code>. Reading a shared gist needs no token at all, so a link you
+        send works for anybody. A workflow you upload becomes a gist on your own account, which
+        you can delete from GitHub at any time.
+      </>
+    ),
+  },
 ]
-
-/**
- * The section each failure channel is about.
- *
- * There are two channels because there are two credential stores, and neither carries an id —
- * so the mapping is stated here rather than guessed at from the text of the failure. Note this
- * still hardcodes *which source tab* within Data sources, which is fine while neuPrint is the
- * only credentialed one and is the thing to fix when a second arrives: `reportAuthFailure`
- * would grow a source id, the way `reportSourceLearned` already carries one.
- */
-const AUTH_FAILURE_TAB = 'neuprint'
 
 export function SourcesPanel() {
   const [open, setOpen] = useState(false)
@@ -154,23 +214,18 @@ export function SourcesPanel() {
   )
   const notify = useGraphStore((s) => s.setNotice)
 
-  // The store outlives this component, but neither failure channel replays — a subscription
-  // started at mount only ever sees failures from now on, which is what we want. Two channels
-  // because there are two credential stores; each knows which section it is about, so nothing
-  // here has to read the message to find out.
+  // The store outlives this component, but no failure channel replays — a subscription started
+  // at mount only ever sees failures from now on, which is what we want. One channel per
+  // credential store, read off the section table so adding a fourth is one entry rather than a
+  // fourth hand-wired subscribe that fails silently if its id is mistyped.
   useEffect(() => {
-    const stopData = subscribeAuthFailure((message) => {
-      setReason({ section: 'data', message })
-      setOpen(true)
-    })
-    const stopAi = subscribeAiAuthFailure((message) => {
-      setReason({ section: 'ai', message })
-      setOpen(true)
-    })
-    return () => {
-      stopData()
-      stopAi()
-    }
+    const stops = SECTIONS.map((section) =>
+      section.subscribe((message) => {
+        setReason({ section: section.id, message })
+        setOpen(true)
+      }),
+    )
+    return () => stops.forEach((stop) => stop())
   }, [])
 
   useEffect(() => {
@@ -224,11 +279,12 @@ export function SourcesPanel() {
     <>
       <button
         type="button"
-        className="btn btn--ghost"
+        className="btn btn--ghost btn--icon"
         onClick={() => setOpen(true)}
-        title="Data sources and API keys"
+        title="Connections — data sources, API keys and sharing"
+        aria-label="Connections"
       >
-        Connections
+        <ConnectionsIcon />
       </button>
       {open && (
         <Dialog
@@ -252,6 +308,37 @@ export function SourcesPanel() {
   )
 }
 
+/**
+ * The Data sources section: a tab bar over the registered backends, and the active one's body.
+ *
+ * Its own component because it is the one section with a second level; the other two are a
+ * single form. Keyed by tab so switching remounts, which re-runs the token field's focus.
+ */
+function DataSourceTabs({ tabId, setTabId, ...tabProps }: Omit<SectionProps, 'onClose'>) {
+  const active = SOURCE_TABS.find((tab) => tab.id === tabId) ?? SOURCE_TABS[0]
+  return (
+    <>
+      <div className="sources__tabs" role="tablist" aria-label="Data sources">
+        {SOURCE_TABS.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            className="sources__tab"
+            aria-selected={tab.id === active.id}
+            onClick={() => setTabId(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+      <div key={active.id} className="sources__body" role="tabpanel" aria-label={active.label}>
+        {active.render(tabProps)}
+      </div>
+    </>
+  )
+}
+
 interface DialogProps extends SourceTabProps {
   onClose: () => void
   reason: { section: SectionId; message: string } | undefined
@@ -261,16 +348,18 @@ function Dialog({ onClose, reason, ...tabProps }: DialogProps) {
   // Tab state lives here rather than in `SourcesPanel` because the dialog is unmounted when
   // closed, so every opening starts on the connection you are most likely to have come for.
   const [sectionId, setSectionId] = useState<SectionId>(reason?.section ?? SECTIONS[0].id)
-  const [tabId, setTabId] = useState(reason ? AUTH_FAILURE_TAB : SOURCE_TABS[0].id)
   const section = SECTIONS.find((s) => s.id === sectionId) ?? SECTIONS[0]
-  const active = SOURCE_TABS.find((tab) => tab.id === tabId) ?? SOURCE_TABS[0]
+  const [tabId, setTabId] = useState(
+    (reason && SECTIONS.find((s) => s.id === reason.section)?.authTab) ?? SOURCE_TABS[0].id,
+  )
 
   // A failure arriving while the dialog is already open would otherwise leave the reason
   // stated above a section that has nothing to do with it.
   useEffect(() => {
     if (!reason) return
     setSectionId(reason.section)
-    if (reason.section === 'data') setTabId(AUTH_FAILURE_TAB)
+    const tab = SECTIONS.find((s) => s.id === reason.section)?.authTab
+    if (tab) setTabId(tab)
   }, [reason])
 
   return (
@@ -314,36 +403,11 @@ function Dialog({ onClose, reason, ...tabProps }: DialogProps) {
          */}
         <p className="sources__privacy">{section.privacy}</p>
 
-        {section.id === 'data' ? (
-          <>
-            <div className="sources__tabs" role="tablist" aria-label="Data sources">
-              {SOURCE_TABS.map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  role="tab"
-                  className="sources__tab"
-                  aria-selected={tab.id === active.id}
-                  onClick={() => setTabId(tab.id)}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Keyed by tab so switching remounts — which re-runs the token field's focus. */}
-            <div
-              key={active.id}
-              className="sources__body"
-              role="tabpanel"
-              aria-label={active.label}
-            >
-              {active.render(tabProps)}
-            </div>
-          </>
+        {section.authTab ? (
+          section.render({ ...tabProps, tabId, setTabId, onClose })
         ) : (
-          <div className="sources__body" role="tabpanel" aria-label="AI assistant">
-            <AssistantTab onSaved={onClose} />
+          <div className="sources__body" role="tabpanel" aria-label={section.label}>
+            {section.render({ ...tabProps, tabId, setTabId, onClose })}
           </div>
         )}
       </div>
@@ -428,6 +492,132 @@ function NeuPrintTab({
         <p className="sources__result" data-tone="ok">
           Connected — {probe.datasets} datasets ({probe.names.join(', ')}
           {probe.datasets > probe.names.length ? ', …' : ''})
+        </p>
+      )}
+      {probe.state === 'failed' && (
+        <p className="sources__result" data-tone="error">
+          {probe.message}
+        </p>
+      )}
+    </section>
+  )
+}
+
+/**
+ * The GitHub token, for putting a workflow in a gist.
+ *
+ * Its own state rather than the shared `SourceTabProps` bundle, the same call `AssistantTab`
+ * makes: that bundle is a token, a proxy path and a dataset probe, and threading a third
+ * unrelated credential through it would make every data source carry fields belonging to none
+ * of them.
+ *
+ * **Test is `GET /user`**, which is the smallest thing a token can be asked and answers the
+ * only question worth asking here — whose account this is, so the share dialog can tell
+ * "update the gist this workflow came from" from "that one is somebody else's". The answer is
+ * stored on success rather than discarded, because the dialog would otherwise ask again.
+ */
+function SharingTab({ onSaved }: { onSaved: () => void }) {
+  const [token, setTokenField] = useState(() => getGithubToken() ?? '')
+  const [probe, setProbe] = useState<Probe<{ login: string }>>({ state: 'idle' })
+  const fieldRef = useRef<HTMLInputElement>(null)
+  useEffect(() => fieldRef.current?.focus(), [])
+
+  const test = useCallback(async () => {
+    setProbe({ state: 'testing' })
+    /*
+     * Tested with the value in the field, not the stored one — otherwise a token cannot be
+     * checked before committing to it. Written first and rolled back on failure, because
+     * `githubLogin` reads the store: the alternative is a second code path taking a token as
+     * an argument, which is how the tested request and the real one come to differ.
+     */
+    const previous = getGithubToken()
+    setGithubToken(token)
+    try {
+      const login = await githubLogin()
+      if (!login) throw new Error('GitHub named no account for that token.')
+      setProbe({ state: 'ok', login })
+    } catch (error) {
+      setGithubToken(previous)
+      setProbe({ state: 'failed', message: errorMessage(error) })
+    }
+  }, [token])
+
+  return (
+    <section className="sources__source">
+      <p className="sources__note">
+        Optional. A workflow link normally carries the whole graph, which needs nothing at all —
+        this is for the case where that link gets too long to paste, and Coda uploads the
+        workflow to a gist instead. Make a token at{' '}
+        <a
+          href="https://github.com/settings/tokens/new?scopes=gist&description=Coda%20workflow%20sharing"
+          target="_blank"
+          rel="noreferrer"
+        >
+          github.com/settings/tokens
+        </a>
+        .
+      </p>
+
+      <label className="sources__field">
+        <span>GitHub token</span>
+        <input
+          ref={fieldRef}
+          className="field field--mono"
+          value={token}
+          spellCheck={false}
+          placeholder="ghp_…"
+          onChange={(e) => setTokenField(e.target.value)}
+        />
+      </label>
+      <p className="sources__note sources__note--tight">
+        <strong>
+          The <code>gist</code> scope, and nothing else.
+        </strong>{' '}
+        A classic token carrying only that cannot read a repository, cannot push and cannot see
+        private code; a fine-grained one needs Gists set to read-and-write. The link above
+        pre-selects the right scope.
+      </p>
+
+      <div className="sources__actions">
+        <button
+          type="button"
+          className="btn btn--ghost"
+          onClick={() => void test()}
+          disabled={!token.trim() || probe.state === 'testing'}
+        >
+          {probe.state === 'testing' ? 'Testing…' : 'Test'}
+        </button>
+        <button
+          type="button"
+          className="btn btn--ghost"
+          onClick={() => {
+            forgetGithubToken()
+            setTokenField('')
+            setProbe({ state: 'idle' })
+          }}
+          disabled={!token}
+        >
+          Forget
+        </button>
+        <div className="toolbar__spacer" />
+        <button
+          type="button"
+          className="btn btn--primary"
+          onClick={() => {
+            setGithubToken(token)
+            // `setGithubToken` drops the cached login whenever the token changes, so a probe
+            // that already learned it is put back rather than re-fetched on the next share.
+            if (probe.state === 'ok') setGithubLogin(probe.login)
+            onSaved()
+          }}
+        >
+          Save
+        </button>
+      </div>
+
+      {probe.state === 'ok' && (
+        <p className="sources__result" data-tone="ok">
+          Signed in as {probe.login}.
         </p>
       )}
       {probe.state === 'failed' && (

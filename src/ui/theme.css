@@ -489,6 +489,34 @@ button {
   font-family: var(--font-mono);
 }
 
+/*
+ * A button that is only an icon — the toolbar's Share, Connections, Assistant and Inspector.
+ *
+ * Square, so the glyph sits centred rather than in a pill the width of the word it replaced;
+ * the same call `.sources__refresh` makes. The height is left to `.btn`'s own padding and line
+ * box rather than fixed, so an icon button lines up with the text buttons beside it however the
+ * toolbar's font resolves — a hard-coded height is how a row of buttons comes out a pixel off on
+ * one platform.
+ *
+ * `color` is dropped to secondary because a 2-unit stroke at 15px carries more visual weight
+ * than 12px text does: at full ink the four icons read as the loudest things in the toolbar,
+ * which is the opposite of what taking their labels away was for. Hover and pressed put it back.
+ */
+.btn--icon {
+  width: 28px;
+  padding: 4px 0;
+  justify-content: center;
+  color: var(--text-secondary);
+}
+.btn--icon:hover:not(:disabled) {
+  color: var(--text-primary);
+}
+.btn--icon[aria-pressed='true'] {
+  color: var(--text-primary);
+  background: var(--surface-hover);
+  border-color: var(--border);
+}
+
 .badge-count {
   display: inline-flex;
   align-items: center;

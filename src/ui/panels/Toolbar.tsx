@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 
 import { CodaMark } from '../CodaMark'
+import { AssistantIcon, InspectorIcon, ShareIcon } from '../Icons'
 import { getSource } from '../../data/source'
 import { EXAMPLES } from '../../examples'
 import type { DatasetFamily } from '../../nodes/lib/datasetFamilies'
@@ -37,6 +38,7 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
   const runAll = useGraphStore((s) => s.runAll)
   const cancelRun = useGraphStore((s) => s.cancelRun)
   const openStartPage = useGraphStore((s) => s.openStartPage)
+  const requestShare = useGraphStore((s) => s.requestShare)
   const undo = useGraphStore((s) => s.undo)
   const redo = useGraphStore((s) => s.redo)
   const canUndo = useGraphStore((s) => s.past.length > 0)
@@ -211,25 +213,50 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
         </span>
       )}
 
+      {/*
+       * The icon cluster. Share is the odd one out — a verb, where the other three are toggles
+       * or a dialog — and it leads because it is about the document, which is what the left-hand
+       * menus are about too. It was under `Save ▸` and moved here for the reason the whole
+       * cluster lost its words: an action reached for by muscle memory does not need a sentence
+       * two clicks deep.
+       */}
+      <button
+        type="button"
+        className="btn btn--ghost btn--icon"
+        onClick={requestShare}
+        title="Share workflow — a link that opens this graph"
+        aria-label="Share workflow"
+      >
+        <ShareIcon />
+      </button>
+
       <SourcesPanel />
 
       <button
         type="button"
-        className="btn btn--ghost"
+        className="btn btn--ghost btn--icon"
         aria-pressed={assistantOpen}
         title="Assistant — describe a change and let it build it (/)"
+        aria-label="Assistant"
         onClick={() => togglePanel('assistant')}
       >
-        Assistant
+        <AssistantIcon />
       </button>
+      {/*
+       * The chevron pair this used to draw (`▐` against `▕`) said open-or-closed in the glyph
+       * itself. An icon that does not change with the state says it through `aria-pressed`
+       * instead — the same trade `.coda-node__fold` records — and the tooltip still names which
+       * way the click goes.
+       */}
       <button
         type="button"
-        className="btn btn--ghost"
+        className="btn btn--ghost btn--icon"
         aria-pressed={inspectorOpen}
         onClick={() => togglePanel('inspector')}
         title={inspectorOpen ? 'Hide the inspector (I)' : 'Show the inspector (I)'}
+        aria-label="Inspector"
       >
-        {inspectorOpen ? '▐' : '▕'} Inspector <span className="btn__kbd">I</span>
+        <InspectorIcon />
       </button>
 
       <button
@@ -667,6 +694,8 @@ function SaveMenu({ close }: { close: () => void }) {
         Browser storage is per-profile and is cleared with the site data.
       </div>
 
+      {/* Share used to sit here, between the shelf and the download. It is a toolbar icon now —
+          see the cluster in `Toolbar`. */}
       <div className="dropdown__group">
         <button
           type="button"

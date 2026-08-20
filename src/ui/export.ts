@@ -88,6 +88,25 @@ export function slugify(text: string, fallback: string): string {
   )
 }
 
+/**
+ * Put text on the clipboard, or reject with a sentence saying why not.
+ *
+ * One copy, because there are two callers and the failure modes are not obvious: the API is
+ * absent in jsdom *and* on any page not served from a secure origin, and a browser can refuse
+ * the write outright. Both callers report through the app's own notice channel rather than
+ * inventing a place to put the message.
+ */
+export async function copyText(text: string): Promise<void> {
+  const clipboard = navigator.clipboard
+  if (!clipboard)
+    throw new Error('This browser has no clipboard access — copy the text by hand.')
+  try {
+    await clipboard.writeText(text)
+  } catch {
+    throw new Error('This browser refused clipboard access.')
+  }
+}
+
 function triggerDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')

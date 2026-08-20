@@ -5,6 +5,8 @@ import { applyTheme } from './store/persistence'
 import { AssistantPanel } from './ui/panels/AssistantPanel'
 import { Editor } from './ui/Editor'
 import { Inspector } from './ui/panels/Inspector'
+import { ShareDialog } from './ui/panels/ShareDialog'
+import { SharedLinkGate } from './ui/panels/SharedLinkGate'
 import { StartPage } from './ui/panels/StartPage'
 import { StatusBar } from './ui/panels/StatusBar'
 import { Toolbar } from './ui/panels/Toolbar'
@@ -29,8 +31,14 @@ export function App() {
       <AssistantPanel />
       <StatusBar />
       <ViewerOverlay />
+      <ShareDialog />
       {/* Last, and on top: it can be reopened over an expanded viewer. */}
       <StartPage />
+      {/*
+       * Above even the start page: a link somebody followed is the most specific intent on the
+       * screen, and the store already withholds the welcome modal when there is one.
+       */}
+      <SharedLinkGate />
     </div>
   )
 }

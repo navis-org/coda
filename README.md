@@ -114,7 +114,7 @@ shadow together, leaving the text on the canvas — a caption rather than a card
 ### The canvas is the default
 
 The right-hand **inspector** and the **minimap** both start collapsed, and the choice is
-remembered. Reopen the inspector from the toolbar or with `I`; the minimap from the button in the
+remembered. Reopen the inspector from the toolbar (the lens icon) or with `I`; the minimap from the button in the
 bottom-right corner, where the map itself appears.
 
 ## How it works
@@ -173,7 +173,7 @@ columns after a query can't participate in the type system.
 ## Connecting to neuPrint
 
 1. Get a token from [neuprint.janelia.org/account](https://neuprint.janelia.org/account).
-2. **Sources** in the toolbar → paste it → **Test** → **Save**.
+2. **Connections** in the toolbar — the branch icon → paste it → **Test** → **Save**.
 3. On a Dataset node, switch **Source** to neuPrint and pick a dataset.
 
 Thirteen datasets are live, including `hemibrain:v1.2.1`, `manc:v1.2.3`, `optic-lobe:v1.1`
@@ -520,11 +520,31 @@ second one.
 
 That shelf is a convenience, not a backup. Browser storage is per-origin and per-profile,
 goes with the site data when you clear it, doesn't sync between machines, and doesn't exist
-in a private window — so the file is still the only durable artefact, and the only one you
-can send to someone else.
+in a private window — so the file is still the durable artefact.
 
 Unknown node types are dropped with a warning on load rather than failing the whole file,
 so a graph made with a newer node pack still opens.
+
+### Sharing a link
+
+The **share icon** in the toolbar turns the graph into a URL, the way neuroglancer does — the whole
+document goes after `#!`, so there's no server, no account and nothing to keep alive. The five
+bundled examples come out at 1.5–2 kB of address, which pastes anywhere.
+
+When a graph is too big for that — an Explore _Select all_ is the case that does it — the same
+dialog uploads it to a **GitHub Gist** and hands back `#!gh://<user>/<id>` instead, forty
+characters however large the workflow. That needs a token with the `gist` scope, under
+**Connections ▸ Sharing** (the branch icon in the toolbar); _reading_ a shared gist needs
+nothing, so a link you send works for
+anybody. Pressing Share again updates the same gist, so a link already sent stays current.
+
+Links pointing at `gs://` buckets and plain `https://` JSON files open too, though Coda can't
+write to either.
+
+The dialog says what a link doesn't carry, because none of it is obvious: rows from **Upload
+Table** live in your browser rather than in the document, and a workflow on a real connectome
+needs the recipient's own neuPrint token to _run_ — it opens without one. No credential is ever
+inside a graph, and nothing in a shared workflow fetches anything until you press Run.
 
 ## What's not built
 

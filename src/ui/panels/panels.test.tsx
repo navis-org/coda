@@ -44,6 +44,39 @@ const inspector = () => document.querySelector('.inspector')
 const minimap = () => document.querySelector('.react-flow__minimap')
 const inspectorToggle = () => screen.getByRole('button', { name: /Inspector/ })
 
+/**
+ * The four icon-only buttons in the toolbar's right-hand cluster.
+ *
+ * Taking a label off a button takes its accessible name with it unless something puts one back,
+ * and nothing about the rendering says which happened — the icon draws either way. So this
+ * asserts the name, that it comes from `aria-label` rather than from stray text, and that a
+ * pointer gets a tooltip too. Assistant and Inspector additionally have to keep announcing
+ * *state*, which they used to say in the glyph itself (`▐` against `▕`) and now say only
+ * through `aria-pressed`.
+ */
+describe('the icon cluster', () => {
+  const NAMED = ['Share workflow', 'Connections', 'Assistant', 'Inspector']
+
+  it('keeps every name, as an icon with no text', () => {
+    render(<App />)
+    for (const name of NAMED) {
+      const button = screen.getByRole('button', { name })
+      expect(button.querySelector('svg')).toBeTruthy()
+      expect(button.textContent).toBe('')
+      expect(button.getAttribute('title')).toBeTruthy()
+    }
+  })
+
+  it('says open-or-closed through aria-pressed, since the glyph no longer does', () => {
+    render(<App />)
+    expect(inspectorToggle().getAttribute('aria-pressed')).toBe('false')
+    fireEvent.click(inspectorToggle())
+    expect(inspectorToggle().getAttribute('aria-pressed')).toBe('true')
+    // And the tooltip names which way the next click goes, which the icon cannot.
+    expect(inspectorToggle().getAttribute('title')).toMatch(/^Hide/)
+  })
+})
+
 describe('panel defaults', () => {
   it('starts with both collapsed', () => {
     render(<App />)

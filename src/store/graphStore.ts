@@ -56,6 +56,7 @@ import {
   renameWorkflow,
   saveWorkflow,
 } from './library'
+import { hasShareFragment } from '../data/share/fragment'
 import type { EdgeRouting, LayoutOptions } from '../layout/options'
 import { EDGE_ROUTINGS } from '../layout/options'
 import type { PanelState, ThemePreference } from './persistence'
@@ -130,6 +131,15 @@ export interface GraphState {
    */
   browserRequest: number
   requestNodeBrowser(): void
+  /**
+   * Asks for the Share dialog.
+   *
+   * A third counter rather than local state in the toolbar, because two surfaces open it — the
+   * Save menu and the command palette — and the palette closes on pick, so it has nowhere to
+   * hold a dialog of its own. Same idiom, same mount-seeded guard.
+   */
+  shareRequest: number
+  requestShare(): void
   /**
    * Asks the canvas to frame the whole graph.
    *
@@ -231,6 +241,8 @@ export interface GraphState {
   // --- document ------------------------------------------------------------
   setGraph(graph: CodaGraph, options?: { history?: boolean; tag?: string }): void
   setGraphName(name: string): void
+  /** Record (or clear) the gist this workflow was last shared to. See `CodaGraph.meta.gist`. */
+  setGraphGist(gist: { id: string; owner?: string } | undefined): void
   newGraph(): void
   loadGraph(graph: CodaGraph, warnings?: string[]): void
   loadExample(id: string): void
@@ -568,6 +580,13 @@ export const useGraphStore = create<GraphState>((set, get) => {
   const initialGraph = initial?.graph.nodes.length ? initial.graph : emptyGraph()
   const startDismissed = loadStartPageDismissed()
   const layoutPrefs = loadLayoutPrefs()
+  /*
+   * Only *whether* there is a link, which is a regex — the reading and the fetching are
+   * `useShareLink`'s, an effect later. Guarded for the environment rather than the feature:
+   * `src/store` is exercised under plain Node in several suites, where there is no `location`.
+   */
+  const sharedLinkPresent =
+    typeof window !== 'undefined' && hasShareFragment(window.location?.hash ?? '')
 
   /*
    * Never unsubscribed: the store is a module singleton that outlives every component, and a
@@ -598,6 +617,8 @@ export const useGraphStore = create<GraphState>((set, get) => {
       set((s) => ({ paletteRequest: { seq: s.paletteRequest.seq + 1, initialQuery } })),
     browserRequest: 0,
     requestNodeBrowser: () => set((s) => ({ browserRequest: s.browserRequest + 1 })),
+    shareRequest: 0,
+    requestShare: () => set((s) => ({ shareRequest: s.shareRequest + 1 })),
     fitRequest: 0,
     requestFitView: () => set((s) => ({ fitRequest: s.fitRequest + 1 })),
     autoRun: loadAutoRun(),
@@ -671,7 +692,12 @@ export const useGraphStore = create<GraphState>((set, get) => {
       savePanels(next)
       set({ panels: next })
     },
-    startPageOpen: !startDismissed,
+    /*
+     * A share link wins over the welcome screen. Decided here rather than in an effect because
+     * both have to be settled in the tick the store is created: a link noticed later means the
+     * modal is already up, over a workflow somebody was sent and has not seen yet.
+     */
+    startPageOpen: !startDismissed && !sharedLinkPresent,
     startPageDismissed: startDismissed,
     openStartPage: () => set({ startPageOpen: true }),
     closeStartPage: () => set({ startPageOpen: false }),
@@ -690,6 +716,22 @@ export const useGraphStore = create<GraphState>((set, get) => {
 
     setGraphName: (name) => {
       commit((g) => ({ ...g, meta: { ...g.meta, name } }), { tag: 'meta:name' })
+    },
+
+    /*
+     * Remember which gist this workflow was shared to, so pressing Share again updates it.
+     *
+     * Deliberately **not** through `commit`. Bookkeeping about a link is not an edit to the
+     * graph: no node can read `meta.gist`, so the inference pass, the state refresh and the
+     * history entry `commit` runs unconditionally would all be work for nothing — on the largest
+     * graphs, which is exactly when somebody reaches for a gist. Same narrower path
+     * `afterSourceLearned` takes, and for the same reason. The autosave still happens, because
+     * the id has to survive a reload for the next Share to find it.
+     */
+    setGraphGist: (gist) => {
+      const graph = { ...get().graph, meta: { ...get().graph.meta, gist } }
+      set({ graph })
+      saveAutosave(graph)
     },
 
     newGraph: () => {

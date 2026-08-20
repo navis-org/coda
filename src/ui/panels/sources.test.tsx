@@ -133,8 +133,8 @@ describe('the credential promise', () => {
   })
 })
 
-describe('the two halves', () => {
-  it('offers Data sources and AI assistant as the top level, opening on data', () => {
+describe('the three sections', () => {
+  it('offers Data sources, AI assistant and Sharing as the top level, opening on data', () => {
     render(<SourcesPanel />)
     open()
 
@@ -142,7 +142,7 @@ describe('the two halves', () => {
       within(screen.getByRole('tablist', { name: 'Connection kind' }))
         .getAllByRole('tab')
         .map((el) => el.textContent),
-    ).toEqual(['Data sources', 'AI assistant'])
+    ).toEqual(['Data sources', 'AI assistant', 'Sharing'])
     expect(section('Data sources').getAttribute('aria-selected')).toBe('true')
   })
 
