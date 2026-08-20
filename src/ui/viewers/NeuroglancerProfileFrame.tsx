@@ -52,7 +52,10 @@ type SceneState =
  * Cached by the source itself — including the undefined — so this costs one small JSON per
  * dataset no matter how many profiles are open on it.
  */
-function usePublishedScene(sourceId: string | undefined, datasetId: string | undefined): SceneState {
+function usePublishedScene(
+  sourceId: string | undefined,
+  datasetId: string | undefined,
+): SceneState {
   const [state, setState] = useState<SceneState>({ status: 'none' })
 
   useEffect(() => {

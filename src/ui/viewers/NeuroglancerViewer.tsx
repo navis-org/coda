@@ -214,9 +214,7 @@ export function NeuroglancerViewer({
    * untouched Explore selection), and neurons on screen. "0 neurons" for the first would read
    * as a failed fetch rather than as a scene nobody has asked anything of yet.
    */
-  const summary = !neurons
-    ? 'dataset scene · no neurons connected'
-    : plural(count, 'neuron')
+  const summary = !neurons ? 'dataset scene · no neurons connected' : plural(count, 'neuron')
 
   const copyLink = () => {
     // Absent in jsdom, and on any page not served over a secure origin.

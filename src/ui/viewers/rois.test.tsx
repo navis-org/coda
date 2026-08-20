@@ -85,7 +85,9 @@ function draw(params: Record<string, ParamValue> = {}, compact = false) {
 describe('the ROIs card', () => {
   it('renders at all, though the node has no output value', async () => {
     draw()
-    await waitFor(() => expect(screen.getByRole('button', { name: /Load \d+ regions/ })).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /Load \d+ regions/ })).toBeTruthy(),
+    )
     // The failure this test exists for: a branch below `!value` shows this forever.
     expect(screen.queryByText(/No result yet/)).toBeNull()
   })
@@ -222,7 +224,7 @@ describe('the ROIs card', () => {
     await waitFor(() => expect(screen.getByText(/completeness not loaded/i)).toBeTruthy())
   })
 
-  it('offers the dataset\'s region groups, and only where there are some', async () => {
+  it("offers the dataset's region groups, and only where there are some", async () => {
     draw()
     fireEvent.click(await screen.findByRole('button', { name: /Load/ }))
     await waitFor(() => expect(screen.getByRole('img', { name: /frontal/i })).toBeTruthy())

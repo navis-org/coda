@@ -9,13 +9,7 @@
  * and has to translate before this can recognise it.
  */
 
-import {
-  getBaseUrl,
-  getKey,
-  getModel,
-  getProviderId,
-  reportAuthFailure,
-} from './credentials'
+import { getBaseUrl, getKey, getModel, getProviderId, reportAuthFailure } from './credentials'
 import { PROVIDERS, providerFor } from './providers'
 import type { CompletionRequest, CompletionResult, KeyCheck } from './types'
 import { AiError } from './types'

@@ -82,7 +82,12 @@ registerEmitter('core.filter', (ctx) => {
       break
     default: {
       const cmp: Record<string, string> = {
-        eq: '==', ne: '!=', gt: '>', ge: '>=', lt: '<', le: '<=',
+        eq: '==',
+        ne: '!=',
+        gt: '>',
+        ge: '>=',
+        lt: '<',
+        le: '<=',
       }
       const operator = cmp[op]
       if (!operator) return ctx.todo(`Unknown filter operator "${op}".`)
@@ -215,7 +220,9 @@ registerEmitter('core.join', (ctx) => {
   const out = ctx.output('out')
   const how = String(ctx.params.how ?? 'left')
   const suffix = String(ctx.params.suffix ?? '_r')
-  const verb = { left: 'left_join', inner: 'inner_join', full: 'full_join', right: 'right_join' }[how] ?? 'left_join'
+  const verb =
+    { left: 'left_join', inner: 'inner_join', full: 'full_join', right: 'right_join' }[how] ??
+    'left_join'
 
   return [
     ...ctx.note(
@@ -329,20 +336,11 @@ registerEmitter('core.normalize', (ctx) => {
       return [`${out} <- ${src}`]
     case 'row':
       // An all-zero row normalises to zeros in Coda, where dividing by zero gives NaN here.
-      return [
-        `${out} <- ${src} / rowSums(${src})`,
-        `${out}[!is.finite(${out})] <- 0`,
-      ]
+      return [`${out} <- ${src} / rowSums(${src})`, `${out}[!is.finite(${out})] <- 0`]
     case 'column':
-      return [
-        `${out} <- t(t(${src}) / colSums(${src}))`,
-        `${out}[!is.finite(${out})] <- 0`,
-      ]
+      return [`${out} <- t(t(${src}) / colSums(${src}))`, `${out}[!is.finite(${out})] <- 0`]
     case 'max':
-      return [
-        `${out} <- ${src} / max(${src}, na.rm = TRUE)`,
-        `${out}[!is.finite(${out})] <- 0`,
-      ]
+      return [`${out} <- ${src} / max(${src}, na.rm = TRUE)`, `${out}[!is.finite(${out})] <- 0`]
     case 'log':
       return [`${out} <- log10(1 + ${src})`]
     default:
@@ -393,8 +391,5 @@ registerEmitter('core.tableFromUrl', (ctx) => {
   const out = ctx.output('out')
   const url = String(ctx.params.url ?? '').trim()
   if (!url) return ctx.todo('This Table from URL node has no URL.')
-  return [
-    `${out} <- read_csv(${rStr(url)}, show_col_types = FALSE)`,
-    ...shapingLines(ctx, out),
-  ]
+  return [`${out} <- read_csv(${rStr(url)}, show_col_types = FALSE)`, ...shapingLines(ctx, out)]
 })

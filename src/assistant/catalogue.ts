@@ -117,7 +117,10 @@ export function portColumns(type: CodaType): Array<[string, string[]]> {
       ['links', 'edges'],
     ]
     return parts
-      .map(([label, part]): [string, string[]] => [label, columnNames(attributeSchema(type, part))])
+      .map(([label, part]): [string, string[]] => [
+        label,
+        columnNames(attributeSchema(type, part)),
+      ])
       .filter(([, names]) => names.length > 0)
   }
   const names = columnNames(attributeSchema(type))
@@ -138,7 +141,9 @@ export function carriesLines(outputs: Readonly<Record<string, CodaType>>): strin
 function producedColumns(def: NodeDefinition): string[] {
   const probe: CodaGraph = {
     version: GRAPH_FORMAT_VERSION,
-    nodes: [{ id: 'probe', type: def.type, position: { x: 0, y: 0 }, params: defaultParams(def) }],
+    nodes: [
+      { id: 'probe', type: def.type, position: { x: 0, y: 0 }, params: defaultParams(def) },
+    ],
     edges: [],
   }
   return carriesLines(nodeTypes(inferGraph(probe), 'probe').outputs)

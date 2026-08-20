@@ -115,8 +115,7 @@ export const ollama: AiProvider = {
   id: 'ollama',
   label: 'Ollama (local)',
   needsKey: false,
-  note:
-    'A model on your own machine — no key, no account, nothing leaves the computer. Needs OLLAMA_ORIGINS set so the browser is allowed to call it, and a model with a large enough context for a ~13k-token prompt. A page served over https may be blocked from reaching a plain-http local server, so this is most reliable on a local dev server.',
+  note: 'A model on your own machine — no key, no account, nothing leaves the computer. Needs OLLAMA_ORIGINS set so the browser is allowed to call it, and a model with a large enough context for a ~13k-token prompt. A page served over https may be blocked from reaching a plain-http local server, so this is most reliable on a local dev server.',
   models: [
     { id: 'qwen2.5-coder:14b', label: 'Qwen2.5 Coder 14B' },
     { id: 'qwen2.5:14b', label: 'Qwen2.5 14B' },
@@ -198,7 +197,10 @@ export const ollama: AiProvider = {
     if (!ok) {
       const message = messageIn(payload, `Ollama returned ${status}.`)
       if (status === 404) {
-        throw new AiError(`${message} — is the model pulled? Try \`ollama pull ${model}\`.`, 404)
+        throw new AiError(
+          `${message} — is the model pulled? Try \`ollama pull ${model}\`.`,
+          404,
+        )
       }
       throw new AiError(message, status)
     }

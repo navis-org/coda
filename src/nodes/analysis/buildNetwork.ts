@@ -24,7 +24,10 @@ import { getColumn, isTableValue, makeTable } from '../../core/values'
 const NODE_ID = 'id'
 
 /** Node attribute schema: the id, whatever we joined, then the derived degree columns. */
-function nodeSchemaFor(joined: TableSchema | undefined, keyColumn: string | undefined): TableSchema {
+function nodeSchemaFor(
+  joined: TableSchema | undefined,
+  keyColumn: string | undefined,
+): TableSchema {
   const extra: ColumnSchema[] = (joined?.columns ?? []).filter((c) => c.name !== keyColumn)
   return tableSchema(
     column(NODE_ID, 'str'),
@@ -195,7 +198,8 @@ export const buildNetworkNode = registerNode({
 
     const sourceColumn = ctx.column('source')
     const targetColumn = ctx.column('target')
-    if (!sourceColumn || !targetColumn) throw new Error('Pick both a source and a target column')
+    if (!sourceColumn || !targetColumn)
+      throw new Error('Pick both a source and a target column')
 
     const weightColumn = ctx.column('weight')
     const directed = ctx.params.directed !== false
@@ -339,7 +343,9 @@ export const buildNetworkNode = registerNode({
         const row = lookup.get(id)
         for (const col of joinedSchema.columns) {
           if (col.name === nodeKey) continue
-          nodeData[col.name]!.push(row === undefined ? null : (attrs as TableValue).data[col.name]?.[row] ?? null)
+          nodeData[col.name]!.push(
+            row === undefined ? null : ((attrs as TableValue).data[col.name]?.[row] ?? null),
+          )
         }
       }
       nodeData['degreeIn']!.push(acc.degreeIn)

@@ -19,7 +19,8 @@ const def = requireNodeDef('out.network')
 const base = defaultParams(def)
 const presentational = (param: ParamDef) => param.presentational === true
 
-const composites = (rows: ParamRow[]) => rows.filter((r): r is CompositeRow => r.kind === 'composite')
+const composites = (rows: ParamRow[]) =>
+  rows.filter((r): r is CompositeRow => r.kind === 'composite')
 const rowLabels = (rows: ParamRow[]) =>
   rows.map((row) => (row.kind === 'composite' ? row.label : row.param.label))
 
@@ -51,7 +52,9 @@ describe('groupParams over out.network', () => {
     const rail = (def.params ?? [])
       .filter((p) => p.presentational && (!p.visibleIf || p.visibleIf(base)))
       .map((p) => p.id)
-    expect([...shownIds(groupParams(def, base, presentational))].sort()).toEqual([...rail].sort())
+    expect([...shownIds(groupParams(def, base, presentational))].sort()).toEqual(
+      [...rail].sort(),
+    )
   })
 
   it('shows each param exactly once', () => {
@@ -158,7 +161,10 @@ describe('link colour offers no sequential mode', () => {
 })
 
 describe('groupParams safety net', () => {
-  const stub = (params: ParamDef[], groups?: NodeDefinition['paramGroups']): NodeDefinition => ({
+  const stub = (
+    params: ParamDef[],
+    groups?: NodeDefinition['paramGroups'],
+  ): NodeDefinition => ({
     type: 'test.stub',
     label: 'Stub',
     category: 'visualisation',
@@ -177,7 +183,10 @@ describe('groupParams safety net', () => {
   })
 
   it('collects a param the definition forgot to group, rather than losing it', () => {
-    const tabs = groupParams(stub([plain('a', 'x'), plain('stray')], [{ id: 'x', label: 'X' }]), {})
+    const tabs = groupParams(
+      stub([plain('a', 'x'), plain('stray')], [{ id: 'x', label: 'X' }]),
+      {},
+    )
     expect(tabs.map((t) => t.id)).toEqual(['x', UNGROUPED_TAB])
     expect(shownIds(tabs)).toContain('stray')
   })
@@ -204,10 +213,13 @@ describe('groupParams safety net', () => {
       composite: { key: 'label', role: 'primary', label: 'Label' },
     })
     const tabs = groupParams(
-      stub([shared('a', 'x'), shared('b', 'y')], [
-        { id: 'x', label: 'X' },
-        { id: 'y', label: 'Y' },
-      ]),
+      stub(
+        [shared('a', 'x'), shared('b', 'y')],
+        [
+          { id: 'x', label: 'X' },
+          { id: 'y', label: 'Y' },
+        ],
+      ),
       {},
     )
     expect(tabs.map((t) => t.rows.length)).toEqual([1, 1])
@@ -233,7 +245,9 @@ describe('the panel admission rule, over every grouped node', () => {
 
   for (const node of grouped) {
     it(`${node.type} admits only presentational params outside a declared data tab`, () => {
-      const dataTabs = new Set((node.paramGroups ?? []).filter((g) => g.affectsData).map((g) => g.id))
+      const dataTabs = new Set(
+        (node.paramGroups ?? []).filter((g) => g.affectsData).map((g) => g.id),
+      )
       const admits = paramsForPanel(node)
       for (const param of node.params ?? []) {
         if (!admits(param)) continue

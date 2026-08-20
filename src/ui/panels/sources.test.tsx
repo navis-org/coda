@@ -55,10 +55,11 @@ describe('source tabs', () => {
     render(<SourcesPanel />)
     open()
 
-    expect(sourceTabs().getAllByRole('tab').map((el) => el.textContent)).toEqual([
-      'neuPrint',
-      'Mock connectome',
-    ])
+    expect(
+      sourceTabs()
+        .getAllByRole('tab')
+        .map((el) => el.textContent),
+    ).toEqual(['neuPrint', 'Mock connectome'])
     expect(tab('neuPrint').getAttribute('aria-selected')).toBe('true')
     expect(tokenField()).not.toBeNull()
   })

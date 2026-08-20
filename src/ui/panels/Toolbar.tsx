@@ -96,10 +96,10 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
         )}
       </Dropdown>
       {/*
-        * Open and Save are menus rather than buttons because each now has two destinations: a
-        * file, and the browser's own shelf. Reading the shelf is deferred to the moment a menu
-        * opens — someone who never uses it never touches IndexedDB.
-        */}
+       * Open and Save are menus rather than buttons because each now has two destinations: a
+       * file, and the browser's own shelf. Reading the shelf is deferred to the moment a menu
+       * opens — someone who never uses it never touches IndexedDB.
+       */}
       <Dropdown label="Open" onOpen={() => void refreshLibrary()}>
         {(close) => <OpenMenu close={close} />}
       </Dropdown>
@@ -241,10 +241,10 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
       </button>
 
       {/*
-        * Next to Run because it is a statement about the same action: whether it happens on its
-        * own. A real checkbox rather than a toggle button — this is a persistent setting with an
-        * on and an off, not a command.
-        */}
+       * Next to Run because it is a statement about the same action: whether it happens on its
+       * own. A real checkbox rather than a toggle button — this is a persistent setting with an
+       * on and an off, not a command.
+       */}
       <label
         className="autorun"
         title={
@@ -253,7 +253,11 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
             : 'Re-run the whole graph after every change. Expensive nodes will query on every edit.'
         }
       >
-        <input type="checkbox" checked={autoRun} onChange={(e) => setAutoRun(e.target.checked)} />
+        <input
+          type="checkbox"
+          checked={autoRun}
+          onChange={(e) => setAutoRun(e.target.checked)}
+        />
         <span>Auto-run</span>
       </label>
 
@@ -294,10 +298,10 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
       )}
 
       {/*
-        * Fullscreen keeps the toolbar and the status bar: what it reclaims is the browser's
-        * ~90px of tabs and address bar, not the app's own chrome. Run, Auto-run and the stale
-        * count are exactly what you want in view while a graph is running.
-        */}
+       * Fullscreen keeps the toolbar and the status bar: what it reclaims is the browser's
+       * ~90px of tabs and address bar, not the app's own chrome. Run, Auto-run and the stale
+       * count are exactly what you want in view while a graph is running.
+       */}
       <button
         type="button"
         className="btn btn--ghost"
@@ -662,11 +666,11 @@ function SaveMenu({ close }: { close: () => void }) {
         </button>
 
         {/*
-          * The refusal is shown *in the menu* rather than as a dialog, and stays until the menu
-          * closes. A graph on a synthetic dataset cannot be exported at all, so the useful
-          * thing is a sentence naming what to change — a modal saying the same would put
-          * browser chrome in front of the canvas the user has to go and edit.
-          */}
+         * The refusal is shown *in the menu* rather than as a dialog, and stays until the menu
+         * closes. A graph on a synthetic dataset cannot be exported at all, so the useful
+         * thing is a sentence naming what to change — a modal saying the same would put
+         * browser chrome in front of the canvas the user has to go and edit.
+         */}
         {refusal ? (
           <div className="dropdown__confirm">
             <p>

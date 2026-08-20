@@ -166,7 +166,12 @@ async function loadSilhouette(
   return task
 }
 
-export function NeuronThumbnail({ sourceId, datasetId, bodyId, size = 76 }: NeuronThumbnailProps) {
+export function NeuronThumbnail({
+  sourceId,
+  datasetId,
+  bodyId,
+  size = 76,
+}: NeuronThumbnailProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [entry, setEntry] = useState<Entry | undefined>(undefined)
 

@@ -264,7 +264,8 @@ describe('Start page', () => {
     })
 
     it('reopens from the palette, and that command is disabled while it is open', () => {
-      const items = () => buildCommandItems({ store: useGraphStore.getState(), fitView: () => {} })
+      const items = () =>
+        buildCommandItems({ store: useGraphStore.getState(), fitView: () => {} })
       const welcome = () => items().find((i) => i.id === 'cmd:welcome')!
 
       expect(welcome().action).toBe('Help')

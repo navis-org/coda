@@ -322,7 +322,14 @@ export class Scheduler {
       const nodeStarted = performance.now()
       try {
         const inputTypes = inference.nodes[nodeId]?.inputs ?? {}
-        const ctx = this.makeEvalContext(def, node.params, inputs, inputTypes, controller.signal, nodeId)
+        const ctx = this.makeEvalContext(
+          def,
+          node.params,
+          inputs,
+          inputTypes,
+          controller.signal,
+          nodeId,
+        )
         const outputs = await def.evaluate(ctx)
 
         if (generation !== this.generation) {

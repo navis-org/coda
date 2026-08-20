@@ -61,8 +61,18 @@ function pipeline(): CodaGraph {
     }),
   )
   g = addNode(g, node('sel', 'core.select'))
-  g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'find', targetHandle: 'dataset' })
-  g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'conn', targetHandle: 'dataset' })
+  g = addEdge(g, {
+    source: 'ds',
+    sourceHandle: 'dataset',
+    target: 'find',
+    targetHandle: 'dataset',
+  })
+  g = addEdge(g, {
+    source: 'ds',
+    sourceHandle: 'dataset',
+    target: 'conn',
+    targetHandle: 'dataset',
+  })
   g = addEdge(g, {
     source: 'find',
     sourceHandle: 'neurons',
@@ -121,7 +131,9 @@ describe('pivot node', () => {
 
     // What the store feeds back in after a run finishes.
     const warm = inferGraph(graph, { observedSchemas: { piv: table.schema } })
-    expect(columnNames(schemaOf(warm.nodes.piv?.outputs.table))).toEqual(columnNames(table.schema))
+    expect(columnNames(schemaOf(warm.nodes.piv?.outputs.table))).toEqual(
+      columnNames(table.schema),
+    )
     // And it reaches the picker on the node downstream, which is the whole point.
     expect(columnNames(schemaOf(warm.nodes.sel?.inputs.in))).toEqual(columnNames(table.schema))
   })
@@ -192,14 +204,17 @@ describe('pivot node — a column the schema has not heard of yet', () => {
   })
 
   it('reports the column as missing, in the same words the multi-picker uses', () => {
-    const issues = validateColumnParams(def, makeInferContext(def, params as never, { in: cold }))
+    const issues = validateColumnParams(
+      def,
+      makeInferContext(def, params as never, { in: cold }),
+    )
     expect(issues).toContain('Missing column: somaSide')
   })
 
   it('resolves normally the moment discovery lands, with no edit', () => {
     expect(pick('columns', warm)).toBe('somaSide')
-    expect(validateColumnParams(def, makeInferContext(def, params as never, { in: warm }))).toEqual(
-      [],
-    )
+    expect(
+      validateColumnParams(def, makeInferContext(def, params as never, { in: warm })),
+    ).toEqual([])
   })
 })

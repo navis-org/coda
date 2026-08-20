@@ -41,7 +41,9 @@ beforeEach(() => {
   const mock = new MockSource({ latencyMs: 0 })
   // Spied rather than replaced: the assertions are about *what is asked for*, and answering
   // from a stub would stop proving that a real source honours it.
-  findNeurons = vi.fn((req: FindNeuronsRequest) => MockSource.prototype.findNeurons.call(mock, req))
+  findNeurons = vi.fn((req: FindNeuronsRequest) =>
+    MockSource.prototype.findNeurons.call(mock, req),
+  )
   source = Object.assign(Object.create(Object.getPrototypeOf(mock) as object), mock, {
     findNeurons,
   }) as DataSource
@@ -73,7 +75,12 @@ function pipeline(params: Record<string, unknown> = {}, withDataset = false): Co
   g = addEdge(g, { source: 'ids', sourceHandle: 'neurons', target: 'sort', targetHandle: 'in' })
   if (withDataset) {
     g = addNode(g, node('ds', 'neuron.dataset', { dataset: DATASET }))
-    g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'ids', targetHandle: 'dataset' })
+    g = addEdge(g, {
+      source: 'ds',
+      sourceHandle: 'dataset',
+      target: 'ids',
+      targetHandle: 'dataset',
+    })
   }
   return g
 }
@@ -112,8 +119,18 @@ describe('neuron.inputIds — without a dataset', () => {
     let g = pipeline({ ids: '1234' })
     g = addNode(g, node('skel', 'neuron.skeletons'))
     g = addNode(g, node('ds', 'neuron.dataset', { dataset: DATASET }))
-    g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'skel', targetHandle: 'dataset' })
-    g = addEdge(g, { source: 'ids', sourceHandle: 'neurons', target: 'skel', targetHandle: 'neurons' })
+    g = addEdge(g, {
+      source: 'ds',
+      sourceHandle: 'dataset',
+      target: 'skel',
+      targetHandle: 'dataset',
+    })
+    g = addEdge(g, {
+      source: 'ids',
+      sourceHandle: 'neurons',
+      target: 'skel',
+      targetHandle: 'neurons',
+    })
     const issues = inferGraph(g).nodes['skel']?.issues ?? []
     expect(issues.filter((i) => i.severity === 'error')).toEqual([])
   })
@@ -167,7 +184,9 @@ describe('neuron.inputIds — with a dataset', () => {
   })
 
   it('advertises the dataset’s schema the moment one is wired', () => {
-    const names = columnNames(schemaOf(inferGraph(pipeline({}, true)).nodes['ids']?.outputs['neurons']))
+    const names = columnNames(
+      schemaOf(inferGraph(pipeline({}, true)).nodes['ids']?.outputs['neurons']),
+    )
     expect(names).toContain('bodyId')
     expect(names).toContain('type')
   })
@@ -206,8 +225,18 @@ describe('neuron.inputIds — the wired IDs table', () => {
     g = addNode(g, node('ds', 'neuron.dataset', { dataset: DATASET }))
     g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC4', status: 'Traced' }))
     g = addNode(g, node('ids', 'neuron.inputIds', { ids: typed }))
-    g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'find', targetHandle: 'dataset' })
-    g = addEdge(g, { source: 'find', sourceHandle: 'neurons', target: 'ids', targetHandle: 'ids' })
+    g = addEdge(g, {
+      source: 'ds',
+      sourceHandle: 'dataset',
+      target: 'find',
+      targetHandle: 'dataset',
+    })
+    g = addEdge(g, {
+      source: 'find',
+      sourceHandle: 'neurons',
+      target: 'ids',
+      targetHandle: 'ids',
+    })
 
     const scheduler = makeScheduler()
     await scheduler.run(g, { mode: 'full' })

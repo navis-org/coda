@@ -59,7 +59,9 @@ export function PathsBody({ node, compact }: NodeBodyProps) {
   if (!summary) {
     return (
       <div className="paths-body paths-body--empty">
-        {isTableValue(paths) ? 'No route found — raise Max hops or lower Min synapses.' : 'Not run yet.'}
+        {isTableValue(paths)
+          ? 'No route found — raise Max hops or lower Min synapses.'
+          : 'Not run yet.'}
       </div>
     )
   }

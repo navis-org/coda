@@ -87,7 +87,12 @@ registerEmitter('core.filter', (ctx) => {
       break
     default: {
       const cmp: Record<string, string> = {
-        eq: '==', ne: '!=', gt: '>', ge: '>=', lt: '<', le: '<=',
+        eq: '==',
+        ne: '!=',
+        gt: '>',
+        ge: '>=',
+        lt: '<',
+        le: '<=',
       }
       const operator = cmp[op]
       if (!operator) return ctx.todo(`Unknown filter operator "${op}".`)
@@ -158,7 +163,10 @@ registerEmitter('core.select', (ctx) => {
   // Empty means every column, which is what the node's own `selectTable` does — so the
   // honest translation is a copy rather than an empty frame.
   if (names.length === 0) {
-    return [...ctx.note('No columns picked, which Coda reads as "keep them all".'), `${out} = ${src}`]
+    return [
+      ...ctx.note('No columns picked, which Coda reads as "keep them all".'),
+      `${out} = ${src}`,
+    ]
   }
   return [`${out} = ${src}[${pyList(names)}]`]
 })
@@ -295,9 +303,7 @@ registerEmitter('core.sample', (ctx) => {
       // different rows and the notebook silently disagrees with the canvas. The helper is
       // Coda's own generator, which is what makes the seed mean the same thing in both.
       ctx.helper('coda_sample_rows')
-      return [
-        `${out} = ${src}.iloc[coda_sample_rows(len(${src}), ${count}, ${seed})]`,
-      ]
+      return [`${out} = ${src}.iloc[coda_sample_rows(len(${src}), ${count}, ${seed})]`]
     default:
       return ctx.todo(`Unknown sample mode "${mode}".`)
   }
@@ -354,9 +360,7 @@ registerEmitter('core.normalize', (ctx) => {
     case 'row':
       // `.where(total > 0, 0)` rather than leaving NaN: an all-zero row normalises to zeros
       // in Coda, and a NaN row would blank that stripe of the heatmap instead.
-      return [
-        `${out} = ${src}.div(${src}.sum(axis=1), axis=0).fillna(0)`,
-      ]
+      return [`${out} = ${src}.div(${src}.sum(axis=1), axis=0).fillna(0)`]
     case 'column':
       return [`${out} = ${src}.div(${src}.sum(axis=0), axis=1).fillna(0)`]
     case 'max':

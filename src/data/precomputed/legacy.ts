@@ -30,7 +30,8 @@ export interface RawMesh {
  * up as a non-multiple-of-three index count rather than as silently missing geometry.
  */
 export function parseLegacyFragment(buffer: ArrayBuffer): RawMesh {
-  if (buffer.byteLength < 4) throw new Error('Mesh fragment is too short to hold a vertex count')
+  if (buffer.byteLength < 4)
+    throw new Error('Mesh fragment is too short to hold a vertex count')
   const view = new DataView(buffer)
   const vertexCount = view.getUint32(0, true)
   const vertexBytes = vertexCount * 12
@@ -41,7 +42,9 @@ export function parseLegacyFragment(buffer: ArrayBuffer): RawMesh {
   }
   const indexBytes = buffer.byteLength - 4 - vertexBytes
   if (indexBytes % 12 !== 0) {
-    throw new Error(`Mesh fragment has ${indexBytes} trailing bytes, not a whole number of triangles`)
+    throw new Error(
+      `Mesh fragment has ${indexBytes} trailing bytes, not a whole number of triangles`,
+    )
   }
 
   // Copy rather than view: the byte offset (4) is not 4-byte aligned for every buffer a

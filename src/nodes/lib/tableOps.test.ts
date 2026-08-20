@@ -127,7 +127,9 @@ describe('sample', () => {
 
   it('strides from the first row', () => {
     expect(sampleRowIndices(7, spec({ mode: 'stride', step: 3 }))).toEqual([0, 3, 6])
-    expect(sampleRowIndices(7, spec({ mode: 'stride', step: 1 }))).toEqual([0, 1, 2, 3, 4, 5, 6])
+    expect(sampleRowIndices(7, spec({ mode: 'stride', step: 1 }))).toEqual([
+      0, 1, 2, 3, 4, 5, 6,
+    ])
   })
 
   it('treats the count as a ceiling rather than a demand', () => {
@@ -145,7 +147,8 @@ describe('sample', () => {
   // The seed is the whole reason this mode is allowed to exist: cache keys are provenance,
   // so a draw that varied per call would make the node's own result disagree with itself.
   it('draws the same rows for a seed and different rows for another', () => {
-    const draw = (seed: number) => sampleRowIndices(200, spec({ mode: 'random', count: 20, seed }))
+    const draw = (seed: number) =>
+      sampleRowIndices(200, spec({ mode: 'random', count: 20, seed }))
     expect(draw(7)).toEqual(draw(7))
     expect(draw(7)).not.toEqual(draw(8))
   })
@@ -204,7 +207,11 @@ describe('upload shaping', () => {
   it('gives the chosen column the name, and suffixes the one that had it', () => {
     const clash = tableSchema(column('root_id', 'i64'), column('bodyId', 'str'))
     const declared = uploadShapeSchema(clash, 'root_id', [])
-    const out = uploadShapeTable(tableFromRows(clash, [{ root_id: 1, bodyId: 'x' }]), 'root_id', [])
+    const out = uploadShapeTable(
+      tableFromRows(clash, [{ root_id: 1, bodyId: 'x' }]),
+      'root_id',
+      [],
+    )
     expectSchemaAgreement(declared, out)
     expect(columnNames(out.schema)).toEqual(['bodyId', 'bodyId_2'])
     expect(out.data.bodyId).toEqual([1])
@@ -266,7 +273,10 @@ describe('stack', () => {
     const ints = tableSchema(column('bodyId', 'i64'), column('score', 'i64'))
     const merged = stackColumns(floats, ints)
     expect(merged.conflicts).toEqual([])
-    expect(merged.columns.map((c) => `${c.name}:${c.dtype}`)).toEqual(['bodyId:i64', 'score:f64'])
+    expect(merged.columns.map((c) => `${c.name}:${c.dtype}`)).toEqual([
+      'bodyId:i64',
+      'score:f64',
+    ])
   })
 
   it('reports a real dtype clash rather than throwing, so infer can read it', () => {
@@ -304,7 +314,9 @@ describe('stack', () => {
   })
 
   it('refuses a source column either input already uses', () => {
-    expect(() => stackTables(left(), right(), { sourceColumn: 'type' })).toThrow(/already exists/)
+    expect(() => stackTables(left(), right(), { sourceColumn: 'type' })).toThrow(
+      /already exists/,
+    )
   })
 
   it('is Neurons only when both sides are', () => {
@@ -557,14 +569,18 @@ describe('pivot', () => {
 
   it('reshapes an empty pivot to a table of the same width', () => {
     const empty = tableFromRows(CONNECTIVITY, [])
-    const wide = matrixToTable(pivotTable(empty, 'bodyId', 'partnerType', 'weight', 'sum'), 'bodyId')
+    const wide = matrixToTable(
+      pivotTable(empty, 'bodyId', 'partnerType', 'weight', 'sum'),
+      'bodyId',
+    )
     expect(wide.length).toBe(0)
     expect(wide.schema.columns.map((c) => c.name)).toEqual(['bodyId'])
   })
 })
 
 describe('normalizeMatrix', () => {
-  const m = () => makeMatrix(['a', 'b'], ['x', 'y'], Float64Array.from([1, 3, 0, 0]), 'synapses')
+  const m = () =>
+    makeMatrix(['a', 'b'], ['x', 'y'], Float64Array.from([1, 3, 0, 0]), 'synapses')
 
   it('normalises by row and leaves all-zero rows at zero', () => {
     const out = normalizeMatrix(m(), 'row')

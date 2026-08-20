@@ -40,8 +40,18 @@ function pipeline(): CodaGraph {
   g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC.*', status: 'Traced' }))
   g = addNode(g, node('filter', 'core.filter', { column: 'size', op: 'ge', value: '0' }))
   g = addNode(g, node('view', 'out.table'))
-  g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'find', targetHandle: 'dataset' })
-  g = addEdge(g, { source: 'find', sourceHandle: 'neurons', target: 'filter', targetHandle: 'in' })
+  g = addEdge(g, {
+    source: 'ds',
+    sourceHandle: 'dataset',
+    target: 'find',
+    targetHandle: 'dataset',
+  })
+  g = addEdge(g, {
+    source: 'find',
+    sourceHandle: 'neurons',
+    target: 'filter',
+    targetHandle: 'in',
+  })
   g = addEdge(g, { source: 'filter', sourceHandle: 'out', target: 'view', targetHandle: 'in' })
   return g
 }
@@ -207,7 +217,8 @@ describe('schema propagation', () => {
     const inference = inferGraph(pipeline())
     const filterInput = inference.nodes.filter?.inputs.in
     expect(filterInput?.kind).toBe('neurons')
-    const columns = filterInput && 'schema' in filterInput ? filterInput.schema?.columns : undefined
+    const columns =
+      filterInput && 'schema' in filterInput ? filterInput.schema?.columns : undefined
     expect(columns?.map((c) => c.name)).toEqual([
       'bodyId',
       'type',
@@ -255,7 +266,9 @@ describe('schema propagation', () => {
 
     const out = inferGraph(graph).nodes.grp?.outputs.out
     const names =
-      out && 'schema' in out ? out.schema?.columns.map((c) => `${c.name}:${c.dtype}`) : undefined
+      out && 'schema' in out
+        ? out.schema?.columns.map((c) => `${c.name}:${c.dtype}`)
+        : undefined
     expect(names).toEqual(['postType:str', 'n:i64', 'sum_weight:i64'])
 
     // Switching to mean changes the dtype of the aggregate column.

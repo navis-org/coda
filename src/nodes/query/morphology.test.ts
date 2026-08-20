@@ -64,9 +64,24 @@ function pipeline(geometryType: string, limit: number): CodaGraph {
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: 'optic-lobe-mini' }))
   g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC4', status: 'Traced' }))
   g = addNode(g, node('geo', geometryType))
-  g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'find', targetHandle: 'dataset' })
-  g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'geo', targetHandle: 'dataset' })
-  g = addEdge(g, { source: 'find', sourceHandle: 'neurons', target: 'geo', targetHandle: 'neurons' })
+  g = addEdge(g, {
+    source: 'ds',
+    sourceHandle: 'dataset',
+    target: 'find',
+    targetHandle: 'dataset',
+  })
+  g = addEdge(g, {
+    source: 'ds',
+    sourceHandle: 'dataset',
+    target: 'geo',
+    targetHandle: 'dataset',
+  })
+  g = addEdge(g, {
+    source: 'find',
+    sourceHandle: 'neurons',
+    target: 'geo',
+    targetHandle: 'neurons',
+  })
   return setNodeParam(g, 'geo', 'limit', limit)
 }
 

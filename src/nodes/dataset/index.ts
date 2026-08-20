@@ -17,7 +17,12 @@ import { T } from '../../core/types'
 import type { DatasetValue } from '../../core/values'
 import { getSource } from '../../data/source'
 import { neuPrintSourceFor } from '../../data/neuprint/registry'
-import { DEFAULT_SERVER, normaliseServer, serverLabel, sourceIdForServer } from '../../data/neuprint/servers'
+import {
+  DEFAULT_SERVER,
+  normaliseServer,
+  serverLabel,
+  sourceIdForServer,
+} from '../../data/neuprint/servers'
 import type { DatasetFamily } from '../lib/datasetFamilies'
 import { DATASET_FAMILIES, resolveDatasetId, versionsFor } from '../lib/datasetFamilies'
 
@@ -106,7 +111,9 @@ function buildDatasetNode(family: DatasetFamily) {
       if (versions.length === 0) return []
       const chosen = String(ctx.params.version ?? '')
       if (chosen && !versions.some((v) => v.version === chosen)) {
-        return [`${family.label} ${chosen} is not on this server — it offers ${versions.map((v) => v.version).join(', ')}`]
+        return [
+          `${family.label} ${chosen} is not on this server — it offers ${versions.map((v) => v.version).join(', ')}`,
+        ]
       }
       return []
     },

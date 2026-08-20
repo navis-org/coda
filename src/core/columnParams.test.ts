@@ -44,14 +44,18 @@ function issues(
   input: CodaType | undefined,
 ): string[] {
   const inputs = { in: input }
-  return validateColumnParams(
-    definition,
-    makeInferContext(definition, params as never, inputs),
-  )
+  return validateColumnParams(definition, makeInferContext(definition, params as never, inputs))
 }
 
 const picker = (extra: Partial<ParamDef> = {}): ParamDef =>
-  ({ id: 'col', kind: 'column', label: 'Column', from: 'in', default: '', ...extra }) as ParamDef
+  ({
+    id: 'col',
+    kind: 'column',
+    label: 'Column',
+    from: 'in',
+    default: '',
+    ...extra,
+  }) as ParamDef
 
 describe('resolveColumns against a schema that has not arrived', () => {
   const picker: ParamDef = {
@@ -78,14 +82,16 @@ describe('resolveColumns against a schema that has not arrived', () => {
   it('still drops a column a known schema does not have', () => {
     // The distinction `columnSchemaFor` exists to draw. This column really is gone: the check
     // reports it, and keeping it would send a name into `evaluate` the table cannot honour.
-    expect(resolveColumns(picker as never, { columns: ['type', 'gone'] }, { in: T.table(SCHEMA) })).toEqual(
-      ['type'],
-    )
+    expect(
+      resolveColumns(picker as never, { columns: ['type', 'gone'] }, { in: T.table(SCHEMA) }),
+    ).toEqual(['type'])
   })
 
   it('resolves to nothing when nothing was chosen, whatever the schema', () => {
     expect(resolveColumns(picker as never, {}, { in: T.table(undefined) })).toEqual([])
-    expect(resolveColumns(picker as never, { columns: [] }, { in: T.table(SCHEMA) })).toEqual([])
+    expect(resolveColumns(picker as never, { columns: [] }, { in: T.table(SCHEMA) })).toEqual(
+      [],
+    )
   })
 })
 
@@ -103,7 +109,9 @@ describe('an input that says nothing', () => {
      * graph opens. Reading that as "this table has no columns" put a warning on every column
      * param downstream of it at once, about a table nobody had seen.
      */
-    expect(issues(def(picker({ dtypes: ['i64', 'f64'] })), { col: 'pre' }, T.table())).toEqual([])
+    expect(issues(def(picker({ dtypes: ['i64', 'f64'] })), { col: 'pre' }, T.table())).toEqual(
+      [],
+    )
   })
 
   it('does not report drift against a schema it cannot see either', () => {
@@ -232,6 +240,8 @@ describe('resolving a column', () => {
   })
 
   it('answers nothing when there is nothing to offer and nothing was chosen', () => {
-    expect(resolveColumn(picker({}) as never, { col: '' } as never, { in: T.table() })).toBeUndefined()
+    expect(
+      resolveColumn(picker({}) as never, { col: '' } as never, { in: T.table() }),
+    ).toBeUndefined()
   })
 })

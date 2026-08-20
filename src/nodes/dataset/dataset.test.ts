@@ -36,7 +36,12 @@ function ctxFor(type: string, params: ParamValues = {}) {
 
 function node(type: string, params: ParamValues = {}) {
   const def = requireNodeDef(type)
-  return { id: 'ds', type, position: { x: 0, y: 0 }, params: { ...defaultParams(def), ...params } }
+  return {
+    id: 'ds',
+    type,
+    position: { x: 0, y: 0 },
+    params: { ...defaultParams(def), ...params },
+  }
 }
 
 /** The `version` param's options, resolved against the live registry. */
@@ -120,7 +125,9 @@ describe('per-dataset nodes', () => {
     const inference = inferGraph(graph)
     expect(inference.ok).toBe(true)
     // The refinement is what lets column pickers populate before anything runs.
-    expect(datasetRef(inference.nodes['find']?.inputs['dataset'])?.datasetId).toBe('hemibrain-mini')
+    expect(datasetRef(inference.nodes['find']?.inputs['dataset'])?.datasetId).toBe(
+      'hemibrain-mini',
+    )
   })
 })
 
@@ -139,7 +146,10 @@ describe('Custom neuPrint', () => {
   it('registers a source for a deployment it has not seen before', () => {
     const def = requireNodeDef('dataset.neuprint')
     const types = def.inferOutputs!(
-      ctxFor('dataset.neuprint', { server: 'https://neuprint-pre.janelia.org', dataset: 'x:v1' }),
+      ctxFor('dataset.neuprint', {
+        server: 'https://neuprint-pre.janelia.org',
+        dataset: 'x:v1',
+      }),
     )
     const ref = datasetRef(types['dataset'])
     expect(ref?.sourceId).toBe('neuprint:https://neuprint-pre.janelia.org')
@@ -149,8 +159,12 @@ describe('Custom neuPrint', () => {
 
   it('shares one source between two nodes naming the same deployment differently', () => {
     const def = requireNodeDef('dataset.neuprint')
-    const a = def.inferOutputs!(ctxFor('dataset.neuprint', { server: 'neuprint.janelia.org/', dataset: 'x' }))
-    const b = def.inferOutputs!(ctxFor('dataset.neuprint', { server: DEFAULT_SERVER, dataset: 'x' }))
+    const a = def.inferOutputs!(
+      ctxFor('dataset.neuprint', { server: 'neuprint.janelia.org/', dataset: 'x' }),
+    )
+    const b = def.inferOutputs!(
+      ctxFor('dataset.neuprint', { server: DEFAULT_SERVER, dataset: 'x' }),
+    )
     expect(datasetRef(a['dataset'])?.sourceId).toBe(datasetRef(b['dataset'])?.sourceId)
   })
 })
@@ -164,7 +178,10 @@ describe('the superseded generic node', () => {
   })
 
   it('still evaluates', async () => {
-    const graph = addNode(emptyGraph('t'), node('neuron.dataset', { source: 'mock', dataset: 'hemibrain-mini' }))
+    const graph = addNode(
+      emptyGraph('t'),
+      node('neuron.dataset', { source: 'mock', dataset: 'hemibrain-mini' }),
+    )
     const sched = new Scheduler({ resolveSource: (id) => requireSource(id) })
     await sched.run(graph, { mode: 'full' })
     expect(isDatasetValue(sched.output('ds', 'dataset'))).toBe(true)

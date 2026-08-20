@@ -210,5 +210,8 @@ export function fetchSkeleton(
   bodyId: number,
   options?: RequestOptions,
 ): Promise<CypherResponse> {
-  return get<CypherResponse>(`/api/skeletons/skeleton/${datasetSegment(dataset)}/${bodyId}`, options)
+  return get<CypherResponse>(
+    `/api/skeletons/skeleton/${datasetSegment(dataset)}/${bodyId}`,
+    options,
+  )
 }

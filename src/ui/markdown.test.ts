@@ -93,7 +93,9 @@ describe('inlines', () => {
 
   it('keeps a fragment-heavy neuroglancer URL intact', () => {
     const found = links(
-      parseMarkdown('[Scene](https://neuroglancer-demo.appspot.com/#!gs://flyem-views/base.json)'),
+      parseMarkdown(
+        '[Scene](https://neuroglancer-demo.appspot.com/#!gs://flyem-views/base.json)',
+      ),
     )
     expect(found[0]!.href).toBe(
       'https://neuroglancer-demo.appspot.com/#!gs://flyem-views/base.json',
@@ -105,9 +107,9 @@ describe('inlines', () => {
     expect(plain((blocks[0] as { children: MarkdownInline[] }).children)).toBe(
       'male_cns_v1 is one token',
     )
-    expect((blocks[0] as { children: MarkdownInline[] }).children.some((n) => n.kind === 'em')).toBe(
-      false,
-    )
+    expect(
+      (blocks[0] as { children: MarkdownInline[] }).children.some((n) => n.kind === 'em'),
+    ).toBe(false)
   })
 
   it('treats an unclosed delimiter as the character it is', () => {
@@ -134,7 +136,9 @@ describe('what a hostile blurb cannot do', () => {
   })
 
   it('allows the schemes a citation actually uses', () => {
-    expect(safeHref('https://doi.org/10.7554/eLife.57443')).toBe('https://doi.org/10.7554/eLife.57443')
+    expect(safeHref('https://doi.org/10.7554/eLife.57443')).toBe(
+      'https://doi.org/10.7554/eLife.57443',
+    )
     expect(safeHref('mailto:flyem@janelia.hhmi.org')).toBe('mailto:flyem@janelia.hhmi.org')
   })
 

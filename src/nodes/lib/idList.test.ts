@@ -120,7 +120,9 @@ describe('collectIds', () => {
 
   it('works from either half alone', () => {
     expect(collectIds({ typed: '1234' }).ids).toEqual([1234])
-    expect(collectIds({ typed: '', table: table(), column: 'bodyId' }).ids).toEqual([5678, 9012])
+    expect(collectIds({ typed: '', table: table(), column: 'bodyId' }).ids).toEqual([
+      5678, 9012,
+    ])
     expect(collectIds({ typed: '' }).ids).toEqual([])
   })
 

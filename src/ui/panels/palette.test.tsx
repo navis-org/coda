@@ -213,7 +213,13 @@ describe('CommandPalette', () => {
       shortcut: '⇧R',
       perform: () => {},
     },
-    { id: 'b', action: 'Run', label: 'Clear Results', hint: 'Drop cached results', perform: () => {} },
+    {
+      id: 'b',
+      action: 'Run',
+      label: 'Clear Results',
+      hint: 'Drop cached results',
+      perform: () => {},
+    },
     {
       id: 'c',
       action: 'Add',
@@ -279,7 +285,9 @@ describe('CommandPalette', () => {
 
   it('finds a row by fuzzy query', () => {
     const { container } = open()
-    fireEvent.change(screen.getByPlaceholderText(/Search commands/), { target: { value: 'gb' } })
+    fireEvent.change(screen.getByPlaceholderText(/Search commands/), {
+      target: { value: 'gb' },
+    })
     // The label is split into highlighted runs across elements, so assert on the
     // concatenated text — the accessibility-name algorithm inserts spaces at element
     // boundaries and would report "G roup B y".
@@ -298,7 +306,9 @@ describe('CommandPalette', () => {
 
   it('highlights the matched characters', () => {
     const { container } = open()
-    fireEvent.change(screen.getByPlaceholderText(/Search commands/), { target: { value: 'gb' } })
+    fireEvent.change(screen.getByPlaceholderText(/Search commands/), {
+      target: { value: 'gb' },
+    })
     const marks = [...container.querySelectorAll('mark')].map((m) => m.textContent)
     expect(marks).toEqual(['G', 'B'])
   })
@@ -328,15 +338,21 @@ describe('CommandPalette', () => {
 
   it('reports no matches instead of an empty list', () => {
     open()
-    fireEvent.change(screen.getByPlaceholderText(/Search commands/), { target: { value: 'zzzz' } })
+    fireEvent.change(screen.getByPlaceholderText(/Search commands/), {
+      target: { value: 'zzzz' },
+    })
     expect(screen.getByText('No matches')).toBeTruthy()
   })
 
   it('restricts the list to node insertions when prefilled with "Add:"', () => {
     const { container } = open({ initialQuery: 'Add:' })
-    expect((screen.getByPlaceholderText('Search nodes…') as HTMLInputElement).value).toBe('Add:')
+    expect((screen.getByPlaceholderText('Search nodes…') as HTMLInputElement).value).toBe(
+      'Add:',
+    )
     // Only the one Add item survives; the three Run commands are filtered out.
-    expect(rowCrumbs(container)).toEqual([['Add', 'Table', 'Group By', 'Collapse rows into groups']])
+    expect(rowCrumbs(container)).toEqual([
+      ['Add', 'Table', 'Group By', 'Collapse rows into groups'],
+    ])
   })
 
   it('fuzzy-matches within an active prefix', () => {
@@ -385,7 +401,10 @@ describe('CommandPalette', () => {
   })
 
   it('names the required type when opened from a link drag', () => {
-    open({ filterType: T.matrix(), items: buildNodeItems({ type: T.matrix(), from: 'source' }) })
+    open({
+      filterType: T.matrix(),
+      items: buildNodeItems({ type: T.matrix(), from: 'source' }),
+    })
     expect(screen.getByPlaceholderText('Search nodes…')).toBeTruthy()
     expect(screen.getByText(/Nodes accepting/)).toBeTruthy()
     expect(screen.getByText('Matrix')).toBeTruthy()
@@ -403,7 +422,10 @@ describe('CommandPalette', () => {
 describe('breadcrumbs on the real item list', () => {
   /** Renders the actual palette contents and reads back a row as plain text. */
   function rowFor(label: string): string {
-    const all = [...buildCommandItems({ store: useGraphStore.getState(), fitView: () => {} }), ...buildNodeItems()]
+    const all = [
+      ...buildCommandItems({ store: useGraphStore.getState(), fitView: () => {} }),
+      ...buildNodeItems(),
+    ]
     render(
       <CommandPalette
         items={all}
@@ -422,7 +444,9 @@ describe('breadcrumbs on the real item list', () => {
   }
 
   it('reads as the requested format for a node', () => {
-    expect(rowFor('Filter')).toBe('Add ▶ Transform ▶ Filter ▶ Keep rows matching a condition on one column.')
+    expect(rowFor('Filter')).toBe(
+      'Add ▶ Transform ▶ Filter ▶ Keep rows matching a condition on one column.',
+    )
   })
 
   it('reads sensibly for a command', () => {
@@ -472,9 +496,9 @@ describe('palette entry points', () => {
     })
 
     expect(useGraphStore.getState().graph.nodes.length).toBe(before + 1)
-    expect(
-      useGraphStore.getState().graph.nodes.some((n) => n.type === 'core.normalize'),
-    ).toBe(true)
+    expect(useGraphStore.getState().graph.nodes.some((n) => n.type === 'core.normalize')).toBe(
+      true,
+    )
   })
 
   it('runs a command picked from the palette', async () => {

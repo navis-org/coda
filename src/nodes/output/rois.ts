@@ -179,7 +179,7 @@ export const roisNode = registerNode({
       id: 'superRois',
       kind: 'ids',
       label: 'Region groups',
-      help: 'Which groups of the dataset\'s region hierarchy to draw. Empty draws every one.',
+      help: "Which groups of the dataset's region hierarchy to draw. Empty draws every one.",
       default: [],
       presentational: true,
       advanced: true,

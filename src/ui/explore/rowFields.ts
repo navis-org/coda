@@ -115,7 +115,10 @@ export interface RowFields {
  * @param chosen Fields the user picked in the inspector. Empty means "decide for me", which is
  * what every dataset starts as and what the priority list above is for.
  */
-export function rowFields(schema: TableSchema | undefined, chosen: readonly string[] = []): RowFields {
+export function rowFields(
+  schema: TableSchema | undefined,
+  chosen: readonly string[] = [],
+): RowFields {
   const byName = new Map((schema?.columns ?? []).map((c) => [c.name, c]))
   const has = (name: string) => byName.has(name)
 

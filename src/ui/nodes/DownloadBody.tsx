@@ -114,11 +114,11 @@ export function DownloadBody({ node, ctx, compact, setParam, onError }: NodeBody
       </div>
 
       {/*
-        * The warning only the card can give. `On run` alone is bounded by the provenance key —
-        * a Run over an unchanged graph re-executes nothing and writes nothing — but auto-run
-        * turns every upstream edit into a full pass, and each of those does write. A node
-        * definition cannot see the store, so this cannot live in `validate`.
-        */}
+       * The warning only the card can give. `On run` alone is bounded by the provenance key —
+       * a Run over an unchanged graph re-executes nothing and writes nothing — but auto-run
+       * turns every upstream edit into a full pass, and each of those does write. A node
+       * definition cannot see the store, so this cannot live in `validate`.
+       */}
       {onRun && autoRun && (
         <div className="list-body__foot list-body__missing">
           ⚠ Auto-run is on, so this writes a file on every upstream edit.
@@ -160,7 +160,10 @@ export function DownloadBody({ node, ctx, compact, setParam, onError }: NodeBody
                 : preview.files.join(', ')}
             </span>
             {preview.truncated && (
-              <span className="list-body__missing" title="A browser stops honouring downloads past about this many">
+              <span
+                className="list-body__missing"
+                title="A browser stops honouring downloads past about this many"
+              >
                 ⚠ first {preview.truncated.kept} of {preview.truncated.total}
               </span>
             )}

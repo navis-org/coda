@@ -108,7 +108,9 @@ export function ParamField({ param, value, ctx, onChange, variant = 'node' }: Pa
 
     case 'ids': {
       const ids = Array.isArray(value) ? value : []
-      return <IdsField label={label} noun={param.noun ?? 'items'} ids={ids} onChange={onChange} />
+      return (
+        <IdsField label={label} noun={param.noun ?? 'items'} ids={ids} onChange={onChange} />
+      )
     }
 
     case 'columns': {
@@ -412,7 +414,11 @@ function IdsField({ label, noun, ids, onChange }: IdsFieldProps) {
         {ids.length === 0 ? `no ${noun}` : `${ids.length} ${noun}`}
       </span>
       {ids.length > 0 && (
-        <button type="button" title={`Clear selection (${ids.join(', ')})`} onClick={() => onChange([])}>
+        <button
+          type="button"
+          title={`Clear selection (${ids.join(', ')})`}
+          onClick={() => onChange([])}
+        >
           clear
         </button>
       )}

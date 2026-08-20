@@ -48,8 +48,18 @@ function pipeline(params: Record<string, unknown> = {}): CodaGraph {
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: 'optic-lobe-mini' }))
   g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC.*', status: 'Traced' }))
   g = addNode(g, node('prof', 'out.profile', params))
-  g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'find', targetHandle: 'dataset' })
-  g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'prof', targetHandle: 'dataset' })
+  g = addEdge(g, {
+    source: 'ds',
+    sourceHandle: 'dataset',
+    target: 'find',
+    targetHandle: 'dataset',
+  })
+  g = addEdge(g, {
+    source: 'ds',
+    sourceHandle: 'dataset',
+    target: 'prof',
+    targetHandle: 'dataset',
+  })
   g = addEdge(g, {
     source: 'find',
     sourceHandle: 'neurons',
@@ -70,9 +80,9 @@ describe('out.profile — types', () => {
 
   it('advertises the incoming column schema on both ports before anything runs', () => {
     const inference = inferGraph(pipeline())
-    expect(schemaOf(inference.nodes['prof']?.outputs['out'])?.columns.map((c) => c.name)).toContain(
-      'bodyId',
-    )
+    expect(
+      schemaOf(inference.nodes['prof']?.outputs['out'])?.columns.map((c) => c.name),
+    ).toContain('bodyId')
     expect(
       schemaOf(inference.nodes['prof']?.outputs['current'])?.columns.map((c) => c.name),
     ).toContain('type')
@@ -101,12 +111,22 @@ describe('out.profile — validation', () => {
   it('names the columns the table does have when bodyId is missing', () => {
     let g = pipeline()
     g = addNode(g, node('sel', 'core.select', { columns: ['type'] }))
-    g = addEdge(g, { source: 'find', sourceHandle: 'neurons', target: 'sel', targetHandle: 'in' })
+    g = addEdge(g, {
+      source: 'find',
+      sourceHandle: 'neurons',
+      target: 'sel',
+      targetHandle: 'in',
+    })
     g = {
       ...g,
       edges: g.edges.filter((e) => !(e.target === 'prof' && e.targetHandle === 'neurons')),
     }
-    g = addEdge(g, { source: 'sel', sourceHandle: 'out', target: 'prof', targetHandle: 'neurons' })
+    g = addEdge(g, {
+      source: 'sel',
+      sourceHandle: 'out',
+      target: 'prof',
+      targetHandle: 'neurons',
+    })
 
     const reported = issues(g, 'prof')
     expect(reported).toHaveLength(1)
@@ -122,9 +142,24 @@ describe('out.profile — validation', () => {
     g = addNode(g, node('ds', 'neuron.dataset', { dataset: 'optic-lobe-mini' }))
     g = addNode(g, node('raw', 'neuron.rawCypher'))
     g = addNode(g, node('prof', 'out.profile'))
-    g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'raw', targetHandle: 'dataset' })
-    g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'prof', targetHandle: 'dataset' })
-    g = addEdge(g, { source: 'raw', sourceHandle: 'result', target: 'prof', targetHandle: 'neurons' })
+    g = addEdge(g, {
+      source: 'ds',
+      sourceHandle: 'dataset',
+      target: 'raw',
+      targetHandle: 'dataset',
+    })
+    g = addEdge(g, {
+      source: 'ds',
+      sourceHandle: 'dataset',
+      target: 'prof',
+      targetHandle: 'dataset',
+    })
+    g = addEdge(g, {
+      source: 'raw',
+      sourceHandle: 'result',
+      target: 'prof',
+      targetHandle: 'neurons',
+    })
     expect(issues(g, 'prof')).toEqual([])
   })
 })

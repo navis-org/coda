@@ -794,9 +794,7 @@ describe('the loop, end to end', () => {
     const result = expectOk(applyPlan(emptyGraph(), outcome.plan))
     expect(result.graph.nodes).toHaveLength(4)
     expect(result.graph.edges).toHaveLength(4)
-    expect(nodeFor(result, 'conn').params.minWeight).toBe(
-      5,
-    )
+    expect(nodeFor(result, 'conn').params.minWeight).toBe(5)
 
     /*
      * The Bar Chart's category and value columns are not knowable here — Connectivity's
@@ -975,7 +973,9 @@ describe('a reply that is not quite a plan', () => {
   })
 
   it('digs the object out from behind prose', () => {
-    const result = parsePlan('Sure! Here is the plan:\n\n{"summary":"hi","add":[]}\n\nHope that helps.')
+    const result = parsePlan(
+      'Sure! Here is the plan:\n\n{"summary":"hi","add":[]}\n\nHope that helps.',
+    )
     if (!result.ok) expect.fail(result.error)
     expect(result.plan.summary).toBe('hi')
   })
@@ -998,7 +998,7 @@ describe('a reply that is not quite a plan', () => {
     expect(result.plan.summary).toBe('a } brace')
   })
 
-  it('refuses a reply in somebody else\'s shape rather than reading it as an empty plan', () => {
+  it("refuses a reply in somebody else's shape rather than reading it as an empty plan", () => {
     /*
      * The failure this exists for. Every field is read by name, so an object carrying none of
      * them parsed *successfully* as a plan that does nothing — while carrying a confident
@@ -1020,7 +1020,9 @@ describe('a reply that is not quite a plan', () => {
   it('still accepts a summary on its own, because that is how a decline arrives', () => {
     // "Coda has no node for that" is a real answer and carries no actions at all. It must not
     // be caught by the rule above.
-    const result = parsePlan(JSON.stringify({ summary: 'Coda has no statistical-testing node.' }))
+    const result = parsePlan(
+      JSON.stringify({ summary: 'Coda has no statistical-testing node.' }),
+    )
     if (!result.ok) expect.fail(result.error)
     expect(isEmptyPlan(result.plan)).toBe(true)
   })
@@ -1040,16 +1042,28 @@ describe('recovering a plan a weak model wrapped in an envelope of its own', () 
    * different key each run. That is what makes them recoverable, and the varying key is why the
    * rule is written against Coda's own verb names rather than against a list of envelope names.
    */
-  it("reads `steps`, which is not a word this format uses", () => {
+  it('reads `steps`, which is not a word this format uses', () => {
     const result = parsePlan(
       JSON.stringify({
         summary: 'Find LC4 neurons in hemibrain and display them in a table.',
         steps: [
           { add: { ref: 'hemi', type: 'dataset.hemibrain' } },
-          { add: { ref: 'findLC4', type: 'neuron.findNeurons', params: { typePattern: 'LC4' } } },
+          {
+            add: { ref: 'findLC4', type: 'neuron.findNeurons', params: { typePattern: 'LC4' } },
+          },
           { add: { ref: 'table', type: 'out.table' } },
-          { connect: { from: { ref: 'hemi', port: 'dataset' }, to: { ref: 'findLC4', port: 'dataset' } } },
-          { connect: { from: { ref: 'findLC4', port: 'neurons' }, to: { ref: 'table', port: 'in' } } },
+          {
+            connect: {
+              from: { ref: 'hemi', port: 'dataset' },
+              to: { ref: 'findLC4', port: 'dataset' },
+            },
+          },
+          {
+            connect: {
+              from: { ref: 'findLC4', port: 'neurons' },
+              to: { ref: 'table', port: 'in' },
+            },
+          },
         ],
       }),
     )
@@ -1070,7 +1084,12 @@ describe('recovering a plan a weak model wrapped in an envelope of its own', () 
         summary: 'Find all LC4 neurons.',
         ops: [
           { add: { type: 'dataset.hemibrain', ref: 'ds' } },
-          { connect: { from: { node: 'ds', port: 'dataset' }, to: { node: 'find', port: 'dataset' } } },
+          {
+            connect: {
+              from: { node: 'ds', port: 'dataset' },
+              to: { node: 'find', port: 'dataset' },
+            },
+          },
         ],
       }),
     )
@@ -1086,8 +1105,17 @@ describe('recovering a plan a weak model wrapped in an envelope of its own', () 
         summary: 'Chart the upstream partners of DNp01.',
         plan: [
           { action: 'add', type: 'dataset.hemibrain', ref: 'ds' },
-          { action: 'add', type: 'neuron.findNeurons', ref: 'find', params: { typePattern: 'LC4' } },
-          { action: 'connect', from: { node: 'ds', port: 'dataset' }, to: { node: 'find', port: 'dataset' } },
+          {
+            action: 'add',
+            type: 'neuron.findNeurons',
+            ref: 'find',
+            params: { typePattern: 'LC4' },
+          },
+          {
+            action: 'connect',
+            from: { node: 'ds', port: 'dataset' },
+            to: { node: 'find', port: 'dataset' },
+          },
         ],
       }),
     )

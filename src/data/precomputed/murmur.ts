@@ -36,7 +36,10 @@ function fmix(h: number): number {
  * bytes), but the block loop is kept so the function is the real algorithm and can be
  * checked against published vectors.
  */
-export function murmurHash3x86_128(data: Uint8Array, seed = 0): [number, number, number, number] {
+export function murmurHash3x86_128(
+  data: Uint8Array,
+  seed = 0,
+): [number, number, number, number] {
   let h1 = seed >>> 0
   let h2 = seed >>> 0
   let h3 = seed >>> 0

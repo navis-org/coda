@@ -14,12 +14,7 @@ import type { CellValue, NetworkValue } from '../../core/values'
 import { getColumn } from '../../core/values'
 
 export type LayoutName =
-  | 'forceatlas2'
-  | 'circular'
-  | 'layered'
-  | 'columns'
-  | 'grouped'
-  | 'spectral'
+  'forceatlas2' | 'circular' | 'layered' | 'columns' | 'grouped' | 'spectral'
 
 export type Orientation = 'lr' | 'tb'
 
@@ -190,7 +185,8 @@ function orderWithinLayers(topology: NetworkTopology, layers: number[]): number[
   }
 
   const order = new Float64Array(count)
-  for (const list of byLayer.values()) list.forEach((node, position) => (order[node] = position))
+  for (const list of byLayer.values())
+    list.forEach((node, position) => (order[node] = position))
 
   // A couple of sweeps is enough to remove most crossings; more has diminishing returns.
   for (let sweep = 0; sweep < 4; sweep++) {
@@ -240,7 +236,8 @@ export async function computeLayout(
     const missing: string[] = []
     for (const id of topology.ids) {
       const at = given[id]
-      if (at && Number.isFinite(at.x) && Number.isFinite(at.y)) positions.set(id, { x: at.x, y: at.y })
+      if (at && Number.isFinite(at.x) && Number.isFinite(at.y))
+        positions.set(id, { x: at.x, y: at.y })
       else missing.push(id)
     }
     if (positions.size > 0) {
@@ -569,7 +566,9 @@ function groupedPositions(
   })
 
   // Size first, then key, so the arrangement cannot depend on insertion order.
-  const ordered = [...groups.entries()].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]))
+  const ordered = [...groups.entries()].sort(
+    (a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]),
+  )
   const ringRadius = Math.max(GROUP_RING_MIN, ordered.length * GROUP_RING_STEP)
 
   ordered.forEach(([, members], groupIndex) => {

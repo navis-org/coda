@@ -51,7 +51,10 @@ describe('R Markdown export', () => {
   it('refuses a graph holding a synthetic dataset', () => {
     let g = emptyGraph('mock')
     g = addNode(g, {
-      id: 'm', type: 'dataset.mock.hemibrain', position: { x: 0, y: 0 }, params: {},
+      id: 'm',
+      type: 'dataset.mock.hemibrain',
+      position: { x: 0, y: 0 },
+      params: {},
     })
     const result = exportRmd(g)
     expect(result.ok).toBe(false)

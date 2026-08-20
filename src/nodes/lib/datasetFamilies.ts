@@ -58,7 +58,8 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     sourceId: 'neuprint',
     family: 'male-cns',
     label: 'MaleCNS',
-    description: 'Whole central nervous system of an adult male fly — brain and ventral nerve cord.',
+    description:
+      'Whole central nervous system of an adult male fly — brain and ventral nerve cord.',
     glyph: 'cns',
   },
   {
@@ -66,7 +67,8 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     sourceId: 'neuprint',
     family: 'hemibrain',
     label: 'Hemibrain',
-    description: 'Central brain of an adult female fly. The most heavily annotated fly connectome.',
+    description:
+      'Central brain of an adult female fly. The most heavily annotated fly connectome.',
     glyph: 'brain',
   },
   {
@@ -82,7 +84,8 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     sourceId: 'neuprint',
     family: 'optic-lobe',
     label: 'Optic Lobe',
-    description: 'The right optic lobe: medulla, lobula and lobula plate, columnar to the core.',
+    description:
+      'The right optic lobe: medulla, lobula and lobula plate, columnar to the core.',
     glyph: 'optic',
   },
   {
@@ -90,7 +93,8 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     sourceId: 'neuprint',
     family: 'fib19',
     label: 'FIB-19',
-    description: 'An early FIB-SEM volume of the mushroom body and surrounds. Small and partial.',
+    description:
+      'An early FIB-SEM volume of the mushroom body and surrounds. Small and partial.',
     glyph: 'brain',
   },
   {
@@ -110,7 +114,8 @@ const MOCK_FAMILIES: DatasetFamily[] = [
     sourceId: 'mock',
     family: 'hemibrain-mini',
     label: 'Hemibrain (mini)',
-    description: 'Synthetic mushroom-body-like connectome generated in the browser. No token needed.',
+    description:
+      'Synthetic mushroom-body-like connectome generated in the browser. No token needed.',
     glyph: 'brain',
     synthetic: true,
   },
@@ -119,7 +124,8 @@ const MOCK_FAMILIES: DatasetFamily[] = [
     sourceId: 'mock',
     family: 'optic-lobe-mini',
     label: 'Optic Lobe (mini)',
-    description: 'Synthetic optic-lobe-like connectome generated in the browser. No token needed.',
+    description:
+      'Synthetic optic-lobe-like connectome generated in the browser. No token needed.',
     glyph: 'optic',
     synthetic: true,
   },

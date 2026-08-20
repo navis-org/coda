@@ -30,7 +30,10 @@ const SCHEMA = tableSchema(
   column('side', 'str'),
 )
 
-function neurons(count: number, overrides: (i: number) => Record<string, unknown> = () => ({})) {
+function neurons(
+  count: number,
+  overrides: (i: number) => Record<string, unknown> = () => ({}),
+) {
   return tableFromRows(
     SCHEMA,
     Array.from({ length: count }, (_, i) => ({
@@ -158,7 +161,11 @@ describe('empty states', () => {
   })
 
   it('says an empty table is empty', () => {
-    const empty = makeTable(SCHEMA, { bodyId: [], pre: [], post: [], type: [], side: [] }, 'neurons')
+    const empty = makeTable(
+      SCHEMA,
+      { bodyId: [], pre: [], post: [], type: [], side: [] },
+      'neurons',
+    )
     draw(empty)
     expect(screen.getByText(/the table is empty/)).toBeTruthy()
   })

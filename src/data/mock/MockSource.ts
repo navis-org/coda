@@ -49,7 +49,12 @@ import {
 import { loadCachedTable, neuronIndexKey } from '../neuronIndex'
 import type { MockConnection, MockConnectome } from './generate'
 import { getConnectome, mockDatasetIds, mockDatasetMeta } from './generate'
-import { generateRoiMesh, generateSkeleton, skeletonToTubeMesh, synapsePosition } from './morphology'
+import {
+  generateRoiMesh,
+  generateSkeleton,
+  skeletonToTubeMesh,
+  synapsePosition,
+} from './morphology'
 
 export interface MockSourceOptions {
   /** Simulated round-trip latency in ms. Set to 0 in tests. */
@@ -238,7 +243,9 @@ export class MockSource implements DataSource {
       const self = connectome.byId.get(bodyId)
       if (!self) continue
       const edges: MockConnection[] =
-        (req.direction === 'outputs' ? connectome.out.get(bodyId) : connectome.in.get(bodyId)) ?? []
+        (req.direction === 'outputs'
+          ? connectome.out.get(bodyId)
+          : connectome.in.get(bodyId)) ?? []
       for (const edge of edges) {
         if (edge.weight < minWeight) continue
         const partnerId = req.direction === 'outputs' ? edge.post : edge.pre
@@ -585,9 +592,7 @@ export class MockSource implements DataSource {
       if (!neuron) continue
       // The skeleton is regenerated here rather than cached, because it is seeded and
       // therefore identical — synapses land on the same arbor the 3D viewer draws.
-      const rois = connectome.roiCounts
-        .filter((rc) => rc.bodyId === bodyId)
-        .map((rc) => rc.roi)
+      const rois = connectome.roiCounts.filter((rc) => rc.bodyId === bodyId).map((rc) => rc.roi)
       const skeleton = generateSkeleton(bodyId, rois)
 
       let index = 0
@@ -715,7 +720,6 @@ function compileRegex(pattern: string | undefined, field: string): RegExp | unde
     throw new Error(`Invalid ${field} pattern /${pattern}/: ${(err as Error).message}`)
   }
 }
-
 
 /**
  * A stable "reconstructed fraction" for one region, derived from its name.

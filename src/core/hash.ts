@@ -43,7 +43,9 @@ export function stableStringify(value: unknown): string {
   } else {
     const keys = Object.keys(value as object).sort()
     out = `{${keys
-      .map((k) => `${JSON.stringify(k)}:${stableStringify((value as Record<string, unknown>)[k])}`)
+      .map(
+        (k) => `${JSON.stringify(k)}:${stableStringify((value as Record<string, unknown>)[k])}`,
+      )
       .join(',')}}`
   }
   serialised.set(value as object, out)

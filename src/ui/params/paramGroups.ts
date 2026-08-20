@@ -90,7 +90,14 @@ export function groupParams(
     const rowKey = `${groupId}/${ref.key}`
     let row = composites.get(rowKey)
     if (!row) {
-      row = { kind: 'composite', key: ref.key, label: ref.label ?? ref.key, primary: undefined, value: undefined, extras: [] }
+      row = {
+        kind: 'composite',
+        key: ref.key,
+        label: ref.label ?? ref.key,
+        primary: undefined,
+        value: undefined,
+        extras: [],
+      }
       composites.set(rowKey, row)
       tab.rows.push(row)
     }
@@ -123,6 +130,9 @@ export function facetLabel(param: ParamDef): string {
  * and let a graph go stale for no visible reason.
  */
 export function paramsForPanel(def: NodeDefinition): (param: ParamDef) => boolean {
-  const dataGroups = new Set((def.paramGroups ?? []).filter((g) => g.affectsData).map((g) => g.id))
-  return (param) => param.presentational === true || (!!param.group && dataGroups.has(param.group))
+  const dataGroups = new Set(
+    (def.paramGroups ?? []).filter((g) => g.affectsData).map((g) => g.id),
+  )
+  return (param) =>
+    param.presentational === true || (!!param.group && dataGroups.has(param.group))
 }

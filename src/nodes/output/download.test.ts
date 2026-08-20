@@ -55,7 +55,12 @@ function pipeline(params: Record<string, unknown> = {}): CodaGraph {
   g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC4', status: 'Traced' }))
   g = addNode(g, node('dl', 'out.download', params))
   g = addNode(g, node('sort', 'core.sort', { column: 'bodyId' }))
-  g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'find', targetHandle: 'dataset' })
+  g = addEdge(g, {
+    source: 'ds',
+    sourceHandle: 'dataset',
+    target: 'find',
+    targetHandle: 'dataset',
+  })
   g = addEdge(g, { source: 'find', sourceHandle: 'neurons', target: 'dl', targetHandle: 'in' })
   g = addEdge(g, { source: 'dl', sourceHandle: 'out', target: 'sort', targetHandle: 'in' })
   return g
@@ -89,10 +94,30 @@ describe('out.download — the tap', () => {
     g = addNode(g, node('conn', 'neuron.connectivity', { direction: 'outputs' }))
     g = addNode(g, node('net', 'net.build'))
     g = addNode(g, node('dl', 'out.download'))
-    g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'find', targetHandle: 'dataset' })
-    g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'conn', targetHandle: 'dataset' })
-    g = addEdge(g, { source: 'find', sourceHandle: 'neurons', target: 'conn', targetHandle: 'neurons' })
-    g = addEdge(g, { source: 'conn', sourceHandle: 'connections', target: 'net', targetHandle: 'edges' })
+    g = addEdge(g, {
+      source: 'ds',
+      sourceHandle: 'dataset',
+      target: 'find',
+      targetHandle: 'dataset',
+    })
+    g = addEdge(g, {
+      source: 'ds',
+      sourceHandle: 'dataset',
+      target: 'conn',
+      targetHandle: 'dataset',
+    })
+    g = addEdge(g, {
+      source: 'find',
+      sourceHandle: 'neurons',
+      target: 'conn',
+      targetHandle: 'neurons',
+    })
+    g = addEdge(g, {
+      source: 'conn',
+      sourceHandle: 'connections',
+      target: 'net',
+      targetHandle: 'edges',
+    })
     g = addEdge(g, { source: 'net', sourceHandle: 'network', target: 'dl', targetHandle: 'in' })
 
     const issues = inferGraph(g).nodes['dl']?.issues ?? []
@@ -149,7 +174,12 @@ describe('out.download — when it runs', () => {
     const scheduler = makeScheduler()
     await scheduler.run(pipeline(), { mode: 'full' })
 
-    for (const params of [{ filename: 'lc4' }, { format: 'json' }, { timestamp: true }, { onRun: false }]) {
+    for (const params of [
+      { filename: 'lc4' },
+      { format: 'json' },
+      { timestamp: true },
+      { onRun: false },
+    ]) {
       const summary = await scheduler.run(pipeline(params), { mode: 'full' })
       expect(summary.executed).toEqual([])
     }

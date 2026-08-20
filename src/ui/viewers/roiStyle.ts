@@ -86,12 +86,17 @@ function hslToHex(hue: number, saturation: number, lightness: number): string {
   const x = c * (1 - Math.abs(((h / 60) % 2) - 1))
   const m = lightness - c / 2
   const [r, g, b] =
-    h < 60 ? [c, x, 0]
-    : h < 120 ? [x, c, 0]
-    : h < 180 ? [0, c, x]
-    : h < 240 ? [0, x, c]
-    : h < 300 ? [x, 0, c]
-    : [c, 0, x]
+    h < 60
+      ? [c, x, 0]
+      : h < 120
+        ? [x, c, 0]
+        : h < 180
+          ? [0, c, x]
+          : h < 240
+            ? [0, x, c]
+            : h < 300
+              ? [x, 0, c]
+              : [c, 0, x]
   const byte = (v: number) =>
     Math.max(0, Math.min(255, Math.round((v + m) * 255)))
       .toString(16)

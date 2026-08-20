@@ -63,7 +63,9 @@ export type StartCard = ExampleCard | DatasetCard | WorkflowCard
  * a tile that throws is worse than a tile that is merely generic.
  */
 function tileNode(types: string[]): { nodeType: string; category: NodeCategory } {
-  const viewer = [...types].reverse().find((type) => getNodeDef(type)?.category === 'visualisation')
+  const viewer = [...types]
+    .reverse()
+    .find((type) => getNodeDef(type)?.category === 'visualisation')
   const type = viewer ?? types.at(-1) ?? 'out.table'
   return { nodeType: type, category: getNodeDef(type)?.category ?? 'visualisation' }
 }

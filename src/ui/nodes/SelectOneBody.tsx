@@ -175,13 +175,13 @@ export function SelectOneBody({ node, ctx, compact, setParam }: NodeBodyProps) {
 
       <div className="list-body__foot">
         {!connected ? (
-          <span className="list-body__foot--empty">
-            Connect a table, skeletons or meshes.
-          </span>
+          <span className="list-body__foot--empty">Connect a table, skeletons or meshes.</span>
         ) : !steppable ? (
           // Said from the type, so it appears while the graph is being wired rather than after
           // a run. The node's badge carries the same refusal; this is where somebody is looking.
-          <span className="list-body__missing">⚠ A {kind} has no elements to step through.</span>
+          <span className="list-body__missing">
+            ⚠ A {kind} has no elements to step through.
+          </span>
         ) : !items ? (
           <span className="list-body__foot--empty">Not run yet.</span>
         ) : total === 0 ? (

@@ -105,12 +105,7 @@ export function NodeThumbnail({ def }: NodeThumbnailProps) {
       <CategoryGlyph def={def} />
 
       {inputs.map((port, index) => (
-        <SocketDot
-          key={`in-${port.id}`}
-          port={port}
-          x={1}
-          y={dotY(index, inputs.length)}
-        />
+        <SocketDot key={`in-${port.id}`} port={port} x={1} y={dotY(index, inputs.length)} />
       ))}
       {outputs.map((port, index) => (
         <SocketDot

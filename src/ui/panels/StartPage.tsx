@@ -136,18 +136,20 @@ export function StartPage() {
                * the dialog names itself from this heading.
                */}
               <h1 id="start-title" aria-label="Coda">
-                C<CodaMark size={38} className="start__o" />da
+                C<CodaMark size={38} className="start__o" />
+                da
               </h1>
               <span className="start__badge">Alpha</span>
               <span className="start__version">v{__APP_VERSION__}</span>
             </div>
             <p className="start__lede">
-              Next-generation connectome analysis. <strong>Build an analysis out of nodes</strong>,
-              wire them together, and see the result at every step.
+              Next-generation connectome analysis.{' '}
+              <strong>Build an analysis out of nodes</strong>, wire them together, and see the
+              result at every step.
             </p>
             <p className="start__alpha">
-              Coda is in alpha. Expect rough edges: node parameters will change, and a graph saved
-              today may not load in a later build.
+              Coda is in alpha. Expect rough edges: node parameters will change, and a graph
+              saved today may not load in a later build.
             </p>
           </header>
 
@@ -185,7 +187,6 @@ export function StartPage() {
             onPick={pick}
             onCancel={() => setConfirming(undefined)}
           />
-
         </div>
 
         {/*
@@ -370,8 +371,7 @@ interface CardProps {
 }
 
 function Card({ card, confirming, onPick, onCancel }: CardProps) {
-  const tint =
-    card.kind === 'dataset' ? 'var(--cat-dataset)' : `var(--cat-${card.category})`
+  const tint = card.kind === 'dataset' ? 'var(--cat-dataset)' : `var(--cat-${card.category})`
 
   return (
     <div className="start-card" style={{ ['--tint' as string]: tint }}>

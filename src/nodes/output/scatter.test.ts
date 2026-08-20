@@ -49,8 +49,18 @@ function pipeline(params: Record<string, unknown> = {}): CodaGraph {
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: 'optic-lobe-mini' }))
   g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC.*', status: 'Traced' }))
   g = addNode(g, node('plot', 'out.scatter', params))
-  g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'find', targetHandle: 'dataset' })
-  g = addEdge(g, { source: 'find', sourceHandle: 'neurons', target: 'plot', targetHandle: 'in' })
+  g = addEdge(g, {
+    source: 'ds',
+    sourceHandle: 'dataset',
+    target: 'find',
+    targetHandle: 'dataset',
+  })
+  g = addEdge(g, {
+    source: 'find',
+    sourceHandle: 'neurons',
+    target: 'plot',
+    targetHandle: 'in',
+  })
   return g
 }
 
@@ -261,11 +271,32 @@ describe('out.scatter — an input whose schema is not known yet', () => {
     let g = emptyGraph('scatter-pivot')
     g = addNode(g, node('ds', 'neuron.dataset', { dataset: 'optic-lobe-mini' }))
     g = addNode(g, node('find', 'neuron.findNeurons', { status: 'Traced' }))
-    g = addNode(g, node('grp', 'core.groupBy', { by: ['type', 'status'], agg: 'sum', value: 'pre' }))
-    g = addNode(g, node('piv', 'core.pivot', { rows: 'type', columns: 'status', agg: 'sum', value: 'sum_pre' }))
+    g = addNode(
+      g,
+      node('grp', 'core.groupBy', { by: ['type', 'status'], agg: 'sum', value: 'pre' }),
+    )
+    g = addNode(
+      g,
+      node('piv', 'core.pivot', {
+        rows: 'type',
+        columns: 'status',
+        agg: 'sum',
+        value: 'sum_pre',
+      }),
+    )
     g = addNode(g, node('plot', 'out.scatter', params))
-    g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'find', targetHandle: 'dataset' })
-    g = addEdge(g, { source: 'find', sourceHandle: 'neurons', target: 'grp', targetHandle: 'in' })
+    g = addEdge(g, {
+      source: 'ds',
+      sourceHandle: 'dataset',
+      target: 'find',
+      targetHandle: 'dataset',
+    })
+    g = addEdge(g, {
+      source: 'find',
+      sourceHandle: 'neurons',
+      target: 'grp',
+      targetHandle: 'in',
+    })
     g = addEdge(g, { source: 'grp', sourceHandle: 'out', target: 'piv', targetHandle: 'in' })
     g = addEdge(g, { source: 'piv', sourceHandle: 'table', target: 'plot', targetHandle: 'in' })
     return g
@@ -322,9 +353,19 @@ describe('out.scatter — what it warns about once it can see', () => {
   function narrowed(columns: string[]): CodaGraph {
     let g = pipeline()
     g = addNode(g, node('sel', 'core.select', { columns }))
-    g = addEdge(g, { source: 'find', sourceHandle: 'neurons', target: 'sel', targetHandle: 'in' })
+    g = addEdge(g, {
+      source: 'find',
+      sourceHandle: 'neurons',
+      target: 'sel',
+      targetHandle: 'in',
+    })
     g = { ...g, edges: g.edges.filter((e) => e.target !== 'plot') }
-    return addEdge(g, { source: 'sel', sourceHandle: 'out', target: 'plot', targetHandle: 'in' })
+    return addEdge(g, {
+      source: 'sel',
+      sourceHandle: 'out',
+      target: 'plot',
+      targetHandle: 'in',
+    })
   }
 
   it('leaves a table with nothing numeric to the shared column check', () => {

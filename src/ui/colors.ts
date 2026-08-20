@@ -24,8 +24,26 @@ export type Mode = 'light' | 'dark'
 
 /** Categorical series, fixed order, never cycled. A 9th series folds into "Other". */
 const CATEGORICAL: Record<Mode, string[]> = {
-  light: ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948'],
-  dark: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767'],
+  light: [
+    '#2a78d6',
+    '#eb6834',
+    '#1baf7a',
+    '#eda100',
+    '#e87ba4',
+    '#008300',
+    '#4a3aa7',
+    '#e34948',
+  ],
+  dark: [
+    '#3987e5',
+    '#d95926',
+    '#199e70',
+    '#c98500',
+    '#d55181',
+    '#008300',
+    '#9085e9',
+    '#e66767',
+  ],
 }
 
 export const MAX_SERIES = 8
@@ -87,11 +105,7 @@ function lerpHex(a: string, b: string, t: number): string {
 
 function parseHex(hex: string): [number, number, number] {
   const h = hex.replace('#', '')
-  return [
-    parseInt(h.slice(0, 2), 16),
-    parseInt(h.slice(2, 4), 16),
-    parseInt(h.slice(4, 6), 16),
-  ]
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)]
 }
 
 function rgbToHex(r: number, g: number, b: number): string {
@@ -188,7 +202,13 @@ export function divergingColor(t: number, mode: Mode): string {
   if (clamped === 0) return mid
   const magnitude = Math.abs(clamped)
   // Arms run from the neutral midpoint out to a saturated pole.
-  const pole = clamped > 0 ? sampleRamp(RED_RAMP, 0.45 + magnitude * 0.5) : sampleRamp(BLUE_RAMP, mode === 'light' ? 0.4 + magnitude * 0.55 : 0.6 - magnitude * 0.55)
+  const pole =
+    clamped > 0
+      ? sampleRamp(RED_RAMP, 0.45 + magnitude * 0.5)
+      : sampleRamp(
+          BLUE_RAMP,
+          mode === 'light' ? 0.4 + magnitude * 0.55 : 0.6 - magnitude * 0.55,
+        )
   return lerpHex(mid, pole, magnitude)
 }
 
@@ -213,23 +233,25 @@ export function chartSurface(mode: Mode): string {
   return mode === 'light' ? '#fcfcfb' : '#1a1a19'
 }
 
-export const CHART_INK: Record<Mode, { primary: string; secondary: string; muted: string; grid: string; axis: string }> =
-  {
-    light: {
-      primary: '#0b0b0b',
-      secondary: '#52514e',
-      muted: '#898781',
-      grid: '#e1e0d9',
-      axis: '#c3c2b7',
-    },
-    dark: {
-      primary: '#ffffff',
-      secondary: '#c3c2b7',
-      muted: '#898781',
-      grid: '#2c2c2a',
-      axis: '#383835',
-    },
-  }
+export const CHART_INK: Record<
+  Mode,
+  { primary: string; secondary: string; muted: string; grid: string; axis: string }
+> = {
+  light: {
+    primary: '#0b0b0b',
+    secondary: '#52514e',
+    muted: '#898781',
+    grid: '#e1e0d9',
+    axis: '#c3c2b7',
+  },
+  dark: {
+    primary: '#ffffff',
+    secondary: '#c3c2b7',
+    muted: '#898781',
+    grid: '#2c2c2a',
+    axis: '#383835',
+  },
+}
 
 /** The 2px spacer that separates touching marks. Never a stroke. */
 export const SURFACE_GAP = 2

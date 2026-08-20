@@ -184,7 +184,10 @@ describe('Anthropic', () => {
     }
     expect(body.system[0]!.cache_control).toEqual({ type: 'ephemeral', ttl: '1h' })
     expect(body.messages[0]!.content[0]!.cache_control).toBeUndefined()
-    expect(body.messages[2]!.content[0]!.cache_control).toEqual({ type: 'ephemeral', ttl: '1h' })
+    expect(body.messages[2]!.content[0]!.cache_control).toEqual({
+      type: 'ephemeral',
+      ttl: '1h',
+    })
   })
 
   it('reads the text past the empty thinking block', async () => {
@@ -205,7 +208,11 @@ describe('Anthropic', () => {
   })
 
   it('checks a key without spending a token', async () => {
-    respond({ id: 'claude-sonnet-5', display_name: 'Claude Sonnet 5', max_input_tokens: 1000000 })
+    respond({
+      id: 'claude-sonnet-5',
+      display_name: 'Claude Sonnet 5',
+      max_input_tokens: 1000000,
+    })
     const check = await anthropic.verify({ apiKey: 'sk-ant', model: 'claude-sonnet-5' })
 
     expect(calls[0]!.method).toBe('GET')
@@ -353,9 +360,7 @@ describe('Ollama', () => {
     // The commonest local failure by a wide margin, and left to the chat request it arrives as
     // a 404 about a manifest. The listing was already fetched, so saying so is free.
     respond({ models: [{ name: 'llama3.1:8b' }, { name: 'mistral-nemo' }] })
-    const error = await ollama
-      .verify({ model: 'qwen2.5-coder:14b' })
-      .catch((e: AiError) => e)
+    const error = await ollama.verify({ model: 'qwen2.5-coder:14b' }).catch((e: AiError) => e)
 
     expect((error as AiError).message).toContain('ollama pull qwen2.5-coder:14b')
     expect((error as AiError).message).toContain('llama3.1:8b')
@@ -393,10 +398,9 @@ describe('every provider', () => {
     ]
     for (const [id, reply] of cut) {
       respond(reply)
-      await expect(
-        providerFor(id)!.complete({ ...ASK, apiKey: 'k' }),
-        id,
-      ).rejects.toThrow(/length limit/i)
+      await expect(providerFor(id)!.complete({ ...ASK, apiKey: 'k' }), id).rejects.toThrow(
+        /length limit/i,
+      )
     }
   })
 
@@ -408,10 +412,9 @@ describe('every provider', () => {
       }),
     )
     for (const provider of PROVIDERS) {
-      await expect(
-        provider.complete({ ...ASK, apiKey: 'k' }),
-        provider.id,
-      ).rejects.toThrow(DOMException)
+      await expect(provider.complete({ ...ASK, apiKey: 'k' }), provider.id).rejects.toThrow(
+        DOMException,
+      )
     }
   })
 
@@ -420,7 +423,10 @@ describe('every provider', () => {
     // would show an empty picker rather than fail.
     for (const provider of PROVIDERS) {
       expect(provider.models.length, provider.id).toBeGreaterThan(0)
-      expect(provider.models.map((m) => m.id), provider.id).toContain(provider.defaultModel)
+      expect(
+        provider.models.map((m) => m.id),
+        provider.id,
+      ).toContain(provider.defaultModel)
       expect(provider.defaultBaseUrl, provider.id).toMatch(/^https?:\/\//)
       expect(providerFor(provider.id)).toBe(provider)
     }

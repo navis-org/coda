@@ -59,9 +59,17 @@ function graphWith(params: Record<string, unknown>, wired: boolean): CodaGraph {
     g = addNode(g, node('ds', 'neuron.dataset', 0, { dataset: DATASET }))
     g = addNode(g, node('find', 'neuron.findNeurons', 320, { typePattern: 'LC.*' }))
     g = addEdge(g, {
-      source: 'ds', sourceHandle: 'dataset', target: 'find', targetHandle: 'dataset',
+      source: 'ds',
+      sourceHandle: 'dataset',
+      target: 'find',
+      targetHandle: 'dataset',
     })
-    g = addEdge(g, { source: 'find', sourceHandle: 'neurons', target: 'pick', targetHandle: 'in' })
+    g = addEdge(g, {
+      source: 'find',
+      sourceHandle: 'neurons',
+      target: 'pick',
+      targetHandle: 'in',
+    })
   }
   return g
 }

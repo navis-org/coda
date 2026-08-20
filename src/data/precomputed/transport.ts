@@ -92,11 +92,7 @@ async function attempt(url: string, options: FetchOptions): Promise<ArrayBuffer>
     ...(options.signal ? { signal: options.signal } : {}),
   })
   if (!response.ok) {
-    throw new PrecomputedFetchError(
-      `${response.status} from ${url}`,
-      url,
-      response.status,
-    )
+    throw new PrecomputedFetchError(`${response.status} from ${url}`, url, response.status)
   }
   return response.arrayBuffer()
 }
@@ -108,7 +104,10 @@ async function attempt(url: string, options: FetchOptions): Promise<ArrayBuffer>
  * a 404 means the object is missing whichever route it took. Only a thrown fetch — CORS or
  * transport — triggers the fallback.
  */
-export async function fetchBytes(url: string, options: FetchOptions = {}): Promise<ArrayBuffer> {
+export async function fetchBytes(
+  url: string,
+  options: FetchOptions = {},
+): Promise<ArrayBuffer> {
   load()
   const host = hostOf(url)
   const mode = host ? modes.get(host) : undefined

@@ -68,7 +68,12 @@ function graphWith(params: Record<string, unknown> = {}): CodaGraph {
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: DATASET }))
   g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC4', status: 'Traced' }))
   g = addNode(g, node('dl', 'out.download', params))
-  g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'find', targetHandle: 'dataset' })
+  g = addEdge(g, {
+    source: 'ds',
+    sourceHandle: 'dataset',
+    target: 'find',
+    targetHandle: 'dataset',
+  })
   g = addEdge(g, { source: 'find', sourceHandle: 'neurons', target: 'dl', targetHandle: 'in' })
   return g
 }
@@ -157,7 +162,9 @@ describe('the button', () => {
 
   it('is disabled before there is anything to write', async () => {
     const body = await open()
-    const button = within(body).getByRole('button', { name: /Download now/ }) as HTMLButtonElement
+    const button = within(body).getByRole('button', {
+      name: /Download now/,
+    }) as HTMLButtonElement
     expect(button.disabled).toBe(true)
     expect(body.textContent).toContain('Not run yet')
   })

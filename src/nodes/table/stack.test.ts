@@ -60,10 +60,25 @@ function pipeline(params: Record<string, unknown> = {}): CodaGraph {
   g = addNode(g, node('b', 'neuron.findNeurons', { typePattern: 'LC6', status: 'Traced' }))
   g = addNode(g, node('stack', 'core.stack', params))
   g = addNode(g, node('sort', 'core.sort', { column: 'bodyId' }))
-  g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'a', targetHandle: 'dataset' })
-  g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'b', targetHandle: 'dataset' })
+  g = addEdge(g, {
+    source: 'ds',
+    sourceHandle: 'dataset',
+    target: 'a',
+    targetHandle: 'dataset',
+  })
+  g = addEdge(g, {
+    source: 'ds',
+    sourceHandle: 'dataset',
+    target: 'b',
+    targetHandle: 'dataset',
+  })
   g = addEdge(g, { source: 'a', sourceHandle: 'neurons', target: 'stack', targetHandle: 'top' })
-  g = addEdge(g, { source: 'b', sourceHandle: 'neurons', target: 'stack', targetHandle: 'bottom' })
+  g = addEdge(g, {
+    source: 'b',
+    sourceHandle: 'neurons',
+    target: 'stack',
+    targetHandle: 'bottom',
+  })
   g = addEdge(g, { source: 'stack', sourceHandle: 'out', target: 'sort', targetHandle: 'in' })
   return g
 }
@@ -77,7 +92,12 @@ function narrowed(columns: string[], params: Record<string, unknown> = {}): Coda
     ...g,
     edges: g.edges.filter((e) => !(e.target === 'stack' && e.targetHandle === 'bottom')),
   }
-  return addEdge(g, { source: 'sel', sourceHandle: 'out', target: 'stack', targetHandle: 'bottom' })
+  return addEdge(g, {
+    source: 'sel',
+    sourceHandle: 'out',
+    target: 'stack',
+    targetHandle: 'bottom',
+  })
 }
 
 describe('core.stack — types', () => {
@@ -110,7 +130,12 @@ describe('core.stack — types', () => {
       ...g,
       edges: g.edges.filter((e) => !(e.target === 'stack' && e.targetHandle === 'bottom')),
     }
-    g = addEdge(g, { source: 'up', sourceHandle: 'out', target: 'stack', targetHandle: 'bottom' })
+    g = addEdge(g, {
+      source: 'up',
+      sourceHandle: 'out',
+      target: 'stack',
+      targetHandle: 'bottom',
+    })
     expect(inferGraph(g).nodes['stack']?.outputs['out']?.kind).toBe('table')
   })
 
@@ -153,9 +178,12 @@ describe('core.stack — evaluate', () => {
 
   it('labels the rows by input when a source column is named', async () => {
     const scheduler = makeScheduler()
-    await scheduler.run(pipeline({ sourceColumn: 'origin', topLabel: 'LC4', bottomLabel: 'LC6' }), {
-      mode: 'full',
-    })
+    await scheduler.run(
+      pipeline({ sourceColumn: 'origin', topLabel: 'LC4', bottomLabel: 'LC6' }),
+      {
+        mode: 'full',
+      },
+    )
     const out = scheduler.output('stack', 'out')
     if (!isTableValue(out)) throw new Error('expected a table')
     expect(new Set(out.data['origin'] as string[])).toEqual(new Set(['LC4', 'LC6']))
@@ -170,20 +198,58 @@ describe('core.stack — evaluate', () => {
      */
     let g = emptyGraph('clash')
     g = addNode(g, node('ds', 'neuron.dataset', { dataset: DATASET }))
-    g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC.*', status: 'Traced' }))
+    g = addNode(
+      g,
+      node('find', 'neuron.findNeurons', { typePattern: 'LC.*', status: 'Traced' }),
+    )
     g = addNode(g, node('conn', 'neuron.connectivity', { direction: 'outputs', minWeight: 1 }))
     g = addNode(
       g,
-      node('piv', 'core.pivot', { rows: 'preId', columns: 'postType', agg: 'sum', value: 'weight' }),
+      node('piv', 'core.pivot', {
+        rows: 'preId',
+        columns: 'postType',
+        agg: 'sum',
+        value: 'weight',
+      }),
     )
     g = addNode(g, node('stack', 'core.stack'))
     g = addNode(g, node('sort', 'core.sort', { column: 'preId' }))
-    g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'find', targetHandle: 'dataset' })
-    g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'conn', targetHandle: 'dataset' })
-    g = addEdge(g, { source: 'find', sourceHandle: 'neurons', target: 'conn', targetHandle: 'neurons' })
-    g = addEdge(g, { source: 'conn', sourceHandle: 'connections', target: 'piv', targetHandle: 'in' })
-    g = addEdge(g, { source: 'conn', sourceHandle: 'connections', target: 'stack', targetHandle: 'top' })
-    g = addEdge(g, { source: 'piv', sourceHandle: 'table', target: 'stack', targetHandle: 'bottom' })
+    g = addEdge(g, {
+      source: 'ds',
+      sourceHandle: 'dataset',
+      target: 'find',
+      targetHandle: 'dataset',
+    })
+    g = addEdge(g, {
+      source: 'ds',
+      sourceHandle: 'dataset',
+      target: 'conn',
+      targetHandle: 'dataset',
+    })
+    g = addEdge(g, {
+      source: 'find',
+      sourceHandle: 'neurons',
+      target: 'conn',
+      targetHandle: 'neurons',
+    })
+    g = addEdge(g, {
+      source: 'conn',
+      sourceHandle: 'connections',
+      target: 'piv',
+      targetHandle: 'in',
+    })
+    g = addEdge(g, {
+      source: 'conn',
+      sourceHandle: 'connections',
+      target: 'stack',
+      targetHandle: 'top',
+    })
+    g = addEdge(g, {
+      source: 'piv',
+      sourceHandle: 'table',
+      target: 'stack',
+      targetHandle: 'bottom',
+    })
     g = addEdge(g, { source: 'stack', sourceHandle: 'out', target: 'sort', targetHandle: 'in' })
 
     const scheduler = makeScheduler()
@@ -207,12 +273,32 @@ describe('core.stack — evaluate', () => {
     g = addNode(g, node('conn', 'neuron.connectivity', { direction: 'outputs', minWeight: 1 }))
     g = addNode(
       g,
-      node('piv', 'core.pivot', { rows: 'preId', columns: 'postType', agg: 'sum', value: 'weight' }),
+      node('piv', 'core.pivot', {
+        rows: 'preId',
+        columns: 'postType',
+        agg: 'sum',
+        value: 'weight',
+      }),
     )
     g = addNode(g, node('stack', 'core.stack'))
-    g = addEdge(g, { source: 'conn', sourceHandle: 'connections', target: 'piv', targetHandle: 'in' })
-    g = addEdge(g, { source: 'conn', sourceHandle: 'connections', target: 'stack', targetHandle: 'top' })
-    g = addEdge(g, { source: 'piv', sourceHandle: 'table', target: 'stack', targetHandle: 'bottom' })
+    g = addEdge(g, {
+      source: 'conn',
+      sourceHandle: 'connections',
+      target: 'piv',
+      targetHandle: 'in',
+    })
+    g = addEdge(g, {
+      source: 'conn',
+      sourceHandle: 'connections',
+      target: 'stack',
+      targetHandle: 'top',
+    })
+    g = addEdge(g, {
+      source: 'piv',
+      sourceHandle: 'table',
+      target: 'stack',
+      targetHandle: 'bottom',
+    })
     const reported = (inferGraph(g).nodes['stack']?.issues ?? []).map((i) => i.message)
     expect(reported.join(' ')).not.toContain('above and')
   })
@@ -237,8 +323,18 @@ describe('core.stack — validation', () => {
     let g = pipeline({ sourceColumn: 'origin' })
     g = { ...g, edges: g.edges.filter((e) => e.targetHandle !== 'bottom') }
     g = addNode(g, node('raw', 'neuron.rawCypher'))
-    g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'raw', targetHandle: 'dataset' })
-    g = addEdge(g, { source: 'raw', sourceHandle: 'result', target: 'stack', targetHandle: 'bottom' })
+    g = addEdge(g, {
+      source: 'ds',
+      sourceHandle: 'dataset',
+      target: 'raw',
+      targetHandle: 'dataset',
+    })
+    g = addEdge(g, {
+      source: 'raw',
+      sourceHandle: 'result',
+      target: 'stack',
+      targetHandle: 'bottom',
+    })
     expect(issues(g)).toBe('')
   })
 
@@ -249,7 +345,12 @@ describe('core.stack — validation', () => {
       ...g,
       edges: g.edges.filter((e) => !(e.target === 'stack' && e.targetHandle === 'bottom')),
     }
-    g = addEdge(g, { source: 'up', sourceHandle: 'out', target: 'stack', targetHandle: 'bottom' })
+    g = addEdge(g, {
+      source: 'up',
+      sourceHandle: 'out',
+      target: 'stack',
+      targetHandle: 'bottom',
+    })
     // Nothing is known about the upload's columns yet, so there is nothing to clash with —
     // which is the honest answer, not an oversight.
     expect(issues(g)).toBe('')

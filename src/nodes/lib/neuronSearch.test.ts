@@ -45,13 +45,48 @@ const SCHEMA = tableSchema(
 const NEURONS: TableValue = tableFromRows(
   SCHEMA,
   [
-    { bodyId: 10, type: 'DNp01', instance: 'DNp01_L', status: 'Traced', class: 'descending', post: 1200 },
-    { bodyId: 20, type: 'DNp17', instance: 'DNp17_R', status: 'Traced', class: 'descending', post: 300 },
-    { bodyId: 30, type: 'LC4', instance: 'LC4_R', status: 'Traced', class: 'visual projection', post: 90 },
-    { bodyId: 40, type: 'LC6', instance: 'LC6_L', status: 'Anchor', class: 'visual projection', post: 40 },
+    {
+      bodyId: 10,
+      type: 'DNp01',
+      instance: 'DNp01_L',
+      status: 'Traced',
+      class: 'descending',
+      post: 1200,
+    },
+    {
+      bodyId: 20,
+      type: 'DNp17',
+      instance: 'DNp17_R',
+      status: 'Traced',
+      class: 'descending',
+      post: 300,
+    },
+    {
+      bodyId: 30,
+      type: 'LC4',
+      instance: 'LC4_R',
+      status: 'Traced',
+      class: 'visual projection',
+      post: 90,
+    },
+    {
+      bodyId: 40,
+      type: 'LC6',
+      instance: 'LC6_L',
+      status: 'Anchor',
+      class: 'visual projection',
+      post: 40,
+    },
     { bodyId: 50, type: 'KCg', instance: 'KCg_x', status: 'Traced', class: null, post: 7 },
     { bodyId: 60, type: null, instance: 'unnamed', status: null, class: 'descending', post: 0 },
-    { bodyId: 70, type: 'aDNp01x', instance: 'weird', status: 'Traced', class: 'descending', post: 5 },
+    {
+      bodyId: 70,
+      type: 'aDNp01x',
+      instance: 'weird',
+      status: 'Traced',
+      class: 'descending',
+      post: 5,
+    },
   ],
   'neurons',
 )
@@ -89,7 +124,9 @@ describe('tokenizeSearch', () => {
   it('still yields a token for an unterminated quote', () => {
     // This is the state of the query for as long as someone is typing one, so it must not
     // collapse to nothing — the completion popup reads the token under the caret.
-    expect(tokenizeSearch('class=="visual pro').map((t) => t.text)).toEqual(['class=="visual pro'])
+    expect(tokenizeSearch('class=="visual pro').map((t) => t.text)).toEqual([
+      'class=="visual pro',
+    ])
   })
 })
 
@@ -109,7 +146,15 @@ describe('parseSearch', () => {
   })
 
   it('reads every comparison operator', () => {
-    const ops = ['type==LC4', 'type!=LC4', 'post>10', 'post<10', 'post>=10', 'post<=10', 'type~LC']
+    const ops = [
+      'type==LC4',
+      'type!=LC4',
+      'post>10',
+      'post<10',
+      'post>=10',
+      'post<=10',
+      'type~LC',
+    ]
     expect(ops.map((q) => parseSearch(q).terms[0])).toEqual([
       { kind: 'field', field: 'type', op: 'eq', value: 'LC4', negate: false },
       { kind: 'field', field: 'type', op: 'ne', value: 'LC4', negate: false },

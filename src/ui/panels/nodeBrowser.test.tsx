@@ -9,7 +9,15 @@
  * hand-maintained — the latter is what stops future nodes shipping with a blank preview.
  */
 
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { App } from '../../App'
@@ -200,7 +208,10 @@ describe('NodeBrowser filtering', () => {
   it('highlights the matched characters in the name', () => {
     const { container } = open()
     fireEvent.change(screen.getByLabelText('Search nodes'), { target: { value: 'gb' } })
-    expect([...container.querySelectorAll('mark')].map((m) => m.textContent)).toEqual(['G', 'B'])
+    expect([...container.querySelectorAll('mark')].map((m) => m.textContent)).toEqual([
+      'G',
+      'B',
+    ])
   })
 })
 
@@ -302,7 +313,10 @@ describe('NodeThumbnail', () => {
       const svg = container.querySelector('svg.node-thumb')
       expect(svg, def.type).toBeTruthy()
       // A glyph group is always present, from the per-node map or the category fallback.
-      expect(svg!.querySelector('.node-thumb__glyph')?.children.length, def.type).toBeGreaterThan(0)
+      expect(
+        svg!.querySelector('.node-thumb__glyph')?.children.length,
+        def.type,
+      ).toBeGreaterThan(0)
       unmount()
     }
   })

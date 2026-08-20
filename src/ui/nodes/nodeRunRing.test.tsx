@@ -16,7 +16,9 @@ import { NodeRunRing } from './NodeRunRing'
 afterEach(cleanup)
 
 function ring(progress?: number) {
-  const { container } = render(<NodeRunRing {...(progress === undefined ? {} : { progress })} />)
+  const { container } = render(
+    <NodeRunRing {...(progress === undefined ? {} : { progress })} />,
+  )
   const svg = container.querySelector('svg')!
   const rect = container.querySelector('rect')!
   return {

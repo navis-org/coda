@@ -14,12 +14,7 @@ import { registerNode } from '../../core/registry'
 import type { TableSchema } from '../../core/types'
 import { T, attributeSchema, column, tableSchema } from '../../core/types'
 import type { TableValue } from '../../core/values'
-import {
-  isMeshesValue,
-  isPointsValue,
-  isSkeletonsValue,
-  makeTable,
-} from '../../core/values'
+import { isMeshesValue, isPointsValue, isSkeletonsValue, makeTable } from '../../core/values'
 import { colorParams } from '../lib/encodingParams'
 import { rowsWithIds } from '../lib/tableOps'
 
@@ -28,7 +23,9 @@ const FALLBACK_SCHEMA: TableSchema = tableSchema(column('bodyId', 'i64'))
 /** The attribute table the selection is drawn from — skeletons first, then meshes. */
 function selectionSourceSchema(ctx: InferContext): TableSchema {
   return (
-    attributeSchema(ctx.inputs.skeletons) ?? attributeSchema(ctx.inputs.meshes) ?? FALLBACK_SCHEMA
+    attributeSchema(ctx.inputs.skeletons) ??
+    attributeSchema(ctx.inputs.meshes) ??
+    FALLBACK_SCHEMA
   )
 }
 

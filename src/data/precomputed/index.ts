@@ -50,7 +50,10 @@ interface RawInfo {
  * or the mesh directory and get the same answer. An `info` with no `@type` at all is treated
  * as legacy, which is what banc's bucket looks like.
  */
-export async function openMeshSource(url: string, options: FetchOptions = {}): Promise<MeshSource> {
+export async function openMeshSource(
+  url: string,
+  options: FetchOptions = {},
+): Promise<MeshSource> {
   const base = url.replace(/\/+$/, '')
   const info = await fetchJson<RawInfo>(`${base}/info`, options)
 
@@ -60,7 +63,8 @@ export async function openMeshSource(url: string, options: FetchOptions = {}): P
   }
   if (info['@type'] === 'neuroglancer_multilod_draco') {
     const multi = await readMultiResInfo(base, options)
-    if (!multi.sharding) throw new Error(`${base} is multi-resolution but unsharded, which is unsupported`)
+    if (!multi.sharding)
+      throw new Error(`${base} is multi-resolution but unsharded, which is unsupported`)
     return { base, format: 'multilod-draco', info: multi, levels: 0 }
   }
   // 'neuroglancer_legacy_mesh', or an info with no @type.
@@ -214,7 +218,6 @@ async function readLodFragments(
   }
   return parts.length ? concatMeshes(parts) : undefined
 }
-
 
 export { parseLegacyFragment } from './legacy'
 export { chooseLod, parseMultiResManifest } from './multires'

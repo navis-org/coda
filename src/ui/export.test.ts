@@ -5,7 +5,13 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { column, tableSchema } from '../core/types'
 import { makeMatrix, tableFromRows } from '../core/values'
 import { installJsdomStubs } from '../test/jsdomStubs'
-import { exportBaseName, matrixToCsv, serializeSvg, tableToCsv, tableToCsvParts } from './export'
+import {
+  exportBaseName,
+  matrixToCsv,
+  serializeSvg,
+  tableToCsv,
+  tableToCsvParts,
+} from './export'
 
 beforeAll(() => installJsdomStubs())
 

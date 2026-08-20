@@ -98,7 +98,9 @@ describe('the SVG export', () => {
 
   it('clips the marks to the plot rect, so a zoom does not spill over the axes', () => {
     const element = svg()
-    expect(element.querySelector('clipPath rect')?.getAttribute('width')).toBe(String(PLOT.width))
+    expect(element.querySelector('clipPath rect')?.getAttribute('width')).toBe(
+      String(PLOT.width),
+    )
     expect(element.querySelector('g[clip-path]')).toBeTruthy()
   })
 
@@ -115,7 +117,7 @@ describe('the SVG export', () => {
     expect(text.length).toBeGreaterThan(4)
   })
 
-  it('draws one trend line per colour group, in that group\'s colour', () => {
+  it("draws one trend line per colour group, in that group's colour", () => {
     // The fixture paints alternate rows two colours, so the default per-group fit is two
     // lines — and each takes the colour of the points it describes, which is what makes it
     // readable against a legend rather than needing its own key.

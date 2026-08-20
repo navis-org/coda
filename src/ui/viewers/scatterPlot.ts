@@ -26,13 +26,7 @@ import type { ColumnData } from '../../core/values'
 export type ScaleKind = 'linear' | 'log'
 
 export type MarkerShape =
-  | 'circle'
-  | 'square'
-  | 'triangle'
-  | 'diamond'
-  | 'cross'
-  | 'plus'
-  | 'dash'
+  'circle' | 'square' | 'triangle' | 'diamond' | 'cross' | 'plus' | 'dash'
 
 /**
  * Shapes in assignment order, most distinguishable first.
@@ -199,7 +193,10 @@ export function padDomain(domain: Domain, fraction = 0.05): Domain {
 export function equaliseAspect(view: Viewport, plot: Rect): Viewport {
   const width = Math.max(1, plot.width)
   const height = Math.max(1, plot.height)
-  const perPixel = Math.max((view.x.max - view.x.min) / width, (view.y.max - view.y.min) / height)
+  const perPixel = Math.max(
+    (view.x.max - view.x.min) / width,
+    (view.y.max - view.y.min) / height,
+  )
   return {
     x: centredOn(view.x, perPixel * width),
     y: centredOn(view.y, perPixel * height),
@@ -234,7 +231,8 @@ function linearTicks(domain: Domain, count: number): number[] {
   const rawStep = span / Math.max(1, count)
   const magnitude = 10 ** Math.floor(Math.log10(rawStep))
   const normalised = rawStep / magnitude
-  const step = (normalised <= 1 ? 1 : normalised <= 2 ? 2 : normalised <= 5 ? 5 : 10) * magnitude
+  const step =
+    (normalised <= 1 ? 1 : normalised <= 2 ? 2 : normalised <= 5 ? 5 : 10) * magnitude
   const ticks: number[] = []
   const first = Math.ceil(domain.min / step - 1e-9) * step
   for (let t = first; t <= domain.max + step * 1e-9; t += step) ticks.push(roundTick(t))
@@ -400,10 +398,16 @@ export function buildScatter(options: BuildOptions): ScatterSpec {
 
   // The frame is computed over *every* usable row, not over the sample: an axis range that
   // moved when the point budget changed would make the cap look like a filter on the data.
-  const view =
-    options.view ??
-    fitView({ xValues, yValues, rows: usable, xScale, yScale, plot, ...(options.aspect ? { aspect: options.aspect } : {}) }) ??
-    { x: { min: 0, max: 1 }, y: { min: 0, max: 1 } }
+  const view = options.view ??
+    fitView({
+      xValues,
+      yValues,
+      rows: usable,
+      xScale,
+      yScale,
+      plot,
+      ...(options.aspect ? { aspect: options.aspect } : {}),
+    }) ?? { x: { min: 0, max: 1 }, y: { min: 0, max: 1 } }
 
   const drawn = sampleRows(usable, options.maxPoints ?? DEFAULT_MAX_POINTS)
   const count = drawn.length

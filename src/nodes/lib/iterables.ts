@@ -25,12 +25,7 @@
  */
 
 import type { CodaType } from '../../core/types'
-import type {
-  MeshesValue,
-  SkeletonsValue,
-  TableValue,
-  Value,
-} from '../../core/values'
+import type { MeshesValue, SkeletonsValue, TableValue, Value } from '../../core/values'
 import { EMPTY_BOUNDS, boundsOf, getRow, isTableValue, selectRows } from '../../core/values'
 
 /** The value kinds `Select One` can step through. */

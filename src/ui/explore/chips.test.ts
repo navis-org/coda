@@ -64,7 +64,16 @@ describe('chip hues', () => {
 
 describe('chipSlots', () => {
   /** The eight male-CNS publishes, which is the widest row any of these datasets produces. */
-  const maleCns = ['class', 'subclass', 'superclass', 'somaSide', 'rootSide', 'itoleeHl', 'consensusNt', 'predictedNt']
+  const maleCns = [
+    'class',
+    'subclass',
+    'superclass',
+    'somaSide',
+    'rootSide',
+    'itoleeHl',
+    'consensusNt',
+    'predictedNt',
+  ]
 
   it('gives every chip in a row a colour of its own', () => {
     // The property that actually matters on screen. Two chips sharing a hue is worse than no

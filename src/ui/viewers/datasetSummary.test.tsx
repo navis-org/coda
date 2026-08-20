@@ -25,7 +25,11 @@ import { tableFromRows } from '../../core/values'
 import { resetCache } from '../../data/cache'
 import { resetIndexLoads } from '../../data/neuronIndex'
 import type { DataSource, DatasetInfo } from '../../data/source'
-import { ROI_COMPLETENESS_SCHEMA, ROI_CONNECTIVITY_SCHEMA, registerSource } from '../../data/source'
+import {
+  ROI_COMPLETENESS_SCHEMA,
+  ROI_CONNECTIVITY_SCHEMA,
+  registerSource,
+} from '../../data/source'
 import { installJsdomStubs } from '../../test/jsdomStubs'
 import { resetNeuronIndexState } from '../useNeuronIndex'
 import { DatasetSummaryViewer } from './DatasetSummaryViewer'
@@ -403,7 +407,15 @@ describe('when completeness has nothing to draw', () => {
       column('postCompleteness', 'f64'),
     )
     stub.completeness = tableFromRows(schema, [
-      { roi: 'A', pre: 9, post: 3, totalPre: 10, totalPost: 10, preCompleteness: 0.9, postCompleteness: 0.3 },
+      {
+        roi: 'A',
+        pre: 9,
+        post: 3,
+        totalPre: 10,
+        totalPost: 10,
+        preCompleteness: 0.9,
+        postCompleteness: 0.3,
+      },
     ])
     show()
     await waitFor(() => expect(tile('Region completeness')).toBeTruthy())
@@ -520,13 +532,23 @@ describe('the mean line', () => {
   const lopsided = [
     {
       roi: 'ME(R)',
-      pre: 900, post: 900, totalPre: 1000, totalPost: 1000,
-      preCompleteness: 0.9, postCompleteness: 0.9, primary: true,
+      pre: 900,
+      post: 900,
+      totalPre: 1000,
+      totalPost: 1000,
+      preCompleteness: 0.9,
+      postCompleteness: 0.9,
+      primary: true,
     },
     {
       roi: 'AB(L)',
-      pre: 1, post: 1, totalPre: 10, totalPost: 10,
-      preCompleteness: 0.1, postCompleteness: 0.1, primary: true,
+      pre: 1,
+      post: 1,
+      totalPre: 10,
+      totalPost: 10,
+      preCompleteness: 0.1,
+      postCompleteness: 0.1,
+      primary: true,
     },
   ]
 
@@ -544,7 +566,9 @@ describe('the mean line', () => {
     stub.completeness = tableFromRows(ROI_COMPLETENESS_SCHEMA, lopsided)
     show()
     await waitFor(() => expect(meanLabel()).toBeTruthy())
-    const line = tile('Region completeness')!.querySelector('.tile__columns-mean') as HTMLElement
+    const line = tile('Region completeness')!.querySelector(
+      '.tile__columns-mean',
+    ) as HTMLElement
     // `bottom` is a percentage of the band the bars fill — the gridlines this replaced sat in
     // the outer plot, where the value and label rows shortened the bars' own box.
     expect(line.style.bottom).toMatch(/^89\.\d+%$/)
@@ -556,8 +580,12 @@ describe('the mean line', () => {
       ROI_COMPLETENESS_SCHEMA,
       Array.from({ length: 40 }, (_, i) => ({
         roi: `R${i}`,
-        pre: i, post: i, totalPre: 100, totalPost: 100,
-        preCompleteness: i / 100, postCompleteness: i / 100,
+        pre: i,
+        post: i,
+        totalPre: 100,
+        totalPost: 100,
+        preCompleteness: i / 100,
+        postCompleteness: i / 100,
         primary: true,
       })),
     )
@@ -576,8 +604,13 @@ describe('the mean line', () => {
     stub.completeness = tableFromRows(ROI_COMPLETENESS_SCHEMA, [
       {
         roi: 'A',
-        pre: 90, post: 30, totalPre: 100, totalPost: 100,
-        preCompleteness: 0.9, postCompleteness: 0.3, primary: true,
+        pre: 90,
+        post: 30,
+        totalPre: 100,
+        totalPost: 100,
+        preCompleteness: 0.9,
+        postCompleteness: 0.3,
+        primary: true,
       },
     ])
     show({ measure: 'post' })
@@ -646,9 +679,12 @@ describe('the completeness measure', () => {
     const onMeasure = vi.fn()
     show({ onMeasure })
     await waitFor(() => expect(tile('Region completeness')).toBeTruthy())
-    fireEvent.change(within(tile('Region completeness')!).getByLabelText('Completeness measure'), {
-      target: { value: 'pre' },
-    })
+    fireEvent.change(
+      within(tile('Region completeness')!).getByLabelText('Completeness measure'),
+      {
+        target: { value: 'pre' },
+      },
+    )
     expect(onMeasure).toHaveBeenCalledWith('pre')
 
     // The widget is controlled, so re-render with the new value the way the node would.

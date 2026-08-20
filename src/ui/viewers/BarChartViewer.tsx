@@ -169,8 +169,7 @@ export function BarChartViewer({
                     // The 2px gap is surface showing through between segments.
                     const width = Math.max(0, endX - startX - (isLast ? 0 : SURFACE_GAP))
                     if (width <= 0) return null
-                    const isHovered =
-                      hover?.bar === barIndex && hover?.segment === segmentIndex
+                    const isHovered = hover?.bar === barIndex && hover?.segment === segmentIndex
                     return (
                       <path
                         key={segment.series}
@@ -234,7 +233,11 @@ export function BarChartViewer({
         )}
 
         {hovered?.segment && (
-          <div className="chart-tooltip" style={{ left: hover!.x + 12, top: hover!.y + 12 }} role="status">
+          <div
+            className="chart-tooltip"
+            style={{ left: hover!.x + 12, top: hover!.y + 12 }}
+            role="status"
+          >
             <strong>{hovered.bar.category}</strong>
             <div className="chart-tooltip__row">
               <span
@@ -255,7 +258,10 @@ export function BarChartViewer({
         <div className="legend">
           {series.map((name, index) => (
             <span key={name} className="legend__item">
-              <span className="legend__swatch" style={{ background: seriesColor(index, mode) }} />
+              <span
+                className="legend__swatch"
+                style={{ background: seriesColor(index, mode) }}
+              />
               {name}
             </span>
           ))}

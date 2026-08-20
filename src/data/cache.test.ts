@@ -113,7 +113,9 @@ describe('loadCachedTable', () => {
     const fetch = vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(second)
 
     expect(await loadCachedTable({ key: 'idx', fingerprint: 'f', fetch })).toBe(first)
-    expect(await loadCachedTable({ key: 'idx', fingerprint: 'f', refresh: true, fetch })).toBe(second)
+    expect(await loadCachedTable({ key: 'idx', fingerprint: 'f', refresh: true, fetch })).toBe(
+      second,
+    )
   })
 
   it('re-fetches when the shape changed', async () => {
@@ -127,7 +129,10 @@ describe('loadCachedTable', () => {
 
   it('does not hold a failed load, so a retry can succeed', async () => {
     const value = table(1)
-    const fetch = vi.fn().mockRejectedValueOnce(new Error('network')).mockResolvedValueOnce(value)
+    const fetch = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('network'))
+      .mockResolvedValueOnce(value)
     const spec = { key: 'idx', fingerprint: 'f', fetch }
 
     await expect(loadCachedTable(spec)).rejects.toThrow('network')

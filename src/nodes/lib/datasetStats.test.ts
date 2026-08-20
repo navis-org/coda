@@ -106,7 +106,9 @@ describe('attributeCounts', () => {
 
   it('folds the tail into a residual that says how much it hid', () => {
     const table = neurons(
-      ['a', 'a', 'a', 'b', 'b', 'c', 'd'].map((c) => ({ class: c }) as Record<string, CellValue>),
+      ['a', 'a', 'a', 'b', 'b', 'c', 'd'].map(
+        (c) => ({ class: c }) as Record<string, CellValue>,
+      ),
     )
     const counts = attributeCounts(table, 'class', { topN: 2 })
     expect(counts.values.map((v) => v.value)).toEqual(['a', 'b'])
@@ -129,7 +131,9 @@ describe('attributeCounts', () => {
   it('omits the residual entirely when nothing was folded', () => {
     // Undefined and a fold of size zero are different statements: only the first lets a
     // caption say "8 of 214" exactly when there is a remainder.
-    expect(attributeCounts(neurons([{ class: 'a' }]), 'class', { topN: 5 }).other).toBeUndefined()
+    expect(
+      attributeCounts(neurons([{ class: 'a' }]), 'class', { topN: 5 }).other,
+    ).toBeUndefined()
   })
 })
 
@@ -147,7 +151,11 @@ describe('summaryAttributes', () => {
   it('excludes numeric columns outright', () => {
     // A bar chart of "how many neurons have exactly 1,204 presynaptic sites" is one bar per
     // neuron. That shape belongs on a histogram, which is a different tile.
-    const schema = tableSchema(column('pre', 'i64'), column('size', 'f64'), column('class', 'str'))
+    const schema = tableSchema(
+      column('pre', 'i64'),
+      column('size', 'f64'),
+      column('class', 'str'),
+    )
     expect(summaryAttributes(schema)).toEqual(['class'])
   })
 
@@ -287,7 +295,11 @@ describe('completenessTotals', () => {
   })
 
   it('sums everything when the table carries no primary column at all', () => {
-    const schema = tableSchema(column('roi', 'str'), column('pre', 'i64'), column('totalPre', 'i64'))
+    const schema = tableSchema(
+      column('roi', 'str'),
+      column('pre', 'i64'),
+      column('totalPre', 'i64'),
+    )
     const table = makeTable(schema, { roi: ['A', 'B'], pre: [1, 2], totalPre: [10, 10] })
     const totals = completenessTotals(table)
     expect(totals.pre).toBe(3)

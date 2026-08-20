@@ -28,7 +28,9 @@ const EDGE_SCHEMA = tableSchema(
 
 /** Builds a network with the roll-ups filled in as `BuildNetwork` would. */
 function network(ids: string[], links: Array<[string, string, number]>): NetworkValue {
-  const acc = new Map(ids.map((id) => [id, { degreeIn: 0, degreeOut: 0, weightIn: 0, weightOut: 0 }]))
+  const acc = new Map(
+    ids.map((id) => [id, { degreeIn: 0, degreeOut: 0, weightIn: 0, weightOut: 0 }]),
+  )
   for (const [from, to, w] of links) {
     const a = acc.get(from)!
     const b = acc.get(to)!
@@ -53,7 +55,9 @@ function network(ids: string[], links: Array<[string, string, number]>): Network
 
 const ids = (n: NetworkValue) => getColumn(n.nodes, 'id').map(String)
 const links = (n: NetworkValue) =>
-  getColumn(n.edges, 'source').map((s, i) => `${String(s)}->${String(getColumn(n.edges, 'target')[i])}`)
+  getColumn(n.edges, 'source').map(
+    (s, i) => `${String(s)}->${String(getColumn(n.edges, 'target')[i])}`,
+  )
 const cell = (n: NetworkValue, col: string, row: number) => n.nodes.data[col]?.[row]
 
 /** a→b (10), b→c (1), a→c (5), plus d with nothing attached. */
@@ -136,7 +140,10 @@ describe('topNodes', () => {
 
 describe('hideIsolated', () => {
   it('drops a node with nothing attached', () => {
-    const { network: out, dropped } = filterNetwork(sample(), { ...NO_FILTER, hideIsolated: true })
+    const { network: out, dropped } = filterNetwork(sample(), {
+      ...NO_FILTER,
+      hideIsolated: true,
+    })
     expect(ids(out)).toEqual(['a', 'b', 'c'])
     expect(dropped).toEqual({ nodes: 1, links: 0 })
   })

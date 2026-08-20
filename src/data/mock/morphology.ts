@@ -41,7 +41,6 @@ const ROI_CENTERS: Record<string, [number, number, number]> = {
 
 const DEFAULT_CENTER: [number, number, number] = [0, 0, 0]
 
-
 /**
  * A synthetic neuropil shell for one region.
  *
@@ -312,7 +311,10 @@ function normalize(v: [number, number, number]): [number, number, number] {
  * `radialSegments` is deliberately low: a mesh here is context, not the analysis surface,
  * and a full dataset of smooth tubes would be millions of triangles for no extra insight.
  */
-export function skeletonToTubeMesh(skeleton: SkeletonGeometry, radialSegments = 5): MeshGeometry {
+export function skeletonToTubeMesh(
+  skeleton: SkeletonGeometry,
+  radialSegments = 5,
+): MeshGeometry {
   const pointCount = skeleton.parents.length
   const positions: number[] = []
   const indices: number[] = []
@@ -375,8 +377,7 @@ function perpendicularBasis(
   axis: [number, number, number],
 ): [[number, number, number], [number, number, number]] {
   // Pick a reference that is not parallel to the axis, or the cross product degenerates.
-  const reference: [number, number, number] =
-    Math.abs(axis[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0]
+  const reference: [number, number, number] = Math.abs(axis[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0]
   const u = normalize(cross(axis, reference))
   const v = normalize(cross(axis, u))
   return [u, v]
@@ -413,4 +414,3 @@ export function synapsePosition(
     skeleton.positions[at * 3 + 2]! + jitter(),
   ]
 }
-

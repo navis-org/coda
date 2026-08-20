@@ -95,7 +95,11 @@ describe('the four states', () => {
   })
 
   it('says it is looking while the peek has not answered', async () => {
-    const id = await putUpload('a.csv', tableFromRows(tableSchema(column('a', 'i64')), [{ a: 1 }]), 8)
+    const id = await putUpload(
+      'a.csv',
+      tableFromRows(tableSchema(column('a', 'i64')), [{ a: 1 }]),
+      8,
+    )
     resetUploads()
     draw({ dataId: id, fileName: 'a.csv' })
     // The state a reload passes through. Not the same claim as "it is not here".
@@ -120,7 +124,11 @@ describe('the four states', () => {
   })
 
   it('tells a colleague what to do when the rows are on somebody else’s machine', async () => {
-    const id = await putUpload('a.csv', tableFromRows(tableSchema(column('a', 'i64')), [{ a: 1 }]), 8)
+    const id = await putUpload(
+      'a.csv',
+      tableFromRows(tableSchema(column('a', 'i64')), [{ a: 1 }]),
+      8,
+    )
     // A different browser: the graph still holds the reference, the database does not hold
     // the rows. This is the whole cost of keeping uploads out of the .coda.json.
     globalThis.indexedDB = new IDBFactory()

@@ -72,7 +72,10 @@ export async function readMultiResInfo(
  * *immediately before* it, so the start of the data is the manifest offset minus the total of
  * every fragment size — there is no separate pointer to find it by.
  */
-export function parseMultiResManifest(buffer: ArrayBuffer, manifestOffset: number): MultiResManifest {
+export function parseMultiResManifest(
+  buffer: ArrayBuffer,
+  manifestOffset: number,
+): MultiResManifest {
   const view = new DataView(buffer)
   const chunkShape: [number, number, number] = [
     view.getFloat32(0, true),
@@ -107,7 +110,8 @@ export function parseMultiResManifest(buffer: ArrayBuffer, manifestOffset: numbe
      */
     const positions = new Uint32Array(count * 3)
     for (let axis = 0; axis < 3; axis++) {
-      for (let f = 0; f < count; f++, at += 4) positions[f * 3 + axis] = view.getUint32(at, true)
+      for (let f = 0; f < count; f++, at += 4)
+        positions[f * 3 + axis] = view.getUint32(at, true)
     }
     const sizes = new Uint32Array(count)
     let bytes = 0

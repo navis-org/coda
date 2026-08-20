@@ -150,7 +150,8 @@ export function DatasetSummaryViewer({
 
   const totals = useMemo(() => (table ? datasetTotals(table) : undefined), [table])
   const regionTotals = useMemo(
-    () => (completeness.status === 'ready' ? completenessTotals(completeness.table) : undefined),
+    () =>
+      completeness.status === 'ready' ? completenessTotals(completeness.table) : undefined,
     [completeness],
   )
 
@@ -197,8 +198,7 @@ export function DatasetSummaryViewer({
    * table is the one set of them that exists nowhere else in the graph.
    */
   const exportSource: ExportSource = {
-    csv: () =>
-      completeness.status === 'ready' ? tableToCsvParts(completeness.table) : ['\n'],
+    csv: () => (completeness.status === 'ready' ? tableToCsvParts(completeness.table) : ['\n']),
   }
 
   return (
@@ -211,15 +211,15 @@ export function DatasetSummaryViewer({
               <Fact label="species" value={info?.species} />
               <Fact label="version" value={info?.version} />
               {/*
-                * Primary first, and the total only when it differs.
-                *
-                * This said `regions 5,619` on male-CNS while the chart below it was over 144
-                * and the caption said "144 primary regions" — two numbers on one card both
-                * called regions, thirty-nine times apart, with nothing saying which was which.
-                * The published list nests: 5,619 counts every sub-region, 144 tile the volume,
-                * and only the second is the one anything may sum. Naming both, in that order,
-                * is what makes the chart's count stop looking like a filter that failed.
-                */}
+               * Primary first, and the total only when it differs.
+               *
+               * This said `regions 5,619` on male-CNS while the chart below it was over 144
+               * and the caption said "144 primary regions" — two numbers on one card both
+               * called regions, thirty-nine times apart, with nothing saying which was which.
+               * The published list nests: 5,619 counts every sub-region, 144 tile the volume,
+               * and only the second is the one anything may sum. Naming both, in that order,
+               * is what makes the chart's count stop looking like a filter that failed.
+               */}
               <Fact label="regions" value={regionCount(info)} />
             </dl>
           </Loadable>
@@ -228,11 +228,11 @@ export function DatasetSummaryViewer({
         <Tile label="Neurons" qualifier={status || 'all statuses'}>
           <Loadable state={indexState}>
             <dl className="tile__facts">
+              <Fact label="total" value={totals ? formatNumber(totals.neurons) : undefined} />
               <Fact
-                label="total"
-                value={totals ? formatNumber(totals.neurons) : undefined}
+                label="typed"
+                value={totals?.typed ? formatNumber(totals.typed) : undefined}
               />
-              <Fact label="typed" value={totals?.typed ? formatNumber(totals.typed) : undefined} />
               <Fact
                 label="cell types"
                 value={totals?.distinctTypes ? formatNumber(totals.distinctTypes) : undefined}
@@ -300,7 +300,6 @@ export function DatasetSummaryViewer({
           page={pages[REGION_KEY] ?? 0}
           onPage={(page) => setPages((p) => ({ ...p, [REGION_KEY]: page }))}
         />
-
       </div>
 
       <div className="viewer__caption">
@@ -327,7 +326,6 @@ export function DatasetSummaryViewer({
     </div>
   )
 }
-
 
 // ---------------------------------------------------------------------------
 // Tiles
@@ -513,7 +511,9 @@ function CompletenessTile({
    * measure, or the other measure would work and this one is simply the wrong question. A bare
    * "None" says the first whichever is true.
    */
-  const other = table ? completenessColumns(table, measure === 'pre' ? 'post' : 'pre', sort).bars : []
+  const other = table
+    ? completenessColumns(table, measure === 'pre' ? 'post' : 'pre', sort).bars
+    : []
   const emptyLabel =
     rows.length > 0
       ? undefined
@@ -536,11 +536,11 @@ function CompletenessTile({
       action={
         <>
           {/*
-            * On the tile rather than only in the inspector: which half of a synapse is traced
-            * is the question this chart exists to answer, and the two answers differ by fifty
-            * points on hemibrain — 91% presynaptic against 37% postsynaptic. A control that
-            * changes the reading that much belongs where the reading is.
-            */}
+           * On the tile rather than only in the inspector: which half of a synapse is traced
+           * is the question this chart exists to answer, and the two answers differ by fifty
+           * points on hemibrain — 91% presynaptic against 37% postsynaptic. A control that
+           * changes the reading that much belongs where the reading is.
+           */}
           <select
             className="tile__measure"
             value={measure}
@@ -551,11 +551,11 @@ function CompletenessTile({
             <option value="pre">presynaptic</option>
           </select>
           {/*
-            * Ranked or named. Ranked answers "where can I trust this?"; named answers "how
-            * complete is *this* region?", which is the question somebody has when they already
-            * know the region — and on a paged chart of sixty-three it is the difference between
-            * hunting and looking it up.
-            */}
+           * Ranked or named. Ranked answers "where can I trust this?"; named answers "how
+           * complete is *this* region?", which is the question somebody has when they already
+           * know the region — and on a paged chart of sixty-three it is the difference between
+           * hunting and looking it up.
+           */}
           <select
             className="tile__measure"
             value={sort}
@@ -570,15 +570,15 @@ function CompletenessTile({
       }
     >
       {/*
-        * The measured box wraps `Loadable`, never the other way round.
-        *
-        * `useElementSize` observes once, on mount, and bails when the ref is empty — so a box
-        * rendered *inside* the loading branch is null exactly when the observer is set up and
-        * is never seen again. The chart then keeps the fallback page size for the rest of the
-        * session, which looks like a chart that simply chose a small number: on male-CNS it sat
-        * at twelve columns in a box that fits eighteen. Mounting the wrapper unconditionally is
-        * what makes the measurement happen at all.
-        */}
+       * The measured box wraps `Loadable`, never the other way round.
+       *
+       * `useElementSize` observes once, on mount, and bails when the ref is empty — so a box
+       * rendered *inside* the loading branch is null exactly when the observer is set up and
+       * is never seen again. The chart then keeps the fallback page size for the rest of the
+       * session, which looks like a chart that simply chose a small number: on male-CNS it sat
+       * at twelve columns in a box that fits eighteen. Mounting the wrapper unconditionally is
+       * what makes the measurement happen at all.
+       */}
       <div ref={plotRef} className="tile__columns-measure">
         <Loadable state={state} empty={rows.length === 0} emptyLabel={emptyLabel}>
           <Columns
@@ -718,7 +718,8 @@ function completenessColumns(
     sort === 'label'
       ? (a, b) => a.key.localeCompare(b.key, undefined, { numeric: true })
       : // Ties break on the name, so an equal pair cannot swap places between renders.
-        (a, b) => b.fraction - a.fraction || a.key.localeCompare(b.key, undefined, { numeric: true }),
+        (a, b) =>
+          b.fraction - a.fraction || a.key.localeCompare(b.key, undefined, { numeric: true }),
   )
   return { bars, mean: presentTotal > 0 ? tracedTotal / presentTotal : null }
 }

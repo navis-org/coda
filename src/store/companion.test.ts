@@ -133,14 +133,24 @@ describe('what does not get one', () => {
 
 describe('starter graphs', () => {
   it('open with the card, since a starter is the first graph most people see', () => {
-    const built = buildStarter({ nodeType: 'dataset.hemibrain', label: 'Hemibrain', sourceId: 'neuprint' })
+    const built = buildStarter({
+      nodeType: 'dataset.hemibrain',
+      label: 'Hemibrain',
+      sourceId: 'neuprint',
+    })
     expect(built.nodes.map((n) => n.type)).toContain('dataset.description')
     const card = built.nodes.find((n) => n.type === 'dataset.description')!
-    expect(built.edges.some((e) => e.target === card.id && e.targetHandle === 'dataset')).toBe(true)
+    expect(built.edges.some((e) => e.target === card.id && e.targetHandle === 'dataset')).toBe(
+      true,
+    )
   })
 
   it('opens a mock starter without one', () => {
-    const built = buildStarter({ nodeType: 'dataset.mock.hemibrain', label: 'Mini', sourceId: 'mock' })
+    const built = buildStarter({
+      nodeType: 'dataset.mock.hemibrain',
+      label: 'Mini',
+      sourceId: 'mock',
+    })
     expect(built.nodes.map((n) => n.type)).not.toContain('dataset.description')
   })
 })

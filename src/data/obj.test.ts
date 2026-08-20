@@ -99,8 +99,17 @@ describe('parseObj', () => {
 
   it('ignores groups, objects and materials rather than choking on them', () => {
     const mesh = parseObj(
-      ['mtllib thing.mtl', 'o region', 'g shell', 'usemtl grey', 's off',
-       'v 0 0 0', 'v 1 0 0', 'v 0 1 0', 'f 1 2 3'].join('\n'),
+      [
+        'mtllib thing.mtl',
+        'o region',
+        'g shell',
+        'usemtl grey',
+        's off',
+        'v 0 0 0',
+        'v 1 0 0',
+        'v 0 1 0',
+        'f 1 2 3',
+      ].join('\n'),
     )
     expect(Array.from(mesh.indices)).toEqual([0, 1, 2])
   })

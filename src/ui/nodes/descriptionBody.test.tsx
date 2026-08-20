@@ -9,7 +9,15 @@
  * hostile blurb never becomes a link node, and this proves it never becomes an element either.
  */
 
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { App } from '../../App'
@@ -113,7 +121,9 @@ describe('the Description card', () => {
   it('is exactly as wide as the dataset card it hangs under, so the pair stacks', async () => {
     openStarter()
     const body = await card()
-    const dataset = document.querySelector('.dataset-body')!.closest('.coda-node') as HTMLElement
+    const dataset = document
+      .querySelector('.dataset-body')!
+      .closest('.coda-node') as HTMLElement
     // jsdom does no layout, so the declaration is the only checkable artefact.
     expect(body.style.getPropertyValue('--node-width')).toBe(
       dataset.style.getPropertyValue('--node-width'),

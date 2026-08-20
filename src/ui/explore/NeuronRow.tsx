@@ -68,7 +68,12 @@ function NeuronRowImpl({
   // because one of them is missing a value.
   const slots = chipSlots(fields.chips)
   const chips = fields.chips
-    .map((name) => ({ name, value: cellOf(table, name, row), slot: slots.get(name), key: chipKey(name) }))
+    .map((name) => ({
+      name,
+      value: cellOf(table, name, row),
+      slot: slots.get(name),
+      key: chipKey(name),
+    }))
     .filter((chip) => chip.value !== null && chip.value !== '')
 
   const secondary = fields.secondary
@@ -92,7 +97,9 @@ function NeuronRowImpl({
         <div className="explore-row__name">
           {/* A neuron with no type is normal in an unfinished dataset, and saying so beats an
               empty row that looks like a rendering bug. */}
-          <strong>{primary === null || primary === '' ? 'untyped' : formatCell(primary)}</strong>
+          <strong>
+            {primary === null || primary === '' ? 'untyped' : formatCell(primary)}
+          </strong>
           <span className="explore-row__id">{bodyId}</span>
         </div>
         {secondary.length > 0 && (

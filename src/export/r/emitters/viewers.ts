@@ -29,10 +29,17 @@ registerEmitter('out.barChart', (ctx) => {
 
   const lines = [`${out} <- ${src}`]
   if (!category || !value) {
-    return [...lines, ...ctx.note('No category or value column is picked, so nothing is drawn.')]
+    return [
+      ...lines,
+      ...ctx.note('No category or value column is picked, so nothing is drawn.'),
+    ]
   }
 
-  const aes = [`x = \`${category}\``, `y = \`${value}\``, ...(series ? [`fill = \`${series}\``] : [])]
+  const aes = [
+    `x = \`${category}\``,
+    `y = \`${value}\``,
+    ...(series ? [`fill = \`${series}\``] : []),
+  ]
   lines.push(
     ``,
     `ggplot(${out}, aes(${aes.join(', ')})) +`,
@@ -112,7 +119,9 @@ registerEmitter('out.scatter', (ctx) => {
   const opacity = Number(ctx.params.opacity ?? 1)
 
   lines.push(``, `ggplot(${out}, aes(${aes.join(', ')})) +`)
-  lines.push(`  geom_point(${Number.isFinite(opacity) && opacity < 1 ? `alpha = ${opacity}` : ''}) +`)
+  lines.push(
+    `  geom_point(${Number.isFinite(opacity) && opacity < 1 ? `alpha = ${opacity}` : ''}) +`,
+  )
   if (ctx.params.xLog === true) lines.push(`  scale_x_log10() +`)
   if (ctx.params.yLog === true) lines.push(`  scale_y_log10() +`)
   if (String(ctx.params.trend ?? 'none') !== 'none') {
@@ -137,7 +146,8 @@ registerEmitter('out.network', (ctx) => {
   if (minLinkWeight > 0) {
     lines.push(`${out} <- delete_edges(${out}, E(${out})[E(${out})$weight < ${minLinkWeight}])`)
   }
-  if (hideIsolated) lines.push(`${out} <- delete_vertices(${out}, V(${out})[degree(${out}) == 0])`)
+  if (hideIsolated)
+    lines.push(`${out} <- delete_vertices(${out}, V(${out})[degree(${out}) == 0])`)
 
   lines.push(
     ``,

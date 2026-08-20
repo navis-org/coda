@@ -15,7 +15,16 @@ import type { NetworkValue } from '../../core/values'
 import { tableFromRows } from '../../core/values'
 import { serializeSvg } from '../export'
 import type { NetworkSvgSpec, SvgEdge, SvgNode } from './networkDraw'
-import { RECIPROCAL_CURVATURE, arrowHead, assignCurvatures, curveControlPoint, curvePoint, edgePath, networkToSvg, splitAlpha } from './networkDraw'
+import {
+  RECIPROCAL_CURVATURE,
+  arrowHead,
+  assignCurvatures,
+  curveControlPoint,
+  curvePoint,
+  edgePath,
+  networkToSvg,
+  splitAlpha,
+} from './networkDraw'
 
 const NODE_SCHEMA = tableSchema(column('id', 'str'))
 const EDGE_SCHEMA = tableSchema(
@@ -229,7 +238,9 @@ describe('networkToSvg', () => {
   })
 
   it('clips to the plot area, so a panned-off node cannot bleed into the legend', () => {
-    const svg = networkToSvg(spec({ nodes: [{ id: 'far', x: 900, y: 40, radius: 5, color: '#fff' }], edges: [] }))
+    const svg = networkToSvg(
+      spec({ nodes: [{ id: 'far', x: 900, y: 40, radius: 5, color: '#fff' }], edges: [] }),
+    )
     expect(svg.querySelector('clipPath')).not.toBeNull()
     expect(svg.querySelector('g[clip-path]')).not.toBeNull()
   })

@@ -457,7 +457,19 @@ export function ScatterViewer({
         })
       },
     }),
-    [table, box.width, box.height, surface, ink, opacity, xColumn, yColumn, legendItems, colors.legend, wrapRef],
+    [
+      table,
+      box.width,
+      box.height,
+      surface,
+      ink,
+      opacity,
+      xColumn,
+      yColumn,
+      legendItems,
+      colors.legend,
+      wrapRef,
+    ],
   )
 
   // --- empty states ------------------------------------------------------
@@ -487,7 +499,10 @@ export function ScatterViewer({
       <div
         ref={wrapRef}
         className="scatter-canvas nowheel nodrag"
-        style={{ background: surface, cursor: gesture?.kind === 'pan' ? 'grabbing' : 'crosshair' }}
+        style={{
+          background: surface,
+          cursor: gesture?.kind === 'pan' ? 'grabbing' : 'crosshair',
+        }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
@@ -598,8 +613,7 @@ export function ScatterViewer({
       <div className="viewer__caption">
         <span>
           {yColumn} vs {xColumn} · {plural(usable, 'point')}
-          {stableSelection.length > 0 &&
-            ` · ${formatNumber(stableSelection.length)} selected`}
+          {stableSelection.length > 0 && ` · ${formatNumber(stableSelection.length)} selected`}
         </span>
         {thinned && !compact && (
           <span
@@ -618,7 +632,10 @@ export function ScatterViewer({
           </span>
         )}
         {singleTrend && !compact && (
-          <span className="viewer__note" title="Pearson correlation, in the space the axes are drawn in.">
+          <span
+            className="viewer__note"
+            title="Pearson correlation, in the space the axes are drawn in."
+          >
             r = {singleTrend.r.toFixed(2)}
           </span>
         )}

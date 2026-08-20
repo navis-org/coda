@@ -27,7 +27,8 @@ export const datasetDescriptionNode = registerNode({
   type: 'dataset.description',
   label: 'Description',
   category: 'dataset',
-  description: 'What a dataset covers, who made it and how to cite it, as its publisher states it.',
+  description:
+    'What a dataset covers, who made it and how to cite it, as its publisher states it.',
   /*
    * Cheap despite reaching the network: the listing is one small JSON per deployment, it is
    * already in hand whenever the dataset node upstream has run, and `evaluate` only asks for it

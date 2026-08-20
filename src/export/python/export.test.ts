@@ -82,7 +82,10 @@ describe('notebook export', () => {
   it('refuses a graph holding a synthetic dataset', () => {
     let g = emptyGraph('mock')
     g = addNode(g, {
-      id: 'm', type: 'dataset.mock.hemibrain', position: { x: 0, y: 0 }, params: {},
+      id: 'm',
+      type: 'dataset.mock.hemibrain',
+      position: { x: 0, y: 0 },
+      params: {},
     })
     const result = exportNotebook(g)
     expect(result.ok).toBe(false)
@@ -105,7 +108,10 @@ describe('notebook export', () => {
   it('names the unwired ports of a node, by their labels', () => {
     let g = emptyGraph('unfinished')
     g = addNode(g, {
-      id: 'c', type: 'neuron.connectivity', position: { x: 0, y: 0 }, params: {},
+      id: 'c',
+      type: 'neuron.connectivity',
+      position: { x: 0, y: 0 },
+      params: {},
     })
     const result = exportNotebook(g, OPTIONS)
     if (!result.ok) throw new Error(result.reason)

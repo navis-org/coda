@@ -18,9 +18,9 @@ export const groupByNode = registerNode({
   label: 'Group By',
   category: 'transform',
   description:
-    'Collapse rows into groups and aggregate a value column. The result carries the group '
-    + 'columns, a row count named `n`, and the aggregate renamed `<agg>_<column>` — so '
-    + 'summing `weight` gives `sum_weight`, not `weight`.',
+    'Collapse rows into groups and aggregate a value column. The result carries the group ' +
+    'columns, a row count named `n`, and the aggregate renamed `<agg>_<column>` — so ' +
+    'summing `weight` gives `sum_weight`, not `weight`.',
   cost: 'cheap',
   inputs: [{ id: 'in', label: 'Table', type: T.table() }],
   outputs: [{ id: 'out', label: 'Table', type: T.table() }],

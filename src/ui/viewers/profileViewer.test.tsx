@@ -57,9 +57,33 @@ function neurons(extra: Array<Record<string, CellValue>> = []) {
   return tableFromRows(
     NEURONS,
     [
-      { bodyId: 1, type: 'CT1', instance: 'CT1_L', status: 'Traced', class: 'optic', pre: 90, post: 40 },
-      { bodyId: 2, type: 'Tm9', instance: 'Tm9_R', status: 'Traced', class: 'optic', pre: 10, post: 30 },
-      { bodyId: 3, type: 'T4a', instance: 'T4a_R', status: 'Traced', class: 'optic', pre: 5, post: 7 },
+      {
+        bodyId: 1,
+        type: 'CT1',
+        instance: 'CT1_L',
+        status: 'Traced',
+        class: 'optic',
+        pre: 90,
+        post: 40,
+      },
+      {
+        bodyId: 2,
+        type: 'Tm9',
+        instance: 'Tm9_R',
+        status: 'Traced',
+        class: 'optic',
+        pre: 10,
+        post: 30,
+      },
+      {
+        bodyId: 3,
+        type: 'T4a',
+        instance: 'T4a_R',
+        status: 'Traced',
+        class: 'optic',
+        pre: 5,
+        post: 7,
+      },
       ...extra,
     ],
     'neurons',
@@ -119,11 +143,7 @@ function stubSource(overrides: Partial<DataSource> = {}): DataSource {
     peekDataset: () => DATASET,
     findNeurons: async () => neurons(),
     fetchConnectivity: async (req) =>
-      hang
-        ? await never()
-        : req.direction === 'inputs'
-          ? INPUTS
-          : OUTPUTS,
+      hang ? await never() : req.direction === 'inputs' ? INPUTS : OUTPUTS,
     fetchAdjacency: async () => {
       throw new Error('not used')
     },
@@ -239,7 +259,9 @@ describe('pinning', () => {
 
   it('marks the pinned state on the control, not only in its label', () => {
     view({ page: 0, pinned: ['1'] })
-    expect(screen.getByRole('button', { name: /Pinned/ }).getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByRole('button', { name: /Pinned/ }).getAttribute('aria-pressed')).toBe(
+      'true',
+    )
   })
 })
 
@@ -343,9 +365,7 @@ describe('the 3D tile', () => {
   it('is an ordinary tile on the card, where it holds a 104px image', () => {
     // Spanning 2x2 for a silhouette would be a tile of whitespace around a thumbnail.
     view({ compact: true })
-    expect(screen.getByText('Shape').closest('.tile')?.hasAttribute('data-span')).toBe(
-      false,
-    )
+    expect(screen.getByText('Shape').closest('.tile')?.hasAttribute('data-span')).toBe(false)
   })
 })
 

@@ -296,7 +296,13 @@ export interface TransmitterReading {
  * exactly as `rowFields.ts` does — a dataset publishing none of these has no transmitter tile
  * rather than a tile full of dashes.
  */
-const CALL_COLUMNS = ['consensusNt', 'predictedNt', 'celltypePredictedNt', 'neurotransmitter', 'nt']
+const CALL_COLUMNS = [
+  'consensusNt',
+  'predictedNt',
+  'celltypePredictedNt',
+  'neurotransmitter',
+  'nt',
+]
 
 const CONFIDENCE_COLUMNS = ['predictedNtProb', 'celltypePredictedNtConfidence', 'ntConfidence']
 

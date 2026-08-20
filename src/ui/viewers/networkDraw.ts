@@ -372,7 +372,9 @@ function drawLegend(
   if (legend.kind === 'categorical') {
     for (const entry of legend.entries) {
       if (x > width - 40) break
-      group.append(element('rect', { x, y: y - 4, width: 8, height: 8, rx: 2, fill: entry.color }))
+      group.append(
+        element('rect', { x, y: y - 4, width: 8, height: 8, rx: 2, fill: entry.color }),
+      )
       const label = text(entry.label, { x: x + 12, y })
       group.append(label)
       // No text metrics without layout, so advance by an estimate; 5.6px per character at
@@ -385,7 +387,15 @@ function drawLegend(
   const barWidth = 90
   const step = barWidth / legend.stops.length
   legend.stops.forEach((color, index) => {
-    group.append(element('rect', { x: x + index * step, y: y - 4, width: step + 0.5, height: 8, fill: color }))
+    group.append(
+      element('rect', {
+        x: x + index * step,
+        y: y - 4,
+        width: step + 0.5,
+        height: 8,
+        fill: color,
+      }),
+    )
   })
   group.append(text(formatNumber(legend.domain[0]), { x, y: y + 10, 'font-size': 9 }))
   group.append(

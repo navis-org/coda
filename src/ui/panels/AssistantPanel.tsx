@@ -26,7 +26,14 @@ import { isConfigured, subscribeCredentials } from '../../data/ai/credentials'
 import { errorMessage } from '../../core/errors'
 import { useGraphStore } from '../../store/graphStore'
 import type { ChatEntry } from '../assistantChat'
-import { appendChat, chatBusy, chatEntries, clearChat, setChatBusy, subscribeChat } from '../assistantChat'
+import {
+  appendChat,
+  chatBusy,
+  chatEntries,
+  clearChat,
+  setChatBusy,
+  subscribeChat,
+} from '../assistantChat'
 
 export function AssistantPanel() {
   const open = useGraphStore((s) => s.panels.assistant)

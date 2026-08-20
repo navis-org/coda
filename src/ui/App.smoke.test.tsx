@@ -9,7 +9,15 @@
  * are the failures a headless engine suite cannot see.
  */
 
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { App } from '../App'
@@ -207,9 +215,7 @@ describe('App', () => {
     const runButtons = screen.getAllByRole('button', { name: 'Run this node', hidden: true })
     // Every node that computes something — the example's text notes are not evaluated and draw
     // no header, so they have no button to offer.
-    const computing = useGraphStore
-      .getState()
-      .graph.nodes.filter((n) => !isAnnotation(n.type))
+    const computing = useGraphStore.getState().graph.nodes.filter((n) => !isAnnotation(n.type))
     expect(runButtons.length).toBe(computing.length)
 
     // Stale nodes offer a live button.

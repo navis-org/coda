@@ -8,7 +8,11 @@
  * level-of-detail argument Coda's `Detail` param maps onto lives.
  */
 
-import { DATASET_FAMILIES, datasetFamily, resolveDatasetId } from '../../../nodes/lib/datasetFamilies'
+import {
+  DATASET_FAMILIES,
+  datasetFamily,
+  resolveDatasetId,
+} from '../../../nodes/lib/datasetFamilies'
 import { parseIdList } from '../../../nodes/lib/idList'
 import { parseTypedLabels } from '../../../nodes/lib/labelLookup'
 import { pyLongList, pyList, pyStr } from '../py'
@@ -32,7 +36,12 @@ import { bodyIds } from './common'
  * starts answering from the other connectome. Passing `client=` costs one kwarg and cannot do
  * that.
  */
-function clientLines(ctx: EmitContext, out: string, server: string, datasetId: string): string[] {
+function clientLines(
+  ctx: EmitContext,
+  out: string,
+  server: string,
+  datasetId: string,
+): string[] {
   ctx.require('os')
   ctx.require('neuprint', 'Client')
   return [
@@ -161,7 +170,9 @@ registerEmitter('neuron.findNeurons', (ctx) => {
     // NeuronCriteria has no size field, so Coda's server-side cut becomes a filter on the
     // result. Same rows, one larger response.
     lines.push(
-      ...ctx.note('Coda applies this size cut in the query; there is no NeuronCriteria field for it.'),
+      ...ctx.note(
+        'Coda applies this size cut in the query; there is no NeuronCriteria field for it.',
+      ),
       `${out} = ${out}[${out}['size'] >= ${minSize}]`,
     )
   }
@@ -178,7 +189,8 @@ registerEmitter('neuron.inputIds', (ctx) => {
   const parsed = parseIdList(String(ctx.params.ids ?? ''))
   const wired = ctx.input('ids')
 
-  if (parsed.error && !wired) return ctx.todo(`The pasted id list is not valid: ${parsed.error}`)
+  if (parsed.error && !wired)
+    return ctx.todo(`The pasted id list is not valid: ${parsed.error}`)
 
   const c = ctx.wired('dataset')
   const lines: string[] = []
@@ -205,7 +217,9 @@ registerEmitter('neuron.inputIds', (ctx) => {
     ctx.require('pandas')
     return [
       ...lines,
-      ...ctx.note('No Dataset is wired, so this is the ids alone — exactly what the node emits.'),
+      ...ctx.note(
+        'No Dataset is wired, so this is the ids alone — exactly what the node emits.',
+      ),
       `${out} = pd.DataFrame({'bodyId': _ids})`,
     ]
   }
@@ -281,8 +295,13 @@ registerEmitter('neuron.adjacency', (ctx) => {
   const targets = ctx.wired('targets')
   if (!sources || !targets) return ctx.todo('Adjacency needs both Sources and Targets wired.')
 
-  ctx.require('neuprint', 'NeuronCriteria', 'fetch_adjacencies', 'merge_neuron_properties',
-    'connection_table_to_matrix')
+  ctx.require(
+    'neuprint',
+    'NeuronCriteria',
+    'fetch_adjacencies',
+    'merge_neuron_properties',
+    'connection_table_to_matrix',
+  )
   const out = ctx.output('matrix')
   const byType = ctx.params.groupByType !== false
   const group = byType ? 'type' : 'bodyId'

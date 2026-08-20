@@ -135,35 +135,211 @@ const OPTIC_LOBE: {
     { type: 'L3', count: 12, rois: [['ME(R)', 1]], size: 160_000 },
     { type: 'L5', count: 10, rois: [['ME(R)', 1]], size: 150_000 },
     { type: 'Mi1', count: 20, rois: [['ME(R)', 1]], size: 240_000 },
-    { type: 'Tm1', count: 16, rois: [['ME(R)', 3], ['LO(R)', 2]], size: 260_000 },
-    { type: 'Tm3', count: 20, rois: [['ME(R)', 3], ['LO(R)', 2]], size: 265_000 },
-    { type: 'Tm9', count: 16, rois: [['ME(R)', 3], ['LO(R)', 2]], size: 250_000 },
+    {
+      type: 'Tm1',
+      count: 16,
+      rois: [
+        ['ME(R)', 3],
+        ['LO(R)', 2],
+      ],
+      size: 260_000,
+    },
+    {
+      type: 'Tm3',
+      count: 20,
+      rois: [
+        ['ME(R)', 3],
+        ['LO(R)', 2],
+      ],
+      size: 265_000,
+    },
+    {
+      type: 'Tm9',
+      count: 16,
+      rois: [
+        ['ME(R)', 3],
+        ['LO(R)', 2],
+      ],
+      size: 250_000,
+    },
     { type: 'Dm8', count: 14, rois: [['ME(R)', 1]], size: 130_000 },
     { type: 'Dm9', count: 10, rois: [['ME(R)', 1]], size: 125_000 },
-    { type: 'C2', count: 6, rois: [['ME(R)', 2], ['LO(R)', 1]], size: 120_000 },
-    { type: 'C3', count: 6, rois: [['ME(R)', 2], ['LO(R)', 1]], size: 118_000 },
+    {
+      type: 'C2',
+      count: 6,
+      rois: [
+        ['ME(R)', 2],
+        ['LO(R)', 1],
+      ],
+      size: 120_000,
+    },
+    {
+      type: 'C3',
+      count: 6,
+      rois: [
+        ['ME(R)', 2],
+        ['LO(R)', 1],
+      ],
+      size: 118_000,
+    },
     { type: 'Pm2', count: 8, rois: [['ME(R)', 1]], size: 110_000 },
-    { type: 'T4a', count: 18, rois: [['ME(R)', 2], ['LOP(R)', 3]], size: 210_000 },
-    { type: 'T4b', count: 18, rois: [['ME(R)', 2], ['LOP(R)', 3]], size: 208_000 },
-    { type: 'T4c', count: 18, rois: [['ME(R)', 2], ['LOP(R)', 3]], size: 212_000 },
-    { type: 'T4d', count: 18, rois: [['ME(R)', 2], ['LOP(R)', 3]], size: 206_000 },
-    { type: 'T5a', count: 18, rois: [['LO(R)', 2], ['LOP(R)', 3]], size: 205_000 },
-    { type: 'T5b', count: 18, rois: [['LO(R)', 2], ['LOP(R)', 3]], size: 204_000 },
-    { type: 'T5c', count: 18, rois: [['LO(R)', 2], ['LOP(R)', 3]], size: 207_000 },
-    { type: 'T5d', count: 18, rois: [['LO(R)', 2], ['LOP(R)', 3]], size: 203_000 },
-    { type: 'LC4', count: 12, rois: [['LO(R)', 3], ['PVLP(R)', 2]], size: 420_000 },
-    { type: 'LC6', count: 10, rois: [['LO(R)', 3], ['PVLP(R)', 2]], size: 400_000 },
-    { type: 'LC9', count: 12, rois: [['LO(R)', 3], ['AOTU(R)', 2]], size: 410_000 },
-    { type: 'LC11', count: 10, rois: [['LO(R)', 3], ['PLP(R)', 2]], size: 380_000 },
-    { type: 'LPLC1', count: 8, rois: [['LOP(R)', 3], ['PLP(R)', 2]], size: 450_000 },
-    { type: 'LPLC2', count: 12, rois: [['LOP(R)', 3], ['PVLP(R)', 2]], size: 460_000 },
-    { type: 'LT1', count: 4, rois: [['LO(R)', 2], ['PLP(R)', 2]], size: 500_000 },
+    {
+      type: 'T4a',
+      count: 18,
+      rois: [
+        ['ME(R)', 2],
+        ['LOP(R)', 3],
+      ],
+      size: 210_000,
+    },
+    {
+      type: 'T4b',
+      count: 18,
+      rois: [
+        ['ME(R)', 2],
+        ['LOP(R)', 3],
+      ],
+      size: 208_000,
+    },
+    {
+      type: 'T4c',
+      count: 18,
+      rois: [
+        ['ME(R)', 2],
+        ['LOP(R)', 3],
+      ],
+      size: 212_000,
+    },
+    {
+      type: 'T4d',
+      count: 18,
+      rois: [
+        ['ME(R)', 2],
+        ['LOP(R)', 3],
+      ],
+      size: 206_000,
+    },
+    {
+      type: 'T5a',
+      count: 18,
+      rois: [
+        ['LO(R)', 2],
+        ['LOP(R)', 3],
+      ],
+      size: 205_000,
+    },
+    {
+      type: 'T5b',
+      count: 18,
+      rois: [
+        ['LO(R)', 2],
+        ['LOP(R)', 3],
+      ],
+      size: 204_000,
+    },
+    {
+      type: 'T5c',
+      count: 18,
+      rois: [
+        ['LO(R)', 2],
+        ['LOP(R)', 3],
+      ],
+      size: 207_000,
+    },
+    {
+      type: 'T5d',
+      count: 18,
+      rois: [
+        ['LO(R)', 2],
+        ['LOP(R)', 3],
+      ],
+      size: 203_000,
+    },
+    {
+      type: 'LC4',
+      count: 12,
+      rois: [
+        ['LO(R)', 3],
+        ['PVLP(R)', 2],
+      ],
+      size: 420_000,
+    },
+    {
+      type: 'LC6',
+      count: 10,
+      rois: [
+        ['LO(R)', 3],
+        ['PVLP(R)', 2],
+      ],
+      size: 400_000,
+    },
+    {
+      type: 'LC9',
+      count: 12,
+      rois: [
+        ['LO(R)', 3],
+        ['AOTU(R)', 2],
+      ],
+      size: 410_000,
+    },
+    {
+      type: 'LC11',
+      count: 10,
+      rois: [
+        ['LO(R)', 3],
+        ['PLP(R)', 2],
+      ],
+      size: 380_000,
+    },
+    {
+      type: 'LPLC1',
+      count: 8,
+      rois: [
+        ['LOP(R)', 3],
+        ['PLP(R)', 2],
+      ],
+      size: 450_000,
+    },
+    {
+      type: 'LPLC2',
+      count: 12,
+      rois: [
+        ['LOP(R)', 3],
+        ['PVLP(R)', 2],
+      ],
+      size: 460_000,
+    },
+    {
+      type: 'LT1',
+      count: 4,
+      rois: [
+        ['LO(R)', 2],
+        ['PLP(R)', 2],
+      ],
+      size: 500_000,
+    },
     { type: 'PVLP002', count: 6, rois: [['PVLP(R)', 4]], size: 620_000 },
     { type: 'PVLP008', count: 4, rois: [['PVLP(R)', 4]], size: 590_000 },
     { type: 'PLP003', count: 5, rois: [['PLP(R)', 4]], size: 610_000 },
     { type: 'AOTU008', count: 4, rois: [['AOTU(R)', 4]], size: 570_000 },
-    { type: 'DNp02', count: 2, rois: [['PVLP(R)', 2], ['PLP(R)', 1]], size: 980_000 },
-    { type: 'DNp11', count: 2, rois: [['PVLP(R)', 2], ['PLP(R)', 1]], size: 950_000 },
+    {
+      type: 'DNp02',
+      count: 2,
+      rois: [
+        ['PVLP(R)', 2],
+        ['PLP(R)', 1],
+      ],
+      size: 980_000,
+    },
+    {
+      type: 'DNp11',
+      count: 2,
+      rois: [
+        ['PVLP(R)', 2],
+        ['PLP(R)', 1],
+      ],
+      size: 950_000,
+    },
   ],
   rules: [
     { from: 'L1', to: 'Mi1', weight: 22, prob: 0.35 },
@@ -234,27 +410,209 @@ const HEMIBRAIN: typeof OPTIC_LOBE = {
     ],
   },
   types: [
-    { type: 'DA1_lPN', count: 8, rois: [['AL(R)', 3], ['CA(R)', 2], ['LH(R)', 3]], size: 320_000 },
-    { type: 'DL5_adPN', count: 4, rois: [['AL(R)', 3], ['CA(R)', 2], ['LH(R)', 2]], size: 300_000 },
-    { type: 'VA1v_adPN', count: 6, rois: [['AL(R)', 3], ['CA(R)', 2], ['LH(R)', 2]], size: 290_000 },
-    { type: 'DM1_lPN', count: 5, rois: [['AL(R)', 3], ['CA(R)', 3], ['LH(R)', 1]], size: 310_000 },
-    { type: 'DC3_adPN', count: 4, rois: [['AL(R)', 3], ['CA(R)', 2], ['LH(R)', 2]], size: 280_000 },
-    { type: 'KCg-m', count: 60, rois: [['CA(R)', 3], ['PED(R)', 1], ['gL(R)', 3]], size: 95_000 },
-    { type: 'KCab-c', count: 30, rois: [['CA(R)', 3], ['PED(R)', 2], ['aL(R)', 2], ['bL(R)', 2]], size: 110_000 },
-    { type: 'KCab-s', count: 25, rois: [['CA(R)', 3], ['PED(R)', 2], ['aL(R)', 2], ['bL(R)', 2]], size: 108_000 },
-    { type: "KCa'b'-ap1", count: 18, rois: [['CA(R)', 3], ["a'L(R)", 2], ["b'L(R)", 2]], size: 100_000 },
-    { type: 'MBON01', count: 2, rois: [['gL(R)', 4], ['SMP(R)', 2]], size: 640_000 },
-    { type: 'MBON03', count: 2, rois: [["b'L(R)", 4], ['SMP(R)', 2]], size: 620_000 },
-    { type: 'MBON05', count: 2, rois: [['gL(R)', 4], ['SLP(R)', 2]], size: 600_000 },
-    { type: 'MBON11', count: 2, rois: [['gL(R)', 3], ['SMP(R)', 2]], size: 580_000 },
-    { type: 'MBON14', count: 2, rois: [["a'L(R)", 4], ['SMP(R)', 1]], size: 590_000 },
-    { type: 'PPL101', count: 2, rois: [['aL(R)', 4], ['SMP(R)', 2]], size: 520_000 },
-    { type: 'PAM04', count: 6, rois: [['bL(R)', 4], ['SMP(R)', 1]], size: 430_000 },
-    { type: 'PAM11', count: 5, rois: [['gL(R)', 4], ['SMP(R)', 1]], size: 420_000 },
-    { type: 'APL', count: 1, rois: [['CA(R)', 3], ['PED(R)', 2], ['gL(R)', 3], ['aL(R)', 2]], size: 1_800_000 },
-    { type: 'DPM', count: 1, rois: [['CA(R)', 2], ["b'L(R)", 3], ["a'L(R)", 3]], size: 1_600_000 },
-    { type: 'LHPV2a1', count: 6, rois: [['LH(R)', 4], ['SLP(R)', 2]], size: 380_000 },
-    { type: 'LHAV3a1', count: 4, rois: [['LH(R)', 4], ['SMP(R)', 1]], size: 360_000 },
+    {
+      type: 'DA1_lPN',
+      count: 8,
+      rois: [
+        ['AL(R)', 3],
+        ['CA(R)', 2],
+        ['LH(R)', 3],
+      ],
+      size: 320_000,
+    },
+    {
+      type: 'DL5_adPN',
+      count: 4,
+      rois: [
+        ['AL(R)', 3],
+        ['CA(R)', 2],
+        ['LH(R)', 2],
+      ],
+      size: 300_000,
+    },
+    {
+      type: 'VA1v_adPN',
+      count: 6,
+      rois: [
+        ['AL(R)', 3],
+        ['CA(R)', 2],
+        ['LH(R)', 2],
+      ],
+      size: 290_000,
+    },
+    {
+      type: 'DM1_lPN',
+      count: 5,
+      rois: [
+        ['AL(R)', 3],
+        ['CA(R)', 3],
+        ['LH(R)', 1],
+      ],
+      size: 310_000,
+    },
+    {
+      type: 'DC3_adPN',
+      count: 4,
+      rois: [
+        ['AL(R)', 3],
+        ['CA(R)', 2],
+        ['LH(R)', 2],
+      ],
+      size: 280_000,
+    },
+    {
+      type: 'KCg-m',
+      count: 60,
+      rois: [
+        ['CA(R)', 3],
+        ['PED(R)', 1],
+        ['gL(R)', 3],
+      ],
+      size: 95_000,
+    },
+    {
+      type: 'KCab-c',
+      count: 30,
+      rois: [
+        ['CA(R)', 3],
+        ['PED(R)', 2],
+        ['aL(R)', 2],
+        ['bL(R)', 2],
+      ],
+      size: 110_000,
+    },
+    {
+      type: 'KCab-s',
+      count: 25,
+      rois: [
+        ['CA(R)', 3],
+        ['PED(R)', 2],
+        ['aL(R)', 2],
+        ['bL(R)', 2],
+      ],
+      size: 108_000,
+    },
+    {
+      type: "KCa'b'-ap1",
+      count: 18,
+      rois: [
+        ['CA(R)', 3],
+        ["a'L(R)", 2],
+        ["b'L(R)", 2],
+      ],
+      size: 100_000,
+    },
+    {
+      type: 'MBON01',
+      count: 2,
+      rois: [
+        ['gL(R)', 4],
+        ['SMP(R)', 2],
+      ],
+      size: 640_000,
+    },
+    {
+      type: 'MBON03',
+      count: 2,
+      rois: [
+        ["b'L(R)", 4],
+        ['SMP(R)', 2],
+      ],
+      size: 620_000,
+    },
+    {
+      type: 'MBON05',
+      count: 2,
+      rois: [
+        ['gL(R)', 4],
+        ['SLP(R)', 2],
+      ],
+      size: 600_000,
+    },
+    {
+      type: 'MBON11',
+      count: 2,
+      rois: [
+        ['gL(R)', 3],
+        ['SMP(R)', 2],
+      ],
+      size: 580_000,
+    },
+    {
+      type: 'MBON14',
+      count: 2,
+      rois: [
+        ["a'L(R)", 4],
+        ['SMP(R)', 1],
+      ],
+      size: 590_000,
+    },
+    {
+      type: 'PPL101',
+      count: 2,
+      rois: [
+        ['aL(R)', 4],
+        ['SMP(R)', 2],
+      ],
+      size: 520_000,
+    },
+    {
+      type: 'PAM04',
+      count: 6,
+      rois: [
+        ['bL(R)', 4],
+        ['SMP(R)', 1],
+      ],
+      size: 430_000,
+    },
+    {
+      type: 'PAM11',
+      count: 5,
+      rois: [
+        ['gL(R)', 4],
+        ['SMP(R)', 1],
+      ],
+      size: 420_000,
+    },
+    {
+      type: 'APL',
+      count: 1,
+      rois: [
+        ['CA(R)', 3],
+        ['PED(R)', 2],
+        ['gL(R)', 3],
+        ['aL(R)', 2],
+      ],
+      size: 1_800_000,
+    },
+    {
+      type: 'DPM',
+      count: 1,
+      rois: [
+        ['CA(R)', 2],
+        ["b'L(R)", 3],
+        ["a'L(R)", 3],
+      ],
+      size: 1_600_000,
+    },
+    {
+      type: 'LHPV2a1',
+      count: 6,
+      rois: [
+        ['LH(R)', 4],
+        ['SLP(R)', 2],
+      ],
+      size: 380_000,
+    },
+    {
+      type: 'LHAV3a1',
+      count: 4,
+      rois: [
+        ['LH(R)', 4],
+        ['SMP(R)', 1],
+      ],
+      size: 360_000,
+    },
   ],
   rules: [
     { from: 'DA1_lPN', to: 'KCg-m', weight: 6, prob: 0.12 },
@@ -350,7 +708,11 @@ function build(def: (typeof DEFINITIONS)[number]): MockConnectome {
           for (const b of targets) {
             if (a.bodyId === b.bodyId) continue
             if (rand() >= rule.prob) continue
-            connections.push({ pre: a.bodyId, post: b.bodyId, weight: skewed(rand, rule.weight) })
+            connections.push({
+              pre: a.bodyId,
+              post: b.bodyId,
+              weight: skewed(rand, rule.weight),
+            })
           }
         }
       }
@@ -388,9 +750,7 @@ function build(def: (typeof DEFINITIONS)[number]): MockConnectome {
       const last = idx === prefs.length - 1
       // Jitter the split, but make the last ROI absorb the remainder so per-ROI
       // counts always sum exactly to the neuron's totals.
-      const pre = last
-        ? n.pre - assignedPre
-        : Math.round(n.pre * share * (0.85 + rand() * 0.3))
+      const pre = last ? n.pre - assignedPre : Math.round(n.pre * share * (0.85 + rand() * 0.3))
       const post = last
         ? n.post - assignedPost
         : Math.round(n.post * share * (0.85 + rand() * 0.3))

@@ -24,7 +24,9 @@ export function useElementSize<T extends HTMLElement>(): [React.RefObject<T | nu
       // Round to whole pixels: sub-pixel churn would re-render on every zoom tick.
       const width = Math.round(box.width)
       const height = Math.round(box.height)
-      setSize((prev) => (prev.width === width && prev.height === height ? prev : { width, height }))
+      setSize((prev) =>
+        prev.width === width && prev.height === height ? prev : { width, height },
+      )
     })
     observer.observe(element)
     return () => observer.disconnect()

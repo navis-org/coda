@@ -108,7 +108,10 @@ describe.skipIf(!KEY)('against the real API', () => {
       emptyGraph(),
       'Give me the mini hemibrain dataset wired to Find Neurons.',
     )
-    const graph = await ask(start, 'Add a table showing the results, and limit the query to 50.')
+    const graph = await ask(
+      start,
+      'Add a table showing the results, and limit the query to 50.',
+    )
     console.log(`\n${describeGraph(graph)}\n`)
     expect(graph.nodes.some((n) => n.type === 'out.table')).toBe(true)
   }, 120_000)

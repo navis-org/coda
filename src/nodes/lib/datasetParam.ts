@@ -11,7 +11,12 @@ import type { CodaType } from '../../core/types'
 import { datasetRef } from '../../core/types'
 import type { DatasetValue, Value } from '../../core/values'
 import { isDatasetValue } from '../../core/values'
-import type { DataSource, DatasetInfo, SourceCapabilities, SourceSchemas } from '../../data/source'
+import type {
+  DataSource,
+  DatasetInfo,
+  SourceCapabilities,
+  SourceSchemas,
+} from '../../data/source'
 import { CANONICAL_SCHEMAS, allSources, getSource } from '../../data/source'
 
 /** Source referenced by a dataset-typed socket, if it is registered. */

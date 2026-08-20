@@ -259,7 +259,8 @@ function main(): void {
       const settled = at(STATES, 2)
       nodes.forEach((node) => {
         const key = node.dataset.key ?? ''
-        node.dataset.state = key === 'find' || key === 'conn' ? 'running' : (settled[key] ?? 'blocked')
+        node.dataset.state =
+          key === 'find' || key === 'conn' ? 'running' : (settled[key] ?? 'blocked')
       })
       window.setTimeout(() => {
         if (token === flashToken) applyStates(current)

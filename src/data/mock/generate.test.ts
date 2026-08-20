@@ -74,7 +74,10 @@ describe('MockSource', () => {
   })
 
   it('anchors type regexes the way Neo4j =~ does', async () => {
-    const table = await source.findNeurons({ datasetId: 'optic-lobe-mini', typePattern: 'LC.*' })
+    const table = await source.findNeurons({
+      datasetId: 'optic-lobe-mini',
+      typePattern: 'LC.*',
+    })
     const types = new Set(table.data.type as string[])
     expect(types).toEqual(new Set(['LC4', 'LC6', 'LC9', 'LC11']))
     // LPLC1/LPLC2 contain "LC" but are not a full match.
@@ -146,7 +149,11 @@ describe('MockSource', () => {
       targetIds: dn.data.bodyId as number[],
       groupByType: true,
     })
-    expect(m.rowLabels).toEqual(['LC4', 'LC6', 'LC9', 'LC11'].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })))
+    expect(m.rowLabels).toEqual(
+      ['LC4', 'LC6', 'LC9', 'LC11'].sort((a, b) =>
+        a.localeCompare(b, undefined, { numeric: true }),
+      ),
+    )
     expect(m.colLabels).toEqual(['DNp02', 'DNp11'])
     const total = [...m.values].reduce((a, b) => a + b, 0)
     expect(total).toBeGreaterThan(0)

@@ -108,7 +108,10 @@ function labelClause(match: LabelMatch): string {
   return `${prop} IN ${stringList(match.values)}`
 }
 
-export function findNeuronsCypher(req: FindNeuronsRequest, extraProperties: string[] = []): string {
+export function findNeuronsCypher(
+  req: FindNeuronsRequest,
+  extraProperties: string[] = [],
+): string {
   const where: string[] = []
   // `=~` anchors at both ends, so a bare `LC.*` matches `LC4` but not `LPLC1`. `MockSource`
   // reproduces that deliberately; don't "fix" either side.
@@ -159,7 +162,8 @@ export function connectivityCypher(req: ConnectivityRequest): string {
       ? `MATCH (n:Neuron)-[w:ConnectsTo]->(p)\nWHERE n.bodyId IN ${ids}`
       : `MATCH (p)-[w:ConnectsTo]->(n:Neuron)\nWHERE n.bodyId IN ${ids}`
 
-  const where = req.minWeight && req.minWeight > 0 ? `\nAND w.weight >= ${Math.floor(req.minWeight)}` : ''
+  const where =
+    req.minWeight && req.minWeight > 0 ? `\nAND w.weight >= ${Math.floor(req.minWeight)}` : ''
   return [
     pattern + where,
     'RETURN n.bodyId, n.type, p.bodyId, p.type, w.weight',
@@ -206,7 +210,9 @@ export function pathStepCypher(req: PathStepRequest): string {
   const key = (n: string) =>
     req.collapseTypes ? `coalesce(${n}.type, toString(${n}.bodyId))` : `toString(${n}.bodyId)`
   const id = (n: string) =>
-    req.collapseTypes ? `CASE WHEN ${n}.type IS NULL THEN ${n}.bodyId ELSE null END` : `${n}.bodyId`
+    req.collapseTypes
+      ? `CASE WHEN ${n}.type IS NULL THEN ${n}.bodyId ELSE null END`
+      : `${n}.bodyId`
 
   // Rows are always presynaptic → postsynaptic, whichever end the frontier was, so the
   // traversal never has to reorient them — the same rule `connectivityOps` arrived at.

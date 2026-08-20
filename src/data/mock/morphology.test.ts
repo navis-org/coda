@@ -29,7 +29,10 @@ beforeAll(() => {
 
 function someBodyIds(count: number): number[] {
   const connectome = getConnectome('optic-lobe-mini')!
-  return connectome.neurons.filter((n) => n.type === 'LC4').slice(0, count).map((n) => n.bodyId)
+  return connectome.neurons
+    .filter((n) => n.type === 'LC4')
+    .slice(0, count)
+    .map((n) => n.bodyId)
 }
 
 describe('generateSkeleton', () => {
@@ -175,7 +178,9 @@ describe('MockSource morphology', () => {
     expect(points.kind).toBe('points')
     expect(points.positions.length).toBe(points.attributes.length * 3)
     expect(points.attributes.schema.columns.map((c) => c.name)).toContain('polarity')
-    expect(new Set(points.attributes.data.polarity as string[])).toEqual(new Set(['pre', 'post']))
+    expect(new Set(points.attributes.data.polarity as string[])).toEqual(
+      new Set(['pre', 'post']),
+    )
   })
 
   it('filters synapses by polarity and weight', async () => {
@@ -282,9 +287,12 @@ describe('mock region meshes', () => {
       const y = skeleton.positions[i * 3 + 1]!
       const z = skeleton.positions[i * 3 + 2]!
       if (
-        x >= union.min[0] && x <= union.max[0] &&
-        y >= union.min[1] && y <= union.max[1] &&
-        z >= union.min[2] && z <= union.max[2]
+        x >= union.min[0] &&
+        x <= union.max[0] &&
+        y >= union.min[1] &&
+        y <= union.max[1] &&
+        z >= union.min[2] &&
+        z <= union.max[2]
       ) {
         inside++
       }

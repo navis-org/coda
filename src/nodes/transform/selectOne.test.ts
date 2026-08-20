@@ -44,7 +44,10 @@ function node(id: string, type: string, params: Record<string, unknown> = {}): G
 }
 
 /** dataset → find(LC.*) → selectOne, with an optional geometry node in between. */
-function pipeline(params: Record<string, unknown> = {}, via?: 'skeletons' | 'meshes'): CodaGraph {
+function pipeline(
+  params: Record<string, unknown> = {},
+  via?: 'skeletons' | 'meshes',
+): CodaGraph {
   let g = emptyGraph('select-one-test')
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: 'optic-lobe-mini' }))
   // Narrowed for the geometry branches: `Max neurons` on the morphology nodes is a refusal
@@ -52,18 +55,38 @@ function pipeline(params: Record<string, unknown> = {}, via?: 'skeletons' | 'mes
   const pattern = via ? 'LC4' : 'LC.*'
   g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: pattern, status: 'Traced' }))
   g = addNode(g, node('pick', 'core.selectOne', params))
-  g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'find', targetHandle: 'dataset' })
+  g = addEdge(g, {
+    source: 'ds',
+    sourceHandle: 'dataset',
+    target: 'find',
+    targetHandle: 'dataset',
+  })
 
   if (!via) {
-    g = addEdge(g, { source: 'find', sourceHandle: 'neurons', target: 'pick', targetHandle: 'in' })
+    g = addEdge(g, {
+      source: 'find',
+      sourceHandle: 'neurons',
+      target: 'pick',
+      targetHandle: 'in',
+    })
     return g
   }
 
   const type = via === 'skeletons' ? 'neuron.skeletons' : 'neuron.meshes'
   const port = via === 'skeletons' ? 'skeletons' : 'meshes'
   g = addNode(g, node('geo', type, { limit: 100 }))
-  g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'geo', targetHandle: 'dataset' })
-  g = addEdge(g, { source: 'find', sourceHandle: 'neurons', target: 'geo', targetHandle: 'neurons' })
+  g = addEdge(g, {
+    source: 'ds',
+    sourceHandle: 'dataset',
+    target: 'geo',
+    targetHandle: 'dataset',
+  })
+  g = addEdge(g, {
+    source: 'find',
+    sourceHandle: 'neurons',
+    target: 'geo',
+    targetHandle: 'neurons',
+  })
   g = addEdge(g, { source: 'geo', sourceHandle: port, target: 'pick', targetHandle: 'in' })
   return g
 }
@@ -83,7 +106,9 @@ describe('core.selectOne — types', () => {
     expect(inferGraph(pipeline({}, 'skeletons')).nodes['pick']?.outputs['item']?.kind).toBe(
       'skeletons',
     )
-    expect(inferGraph(pipeline({}, 'meshes')).nodes['pick']?.outputs['item']?.kind).toBe('meshes')
+    expect(inferGraph(pipeline({}, 'meshes')).nodes['pick']?.outputs['item']?.kind).toBe(
+      'meshes',
+    )
   })
 
   it('takes an any port, because the type system cannot say "a collection"', () => {
@@ -121,15 +146,41 @@ describe('core.selectOne — validation', () => {
     g = addNode(g, node('ds', 'neuron.dataset', { dataset: 'optic-lobe-mini' }))
     g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC.*' }))
     g = addNode(g, node('conn', 'neuron.connectivity'))
-    g = addNode(g, node('piv', 'core.pivot', {
-      rows: 'preType', columns: 'postType', value: 'weight', agg: 'sum',
-    }))
+    g = addNode(
+      g,
+      node('piv', 'core.pivot', {
+        rows: 'preType',
+        columns: 'postType',
+        value: 'weight',
+        agg: 'sum',
+      }),
+    )
     g = addNode(g, node('pick', 'core.selectOne'))
-    g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'find', targetHandle: 'dataset' })
-    g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'conn', targetHandle: 'dataset' })
-    g = addEdge(g, { source: 'find', sourceHandle: 'neurons', target: 'conn', targetHandle: 'neurons' })
+    g = addEdge(g, {
+      source: 'ds',
+      sourceHandle: 'dataset',
+      target: 'find',
+      targetHandle: 'dataset',
+    })
+    g = addEdge(g, {
+      source: 'ds',
+      sourceHandle: 'dataset',
+      target: 'conn',
+      targetHandle: 'dataset',
+    })
+    g = addEdge(g, {
+      source: 'find',
+      sourceHandle: 'neurons',
+      target: 'conn',
+      targetHandle: 'neurons',
+    })
     g = addEdge(g, { source: 'conn', sourceHandle: 'edges', target: 'piv', targetHandle: 'in' })
-    g = addEdge(g, { source: 'piv', sourceHandle: 'matrix', target: 'pick', targetHandle: 'in' })
+    g = addEdge(g, {
+      source: 'piv',
+      sourceHandle: 'matrix',
+      target: 'pick',
+      targetHandle: 'in',
+    })
 
     const reported = issues(g, 'pick')
     expect(reported).toHaveLength(1)

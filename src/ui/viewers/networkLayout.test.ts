@@ -54,7 +54,13 @@ const chain = () =>
 
 describe('readTopology', () => {
   it('maps ids to indices and drops edges pointing at unknown nodes', () => {
-    const value = network([{ id: 'a' }, { id: 'b' }], [['a', 'b'], ['a', 'ghost']])
+    const value = network(
+      [{ id: 'a' }, { id: 'b' }],
+      [
+        ['a', 'b'],
+        ['a', 'ghost'],
+      ],
+    )
     const topology = readTopology(value)
     expect(topology.ids).toEqual(['a', 'b'])
     expect(topology.edges).toEqual([[0, 1]])
@@ -97,7 +103,13 @@ describe('assignLayers', () => {
 
 describe('computeLayout', () => {
   it('returns a position per node for every layout', async () => {
-    for (const layout of ['forceatlas2', 'circular', 'layered', 'columns', 'grouped'] as const) {
+    for (const layout of [
+      'forceatlas2',
+      'circular',
+      'layered',
+      'columns',
+      'grouped',
+    ] as const) {
       const positions = await computeLayout(chain(), { layout, iterations: 20 })
       expect(positions.size, layout).toBe(3)
       for (const id of ['a', 'b', 'c']) {
@@ -265,10 +277,7 @@ describe('the layered layout', () => {
 
 describe('the grouped layout', () => {
   const clustered = () => {
-    const value = network(
-      [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }],
-      [['a', 'c']],
-    )
+    const value = network([{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }], [['a', 'c']])
     return {
       ...value,
       nodes: {
@@ -283,7 +292,10 @@ describe('the grouped layout', () => {
     Math.hypot(p.x - q.x, p.y - q.y)
 
   it('puts members of a group nearer each other than members of different groups', async () => {
-    const positions = await computeLayout(clustered(), { layout: 'grouped', groupColumn: 'side' })
+    const positions = await computeLayout(clustered(), {
+      layout: 'grouped',
+      groupColumn: 'side',
+    })
     const [a, b, c] = ['a', 'b', 'c'].map((id) => positions.get(id)!)
     expect(distance(a!, b!)).toBeLessThan(distance(a!, c!))
   })
@@ -365,7 +377,9 @@ describe('spectralAxes', () => {
   })
 
   it('declines a graph too small to embed', () => {
-    expect(spectralAxes(readTopology(network([{ id: 'a' }, { id: 'b' }], [['a', 'b']])))).toBeUndefined()
+    expect(
+      spectralAxes(readTopology(network([{ id: 'a' }, { id: 'b' }], [['a', 'b']]))),
+    ).toBeUndefined()
   })
 
   it('declines a graph with no edges, where every node is its own component', () => {
@@ -390,7 +404,10 @@ describe('the spectral layout', () => {
     )
     const positions = await computeLayout(value, { layout: 'spectral' })
     const distance = (p: string, q: string) =>
-      Math.hypot(positions.get(p)!.x - positions.get(q)!.x, positions.get(p)!.y - positions.get(q)!.y)
+      Math.hypot(
+        positions.get(p)!.x - positions.get(q)!.x,
+        positions.get(p)!.y - positions.get(q)!.y,
+      )
     expect(distance('a', 'b')).toBeLessThan(distance('a', 'e'))
   })
 

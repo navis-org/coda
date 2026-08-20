@@ -60,7 +60,12 @@ function graph(type: string, params: Record<string, unknown> = {}): CodaGraph {
   let g = emptyGraph('roi-summary-test')
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: DATASET }))
   g = addNode(g, node('roi', type, params))
-  g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'roi', targetHandle: 'dataset' })
+  g = addEdge(g, {
+    source: 'ds',
+    sourceHandle: 'dataset',
+    target: 'roi',
+    targetHandle: 'dataset',
+  })
   return g
 }
 
@@ -89,7 +94,9 @@ describe('neuron.roiCompleteness', () => {
   it('advertises the schema it returns, before anything has run', () => {
     // Fixed rather than discovered, unlike most query nodes here — so a column picker
     // downstream is populated the moment the wire is made rather than after the first Run.
-    const out = inferGraph(graph('neuron.roiCompleteness')).nodes['roi']?.outputs['completeness']
+    const out = inferGraph(graph('neuron.roiCompleteness')).nodes['roi']?.outputs[
+      'completeness'
+    ]
     expect(columnNames(schemaOf(out))).toContain('preCompleteness')
   })
 
@@ -130,7 +137,9 @@ describe('neuron.roiCompleteness', () => {
     }) as DataSource
 
     const scheduler = makeScheduler()
-    await scheduler.run(graph('neuron.roiCompleteness', { primaryOnly: true }), { mode: 'full' })
+    await scheduler.run(graph('neuron.roiCompleteness', { primaryOnly: true }), {
+      mode: 'full',
+    })
     const out = scheduler.output('roi', 'completeness')
     if (!isTableValue(out)) throw new Error('expected a table')
     expect(out.length).toBeGreaterThan(0)
@@ -175,8 +184,10 @@ describe('neuron.roiConnectivity', () => {
     const count = getColumn(links, 'count') as number[]
     for (let row = 0; row < links.length; row++) {
       const cell =
-        matrix.values[index.get(String(source[row]))! * matrix.rowLabels.length +
-          index.get(String(target[row]))!]
+        matrix.values[
+          index.get(String(source[row]))! * matrix.rowLabels.length +
+            index.get(String(target[row]))!
+        ]
       expect(cell).toBe(count[row])
     }
   })

@@ -112,8 +112,8 @@ const SECTIONS: readonly [Section, ...Section[]] = [
         <strong>Credentials stay in this browser.</strong> Tokens are held in this
         browser&rsquo;s local storage on this machine only. They are never written into a saved
         graph or an export, never sent to us, and never shared with any third party — they go
-        only to the service they authenticate, through the same-origin proxy that request has
-        to travel through.
+        only to the service they authenticate, through the same-origin proxy that request has to
+        travel through.
       </>
     ),
   },
@@ -598,7 +598,11 @@ function ProviderForm({
     <section className="sources__source">
       <label className="sources__field">
         <span>Provider</span>
-        <select className="field" value={provider.id} onChange={(e) => onChoose(e.target.value)}>
+        <select
+          className="field"
+          value={provider.id}
+          onChange={(e) => onChoose(e.target.value)}
+        >
           {PROVIDERS.map((entry) => (
             <option key={entry.id} value={entry.id}>
               {entry.label}

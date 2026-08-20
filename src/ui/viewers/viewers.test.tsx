@@ -183,7 +183,9 @@ describe('BarChartViewer', () => {
     // Locale collation, not code-unit order — otherwise lowercase type names like
     // "gL(R)" sort after every uppercase one, which reads as random to a user.
     expect(labelsOf(alpha.container)).toEqual(
-      ['PED(R)', 'gL(R)', 'CA(R)'].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
+      ['PED(R)', 'gL(R)', 'CA(R)'].sort((a, b) =>
+        a.localeCompare(b, undefined, { numeric: true }),
+      ),
     )
   })
 

@@ -140,7 +140,11 @@ export function parseMarkdown(source: string): MarkdownBlock[] {
     const open = stack[stack.length - 1]
     const last = open?.list.items[open.list.items.length - 1]
     if (last && /^\s/.test(line)) {
-      last.children = [...last.children, { kind: 'text', text: ' ' }, ...parseInline(line.trim())]
+      last.children = [
+        ...last.children,
+        { kind: 'text', text: ' ' },
+        ...parseInline(line.trim()),
+      ]
       continue
     }
 

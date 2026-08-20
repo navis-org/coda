@@ -237,17 +237,19 @@ export const MAX_MORPHOLOGY_FILES = 50
 function skeletonFiles(value: SkeletonsValue, base: string): ExportFile[] {
   return value.items
     .slice(0, MAX_MORPHOLOGY_FILES)
-    .map((item) => ({ name: `${base}-${item.bodyId}.swc`, parts: [skeletonToSwc(item)], mime: TEXT }))
+    .map((item) => ({
+      name: `${base}-${item.bodyId}.swc`,
+      parts: [skeletonToSwc(item)],
+      mime: TEXT,
+    }))
 }
 
 function meshFiles(value: MeshesValue, base: string): ExportFile[] {
-  return value.items
-    .slice(0, MAX_MORPHOLOGY_FILES)
-    .map((item) => ({
-      name: `${base}-${meshFileStem(item)}.obj`,
-      parts: [meshToObj(item)],
-      mime: TEXT,
-    }))
+  return value.items.slice(0, MAX_MORPHOLOGY_FILES).map((item) => ({
+    name: `${base}-${meshFileStem(item)}.obj`,
+    parts: [meshToObj(item)],
+    mime: TEXT,
+  }))
 }
 
 /**
@@ -283,7 +285,8 @@ export function planExport(
   if (!value) return { files: [] }
   const resolved = format === 'auto' ? defaultFormat(value) : format
 
-  if (resolved === 'json') return { files: [{ name: `${base}.json`, parts: [valueToJson(value)], mime: JSON_MIME }] }
+  if (resolved === 'json')
+    return { files: [{ name: `${base}.json`, parts: [valueToJson(value)], mime: JSON_MIME }] }
 
   switch (value.kind) {
     case 'table':

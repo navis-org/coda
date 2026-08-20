@@ -44,7 +44,10 @@ registerEmitter('out.barChart', (ctx) => {
   if (!category || !value) {
     // The node itself does not refuse over an unpicked column — it is a tap, and blocking
     // everything downstream because a drawing cannot be configured helps nobody.
-    return [...lines, ...ctx.note('No category or value column is picked, so nothing is drawn.')]
+    return [
+      ...lines,
+      ...ctx.note('No category or value column is picked, so nothing is drawn.'),
+    ]
   }
 
   if (series) {
@@ -116,9 +119,7 @@ registerEmitter('out.scatter', (ctx) => {
   const selection = selectionIds(ctx)
   const idColumn = ctx.column('idColumn')
   if (selection.length > 0 && idColumn) {
-    lines.push(
-      `${selected} = ${out}[${out}[${pyStr(idColumn)}].isin(${pyList(selection)})]`,
-    )
+    lines.push(`${selected} = ${out}[${out}[${pyStr(idColumn)}].isin(${pyList(selection)})]`)
   } else {
     lines.push(
       ...ctx.note('Nothing is lassoed on the canvas, so Selected is empty.'),
@@ -144,20 +145,14 @@ registerEmitter('out.scatter', (ctx) => {
   const opacity = Number(ctx.params.opacity ?? 1)
   if (Number.isFinite(opacity) && opacity < 1) args.push(`alpha=${opacity}`)
 
-  lines.push(
-    ``,
-    `plt.figure(figsize=(8, 6))`,
-    `sns.scatterplot(${args.join(', ')})`,
-  )
+  lines.push(``, `plt.figure(figsize=(8, 6))`, `sns.scatterplot(${args.join(', ')})`)
   if (ctx.params.xLog === true) lines.push(`plt.xscale('log')`)
   if (ctx.params.yLog === true) lines.push(`plt.yscale('log')`)
   if (String(ctx.params.aspect ?? '') === 'equal') lines.push(`plt.gca().set_aspect('equal')`)
   if (String(ctx.params.trend ?? 'none') !== 'none') {
     // seaborn's regplot fits in the space it is drawn in, which is the same reading Coda's
     // trend gives: straight on screen, so a log-log fit is a power law.
-    lines.push(
-      `sns.regplot(data=${out}, x=${pyStr(x)}, y=${pyStr(y)}, scatter=False, ci=None)`,
-    )
+    lines.push(`sns.regplot(data=${out}, x=${pyStr(x)}, y=${pyStr(y)}, scatter=False, ci=None)`)
   }
   lines.push(`plt.tight_layout()`, `plt.show()`)
   return lines
@@ -307,7 +302,7 @@ registerEmitter('dataset.description', (ctx) => {
   // No outputs, and the card's whole content is somebody else's prose. A cell that fetched
   // and printed it would be a network call for a credit line.
   return ctx.todo(
-    'This card shows the dataset\'s published description and citation. Read it with ' +
+    "This card shows the dataset's published description and citation. Read it with " +
       '`fetch_meta(client=...)` if you need it here.',
   )
 })

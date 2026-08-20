@@ -36,7 +36,20 @@ const HEMIBRAIN = {
   ],
 }
 
-const PRIMARY = ['AL(L)', 'AL(R)', 'AB(L)', 'AB(R)', 'EB', 'FB', 'NO', 'PB', 'GNG', 'ATL(L)', 'ATL(R)', 'IB']
+const PRIMARY = [
+  'AL(L)',
+  'AL(R)',
+  'AB(L)',
+  'AB(R)',
+  'EB',
+  'FB',
+  'NO',
+  'PB',
+  'GNG',
+  'ATL(L)',
+  'ATL(R)',
+  'IB',
+]
 
 describe('superRoisFrom', () => {
   it('maps a primary region to the group above it', () => {

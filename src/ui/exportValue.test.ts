@@ -50,7 +50,10 @@ function skeletons(count = 1): SkeletonsValue {
   return {
     kind: 'skeletons',
     items,
-    attributes: tableFromRows(tableSchema(column('bodyId', 'i64')), items.map((s) => ({ bodyId: s.bodyId }))),
+    attributes: tableFromRows(
+      tableSchema(column('bodyId', 'i64')),
+      items.map((s) => ({ bodyId: s.bodyId })),
+    ),
     bounds: EMPTY_BOUNDS,
   }
 }
@@ -64,7 +67,10 @@ function meshes(count = 1): MeshesValue {
   return {
     kind: 'meshes',
     items,
-    attributes: tableFromRows(tableSchema(column('bodyId', 'i64')), items.map((m) => ({ bodyId: m.bodyId }))),
+    attributes: tableFromRows(
+      tableSchema(column('bodyId', 'i64')),
+      items.map((m) => ({ bodyId: m.bodyId })),
+    ),
     bounds: EMPTY_BOUNDS,
   }
 }
@@ -81,7 +87,10 @@ describe('SWC', () => {
   })
 
   it('shifts every id and parent to 1-based, keeping a root at -1', () => {
-    const rows = skeletonToSwc(skeleton()).trim().split('\n').filter((l) => !l.startsWith('#'))
+    const rows = skeletonToSwc(skeleton())
+      .trim()
+      .split('\n')
+      .filter((l) => !l.startsWith('#'))
     const parents = rows.map((r) => Number(r.split(' ')[6]))
     // Coda's parents are [-1, 0, 1] — array indices. Written unshifted, point 2 would claim a
     // parent of 0, which no SWC reader accepts and several silently reparent to nothing.
@@ -90,7 +99,9 @@ describe('SWC', () => {
   })
 
   it('says what the numbers mean, since the format itself does not', () => {
-    const header = skeletonToSwc(skeleton()).split('\n').filter((l) => l.startsWith('#'))
+    const header = skeletonToSwc(skeleton())
+      .split('\n')
+      .filter((l) => l.startsWith('#'))
     expect(header.join(' ')).toContain('nanometres')
     expect(header.join(' ')).toContain('101')
   })
@@ -98,7 +109,10 @@ describe('SWC', () => {
   it('writes the structure identifier as 0 rather than guessing one', () => {
     // neuPrint publishes no soma/axon/dendrite labelling, and marking the root as soma would
     // be a claim about anatomy that nothing in the data supports.
-    const rows = skeletonToSwc(skeleton()).trim().split('\n').filter((l) => !l.startsWith('#'))
+    const rows = skeletonToSwc(skeleton())
+      .trim()
+      .split('\n')
+      .filter((l) => !l.startsWith('#'))
     expect(rows.every((r) => r.split(' ')[1] === '0')).toBe(true)
   })
 })
@@ -106,7 +120,10 @@ describe('SWC', () => {
 describe('OBJ', () => {
   it('writes vertices then faces, with 1-based indices', () => {
     const text = meshToObj(meshes().items[0]!)
-    const lines = text.trim().split('\n').filter((l) => !l.startsWith('#'))
+    const lines = text
+      .trim()
+      .split('\n')
+      .filter((l) => !l.startsWith('#'))
     expect(lines).toContain('v 0 0 0')
     expect(lines).toContain('v 1 0 0')
     // The single thing every hand-written OBJ writer gets wrong. `f 0 1 2` loads as one corrupt
@@ -162,10 +179,9 @@ describe('planExport — auto', () => {
       kind: 'network',
       directed: true,
       nodes: tableFromRows(tableSchema(column('id', 'str')), [{ id: 'a' }]),
-      edges: tableFromRows(
-        tableSchema(column('source', 'str'), column('target', 'str')),
-        [{ source: 'a', target: 'a' }],
-      ),
+      edges: tableFromRows(tableSchema(column('source', 'str'), column('target', 'str')), [
+        { source: 'a', target: 'a' },
+      ]),
     }
     expect(planExport(network, 'auto', base).files.map((f) => f.name)).toEqual([
       'out-nodes.csv',
@@ -191,7 +207,10 @@ describe('planExport — auto', () => {
     // reads as the export having half-worked.
     const plan = planExport(skeletons(MAX_MORPHOLOGY_FILES + 5), 'auto', base)
     expect(plan.files).toHaveLength(MAX_MORPHOLOGY_FILES)
-    expect(plan.truncated).toEqual({ kept: MAX_MORPHOLOGY_FILES, total: MAX_MORPHOLOGY_FILES + 5 })
+    expect(plan.truncated).toEqual({
+      kept: MAX_MORPHOLOGY_FILES,
+      total: MAX_MORPHOLOGY_FILES + 5,
+    })
   })
 
   it('keeps a point cloud’s positions with its attributes', () => {
@@ -199,7 +218,10 @@ describe('planExport — auto', () => {
     const points: PointsValue = {
       kind: 'points',
       positions: new Float32Array([1, 2, 3, 4, 5, 6]),
-      attributes: tableFromRows(tableSchema(column('kind', 'str')), [{ kind: 'pre' }, { kind: 'post' }]),
+      attributes: tableFromRows(tableSchema(column('kind', 'str')), [
+        { kind: 'pre' },
+        { kind: 'post' },
+      ]),
       bounds: EMPTY_BOUNDS,
     }
     const text = planExport(points, 'auto', base).files[0]!.parts.join('')
@@ -212,7 +234,9 @@ describe('planExport — auto', () => {
 describe('planExport — an explicit format', () => {
   it('honours JSON for anything', () => {
     expect(planExport(table(), 'json', 'out').files.map((f) => f.name)).toEqual(['out.json'])
-    expect(planExport(skeletons(), 'json', 'out').files.map((f) => f.name)).toEqual(['out.json'])
+    expect(planExport(skeletons(), 'json', 'out').files.map((f) => f.name)).toEqual([
+      'out.json',
+    ])
   })
 
   it('plans nothing for a format the value cannot be written as', () => {

@@ -19,7 +19,15 @@ function mask(width: number, height: number): Uint8Array {
 }
 
 /** Paint an axis-aligned rectangle as two triangles, the way a real caller would. */
-function rect(m: Uint8Array, w: number, h: number, x0: number, y0: number, x1: number, y1: number) {
+function rect(
+  m: Uint8Array,
+  w: number,
+  h: number,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+) {
   fillTriangle(m, w, h, [x0, y0], [x1, y0], [x1, y1])
   fillTriangle(m, w, h, [x0, y0], [x1, y1], [x0, y1])
 }

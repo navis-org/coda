@@ -117,7 +117,10 @@ export function markPath(shape: MarkerShape, x: number, y: number, r: number): s
   const vertices = markVertices(shape)
   if (vertices.length === 0) return ''
   return `${vertices
-    .map(([vx, vy], index) => `${index === 0 ? 'M' : 'L'}${round(x + vx! * r)},${round(y + vy! * r)}`)
+    .map(
+      ([vx, vy], index) =>
+        `${index === 0 ? 'M' : 'L'}${round(x + vx! * r)},${round(y + vy! * r)}`,
+    )
     .join('')}Z`
 }
 
@@ -238,7 +241,8 @@ export function drawScatter(
     context.fillStyle = key.slice(0, key.lastIndexOf('|'))
     const shape = key.slice(key.lastIndexOf('|') + 1) as MarkerShape
     context.beginPath()
-    for (const i of indices) traceMark(context, shape, spec.px[i]!, spec.py[i]!, spec.radius[i]!)
+    for (const i of indices)
+      traceMark(context, shape, spec.px[i]!, spec.py[i]!, spec.radius[i]!)
     context.fill()
   }
 
@@ -360,7 +364,10 @@ function element<K extends keyof SVGElementTagNameMap>(
   return node
 }
 
-function textNode(content: string, attributes: Record<string, string | number>): SVGTextElement {
+function textNode(
+  content: string,
+  attributes: Record<string, string | number>,
+): SVGTextElement {
   const node = element('text', attributes)
   node.textContent = content
   return node
@@ -532,9 +539,17 @@ export function scatterToSvg(options: ScatterSvgSpec): SVGSVGElement {
         )
       })
       defs.append(gradient)
-      legend.append(textNode(options.ramp.label, { x: cursor, y: baseline, 'dominant-baseline': 'central' }))
+      legend.append(
+        textNode(options.ramp.label, {
+          x: cursor,
+          y: baseline,
+          'dominant-baseline': 'central',
+        }),
+      )
       cursor += options.ramp.label.length * 5.6 + 8
-      legend.append(textNode(options.ramp.low, { x: cursor, y: baseline, 'dominant-baseline': 'central' }))
+      legend.append(
+        textNode(options.ramp.low, { x: cursor, y: baseline, 'dominant-baseline': 'central' }),
+      )
       cursor += options.ramp.low.length * 5.6 + 5
       legend.append(
         element('rect', {
@@ -547,7 +562,9 @@ export function scatterToSvg(options: ScatterSvgSpec): SVGSVGElement {
         }),
       )
       cursor += 66
-      legend.append(textNode(options.ramp.high, { x: cursor, y: baseline, 'dominant-baseline': 'central' }))
+      legend.append(
+        textNode(options.ramp.high, { x: cursor, y: baseline, 'dominant-baseline': 'central' }),
+      )
       cursor += options.ramp.high.length * 5.6 + 14
     }
     for (const item of legendItems) {
@@ -560,7 +577,14 @@ export function scatterToSvg(options: ScatterSvgSpec): SVGSVGElement {
         )
       } else {
         legend.append(
-          element('rect', { x: cursor, y: baseline - 4, width: 8, height: 8, rx: 2, fill: item.color ?? ink.muted }),
+          element('rect', {
+            x: cursor,
+            y: baseline - 4,
+            width: 8,
+            height: 8,
+            rx: 2,
+            fill: item.color ?? ink.muted,
+          }),
         )
       }
       legend.append(

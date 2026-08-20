@@ -48,7 +48,12 @@ import {
   skeletonFromSwc,
   tableFromCypher,
 } from './decode'
-import { CORE_NEURON_COLUMNS, MAX_EXTRA_COLUMNS, discoverNeuronSchema, schemasFor } from './schema'
+import {
+  CORE_NEURON_COLUMNS,
+  MAX_EXTRA_COLUMNS,
+  discoverNeuronSchema,
+  schemasFor,
+} from './schema'
 import type { RoiConnectivityResponse } from './client'
 import {
   ROI_COMPLETENESS_COLUMNS,
@@ -314,9 +319,9 @@ describe('query building', () => {
 
   it('matches a bare node at the far end, so sub-threshold partners still count', () => {
     // `(p)` not `(p:Neuron)`: excluding Segments would silently under-report total weight.
-    expect(connectivityCypher({ datasetId: 'x', bodyIds: [1], direction: 'outputs' })).toContain(
-      '->(p)\n',
-    )
+    expect(
+      connectivityCypher({ datasetId: 'x', bodyIds: [1], direction: 'outputs' }),
+    ).toContain('->(p)\n')
   })
 
   it('constrains both ends for adjacency', () => {
@@ -684,7 +689,10 @@ describe('skeletons', () => {
 })
 
 describe('per-dataset schema discovery', () => {
-  const mancProperties = JSON.parse(String(metaManc.data[0]?.[0] ?? '{}')) as Record<string, string>
+  const mancProperties = JSON.parse(String(metaManc.data[0]?.[0] ?? '{}')) as Record<
+    string,
+    string
+  >
   const hemibrainSample = sampleNeurons.data
     .map((row) => row[0])
     .filter((v): v is Record<string, unknown> => Boolean(v) && typeof v === 'object')
@@ -820,9 +828,9 @@ describe('failure diagnosis', () => {
 
   it('does not claim a missing proxy when the base is absolute', async () => {
     stubFetch({ status: 404 })
-    await expect(
-      get('/api/x', { token: 't', baseUrl: 'https://example.org' }),
-    ).rejects.toThrow(/neuPrint returned 404/)
+    await expect(get('/api/x', { token: 't', baseUrl: 'https://example.org' })).rejects.toThrow(
+      /neuPrint returned 404/,
+    )
   })
 
   it('points at the token on a 401, and raises the signal that opens the panel', async () => {
@@ -866,7 +874,9 @@ describe('mesh source resolution', () => {
   it('refuses dvid:// rather than mangling it into a 404', () => {
     // DVID serves meshes through an entirely different API. Pretending it is an object store
     // would turn "unsupported source" into "every neuron is missing".
-    expect(precomputedToHttp('dvid://https://emdata5.janelia.org/8e29f/segmentation')).toBeUndefined()
+    expect(
+      precomputedToHttp('dvid://https://emdata5.janelia.org/8e29f/segmentation'),
+    ).toBeUndefined()
   })
 
   it('prefers a dedicated mesh layer over the segmentation volume', () => {
@@ -927,7 +937,9 @@ describe('mesh source resolution', () => {
             { url: 'precomputed://gs://flyem-male-cns/v1.0/segmentation' },
             { url: 'precomputed://gs://flyem-male-cns/v1.0/segmentation/type_property' },
             { url: 'precomputed://gs://flyem-male-cns/v1.0/segmentation/numeric_properties' },
-            { url: 'precomputed://gs://flyem-male-cns/v1.0/segmentation/meshes-malecns/single-res-meshes' },
+            {
+              url: 'precomputed://gs://flyem-male-cns/v1.0/segmentation/meshes-malecns/single-res-meshes',
+            },
           ],
         },
       ],
@@ -961,7 +973,11 @@ describe('mesh source resolution', () => {
       layers: [
         { type: 'image', name: 'em', source: 'precomputed://gs://b/em' },
         { type: 'segmentation', name: 'rois', source: 'precomputed://gs://b/rois/shells' },
-        { type: 'segmentation', name: 'hemibrain:v1.2.1', source: 'precomputed://gs://b/v1.2/segmentation' },
+        {
+          type: 'segmentation',
+          name: 'hemibrain:v1.2.1',
+          source: 'precomputed://gs://b/v1.2/segmentation',
+        },
       ],
     }
     expect(meshSourceFromState(state, 'hemibrain:v1.2.1')?.source).toBe(
@@ -972,7 +988,11 @@ describe('mesh source resolution', () => {
   it('returns nothing when a dataset publishes only dvid', () => {
     const state = {
       layers: [
-        { type: 'segmentation', name: 'manc:v1.0', source: 'dvid://https://emdata5.janelia.org/8e29f/segmentation' },
+        {
+          type: 'segmentation',
+          name: 'manc:v1.0',
+          source: 'dvid://https://emdata5.janelia.org/8e29f/segmentation',
+        },
       ],
     }
     expect(meshSourceFromState(state, 'manc:v1.0')).toBeUndefined()

@@ -95,8 +95,10 @@ function open(): Promise<IDBDatabase> {
     }
     request.onupgradeneeded = () => {
       const database = request.result
-      if (!database.objectStoreNames.contains(META_STORE)) database.createObjectStore(META_STORE)
-      if (!database.objectStoreNames.contains(TABLE_STORE)) database.createObjectStore(TABLE_STORE)
+      if (!database.objectStoreNames.contains(META_STORE))
+        database.createObjectStore(META_STORE)
+      if (!database.objectStoreNames.contains(TABLE_STORE))
+        database.createObjectStore(TABLE_STORE)
     }
     request.onsuccess = () => resolve(request.result)
     // Private-mode Firefox rejects here; so does a browser with storage switched off.
@@ -134,7 +136,9 @@ function asError(err: unknown, fallback: string): Error {
  * the `put` succeed and then aborts, so awaiting the request would report a save that was
  * rolled back — which for an upload means claiming to hold a file that is gone.
  */
-async function write(run: (meta: IDBObjectStore, tables: IDBObjectStore) => void): Promise<void> {
+async function write(
+  run: (meta: IDBObjectStore, tables: IDBObjectStore) => void,
+): Promise<void> {
   const database = await db()
   await new Promise<void>((resolve, reject) => {
     let tx: IDBTransaction
@@ -283,7 +287,11 @@ async function loadMeta(id: string): Promise<void> {
  *
  * Rejects rather than degrading. See the module note.
  */
-export async function putUpload(name: string, table: TableValue, bytes: number): Promise<string> {
+export async function putUpload(
+  name: string,
+  table: TableValue,
+  bytes: number,
+): Promise<string> {
   const id = uploadId(table)
   const meta: UploadMeta = {
     id,

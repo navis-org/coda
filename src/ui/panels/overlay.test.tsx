@@ -8,7 +8,15 @@
  * the graph stale. If that ever regresses, inspecting a result would start invalidating it.
  */
 
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { App } from '../../App'
@@ -120,9 +128,9 @@ describe('ViewerOverlay', () => {
     expect(scale.value).toBe('sequential')
 
     fireEvent.change(scale, { target: { value: 'diverging' } })
-    expect(useGraphStore.getState().graph.nodes.find((n) => n.id === 'heat')?.params.scale).toBe(
-      'diverging',
-    )
+    expect(
+      useGraphStore.getState().graph.nodes.find((n) => n.id === 'heat')?.params.scale,
+    ).toBe('diverging')
 
     fireEvent.click(showValues)
     expect(
@@ -193,7 +201,10 @@ describe('the styling sidebar', () => {
    * restyling, and the same promise that touching them never invalidates the result.
    */
 
-  const tabs = (dialog: HTMLElement) => within(dialog).getAllByRole('tab').map((t) => t.textContent)
+  const tabs = (dialog: HTMLElement) =>
+    within(dialog)
+      .getAllByRole('tab')
+      .map((t) => t.textContent)
 
   it('renders a tab per declared group, in the declared order', async () => {
     const dialog = await openOverlay('network', 'view')
@@ -202,9 +213,9 @@ describe('the styling sidebar', () => {
 
   it('opens on the first tab', async () => {
     const dialog = await openOverlay('network', 'view')
-    expect(within(dialog).getByRole('tab', { name: 'Node' }).getAttribute('aria-selected')).toBe(
-      'true',
-    )
+    expect(
+      within(dialog).getByRole('tab', { name: 'Node' }).getAttribute('aria-selected'),
+    ).toBe('true')
     expect(within(dialog).getByRole('tabpanel', { name: 'Node' })).toBeTruthy()
   })
 
@@ -248,7 +259,9 @@ describe('the styling sidebar', () => {
     })
 
     const store = useGraphStore.getState()
-    expect(store.graph.nodes.find((n) => n.id === 'view')?.params.nodeColorMode).toBe('sequential')
+    expect(store.graph.nodes.find((n) => n.id === 'view')?.params.nodeColorMode).toBe(
+      'sequential',
+    )
     // The rail's guarantee, carried over: restyling must never invalidate the result.
     expect(store.nodeInfo('view').state).toBe('ok')
     expect(store.nodeOutput('view', 'out')).toBeDefined()

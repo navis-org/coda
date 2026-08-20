@@ -8,7 +8,14 @@
 
 import { beforeAll, describe, expect, it } from 'vitest'
 
-import { addEdge, addNode, deserializeGraph, emptyGraph, serializeGraph, setNodeParam } from '../../core/graph'
+import {
+  addEdge,
+  addNode,
+  deserializeGraph,
+  emptyGraph,
+  serializeGraph,
+  setNodeParam,
+} from '../../core/graph'
 import type { CodaGraph, GraphNode } from '../../core/graph'
 import { inferGraph } from '../../core/inference'
 import type { EvalContext, NodeDefinition, ParamValues } from '../../core/node'
@@ -58,10 +65,30 @@ function pipeline(overrides: Record<string, unknown> = {}): CodaGraph {
     }),
   )
   g = addNode(g, node('view', 'out.network'))
-  g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'find', targetHandle: 'dataset' })
-  g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'conn', targetHandle: 'dataset' })
-  g = addEdge(g, { source: 'find', sourceHandle: 'neurons', target: 'conn', targetHandle: 'neurons' })
-  g = addEdge(g, { source: 'conn', sourceHandle: 'connections', target: 'net', targetHandle: 'edges' })
+  g = addEdge(g, {
+    source: 'ds',
+    sourceHandle: 'dataset',
+    target: 'find',
+    targetHandle: 'dataset',
+  })
+  g = addEdge(g, {
+    source: 'ds',
+    sourceHandle: 'dataset',
+    target: 'conn',
+    targetHandle: 'dataset',
+  })
+  g = addEdge(g, {
+    source: 'find',
+    sourceHandle: 'neurons',
+    target: 'conn',
+    targetHandle: 'neurons',
+  })
+  g = addEdge(g, {
+    source: 'conn',
+    sourceHandle: 'connections',
+    target: 'net',
+    targetHandle: 'edges',
+  })
   g = addEdge(g, { source: 'net', sourceHandle: 'network', target: 'view', targetHandle: 'in' })
   return g
 }
@@ -164,8 +191,12 @@ describe('BuildNetwork', () => {
     const networkType = inference.nodes.net?.outputs.network
     expect(networkType?.kind).toBe('network')
     // This is what lets the viewer's "colour by" picker populate before anything runs.
-    expect(attributeSchema(networkType, 'nodes')?.columns.map((c) => c.name)).toContain('weightOut')
-    expect(attributeSchema(networkType, 'edges')?.columns.map((c) => c.name)).toContain('weight')
+    expect(attributeSchema(networkType, 'nodes')?.columns.map((c) => c.name)).toContain(
+      'weightOut',
+    )
+    expect(attributeSchema(networkType, 'edges')?.columns.map((c) => c.name)).toContain(
+      'weight',
+    )
   })
 
   it('warns when source and target are the same column', () => {
@@ -290,7 +321,10 @@ describe('network viewer link labels', () => {
     const graph = setNodeParam(pipeline(), 'view', 'selection', ['LC4', 'DNp02'])
     const { graph: loaded, warnings } = deserializeGraph(serializeGraph(graph))
     expect(warnings).toEqual([])
-    expect(loaded.nodes.find((n) => n.id === 'view')?.params.selection).toEqual(['LC4', 'DNp02'])
+    expect(loaded.nodes.find((n) => n.id === 'view')?.params.selection).toEqual([
+      'LC4',
+      'DNp02',
+    ])
   })
 })
 
@@ -354,11 +388,7 @@ describe('the viewer filters its own output', () => {
  * Drive one node's `evaluate` directly, with column params resolved the way the editor
  * resolves them. Small controlled fixtures say more here than the mock connectome does.
  */
-function evalContext(
-  def: NodeDefinition,
-  params: ParamValues,
-  edges: TableValue,
-): EvalContext {
+function evalContext(def: NodeDefinition, params: ParamValues, edges: TableValue): EvalContext {
   const types: Record<string, CodaType | undefined> = { edges: T.table(edges.schema) }
   return {
     params,
@@ -436,7 +466,9 @@ describe('edge attributes riding along', () => {
   })
 
   it('takes a non-empty list literally, and in the order given', () => {
-    const { network } = build([{ from: 'a', to: 'b', w: 1, roi: 'LO' }], { keep: ['syn', 'roi'] })
+    const { network } = build([{ from: 'a', to: 'b', w: 1, roi: 'LO' }], {
+      keep: ['syn', 'roi'],
+    })
     expect(cols(network)).toEqual(['source', 'target', 'weight', 'edges', 'syn', 'roi'])
   })
 
@@ -519,11 +551,16 @@ describe('edge attributes riding along', () => {
     // Loading does not fill missing params with defaults, so an older file has no `keep` key
     // at all. It must read as "all", not crash and not silently carry nothing.
     const table = tableFromRows(EDGE_SCHEMA, [{ from: 'a', to: 'b', w: 1, roi: 'LO', syn: 1 }])
-    const legacy = { source: 'from', target: 'to', weight: 'w', directed: true, aggregate: true }
-    const out = def.evaluate(evalContext(def, legacy as unknown as ParamValues, table)) as Record<
-      string,
-      Value | undefined
-    >
+    const legacy = {
+      source: 'from',
+      target: 'to',
+      weight: 'w',
+      directed: true,
+      aggregate: true,
+    }
+    const out = def.evaluate(
+      evalContext(def, legacy as unknown as ParamValues, table),
+    ) as Record<string, Value | undefined>
     if (!isNetworkValue(out.network)) throw new Error('expected a network')
     expect(out.network.edges.schema.columns.map((c) => c.name)).toContain('roi')
   })

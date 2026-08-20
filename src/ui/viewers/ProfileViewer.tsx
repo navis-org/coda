@@ -279,7 +279,11 @@ export function ProfileViewer({
           <Loadable state={profile.status}>
             <SplitMeter
               parts={[
-                { label: 'in', value: inputSummary.synapses, color: seriesColor(0, currentMode()) },
+                {
+                  label: 'in',
+                  value: inputSummary.synapses,
+                  color: seriesColor(0, currentMode()),
+                },
                 {
                   label: 'out',
                   value: outputSummary.synapses,
@@ -365,10 +369,10 @@ export function ProfileViewer({
           <Loadable state={profile.status} empty={regions.length === 0}>
             <RegionBars rows={regions} />
             {/*
-              * Said out loud when it applies. `roiInfo` nests, so without the dataset's
-              * primary list these bars include a region and its parent and the total is
-              * roughly double. Reporting that is the difference between a caveat and a lie.
-              */}
+             * Said out loud when it applies. `roiInfo` nests, so without the dataset's
+             * primary list these bars include a region and its parent and the total is
+             * roughly double. Reporting that is the difference between a caveat and a lie.
+             */}
             {data && !data.primaryRois && (
               <p className="tile__note">
                 Includes nested regions — this dataset&rsquo;s primary region list has not
@@ -381,7 +385,11 @@ export function ProfileViewer({
                   parts={[
                     { label: 'L', value: sides.left, color: seriesColor(2, currentMode()) },
                     { label: 'R', value: sides.right, color: seriesColor(3, currentMode()) },
-                    { label: 'center', value: sides.center, color: CHART_INK[currentMode()].muted },
+                    {
+                      label: 'center',
+                      value: sides.center,
+                      color: CHART_INK[currentMode()].muted,
+                    },
                   ]}
                 />
               </>
@@ -390,7 +398,9 @@ export function ProfileViewer({
         </Tile>
 
         <Tile label={`All ${neurons.schema.columns.length} attributes`} wide collapsible>
-          <Facts rows={neurons.schema.columns.map((col) => [col.name, row?.[col.name] ?? null])} />
+          <Facts
+            rows={neurons.schema.columns.map((col) => [col.name, row?.[col.name] ?? null])}
+          />
         </Tile>
       </div>
 

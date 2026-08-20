@@ -72,8 +72,24 @@ describe('rasteriseSilhouette', () => {
   it('shades by depth, so a flat projection still reads as a 3D object', () => {
     // Two separated triangles at different depths; the nearer one must be brighter.
     const positions = new Float32Array([
-      0, 0, 0, 4, 0, 0, 0, 4, 0, // near
-      6, 6, 100, 10, 6, 100, 6, 10, 100, // far
+      0,
+      0,
+      0,
+      4,
+      0,
+      0,
+      0,
+      4,
+      0, // near
+      6,
+      6,
+      100,
+      10,
+      6,
+      100,
+      6,
+      10,
+      100, // far
     ])
     const indices = new Uint32Array([0, 1, 2, 3, 4, 5])
     const result = rasteriseSilhouette(positions, indices, 48)
@@ -94,10 +110,14 @@ describe('rasteriseSilhouette', () => {
   })
 
   it('returns an empty mask rather than throwing on degenerate input', () => {
-    expect(coverageFraction(rasteriseSilhouette(new Float32Array(0), new Uint32Array(0), 16))).toBe(0)
+    expect(
+      coverageFraction(rasteriseSilhouette(new Float32Array(0), new Uint32Array(0), 16)),
+    ).toBe(0)
     // Every vertex identical: no span to scale by, and a division would produce NaN indices.
     const collapsed = new Float32Array([5, 5, 5, 5, 5, 5, 5, 5, 5])
-    expect(coverageFraction(rasteriseSilhouette(collapsed, new Uint32Array([0, 1, 2]), 16))).toBe(0)
+    expect(
+      coverageFraction(rasteriseSilhouette(collapsed, new Uint32Array([0, 1, 2]), 16)),
+    ).toBe(0)
   })
 
   it('ignores indices that point outside the vertex list', () => {
@@ -151,9 +171,19 @@ describe('rowFields', () => {
     column('bodyId', 'i64'),
     column('type', 'str'),
     column('instance', 'str'),
-    ...['class', 'subclass', 'superclass', 'somaSide', 'rootSide', 'itoleeHl', 'trumanHl', 'hemilineage', 'consensusNt', 'predictedNt', 'flywireType'].map(
-      (n) => column(n, 'str'),
-    ),
+    ...[
+      'class',
+      'subclass',
+      'superclass',
+      'somaSide',
+      'rootSide',
+      'itoleeHl',
+      'trumanHl',
+      'hemilineage',
+      'consensusNt',
+      'predictedNt',
+      'flywireType',
+    ].map((n) => column(n, 'str')),
     ...['pre', 'post', 'synweight', 'upstream', 'downstream'].map((n) => column(n, 'i64')),
   )
 
@@ -195,9 +225,17 @@ describe('rowFields', () => {
     const wide = tableSchema(
       column('bodyId', 'i64'),
       column('type', 'str'),
-      ...['class', 'subclass', 'superclass', 'somaSide', 'rootSide', 'itoleeHl', 'consensusNt', 'cellBodyFiber', 'flywireType'].map(
-        (n) => column(n, 'str'),
-      ),
+      ...[
+        'class',
+        'subclass',
+        'superclass',
+        'somaSide',
+        'rootSide',
+        'itoleeHl',
+        'consensusNt',
+        'cellBodyFiber',
+        'flywireType',
+      ].map((n) => column(n, 'str')),
     )
     expect(rowFields(wide).chips).toHaveLength(8)
     expect(rowFields(maleCns).stats).toHaveLength(3)
@@ -250,7 +288,11 @@ describe('rowFields', () => {
     // `trumanHl` is not a candidate at all — one of male-CNS's two nomenclatures has to lead,
     // and the `chips` param is how someone asks for the other.
     expect(rowFields(maleCns).chips).not.toContain('trumanHl')
-    const manc = tableSchema(column('bodyId', 'i64'), column('type', 'str'), column('hemilineage', 'str'))
+    const manc = tableSchema(
+      column('bodyId', 'i64'),
+      column('type', 'str'),
+      column('hemilineage', 'str'),
+    )
     expect(rowFields(manc).chips).toEqual(['hemilineage'])
   })
 

@@ -127,7 +127,11 @@ registerEmitter('neuron.explore', (ctx) => {
       )
     }
   } else {
-    lines.push(``, ...ctx.note('The search box is empty, so Hits is the whole table.'), `${hits} <- ${all}`)
+    lines.push(
+      ``,
+      ...ctx.note('The search box is empty, so Hits is the whole table.'),
+      `${hits} <- ${all}`,
+    )
   }
 
   lines.push(``)
@@ -156,7 +160,7 @@ registerHelper({
   requires: ['dplyr'],
   source: [
     'coda_search <- function(df, query) {',
-    '  # Coda\'s Explore query language, matching only.',
+    "  # Coda's Explore query language, matching only.",
     '  #',
     '  # Terms are AND-ed; a leading "!" or "-" negates one. A bare word is a substring of the',
     '  # row\'s searchable text; "field=value" compares one column, with > < >= <= != and ~',
@@ -304,7 +308,7 @@ registerHelper({
   requires: ['neuprintr', 'dplyr'],
   source: [
     'coda_profile <- function(ids, min_weight = 1, top_n = 10, conn) {',
-    '  # Keys mirror the card\'s tiles: upstream_types, downstream_types, top_upstream,',
+    "  # Keys mirror the card's tiles: upstream_types, downstream_types, top_upstream,",
     '  # top_downstream, regions.',
     '  #',
     '  # Three rules that produce a plausible wrong number rather than an error:',

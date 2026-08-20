@@ -103,7 +103,9 @@ describe('dimColor', () => {
   })
 
   it('flips direction with the theme, because the surface does', () => {
-    expect(dimColor('#3987e5', 'dark', DIM_NODE)).not.toBe(dimColor('#3987e5', 'light', DIM_NODE))
+    expect(dimColor('#3987e5', 'dark', DIM_NODE)).not.toBe(
+      dimColor('#3987e5', 'light', DIM_NODE),
+    )
   })
 
   it('falls back to muted ink rather than painting nothing when handed no colour', () => {

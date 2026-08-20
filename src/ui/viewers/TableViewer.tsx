@@ -92,7 +92,8 @@ export function TableViewer({
     setSort((current) => {
       // Cycle ascending → descending → unsorted, so there is always a way back to the
       // order the graph actually produced.
-      if (!current || current.column !== columnName) return { column: columnName, descending: false }
+      if (!current || current.column !== columnName)
+        return { column: columnName, descending: false }
       if (!current.descending) return { column: columnName, descending: true }
       return undefined
     })
@@ -110,7 +111,9 @@ export function TableViewer({
                   <th
                     key={col.name}
                     onClick={() => toggleSort(col.name)}
-                    aria-sort={active ? (sort!.descending ? 'descending' : 'ascending') : 'none'}
+                    aria-sort={
+                      active ? (sort!.descending ? 'descending' : 'ascending') : 'none'
+                    }
                     title={`${col.name} · ${col.dtype} — click to sort this view`}
                     data-sorted={active || undefined}
                   >
@@ -219,7 +222,10 @@ export function TableViewer({
         </div>
 
         {sort && !compact && (
-          <span className="viewer__note" title="Downstream nodes still receive the original order">
+          <span
+            className="viewer__note"
+            title="Downstream nodes still receive the original order"
+          >
             sorted view only
           </span>
         )}

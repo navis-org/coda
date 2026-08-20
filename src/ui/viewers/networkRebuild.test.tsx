@@ -197,7 +197,9 @@ describe('positions handed in on the Layout socket', () => {
 
   it('does not lay out again for an equal layout under a new identity', () => {
     const { rerender } = render(<NetworkViewer {...props({ given })} />)
-    rerender(<NetworkViewer {...props({ given: { a: { x: 0, y: 0 }, b: { x: 100, y: 0 } } })} />)
+    rerender(
+      <NetworkViewer {...props({ given: { a: { x: 0, y: 0 }, b: { x: 100, y: 0 } } })} />,
+    )
     expect(computeLayout).toHaveBeenCalledTimes(1)
   })
 

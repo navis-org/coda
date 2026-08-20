@@ -42,7 +42,10 @@ interface HierarchyNode {
  * Never throws. The hierarchy arrives as a JSON string from a server this app does not control,
  * and a dataset that publishes a malformed one should lose the grouping control, not the map.
  */
-export function superRoisFrom(raw: unknown, primaryRois: readonly string[]): Record<string, string> {
+export function superRoisFrom(
+  raw: unknown,
+  primaryRois: readonly string[],
+): Record<string, string> {
   const root = parse(raw)
   if (!root) return {}
   const primary = new Set(primaryRois)

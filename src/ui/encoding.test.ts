@@ -14,11 +14,7 @@ import { tableFromRows } from '../core/values'
 import { MAX_SERIES, OTHER_LABEL, seriesColor } from './colors'
 import { hexToRgbFloat, resolveColor, resolveSize } from './encoding'
 
-const SCHEMA = tableSchema(
-  column('id', 'str'),
-  column('type', 'str'),
-  column('weight', 'f64'),
-)
+const SCHEMA = tableSchema(column('id', 'str'), column('type', 'str'), column('weight', 'f64'))
 
 function table(rows: Array<{ id: string; type: string | null; weight: number | null }>) {
   return tableFromRows(SCHEMA, rows)
@@ -32,7 +28,11 @@ describe('resolveColor', () => {
   ])
 
   it('returns a flat colour in constant mode and no legend', () => {
-    const result = resolveColor(data, { mode: 'constant', column: undefined, constant: '0' }, 'dark')
+    const result = resolveColor(
+      data,
+      { mode: 'constant', column: undefined, constant: '0' },
+      'dark',
+    )
     expect(result.at(0)).toBe(seriesColor(0, 'dark'))
     expect(result.at(2)).toBe(seriesColor(0, 'dark'))
     expect(result.legend).toBeUndefined()
@@ -48,7 +48,11 @@ describe('resolveColor', () => {
   })
 
   it('assigns categorical slots by frequency, commonest first', () => {
-    const result = resolveColor(data, { mode: 'categorical', column: 'type', constant: '0' }, 'dark')
+    const result = resolveColor(
+      data,
+      { mode: 'categorical', column: 'type', constant: '0' },
+      'dark',
+    )
     // LC4 appears twice, so it takes slot 0.
     expect(result.at(0)).toBe(seriesColor(0, 'dark'))
     expect(result.at(1)).toBe(seriesColor(0, 'dark'))
@@ -56,7 +60,11 @@ describe('resolveColor', () => {
   })
 
   it('emits a categorical legend, because colour must never be the only channel', () => {
-    const result = resolveColor(data, { mode: 'categorical', column: 'type', constant: '0' }, 'dark')
+    const result = resolveColor(
+      data,
+      { mode: 'categorical', column: 'type', constant: '0' },
+      'dark',
+    )
     expect(result.legend?.kind).toBe('categorical')
     if (result.legend?.kind !== 'categorical') throw new Error('expected categorical')
     expect(result.legend.entries.map((e) => e.label)).toEqual(['LC4', 'LC6'])
@@ -74,7 +82,11 @@ describe('resolveColor', () => {
     }
     const many = table(rows)
     const rankOf = (type: number) => rows.findIndex((r) => r.type === `T${type}`)
-    const result = resolveColor(many, { mode: 'categorical', column: 'type', constant: '0' }, 'dark')
+    const result = resolveColor(
+      many,
+      { mode: 'categorical', column: 'type', constant: '0' },
+      'dark',
+    )
     if (result.legend?.kind !== 'categorical') throw new Error('expected categorical')
 
     expect(result.legend.truncated).toBe(true)
@@ -91,7 +103,11 @@ describe('resolveColor', () => {
   })
 
   it('maps a numeric column onto a single-hue ramp with a domain legend', () => {
-    const result = resolveColor(data, { mode: 'sequential', column: 'weight', constant: '0' }, 'dark')
+    const result = resolveColor(
+      data,
+      { mode: 'sequential', column: 'weight', constant: '0' },
+      'dark',
+    )
     expect(result.legend?.kind).toBe('sequential')
     if (result.legend?.kind !== 'sequential') throw new Error('expected sequential')
     expect(result.legend.domain).toEqual([10, 30])
@@ -114,7 +130,11 @@ describe('resolveColor', () => {
   })
 
   it('degrades to the constant colour when the column has gone', () => {
-    const result = resolveColor(data, { mode: 'categorical', column: 'gone', constant: '2' }, 'dark')
+    const result = resolveColor(
+      data,
+      { mode: 'categorical', column: 'gone', constant: '2' },
+      'dark',
+    )
     expect(result.at(0)).toBe(seriesColor(2, 'dark'))
     expect(result.legend).toBeUndefined()
   })
@@ -130,7 +150,9 @@ describe('resolveColor', () => {
 
   it('picks mode-appropriate hues for light and dark', () => {
     const spec = { mode: 'categorical' as const, column: 'type', constant: '0' }
-    expect(resolveColor(data, spec, 'light').at(0)).not.toBe(resolveColor(data, spec, 'dark').at(0))
+    expect(resolveColor(data, spec, 'light').at(0)).not.toBe(
+      resolveColor(data, spec, 'dark').at(0),
+    )
   })
 })
 
@@ -162,7 +184,11 @@ describe('resolveSize', () => {
   })
 
   it('can scale linearly, which is right for line widths', () => {
-    const result = resolveSize(data, { column: 'weight', min: 0, max: 100 }, { areaScaled: false })
+    const result = resolveSize(
+      data,
+      { column: 'weight', min: 0, max: 100 },
+      { areaScaled: false },
+    )
     expect(result.at(1)).toBeCloseTo(50, 5)
   })
 

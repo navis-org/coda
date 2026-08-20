@@ -15,7 +15,15 @@
 
 import { useState } from 'react'
 
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { availableColumns, makeInferContext } from '../../core/node'
@@ -126,7 +134,9 @@ function setup(initial: ParamValues = {}, sourceId = 'mock') {
   return { writes, external: (id: string, value: ParamValue) => act(() => external(id, value)) }
 }
 
-function defaults(defs: readonly { id: string; default: ParamValue }[] | undefined): ParamValues {
+function defaults(
+  defs: readonly { id: string; default: ParamValue }[] | undefined,
+): ParamValues {
   const out: ParamValues = {}
   for (const p of defs ?? []) out[p.id] = Array.isArray(p.default) ? [...p.default] : p.default
   return out
@@ -171,14 +181,18 @@ describe('ExploreBody', () => {
   it('filters the list as you type, without waiting for a run', async () => {
     setup()
     await ready()
-    const total = Number(/(\d+) neurons/.exec(screen.getByText(/\d+ neurons/).textContent ?? '')?.[1])
+    const total = Number(
+      /(\d+) neurons/.exec(screen.getByText(/\d+ neurons/).textContent ?? '')?.[1],
+    )
     expect(total).toBeGreaterThan(0)
 
     await type('KC')
     // Row count is the wrong measure — a full page stays a full page — so check the hit count
     // and that every row shown actually matches.
     await waitFor(() => {
-      const hits = Number(/([\d,]+) of/.exec(screen.getByText(/of \d/).textContent ?? '')?.[1]?.replace(/,/g, ''))
+      const hits = Number(
+        /([\d,]+) of/.exec(screen.getByText(/of \d/).textContent ?? '')?.[1]?.replace(/,/g, ''),
+      )
       expect(hits).toBeLessThan(total)
       expect(hits).toBeGreaterThan(0)
     })
@@ -271,7 +285,9 @@ describe('ExploreBody', () => {
     const { writes } = setup({ pageSize: 5 })
     await ready()
     await type('KC')
-    const hits = Number(/(\d+) of/.exec(screen.getByText(/of \d+ neurons|\d+ of \d+/).textContent ?? '')?.[1])
+    const hits = Number(
+      /(\d+) of/.exec(screen.getByText(/of \d+ neurons|\d+ of \d+/).textContent ?? '')?.[1],
+    )
     expect(hits).toBeGreaterThan(5)
 
     fireEvent.click(screen.getByText('+ all'))
@@ -413,7 +429,12 @@ describe('ExploreBody', () => {
     const def = requireNodeDef('neuron.explore')
     render(
       <ExploreBody
-        node={{ id: 'n1', type: 'neuron.explore', position: { x: 0, y: 0 }, params: defaults(def.params) }}
+        node={{
+          id: 'n1',
+          type: 'neuron.explore',
+          position: { x: 0, y: 0 },
+          params: defaults(def.params),
+        }}
         ctx={makeInferContext(def, defaults(def.params), {})}
         compact
         setParam={() => {}}
@@ -481,9 +502,7 @@ describe('thumbnail caching', () => {
     )
 
     renderThumb('mock-refuses')
-    await waitFor(() =>
-      expect(document.querySelector('.explore-thumb--empty')).not.toBeNull(),
-    )
+    await waitFor(() => expect(document.querySelector('.explore-thumb--empty')).not.toBeNull())
     expect(await cacheGet(`thumb:mock-refuses:${DATASET}:${BODY}:152`)).toBeUndefined()
   })
 })
@@ -538,9 +557,15 @@ describe('annotation chips', () => {
       tableSchema(
         column('bodyId', 'i64'),
         column('type', 'str'),
-        ...['class', 'subclass', 'superclass', 'somaSide', 'rootSide', 'itoleeHl', 'consensusNt'].map(
-          (n) => column(n, 'str'),
-        ),
+        ...[
+          'class',
+          'subclass',
+          'superclass',
+          'somaSide',
+          'rootSide',
+          'itoleeHl',
+          'consensusNt',
+        ].map((n) => column(n, 'str')),
       ),
       {
         bodyId: [1],
@@ -652,7 +677,9 @@ describe('Explore in the editor', () => {
     const box = await screen.findByLabelText('Search neurons')
     // Inside the card, not floating somewhere in the app shell.
     expect(box.closest('.coda-node')).not.toBeNull()
-    await waitFor(() => expect(document.querySelectorAll('.explore-row').length).toBeGreaterThan(0))
+    await waitFor(() =>
+      expect(document.querySelectorAll('.explore-row').length).toBeGreaterThan(0),
+    )
   })
 
   it('widens the card rather than using the default node width', async () => {

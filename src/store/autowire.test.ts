@@ -122,14 +122,12 @@ describe('what it refuses to do', () => {
     const ds = add('neuron.dataset', { x: 0, y: 0 })
     const other = add('neuron.dataset', { x: 0, y: 200 })
     const find = add('neuron.findNeurons', { x: 300, y: 0 })
-    useGraphStore
-      .getState()
-      .connect({
-        source: other,
-        sourceHandle: 'dataset',
-        target: find,
-        targetHandle: 'dataset',
-      })
+    useGraphStore.getState().connect({
+      source: other,
+      sourceHandle: 'dataset',
+      target: find,
+      targetHandle: 'dataset',
+    })
 
     // Deleting one of the two leaves a single dataset on the canvas, but nothing re-runs:
     // the auto-wire happens on add and never repairs the graph afterwards.

@@ -144,7 +144,9 @@ function ValuePreviewInner({
         colorBy={roiColorMode(node.params.colorBy)}
         labels={roiLabelMode(node.params.labels)}
         hemisphere={roiHemisphere(node.params.hemisphere)}
-        superRois={Array.isArray(node.params.superRois) ? (node.params.superRois as string[]) : []}
+        superRois={
+          Array.isArray(node.params.superRois) ? (node.params.superRois as string[]) : []
+        }
         opacity={Number(node.params.opacity ?? 0.12)}
         refresh={Number(node.params.refresh ?? 0)}
         {...(onParamChange ? { onParamChange } : {})}
@@ -427,7 +429,10 @@ function roiView(value: unknown): RoiView {
 }
 
 function roiColorMode(value: unknown): RoiColorMode {
-  return value === 'preCompleteness' || value === 'region' || value === 'side' || value === 'flat'
+  return value === 'preCompleteness' ||
+    value === 'region' ||
+    value === 'side' ||
+    value === 'flat'
     ? value
     : 'postCompleteness'
 }

@@ -113,7 +113,8 @@ export function ExploreBody({ node, ctx, compact, setParam }: NodeBodyProps) {
   const visible = result.rows.slice(page * pageSize, page * pageSize + pageSize)
 
   const selection = useMemo(
-    () => new Set((Array.isArray(node.params.selection) ? node.params.selection : []).map(String)),
+    () =>
+      new Set((Array.isArray(node.params.selection) ? node.params.selection : []).map(String)),
     [node.params.selection],
   )
 
@@ -155,7 +156,10 @@ export function ExploreBody({ node, ctx, compact, setParam }: NodeBodyProps) {
   )
 
   const selectVisible = useCallback(() => selectRowsInto(visible), [selectRowsInto, visible])
-  const selectAll = useCallback(() => selectRowsInto(result.rows), [selectRowsInto, result.rows])
+  const selectAll = useCallback(
+    () => selectRowsInto(result.rows),
+    [selectRowsInto, result.rows],
+  )
 
   const accept = useCallback(
     (index: number) => {
@@ -211,7 +215,9 @@ export function ExploreBody({ node, ctx, compact, setParam }: NodeBodyProps) {
           className="explore__input"
           type="text"
           value={text}
-          placeholder={compact ? 'Search neurons…' : 'Search: DNp01   class==sensory   post>1000'}
+          placeholder={
+            compact ? 'Search neurons…' : 'Search: DNp01   class==sensory   post>1000'
+          }
           title={SEARCH_SYNTAX_HELP}
           aria-label="Search neurons"
           aria-describedby={listId}
@@ -271,7 +277,9 @@ export function ExploreBody({ node, ctx, compact, setParam }: NodeBodyProps) {
                   }}
                 >
                   <span>{item.label}</span>
-                  {item.detail && <span className="explore__completion-detail">{item.detail}</span>}
+                  {item.detail && (
+                    <span className="explore__completion-detail">{item.detail}</span>
+                  )}
                 </button>
               </li>
             ))}
@@ -323,10 +331,14 @@ export function ExploreBody({ node, ctx, compact, setParam }: NodeBodyProps) {
 
           <div className="explore__foot" id={listId}>
             <span className="explore__count">
-              {applied ? `${formatNumber(hits)} of ${formatNumber(total)}` : `${formatNumber(total)} neurons`}
+              {applied
+                ? `${formatNumber(hits)} of ${formatNumber(total)}`
+                : `${formatNumber(total)} neurons`}
               {/* Said out loud, because silently widening a search is how a hit count starts
                   lying about what it counted. */}
-              {result.fuzzy && <span className="explore__fuzzy"> · no exact match, showing similar</span>}
+              {result.fuzzy && (
+                <span className="explore__fuzzy"> · no exact match, showing similar</span>
+              )}
             </span>
 
             {selection.size > 0 && (

@@ -50,7 +50,12 @@ function pipeline(params: Record<string, unknown> = {}): CodaGraph {
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: 'optic-lobe-mini' }))
   g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC.*', status: 'Traced' }))
   g = addNode(g, node('smp', 'core.sample', params))
-  g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'find', targetHandle: 'dataset' })
+  g = addEdge(g, {
+    source: 'ds',
+    sourceHandle: 'dataset',
+    target: 'find',
+    targetHandle: 'dataset',
+  })
   g = addEdge(g, { source: 'find', sourceHandle: 'neurons', target: 'smp', targetHandle: 'in' })
   return g
 }
@@ -106,7 +111,9 @@ describe('core.sample — modes', () => {
   it('warns when a stride of 1 leaves the node doing nothing', () => {
     const issues = inferGraph(pipeline({ mode: 'stride', step: 1 })).nodes['smp']?.issues ?? []
     expect(issues.map((i) => i.message).join(' ')).toContain('keeps every row')
-    expect(inferGraph(pipeline({ mode: 'stride', step: 2 })).nodes['smp']?.issues ?? []).toEqual([])
+    expect(
+      inferGraph(pipeline({ mode: 'stride', step: 2 })).nodes['smp']?.issues ?? [],
+    ).toEqual([])
   })
 })
 

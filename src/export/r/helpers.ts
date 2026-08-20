@@ -50,7 +50,7 @@ registerHelper({
     '}',
     '',
     '.coda_rng <- function(seed) {',
-    '  # mulberry32, the generator behind Coda\'s Sample node.',
+    "  # mulberry32, the generator behind Coda's Sample node.",
     '  a <- .coda_u32(as.numeric(seed))',
     '  function() {',
     '    a <<- .coda_u32(a + 1831565813)',

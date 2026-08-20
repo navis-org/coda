@@ -163,7 +163,12 @@ describe('core.tableFromUrl — the shape is the server’s', () => {
     await makeScheduler().run(pipeline(), { mode: 'full' })
 
     // `cluster` is i64, so it is offered as an id; a float column would not be.
-    expect(idParam.options(ctx).map((o) => o.value)).toEqual(['', 'root_id', 'cellType', 'cluster'])
+    expect(idParam.options(ctx).map((o) => o.value)).toEqual([
+      '',
+      'root_id',
+      'cellType',
+      'cluster',
+    ])
     // And the Text columns picker has something to pick — the whole reason the schema lives in
     // a map every caller can read rather than in `ctx.observed`, which `schemaFrom` cannot see.
     expect(availableColumns(textParam, {}, { url: URL_ })).toEqual([
@@ -258,7 +263,8 @@ describe('core.tableFromUrl — validation', () => {
   it('warns about http rather than refusing it', () => {
     // A warning, not a refusal — the same call `Find Neurons` makes about `limit: 0`. Whether
     // it is actually blocked depends on how this app is served, which is not knowable here.
-    const reported = inferGraph(pipeline({ url: 'http://example.org/a.csv' })).nodes['url']?.issues
+    const reported = inferGraph(pipeline({ url: 'http://example.org/a.csv' })).nodes['url']
+      ?.issues
     expect(reported).toHaveLength(1)
     expect(reported?.[0]?.severity).toBe('warning')
   })
@@ -311,7 +317,9 @@ describe('core.tableFromUrl — refusals', () => {
       ok: true,
       status: 200,
       statusText: 'OK',
-      headers: { get: (k: string) => (k.toLowerCase() === 'content-length' ? '999999999' : null) },
+      headers: {
+        get: (k: string) => (k.toLowerCase() === 'content-length' ? '999999999' : null),
+      },
       text: () => Promise.reject(new Error('the body must not be read')),
     } as unknown as Response)
     const message = await errorFrom(pipeline())

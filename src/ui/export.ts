@@ -112,7 +112,9 @@ export function downloadCsv(parts: string[], filename: string): void {
  * gate *multiple downloads from one user gesture* behind a permission prompt, and spacing them
  * out with timers loses the gesture and gets them blocked outright instead of asked about once.
  */
-export function downloadFiles(files: Array<{ name: string; parts: BlobPart[]; mime: string }>): void {
+export function downloadFiles(
+  files: Array<{ name: string; parts: BlobPart[]; mime: string }>,
+): void {
   for (const file of files) {
     triggerDownload(new Blob(file.parts, { type: file.mime }), file.name)
   }
@@ -156,7 +158,9 @@ export async function downloadNotebook(
   const result = exportNotebook(graph, options)
   if (!result.ok) return result
 
-  const blob = new Blob([serializeNotebook(result.notebook)], { type: 'application/x-ipynb+json' })
+  const blob = new Blob([serializeNotebook(result.notebook)], {
+    type: 'application/x-ipynb+json',
+  })
   triggerDownload(blob, `${slugify(graph.meta?.name ?? '', 'untitled')}.ipynb`)
   return { ok: true, warnings: result.warnings }
 }
@@ -254,7 +258,9 @@ export async function downloadPng(
     context.scale(scale, scale)
     context.drawImage(image, 0, 0, width, height)
 
-    const pngBlob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'))
+    const pngBlob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, 'image/png'),
+    )
     if (!pngBlob) throw new Error('Canvas produced no PNG data')
     triggerDownload(pngBlob, filename)
   } finally {
@@ -270,4 +276,3 @@ function loadImage(url: string): Promise<HTMLImageElement> {
     image.src = url
   })
 }
-

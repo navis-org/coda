@@ -275,7 +275,12 @@ export function parseDelimited(text: string): ParsedTable {
   const delimiter = detectDelimiter(body)
   const rows = splitRows(body, delimiter)
   if (rows.length === 0) {
-    return { table: makeTable(tableSchema(), {}, 'table'), delimiter, hasHeader: false, raggedRows: 0 }
+    return {
+      table: makeTable(tableSchema(), {}, 'table'),
+      delimiter,
+      hasHeader: false,
+      raggedRows: 0,
+    }
   }
 
   const hasHeader = detectHeader(rows[0]!)

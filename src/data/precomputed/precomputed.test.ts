@@ -18,12 +18,7 @@ import fragmentFixture from './__fixtures__/dracoFragment.json'
 import manifestFixture from './__fixtures__/hemibrainManifest.json'
 import { concatMeshes, parseLegacyFragment } from './legacy'
 import type { MultiResInfo } from './multires'
-import {
-  chooseLod,
-  fragmentOffset,
-  fragmentTransform,
-  parseMultiResManifest,
-} from './multires'
+import { chooseLod, fragmentOffset, fragmentTransform, parseMultiResManifest } from './multires'
 import { hashUint64, murmurHash3x86_128 } from './murmur'
 import type { ShardingSpec } from './sharded'
 import { locate } from './sharded'
@@ -160,8 +155,12 @@ describe('multi-resolution manifest', () => {
 
   it('accumulates fragment offsets across levels', () => {
     expect(fragmentOffset(manifest, 0, 0)).toBe(manifest.dataStart)
-    expect(fragmentOffset(manifest, 0, 1)).toBe(manifest.dataStart + manifest.levels[0]!.sizes[0]!)
-    expect(fragmentOffset(manifest, 1, 0)).toBe(manifest.dataStart + manifest.levels[0]!.totalBytes)
+    expect(fragmentOffset(manifest, 0, 1)).toBe(
+      manifest.dataStart + manifest.levels[0]!.sizes[0]!,
+    )
+    expect(fragmentOffset(manifest, 1, 0)).toBe(
+      manifest.dataStart + manifest.levels[0]!.totalBytes,
+    )
   })
 
   it('tolerates a zero-size fragment, which real data contains', () => {
@@ -227,7 +226,9 @@ describe('chooseLod', () => {
 
   it('sums across every neuron, so forty of them go coarser than one', () => {
     const one = [pyramid([2_000_000, 280_000, 48_000, 11_000])]
-    const forty = Array.from({ length: 40 }, () => pyramid([2_000_000, 280_000, 48_000, 11_000]))
+    const forty = Array.from({ length: 40 }, () =>
+      pyramid([2_000_000, 280_000, 48_000, 11_000]),
+    )
     expect(chooseLod(one, 1_500_000)).toBe(0)
     expect(chooseLod(forty, 1_500_000)).toBeGreaterThan(0)
   })
@@ -310,7 +311,9 @@ describe('transport', () => {
   })
 
   it('maps a Google Storage URL onto the same-origin proxy prefix', () => {
-    expect(proxied('https://storage.googleapis.com/bucket/a/b/info')).toBe('/gcs/bucket/a/b/info')
+    expect(proxied('https://storage.googleapis.com/bucket/a/b/info')).toBe(
+      '/gcs/bucket/a/b/info',
+    )
     expect(proxied('https://example.org/x')).toBeUndefined()
   })
 
@@ -321,15 +324,15 @@ describe('transport', () => {
     globalThis.fetch = ((url: string) => {
       seen.push(url)
       if (url.startsWith('https://')) return Promise.reject(new TypeError('Failed to fetch'))
-      return Promise.resolve({ ok: true, arrayBuffer: () => Promise.resolve(new ArrayBuffer(8)) } as Response)
+      return Promise.resolve({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(new ArrayBuffer(8)),
+      } as Response)
     }) as typeof fetch
 
     const result = await fetchBytes('https://storage.googleapis.com/private/info')
     expect(result.byteLength).toBe(8)
-    expect(seen).toEqual([
-      'https://storage.googleapis.com/private/info',
-      '/gcs/private/info',
-    ])
+    expect(seen).toEqual(['https://storage.googleapis.com/private/info', '/gcs/private/info'])
   })
 
   it('remembers that a host needs the proxy and stops retrying direct', async () => {
@@ -337,7 +340,10 @@ describe('transport', () => {
     globalThis.fetch = ((url: string) => {
       seen.push(url)
       if (url.startsWith('https://')) return Promise.reject(new TypeError('Failed to fetch'))
-      return Promise.resolve({ ok: true, arrayBuffer: () => Promise.resolve(new ArrayBuffer(4)) } as Response)
+      return Promise.resolve({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(new ArrayBuffer(4)),
+      } as Response)
     }) as typeof fetch
 
     await fetchBytes('https://storage.googleapis.com/private/one')
@@ -366,7 +372,10 @@ describe('transport', () => {
     let headers: HeadersInit | undefined
     globalThis.fetch = ((_url: string, init: RequestInit) => {
       headers = init.headers
-      return Promise.resolve({ ok: true, arrayBuffer: () => Promise.resolve(new ArrayBuffer(2)) } as Response)
+      return Promise.resolve({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(new ArrayBuffer(2)),
+      } as Response)
     }) as typeof fetch
     await fetchBytes('https://storage.googleapis.com/b/o', { range: [10, 19] })
     expect((headers as Record<string, string>)['Range']).toBe('bytes=10-19')
@@ -445,7 +454,11 @@ describe('draco decoding', () => {
     serveWasmFromDisk()
     const { decodeDracoFragment } = await import('./draco')
     await expect(
-      decodeDracoFragment(new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]).buffer, [1, 1, 1], [0, 0, 0]),
+      decodeDracoFragment(
+        new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]).buffer,
+        [1, 1, 1],
+        [0, 0, 0],
+      ),
     ).rejects.toThrow()
   }, 60_000)
 })

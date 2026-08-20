@@ -126,9 +126,10 @@ export function inferGraph(graph: CodaGraph, options: InferOptions = {}): Infere
     // 3. Node-specific and generic param validation.
     try {
       issues.push(
-        ...validateColumnParams(def, ctx).map(
-          (message): NodeIssue => ({ severity: 'warning', message }),
-        ),
+        ...validateColumnParams(def, ctx).map((message): NodeIssue => ({
+          severity: 'warning',
+          message,
+        })),
       )
       if (def.validate) {
         issues.push(
@@ -136,7 +137,10 @@ export function inferGraph(graph: CodaGraph, options: InferOptions = {}): Infere
         )
       }
     } catch (err) {
-      issues.push({ severity: 'warning', message: `Validation failed: ${(err as Error).message}` })
+      issues.push({
+        severity: 'warning',
+        message: `Validation failed: ${(err as Error).message}`,
+      })
     }
 
     result[nodeId] = { inputs, outputs, issues }
@@ -225,4 +229,3 @@ function createsCycle(graph: CodaGraph, source: string, target: string): boolean
   }
   return false
 }
-

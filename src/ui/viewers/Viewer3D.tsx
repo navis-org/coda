@@ -91,7 +91,11 @@ export function Viewer3D(props: Viewer3DProps) {
       <div className="viewer3d-canvas nowheel">
         <Canvas
           frameloop="demand"
-          camera={{ position: [center[0], center[1], center[2] + size * 1.9], fov: 45, far: size * 40 }}
+          camera={{
+            position: [center[0], center[1], center[2] + size * 1.9],
+            fov: 45,
+            far: size * 40,
+          }}
           onCreated={({ gl }) => gl.setClearColor(surface)}
         >
           <ambientLight intensity={0.85} />
@@ -117,7 +121,9 @@ export function Viewer3D(props: Viewer3DProps) {
         <span>
           {skeletons ? `${skeletons.items.length} skeletons` : ''}
           {meshes ? `${skeletons ? ' · ' : ''}${meshes.items.length} meshes` : ''}
-          {points ? `${skeletons || meshes ? ' · ' : ''}${points.attributes.length} points` : ''}
+          {points
+            ? `${skeletons || meshes ? ' · ' : ''}${points.attributes.length} points`
+            : ''}
           {selection.length > 0 && ` · ${selection.length} selected`}
         </span>
         {meshes?.detail && !compact && (
@@ -132,7 +138,9 @@ export function Viewer3D(props: Viewer3DProps) {
             mesh LOD {meshes.detail.lod}/{meshes.detail.levels - 1}
           </span>
         )}
-        {skeletonColors.legend && !compact && <span>{describeLegend(skeletonColors.legend)}</span>}
+        {skeletonColors.legend && !compact && (
+          <span>{describeLegend(skeletonColors.legend)}</span>
+        )}
         <ViewerActions
           baseName={baseName ?? makeBaseName(undefined, '3d')}
           source={exportSource}
@@ -259,8 +267,7 @@ function SkeletonLines({
     for (let s = 0; s < built.segments; s++) {
       const itemIndex = built.segmentItem[s]!
       const bodyId = String(skeletons.items[itemIndex]?.bodyId ?? '')
-      const rgb =
-        dimming && !selected.has(bodyId) ? DIMMED : hexToRgbFloat(colorAt(itemIndex))
+      const rgb = dimming && !selected.has(bodyId) ? DIMMED : hexToRgbFloat(colorAt(itemIndex))
       for (let v = 0; v < 2; v++) {
         buffer[s * 6 + v * 3] = rgb[0]
         buffer[s * 6 + v * 3 + 1] = rgb[1]
@@ -294,7 +301,9 @@ function SkeletonLines({
     if (!bodyId) return
     event.stopPropagation()
     onSelectionChange(
-      selection.includes(bodyId) ? selection.filter((id) => id !== bodyId) : [...selection, bodyId],
+      selection.includes(bodyId)
+        ? selection.filter((id) => id !== bodyId)
+        : [...selection, bodyId],
     )
   }
 

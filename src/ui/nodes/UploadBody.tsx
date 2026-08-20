@@ -205,7 +205,8 @@ export function UploadBody({ node, ctx, compact, setParam, onError }: NodeBodyPr
           <>
             <strong title={meta.name}>{meta.name}</strong>
             <span>
-              {formatNumber(meta.rows)} × {meta.schema.columns.length} · {formatBytes(meta.bytes)}
+              {formatNumber(meta.rows)} × {meta.schema.columns.length} ·{' '}
+              {formatBytes(meta.bytes)}
             </span>
           </>
         )}

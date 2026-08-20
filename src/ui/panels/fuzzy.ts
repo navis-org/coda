@@ -22,7 +22,13 @@ const BONUS_FULL_PREFIX = 12
 
 function isBoundary(previous: string | undefined): boolean {
   if (previous === undefined) return true
-  return previous === ' ' || previous === '.' || previous === '-' || previous === '_' || previous === '/'
+  return (
+    previous === ' ' ||
+    previous === '.' ||
+    previous === '-' ||
+    previous === '_' ||
+    previous === '/'
+  )
 }
 
 /**

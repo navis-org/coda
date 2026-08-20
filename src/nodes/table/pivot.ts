@@ -29,7 +29,8 @@ export const pivotNode = registerNode({
   type: 'core.pivot',
   label: 'Pivot',
   category: 'transform',
-  description: 'Reshape a long table into a matrix of rows × columns, as a matrix and a wide table.',
+  description:
+    'Reshape a long table into a matrix of rows × columns, as a matrix and a wide table.',
   cost: 'cheap',
   inputs: [{ id: 'in', label: 'Table', type: T.table() }],
   outputs: [
@@ -62,7 +63,8 @@ export const pivotNode = registerNode({
       issues.push('Rows and Columns point at the same column')
     }
     const agg = String(ctx.params.agg ?? 'sum') as AggFn
-    if (agg !== 'count' && !ctx.column('value')) issues.push(`"${agg}" needs a numeric value column`)
+    if (agg !== 'count' && !ctx.column('value'))
+      issues.push(`"${agg}" needs a numeric value column`)
     return issues
   },
 

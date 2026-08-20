@@ -50,7 +50,9 @@ describe('dataset node body', () => {
     const preview = body.querySelector('.dataset-preview')!
     const fields = body.querySelector('.dataset-body__fields')!
     // Placeholder art for now, but its position is the contract a real rendering inherits.
-    expect(preview.compareDocumentPosition(fields) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(
+      preview.compareDocumentPosition(fields) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
   })
 
   it('offers a version dropdown that names what Latest resolves to', async () => {
@@ -75,7 +77,9 @@ describe('dataset node body', () => {
     fireEvent.change(select, { target: { value: pinned.value } })
 
     await waitFor(() => {
-      const node = useGraphStore.getState().graph.nodes.find((n) => n.type === 'dataset.mock.hemibrain')
+      const node = useGraphStore
+        .getState()
+        .graph.nodes.find((n) => n.type === 'dataset.mock.hemibrain')
       expect(node?.params.version).toBe(pinned.value)
     })
   })

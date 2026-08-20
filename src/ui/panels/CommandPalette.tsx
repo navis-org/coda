@@ -93,7 +93,9 @@ export function CommandPalette({
 
   // Keep the highlighted row in view during keyboard navigation.
   useEffect(() => {
-    listRef.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' })
+    listRef.current
+      ?.querySelector('[aria-selected="true"]')
+      ?.scrollIntoView({ block: 'nearest' })
   }, [activeIndex])
 
   /** Step over disabled rows so arrow keys never park on something inert. */

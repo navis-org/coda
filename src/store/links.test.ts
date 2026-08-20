@@ -37,7 +37,10 @@ function chain() {
 }
 
 const edges = () => useGraphStore.getState().graph.edges
-const wiring = () => edges().map((e) => `${e.source}->${e.target}`).sort()
+const wiring = () =>
+  edges()
+    .map((e) => `${e.source}->${e.target}`)
+    .sort()
 
 beforeEach(() => {
   clearStorage()
@@ -79,14 +82,12 @@ describe('reconnect', () => {
     const { filter, table2 } = chain()
     const link = edges().find((e) => e.source === filter)!
 
-    const ok = useGraphStore
-      .getState()
-      .reconnect(link.id, {
-        source: filter,
-        sourceHandle: 'out',
-        target: table2,
-        targetHandle: 'in',
-      })
+    const ok = useGraphStore.getState().reconnect(link.id, {
+      source: filter,
+      sourceHandle: 'out',
+      target: table2,
+      targetHandle: 'in',
+    })
 
     expect(ok).toBe(true)
     const moved = edges().filter((e) => e.source === filter)
@@ -100,17 +101,19 @@ describe('reconnect', () => {
     const link = edges().find((e) => e.target === table)!
 
     // Skip the filter: feed the table straight off Find Neurons.
-    const ok = useGraphStore
-      .getState()
-      .reconnect(link.id, {
-        source: find,
-        sourceHandle: 'neurons',
-        target: table,
-        targetHandle: 'in',
-      })
+    const ok = useGraphStore.getState().reconnect(link.id, {
+      source: find,
+      sourceHandle: 'neurons',
+      target: table,
+      targetHandle: 'in',
+    })
 
     expect(ok).toBe(true)
-    expect(edges().filter((e) => e.target === table).map((e) => e.source)).toEqual([find])
+    expect(
+      edges()
+        .filter((e) => e.target === table)
+        .map((e) => e.source),
+    ).toEqual([find])
     expect(edges().some((e) => e.source === filter)).toBe(false)
   })
 
@@ -119,14 +122,12 @@ describe('reconnect', () => {
     const before = wiring()
     const link = edges().find((e) => e.source === filter)!
 
-    useGraphStore
-      .getState()
-      .reconnect(link.id, {
-        source: filter,
-        sourceHandle: 'out',
-        target: table2,
-        targetHandle: 'in',
-      })
+    useGraphStore.getState().reconnect(link.id, {
+      source: filter,
+      sourceHandle: 'out',
+      target: table2,
+      targetHandle: 'in',
+    })
     useGraphStore.getState().undo()
 
     expect(wiring()).toEqual(before)
@@ -142,14 +143,12 @@ describe('reconnect', () => {
     const link = edges().find((e) => e.target === table)!
     const before = useGraphStore.getState().graph
 
-    const ok = useGraphStore
-      .getState()
-      .reconnect(link.id, {
-        source: ds,
-        sourceHandle: 'dataset',
-        target: filter,
-        targetHandle: 'in',
-      })
+    const ok = useGraphStore.getState().reconnect(link.id, {
+      source: ds,
+      sourceHandle: 'dataset',
+      target: filter,
+      targetHandle: 'in',
+    })
 
     expect(ok).toBe(false)
     expect(useGraphStore.getState().graph).toBe(before)
@@ -167,14 +166,12 @@ describe('reconnect', () => {
     const link = edges().find((e) => e.target === table)!
     const before = useGraphStore.getState().graph
 
-    const ok = useGraphStore
-      .getState()
-      .reconnect(link.id, {
-        source: table,
-        sourceHandle: 'out',
-        target: filter,
-        targetHandle: 'in',
-      })
+    const ok = useGraphStore.getState().reconnect(link.id, {
+      source: table,
+      sourceHandle: 'out',
+      target: filter,
+      targetHandle: 'in',
+    })
 
     expect(ok).toBe(false)
     expect(useGraphStore.getState().graph).toBe(before)
@@ -184,14 +181,12 @@ describe('reconnect', () => {
     const { filter, table } = chain()
     const link = edges().find((e) => e.target === table)!
 
-    const ok = useGraphStore
-      .getState()
-      .reconnect(link.id, {
-        source: filter,
-        sourceHandle: 'out',
-        target: table,
-        targetHandle: 'in',
-      })
+    const ok = useGraphStore.getState().reconnect(link.id, {
+      source: filter,
+      sourceHandle: 'out',
+      target: table,
+      targetHandle: 'in',
+    })
 
     expect(ok).toBe(true)
     expect(edges().filter((e) => e.target === table)).toHaveLength(1)

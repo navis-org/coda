@@ -171,7 +171,7 @@ registerEmitter('neuron.paths', (ctx) => {
 
   return [
     ...ctx.note(
-      'neuprint\'s `fetch_paths` returns every route within the hop budget. Coda additionally ' +
+      "neuprint's `fetch_paths` returns every route within the hop budget. Coda additionally " +
         'ranks them by their weakest link and keeps the strongest — that ranking is not ' +
         'reproduced here, so this is the unranked set.',
     ),

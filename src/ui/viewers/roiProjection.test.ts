@@ -179,7 +179,15 @@ describe('projectRegions', () => {
 
 describe('relaxShifts', () => {
   const meshes = [
-    'CA(R)', 'PED(R)', 'AL(R)', 'LH(R)', 'SLP(R)', 'SMP(R)', 'aL(R)', 'bL(R)', 'gL(R)',
+    'CA(R)',
+    'PED(R)',
+    'AL(R)',
+    'LH(R)',
+    'SLP(R)',
+    'SMP(R)',
+    'aL(R)',
+    'bL(R)',
+    'gL(R)',
   ].map((roi) => generateRoiMesh(roi))
 
   it('un-stacks the arrangement', () => {
@@ -429,16 +437,45 @@ describe('what a mesh knows about itself', () => {
   const cube: MeshGeometry = {
     bodyId: 0,
     positions: new Float32Array([
-      0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0,
-      0, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1,
+      0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1,
     ]),
     indices: new Uint32Array([
-      0, 2, 1, 0, 3, 2, // bottom
-      4, 5, 6, 4, 6, 7, // top
-      0, 1, 5, 0, 5, 4, // front
-      2, 3, 7, 2, 7, 6, // back
-      0, 4, 7, 0, 7, 3, // left
-      1, 2, 6, 1, 6, 5, // right
+      0,
+      2,
+      1,
+      0,
+      3,
+      2, // bottom
+      4,
+      5,
+      6,
+      4,
+      6,
+      7, // top
+      0,
+      1,
+      5,
+      0,
+      5,
+      4, // front
+      2,
+      3,
+      7,
+      2,
+      7,
+      6, // back
+      0,
+      4,
+      7,
+      0,
+      7,
+      3, // left
+      1,
+      2,
+      6,
+      1,
+      6,
+      5, // right
     ]),
   }
 

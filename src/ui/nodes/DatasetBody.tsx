@@ -80,7 +80,9 @@ export function DatasetBody({ node, ctx, compact, setParam }: NodeBodyProps) {
         </span>
         {/* Only the custom node has a server worth naming; a family node's is always Janelia. */}
         {!compact && serverParam && (
-          <span className="dataset-body__server">{serverLabel(String(node.params.server ?? ''))}</span>
+          <span className="dataset-body__server">
+            {serverLabel(String(node.params.server ?? ''))}
+          </span>
         )}
         {facts.length > 0 && <span className="dataset-body__facts">{facts.join(' · ')}</span>}
         <button

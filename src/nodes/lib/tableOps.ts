@@ -65,7 +65,9 @@ const BOOL_OPS: Array<{ value: FilterOp; label: string }> = [
 ]
 
 /** Ops that make sense for a column's dtype — drives the operator dropdown. */
-export function opsForDType(dtype: DType | undefined): Array<{ value: FilterOp; label: string }> {
+export function opsForDType(
+  dtype: DType | undefined,
+): Array<{ value: FilterOp; label: string }> {
   if (!dtype) return STRING_OPS
   if (isNumericDType(dtype)) return NUMERIC_OPS
   if (dtype === 'bool') return BOOL_OPS
@@ -344,10 +346,7 @@ const ID_COLUMN_NAME = 'bodyId'
  * typed `neurons` whose values arrive as a plain table breaks every downstream node's bodyId
  * guarantee only after a run.
  */
-export function uploadIsNeurons(
-  schema: TableSchema | undefined,
-  idColumn: string,
-): boolean {
+export function uploadIsNeurons(schema: TableSchema | undefined, idColumn: string): boolean {
   return Boolean(idColumn) && Boolean(findColumn(schema, idColumn))
 }
 
@@ -417,11 +416,7 @@ export function uploadShapeTable(
       ? source.map((cell) => (cell === null ? null : String(cell)))
       : source
   }
-  return makeTable(
-    schema,
-    data,
-    uploadIsNeurons(table.schema, idColumn) ? 'neurons' : 'table',
-  )
+  return makeTable(schema, data, uploadIsNeurons(table.schema, idColumn) ? 'neurons' : 'table')
 }
 
 // ---------------------------------------------------------------------------
@@ -443,7 +438,11 @@ export function selectTable(table: TableValue, names: string[]): TableValue {
   const schema = { columns: wanted.map((n) => findColumn(table.schema, n)!) }
   const data: Record<string, ColumnData> = {}
   for (const n of wanted) data[n] = getColumn(table, n)
-  return makeTable(schema, data, table.kind === 'neurons' && wanted.includes('bodyId') ? 'neurons' : 'table')
+  return makeTable(
+    schema,
+    data,
+    table.kind === 'neurons' && wanted.includes('bodyId') ? 'neurons' : 'table',
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -510,7 +509,11 @@ export function stackColumns(
     }
     // The unit rides along only while both agree on it: nanometres stacked onto voxels is a
     // column with no single unit, and carrying one of them would label the other's rows wrongly.
-    columns.push(col.unit && col.unit === other.unit ? column(col.name, dtype, col.unit) : column(col.name, dtype))
+    columns.push(
+      col.unit && col.unit === other.unit
+        ? column(col.name, dtype, col.unit)
+        : column(col.name, dtype),
+    )
   }
 
   for (const col of bottom.columns) {
@@ -587,7 +590,8 @@ export function stackTables(
     const fromTop = top.data[col.name]
     if (fromTop) for (let i = 0; i < top.length; i++) out[i] = fromTop[i] ?? null
     const fromBottom = bottom.data[col.name]
-    if (fromBottom) for (let i = 0; i < bottom.length; i++) out[top.length + i] = fromBottom[i] ?? null
+    if (fromBottom)
+      for (let i = 0; i < bottom.length; i++) out[top.length + i] = fromBottom[i] ?? null
     data[col.name] = out
   }
 
@@ -849,7 +853,7 @@ export function joinTables(
   }
   for (const { source, out } of rightNames) {
     const src = getColumn(right, source)
-    data[out] = rightRows.map((i) => (i === null ? null : src[i] ?? null))
+    data[out] = rightRows.map((i) => (i === null ? null : (src[i] ?? null)))
   }
 
   return makeTable(schema, data, left.kind)
@@ -901,11 +905,13 @@ export function pivotTable(
   valueColumn: string | undefined,
   agg: AggFn,
 ): MatrixValue {
-  if (!findColumn(table.schema, indexColumn)) throw new Error(`Row column "${indexColumn}" not found`)
+  if (!findColumn(table.schema, indexColumn))
+    throw new Error(`Row column "${indexColumn}" not found`)
   if (!findColumn(table.schema, columnsColumn)) {
     throw new Error(`Column column "${columnsColumn}" not found`)
   }
-  if (agg !== 'count' && !valueColumn) throw new Error(`Aggregation "${agg}" needs a value column`)
+  if (agg !== 'count' && !valueColumn)
+    throw new Error(`Aggregation "${agg}" needs a value column`)
 
   const rowData = getColumn(table, indexColumn)
   const colData = getColumn(table, columnsColumn)

@@ -12,7 +12,11 @@
  *  - **There is no neuron-mesh fetch at all.** `neuprint_ROI_mesh()` is ROI shells.
  */
 
-import { DATASET_FAMILIES, datasetFamily, resolveDatasetId } from '../../../nodes/lib/datasetFamilies'
+import {
+  DATASET_FAMILIES,
+  datasetFamily,
+  resolveDatasetId,
+} from '../../../nodes/lib/datasetFamilies'
 import { parseIdList } from '../../../nodes/lib/idList'
 import { parseTypedLabels } from '../../../nodes/lib/labelLookup'
 import { rLongVector, rStr, rVector } from '../r'
@@ -38,7 +42,12 @@ const DEFAULT_DEPLOYMENT = 'https://neuprint.janelia.org'
  * The token comes from an environment variable, never from the document. `neuprintr` reads
  * `neuprint_token` by convention, which is what `Sys.getenv` is asked for.
  */
-function connectionLines(ctx: EmitContext, out: string, server: string, datasetId: string): string[] {
+function connectionLines(
+  ctx: EmitContext,
+  out: string,
+  server: string,
+  datasetId: string,
+): string[] {
   ctx.library('neuprintr')
   return [
     `${out} <- neuprint_connection(`,
@@ -169,7 +178,7 @@ registerEmitter('neuron.findNeurons', (ctx) => {
     ctx.library('dplyr')
     lines.push(
       ...ctx.note(
-        'neuprint_search narrows on one field, so Coda\'s other criteria are applied to the ' +
+        "neuprint_search narrows on one field, so Coda's other criteria are applied to the " +
           'result rather than in the query. Same rows, one larger response.',
       ),
       `${out} <- ${out} |> filter(${filters.join(', ')})`,
@@ -190,14 +199,20 @@ registerEmitter('neuron.inputIds', (ctx) => {
   const out = ctx.output('neurons')
   const parsed = parseIdList(String(ctx.params.ids ?? ''))
   const wired = ctx.input('ids')
-  if (parsed.error && !wired) return ctx.todo(`The pasted id list is not valid: ${parsed.error}`)
+  if (parsed.error && !wired)
+    return ctx.todo(`The pasted id list is not valid: ${parsed.error}`)
 
   const column = ctx.column('column') ?? 'bodyId'
   const lines: string[] = []
 
   if (parsed.ids.length > 0 && wired) {
     const [first, ...rest] = rLongVector(parsed.ids)
-    lines.push(`ids <- unique(c(`, `  ${first}`, ...rest.map((l) => `  ${l}`), `, ${wired}$${column}))`)
+    lines.push(
+      `ids <- unique(c(`,
+      `  ${first}`,
+      ...rest.map((l) => `  ${l}`),
+      `, ${wired}$${column}))`,
+    )
   } else if (wired) {
     lines.push(`ids <- unique(${wired}$${column})`)
   } else {
@@ -210,7 +225,9 @@ registerEmitter('neuron.inputIds', (ctx) => {
     ctx.library('dplyr')
     return [
       ...lines,
-      ...ctx.note('No Dataset is wired, so this is the ids alone — exactly what the node emits.'),
+      ...ctx.note(
+        'No Dataset is wired, so this is the ids alone — exactly what the node emits.',
+      ),
       `${out} <- tibble(bodyId = ids)`,
     ]
   }
@@ -389,6 +406,11 @@ registerEmitter('neuron.synapses', (ctx) => {
   const neurons = ctx.wired('neurons')
   ctx.library('neuprintr')
   const polarity = String(ctx.params.polarity ?? '')
-  const args = [bodyIds(neurons), ...(polarity ? [`prepost = ${rStr(polarity.toUpperCase())}`] : [])]
-  return [`${ctx.output('points')} <- neuprint_get_synapses(${args.join(', ')}, conn = ${conn})`]
+  const args = [
+    bodyIds(neurons),
+    ...(polarity ? [`prepost = ${rStr(polarity.toUpperCase())}`] : []),
+  ]
+  return [
+    `${ctx.output('points')} <- neuprint_get_synapses(${args.join(', ')}, conn = ${conn})`,
+  ]
 })

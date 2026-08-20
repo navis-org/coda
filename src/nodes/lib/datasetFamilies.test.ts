@@ -81,7 +81,9 @@ describe('the family table', () => {
 
   it('covers every family neuPrint publishes visibly', () => {
     // Verified against the live listing: banc and wasp3 are marked hidden and never surface.
-    const neuprint = DATASET_FAMILIES.filter((f) => f.sourceId === 'neuprint').map((f) => f.family)
+    const neuprint = DATASET_FAMILIES.filter((f) => f.sourceId === 'neuprint').map(
+      (f) => f.family,
+    )
     expect(neuprint.sort()).toEqual([
       'fib19',
       'hemibrain',
@@ -141,7 +143,9 @@ describe('deployment URLs', () => {
   })
 
   it('keeps a different deployment', () => {
-    expect(normaliseServer('https://neuprint-pre.janelia.org')).toBe('https://neuprint-pre.janelia.org')
+    expect(normaliseServer('https://neuprint-pre.janelia.org')).toBe(
+      'https://neuprint-pre.janelia.org',
+    )
   })
 
   it('sends the default deployment through the configured proxy', () => {
@@ -158,7 +162,9 @@ describe('deployment URLs', () => {
 
   it('keeps the bare source id for the default, so existing graphs still resolve', () => {
     expect(sourceIdForServer(DEFAULT_SERVER)).toBe('neuprint')
-    expect(sourceIdForServer('https://other.example.org')).toBe('neuprint:https://other.example.org')
+    expect(sourceIdForServer('https://other.example.org')).toBe(
+      'neuprint:https://other.example.org',
+    )
   })
 
   it('labels a deployment by host', () => {

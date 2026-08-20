@@ -53,7 +53,10 @@ function fakeSource(edges: Edge[], minWeight = 0) {
     frontier: Frontier,
     direction: ConnectionDirection,
   ): Promise<TableValue> => {
-    calls.push({ frontier: { types: [...frontier.types], bodyIds: [...frontier.bodyIds] }, direction })
+    calls.push({
+      frontier: { types: [...frontier.types], bodyIds: [...frontier.bodyIds] },
+      direction,
+    })
     const wanted = new Set(frontier.types)
     const rows = edges
       .filter(
@@ -388,9 +391,9 @@ describe('pathsToNetwork', () => {
     ]
     const { pruned, ranked } = await findPaths(edges, ['A'], ['T'], 2)
     const network = pathsToNetwork(pruned, ranked.paths, ['A'], ['T'])
-    expect([...getColumn(network.edges, 'weight')].sort((a, b) => Number(a) - Number(b))).toEqual([
-      42, 137,
-    ])
+    expect(
+      [...getColumn(network.edges, 'weight')].sort((a, b) => Number(a) - Number(b)),
+    ).toEqual([42, 137])
   })
 
   it('is empty, rather than broken, when nothing connects', async () => {

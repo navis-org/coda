@@ -55,7 +55,12 @@ function graph(params: Record<string, unknown> = {}): CodaGraph {
   let g = emptyGraph('summary-test')
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: DATASET }))
   g = addNode(g, node('sum', 'out.datasetSummary', params))
-  g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'sum', targetHandle: 'dataset' })
+  g = addEdge(g, {
+    source: 'ds',
+    sourceHandle: 'dataset',
+    target: 'sum',
+    targetHandle: 'dataset',
+  })
   return g
 }
 
@@ -140,8 +145,8 @@ describe('out.datasetSummary', () => {
      */
     const status = requireNodeDef('out.datasetSummary').params?.find((p) => p.id === 'status')
     expect(status?.default).toBe('')
-    expect(requireNodeDef('neuron.findNeurons').params?.find((p) => p.id === 'status')?.default).toBe(
-      'Traced',
-    )
+    expect(
+      requireNodeDef('neuron.findNeurons').params?.find((p) => p.id === 'status')?.default,
+    ).toBe('Traced')
   })
 })

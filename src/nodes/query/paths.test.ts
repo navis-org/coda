@@ -43,11 +43,7 @@ function node(id: string, type: string, params: Record<string, unknown> = {}): G
 }
 
 /** dataset → (find sources, find targets) → paths */
-function pipeline(
-  params: Record<string, unknown> = {},
-  from = 'L1',
-  to = 'DNp02',
-): CodaGraph {
+function pipeline(params: Record<string, unknown> = {}, from = 'L1', to = 'DNp02'): CodaGraph {
   let g = emptyGraph('paths-test')
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: DATASET }))
   g = addNode(g, node('src', 'neuron.findNeurons', { typePattern: from, status: 'Traced' }))

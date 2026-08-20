@@ -43,10 +43,7 @@ export function NodeBrowser({ onPick, onClose }: NodeBrowserProps) {
   const listRef = useRef<HTMLDivElement>(null)
 
   /** Registry order, grouped by category — the order rows appear in with no query. */
-  const ordered = useMemo(
-    () => nodeDefsByCategory().flatMap((group) => group.defs),
-    [],
-  )
+  const ordered = useMemo(() => nodeDefsByCategory().flatMap((group) => group.defs), [])
 
   const counts = useMemo(() => {
     const map = new Map<NodeCategory | 'all', number>([['all', listableNodeDefs().length]])
@@ -78,7 +75,9 @@ export function NodeBrowser({ onPick, onClose }: NodeBrowserProps) {
   }, [onClose])
 
   useEffect(() => {
-    listRef.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' })
+    listRef.current
+      ?.querySelector('[aria-selected="true"]')
+      ?.scrollIntoView({ block: 'nearest' })
   }, [activeIndex])
 
   const step = (direction: 1 | -1) => {
@@ -145,26 +144,28 @@ export function NodeBrowser({ onPick, onClose }: NodeBrowserProps) {
         </div>
 
         <div className="node-browser__chips" role="tablist" aria-label="Node categories">
-          {(['all', ...nodeDefsByCategory().map((g) => g.category)] as Array<NodeCategory | 'all'>).map(
-            (value) => (
-              <button
-                key={value}
-                type="button"
-                role="tab"
-                className="chip-filter"
-                aria-selected={category === value}
-                data-category={value === 'all' ? undefined : value}
-                onClick={() => {
-                  setCategory(value)
-                  // Picking a chip is the other half of the exclusivity rule.
-                  setQuery('')
-                }}
-              >
-                {value === 'all' ? 'All' : CATEGORY_LABELS[value]}
-                <span className="chip-filter__count">{counts.get(value) ?? 0}</span>
-              </button>
-            ),
-          )}
+          {(
+            ['all', ...nodeDefsByCategory().map((g) => g.category)] as Array<
+              NodeCategory | 'all'
+            >
+          ).map((value) => (
+            <button
+              key={value}
+              type="button"
+              role="tab"
+              className="chip-filter"
+              aria-selected={category === value}
+              data-category={value === 'all' ? undefined : value}
+              onClick={() => {
+                setCategory(value)
+                // Picking a chip is the other half of the exclusivity rule.
+                setQuery('')
+              }}
+            >
+              {value === 'all' ? 'All' : CATEGORY_LABELS[value]}
+              <span className="chip-filter__count">{counts.get(value) ?? 0}</span>
+            </button>
+          ))}
         </div>
 
         <div className="node-browser__list" ref={listRef} role="listbox" aria-label="Nodes">

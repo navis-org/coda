@@ -85,8 +85,10 @@ function request<T>(make: (store: IDBObjectStore) => IDBRequest<T>, mode: IDBTra
 
 function fresh(envelope: Envelope | undefined, options: CacheGetOptions): boolean {
   if (!envelope) return false
-  if (options.fingerprint !== undefined && envelope.fingerprint !== options.fingerprint) return false
-  if (options.maxAgeMs !== undefined && Date.now() - envelope.savedAt > options.maxAgeMs) return false
+  if (options.fingerprint !== undefined && envelope.fingerprint !== options.fingerprint)
+    return false
+  if (options.maxAgeMs !== undefined && Date.now() - envelope.savedAt > options.maxAgeMs)
+    return false
   return true
 }
 
@@ -94,11 +96,17 @@ function fresh(envelope: Envelope | undefined, options: CacheGetOptions): boolea
  * Read a cached value. Resolves undefined on a miss, a shape mismatch, an expiry, or any
  * storage failure — all four are the same thing to a caller.
  */
-export async function cacheGet<T>(key: string, options: CacheGetOptions = {}): Promise<T | undefined> {
+export async function cacheGet<T>(
+  key: string,
+  options: CacheGetOptions = {},
+): Promise<T | undefined> {
   const held = memory.get(key)
   if (fresh(held, options)) return held!.value as T
 
-  const stored = await request<Envelope>((store) => store.get(key) as IDBRequest<Envelope>, 'readonly')
+  const stored = await request<Envelope>(
+    (store) => store.get(key) as IDBRequest<Envelope>,
+    'readonly',
+  )
   if (!fresh(stored, options)) return undefined
   // Promote into memory so a second reader in the same session skips IndexedDB entirely.
   memory.set(key, stored!)

@@ -120,7 +120,8 @@ export function RoisViewer(props: RoisViewerProps) {
    * nobody can get back to.
    */
   const groups = useMemo(() => {
-    const map = sourceId && datasetId ? getSource(sourceId)?.peekDataset(datasetId)?.roiSuper : undefined
+    const map =
+      sourceId && datasetId ? getSource(sourceId)?.peekDataset(datasetId)?.roiSuper : undefined
     if (!map) return []
     const seen = new Set<string>()
     const names: string[] = []
@@ -133,7 +134,8 @@ export function RoisViewer(props: RoisViewerProps) {
   }, [sourceId, datasetId])
 
   const groupOf = useMemo(() => {
-    const map = sourceId && datasetId ? getSource(sourceId)?.peekDataset(datasetId)?.roiSuper : undefined
+    const map =
+      sourceId && datasetId ? getSource(sourceId)?.peekDataset(datasetId)?.roiSuper : undefined
     return map ?? {}
   }, [sourceId, datasetId])
 
@@ -277,7 +279,12 @@ export function RoisViewer(props: RoisViewerProps) {
     const regions = outlines.state.regions
     return (
       <div className="viewer rois rois--empty">
-        <button className="rois__load" type="button" onClick={outlines.load} disabled={regions === 0}>
+        <button
+          className="rois__load"
+          type="button"
+          onClick={outlines.load}
+          disabled={regions === 0}
+        >
           {regions === 0 ? 'No regions listed yet' : `Load ${regions} regions`}
         </button>
         <p className="rois__note">
@@ -293,7 +300,8 @@ export function RoisViewer(props: RoisViewerProps) {
     return (
       <div className="viewer rois rois--empty">
         <p className="rois__note">
-          Downloading region meshes… {pct}%{outlines.state.note ? ` · ${outlines.state.note}` : ''}
+          Downloading region meshes… {pct}%
+          {outlines.state.note ? ` · ${outlines.state.note}` : ''}
         </p>
         <div className="rois__progress">
           <i style={{ width: `${pct}%` }} />
@@ -523,7 +531,8 @@ export function RoisViewer(props: RoisViewerProps) {
 
       <div className="rois__cap">
         <span>
-          {projected.length} of {(set?.regions.length ?? 0) + (set?.missing.length ?? 0)} regions
+          {projected.length} of {(set?.regions.length ?? 0) + (set?.missing.length ?? 0)}{' '}
+          regions
         </span>
         <span className="sep">·</span>
         <span>{view}</span>
@@ -583,9 +592,7 @@ function RegionRail({
           />
         </Tile>
         <Tile label="Reading this">
-          <p className="tile__pending">
-            Hover a region for its figures. Click to pin it.
-          </p>
+          <p className="tile__pending">Hover a region for its figures. Click to pin it.</p>
         </Tile>
       </>
     )
@@ -616,11 +623,11 @@ function RegionRail({
       </Tile>
 
       {/*
-        * Marked approximate, and the qualifier is not decoration. neuPrint publishes these
-        * meshes "for visualization only… not suitable for quantitative analysis", and Coda
-        * decimates them further before measuring — so this is an estimate off a display surface.
-        * It is carried because nothing else in the app can say anything about a region's size.
-        */}
+       * Marked approximate, and the qualifier is not decoration. neuPrint publishes these
+       * meshes "for visualization only… not suitable for quantitative analysis", and Coda
+       * decimates them further before measuring — so this is an estimate off a display surface.
+       * It is carried because nothing else in the app can say anything about a region's size.
+       */}
       <Tile label="Size" qualifier="≈ from display mesh">
         <Facts
           rows={[

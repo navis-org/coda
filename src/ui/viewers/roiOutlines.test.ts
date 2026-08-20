@@ -93,7 +93,9 @@ describe('buildRoiOutlines', () => {
       ...fetched,
       attributes: {
         ...fetched.attributes,
-        schema: { columns: fetched.attributes.schema.columns.filter((c) => c.name !== 'primary') },
+        schema: {
+          columns: fetched.attributes.schema.columns.filter((c) => c.name !== 'primary'),
+        },
         data: { roi: fetched.attributes.data['roi']! },
       },
     }
@@ -106,10 +108,18 @@ describe('buildRoiOutlines', () => {
     const empty = {
       kind: 'meshes' as const,
       items: [
-        { bodyId: 0, label: 'nothing', positions: new Float32Array(0), indices: new Uint32Array(0) },
+        {
+          bodyId: 0,
+          label: 'nothing',
+          positions: new Float32Array(0),
+          indices: new Uint32Array(0),
+        },
       ],
       attributes: { length: 1, schema: { columns: [] }, data: {} },
-      bounds: { min: [0, 0, 0] as [number, number, number], max: [0, 0, 0] as [number, number, number] },
+      bounds: {
+        min: [0, 0, 0] as [number, number, number],
+        max: [0, 0, 0] as [number, number, number],
+      },
     }
     const set = buildRoiOutlines(empty as never, ['nothing'])
     expect(set.regions).toHaveLength(0)

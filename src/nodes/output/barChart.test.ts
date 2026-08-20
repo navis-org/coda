@@ -47,7 +47,12 @@ function pipeline(params: Record<string, unknown> = {}): CodaGraph {
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: 'optic-lobe-mini' }))
   g = addNode(g, node('find', 'neuron.findNeurons', { status: 'Traced' }))
   g = addNode(g, node('bar', 'out.barChart', params))
-  g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'find', targetHandle: 'dataset' })
+  g = addEdge(g, {
+    source: 'ds',
+    sourceHandle: 'dataset',
+    target: 'find',
+    targetHandle: 'dataset',
+  })
   g = addEdge(g, { source: 'find', sourceHandle: 'neurons', target: 'bar', targetHandle: 'in' })
   return g
 }
@@ -57,10 +62,26 @@ function pivoted(): CodaGraph {
   let g = emptyGraph('bar-pivot')
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: 'optic-lobe-mini' }))
   g = addNode(g, node('find', 'neuron.findNeurons', { status: 'Traced' }))
-  g = addNode(g, node('grp', 'core.groupBy', { by: ['type', 'status'], agg: 'sum', value: 'pre' }))
-  g = addNode(g, node('piv', 'core.pivot', { rows: 'type', columns: 'status', agg: 'sum', value: 'sum_pre' }))
+  g = addNode(
+    g,
+    node('grp', 'core.groupBy', { by: ['type', 'status'], agg: 'sum', value: 'pre' }),
+  )
+  g = addNode(
+    g,
+    node('piv', 'core.pivot', {
+      rows: 'type',
+      columns: 'status',
+      agg: 'sum',
+      value: 'sum_pre',
+    }),
+  )
   g = addNode(g, node('bar', 'out.barChart'))
-  g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'find', targetHandle: 'dataset' })
+  g = addEdge(g, {
+    source: 'ds',
+    sourceHandle: 'dataset',
+    target: 'find',
+    targetHandle: 'dataset',
+  })
   g = addEdge(g, { source: 'find', sourceHandle: 'neurons', target: 'grp', targetHandle: 'in' })
   g = addEdge(g, { source: 'grp', sourceHandle: 'out', target: 'piv', targetHandle: 'in' })
   g = addEdge(g, { source: 'piv', sourceHandle: 'table', target: 'bar', targetHandle: 'in' })
@@ -131,7 +152,12 @@ describe('out.barChart — what it warns about', () => {
   function narrowed(columns: string[]): CodaGraph {
     let g = pipeline()
     g = addNode(g, node('sel', 'core.select', { columns }))
-    g = addEdge(g, { source: 'find', sourceHandle: 'neurons', target: 'sel', targetHandle: 'in' })
+    g = addEdge(g, {
+      source: 'find',
+      sourceHandle: 'neurons',
+      target: 'sel',
+      targetHandle: 'in',
+    })
     g = { ...g, edges: g.edges.filter((e) => e.target !== 'bar') }
     return addEdge(g, { source: 'sel', sourceHandle: 'out', target: 'bar', targetHandle: 'in' })
   }

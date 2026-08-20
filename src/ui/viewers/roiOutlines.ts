@@ -171,7 +171,9 @@ export function buildRoiOutlines(
    * `primary` column has not said these regions are nested — it has said nothing, which is a
    * different thing and must not read as `false`.
    */
-  const hasPrimary = meshes.attributes.schema.columns.some((column) => column.name === 'primary')
+  const hasPrimary = meshes.attributes.schema.columns.some(
+    (column) => column.name === 'primary',
+  )
   const primaryColumn = hasPrimary ? meshes.attributes.data['primary'] : undefined
 
   /*

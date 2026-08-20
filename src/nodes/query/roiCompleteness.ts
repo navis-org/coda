@@ -35,7 +35,9 @@ export const roiCompletenessNode = registerNode({
     'How completely each region of the dataset has been reconstructed: traced synapses against the total present.',
   cost: 'expensive',
   inputs: [{ id: 'dataset', label: 'Dataset', type: T.dataset() }],
-  outputs: [{ id: 'completeness', label: 'Completeness', type: T.table(ROI_COMPLETENESS_SCHEMA) }],
+  outputs: [
+    { id: 'completeness', label: 'Completeness', type: T.table(ROI_COMPLETENESS_SCHEMA) },
+  ],
   params: [
     {
       id: 'primaryOnly',

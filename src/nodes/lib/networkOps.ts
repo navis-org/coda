@@ -147,7 +147,9 @@ function recomputeRollups(
   const present = ROLLUPS.filter((name) => hasColumn(nodes.schema, name))
   if (present.length === 0) return nodes
 
-  const acc = new Map(order.map((id) => [id, { degreeIn: 0, degreeOut: 0, weightIn: 0, weightOut: 0 }]))
+  const acc = new Map(
+    order.map((id) => [id, { degreeIn: 0, degreeOut: 0, weightIn: 0, weightOut: 0 }]),
+  )
   for (const link of links) {
     const from = acc.get(link.source)
     const to = acc.get(link.target)

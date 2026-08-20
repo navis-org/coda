@@ -109,7 +109,10 @@ describe('rebuilding the plot', () => {
     const before = buildScatter.mock.calls.length
 
     rerender(
-      <ScatterViewer {...props()} color={{ mode: 'constant', column: undefined, constant: '4' }} />,
+      <ScatterViewer
+        {...props()}
+        color={{ mode: 'constant', column: undefined, constant: '4' }}
+      />,
     )
     expect(buildScatter.mock.calls.length).toBeGreaterThan(before)
   })

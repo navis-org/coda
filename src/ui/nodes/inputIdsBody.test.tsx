@@ -56,7 +56,12 @@ function graphWith(params: Record<string, unknown>, withDataset: boolean): CodaG
   g = addNode(g, node('ids', 'neuron.inputIds', params))
   if (withDataset) {
     g = addNode(g, node('ds', 'neuron.dataset', { dataset: DATASET }))
-    g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'ids', targetHandle: 'dataset' })
+    g = addEdge(g, {
+      source: 'ds',
+      sourceHandle: 'dataset',
+      target: 'ids',
+      targetHandle: 'dataset',
+    })
   }
   return g
 }

@@ -100,8 +100,14 @@ export function installJsdomStubs(options: JsdomStubOptions = {}): void {
       } as DOMRect
     },
   })
-  Object.defineProperty(HTMLElement.prototype, 'offsetWidth', { configurable: true, value: 1200 })
-  Object.defineProperty(HTMLElement.prototype, 'offsetHeight', { configurable: true, value: 800 })
+  Object.defineProperty(HTMLElement.prototype, 'offsetWidth', {
+    configurable: true,
+    value: 1200,
+  })
+  Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+    configurable: true,
+    value: 800,
+  })
 
   installCanvas2d()
 }

@@ -249,7 +249,11 @@ function projectVertices(mesh: MeshGeometry, view: RoiView): Flattened {
 }
 
 /** Rasterise one region's faces and walk the edges, returning rings in projection units. */
-function traceRegion(item: Flattened, mesh: MeshGeometry, pixelsPerUnit: number): Float32Array[] {
+function traceRegion(
+  item: Flattened,
+  mesh: MeshGeometry,
+  pixelsPerUnit: number,
+): Float32Array[] {
   // One pixel of margin so a blob touching the mask edge still has an outside to walk along.
   const pad = 1
   const width = Math.max(1, Math.ceil((item.maxX - item.minX) * pixelsPerUnit) + pad * 2)
@@ -628,7 +632,10 @@ export function fitFrame(
 
   const innerW = Math.max(1, width - padding * 2)
   const innerH = Math.max(1, height - padding * 2)
-  const scale = Math.min(innerW / Math.max(1e-6, maxX - minX), innerH / Math.max(1e-6, maxY - minY))
+  const scale = Math.min(
+    innerW / Math.max(1e-6, maxX - minX),
+    innerH / Math.max(1e-6, maxY - minY),
+  )
   return {
     scale,
     offsetX: padding + (innerW - (maxX - minX) * scale) / 2 - minX * scale,

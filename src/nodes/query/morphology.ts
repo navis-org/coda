@@ -69,7 +69,8 @@ export const skeletonsNode = registerNode({
 
   validate: (ctx) => {
     const source = ctx.inputs.dataset
-    if (source && !sourceSupports(ctx, 'skeletons')) return ['This data source has no skeletons']
+    if (source && !sourceSupports(ctx, 'skeletons'))
+      return ['This data source has no skeletons']
     return []
   },
 

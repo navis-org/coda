@@ -1,7 +1,12 @@
 import { registerNode } from '../../core/registry'
 import { T } from '../../core/types'
 import { isTableValue } from '../../core/values'
-import { ANY_OPTION, datasetInfoFromType, requireDataset, schemasFromType } from '../lib/datasetParam'
+import {
+  ANY_OPTION,
+  datasetInfoFromType,
+  requireDataset,
+  schemasFromType,
+} from '../lib/datasetParam'
 
 /**
  * Find neurons matching a pattern. The workhorse entry query.

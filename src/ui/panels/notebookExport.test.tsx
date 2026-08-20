@@ -43,14 +43,22 @@ function openSaveMenu(): void {
 function realGraph() {
   let g = emptyGraph('LC4 partners')
   g = addNode(g, {
-    id: 'ds', type: 'dataset.hemibrain', position: { x: 0, y: 0 }, params: { version: 'v1.2.1' },
+    id: 'ds',
+    type: 'dataset.hemibrain',
+    position: { x: 0, y: 0 },
+    params: { version: 'v1.2.1' },
   })
   g = addNode(g, {
-    id: 'find', type: 'neuron.findNeurons', position: { x: 260, y: 0 },
+    id: 'find',
+    type: 'neuron.findNeurons',
+    position: { x: 260, y: 0 },
     params: { typePattern: 'LC4' },
   })
   return addEdge(g, {
-    source: 'ds', sourceHandle: 'dataset', target: 'find', targetHandle: 'dataset',
+    source: 'ds',
+    sourceHandle: 'dataset',
+    target: 'find',
+    targetHandle: 'dataset',
   })
 }
 
@@ -84,7 +92,10 @@ describe('Export as Jupyter Notebook', () => {
       render(<App />)
       let g = emptyGraph('Mocked')
       g = addNode(g, {
-        id: 'm', type: 'dataset.mock.hemibrain', position: { x: 0, y: 0 }, params: {},
+        id: 'm',
+        type: 'dataset.mock.hemibrain',
+        position: { x: 0, y: 0 },
+        params: {},
       })
       act(() => useGraphStore.getState().loadGraph(g))
 

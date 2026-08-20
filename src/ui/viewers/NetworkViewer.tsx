@@ -316,8 +316,10 @@ function applyStyle(
   const links = linkColor(style.mode)
   const border = chartSurface(style.mode)
 
-  const forceNodeLabels = style.nodeLabels !== undefined && graph.order <= FORCE_NODE_LABELS_BELOW
-  const forceEdgeLabels = style.edgeLabels !== undefined && graph.size <= FORCE_EDGE_LABELS_BELOW
+  const forceNodeLabels =
+    style.nodeLabels !== undefined && graph.order <= FORCE_NODE_LABELS_BELOW
+  const forceEdgeLabels =
+    style.edgeLabels !== undefined && graph.size <= FORCE_EDGE_LABELS_BELOW
 
   // Bulk updaters, not per-item setters: graphology fires one aggregate event for these,
   // where a `setNodeAttribute` loop fires one refresh per node.
@@ -686,7 +688,14 @@ export function NetworkViewer({
           // `row` ties a graph node back to its attribute-table row, which is what every
           // encoding is indexed by. Insertion order would do the same job until the day
           // something reorders the graph.
-          graph.addNode(id, { x: position.x, y: position.y, row, size: 4, color: '', label: '' })
+          graph.addNode(id, {
+            x: position.x,
+            y: position.y,
+            row,
+            size: 4,
+            color: '',
+            label: '',
+          })
         })
 
         const sourceColumn = getColumn(network.edges, 'source')
@@ -863,7 +872,10 @@ export function NetworkViewer({
           if (!hoveredEdge && !hoveredNodeRef.current) return
           setTip((current) =>
             current
-              ? { ...current, ...tipPlacement(sigma.getDimensions(), event, current.lines.length) }
+              ? {
+                  ...current,
+                  ...tipPlacement(sigma.getDimensions(), event, current.lines.length),
+                }
               : current,
           )
         })
@@ -1121,7 +1133,9 @@ export function NetworkViewer({
               <button
                 type="button"
                 className="network-strip__btn"
-                title={settling ? 'Freeze the layout where it is' : 'Let the layout keep settling'}
+                title={
+                  settling ? 'Freeze the layout where it is' : 'Let the layout keep settling'
+                }
                 aria-label={settling ? 'Freeze layout' : 'Resume layout'}
                 aria-pressed={!settling}
                 onClick={toggleSettling}
@@ -1154,9 +1168,7 @@ export function NetworkViewer({
             }}
           />
           {query.trim() && (
-            <span className="network-strip__count">
-              {matches.length.toLocaleString()}
-            </span>
+            <span className="network-strip__count">{matches.length.toLocaleString()}</span>
           )}
         </div>
       )}
@@ -1195,8 +1207,8 @@ export function NetworkViewer({
 
       <div className="viewer__caption">
         <span>
-          {network.nodes.length.toLocaleString()} nodes · {network.edges.length.toLocaleString()}{' '}
-          links
+          {network.nodes.length.toLocaleString()} nodes ·{' '}
+          {network.edges.length.toLocaleString()} links
           {stableSelection.length > 0 && ` · ${stableSelection.length} selected`}
         </span>
         {filteredNote && !compact && (

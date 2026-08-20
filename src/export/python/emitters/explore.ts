@@ -41,7 +41,9 @@ registerEmitter('neuron.explore', (ctx) => {
       lines.push(
         ...ctx.note(
           `Coda caps this at ${limit} hits and keeps the ${limit} most *relevant*; the ` +
-            'relevance ranking is not ported, so this keeps the first ' + limit + ' matches ' +
+            'relevance ranking is not ported, so this keeps the first ' +
+            limit +
+            ' matches ' +
             'in table order instead. The rows may differ from the canvas.',
         ),
         `${hits} = ${hits}.head(${limit})`,
@@ -49,7 +51,11 @@ registerEmitter('neuron.explore', (ctx) => {
     }
   } else {
     // An empty search is every neuron, which is what the node's own `Hits` port answers.
-    lines.push('', ...ctx.note('The search box is empty, so Hits is the whole table.'), `${hits} = ${all}`)
+    lines.push(
+      '',
+      ...ctx.note('The search box is empty, so Hits is the whole table.'),
+      `${hits} = ${all}`,
+    )
   }
 
   lines.push('')
@@ -182,7 +188,7 @@ registerHelper({
     '',
     '    A missing value satisfies "!=" and nothing else -- so status!=Traced returns the',
     '    untraced *and* the unlabelled, which is the question somebody auditing a dataset',
-    '    for gaps is actually asking. SQL\'s three-valued logic drops both, silently.',
+    "    for gaps is actually asking. SQL's three-valued logic drops both, silently.",
     '    """',
     '    col = next((c for c in df.columns if str(c).lower() == field.lower()), None)',
     '    if col is None:',

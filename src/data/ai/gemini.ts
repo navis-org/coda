@@ -136,7 +136,10 @@ export const gemini: AiProvider = {
     const candidate = reply.candidates?.[0]
 
     if (candidate?.finishReason === 'MAX_TOKENS') truncated()
-    if (candidate?.finishReason === 'SAFETY' || candidate?.finishReason === 'PROHIBITED_CONTENT') {
+    if (
+      candidate?.finishReason === 'SAFETY' ||
+      candidate?.finishReason === 'PROHIBITED_CONTENT'
+    ) {
       declined()
     }
 

@@ -158,7 +158,6 @@ async function loadMinishard(
   return entries
 }
 
-
 /** Fetch and decode one object out of a shard. */
 export async function readObject(
   shardUrl: string,

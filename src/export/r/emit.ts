@@ -40,8 +40,7 @@ export interface ExportOptions {
 }
 
 export type ExportResult =
-  | { ok: true; source: string; warnings: string[] }
-  | ({ ok: false } & ExportRefusal)
+  { ok: true; source: string; warnings: string[] } | ({ ok: false } & ExportRefusal)
 
 /** `"a"`, `"a" and "b"`, `"a", "b" and "c"` — for a message listing ports or nodes. */
 function quoted(names: readonly string[]): string {
@@ -132,7 +131,11 @@ export function exportRmd(graph: CodaGraph, options: ExportOptions = {}): Export
 
     if (!def) {
       warnings.push(`Unknown node type "${node.type}" — emitted as a comment.`)
-      bodyCells.push({ kind: 'code', label: `unknown-${bodyCells.length}`, source: rComment(`Unknown node type "${node.type}". Skipped.`) })
+      bodyCells.push({
+        kind: 'code',
+        label: `unknown-${bodyCells.length}`,
+        source: rComment(`Unknown node type "${node.type}". Skipped.`),
+      })
       continue
     }
 
@@ -143,17 +146,17 @@ export function exportRmd(graph: CodaGraph, options: ExportOptions = {}): Export
 
     if (node.disabled) {
       bodyCells.push({
-          kind: 'code',
-          label: chunkLabel(varName),
-          source: [
-            header,
-            ...rComment(
-              'Muted on the canvas, so it produced nothing and nothing downstream of it ' +
-                'ran. Left here rather than dropped, because a node missing from the ' +
-                'document and a node deliberately switched off look identical otherwise.',
-            ),
-          ],
-        })
+        kind: 'code',
+        label: chunkLabel(varName),
+        source: [
+          header,
+          ...rComment(
+            'Muted on the canvas, so it produced nothing and nothing downstream of it ' +
+              'ran. Left here rather than dropped, because a node missing from the ' +
+              'document and a node deliberately switched off look identical otherwise.',
+          ),
+        ],
+      })
       continue
     }
 
@@ -310,7 +313,9 @@ export function exportRmd(graph: CodaGraph, options: ExportOptions = {}): Export
 function titleCells(graph: CodaGraph): Cell[] {
   const description = graph.meta?.description?.trim()
   const provenance = '*Exported from Coda.*'
-  return [{ kind: 'markdown', source: description ? [description, '', provenance] : [provenance] }]
+  return [
+    { kind: 'markdown', source: description ? [description, '', provenance] : [provenance] },
+  ]
 }
 
 /**
@@ -326,7 +331,8 @@ function titleCells(graph: CodaGraph): Cell[] {
  */
 function setupChunk(packages: Set<RPackage>): Cell {
   const declared = (Object.keys(PACKAGES) as RPackage[]).filter((p) => packages.has(p))
-  if (declared.length === 0) return { kind: 'code', label: 'setup', source: ['# No packages needed.'] }
+  if (declared.length === 0)
+    return { kind: 'code', label: 'setup', source: ['# No packages needed.'] }
 
   const cran = declared.filter((p) => !PACKAGES[p].github)
   const github = declared.filter((p) => PACKAGES[p].github)

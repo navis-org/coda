@@ -276,4 +276,3 @@ export function skeletonFromSwc(bodyId: number, response: SwcResponse): Skeleton
     parents: parents.subarray(0, emitted),
   }
 }
-

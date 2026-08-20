@@ -625,7 +625,12 @@ export class NeuPrintSource implements DataSource {
      */
     const rois = req.rois ?? info?.primaryRois ?? info?.rois ?? []
     if (rois.length === 0) {
-      return { kind: 'meshes', items: [], attributes: emptyTable(ROI_MESH_SCHEMA), bounds: EMPTY_BOUNDS }
+      return {
+        kind: 'meshes',
+        items: [],
+        attributes: emptyTable(ROI_MESH_SCHEMA),
+        bounds: EMPTY_BOUNDS,
+      }
     }
 
     const result = await fetchRoiMeshSet(req.datasetId, rois, state?.scale ?? IDENTITY_SCALE, {
@@ -1057,7 +1062,6 @@ function parseJsonMap(raw: unknown): Record<string, string> | undefined {
 function emptyDiscovered(): DiscoveredSchema {
   return discoverNeuronSchema({})
 }
-
 
 /**
  * Pivot a connection list into a matrix.

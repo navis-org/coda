@@ -63,7 +63,9 @@ describe('framing what was just opened', () => {
     const before = fits()
     useGraphStore.getState().loadExample('partners')
     expect(fits()).toBe(before + 1)
-    useGraphStore.getState().loadStarter({ nodeType: 'dataset.mock.hemibrain', label: 'Mini', sourceId: 'mock' })
+    useGraphStore
+      .getState()
+      .loadStarter({ nodeType: 'dataset.mock.hemibrain', label: 'Mini', sourceId: 'mock' })
     expect(fits()).toBe(before + 2)
   })
 })

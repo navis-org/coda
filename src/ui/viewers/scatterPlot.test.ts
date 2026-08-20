@@ -71,7 +71,13 @@ describe('reading a cell', () => {
 
 describe('usable rows', () => {
   it('drops a row missing either coordinate and counts what it dropped', () => {
-    const { rows, skipped } = usableRows([1, null, 3, 4], [1, 2, null, 4], 4, 'linear', 'linear')
+    const { rows, skipped } = usableRows(
+      [1, null, 3, 4],
+      [1, 2, null, 4],
+      4,
+      'linear',
+      'linear',
+    )
     expect([...rows]).toEqual([0, 3])
     expect(skipped).toBe(2)
   })

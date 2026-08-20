@@ -1,7 +1,12 @@
 import { registerNode } from '../../core/registry'
 import { selectRows } from '../../core/values'
 import { T } from '../../core/types'
-import { requireDataset, schemasFromType, sourceLabel, sourceSupports } from '../lib/datasetParam'
+import {
+  requireDataset,
+  schemasFromType,
+  sourceLabel,
+  sourceSupports,
+} from '../lib/datasetParam'
 import {
   SEARCH_SYNTAX_HELP,
   parseSearch,
@@ -166,7 +171,7 @@ export const exploreNode = registerNode({
       id: 'refresh',
       kind: 'int',
       label: 'Refresh',
-      help: 'Bumped by the widget\'s reload button. Re-downloads the dataset index instead of reading the cached copy.',
+      help: "Bumped by the widget's reload button. Re-downloads the dataset index instead of reading the cached copy.",
       default: 0,
       min: 0,
       advanced: true,
@@ -231,4 +236,3 @@ export const exploreNode = registerNode({
     }
   },
 })
-

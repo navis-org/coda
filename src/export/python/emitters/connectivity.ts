@@ -98,8 +98,7 @@ registerEmitter('neuron.connectivity', (ctx) => {
     ]
   }
 
-  const [sources, targets] =
-    direction === 'inputs' ? ['None', criteria] : [criteria, 'None']
+  const [sources, targets] = direction === 'inputs' ? ['None', criteria] : [criteria, 'None']
   const label = direction === 'inputs' ? 'upstream' : 'downstream'
 
   return [

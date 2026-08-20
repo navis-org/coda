@@ -1,7 +1,14 @@
 import { useMemo, useRef, useState } from 'react'
 
 import type { MatrixValue } from '../../core/values'
-import { CHART_INK, chartSurface, currentMode, divergingColor, inkOn, sequentialColor } from '../colors'
+import {
+  CHART_INK,
+  chartSurface,
+  currentMode,
+  divergingColor,
+  inkOn,
+  sequentialColor,
+} from '../colors'
 import { exportBaseName as makeBaseName, matrixToCsv } from '../export'
 import { formatCompact, formatNumber, truncateLabel } from '../format'
 import type { ExportSource } from './ViewerActions'
@@ -86,8 +93,8 @@ export function HeatmapViewer({
     return (
       <div className="viewer">
         <div className="viewer__empty">
-          {rows.toLocaleString()} × {cols.toLocaleString()} is too large to draw
-          ({(rows * cols).toLocaleString()} cells).
+          {rows.toLocaleString()} × {cols.toLocaleString()} is too large to draw (
+          {(rows * cols).toLocaleString()} cells).
           <br />
           Aggregate upstream — e.g. group by type before pivoting.
         </div>
@@ -124,8 +131,7 @@ export function HeatmapViewer({
   }
 
   // Only label cells where the formatted text actually fits with padding.
-  const labelsFit =
-    showValues && cellHeight >= 14 && cellWidth >= 26 && rows * cols <= 400
+  const labelsFit = showValues && cellHeight >= 14 && cellWidth >= 26 && rows * cols <= 400
 
   const hovered = hover
     ? {
@@ -137,9 +143,19 @@ export function HeatmapViewer({
 
   return (
     <div className="viewer">
-      <div ref={ref} className="viewer__scroll" style={{ overflow: 'hidden', position: 'relative' }}>
+      <div
+        ref={ref}
+        className="viewer__scroll"
+        style={{ overflow: 'hidden', position: 'relative' }}
+      >
         {size.width > 40 && size.height > 40 && (
-          <svg ref={svgRef} className="chart" width={size.width} height={size.height} role="img">
+          <svg
+            ref={svgRef}
+            className="chart"
+            width={size.width}
+            height={size.height}
+            role="img"
+          >
             <title>
               {`Heatmap, ${rows} rows × ${cols} columns${matrix.valueLabel ? `, ${matrix.valueLabel}` : ''}`}
             </title>
@@ -254,14 +270,22 @@ export function HeatmapViewer({
           {matrix.valueLabel ? ` · ${matrix.valueLabel}` : ''}
         </span>
         <span className="colorbar">
-          {formatCompact(scale === 'diverging' ? -Math.max(Math.abs(stats.min), Math.abs(stats.max)) : Math.min(0, stats.min))}
+          {formatCompact(
+            scale === 'diverging'
+              ? -Math.max(Math.abs(stats.min), Math.abs(stats.max))
+              : Math.min(0, stats.min),
+          )}
           <span
             className="colorbar__ramp"
             style={{
               background: `linear-gradient(to right, ${rampStops(scale, mode).join(', ')})`,
             }}
           />
-          {formatCompact(scale === 'diverging' ? Math.max(Math.abs(stats.min), Math.abs(stats.max)) : stats.max)}
+          {formatCompact(
+            scale === 'diverging'
+              ? Math.max(Math.abs(stats.min), Math.abs(stats.max))
+              : stats.max,
+          )}
         </span>
         <ViewerActions
           baseName={baseName ?? makeBaseName(undefined, 'heatmap')}

@@ -45,9 +45,20 @@ describe('regionColor', () => {
      * named regions looking alike often enough to notice, which on a map of neuropils reads as
      * two structures being related when they are not.
      */
-    const hues = ['ME', 'LO', 'LOP', 'CA', 'PED', 'AL', 'LH', 'SLP', 'SMP', 'FB', 'EB', 'PB'].map(
-      (roi) => regionColor(`${roi}(R)`, 'dark'),
-    )
+    const hues = [
+      'ME',
+      'LO',
+      'LOP',
+      'CA',
+      'PED',
+      'AL',
+      'LH',
+      'SLP',
+      'SMP',
+      'FB',
+      'EB',
+      'PB',
+    ].map((roi) => regionColor(`${roi}(R)`, 'dark'))
     expect(new Set(hues).size).toBe(hues.length)
   })
 
@@ -103,7 +114,9 @@ describe('rampColor', () => {
       return 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5)
     }
     for (const hue of ['blue', 'red'] as const) {
-      const steps = Array.from({ length: 9 }, (_, i) => luminance(rampColor(i / 8, 'light', hue)))
+      const steps = Array.from({ length: 9 }, (_, i) =>
+        luminance(rampColor(i / 8, 'light', hue)),
+      )
       for (let i = 0; i + 1 < steps.length; i++) {
         expect(steps[i]!).toBeGreaterThan(steps[i + 1]!)
       }

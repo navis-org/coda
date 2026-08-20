@@ -38,7 +38,13 @@ const DATASET_ID = `${FAMILY.family}:v1.0`
  * `NeuPrintSource.loadDatasets` does.
  */
 function unlistedSource(): DataSource & { listing(): Promise<DatasetInfo[]> } {
-  const info: DatasetInfo = { id: DATASET_ID, label: 'MaleCNS', rois: [], statuses: ['Traced'], version: 'v1.0' }
+  const info: DatasetInfo = {
+    id: DATASET_ID,
+    label: 'MaleCNS',
+    rois: [],
+    statuses: ['Traced'],
+    version: 'v1.0',
+  }
   let known: DatasetInfo[] | undefined
   const base: DataSource = new MockSource({ latencyMs: 0 })
   return Object.assign(Object.create(base) as DataSource, {
@@ -95,12 +101,19 @@ describe('inference after a source learns something', () => {
     const store = useGraphStore.getState()
     const dataset = store.addNode(`dataset.${FAMILY.key}`, { x: 0, y: 0 })
     const explore = store.addNode('neuron.explore', { x: 300, y: 0 })
-    store.connect({ source: dataset, sourceHandle: 'dataset', target: explore, targetHandle: 'dataset' })
+    store.connect({
+      source: dataset,
+      sourceHandle: 'dataset',
+      target: explore,
+      targetHandle: 'dataset',
+    })
 
-    expect(datasetRef(useGraphStore.getState().inference.nodes[explore]?.inputs?.dataset)?.datasetId).toBeUndefined()
+    expect(
+      datasetRef(useGraphStore.getState().inference.nodes[explore]?.inputs?.dataset)?.datasetId,
+    ).toBeUndefined()
     await source.listDatasets()
-    expect(datasetRef(useGraphStore.getState().inference.nodes[explore]?.inputs?.dataset)?.datasetId).toBe(
-      DATASET_ID,
-    )
+    expect(
+      datasetRef(useGraphStore.getState().inference.nodes[explore]?.inputs?.dataset)?.datasetId,
+    ).toBe(DATASET_ID)
   })
 })

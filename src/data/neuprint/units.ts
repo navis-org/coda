@@ -38,7 +38,8 @@ const TO_NANOMETRES: Record<string, number> = {
  */
 export function voxelScale(voxelSize: unknown, voxelUnits: unknown): VoxelScale {
   if (!Array.isArray(voxelSize) || voxelSize.length < 3) return IDENTITY_SCALE
-  const unit = typeof voxelUnits === 'string' ? TO_NANOMETRES[voxelUnits.toLowerCase()] : undefined
+  const unit =
+    typeof voxelUnits === 'string' ? TO_NANOMETRES[voxelUnits.toLowerCase()] : undefined
   if (unit === undefined) return IDENTITY_SCALE
 
   const scale = [0, 1, 2].map((axis) => {

@@ -111,7 +111,9 @@ export function Loadable({
 }
 
 export function Facts({ rows }: { rows: Array<[string, CellValue | undefined]> }) {
-  const present = rows.filter(([, value]) => value !== null && value !== undefined && value !== '')
+  const present = rows.filter(
+    ([, value]) => value !== null && value !== undefined && value !== '',
+  )
   if (present.length === 0) return null
   return (
     <dl className="tile__facts">
@@ -144,7 +146,10 @@ export function Bars({ rows, color }: { rows: BarRow[]; color: string }) {
           <span className="tile__bar-track">
             <span
               className="tile__bar-fill"
-              style={{ width: `${Math.max(0, Math.min(1, row.fraction)) * 100}%`, background: color }}
+              style={{
+                width: `${Math.max(0, Math.min(1, row.fraction)) * 100}%`,
+                background: color,
+              }}
             />
           </span>
           <span className="tile__bar-value">
@@ -192,12 +197,12 @@ export function Donut({ slices, total }: { slices: Slice[]; total: string }) {
     <div className="tile__donut">
       <svg className="tile__donut-ring" viewBox="0 0 42 42" role="presentation">
         {/*
-          * Drawn with `stroke-dasharray` on one circle per slice rather than with arc paths.
-          * The circumference is 2πr, so a slice is `share * C` of dash followed by the rest as
-          * gap, rotated to where the previous slice ended — which means a slice covering the
-          * whole ring is an ordinary full-length dash rather than the degenerate arc an
-          * `A`-command path produces when its start and end coincide.
-          */}
+         * Drawn with `stroke-dasharray` on one circle per slice rather than with arc paths.
+         * The circumference is 2πr, so a slice is `share * C` of dash followed by the rest as
+         * gap, rotated to where the previous slice ended — which means a slice covering the
+         * whole ring is an ordinary full-length dash rather than the degenerate arc an
+         * `A`-command path produces when its start and end coincide.
+         */}
         {drawn.map((slice, i) => {
           const offset = drawn.slice(0, i).reduce((sum, s) => sum + s.share, 0)
           return (

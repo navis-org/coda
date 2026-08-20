@@ -86,7 +86,8 @@ export const T = {
     ...(sourceId ? { sourceId } : {}),
     ...(datasetId ? { datasetId } : {}),
   }),
-  table: (schema?: TableSchema): CodaType => (schema ? { kind: 'table', schema } : { kind: 'table' }),
+  table: (schema?: TableSchema): CodaType =>
+    schema ? { kind: 'table', schema } : { kind: 'table' },
   neurons: (schema?: TableSchema): CodaType =>
     schema ? { kind: 'neurons', schema } : { kind: 'neurons' },
   matrix: (): CodaType => ({ kind: 'matrix' }),
@@ -198,7 +199,12 @@ export function attributeSchema(
 export function datasetRef(
   t: CodaType | undefined,
 ): { sourceId?: string; datasetId?: string } | undefined {
-  return t?.kind === 'dataset' ? { ...(t.sourceId ? { sourceId: t.sourceId } : {}), ...(t.datasetId ? { datasetId: t.datasetId } : {}) } : undefined
+  return t?.kind === 'dataset'
+    ? {
+        ...(t.sourceId ? { sourceId: t.sourceId } : {}),
+        ...(t.datasetId ? { datasetId: t.datasetId } : {}),
+      }
+    : undefined
 }
 
 // ---------------------------------------------------------------------------
@@ -213,7 +219,10 @@ export function tableSchema(...columns: ColumnSchema[]): TableSchema {
   return { columns }
 }
 
-export function findColumn(schema: TableSchema | undefined, name: string): ColumnSchema | undefined {
+export function findColumn(
+  schema: TableSchema | undefined,
+  name: string,
+): ColumnSchema | undefined {
   return schema?.columns.find((c) => c.name === name)
 }
 
@@ -222,7 +231,10 @@ export function columnNames(schema: TableSchema | undefined): string[] {
 }
 
 /** Columns restricted to a set of dtypes — powers dtype-aware column pickers. */
-export function columnsOfType(schema: TableSchema | undefined, dtypes: DType[]): ColumnSchema[] {
+export function columnsOfType(
+  schema: TableSchema | undefined,
+  dtypes: DType[],
+): ColumnSchema[] {
   return (schema?.columns ?? []).filter((c) => dtypes.includes(c.dtype))
 }
 

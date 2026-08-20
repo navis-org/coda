@@ -139,7 +139,9 @@ function unquote(value: string): string {
 }
 
 /** Split a token into `field`, operator and value, or undefined when it is a bare term. */
-function splitOperator(token: string): { field: string; op: CompareOp; value: string } | undefined {
+function splitOperator(
+  token: string,
+): { field: string; op: CompareOp; value: string } | undefined {
   for (const [symbol, op] of OPERATORS) {
     const at = token.indexOf(symbol)
     if (at <= 0) continue
@@ -284,7 +286,12 @@ function resolveColumn(table: TableValue, field: string): ColumnSchema | undefin
  * three-valued logic would drop the unlabelled from both sides of the comparison and never say
  * it had. Every other operator, `==` included, treats null as "no value to compare".
  */
-function cellMatches(cell: CellValue, term: FieldTerm, numeric: boolean, regex?: RegExp): boolean {
+function cellMatches(
+  cell: CellValue,
+  term: FieldTerm,
+  numeric: boolean,
+  regex?: RegExp,
+): boolean {
   if (cell === null || cell === undefined) return term.op === 'ne'
 
   if (term.op === 'match') return regex ? regex.test(String(cell)) : false
@@ -440,7 +447,12 @@ function tierOf(table: TableValue, index: SearchIndex, row: number, needle: stri
  * Hits arrive in the table's own order (body id) and buckets preserve it, so the result is a
  * total order: the same query always yields the same rows in the same sequence.
  */
-function rankHits(table: TableValue, index: SearchIndex, hits: number[], needle: string): number[] {
+function rankHits(
+  table: TableValue,
+  index: SearchIndex,
+  hits: number[],
+  needle: string,
+): number[] {
   const buckets: number[][] = Array.from({ length: TIERS }, () => [])
   for (const row of hits) buckets[tierOf(table, index, row, needle)]!.push(row)
   return buckets.flat()
@@ -456,7 +468,10 @@ function rankHits(table: TableValue, index: SearchIndex, hits: number[], needle:
  * An unknown field is a warning rather than a silent empty result, because `superclas==x`
  * matching nothing looks identical to a dataset that genuinely has no such neurons.
  */
-export function validateSearch(schema: TableSchema | undefined, parsed: ParsedSearch): string[] {
+export function validateSearch(
+  schema: TableSchema | undefined,
+  parsed: ParsedSearch,
+): string[] {
   const issues = [...parsed.errors]
   if (!schema) return issues
   const names = new Set(schema.columns.map((c) => c.name.toLowerCase()))
@@ -548,7 +563,10 @@ export function rankStrings(query: string, values: readonly string[], limit: num
     scored.push({ value, tier })
   }
   // Shorter wins within a tier: for "lc", "LC4" should beat "LC4_complex_variant".
-  scored.sort((a, b) => a.tier - b.tier || a.value.length - b.value.length || (a.value < b.value ? -1 : 1))
+  scored.sort(
+    (a, b) =>
+      a.tier - b.tier || a.value.length - b.value.length || (a.value < b.value ? -1 : 1),
+  )
   return scored.slice(0, limit).map((entry) => entry.value)
 }
 
@@ -591,7 +609,11 @@ export function completeSearch(
   const column = resolveColumn(table, split.field)
   if (!column || column.dtype !== 'str') return empty
 
-  const values = rankStrings(unquote(split.value), fieldValues(table, column.name), MAX_COMPLETIONS)
+  const values = rankStrings(
+    unquote(split.value),
+    fieldValues(table, column.name),
+    MAX_COMPLETIONS,
+  )
   return {
     from: token.from,
     to: token.to,

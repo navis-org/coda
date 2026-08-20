@@ -27,7 +27,11 @@ function bounds(positions: Float32Array): { min: number[]; max: number[] } {
 }
 
 /** A dense sphere, standing in for a full-resolution neuropil. */
-function sphere(rings = 150, segments = 220, radius = 1000): {
+function sphere(
+  rings = 150,
+  segments = 220,
+  radius = 1000,
+): {
   positions: Float32Array
   indices: Uint32Array
 } {
@@ -117,7 +121,7 @@ describe('decimateMesh', () => {
     expect(same.indices).toBe(faces)
   })
 
-  it('welds a UV sphere\'s seam even at a fine grid, and that is a gain', () => {
+  it("welds a UV sphere's seam even at a fine grid, and that is a gain", () => {
     /*
      * A sphere built ring by ring repeats its seam column and collapses every pole ring to one
      * point, so a mesh that is "already coarse" still carries exact duplicates. Merging them is
