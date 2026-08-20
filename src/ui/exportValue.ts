@@ -11,7 +11,9 @@
  * an explicit format is honoured or reported as unavailable.
  */
 
+import type { ColumnSchema, DType, TableSchema } from '../core/types'
 import type {
+  CellValue,
   MatrixValue,
   MeshesValue,
   NetworkValue,
@@ -21,7 +23,7 @@ import type {
   TableValue,
   Value,
 } from '../core/values'
-import { getRow } from '../core/values'
+import { getColumn, getRow } from '../core/values'
 import { matrixToCsv, tableToCsvParts } from './export'
 
 /** One file a download will write. `parts` goes straight into a `Blob`. */
@@ -32,11 +34,21 @@ export interface ExportFile {
   mime: string
 }
 
-export type ExportFormat = 'auto' | 'csv' | 'json' | 'svg' | 'png' | 'swc' | 'obj'
+export type ExportFormat =
+  | 'auto'
+  | 'csv'
+  | 'graphml'
+  | 'json'
+  | 'svg'
+  | 'png'
+  | 'swc'
+  | 'obj'
 
 const TEXT = 'text/plain;charset=utf-8'
 const CSV = 'text/csv;charset=utf-8'
 const JSON_MIME = 'application/json'
+/** Exported so the viewer's own download button writes the same type the Download node does. */
+export const GRAPHML_MIME = 'application/graphml+xml'
 
 // ---------------------------------------------------------------------------
 // Morphology
@@ -168,6 +180,192 @@ function pointsToCsv(points: PointsValue): string[] {
 }
 
 // ---------------------------------------------------------------------------
+// GraphML
+// ---------------------------------------------------------------------------
+
+/**
+ * A network as GraphML, for Cytoscape, NetworkX, Gephi, igraph and yEd.
+ *
+ * Chosen over GML — the other format all five read — for one reason: it is the only one that
+ * carries Coda's attribute tables *with their types*. A `<key>` declares `attr.type` up front,
+ * so an `i64` arrives as a long and an `f64` as a double rather than as whatever the reader
+ * infers from the first literal it meets, and an absent value is an omitted element rather than
+ * a zero somebody has to notice. GML implies types by literal syntax and restricts key names to
+ * something a column called `sum_bodyId` survives and one called `pt root id` does not.
+ *
+ * **Attributes only — no positions and no colours.** So the two nodes offering this produce
+ * byte-identical files for the same network, and the file says what the data says rather than
+ * what one particular viewer happened to be showing. Every reader here lays a graph out on
+ * import anyway.
+ *
+ * Deliberately *not* built through `XMLSerializer`: the whole point of chunking is to avoid
+ * materialising a 20,000-node document at once, and a DOM is that document plus an object per
+ * element.
+ */
+
+/** Coda's dtypes as GraphML's. The reason this format was picked over GML. */
+const GRAPHML_TYPE: Record<DType, string> = {
+  i64: 'long',
+  f64: 'double',
+  str: 'string',
+  bool: 'boolean',
+}
+
+/**
+ * Columns each half already represents structurally, and so does not repeat as an attribute.
+ *
+ * The same subtraction `keptEdgeColumns` makes when it declines to carry the source, target and
+ * weight columns onto a link under their original names: an id written twice is not extra
+ * information, and on import it becomes a redundant column beside the one the reader keyed on.
+ */
+const GRAPHML_NODE_OWNED = new Set(['id'])
+const GRAPHML_EDGE_OWNED = new Set(['source', 'target'])
+
+/** Rows per string part, matching `tableToCsvParts` — a whole document is one huge string. */
+const GRAPHML_CHUNK_ROWS = 2000
+
+interface GraphmlKey {
+  /** Generated, never the column name: a `<key>` id is an XML ID and a column name is text. */
+  id: string
+  column: ColumnSchema
+}
+
+function graphmlKeys(schema: TableSchema, owned: Set<string>, prefix: string): GraphmlKey[] {
+  return schema.columns
+    .filter((c) => !owned.has(c.name))
+    .map((column, i) => ({ id: `${prefix}${i}`, column }))
+}
+
+/**
+ * Written as escapes rather than typed: a raw control character in a source file is invisible
+ * to every reader and to `grep`, which is the lesson `uploads.ts` records about its separator.
+ *
+ * `no-control-regex` is off for this one line because control characters are the *subject*
+ * here rather than a slip — the rule exists to catch one that arrived by accident.
+ */
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g
+
+/**
+ * XML text, with the characters XML cannot carry **removed** rather than escaped.
+ *
+ * The five entities are the easy half. The half worth writing down is that XML 1.0 forbids most
+ * C0 control characters outright — there is no escape for them, `&#1;` is as illegal as the byte
+ * itself, and a document carrying one is *rejected* by every conforming parser rather than read
+ * leniently. A neuron type never holds one; a column of somebody's uploaded CSV can, and losing
+ * a stray byte beats losing the file. Tab, newline and carriage return are legal and stay.
+ *
+ * `&` is replaced first, or it would escape the ampersands of the replacements after it. `"` is
+ * escaped as well so one function serves both text and attribute values — node ids are user
+ * data, and an `a'L(R)`-shaped region name is the ordinary case rather than the hostile one.
+ */
+export function xmlText(value: string): string {
+  return value
+    .replace(CONTROL_CHARS, '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+}
+
+/**
+ * One cell as GraphML text, or `undefined` for "write no element at all".
+ *
+ * Absence is the case that matters. A missing value has no lexical form in a `double`, and
+ * writing `0` would make it a reading — the trap `numeric()` in `encoding.ts` exists for, one
+ * step further downstream. Omitting the element leaves the attribute simply absent from that
+ * node, which is what every reader here treats as "not recorded".
+ *
+ * A non-finite number goes the same way. XML Schema does spell `NaN` and `INF`, but the readers
+ * disagree about them and a number nobody can compare is not worth a parse error.
+ *
+ * An **empty string is kept**, unlike a null, because this is a serializer rather than an
+ * analysis: `<data key="nd0"></data>` reads back as `''`, where omitting it reads back as a
+ * missing key and turns a blank cell into a `KeyError` in somebody's script.
+ */
+function graphmlCell(value: CellValue | undefined, dtype: DType): string | undefined {
+  if (value === null || value === undefined) return undefined
+  if (dtype === 'i64' || dtype === 'f64') {
+    const number = Number(value)
+    return Number.isFinite(number) ? String(number) : undefined
+  }
+  if (dtype === 'bool') {
+    // A `bool` column holds booleans; the string forms are what a foreign table can arrive
+    // with, and `Boolean('false')` is `true`.
+    if (value === 'true' || value === 'false') return value
+    return value ? 'true' : 'false'
+  }
+  return xmlText(String(value))
+}
+
+/** The `<data>` children of one node or edge, indented to sit inside it. */
+function graphmlData(table: TableValue, keys: GraphmlKey[], row: number): string {
+  let out = ''
+  for (const { id, column } of keys) {
+    const text = graphmlCell(table.data[column.name]?.[row] ?? null, column.dtype)
+    if (text === undefined) continue
+    out += `      <data key="${id}">${text}</data>\n`
+  }
+  return out
+}
+
+function graphmlKeyElement(key: GraphmlKey, scope: 'node' | 'edge'): string {
+  const { name, dtype } = key.column
+  return (
+    `  <key id="${key.id}" for="${scope}" attr.name="${xmlText(name)}"` +
+    ` attr.type="${GRAPHML_TYPE[dtype]}"/>\n`
+  )
+}
+
+export function networkToGraphml(network: NetworkValue): string[] {
+  const nodeKeys = graphmlKeys(network.nodes.schema, GRAPHML_NODE_OWNED, 'nd')
+  const edgeKeys = graphmlKeys(network.edges.schema, GRAPHML_EDGE_OWNED, 'ed')
+
+  const head = [
+    `<?xml version="1.0" encoding="UTF-8"?>\n`,
+    `<graphml xmlns="http://graphml.graphdrawing.org/xmlns"\n`,
+    `         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"\n`,
+    `         xsi:schemaLocation="http://graphml.graphdrawing.org/xmlns ` +
+      `http://graphml.graphdrawing.org/xmlns/1.0/graphml.xsd">\n`,
+    ...nodeKeys.map((key) => graphmlKeyElement(key, 'node')),
+    ...edgeKeys.map((key) => graphmlKeyElement(key, 'edge')),
+    `  <graph edgedefault="${network.directed ? 'directed' : 'undirected'}">\n`,
+  ]
+
+  const parts: string[] = [head.join('')]
+  let chunk: string[] = []
+  const flush = () => {
+    if (chunk.length === 0) return
+    parts.push(chunk.join(''))
+    chunk = []
+  }
+
+  const ids = getColumn(network.nodes, 'id')
+  for (let row = 0; row < network.nodes.length; row++) {
+    const id = xmlText(String(ids[row] ?? ''))
+    const data = graphmlData(network.nodes, nodeKeys, row)
+    chunk.push(data ? `    <node id="${id}">\n${data}    </node>\n` : `    <node id="${id}"/>\n`)
+    if (chunk.length >= GRAPHML_CHUNK_ROWS) flush()
+  }
+  flush()
+
+  const sources = getColumn(network.edges, 'source')
+  const targets = getColumn(network.edges, 'target')
+  for (let row = 0; row < network.edges.length; row++) {
+    const from = xmlText(String(sources[row] ?? ''))
+    const to = xmlText(String(targets[row] ?? ''))
+    const open = `<edge source="${from}" target="${to}"`
+    const data = graphmlData(network.edges, edgeKeys, row)
+    chunk.push(data ? `    ${open}>\n${data}    </edge>\n` : `    ${open}/>\n`)
+    if (chunk.length >= GRAPHML_CHUNK_ROWS) flush()
+  }
+  flush()
+
+  parts.push('  </graph>\n</graphml>\n')
+  return parts
+}
+
+// ---------------------------------------------------------------------------
 // Dispatch
 // ---------------------------------------------------------------------------
 
@@ -195,6 +393,9 @@ export function formatsFor(value: Value | undefined): ExportFormat[] {
   const csv = defaultFormat(value) === 'csv'
   const out: ExportFormat[] = []
   if (csv) out.push('csv')
+  // After CSV rather than instead of it, and CSV stays the `auto` answer: GraphML is the
+  // better file for Cytoscape and NetworkX, and a spreadsheet cannot open it at all.
+  if (value.kind === 'network') out.push('graphml')
   if (value.kind === 'skeletons') out.push('swc')
   if (value.kind === 'meshes') out.push('obj')
   out.push('json')
@@ -220,6 +421,13 @@ function networkFiles(network: NetworkValue, base: string): ExportFile[] {
   return [
     { name: `${base}-nodes.csv`, parts: tableToCsvParts(network.nodes), mime: CSV },
     { name: `${base}-links.csv`, parts: tableToCsvParts(network.edges), mime: CSV },
+  ]
+}
+
+/** The same network as one file, with both halves and their types intact. */
+function graphmlFiles(network: NetworkValue, base: string): ExportFile[] {
+  return [
+    { name: `${base}.graphml`, parts: networkToGraphml(network), mime: GRAPHML_MIME },
   ]
 }
 
@@ -298,6 +506,7 @@ export function planExport(
       break
     case 'network':
       if (resolved === 'csv') return { files: networkFiles(value, base) }
+      if (resolved === 'graphml') return { files: graphmlFiles(value, base) }
       break
     case 'points':
       // Positions and attributes in one table, because they are one row each and splitting

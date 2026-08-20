@@ -77,6 +77,25 @@ export const networkViewNode = registerNode({
     { id: 'out', label: 'Network', type: T.network() },
     { id: 'selected', label: 'Selected', type: T.neurons() },
   ],
+  /*
+   * **Only `Layout` reaches the card; everything else is `advanced`.**
+   *
+   * Thirty-three params is the largest set in the registry, and drawn as generic rows fifteen
+   * of them showed at once on the default settings — a column of pickers stacked above the
+   * drawing they configure, on the one node whose card is worth looking at. `advanced` here
+   * costs nothing that a smaller node's would, because this node has two places for them to
+   * go: they stay `presentational`, so the expanded view's styling panel offers every one
+   * under the tab it was grouped for, and the inspector shows the full set for whatever is
+   * selected. The card's `… N more` hint is what says they are there.
+   *
+   * `Layout` stays because it is the one control that decides what the picture *is* rather
+   * than how it looks — and because a card drawing no rows at all would lose its `☰` fold and
+   * read as a node with nothing to set, which is the state `out.neuroglancer` is in and which
+   * a viewer this configurable should not be mistaken for.
+   *
+   * `selection` goes too, though it is neither styling nor layout. Its row said
+   * `3 nodes · clear`, which the caption already says and clicking the canvas already does.
+   */
   params: [
     {
       id: 'layout',
@@ -164,6 +183,7 @@ export const networkViewNode = registerNode({
         { value: 'tb', label: 'top to bottom' },
       ],
       presentational: true,
+      advanced: true,
       group: 'layout',
       composite: { key: 'layout', role: 'extra', facet: 'direction' },
       visibleIf: (params) => params.layout === 'layered',
@@ -178,6 +198,7 @@ export const networkViewNode = registerNode({
       optional: true,
       help: 'Take each layer from this column instead of from how far downstream a node is.',
       presentational: true,
+      advanced: true,
       group: 'layout',
       composite: { key: 'layout', role: 'extra', facet: 'layer by' },
       visibleIf: (params) => params.layout === 'layered',
@@ -191,6 +212,7 @@ export const networkViewNode = registerNode({
       default: '',
       help: 'Cluster nodes sharing a value — a class, a side, an ROI.',
       presentational: true,
+      advanced: true,
       group: 'layout',
       composite: { key: 'layout', role: 'extra', facet: 'group by' },
       visibleIf: (params) => params.layout === 'grouped',
@@ -217,6 +239,7 @@ export const networkViewNode = registerNode({
       part: 'nodes',
       default: '',
       presentational: true,
+      advanced: true,
       group: 'layout',
       composite: { key: 'layout', role: 'extra', facet: 'x' },
       visibleIf: (params) => params.layout === 'columns',
@@ -229,6 +252,7 @@ export const networkViewNode = registerNode({
       part: 'nodes',
       default: '',
       presentational: true,
+      advanced: true,
       group: 'layout',
       composite: { key: 'layout', role: 'extra', facet: 'y' },
       visibleIf: (params) => params.layout === 'columns',
@@ -242,6 +266,7 @@ export const networkViewNode = registerNode({
       rowLabel: 'Colour',
       group: 'node',
       defaultMode: 'categorical',
+      advanced: true,
     }),
     ...sizeParams({
       prefix: 'node',
@@ -252,6 +277,7 @@ export const networkViewNode = registerNode({
       group: 'node',
       defaultMin: 4,
       defaultMax: 18,
+      advanced: true,
     }),
     {
       id: 'nodeBorderWidth',
@@ -263,6 +289,7 @@ export const networkViewNode = registerNode({
       max: 4,
       step: 0.5,
       presentational: true,
+      advanced: true,
       group: 'node',
       composite: { key: 'nodeBorder', role: 'primary', label: 'Border' },
     },
@@ -286,6 +313,7 @@ export const networkViewNode = registerNode({
       // `muted` is the ink links have always been drawn in, so the default is a no-op.
       defaultColor: 'muted',
       modes: ['categorical'],
+      advanced: true,
     }),
     {
       id: 'edgeOpacity',
@@ -297,6 +325,7 @@ export const networkViewNode = registerNode({
       max: 1,
       step: 0.1,
       presentational: true,
+      advanced: true,
       group: 'link',
       composite: { key: 'edgeColor', role: 'extra', facet: 'opacity' },
     },
@@ -317,6 +346,7 @@ export const networkViewNode = registerNode({
       label: 'Labels',
       default: true,
       presentational: true,
+      advanced: true,
       group: 'node',
       composite: { key: 'nodeLabel', role: 'primary', label: 'Label' },
     },
@@ -339,6 +369,7 @@ export const networkViewNode = registerNode({
       label: 'Arrows',
       default: true,
       presentational: true,
+      advanced: true,
       group: 'link',
       help: 'Arrowheads at the target end. Ignored on an undirected network.',
     },
@@ -348,6 +379,7 @@ export const networkViewNode = registerNode({
       label: 'Link labels',
       default: false,
       presentational: true,
+      advanced: true,
       group: 'link',
       composite: { key: 'edgeLabel', role: 'primary', label: 'Label' },
       help: 'Print each link’s weight beside it. Unreadable past a few hundred links.',
@@ -381,6 +413,7 @@ export const networkViewNode = registerNode({
       default: 0,
       min: 0,
       step: 1,
+      advanced: true,
       group: 'filter',
     },
     {
@@ -391,6 +424,7 @@ export const networkViewNode = registerNode({
       default: 0,
       min: 0,
       step: 10,
+      advanced: true,
       group: 'filter',
     },
     {
@@ -399,6 +433,7 @@ export const networkViewNode = registerNode({
       label: 'Hide isolated',
       help: 'Drop nodes left with no links, including ones stranded by the filters above.',
       default: false,
+      advanced: true,
       group: 'filter',
     },
     {
@@ -407,6 +442,7 @@ export const networkViewNode = registerNode({
       label: 'Selected',
       noun: 'nodes',
       default: [],
+      advanced: true,
       help: 'Set by clicking nodes in the viewer. Feeds the Selected output.',
     },
   ],

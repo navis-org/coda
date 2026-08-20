@@ -20,8 +20,10 @@ import type { CodaGraph, GraphNode } from '../../core/graph'
 import { inferGraph } from '../../core/inference'
 import type { EvalContext, NodeDefinition, ParamValues } from '../../core/node'
 import {
+  configurableParams,
   defaultParams,
   findParam,
+  hiddenParams,
   makeInferContext,
   resolveColumn,
   resolveColumns,
@@ -325,6 +327,41 @@ describe('network viewer link labels', () => {
       'LC4',
       'DNp02',
     ])
+  })
+})
+
+describe('what the unexpanded card draws', () => {
+  /*
+   * Thirty-three params, of which fifteen used to show at once on the default settings — a
+   * column of pickers stacked above the drawing they configure. Only `Layout` is on the card
+   * now; the rest are `advanced`, which on this node means the styling panel and the
+   * inspector rather than nowhere.
+   *
+   * Pinned because a param added without the flag fails no type check and nothing else here
+   * would notice: it simply appears on the card, and the column starts growing back.
+   */
+  const def = requireNodeDef('out.network')
+  const values = defaultParams(def)
+  const onCard = (def.params ?? []).filter(
+    (p) => !p.advanced && (!p.visibleIf || p.visibleIf(values)),
+  )
+
+  it('shows the one control that decides what the picture is, and nothing else', () => {
+    expect(onCard.map((p) => p.id)).toEqual(['layout'])
+  })
+
+  it('keeps a band to fold, rather than reading as a node with nothing to set', () => {
+    // A card drawing no rows at all loses its `☰` and looks like out.neuroglancer, which is
+    // exactly what a viewer with thirty-three settings should not be mistaken for.
+    expect(onCard.length).toBeGreaterThan(0)
+  })
+
+  it('leaves everything else reachable, and says how much there is', () => {
+    const hidden = hiddenParams(def, values)
+    expect(hidden.length).toBeGreaterThan(0)
+    // "more", not "hidden": Layout is still on the card, so the hidden ones are not all there
+    // is — the distinction `CodaNodeView` draws off exactly this comparison.
+    expect(hidden.length).toBeLessThan(configurableParams(def, values).length)
   })
 })
 

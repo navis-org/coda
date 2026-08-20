@@ -124,6 +124,18 @@ export function downloadCsv(parts: string[], filename: string): void {
 }
 
 /**
+ * One text file, with its type named by the caller.
+ *
+ * `downloadCsv` with a different mime, and separate from it rather than a widened version:
+ * every caller of that one is writing CSV, and giving it an optional mime would invite a
+ * `.graphml` written as `text/csv`, which is the sort of thing nothing catches until somebody
+ * double-clicks the file and a spreadsheet opens.
+ */
+export function downloadText(parts: string[], filename: string, mime: string): void {
+  triggerDownload(new Blob(parts, { type: mime }), filename)
+}
+
+/**
  * Write several files from one gesture, for the Download node.
  *
  * A network is two CSVs and a skeleton set is one SWC per neuron, so a single press routinely

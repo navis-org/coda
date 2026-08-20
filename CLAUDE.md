@@ -331,7 +331,8 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `ui/nodes/inputIdsBody.test.tsx`         | the card: the counts, the ids named as missing, and that it claims nothing with no Dataset wired                                 |
 | `nodes/table/stack.test.ts`              | the union schema needing both sides, a real dtype clash refused at run time, and the source column                               |
 | `ui/fullscreen.test.tsx`                 | the ⛶ and `F`: what element is handed over, that a refusal leaves the button unpressed, and the manifest's relative scope        |
-| `ui/exportValue.test.ts`                 | SWC's 1-based ids and -1 roots, OBJ's 1-based faces, the JSON typed-array unpack, and the file cap                               |
+| `ui/exportValue.test.ts`                 | SWC's 1-based ids and -1 roots, OBJ's 1-based faces, the JSON typed-array unpack, the file cap, and GraphML parsed as real XML   |
+| `ui/nodes/resultDownload.test.tsx`       | the card foot's ⤓: absent before a run, withheld on a viewer card, the formats offered, and the dataset card the one rule reaches |
 | `nodes/output/download.test.ts`          | the tap: identity pass-through, deferred by the auto pass, and settings re-running nothing                                       |
 | `ui/useDownloads.test.tsx`               | the side effect: written on an executing run, not on an unchanged one, and the auto-run warning                                  |
 | `ui/panels/startPage.test.tsx`           | (also) the field-guide links, in the welcome bar and the Help menu, composed against `BASE_URL`                                  |
@@ -1515,6 +1516,26 @@ safe to touch, and it is passed into `groupParams` rather than baked into it —
 hook a Filter tab of non-presentational params would come in through, along with something in
 the UI admitting that those _do_ stale the graph.
 
+**And `out.network`'s card draws only `Layout`.** Thirty-three params is the largest set in the
+registry; fifteen of them showed at once on the default settings, as a column of generic pickers
+stacked above the drawing they configure. Everything else is `advanced` now, which is the same
+call `out.neuroglancer` and `out.rois` make and is cheaper here than on a smaller node, because
+`advanced` is read by the _card_ alone: `paramsForPanel` and `groupParams` never look at it, so
+every one of them still reaches the styling panel under the tab it was grouped for, and the
+inspector still shows the full set. The `… 24 more` hint is what says so.
+
+Two params are not styling and were still decided the same way. `Layout` stays because it is the
+one control that decides what the picture _is_ rather than how it looks — and because a card with
+no rows at all loses its `☰` fold and reads as a node with nothing to set, which is exactly what a
+viewer this configurable should not be mistaken for. `selection` goes, though it is neither
+styling nor layout: its row said `3 nodes · clear`, which the caption already says and clicking
+the canvas already does.
+
+Note what pins it. A param added without the flag fails no type check, is not caught by
+`paramGroups.test.ts` — which asks about the panel, where `advanced` changes nothing — and simply
+appears on the card, so the column starts growing back one param at a time. `network.test.ts`
+asserts the card's contents exactly.
+
 ## Output widgets
 
 `ValuePreview` picks a viewer by node type, then by value kind, and forwards a shared prop
@@ -1535,6 +1556,81 @@ without export or expand.
 - jsdom has no `URL.createObjectURL`, no navigation and no Fullscreen API.
   `installDownloadCapture()` in `test/jsdomStubs.ts` intercepts the anchor-click download so
   tests can assert filename and content.
+
+### Downloading a result
+
+Two surfaces, one decision function. `ui/exportValue.ts`'s `formatsFor`/`planExport` answer what
+a value can be written as and what the files are called; the **Download node**, the **viewers'
+caption bar** and now **every card's foot** all read the same answer, so a format added in one
+place appears in all three and none of them can disagree about a filename.
+
+**A network exports as GraphML**, alongside the two CSVs it has always written. Chosen over GML —
+the other format Cytoscape, NetworkX, Gephi, igraph and yEd all read — for one reason: it is the
+only one that carries Coda's attribute tables *with their types*. A `<key>` declares `attr.type`
+up front, so `i64` arrives as a long and `f64` as a double rather than as whatever the reader
+infers from the first literal it meets, and an absent value is an omitted element rather than a
+zero somebody has to notice. GML implies types by literal syntax and restricts key names to
+something `sum_bodyId` survives and `pt root id` does not.
+
+**Attributes only — no positions, no colours.** So the Network viewer and Build Network write
+byte-identical files for the same network, and the document says what the data says rather than
+what one viewer happened to be showing. Every reader here lays a graph out on import anyway.
+
+Four things in the writer that each produce a plausible wrong file:
+
+- **A null is an omitted element, never a zero.** The same trap `numeric()` exists for, one step
+  downstream: a written `0` is a reading. A non-finite number goes the same way — XML Schema does
+  spell `NaN` and `INF`, but the readers disagree and a number nobody can compare is not worth a
+  parse error. An **empty string is kept**, unlike a null, because this is a serializer: an
+  omitted element reads back as a missing key and turns a blank cell into a `KeyError`.
+- **XML 1.0 forbids most C0 control characters outright**, and there is no escape for them —
+  `&#1;` is as illegal as the byte, so a document carrying one is *rejected* rather than read
+  leniently. `xmlText` strips them; tab, newline and carriage return are legal and stay. Written
+  as `\u0000`-style escapes for the reason `uploads.ts` records about its separator.
+- **`id`, `source` and `target` are never repeated as attributes**, the same subtraction
+  `keptEdgeColumns` makes: an id written twice becomes a redundant column beside the one the
+  reader keyed on.
+- **`<key>` ids are generated (`nd0`, `ed0`), never the column name.** A key id is an XML ID and a
+  column name is arbitrary text; `attr.name` is what NetworkX reads back, so the generated id
+  costs nothing.
+
+The document is built as **string parts, not through `XMLSerializer`** — the whole point of
+chunking at 2,000 rows is that a 20,000-node network never becomes one huge string, and a DOM is
+that string plus an object per element. `exportValue.test.ts` still asserts against a *parsed*
+document (hence its `@vitest-environment jsdom`), because a snapshot of well-formed-*looking* XML
+is exactly what a file with an unescaped `&` in a region name produces.
+
+**CSV stays what `auto` picks.** GraphML is the better file for Cytoscape and NetworkX; a
+spreadsheet cannot open it at all, and `auto` is what somebody gets without choosing.
+
+### The ⤓ in a card's foot
+
+`ResultDownload`, rendered in `.coda-node__footer` for any card whose result `planExport` can
+write. Downloading a node's output used to mean wiring a Download node beside it — the right
+answer for a repeatable pipeline and the wrong one for "let me have that table", since a download
+is a verb people look for on the thing.
+
+**Withheld where the card is already drawing a viewer.** That card carries its own ⤓ an inch
+above, and it is the better of the two: it can offer the picture as SVG and PNG, which no amount
+of looking at the value can produce. Same rule the `… N more` hint follows when it stands down on
+a fold — do not say the same thing twice on one card.
+
+**The rule bites on the dataset cards, and that is recorded rather than special-cased.**
+`formatsFor` never comes back empty for a real value, because JSON is the universal fallback — so
+"any node whose result is downloadable" is really "every node with a result", and the nine dataset
+nodes gain a ⤓ writing a four-line JSON handle. It was kept because that file is valid and
+meaningful (it names the *resolved* version, which is the provenance question an unpinned
+`Latest` leaves open), so it is a control that delivers rather than one that promises. The
+narrowing, if it ever reads as noise, is `defaultFormat(value) !== 'json'` — one predicate, no
+list — and `resultDownload.test.tsx` is where that case is pinned.
+
+**`DownloadButton` is shared, not copied.** The ⤓, its menu, the dismiss and the busy state are
+one component behind both `ViewerActions` and `ResultDownload`; the callers differ only in what a
+format is called and what picking one does, because one asks a live viewer for its picture and the
+other asks `planExport` about a value. Same call as `LegendKeys`, extracted from `NetworkLegend`
+for the same reason. It carries its own `.download-button` positioning context: the menu is
+absolute against it and must not anchor to the surrounding row, which holds ⤢ in a caption bar and
+the summary in a foot.
 
 ### An identifier is not a quantity
 

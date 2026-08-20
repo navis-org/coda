@@ -89,6 +89,7 @@ export const downloadNode = registerNode({
       options: [
         { value: 'auto', label: 'auto (by type)' },
         { value: 'csv', label: 'CSV' },
+        { value: 'graphml', label: 'GraphML (networks)' },
         { value: 'json', label: 'JSON' },
         { value: 'swc', label: 'SWC (skeletons)' },
         { value: 'obj', label: 'OBJ (meshes)' },

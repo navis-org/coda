@@ -30,6 +30,7 @@ import { CHART_INK, chartSurface, currentMode, withAlpha } from '../colors'
 import type { ResolvedColor, ResolvedSize } from '../encoding'
 import { resolveColor, resolveSize } from '../encoding'
 import { exportBaseName as makeBaseName, tableToCsvParts } from '../export'
+import { networkToGraphml } from '../exportValue'
 import { formatCell } from '../format'
 import { NetworkLegend } from './NetworkLegend'
 import type { SvgEdge, SvgNode } from './networkDraw'
@@ -569,6 +570,11 @@ export function NetworkViewer({
       // Nodes and edges are two tables; the node table is the one people want in a
       // spreadsheet, and the edge table is reachable from the passthrough output.
       csv: () => tableToCsvParts(network.nodes),
+      // The one format that carries *both* halves in one file, with their dtypes — for
+      // Cytoscape, NetworkX, Gephi and igraph. Attributes only: no positions, so this file is
+      // the same one Build Network writes for the same network, and the layout on screen is
+      // not smuggled into a document that says nothing about how it was made.
+      graphml: () => networkToGraphml(network),
       svg: () => buildSvg(renderedRef.current, styleRef.current, network),
     }),
     [network],

@@ -2,20 +2,28 @@
  * The download / expand controls that sit in every viewer's caption bar.
  *
  * Formats are declared by the viewer, not assumed here: a table offers CSV, a chart offers
- * CSV plus SVG and PNG. When only one format is available the button downloads directly
- * instead of opening a one-item menu.
+ * CSV plus SVG and PNG, and the network adds GraphML. When only one format is available the
+ * button downloads directly instead of opening a one-item menu.
  */
 
-import { useCallback, useContext, useEffect, useRef, useState } from 'react'
+import { useContext, useEffect, useRef } from 'react'
 
-import { downloadCsv, downloadPng, downloadSvg } from '../export'
+import { DownloadButton } from '../DownloadButton'
+import { downloadCsv, downloadPng, downloadSvg, downloadText } from '../export'
+import { GRAPHML_MIME } from '../exportValue'
 import { ExportNodeContext, registerExportSource } from './exportRegistry'
-import { useDismissOnOutside } from '../useDismiss'
-import { errorMessage } from '../../core/errors'
 
 export interface ExportSource {
   /** Called lazily — a large CSV is only built when the user actually asks for it. */
   csv?: () => string[]
+  /**
+   * The whole graph as one GraphML document, for a viewer whose value is a network.
+   *
+   * Its own accessor rather than a second `csv`, because the two answer different questions: a
+   * spreadsheet wants the node table, and Cytoscape wants both halves with their dtypes. Built
+   * lazily for the same reason as the CSV.
+   */
+  graphml?: () => string[]
   /** Live chart element, for vector and raster export. */
   svg?: () => SVGSVGElement | null
 }
@@ -31,12 +39,21 @@ export interface ViewerActionsProps {
   onError?: (message: string) => void
 }
 
-type Format = 'csv' | 'svg' | 'png'
+type Format = 'csv' | 'graphml' | 'svg' | 'png'
 
 const FORMAT_LABEL: Record<Format, string> = {
   csv: 'CSV data',
+  graphml: 'GraphML graph',
   svg: 'SVG vector',
   png: 'PNG image',
+}
+
+/** What the single-format button prints beside the arrow. */
+const FORMAT_SHORT: Record<Format, string> = {
+  csv: 'CSV',
+  graphml: 'GraphML',
+  svg: 'SVG',
+  png: 'PNG',
 }
 
 export function ViewerActions({
@@ -46,10 +63,6 @@ export function ViewerActions({
   compact = false,
   onError,
 }: ViewerActionsProps) {
-  const [open, setOpen] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const containerRef = useRef<HTMLDivElement>(null)
-
   /*
    * Publish this viewer's export source so the Download node can reach its picture.
    *
@@ -64,87 +77,51 @@ export function ViewerActions({
     if (!nodeId) return
     return registerExportSource(nodeId, {
       csv: () => sourceRef.current.csv?.(),
+      graphml: () => sourceRef.current.graphml?.(),
       svg: () => sourceRef.current.svg?.() ?? null,
     } as ExportSource)
   }, [nodeId])
 
   const formats: Format[] = []
   if (source.csv) formats.push('csv')
+  if (source.graphml) formats.push('graphml')
   if (source.svg) formats.push('svg', 'png')
 
-  const close = useCallback(() => setOpen(false), [])
-  useDismissOnOutside(containerRef, close, { enabled: open })
-
+  // Throws rather than reports: `DownloadButton` owns the busy state and the notice channel,
+  // so a viewer whose chart is not rendered yet says so through the same path a failed
+  // rasterisation does.
   const run = async (format: Format) => {
-    setOpen(false)
-    try {
-      if (format === 'csv') {
-        const parts = source.csv?.()
-        if (!parts) throw new Error('Nothing to export')
-        downloadCsv(parts, `${baseName}.csv`)
-        return
-      }
-      const svg = source.svg?.()
-      if (!svg) throw new Error('Chart is not rendered yet')
-      if (format === 'svg') {
-        downloadSvg(svg, `${baseName}.svg`)
-        return
-      }
-      setBusy(true)
-      await downloadPng(svg, `${baseName}.png`)
-    } catch (error) {
-      onError?.(errorMessage(error))
-    } finally {
-      setBusy(false)
+    if (format === 'csv') {
+      const parts = source.csv?.()
+      if (!parts) throw new Error('Nothing to export')
+      downloadCsv(parts, `${baseName}.csv`)
+      return
     }
+    if (format === 'graphml') {
+      const parts = source.graphml?.()
+      if (!parts) throw new Error('Nothing to export')
+      downloadText(parts, `${baseName}.graphml`, GRAPHML_MIME)
+      return
+    }
+    const svg = source.svg?.()
+    if (!svg) throw new Error('Chart is not rendered yet')
+    if (format === 'svg') {
+      downloadSvg(svg, `${baseName}.svg`)
+      return
+    }
+    await downloadPng(svg, `${baseName}.png`)
   }
 
   return (
-    <div className="viewer-actions" ref={containerRef}>
-      {formats.length === 1 && formats[0] && (
-        <button
-          type="button"
-          className="viewer-actions__btn nodrag"
-          title={`Download ${FORMAT_LABEL[formats[0]]}`}
-          aria-label={`Download ${FORMAT_LABEL[formats[0]]}`}
-          disabled={busy}
-          onClick={() => void run(formats[0]!)}
-        >
-          ⤓{!compact && <span>CSV</span>}
-        </button>
-      )}
-
-      {formats.length > 1 && (
-        <>
-          <button
-            type="button"
-            className="viewer-actions__btn nodrag"
-            title="Download…"
-            aria-label="Download"
-            aria-expanded={open}
-            disabled={busy}
-            onClick={() => setOpen((v) => !v)}
-          >
-            ⤓{!compact && <span>Download</span>}
-          </button>
-          {open && (
-            <div className="viewer-actions__menu" role="menu">
-              {formats.map((format) => (
-                <button
-                  key={format}
-                  type="button"
-                  className="viewer-actions__item"
-                  role="menuitem"
-                  onClick={() => void run(format)}
-                >
-                  {FORMAT_LABEL[format]}
-                  <span>.{format}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </>
-      )}
+    <div className="viewer-actions">
+      <DownloadButton
+        formats={formats}
+        label={(format) => FORMAT_LABEL[format]}
+        short={(format) => FORMAT_SHORT[format]}
+        onPick={run}
+        compact={compact}
+        {...(onError ? { onError } : {})}
+      />
 
       {onExpand && (
         <button

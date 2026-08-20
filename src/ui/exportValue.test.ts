@@ -1,5 +1,13 @@
+// @vitest-environment jsdom
+
 /**
  * Writing a value out as files.
+ *
+ * Under jsdom for one reason: the GraphML block asserts against a *parsed* document, and node
+ * has no `DOMParser`. The writers themselves stay pure — `networkToGraphml` builds strings
+ * precisely so a 20,000-node document never becomes a DOM — and the parse is the test's own
+ * tool, which is what makes it an independent check rather than a snapshot of the output
+ * agreeing with itself.
  *
  * The two morphology formats are where this earns its tests, because both have a failure mode
  * that produces a *valid file that is wrong*:
@@ -22,10 +30,13 @@ import { EMPTY_BOUNDS, makeMatrix, tableFromRows } from '../core/values'
 import {
   MAX_MORPHOLOGY_FILES,
   defaultFormat,
+  formatsFor,
   meshToObj,
+  networkToGraphml,
   planExport,
   skeletonToSwc,
   valueToJson,
+  xmlText,
 } from './exportValue'
 
 const NEURONS = tableSchema(column('bodyId', 'i64'), column('type', 'str'))
@@ -152,6 +163,190 @@ describe('JSON', () => {
   it('round-trips a plain table unchanged', () => {
     const parsed = JSON.parse(valueToJson(table())) as { data: Record<string, unknown[]> }
     expect(parsed.data['bodyId']).toEqual([1, 2])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// GraphML
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse the writer's output as XML and hand back the document.
+ *
+ * The load-bearing choice in this block: everything is asserted against a *parsed* document
+ * rather than against the string. A snapshot of well-formed-looking XML is exactly what a file
+ * with an unescaped `&` in a region name looks like — and the readers this format exists for do
+ * not read leniently, so a document that does not parse is a download that fails silently on
+ * somebody else's machine rather than here.
+ */
+function parseGraphml(network: NetworkValue): Document {
+  const text = networkToGraphml(network).join('')
+  const doc = new DOMParser().parseFromString(text, 'application/xml')
+  const failure = doc.querySelector('parsererror')
+  if (failure) throw new Error(`not well-formed XML: ${failure.textContent}`)
+  return doc
+}
+
+/** Attribute name → value for one `<node>`/`<edge>`, resolved through the `<key>` table. */
+function attrs(doc: Document, element: Element): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const data of [...element.querySelectorAll('data')]) {
+    const key = doc.querySelector(`key[id="${data.getAttribute('key')}"]`)
+    out[key?.getAttribute('attr.name') ?? '?'] = data.textContent ?? ''
+  }
+  return out
+}
+
+/** A two-node network exercising every dtype, a null, and a name full of XML metacharacters. */
+function graph(): NetworkValue {
+  return {
+    kind: 'network',
+    directed: true,
+    nodes: tableFromRows(
+      tableSchema(
+        column('id', 'str'),
+        column('type', 'str'),
+        column('degreeOut', 'i64'),
+        column('weightOut', 'f64'),
+        column('cropped', 'bool'),
+      ),
+      [
+        { id: 'LC4', type: 'LC4', degreeOut: 1, weightOut: 312.5, cropped: false },
+        { id: "a'L(R) & <x>", type: null, degreeOut: 0, weightOut: 0, cropped: true },
+      ],
+    ),
+    edges: tableFromRows(
+      tableSchema(
+        column('source', 'str'),
+        column('target', 'str'),
+        column('weight', 'f64'),
+        column('roi', 'str'),
+      ),
+      [{ source: 'LC4', target: "a'L(R) & <x>", weight: 40, roi: null }],
+    ),
+  }
+}
+
+describe('GraphML', () => {
+  it('is well-formed XML in the GraphML namespace', () => {
+    const doc = parseGraphml(graph())
+    expect(doc.documentElement.tagName).toBe('graphml')
+    expect(doc.documentElement.namespaceURI).toBe('http://graphml.graphdrawing.org/xmlns')
+  })
+
+  it('declares a type per column, which is the reason this format was chosen over GML', () => {
+    const doc = parseGraphml(graph())
+    const declared = [...doc.querySelectorAll('key')].map(
+      (k) =>
+        `${k.getAttribute('for')}:${k.getAttribute('attr.name')}:${k.getAttribute('attr.type')}`,
+    )
+    expect(declared).toEqual([
+      'node:type:string',
+      'node:degreeOut:long',
+      'node:weightOut:double',
+      'node:cropped:boolean',
+      'edge:weight:double',
+      'edge:roi:string',
+    ])
+  })
+
+  it('never repeats the columns the structure already carries', () => {
+    // `id`, `source` and `target` become the element's own attributes; writing them again
+    // would land in Cytoscape as a redundant column beside the one it keyed on.
+    const names = [...parseGraphml(graph()).querySelectorAll('key')].map((k) =>
+      k.getAttribute('attr.name'),
+    )
+    expect(names).not.toContain('id')
+    expect(names).not.toContain('source')
+    expect(names).not.toContain('target')
+  })
+
+  it('escapes a node id full of XML metacharacters, in the id and on the edge alike', () => {
+    // Region and type names carry quotes, ampersands and parens on real datasets. An id
+    // escaped on the node and not on the edge is a file that parses and joins nothing.
+    const doc = parseGraphml(graph())
+    const ids = [...doc.querySelectorAll('node')].map((n) => n.getAttribute('id'))
+    expect(ids).toEqual(['LC4', "a'L(R) & <x>"])
+    expect(doc.querySelector('edge')?.getAttribute('target')).toBe("a'L(R) & <x>")
+  })
+
+  it('omits a null rather than writing a zero or an empty string', () => {
+    // The trap `numeric()` exists for, one step downstream: a written `0` is a reading.
+    const doc = parseGraphml(graph())
+    const second = [...doc.querySelectorAll('node')][1]!
+    expect(attrs(doc, second)).toEqual({ degreeOut: '0', weightOut: '0', cropped: 'true' })
+    expect(attrs(doc, doc.querySelector('edge')!)).toEqual({ weight: '40' })
+  })
+
+  it('writes a real zero, so absence and zero stay distinguishable', () => {
+    const doc = parseGraphml(graph())
+    expect(attrs(doc, [...doc.querySelectorAll('node')][1]!)['weightOut']).toBe('0')
+  })
+
+  it('carries the direction, which decides how every reader treats the edges', () => {
+    expect(parseGraphml(graph()).querySelector('graph')?.getAttribute('edgedefault')).toBe(
+      'directed',
+    )
+    expect(
+      parseGraphml({ ...graph(), directed: false })
+        .querySelector('graph')
+        ?.getAttribute('edgedefault'),
+    ).toBe('undirected')
+  })
+
+  it('strips the control characters XML cannot carry at all', () => {
+    // There is no escape for these — `&#1;` is as illegal as the byte — so a document holding
+    // one is rejected outright. Losing the byte beats losing the file.
+    expect(xmlText('a\u0001b\u001fc')).toBe('abc')
+    // Tab, newline and carriage return are legal and must survive.
+    expect(xmlText('a\tb\nc\rd')).toBe('a\tb\nc\rd')
+  })
+
+  it('parses even when a name arrives with one in it', () => {
+    const dirty = graph()
+    const doc = parseGraphml({
+      ...dirty,
+      nodes: tableFromRows(dirty.nodes.schema, [
+        { id: 'LC\u00014', type: null, degreeOut: 0, weightOut: 0, cropped: false },
+      ]),
+      edges: tableFromRows(dirty.edges.schema, []),
+    })
+    expect(doc.querySelector('node')?.getAttribute('id')).toBe('LC4')
+  })
+
+  it('chunks the document rather than building one huge string', () => {
+    // `parts` goes straight into a Blob; a 20,000-node network as one string is the thing
+    // `tableToCsvParts` chunks for, and this writes considerably more per row than it does.
+    const rows = Array.from({ length: 4100 }, (_, i) => ({ id: `n${i}` }))
+    const big: NetworkValue = {
+      kind: 'network',
+      directed: true,
+      nodes: tableFromRows(tableSchema(column('id', 'str')), rows),
+      edges: tableFromRows(tableSchema(column('source', 'str'), column('target', 'str')), []),
+    }
+    // head + two full chunks + the remainder + the closing tags.
+    expect(networkToGraphml(big).length).toBe(5)
+  })
+
+  it('is offered for a network and for nothing else', () => {
+    expect(formatsFor(graph())).toEqual(['csv', 'graphml', 'json'])
+    // CSV stays the `auto` answer: GraphML is the better file for Cytoscape, and a spreadsheet
+    // cannot open it at all.
+    expect(defaultFormat(graph())).toBe('csv')
+    expect(formatsFor(table())).toEqual(['csv', 'json'])
+    expect(formatsFor(skeletons())).not.toContain('graphml')
+  })
+
+  it('is one file, where CSV is two', () => {
+    const plan = planExport(graph(), 'graphml', 'out')
+    expect(plan.files.map((f) => f.name)).toEqual(['out.graphml'])
+    expect(plan.files[0]!.mime).toBe('application/graphml+xml')
+  })
+
+  it('refuses a value that is not a network, rather than falling back to JSON', () => {
+    // An explicit format the value cannot be written as plans nothing and is reported; a
+    // silent fallback would hide that the choice did not apply.
+    expect(planExport(table(), 'graphml', 'out').files).toEqual([])
   })
 })
 

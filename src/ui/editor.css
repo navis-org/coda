@@ -2160,6 +2160,21 @@ select.field {
   gap: 2px;
   flex: none;
 }
+/*
+ * The ⤓ control's own positioning context, since the menu is absolute against it.
+ *
+ * It cannot be the surrounding row: in a viewer's caption bar that row also holds ⤢, and in a
+ * card's foot it holds the summary and the timing — anchoring the menu to either would slide it
+ * out from under the button it belongs to. The button, the menu and its rows keep the
+ * `viewer-actions__*` classes, because there is one ⤓ in this app and it should look like it
+ * wherever it is standing.
+ */
+.download-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+}
 .viewer-actions__btn {
   display: inline-flex;
   align-items: center;

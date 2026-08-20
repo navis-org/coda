@@ -36,6 +36,7 @@ import { socketStyle } from '../socketStyle'
 import { ValuePreview } from '../viewers/ValuePreview'
 import { nodeBody } from './nodeBodies'
 import { NodeRunRing } from './NodeRunRing'
+import { ResultDownload } from './ResultDownload'
 
 export interface CodaNodeData {
   [key: string]: unknown
@@ -645,6 +646,21 @@ function CodaNodeViewImpl({
             {info.state === 'running' && info.note && <span>{info.note}</span>}
             {info.durationMs !== undefined && info.state === 'ok' && (
               <span className="coda-node__timing">{formatDuration(info.durationMs)}</span>
+            )}
+            {/*
+              * Write this node's result to a file, for the cards that have no viewer to ask.
+              *
+              * Withheld where the card is drawing one, because that card already carries a ⤓ an
+              * inch above this — and it is the better of the two there, since a viewer can offer
+              * its picture as SVG and PNG where a value cannot. Saying the same thing twice on
+              * one card is the rule the `… N more` hint follows when it stands down on a fold.
+              */}
+            {!showPreview && (
+              <ResultDownload
+                value={outputValue}
+                baseName={exportBaseName(graphName, node.title ?? def.label)}
+                onError={setNotice}
+              />
             )}
           </div>
         )}
