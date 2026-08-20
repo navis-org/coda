@@ -87,6 +87,17 @@
    */
   --status-running-ring: #a87400;
 
+  /*
+   * A caveat beside a result that is otherwise fine — reported, not refused.
+   *
+   * Per-mode for the same reason the ring above is, and measured against --surface-1 rather than
+   * the canvas because it is dialog text: this carries prose at 11px, so the floor is 4.5:1 and
+   * not 3:1. No single gold clears that on both surfaces — the bright #fab219 is 9.78:1 dark and
+   * 1.74:1 light, i.e. unreadable exactly where a light-mode user reads it. #8a5e00 is 5.41:1 on
+   * the light panel; the dark value keeps the established gold at 9.78:1.
+   */
+  --status-warn: #8a5e00;
+
   /* --- node category header tints (decorative, low chroma) --------------- */
   --cat-dataset: #1baf7a;
   --cat-query: #2a78d6;
@@ -148,6 +159,7 @@
     --grid: #2c2c2a;
     /* Bright gold reads at 10.2:1 on this canvas; the light value would be 1.5:1. */
     --status-running-ring: #fab219;
+    --status-warn: #fab219;
     --accent: #3987e5;
     --accent-soft: rgba(57, 135, 229, 0.2);
     --socket-table: #3987e5;
@@ -205,6 +217,7 @@
   --border-strong: #383835;
   --grid: #2c2c2a;
   --status-running-ring: #fab219;
+  --status-warn: #fab219;
   --accent: #3987e5;
   --accent-soft: rgba(57, 135, 229, 0.2);
   --socket-table: #3987e5;
@@ -317,11 +330,18 @@ button {
 
 .app {
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  /*
+   * The assistant row is `auto`, so it takes exactly the height of what is in it — and the
+   * panel renders nothing when closed, which collapses the row to zero rather than leaving a
+   * reserved strip. Full width, below both docks: a reply and a list of refusals read across
+   * a wide band, and a horizontal pipeline can spare height more easily than width.
+   */
+  grid-template-rows: auto 1fr auto auto;
   grid-template-columns: 1fr auto;
   grid-template-areas:
     'toolbar toolbar'
     'canvas inspector'
+    'assistant assistant'
     'status status';
   height: 100%;
 }

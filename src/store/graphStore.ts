@@ -14,6 +14,9 @@
 import { create } from 'zustand'
 
 import type { CodaGraph, GraphEdge, GraphNode } from '../core/graph'
+import type { ApplyResult } from '../assistant/apply'
+import { applyPlan } from '../assistant/apply'
+import type { AssistantPlan } from '../assistant/planShape'
 import {
   addEdge as addGraphEdge,
   edgeInto,
@@ -288,6 +291,27 @@ export interface GraphState {
     to: { nodeId: string; portId: string },
   ): { ok: boolean; reason?: string }
   setSelection(ids: string[]): void
+
+  // --- assistant -----------------------------------------------------------
+  /**
+   * Apply a plan an assistant produced, as one undo step.
+   *
+   * The whole seam. `applyPlan` is pure and headless — it validates every wire against the
+   * same `checkConnection` a drag runs and hands back a finished graph or a list of refusals —
+   * so all this adds is the commit, which is the one thing only the store can do. A plan that
+   * added six nodes and five wires undoes in a single Ctrl-Z, on the same rule the companion
+   * card and the dataset auto-wire already follow.
+   *
+   * Refusals are returned rather than thrown, and nothing is committed on one: the caller is
+   * expected to feed them back to the model through `repairPrompt`, which is a conversation
+   * rather than an error.
+   *
+   * Deliberately takes a *plan*, not a request. Asking the model lives in
+   * `assistant/converse.ts`, which reaches the network and pulls in the ~28k-character
+   * catalogue; keeping it out of here is what lets the panel `await import()` that half and
+   * leave it out of the main chunk, the same doctrine as elkjs and the exporters.
+   */
+  applyAssistantPlan(plan: AssistantPlan): ApplyResult
 
   // --- history -------------------------------------------------------------
   undo(): void
@@ -1007,6 +1031,41 @@ export const useGraphStore = create<GraphState>((set, get) => {
       const current = get().selection
       if (current.length === ids.length && current.every((id, i) => id === ids[i])) return
       set({ selection: ids })
+    },
+
+    // --- assistant ---------------------------------------------------------
+
+    applyAssistantPlan: (plan) => {
+      const result = applyPlan(get().graph, plan)
+      if (!result.ok) return result
+
+      /*
+       * `commit` compares by identity and does nothing when the graph did not change, which is
+       * what makes a declined plan — an empty one whose summary says "I cannot do that" — leave
+       * no undo step behind. `applyPlan` returns the *same* object in that case for exactly this.
+       *
+       * Committed through the ordinary path, autoRun and all: a plan genuinely changes the
+       * document, so it should mark what it touched stale and schedule the cheap pass like any
+       * other edit. It must not press Run itself — the expensive nodes it just added point at a
+       * shared production database, and invariant 6 exists to keep a machine from deciding that.
+       *
+       * **No `tag`, and that is not an omission.** A tag is purely `pushHistory`'s coalescing
+       * key: two commits sharing one within `HISTORY_COALESCE_MS` collapse into a single undo
+       * step, which is what makes typing "12345" into a threshold one undo rather than five.
+       * A constant `'assistant'` tag therefore merged two *separate* requests whenever they
+       * landed inside 700ms — so undoing the second also silently undid the first. Each plan is
+       * a deliberate, discrete edit and gets its own step.
+       */
+      commit(() => result.graph)
+
+      /*
+       * Select what it made, so the answer to "what did you just do" is on screen rather than
+       * in a panel. Only the nodes the plan named: a companion card that came along with a
+       * dataset node was not asked for, and selecting it would misreport the edit.
+       */
+      const made = Object.values(result.created)
+      if (made.length) set({ selection: made })
+      return result
     },
 
     // --- history -----------------------------------------------------------

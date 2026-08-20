@@ -61,9 +61,20 @@ export default tseslint.config(
    * consumer (a CLI runner, or a Python-side executor consuming the same graph JSON).
    * `src/data` is the same deal for backends. Enforced here rather than trusted to
    * discipline, because this is exactly the boundary that erodes first.
+   *
+   * `src/assistant` is in for the same reason and one of its own: it turns a model's reply
+   * into a graph, and the one thing that keeps that safe is that it cannot commit anything —
+   * it hands a `CodaGraph` back and the store decides. Give it the store and "validate, then
+   * apply atomically" becomes "apply, and validate somewhere".
    */
   {
-    files: ['src/core/**/*.ts', 'src/data/**/*.ts'],
+    files: [
+      'src/core/**/*.ts',
+      'src/data/**/*.ts',
+      'src/assistant/**/*.ts',
+      // In because `src/assistant` imports it: the property is transitive, the rule is not.
+      'src/layout/**/*.ts',
+    ],
     rules: {
       'no-restricted-imports': [
         'error',
@@ -76,7 +87,12 @@ export default tseslint.config(
           ],
           patterns: [
             {
-              group: ['../ui/*', '../../ui/*', '@/ui/*', '../store/*', '../../store/*', '@/store/*'],
+              /*
+               * Depth-independent. The enumerated `../ui/*` / `../../ui/*` form covered two
+               * levels, and `src/data/ai/` is the first directory at three — the next nesting
+               * would have escaped the rule silently.
+               */
+              group: ['**/ui/*', '**/store/*', '@/ui/*', '@/store/*'],
               message: 'src/core and src/data must not depend on the UI or the store.',
             },
           ],

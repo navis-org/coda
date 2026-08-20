@@ -3383,6 +3383,51 @@ a.viewer-actions__btn {
 }
 
 /* Same underline idiom as the styling sidebar's tabs — a tab bar should read as one thing. */
+/*
+ * The top level: what kind of connection. A segmented control rather than a second row of
+ * underlined tabs, because two rows of the same affordance read as one bar that has wrapped —
+ * the levels have to look different to be read as levels.
+ */
+/*
+ * The dialog's two top-level sections — Data sources / AI assistant.
+ *
+ * Deliberately *not* `.layout-bubble__segments`, which is the other segmented control here and
+ * the obvious thing to reuse. That one is a row of bordered buttons in a 22px bubble, marking a
+ * setting; this is an inset track with a raised pill, marking which half of a dialog you are in.
+ * Sharing one block would mean picking a single appearance for both, and the one thing that
+ * cannot be checked from here is how either then looks — jsdom applies no CSS. Two small blocks
+ * beats a merge nobody can verify.
+ */
+.sources__sections {
+  display: flex;
+  flex: none;
+  gap: 4px;
+  margin: 0 12px 10px;
+  padding: 3px;
+  border-radius: 7px;
+  background: var(--surface-2);
+}
+.sources__section {
+  appearance: none;
+  flex: 1;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+.sources__section:hover {
+  color: var(--text-primary);
+}
+.sources__section[aria-selected='true'] {
+  background: var(--surface-1);
+  color: var(--text-primary);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.16);
+}
+
 .sources__tabs {
   display: flex;
   flex: none;
@@ -3428,6 +3473,35 @@ a.viewer-actions__btn {
   color: var(--text-muted);
 }
 
+/* A field whose control has a button beside it — the model picker and its refresh. */
+.sources__inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.sources__inline > .field {
+  flex: 1;
+  min-width: 0;
+}
+/*
+ * Square, so the glyph sits centred rather than in a pill the width of the word it replaced.
+ * `flex: none` because the row above puts everything else on `flex: 1`.
+ */
+.sources__refresh {
+  flex: none;
+  width: 30px;
+  padding: 0;
+  text-align: center;
+}
+.sources__hint {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.sources__hint code {
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
 .sources__actions {
   display: flex;
   align-items: center;
@@ -3445,6 +3519,9 @@ a.viewer-actions__btn {
 }
 .sources__result[data-tone='error'] {
   color: var(--status-error);
+}
+.sources__result[data-tone='warn'] {
+  color: var(--status-warn);
 }
 
 /* Multiline param/text fields — Cypher, tokens. */
@@ -5523,4 +5600,121 @@ details[open] > summary.tile__label {
 
 .rois__menu input {
   accent-color: var(--accent);
+}
+
+/* --------------------------------------------------------------------------
+ * The assistant drawer
+ *
+ * Full width under both docks. The row it sits in is `auto`, so the height here is the
+ * height of the drawer — there is no reserved strip when it is closed, because the component
+ * renders nothing at all rather than collapsing to zero.
+ * -------------------------------------------------------------------------- */
+
+.assistant {
+  grid-area: assistant;
+  display: flex;
+  flex-direction: column;
+  /*
+   * Tall enough to read a reply and a couple of warnings without scrolling, short enough that
+   * a horizontal pipeline still has room above it. The log scrolls; the drawer does not grow.
+   */
+  height: 232px;
+  background: var(--surface-1);
+  border-top: 1px solid var(--border);
+}
+
+.assistant__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.assistant__title {
+  font-size: 12px;
+  font-weight: 600;
+  margin: 0;
+}
+.assistant__hint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* Only the log scrolls, so the ask box stays put while an answer arrives. */
+.assistant__log {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.assistant__empty {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  max-width: 62ch;
+}
+
+/* What you asked, set apart from what came back without needing a colour to say so. */
+.assistant__said {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding-left: 10px;
+  border-left: 2px solid var(--border);
+}
+
+.assistant__entry {
+  border-left: 2px solid var(--accent);
+  padding-left: 10px;
+}
+.assistant__entry[data-tone='error'] {
+  border-left-color: var(--status-error, var(--text-muted));
+}
+.assistant__summary {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.assistant__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+  min-height: 22px;
+}
+.assistant__tally {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.assistant__detail,
+.assistant__warnings {
+  margin: 4px 0 0;
+  padding-left: 16px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.assistant__warnings li[data-severity='error'] {
+  color: var(--text-primary);
+}
+.assistant__working {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.assistant__ask {
+  display: flex;
+  flex: none;
+  gap: 6px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+}
+.assistant__ask .field {
+  flex: 1;
 }

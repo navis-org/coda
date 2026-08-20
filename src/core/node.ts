@@ -374,6 +374,77 @@ export function findParam(def: NodeDefinition, paramId: string): ParamDef | unde
 }
 
 /**
+ * Is this a value the param could hold? `undefined` when it is, otherwise the sentence saying
+ * why not, naming the param.
+ *
+ * Here rather than in the caller that needed it first, for two reasons. It mirrors the
+ * `ParamDef` union, and a mirror belongs beside the thing it reflects — the `default` arm
+ * assigns to `never`, so adding an eighth param kind fails to compile here instead of falling
+ * silently through a switch somewhere else. And it has more than one consumer waiting:
+ * anything that accepts params it did not write — a plan from an assistant, a `.coda.json` from
+ * another build, a future non-browser executor over the same graph JSON — needs exactly this
+ * check and cannot reach into `src/ui` for it.
+ *
+ * It answers about the *value* alone. Whether the param applies at all is `configurableParams`,
+ * because that depends on the node's other values and this cannot see them.
+ */
+export function validateParamValue(param: ParamDef, value: ParamValue): string | undefined {
+  const got = Array.isArray(value) ? 'a list' : `a ${typeof value}`
+  const wrongType = (want: string) => `"${param.id}" wants ${want}, got ${got}.`
+
+  switch (param.kind) {
+    case 'number':
+    case 'int': {
+      const whole = param.kind === 'int'
+      if (typeof value !== 'number' || !Number.isFinite(value)) {
+        return wrongType(whole ? 'a whole number' : 'a number')
+      }
+      if (whole && !Number.isInteger(value))
+        return `"${param.id}" wants a whole number, got ${value}.`
+      // The definition declares these and the number input honours them, so anything writing a
+      // param without going through that input has to honour them too or it is the one route
+      // that can store a value the UI would have refused.
+      if (param.min !== undefined && value < param.min) {
+        return `"${param.id}" must be at least ${param.min}, got ${value}.`
+      }
+      if (param.max !== undefined && value > param.max) {
+        return `"${param.id}" must be at most ${param.max}, got ${value}.`
+      }
+      return undefined
+    }
+    case 'string':
+      return typeof value === 'string' ? undefined : wrongType('a string')
+    case 'boolean':
+      return typeof value === 'boolean' ? undefined : wrongType('true or false')
+    case 'enum': {
+      if (typeof value !== 'string') return wrongType('one of its options')
+      /*
+       * Options can be a function of the resolved input types (aggregations per dtype, say).
+       * Those cannot be listed without an inference context, and building one here would let
+       * this disagree with the picker about what is on offer — so a dynamic enum takes any
+       * string and the node's own `validate` has the last word.
+       */
+      if (typeof param.options === 'function') return undefined
+      if (param.options.some((o) => o.value === value)) return undefined
+      return `"${param.id}" has no option "${value}". Options: ${param.options
+        .map((o) => o.value)
+        .join(', ')}.`
+    }
+    case 'column':
+      return typeof value === 'string' ? undefined : wrongType('a column name')
+    case 'columns':
+    case 'ids':
+      return Array.isArray(value) && value.every((v) => typeof v === 'string')
+        ? undefined
+        : wrongType('a list of strings')
+    default: {
+      const unreachable: never = param
+      return `"${(unreachable as ParamDef).id}" has a param kind nothing can validate.`
+    }
+  }
+}
+
+/**
  * The params that apply to these values and are somebody's to set.
  *
  * Two subtractions, and both are about not counting something as a decision. `visibleIf` first:

@@ -24,6 +24,20 @@ export interface Rect extends XY {
 /** Gap left between the arranged block and a note it had to dodge. */
 export const DODGE_GAP = 48
 
+/**
+ * The hand-placement grid: what a column of the pipeline costs, and where the first node goes.
+ *
+ * Not what ELK uses — it computes its own spacing. This is for the places that lay a graph out
+ * *without* running a layout pass, which have to agree with each other or the same canvas ends
+ * up drawn on two grids: the bundled examples, and the assistant's applier, which must stay
+ * synchronous and so cannot await the engine. Here because this module already owns the
+ * arithmetic about where a block of nodes sits.
+ */
+export const COL_WIDTH = 288
+export const ROW_HEIGHT = 190
+/** Where the first node of a hand-placed graph lands on an empty canvas. */
+export const GRID_ORIGIN = { x: 60, y: 80 } as const
+
 function union(rects: readonly Rect[]): Rect | undefined {
   if (rects.length === 0) return undefined
   let left = Infinity

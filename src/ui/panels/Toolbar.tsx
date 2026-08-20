@@ -45,6 +45,7 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
   const autoRun = useGraphStore((s) => s.autoRun)
   const setAutoRun = useGraphStore((s) => s.setAutoRun)
   const togglePanel = useGraphStore((s) => s.togglePanel)
+  const assistantOpen = useGraphStore((s) => s.panels.assistant)
   // A primitive, not the panels object: the store is read through `useSyncExternalStore`, which
   // compares snapshots by identity, and `togglePanel` mints a fresh object each time.
   const inspectorOpen = useGraphStore((s) => s.panels.inspector)
@@ -197,6 +198,15 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
 
       <SourcesPanel />
 
+      <button
+        type="button"
+        className="btn btn--ghost"
+        aria-pressed={assistantOpen}
+        title="Assistant — describe a change and let it build it (/)"
+        onClick={() => togglePanel('assistant')}
+      >
+        Assistant
+      </button>
       <button
         type="button"
         className="btn btn--ghost"

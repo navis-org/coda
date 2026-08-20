@@ -13,6 +13,9 @@
  *    messages, and matching on message text is how that stops working quietly.
  */
 
+import { channel } from '../channel'
+import { readStorage, writeStorage } from '../localStore'
+
 const TOKEN_KEY = 'coda.neuprint.token'
 const SERVER_KEY = 'coda.neuprint.server'
 
@@ -23,26 +26,8 @@ let token: string | undefined
 let baseUrl: string = DEFAULT_BASE_URL
 let loaded = false
 
-const tokenListeners = new Set<() => void>()
-const authFailureListeners = new Set<(message: string) => void>()
-
-/** localStorage is undefined under Node + jsdom without `--localstorage-file`. */
-function readStorage(key: string): string | undefined {
-  try {
-    return window.localStorage?.getItem(key) ?? undefined
-  } catch {
-    return undefined
-  }
-}
-
-function writeStorage(key: string, value: string | undefined): void {
-  try {
-    if (value) window.localStorage?.setItem(key, value)
-    else window.localStorage?.removeItem(key)
-  } catch {
-    // Storage disabled or full. The in-memory value still works for this session.
-  }
-}
+const changed = channel()
+const authFailure = channel<string>()
 
 function load(): void {
   if (loaded) return
@@ -65,7 +50,7 @@ export function setToken(raw: string | undefined): void {
   const cleaned = raw?.trim().replace(/^Bearer\s+/i, '')
   token = cleaned || undefined
   writeStorage(TOKEN_KEY, token)
-  for (const listener of tokenListeners) listener()
+  changed.notify()
 }
 
 export function forgetToken(): void {
@@ -82,18 +67,12 @@ export function setBaseUrl(raw: string | undefined): void {
   load()
   baseUrl = (raw?.trim().replace(/\/+$/, '') || DEFAULT_BASE_URL) as string
   writeStorage(SERVER_KEY, baseUrl === DEFAULT_BASE_URL ? undefined : baseUrl)
-  for (const listener of tokenListeners) listener()
+  changed.notify()
 }
 
 /** Raised by the client on 401/403 so the UI can offer the fix instead of a bare error. */
-export function reportAuthFailure(message: string): void {
-  for (const listener of authFailureListeners) listener(message)
-}
-
-export function subscribeAuthFailure(listener: (message: string) => void): () => void {
-  authFailureListeners.add(listener)
-  return () => authFailureListeners.delete(listener)
-}
+export const reportAuthFailure = authFailure.notify
+export const subscribeAuthFailure = authFailure.subscribe
 
 /** Test seam: drop everything held in memory and in storage. */
 export function resetCredentials(): void {

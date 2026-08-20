@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 
 import { useGraphStore } from './store/graphStore'
 import { applyTheme } from './store/persistence'
+import { AssistantPanel } from './ui/panels/AssistantPanel'
 import { Editor } from './ui/Editor'
 import { Inspector } from './ui/panels/Inspector'
 import { StartPage } from './ui/panels/StartPage'
@@ -25,6 +26,7 @@ export function App() {
       <Toolbar onOpenPalette={requestPalette} onOpenBrowser={requestNodeBrowser} />
       <Editor />
       <Inspector />
+      <AssistantPanel />
       <StatusBar />
       <ViewerOverlay />
       {/* Last, and on top: it can be reopened over an expanded viewer. */}

@@ -13,6 +13,7 @@ import { addEdge, addNode, emptyGraph } from '../core/graph'
 import type { ParamValues } from '../core/node'
 import { defaultParams } from '../core/node'
 import { requireNodeDef } from '../core/registry'
+import { COL_WIDTH, GRID_ORIGIN, ROW_HEIGHT } from '../layout/place'
 
 export interface ExampleGraph {
   id: string
@@ -32,15 +33,15 @@ interface Placement {
   params?: Record<string, unknown>
 }
 
-const COL_WIDTH = 288
-const ROW_HEIGHT = 190
-
 function place({ id, type, col, row = 0, params }: Placement): GraphNode {
   const def = requireNodeDef(type)
   return {
     id,
     type,
-    position: { x: 60 + col * COL_WIDTH, y: 80 + row * ROW_HEIGHT },
+    position: {
+      x: GRID_ORIGIN.x + col * COL_WIDTH,
+      y: GRID_ORIGIN.y + row * ROW_HEIGHT,
+    },
     params: { ...defaultParams(def), ...params } as ParamValues,
   }
 }
@@ -95,7 +96,7 @@ function placeNote({ id, col, y, width, height, text }: NoteSpec): GraphNode {
   return {
     id,
     type: NOTE_TYPE,
-    position: { x: 60 + col * COL_WIDTH, y },
+    position: { x: GRID_ORIGIN.x + col * COL_WIDTH, y },
     params: { ...defaultParams(requireNodeDef(NOTE_TYPE)), text: dedent(text) } as ParamValues,
     size: { width, height },
   }
@@ -257,7 +258,13 @@ const matrix: ExampleGraph = {
           row: 1.1,
           params: { typePattern: 'DNp.*|PVLP.*|PLP.*|AOTU.*', status: 'Traced' },
         },
-        { id: 'adj', type: 'neuron.adjacency', col: 2, row: 0.5, params: { groupByType: true } },
+        {
+          id: 'adj',
+          type: 'neuron.adjacency',
+          col: 2,
+          row: 0.5,
+          params: { groupByType: true },
+        },
         { id: 'norm', type: 'core.normalize', col: 3, row: 0.5, params: { mode: 'row' } },
         {
           id: 'heat',

@@ -100,6 +100,14 @@ export interface PanelState {
   inspector: boolean
   minimap: boolean
   /**
+   * The assistant drawer. Closed by default, like the other two on the canvas: it takes a
+   * strip of height before anyone has asked it anything, and the graph is the thing.
+   *
+   * Only whether it is *open* is remembered. The conversation itself is not persisted at all
+   * — see `assistantChat.ts`.
+   */
+  assistant: boolean
+  /**
    * The expanded viewer's styling sidebar. Unlike the other two this defaults **open**: it
    * lives inside a modal nobody opens by accident, and the controls are most of the reason
    * to open it. The canvas argument above does not apply — there is no canvas in there.
@@ -107,7 +115,12 @@ export interface PanelState {
   style: boolean
 }
 
-export const DEFAULT_PANELS: PanelState = { inspector: false, minimap: false, style: true }
+export const DEFAULT_PANELS: PanelState = {
+  inspector: false,
+  minimap: false,
+  assistant: false,
+  style: true,
+}
 
 export function loadPanels(): PanelState {
   try {
@@ -119,6 +132,7 @@ export function loadPanels(): PanelState {
     return {
       inspector: held.inspector === true,
       minimap: held.minimap === true,
+      assistant: held.assistant === true,
       // Note the inverted test: absent means open for this one, and a build written before
       // the key existed must not read as "the user closed it".
       style: held.style !== false,

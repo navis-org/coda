@@ -50,7 +50,7 @@ async function request<T>(
   const base = options.baseUrl ?? getBaseUrl()
   const token = options.token ?? getToken()
   if (!token) {
-    const message = 'No neuPrint token. Add one in Sources (⌘, or the toolbar).'
+    const message = 'No neuPrint token. Add one in Connections, in the toolbar.'
     reportAuthFailure(message)
     throw new NeuPrintError(message, 401)
   }

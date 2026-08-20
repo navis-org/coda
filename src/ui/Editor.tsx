@@ -599,6 +599,17 @@ function EditorCanvas() {
         void toggleFullscreen(appElement())
         return
       }
+      /*
+       * `/` rather than a letter, and unqualified. Every bare letter near the canvas is either
+       * taken (`f`, `i`, `m`, `h`) or one shift away from something else — `a` would sit beside
+       * `⇧A` for the node browser and mean something entirely different. `/` is the universal
+       * "start typing at something" and collides with nothing here.
+       */
+      if (!mod && event.key === '/') {
+        event.preventDefault()
+        useGraphStore.getState().togglePanel('assistant')
+        return
+      }
       // Unqualified, unlike `m` and `h`: showing the inspector is worth doing with nothing
       // selected, since that is exactly when you are about to select something.
       if (!mod && !event.shiftKey && event.key.toLowerCase() === 'i') {

@@ -145,12 +145,22 @@ describe('the minimap', () => {
 
 describe('the stored preference', () => {
   it('defaults to both canvas panels closed when nothing is stored', () => {
-    expect(loadPanels()).toEqual({ inspector: false, minimap: false, style: true })
+    expect(loadPanels()).toEqual({
+      inspector: false,
+      minimap: false,
+      assistant: false,
+      style: true,
+    })
   })
 
   it('round-trips', () => {
-    savePanels({ inspector: true, minimap: false, style: false })
-    expect(loadPanels()).toEqual({ inspector: true, minimap: false, style: false })
+    savePanels({ inspector: true, minimap: false, assistant: true, style: false })
+    expect(loadPanels()).toEqual({
+      inspector: true,
+      minimap: false,
+      assistant: true,
+      style: false,
+    })
   })
 
   it('reads an absent styling sidebar as open, not as closed', () => {
