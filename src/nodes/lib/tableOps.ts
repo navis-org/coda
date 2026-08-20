@@ -1085,6 +1085,9 @@ export const NORMALIZE_OPTIONS: Array<{ value: NormalizeMode; label: string }> =
 ]
 
 export function normalizeMatrix(matrix: MatrixValue, mode: NormalizeMode): MatrixValue {
+  // Note what is deliberately not carried: `measure`. A fraction of a row is no longer the
+  // quantity that went in — a normalised count is a proportion, not a count — so the honest
+  // answer downstream is "nobody said" rather than the old claim restated about new numbers.
   if (mode === 'none') return matrix
   const rows = matrix.rowLabels.length
   const cols = matrix.colLabels.length

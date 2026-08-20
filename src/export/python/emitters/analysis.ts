@@ -184,3 +184,154 @@ registerEmitter('neuron.paths', (ctx) => {
     `)`,
   ]
 })
+
+// ---------------------------------------------------------------------------
+// NBLAST
+// ---------------------------------------------------------------------------
+
+/**
+ * The units sentence both NBLAST emitters carry, and the dotprops block all three call sites
+ * build. Written once here rather than three times below — `common.ts` is the home for the
+ * cross-file version of this, but these two emitters are the only readers.
+ */
+const MICRON_NOTE =
+  'NBLAST is calibrated in micrometres — navis: "Neurons should be in microns as NBLAST is ' +
+  'optimized for that". This converts through the units navis carries on the neuron rather ' +
+  'than assuming a factor.'
+
+function dotpropsLines(from: string, name: string, k: number, resample: number): string[] {
+  return [
+    `${name} = navis.make_dotprops(`,
+    `    ${from}.convert_units('um'),`,
+    `    k=${k},`,
+    ...(resample > 0 ? [`    resample=${resample},`] : []),
+    `)`,
+  ]
+}
+
+/**
+ * The one node whose Python is the *same implementation*, not a translation of it.
+ *
+ * Coda runs navis-fastcore in the browser and navis reaches for the very same wheel when it is
+ * installed, so a notebook of this cell is not an approximation of what the canvas did — it is
+ * what the canvas did, on a machine with cores. Two things still differ and both are said out
+ * loud rather than papered over: units, and how the symmetric case is spelled.
+ */
+registerEmitter('neuron.nblast', (ctx) => {
+  const query = ctx.wired('query')
+  const target = ctx.input('target')
+  ctx.require('navis')
+
+  const out = ctx.output('scores')
+  const dots = `${ctx.name}_dp`
+  const k = Number(ctx.params.k ?? 5)
+  const resample = Number(ctx.params.resample ?? 1)
+  const symmetry = String(ctx.params.symmetry ?? 'mean')
+  const normalized = ctx.params.normalize !== false
+  const useAlpha = ctx.params.useAlpha === true
+
+  const lines: string[] = [
+    /*
+     * `convert_units` rather than a division by 1000: navis carries the unit on the neuron, so
+     * this is right for a dataset whose voxels are not 8 nm and it *raises* rather than
+     * silently scaling where the unit is unknown. Coda has to use the factor, because its own
+     * skeletons are nanometres by construction.
+     */
+    ...ctx.note(MICRON_NOTE),
+    ...dotpropsLines(query, dots, k, resample),
+  ]
+
+  const targetDots = target ? `${ctx.name}_target_dp` : undefined
+  if (target && targetDots) lines.push(...dotpropsLines(target, targetDots, k, resample))
+
+  const common = [
+    `    normalized=${normalized ? 'True' : 'False'},`,
+    ...(useAlpha ? [`    use_alpha=True,`] : []),
+  ]
+
+  if (!target && symmetry === 'none') {
+    // navis's own docstring: "A more efficient way than running nblast(query=x, target=x)".
+    lines.push(`${out} = navis.nblast_allbyall(`, `    ${dots},`, ...common, `)`)
+  } else {
+    if (!target) {
+      lines.push(
+        ...ctx.note(
+          `nblast_allbyall has no symmetry option, so the symmetric case goes through ` +
+            `nblast(x, x, scores='${symmetry}'). Same scores, a little more work.`,
+        ),
+      )
+    }
+    lines.push(
+      `${out} = navis.nblast(`,
+      `    ${dots},`,
+      `    ${targetDots ?? dots},`,
+      `    scores=${pyStr(symmetry === 'none' ? 'forward' : symmetry)},`,
+      ...common,
+      `)`,
+    )
+  }
+
+  const label = ctx.column('labelColumn')
+  if (label) {
+    lines.push(
+      ...ctx.note(
+        `Coda labels the rows by "${label}"; this frame is indexed by body id, which is what ` +
+          `every other navis call takes.`,
+      ),
+    )
+  }
+  return lines
+})
+
+/**
+ * navis has this one outright — `nblast_knn(..., format='long')` returns the same tidy frame
+ * this node emits, which makes the translation a rename rather than a reshape.
+ *
+ * The rename is not cosmetic. navis calls the columns `query` and `target`; Coda calls them
+ * `queryId` and `targetId` because `isIdentifierColumn` reads a name's last word to decide
+ * whether a number is an identifier or a quantity, and a column called `query` prints body
+ * 527536 as "527,536". Emitting navis's names would leave every downstream cell addressing
+ * columns that are not there.
+ */
+registerEmitter('neuron.nblastKnn', (ctx) => {
+  const query = ctx.wired('query')
+  const target = ctx.input('target')
+  ctx.require('navis')
+
+  const out = ctx.output('matches')
+  const dots = `${ctx.name}_dp`
+  const tangentK = Number(ctx.params.tangentK ?? 5)
+  const resample = Number(ctx.params.resample ?? 1)
+  const symmetry = String(ctx.params.symmetry ?? 'mean')
+
+  const lines: string[] = [...ctx.note(MICRON_NOTE), ...dotpropsLines(query, dots, tangentK, resample)]
+
+  const targetDots = target ? `${ctx.name}_target_dp` : undefined
+  if (target && targetDots) lines.push(...dotpropsLines(target, targetDots, tangentK, resample))
+
+  lines.push(
+    `${out} = navis.nblast_knn(`,
+    `    ${dots},`,
+    ...(targetDots ? [`    target=${targetDots},`] : []),
+    `    k=${Number(ctx.params.k ?? 5)},`,
+    `    scores=${pyStr(symmetry === 'none' ? 'forward' : symmetry)},`,
+    `    n_candidates=${Number(ctx.params.nCandidates ?? 200)},`,
+    `    format='long',`,
+    `    normalized=${ctx.params.normalize !== false ? 'True' : 'False'},`,
+    ...(ctx.params.useAlpha === true ? [`    use_alpha=True,`] : []),
+    `)`,
+    // Coda's column names, so anything wired after this node addresses the same frame.
+    `${out} = ${out}.rename(columns={'query': 'queryId', 'target': 'targetId'})`,
+  )
+
+  const label = ctx.column('labelColumn')
+  if (label) {
+    lines.push(
+      ...ctx.note(
+        `Coda also carries "${label}" for each side as queryLabel / targetLabel. Join them ` +
+          `back on from the neuron table if you need them here.`,
+      ),
+    )
+  }
+  return lines
+})

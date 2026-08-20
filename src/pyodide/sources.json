@@ -1,0 +1,18 @@
+{
+  "comment": [
+    "Where the Python runtime comes from. One copy, because two readers need it: src/pyodide/runtime.ts",
+    "and scripts/probe-nblast.mjs, which has no way to import TypeScript.",
+    "",
+    "Both hosts were checked for CORS rather than assumed. jsdelivr answers every request with",
+    "access-control-allow-origin: *. files.pythonhosted.org answers with it only when the request",
+    "carries an Origin header - a bare curl -I shows no CORS headers at all and reads as a host that",
+    "would block a browser, which it is not. Same shape as the /api/roimeshes HEAD-vs-GET finding.",
+    "",
+    "To self-host instead: drop the wheel in public/ and set fastcoreWheel to a BASE_URL-relative",
+    "path. It is 1.1 MB, against the ~10 MB of CPython and numpy that would still come from the CDN,",
+    "so hosting the algorithm and borrowing the runtime is a defensible middle."
+  ],
+  "pyodideIndex": "https://cdn.jsdelivr.net/pyodide/v314.0.5/full/",
+  "fastcoreWheel": "https://files.pythonhosted.org/packages/48/11/74206ba362a2b287cd94bc15605e0185f0e26397116e84a1ae27266a3e2e/navis_fastcore-0.13.0-cp39-abi3-pyemscripten_2026_0_wasm32.whl",
+  "fastcoreVersion": "0.13.0"
+}

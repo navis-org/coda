@@ -264,6 +264,9 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `ui/nodes/nodeRunRing.test.tsx`          | run-indicator arithmetic: dash fractions, the zero floor, indeterminate mode                                                     |
 | `ui/nodes/runRing.placement.test.tsx`    | that the outline renders outside the clipped card (slow mock, so 'running' is observable)                                        |
 | `nodes/analysis/network.test.ts`         | BuildNetwork semantics + the selection round-trip                                                                                |
+| `nodes/analysis/nblast.test.ts`          | the units conversion above all, plus the flattening, the labels, the ceiling, the voxel refusal, and every control reaching the request |
+| `nodes/analysis/nblastKnn.test.ts`       | the k-NN shape: the rectangle laid out long, the padding dropped and counted, and the id columns named so a body id is not a quantity |
+| `core/values.test.ts`                    | what a node footer says about a geometry value: its units printed always, and voxels-vs-unknown told apart                        |
 | `data/neuroglancer/scene.test.ts`        | scene editing against the real published shapes, and the URL round-trip                                                          |
 | `nodes/output/neuroglancer.test.ts`      | what lands in the link: segments, colour agreement with the 3D view, the limit                                                   |
 | `ui/viewers/neuroglancerViewer.test.tsx` | that a restyle navigates the frame rather than remounting it                                                                     |
@@ -581,6 +584,211 @@ summing or the totals roughly double; and a null type sorts **last** on a tie, m
   which is the same accepted cost with the same honest statement of it.
 - **Neuroglancer** emits a note: the URL is built from a published scene, which is a fetch this
   translation does not make.
+
+## NBLAST, and Python in the tab
+
+`neuron.nblast`, `Add ▸ Analysis ▸ NBLAST`. Skeletons in, a score matrix out — which is a
+`MatrixValue`, so the Heatmap draws it, Normalize rescales it and Download writes the CSV,
+none of which had to learn anything. The comparison is **navis-fastcore**, the Rust
+implementation navis itself uses, running in the page as a Pyodide worker (`src/pyodide/`).
+
+**This is a spike, and what it is spiking is the hosting cost rather than the algorithm.**
+Every number below was measured rather than estimated — in Node against the wheel, and in
+headless Chrome against `pnpm dev`.
+
+### What it costs
+
+| first use | raw | over the wire |
+| --- | --- | --- |
+| `pyodide.asm.wasm` | 9.6 MB | 3.44 MB |
+| `python_stdlib.zip` | 2.5 MB | 2.5 MB |
+| numpy | 2.92 MB | 2.92 MB |
+| **navis-fastcore** | **1.10 MB** | **1.10 MB** |
+
+About ten megabytes, **of which the algorithm is one** — nine tenths of that download is
+CPython and numpy. That is the number to have in mind before adding a *second* Python-backed
+node, and equally the reason the second one is nearly free. Measured in a browser: 2.3 s from
+cold to a scored matrix, 536 ms for a 100 x 100 all-by-all once booted, 8 ms for eight neurons.
+
+**Nothing enters the bundle.** Pyodide is not an npm dependency; the worker imports it from a
+CDN at run time. `main` grew 6.3 kB — the node, its ops and the engine — and the worker is its
+own 5.9 kB chunk carrying `nblast.py` inlined. Verify with `pnpm build`: `worker-*.js` should
+contain `coda_dotprops`, and `main-*.js` should not match `jsdelivr` at all.
+
+### The trap, which produces no error
+
+**Coda's skeletons are nanometres; NBLAST's scoring matrix is micrometres.** The FCWB matrix
+fastcore embeds runs out at a 40 um distance bin and past it every cell is about -10 — so a set
+handed over in nm scores every pair as if no two neurons had ever been near each other,
+uniformly, with nothing anywhere to say why. `NM_PER_UM` in `nodes/lib/nblastOps.ts` is the
+whole of the fix and `nblast.test.ts` pins it. The related limit is that NBLAST **across**
+datasets means nothing without a template-space registration, which Coda has no route to yet;
+within one dataset it is exactly the usual analysis.
+
+**So geometry now carries its units, and the conversion is checked rather than assumed.**
+`GeometryUnits` (`core/values.ts`) rides on `SkeletonsValue`, `MeshesValue` and `PointsValue`,
+`describeValue` prints it in the node footer — `12 skeletons · 43,210 pts · nm` — and
+`checkNblastUnits` refuses anything that is not `nm` before a byte is marshalled.
+
+Three things about it are load-bearing:
+
+- **`voxelScale` answers `undefined` where it used to answer the identity**, and that is the
+  change that made the rest possible. neuPrint returns voxels; the conversion needs
+  `Meta.voxelSize` *and* a unit string the table recognises, and where either is missing the old
+  code fell back to a 1:1 scale — which is indistinguishable from a dataset that genuinely
+  publishes 1 nm voxels. So the failure was silent and, worse, unrecoverable downstream. Now the
+  absence is the information: `geometryUnitsFor` sits beside `voxelScale` and turns it into
+  `nm` or `voxels`, the two kept together on invariant 3's reasoning.
+- **`voxels` is a real answer, not a failure**, and absent is a third thing again. The
+  coordinates in that state genuinely are voxels — nobody here knows how big one is. Absent
+  means unknown, which no source produces today, so NBLAST lets it through rather than refusing
+  on a fact nobody stated. Same distinction as `columnSchemaFor`'s missing-versus-empty.
+- **The units print even when they are the expected ones.** A line that shows up only when
+  something is wrong is a line nobody learns to look at — the same reasoning that keeps the
+  matched half of `unmatchedLabels` on screen.
+
+Note what this does *not* catch, because it is a units check rather than a scale one: the mock
+connectome is honestly `nm` and merely small, an 18 um brain against a real hemibrain's 250. The
+bounds sanity check that would catch that is still unwritten.
+
+### The k-NN sibling
+
+`neuron.nblastKnn`, `Add ▸ Analysis ▸ NBLAST k-NN`. A different *question* rather than a faster
+answer to the same one: a matrix asks how alike every pair is, this asks what one neuron is most
+like — which is what a similarity search, a k-NN graph and an embedding all actually want.
+fastcore shortlists candidates from a coarse voxel signature and scores only those, so the cost
+is `n × nCandidates` rather than `n²`. **Every score returned is an exact NBLAST value**; only
+which pairs were considered is approximate. fastcore's measurement, on 163,976 neurons: recall
+of the true top 20 is 0.911 at 50 candidates, 0.969 at 100, 0.990 at the default 200, 0.996 at
+400, having scored 0.16% of the pairs.
+
+**It emits a long table** — `queryId`, `targetId`, `rank`, `score`, plus a label per side when
+the picker is set — because that is the shape Filter, Sort, Download and `net.build` already
+take. Building the graph here would be this node deciding merge rules `net.build` owns.
+
+- **`queryId`/`targetId`, not navis's `query`/`target`.** `isIdentifierColumn` reads a name's
+  last word to decide whether a number is an identifier or a quantity, so a column called
+  `query` prints body 527536 as "527,536". The Python emitter renames navis's frame to match,
+  or every downstream cell would address columns that are not there.
+- **`idx` is cast to int32 in Python.** fastcore returns int64, and an int64 numpy array crosses
+  to JavaScript as a `BigInt64Array` — which converts without complaint and then compares equal
+  to nothing. `int32From` names that case in its error.
+- **Padding is dropped and counted.** A row with fewer than `k` candidates comes back filled
+  with `-1` / `-inf` to keep the arrays rectangular. Carried through, that is a neighbour called
+  -1 with a score of negative infinity in somebody's chart.
+- **A neuron present in both sets matches itself at 1.0**, which is fastcore's behaviour with an
+  explicit target and is kept rather than corrected — so "top 5" is four others for such a
+  neuron. Without a target, every neuron is excluded from its own row. The guide says so.
+- **`symmetry` is applied before the top-k cut**, which is why it matters more here than on a
+  matrix: once only k neighbours per row survive there is no transpose left to symmetrise
+  against.
+- **Two different things are called `k`.** fastcore's k-NN `k` is how many matches come back;
+  its dotprops `k` fits the tangent vectors. On the card they are `Matches per neuron` and
+  `Tangent neighbours`, in both nodes, because two controls called k is a card nobody can use.
+- **`nat.nblast` has no equivalent**, so the R emitter is a TODO that says why: the honest
+  translation is `nblast_allbyall()` plus a per-row top-k, which is the n² this node exists to
+  avoid.
+
+**What it does not yet buy is scale.** The Skeletons node refuses above 500 neurons and at 500
+the full matrix is about seventeen seconds, so today this earns its place on the neighbour table
+and the graph rather than on speed. It is the node that is ready when the fetch ceiling moves —
+which is a decision about 5,000 HTTP requests against a shared production Neo4j, not about this.
+
+### The bridge is about calling a function, not about NBLAST
+
+`src/pyodide/` hosts **one** Pyodide instance — a module-level singleton in `engine.ts` — and the
+protocol is `callPython({ module, fn, args })`. A capability is three things and no more: a
+`.py` registered in `runtime.ts`'s `MODULES`, its request and result types, and a wrapper that
+calls the bridge and reads the answer by name. `nblast.ts` is the first and the one to copy;
+nothing in `engine.ts`, `worker.ts` or `types.ts` changes when a second arrives.
+
+That shape was chosen over a message type per operation because the second capability is likely
+(`linkage` for a Dendrogram is the named candidate) and the alternative grows a union without
+bound. **The cost it avoids is not a protocol tidy-up but a second 10 MB runtime**, which is
+what a separate engine would mean.
+
+**A capability declares its own packages**, in `MODULES`, and they are installed the first time
+something calls into it. Loading numpy and the 1.1 MB fastcore wheel from `boot()` instead
+would be right only for as long as every capability wanted exactly those — the next one needing
+scipy would edit the boot, and one needing neither would pay for the wheel. They go in as one
+`loadPackage` call rather than two awaits: numpy comes from jsDelivr and the wheel from PyPI,
+so serialised the second request's DNS, TLS and slow-start all wait on the first transfer. Worth
+about 285 ms of a 2.1 s cold start, measured in a browser.
+
+Four conventions carry it, each established against the runtime rather than assumed —
+`scripts/probe-nblast.mjs` exercises all of them:
+
+- **Arguments go over as they are.** A JS object arrives in Python as a dict through `.to_py()`,
+  and a typed array nested inside one arrives as a buffer `np.frombuffer` reads directly. So a
+  call passes one request object, the buffers are still transferred rather than cloned, and
+  there is no marshalling layer to keep in step.
+- **Results are a flat dict**: scalars and **one-dimensional** arrays, with any shape carried as
+  its own entry. This is the one that bites. A 2-D numpy array does not fail to convert on the
+  way out — it converts to a nested plain `Array`, which for a 400 x 400 matrix is 160,000 boxed
+  numbers and nothing to say it went wrong. Hence `.ravel()` and explicit `rows`/`cols`, and
+  `float64From` naming that case in its error.
+- **`report` is the last positional argument** of every callable, `report=None` where there is
+  nothing to say. A keyword would read better and would rest on `callKwargs`, which is more of
+  Pyodide's surface to depend on for no gain.
+- **A type crossing the bridge is a `type`, not an `interface`.** TypeScript gives a type alias
+  an implicit index signature and an interface none, so an interface is not assignable to
+  `PyArg` and the call fails to compile with a message about `undefined`. Not obvious from the
+  error; worth knowing before writing the second wrapper.
+
+`toJs` **copies** out of the wasm heap, checked rather than assumed — so a result outlives the
+proxy it came from, while every proxy taken is still destroyed where it was taken.
+
+### Decisions worth keeping
+
+- **`nblast.py` is a real `.py` file**, loaded with `?raw`, not a template literal. It is
+  readable and diffable, and `scripts/probe-nblast.mjs` (`pnpm probe:nblast`) runs *that file*
+  against *that wheel* through *the same entry point the worker calls*. vitest has no Pyodide
+  and jsdom has no `Worker`, so nothing in `pnpm test` executes a line of it — which is why
+  `.github/workflows/pyodide.yml` does, path-filtered to `src/pyodide/**` and pinned to the
+  Pyodide version `sources.json` names. Pinned rather than `latest` so a bump is a deliberate
+  change with its own diff instead of an unrelated PR going red. The probe asserts the
+  *contract* and not the scores — square result, flat float64, one finite score per pair, a
+  self-match of exactly 1, progress actually reported. fastcore owns the numbers; this owns
+  the marshalling.
+- **The square case is one `nblast_allbyall` call, so no progress is reported from inside the
+  blast.** Chunking the rows to drive a bar was measured at 1.8x (50-row chunks) to 5.1x
+  (10-row) the run it would be reporting on, for byte-identical scores.
+- **Cancel terminates the worker rather than interrupting Python.** Interrupting needs
+  `setInterruptBuffer`, which needs a `SharedArrayBuffer`, which needs COOP/COEP headers, which
+  GitHub Pages cannot set and which this app has no service worker to fake. Measured: abort
+  lands in 153 ms, and the next run re-boots in 1.4 s because the ten megabytes are cached by
+  then. The same missing headers are why it is **single-threaded** — `get_num_threads()` is 1 —
+  so fastcore's headline multi-core speed is not available here whatever the backend.
+- **Nothing is guarded that fastcore already handles.** Checked against the wheel rather than
+  assumed: it clamps `k` to the point count, resamples a multi-rooted fragment with both roots
+  surviving, and accepts a one-point neuron. So `dotpropSetFrom` drops nothing — a filtered set
+  would put every label after the dropped neuron on the wrong row.
+- **The score matrix says it is a similarity.** `MatrixValue.measure` (`'similarity' |
+  'distance' | 'count'`) is the machine-readable half of `valueLabel`, and it exists because
+  clustering needs *distances*: somebody has to know to invert, and in the consumer that is a
+  special case per producer. Optional, and absent means unknown — Pivot genuinely cannot say,
+  since its cells are whatever aggregation was picked — so a consumer asks and carries on when
+  nobody answered. Only NBLAST sets it today.
+- **No param is presentational**, which is unusual enough here to be worth saying. Every one
+  changes the scores, `Label by` included: the labels are part of the matrix that leaves the
+  port, not a way of drawing it.
+- **The wheel tag is not Pyodide-specific.** `pyemscripten_2026_0_wasm32` is the emscripten ABI
+  tag and Pyodide 314.x's lock declares `abi_version: 2026_0`. `sources.json` pins both, because
+  a Pyodide bump that moves the ABI needs a wheel built against it.
+- **CORS was checked with an `Origin` header, and that mattered.** `files.pythonhosted.org`
+  sends no CORS headers at all to a bare `curl -I` and `access-control-allow-origin: *` to a
+  request carrying `Origin` — so the wheel loads in a browser, which the obvious check says it
+  does not. Same shape as the `/api/roimeshes` HEAD-vs-GET finding. jsdelivr is open either way.
+
+### What is not settled
+
+The CDN is a third-party runtime dependency this app otherwise does not have; the wheel is
+1.1 MB and could sit in `public/` while the runtime is still borrowed. And the honest way to
+price the whole thing is not "ten megabytes for NBLAST" but "ten megabytes for a numerical
+backend" — `linkage` (the Dendrogram TODO), the CMTK/Elastix/TPS transforms (the template-space
+TODO), geodesic distances and Strahler for morphometrics, and "custom nodes using Python" all
+come out of the same download. Judged as one node it is disproportionate; judged as a backend it
+is cheap. That is the decision the spike exists to inform.
 
 ## Auto-run
 

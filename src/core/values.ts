@@ -20,6 +20,21 @@ export interface TableValue {
   readonly length: number
 }
 
+/**
+ * What a matrix's numbers *are*, where that changes what may be done with them.
+ *
+ * Distinct from `valueLabel`, which is prose for an axis. This is the machine-readable half,
+ * and it exists because clustering needs **distances** where NBLAST produces similarities — so
+ * somebody has to know to invert, and putting that knowledge in the consumer makes it a
+ * special case per producer.
+ *
+ * **Optional, and absent means unknown.** A consumer asks and carries on when nobody said:
+ * Pivot genuinely cannot answer, since its cells are whatever aggregation was picked. Refusing
+ * on an absent one would refuse on a fact nobody stated — the distinction `columnSchemaFor`
+ * draws between a schema that is missing and one that is empty.
+ */
+export type MatrixMeasure = 'similarity' | 'distance' | 'count'
+
 export interface MatrixValue {
   readonly kind: 'matrix'
   readonly rowLabels: string[]
@@ -28,6 +43,7 @@ export interface MatrixValue {
   readonly values: Float64Array
   /** What the cells mean, for viewer axis/legend labels. */
   readonly valueLabel?: string
+  readonly measure?: MatrixMeasure
 }
 
 export interface DatasetValue {
@@ -66,6 +82,25 @@ export interface NetworkValue {
   readonly edges: TableValue
 }
 
+/**
+ * What a geometry value's coordinates are in.
+ *
+ * Everything drawn in one scene is nanometres, converted at the source seam — see
+ * `data/neuprint/units.ts` for why that is the common space rather than voxels. This field is
+ * that invariant made checkable: it travels with the value, so a consumer whose answer depends
+ * on physical scale can ask instead of assuming.
+ *
+ * **`voxels` is a real answer, not a failure.** neuPrint returns skeleton and synapse
+ * coordinates in dataset voxels, and the conversion needs `Meta.voxelSize` plus a unit string
+ * the table recognises. Where either is missing the numbers are still voxels — we simply do
+ * not know how big one is — and saying so is the difference between a comparison that refuses
+ * and one that quietly scores a brain eight times too small.
+ *
+ * **Absent means unknown**, which no source produces today. It is what a value built before
+ * this field existed says, and what a future source that cannot tell should say.
+ */
+export type GeometryUnits = 'nm' | 'voxels'
+
 /** One neuron's branching morphology, SWC-style, in parallel typed arrays. */
 export interface SkeletonGeometry {
   readonly bodyId: number
@@ -82,6 +117,7 @@ export interface SkeletonsValue {
   /** One row per item, in the same order. Must contain `bodyId`. */
   readonly attributes: TableValue
   readonly bounds: Bounds3
+  readonly units?: GeometryUnits
 }
 
 export interface MeshGeometry {
@@ -126,6 +162,7 @@ export interface MeshesValue {
   readonly attributes: TableValue
   readonly bounds: Bounds3
   readonly detail?: MeshDetail
+  readonly units?: GeometryUnits
 }
 
 /**
@@ -139,6 +176,7 @@ export interface PointsValue {
   readonly positions: Float32Array
   readonly attributes: TableValue
   readonly bounds: Bounds3
+  readonly units?: GeometryUnits
 }
 
 /**
@@ -224,14 +262,20 @@ export function makeMatrix(
   colLabels: string[],
   values: Float64Array,
   valueLabel?: string,
+  measure?: MatrixMeasure,
 ): MatrixValue {
   const expected = rowLabels.length * colLabels.length
   if (values.length !== expected) {
     throw new Error(`makeMatrix: expected ${expected} values, got ${values.length}`)
   }
-  return valueLabel
-    ? { kind: 'matrix', rowLabels, colLabels, values, valueLabel }
-    : { kind: 'matrix', rowLabels, colLabels, values }
+  return {
+    kind: 'matrix',
+    rowLabels,
+    colLabels,
+    values,
+    ...(valueLabel ? { valueLabel } : {}),
+    ...(measure ? { measure } : {}),
+  }
 }
 
 export function num(value: number): ScalarValue {
@@ -389,6 +433,18 @@ export function asString(v: Value | undefined, fallback = ''): string {
   return fallback
 }
 
+/**
+ * How a geometry value's units read in a footer.
+ *
+ * Printed even when they are the expected nanometres, deliberately. A line that appears only
+ * when something is wrong is a line nobody learns to look at — the same reasoning that keeps
+ * the matched half of `unmatchedLabels` on screen — and here the whole point is that the
+ * reader can tell `nm` from `voxels` at a glance on the node that fetched them.
+ */
+export function unitsLabel(units: GeometryUnits | undefined): string {
+  return units ?? 'units unknown'
+}
+
 /** Row count summary used in node footers: "1,234 rows". */
 export function describeValue(v: Value | undefined): string {
   if (!v) return '—'
@@ -403,11 +459,17 @@ export function describeValue(v: Value | undefined): string {
     case 'network':
       return `${v.nodes.length.toLocaleString()} nodes · ${v.edges.length.toLocaleString()} edges`
     case 'skeletons':
-      return `${v.items.length} skeleton${v.items.length === 1 ? '' : 's'} · ${skeletonPointCount(v).toLocaleString()} pts`
+      return (
+        `${v.items.length} skeleton${v.items.length === 1 ? '' : 's'} · ` +
+        `${skeletonPointCount(v).toLocaleString()} pts · ${unitsLabel(v.units)}`
+      )
     case 'meshes':
-      return `${v.items.length} mesh${v.items.length === 1 ? '' : 'es'} · ${meshTriangleCount(v).toLocaleString()} tris`
+      return (
+        `${v.items.length} mesh${v.items.length === 1 ? '' : 'es'} · ` +
+        `${meshTriangleCount(v).toLocaleString()} tris · ${unitsLabel(v.units)}`
+      )
     case 'points':
-      return `${v.attributes.length.toLocaleString()} points`
+      return `${v.attributes.length.toLocaleString()} points · ${unitsLabel(v.units)}`
     case 'layout': {
       const count = Object.keys(v.positions).length
       return `${count.toLocaleString()} placed${v.algorithm ? ` · ${v.algorithm}` : ''}`

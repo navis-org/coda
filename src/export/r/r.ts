@@ -176,6 +176,16 @@ const RESERVED = new Set([
   'Reduce',
   // Bindings the setup chunk makes.
   'conn',
+  /*
+   * `nat.nblast`'s own verbs, and the node is called NBLAST — so this is `filter` again, with
+   * one difference worth knowing: R resolves a *call* by searching for a function binding and
+   * skipping non-function values, so `nblast <- nblast_allbyall(...)` in one chunk does not
+   * actually break `nblast(...)` in the next. It reads as though it should, which is its own
+   * cost, and the moment somebody assigns a function to it the leniency stops.
+   */
+  'nblast',
+  'nblast_allbyall',
+  'dotprops',
 ])
 
 /**

@@ -13,6 +13,8 @@
  * returned, which is why this is a named, documented conversion instead of a stray `* 8`.
  */
 
+import type { GeometryUnits } from '../../core/values'
+
 /** Scale factors that take dataset voxels to nanometres, per axis. */
 export type VoxelScale = readonly [number, number, number]
 
@@ -32,21 +34,38 @@ const TO_NANOMETRES: Record<string, number> = {
 /**
  * Read `Meta.voxelSize` / `Meta.voxelUnits` into a per-axis nm scale.
  *
- * Falls back to the identity rather than guessing: a dataset that does not say what its
- * voxels measure is better left in its own units, where at least skeletons and synapses
- * still agree with each other, than scaled by a number nobody checked.
+ * **Answers `undefined` rather than the identity when it cannot tell**, and the distinction is
+ * the whole reason this returns an option. A dataset that does not say what its voxels measure
+ * is better left in its own units — where at least skeletons and synapses still agree with each
+ * other — than scaled by a number nobody checked. But the caller then has two very different
+ * facts to publish: coordinates in nanometres, or coordinates in voxels of unknown size. An
+ * identity scale conflates them, and a consumer whose answer depends on physical scale (NBLAST
+ * is the one that does) cannot recover the difference afterwards. Note that identity is also a
+ * perfectly ordinary *success*: a dataset publishing 1 nm voxels scales by exactly 1.
  */
-export function voxelScale(voxelSize: unknown, voxelUnits: unknown): VoxelScale {
-  if (!Array.isArray(voxelSize) || voxelSize.length < 3) return IDENTITY_SCALE
+export function voxelScale(voxelSize: unknown, voxelUnits: unknown): VoxelScale | undefined {
+  if (!Array.isArray(voxelSize) || voxelSize.length < 3) return undefined
   const unit =
     typeof voxelUnits === 'string' ? TO_NANOMETRES[voxelUnits.toLowerCase()] : undefined
-  if (unit === undefined) return IDENTITY_SCALE
+  if (unit === undefined) return undefined
 
   const scale = [0, 1, 2].map((axis) => {
     const size = Number(voxelSize[axis])
     return Number.isFinite(size) && size > 0 ? size * unit : 1
   }) as [number, number, number]
   return scale
+}
+
+/**
+ * What coordinates scaled by this are in — the other half of `voxelScale`'s answer.
+ *
+ * Kept beside it rather than at the call sites, on the same reasoning as invariant 3: the two
+ * halves have to agree, and they cannot drift while they are three lines apart. neuPrint hands
+ * back dataset voxels, so a scale it could not read leaves them voxels; anything else has been
+ * multiplied into nanometres.
+ */
+export function geometryUnitsFor(scale: VoxelScale | undefined): GeometryUnits {
+  return scale ? 'nm' : 'voxels'
 }
 
 /** True when the scale would leave coordinates untouched — lets callers skip the work. */

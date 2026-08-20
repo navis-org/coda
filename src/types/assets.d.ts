@@ -16,6 +16,16 @@ declare module '*?worker' {
   export default WorkerConstructor
 }
 
+/**
+ * Vite's `?raw` imports. `pyodide/runtime.ts` loads `nblast.py` this way, so the Python stays a
+ * real `.py` file — readable, diffable, and runnable against the same wheel by
+ * `scripts/probe-nblast.mjs` rather than only through a browser.
+ */
+declare module '*?raw' {
+  const source: string
+  export default source
+}
+
 /** The Draco decoder is a universal Emscripten build; see `precomputed/draco.ts`. */
 declare module 'draco3d/draco_decoder_nodejs.js' {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

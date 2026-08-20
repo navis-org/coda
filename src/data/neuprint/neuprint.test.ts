@@ -26,7 +26,13 @@ import {
 } from './client'
 import { meshSourceFromState, precomputedToHttp } from './nglayers'
 import { fetchRoiMeshSet, roiMeshPath } from './roiMeshes'
-import { IDENTITY_SCALE, scalePositions, scaleRadii, voxelScale } from './units'
+import {
+  IDENTITY_SCALE,
+  geometryUnitsFor,
+  scalePositions,
+  scaleRadii,
+  voxelScale,
+} from './units'
 import { resetCredentials, setToken, subscribeAuthFailure } from './credentials'
 import connectivityFixture from './__fixtures__/connectivity.json'
 import metaMancFixture from './__fixtures__/metaManc.json'
@@ -1187,12 +1193,24 @@ describe('voxel to nanometre conversion', () => {
     expect(voxelScale([1, 1, 1], 'micrometers')).toEqual([1000, 1000, 1000])
   })
 
-  it('falls back to identity rather than guessing at an unknown unit', () => {
+  it('answers undefined rather than guessing at an unknown unit', () => {
     // Leaving a dataset in its own units keeps skeletons and synapses agreeing with each
-    // other, which a made-up scale factor would not.
-    expect(voxelScale([8, 8, 8], 'cubits')).toEqual(IDENTITY_SCALE)
-    expect(voxelScale(undefined, 'nanometers')).toEqual(IDENTITY_SCALE)
-    expect(voxelScale([8, 8], 'nanometers')).toEqual(IDENTITY_SCALE)
+    // other, which a made-up scale factor would not. Undefined rather than the identity,
+    // because the caller has to publish which of the two it is: nanometres, or voxels of a
+    // size nobody knows. A consumer cannot recover that distinction afterwards.
+    expect(voxelScale([8, 8, 8], 'cubits')).toBeUndefined()
+    expect(voxelScale(undefined, 'nanometers')).toBeUndefined()
+    expect(voxelScale([8, 8], 'nanometers')).toBeUndefined()
+    // And the identity is still an ordinary success: 1 nm voxels scale by exactly 1.
+    expect(voxelScale([1, 1, 1], 'nanometers')).toEqual(IDENTITY_SCALE)
+  })
+
+  it('publishes what the coordinates ended up in, paired with the scale', () => {
+    // The two halves are read together or a dataset whose Meta is silent hands back voxels
+    // labelled nanometres — which is exactly the case nothing downstream could detect.
+    expect(geometryUnitsFor(voxelScale([8, 8, 8], 'nanometers'))).toBe('nm')
+    expect(geometryUnitsFor(voxelScale([8, 8, 8], 'cubits'))).toBe('voxels')
+    expect(geometryUnitsFor(undefined)).toBe('voxels')
   })
 
   it('scales positions in place, and skips the work for the identity', () => {
@@ -1213,7 +1231,7 @@ describe('voxel to nanometre conversion', () => {
     // Ground truth: neuPrint returns body 1158187240's skeleton spanning x 88..15628 voxels;
     // its precomputed mesh spans x 704..125408 nm. Only the 8 nm scale reconciles them.
     const voxels = new Float32Array([88, 9808, 16392, 15628, 21750, 31330])
-    const nm = scalePositions(voxels, voxelScale([8, 8, 8], 'nanometers'))
+    const nm = scalePositions(voxels, voxelScale([8, 8, 8], 'nanometers') ?? IDENTITY_SCALE)
     expect(nm[0]).toBe(704)
     expect(nm[3]).toBe(125024)
   })

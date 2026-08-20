@@ -33,7 +33,15 @@ export type Cell = MarkdownCell | CodeCell
  * it is **not on CRAN**, so `install.packages` does not find it and the comment has to say
  * `install_github` instead.
  */
-export type RPackage = 'neuprintr' | 'nat' | 'dplyr' | 'tidyr' | 'readr' | 'ggplot2' | 'igraph'
+export type RPackage =
+  | 'neuprintr'
+  | 'nat'
+  | 'nat.nblast'
+  | 'dplyr'
+  | 'tidyr'
+  | 'readr'
+  | 'ggplot2'
+  | 'igraph'
 
 export interface PackageSpec {
   /** Where it comes from, for the install comment. CRAN unless stated. */
@@ -44,6 +52,8 @@ export interface PackageSpec {
 export const PACKAGES: Record<RPackage, PackageSpec> = {
   neuprintr: { github: 'natverse/neuprintr' },
   nat: {},
+  // On CRAN, unlike neuprintr — `install.packages` finds it.
+  'nat.nblast': {},
   dplyr: {},
   tidyr: {},
   readr: {},

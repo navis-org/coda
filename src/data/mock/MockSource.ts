@@ -523,6 +523,7 @@ export class MockSource implements DataSource {
       items,
       attributes: tableFromRows(ROI_MESH_SCHEMA, rows),
       bounds: boundsOf(items.map((m) => m.positions)),
+      units: 'nm',
     }
   }
 
@@ -562,6 +563,9 @@ export class MockSource implements DataSource {
       items,
       attributes: tableFromRows(this.schemas.morphology, rows),
       bounds: boundsOf(items.map((s) => s.positions)),
+      // Synthetic, but generated in nm-like units, so it says so rather than leaving a
+      // consumer to guess — the brain is simply a small one.
+      units: 'nm',
     }
   }
 
@@ -575,6 +579,7 @@ export class MockSource implements DataSource {
       items,
       attributes: skeletons.attributes,
       bounds: boundsOf(items.map((m) => m.positions)),
+      units: 'nm',
     }
   }
 
@@ -621,6 +626,7 @@ export class MockSource implements DataSource {
       positions: buffer,
       attributes: tableFromRows(this.schemas.synapses, rows),
       bounds: boundsOf([buffer]),
+      units: 'nm',
     }
   }
 

@@ -13,8 +13,14 @@ import { isTableValue } from '../../core/values'
 import { requireDataset, schemasFromType, sourceSupports } from '../lib/datasetParam'
 import { idColumn } from '../lib/tableOps'
 
-/** Ceiling on every morphology node's `Max neurons`, so one number governs all three. */
-const MAX_NEURONS = 500
+/**
+ * Ceiling on every morphology node's `Max neurons`, so one number governs all three.
+ *
+ * Exported because it governs more than three now: nothing can reach the NBLAST nodes that
+ * these did not fetch, so their ceiling is this one. Restating the literal there made "parity
+ * with the Skeletons node" a comment rather than a fact.
+ */
+export const MAX_NEURONS = 500
 
 /**
  * Read body ids off the incoming table, refusing an oversized set.

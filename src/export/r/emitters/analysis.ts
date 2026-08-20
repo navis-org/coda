@@ -370,3 +370,115 @@ registerHelper({
     '}',
   ],
 })
+
+// ---------------------------------------------------------------------------
+// NBLAST
+// ---------------------------------------------------------------------------
+
+/**
+ * `nat.nblast` is the original, and Coda's is a port of a port — so this is the one emitter
+ * that translates *back* to the reference implementation.
+ *
+ * Two things do not carry across. Units: `neuprint_read_neurons` returns raw voxels, which is
+ * 8 nm on the hemibrain and is a per-dataset fact nothing in the graph records, so the factor
+ * is emitted with its assumption stated rather than hidden in a helper. And symmetry: R folds
+ * normalisation and symmetry into one `normalisation` argument with three values, so `min` and
+ * `max` have nowhere to go and say so.
+ */
+registerEmitter('neuron.nblast', (ctx) => {
+  const query = ctx.wired('query')
+  const target = ctx.input('target')
+  ctx.library('nat')
+  ctx.library('nat.nblast')
+
+  const out = ctx.output('scores')
+  const dots = `${ctx.name}_dps`
+  const k = Number(ctx.params.k ?? 5)
+  const resample = Number(ctx.params.resample ?? 1)
+  const symmetry = String(ctx.params.symmetry ?? 'mean')
+  const normalized = ctx.params.normalize !== false
+  const useAlpha = ctx.params.useAlpha === true
+
+  const dotprops = (from: string, name: string): string[] => [
+    `${name} <- dotprops(`,
+    `  ${from} * VOXEL_UM,`,
+    `  k = ${k},`,
+    ...(resample > 0 ? [`  resample = ${resample},`] : []),
+    `)`,
+  ]
+
+  const lines: string[] = [
+    ...ctx.note(
+      'NBLAST is calibrated in micrometres and neuprintr returns raw voxels — 8 nm on the ' +
+        'hemibrain. Check this factor against your dataset: nothing in the graph records it.',
+    ),
+    `VOXEL_UM <- 8 / 1000`,
+    ``,
+    ...dotprops(query, dots),
+  ]
+
+  const targetDots = target ? `${ctx.name}_target_dps` : undefined
+  if (target && targetDots) lines.push(``, ...dotprops(target, targetDots))
+
+  const alpha = useAlpha ? [`  UseAlpha = TRUE,`] : []
+
+  if (target && targetDots) {
+    if (symmetry !== 'none') {
+      lines.push(
+        ...ctx.note(
+          `nat.nblast's nblast() scores query against target only. Coda's "${symmetry}" ` +
+            `symmetry would need the reverse call as well — mind the orientation of the two ` +
+            `matrices before combining them.`,
+        ),
+      )
+    }
+    lines.push(
+      ``,
+      `${out} <- nblast(`,
+      `  query = ${dots},`,
+      `  target = ${targetDots},`,
+      `  normalised = ${normalized ? 'TRUE' : 'FALSE'},`,
+      ...alpha,
+      `)`,
+    )
+    return lines
+  }
+
+  // One `normalisation` argument carries what Coda splits over two params, and it has three
+  // values rather than four.
+  const normalisation = !normalized ? 'raw' : symmetry === 'none' ? 'normalised' : 'mean'
+  if (symmetry === 'min' || symmetry === 'max') {
+    lines.push(
+      ...ctx.note(
+        `nat.nblast offers raw, normalised and mean — there is no "${symmetry}". This uses ` +
+          `the mean of both directions.`,
+      ),
+    )
+  }
+  lines.push(
+    ``,
+    `${out} <- nblast_allbyall(`,
+    `  ${dots},`,
+    `  normalisation = ${rStr(normalisation)},`,
+    ...alpha,
+    `)`,
+  )
+  return lines
+})
+
+/**
+ * The one NBLAST capability the natverse does not have.
+ *
+ * `nat.nblast` scores pairs and `nblast_allbyall` builds the whole matrix; there is no
+ * shortlisted k-nearest search, and the honest translation of one is the matrix followed by a
+ * per-row top-k — which is the `n²` this node exists to avoid and would be a different
+ * computation wearing the same name. So this says so and points at the node that does export.
+ */
+registerEmitter('neuron.nblastKnn', (ctx) =>
+  ctx.todo(
+    'nat.nblast has no shortlisted k-nearest search. The honest equivalent is ' +
+      'nblast_allbyall() followed by a per-row top-k, which is the full n^2 matrix this node ' +
+      'exists to avoid — a different computation under the same name. Use the NBLAST node, ' +
+      'which exports as nblast_allbyall(), and take the top matches from its matrix.',
+  ),
+)

@@ -74,6 +74,9 @@ export default tseslint.config(
       'src/assistant/**/*.ts',
       // In because `src/assistant` imports it: the property is transitive, the rule is not.
       'src/layout/**/*.ts',
+      // A compute backend, same deal as `src/data`. It runs in a worker, where there is no
+      // React and no store to reach for anyway — which is exactly when a boundary erodes.
+      'src/pyodide/**/*.ts',
     ],
     rules: {
       'no-restricted-imports': [

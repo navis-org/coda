@@ -1,0 +1,52 @@
+# The Python half of the NBLAST node, actually executed.
+#
+# Split out from `deploy.yml` for exactly the reason `export.yml` is: this needs something the
+# rest of the suite does not have. vitest has no Pyodide and jsdom has no `Worker`, so nothing
+# in `pnpm test` runs a line of `src/pyodide/*.py` — and the TypeScript marshalling and the
+# Python signatures are a pair that nothing type-checks. That is the same drift the emitter
+# registry has, and the answer is the same: a job that runs the real thing when the real thing
+# changes.
+#
+# It installs Pyodide from npm, which the app itself deliberately does not depend on (the
+# browser loads it from a CDN). The version is read from `src/pyodide/sources.json`, so this
+# checks the runtime the app actually pins rather than whatever npm calls latest — a bump is
+# then a deliberate change with its own diff, instead of an unrelated PR going red.
+name: Python runtime
+
+on:
+  push:
+    paths:
+      - 'src/pyodide/**'
+      - 'scripts/probe-nblast.mjs'
+      - '.github/workflows/pyodide.yml'
+  pull_request:
+    paths:
+      - 'src/pyodide/**'
+      - 'scripts/probe-nblast.mjs'
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+
+      # The version the app pins, not `latest`. `pyodideIndex` is the single copy of it —
+      # `sources.json` exists so this file and `runtime.ts` cannot disagree about which
+      # runtime is under test.
+      - name: Install the pinned Pyodide
+        run: |
+          version=$(node -p "require('./src/pyodide/sources.json').pyodideIndex.match(/\/v([0-9.]+)\//)[1]")
+          echo "Pyodide $version"
+          npm install --no-save "pyodide@$version"
+
+      # Runs `src/pyodide/nblast.py` through the same entry point the worker calls, with the
+      # same request shape, and asserts the contract rather than the scores: a square result,
+      # a flat float64 array, one finite score per pair, a self-match of exactly 1, and
+      # progress actually reported. fastcore owns the numbers; this owns the marshalling.
+      - run: node scripts/probe-nblast.mjs
+        env:
+          PYODIDE_PATH: node_modules/pyodide

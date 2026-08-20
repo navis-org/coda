@@ -36,6 +36,8 @@ export { uploadTableNode } from './table/upload'
 export { tableFromUrlNode } from './table/fromUrl'
 export { selectOneNode } from './transform/selectOne'
 export { buildNetworkNode } from './analysis/buildNetwork'
+export { nblastNode } from './analysis/nblast'
+export { nblastKnnNode } from './analysis/nblastKnn'
 
 export { tableViewNode } from './output/table'
 export { heatmapNode } from './output/heatmap'

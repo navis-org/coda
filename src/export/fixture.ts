@@ -159,6 +159,40 @@ export function everythingGraph(): CodaGraph {
     { id: 'mesh', type: 'neuron.meshes', col: 2, row: 6, params: { limit: 10 } },
     { id: 'syn', type: 'neuron.synapses', col: 2, row: 7, params: { polarity: 'pre' } },
 
+    /*
+     * Two NBLAST nodes, for the reason there are two Select One nodes: the emitters branch on
+     * whether a Target is wired, and one node would record only the branch that happens to be
+     * an all-by-all. The symmetric one also takes the non-default `symmetry` so the golden
+     * shows `nblast(x, x)` rather than `nblast_allbyall`, which is the substitution most
+     * likely to go wrong unnoticed.
+     */
+    {
+      id: 'nblast',
+      type: 'neuron.nblast',
+      col: 3,
+      row: 5,
+      params: { symmetry: 'mean', labelColumn: 'type' },
+    },
+    {
+      id: 'nblastPair',
+      type: 'neuron.nblast',
+      col: 3,
+      row: 6,
+      params: { symmetry: 'none', resample: 0, useAlpha: true },
+    },
+
+    /*
+     * One k-NN node, with a label column picked: that is the branch where the emitted frame
+     * gains columns the notebook does not carry, so it is the one whose note has to appear.
+     */
+    {
+      id: 'nblastKnn',
+      type: 'neuron.nblastKnn',
+      col: 3,
+      row: 7,
+      params: { k: 5, symmetry: 'mean', labelColumn: 'type' },
+    },
+
     {
       id: 'filter',
       type: 'core.filter',
@@ -411,6 +445,10 @@ export function everythingGraph(): CodaGraph {
     ['group', 'out', 'tableFilt', 'in'],
     ['group', 'out', 'net', 'edges'],
     ['net', 'network', 'netview', 'in'],
+    ['skel', 'skeletons', 'nblastKnn', 'query'],
+    ['skel', 'skeletons', 'nblast', 'query'],
+    ['skel', 'skeletons', 'nblastPair', 'query'],
+    ['skel', 'skeletons', 'nblastPair', 'target'],
     ['skel', 'skeletons', 'v3d', 'skeletons'],
     ['stack', 'out', 'muted', 'in'],
   ]

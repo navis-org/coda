@@ -143,6 +143,9 @@ describe('MockSource morphology', () => {
     expect(skeletons.attributes.data.bodyId).toEqual(skeletons.items.map((i) => i.bodyId))
     expect(skeletons.attributes.schema.columns.map((c) => c.name)).toContain('cableLength')
     expect(skeletonPointCount(skeletons)).toBeGreaterThan(100)
+    // Synthetic, but it still states its units rather than leaving a consumer to guess — the
+    // NBLAST node refuses anything that is not nanometres, and silence is not nanometres.
+    expect(skeletons.units).toBe('nm')
   })
 
   it('reports bounds that enclose the geometry', async () => {

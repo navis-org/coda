@@ -12,11 +12,12 @@ Every node type that emits, wired up once.
 *Exported from Coda.*
 
 ```{r setup}
-# install.packages(c("nat", "dplyr", "tidyr", "readr", "ggplot2", "igraph"))
+# install.packages(c("nat", "nat.nblast", "dplyr", "tidyr", "readr", "ggplot2", "igraph"))
 # remotes::install_github("natverse/neuprintr")  # not on CRAN
 
 library(neuprintr)
 library(nat)
+library(nat.nblast)
 library(dplyr)
 library(tidyr)
 library(readr)
@@ -661,6 +662,59 @@ filter_df <- connectivity |> filter(`weight` >= 10)
 ```{r select-one}
 # ── Select One ──
 select_one <- skeletons |> slice(1)
+```
+
+```{r nblast-k-nn}
+# ── NBLAST k-NN ──
+# TODO: nat.nblast has no shortlisted k-nearest search. The honest
+# equivalent is nblast_allbyall() followed by a per-row top-k, which is the
+# full n^2 matrix this node exists to avoid — a different computation under
+# the same name. Use the NBLAST node, which exports as nblast_allbyall(),
+# and take the top matches from its matrix.
+```
+
+```{r nblast-df}
+# ── NBLAST ──
+# NOTE: NBLAST is calibrated in micrometres and neuprintr returns raw voxels
+# — 8 nm on the hemibrain. Check this factor against your dataset: nothing
+# in the graph records it.
+VOXEL_UM <- 8 / 1000
+
+nblast_df_dps <- dotprops(
+  skeletons * VOXEL_UM,
+  k = 5,
+  resample = 1,
+)
+
+nblast_df <- nblast_allbyall(
+  nblast_df_dps,
+  normalisation = "mean",
+)
+```
+
+```{r nblast-df-2}
+# ── NBLAST ──
+# NOTE: NBLAST is calibrated in micrometres and neuprintr returns raw voxels
+# — 8 nm on the hemibrain. Check this factor against your dataset: nothing
+# in the graph records it.
+VOXEL_UM <- 8 / 1000
+
+nblast_df_2_dps <- dotprops(
+  skeletons * VOXEL_UM,
+  k = 5,
+)
+
+nblast_df_2_target_dps <- dotprops(
+  skeletons * VOXEL_UM,
+  k = 5,
+)
+
+nblast_df_2 <- nblast(
+  query = nblast_df_2_dps,
+  target = nblast_df_2_target_dps,
+  normalised = TRUE,
+  UseAlpha = TRUE,
+)
 ```
 
 ```{r n-3d-view}

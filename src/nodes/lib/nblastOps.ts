@@ -1,0 +1,257 @@
+/**
+ * Skeletons in, the shape NBLAST wants out.
+ *
+ * Headless and pure, which is the whole point: the Python side cannot be tested here (vitest
+ * has no Pyodide) and the worker cannot either (jsdom has no `Worker`), so everything that can
+ * be decided without them is decided here, where a test can see it. What is left on the other
+ * side of the seam is one call.
+ */
+
+import type { TableSchema } from '../../core/types'
+import { column, tableSchema } from '../../core/types'
+import type { CellValue, MatrixValue, SkeletonsValue, TableValue } from '../../core/values'
+import { getColumn, isSkeletonsValue, makeMatrix, skeletonPointCount, tableFromRows } from '../../core/values'
+import type { Value } from '../../core/values'
+import type { NblastKnnResult, NblastResult, PointSet } from '../../pyodide/nblast'
+
+/**
+ * Coda's skeletons are nanometres; NBLAST's scoring matrix is micrometres.
+ *
+ * This is the one number in the feature that produces a confident wrong answer rather than an
+ * error. The FCWB matrix fastcore embeds runs out at a 40 um distance bin, and past it every
+ * cell is about -10 — so a set of neurons handed over in nanometres scores as if no two of them
+ * had ever been near each other, uniformly, with nothing anywhere to say why. See `nblast.py`.
+ */
+export const NM_PER_UM = 1000
+
+/**
+ * How many pairs one node may ask for.
+ *
+ * Measured on this wheel, single-threaded in wasm at a thousand points a neuron: about 15k
+ * pairs a second. So this ceiling is roughly seventeen seconds of scoring, and it is checked
+ * against the two counts *before* anything is marshalled — the same rule `pivotTable` follows
+ * for the same reason, that by the time the array exists the tab has already stalled.
+ */
+const MAX_NBLAST_PAIRS = 250_000
+
+/**
+ * How the two directions of a pair are combined, and what each is called on a card.
+ *
+ * Shared by both NBLAST nodes rather than re-typed: they take the same values through to the
+ * same fastcore argument, and two lists that must agree are one list.
+ */
+export const SYMMETRY_OPTIONS = [
+  { value: 'mean', label: 'mean of both directions' },
+  { value: 'min', label: 'weaker direction' },
+  { value: 'max', label: 'stronger direction' },
+  { value: 'none', label: 'query against target only' },
+]
+
+/**
+ * Lay a skeleton set out flat, in micrometres.
+ *
+ * Three buffers, every neuron after the last, because that is what crosses a `postMessage`
+ * without being cloned point by point.
+ *
+ * **Nothing is dropped, however small.** A one-point skeleton is a degenerate dotprop, and the
+ * temptation is to filter those out — but then the rows coming back no longer line up with the
+ * neurons that went in, and every label after the dropped one is wrong. fastcore was checked
+ * against exactly these cases rather than guessed at: it clamps `k` to the point count, takes a
+ * single point, and resamples a multi-rooted fragment without complaint.
+ */
+export function dotpropSetFrom(skeletons: SkeletonsValue): PointSet {
+  const total = skeletonPointCount(skeletons)
+
+  const points = new Float32Array(total * 3)
+  const parents = new Int32Array(total)
+  const offsets = new Int32Array(skeletons.items.length + 1)
+
+  let at = 0
+  for (let n = 0; n < skeletons.items.length; n++) {
+    const item = skeletons.items[n]!
+    const count = item.parents.length
+    for (let i = 0; i < count; i++) {
+      points[(at + i) * 3] = item.positions[i * 3]! / NM_PER_UM
+      points[(at + i) * 3 + 1] = item.positions[i * 3 + 1]! / NM_PER_UM
+      points[(at + i) * 3 + 2] = item.positions[i * 3 + 2]! / NM_PER_UM
+      // Parent indices stay neuron-local: `nblast.py` slices each neuron out and hands
+      // fastcore row numbers as node ids, so a global offset here would be a forest of
+      // dangling references rather than a tree.
+      parents[at + i] = item.parents[i]!
+    }
+    at += count
+    offsets[n + 1] = at
+  }
+  return { points, parents, offsets }
+}
+
+/**
+ * What to call each row.
+ *
+ * Body ids unless a column was picked, and body ids again wherever that column is empty — a
+ * neuron with no type is still a neuron, and a blank row label in a heatmap is a row nobody
+ * can identify rather than a row with nothing to say.
+ */
+export function nblastLabels(skeletons: SkeletonsValue, column: string | undefined): string[] {
+  const values = column ? getColumn(skeletons.attributes, column) : undefined
+  return skeletons.items.map((item, i) => {
+    const cell = values?.[i]
+    return cell === null || cell === undefined || cell === '' ? String(item.bodyId) : String(cell)
+  })
+}
+
+/**
+ * Refuse coordinates that are not nanometres, naming the side.
+ *
+ * A refusal rather than a warning, and that is forced rather than chosen: there is no run-time
+ * warning channel here that survives a result being restored from cache instead of recomputed
+ * (see `unmatchedLabels` for the same gap worked around a different way). Given the choice
+ * between silence and a stop, a comparison whose every number would be wrong should stop.
+ *
+ * **Absent units are allowed through.** Absent means unknown, and no source produces it today —
+ * every geometry value from either source says `nm` or `voxels`. Refusing on it would refuse on
+ * a fact nobody stated, which is the same distinction `columnSchemaFor` draws between a schema
+ * that is missing and one that is empty.
+ */
+export function checkNblastUnits(side: string, skeletons: SkeletonsValue): void {
+  if (skeletons.units === undefined || skeletons.units === 'nm') return
+  throw new Error(
+    `${side} skeletons are in ${skeletons.units}, not nanometres, so NBLAST would compare them ` +
+      `at the wrong scale and say nothing about it. This happens when the dataset's Meta ` +
+      `publishes no voxelSize or no unit this build recognises, so the fetch had nothing to ` +
+      `convert with — the Skeletons node's footer says which units it got.`,
+  )
+}
+
+/** Refuse an oversized comparison, naming both sides so it is clear which one to cut. */
+export function checkNblastSize(rows: number, cols: number): void {
+  if (rows * cols > MAX_NBLAST_PAIRS) {
+    throw new Error(
+      `${rows} x ${cols} is ${(rows * cols).toLocaleString()} pairs, over this node's ceiling ` +
+        `of ${MAX_NBLAST_PAIRS.toLocaleString()}. Scoring runs single-threaded in the browser ` +
+        `at roughly 15,000 pairs a second — filter upstream, or raise Max neurons only if you ` +
+        `mean to wait.`,
+    )
+  }
+}
+
+/**
+ * Read both sides of a comparison, refusing everything that must not reach the runtime.
+ *
+ * Both NBLAST nodes ask the same four questions of their inputs — is this a skeleton set, is
+ * it empty, is it over the ceiling, is it in nanometres — and asked at each node they were the
+ * same twenty lines twice, including the messages. The precedent is `bodyIdsFrom` in
+ * `query/morphology.ts`, which folds the identical three concerns for the three fetch nodes.
+ *
+ * The units check is the one that earns the sharing: it is the guard whose absence produces a
+ * confident wrong matrix rather than an error, so a fix applied to one copy and not the other
+ * is the worst shape this could take.
+ */
+export function nblastSidesFrom(
+  queryValue: Value | undefined,
+  targetValue: Value | undefined,
+  limit: number,
+): { query: SkeletonsValue; target?: SkeletonsValue } {
+  if (!isSkeletonsValue(queryValue)) throw new Error('Query input is not a set of skeletons')
+  if (targetValue !== undefined && !isSkeletonsValue(targetValue)) {
+    throw new Error('Target input is not a set of skeletons')
+  }
+  if (queryValue.items.length === 0) throw new Error('No skeletons on the Query input')
+
+  const refuse = (side: string, count: number): never => {
+    throw new Error(
+      `${count} neurons on ${side} exceeds this node's Max neurons (${limit}). ` +
+        `Filter upstream, or raise the limit if you mean it.`,
+    )
+  }
+  if (queryValue.items.length > limit) refuse('Query', queryValue.items.length)
+  if (targetValue && targetValue.items.length > limit) refuse('Target', targetValue.items.length)
+
+  checkNblastUnits('Query', queryValue)
+  if (targetValue) checkNblastUnits('Target', targetValue)
+
+  return { query: queryValue, ...(targetValue ? { target: targetValue } : {}) }
+}
+
+/**
+ * What both nodes warn about at edit time.
+ *
+ * One rule, because it is a fact about NBLAST rather than about either node.
+ */
+export function nblastIssues(resample: number): string[] {
+  return resample === 0
+    ? ['Resample is 0, so scores follow how finely each neuron was traced as much as its shape']
+    : []
+}
+
+/** The scores, as the value the Heatmap and Normalize already understand. */
+export function nblastMatrix(
+  result: NblastResult,
+  rowLabels: string[],
+  colLabels: string[],
+): MatrixValue {
+  // Through `makeMatrix` rather than a literal: it is the one place that checks the labels
+  // against the values, and a label array that has drifted from the result would otherwise
+  // reach the Heatmap silently. Similarity whether or not it was normalised — un-normalised
+  // scores are unbounded but they still rise with likeness, and a clustering node has to know
+  // to invert them.
+  return makeMatrix(rowLabels, colLabels, result.scores, 'NBLAST score', 'similarity')
+}
+
+/**
+ * The columns a k-NN result comes out as.
+ *
+ * **`queryId` / `targetId` rather than navis's `query` / `target`**, and that is not gratuitous
+ * divergence: `isIdentifierColumn` reads a column name's *last word* to decide whether a number
+ * is an identifier or a quantity, so a column called `query` would print body 527536 as
+ * "527,536" — a string no query accepts and, under another locale, not even the same string.
+ * The Python emitter renames navis's frame to these, or every downstream cell in the notebook
+ * would be addressing columns that are not there.
+ */
+export function knnSchema(withLabels: boolean): TableSchema {
+  return tableSchema(
+    column('queryId', 'i64'),
+    column('targetId', 'i64'),
+    column('rank', 'i64'),
+    column('score', 'f64'),
+    ...(withLabels ? [column('queryLabel', 'str'), column('targetLabel', 'str')] : []),
+  )
+}
+
+/**
+ * One row per (neuron, neighbour), best first.
+ *
+ * **Padding is dropped.** fastcore fills a short row with `-1` / `-inf` to keep the two arrays
+ * rectangular; carrying that into a table would put a neighbour called -1 with a score of
+ * negative infinity in front of somebody. What is left is a table with fewer than `k` rows for
+ * such a neuron, which is the honest artefact — there is no run-time channel to say more, and
+ * a count returned to a caller that discards it is not one.
+ *
+ * `rank` is 1-based, so the best match reads as rank 1 rather than rank 0.
+ */
+export function knnTable(
+  result: NblastKnnResult,
+  queryIds: number[],
+  targetIds: number[],
+  labels?: { query: string[]; target: string[] },
+): TableValue {
+  const rows: Record<string, CellValue>[] = []
+
+  for (let r = 0; r < result.rows; r++) {
+    for (let c = 0; c < result.k; c++) {
+      const at = r * result.k + c
+      const target = result.idx[at]!
+      if (target < 0) continue
+      rows.push({
+        queryId: queryIds[r] ?? null,
+        targetId: targetIds[target] ?? null,
+        rank: c + 1,
+        score: result.scores[at]!,
+        ...(labels
+          ? { queryLabel: labels.query[r] ?? null, targetLabel: labels.target[target] ?? null }
+          : {}),
+      })
+    }
+  }
+  return tableFromRows(knnSchema(labels !== undefined), rows)
+}

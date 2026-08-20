@@ -15,6 +15,7 @@
 import type { TableSchema } from '../../core/types'
 import type {
   ColumnData,
+  GeometryUnits,
   MatrixValue,
   MeshesValue,
   PointsValue,
@@ -96,7 +97,7 @@ import { fetchNgState, meshSourceFromState } from './nglayers'
 import type { DiscoveredSchema } from './schema'
 import { discoverNeuronSchema, schemasFor } from './schema'
 import type { VoxelScale } from './units'
-import { IDENTITY_SCALE, scalePositions, scaleRadii, voxelScale } from './units'
+import { IDENTITY_SCALE, geometryUnitsFor, scalePositions, scaleRadii, voxelScale } from './units'
 import { mapWithConcurrency } from '../concurrency'
 
 /**
@@ -130,8 +131,12 @@ interface DatasetState {
   info: DatasetInfo
   discovered?: DiscoveredSchema
   schemas?: SourceSchemas
-  /** Voxels → nanometres, from `Meta.voxelSize`. Identity until discovery has run. */
-  scale: VoxelScale
+  /**
+   * Voxels → nanometres, from `Meta.voxelSize`. Absent until discovery has run, and absent
+   * afterwards for a dataset whose `Meta` does not say — which is a different fact from a 1:1
+   * scale and is what `unitsFor` publishes on every geometry value.
+   */
+  scale?: VoxelScale
   /** Resolved once from the nglayers endpoint; null when the dataset publishes none. */
   meshSource?: MeshSource | null
   meshResolving?: Promise<MeshSource | null>
@@ -271,7 +276,7 @@ export class NeuPrintSource implements DataSource {
           // exactly that, so a merge that dropped this would un-learn it after discovery.
           ...(existing.info.roiSuper ? { roiSuper: existing.info.roiSuper } : {}),
         }
-      else this.states.set(info.id, { info, scale: IDENTITY_SCALE })
+      else this.states.set(info.id, { info })
     }
     this.ordered = infos.map((info) => this.states.get(info.id)!.info)
     // `peekDatasets` answers differently from here on, and a dataset node's "Latest" resolves
@@ -334,10 +339,7 @@ export class NeuPrintSource implements DataSource {
 
   /** Learn a dataset's neuron properties and statuses. Idempotent and deduplicated. */
   async discover(datasetId: string, signal?: AbortSignal): Promise<void> {
-    const state = this.states.get(datasetId) ?? {
-      info: placeholderInfo(datasetId),
-      scale: IDENTITY_SCALE,
-    }
+    const state = this.states.get(datasetId) ?? { info: placeholderInfo(datasetId) }
     this.states.set(datasetId, state)
     if (state.schemas) return
     state.discovering ??= this.runDiscovery(state, datasetId, signal).finally(() => {
@@ -422,6 +424,21 @@ export class NeuPrintSource implements DataSource {
   /** Voxels → nanometres for a dataset. Identity until discovery has run. */
   private scaleFor(datasetId: string): VoxelScale {
     return this.states.get(datasetId)?.scale ?? IDENTITY_SCALE
+  }
+
+  /**
+   * What this dataset's fetched coordinates are in, which is a fact about `Meta` rather than
+   * about the geometry.
+   *
+   * neuPrint returns skeleton and synapse coordinates in dataset voxels, so a scale we could
+   * not read leaves them exactly that: voxels, of a size nobody here knows. Naming that is the
+   * difference between NBLAST refusing and NBLAST scoring a hemibrain eight times too small,
+   * which is well inside the range its matrix finds plausible.
+   */
+  private unitsFor(datasetId: string): GeometryUnits {
+    // Read from the state rather than through `scaleFor`, which coalesces to the identity and
+    // so cannot tell "1:1" from "we never found out" — the one distinction this exists for.
+    return geometryUnitsFor(this.states.get(datasetId)?.scale)
   }
 
   /** Extra neuron properties this dataset's queries should request. */
@@ -624,6 +641,7 @@ export class NeuPrintSource implements DataSource {
         items: [],
         attributes: emptyTable(ROI_MESH_SCHEMA),
         bounds: EMPTY_BOUNDS,
+        units: this.unitsFor(req.datasetId),
       }
     }
 
@@ -645,6 +663,7 @@ export class NeuPrintSource implements DataSource {
       items: result.items,
       attributes: tableFromRows(ROI_MESH_SCHEMA, rows),
       bounds: boundsOf(result.items.map((item) => item.positions)),
+      units: this.unitsFor(req.datasetId),
     }
   }
 
@@ -687,6 +706,7 @@ export class NeuPrintSource implements DataSource {
         items: [],
         attributes: emptyTable(schema),
         bounds: EMPTY_BOUNDS,
+        units: this.unitsFor(req.datasetId),
       }
     }
 
@@ -742,6 +762,7 @@ export class NeuPrintSource implements DataSource {
       items: ordered,
       attributes: makeTable(schema, data),
       bounds: boundsOf(ordered.map((item) => item.positions)),
+      units: this.unitsFor(req.datasetId),
     }
   }
 
@@ -755,6 +776,7 @@ export class NeuPrintSource implements DataSource {
         positions: new Float32Array(0),
         attributes: emptyTable(schema),
         bounds: EMPTY_BOUNDS,
+        units: this.unitsFor(req.datasetId),
       }
     }
     req.onProgress?.(0.15, 'querying')
@@ -788,6 +810,7 @@ export class NeuPrintSource implements DataSource {
       positions,
       attributes: makeTable(schema, data),
       bounds: boundsOf([positions]),
+      units: this.unitsFor(req.datasetId),
     }
   }
 
@@ -811,6 +834,9 @@ export class NeuPrintSource implements DataSource {
         items: [],
         attributes: emptyTable(schema),
         bounds: EMPTY_BOUNDS,
+        // Precomputed meshes arrive in physical nanometres and take no voxel scale, so unlike
+        // every other geometry here their units do not depend on what `Meta` said.
+        units: 'nm',
       }
     }
 
@@ -862,6 +888,7 @@ export class NeuPrintSource implements DataSource {
       ...(result.lod !== undefined && result.levels !== undefined
         ? { detail: { lod: result.lod, levels: result.levels, triangles: result.triangles } }
         : {}),
+      units: 'nm',
     }
   }
 
@@ -869,7 +896,7 @@ export class NeuPrintSource implements DataSource {
   private stateFor(datasetId: string): DatasetState {
     const existing = this.states.get(datasetId)
     if (existing) return existing
-    const created: DatasetState = { info: placeholderInfo(datasetId), scale: IDENTITY_SCALE }
+    const created: DatasetState = { info: placeholderInfo(datasetId) }
     this.states.set(datasetId, created)
     return created
   }
