@@ -12,11 +12,12 @@ import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import {
   DEFAULT_SERVER,
-  baseUrlForServer,
+  routesForServer,
   normaliseServer,
   serverLabel,
   sourceIdForServer,
 } from '../../data/neuprint/servers'
+import { resetCredentials, setBaseUrl } from '../../data/neuprint/credentials'
 import {
   DATASET_FAMILIES,
   compareVersions,
@@ -148,16 +149,41 @@ describe('deployment URLs', () => {
     )
   })
 
-  it('sends the default deployment through the configured proxy', () => {
-    // Not the deployment URL itself: neuPrint sends no CORS headers, so a direct fetch is
-    // blocked before it is sent. This mapping is the entire reason the two are separate.
-    expect(baseUrlForServer(DEFAULT_SERVER)).toBe('/neuprint')
+  it('tries the default deployment directly, then its proxy path', () => {
+    // Direct first is what lets a static deploy reach a CORS-enabled deployment with no
+    // relay at all; the proxy stays second because the public server does not send CORS yet.
+    expect(routesForServer(DEFAULT_SERVER)).toEqual([
+      { base: DEFAULT_SERVER, kind: 'direct' },
+      { base: '/neuprint', kind: 'proxy' },
+    ])
   })
 
-  it('sends any other deployment through the generic proxy', () => {
-    expect(baseUrlForServer('https://neuprint-pre.janelia.org')).toBe(
-      '/np/https%3A%2F%2Fneuprint-pre.janelia.org',
-    )
+  it('gives any other deployment the generic proxy prefix as its fallback', () => {
+    expect(routesForServer('https://neuprint-pre.janelia.org')).toEqual([
+      { base: 'https://neuprint-pre.janelia.org', kind: 'direct' },
+      { base: '/np/https%3A%2F%2Fneuprint-pre.janelia.org', kind: 'proxy' },
+    ])
+  })
+
+  it('collapses to the named base URL, with no fallback, when one is set', () => {
+    // Somebody who named a base has said where the request goes. Quietly trying elsewhere
+    // would report success for a wrong entry, which is the one thing an override must not do.
+    setBaseUrl('https://proxy.example.org/neuprint')
+    expect(routesForServer(DEFAULT_SERVER)).toEqual([
+      { base: 'https://proxy.example.org/neuprint', kind: 'direct' },
+    ])
+    resetCredentials()
+  })
+
+  it('does not let that override capture a different deployment', () => {
+    // A Custom node names its own origin; an override aimed at the default server has no
+    // business sending its queries to another deployment's proxy.
+    setBaseUrl('/my-proxy')
+    expect(routesForServer('https://neuprint-test.janelia.org')[0]).toEqual({
+      base: 'https://neuprint-test.janelia.org',
+      kind: 'direct',
+    })
+    resetCredentials()
   })
 
   it('keeps the bare source id for the default, so existing graphs still resolve', () => {

@@ -22,16 +22,16 @@
 
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 
-import { fetchDatasets } from '../../data/neuprint/client'
+import { fetchDatasets, forgetRoutes } from '../../data/neuprint/client'
 import {
-  DEFAULT_BASE_URL,
   forgetToken,
-  getBaseUrl,
+  getBaseUrlOverride,
   getToken,
   setBaseUrl,
   setToken,
   subscribeAuthFailure,
 } from '../../data/neuprint/credentials'
+import { DEFAULT_PROXY_PATH } from '../../data/neuprint/servers'
 import {
   forgetKey,
   getBaseUrl as getAiBaseUrl,
@@ -147,7 +147,7 @@ const AUTH_FAILURE_TAB = 'neuprint'
 export function SourcesPanel() {
   const [open, setOpen] = useState(false)
   const [token, setTokenField] = useState(() => getToken() ?? '')
-  const [server, setServerField] = useState(() => getBaseUrl())
+  const [server, setServerField] = useState(() => getBaseUrlOverride() ?? '')
   const [probe, setProbe] = useState<Probe>({ state: 'idle' })
   const [reason, setReason] = useState<{ section: SectionId; message: string } | undefined>(
     undefined,
@@ -176,7 +176,7 @@ export function SourcesPanel() {
   useEffect(() => {
     if (!open) return
     setTokenField(getToken() ?? '')
-    setServerField(getBaseUrl())
+    setServerField(getBaseUrlOverride() ?? '')
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setOpen(false)
     }
@@ -188,10 +188,15 @@ export function SourcesPanel() {
     setProbe({ state: 'testing' })
     try {
       // Tested with the values in the fields, not the stored ones — otherwise you cannot
-      // check a token before committing to it.
+      // check a token before committing to it. An empty field is the real "work it out"
+      // case rather than a stand-in for the proxy path, so it is tested by *doing* that,
+      // from a clean slate: Test means re-probe, and a remembered route is exactly what
+      // somebody pressing it may be trying to get out of.
+      const base = server.trim().replace(/\/+$/, '')
+      forgetRoutes()
       const raw = await fetchDatasets({
         token: token.trim().replace(/^Bearer\s+/i, ''),
-        baseUrl: server.trim().replace(/\/+$/, '') || DEFAULT_BASE_URL,
+        ...(base ? { baseUrl: base } : {}),
       })
       const names = Object.keys(raw).sort()
       setProbe({ state: 'ok', datasets: names.length, names: names.slice(0, 6) })
@@ -383,7 +388,7 @@ function NeuPrintTab({
       </label>
 
       <label className="sources__field">
-        <span>Proxy path</span>
+        <span>Base URL</span>
         <input
           className="field field--mono"
           value={server}
@@ -392,12 +397,13 @@ function NeuPrintTab({
         />
       </label>
       <p className="sources__note sources__note--tight">
-        Not the same thing as a dataset node&rsquo;s <em>Server</em>, which names a neuPrint{' '}
-        <em>deployment</em>. This is the <strong>same-origin path</strong> the browser actually
-        fetches: neuPrint sends no CORS headers, so a direct request is blocked before it is
-        sent. In development it is <code>{DEFAULT_BASE_URL}</code>, served by the proxy in{' '}
-        <code>vite.config.ts</code>. Pointing it at <code>https://neuprint.janelia.org</code>{' '}
-        will not work however valid the token.
+        <strong>Leave this empty unless you run your own proxy.</strong> Empty means work it
+        out: the deployment is tried directly, and where it sends no CORS headers the
+        same-origin <code>{DEFAULT_PROXY_PATH}</code> path is used instead — served in
+        development by <code>vite.config.ts</code>, and by nothing at all in a static deploy.
+        Naming a URL here overrides both, with no fallback, and applies to the default
+        deployment only. Not the same thing as a dataset node&rsquo;s <em>Server</em>, which
+        names which neuPrint <em>deployment</em> to ask.
       </p>
 
       <div className="sources__actions">

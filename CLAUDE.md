@@ -2021,19 +2021,47 @@ cannot be read. Picking neurons stays upstream.
 Lives entirely under `src/data/neuprint/`. Nodes see the same `DataSource` interface the
 mock implements; nothing above `src/data` knows Cypher exists.
 
-**There is no direct browser access, and there never will be without Janelia's help.**
-neuPrint sends _no_ `Access-Control-*` headers on any response, and its `OPTIONS` preflight
-returns 401 before CORS middleware would run — so a request carrying an `Authorization`
-header is blocked by the browser before it is sent. Every call goes through a same-origin
-proxy: the `/neuprint` rule in `vite.config.ts`, registered under **both `server.proxy` and
-`preview.proxy`** — those are separate config keys, and a preview server without it 404s
-every request with an empty body. Pointing the base URL straight at
-`https://neuprint.janelia.org` fails however valid the token is. Verified empirically.
+**Direct access depends on the deployment, so the route is discovered rather than declared.**
+neuPrint used to send _no_ `Access-Control-*` headers on any response, with its `OPTIONS`
+preflight returning 401 before CORS middleware would run — so a request carrying an
+`Authorization` header was blocked by the browser before it was sent, and every call had to go
+through a same-origin proxy. Janelia has since fixed that on `neuprint-test.janelia.org`, and
+the fix was checked end to end rather than taken on trust: 204 on the preflight,
+`Allow-Headers: Authorization, Content-Type` (exactly what this app sends — `Accept` is
+safelisted and needs no mention), no `Allow-Credentials`, and `Access-Control-Allow-Origin` on
+**every** response including 401 and 404. That last one is the load-bearing part: the
+`reportAuthFailure` channel works by reading a 401's status, which a browser only surfaces if
+the response itself carries ACAO. All seven endpoints this app calls were verified, each path
+prefix preflighted separately (nginx CORS config is per-location), and a 4 MB Explore-shaped
+index came back gzipped to 957 kB in 1.4 s. `neuprint.janelia.org` does **not** have it yet.
 
-**An empty-bodied 404 means "no proxy", not "neuPrint said no".** neuPrint's own errors
-always carry a JSON body, so `client.ts` uses the empty body to tell the two apart and says
-which machine dropped the request. Do not collapse that back into a generic message — it
-cost a debugging round trip once already.
+So `routesForServer` offers two routes — the deployment itself, then the proxy path — and
+`client.ts` _tries_ them, because a browser reports a CORS refusal as an opaque `TypeError`
+indistinguishable from a dead host. The answer is remembered per deployment in `localStorage`,
+since without that every request in a proxy-only session pays a failed preflight first. Three
+rules make that safe, and each is pinned by a mutation-checked test:
+
+- **Only a thrown fetch moves on to the next route.** A response of any status means the
+  request arrived, so a 404 is neuPrint saying 404. Retrying a _status_ would also send a
+  second copy of a POST — and that endpoint runs Cypher. Same rule as `transport.ts`.
+- **Only a 2xx is remembered.** A 404 is what a static host answers for a proxy path nobody
+  serves; remembering it would pin a deployment to a route that can never work, and would
+  outlive the day that deployment gains CORS.
+- **An `AbortError` is never answered by trying elsewhere** — that would issue the request the
+  cancellation was meant to stop.
+
+The proxy still matters and is registered under **both `server.proxy` and `preview.proxy`** —
+those are separate config keys, and a preview server without it 404s every request with an
+empty body.
+
+**A 404 on a same-origin base means "no proxy", not "neuPrint said no" — and it takes two
+tells, not one.** neuPrint's own errors always carry a JSON body, so an _empty_ body is the
+tell for a vite server with no matching rule. A static host is the other case and answers
+differently: GitHub Pages serves its own 9 kB HTML 404 page. Checking only for the empty body
+is how a Pages deploy came to report `neuPrint returned 404: <!DOCTYPE html>…`, blaming a
+server that never saw the request and sending somebody to look at their token. `looksLikeHtml`
+is the second tell. Do not collapse either back into a generic message — the first cost a
+debugging round trip already, and the second cost one in the deployed app.
 
 **Per-dataset schemas.** `DataSource.schemasFor(datasetId)` is optional and synchronous;
 `schemasFromType()` in `datasetParam.ts` is the single funnel every query node goes through,
@@ -2188,17 +2216,27 @@ upgraded, and `validate` reports it.
 
 **"Server" means two different things and they are not interchangeable.**
 
-|                           | means                                        | example                        |
-| ------------------------- | -------------------------------------------- | ------------------------------ |
-| a dataset node's `Server` | a neuPrint **deployment**                    | `https://neuprint.janelia.org` |
-| Sources → `Proxy path`    | the **same-origin path** the browser fetches | `/neuprint`                    |
+|                             | means                                          | example                        |
+| --------------------------- | ---------------------------------------------- | ------------------------------ |
+| a dataset node's `Server`   | a neuPrint **deployment**                      | `https://neuprint.janelia.org` |
+| Connections → `Base URL`    | an **override** of the URL the browser fetches | `/neuprint`                    |
 
-`data/neuprint/servers.ts` maps the first to the second, because neuPrint sends no CORS headers
-and a direct request is blocked before it is sent. The default deployment defers to the
-configured proxy path; anything else routes through `/np/<encoded-deployment>/…`, served by the
+`data/neuprint/servers.ts` maps a deployment to the routes worth trying. **An empty `Base URL`
+is a real answer, not a synonym for the proxy**, and that distinction was a bug: the field used
+to fall back to `/neuprint` when cleared, so "remove the proxy" silently meant "use the proxy"
+and the field appeared to revert on its own. Empty now means work it out; naming a URL collapses
+it to that one route with **no fallback**, because somebody who named a base has said where the
+request goes and quietly trying elsewhere would report success for a wrong entry. The override
+applies to the **default deployment only** — a Custom node names its own origin, and letting an
+override capture it would send one deployment's queries to another's proxy.
+
+A non-default deployment falls back to `/np/<encoded-deployment>/…`, served by the
 `deploymentProxy` plugin in `vite.config.ts`. **That plugin refuses anything but https to a
 public host** — a dev server that forwards wherever a page points it is an SSRF hole aimed at the
-developer's own network.
+developer's own network. Note what that path costs in a static deploy, which is how this was
+found: on GitHub Pages `/np/…` is served by nothing, so a Custom node pointed at a CORS-enabled
+deployment used to fail with GitHub's own 404 without ever attempting the direct route that
+would have worked.
 
 `NeuPrintSource` takes a deployment in its constructor and every HTTP call goes through its
 private `options()`. A call site that forgets the base URL does not fail; it quietly queries the

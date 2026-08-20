@@ -72,13 +72,7 @@ import {
   runCypher,
 } from './client'
 import { roiCompletenessFromResponse, roiConnectivityFromResponse } from './roiSummary'
-import {
-  DEFAULT_SERVER,
-  baseUrlForServer,
-  normaliseServer,
-  serverLabel,
-  sourceIdForServer,
-} from './servers'
+import { DEFAULT_SERVER, normaliseServer, serverLabel, sourceIdForServer } from './servers'
 import {
   adjacencyCypher,
   connectivityCypher,
@@ -207,8 +201,8 @@ export class NeuPrintSource implements DataSource {
    * that forgets the base URL does not fail — it quietly queries the *default* deployment and
    * returns plausible data from the wrong server.
    */
-  private options(signal?: AbortSignal): { signal?: AbortSignal; baseUrl: string } {
-    return { baseUrl: baseUrlForServer(this.server), ...(signal ? { signal } : {}) }
+  private options(signal?: AbortSignal): { signal?: AbortSignal; server: string } {
+    return { server: this.server, ...(signal ? { signal } : {}) }
   }
 
   // -------------------------------------------------------------------------

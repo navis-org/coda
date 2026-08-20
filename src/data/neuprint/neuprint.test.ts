@@ -16,7 +16,7 @@ import { NUMERIC_DTYPES } from '../../core/types'
 import { cableLength, getColumn } from '../../core/values'
 
 import { NeuPrintSource, THUMBNAIL_MAX_BYTES, meshProgressFraction } from './NeuPrintSource'
-import { datasetSegment, get } from './client'
+import { datasetSegment, forgetRoutes, get, neuPrintRoutes } from './client'
 import { meshSourceFromState, precomputedToHttp } from './nglayers'
 import { fetchRoiMeshSet, roiMeshPath } from './roiMeshes'
 import { IDENTITY_SCALE, scalePositions, scaleRadii, voxelScale } from './units'
@@ -849,6 +849,133 @@ describe('failure diagnosis', () => {
     await expect(get('/api/x', { token: '', baseUrl: '/neuprint' })).rejects.toThrow(
       /No neuPrint token/,
     )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Which route a request takes.
+//
+// A deployment is reached directly where it sends CORS headers and through a same-origin
+// proxy where it does not, and nothing can tell those apart in advance — a browser reports a
+// CORS refusal as an opaque TypeError. So the choice is made by trying, which means the order,
+// what counts as an answer, and what is remembered are all behaviour rather than plumbing.
+// ---------------------------------------------------------------------------
+
+describe('route selection', () => {
+  const original = globalThis.fetch
+  const DEPLOYMENT = 'https://neuprint-test.janelia.org'
+  const PROXY = '/np/https%3A%2F%2Fneuprint-test.janelia.org'
+
+  /** A fetch that answers per URL, so the two routes can behave differently. */
+  function routeStub(
+    reply: (url: string) => { status: number; text?: string } | Error,
+  ): string[] {
+    const seen: string[] = []
+    globalThis.fetch = ((input: RequestInfo | URL) => {
+      const url = String(input)
+      seen.push(url)
+      const answer = reply(url)
+      if (answer instanceof Error) return Promise.reject(answer)
+      return Promise.resolve({
+        ok: answer.status >= 200 && answer.status < 300,
+        status: answer.status,
+        text: () => Promise.resolve(answer.text ?? ''),
+        json: () => Promise.resolve(JSON.parse(answer.text || '{}')),
+      } as Response)
+    }) as typeof fetch
+    return seen
+  }
+
+  beforeEach(() => {
+    resetCredentials()
+    forgetRoutes()
+  })
+
+  afterEach(() => {
+    globalThis.fetch = original
+    forgetRoutes()
+  })
+
+  it('tries the deployment directly first', async () => {
+    const seen = routeStub(() => ({ status: 200, text: '{}' }))
+    await get('/api/x', { token: 't', server: DEPLOYMENT })
+    expect(seen).toEqual([`${DEPLOYMENT}/api/x`])
+  })
+
+  it('falls back to the proxy when the direct fetch throws', async () => {
+    // What a CORS refusal actually looks like from JS: an opaque TypeError, which is also
+    // what a dead host looks like. That indistinguishability is the whole reason for trying.
+    const seen = routeStub((url) =>
+      url.startsWith('http') ? new TypeError('Failed to fetch') : { status: 200, text: '{}' },
+    )
+    await get('/api/x', { token: 't', server: DEPLOYMENT })
+    expect(seen).toEqual([`${DEPLOYMENT}/api/x`, `${PROXY}/api/x`])
+  })
+
+  it('does not answer a non-2xx by trying somewhere else', async () => {
+    // A response of any status means the request arrived, so a 404 is neuPrint saying 404.
+    // Retrying would also send a second copy of a POST — and that endpoint runs Cypher.
+    const seen = routeStub(() => ({ status: 404, text: '{"error":"no store found"}' }))
+    await expect(get('/api/x', { token: 't', server: DEPLOYMENT })).rejects.toThrow(
+      /neuPrint returned 404/,
+    )
+    expect(seen).toEqual([`${DEPLOYMENT}/api/x`])
+  })
+
+  it('remembers the route that answered, so the next request starts there', async () => {
+    const first = routeStub((url) =>
+      url.startsWith('http') ? new TypeError('Failed to fetch') : { status: 200, text: '{}' },
+    )
+    await get('/api/x', { token: 't', server: DEPLOYMENT })
+    expect(first).toHaveLength(2)
+    expect(neuPrintRoutes()[DEPLOYMENT]).toBe('proxy')
+
+    // Without the memory this is a failed cross-origin attempt — and a preflight — per query.
+    const second = routeStub(() => ({ status: 200, text: '{}' }))
+    await get('/api/y', { token: 't', server: DEPLOYMENT })
+    expect(second).toEqual([`${PROXY}/api/y`])
+  })
+
+  it('does not remember a route that only ever produced a 404', async () => {
+    // A static host answers a proxy path nobody serves with its own 404. Remembering that
+    // pins the deployment to a route that can never work, and it would outlive the fix.
+    routeStub((url) =>
+      url.startsWith('http')
+        ? new TypeError('Failed to fetch')
+        : { status: 404, text: '<!DOCTYPE html><html>…' },
+    )
+    await expect(get('/api/x', { token: 't', server: DEPLOYMENT })).rejects.toThrow(/./)
+    expect(neuPrintRoutes()[DEPLOYMENT]).toBeUndefined()
+  })
+
+  it('blames the missing proxy when a static host serves its own HTML 404', async () => {
+    // The GitHub Pages case, and the reason the empty-body tell was not enough on its own:
+    // vite answers an unproxied path with nothing, Pages answers with 9 kB of markup. Read as
+    // neuPrint's, it reported `neuPrint returned 404: <!DOCTYPE html>…` about a server that
+    // never saw the request.
+    routeStub((url) =>
+      url.startsWith('http')
+        ? new TypeError('Failed to fetch')
+        : { status: 404, text: '<!DOCTYPE html>\n<html><head><title>Site not found</title>' },
+    )
+    await expect(get('/api/x', { token: 't', server: DEPLOYMENT })).rejects.toThrow(
+      new RegExp(`Nothing is serving ${PROXY.replace(/[.*+?^$()|[\]\\]/g, '\\$&')}`),
+    )
+  })
+
+  it('reports both attempts when neither route answers at all', async () => {
+    routeStub(() => new TypeError('Failed to fetch'))
+    await expect(get('/api/x', { token: 't', server: DEPLOYMENT })).rejects.toThrow(
+      /Could not reach neuPrint at https:\/\/neuprint-test\.janelia\.org/,
+    )
+  })
+
+  it('does not answer a cancelled run by trying another route', async () => {
+    // An AbortError is the scheduler cancelling. Falling through to the proxy would issue the
+    // request the cancellation was meant to stop, and report "the server is down" for it.
+    const seen = routeStub(() => new DOMException('aborted', 'AbortError'))
+    await expect(get('/api/x', { token: 't', server: DEPLOYMENT })).rejects.toThrow(/aborted/)
+    expect(seen).toHaveLength(1)
   })
 })
 

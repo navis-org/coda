@@ -19,11 +19,8 @@ import { readStorage, writeStorage } from '../localStore'
 const TOKEN_KEY = 'coda.neuprint.token'
 const SERVER_KEY = 'coda.neuprint.server'
 
-/** Where the dev proxy in `vite.config.ts` forwards from. */
-export const DEFAULT_BASE_URL = '/neuprint'
-
 let token: string | undefined
-let baseUrl: string = DEFAULT_BASE_URL
+let baseUrlOverride: string | undefined
 let loaded = false
 
 const changed = channel()
@@ -33,7 +30,7 @@ function load(): void {
   if (loaded) return
   loaded = true
   token = readStorage(TOKEN_KEY)
-  baseUrl = readStorage(SERVER_KEY) || DEFAULT_BASE_URL
+  baseUrlOverride = readStorage(SERVER_KEY) || undefined
 }
 
 export function getToken(): string | undefined {
@@ -57,16 +54,29 @@ export function forgetToken(): void {
   setToken(undefined)
 }
 
-export function getBaseUrl(): string {
+/**
+ * The base URL to fetch instead of working one out, when somebody has named one.
+ *
+ * `undefined` means "decide for me", which is what an untouched field has always meant and is
+ * now a real answer rather than a synonym for the dev proxy: `routesForServer` tries the
+ * deployment directly and falls back to the proxy path. Before CORS existed there was nothing
+ * to decide, so this held `/neuprint` and an empty field silently became it — which is why
+ * clearing the field looked like it reverted rather than like it turned something off.
+ */
+export function getBaseUrlOverride(): string | undefined {
   load()
-  return baseUrl
+  return baseUrlOverride
 }
 
-/** Trailing slashes are stripped so path joining stays a plain concatenation. */
+/**
+ * Name a base URL, or clear it with an empty value.
+ *
+ * Trailing slashes are stripped so path joining stays a plain concatenation.
+ */
 export function setBaseUrl(raw: string | undefined): void {
   load()
-  baseUrl = (raw?.trim().replace(/\/+$/, '') || DEFAULT_BASE_URL) as string
-  writeStorage(SERVER_KEY, baseUrl === DEFAULT_BASE_URL ? undefined : baseUrl)
+  baseUrlOverride = raw?.trim().replace(/\/+$/, '') || undefined
+  writeStorage(SERVER_KEY, baseUrlOverride)
   changed.notify()
 }
 
@@ -78,7 +88,7 @@ export const subscribeAuthFailure = authFailure.subscribe
 export function resetCredentials(): void {
   loaded = false
   token = undefined
-  baseUrl = DEFAULT_BASE_URL
+  baseUrlOverride = undefined
   writeStorage(TOKEN_KEY, undefined)
   writeStorage(SERVER_KEY, undefined)
 }

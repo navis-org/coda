@@ -23,12 +23,18 @@ const { version } = JSON.parse(
 ) as { version: string }
 
 /*
- * neuPrint sends no CORS headers on any response, and its OPTIONS preflight returns 401
- * before CORS middleware would run — so a browser cannot call it directly from any origin,
- * token or not. Proxying makes every request same-origin, which sidesteps CORS entirely.
+ * A fallback route to neuPrint, not the only one any more.
  *
- * This only exists while a vite server is running. A build served by anything else needs
- * its own equivalent; point the app at it in Sources → Server.
+ * neuPrint historically sent no CORS headers on any response and answered its OPTIONS
+ * preflight with 401 before CORS middleware would run, so a browser could not call it
+ * directly from any origin, token or not. Janelia has since fixed that on
+ * `neuprint-test.janelia.org`; the public deployment has not got it yet. So the app tries a
+ * deployment directly first and falls back to this path — see `client.ts`, which does the
+ * trying, and `servers.ts`, which decides the order.
+ *
+ * This only exists while a vite server is running. A build served by anything else has no
+ * fallback: against a CORS-enabled deployment it needs none, and against the public one it
+ * needs a proxy of its own, named in Connections → Base URL.
  */
 const NEUPRINT_PROXY = {
   '/neuprint': {

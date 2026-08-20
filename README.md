@@ -173,12 +173,20 @@ Thirteen datasets are live, including `hemibrain:v1.2.1`, `manc:v1.2.3`, `optic-
 and `male-cns:v1.0`. Find Neurons, Connectivity, Adjacency, ROI Counts, Skeletons, Synapses
 and the Cypher node all work against them.
 
-**Why it needs a proxy.** neuPrint sends no CORS headers on any response, and its preflight
-returns 401 before CORS handling would run — so a browser cannot call it directly from any
-origin, valid token or not. `pnpm dev` and `pnpm preview` both proxy it at `/neuprint`, which
-makes every request same-origin. Serving `dist/` any other way needs your own proxy; point
-**Sources → Server** at it. Setting that field to `https://neuprint.janelia.org` will never
-work.
+**How a request gets there.** A deployment is tried **directly** first, and falls back to a
+same-origin proxy path when the browser refuses the cross-origin call. Which one works is a
+property of the deployment: neuPrint historically sent no CORS headers at all and answered its
+preflight with 401 before CORS handling would run, so nothing could call it from a page.
+Janelia has fixed that on `neuprint-test.janelia.org` — the public deployment does not have it
+yet, so it still goes through the proxy that `pnpm dev` and `pnpm preview` serve at
+`/neuprint`. Coda works this out by trying, because a browser reports a CORS refusal as an
+indistinguishable network error, and remembers the answer per deployment.
+
+The consequence worth knowing: against a CORS-enabled deployment a **static build needs no
+proxy at all**, so a GitHub Pages deploy can run real queries. Against the public deployment
+it still does, and **Connections → Base URL** is where you name your own. Leave that field
+empty otherwise — empty means "work it out", and the first attempt against a proxy-only
+deployment logs one CORS error to the console before falling back.
 
 If **Test** reports _"Nothing is serving /neuprint"_, the request never left your machine —
 the path isn't being proxied. Check it directly:
@@ -515,10 +523,12 @@ so a graph made with a newer node pack still opens.
 
 Being explicit, because the milestone was deliberately scoped to the editor:
 
-- **neuPrint needs a proxy, and one only ships for development.** neuPrint sends no CORS
-  headers at all, so the browser cannot call it directly; `pnpm dev` proxies it at
-  `/neuprint`. A deployed static build has nothing to talk to until you put an equivalent
-  proxy in front of it and point Sources → Server at it.
+- **The public neuPrint still needs a proxy, and one only ships for development.**
+  `neuprint.janelia.org` sends no CORS headers, so a browser cannot call it directly and
+  `pnpm dev` proxies it at `/neuprint`; a static build has nothing serving that path until you
+  put an equivalent in front of it and name it in Connections → Base URL. Deployments that
+  *do* send CORS headers — `neuprint-test.janelia.org` today — are reached directly and need
+  none of this.
 - **Meshes cover four datasets.** hemibrain, MANC, optic-lobe and male-CNS publish a
   precomputed source; the rest (banc, wasp3, fib19, mushroombody) either publish only DVID
   or nothing, and the Meshes node says so rather than failing mid-run.
@@ -537,8 +547,9 @@ Being explicit, because the milestone was deliberately scoped to the editor:
   but the _families_ Coda ships a node for are a static table — node types have to exist before a
   saved graph is deserialised, and a listing is a network call. A family added to neuPrint later
   needs a line of code; `Custom neuPrint` reaches it in the meantime.
-- **A non-default neuPrint deployment needs the dev server.** `pnpm dev` and `pnpm preview` proxy
-  `/np/<deployment>/…` (https to public hosts only); a static build has nothing serving that path.
+- **A non-default neuPrint deployment needs CORS or the dev server.** It is tried directly
+  first; failing that, `pnpm dev` and `pnpm preview` proxy `/np/<deployment>/…` (https to
+  public hosts only), and a static build has nothing serving that path.
 - **The dataset node's preview is a placeholder** — a specimen silhouette keyed to a coarse
   anatomical kind, not a rendering of the data.
 - **Explore's index is per dataset and downloaded whole.** Fine at male-CNS's 165k neurons
@@ -551,8 +562,9 @@ Being explicit, because the milestone was deliberately scoped to the editor:
 
 ## Next steps
 
-1. A deployable proxy (Cloudflare Worker or similar) so a built Coda can reach neuPrint
-   without a dev server. Meshes already work without one.
+1. CORS on the public neuPrint, which Janelia has already done on their test instance — that
+   removes the need for a deployable proxy entirely. Until then, a Cloudflare Worker or
+   similar is the fallback for a built Coda. Meshes already work without one.
 2. Decode Draco fragments in a worker — a full-resolution pair is 3.2M triangles, and that
    currently blocks the main thread while it decodes.
 3. Synapse partners, for connectivity-by-synapse work.

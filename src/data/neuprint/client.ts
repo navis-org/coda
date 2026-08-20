@@ -1,18 +1,27 @@
 /**
- * HTTP to neuPrint.
+ * HTTP to neuPrint, and the choice of how to get there.
  *
- * **There is no direct browser access.** neuPrint sends no `Access-Control-*` headers on
- * any response, and its `OPTIONS` preflight returns 401 before CORS middleware would run —
- * so a request carrying an `Authorization` header is blocked by the browser before it is
- * ever sent. Every request here therefore goes through a same-origin proxy. In development
- * that is the `/neuprint` rule in `vite.config.ts`; a deployed build needs its own, which
- * is what `setBaseUrl` is for. Point the base URL straight at `https://neuprint.janelia.org`
- * and nothing will work, no matter how valid the token is.
+ * **Direct where CORS allows it, a same-origin proxy where it does not.** neuPrint historically
+ * sent no `Access-Control-*` headers at all and answered its `OPTIONS` preflight with 401
+ * before CORS middleware would run, so a browser could not call it from any origin, token or
+ * not, and every request had to be relayed. Janelia has since fixed that on
+ * `neuprint-test.janelia.org` — 204 on the preflight, `Access-Control-Allow-Origin` on every
+ * response *including its errors*, which is the part that matters, since the 401 channel below
+ * only works if the browser lets us read the status. The public deployment has not got it yet.
+ *
+ * So which route works is a property of the deployment, and it is not knowable in advance: a
+ * browser reports a CORS refusal as an opaque `TypeError` indistinguishable from a dead host.
+ * `routesForServer` offers the candidates and this module *tries* them, remembering per
+ * deployment which one answered. Same trade, same reasoning, and deliberately the same shape as
+ * `data/precomputed/transport.ts`, which has always done this for the mesh buckets.
  */
 
-import { getBaseUrl, getToken, reportAuthFailure } from './credentials'
+import { getToken, reportAuthFailure } from './credentials'
 import type { CypherResponse } from './decode'
+import type { Route, RouteKind } from './servers'
+import { normaliseServer, routesForServer } from './servers'
 import { errorMessage } from '../../core/errors'
+import { readStorage, writeStorage } from '../localStore'
 
 export class NeuPrintError extends Error {
   readonly status: number
@@ -26,9 +35,107 @@ export class NeuPrintError extends Error {
 /** Everything a query needs to reach the server, resolved at call time. */
 export interface RequestOptions {
   signal?: AbortSignal | undefined
-  /** Overrides the stored base URL. Used by the connection panel to test a candidate. */
+  /**
+   * Which deployment to talk to. Routes are worked out from it, best first.
+   *
+   * Absent means the default deployment — which is a real hazard rather than a convenience,
+   * so `NeuPrintSource` passes it on every call: a site that forgets it does not fail, it
+   * quietly queries Janelia's public server and returns plausible data from the wrong place.
+   */
+  server?: string | undefined
+  /**
+   * Fetch exactly this base and do not fall back. Used by the connection panel to test a
+   * candidate, where trying somewhere else would report success for a wrong entry.
+   */
   baseUrl?: string | undefined
   token?: string | undefined
+}
+
+const ROUTE_KEY = 'coda.neuprint.routes'
+
+/**
+ * Which route last answered, per deployment.
+ *
+ * Persisted, because without it every request in a session where the proxy is the working
+ * route pays a failed cross-origin attempt first — and a CORS refusal costs a preflight, so
+ * that is a real round trip per query rather than a branch.
+ *
+ * **Only a route that produced a 2xx is remembered.** A 404 is not evidence a route works: it
+ * is what a static host answers for a proxy path nobody is serving, and remembering that would
+ * pin a deployment to a route that cannot ever succeed. Not remembering merely costs a re-probe,
+ * which is also what lets a deployment that gains CORS later stop being reached through a relay.
+ */
+const routeMemory = new Map<string, RouteKind>()
+let memoryLoaded = false
+
+function loadMemory(): void {
+  if (memoryLoaded) return
+  memoryLoaded = true
+  const raw = readStorage(ROUTE_KEY)
+  if (!raw) return
+  try {
+    for (const [server, kind] of Object.entries(JSON.parse(raw) as Record<string, RouteKind>)) {
+      if (kind === 'direct' || kind === 'proxy') routeMemory.set(server, kind)
+    }
+  } catch {
+    // Corrupt: start from scratch and re-probe.
+  }
+}
+
+function rememberRoute(server: string, kind: RouteKind): void {
+  loadMemory()
+  if (routeMemory.get(server) === kind) return
+  routeMemory.set(server, kind)
+  writeStorage(ROUTE_KEY, JSON.stringify(Object.fromEntries(routeMemory)))
+}
+
+/** Drop what is known about how to reach a deployment, so the next request re-probes. */
+export function forgetRoutes(server?: string): void {
+  loadMemory()
+  if (server) routeMemory.delete(normaliseServer(server))
+  else routeMemory.clear()
+  writeStorage(
+    ROUTE_KEY,
+    routeMemory.size ? JSON.stringify(Object.fromEntries(routeMemory)) : undefined,
+  )
+}
+
+/** How each deployment is currently being reached. Surfaced by the Sources panel. */
+export function neuPrintRoutes(): Record<string, RouteKind> {
+  loadMemory()
+  return Object.fromEntries(routeMemory)
+}
+
+/**
+ * The routes to try, in order, with whatever answered last time first.
+ *
+ * The remembered route is preferred rather than used exclusively: if it has stopped working —
+ * a dev server that is no longer running, a proxy that has gone away — the others are still
+ * there. That costs nothing when the memory is right, which is the common case.
+ */
+function candidateRoutes(options: RequestOptions): {
+  server: string
+  routes: readonly Route[]
+} {
+  const server = normaliseServer(options.server)
+  if (options.baseUrl) {
+    return {
+      server,
+      routes: [
+        { base: options.baseUrl, kind: options.baseUrl.startsWith('/') ? 'proxy' : 'direct' },
+      ],
+    }
+  }
+  loadMemory()
+  const routes = routesForServer(options.server)
+  const preferred = routeMemory.get(server)
+  if (!preferred || routes.length < 2) return { server, routes }
+  return {
+    server,
+    routes: [...routes].sort(
+      (a, b) => Number(b.kind === preferred) - Number(a.kind === preferred),
+    ),
+  }
 }
 
 /**
@@ -47,7 +154,6 @@ async function request<T>(
   options: RequestOptions = {},
   mode: BodyMode = 'json',
 ): Promise<T> {
-  const base = options.baseUrl ?? getBaseUrl()
   const token = options.token ?? getToken()
   if (!token) {
     const message = 'No neuPrint token. Add one in Connections, in the toolbar.'
@@ -60,24 +166,59 @@ async function request<T>(
   headers.set('Accept', mode === 'text' ? '*/*' : 'application/json')
   if (init.body) headers.set('Content-Type', 'application/json')
 
-  let response: Response
-  try {
-    response = await fetch(`${base}${path}`, {
-      ...init,
-      headers,
-      ...(options.signal ? { signal: options.signal } : {}),
-    })
-  } catch (error) {
-    // An AbortError is the scheduler cancelling; it must stay an AbortError so the run
-    // machinery reports "cancelled" rather than "the server is down".
-    if (error instanceof DOMException && error.name === 'AbortError') throw error
-    throw new NeuPrintError(
-      `Could not reach neuPrint at ${base}. In development this needs the /neuprint proxy — ` +
-        `is the dev server running? (${errorMessage(error)})`,
-      0,
-    )
+  const { server, routes } = candidateRoutes(options)
+
+  /*
+   * Only a *thrown* fetch moves on to the next route, which is `transport.ts`'s rule and it is
+   * load-bearing here too: a response of any status means the request plainly arrived, so a 404
+   * means neuPrint said 404 rather than that this route is wrong. Retrying a status would also
+   * send a second copy of a POST somewhere else, which for an endpoint that runs Cypher is not
+   * a free thing to do.
+   */
+  let lastError: unknown
+  for (const route of routes) {
+    let response: Response
+    try {
+      response = await fetch(`${route.base}${path}`, {
+        ...init,
+        headers,
+        ...(options.signal ? { signal: options.signal } : {}),
+      })
+    } catch (error) {
+      // An AbortError is the scheduler cancelling; it must stay an AbortError so the run
+      // machinery reports "cancelled" rather than "the server is down", and it must not be
+      // answered by trying somewhere else.
+      if (error instanceof DOMException && error.name === 'AbortError') throw error
+      lastError = error
+      continue
+    }
+    if (response.ok) rememberRoute(server, route.kind)
+    return await readResponse<T>(response, route, mode)
   }
 
+  /*
+   * Named by kind rather than by position: `candidateRoutes` may have put the remembered route
+   * first, so `routes[1]` is not reliably the proxy. Both halves are stated because the fixes
+   * are nothing alike — a deployment with no CORS needs a relay in front of it, an unproxied
+   * path needs the dev server or a deploy that serves it — and neither can be told from the
+   * other by a browser, which reports a refused cross-origin read and a dead host identically.
+   */
+  const fallback = routes.find((route) => route.kind === 'proxy')
+  throw new NeuPrintError(
+    `Could not reach neuPrint at ${server}. It could not be read cross-origin — the deployment ` +
+      `may send no CORS headers, or may simply be down; a browser reports both the same way` +
+      (fallback && fallback.base !== server
+        ? `. ${fallback.base} did not answer either: in development that path comes from ` +
+          `vite.config.ts, so it needs \`pnpm dev\` or \`pnpm preview\`, and a static deploy ` +
+          `serves nothing there at all.`
+        : `.`) +
+      ` (${errorMessage(lastError)})`,
+    0,
+  )
+}
+
+/** Status handling, shared by every route so a failure reads the same whichever one produced it. */
+async function readResponse<T>(response: Response, route: Route, mode: BodyMode): Promise<T> {
   if (response.status === 401 || response.status === 403) {
     const message = `neuPrint rejected the token (${response.status}). It may have expired — get a new one from neuprint.janelia.org/account.`
     reportAuthFailure(message)
@@ -86,22 +227,35 @@ async function request<T>(
   if (!response.ok) {
     const body = (await response.text()).slice(0, 300)
     /*
-     * A 404 with an empty body on a same-origin base means the request never left the local
-     * server: nothing is proxying `base` to neuPrint. neuPrint's own errors always carry a
-     * JSON body, so the empty body is the tell. Reporting this as "neuPrint returned 404"
-     * blames the wrong machine and sends people looking at their token.
+     * A 404 on a *same-origin* base means the request never left the machine serving this page:
+     * nothing is proxying that path to neuPrint. Two tells, because the two hosts that produce
+     * it answer differently — a vite server with no matching rule sends an empty body, and a
+     * static host (GitHub Pages) sends its own HTML 404 page. Checking only for the empty body
+     * is how a Pages deploy came to report `neuPrint returned 404: <!DOCTYPE html>…`, blaming a
+     * server that never saw the request and sending people to look at their token.
      */
-    if (response.status === 404 && !body && base.startsWith('/')) {
+    if (
+      response.status === 404 &&
+      route.kind === 'proxy' &&
+      route.base.startsWith('/') &&
+      (!body || looksLikeHtml(body))
+    ) {
       throw new NeuPrintError(
-        `Nothing is serving ${base} — the request never reached neuPrint. That path has to be ` +
-          `proxied: run \`pnpm dev\` (or \`pnpm preview\`), which proxies it via vite.config.ts. ` +
-          `If the app is served some other way, set Sources → Server to your own proxy.`,
+        `Nothing is serving ${route.base} — the request never reached neuPrint. That path has ` +
+          `to be proxied: \`pnpm dev\` and \`pnpm preview\` proxy it via vite.config.ts, and a ` +
+          `static deploy does not. Where the deployment sends CORS headers no proxy is needed ` +
+          `at all; where it does not, put one in front and name it in Connections → Base URL.`,
         404,
       )
     }
     throw new NeuPrintError(`neuPrint returned ${response.status}: ${body}`, response.status)
   }
   return (mode === 'text' ? await response.text() : await response.json()) as T
+}
+
+/** A served error page rather than anything neuPrint would send: its own errors are JSON. */
+function looksLikeHtml(body: string): boolean {
+  return /^\s*<(!doctype|html)/i.test(body)
 }
 
 export function get<T>(path: string, options?: RequestOptions): Promise<T> {
