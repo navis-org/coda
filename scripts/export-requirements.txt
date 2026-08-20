@@ -1,0 +1,10 @@
+# The libraries the generated notebooks import. They are installed in CI so
+# `check-export.py --strict` can resolve attribute chains against the real packages;
+# nothing is ever executed, so there is no token and no network beyond the install.
+#
+# This file exists to be a file: `actions/setup-python`'s pip cache is keyed on a
+# dependency manifest and fails outright when it can find none. Naming it here also
+# keeps the versions the checker resolved against in the repository rather than in a
+# workflow step.
+neuprint-python
+navis

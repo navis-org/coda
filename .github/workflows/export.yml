@@ -16,11 +16,13 @@ on:
     paths:
       - 'src/export/**'
       - 'scripts/check-export.py'
+      - 'scripts/export-requirements.txt'
       - '.github/workflows/export.yml'
   pull_request:
     paths:
       - 'src/export/**'
       - 'scripts/check-export.py'
+      - 'scripts/export-requirements.txt'
   workflow_dispatch:
 
 jobs:
@@ -37,6 +39,9 @@ jobs:
         with:
           python-version: '3.12'
           cache: pip
+          # `cache: pip` keys on a dependency manifest and errors when it finds none,
+          # so the requirements below are a file rather than an inline `pip install`.
+          cache-dependency-path: scripts/export-requirements.txt
 
       - run: pnpm install --frozen-lockfile
 
@@ -44,7 +49,7 @@ jobs:
       # network — but they have to be importable for the attribute pass to mean anything,
       # which is why this is `--strict`: a silent skip would report success for a check that
       # did not run.
-      - run: pip install neuprint-python navis
+      - run: pip install -r scripts/export-requirements.txt
 
       # Regenerates the fixtures from the current emitters and compares them to the golden
       # files, so a stale golden fails here rather than being papered over by the next step.
