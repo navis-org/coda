@@ -14,6 +14,7 @@
 import type { ColumnSchema, DType, TableSchema } from '../core/types'
 import type {
   CellValue,
+  LinkageValue,
   MatrixValue,
   MeshesValue,
   NetworkValue,
@@ -43,12 +44,88 @@ export type ExportFormat =
   | 'png'
   | 'swc'
   | 'obj'
+  | 'newick'
 
 const TEXT = 'text/plain;charset=utf-8'
 const CSV = 'text/csv;charset=utf-8'
 const JSON_MIME = 'application/json'
 /** Exported so the viewer's own download button writes the same type the Download node does. */
 export const GRAPHML_MIME = 'application/graphml+xml'
+const NEWICK_MIME = 'text/x-nh'
+
+// ---------------------------------------------------------------------------
+// Trees
+// ---------------------------------------------------------------------------
+
+/**
+ * A merge tree as Newick, which is what everything that draws trees reads.
+ *
+ * The alternative — writing the linkage matrix as a CSV — is offered too and is the right
+ * file for going *back* into SciPy or R. It is the wrong one for a reader: `[a, b, height,
+ * size]` with clusters numbered `n + i` is a machine format, and nothing outside those two
+ * ecosystems parses it. Newick is read by iTOL, FigTree, ete3, ape, dendropy and Biopython,
+ * carries the labels and the branch lengths, and is a few kilobytes.
+ *
+ * **Branch lengths are differences, not heights.** A Newick branch is the length of the edge
+ * *below* a node, so it is the parent's merge height minus this node's — a leaf hanging off a
+ * merge at 0.4 has a branch of 0.4, and a cluster formed at 0.3 under it has 0.1. Writing the
+ * absolute height instead produces a tree that parses, draws, and is wrong in a way only a
+ * scale bar reveals.
+ */
+export function linkageToNewick(linkage: LinkageValue): string {
+  const n = linkage.labels.length
+  const merges = linkage.merges.length / 4
+  if (n === 0) return ';'
+  if (merges === 0) return `${newickLabel(linkage.labels[0]!)};`
+
+  // Bottom up in row order rather than by recursion: a merge can only reference clusters
+  // formed before it, so one pass suffices — and a single-linkage tree of a few thousand
+  // leaves is a chain that deep recursion would not survive.
+  const text: string[] = linkage.labels.map(newickLabel)
+  const height = new Float64Array(n + merges)
+
+  for (let i = 0; i < merges; i++) {
+    const a = linkage.merges[i * 4]!
+    const b = linkage.merges[i * 4 + 1]!
+    const at = linkage.merges[i * 4 + 2]!
+    height[n + i] = at
+    text[n + i] =
+      `(${text[a]}:${branch(at - height[a]!)},${text[b]}:${branch(at - height[b]!)})`
+  }
+  return `${text[n + merges - 1]};`
+}
+
+/** Six significant figures, and never an exponent — Newick parsers vary on `1e-7`. */
+function branch(length: number): string {
+  const safe = Number.isFinite(length) && length > 0 ? length : 0
+  return safe.toFixed(6).replace(/0+$/, '').replace(/\.$/, '') || '0'
+}
+
+/**
+ * Newick reserves `(`, `)`, `,`, `:`, `;` and `[`; a space is read as one too by most parsers.
+ * Quoting is the escape, with an internal quote doubled — a cell type called `5-HT` needs
+ * none, and one called `SMP001(a)` would otherwise close a clade in the middle of a name.
+ */
+function newickLabel(label: string): string {
+  const clean = label.replace(/[\r\n\t]/g, ' ')
+  return /[(),:;[\]'\s]/.test(clean) ? `'${clean.replace(/'/g, "''")}'` : clean
+}
+
+/** The linkage matrix itself, in the `[a, b, height, size]` layout SciPy and R both read. */
+function linkageToCsv(linkage: LinkageValue): string {
+  const rows = [['cluster1', 'cluster2', 'distance', 'size'].join(',')]
+  for (let i = 0; i < linkage.merges.length; i += 4) {
+    rows.push(
+      [
+        linkage.merges[i]!,
+        linkage.merges[i + 1]!,
+        linkage.merges[i + 2]!,
+        linkage.merges[i + 3]!,
+      ].join(','),
+    )
+  }
+  return `${rows.join('\n')}\n`
+}
 
 // ---------------------------------------------------------------------------
 // Morphology
@@ -382,6 +459,8 @@ export function defaultFormat(value: Value | undefined): ExportFormat {
       return 'swc'
     case 'meshes':
       return 'obj'
+    case 'linkage':
+      return 'newick'
     default:
       return 'json'
   }
@@ -398,6 +477,11 @@ export function formatsFor(value: Value | undefined): ExportFormat[] {
   if (value.kind === 'network') out.push('graphml')
   if (value.kind === 'skeletons') out.push('swc')
   if (value.kind === 'meshes') out.push('obj')
+  if (value.kind === 'linkage') {
+    // Newick first and as the `auto` answer, because it is the file somebody can open. The
+    // CSV is the linkage matrix as it stands, for going back into SciPy or R.
+    out.push('newick', 'csv')
+  }
   out.push('json')
   return out
 }
@@ -523,6 +607,16 @@ export function planExport(
             ? { truncated: { kept: MAX_MORPHOLOGY_FILES, total: value.items.length } }
             : {}),
         }
+      }
+      break
+    case 'linkage':
+      if (resolved === 'newick') {
+        return {
+          files: [{ name: `${base}.nwk`, parts: [linkageToNewick(value)], mime: NEWICK_MIME }],
+        }
+      }
+      if (resolved === 'csv') {
+        return { files: [{ name: `${base}.csv`, parts: [linkageToCsv(value)], mime: CSV }] }
       }
       break
     case 'meshes':

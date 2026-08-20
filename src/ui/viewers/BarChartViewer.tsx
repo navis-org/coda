@@ -15,6 +15,7 @@ import { exportBaseName as makeBaseName, tableToCsvParts } from '../export'
 import { formatCompact, formatNumber, niceTicks, truncateLabel } from '../format'
 import type { ExportSource } from './ViewerActions'
 import { ViewerActions } from './ViewerActions'
+import { tooltipPoint } from './tooltipPoint'
 import { useElementSize } from './useElementSize'
 
 export interface BarChartViewerProps {
@@ -180,8 +181,8 @@ export function BarChartViewer({
                           setHover({
                             bar: barIndex,
                             segment: segmentIndex,
-                            x: e.clientX,
-                            y: e.clientY,
+                            // Container coordinates — see `tooltipPoint`.
+                            ...tooltipPoint(e, ref.current),
                           })
                         }
                         onMouseLeave={() => setHover(null)}

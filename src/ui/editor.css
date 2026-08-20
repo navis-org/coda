@@ -2296,7 +2296,14 @@ select.field {
 }
 
 .chart-tooltip {
-  position: fixed;
+  /*
+   * Absolute, against `.viewer` / `.viewer__scroll` — never `fixed`. A node card lives inside
+   * React Flow's transformed pane, and a transform makes an ancestor the containing block for
+   * `fixed` descendants too, so viewport coordinates land hundreds of pixels away there while
+   * reading perfectly in the expanded overlay. `tooltipPoint()` supplies the coordinates this
+   * expects; the same reasoning is written out at `.viewer`'s `position: relative`.
+   */
+  position: absolute;
   z-index: 50;
   pointer-events: none;
   background: var(--surface-1);

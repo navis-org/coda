@@ -26,11 +26,12 @@ import { describe, expect, it } from 'vitest'
 
 import { column, tableSchema } from '../core/types'
 import type { MeshesValue, NetworkValue, PointsValue, SkeletonsValue } from '../core/values'
-import { EMPTY_BOUNDS, makeMatrix, tableFromRows } from '../core/values'
+import { EMPTY_BOUNDS, makeLinkage, makeMatrix, tableFromRows } from '../core/values'
 import {
   MAX_MORPHOLOGY_FILES,
   defaultFormat,
   formatsFor,
+  linkageToNewick,
   meshToObj,
   networkToGraphml,
   planExport,
@@ -443,5 +444,89 @@ describe('planExport — an explicit format', () => {
 
   it('plans nothing at all with no value', () => {
     expect(planExport(undefined, 'auto', 'out').files).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Trees
+// ---------------------------------------------------------------------------
+
+/**
+ * The tree used below, and the numbers every assertion turns on.
+ *
+ *   a ─┐ 0.1
+ *   b ─┴────┐
+ *   c ─┐    ├── 0.8
+ *   d ─┴────┘ 0.2
+ */
+function tree() {
+  return makeLinkage(
+    Float64Array.from([0, 1, 0.1, 2, 2, 3, 0.2, 2, 4, 5, 0.8, 4]),
+    ['a', 'b', 'c', 'd'],
+    Int32Array.from([0, 1, 2, 3]),
+    { method: 'average' },
+  )
+}
+
+describe('linkageToNewick', () => {
+  it('writes branch lengths as differences, not heights', () => {
+    // The one that produces a file which parses, draws, and is wrong. A Newick branch is the
+    // edge *below* a node: a and b hang 0.1 off their merge, and that merge hangs 0.7 below
+    // the root at 0.8. Verified against a real parser rather than by eye — biopython reads
+    // this back with every root-to-leaf distance equal to 0.8, i.e. ultrametric as a
+    // clustering tree must be, and each pair's path distance twice its merge height.
+    expect(linkageToNewick(tree())).toBe('((a:0.1,b:0.1):0.7,(c:0.2,d:0.2):0.6);')
+  })
+
+  it('quotes a label carrying Newick punctuation, and doubles an internal quote', () => {
+    // `SMP001(a)` would otherwise close a clade in the middle of a name.
+    const named = makeLinkage(
+      Float64Array.from([0, 1, 0.5, 2]),
+      ["SMP001(a)", "o'brien"],
+      Int32Array.from([0, 1]),
+    )
+    expect(linkageToNewick(named)).toBe("('SMP001(a)':0.5,'o''brien':0.5);")
+  })
+
+  it('leaves an ordinary label alone, including one with a hyphen', () => {
+    const named = makeLinkage(
+      Float64Array.from([0, 1, 0.25, 2]),
+      ['5-HT', 'LC4'],
+      Int32Array.from([0, 1]),
+    )
+    expect(linkageToNewick(named)).toBe('(5-HT:0.25,LC4:0.25);')
+  })
+
+  it('never writes an exponent, which parsers disagree about', () => {
+    const tiny = makeLinkage(
+      Float64Array.from([0, 1, 0.0000001, 2]),
+      ['a', 'b'],
+      Int32Array.from([0, 1]),
+    )
+    expect(linkageToNewick(tiny)).not.toMatch(/e-/)
+  })
+
+  it('writes a single leaf and an empty tree without inventing a clade', () => {
+    expect(linkageToNewick(makeLinkage(new Float64Array(0), ['only'], Int32Array.from([0])))).toBe(
+      'only;',
+    )
+    expect(linkageToNewick(makeLinkage(new Float64Array(0), [], new Int32Array(0)))).toBe(';')
+  })
+})
+
+describe('exporting a tree', () => {
+  it('writes Newick unprompted, because that is the file somebody can open', () => {
+    expect(defaultFormat(tree())).toBe('newick')
+    const plan = planExport(tree(), 'auto', 'clusters')
+    expect(plan.files.map((f) => f.name)).toEqual(['clusters.nwk'])
+  })
+
+  it('also offers the linkage matrix itself, for going back into SciPy or R', () => {
+    expect(formatsFor(tree())).toEqual(['newick', 'csv', 'json'])
+    const csv = planExport(tree(), 'csv', 'clusters').files[0]!
+    expect(csv.name).toBe('clusters.csv')
+    expect(csv.parts.join('')).toBe(
+      'cluster1,cluster2,distance,size\n0,1,0.1,2\n2,3,0.2,2\n4,5,0.8,4\n',
+    )
   })
 })

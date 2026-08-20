@@ -193,6 +193,36 @@ export function everythingGraph(): CodaGraph {
       params: { k: 5, symmetry: 'mean', labelColumn: 'type' },
     },
 
+    /*
+     * The clustering trio, hung off the all-by-all NBLAST — which is the wiring it exists for,
+     * and the only matrix in this graph that is square over one population. Two Cut nodes for
+     * the reason there are two NBLAST nodes: the emitters branch on `mode`, and the two
+     * branches are genuinely different calls (`cut_tree` against `fcluster`, `k =` against
+     * `h =`), so one node would record only whichever happened to be the default.
+     */
+    { id: 'linkage', type: 'cluster.linkage', col: 4, row: 5, params: { method: 'average' } },
+    { id: 'cut', type: 'cluster.cut', col: 5, row: 5, params: { mode: 'count', count: 4 } },
+    { id: 'cutH', type: 'cluster.cut', col: 5, row: 6, params: { mode: 'height', height: 0.6 } },
+    // A selection set, since that is the branch whose emitted frame is not simply empty.
+    /*
+     * The two label-to-neuron nodes, one on each branch of their shared emitter: `sel` has no
+     * Neurons wired, so its labels are read as body ids, and `clu` has one, so it matches as
+     * text and carries the cluster number across. One node would record only whichever branch
+     * happened to be wired — the same reason there are two NBLAST nodes and two Select Ones.
+     */
+    { id: 'sel', type: 'cluster.selectedToNeurons', col: 7, row: 5 },
+    { id: 'clu', type: 'cluster.clustersToNeurons', col: 6, row: 6, params: { matchColumn: 'type' } },
+
+    {
+      id: 'dendro',
+      type: 'out.dendrogram',
+      col: 6,
+      row: 5,
+      // Positions rather than labels, which is what the viewer writes — a label column can
+      // name two leaves the same thing.
+      params: { orientation: 'down', selection: ['0', '2'] },
+    },
+
     {
       id: 'filter',
       type: 'core.filter',
@@ -449,6 +479,15 @@ export function everythingGraph(): CodaGraph {
     ['skel', 'skeletons', 'nblast', 'query'],
     ['skel', 'skeletons', 'nblastPair', 'query'],
     ['skel', 'skeletons', 'nblastPair', 'target'],
+    ['nblast', 'scores', 'linkage', 'in'],
+    ['linkage', 'tree', 'cut', 'in'],
+    ['linkage', 'tree', 'cutH', 'in'],
+    // Through the Cut rather than off the Linkage, so the golden shows a Dendrogram reading a
+    // tree that has been cut — which is the arrangement that colours its branches.
+    ['cut', 'tree', 'dendro', 'in'],
+    ['dendro', 'selected', 'sel', 'labels'],
+    ['cut', 'clusters', 'clu', 'labels'],
+    ['find', 'neurons', 'clu', 'neurons'],
     ['skel', 'skeletons', 'v3d', 'skeletons'],
     ['stack', 'out', 'muted', 'in'],
   ]

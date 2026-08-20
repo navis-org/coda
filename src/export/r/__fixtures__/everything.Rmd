@@ -731,6 +731,20 @@ sort_df <- filter_df |> arrange(desc(`weight`))
 sort_df <- sort_df |> head(500)
 ```
 
+```{r linkage}
+# ── Linkage ──
+# NOTE: Coda runs navis-fastcore, whose linkage is SciPy's, and "average" is
+# hclust's "average". Checked through both on one matrix: same merge
+# heights, same leaf order. Note that "ward.D" is a different criterion and
+# would not agree.
+m_ <- as.matrix(nblast_df)
+d_ <- as.dist(1 - ((m_ + t(m_)) / 2))
+
+linkage_tree <- hclust(d_, method = "average")
+linkage_ordered <- nblast_df[linkage_tree$order, linkage_tree$order]
+linkage_tree_clusters <- NULL
+```
+
 ```{r sample-df}
 # ── Sample ──
 sample_df <- sort_df |> slice(coda_sample_rows(nrow(sort_df), 200, 7))
@@ -741,11 +755,97 @@ sample_df <- sort_df |> slice(coda_sample_rows(nrow(sort_df), 200, 7))
 select_one_2 <- sort_df |> slice(4)
 ```
 
+```{r cut-tree}
+# ── Cut Tree ──
+cl_ <- cutree(linkage_tree, k = 4)
+# NOTE: Coda numbers clusters left to right as the dendrogram draws them, so
+# the column reads against the picture. `cutree` numbers by observation
+# order; the grouping is the same either way, and this renumbers so the two
+# agree.
+cl_ <- match(cl_, unique(cl_[linkage_tree$order]))
+
+cut_tree_clusters <- tibble(
+  label = linkage_tree$labels,
+  cluster = cl_,
+  order = match(seq_along(linkage_tree$labels), linkage_tree$order) - 1L,
+) |>
+  group_by(cluster) |>
+  mutate(size = n()) |>
+  ungroup()
+
+cut_tree_tree <- linkage_tree
+cut_tree_tree_clusters <- cl_
+```
+
+```{r cut-tree-2}
+# ── Cut Tree ──
+# NOTE: Cutting at a height gives however many groups fall out below it,
+# which may be one if the height is above the top of the tree.
+cl_ <- cutree(linkage_tree, h = 0.6)
+# NOTE: Coda numbers clusters left to right as the dendrogram draws them, so
+# the column reads against the picture. `cutree` numbers by observation
+# order; the grouping is the same either way, and this renumbers so the two
+# agree.
+cl_ <- match(cl_, unique(cl_[linkage_tree$order]))
+
+cut_tree_2_clusters <- tibble(
+  label = linkage_tree$labels,
+  cluster = cl_,
+  order = match(seq_along(linkage_tree$labels), linkage_tree$order) - 1L,
+) |>
+  group_by(cluster) |>
+  mutate(size = n()) |>
+  ungroup()
+
+cut_tree_2_tree <- linkage_tree
+cut_tree_2_tree_clusters <- cl_
+```
+
 ```{r group-by-df}
 # ── Group By ──
 group_by_df <- sample_df |>
   group_by(`preType`, `postType`) |>
   summarise(n = n(), `sum_weight` = sum(`weight`), .groups = "drop")
+```
+
+```{r dendrogram}
+# ── Dendrogram ──
+dendrogram_out <- cut_tree_tree
+dendrogram_out_clusters <- cut_tree_tree_clusters
+
+plot(
+  as.dendrogram(dendrogram_out),
+  horiz = FALSE,
+)
+
+picked_ <- c(1, 3)
+palette_ <- c("#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767")
+cl_ <- if (is.null(dendrogram_out_clusters)) rep(0L, length(dendrogram_out$labels)) else dendrogram_out_clusters
+dendrogram_selected <- tibble(
+  label = dendrogram_out$labels[picked_],
+  order = match(picked_, dendrogram_out$order) - 1L,
+  cluster = as.integer(cl_[picked_]),
+  color = ifelse(cluster <= 0, "#898781", palette_[((cluster - 1) %% 8) + 1]),
+) |>
+  arrange(order)
+```
+
+```{r clusters-to-neurons}
+# ── Clusters to Neurons ──
+# NOTE: Coda matches labels as text, so both sides go through a character
+# key — a tree labelled by body id carries "722817260" against a numeric
+# column, and joining those directly matches nothing.
+clusters_to_neurons <- find_neurons |>
+  mutate(key_ = as.character(`type`)) |>
+  inner_join(
+    cut_tree_clusters |>
+      mutate(key_ = as.character(`label`)) |>
+      distinct(key_, .keep_all = TRUE) |>
+      select(-`label`),
+    by = "key_",
+    suffix = c("", "_c"),
+  ) |>
+  select(-key_)
 ```
 
 ```{r select-columns}
@@ -791,6 +891,18 @@ build_network <- graph_from_data_frame(
   links,
   directed = TRUE
 )
+```
+
+```{r selected-to-neurons}
+# ── Selected to Neurons ──
+# NOTE: No neuron table is wired on the canvas, so the labels are read as
+# body ids. They stay `numeric` rather than becoming `integer`: R integers
+# are 32-bit and a body id can exceed that, where a double is exact to 2^53
+# — which is Coda's own representation.
+selected_to_neurons <- dendrogram_selected |>
+  mutate(bodyId = suppressWarnings(as.numeric(`label`))) |>
+  filter(!is.na(bodyId)) |>
+  select(bodyId, everything(), -`label`)
 ```
 
 ```{r join}

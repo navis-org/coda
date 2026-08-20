@@ -54,6 +54,8 @@ export type PyModule =
   | 'networkx'
   | 'matplotlib'
   | 'seaborn'
+  | 'scipyCluster'
+  | 'scipyDistance'
 
 export interface ModuleSpec {
   /** Emitted verbatim when the module is imported whole. */
@@ -85,6 +87,19 @@ export const MODULES: Record<PyModule, ModuleSpec> = {
     pip: 'navis',
   },
   neuprint: { from: 'neuprint', pip: 'neuprint-python' },
+  /*
+   * Two keys for one distribution, because a `from` import can only name one module and the
+   * clustering needs `scipy.cluster.hierarchy` and `scipy.spatial.distance` both. The pip
+   * line dedupes, so this is still one `pip install scipy`.
+   *
+   * Worth saying why SciPy at all, when Coda runs navis-fastcore: fastcore's linkage matrix
+   * *is* SciPy's — checked against `scipy.cluster.hierarchy.linkage` on NBLAST-shaped
+   * matrices, merge order identical across 60 trials and heights agreeing to 1.3e-15 — so
+   * emitting SciPy is a translation rather than a substitution. It is also already installed
+   * for anybody who has navis.
+   */
+  scipyCluster: { from: 'scipy.cluster.hierarchy', pip: 'scipy' },
+  scipyDistance: { from: 'scipy.spatial.distance', pip: 'scipy' },
 }
 
 // ---------------------------------------------------------------------------

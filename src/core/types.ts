@@ -69,6 +69,15 @@ export type CodaType =
    * columns and fail at run time with a column picker to configure first.
    */
   | { kind: 'layout' }
+  /**
+   * A hierarchical clustering — the merge tree of a score matrix.
+   *
+   * Its own kind for the reason `layout` is: it is a tree computed *for* one particular set of
+   * observations, not data about them, so typing it means a Dendrogram's socket can only ever
+   * be handed one. As a table of `[a, b, height, size]` it would take any four numeric columns
+   * and be quietly destroyed by an upstream Sort. See `LinkageValue`.
+   */
+  | { kind: 'linkage' }
 
 export type TypeKind = CodaType['kind']
 
@@ -103,6 +112,7 @@ export const T = {
   points: (schema?: TableSchema): CodaType =>
     schema ? { kind: 'points', schema } : { kind: 'points' },
   layout: (): CodaType => ({ kind: 'layout' }),
+  linkage: (): CodaType => ({ kind: 'linkage' }),
 } as const
 
 /** Types whose values are tabular, i.e. carry a `TableSchema`. */
@@ -155,6 +165,8 @@ export function typeLabel(t: CodaType | undefined): string {
       return 'Any'
     case 'layout':
       return 'Layout'
+    case 'linkage':
+      return 'Linkage'
     case 'dataset':
       return t.datasetId ? `Dataset(${t.datasetId})` : 'Dataset'
     default:

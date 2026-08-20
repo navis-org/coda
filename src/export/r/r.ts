@@ -25,6 +25,21 @@ export function rStr(value: string): string {
 }
 
 /**
+ * A column reference in a dplyr verb.
+ *
+ * Backticked always, not only when it needs it: neuPrint publishes columns like `pre` and
+ * `post` that are fine bare and others that are not, and a rule with an exception is a rule
+ * somebody gets wrong on the column that has a dot in it.
+ *
+ * Distinct from `tableFilters.ts`'s own `col`, which emits the `.data[["x"]]` pronoun — that
+ * one is for inside `filter()`, where a bare name can shadow a variable in scope. Two spellings
+ * for two jobs, which is why only this one is shared.
+ */
+export function rCol(name: string): string {
+  return `\`${name}\``
+}
+
+/**
  * An R numeric literal.
  *
  * R spells the non-finite values as bare names rather than through a constructor, which is the

@@ -2,9 +2,14 @@
  * The remaining data nodes: Build Network, the two importers, and Paths.
  */
 
+// An emitter may reach `src/ui`, which is what keeps the palette in one place rather than
+// transcribed into two exporters — the same licence `out.scatter`'s emitter takes.
+import { MAX_SERIES } from '../../../ui/colors'
+import { clusterColor } from '../../../ui/encoding'
 import { pyList, pyStr } from '../py'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
+import { selectionIds } from './common'
 
 // ---------------------------------------------------------------------------
 // Build Network
@@ -335,3 +340,283 @@ registerEmitter('neuron.nblastKnn', (ctx) => {
   }
   return lines
 })
+
+// ---------------------------------------------------------------------------
+// Clustering
+// ---------------------------------------------------------------------------
+
+/**
+ * **A Coda tree carries its labels and a SciPy `Z` does not**, which is the one shape decision
+ * in this trio. `Z` is `(n - 1) x 4` of numbers and nothing in it says which observation index
+ * 3 was; the matrix's row labels are what a dendrogram and a cluster table both need.
+ *
+ * So the tree output binds the `Z` — a real linkage matrix, so `fcluster`, `cut_tree`,
+ * `dendrogram` and `cophenet` all take it directly, which is what a reader wants — and its
+ * labels and leaf order ride alongside under derived names. The walk gives every emitter its
+ * input's *variable name*, so a node downstream reconstructs the companions from that with no
+ * channel between emitters and nothing to keep in step.
+ */
+function companions(variable: string): { labels: string; order: string; clusters: string } {
+  return {
+    labels: `${variable}_labels`,
+    order: `${variable}_order`,
+    // The third arrived with the Dendrogram's `cluster`/`color` columns: a cut is a fact about
+    // the tree in Coda, where SciPy keeps it in whatever variable `cut_tree` was assigned to.
+    // Bound to `None` by Linkage and to the cut by Cut Tree, so a Dendrogram can read it either
+    // way without knowing which is upstream.
+    clusters: `${variable}_clusters`,
+  }
+}
+
+registerEmitter('cluster.linkage', (ctx) => {
+  const src = ctx.wired('in')
+  ctx.require('numpy')
+  ctx.require('scipyCluster', 'leaves_list', 'linkage')
+  ctx.require('scipyDistance', 'squareform')
+
+  const tree = ctx.output('tree')
+  const ordered = ctx.output('ordered')
+  const { labels, order, clusters } = companions(tree)
+  const method = String(ctx.params.method ?? 'ward')
+  const symmetry = String(ctx.params.symmetry ?? 'mean')
+  const distance = String(ctx.params.distance ?? 'auto')
+
+  const combined =
+    symmetry === 'mean'
+      ? '(_m + _m.T) / 2'
+      : symmetry === 'min'
+        ? 'np.minimum(_m, _m.T)'
+        : symmetry === 'max'
+          ? 'np.maximum(_m, _m.T)'
+          : '_m'
+
+  const lines: string[] = [
+    ...ctx.note(
+      'Coda runs navis-fastcore, whose linkage matrix is SciPy’s: checked against ' +
+        'scipy.cluster.hierarchy.linkage on NBLAST-shaped matrices, merge order identical and ' +
+        'heights agreeing to 1e-15. The fused pass fastcore uses saves memory, not accuracy.',
+    ),
+    `_m = np.asarray(${src}, dtype=float)`,
+  ]
+
+  if (symmetry === 'none') {
+    lines.push(
+      ...ctx.note(
+        'Symmetry is off, so only the upper triangle is read — `squareform` ignores the ' +
+          'lower half exactly as fastcore does. On a matrix that is not already symmetric ' +
+          'that discards data rather than combining it.',
+      ),
+    )
+  }
+
+  // `checks=False` because the diagonal is never read either here or in fastcore, and a
+  // self-score of 1 makes a diagonal of 0 distance that `squareform`'s checks would want
+  // anyway. Turning them on would refuse a matrix that clusters perfectly well.
+  lines.push(
+    `_d = ${distance === 'none' ? combined : `1.0 - (${combined})`}`,
+    `${tree} = linkage(squareform(_d, checks=False), method=${pyStr(method)})`,
+    `${labels} = list(getattr(${src}, 'index', range(len(_m))))`,
+    `${order} = leaves_list(${tree})`,
+    // Nothing has cut it yet, and `None` says so where an empty list would read as "cut into
+    // nothing" — the same absent-is-not-empty distinction the tree value itself draws.
+    `${clusters} = None`,
+    // The block-diagonal picture, which is what the second port is for.
+    `${ordered} = ${src}.iloc[${order}, ${order}]`,
+  )
+
+  if (distance === 'auto') {
+    lines.push(
+      ...ctx.note(
+        'Scores are similarities, so the distance is 1 − score. A matrix that carries ' +
+          'distances already would be clustered as it stands.',
+      ),
+    )
+  }
+  return lines
+})
+
+/**
+ * `cut_tree`, not `fcluster(..., 'maxclust')`, and the difference is not cosmetic.
+ *
+ * Both cut a tree into k groups and they disagree on ties: `maxclust` finds the lowest height
+ * leaving *at most* k clusters, so on six observations in three tied pairs it answers three
+ * clusters for k = 2, 4 and 5 alike. `cut_tree` undoes the last k - 1 merges and returns
+ * exactly k, which is what Coda's node does — verified as the same partition on all 300
+ * comparisons across the five methods offered.
+ */
+registerEmitter('cluster.cut', (ctx) => {
+  const src = ctx.wired('in')
+  const { labels, order } = companions(src)
+  ctx.require('pandas')
+  ctx.require('numpy')
+
+  const clustersOut = ctx.output('clusters')
+  const tree = ctx.output('tree')
+  const out = companions(tree)
+  const byHeight = String(ctx.params.mode ?? 'count') === 'height'
+
+  ctx.require('scipyCluster', byHeight ? 'fcluster' : 'cut_tree')
+  const cut = byHeight
+    ? `fcluster(${src}, t=${Number(ctx.params.height ?? 0.5)}, criterion='distance')`
+    : `cut_tree(${src}, n_clusters=${Number(ctx.params.count ?? 4)}).ravel()`
+
+  return [
+    `_raw = np.asarray(${cut})`,
+    ...ctx.note(
+      'Coda numbers clusters left to right as the dendrogram draws them, so the column reads ' +
+        'against the picture. SciPy numbers them by its own bookkeeping — the grouping is ' +
+        'identical either way; this renumbers so the two agree.',
+    ),
+    `_renumber = {c: i + 1 for i, c in enumerate(dict.fromkeys(_raw[${order}]))}`,
+    `_cluster = [_renumber[c] for c in _raw]`,
+    `_position = {int(obs): i for i, obs in enumerate(${order})}`,
+    `${clustersOut} = pd.DataFrame({`,
+    `    'label': ${labels},`,
+    `    'cluster': _cluster,`,
+    `    'order': [_position[i] for i in range(len(${labels}))],`,
+    `})`,
+    `${clustersOut}['size'] = ${clustersOut}.groupby('cluster')['label'].transform('size')`,
+    ``,
+    // The tree passes through, companions and all, so a Dendrogram wired after this one still
+    // finds its labels.
+    `${tree} = ${src}`,
+    `${out.labels} = ${labels}`,
+    `${out.order} = ${order}`,
+    `${out.clusters} = _cluster`,
+  ]
+})
+
+/**
+ * SciPy's `orientation` is named for where the **root** goes, not the leaves — checked against
+ * the docstring rather than guessed. Coda's "leaves on the right" is therefore `'left'`, and
+ * getting it backwards produces a mirrored picture that looks perfectly reasonable.
+ */
+registerEmitter('out.dendrogram', (ctx) => {
+  const src = ctx.wired('in')
+  const { labels, order, clusters } = companions(src)
+  ctx.require('pandas')
+  ctx.require('matplotlib')
+  ctx.require('scipyCluster', 'dendrogram')
+
+  const out = ctx.output('out')
+  const selected = ctx.output('selected')
+  const outNames = companions(out)
+  const down = String(ctx.params.orientation ?? 'right') === 'down'
+  // Leaf *positions*, not names: a label column can call two leaves the same thing, so the
+  // canvas holds the observation index. See `out.dendrogram`.
+  const selection = selectionIds(ctx)
+
+  const lines = [
+    `${out} = ${src}`,
+    `${outNames.labels} = ${labels}`,
+    `${outNames.order} = ${order}`,
+    `${outNames.clusters} = ${clusters}`,
+    ``,
+    `plt.figure(figsize=(10, 6))`,
+    `dendrogram(`,
+    `    ${out},`,
+    `    labels=${outNames.labels},`,
+    // 'left' puts the root at the left and the leaves to its right.
+    `    orientation=${pyStr(down ? 'top' : 'left')},`,
+    ...(ctx.params.showLabels === false ? [`    no_labels=True,`] : []),
+    `)`,
+    `plt.tight_layout()`,
+    `plt.show()`,
+    ``,
+  ]
+
+  /*
+   * The palette is read off the real one rather than restated — an emitter may reach `src/ui`,
+   * which is half of why the registry is separate from the node definitions. Coda's dark ramp,
+   * because `evaluate` pins it: see `EMITTED_MODE` in the node.
+   *
+   * Worth knowing that this does **not** make the drawing above match: `scipy.dendrogram` has a
+   * colour scheme of its own and takes `link_color_func` to override it. What matches is the
+   * column, which is what anything downstream reads.
+   */
+  const palette = Array.from({ length: MAX_SERIES }, (_, i) => clusterColor(i + 1, 'dark'))
+  const uncut = clusterColor(0, 'dark')
+
+  if (selection.length > 0) {
+    lines.push(
+      `_picked = ${pyList(selection)}`,
+      `_position = {int(obs): i for i, obs in enumerate(${outNames.order})}`,
+      `_palette = ${pyList(palette)}`,
+      `_cluster_of = lambda i: 0 if ${outNames.clusters} is None else int(${outNames.clusters}[i])`,
+      // Cycling past the eighth, as the tree draws it — see `clusterColor`.
+      `_colour_of = lambda c: ${pyStr(uncut)} if c <= 0 else _palette[(c - 1) % ${MAX_SERIES}]`,
+      `${selected} = pd.DataFrame({`,
+      `    'label': [${outNames.labels}[i] for i in _picked],`,
+      `    'order': [_position[i] for i in _picked],`,
+      `    'cluster': [_cluster_of(i) for i in _picked],`,
+      `    'color': [_colour_of(_cluster_of(i)) for i in _picked],`,
+      `}).sort_values('order')`,
+    )
+  } else {
+    lines.push(
+      ...ctx.note('No branch is selected on the canvas, so Selected is empty.'),
+      `${selected} = pd.DataFrame({'label': [], 'order': [], 'cluster': [], 'color': []})`,
+    )
+  }
+  return lines
+})
+
+/**
+ * `Selected to Neurons` / `Clusters to Neurons` — one emitter, two registrations, exactly as
+ * the node is one operation under two names.
+ *
+ * **`merge` compares by value and Coda compares as text**, which is the whole care in this
+ * cell. An NBLAST labelled by body id produces the *string* `"722817260"` against an `int64`
+ * column, so a plain `left_on='bodyId', right_on='label'` merges nothing at all — zero rows,
+ * no error, on the single most common wiring. Both sides are cast to `str` into a scratch key
+ * for that reason, which reproduces `joinTables`' `String(cell)` rule exactly.
+ *
+ * The `drop_duplicates` is the second half of the same fidelity: Coda takes the first row for a
+ * repeated label where `merge` would emit the cross product, turning a duplicate into extra
+ * neurons nobody selected.
+ */
+function labelsToNeuronsEmitter(ctx: EmitContext): string[] {
+  const labels = ctx.wired('labels')
+  const neurons = ctx.input('neurons')
+  ctx.require('pandas')
+
+  const out = ctx.output('neurons')
+  const labelColumn = ctx.column('labelColumn') ?? 'label'
+  const suffix = String(ctx.params.suffix ?? '_c')
+
+  if (!neurons) {
+    ctx.require('numpy')
+    return [
+      ...ctx.note(
+        'No neuron table is wired on the canvas, so the labels are read as body ids — which ' +
+          'is what they are unless NBLAST was told to label by something else. Rows that are ' +
+          'not usable ids are dropped, as they are in Coda.',
+      ),
+      `${out} = ${labels}.copy()`,
+      `${out}['bodyId'] = pd.to_numeric(${out}[${pyStr(labelColumn)}], errors='coerce')`,
+      `${out} = ${out}[${out}['bodyId'].notna()].drop(columns=[${pyStr(labelColumn)}])`,
+      `${out}['bodyId'] = ${out}['bodyId'].astype('int64')`,
+      // bodyId first, as the node emits it — a column order nothing depends on but everything
+      // downstream is read by a person.
+      `${out} = ${out}[['bodyId'] + [c for c in ${out}.columns if c != 'bodyId']]`,
+    ]
+  }
+
+  const matchColumn = ctx.column('matchColumn') ?? 'bodyId'
+  return [
+    ...ctx.note(
+      'Coda matches labels as text, so both sides go through a string key: an NBLAST labelled ' +
+        'by body id gives "722817260" against an int64 column, and merging those directly ' +
+        'returns nothing at all.',
+    ),
+    `_left = ${neurons}.assign(_key=${neurons}[${pyStr(matchColumn)}].astype(str))`,
+    `_right = ${labels}.assign(_key=${labels}[${pyStr(labelColumn)}].astype(str))`,
+    // First match wins, as it does in Coda; merge would otherwise emit the cross product.
+    `_right = _right.drop_duplicates('_key').drop(columns=[${pyStr(labelColumn)}])`,
+    `${out} = _left.merge(_right, on='_key', how='inner', suffixes=('', ${pyStr(suffix)}))`,
+    `${out} = ${out}.drop(columns=['_key'])`,
+  ]
+}
+
+registerEmitter('cluster.selectedToNeurons', labelsToNeuronsEmitter)
+registerEmitter('cluster.clustersToNeurons', labelsToNeuronsEmitter)

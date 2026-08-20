@@ -89,6 +89,7 @@ export const neuroglancerNode = registerNode({
      */
     ...colorParams({
       prefix: 'segment',
+      allowLiteral: true,
       from: 'neurons',
       label: 'Colour',
       defaultMode: 'categorical',

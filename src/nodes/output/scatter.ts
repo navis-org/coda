@@ -123,6 +123,7 @@ export const scatterNode = registerNode({
     // --- points ----------------------------------------------------------
     ...colorParams({
       prefix: 'point',
+      allowLiteral: true,
       from: 'in',
       label: 'Colour',
       defaultMode: 'constant',

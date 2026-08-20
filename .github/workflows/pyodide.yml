@@ -18,11 +18,13 @@ on:
     paths:
       - 'src/pyodide/**'
       - 'scripts/probe-nblast.mjs'
+      - 'scripts/probe-linkage.mjs'
       - '.github/workflows/pyodide.yml'
   pull_request:
     paths:
       - 'src/pyodide/**'
       - 'scripts/probe-nblast.mjs'
+      - 'scripts/probe-linkage.mjs'
   workflow_dispatch:
 
 jobs:
@@ -48,5 +50,12 @@ jobs:
       # a flat float64 array, one finite score per pair, a self-match of exactly 1, and
       # progress actually reported. fastcore owns the numbers; this owns the marshalling.
       - run: node scripts/probe-nblast.mjs
+        env:
+          PYODIDE_PATH: node_modules/pyodide
+
+      # The clustering capability, in its own process for the reason it has its own `.py`: what
+      # a probe checks is one function's contract. The second boot costs a few seconds against
+      # a job that only runs when `src/pyodide/**` changes.
+      - run: node scripts/probe-linkage.mjs
         env:
           PYODIDE_PATH: node_modules/pyodide

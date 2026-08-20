@@ -785,7 +785,7 @@ export function groupByTable(
 export type JoinHow = 'inner' | 'left'
 
 /** Right-side columns get a suffix when they collide with a left-side name. */
-function joinedColumns(
+export function joinedColumns(
   left: TableSchema,
   right: TableSchema,
   rightKey: string,

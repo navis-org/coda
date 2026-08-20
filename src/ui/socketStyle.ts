@@ -49,6 +49,13 @@ export function socketStyle(type: CodaType | undefined): SocketStyle {
     // all-pairs colourblind gate — see colors.ts.
     case 'layout':
       return { family: 'matrix', shape: 'square' }
+    // A linkage is a clustering *of* a matrix, so it takes the matrix hue and the one shape
+    // that family has left. `ring` is also the table family's, which is the existing trade
+    // rather than a new one — geometry and table both draw a circle, and hue plus the always
+    // visible label carry the difference. A sixth chromatic family would fail the all-pairs
+    // colourblind gate; see colors.ts.
+    case 'linkage':
+      return { family: 'matrix', shape: 'ring' }
     case 'number':
     case 'string':
     case 'boolean':

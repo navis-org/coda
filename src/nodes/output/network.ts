@@ -260,6 +260,7 @@ export const networkViewNode = registerNode({
 
     ...colorParams({
       prefix: 'node',
+      allowLiteral: true,
       from: 'in',
       part: 'nodes',
       label: 'Node colour',

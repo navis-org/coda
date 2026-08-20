@@ -26,6 +26,7 @@ import { DescriptionBody } from './DescriptionBody'
 import { DownloadBody } from './DownloadBody'
 import { IdsFromLabelBody } from './IdsFromLabelBody'
 import { InputIdsBody } from './InputIdsBody'
+import { LabelsToNeuronsBody } from './LabelsToNeuronsBody'
 import { PathsBody } from './PathsBody'
 import { SelectOneBody } from './SelectOneBody'
 import { UploadBody } from './UploadBody'
@@ -80,6 +81,13 @@ export const NODE_BODIES: Record<string, NodeBodyEntry> = {
    * the readout is one line and the fields are two.
    */
   'neuron.inputIds': { Component: InputIdsBody, width: 300 },
+  /*
+   * Both clustering bridges, one component: they are one operation under two names, and a
+   * second copy of the readout is how the two come to report differently on the same failure.
+   * Wide enough for two column pickers and for "N matched nothing" to sit beside the counts.
+   */
+  'cluster.selectedToNeurons': { Component: LabelsToNeuronsBody, width: 300 },
+  'cluster.clustersToNeurons': { Component: LabelsToNeuronsBody, width: 300 },
   /*
    * Wide enough for a filename field and for the auto-run warning to read as a sentence — that
    * line is the whole reason somebody does not end up with four hundred files. Not `expandable`:

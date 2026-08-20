@@ -1,7 +1,11 @@
 /** Build Network, Paths, Explore and Profile. */
 
-import { rStr, rVector } from '../r'
+// An emitter may reach `src/ui` — see the notebook emitter for why the palette lives there.
+import { MAX_SERIES } from '../../../ui/colors'
+import { clusterColor } from '../../../ui/encoding'
+import { rCol as col, rStr, rVector } from '../r'
 import { registerEmitter, registerHelper } from '../registry'
+import type { EmitContext } from '../types'
 import { bodyIds, selectionIds } from './common'
 
 // ---------------------------------------------------------------------------
@@ -482,3 +486,242 @@ registerEmitter('neuron.nblastKnn', (ctx) =>
       'which exports as nblast_allbyall(), and take the top matches from its matrix.',
   ),
 )
+
+// ---------------------------------------------------------------------------
+// Clustering
+// ---------------------------------------------------------------------------
+
+/**
+ * `hclust` is the cleanest correspondence in either exporter, and unusually it needs no
+ * companion variables: an `hclust` object carries `$merge`, `$height`, `$order` *and*
+ * `$labels`, which is the whole of a Coda linkage in one object. Python's `Z` carries only the
+ * first two, which is why the notebook has to pass labels alongside.
+ *
+ * Every one of the five method names was checked against SciPy rather than mapped from memory,
+ * on the same 12 x 12 matrix through both: `ward`→`ward.D2`, `average`, `complete`, `single`
+ * and `weighted`→`mcquitty` all reproduce the merge heights, and `leaves_list` and `$order`
+ * agree exactly. `ward.D` is the older variant of Ward's criterion and is **not** the match —
+ * the two differ on the same data and neither errors.
+ */
+const R_METHODS: Record<string, string> = {
+  ward: 'ward.D2',
+  average: 'average',
+  complete: 'complete',
+  single: 'single',
+  weighted: 'mcquitty',
+}
+
+registerEmitter('cluster.linkage', (ctx) => {
+  const src = ctx.wired('in')
+  const tree = ctx.output('tree')
+  const ordered = ctx.output('ordered')
+  const method = R_METHODS[String(ctx.params.method ?? 'ward')] ?? 'ward.D2'
+  const symmetry = String(ctx.params.symmetry ?? 'mean')
+  const distance = String(ctx.params.distance ?? 'auto')
+
+  const combined =
+    symmetry === 'mean'
+      ? '(m_ + t(m_)) / 2'
+      : symmetry === 'min'
+        ? 'pmin(m_, t(m_))'
+        : symmetry === 'max'
+          ? 'pmax(m_, t(m_))'
+          : 'm_'
+
+  const lines: string[] = [
+    ...ctx.note(
+      `Coda runs navis-fastcore, whose linkage is SciPy's, and "${String(ctx.params.method ?? 'ward')}" ` +
+        `is hclust's "${method}". Checked through both on one matrix: same merge heights, same ` +
+        `leaf order. Note that "ward.D" is a different criterion and would not agree.`,
+    ),
+    `m_ <- as.matrix(${src})`,
+    `d_ <- as.dist(${distance === 'none' ? combined : `1 - (${combined})`})`,
+  ]
+
+  if (symmetry === 'none') {
+    lines.push(
+      ...ctx.note(
+        'Symmetry is off, and `as.dist` reads the **lower** triangle where Coda and the ' +
+          'notebook export read the upper. On a matrix that is already symmetric that is the ' +
+          'same answer; on one that is not, this is the transpose of what the canvas shows.',
+      ),
+    )
+  }
+
+  lines.push(
+    ``,
+    `${tree} <- hclust(d_, method = ${rStr(method)})`,
+    // The block-diagonal picture, which is what the second port is for.
+    `${ordered} <- ${src}[${tree}$order, ${tree}$order]`,
+    // An `hclust` carries `$labels` and `$order` but has nowhere to put a cut, so the cluster
+    // vector rides beside it. NULL rather than an empty vector: nothing has cut this yet, which
+    // is not the same as cutting it into nothing.
+    `${tree}_clusters <- NULL`,
+  )
+  return lines
+})
+
+registerEmitter('cluster.cut', (ctx) => {
+  const src = ctx.wired('in')
+  ctx.library('dplyr')
+  const clusters = ctx.output('clusters')
+  const tree = ctx.output('tree')
+  const byHeight = String(ctx.params.mode ?? 'count') === 'height'
+
+  const cut = byHeight
+    ? `cutree(${src}, h = ${Number(ctx.params.height ?? 0.5)})`
+    : `cutree(${src}, k = ${Number(ctx.params.count ?? 4)})`
+
+  return [
+    ...(byHeight
+      ? ctx.note(
+          'Cutting at a height gives however many groups fall out below it, which may be one ' +
+            'if the height is above the top of the tree.',
+        )
+      : []),
+    `cl_ <- ${cut}`,
+    ...ctx.note(
+      'Coda numbers clusters left to right as the dendrogram draws them, so the column reads ' +
+        'against the picture. `cutree` numbers by observation order; the grouping is the same ' +
+        'either way, and this renumbers so the two agree.',
+    ),
+    `cl_ <- match(cl_, unique(cl_[${src}$order]))`,
+    ``,
+    `${clusters} <- tibble(`,
+    `  label = ${src}$labels,`,
+    `  cluster = cl_,`,
+    // Zero-based, as the canvas column is, so the two can be compared row for row.
+    `  order = match(seq_along(${src}$labels), ${src}$order) - 1L,`,
+    `) |>`,
+    `  group_by(cluster) |>`,
+    `  mutate(size = n()) |>`,
+    `  ungroup()`,
+    ``,
+    `${tree} <- ${src}`,
+    `${tree}_clusters <- cl_`,
+  ]
+})
+
+/**
+ * `horiz` was measured rather than assumed, because a mirrored dendrogram is a perfectly
+ * plausible picture. Reading `par("usr")` back after the call: `horiz = TRUE` runs the height
+ * axis from 0.568 down to −0.022, i.e. the **root at the left and the leaves on the right**,
+ * which is Coda's default orientation; `horiz = FALSE` runs the height up the y-axis, i.e. the
+ * root at the top and the leaves at the bottom. Both map directly with no flip.
+ */
+registerEmitter('out.dendrogram', (ctx) => {
+  const src = ctx.wired('in')
+  ctx.library('dplyr')
+  const out = ctx.output('out')
+  const selected = ctx.output('selected')
+  const down = String(ctx.params.orientation ?? 'right') === 'down'
+  // Leaf positions, not names — see the notebook emitter and `out.dendrogram`.
+  const selection = selectionIds(ctx)
+
+  const lines = [
+    `${out} <- ${src}`,
+    // All three companions, not two: the tree passes through, and so does the cut beside it.
+    // Bound rather than read from `${src}` below, so a chunk further on sees one name.
+    `${out}_clusters <- ${src}_clusters`,
+    ``,
+    // `as.dendrogram` rather than plotting the hclust directly: `plot.hclust` has no `horiz`,
+    // so the orientation this node offers only exists on the dendrogram class.
+    `plot(`,
+    `  as.dendrogram(${out}),`,
+    `  horiz = ${down ? 'FALSE' : 'TRUE'},`,
+    ...(ctx.params.showLabels === false ? [`  leaflab = "none",`] : []),
+    `)`,
+    ``,
+  ]
+
+  /*
+   * Coda's dark ramp, read off the real palette rather than transcribed — see the notebook
+   * emitter. `plot()` above draws in black regardless; what matches the canvas is the column.
+   */
+  const palette = Array.from({ length: MAX_SERIES }, (_, i) => clusterColor(i + 1, 'dark'))
+  const uncut = clusterColor(0, 'dark')
+
+  if (selection.length > 0) {
+    lines.push(
+      // Coda counts observations from 0 and R indexes from 1, so the shift is explicit rather
+      // than left to whoever reads this next.
+      `picked_ <- c(${selection.map((i) => i + 1).join(', ')})`,
+      `palette_ <- ${rVector(palette)}`,
+      `cl_ <- if (is.null(${out}_clusters)) rep(0L, length(${out}$labels)) else ${out}_clusters`,
+      `${selected} <- tibble(`,
+      `  label = ${out}$labels[picked_],`,
+      `  order = match(picked_, ${out}$order) - 1L,`,
+      `  cluster = as.integer(cl_[picked_]),`,
+      // Cycling past the eighth, as the tree draws it.
+      `  color = ifelse(cluster <= 0, ${rStr(uncut)}, palette_[((cluster - 1) %% ${MAX_SERIES}) + 1]),`,
+      `) |>`,
+      `  arrange(order)`,
+    )
+  } else {
+    lines.push(
+      ...ctx.note('No branch is selected on the canvas, so Selected is empty.'),
+      `${selected} <- tibble(`,
+      `  label = character(), order = integer(), cluster = integer(), color = character(),`,
+      `)`,
+    )
+  }
+  return lines
+})
+
+/**
+ * `Selected to Neurons` / `Clusters to Neurons`, with the same two fidelity concerns the
+ * notebook emitter records: **matched as text**, because a tree labelled by body id carries
+ * strings against a numeric column, and **first match wins**, because `inner_join` would
+ * otherwise emit the cross product for a repeated label.
+ *
+ * `suffix = c("", "_c")` is dplyr's, and it is the right shape here: Coda leaves the neuron
+ * columns alone and suffixes only what the labels table brought, which is what an empty first
+ * element means.
+ */
+function labelsToNeuronsEmitter(ctx: EmitContext): string[] {
+  const labels = ctx.wired('labels')
+  const neurons = ctx.input('neurons')
+  ctx.library('dplyr')
+
+  const out = ctx.output('neurons')
+  const labelColumn = ctx.column('labelColumn') ?? 'label'
+  const suffix = String(ctx.params.suffix ?? '_c')
+
+  if (!neurons) {
+    return [
+      ...ctx.note(
+        'No neuron table is wired on the canvas, so the labels are read as body ids. They stay ' +
+          '`numeric` rather than becoming `integer`: R integers are 32-bit and a body id can ' +
+          'exceed that, where a double is exact to 2^53 — which is Coda\'s own representation.',
+      ),
+      `${out} <- ${labels} |>`,
+      `  mutate(bodyId = suppressWarnings(as.numeric(${col(labelColumn)}))) |>`,
+      `  filter(!is.na(bodyId)) |>`,
+      `  select(bodyId, everything(), -${col(labelColumn)})`,
+    ]
+  }
+
+  const matchColumn = ctx.column('matchColumn') ?? 'bodyId'
+  return [
+    ...ctx.note(
+      'Coda matches labels as text, so both sides go through a character key — a tree labelled ' +
+        'by body id carries "722817260" against a numeric column, and joining those directly ' +
+        'matches nothing.',
+    ),
+    `${out} <- ${neurons} |>`,
+    `  mutate(key_ = as.character(${col(matchColumn)})) |>`,
+    `  inner_join(`,
+    `    ${labels} |>`,
+    `      mutate(key_ = as.character(${col(labelColumn)})) |>`,
+    // First match wins, as in Coda.
+    `      distinct(key_, .keep_all = TRUE) |>`,
+    `      select(-${col(labelColumn)}),`,
+    `    by = "key_",`,
+    `    suffix = c("", ${rStr(suffix)}),`,
+    `  ) |>`,
+    `  select(-key_)`,
+  ]
+}
+
+registerEmitter('cluster.selectedToNeurons', labelsToNeuronsEmitter)
+registerEmitter('cluster.clustersToNeurons', labelsToNeuronsEmitter)

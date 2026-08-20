@@ -267,6 +267,14 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `nodes/analysis/nblast.test.ts`          | the units conversion above all, plus the flattening, the labels, the ceiling, the voxel refusal, and every control reaching the request |
 | `nodes/analysis/nblastKnn.test.ts`       | the k-NN shape: the rectangle laid out long, the padding dropped and counted, and the id columns named so a body id is not a quantity |
 | `core/values.test.ts`                    | what a node footer says about a geometry value: its units printed always, and voxels-vs-unknown told apart                        |
+| `nodes/lib/linkageOps.test.ts`           | the tree ops: the square-but-not-one-population refusal, exactly-k against a tie, clusters numbered in leaf order, the copied buffer |
+| `nodes/analysis/linkage.test.ts`         | the three nodes: every control reaching the request, the cut carried on the pass-through, and a restyle costing no run             |
+| `ui/viewers/dendrogramLayout.test.ts`    | the brackets: slot centres, a subtree as a contiguous run, a branch coloured only where its leaves agree, and both orientations     |
+| `ui/viewers/tooltipPoint.test.ts`        | a tooltip's coordinates: relative to its containing block and divided by the zoom, plus that the stylesheet still says `absolute`   |
+| `nodes/lib/labelsToNeurons.test.ts`      | labels to neurons: a type expanding to every neuron carrying it, matched as text, the first row for a repeat, and a collision suffixed |
+| `nodes/transform/labelsToNeurons.test.ts`| the two registrations: identical params, one warning that differs, and a neurons type published for a 3D socket                     |
+| `ui/nodes/labelsToNeuronsBody.test.tsx`  | the readout: what a wrong `Match on` says, not-wired against not-run, and every non-advanced param drawn                            |
+| `ui/viewers/dendrogram.test.tsx`         | the card through `ValuePreview`: a click handing back exactly the leaves under it, and every admission the caption makes           |
 | `data/neuroglancer/scene.test.ts`        | scene editing against the real published shapes, and the URL round-trip                                                          |
 | `nodes/output/neuroglancer.test.ts`      | what lands in the link: segments, colour agreement with the 3D view, the limit                                                   |
 | `ui/viewers/neuroglancerViewer.test.tsx` | that a restyle navigates the frame rather than remounting it                                                                     |
@@ -789,6 +797,287 @@ backend" — `linkage` (the Dendrogram TODO), the CMTK/Elastix/TPS transforms (t
 TODO), geodesic distances and Strahler for morphometrics, and "custom nodes using Python" all
 come out of the same download. Judged as one node it is disproportionate; judged as a backend it
 is cheap. That is the decision the spike exists to inform.
+
+**The second capability has now landed and the prediction held.** Clustering (below) is
+`linkage.py` plus a wrapper plus a line in `MODULES`, and it costs **2 ms** on a runtime that
+has already run NBLAST — measured, against 366 ms for the first module, which is almost
+entirely its `import numpy` / `import navis_fastcore`. Its packages cost **0 ms**, being the
+same two. So the honest price of the *third* Python-backed node is a few kilobytes of source,
+and the ten megabytes stays a one-off for the backend rather than a tax per capability.
+
+## Clustering: Linkage, Cut Tree, Dendrogram
+
+`cluster.linkage`, `cluster.cut` (both `Add ▸ Analysis`) and `out.dendrogram`
+(`Add ▸ Visualisation`). NBLAST answers how alike every pair is; these answer what the
+*groups* are. `NBLAST → Linkage → Cut Tree → Dendrogram` is the chain, and each arrow is a
+separate act rather than a step of one: the tree is computed once and expensively, the cut is
+somebody trying a number and looking at the picture, and the picture is free.
+
+The comparison is **navis-fastcore** again — `fc.linkage`, `fc.leaf_order` — through the same
+Pyodide bridge, as the second capability on it.
+
+### The value kind, and why not a table
+
+`LinkageValue` (`core/values.ts`) carries SciPy's `Z` ravelled, the labels, the leaf order and
+optionally a cut. It is its own `CodaType`, on **`LayoutValue`'s exact argument**: a linkage is
+not data about neurons, it is a tree computed *for* one particular set of them. As a table of
+`[a, b, height, size]` it would accept any four numeric columns, need four pickers to
+configure, and be silently destroyed by a Sort upstream of whatever drew it — none of which a
+reader would connect to the wrong picture they got.
+
+The socket takes the matrix hue and the one shape that family had left (`ring`). A sixth
+chromatic family would fail the all-pairs colourblind gate; see `colors.ts`.
+
+**`clusters` is optional on the value, and absent means _not cut_ rather than _one cluster_** —
+the distinction `MatrixValue.measure` draws. `cluster.cut` sets it, which is what lets a
+Dendrogram wired *after* a Cut colour its branches by group with no second input and no column
+picker.
+
+### Verified against the reference rather than assumed
+
+Four findings, each of which was a wrong answer before it was checked. All were established
+against scipy 1.15.3, R 4.4.1 and the real fastcore wheel, not recalled.
+
+- **fastcore's linkage _is_ SciPy's.** Merge order identical on every one of 60 trials across
+  the five methods, heights agreeing to 1.3e-15, and `fc.leaf_order` identical to
+  `scipy.cluster.hierarchy.leaves_list` on 20/20 random matrices. That is what makes the
+  notebook export a translation rather than a second implementation to keep in step, and it is
+  worth knowing before anyone reaches for a hand-rolled clustering here.
+- **`centroid` and `median` produce non-monotonic trees, and are not offered.** Measured on
+  random NBLAST-shaped matrices, 25 observations, 40 trials: `centroid` inverted in **39 of
+  40** and `median` in **40 of 40**, where `ward`, `average`, `complete`, `single` and
+  `weighted` inverted in none. A merge below its own child cannot be drawn honestly — and both
+  are defined on *squared Euclidean* distances, which `1 - NBLAST score` is not, so they were
+  offering a wrong answer as well as an undrawable one. Their absence is also what makes the
+  cut below sound: on a monotonic tree, row order *is* ascending height order.
+- **`fcluster(..., 'maxclust')` is the wrong function for "give me k groups".** It finds the
+  lowest height leaving *at most* k clusters, so on six observations in three tied pairs it
+  answers three clusters for k = 2, 4 and 5 alike. `cut_tree(Z, n_clusters=k)` undoes the last
+  k − 1 merges and returns exactly k, which is what `cutByCount` does — and the two agreed on
+  every one of 300 comparisons across the five methods offered, against 45 disagreements in 120
+  across the two that are not. A spinner marked "Clusters: 4" that yields 3 with nothing saying
+  why is the silent surprise this codebase exists to avoid.
+- **R's `hclust` mapping, all five, through both implementations on one matrix**:
+  `ward`→`ward.D2`, `average`, `complete`, `single`, `weighted`→`mcquitty`, reproducing the
+  merge heights and the leaf order exactly. `ward.D` is the older variant of Ward's criterion,
+  disagrees on the same data, and errors nowhere.
+
+### Cluster numbers are ours; the partition is SciPy's
+
+**Clusters are numbered left to right as the dendrogram draws them**, so cluster 1 is the
+leftmost group and the column reads against the picture. That is a deliberate divergence, and
+it costs nothing: SciPy's own two cut functions do not agree with *each other* on numbering, so
+there was never a convention to match — only a partition, which does match exactly. Both
+exporters renumber (three lines of pandas, one of R) so the notebook and the canvas agree.
+
+### Two bugs a browser found, and jsdom could not
+
+Both were invisible to a green suite of 2,498 tests, and both are the class this codebase keeps
+being caught by. They are recorded at length because the *symptom* points nowhere near the
+cause in either case.
+
+- **A matrix of counts becomes negative distances, and the tree draws off the card.** `auto`
+  reads a matrix that says nothing as similarities, so an Adjacency of raw synapse counts gives
+  `1 - 77 = -76`. fastcore clusters negative distances without complaint; the viewer then
+  normalises against a maximum it is nowhere near, and the brackets project to **x = 42,423 on
+  a 550-pixel card**. Nothing throws, nothing logs, the node goes green, and the caption's
+  counts are all correct — the drawing is simply not there. The comment that used to sit on
+  `transformFor` predicted the opposite symptom ("it comes out inverted rather than subtly
+  off"), which is exactly why the guess is now *checked*: `checkLinkageDistances` scans the
+  cells before anything is marshalled and names the two fixes, which are opposite — counts want
+  a Normalize upstream, un-normalised NBLAST scores want the switch back on at the NBLAST node.
+- **A selection held as labels lit two thirds of the tree.** Leaf labels are whatever named the
+  matrix, and `NBLAST → Label by: type` makes them repeat — fourteen neurons, five distinct
+  names. A branch was drawn as selected when *every leaf under it* was in the selected set, so
+  picking one three-leaf clade lit every branch that happened to share a name with it. The
+  caption said "3 selected" throughout, which is why no assertion on it would have caught this.
+  The selection now holds **observation indices**, which are unique by construction; the cost
+  is `core.selectOne`'s trade, that a position is not an identity — and it is forced rather
+  than chosen, since a tree offers no stabler handle for a leaf, only a less honest one.
+
+### The traps
+
+- **The matrix is copied before it crosses the bridge**, and this is the one that would have
+  been a live bug. `callPython` *transfers* every typed array in a call's arguments — right for
+  the point buffers NBLAST builds and drops — and this one is the upstream node's own cached
+  result. Transferred, it is detached: the Heatmap an inch away redraws empty, the scheduler's
+  cache holds a zero-length array, and nothing connects either to the node that ran. 500 × 500
+  is 2 MB, which is what the copy costs.
+- **A square matrix is not necessarily over one population.** NBLAST with a Target set of equal
+  size is perfectly square, and clustering it would treat row 3 and column 3 as one observation
+  because they share an index. `checkLinkageInput` compares the row and column labels and
+  refuses, naming that case — the only check in the module that is about meaning rather than
+  arithmetic.
+- **`as.dist` reads the _lower_ triangle where `squareform` reads the upper.** Identical on a
+  symmetric matrix and the transpose of each other on one that is not, which is exactly the
+  `Symmetry: none` case. The R emitter says so rather than quietly disagreeing with the
+  notebook.
+- **SciPy's `dendrogram(orientation=)` is named for where the _root_ goes, not the leaves**, so
+  Coda's "leaves on the right" is `'left'`. R's `horiz` was measured rather than read: reading
+  `par("usr")` back, `horiz = TRUE` runs the height axis from 0.568 down to −0.022, i.e. root at
+  the left and leaves on the right, so both map with no flip. Getting either backwards produces
+  a mirrored picture that looks perfectly reasonable.
+
+### The second output is most of a clustermap
+
+`Linkage` emits `Ordered` as well as `Tree`: the input matrix with rows and columns permuted
+into leaf order. Wired to the **existing** Heatmap that is the block-diagonal picture, with no
+new drawing, no second colour scale to keep in step, and one permutation of a `Float64Array` to
+pay for it. It is the *scores* reordered rather than the distances the tree was built from —
+what somebody wants to look at is the matrix they have, arranged so its structure shows.
+
+### The drawing
+
+`DendrogramViewer` is **SVG rather than canvas**, which is the opposite of `ScatterViewer`'s
+call and for the opposite reason: a scatter is fed by an embedding of a whole dataset, where
+this is bounded by `MAX_LINKAGE_OBSERVATIONS` and by what a reader can take in. What SVG buys
+is the whole export path free (`ViewerActions` clones the live `<svg>`), hit testing on every
+branch with no quadtree, and labels the browser lays out.
+
+- **Clicking a bracket selects the leaves under it**, which is the gesture the drawing exists
+  for — a clade is exactly the thing somebody wants to pull out and look at in 3D, and it is the
+  one selection a table cannot express because it is a fact about the tree. The range is exact
+  rather than approximate: the leaf order is a depth-first walk, so every subtree is a
+  *contiguous run* of it and a click is `order.slice(first, last + 1)` however many thousand
+  leaves hang off it. **What is stored is positions, not names** — see the browser findings
+  above — so both exporters map indices back to labels, and R's do it one-based.
+- **A branch selects; it does not cut.** The cut lives one node upstream where it is a stored
+  number everything downstream can see. A viewer that also cut would be a second answer to the
+  same question with nothing saying which won.
+- **Colours cycle past the eighth cluster, and the caption says `colours repeat`.** Everywhere
+  else here a ninth category takes the achromatic Other colour, because in a legend a repeated
+  hue claims two series are the same thing. A dendrogram is the case that rule does not fit:
+  clusters sit in leaf order along one axis, so two sharing a hue are visibly far apart and the
+  number in the table is the identity — where greying everything past eight leaves a
+  twenty-cluster cut with no picture at all. Admitted rather than hidden, on the `labels
+  thinned` idiom, which the same caption also carries.
+- **Geometry is in unit space** (`dendrogramLayout.ts`, headless), so orientation is a
+  projection at the end rather than two layouts that can disagree.
+
+### Newick, because a `Z` matrix is not a file anyone can open
+
+A linkage exports as **Newick** by default — read by iTOL, FigTree, ete3, ape, dendropy and
+Biopython — with the linkage matrix itself offered as CSV for going back into SciPy or R.
+
+**Branch lengths are differences, not heights**, and that is the trap: a Newick branch is the
+edge *below* a node, so it is the parent's merge height minus this node's. Writing the absolute
+height instead produces a file that parses, draws, and is wrong in a way only a scale bar
+reveals. Verified with biopython rather than by eye — it reads the output back ultrametric,
+every root-to-leaf distance equal to the top merge, and each pair's path distance exactly twice
+its merge height. Labels carrying `(`, `)`, `,`, `:`, `;` or a space are quoted with an internal
+quote doubled, since `SMP001(a)` would otherwise close a clade mid-name.
+
+### Getting back to neurons: the two bridges
+
+`cluster.selectedToNeurons` and `cluster.clustersToNeurons`, both `Add ▸ Transform`. A
+`LinkageValue` knows its leaves only by **label**, because that is all a `MatrixValue` axis
+carries — so a Dendrogram's `Selected` and a Cut Tree's `Clusters` are tables of *names*, and
+everything that draws neurons wants `T.neurons()`. These cross that gap.
+
+**Two registrations over one operation** (`lib/labelsToNeurons.ts`), which is unusual enough
+here to say out loud. They take the same inputs, run the same function and emit the same shape;
+what differs is the name, what the input socket says, and one edit-time warning. The case for
+two is discoverability — somebody holding a Cut Tree looks for a node named after what they
+have — and the cost is paid once rather than as two implementations that drift.
+
+**Matched locally, never queried.** The neurons come from a table already on the canvas, so a
+clade of three cell types resolves to the neurons that were *clustered* rather than to every
+neuron of those types in the connectome. That is a different question and `IDs from Label` is
+the node that asks it. With no Neurons wired the labels are read as body ids, which is what
+they are unless NBLAST was told to label by something else.
+
+Four things in it that each produce a plausible wrong table:
+
+- **Matched as text**, the `String(cell)` rule `joinTables` follows. An NBLAST labelled by body
+  id produces the *string* `"722817260"` against an `i64` column, so comparing by value fails on
+  the default wiring rather than on an exotic one. Both exporters cast into a scratch key for
+  the same reason — a plain `left_on`/`right_on` merges nothing at all there, with no error.
+- **The neuron table drives order and count.** One label naming six neurons gives six rows,
+  which is the point when the labels are types; a repeated label takes the first row rather than
+  the cross product, which `drop_duplicates` and `distinct` reproduce.
+- **Every column survives**, with a collision suffixed as `Join` does. Visible on a real graph:
+  a neuron table's own `size` puts the Clusters table's `size` through as `size_c`.
+- **A wrong `Match on` is otherwise silent** — an empty table with every count correct. The card
+  says `4 labels · 0 neurons · ⚠ 4 matched nothing`, derived from the run for the reason
+  `unmatchedLabels` is: there is no channel from `evaluate` to a badge that survives a result
+  being restored from cache.
+
+**Known gap: `Skeletons` does not carry extra columns.** It fetches from the dataset, so a
+`cluster`/`color` put on a neuron table does not survive `Clusters to Neurons → Skeletons → 3D
+View` — the picker there reads `color (missing)`. Neuroglancer takes the neuron table directly
+and is unaffected. Closing it means joining the input table's extra columns onto the fetched
+attributes, which is a change to a fetch node every graph uses and has not been made.
+
+### `literal`: colours somebody else already chose
+
+A fifth `ColorMode`, opt-in per node via `colorParams({ allowLiteral: true })`, offered today by
+Neuroglancer, the 3D view, the Network and the Scatter. The cells **are** the colours.
+
+**It exists because `categorical` cannot reproduce a dendrogram.** `resolveColor` ranks values
+by frequency so the commonest takes the leading slot, then folds everything past eight into one
+achromatic bucket. `clusterColor` assigns `(cluster - 1) % 8`, by number, cycling — so the two
+agree only by luck, and "colour Neuroglancer by cluster" hands the biggest group the hue the
+first group was drawn in. Hence `out.dendrogram`'s `Selected` carries a **`color`** column
+beside its `cluster`, and something has to be able to honour it.
+
+- **`clusterColor` is shared** between the viewer and the node. Two copies is a tree whose
+  branches disagree with the neurons it sent to a 3D view; the node reaches into `src/ui` for
+  it, which is the licence `out.neuroglancer` already takes for `resolveColor`.
+- **The emitted hex is the _dark_ palette, pinned.** `evaluate` must be deterministic
+  (invariant 4) and a cache key does not change when somebody flips the theme, so resolving from
+  `currentMode()` would go stale with nothing to invalidate it. Dark because that is where the
+  colours are going — neuroglancer renders on black. The cost, stated: on a light canvas the
+  tree's own branches take the light ramp, a shade off the hex in the column.
+- **`cluster` and `color` are always present**, 0 and the achromatic ink where nothing has cut
+  the tree. A schema that gained and lost them as a Cut Tree came and went would silently empty
+  every picker pointing at them — `neuron.connectivity`'s rule for its own `hop` and `direction`.
+- **A cell that is not a colour goes grey rather than being coerced.** `#rgb`, `#rrggbb` and
+  `#rrggbbaa` only; a column of cell types under this mode is a mistake, and hashing the text
+  into a hue would produce a picture that looks deliberate.
+- **No legend.** A hex is not a name, so every swatch would be labelled with the colour beside
+  it.
+- Both exporters carry a third companion (`<tree>_clusters`, `NULL`/`None` from Linkage and the
+  cut from Cut Tree), since neither SciPy's `Z` nor R's `hclust` has anywhere to put a cut. The
+  palette is read off `clusterColor` rather than transcribed — an emitter may reach `src/ui`,
+  which is half of why the emitter registry is separate from the node definitions.
+
+### What it costs, and what is not verified
+
+**+18.6 kB raw / +6.1 kB gzipped on the main chunk**, measured against a build of the same tree
+with the feature absent (976.00 → 994.59 kB). The Pyodide worker grew 9.5 → 13.1 kB, carrying
+both `.py` files inlined; `main-*.js` still matches `jsdelivr` nowhere. Well under this
+codebase's bar for a lazy boundary (the exporters, at 17.6 kB gzipped).
+
+Clustering is **free next to the comparison it follows**: measured in Node against the real
+wheel, 400 observations in 2–4 ms and 2,000 in 33 ms, against roughly seventeen seconds to score
+500 neurons in the first place. `scripts/probe-linkage.mjs` (`pnpm probe:linkage`) runs
+`linkage.py` against that wheel through the same entry point the worker calls and asserts the
+*contract* — one merge fewer than observations, flat float64, `order` as int32 rather than the
+int64 numpy holds it in, heights ascending, no merge referencing a later cluster — plus one
+structural check on a planted two-block matrix, which is the cheapest thing that would catch a
+matrix handed over transposed or as similarities where distances were meant.
+
+### What was checked in a real browser
+
+Headless Chrome over CDP against `pnpm dev`, driving a shared-link graph of
+`Mock hemibrain → Find Neurons → Skeletons → NBLAST → Linkage → Cut Tree → Dendrogram` with the
+ordered matrix going to a Heatmap. That is also the only place the **worker runs two Python
+modules in one session**, which nothing in the suite covers: NBLAST boots the runtime and
+clustering arrives into it, both landing inside two seconds.
+
+Verified: fourteen leaves and thirteen brackets, merge heights to scale, both orientations
+(labels rotated under `down`, all fourteen inside the plot in both), the three clusters coloured
+with the branches *above* the cut in neutral grey, the caption, the styling rail in the overlay,
+a click lighting exactly the clade under it and nothing else, and no console errors. Both bugs
+above came out of this pass.
+
+The **light theme** was driven too, and comes out of the palette rather than out of a literal:
+surface `#fcfcfb`, the three cluster hues from the light categorical ramp, `#898781` above the
+cut and `#52514e` on the labels — all through `currentMode()`, `CHART_INK` and `seriesColor`,
+which is the only reason a viewer computing hex in JS survives a theme switch at all.
+
+What has **not** been looked at is a tree at the few-hundred-leaf end, where the label thinning
+actually bites, and the `Ordered` matrix beside a Heatmap at a size where the blocks matter.
 
 ## Auto-run
 
@@ -1756,6 +2045,29 @@ without export or expand.
   their colours as literal hex in JS, which is the only reason vector export is nearly
   free; if a viewer ever starts using a CSS variable for a fill, exported files will lose
   that colour.
+- **Tooltips are positioned in container coordinates, never viewport ones.** `.chart-tooltip`
+  was `position: fixed` with `left: event.clientX` for the life of four viewers, which is
+  correct everywhere except the place they are usually read: a **transformed ancestor becomes
+  the containing block for `fixed` descendants too**, and React Flow's viewport pane carries
+  `transform: translate(…) scale(z)`. So the tooltip was right in the expanded overlay, which
+  sits outside that pane, and hundreds of pixels adrift on a node card. Measured before the
+  fix: a dendrogram bracket hovered at (1254, 417) put its tooltip at (1787, 498), a heatmap
+  cell at (1098, 655) put its at (1693, 950).
+
+  Two corrections, and only doing one leaves it subtly wrong: the pointer has to be made
+  relative to the containing block, **and** the distance divided by the zoom, because a length
+  inside a `scale(z)` pane is drawn `z` times as long. `offsetWidth` ignores transforms where
+  `getBoundingClientRect()` has applied them, so their ratio *is* the zoom — the identity the
+  auto-layout measurement leans on. `tooltipPoint()` is that, shared by Heatmap, Bar Chart,
+  Scatter and Dendrogram; `NetworkViewer` never had the bug because it was already `absolute`
+  over sigma's container coordinates, which is what `.viewer`'s own `position: relative` comment
+  describes. Verified in a browser at three zoom levels — the gap tracks the camera at 4, 7 and
+  10 px for 0.35, 0.60 and 0.86, being one constant 12 local px throughout.
+
+  Note what the fix depends on: the container passed must be the tooltip's **containing block**.
+  That is `.viewer__scroll` for three of them and `.viewer` for the scatter, whose tooltip is a
+  sibling of its plot box — passing the wrong one is off by that element's own offset, which on
+  a card looks like a styling choice rather than a bug.
 - **Fullscreen** uses the real Fullscreen API on the overlay panel. `.overlay__panel:fullscreen`
   resets the backdrop padding and rounding, because in fullscreen the panel _is_ the root
   element and would otherwise render as a floating card with bars around it.

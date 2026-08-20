@@ -46,6 +46,7 @@ export const viewer3dNode = registerNode({
   params: [
     ...colorParams({
       prefix: 'skeleton',
+      allowLiteral: true,
       from: 'skeletons',
       label: 'Skeleton colour',
       defaultMode: 'categorical',
@@ -63,6 +64,7 @@ export const viewer3dNode = registerNode({
     },
     ...colorParams({
       prefix: 'mesh',
+      allowLiteral: true,
       from: 'meshes',
       label: 'Mesh colour',
       defaultMode: 'constant',
@@ -82,6 +84,7 @@ export const viewer3dNode = registerNode({
     },
     ...colorParams({
       prefix: 'point',
+      allowLiteral: true,
       from: 'points',
       label: 'Point colour',
       defaultMode: 'categorical',

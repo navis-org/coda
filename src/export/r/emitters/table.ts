@@ -9,20 +9,12 @@
 import { isNumericDType } from '../../../core/types'
 import type { AggFn } from '../../../nodes/lib/tableOps'
 import { aggColumnName } from '../../../nodes/lib/tableOps'
-import { rStr, rValue, rVector } from '../r'
+import { rCol, rStr, rValue, rVector } from '../r'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
 
-/**
- * A column reference inside a dplyr verb.
- *
- * Backticked always, not only when it needs it: neuPrint publishes columns like `pre` and
- * `post` that are fine bare and others that are not, and a rule with an exception is a rule
- * somebody gets wrong on the column that has a dot in it.
- */
-function col(name: string): string {
-  return `\`${name}\``
-}
+/** The short local name this file uses forty times over. The rule itself is `rCol`. */
+const col = rCol
 
 /**
  * Coda's comparison operators as R's.

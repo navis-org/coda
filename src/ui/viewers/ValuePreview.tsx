@@ -9,6 +9,7 @@ import {
   describeValue,
   isDatasetValue,
   isLayoutValue,
+  isLinkageValue,
   isMatrixValue,
   isMeshesValue,
   isNetworkValue,
@@ -28,6 +29,7 @@ import type { RoiView } from './roiProjection'
 import { ProfileViewer } from './ProfileViewer'
 import { ExportNodeContext } from './exportRegistry'
 import { ScatterViewer } from './ScatterViewer'
+import { DendrogramViewer } from './DendrogramViewer'
 import type { LayoutName } from './networkLayout'
 import type { FilterClause } from '../../nodes/lib/tableFilter'
 import { decodeClauses, encodeClauses } from '../../nodes/lib/tableFilter'
@@ -291,6 +293,19 @@ function ValuePreviewInner({
     )
   }
 
+  if (node.type === 'out.dendrogram' && isLinkageValue(value)) {
+    return (
+      <DendrogramViewer
+        linkage={value}
+        orientation={node.params.orientation === 'down' ? 'down' : 'right'}
+        showLabels={node.params.showLabels !== false}
+        selection={selection}
+        {...(onSelectionChange ? { onSelectionChange } : {})}
+        {...shared}
+      />
+    )
+  }
+
   if (node.type === 'out.heatmap' && isMatrixValue(value)) {
     return (
       <HeatmapViewer
@@ -444,12 +459,15 @@ function ValuePreviewInner({
     )
   }
 
-  // Scalars print themselves; a layout has nothing to draw on its own — it is an arrangement
-  // for someone else's nodes — so it falls back to the same summary the footer shows.
+  // Scalars print themselves. A layout and a linkage have nothing to draw on their own — one
+  // is an arrangement for someone else's nodes, the other a tree wired to no Dendrogram — so
+  // both fall back to the same summary the footer shows.
   return (
     <div className="viewer">
       <div className="viewer__empty">
-        {value.kind === 'layout' ? describeValue(value) : String(value.value)}
+        {value.kind === 'layout' || value.kind === 'linkage'
+          ? describeValue(value)
+          : String(value.value)}
       </div>
     </div>
   )

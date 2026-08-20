@@ -15,6 +15,7 @@
     "export:check": "vitest run src/export && python3 scripts/check-export.py && Rscript scripts/check-export.R",
     "export:golden": "UPDATE_GOLDEN=1 vitest run src/export",
     "probe:nblast": "node scripts/probe-nblast.mjs",
+    "probe:linkage": "node scripts/probe-linkage.mjs",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
     "lint": "eslint .",
     "preview": "vite preview",

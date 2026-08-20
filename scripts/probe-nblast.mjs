@@ -14,46 +14,13 @@
  * Pyodide is deliberately *not* a dependency of this project: the app loads it from a CDN at
  * run time and nothing in the bundle imports it. So this script asks for it and says how to
  * get it rather than assuming it is there — the same skip-with-a-notice `check-export.py` uses.
+ * Finding it, booting it and counting failures are shared with `probe-linkage.mjs` in
+ * `lib/pyodideProbe.mjs`; what stays here is the request shapes and the assertions.
  */
 
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
-import { dirname, join, resolve } from 'node:path'
+import { bootPyodide, probeReport, readRepoFile, sources } from './lib/pyodideProbe.mjs'
 
-const here = dirname(fileURLToPath(import.meta.url))
-const root = join(here, '..')
-
-// Read, never copied: `sources.json` exists so the app and this script cannot disagree about
-// which runtime is being checked.
-const sources = JSON.parse(readFileSync(join(root, 'src/pyodide/sources.json'), 'utf8'))
-
-// Resolved to an absolute path: a bare `node_modules/pyodide/pyodide.mjs` is read by `import()`
-// as a *specifier* rather than a path, so it would fail and fall through to the package below —
-// which happens to work, and would mean the env var silently did nothing.
-const pyodidePath = process.env.PYODIDE_PATH ? resolve(process.env.PYODIDE_PATH) : undefined
-
-async function loadRuntime() {
-  const candidates = [pyodidePath ? join(pyodidePath, 'pyodide.mjs') : undefined, 'pyodide'].filter(
-    Boolean,
-  )
-  for (const spec of candidates) {
-    try {
-      return await import(spec)
-    } catch {
-      /* try the next */
-    }
-  }
-  console.error(
-    'Pyodide is not installed here. `npm i pyodide` (or set PYODIDE_PATH to a directory\n' +
-      'holding pyodide.mjs) and run again. Nothing was checked.',
-  )
-  process.exit(2)
-}
-
-const t0 = performance.now()
-const { loadPyodide } = await loadRuntime()
-const py = await loadPyodide({ indexURL: pyodidePath ?? sources.pyodideIndex })
-console.log(`boot                 ${(performance.now() - t0).toFixed(0)} ms`)
+const py = await bootPyodide()
 
 let t = performance.now()
 await py.loadPackage('numpy', { messageCallback: () => {} })
@@ -64,7 +31,7 @@ await py.loadPackage(sources.fastcoreWheel, { messageCallback: () => {} })
 console.log(`navis-fastcore       ${(performance.now() - t).toFixed(0)} ms`)
 
 t = performance.now()
-py.runPython(readFileSync(join(root, 'src/pyodide/nblast.py'), 'utf8'))
+py.runPython(readRepoFile('src/pyodide/nblast.py'))
 console.log(`nblast.py            ${(performance.now() - t).toFixed(0)} ms`)
 
 // A synthetic neuron set in micrometres: a random walk per neuron, laid end to end exactly
@@ -89,32 +56,9 @@ function neurons(count, points) {
   return { points: xyz, parents, offsets }
 }
 
-/*
- * Every call is wrapped: a Python exception surfaces as a `PythonError` whose `message` holds
- * the traceback, and an unhandled one prints the whole minified Pyodide bundle instead — which
- * is not something anyone reads, least of all in CI.
- */
-function attempt(what, fn) {
-  try {
-    return fn()
-  } catch (error) {
-    console.error(`  FAIL  ${what}`)
-    for (const line of String(error?.message ?? error).split('\n').filter((l) => l.trim()).slice(-6)) {
-      console.error(`        ${line}`)
-    }
-    return undefined
-  }
-}
+const { check, attempt, finish } = probeReport()
 
 const run = py.globals.get('coda_nblast_run')
-
-let failures = 0
-function check(what, ok) {
-  if (!ok) {
-    failures += 1
-    console.error(`  FAIL  ${what}`)
-  }
-}
 
 for (const [count, points] of [
   [4, 200],
@@ -130,10 +74,7 @@ for (const [count, points] of [
       (f, note) => notes.push(`${f.toFixed(2)} ${note ?? ''}`),
     ),
   )
-  if (!proxy) {
-    failures += 1
-    continue
-  }
+  if (!proxy) continue
   const out = proxy.toJs({ dict_converter: Object.fromEntries })
   proxy.destroy()
   const ms = performance.now() - t
@@ -178,9 +119,7 @@ const knn = py.globals.get('coda_nblast_knn_run')
       undefined,
     ),
   )
-  if (!proxy) {
-    failures += 1
-  } else {
+  if (proxy) {
     const out = proxy.toJs({ dict_converter: Object.fromEntries })
     proxy.destroy()
     const ms = performance.now() - t
@@ -207,10 +146,4 @@ const knn = py.globals.get('coda_nblast_knn_run')
 knn.destroy()
 
 run.destroy()
-console.log(`heap                 ${(py._module.HEAP8.length / 1048576).toFixed(0)} MB`)
-
-if (failures > 0) {
-  console.error(`\n${failures} check(s) failed.`)
-  process.exit(1)
-}
-console.log('\nall checks passed')
+finish(py)

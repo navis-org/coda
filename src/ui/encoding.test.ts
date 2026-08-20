@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest'
 import { column, tableSchema } from '../core/types'
 import { tableFromRows } from '../core/values'
 import { MAX_SERIES, OTHER_LABEL, seriesColor } from './colors'
-import { hexToRgbFloat, resolveColor, resolveSize } from './encoding'
+import { clusterColor, hexToRgbFloat, literalColor, resolveColor, resolveSize } from './encoding'
 
 const SCHEMA = tableSchema(column('id', 'str'), column('type', 'str'), column('weight', 'f64'))
 
@@ -224,5 +224,112 @@ describe('hexToRgbFloat', () => {
   it('expands shorthand and survives nonsense', () => {
     expect(hexToRgbFloat('#fff')).toEqual([1, 1, 1])
     expect(hexToRgbFloat('not-a-colour')).toEqual([1, 1, 1])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Colours somebody else already decided
+// ---------------------------------------------------------------------------
+
+describe('literalColor', () => {
+  it('takes the three hex forms this palette actually emits', () => {
+    expect(literalColor('#3987e5')).toBe('#3987e5')
+    expect(literalColor('#abc')).toBe('#abc')
+    // `withAlpha` produces eight digits, and a link colour arrives that way.
+    expect(literalColor('#3987e5cc')).toBe('#3987e5cc')
+    expect(literalColor('  #3987E5  ')).toBe('#3987E5')
+  })
+
+  it('refuses anything that is not one, rather than coercing it', () => {
+    // A column of cell types under this mode is a mistake. Painting it grey says so, where
+    // hashing the text into a hue would produce a picture that looks deliberate.
+    expect(literalColor('LC4')).toBeUndefined()
+    expect(literalColor('red')).toBeUndefined()
+    expect(literalColor('3987e5')).toBeUndefined()
+    expect(literalColor('#12345')).toBeUndefined()
+    expect(literalColor(null)).toBeUndefined()
+    expect(literalColor(42)).toBeUndefined()
+  })
+})
+
+describe('clusterColor', () => {
+  it('gives cluster 1 the leading slot, so the leftmost group leads', () => {
+    expect(clusterColor(1, 'dark')).toBe(seriesColor(0, 'dark'))
+    expect(clusterColor(2, 'dark')).toBe(seriesColor(1, 'dark'))
+  })
+
+  it('cycles past the eighth rather than going achromatic', () => {
+    // The one place this departs from `resolveColor`'s categorical rule, and deliberately:
+    // clusters sit in leaf order along one axis, so two sharing a hue are visibly far apart.
+    expect(clusterColor(MAX_SERIES + 1, 'dark')).toBe(seriesColor(0, 'dark'))
+  })
+
+  it('gives an uncut leaf the achromatic ink, not a palette slot', () => {
+    // Belonging to no group is not being a ninth category.
+    expect(clusterColor(0, 'dark')).not.toBe(seriesColor(0, 'dark'))
+    expect(clusterColor(0, 'dark')).toBe(clusterColor(-1, 'dark'))
+  })
+
+  it('follows the theme, which is why the node pins one', () => {
+    expect(clusterColor(1, 'light')).not.toBe(clusterColor(1, 'dark'))
+  })
+})
+
+describe('resolveColor — literal', () => {
+  const table = tableFromRows(
+    tableSchema(column('bodyId', 'i64'), column('color', 'str')),
+    [
+      { bodyId: 1, color: '#3987e5' },
+      { bodyId: 2, color: '#d95926' },
+      { bodyId: 3, color: 'not a colour' },
+      { bodyId: 4, color: null },
+    ],
+  )
+
+  it('uses the cells as they stand', () => {
+    const resolved = resolveColor(table, { mode: 'literal', column: 'color', constant: '0' }, 'dark')
+    expect(resolved.at(0)).toBe('#3987e5')
+    expect(resolved.at(1)).toBe('#d95926')
+  })
+
+  it('does not rank by frequency, which is the whole reason the mode exists', () => {
+    /*
+     * `categorical` gives the most common value the leading slot. A dendrogram numbers its
+     * clusters left to right, so colouring by the cluster *number* hands the biggest group the
+     * hue the first group was drawn in — the two agree only by luck.
+     */
+    const many = tableFromRows(tableSchema(column('color', 'str')), [
+      { color: '#d95926' },
+      { color: '#d95926' },
+      { color: '#3987e5' },
+    ])
+    const literal = resolveColor(many, { mode: 'literal', column: 'color', constant: '0' }, 'dark')
+    expect(literal.at(2)).toBe('#3987e5')
+
+    const categorical = resolveColor(
+      many,
+      { mode: 'categorical', column: 'color', constant: '0' },
+      'dark',
+    )
+    // The commonest value takes slot 0, so the rarer one is *not* the colour it names.
+    expect(categorical.at(2)).not.toBe('#3987e5')
+  })
+
+  it('greys a cell that is not a colour, and a null', () => {
+    const resolved = resolveColor(table, { mode: 'literal', column: 'color', constant: '0' }, 'dark')
+    expect(resolved.at(2)).toBe(resolved.at(3))
+    expect(resolved.at(2)).not.toBe('#3987e5')
+  })
+
+  it('offers no legend, because a hex is not a name', () => {
+    // Every swatch would be labelled with the colour beside it.
+    expect(
+      resolveColor(table, { mode: 'literal', column: 'color', constant: '0' }, 'dark').legend,
+    ).toBeUndefined()
+  })
+
+  it('falls back to the flat colour with no column picked', () => {
+    const resolved = resolveColor(table, { mode: 'literal', column: undefined, constant: '0' }, 'dark')
+    expect(resolved.at(0)).toBe(resolved.at(2))
   })
 })

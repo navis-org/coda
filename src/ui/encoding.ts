@@ -10,7 +10,7 @@
  * a legend is colour-as-sole-channel, which the accessibility pass rules out.
  */
 
-import type { TableValue } from '../core/values'
+import type { CellValue, TableValue } from '../core/values'
 import { getColumn } from '../core/values'
 import type { ColorSpec, SizeSpec } from '../nodes/lib/encodingParams'
 import type { Mode } from './colors'
@@ -71,6 +71,36 @@ function constantColor(spec: ColorSpec, mode: Mode): string {
 }
 
 /**
+ * A cell read as a colour, or undefined where it is not one.
+ *
+ * `#rgb`, `#rrggbb` and `#rrggbbaa` — the three forms the rest of this module already emits and
+ * `withAlpha` already produces. Anything else is **not** coerced: a column of cell types under
+ * this mode is a mistake, and painting it grey says so where guessing a hue from the text would
+ * produce a picture that looks deliberate. Same null-as-grey rule the other modes follow.
+ */
+export function literalColor(cell: CellValue | undefined): string | undefined {
+  if (typeof cell !== 'string') return undefined
+  const text = cell.trim()
+  return /^#(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(text) ? text : undefined
+}
+
+/**
+ * The colour a cluster is drawn in, wherever it is drawn.
+ *
+ * One rule, because two would be a dendrogram whose branches disagree with the neurons it sent
+ * to a 3D view. Cluster numbers are 1-based and 0 means *not cut*, which takes the achromatic
+ * ink rather than a palette slot — a leaf belonging to no group is not a ninth category.
+ *
+ * **Hues cycle past the eighth**, which is the one place this departs from `resolveColor`'s
+ * categorical rule, and deliberately: there a repeated hue claims two series are the same
+ * thing, where clusters sit in leaf order along one axis so two sharing a hue are visibly far
+ * apart. `DendrogramViewer` says so in its caption when it happens.
+ */
+export function clusterColor(cluster: number, mode: Mode): string {
+  return cluster <= 0 ? CHART_INK[mode].muted : seriesColor((cluster - 1) % MAX_SERIES, mode)
+}
+
+/**
  * Build a colour accessor over an attribute table.
  *
  * Falls back to the constant colour whenever the chosen column is missing or unusable, so
@@ -95,6 +125,25 @@ export function resolveColor(
     data = getColumn(attributes, spec.column)
   } catch {
     return fallback
+  }
+
+  /*
+   * Literal: the cells *are* the colours, so nothing is derived and nothing is ranked.
+   *
+   * The point of the mode is that a producer has already decided, and the usual categorical
+   * pass would quietly overrule it — `resolveColor` ranks by frequency where a dendrogram
+   * numbers its clusters left to right, so "colour by cluster" gives the biggest group the
+   * leading slot rather than the one it was drawn in.
+   *
+   * **No legend.** A hex is not a name, so there is nothing to key: the swatches would be
+   * correct and every label beside them would be `#3987e5`. Silence beats a legend that only
+   * repeats the colour it is next to.
+   */
+  if (spec.mode === 'literal') {
+    return {
+      at: (rowIndex) => literalColor(data[rowIndex]) ?? MUTED,
+      legend: undefined,
+    }
   }
 
   if (spec.mode === 'sequential') {

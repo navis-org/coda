@@ -20,7 +20,7 @@ import type { CompositeRef, ParamDef } from '../../core/node'
  * means something — neuroglancer hash-colours each segment, which is genuinely useful and is
  * also the shortest link. In-app viewers have no such notion, so they do not enable it.
  */
-export type ColorMode = 'default' | 'constant' | 'categorical' | 'sequential'
+export type ColorMode = 'default' | 'constant' | 'categorical' | 'sequential' | 'literal'
 
 /** The eight validated categorical slots, by name, so a constant colour stays in-palette. */
 export const CONSTANT_COLOR_OPTIONS = [
@@ -77,6 +77,20 @@ export interface ColorParamOptions {
    */
   allowDefault?: { label: string }
   /**
+   * Offer the `literal` mode: the chosen column already holds colours.
+   *
+   * Opt-in for the reason `allowDefault` is, though the reasoning runs the other way. That one
+   * is offered by a single node and would be *wrong* elsewhere; this one is simply useless
+   * where nothing upstream produces colours, and a mode that lands on grey for every table in
+   * the app is a control that teaches people not to trust the picker.
+   *
+   * What it is *for*: a producer that has already decided the colours and needs them honoured
+   * rather than re-derived. `out.dendrogram` is the first — its `Selected` carries the hue each
+   * leaf was drawn in, and `categorical` on the cluster number cannot reproduce it, because
+   * `resolveColor` ranks categories by frequency where a dendrogram numbers them left to right.
+   */
+  allowLiteral?: boolean
+  /**
    * Which data-driven modes to offer; defaults to both.
    *
    * Exists because a mode can be wrong for a *mark* rather than for a node. `sequential` on a
@@ -130,6 +144,9 @@ export function colorParams(options: ColorParamOptions): ParamDef[] {
             ? { value: 'categorical', label: 'by category' }
             : { value: 'sequential', label: 'by value' },
         ),
+        // Last: it is the specialist of the four, and only ever means anything when something
+        // upstream has put colours in a column.
+        ...(options.allowLiteral ? [{ value: 'literal', label: 'colours in a column' }] : []),
       ],
     },
     {

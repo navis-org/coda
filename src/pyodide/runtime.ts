@@ -29,6 +29,7 @@
  * that moves the ABI needs a wheel built against it, which is why `sources.json` pins both.
  */
 
+import LINKAGE_PY from './linkage.py?raw'
 import NBLAST_PY from './nblast.py?raw'
 import sources from './sources.json'
 import type { PyArg, PyResult } from './types'
@@ -60,6 +61,15 @@ interface PyModule {
 const MODULES: Record<string, PyModule> = {
   nblast: {
     source: NBLAST_PY,
+    packages: ['numpy', sources.fastcoreWheel],
+    label: `numpy · navis-fastcore ${sources.fastcoreVersion}`,
+  },
+  // The same two packages, which is what makes this one nearly free once NBLAST has run:
+  // `loadPackage` is a no-op for what is already installed, so all a second module costs then
+  // is `runPython` of its own definitions. It still declares them rather than leaning on the
+  // first — a graph that clusters an Adjacency matrix never touches NBLAST at all.
+  linkage: {
+    source: LINKAGE_PY,
     packages: ['numpy', sources.fastcoreWheel],
     label: `numpy · navis-fastcore ${sources.fastcoreVersion}`,
   },

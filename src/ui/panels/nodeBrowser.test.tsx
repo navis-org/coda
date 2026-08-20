@@ -157,6 +157,7 @@ describe('NodeBrowser filtering', () => {
       '3D View',
       'Bar Chart',
       'Dataset Summary',
+      'Dendrogram',
       'Heatmap',
       'Network',
       'Neuroglancer',
@@ -165,7 +166,7 @@ describe('NodeBrowser filtering', () => {
       'Scatter Plot',
       'Table',
     ])
-    expect(screen.getByText('10 nodes')).toBeTruthy()
+    expect(screen.getByText('11 nodes')).toBeTruthy()
   })
 
   it('fuzzy-searches across every category, best match first', () => {

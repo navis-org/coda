@@ -42,6 +42,7 @@ import {
 } from './scatterPlot'
 import type { ExportSource } from './ViewerActions'
 import { ViewerActions } from './ViewerActions'
+import { tooltipPoint } from './tooltipPoint'
 import { useElementSize } from './useElementSize'
 import { useStable } from './useStable'
 
@@ -111,6 +112,12 @@ export function ScatterViewer({
   onError,
 }: ScatterViewerProps) {
   const [wrapRef, box] = useElementSize<HTMLDivElement>()
+  /*
+   * The tooltip is a child of `.viewer`, not of the plot box, so that is the element its
+   * `left`/`top` resolve against. The two share an origin today — the canvas is the first flex
+   * child — but naming the right one is what keeps that a coincidence rather than a dependency.
+   */
+  const viewerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [view, setView] = useState<Viewport | undefined>(undefined)
   const [hovered, setHovered] = useState<{ index: number; x: number; y: number } | null>(null)
@@ -320,7 +327,7 @@ export function ScatterViewer({
 
     if (!gesture) {
       const index = hitIndex?.nearest(x, y, HOVER_RADIUS) ?? -1
-      setHovered(index >= 0 ? { index, x: event.clientX, y: event.clientY } : null)
+      setHovered(index >= 0 ? { index, ...tooltipPoint(event, viewerRef.current) } : null)
       return
     }
 
@@ -495,7 +502,7 @@ export function ScatterViewer({
   const hoveredRow = hovered && spec ? spec.rows[hovered.index] : undefined
 
   return (
-    <div className="viewer">
+    <div className="viewer" ref={viewerRef}>
       <div
         ref={wrapRef}
         className="scatter-canvas nowheel nodrag"

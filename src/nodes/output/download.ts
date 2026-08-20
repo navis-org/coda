@@ -93,6 +93,7 @@ export const downloadNode = registerNode({
         { value: 'json', label: 'JSON' },
         { value: 'swc', label: 'SWC (skeletons)' },
         { value: 'obj', label: 'OBJ (meshes)' },
+        { value: 'newick', label: 'Newick (trees)' },
         { value: 'svg', label: 'SVG (upstream chart)' },
         { value: 'png', label: 'PNG (upstream chart)' },
       ],

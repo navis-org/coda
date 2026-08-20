@@ -194,6 +194,50 @@ export interface LayoutValue {
   readonly algorithm?: string
 }
 
+/**
+ * A hierarchical clustering of the things some matrix was over.
+ *
+ * **Not a table of `[a, b, height, size]`**, and that is the same call `LayoutValue` makes: a
+ * linkage is not data about neurons, it is a tree computed *for* one particular set of them.
+ * As a table it would accept any four numeric columns, need four column pickers to configure,
+ * and be silently destroyed by a Sort or a Filter upstream of whatever drew it — none of which
+ * a reader would connect to the wrong picture they got.
+ *
+ * `merges` is SciPy's `Z` ravelled: one merge per four entries, `[a, b, height, size]`, where
+ * `a` and `b` are observation indices below `labels.length` and cluster indices above it — the
+ * cluster formed at step `i` is numbered `labels.length + i`. That layout is not ours to
+ * invent; it is what `scipy.cluster.hierarchy`, R's `hclust` and navis-fastcore all speak, and
+ * keeping it means the notebook export is a translation rather than a reimplementation.
+ *
+ * **Merges are in ascending height order**, which the five methods Coda offers all guarantee.
+ * That is not true of hierarchical clustering in general — see `LINKAGE_METHODS` for the two
+ * methods left out and the measurement behind it.
+ */
+export interface LinkageValue {
+  readonly kind: 'linkage'
+  /** Row-major `(labels.length - 1) x 4`: `[a, b, height, size]` per merge. */
+  readonly merges: Float64Array
+  /** One per observation, in observation order. Index `i` names observation `i`. */
+  readonly labels: string[]
+  /**
+   * The observations left to right, so a dendrogram draws without crossing itself. A
+   * permutation of `0..n-1`, so `order.map(i => labels[i])` is the drawing order.
+   */
+  readonly order: Int32Array
+  /**
+   * A cluster number per observation, 1-based, or absent where nothing has cut the tree.
+   *
+   * Optional, and absent means *not cut* rather than *one cluster* — the same distinction
+   * `MatrixValue.measure` draws. `cluster.cut` is what sets it, which is what lets a
+   * Dendrogram downstream of a Cut colour its branches with no second input and no picker.
+   */
+  readonly clusters?: Int32Array
+  /** Which linkage method built it, for a caption. */
+  readonly method?: string
+  /** What a height means, e.g. `1 - NBLAST score`. For the axis, and for honesty. */
+  readonly distanceLabel?: string
+}
+
 export type Value =
   | TableValue
   | MatrixValue
@@ -204,6 +248,7 @@ export type Value =
   | MeshesValue
   | PointsValue
   | LayoutValue
+  | LinkageValue
 
 // ---------------------------------------------------------------------------
 // Constructors
@@ -419,6 +464,54 @@ export function isLayoutValue(v: Value | undefined): v is LayoutValue {
   return !!v && v.kind === 'layout'
 }
 
+export function isLinkageValue(v: Value | undefined): v is LinkageValue {
+  return !!v && v.kind === 'linkage'
+}
+
+/** How many merges. `merges` is four numbers each, so this is not its length. */
+export function linkageMergeCount(v: LinkageValue): number {
+  return v.merges.length / 4
+}
+
+/**
+ * A tree, checked against itself.
+ *
+ * The one place the three arrays are compared, for the reason `makeMatrix` exists: `merges`,
+ * `labels` and `order` are built by three different pieces of code — Python, the node, and
+ * fastcore — and a drift between them reaches the viewer as a tree drawn over the wrong names
+ * rather than as an error.
+ */
+export function makeLinkage(
+  merges: Float64Array,
+  labels: string[],
+  order: Int32Array,
+  extra: { clusters?: Int32Array; method?: string; distanceLabel?: string } = {},
+): LinkageValue {
+  const expected = Math.max(0, labels.length - 1) * 4
+  if (merges.length !== expected) {
+    throw new Error(
+      `makeLinkage: ${labels.length} labels needs ${expected / 4} merges, got ${merges.length / 4}`,
+    )
+  }
+  if (order.length !== labels.length) {
+    throw new Error(`makeLinkage: ${labels.length} labels but ${order.length} in the leaf order`)
+  }
+  if (extra.clusters && extra.clusters.length !== labels.length) {
+    throw new Error(
+      `makeLinkage: ${labels.length} labels but ${extra.clusters.length} cluster assignments`,
+    )
+  }
+  return {
+    kind: 'linkage',
+    merges,
+    labels,
+    order,
+    ...(extra.clusters ? { clusters: extra.clusters } : {}),
+    ...(extra.method ? { method: extra.method } : {}),
+    ...(extra.distanceLabel ? { distanceLabel: extra.distanceLabel } : {}),
+  }
+}
+
 export function makeLayout(
   positions: Record<string, { x: number; y: number }>,
   algorithm?: string,
@@ -473,6 +566,10 @@ export function describeValue(v: Value | undefined): string {
     case 'layout': {
       const count = Object.keys(v.positions).length
       return `${count.toLocaleString()} placed${v.algorithm ? ` · ${v.algorithm}` : ''}`
+    }
+    case 'linkage': {
+      const cut = v.clusters ? ` · ${new Set(v.clusters).size} clusters` : ''
+      return `${v.labels.length} leaves${v.method ? ` · ${v.method}` : ''}${cut}`
     }
     case 'string': {
       // Elided, because this is a one-line footer and a string value can be enormous — the

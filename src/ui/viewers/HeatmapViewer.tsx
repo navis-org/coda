@@ -11,6 +11,7 @@ import {
 } from '../colors'
 import { exportBaseName as makeBaseName, matrixToCsv } from '../export'
 import { formatCompact, formatNumber, truncateLabel } from '../format'
+import { tooltipPoint } from './tooltipPoint'
 import type { ExportSource } from './ViewerActions'
 import { ViewerActions } from './ViewerActions'
 import { useElementSize } from './useElementSize'
@@ -179,7 +180,8 @@ export function HeatmapViewer({
                       height={h}
                       fill={fill}
                       onMouseMove={(e) =>
-                        setHover({ row: r, col: c, x: e.clientX, y: e.clientY })
+                        // Container coordinates, not the viewport's — see `tooltipPoint`.
+                        setHover({ row: r, col: c, ...tooltipPoint(e, ref.current) })
                       }
                       onMouseLeave={() => setHover(null)}
                     />
