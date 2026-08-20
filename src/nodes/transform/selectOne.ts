@@ -59,6 +59,8 @@ export const selectOneNode = registerNode({
   label: 'Select One',
   category: 'transform',
   description: 'Step through a table, skeletons or meshes and emit one element at a time.',
+  guide:
+    'Step through a collection one element at a time — one row of a table, one neuron of a skeleton set. Explore → Select One → Skeletons → 3D View is the shape it exists for: looking at the neurons of a result one by one without editing a filter for each. Browsing is free and committing is not, so the arrows move the card while Use this moves the port; turn Live on and the two move together, which is what you want on a cheap chain and not on an expensive one.',
   // No network and no serious CPU: taking one element of a collection already in hand.
   cost: 'cheap',
   inputs: [{ id: 'in', label: 'Items', type: T.any() }],

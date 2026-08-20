@@ -34,6 +34,8 @@ export const textNoteNode = registerNode({
   label: 'Text',
   category: 'utility',
   description: 'A block of text on the canvas — what a graph is for, in words. Markdown.',
+  guide:
+    'A block of markdown on the canvas: what a graph is for, why this threshold, what the chart at the end is meant to show. It is not part of the pipeline — no sockets, never evaluated, never counted as stale — which is exactly what makes it safe to leave anywhere. Double-click to edit, Escape to abandon the edit; drag it anywhere in read mode.',
   annotation: true,
   cost: 'cheap',
   inputs: [],

@@ -1,0 +1,1099 @@
+/*
+ * The node guide.
+ *
+ * Same construction as the tutorial page: tokens come from the app's own `theme.css` rather
+ * than a second copy of the palette, so the socket colours, the category tints and the node
+ * card here cannot drift from the editor's. Everything below is page layout.
+ *
+ * Unlike the tutorial, this page does *not* pin `data-theme="dark"`. The field guide is read
+ * once, front to back; this one is a reference kept open beside the editor, and a dark
+ * reference sheet next to a light canvas is the wrong half of the pair to be stubborn about.
+ * So it follows `prefers-color-scheme` exactly as the app does.
+ */
+
+@import '../ui/theme.css';
+
+:root {
+  --gutter: clamp(1rem, 4vw, 3rem);
+  /* The search hit's wash. Amber rather than the accent, which is byte-identical to the
+     Table socket colour and to categorical slot 0 — a highlight has no business colliding
+     with an encoding. */
+  --mark: rgba(250, 178, 25, 0.32);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --mark: rgba(250, 178, 25, 0.26);
+  }
+}
+:root[data-theme='dark'] {
+  --mark: rgba(250, 178, 25, 0.26);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--canvas);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  /* theme.css pins this off for the editor canvas; a document wants it back. */
+  overscroll-behavior: auto;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  text-wrap: balance;
+  letter-spacing: -0.028em;
+  font-weight: 800;
+  line-height: 1.08;
+}
+p {
+  margin: 0;
+}
+button {
+  font: inherit;
+  color: inherit;
+}
+a {
+  color: inherit;
+  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+  text-underline-offset: 3px;
+}
+a:hover {
+  text-decoration-color: currentColor;
+}
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+.shell {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding-inline: var(--gutter);
+}
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* --------------------------------------------------------------------------
+   Masthead
+   -------------------------------------------------------------------------- */
+.top {
+  position: relative;
+  border-bottom: 1px solid var(--border);
+  background:
+    radial-gradient(
+      900px 380px at 82% 10%,
+      color-mix(in srgb, var(--accent) 9%, transparent),
+      transparent 68%
+    ),
+    var(--canvas);
+  overflow: hidden;
+}
+.top__dots {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(var(--canvas-dot) 1px, transparent 1px);
+  background-size: 22px 22px;
+  opacity: 0.8;
+  pointer-events: none;
+}
+.top__inner {
+  position: relative;
+  display: grid;
+  gap: 1.1rem;
+  padding-block: clamp(1.6rem, 4vw, 2.9rem) clamp(1.4rem, 3vw, 2rem);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.brand svg {
+  color: var(--text-primary);
+  flex: none;
+}
+.brand__tag {
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  padding: 0.1em 0.7em;
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 0.1em;
+}
+.brand__spacer {
+  flex: 1;
+}
+.brand a {
+  color: var(--text-muted);
+}
+.brand a:hover {
+  color: var(--text-primary);
+}
+
+.top h1 {
+  font-size: clamp(1.9rem, 4.4vw, 3.1rem);
+  max-width: 20ch;
+  letter-spacing: -0.035em;
+}
+.top h1 em {
+  font-style: normal;
+  color: var(--text-muted);
+}
+.top__sub {
+  max-width: 58ch;
+  color: var(--text-secondary);
+  font-size: clamp(1rem, 1.5vw, 1.12rem);
+}
+
+/* --------------------------------------------------------------------------
+   Control bar
+   -------------------------------------------------------------------------- */
+.bar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: color-mix(in srgb, var(--canvas) 88%, transparent);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+}
+.bar__inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem 0.9rem;
+  padding-block: 0.7rem;
+}
+
+.search {
+  position: relative;
+  flex: 1 1 260px;
+  min-width: 200px;
+}
+.search svg {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  pointer-events: none;
+}
+.search input {
+  width: 100%;
+  font: inherit;
+  font-size: 14px;
+  padding: 0.5rem 2.6rem 0.5rem 2.1rem;
+  background: var(--surface-2);
+  color: var(--text-primary);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+}
+.search input::placeholder {
+  color: var(--text-muted);
+}
+.search input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.search__key {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.1em 0.4em;
+  background: var(--surface-3);
+  pointer-events: none;
+}
+.search input:not(:placeholder-shown) ~ .search__key {
+  display: none;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  padding: 0.3rem 0.6rem;
+  border-radius: 999px;
+  cursor: pointer;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.chip:hover {
+  color: var(--text-primary);
+}
+.chip__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--dot, var(--text-muted));
+  flex: none;
+}
+.chip[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--dot, var(--accent)) 15%, var(--surface-2));
+  border-color: var(--dot, var(--accent));
+  color: var(--text-primary);
+}
+.chip__n {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.count b {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* --------------------------------------------------------------------------
+   Workbench
+   -------------------------------------------------------------------------- */
+.work {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 400px);
+  gap: clamp(1.25rem, 3vw, 2.5rem);
+  align-items: start;
+  padding-block: clamp(1.5rem, 3vw, 2.5rem) 4rem;
+}
+
+.group {
+  padding-block: 0.5rem 1.7rem;
+}
+.group__head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding-block: 0.35rem 0.9rem;
+}
+/* Numbered because dataset → query → transform → viewer is a real pipeline order.
+   Utility sits outside that sequence and gets a dot instead. */
+.group__n {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  width: 22px;
+  height: 22px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  letter-spacing: 0;
+  align-self: center;
+}
+.group__title {
+  font-size: 1.02rem;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+}
+.group__note {
+  color: var(--text-muted);
+  font-size: 0.86rem;
+  min-width: 0;
+  flex: 1;
+}
+.group__rule {
+  height: 1px;
+  background: var(--border);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 0.6rem;
+  padding-top: 0.9rem;
+}
+
+/* --- a node tile --------------------------------------------------------- */
+.tile {
+  position: relative;
+  display: grid;
+  gap: 0.4rem;
+  text-align: left;
+  cursor: pointer;
+  padding: 0.6rem 0.65rem 0.55rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid color-mix(in srgb, var(--cat) 70%, transparent);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-node);
+  transition:
+    transform 0.16s ease,
+    border-color 0.16s ease,
+    opacity 0.2s ease;
+}
+.tile:hover {
+  transform: translateY(-1px);
+  border-color: var(--border-strong);
+  border-left-color: var(--cat);
+}
+.tile[aria-pressed='true'] {
+  border-color: var(--accent);
+  border-left-color: var(--accent);
+  box-shadow:
+    0 0 0 1px var(--accent),
+    var(--shadow-node);
+}
+.tile[data-dim='1'] {
+  opacity: 0.3;
+  filter: saturate(0.35);
+}
+.tile[data-dim='1']:hover {
+  opacity: 0.65;
+}
+.tile[data-hit='1'] {
+  border-color: color-mix(in srgb, var(--status-stale) 65%, transparent);
+}
+
+.tile__top {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+.tile__glyph {
+  color: var(--cat);
+  flex: none;
+}
+.tile__label {
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: -0.012em;
+  line-height: 1.3;
+  min-width: 0;
+}
+.tile__ports {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin-top: 1px;
+}
+.tile__ports .gap {
+  width: 9px;
+  height: 1px;
+  background: var(--border-strong);
+}
+.tile__cost {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0 0.4em;
+}
+.tile__cost[data-cost='expensive'] {
+  color: color-mix(in srgb, var(--status-stale) 80%, var(--text-secondary));
+  border-color: color-mix(in srgb, var(--status-stale) 45%, transparent);
+}
+
+/* A socket pip, shared by the tiles, the legend and the socket list. */
+.pip {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--socket-scalar);
+  flex: none;
+  display: inline-block;
+}
+.pip[data-fam='table'] {
+  background: var(--socket-table);
+}
+.pip[data-fam='matrix'] {
+  background: var(--socket-matrix);
+}
+.pip[data-fam='dataset'],
+.pip[data-fam='geometry'] {
+  background: var(--socket-dataset);
+}
+.pip[data-shape='ring'] {
+  background: var(--surface-2);
+  border: 2px solid var(--socket-table);
+}
+.pip[data-shape='ring'][data-fam='matrix'] {
+  border-color: var(--socket-matrix);
+}
+.pip[data-shape='ring'][data-fam='any'] {
+  border-color: var(--socket-scalar);
+}
+.pip[data-shape='square'] {
+  border-radius: 2px;
+}
+.pip[data-shape='diamond'] {
+  border-radius: 1px;
+  transform: rotate(45deg);
+  width: 8px;
+  height: 8px;
+}
+.pip[data-shape='hex'] {
+  border-radius: 1px;
+  clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%);
+}
+.pip[data-shape='dot'] {
+  width: 5px;
+  height: 5px;
+}
+.pip[data-req='0'] {
+  opacity: 0.45;
+}
+
+mark {
+  background: var(--mark);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+.empty {
+  display: none;
+  padding: 3rem 1rem;
+  text-align: center;
+  color: var(--text-muted);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  margin-top: 1rem;
+}
+.empty[data-on='1'] {
+  display: block;
+}
+.empty b {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+}
+
+/* --------------------------------------------------------------------------
+   Detail pane
+   -------------------------------------------------------------------------- */
+/* Scrollable, because the pane must never clip: out.network alone carries 33
+   settings, which is taller than most viewports. */
+.detail {
+  position: sticky;
+  top: 68px;
+  display: grid;
+  gap: 0.9rem;
+  max-height: calc(100vh - 84px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.panel {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-panel);
+  overflow: hidden;
+}
+.legendbox {
+  padding: 0.85rem 1rem 1rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.panel__head {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.95rem 1rem 0.85rem;
+  border-bottom: 1px solid var(--border);
+}
+.panel__cat {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+.panel__cat .eyebrow {
+  color: var(--cat);
+}
+.panel__cat .rule {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.panel__title {
+  font-size: 1.32rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+.panel__desc {
+  color: var(--text-secondary);
+  font-size: 0.94rem;
+  line-height: 1.58;
+}
+.panel__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.5rem;
+  padding-top: 0.15rem;
+}
+.badge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.12em 0.55em;
+}
+.badge[data-kind='type'] {
+  color: var(--text-muted);
+}
+.badge[data-kind='expensive'] {
+  color: color-mix(in srgb, var(--status-stale) 80%, var(--text-secondary));
+  border-color: color-mix(in srgb, var(--status-stale) 45%, transparent);
+}
+.badge[data-kind='cheap'] {
+  color: color-mix(in srgb, var(--status-ok) 78%, var(--text-secondary));
+  border-color: color-mix(in srgb, var(--status-ok) 40%, transparent);
+}
+
+.panel__body {
+  padding: 0.95rem 1rem 1.1rem;
+  display: grid;
+  gap: 1rem;
+}
+.sub {
+  display: grid;
+  gap: 0.4rem;
+}
+.sub__h {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.ports {
+  display: grid;
+  gap: 0.28rem;
+}
+.portrow {
+  display: grid;
+  grid-template-columns: 1.8rem 1fr auto;
+  gap: 0.5rem;
+  align-items: center;
+  font-size: 12.5px;
+}
+.portrow .dir {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.portrow .nm {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--text-primary);
+  min-width: 0;
+}
+.portrow .nm span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.portrow .ty {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+.portrow .opt {
+  color: var(--text-muted);
+}
+
+/* --- settings, with help behind a disclosure ------------------------------ */
+.plist {
+  display: grid;
+  gap: 0.15rem;
+}
+.setting {
+  display: grid;
+  gap: 0.1rem;
+}
+.setting__row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.5rem;
+  align-items: baseline;
+  font-size: 12.5px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  padding: 0.12rem 0;
+  border-radius: 3px;
+}
+button.setting__row {
+  cursor: pointer;
+}
+button.setting__row:hover {
+  background: var(--surface-3);
+}
+.setting__name {
+  color: var(--text-secondary);
+  min-width: 0;
+}
+/* A dotted underline is the long-standing "there is more here" convention, and it
+   costs no width in a column that is already tight. */
+button.setting__row .setting__name {
+  text-decoration: underline dotted color-mix(in srgb, var(--text-muted) 70%, transparent);
+  text-underline-offset: 3px;
+}
+button.setting__row[aria-expanded='true'] .setting__name {
+  color: var(--text-primary);
+}
+.setting__value {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-primary);
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0 0.4em;
+  max-width: 15ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.setting__flag {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.setting__help {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  padding: 0.15rem 0 0.4rem 0.7rem;
+  border-left: 2px solid var(--border);
+  margin-bottom: 0.2rem;
+}
+.setting__help[hidden] {
+  display: none;
+}
+
+.hint {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.more {
+  margin-top: 0.15rem;
+}
+.more > summary {
+  cursor: pointer;
+  list-style: none;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+  padding: 0.1rem 0;
+  width: fit-content;
+}
+.more > summary::-webkit-details-marker {
+  display: none;
+}
+.more > summary::before {
+  content: '+ ';
+}
+.more[open] > summary::before {
+  content: '\2212 ';
+}
+.more > summary:hover {
+  color: var(--text-primary);
+}
+.more .plist {
+  padding-top: 0.3rem;
+}
+
+/* --------------------------------------------------------------------------
+   The preview — a real Coda card, built the way the editor builds one.
+
+   Same construction as the tutorial page's cards, and for the same reason: a
+   guide that drew its own approximation of a node would be the one place a
+   reader could learn something untrue about what a socket looks like.
+   -------------------------------------------------------------------------- */
+.preview {
+  background:
+    radial-gradient(var(--canvas-dot) 1px, transparent 1px) 0 0 / 20px 20px,
+    var(--canvas);
+  border-bottom: 1px solid var(--border);
+  padding: 1.4rem 1rem;
+  display: grid;
+  place-items: center;
+}
+.node {
+  position: relative;
+  width: min(100%, 236px);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-node);
+  font-size: 12px;
+  overflow: hidden;
+  --state-bar: 3px;
+}
+.node::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--state-bar);
+  background: var(--status-ok);
+  z-index: 1;
+}
+.node__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1.5;
+  padding: 5px 8px 5px calc(8px + var(--state-bar));
+  background: color-mix(in srgb, var(--cat) 16%, var(--surface-2));
+  border-bottom: 1px solid var(--border);
+}
+.node__title {
+  flex: 1;
+  font-weight: 650;
+  font-size: 12px;
+  letter-spacing: -0.01em;
+}
+.node__play {
+  font-size: 10px;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0 4px;
+  line-height: 1.5;
+}
+
+.node__ports {
+  padding: 4px 0;
+}
+/* Inputs left, outputs right, paired by row — the editor's own arrangement. */
+.port {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  align-items: center;
+  min-height: 20px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.port__in,
+.port__out {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.port__in {
+  padding-left: calc(11px + var(--state-bar));
+}
+.port__out {
+  text-align: right;
+  padding-right: 11px;
+}
+.port__in:empty,
+.port__out:empty {
+  visibility: hidden;
+}
+
+.sock {
+  position: absolute;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 1.5px solid var(--surface-2);
+  background: var(--socket-scalar);
+  top: 50%;
+  transform: translateY(-50%);
+}
+.sock--in {
+  left: calc(-6px + var(--state-bar));
+}
+.sock--out {
+  right: -6px;
+}
+.sock[data-fam='table'] {
+  background: var(--socket-table);
+}
+.sock[data-fam='matrix'] {
+  background: var(--socket-matrix);
+}
+.sock[data-fam='dataset'],
+.sock[data-fam='geometry'] {
+  background: var(--socket-dataset);
+}
+.sock[data-shape='ring'] {
+  background: var(--surface-2);
+  border-width: 2.5px;
+  border-color: var(--socket-table);
+}
+.sock[data-shape='ring'][data-fam='matrix'] {
+  border-color: var(--socket-matrix);
+}
+.sock[data-shape='ring'][data-fam='any'] {
+  border-color: var(--socket-scalar);
+}
+.sock[data-shape='square'] {
+  border-radius: 2px;
+}
+.sock[data-shape='diamond'] {
+  border-radius: 2px;
+  width: 10px;
+  height: 10px;
+  transform: translateY(-50%) rotate(45deg);
+}
+.sock[data-shape='hex'] {
+  border-radius: 1px;
+  clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%);
+}
+.sock[data-shape='dot'] {
+  width: 7px;
+  height: 7px;
+}
+
+.node__params {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 5px 8px 6px calc(8px + var(--state-bar));
+  border-top: 1px solid var(--border);
+}
+.prow {
+  display: grid;
+  grid-template-columns: 1fr 1.15fr;
+  gap: 6px;
+  align-items: center;
+}
+.prow span {
+  font-size: 10.5px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prow b {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 400;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 5px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prow b.is-picker::after {
+  content: '▾';
+  float: right;
+  color: var(--text-muted);
+  margin-left: 4px;
+}
+/* The card's own "… N more" line, which is how the editor says a node has
+   settings that are not on it. */
+.node__more {
+  padding: 3px 8px 5px calc(8px + var(--state-bar));
+  font-size: 10px;
+  color: var(--text-muted);
+  text-align: right;
+}
+.node__foot {
+  display: flex;
+  gap: 6px;
+  padding: 3px 8px 4px calc(8px + var(--state-bar));
+  border-top: 1px solid var(--border);
+  background: var(--surface-3);
+  font-size: 10px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.node__foot span:first-child {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A text note draws no chrome at all — the card is the paper. */
+.note-card {
+  width: min(100%, 236px);
+  background: var(--note-surface);
+  border: 1.5px solid var(--note-border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-node);
+  padding: 9px 11px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+.note-card strong {
+  display: block;
+  color: var(--text-primary);
+  font-size: 12.5px;
+  margin-bottom: 2px;
+}
+
+/* --- "seen in" ------------------------------------------------------------ */
+.seen {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.seen a {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.1em 0.6em;
+  text-decoration: none;
+}
+.seen a:hover {
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+
+/* --------------------------------------------------------------------------
+   Legend and footer
+   -------------------------------------------------------------------------- */
+.legend {
+  display: grid;
+  gap: 0.35rem;
+}
+.legend__row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.legend__row .nm {
+  font-weight: 600;
+  color: var(--text-primary);
+  min-width: 5.5em;
+}
+.legend__row .why {
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.foot {
+  border-top: 1px solid var(--border);
+  background: var(--surface-1);
+}
+.foot__inner {
+  display: grid;
+  gap: 1rem;
+  padding-block: 1.4rem 1.8rem;
+}
+/* The one sentence on the page addressed to somebody who did not find what they came for,
+   so it is prose at reading size rather than another mono meta item — a request set in the
+   footer's 11px grey reads as small print nobody is expected to act on. */
+.foot__ask {
+  max-width: 62ch;
+  font-size: 0.94rem;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+.foot__ask strong {
+  color: var(--text-primary);
+  font-weight: 650;
+}
+.foot__ask a {
+  color: var(--accent);
+  text-decoration-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.foot__ask a:hover {
+  text-decoration-color: currentColor;
+}
+.foot__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* --------------------------------------------------------------------------
+   Responsive
+   -------------------------------------------------------------------------- */
+@media (max-width: 1080px) {
+  .work {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .detail {
+    position: static;
+    order: -1;
+    max-height: none;
+    overflow: visible;
+  }
+}
+@media (max-width: 560px) {
+  .grid {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  }
+  .bar__inner {
+    gap: 0.5rem;
+  }
+  .count {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+  .tile:hover {
+    transform: none;
+  }
+}

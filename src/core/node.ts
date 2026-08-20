@@ -288,7 +288,22 @@ export interface NodeDefinition<P extends ParamValues = ParamValues> {
   type: string
   label: string
   category: NodeCategory
+  /** One line, sized for a palette row and the node browser. Kept terse on purpose. */
   description?: string
+  /**
+   * Two or three sentences for the node guide (`nodes.html`) — what the node is for, what it
+   * hands on, and the one thing that surprises people about it.
+   *
+   * Separate from `description` rather than a longer version of it, because the two are read
+   * in different places at different moments: a palette row has one line of space and somebody
+   * scanning it already knows roughly what they want, where a guide page is read by somebody
+   * deciding whether this is the node at all. Collapsing them would make one of the two wrong —
+   * a palette row wrapping to four lines, or a guide entry that says nothing.
+   *
+   * Prose, not markdown: the guide renders it as a paragraph, and a subset parser there would
+   * be a second copy of `ui/markdown.ts` on a page that deliberately imports nothing.
+   */
+  guide?: string
   cost: NodeCost
   /**
    * Tabs for a grouped styling panel, in display order; a param's `group` names one.

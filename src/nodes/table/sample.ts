@@ -22,6 +22,8 @@ export const sampleNode = registerNode({
   label: 'Sample',
   category: 'transform',
   description: 'Keep a subset of the rows: the top, the bottom, every Nth, or a random draw.',
+  guide:
+    'Cut a table down to a manageable size: the top, the bottom, every Nth row, or a random draw. The random mode takes a seed and the draw is reproducible from it, so a figure made from a sample can be remade — which is the whole reason the seed is a visible parameter rather than a hidden one. The other three modes ignore the seed entirely and cost nothing when it changes.',
   cost: 'cheap',
   inputs: [{ id: 'in', label: 'Table', type: T.table() }],
   outputs: [{ id: 'out', label: 'Table', type: T.table() }],

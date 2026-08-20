@@ -14,6 +14,7 @@ export const myNode = registerNode({
   label: 'My Thing',
   category: 'table',           // input | query | table | analysis | output | utility
   description: 'One line, shown in the palette and as the header tooltip.',
+  guide: 'Two or three sentences for the node guide. Required — see "Prose" below.',
   cost: 'cheap',               // see "Cost" below — this is not a cosmetic choice
 
   inputs: [{ id: 'in', label: 'Table', type: T.table() }],
@@ -43,6 +44,28 @@ export const myNode = registerNode({
 
 Then export it from [`src/nodes/index.ts`](../src/nodes/index.ts). That file is the node
 pack; importing it registers everything.
+
+## Prose
+
+Two fields, read in two places at two different moments, and both are required.
+
+`description` is **one line**, sized for a palette row and the node browser. Somebody reading it
+already knows roughly what they want and is scanning for the name.
+
+`guide` is **two or three sentences** for [the node guide](../nodes.html) (`nodes.html`), read by
+somebody deciding whether this is the node at all. Say what it is for, what it hands on, and the
+one thing that surprises people about it — the trade you made, the parameter that is not what it
+looks like, the failure it is easy to walk into. It is prose, not markdown: the guide renders it
+as a paragraph, and a subset parser there would be a second copy of `ui/markdown.ts` on a page
+that deliberately imports nothing.
+
+Collapsing the two would make one of them wrong: a palette row wrapping to four lines, or a guide
+entry that says nothing. `nodeGuide.test.ts` fails a node that ships without a `guide`, or one
+whose `guide` merely repeats its `description`.
+
+Everything else on the guide page is derived — sockets, settings, defaults, the preview card, the
+"seen in" cross-reference against the bundled examples. Adding a node is these two strings and
+nothing else; see `src/nodeguide/data.ts`.
 
 ## Cost
 
@@ -169,6 +192,7 @@ the node, its version dropdown and its body:
   family: 'male-cns',      // family half of a `family:version` dataset id
   label: 'MaleCNS',
   description: '…',
+  guide: '…',              // the node guide's paragraph; the factory passes it through
   glyph: 'cns',            // brain | vnc | cns | optic | specimen
   // synthetic: true,      // generated in the browser: no Description companion, nobody to cite
 }

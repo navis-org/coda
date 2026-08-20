@@ -2808,6 +2808,16 @@ select.field {
   font-family: var(--font-mono);
   flex: none;
 }
+/* The one link in a row of keyboard hints, so it has to read as a link rather than as
+   another shortcut — hence the accent and the underline on hover. */
+.node-browser__guide {
+  color: var(--accent);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.node-browser__guide:hover {
+  text-decoration: underline;
+}
 
 /* Narrow windows: drop the right-hand meta column rather than squeezing everything. */
 @media (max-width: 680px) {

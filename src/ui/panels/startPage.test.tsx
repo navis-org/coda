@@ -133,6 +133,17 @@ describe('Start page', () => {
       expect(guide.getAttribute('href')).toBe(`${import.meta.env.BASE_URL}tutorial.html`)
       expect(guide.getAttribute('rel')).toContain('noopener')
     })
+
+    /*
+     * The reference half of the pair, and a third vite entry with the same standing as the
+     * second: not a route, so nothing else catches it going missing.
+     */
+    it('offers the node guide beside Docs, composed the same way', () => {
+      render(<StartPage />)
+      const guide = screen.getByRole('link', { name: 'Node guide' })
+      expect(guide.getAttribute('href')).toBe(`${import.meta.env.BASE_URL}nodes.html`)
+      expect(guide.getAttribute('rel')).toContain('noopener')
+    })
   })
 
   describe('picking something', () => {
@@ -260,6 +271,16 @@ describe('Start page', () => {
       const guide = await screen.findByRole('link', { name: /Field Guide/ })
       expect(guide.getAttribute('href')).toBe(`${import.meta.env.BASE_URL}tutorial.html`)
       // A button here would lose the graph on the canvas; a link opens a tab.
+      expect(guide.tagName).toBe('A')
+    })
+
+    it('offers the node guide in the same menu, as a separate item', async () => {
+      act(() => useGraphStore.getState().closeStartPage())
+      render(<App />)
+
+      fireEvent.click(screen.getByRole('button', { name: 'Help' }))
+      const guide = await screen.findByRole('link', { name: /Node Guide/ })
+      expect(guide.getAttribute('href')).toBe(`${import.meta.env.BASE_URL}nodes.html`)
       expect(guide.tagName).toBe('A')
     })
 

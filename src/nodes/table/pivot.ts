@@ -31,6 +31,8 @@ export const pivotNode = registerNode({
   category: 'transform',
   description:
     'Reshape a long table into a matrix of rows × columns, as a matrix and a wide table.',
+  guide:
+    'Reshape a long table into rows × columns — the step between a connectivity result and a heatmap. It emits both shapes of the same pivot: a Matrix for the Heatmap and Normalize, and the same thing wide as an ordinary Table, which is what makes a pivot sortable, filterable and exportable without a second node. The wide table’s columns are the distinct values of the Columns field, so nothing can name them until it has run once.',
   cost: 'cheap',
   inputs: [{ id: 'in', label: 'Table', type: T.table() }],
   outputs: [

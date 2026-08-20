@@ -99,6 +99,20 @@ describe('NodeBrowser layout', () => {
     expect(screen.getByText(`${listableNodeDefs().length} nodes`)).toBeTruthy()
   })
 
+  /*
+   * The browser is where somebody picks a node they may not know, so it is the one surface
+   * that should offer the reference. A link rather than a button, because the browser is modal
+   * over a graph and answering "what is Pivot?" must not cost the canvas behind it.
+   */
+  it('links the node guide from the footer, through BASE_URL', () => {
+    open()
+    const guide = screen.getByRole('link', { name: /Node guide/ })
+    expect(guide.getAttribute('href')).toBe(`${import.meta.env.BASE_URL}nodes.html`)
+    expect(guide.getAttribute('rel')).toContain('noopener')
+    // The keyboard hints it sits beside must survive it.
+    expect(screen.getByText(/Space opens the command palette/)).toBeTruthy()
+  })
+
   it('gives every row a thumbnail', () => {
     const { container } = open()
     const rows = container.querySelectorAll('.node-row')

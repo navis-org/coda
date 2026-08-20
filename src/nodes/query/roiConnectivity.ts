@@ -43,6 +43,8 @@ export const roiConnectivityNode = registerNode({
   label: 'ROI Connectivity',
   category: 'query',
   description: 'Region-to-region connectivity for the whole dataset, as a matrix and a table.',
+  guide:
+    'Region-to-region connectivity for the whole dataset, precomputed on neuPrint’s side, so a whole connectome answers in a few hundred kilobytes. Emits both a matrix for the Heatmap and a long table for everything else. The matrix carries count, which is a synapse count and unambiguous; the table also carries neuPrint’s weight, which is scaled or normalised in a way that is not documented — treat it as the server’s number rather than as synapses.',
   cost: 'expensive',
   inputs: [{ id: 'dataset', label: 'Dataset', type: T.dataset() }],
   outputs: [

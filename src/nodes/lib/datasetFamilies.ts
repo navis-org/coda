@@ -36,6 +36,8 @@ export interface DatasetFamily {
   family: string
   label: string
   description: string
+  /** The node guide's paragraph. See `NodeDefinition.guide`. */
+  guide: string
   glyph: DatasetGlyph
   /**
    * Generated in the browser rather than reconstructed by anyone.
@@ -60,6 +62,8 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     label: 'MaleCNS',
     description:
       'Whole central nervous system of an adult male fly — brain and ventral nerve cord.',
+    guide:
+      'The largest fly connectome published so far: 165,122 traced neurons across brain and nerve cord, so a circuit can be followed from a sensory neuron to the muscle it drives without leaving the dataset. That size is also what you are paying for — an unbounded query here is a real load on a shared server, and Explore downloads about 7 MB before it can search.',
     glyph: 'cns',
   },
   {
@@ -69,6 +73,8 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     label: 'Hemibrain',
     description:
       'Central brain of an adult female fly. The most heavily annotated fly connectome.',
+    guide:
+      'The dataset most published fly circuit work is built on, and the one with the richest annotation: cell type, class, cell body fibre, soma radius, hemilineage. It is one hemisphere of the central brain, so a neuron whose partner sits on the other side has that partner truncated rather than missing — worth remembering before reading a low synapse count as weak.',
     glyph: 'brain',
   },
   {
@@ -77,6 +83,8 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     family: 'manc',
     label: 'MANC',
     description: 'Male adult nerve cord — the ventral nerve cord, motor and premotor circuits.',
+    guide:
+      'The ventral nerve cord on its own: motor neurons, the premotor circuits driving them, and the descending neurons arriving from the brain. Pairs naturally with MaleCNS, which contains the same territory in a whole-animal volume; MANC is the older and more heavily curated reconstruction of it.',
     glyph: 'vnc',
   },
   {
@@ -86,6 +94,8 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     label: 'Optic Lobe',
     description:
       'The right optic lobe: medulla, lobula and lobula plate, columnar to the core.',
+    guide:
+      'One optic lobe, reconstructed to the column — medulla, lobula and lobula plate. Columnar cell types repeat across the retinotopic array, so this is the dataset where a type is a population of hundreds rather than a handful, and where averaging across a type actually means something.',
     glyph: 'optic',
   },
   {
@@ -95,6 +105,8 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     label: 'FIB-19',
     description:
       'An early FIB-SEM volume of the mushroom body and surrounds. Small and partial.',
+    guide:
+      'An early FIB-SEM volume from before the hemibrain, covering the mushroom body and its surrounds. Small, partial and largely of historical interest — useful mainly as a fast dataset to try a pipeline on, or for comparing against the reconstructions that followed it.',
     glyph: 'brain',
   },
   {
@@ -103,6 +115,8 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     family: 'mushroombody',
     label: 'Mushroom Body',
     description: 'Mushroom body reconstruction. Carries no version in its dataset id.',
+    guide:
+      'A dedicated mushroom body reconstruction: Kenyon cells, the output neurons and the dopaminergic neurons that modulate them. It is the one dataset here whose id carries no version, so its version dropdown has nothing to pin and the node simply names the dataset.',
     glyph: 'brain',
   },
 ]
@@ -116,6 +130,8 @@ const MOCK_FAMILIES: DatasetFamily[] = [
     label: 'Hemibrain (mini)',
     description:
       'Synthetic mushroom-body-like connectome generated in the browser. No token needed.',
+    guide:
+      'A connectome generated in the browser at load, shaped like a mushroom body — Kenyon cells, output neurons, a modulatory population. Nothing is fetched and no token is needed, which is what makes it the dataset the bundled examples run on and the right place to try a pipeline before pointing it at a real volume.',
     glyph: 'brain',
     synthetic: true,
   },
@@ -126,6 +142,8 @@ const MOCK_FAMILIES: DatasetFamily[] = [
     label: 'Optic Lobe (mini)',
     description:
       'Synthetic optic-lobe-like connectome generated in the browser. No token needed.',
+    guide:
+      'A synthetic optic lobe, generated in the browser with the columnar repetition a real one has. Same standing as the mini hemibrain: no token, no network, deterministic from a seed — so a graph built on it gives the same answer on any machine.',
     glyph: 'optic',
     synthetic: true,
   },

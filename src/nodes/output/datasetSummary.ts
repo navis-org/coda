@@ -58,6 +58,8 @@ export const datasetSummaryNode = registerNode({
   category: 'visualisation',
   description:
     'What is in a dataset: neuron counts, how they are classified, and how completely each region is traced.',
+  guide:
+    'The question that comes before all the others: what is actually in this dataset? Neuron counts, how they break down by class, side and flow, and how completely each region has been reconstructed. That last chart is the one no other surface here can draw, and it is worth reading before trusting a connectivity result out of a region that turns out to be 39% traced.',
   cost: 'cheap',
   // Profile's box. The two are the same kind of card — a grid of tiles read at a glance — and a
   // summary that opened narrower than the thing it is a sibling of would read as less important.

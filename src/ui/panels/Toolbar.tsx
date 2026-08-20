@@ -159,6 +159,21 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
               <strong>Field Guide</strong>
               <span>Nodes, wires, queries and viewers, from the beginning</span>
             </a>
+            {/*
+             * The reference half of the pair. The field guide is read once, front to back;
+             * this is the one somebody comes back to with a node in mind, which is why both
+             * are offered rather than the second being a section of the first.
+             */}
+            <a
+              className="dropdown__item"
+              href={`${import.meta.env.BASE_URL}nodes.html`}
+              target="_blank"
+              rel="noreferrer noopener"
+              onClick={close}
+            >
+              <strong>Node Guide</strong>
+              <span>Every node: what it takes, what it hands on, what it draws</span>
+            </a>
           </>
         )}
       </Dropdown>

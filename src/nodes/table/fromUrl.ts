@@ -65,6 +65,8 @@ export const tableFromUrlNode = registerNode({
   label: 'Table from URL',
   category: 'utility',
   description: 'Fetch a CSV from a URL and read it as a table.',
+  guide:
+    'The same CSV, fetched rather than picked — which is the one thing Upload Table cannot do: a URL is reproducible, so a colleague opening your .coda.json gets the data too. What it gives up is working on a file that only exists on somebody’s disk, behind a login, or on a host that sends no CORS headers. Refresh is the only thing that re-fetches, because a file at a fixed URL can change under a fixed set of parameters.',
   cost: 'expensive',
   inputs: [],
   outputs: [{ id: 'out', label: 'Table', type: T.table() }],

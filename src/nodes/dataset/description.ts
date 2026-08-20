@@ -29,6 +29,8 @@ export const datasetDescriptionNode = registerNode({
   category: 'dataset',
   description:
     'What a dataset covers, who made it and how to cite it, as its publisher states it.',
+  guide:
+    'A credit card, and the text on it is the publisher’s rather than ours — neuPrint ships a markdown blurb per dataset naming the project, its companion viewers and the papers to cite, which nothing else in Coda renders. It arrives already wired whenever you add a dataset node, because a connectome is years of somebody’s reconstruction work published with a request for attribution, and a picker labelled “MaleCNS” gives no hint of that. Delete it and it stays deleted; Add ▸ Dataset ▸ Description brings it back.',
   /*
    * Cheap despite reaching the network: the listing is one small JSON per deployment, it is
    * already in hand whenever the dataset node upstream has run, and `evaluate` only asks for it

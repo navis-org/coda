@@ -7,6 +7,8 @@ export const heatmapNode = registerNode({
   label: 'Heatmap',
   category: 'visualisation',
   description: 'Render a matrix as a heatmap.',
+  guide:
+    'A matrix drawn as a grid of coloured cells — the natural end of Adjacency or Pivot. Sequential for counts and fractions, diverging when zero is a meaningful middle, as it is after a log-ratio. Put a Normalize in front of it if one row dominates: a heatmap of raw synapse counts is usually a picture of which cell type is numerous.',
   cost: 'cheap',
   inputs: [{ id: 'in', label: 'Matrix', type: T.matrix() }],
   outputs: [{ id: 'out', label: 'Matrix', type: T.matrix() }],

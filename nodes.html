@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Coda Node Guide</title>
+    <meta
+      name="description"
+      content="Every node in Coda: what it takes, what it hands on, and the card it draws — searchable, grouped by where it sits in a pipeline."
+    />
+    <link rel="icon" href="./logo.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f9f9f7" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#171716" />
+  </head>
+  <body>
+    <!-- ======================================================================
+         Masthead. Everything below the control bar is rendered by main.ts from
+         the node registry — see src/nodeguide/data.ts.
+         ====================================================================== -->
+    <header class="top">
+      <div class="top__dots" aria-hidden="true"></div>
+      <div class="shell top__inner">
+        <div class="brand">
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 64 64"
+            fill="currentColor"
+            aria-hidden="true"
+          >
+            <path
+              fill-rule="evenodd"
+              d="M32 12a18 20 0 1 0 0 40 18 20 0 1 0 0-40Zm0 3.6a12.24 16.4 0 1 1 0 32.8 12.24 16.4 0 1 1 0-32.8Z"
+            />
+            <rect x="30" y="5" width="4" height="54" rx="2" />
+            <rect x="7" y="30" width="50" height="4" rx="2" />
+          </svg>
+          <span>Coda &middot; Node guide</span>
+          <span class="brand__tag">Alpha</span>
+          <span class="brand__spacer"></span>
+          <a href="./tutorial.html">Field guide &rarr;</a>
+        </div>
+
+        <h1>Every node in Coda, <em>and what it hands on</em></h1>
+
+        <p class="top__sub">
+          A pipeline reads left to right: a dataset, a query against it, a transform or two, and
+          a viewer at the end. Pick any card to see its sockets, its settings and the card it
+          draws on the canvas.
+        </p>
+      </div>
+    </header>
+
+    <div class="bar">
+      <div class="shell bar__inner">
+        <div class="search">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.2"
+            stroke-linecap="round"
+            aria-hidden="true"
+          >
+            <circle cx="10.5" cy="10.5" r="6.5" />
+            <line x1="15.5" y1="15.5" x2="21" y2="21" />
+          </svg>
+          <input
+            id="q"
+            type="search"
+            placeholder="Search nodes, sockets and settings"
+            autocomplete="off"
+            spellcheck="false"
+            aria-label="Search nodes"
+            aria-describedby="count"
+          />
+          <span class="search__key" aria-hidden="true">/</span>
+        </div>
+        <div class="chips" id="chips" role="group" aria-label="Filter by category"></div>
+        <p class="count" id="count" aria-live="polite"></p>
+      </div>
+    </div>
+
+    <main class="shell work">
+      <div>
+        <div id="groups"></div>
+        <p class="empty" id="empty">
+          Nothing matches <b id="emptyq"></b>. Try a socket type &mdash; <b>matrix</b>,
+          <b>skeletons</b> &mdash; or a setting like <b>hops</b>.
+        </p>
+      </div>
+
+      <aside class="detail" aria-label="Node detail">
+        <article class="panel" id="panel"></article>
+
+        <section class="panel legendbox">
+          <h2 class="sub__h">Reading a socket</h2>
+          <div class="legend" id="legend"></div>
+          <p class="hint">
+            Colour, shape and the label beside it all say the same thing &mdash; three channels,
+            because only three hues clear the colourblind gate on this surface.
+          </p>
+        </section>
+      </aside>
+    </main>
+
+    <footer class="foot">
+      <div class="shell foot__inner">
+        <p class="foot__ask">
+          <strong>Nothing here does what you need?</strong>
+          <a
+            href="https://github.com/navis-org/coda/issues/new"
+            target="_blank"
+            rel="noreferrer noopener"
+            >Open an issue</a
+          >
+          and say what you were trying to work out. The question is more useful than a proposed
+          node &mdash; often it turns out two of the ones above already answer it, and when it
+          does not, that is how the next node gets written.
+        </p>
+        <div class="foot__meta">
+          <span id="stamp"></span>
+          <span>Generated from the node registry</span>
+          <span><a href="https://github.com/navis-org/coda">Source</a></span>
+        </div>
+      </div>
+    </footer>
+
+    <script type="module" src="/src/nodeguide/main.ts"></script>
+  </body>
+</html>

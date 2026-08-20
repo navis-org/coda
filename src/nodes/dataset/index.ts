@@ -68,6 +68,7 @@ function buildDatasetNode(family: DatasetFamily) {
     label: family.label,
     category: 'dataset',
     description: family.description,
+    guide: family.guide,
     ...(family.synthetic ? {} : { companion: DESCRIPTION_COMPANION }),
     // Cheap: it only resolves metadata, so switching version updates every downstream column
     // picker instantly while the actual queries stay stale until Run.
@@ -155,6 +156,12 @@ export const customNeuPrintNode = registerNode({
   label: 'Custom neuPrint',
   category: 'dataset',
   description: 'Any neuPrint deployment and dataset, named by hand.',
+  guide:
+    'The escape hatch for a dataset Coda ships no node for: a release newer than this build, a ' +
+    'private deployment, or a neuPrint instance somewhere else entirely. Type the server and the ' +
+    'dataset id exactly as that server names it, version included. Note that Server here means a ' +
+    'neuPrint deployment, not the Base URL override under Connections — the two are different ' +
+    'settings and naming one does not set the other.',
   companion: DESCRIPTION_COMPANION,
   cost: 'cheap',
   outputs: [{ id: 'dataset', label: 'Dataset', type: T.dataset() }],

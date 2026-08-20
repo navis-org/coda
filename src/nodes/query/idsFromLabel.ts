@@ -43,6 +43,8 @@ export const idsFromLabelNode = registerNode({
   label: 'IDs from Label',
   category: 'query',
   description: 'Resolve cell type or other labels back to the neurons carrying them.',
+  guide:
+    'The inverse query. Every other node here narrows a population; this one resolves a named set — labels in, the neurons carrying them out. Labels come from a text box and from an optional table column, and the two union, so a list pasted from a paper and the preType column of a connectivity result can go in together. Literal matching is the default because a label is text somebody copied, and SMP001(a) is not a regular expression anyone meant to write.',
   cost: 'expensive',
   inputs: [
     { id: 'dataset', label: 'Dataset', type: T.dataset() },

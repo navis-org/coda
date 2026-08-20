@@ -61,6 +61,8 @@ export const neuroglancerNode = registerNode({
   label: 'Neuroglancer',
   category: 'visualisation',
   description: "Open the incoming neurons in the dataset's own neuroglancer scene.",
+  guide:
+    'Opens the incoming neurons in the dataset’s own published neuroglancer scene — the EM volume, the region meshes and the synapse layers that scene already carries, with your neurons added to it. The node emits a URL and the card embeds it, so it is both a viewer and something to paste into an email. Every setting is inspector-only, because a row of pickers above a 400-pixel embed takes a tenth of the space somebody opened the node for.',
   cost: 'cheap',
   /*
    * Big enough that the embed is worth having on the canvas at all. Only a starting point —

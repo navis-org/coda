@@ -30,6 +30,8 @@ export const connectivityNode = registerNode({
   label: 'Connectivity',
   category: 'query',
   description: 'Fetch synaptic partners for the incoming neurons, one or more hops out.',
+  guide:
+    'Who is wired to these neurons. The output is an edge list rather than a partner list — every row is preId → postId oriented the way the synapse points, whichever direction you asked for, so Build Network downstream is correct with nothing to think about. Past one hop the traversal expands every neuron it reached, so Min weight is what keeps a two-hop query from pulling half the connectome; both is the undirected ball rather than two cones, which is what finds the neurons sharing input with your seed.',
   cost: 'expensive',
   inputs: [
     { id: 'dataset', label: 'Dataset', type: T.dataset() },

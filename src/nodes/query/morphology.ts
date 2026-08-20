@@ -41,6 +41,8 @@ export const skeletonsNode = registerNode({
   label: 'Skeletons',
   category: 'query',
   description: 'Fetch branching morphologies for the incoming neurons.',
+  guide:
+    'Branching morphologies for the incoming neurons — the wire-frame shape of the cell, ready for the 3D View. Each skeleton arrives with an attribute row of its own, so colouring by cell type is a column picker rather than a special case in the viewer. Coordinates come out in nanometres, converted from the dataset’s voxels, so a skeleton and a mesh of the same neuron sit in the same space.',
   cost: 'expensive',
   inputs: [
     { id: 'dataset', label: 'Dataset', type: T.dataset() },
@@ -100,6 +102,8 @@ export const meshesNode = registerNode({
   label: 'Meshes',
   category: 'query',
   description: 'Fetch surface meshes for the incoming neurons.',
+  guide:
+    'Surface meshes for the incoming neurons: the filled shape rather than the wire frame, which is what you want for a figure and for seeing where a neurite actually thickens. Meshes come from public object stores rather than from neuPrint, so they need no token and work in a static deploy. Detail picks the finest level of the published multi-resolution mesh that fits a triangle budget across the whole batch — the caption says which level it settled on.',
   cost: 'expensive',
   inputs: [
     { id: 'dataset', label: 'Dataset', type: T.dataset() },
@@ -177,6 +181,8 @@ export const synapsesNode = registerNode({
   label: 'Synapses',
   category: 'query',
   description: 'Fetch synapse locations as a 3D point cloud.',
+  guide:
+    'Synapse locations as a 3D point cloud, one point per synapse with its polarity and partner in the attribute table. Drawn in the same space as skeletons and meshes, so a scene can colour neurons by cell type and their synapses by direction at once. This is the node that turns “these two are connected” into “and here is where”.',
   cost: 'expensive',
   inputs: [
     { id: 'dataset', label: 'Dataset', type: T.dataset() },

@@ -33,6 +33,8 @@ export const roiCompletenessNode = registerNode({
   category: 'query',
   description:
     'How completely each region of the dataset has been reconstructed: traced synapses against the total present.',
+  guide:
+    'The one query that asks about the volume rather than about neurons: nothing wired but a Dataset. Each row pairs the synapses belonging to reconstructed neurons with the synapses that are there at all, which is the answer to “where in here can I trust the numbers?”. The gap is real and large — hemibrain is 91% complete on presynaptic sites and 39% on postsynaptic ones — and it is why a connectivity result from one region can mean something quite different from the same result out of another.',
   cost: 'expensive',
   inputs: [{ id: 'dataset', label: 'Dataset', type: T.dataset() }],
   outputs: [

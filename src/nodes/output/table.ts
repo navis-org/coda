@@ -14,6 +14,8 @@ export const tableViewNode = registerNode({
   label: 'Table',
   category: 'visualisation',
   description: 'Show a table. Passes data through, so it can sit anywhere in the chain.',
+  guide:
+    'The plain view: rows and columns, sortable, paged, exportable as CSV. Like every viewer here it passes its input straight through, so it can be dropped into the middle of a chain to see what is actually on a wire without breaking anything downstream. Sorting is view-only and costs no run.',
   cost: 'cheap',
   inputs: [{ id: 'in', label: 'Table', type: T.table() }],
   outputs: [{ id: 'out', label: 'Table', type: T.table() }],

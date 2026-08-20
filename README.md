@@ -37,6 +37,13 @@ single scrolling page that builds a real pipeline as you read — nodes, wires, 
 Explore, the viewers, and saving your work. It is built with the app (`tutorial.html`), so it
 also opens from **?&nbsp;▾ ▸ Field Guide** in the toolbar and from the welcome screen.
 
+Then the **[node guide](https://navis-org.github.io/coda/nodes.html)** (`nodes.html`, **?&nbsp;▾ ▸
+Node Guide**, and a link in the add-node browser) is the reference half: every node grouped by
+where it sits in a pipeline, searchable by socket type or setting name, each one showing its
+sockets, its settings and the card it draws on the canvas. It is generated from the node registry
+at build time, so it cannot drift from the app — see
+[docs/adding-a-node.md](docs/adding-a-node.md) if you are adding one.
+
 **New ▾** offers an empty canvas or a graph already pointed at a dataset, which builds
 `Dataset → Explore → Table`.
 

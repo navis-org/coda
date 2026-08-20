@@ -16,6 +16,8 @@ export const filterNode = registerNode({
   label: 'Filter',
   category: 'transform',
   description: 'Keep rows matching a condition on one column.',
+  guide:
+    'Keep the rows matching one condition. The operator list follows the column’s type — pick a number and you get ≥, ≤, between; pick text and you get contains and matches — which is schema propagation doing something visible. It is cheap, so the result re-computes as you type a threshold, with nothing waiting for Run.',
   cost: 'cheap',
   inputs: [{ id: 'in', label: 'Table', type: T.table() }],
   outputs: [{ id: 'out', label: 'Table', type: T.table() }],

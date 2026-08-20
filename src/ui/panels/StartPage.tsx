@@ -37,6 +37,8 @@ const ISSUES_URL = `${REPO_URL}/issues`
  * root and 404s on GitHub Pages.
  */
 const TUTORIAL_URL = `${import.meta.env.BASE_URL}tutorial.html`
+/** The node reference, built as a third entry. Same `BASE_URL` reasoning as above. */
+const NODE_GUIDE_URL = `${import.meta.env.BASE_URL}nodes.html`
 
 export function StartPage() {
   const open = useGraphStore((s) => s.startPageOpen)
@@ -246,6 +248,10 @@ export function StartPage() {
               for bugs and feature requests ·{' '}
               <a href={TUTORIAL_URL} target="_blank" rel="noreferrer noopener">
                 Docs
+              </a>{' '}
+              ·{' '}
+              <a href={NODE_GUIDE_URL} target="_blank" rel="noreferrer noopener">
+                Node guide
               </a>
             </span>
           </div>

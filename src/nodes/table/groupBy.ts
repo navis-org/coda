@@ -21,6 +21,8 @@ export const groupByNode = registerNode({
     'Collapse rows into groups and aggregate a value column. The result carries the group ' +
     'columns, a row count named `n`, and the aggregate renamed `<agg>_<column>` — so ' +
     'summing `weight` gives `sum_weight`, not `weight`.',
+  guide:
+    'Collapse rows into groups and aggregate a value — synapses per cell type, mean size per class. The output schema is computed rather than copied, so switching sum to mean renames the column and every picker downstream follows before anything re-runs. It always emits n alongside the aggregate, because you nearly always want to know whether a mean came from two rows or two hundred.',
   cost: 'cheap',
   inputs: [{ id: 'in', label: 'Table', type: T.table() }],
   outputs: [{ id: 'out', label: 'Table', type: T.table() }],

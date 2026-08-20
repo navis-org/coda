@@ -37,6 +37,8 @@ export const stackNode = registerNode({
   label: 'Stack Tables',
   category: 'transform',
   description: 'Combine two tables vertically, keeping every column either of them has.',
+  guide:
+    'The vertical Join: where that one widens a table with columns, this lengthens it with rows. Two connectivity results from different seeds, a curated list added to a query result, the same analysis run on two datasets. A column only one side has is filled with null for the other’s rows rather than being dropped — but a column the two sides genuinely disagree about, a bodyId that is a number above and text below, is refused by name rather than silently reconciled.',
   cost: 'cheap',
   inputs: [
     { id: 'top', label: 'Top', type: T.table() },

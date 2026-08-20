@@ -79,6 +79,8 @@ export const exploreNode = registerNode({
   category: 'query',
   description:
     'Browse every neuron in a dataset. Fuzzy search across all fields, per-field filters, and a picker.',
+  guide:
+    'The entry point when you do not yet know what to ask for. Find Neurons is procedural — state a pattern, get a result; Explore holds the dataset’s entire neuron table and searches it as you type, with thumbnails, per-field filters and tick boxes. The whole table is downloaded once and searched locally, which is why the first run waits and every keystroke after it does not. Three outputs: Hits is everything matching the query, Selected is only what you ticked, and All is the index itself — an ordinary table for a group-by or a chart, at no extra cost.',
   cost: 'expensive',
   inputs: [{ id: 'dataset', label: 'Dataset', type: T.dataset() }],
   outputs: [

@@ -7,6 +7,8 @@ export const barChartNode = registerNode({
   label: 'Bar Chart',
   category: 'visualisation',
   description: 'Bar chart of one numeric column, grouped by a category and optional series.',
+  guide:
+    'One numeric column, grouped by a category, optionally split into a series. The ordinary end of a Group By, and the fastest way to turn “synapses per partner type” into something you can read. Every knob on it is presentational, so restyling never marks anything stale.',
   cost: 'cheap',
   inputs: [{ id: 'in', label: 'Table', type: T.table() }],
   outputs: [{ id: 'out', label: 'Table', type: T.table() }],

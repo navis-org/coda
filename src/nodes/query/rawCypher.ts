@@ -24,6 +24,8 @@ export const rawCypherNode = registerNode({
   label: 'Cypher',
   category: 'query',
   description: 'Run a Cypher query against the dataset and return its columns as a table.',
+  guide:
+    'The trapdoor: your own Cypher against the dataset, with its columns arriving as an ordinary table. Everything downstream works normally, with one caveat — the shape of the result is decided by the server, so the column pickers are empty until the first run and empty again after a reload. Queries are sent as typed, against a shared production Neo4j, and neuPrint accepts read-only queries only.',
   cost: 'expensive',
   inputs: [{ id: 'dataset', label: 'Dataset', type: T.dataset() }],
   outputs: [{ id: 'result', label: 'Result', type: T.table() }],

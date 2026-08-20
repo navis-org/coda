@@ -34,6 +34,8 @@ export const viewer3dNode = registerNode({
   label: '3D View',
   category: 'visualisation',
   description: 'Render skeletons, meshes and synapses in 3D, with data-driven colour.',
+  guide:
+    'Skeletons, meshes and synapse points in one 3D scene, each with its own colour encoding — so neurons can be coloured by cell type while their synapses are coloured by polarity, in the same space. Only one of the three sockets needs filling; a scene of meshes alone is a perfectly good thing to look at. Everything arrives in nanometres, so geometry from different queries lines up.',
   cost: 'cheap',
   inputs: [
     { id: 'skeletons', label: 'Skeletons', type: T.skeletons(), required: false },

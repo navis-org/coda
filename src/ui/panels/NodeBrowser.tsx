@@ -213,8 +213,21 @@ export function NodeBrowser({ onPick, onClose }: NodeBrowserProps) {
           <span>↑↓ navigate</span>
           <span>⏎ add</span>
           <span>esc close</span>
-          <span className="toolbar__spacer" />
           <span>Space opens the command palette instead</span>
+          <span className="toolbar__spacer" />
+          {/*
+           * The one place somebody is already choosing a node and may not know what one does.
+           * A new tab rather than a route: the browser is modal over a graph, and answering
+           * "what is Pivot?" must not cost the canvas behind it.
+           */}
+          <a
+            className="node-browser__guide"
+            href={`${import.meta.env.BASE_URL}nodes.html`}
+            target="_blank"
+            rel="noreferrer noopener"
+          >
+            Node guide ↗
+          </a>
         </div>
       </div>
     </div>

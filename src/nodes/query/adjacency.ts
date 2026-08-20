@@ -15,6 +15,8 @@ export const adjacencyNode = registerNode({
   label: 'Adjacency',
   category: 'query',
   description: 'Synapse counts from one neuron set onto another, as a matrix.',
+  guide:
+    'Synapse counts from one neuron set onto another, as a matrix ready for the Heatmap. Two inputs rather than one because the question is nearly always “A onto B”, and pushing both through a single collection would lose exactly the grouping that makes the picture readable. Feed it through Normalize first if the counts are dominated by whichever type happens to be numerous.',
   cost: 'expensive',
   inputs: [
     { id: 'dataset', label: 'Dataset', type: T.dataset() },
