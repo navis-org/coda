@@ -1,10 +1,12 @@
 /**
- * The toolbar's icons.
+ * The icon set.
  *
- * Four buttons in the right-hand cluster carry an icon and no words — Share, Connections,
- * Assistant, Inspector. They are the actions that are reached for rather than read: a toolbar
- * that spells all four out spends most of its width on labels nobody re-reads after the first
- * week, and the labels were pushing the run controls toward the edge on a narrow window.
+ * Four buttons in the toolbar's right-hand cluster carry an icon and no words — Share,
+ * Connections, Assistant, Inspector. They are the actions that are reached for rather than
+ * read: a toolbar that spells all four out spends most of its width on labels nobody re-reads
+ * after the first week, and the labels were pushing the run controls toward the edge on a
+ * narrow window. `FilterIcon` is the fifth and the first one drawn outside the toolbar, in a
+ * viewer caption at two thirds the size.
  *
  * **Every one keeps its name where it counts.** `title` gives the hover tooltip and `aria-label`
  * the accessible name, so a screen reader still hears "Connections" and the tests still find the
@@ -23,14 +25,14 @@
  * be the same blue as a Table socket and read as a typed port rather than as chrome.
  */
 
-/** The toolbar draws them all at one size; add a prop when a second size exists. */
+/** What the toolbar draws them at. A caption asks for less; see `FilterIcon`. */
 const ICON_PX = 15
 
-function Icon({ children }: { children: React.ReactNode }) {
+function Icon({ children, size = ICON_PX }: { children: React.ReactNode; size?: number }) {
   return (
     <svg
-      width={ICON_PX}
-      height={ICON_PX}
+      width={size}
+      height={size}
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -108,6 +110,25 @@ export function InspectorIcon() {
     <Icon>
       <circle cx="10.5" cy="10.5" r="6.5" />
       <path d="m15.4 15.4 5.1 5.1" />
+    </Icon>
+  )
+}
+
+/**
+ * Filter — three lines tapering to a point.
+ *
+ * Not a funnel, which is the more obvious reading and does not survive the size. This one is
+ * drawn in a viewer caption at 11px, where the 2-unit stroke that keeps the lens legible at 15
+ * closes a funnel's throat into a blob; three straight lines are the same weight at any size.
+ * It cannot be confused with the sort control beside it either, since that is a `▴`/`▾` on the
+ * column itself rather than a glyph in the caption.
+ */
+export function FilterIcon({ size }: { size?: number }) {
+  return (
+    <Icon {...(size ? { size } : {})}>
+      <path d="M3 6h18" />
+      <path d="M7 12h10" />
+      <path d="M10.5 18h3" />
     </Icon>
   )
 }

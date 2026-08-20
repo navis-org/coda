@@ -2061,13 +2061,30 @@ select.field {
   padding: 1px 2px;
 }
 
-/* Sortable table headers. */
-.data-table th {
+/*
+ * Sortable table headers.
+ *
+ * The name is a `<button>` so it is reachable by keyboard beside the filter field under it,
+ * and it is stripped back to looking like the text it replaced — a header that suddenly read
+ * as a button would be the loudest thing in a table of data. The hover that used to sit on the
+ * `th` moves with it, or the whole cell would light up when the pointer is over the filter.
+ */
+.data-table__name {
+  all: unset;
   cursor: pointer;
   user-select: none;
+  display: block;
+  width: 100%;
+  white-space: nowrap;
+}
+.data-table__name:hover {
+  color: var(--text-primary);
+}
+.data-table__name:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
 }
 .data-table th:hover {
-  color: var(--text-primary);
   background: var(--surface-hover);
 }
 .data-table th[data-sorted] {
@@ -2079,6 +2096,59 @@ select.field {
   margin-left: 2px;
   font-size: 8px;
   color: var(--accent);
+}
+
+/*
+ * The per-column filter, drawn inside its header cell rather than in a second row: `th` is the
+ * sticky element, and a second sticky row would need the first one's height as its `top` — a
+ * height that changes with whether the column declares a unit.
+ *
+ * `width: 100%` with `min-width: 0` is what keeps a filtered column from widening: the field
+ * takes the width the *data* settled on, and a long expression scrolls inside it rather than
+ * pushing the neighbouring columns sideways while somebody types.
+ */
+.data-table__filter {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  margin-top: 2px;
+  padding: 1px 3px;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--text-primary);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+.data-table__filter::placeholder {
+  color: var(--text-muted);
+}
+.data-table__filter:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+/* A cell that is doing something, marked on the header so it reads down the column. */
+.data-table th[data-filtered] .data-table__filter {
+  border-color: var(--accent);
+}
+.data-table th[data-filtered] {
+  color: var(--text-primary);
+}
+/*
+ * A clause that cannot be applied. Achromatic would be wrong here — this is the one state in
+ * the table that is *about* something being wrong — and it takes the same `--status-error` a
+ * failed node does rather than a red of its own.
+ */
+.data-table__filter[data-invalid] {
+  border-color: var(--status-error);
+}
+
+/* The caption's filter toggle: an icon button among the pager's text glyphs. */
+.pager__btn--icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* --- viewer actions ----------------------------------------------------- */

@@ -30,7 +30,7 @@ import { CHART_INK, chartSurface, currentMode, withAlpha } from '../colors'
 import type { ResolvedColor, ResolvedSize } from '../encoding'
 import { resolveColor, resolveSize } from '../encoding'
 import { exportBaseName as makeBaseName, tableToCsvParts } from '../export'
-import { formatNumber } from '../format'
+import { formatCell } from '../format'
 import { NetworkLegend } from './NetworkLegend'
 import type { SvgEdge, SvgNode } from './networkDraw'
 import { assignCurvatures, networkToSvg } from './networkDraw'
@@ -516,7 +516,7 @@ export function NetworkViewer({
     return Array.from({ length: network.edges.length }, (_, i) => {
       const cell = column[i]
       if (cell === null || cell === undefined) return ''
-      return typeof cell === 'number' ? formatNumber(cell) : String(cell)
+      return formatCell(cell, edgeLabelColumn || 'weight')
     })
   }, [network.edges, edgeLabels, edgeLabelColumn])
 

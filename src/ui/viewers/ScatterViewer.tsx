@@ -575,7 +575,7 @@ export function ScatterViewer({
         >
           <strong>
             {labelColumn
-              ? formatCell(table.data[labelColumn]?.[hoveredRow] ?? null)
+              ? formatCell(table.data[labelColumn]?.[hoveredRow] ?? null, labelColumn)
               : keyAt(hoveredRow)}
           </strong>
           <div className="chart-tooltip__row">
@@ -591,12 +591,12 @@ export function ScatterViewer({
           {stableColor.column && (
             <div className="chart-tooltip__row">
               {stableColor.column}:{' '}
-              {formatCell(table.data[stableColor.column]?.[hoveredRow] ?? null)}
+              {formatCell(table.data[stableColor.column]?.[hoveredRow] ?? null, stableColor.column)}
             </div>
           )}
           {shapeColumn && shapeColumn !== stableColor.column && (
             <div className="chart-tooltip__row">
-              {shapeColumn}: {formatCell(table.data[shapeColumn]?.[hoveredRow] ?? null)}
+              {shapeColumn}: {formatCell(table.data[shapeColumn]?.[hoveredRow] ?? null, shapeColumn)}
             </div>
           )}
         </div>

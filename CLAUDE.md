@@ -249,6 +249,7 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `ui/panels/overlay.test.tsx`             | expand/close paths, rail params, and that restyling does not stale a node                                                        |
 | `ui/params/paramGroups.test.ts`          | tabs/rows reshaping: that the panel shows every param the flat rail did, exactly once                                            |
 | `ui/export.test.ts`                      | CSV quoting/nulls/chunking, wide-matrix CSV, filenames, standalone SVG                                                           |
+| `ui/format.test.ts`                      | that an id column prints verbatim while the count beside it groups, and that an aggregate of one is a quantity again             |
 | `ui/panels/nodeBrowser.test.tsx`         | rows/thumbnails/signatures, chip-search exclusivity, entry points                                                                |
 | `ui/encoding.test.ts`                    | palette rules: 8 slots, Other fold, area scaling, null handling                                                                  |
 | `ui/viewers/networkLayout.test.ts`       | topology reading, layering (incl. cycles), all four layouts                                                                      |
@@ -317,6 +318,8 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `core/columnParams.test.ts`              | what a column picker may complain about: unknown-vs-empty schema, what `optional` changes, and a plural keeping an unseen list   |
 | `nodes/output/barChart.test.ts`          | the tap, that an unpicked column is a warning and not a refusal, and the stack-by-itself catch                                   |
 | `nodes/table/pivot.test.ts`              | the two outputs describing one pivot, and the wide schema arriving only by observation                                           |
+| `nodes/lib/tableFilter.test.ts`          | a header cell's grammar: a bare value following the column's dtype, the null rule, and every clause it drops rather than applies |
+| `nodes/output/table.test.ts`             | the two ports: the tap kept whole, filtering staling the node while paging does not, and a bad clause refusing nothing           |
 | `nodes/table/sample.test.ts`             | the four sampling modes, a draw reproduced from its seed, and the seed costing nothing in the other three                        |
 | `data/csv.test.ts`                       | reading somebody else's file: quoting, delimiter-by-consistency, header bias, and every value the parse refuses to widen         |
 | `data/uploads.test.ts`                   | the store against real IndexedDB: content addressing incl. a separator collision, a write that rejects, and the peek's one read  |
@@ -1532,6 +1535,165 @@ without export or expand.
 - jsdom has no `URL.createObjectURL`, no navigation and no Fullscreen API.
   `installDownloadCapture()` in `test/jsdomStubs.ts` intercepts the anchor-click download so
   tests can assert filename and content.
+
+### An identifier is not a quantity
+
+`formatCell` takes the **column name** as well as the value, and a column of identifiers is
+printed verbatim: `527536`, not `527,536`. A thousands separator is a reading aid for
+magnitude, and an identifier has none — body 527536 is not five hundred thousand of anything,
+so the grouped form is a string no query accepts, and under another locale it is not even the
+same string, which makes a column copied out of the table disagree with itself between two
+machines. Worth knowing that the Table viewer's cell `title` has always been `String(cell)`,
+so before this the hover and the cell under it disagreed on every id.
+
+**The rule is the name, because nothing in a `DType` can say it.** That is the same gap
+`BuildNetwork`'s merge rule documents — "summing added `preId` up to 24093454514" — and the one
+the upload node's `Text columns` exists for; `isIdentifierColumn` in `ui/format.ts` is those
+two answers applied to the formatter. It reads the name's **last word**, split on separators
+and camelCase, which covers `bodyId`, `preId`/`postId`, `partnerId`, `sourceId`/`targetId` and
+the `root_id` / `pt_root_id` spellings an uploaded CSV arrives under with no list to keep in
+step. A plain `endsWith('id')` is not the same rule and is wrong: `centroid` and `valid` are
+words that happen to end that way.
+
+**An aggregate of an id column is a quantity again**, and is excluded by its prefix, derived
+from `AGG_OPTIONS` rather than typed out. `groupBy` writes `<agg>_<column>`, so a count of
+distinct partners is literally called `countDistinct_partnerId` — five figures on male-CNS, and
+it does want its separator. What that costs is a column somebody else called `max_id`, which
+reads as an aggregate and keeps its grouping; taken deliberately, since `sum_bodyId` is a name
+Coda generates and `max_id` can only arrive in a file.
+
+**The name is optional and absent means "a quantity"**, which is what every caller did before
+it existed. It is passed wherever the caller has one — the table cell, the network tooltip and
+edge label, the scatter tooltip's label/colour/shape rows, the Profile and Explore chips.
+`Tiles`' `Facts` takes label/value pairs with no schema behind them and is left alone.
+
+`format.test.ts` pins the rule and `viewers.test.tsx` pins the wiring, because a cell rendering
+`formatCell(cell)` with the name dropped fails no type check and looks exactly like the bug
+this fixed.
+
+### Filtering a table, and the port it feeds
+
+Each column header carries a filter field, and what survives leaves by a second output,
+**`Filtered`**. `nodes/lib/tableFilter.ts` is the whole of the semantics, headless — the widget
+filters its own copy on every keystroke and `evaluate` filters the real one on the committed
+param, and a second implementation in the UI would draw a row count the port does not honour.
+
+**A cell is the right-hand side of an Explore field term.** `>=10` under a count means what
+`weight>=10` means in the Explore box: same operator table, same null rule (a missing value
+satisfies `!=` and nothing else), same comparison semantics, because `resolveFilters` builds
+real `FieldTerm`s and hands them to `neuronSearch.ts`'s own matcher. That reuse is why
+`prepareFieldTerms`/`fieldTermsMatch` were extracted out of `runSearch` — two loops over one
+matcher, rather than two matchers that part company on the first null. **Do not re-implement
+the comparison here.**
+
+**What a cell decides that a query token does not is the meaning of a bare value**, and it is
+decided from the column's dtype. On a number `10` is `== 10` — read as a substring it would
+match 100 and 210, which is nobody's intent in a synapse count. On text it is a substring,
+compiled as an *escaped* regex so `LC4(R)` matches itself rather than being read as a group.
+
+**It does not agree with the Filter node, and that is recorded rather than fixed.** The header
+*sort* shares `sortedRowIndices` with the Sort node on a stated rule — collation and null
+placement must not differ between a node and a header click. The header *filter* borrows
+Explore's grammar instead, so it lands elsewhere on both. Measured: `type == "lc4"` keeps 0 rows
+in a Filter node (case-sensitive) and 1 in a header cell; `pre == 0` against a null keeps the
+null row in a Filter node (`Number(null)` is 0) and none in a cell. Neither is wrong on its own,
+but a graph can hold both an inch apart, so `tableFilter.ts` and `filterTable` each name the
+other. Folding one onto the other is a decision about which semantics wins and changes what
+every saved `core.filter` returns — not a tidy-up.
+
+**Nothing in it ever throws.** A half-typed cell, a regex that does not compile, a column an
+upstream edit removed — none of those may block the graph, because `out.table` is a tap and a
+refusal there reaches everything downstream of the *pass-through* too. A clause that cannot be
+applied is dropped and reported; `validate` says so on the node and the cell wears
+`data-invalid`. Note which way that errs: dropping shows **more** rows than intended, where
+letting an unresolvable column reach `prepareFieldTerms` marks it `unknown`, which matches no
+row — so one stale column name would empty the table and read as a node that had broken.
+
+**A problem carries its column beside the message, never inside it.** The cell that draws the
+red border has to know which column a problem belongs to, and recovering that by substring-
+matching the prose is both fragile and wrong: `Filter on "pre": "abc" is not a number` quotes
+the offending *value* too, so a table with a column called `abc` would see that column marked
+broken. Same reasoning as `reportAuthFailure` — matching on message text rots silently.
+`validate` flattens to strings for the badge; the viewer indexes by column.
+
+**`filterRowIndices` answers `undefined` for "every row", not an identity array.** The
+unfiltered case is the common one and a table here can be the whole of male-CNS, so
+`Array.from({length}, (_, i) => i)` is 165,000 elements built and discarded — once per
+`evaluate` and once per *render*. Both callers already treat "all rows" specially, so the
+sentinel costs neither a branch.
+
+**Filtering is data; sorting is still a view.** The two controls sit inches apart and mean
+opposite things, so the caption carries both: `5 of 6 rows` for the filter, `sorted view only`
+for the sort. Sorting stays out of the provenance key deliberately — a header click is the
+cheapest gesture anyone makes on a table, and staling the graph for it would read as a
+scheduler bug.
+
+**The bill, which is not visible from the port that pays it.** A cache key is one per *node*, so
+editing a filter invalidates `out.table` whole and reaches a chain hanging off `Table` as well —
+whose bytes did not change. It lands there as `blocked` rather than `stale`. Same trade
+`out.network`'s filters make, and `table.test.ts` pins it so nobody is surprised later.
+
+**Draft now, commit in a moment.** Typing filters the drawing immediately and reaches the param
+`COMMIT_DELAY_MS` (140ms) after the last keystroke — Explore's split, for Explore's reason: the
+param is in the provenance key, so committing per keystroke is a re-run of everything downstream
+between two letters of a cell type.
+
+**Two memos, not one, and the decode is `ValuePreview`'s job.** The sort is keyed on
+`[table, sort]` alone: folding it in with the filter re-ran `sortedRowIndices` on every
+keystroke, which on 165k rows of a string column is hundreds of milliseconds of `localeCompare`
+per character. And the clauses are decoded in a memo keyed on the stored `string[]` — decoded
+inline they were a fresh array every store tick, and the viewer resets its draft whenever that
+identity changes, so it discarded what was being typed and re-filtered and re-paged on each
+tick. Same trap `useStable` was extracted for: **memoise by value.**
+
+**The field lives inside its `<th>`, not in a second row.** `.data-table th` is
+`position: sticky; top: 0`, so a second sticky row would need the first one's height as its
+offset — a height that varies with whether the column declares a unit. One sticky element that
+grows cannot drift. The knock-on is that the column *name* became a `<button>`, which is what
+sorts; clicking the field does not. `width: 100%; min-width: 0` on the field is what stops a
+filtered column widening as somebody types.
+
+**The controls are `out.table`'s alone.** `TableViewer` draws every table in the app — a Filter
+node's own output, a Group By's, an upload's — and only this node has a port for the result, so
+`ValuePreview` supplies `filters`/`onFiltersChange` for that one type. Both halves travel
+together, or there is a state where the row can be edited and not stored.
+
+**Clauses are stored as JSON pairs, not as a query string.** `parseSearch` reads a field name
+only where it matches `FIELD_NAME`, and the columns this viewer draws routinely do not: a wide
+pivot names its columns after label values (`LC11_02(R)`) and an uploaded CSV's header can hold
+a space. Storing the whole filter as one re-parsed query would lose exactly the columns somebody
+is most likely to be filtering. `["Cell Type","~^LC"]` also reads in a `.coda.json` people mail
+each other, where a unit-separator join would not.
+
+**The row is toggled from the caption and forced open whenever anything is set**, so an
+unfiltered Table card looks exactly as it did before and a filtered one always says why it is
+short. The toggle is `disabled` while a filter is live rather than absent — clearing the cells
+is what closes the row.
+
+**Both exporters emit real filter code**, since `Filtered` has to bind something or downstream
+Python/R refers to a variable nothing assigns. Two disagreements had to be written out rather
+than inherited: pandas and dplyr are both **case-sensitive** where Coda lowercases both sides
+and carries the `i` flag, and `dplyr::filter` **drops `NA`** where a missing value satisfies
+`!=` here. Every mask guards `isna`/`is.na` explicitly, including where the operator would have
+got it right anyway — those are the ones that break quietly when edited. The fixture carries a
+**second** Table node for the same reason it carries two Select One nodes: the first is fed by
+the Pivot, whose wide schema is observed rather than inferred, so no clause on it resolves at
+export time and the golden would record only the branch that binds `filtered = out`.
+
+**One pre-existing bug surfaced with it.** The overlay's rail draws each param's label itself
+*and* passed no `variant` to `ParamField`, whose checkbox draws its own — so a presentational
+boolean rendered `Show filter row / Show filter row`. `out.table`'s filter-row toggle is the
+first boolean to reach that rail, which is why it had survived: every other param kind ignores
+`showLabel`. The rail now passes `variant="inspector"`, as `ParamRows` already did. Exactly the
+double-label trap `SelectOneBody` documents, in the other surface that pairs its own label with
+a `ParamField`.
+
+**Verified in a real browser** as well as headlessly, because the header cell's layout is the
+class jsdom cannot see: the field sits inside the sticky header (`th` 129–177, field 152–171,
+first row starting at 177), column widths do not move as a filter is typed (468/468/481 before
+and after), the numeric, regex and invalid cases all behave, and the card shows the row at its
+own width with the toggle disabled while filtering. What is *not* covered anywhere is the light
+theme, and a table wide enough to scroll the filter row sideways.
 
 ## Network + 3D widgets
 

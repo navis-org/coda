@@ -24,8 +24,24 @@ import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
 
 /** `df['col']` where the name is safe, `df[...]` otherwise — both are one idiom in pandas. */
-function col(frame: string, name: string): string {
+export function col(frame: string, name: string): string {
   return `${frame}[${pyStr(name)}]`
+}
+
+/**
+ * Coda's comparison operators as Python's.
+ *
+ * Shared with `tableFilters.ts`, whose `FieldTerm['op']` overlaps `FilterOp` on exactly these
+ * six names — two copies is how the Filter node and the Table's header cells come to render
+ * the same comparison differently in one notebook.
+ */
+export const PY_COMPARISON: Record<string, string> = {
+  eq: '==',
+  ne: '!=',
+  gt: '>',
+  ge: '>=',
+  lt: '<',
+  le: '<=',
 }
 
 function dtypeOf(ctx: EmitContext, portId: string, name: string | undefined) {
@@ -86,14 +102,7 @@ registerEmitter('core.filter', (ctx) => {
       )
       break
     default: {
-      const cmp: Record<string, string> = {
-        eq: '==',
-        ne: '!=',
-        gt: '>',
-        ge: '>=',
-        lt: '<',
-        le: '<=',
-      }
+      const cmp = PY_COMPARISON
       const operator = cmp[op]
       if (!operator) return ctx.todo(`Unknown filter operator "${op}".`)
       if (numeric) {

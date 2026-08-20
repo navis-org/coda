@@ -78,6 +78,20 @@ describe('ViewerOverlay', () => {
     expect(dialog.textContent).toMatch(/rows × \d+ col/)
   })
 
+  /**
+   * The rail draws each param's label itself, and `ParamField`'s checkbox draws one too unless
+   * told otherwise — so the default variant names a boolean twice. `out.table`'s filter-row
+   * toggle is the first boolean to reach this rail, which is why it survived: every other kind
+   * ignores `showLabel`. Counted rather than looked at, since jsdom applies no CSS and both
+   * copies are equally visible to it.
+   */
+  it('names a boolean rail param exactly once', async () => {
+    const dialog = await openOverlay('partners', 'view')
+    const rail = dialog.querySelector('.overlay__rail')!
+    expect(within(rail as HTMLElement).getAllByText('Show filter row')).toHaveLength(1)
+    expect(within(rail as HTMLElement).getByLabelText('Show filter row')).toBeTruthy()
+  })
+
   it('renders the result at full size, with paging', async () => {
     const dialog = await openOverlay('partners', 'view')
     expect(within(dialog).getByRole('table')).toBeTruthy()

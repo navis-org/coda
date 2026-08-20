@@ -259,6 +259,28 @@ export function everythingGraph(): CodaGraph {
     },
 
     { id: 'table', type: 'out.table', col: 12 },
+    /*
+     * A second Table, filtered, for the same reason there are two Select One nodes: the first
+     * one is fed by the **pivot**, whose wide schema is observed rather than inferred, so no
+     * clause on it can resolve at export time and the golden would record only the branch that
+     * binds `filtered = out`. This one hangs off `group`, whose columns are known — and its
+     * four clauses are one of each shape the emitters branch on: a numeric comparison, a bare
+     * text value (an escaped regex, case-insensitively), an explicit regex, and a negation.
+     */
+    {
+      id: 'tableFilt',
+      type: 'out.table',
+      col: 12,
+      row: 2,
+      params: {
+        filters: [
+          '["sum_weight",">=10"]',
+          '["preType","LC"]',
+          '["postType","~^DN"]',
+          '["n","!1"]',
+        ],
+      },
+    },
     { id: 'heat', type: 'out.heatmap', col: 12, row: 1, params: { showValues: false } },
     {
       id: 'bar',
@@ -386,6 +408,7 @@ export function everythingGraph(): CodaGraph {
     ['table', 'out', 'dl', 'in'],
 
     ['group', 'out', 'bar', 'in'],
+    ['group', 'out', 'tableFilt', 'in'],
     ['group', 'out', 'net', 'edges'],
     ['net', 'network', 'netview', 'in'],
     ['skel', 'skeletons', 'v3d', 'skeletons'],

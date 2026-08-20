@@ -24,6 +24,22 @@ function col(name: string): string {
   return `\`${name}\``
 }
 
+/**
+ * Coda's comparison operators as R's.
+ *
+ * Shared with `tableFilters.ts`, whose `FieldTerm['op']` overlaps `FilterOp` on exactly these
+ * six names — two copies is how the Filter node and the Table's header cells come to render
+ * the same comparison differently in one document.
+ */
+export const R_COMPARISON: Record<string, string> = {
+  eq: '==',
+  ne: '!=',
+  gt: '>',
+  ge: '>=',
+  lt: '<',
+  le: '<=',
+}
+
 function dtypeOf(ctx: EmitContext, portId: string, name: string | undefined) {
   return name ? ctx.schema(portId)?.columns.find((c) => c.name === name)?.dtype : undefined
 }
@@ -81,14 +97,7 @@ registerEmitter('core.filter', (ctx) => {
       )
       break
     default: {
-      const cmp: Record<string, string> = {
-        eq: '==',
-        ne: '!=',
-        gt: '>',
-        ge: '>=',
-        lt: '<',
-        le: '<=',
-      }
+      const cmp = R_COMPARISON
       const operator = cmp[op]
       if (!operator) return ctx.todo(`Unknown filter operator "${op}".`)
       if (numeric) {

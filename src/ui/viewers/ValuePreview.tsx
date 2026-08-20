@@ -1,3 +1,5 @@
+import { useMemo } from 'react'
+
 import type { GraphNode } from '../../core/graph'
 import type { InferContext, ParamValue } from '../../core/node'
 import { schemaOf } from '../../core/types'
@@ -27,6 +29,8 @@ import { ProfileViewer } from './ProfileViewer'
 import { ExportNodeContext } from './exportRegistry'
 import { ScatterViewer } from './ScatterViewer'
 import type { LayoutName } from './networkLayout'
+import type { FilterClause } from '../../nodes/lib/tableFilter'
+import { decodeClauses, encodeClauses } from '../../nodes/lib/tableFilter'
 import { TableViewer } from './TableViewer'
 
 export interface ValuePreviewProps {
@@ -97,6 +101,15 @@ function ValuePreviewInner({
     ...(onExpand ? { onExpand } : {}),
     ...(onError ? { onError } : {}),
   }
+
+  /*
+   * Up here rather than in the table branch below, because this component returns early a
+   * dozen times and a hook after a conditional return is not a hook. Keyed on the stored
+   * `string[]`, which changes only when somebody edits a filter — decoding inline would mint a
+   * fresh array every store tick, and `TableViewer` resets its draft whenever this changes
+   * identity, so it would discard what was being typed and re-filter and re-page on each one.
+   */
+  const filterClauses = useMemo(() => decodeClauses(node.params.filters), [node.params.filters])
 
   /*
    * Above the `!value` guard, and that placement is the whole reason this node renders at all.
@@ -371,10 +384,34 @@ function ValuePreviewInner({
   if (isTableValue(value)) {
     // out.table declares its page size; other nodes fall back to a sensible default.
     const pageSize = Number(node.params.pageSize)
+    /*
+     * The filter controls are `out.table`'s alone, because it is the only node with a port to
+     * put the result on. This same component draws the preview for *every* table in the app —
+     * a Filter node's own output, a Group By's, an upload's — and handing those a control that
+     * writes `filters` would be a control writing a param the node does not declare.
+     *
+     * Both halves travel together for the same reason: `TableViewer` reads the pair as one
+     * decision, so there is no state in which the row can be edited and not stored.
+     */
+    const filtering =
+      node.type === 'out.table'
+        ? {
+            // Decoded through a memo keyed on the stored `string[]`, which only changes when
+            // somebody edits a filter. Decoding inline would mint a fresh array on every store
+            // tick, and the viewer resets its draft whenever this changes identity — throwing
+            // away what was being typed, and re-running the filter and the page on every tick.
+            filters: filterClauses,
+            onFiltersChange: (next: FilterClause[]) =>
+              onParamChange?.('filters', encodeClauses(next)),
+            showFilters: node.params.showFilters === true,
+            onShowFiltersChange: (show: boolean) => onParamChange?.('showFilters', show),
+          }
+        : {}
     return (
       <TableViewer
         table={value}
         pageSize={Number.isFinite(pageSize) && pageSize > 0 ? pageSize : 100}
+        {...filtering}
         {...shared}
       />
     )

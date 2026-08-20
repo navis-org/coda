@@ -1,3 +1,4 @@
+import { AGG_OPTIONS } from '../nodes/lib/tableOps'
 import type { CellValue } from '../core/values'
 
 /** Compact form for axis ticks and tips: 1,284 / 12.9K / 4.2M. */
@@ -26,9 +27,81 @@ export function formatNumber(value: number): string {
   return value.toLocaleString(undefined, { maximumFractionDigits: 3 })
 }
 
-export function formatCell(value: CellValue): string {
+/**
+ * An identifier printed as it would be typed back in: no grouping, no rounding.
+ *
+ * `String` rather than a `useGrouping: false` locale call because that is exactly what the
+ * cell's own `title` already shows — a hover that disagrees with the cell under it is the
+ * failure this is here to fix, not a second spelling of it.
+ */
+function formatId(value: number): string {
+  return Number.isFinite(value) ? String(value) : '—'
+}
+
+/** `sum_`, `mean_`, … — derived, so a sixth aggregate is covered by adding it there. */
+const AGG_PREFIXES = AGG_OPTIONS.map((option) => `${option.value}_`)
+
+/**
+ * Whether a column's numbers are *names* rather than quantities.
+ *
+ * A thousands separator is a reading aid for magnitude, and an identifier has no magnitude:
+ * body 527536 is not five hundred thousand of anything, so `527,536` is a string nobody can
+ * paste back into a query — and under another locale it is not even the same string, which
+ * makes a copied column disagree with itself between two machines.
+ *
+ * Nothing in a `DType` says which of the two a column holds. That is the same gap
+ * `BuildNetwork`'s merge rule documents ("summing added `preId` up to 24093454514") and the
+ * one the upload node's `Text columns` exists for, so the answer here is theirs: the *name*.
+ *
+ * The rule is the name's **last word**, split on separators and camelCase boundaries. That
+ * covers `bodyId`, `preId`/`postId`, `partnerId`, `sourceId`/`targetId` and the `root_id` /
+ * `pt_root_id` spellings an uploaded CSV arrives under, with no list of them to keep in step —
+ * and it is why a plain `endsWith('id')` is not enough, since `centroid` and `valid` are words
+ * that happen to end that way rather than columns of ids.
+ *
+ * An **aggregate of** an id column is a quantity again, and is excluded by its prefix:
+ * `countDistinct_partnerId` counts partners and does want its separator. The cost is a column
+ * somebody else called `max_id`, which reads as an aggregate and keeps its grouping — taken
+ * deliberately, because `sum_bodyId` is a name Coda's own `groupBy` generates where `max_id`
+ * can only arrive in somebody's CSV.
+ *
+ * Memoised, because this is asked once per *cell*: a 500-row page of ten numeric columns is
+ * 5,000 calls per render, each otherwise doing a regex replace, a split and a filter — twenty
+ * thousand throwaway arrays to answer a question about a handful of distinct strings. The
+ * network viewer asks it per edge for one constant name, which is the same waste in one line.
+ * Keyed on the name because that is the whole input; the set of names in a session is small
+ * and bounded, so the map needs no eviction.
+ */
+const identifierColumns = new Map<string, boolean>()
+
+export function isIdentifierColumn(name: string | undefined): boolean {
+  if (!name) return false
+  const cached = identifierColumns.get(name)
+  if (cached !== undefined) return cached
+
+  let answer = false
+  if (!AGG_PREFIXES.some((prefix) => name.startsWith(prefix))) {
+    const words = name
+      .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+      .split(/[^A-Za-z0-9]+/)
+      .filter(Boolean)
+    const last = words[words.length - 1]?.toLowerCase()
+    answer = last === 'id' || last === 'ids'
+  }
+  identifierColumns.set(name, answer)
+  return answer
+}
+
+/**
+ * One cell as it should read on screen, given the column it came from.
+ *
+ * The column name is optional because several callers hold a bare value; passing it is what
+ * keeps an id out of `formatNumber`'s hands. See `isIdentifierColumn`.
+ */
+export function formatCell(value: CellValue, columnName?: string): string {
   if (value === null || value === undefined) return '—'
-  if (typeof value === 'number') return formatNumber(value)
+  if (typeof value === 'number')
+    return isIdentifierColumn(columnName) ? formatId(value) : formatNumber(value)
   if (typeof value === 'boolean') return value ? 'true' : 'false'
   return value
 }

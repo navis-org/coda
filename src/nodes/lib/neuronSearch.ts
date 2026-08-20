@@ -46,7 +46,7 @@
 
 import type { ColumnSchema, TableSchema } from '../../core/types'
 import { isNumericDType } from '../../core/types'
-import type { CellValue, TableValue } from '../../core/values'
+import type { CellValue, ColumnData, TableValue } from '../../core/values'
 
 export type CompareOp = 'eq' | 'ne' | 'gt' | 'lt' | 'ge' | 'le' | 'match'
 
@@ -130,12 +130,34 @@ export function tokenizeSearch(text: string): Token[] {
   return tokens
 }
 
-function unquote(value: string): string {
+/**
+ * Strip one layer of matching quotes.
+ *
+ * Exported because the table viewer's per-column filter cells accept the same values these
+ * tokens do, and a quote that is punctuation here and a literal character there would be one
+ * grammar in name only.
+ */
+export function unquote(value: string): string {
   const first = value[0]
   if ((first === '"' || first === "'") && value.length >= 2) {
     return value.endsWith(first) ? value.slice(1, -1) : value.slice(1)
   }
   return value
+}
+
+/**
+ * An operator written at the *start* of a string, with what follows it.
+ *
+ * This is the half of `splitOperator` that a per-column filter cell needs: the column is
+ * already known there, so `>=10` has to mean what `weight>=10` means here. Longest-first
+ * order matters and is `OPERATORS`', so `>=` cannot be read as `>` in one place and not the
+ * other.
+ */
+export function leadingOperator(text: string): { op: CompareOp; rest: string } | undefined {
+  for (const [symbol, op] of OPERATORS) {
+    if (text.startsWith(symbol)) return { op, rest: text.slice(symbol.length) }
+  }
+  return undefined
 }
 
 /** Split a token into `field`, operator and value, or undefined when it is a bare term. */
@@ -335,6 +357,56 @@ function cellMatches(
   }
 }
 
+/**
+ * One field term with everything that does not vary by row already resolved.
+ *
+ * Split out from `runSearch` because the table viewer's per-column filters are field terms
+ * and nothing else, so they get to reuse the *semantics* — the null rule, numeric-versus-
+ * lexicographic comparison, case-insensitive regex — rather than agreeing with them. Two
+ * loops over one matcher; the alternative is two matchers that drift on the first null.
+ *
+ * Precondition: a `match` term's value must already compile, which `parseSearch` and
+ * `resolveFilters` both guarantee by dropping the ones that do not. Constructing it here
+ * rather than per row is most of what makes a 165k-row scan affordable.
+ */
+export interface PreparedFieldTerm {
+  term: FieldTerm
+  data: ColumnData | undefined
+  numeric: boolean
+  regex: RegExp | undefined
+  /** The column is not in this table, so nothing can match it. */
+  unknown: boolean
+}
+
+export function prepareFieldTerms(
+  table: TableValue,
+  terms: readonly FieldTerm[],
+): PreparedFieldTerm[] {
+  return terms.map((term) => {
+    const column = resolveColumn(table, term.field)
+    const data = column ? table.data[column.name] : undefined
+    return {
+      term,
+      data,
+      numeric: column ? isNumericDType(column.dtype) : false,
+      regex: term.op === 'match' ? new RegExp(term.value, 'i') : undefined,
+      // An unknown field cannot match anything; `validateSearch` is what tells the user why.
+      unknown: !column || !data,
+    }
+  })
+}
+
+/** Whether one row satisfies every prepared term. */
+export function fieldTermsMatch(prepared: readonly PreparedFieldTerm[], row: number): boolean {
+  for (const entry of prepared) {
+    const matched = entry.unknown
+      ? false
+      : cellMatches(entry.data![row] ?? null, entry.term, entry.numeric, entry.regex)
+    if (matched === entry.term.negate) return false
+  }
+  return true
+}
+
 export interface SearchResult {
   /** Matching row indices, best first. */
   rows: number[]
@@ -361,36 +433,13 @@ export function runSearch(
     return { rows: Array.from({ length: table.length }, (_, i) => i), fuzzy: false }
   }
 
-  // Resolved once per term rather than per row: a RegExp constructor and a schema lookup
-  // inside a 165k-iteration loop is most of the cost of the loop.
-  const prepared = fieldTerms.map((term) => {
-    const column = resolveColumn(table, term.field)
-    const data = column ? table.data[column.name] : undefined
-    return {
-      term,
-      data,
-      numeric: column ? isNumericDType(column.dtype) : false,
-      regex: term.op === 'match' ? new RegExp(term.value, 'i') : undefined,
-      // An unknown field cannot match anything; `validateSearch` is what tells the user why.
-      unknown: !column || !data,
-    }
-  })
+  const prepared = prepareFieldTerms(table, fieldTerms)
 
   const scan = (fuzzy: boolean): number[] => {
     const hits: number[] = []
     for (let row = 0; row < table.length; row++) {
       let keep = true
-
-      for (const entry of prepared) {
-        const matched = entry.unknown
-          ? false
-          : cellMatches(entry.data![row] ?? null, entry.term, entry.numeric, entry.regex)
-        if (matched === entry.term.negate) {
-          keep = false
-          break
-        }
-      }
-      if (!keep) continue
+      if (!fieldTermsMatch(prepared, row)) continue
 
       for (const term of textTerms) {
         const hay = index.haystacks[row] ?? ''

@@ -441,7 +441,7 @@ function Chips({
       {chips.map((chip) => (
         <span key={chip.name} className="explore-chip" data-slot={chip.slot} title={chip.name}>
           {chip.key && <span className="explore-chip__key">{chip.key}</span>}
-          {formatCell(chip.value as CellValue)}
+          {formatCell(chip.value as CellValue, chip.name)}
         </span>
       ))}
     </div>

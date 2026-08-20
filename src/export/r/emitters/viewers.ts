@@ -7,16 +7,59 @@
  * silently ignored is worse than a knob visibly not translated.
  */
 
+import { decodeClauses, resolveFilters, usesRegex } from '../../../nodes/lib/tableFilter'
 import { rStr, rVector } from '../r'
 import { registerEmitter } from '../registry'
 import { selectionIds } from './common'
+import { filterPredicates } from './tableFilters'
 
 registerEmitter('out.table', (ctx) => {
   const src = ctx.wired('in')
   const out = ctx.output('out')
+  const filtered = ctx.output('filtered')
+  const { terms, problems } = resolveFilters(ctx.schema('in'), decodeClauses(ctx.params.filters))
+  const predicates = filterPredicates(terms, ctx.schema('in'))
+
+  const lines = [`${out} <- ${src}`]
+
+  /*
+   * Bound whether or not it filters anything: the walk binds names for the reader, and a node
+   * downstream of an unfiltered Filtered port is perfectly ordinary. Leaving the name unbound
+   * would emit working R referring to a variable nothing ever creates.
+   */
+  if (predicates.length === 0) {
+    lines.push(`${filtered} <- ${out}`)
+  } else if (predicates.length === 1) {
+    ctx.library('dplyr')
+    lines.push(`${filtered} <- dplyr::filter(${out}, ${predicates[0]})`)
+  } else {
+    ctx.library('dplyr')
+    // Separate arguments rather than one `&` chain: `filter` ANDs them, and one clause per
+    // line is what makes a four-clause filter readable and editable.
+    lines.push(`${filtered} <- dplyr::filter(`)
+    lines.push(`  ${out},`)
+    predicates.forEach((predicate, i) =>
+      lines.push(`  ${predicate}${i === predicates.length - 1 ? '' : ','}`),
+    )
+    lines.push(')')
+  }
+
+  if (usesRegex(terms)) {
+    lines.push(
+      ...ctx.note(
+        'Coda matches these regexes with JavaScript semantics. `perl = TRUE` is the closest ' +
+          'of R’s engines; the two differ on lookbehind and named groups.',
+      ),
+    )
+  }
+
+  // A clause the canvas was ignoring is one this document must ignore too — and say so, or the
+  // two quietly report different row counts for the same graph.
+  for (const problem of problems) lines.push(...ctx.note(`${problem} — not applied.`))
+
   // A bare name on the last line prints the frame, which under `df_print: paged` is a
   // scrollable table — the nearest thing R Markdown has to this node.
-  return [`${out} <- ${src}`, out]
+  return [...lines, predicates.length > 0 ? filtered : out]
 })
 
 registerEmitter('out.barChart', (ctx) => {

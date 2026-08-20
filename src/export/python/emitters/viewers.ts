@@ -11,9 +11,11 @@
  * worse than a knob visibly not translated.
  */
 
+import { decodeClauses, resolveFilters, usesRegex } from '../../../nodes/lib/tableFilter'
 import { pyList, pyStr } from '../py'
 import { registerEmitter } from '../registry'
 import { selectionIds } from './common'
+import { filterMasks } from './tableFilters'
 
 // ---------------------------------------------------------------------------
 // Table — the one viewer with nothing to draw
@@ -22,9 +24,46 @@ import { selectionIds } from './common'
 registerEmitter('out.table', (ctx) => {
   const src = ctx.wired('in')
   const out = ctx.output('out')
+  const filtered = ctx.output('filtered')
+  const { terms, problems } = resolveFilters(ctx.schema('in'), decodeClauses(ctx.params.filters))
+  const masks = filterMasks(out, terms, ctx.schema('in'))
+
+  const lines = [`${out} = ${src}`]
+
+  /*
+   * The second port is bound whether or not it filters anything, because the walk binds names
+   * for the reader rather than for us: a node downstream of an *unfiltered* Filtered port is
+   * perfectly ordinary, and leaving the name unassigned would emit working code referring to a
+   * variable nothing ever creates.
+   */
+  if (masks.length === 0) {
+    lines.push(`${filtered} = ${out}`)
+  } else if (masks.length === 1) {
+    ctx.require('pandas')
+    lines.push(`${filtered} = ${out}[${masks[0]}]`)
+  } else {
+    ctx.require('pandas')
+    // Inside the subscript brackets, so the continuation needs no backslashes and a reader can
+    // comment one clause out without touching the others.
+    lines.push(`${filtered} = ${out}[`, ...masks.map((mask, i) => `    ${i === 0 ? ' ' : '&'} ${mask}`), ']')
+  }
+
+  if (usesRegex(terms)) {
+    lines.push(
+      ...ctx.note(
+        'Coda matches these regexes with JavaScript semantics and pandas uses Python `re`. ' +
+          'The two agree on ordinary patterns and differ on lookbehind and named groups.',
+      ),
+    )
+  }
+
+  // A clause the canvas was ignoring is a clause the notebook must ignore too — and say so,
+  // or the two quietly report different row counts for the same graph.
+  for (const problem of problems) lines.push(...ctx.note(`${problem} — not applied.`))
+
   // A bare name on the last line is how a notebook displays a frame, which is exactly what
   // this node is for.
-  return [`${out} = ${src}`, out]
+  return [...lines, masks.length > 0 ? filtered : out]
 })
 
 // ---------------------------------------------------------------------------

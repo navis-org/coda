@@ -84,6 +84,14 @@ export function filterSchema(schema: TableSchema | undefined): TableSchema | und
   return schema
 }
 
+/**
+ * Keep the rows matching one condition.
+ *
+ * Note that this does **not** agree with the Table viewer's header filters, which borrow
+ * Explore's grammar instead: text compares here are case-*sensitive*, and `Number(null)` is 0
+ * so a null matches `== 0`. Neither is wrong on its own and the divergence is recorded in
+ * `tableFilter.ts`; the point is that a graph can hold both an inch apart.
+ */
 export function filterTable(
   table: TableValue,
   columnName: string,

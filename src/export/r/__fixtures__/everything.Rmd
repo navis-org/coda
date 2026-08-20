@@ -710,6 +710,22 @@ ggplot(bar_chart, aes(x = `preType`, y = `sum_weight`)) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
 
+```{r table-df}
+# ── Table ──
+table_df_out <- group_by_df
+table_df_filtered <- dplyr::filter(
+  table_df_out,
+  (!is.na(.data[["sum_weight"]]) & .data[["sum_weight"]] >= 10),
+  !is.na(.data[["preType"]]) & grepl("LC", as.character(.data[["preType"]]), ignore.case = TRUE, perl = TRUE),
+  !is.na(.data[["postType"]]) & grepl("^DN", as.character(.data[["postType"]]), ignore.case = TRUE, perl = TRUE),
+  !((!is.na(.data[["n"]]) & .data[["n"]] == 1))
+)
+# NOTE: Coda matches these regexes with JavaScript semantics. `perl = TRUE`
+# is the closest of R’s engines; the two differ on lookbehind and named
+# groups.
+table_df_filtered
+```
+
 ```{r build-network}
 # ── Build Network ──
 links <- group_by_df |>
@@ -787,10 +803,11 @@ normalize <- pivot_matrix_df / rowSums(pivot_matrix_df)
 normalize[!is.finite(normalize)] <- 0
 ```
 
-```{r table-df}
+```{r table-df-2}
 # ── Table ──
-table_df <- pivot_table_df
-table_df
+table_df_2_out <- pivot_table_df
+table_df_2_filtered <- table_df_2_out
+table_df_2_out
 ```
 
 ```{r heatmap}
@@ -810,6 +827,6 @@ heatmap |>
 
 ```{r download}
 # ── Download ──
-download <- table_df
+download <- table_df_2_out
 write_csv(download, "partners.csv")
 ```

@@ -10,7 +10,7 @@
  * dropped rather than clipped when they don't fit.
  */
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { column, tableSchema } from '../../core/types'
@@ -283,6 +283,182 @@ describe('TableViewer', () => {
     const { container } = render(<TableViewer table={withNull} />)
     expect(container.querySelector('td[data-null="true"]')?.textContent).toBe('—')
   })
+
+  /**
+   * A body id is a name, so it is printed as it would be typed back — while the count in the
+   * column beside it keeps its separator. Asserted here rather than only in `format.test.ts`
+   * because the rule is worth nothing until the column name reaches it, and a cell rendering
+   * `formatCell(cell)` with the name dropped fails no type check.
+   */
+  it('prints ids verbatim and quantities grouped, in the same row', () => {
+    const schema = tableSchema(column('bodyId', 'i64'), column('post', 'i64', 'synapses'))
+    const { container } = render(
+      <TableViewer table={tableFromRows(schema, [{ bodyId: 527536, post: 527536 }])} />,
+    )
+    const cells = [...container.querySelectorAll('tbody td')].map((td) => td.textContent)
+    expect(cells).toEqual(['527536', '527,536'])
+    // And the hover agrees with what is drawn, which it did not before.
+    const idCell = container.querySelector('tbody td')
+    expect(idCell?.getAttribute('title')).toBe(idCell?.textContent)
+  })
+})
+
+/**
+ * The filter row.
+ *
+ * The semantics are `tableFilter.test.ts`'s; what is asserted here is the *wiring*, which is
+ * where this can silently stop working: a control that edits a draft and never commits, a
+ * commit that fires per keystroke, or a caption that reports the whole table while showing a
+ * subset. None of those fail a type check and all three look fine in a screenshot.
+ */
+describe('TableViewer filtering', () => {
+  const NEURONS = tableSchema(column('bodyId', 'i64'), column('type', 'str'), column('pre', 'i64'))
+  const neurons = () =>
+    tableFromRows(NEURONS, [
+      { bodyId: 1, type: 'LC4', pre: 40 },
+      { bodyId: 2, type: 'LC6', pre: 5 },
+      { bodyId: 3, type: 'DNp01', pre: 100 },
+    ])
+
+  const cell = (container: HTMLElement, name: string) =>
+    container.querySelector<HTMLInputElement>(`input[aria-label="Filter ${name}"]`)
+
+  const bodyIds = (container: HTMLElement) =>
+    [...container.querySelectorAll('tbody tr')].map(
+      (row) => row.querySelector('td')?.textContent,
+    )
+
+  it('shows no filter controls at all without a way to store them', () => {
+    // This component draws every table in the app; only `out.table` has a port for the result,
+    // so a Filter node's own preview must not grow a control that writes a param it lacks.
+    const { container } = render(<TableViewer table={neurons()} />)
+    expect(cell(container, 'type')).toBeNull()
+    expect(screen.queryByLabelText(/filter row/i)).toBeNull()
+  })
+
+  it('filters the drawn rows on the keystroke, before anything is committed', () => {
+    const onFiltersChange = vi.fn()
+    const { container } = render(
+      <TableViewer
+        table={neurons()}
+        filters={[]}
+        onFiltersChange={onFiltersChange}
+        showFilters
+      />,
+    )
+    fireEvent.change(cell(container, 'type')!, { target: { value: 'LC' } })
+    expect(bodyIds(container)).toEqual(['1', '2'])
+    // The param follows the pause, not the keystroke — see COMMIT_DELAY_MS.
+    expect(onFiltersChange).not.toHaveBeenCalled()
+  })
+
+  it('commits once for a burst of typing', async () => {
+    vi.useFakeTimers()
+    try {
+      const onFiltersChange = vi.fn()
+      const { container } = render(
+        <TableViewer
+          table={neurons()}
+          filters={[]}
+          onFiltersChange={onFiltersChange}
+          showFilters
+        />,
+      )
+      const field = cell(container, 'type')!
+      fireEvent.change(field, { target: { value: 'L' } })
+      fireEvent.change(field, { target: { value: 'LC' } })
+      fireEvent.change(field, { target: { value: 'LC4' } })
+      act(() => void vi.advanceTimersByTime(500))
+      expect(onFiltersChange).toHaveBeenCalledTimes(1)
+      expect(onFiltersChange).toHaveBeenLastCalledWith([{ column: 'type', expression: 'LC4' }])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('says how many rows of how many, beside the sort note that means something else', () => {
+    const { container } = render(
+      <TableViewer
+        table={neurons()}
+        filters={[{ column: 'pre', expression: '>=40' }]}
+        onFiltersChange={() => {}}
+      />,
+    )
+    // The filter changed the data and reports in rows; the sort changed only the view and says
+    // so in words. Two controls that look alike, told apart in the one place a reader looks.
+    expect(screen.getByText('2 of 3 rows')).toBeTruthy()
+    expect(screen.queryByText('sorted view only')).toBeNull()
+    fireEvent.click(screen.getByText('bodyId'))
+    expect(screen.getByText('sorted view only')).toBeTruthy()
+    expect(screen.getByText('2 of 3 rows')).toBeTruthy()
+    // Paging counts what survived, not what arrived.
+    expect(screen.getByText('1–2 of 2')).toBeTruthy()
+    expect(bodyIds(container)).toEqual(['1', '3'])
+  })
+
+  it('opens the row for a filter that is already set, and refuses to hide it', () => {
+    // A filtered table must always show why it is short; clearing the cells is what closes it.
+    const { container } = render(
+      <TableViewer
+        table={neurons()}
+        filters={[{ column: 'type', expression: 'LC' }]}
+        onFiltersChange={() => {}}
+        showFilters={false}
+      />,
+    )
+    expect(cell(container, 'type')?.value).toBe('LC')
+    expect(screen.getByLabelText(/filter row/i).hasAttribute('disabled')).toBe(true)
+  })
+
+  it('marks a clause it cannot apply rather than emptying the table', () => {
+    const { container } = render(
+      <TableViewer
+        table={neurons()}
+        filters={[{ column: 'type', expression: '~^LC[' }]}
+        onFiltersChange={() => {}}
+      />,
+    )
+    expect(cell(container, 'type')?.getAttribute('data-invalid')).toBe('true')
+    // Dropped, so every row survives — a broken clause shows more rows, never fewer.
+    expect(bodyIds(container)).toEqual(['1', '2', '3'])
+  })
+
+  it('distinguishes an empty result from an empty input', () => {
+    const { rerender } = render(
+      <TableViewer
+        table={neurons()}
+        filters={[{ column: 'type', expression: '==nothing' }]}
+        onFiltersChange={() => {}}
+      />,
+    )
+    expect(screen.getByText('no rows match the filters')).toBeTruthy()
+    rerender(
+      <TableViewer table={tableFromRows(NEURONS, [])} filters={[]} onFiltersChange={() => {}} />,
+    )
+    expect(screen.getByText('no rows')).toBeTruthy()
+  })
+
+  it('exports what is on screen', async () => {
+    const capture = installDownloadCapture()
+    try {
+      render(
+        <TableViewer
+          table={neurons()}
+          filters={[{ column: 'type', expression: '==LC4' }]}
+          onFiltersChange={() => {}}
+          baseName="neurons"
+        />,
+      )
+      fireEvent.click(screen.getByTitle(/CSV/i))
+      const text = await capture.downloads[0]!.text()
+      // The button has always exported the table it was drawing. Now that the drawing can be a
+      // subset, exporting the whole input would make it disagree with the rows above it.
+      expect(text).toContain('LC4')
+      expect(text).not.toContain('DNp01')
+    } finally {
+      capture.restore()
+    }
+  })
 })
 
 describe('TableViewer paging', () => {
@@ -374,18 +550,21 @@ describe('TableViewer sorting', () => {
 
   it('cycles ascending, descending, then back to source order', () => {
     const { container } = render(<TableViewer table={unsorted()} />)
-    const header = screen.getByText('sum_post').closest('th')!
+    // The name is the sort target and the `th` carries `aria-sort`, because the cell also
+    // holds a filter field that must not sort when it is clicked.
+    const name = screen.getByText('sum_post')
+    const header = name.closest('th')!
 
-    fireEvent.click(header)
+    fireEvent.click(name)
     // Nulls sort last in both directions — absence is not an extreme.
     expect(columnValues(container, 2)).toEqual(['5', '20', '—'])
     expect(header.getAttribute('aria-sort')).toBe('ascending')
 
-    fireEvent.click(header)
+    fireEvent.click(name)
     expect(columnValues(container, 2)).toEqual(['20', '5', '—'])
     expect(header.getAttribute('aria-sort')).toBe('descending')
 
-    fireEvent.click(header)
+    fireEvent.click(name)
     // Third click restores exactly what the graph produced.
     expect(columnValues(container, 2)).toEqual(['20', '5', '—'])
     expect(columnValues(container, 0)).toEqual(['b', 'c', 'a'])
@@ -394,14 +573,14 @@ describe('TableViewer sorting', () => {
 
   it('sorts text with locale collation', () => {
     const { container } = render(<TableViewer table={unsorted()} />)
-    fireEvent.click(screen.getByText('roi').closest('th')!)
+    fireEvent.click(screen.getByText('roi'))
     expect(columnValues(container, 0)).toEqual(['a', 'b', 'c'])
   })
 
   it('says the sort is view-only, since downstream nodes are unaffected', () => {
     render(<TableViewer table={unsorted()} />)
     expect(screen.queryByText('sorted view only')).toBeNull()
-    fireEvent.click(screen.getByText('roi').closest('th')!)
+    fireEvent.click(screen.getByText('roi'))
     expect(screen.getByText('sorted view only')).toBeTruthy()
   })
 
@@ -413,7 +592,7 @@ describe('TableViewer sorting', () => {
     render(<TableViewer table={many} pageSize={10} />)
     fireEvent.click(screen.getByLabelText('Next page'))
     expect(screen.getByText('11–20 of 40')).toBeTruthy()
-    fireEvent.click(screen.getByText('sum_post').closest('th')!)
+    fireEvent.click(screen.getByText('sum_post'))
     expect(screen.getByText('1–10 of 40')).toBeTruthy()
   })
 })

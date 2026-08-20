@@ -14,7 +14,7 @@ import type { TableSchema } from '../../core/types'
 import type { NetworkValue, TableValue } from '../../core/values'
 import type { Mode } from '../colors'
 import { CHART_INK, chartSurface, mixHex } from '../colors'
-import { formatNumber } from '../format'
+import { formatCell } from '../format'
 
 // ---------------------------------------------------------------------------
 // Focus
@@ -244,8 +244,9 @@ export function tipColumns(
 
 function showCell(table: TableValue, name: string, row: number): string {
   const value = table.data[name]?.[row]
-  if (value === null || value === undefined || value === '') return '—'
-  return typeof value === 'number' ? formatNumber(value) : String(value)
+  // `formatCell` rather than a third copy of the number/string branch — and it is what knows
+  // that a tooltip row for `bodyId` is a name and not a count.
+  return value === '' ? '—' : formatCell(value ?? null, name)
 }
 
 export function describeNodeTip(

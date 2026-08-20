@@ -98,7 +98,9 @@ function NeuronRowImpl({
           {/* A neuron with no type is normal in an unfinished dataset, and saying so beats an
               empty row that looks like a rendering bug. */}
           <strong>
-            {primary === null || primary === '' ? 'untyped' : formatCell(primary)}
+            {primary === null || primary === ''
+              ? 'untyped'
+              : formatCell(primary, fields.primary)}
           </strong>
           <span className="explore-row__id">{bodyId}</span>
         </div>
@@ -117,7 +119,7 @@ function NeuronRowImpl({
                 title={chip.name}
               >
                 {chip.key && <span className="explore-chip__key">{chip.key}</span>}
-                {formatCell(chip.value)}
+                {formatCell(chip.value, chip.name)}
               </span>
             ))}
           </div>
