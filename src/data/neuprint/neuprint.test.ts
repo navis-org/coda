@@ -16,7 +16,14 @@ import { NUMERIC_DTYPES } from '../../core/types'
 import { cableLength, getColumn } from '../../core/values'
 
 import { NeuPrintSource, THUMBNAIL_MAX_BYTES, meshProgressFraction } from './NeuPrintSource'
-import { datasetSegment, forgetRoutes, get, neuPrintRoutes } from './client'
+import {
+  datasetSegment,
+  forgetRoutes,
+  get,
+  neuPrintRoutes,
+  runCypher,
+  tagQuery,
+} from './client'
 import { meshSourceFromState, precomputedToHttp } from './nglayers'
 import { fetchRoiMeshSet, roiMeshPath } from './roiMeshes'
 import { IDENTITY_SCALE, scalePositions, scaleRadii, voxelScale } from './units'
@@ -849,6 +856,52 @@ describe('failure diagnosis', () => {
     await expect(get('/api/x', { token: '', baseUrl: '/neuprint' })).rejects.toThrow(
       /No neuPrint token/,
     )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Saying who is asking.
+//
+// A browser cannot set `User-Agent`, and a custom header would fail the CORS preflight until
+// neuPrint's fixed allow-list grows one — so a Cypher comment is the only channel there is.
+// ---------------------------------------------------------------------------
+
+describe('client identification', () => {
+  const original = globalThis.fetch
+
+  afterEach(() => {
+    globalThis.fetch = original
+  })
+
+  it('names the app and version on its own line, leaving the query untouched', () => {
+    const tagged = tagQuery('MATCH (n:Neuron) RETURN n.bodyId')
+    const [comment, ...rest] = tagged.split('\n')
+    expect(comment).toMatch(/^\/\/ coda\//)
+    // The query has to survive verbatim: the builders' escaping is asserted elsewhere against
+    // exact text, and a tag that rewrote any of it would be changing what runs.
+    expect(rest.join('\n')).toBe('MATCH (n:Neuron) RETURN n.bodyId')
+  })
+
+  it('sends the tagged query, and touches nothing else in the request', async () => {
+    let body: unknown
+    globalThis.fetch = ((_url: RequestInfo | URL, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body))
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        text: () => Promise.resolve('{}'),
+        json: () => Promise.resolve({ columns: [], data: [] }),
+      } as Response)
+    }) as typeof fetch
+
+    await runCypher('MATCH (n:Meta) RETURN n.dataset', 'hemibrain:v1.2.1', {
+      token: 't',
+      baseUrl: '/neuprint',
+    })
+    expect(body).toEqual({
+      cypher: tagQuery('MATCH (n:Meta) RETURN n.dataset'),
+      dataset: 'hemibrain:v1.2.1',
+    })
   })
 })
 

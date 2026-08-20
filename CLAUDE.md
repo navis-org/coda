@@ -2063,6 +2063,32 @@ server that never saw the request and sending somebody to look at their token. `
 is the second tell. Do not collapse either back into a generic message — the first cost a
 debugging round trip already, and the second cost one in the deployed app.
 
+**The app introduces itself in a Cypher comment, because nothing else is available.** neuPrint
+is a shared production Neo4j and an operator reading a slow-query log cannot otherwise tell which
+client sent what. A browser cannot help the way neuprint-python does: `User-Agent` is a forbidden
+header name in the Fetch spec, so it is silently ignored and Coda sends the browser's. A custom
+header is the obvious substitute and is currently **worse than nothing** — it is not
+CORS-safelisted, so it must appear in `Access-Control-Allow-Headers`, and neuPrint answers a
+preflight with a **fixed** `Authorization, Content-Type` whatever is requested (checked with
+three different `Access-Control-Request-Headers`). Adding one today would fail every
+cross-origin request outright rather than merely going unnoticed. It is a line of nginx config
+on Janelia's side; ask for it alongside the production CORS rollout, since it is the same file.
+
+So `tagQuery` prefixes `// coda/<version>`, which reaches the query log and changes nothing that
+executes. Three things about it:
+
+- **It lives in `client.ts`'s `runCypher`, not in `cypher.ts`'s builders.** One place covers
+  every query including the Raw Cypher node's, which no builder sees — and the builders are
+  asserted against exact query text throughout `neuprint.test.ts`, so tagging there would thread
+  a version through several dozen assertions that are about escaping and column order.
+- **It costs no provenance.** A cache key is `hash(type, params, upstream keys)` and never the
+  query text, so a version bump changes no key and invalidates nobody's results.
+- **It was checked against the live deployment rather than assumed.** neuPrint validates that a
+  query is read-only and a leading comment could plausibly have upset that; six shapes were run
+  against `neuprint-test` — plain `MATCH`, `WHERE … IN`, a `WITH` pipeline, a bare `RETURN`, a
+  `CALL`, and a query that already carries its own comment. All accepted, and neuPrint echoes
+  the whole query back in a `debug` field, which is where it becomes visible.
+
 **Per-dataset schemas.** `DataSource.schemasFor(datasetId)` is optional and synchronous;
 `schemasFromType()` in `datasetParam.ts` is the single funnel every query node goes through,
 so this is the only place that had to change. hemibrain has `cellBodyFiber` and `somaRadius`,

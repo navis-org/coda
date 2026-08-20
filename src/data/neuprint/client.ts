@@ -268,11 +268,46 @@ export function getText(path: string, options?: RequestOptions): Promise<string>
 }
 
 /**
+ * How this app introduces itself, and the one channel available for doing so.
+ *
+ * neuPrint is a shared production Neo4j, and an operator looking at a slow query log has no way
+ * to tell which client sent what. A browser cannot help with that the way a Python client can:
+ * `User-Agent` is a forbidden header name in the Fetch spec, so it is silently ignored and Coda
+ * sends whatever UA the browser sends. A custom header would be the obvious substitute and is
+ * currently worse than nothing — it is not CORS-safelisted, so it has to appear in
+ * `Access-Control-Allow-Headers`, and neuPrint answers a preflight with a **fixed**
+ * `Authorization, Content-Type` whatever is asked for. Adding one today would fail every
+ * cross-origin request rather than merely going unnoticed. That is a line of nginx config on
+ * Janelia's side; until it exists, this is the whole of what is available.
+ *
+ * So the tag rides in the query as a Cypher line comment, which reaches the server's query log
+ * and changes nothing that executes. Checked against the live deployment rather than assumed —
+ * neuPrint validates that a query is read-only, and a leading comment could have upset that.
+ */
+const CLIENT_TAG = `coda/${typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : 'dev'}`
+
+/**
+ * Prefix a query with the client tag.
+ *
+ * Applied here rather than in `cypher.ts`'s builders for two reasons. It covers every query at
+ * once, including the Raw Cypher node's, which no builder ever sees; and the builders are
+ * asserted against expected query text throughout `neuprint.test.ts`, so tagging there would
+ * mean threading a version through several dozen assertions that are about escaping and column
+ * order and have nothing to do with this.
+ *
+ * It costs no provenance: a cache key is `hash(type, params, upstream keys)` and never the query
+ * text, so a version bump changes no key and invalidates nobody's results.
+ */
+export function tagQuery(cypher: string): string {
+  return `// ${CLIENT_TAG}\n${cypher}`
+}
+
+/**
  * Run Cypher against a dataset.
  *
- * neuPrint's custom endpoint takes no parameter map, so values are inlined by the builders
- * in `cypher.ts` — which is why everything that reaches a query goes through `escapeString`
- * or `numberList` there.
+ * neuPrint's custom endpoint takes no parameter map, so values must go through `escapeString`
+ * or `numberList` in `cypher.ts` — which is why everything that reaches a query goes through
+ * one of them.
  */
 export function runCypher(
   cypher: string,
@@ -281,7 +316,7 @@ export function runCypher(
 ): Promise<CypherResponse> {
   return request<CypherResponse>(
     '/api/custom/custom',
-    { method: 'POST', body: JSON.stringify({ cypher, dataset }) },
+    { method: 'POST', body: JSON.stringify({ cypher: tagQuery(cypher), dataset }) },
     options,
   )
 }
