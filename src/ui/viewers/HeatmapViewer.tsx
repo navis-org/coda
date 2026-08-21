@@ -1,16 +1,20 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import type { MatrixValue } from '../../core/values'
-import {
-  CHART_INK,
-  chartSurface,
-  currentMode,
-  divergingColor,
-  inkOn,
-  sequentialColor,
-} from '../colors'
+import { CHART_INK, chartSurface, currentMode } from '../colors'
 import { exportBaseName as makeBaseName, matrixToCsv } from '../export'
-import { formatCompact, formatNumber, truncateLabel } from '../format'
+import { formatCompact, formatNumber } from '../format'
+import { drawHeatmap, heatmapToSvg } from './heatmapDraw'
+import {
+  MAX_HEATMAP_CELLS,
+  axisMarks,
+  buildHeatmapSpec,
+  cellAt,
+  cellRect,
+  rampColors,
+  valueMarks,
+} from './heatmapPlot'
+import { prepareCanvas } from './canvas2d'
 import { tooltipPoint } from './tooltipPoint'
 import type { ExportSource } from './ViewerActions'
 import { ViewerActions } from './ViewerActions'
@@ -30,11 +34,13 @@ export interface HeatmapViewerProps {
 interface Hover {
   row: number
   col: number
+  index: number
   x: number
   y: number
 }
 
-const MAX_CELLS = 20_000
+/** Steps in the caption's colour bar — a coarse sampling of the same ramp the cells use. */
+const BAR_STEPS = 9
 
 /**
  * Matrix heatmap.
@@ -43,9 +49,24 @@ const MAX_CELLS = 20_000
  * recedes toward the surface it is drawn on (see `sequentialColor`). Diverging uses the
  * blue↔red pair with a neutral gray midpoint, centred on zero — never a rainbow.
  *
- * Cell values are drawn only when the cell is genuinely big enough for the text, with the
- * ink picked from the fill's luminance. A label that would not fit is dropped rather than
- * clipped; the hover tooltip carries it instead.
+ * ## Canvas for the cells, SVG for everything else
+ *
+ * The cells were one `<rect>` each, with their own hover handlers, and the viewer refused above
+ * 20,000 cells because that is 40,000 DOM nodes and as many listeners on one card. Cells are
+ * now painted to a canvas from a grid `heatmapPlot` has already folded to at most one cell per
+ * pixel, so the cost of a repaint is bounded by the plot rather than by the matrix.
+ *
+ * The **labels, the printed values and the hover outline stay in an SVG overlay**, which is the
+ * one place this departs from `ScatterViewer`'s all-canvas call — and it is a departure the
+ * arithmetic licenses rather than a preference. A scatter's tick labels are a handful either
+ * way; a heatmap's axis labels are bounded by *pixels*, since only so many 10px names fit down
+ * an edge whatever the matrix is, so keeping them as real text costs nothing and buys text that
+ * can be selected, found and read aloud. It is also what makes a hover free: the ring is one
+ * element in the overlay, so moving the pointer never repaints four million cells.
+ *
+ * Cell values are drawn only when the cell is genuinely big enough for the text, with the ink
+ * picked from the fill's luminance. A label that would not fit is dropped rather than clipped;
+ * the hover tooltip carries it instead.
  */
 export function HeatmapViewer({
   matrix,
@@ -58,30 +79,107 @@ export function HeatmapViewer({
 }: HeatmapViewerProps) {
   const [ref, size] = useElementSize<HTMLDivElement>()
   const [hover, setHover] = useState<Hover | null>(null)
-  const svgRef = useRef<SVGSVGElement>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
   const mode = currentMode()
   const ink = CHART_INK[mode]
   const surface = chartSurface(mode)
 
+  const title = chartTitle(matrix)
   const rows = matrix.rowLabels.length
   const cols = matrix.colLabels.length
+  const cells = rows * cols
+  const oversized = cells > MAX_HEATMAP_CELLS
+  const drawable = rows > 0 && cols > 0 && !oversized && size.width > 40 && size.height > 40
 
-  const exportSource: ExportSource = useMemo(
-    () => ({ csv: () => [matrixToCsv(matrix)], svg: () => svgRef.current }),
-    [matrix],
+  /*
+   * The two expensive passes — the extent scan and the fold — behind one memo, keyed on what
+   * genuinely changes them. Not on the theme: `buckets` is mode-independent by construction, so
+   * a theme flip re-resolves the ramp's hex and repaints rather than re-folding the matrix.
+   */
+  const spec = useMemo(
+    () =>
+      drawable
+        ? buildHeatmapSpec({
+            matrix,
+            scale,
+            width: size.width,
+            height: size.height,
+            showLabels: !compact || size.width > 220,
+          })
+        : null,
+    [drawable, matrix, scale, size.width, size.height, compact],
   )
 
-  const stats = useMemo(() => {
-    let min = Number.POSITIVE_INFINITY
-    let max = Number.NEGATIVE_INFINITY
-    for (const v of matrix.values) {
-      if (!Number.isFinite(v)) continue
-      if (v < min) min = v
-      if (v > max) max = v
-    }
-    if (!Number.isFinite(min)) return { min: 0, max: 0 }
-    return { min, max }
-  }, [matrix])
+  const ramp = useMemo(() => rampColors(scale, mode), [scale, mode])
+  // Sampled out of the cells' own ramp rather than resolved a second time, so the bar cannot
+  // come to describe a scale the cells are not drawn in.
+  const barRamp = useMemo(
+    () =>
+      Array.from(
+        { length: BAR_STEPS },
+        (_, i) => ramp[Math.round((i / (BAR_STEPS - 1)) * (ramp.length - 1))]!,
+      ),
+    [ramp],
+  )
+
+  // --- painting ----------------------------------------------------------
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas || !spec) return
+    const context = prepareCanvas(canvas, size.width, size.height)
+    if (!context) return
+    drawHeatmap(context, {
+      spec,
+      ramp,
+      background: surface,
+      width: size.width,
+      height: size.height,
+    })
+  }, [spec, ramp, surface, size.width, size.height])
+
+  /*
+   * Memoised apart from the hover, which re-renders at pointer-poll rate: without this every
+   * mouse move rebuilt up to 400 value nodes — each one a `formatCompact`, i.e. an `Intl` call —
+   * plus every axis label, for React to diff against an identical tree.
+   */
+  const chrome = useMemo(
+    () =>
+      spec
+        ? [
+            ...(showValues ? valueMarks(spec, matrix.values, ramp) : []),
+            ...axisMarks(spec, ink.secondary),
+          ]
+        : [],
+    [spec, matrix.values, ramp, ink.secondary, showValues],
+  )
+
+  const exportSource: ExportSource = useMemo(
+    () => ({
+      csv: () => [matrixToCsv(matrix)],
+      svg: () => {
+        if (!spec) return null
+        return heatmapToSvg({
+          spec,
+          ramp,
+          ink,
+          background: surface,
+          width: size.width,
+          height: size.height,
+          font:
+            typeof getComputedStyle === 'function' && ref.current
+              ? getComputedStyle(ref.current).fontFamily || 'sans-serif'
+              : 'sans-serif',
+          values: matrix.values,
+          showValues,
+          title,
+          ...(matrix.valueLabel ? { valueLabel: matrix.valueLabel } : {}),
+          barLow: formatCompact(spec.domain.lo),
+          barHigh: formatCompact(spec.domain.hi),
+        })
+      },
+    }),
+    [spec, matrix, title, ramp, ink, surface, size.width, size.height, showValues, ref],
+  )
 
   if (rows === 0 || cols === 0) {
     return (
@@ -90,12 +188,12 @@ export function HeatmapViewer({
       </div>
     )
   }
-  if (rows * cols > MAX_CELLS) {
+  if (oversized) {
     return (
       <div className="viewer">
         <div className="viewer__empty">
           {rows.toLocaleString()} × {cols.toLocaleString()} is too large to draw (
-          {(rows * cols).toLocaleString()} cells).
+          {cells.toLocaleString()} cells).
           <br />
           Aggregate upstream — e.g. group by type before pivoting.
         </div>
@@ -103,157 +201,78 @@ export function HeatmapViewer({
     )
   }
 
-  // Label gutters sized to the content, capped so the plot keeps most of the space.
-  const longestRowLabel = matrix.rowLabels.reduce((m, l) => Math.max(m, l.length), 0)
-  const longestColLabel = matrix.colLabels.reduce((m, l) => Math.max(m, l.length), 0)
-  const showLabels = !compact || size.width > 220
-  const left = showLabels ? Math.min(96, Math.max(28, longestRowLabel * 6 + 8)) : 4
-  const top = showLabels ? Math.min(72, Math.max(16, longestColLabel * 5.4 + 8)) : 4
-  const right = 4
-  const bottom = 4
-
-  const plotWidth = Math.max(0, size.width - left - right)
-  const plotHeight = Math.max(0, size.height - top - bottom)
-  const cellWidth = plotWidth / cols
-  const cellHeight = plotHeight / rows
-  // The 1px inset is the surface showing between cells — the separator is negative
-  // space, never a stroke around each cell.
-  const gap = cellWidth > 6 && cellHeight > 6 ? 1 : 0
-
-  const valueAt = (r: number, c: number): number => matrix.values[r * cols + c] ?? 0
-
-  const colorAt = (value: number): string => {
-    if (scale === 'diverging') {
-      const extent = Math.max(Math.abs(stats.min), Math.abs(stats.max)) || 1
-      return divergingColor(value / extent, mode)
-    }
-    const span = stats.max - Math.min(0, stats.min) || 1
-    return sequentialColor((value - Math.min(0, stats.min)) / span, mode)
-  }
-
-  // Only label cells where the formatted text actually fits with padding.
-  const labelsFit = showValues && cellHeight >= 14 && cellWidth >= 26 && rows * cols <= 400
-
-  const hovered = hover
-    ? {
-        row: matrix.rowLabels[hover.row] ?? '',
-        col: matrix.colLabels[hover.col] ?? '',
-        value: valueAt(hover.row, hover.col),
-      }
-    : null
+  const hovered =
+    hover && matrix.values[hover.index] !== undefined
+      ? {
+          row: matrix.rowLabels[hover.row] ?? '',
+          col: matrix.colLabels[hover.col] ?? '',
+          value: matrix.values[hover.index]!,
+        }
+      : null
+  const hoverBox = hover && spec ? cellRect(spec, hover.row, hover.col) : null
+  const thinned = spec ? spec.rowLabelsThinned + spec.colLabelsThinned : 0
 
   return (
     <div className="viewer">
-      <div
-        ref={ref}
-        className="viewer__scroll"
-        style={{ overflow: 'hidden', position: 'relative' }}
-      >
-        {size.width > 40 && size.height > 40 && (
+      <div className="heatmap-plot" ref={ref} style={{ background: surface }}>
+        <canvas
+          ref={canvasRef}
+          onMouseMove={(event) => {
+            if (!spec) return
+            // Container coordinates, not the viewport's — see `tooltipPoint`.
+            const point = tooltipPoint(event, ref.current)
+            const hit = cellAt(spec, point.x, point.y)
+            setHover(hit ? { ...hit, ...point } : null)
+          }}
+          onMouseLeave={() => setHover(null)}
+        />
+
+        {spec && (
           <svg
-            ref={svgRef}
-            className="chart"
+            className="heatmap-overlay"
             width={size.width}
             height={size.height}
             role="img"
+            aria-label={title}
           >
-            <title>
-              {`Heatmap, ${rows} rows × ${cols} columns${matrix.valueLabel ? `, ${matrix.valueLabel}` : ''}`}
-            </title>
-            <rect width={size.width} height={size.height} fill={surface} />
+            <title>{title}</title>
 
-            {matrix.rowLabels.map((_rowLabel, r) =>
-              matrix.colLabels.map((_, c) => {
-                const value = valueAt(r, c)
-                const fill = colorAt(value)
-                const x = left + c * cellWidth
-                const y = top + r * cellHeight
-                const w = Math.max(0, cellWidth - gap)
-                const h = Math.max(0, cellHeight - gap)
-                const isHovered = hover?.row === r && hover?.col === c
-                return (
-                  <g key={`${r}-${c}`}>
-                    <rect
-                      x={x}
-                      y={y}
-                      width={w}
-                      height={h}
-                      fill={fill}
-                      onMouseMove={(e) =>
-                        // Container coordinates, not the viewport's — see `tooltipPoint`.
-                        setHover({ row: r, col: c, ...tooltipPoint(e, ref.current) })
-                      }
-                      onMouseLeave={() => setHover(null)}
-                    />
-                    {isHovered && (
-                      <rect
-                        x={x}
-                        y={y}
-                        width={w}
-                        height={h}
-                        fill="none"
-                        stroke={ink.primary}
-                        strokeWidth={1.5}
-                        pointerEvents="none"
-                      />
-                    )}
-                    {labelsFit && value !== 0 && (
-                      <text
-                        x={x + w / 2}
-                        y={y + h / 2}
-                        fill={inkOn(fill)}
-                        fontSize={9.5}
-                        textAnchor="middle"
-                        dominantBaseline="central"
-                        pointerEvents="none"
-                      >
-                        {formatCompact(value)}
-                      </text>
-                    )}
-                  </g>
-                )
-              }),
+            {/* The same placements `heatmapToSvg` appends, so the card and the file cannot
+                disagree about a label's position or a printed value's ink. */}
+            {chrome.map((mark) => (
+              <text
+                key={mark.key}
+                x={mark.x}
+                y={mark.y}
+                fill={mark.fill}
+                fontSize={mark.size}
+                textAnchor={mark.anchor}
+                {...(mark.baseline ? { dominantBaseline: mark.baseline } : {})}
+                {...(mark.transform ? { transform: mark.transform } : {})}
+              >
+                {mark.text}
+              </text>
+            ))}
+
+            {hoverBox && (
+              <rect
+                x={hoverBox.x}
+                y={hoverBox.y}
+                width={hoverBox.width}
+                height={hoverBox.height}
+                fill="none"
+                stroke={ink.primary}
+                strokeWidth={1.5}
+              />
             )}
 
-            {showLabels &&
-              matrix.rowLabels.map((label, r) => (
-                <text
-                  key={`r-${label}-${r}`}
-                  x={left - 5}
-                  y={top + r * cellHeight + cellHeight / 2}
-                  fill={ink.secondary}
-                  fontSize={10}
-                  textAnchor="end"
-                  dominantBaseline="central"
-                >
-                  {truncateLabel(label, left - 8)}
-                </text>
-              ))}
-
-            {showLabels &&
-              matrix.colLabels.map((label, c) => {
-                const x = left + c * cellWidth + cellWidth / 2
-                return (
-                  <text
-                    key={`c-${label}-${c}`}
-                    x={x}
-                    y={top - 5}
-                    fill={ink.secondary}
-                    fontSize={10}
-                    textAnchor="start"
-                    // Rotated so long type names don't collide; -90 keeps reading order.
-                    transform={`rotate(-90 ${x} ${top - 5})`}
-                  >
-                    {truncateLabel(label, top - 8, 5.4)}
-                  </text>
-                )
-              })}
           </svg>
         )}
-        {hovered && (
+
+        {hovered && hover && (
           <div
             className="chart-tooltip"
-            style={{ left: hover!.x + 12, top: hover!.y + 12 }}
+            style={{ left: hover.x + 12, top: hover.y + 12 }}
             role="status"
           >
             <strong>
@@ -263,31 +282,45 @@ export function HeatmapViewer({
               {formatNumber(hovered.value)}
               {matrix.valueLabel ? ` ${matrix.valueLabel}` : ''}
             </div>
+            {spec?.folded && (
+              // The block under the pointer stands for many cells and is drawn as the
+              // strongest of them, so say which one is being named.
+              <div className="chart-tooltip__row">
+                strongest of ~{spec.foldFactor.toLocaleString()} cells
+              </div>
+            )}
           </div>
         )}
       </div>
+
       <div className="viewer__caption">
         <span>
-          {rows} × {cols}
+          {rows.toLocaleString()} × {cols.toLocaleString()}
           {matrix.valueLabel ? ` · ${matrix.valueLabel}` : ''}
         </span>
+        {spec?.folded && !compact && (
+          <span
+            className="viewer__note"
+            title={`More cells than pixels: each block is drawn as the strongest of about ${spec.foldFactor.toLocaleString()} cells. Enlarge the card to see more of them.`}
+          >
+            cells merged
+          </span>
+        )}
+        {thinned > 0 && !compact && (
+          <span
+            className="viewer__note"
+            title="Too many labels to draw them all — enlarge the card, or aggregate upstream."
+          >
+            labels thinned
+          </span>
+        )}
         <span className="colorbar">
-          {formatCompact(
-            scale === 'diverging'
-              ? -Math.max(Math.abs(stats.min), Math.abs(stats.max))
-              : Math.min(0, stats.min),
-          )}
+          {formatCompact(spec ? spec.domain.lo : 0)}
           <span
             className="colorbar__ramp"
-            style={{
-              background: `linear-gradient(to right, ${rampStops(scale, mode).join(', ')})`,
-            }}
+            style={{ background: `linear-gradient(to right, ${barRamp.join(', ')})` }}
           />
-          {formatCompact(
-            scale === 'diverging'
-              ? Math.max(Math.abs(stats.min), Math.abs(stats.max))
-              : stats.max,
-          )}
+          {formatCompact(spec ? spec.domain.hi : 0)}
         </span>
         <ViewerActions
           baseName={baseName ?? makeBaseName(undefined, 'heatmap')}
@@ -301,11 +334,8 @@ export function HeatmapViewer({
   )
 }
 
-/** Sample the active scale into CSS gradient stops for the colour bar. */
-function rampStops(scale: 'sequential' | 'diverging', mode: 'light' | 'dark'): string[] {
-  const steps = 9
-  return Array.from({ length: steps }, (_, i) => {
-    const t = i / (steps - 1)
-    return scale === 'diverging' ? divergingColor(t * 2 - 1, mode) : sequentialColor(t, mode)
-  })
+function chartTitle(matrix: MatrixValue): string {
+  return `Heatmap, ${matrix.rowLabels.length} rows × ${matrix.colLabels.length} columns${
+    matrix.valueLabel ? `, ${matrix.valueLabel}` : ''
+  }`
 }

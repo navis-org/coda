@@ -4,11 +4,10 @@ import type { LinkageValue } from '../../core/values'
 import { CHART_INK, MAX_SERIES, chartSurface, currentMode } from '../colors'
 import { clusterColor } from '../encoding'
 import { exportBaseName as makeBaseName } from '../export'
-import { formatNumber, truncateLabel } from '../format'
+import { formatNumber, truncateLabel, labelStep } from '../format'
 import type { DendrogramLink, DendrogramOrientation } from './dendrogramLayout'
 import {
   dendrogramShape,
-  labelStep,
   linkPath,
   observationsUnder,
   projectPoint,

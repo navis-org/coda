@@ -3185,17 +3185,41 @@ a.dropdown__item {
  * canvas repaints on pan and zoom, where the picture genuinely moves, and not on every
  * pointer move that only extends an outline.
  */
-.scatter-canvas {
+/*
+ * The plot box of a viewer that paints to a canvas — the scatter, and the heatmap's cells.
+ *
+ * `position: relative` is load-bearing twice over: it is the containing block the tooltip is
+ * positioned in (`tooltipPoint` is passed this element), and any overlay is `absolute` against
+ * it. Stated once for both, so the guarantee cannot drift between them.
+ */
+.scatter-canvas,
+.heatmap-plot {
   flex: 1;
   min-height: 0;
   min-width: 0;
   position: relative;
   overflow: hidden;
+}
+.scatter-canvas canvas,
+.heatmap-plot canvas {
+  display: block;
+}
+/* The scatter alone takes pointer gestures directly on the box. */
+.scatter-canvas {
   touch-action: none;
 }
 .scatter-canvas canvas {
-  display: block;
   outline: none;
+}
+/*
+ * The heatmap's labels, printed values and hover outline. `pointer-events: none` so the canvas
+ * underneath keeps every hover — the overlay covers the whole plot, and a label intercepting
+ * the pointer would put a dead strip across the row it names.
+ */
+.heatmap-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
 }
 .scatter-gesture {
   position: absolute;

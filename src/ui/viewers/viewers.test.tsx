@@ -19,6 +19,7 @@ import { MAX_BAR_THICKNESS, SURFACE_GAP } from '../colors'
 import { installDownloadCapture, installJsdomStubs } from '../../test/jsdomStubs'
 import { BarChartViewer } from './BarChartViewer'
 import { HeatmapViewer } from './HeatmapViewer'
+import { MAX_HEATMAP_CELLS } from './heatmapPlot'
 import { TableViewer } from './TableViewer'
 
 beforeAll(() => installJsdomStubs({ width: 800, height: 400 }))
@@ -205,11 +206,14 @@ describe('HeatmapViewer', () => {
       'fraction of row',
     )
 
-  it('draws one cell per matrix entry', () => {
+  it('paints the cells to a canvas and keeps the labels as real text', () => {
     const { container } = render(<HeatmapViewer matrix={matrix()} />)
-    // 6 cells + 1 background rect.
-    const rects = [...container.querySelectorAll('rect')]
-    expect(rects.length).toBeGreaterThanOrEqual(7)
+    // The cells are unbounded — a matrix can be millions — so they go to a canvas. The axis
+    // labels are bounded by pixels however large the matrix is, so they stay in the DOM,
+    // where they can be selected, found and read aloud.
+    expect(container.querySelector('canvas')).toBeTruthy()
+    expect(container.querySelector('.heatmap-overlay')).toBeTruthy()
+    expect(screen.getByText('LC4')).toBeTruthy()
   })
 
   it('labels both axes', () => {
@@ -244,10 +248,39 @@ describe('HeatmapViewer', () => {
     expect(labels).not.toContain('0')
   })
 
-  it('refuses to draw an unreasonably large matrix and says what to do', () => {
-    const rows = Array.from({ length: 200 }, (_, i) => `r${i}`)
-    const cols = Array.from({ length: 200 }, (_, i) => `c${i}`)
-    render(<HeatmapViewer matrix={makeMatrix(rows, cols, new Float64Array(40_000))} />)
+  it('draws a matrix the old per-cell rendering refused, and says it merged cells', () => {
+    // 200 x 200 = 40,000 was refused outright when every cell was its own <rect>. It is now
+    // simply a picture; a matrix with more cells than the plot has pixels is folded, and the
+    // caption says so rather than the viewer quietly showing a subset.
+    const big = (n: number) =>
+      makeMatrix(
+        Array.from({ length: n }, (_, i) => `r${i}`),
+        Array.from({ length: n }, (_, i) => `c${i}`),
+        Float64Array.from({ length: n * n }, (_, i) => i % 7),
+      )
+
+    const drawn = render(<HeatmapViewer matrix={big(200)} />)
+    expect(screen.queryByText(/too large to draw/)).toBeNull()
+    expect(drawn.container.querySelector('canvas')).toBeTruthy()
+    // 200 rows against a 400px-tall stub: labels cannot all fit, and the caption admits it.
+    expect(screen.getByText('labels thinned')).toBeTruthy()
+    drawn.unmount()
+
+    render(<HeatmapViewer matrix={big(1_000)} />)
+    expect(screen.getByText('cells merged')).toBeTruthy()
+  })
+
+  it('still refuses a matrix past the ceiling, and says what to do', () => {
+    const cols = Math.ceil(Math.sqrt(MAX_HEATMAP_CELLS))
+    const rows = Math.floor(MAX_HEATMAP_CELLS / cols) + 1
+    const labels = (p: string, n: number) => Array.from({ length: n }, (_, i) => `${p}${i}`)
+    const matrix = makeMatrix(
+      labels('r', rows),
+      labels('c', cols),
+      new Float64Array(rows * cols),
+    )
+    expect(rows * cols).toBeGreaterThan(MAX_HEATMAP_CELLS)
+    render(<HeatmapViewer matrix={matrix} />)
     expect(screen.getByText(/too large to draw/)).toBeTruthy()
     expect(screen.getByText(/Aggregate upstream/)).toBeTruthy()
   })
@@ -643,6 +676,39 @@ describe('viewer downloads', () => {
 
     expect(capture.downloads[0]!.filename).toBe('matrix.csv')
     expect(await capture.downloads[0]!.text()).toBe(',DNp02,DNp11\nLC4,40,12\n')
+  })
+
+  it('exports a heatmap as SVG, one subpath per drawn cell', async () => {
+    /*
+     * jsdom has no canvas beyond the accept-everything stub, so the cells are not observable on
+     * screen — the SVG the same spec produces is the only handle on the drawing without a
+     * browser, exactly as `networkDraw.test.ts` is for the network.
+     */
+    render(
+      <HeatmapViewer
+        matrix={makeMatrix(
+          ['LC4', 'LC6'],
+          ['DNp02', 'DNp11', 'PVLP002'],
+          Float64Array.from([0.7, 0.2, 0.1, 0, 0.4, 0.6]),
+        )}
+        baseName="matrix"
+      />,
+    )
+    fireEvent.click(screen.getByLabelText('Download'))
+    fireEvent.click(screen.getByText('SVG vector'))
+
+    const text = await capture.downloads[0]!.text()
+    expect(capture.downloads[0]!.filename).toBe('matrix.svg')
+    expect(text).toContain('xmlns="http://www.w3.org/2000/svg"')
+    // A path per ramp bucket carrying a subpath per cell, never a <rect> per cell: at one cell
+    // per pixel a full-width plot is ~285,000 of them, which is a file nothing opens.
+    const doc = new DOMParser().parseFromString(text, 'image/svg+xml')
+    const subpaths = [...doc.querySelectorAll('path')]
+      .map((path) => (path.getAttribute('d') ?? '').split('M').length - 1)
+      .reduce((a, b) => a + b, 0)
+    expect(subpaths).toBe(6)
+    // The axis names travel with it.
+    expect(text).toContain('PVLP002')
   })
 
   it('exports a chart as SVG', async () => {

@@ -325,6 +325,8 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `ui/viewers/scatterPlot.test.ts`         | the scales and the log drop, the point budget's stride, the trend in transformed space, and a lasso catching rows nothing drew   |
 | `ui/viewers/scatterDraw.test.ts`         | marker geometry, the colour+shape batching, and the exported SVG                                                                 |
 | `ui/viewers/scatterViewer.test.tsx`      | the scatter caption: every admission it makes, and which legend keys stand down in a card                                        |
+| `ui/viewers/heatmapPlot.test.ts`         | the heatmap fold: a grid bounded by the plot, the strongest cell of a block surviving, the ramp table proved lossless, thinning |
+| `ui/viewers/svgBuilders.test.ts`         | every synthesised export through the real serializer: one namespace declaration, one font, and a document that actually parses |
 | `nodes/output/scatter.test.ts`           | the tap, id-vs-row-index selection, and that `Max points` stales nothing                                                         |
 | `core/columnParams.test.ts`              | what a column picker may complain about: unknown-vs-empty schema, what `optional` changes, and a plural keeping an unseen list   |
 | `nodes/output/barChart.test.ts`          | the tap, that an unpicked column is a warning and not a refusal, and the stack-by-itself catch                                   |
@@ -2765,6 +2767,186 @@ state distinguishes _not known yet_ from _nothing to pick_. See invariant 5's co
 **No visual verification exists.** jsdom has no canvas beyond the accept-everything stub, so
 the marks have not been looked at by anyone; what is checked is the geometry, the exported SVG
 and the caption. Same standing as the WebGL viewers.
+
+## Heatmap: more cells than pixels
+
+`out.heatmap` used to refuse above **20,000 cells**, and that number was a fact about SVG rather
+than about matrices: every cell was a `<g>` wrapping a `<rect>` carrying its own `onMouseMove`
+and `onMouseLeave`, so the cap was really 40,000 DOM nodes and as many listeners on one card. It
+landed on exactly the pictures this viewer exists for — an NBLAST score matrix at the Skeletons
+node's own 500-neuron ceiling is 250,000 cells, and `Linkage → Ordered → Heatmap` is *meant* to
+be read at that size, where the structure is texture rather than cells. The ceiling is now
+**4,000,000**, which is above `MAX_PIVOT_CELLS`, so the viewer draws anything a Pivot will build.
+
+`heatmapPlot.ts` is the headless half — geometry, the fold, the hit test — and `heatmapDraw.ts`
+is the canvas pass and the standalone SVG, both reading one spec. `scatterPlot`/`scatterDraw`'s
+arrangement, for its reasons: jsdom has no canvas, so anything left in the component is covered
+by nothing, and one spec is what makes the exported file the picture on screen.
+
+### The fold is the whole of it
+
+**A cell smaller than a pixel is not drawn.** The matrix is folded onto a grid of at most one
+cell per CSS pixel of the plot, and the canvas pass, the SVG export and the hit test all work on
+that grid — so **drawing costs the card rather than the data**. Only the two passes that cannot
+be bounded stay O(n): the extent scan and the fold itself. Measured in a browser at 1400×700,
+spec build then first paint: 90,000 cells 1.2/5.6 ms, 250,000 3.2/17 ms, 1,000,000 11/37 ms,
+4,000,000 20/46 ms. So the ceiling costs about 65 ms of one frame, on a resize or a theme flip
+and never on a hover.
+
+**CSS pixels, not device pixels**, so the picture does not change between a retina screen and a
+projector, and the exported SVG — which draws the same grid — is the same file whoever exported
+it. What is given up is the sub-CSS-pixel detail a 2× screen could have shown.
+
+**A block keeps its strongest cell, never the mean.** A connectivity matrix is sparse, and
+averaging one strong connection across the hundred empty cells beside it puts it at a fraction of
+a percent of the ramp — off the picture, which is the only thing in it. Strength is measured from
+the scale's own neutral end (the low end for sequential, zero for diverging), so a diverging fold
+keeps both tails rather than only the positive one, and a sequential fold keeps the largest value
+rather than the largest magnitude. Same brightest-wins rule as `raster.ts`.
+
+**The winning cell's index is kept**, so the tooltip over a folded block names a real row, column
+and value — and says `strongest of ~N cells` beside it. That admission is on the *card* as well
+as in the overlay, which matters, because the caption's `cells merged` note stands down under
+`compact` as every viewer note here does. A folded picture that said nothing anywhere would be
+the failure `labels thinned` already exists to prevent.
+
+### Canvas for the cells, SVG for everything else
+
+This is the one place the viewer departs from `ScatterViewer`'s all-canvas call, and the
+arithmetic licenses it rather than taste. A scatter's tick labels are a handful either way; a
+heatmap's axis labels are bounded by **pixels**, since only so many 10px names fit down an edge
+however large the matrix is. So the labels, the printed cell values and the hover outline stay in
+an SVG overlay: real text that can be selected, found and read aloud, laid out by the browser
+rather than by `measureText` — and a hover that costs one element rather than a repaint of four
+million cells. `.heatmap-overlay` is `pointer-events: none`, or a label would put a dead strip
+across the row it names.
+
+Axis labels are **thinned to a legible pitch and the drop is counted**, which the old code never
+had to do because it never drew a matrix taller than its own labels.
+
+### The chrome is shared, not drawn twice
+
+The cells were shared from the start (`cornersByBucket`), and the labels and printed values were
+not — two independent drawings carrying the same magic numbers, and they **had already parted
+company** after one afternoon: a cell whose bucket is `-1` took ramp-bottom ink on screen and
+black in the file. `axisMarks`/`valueMarks` in `heatmapPlot.ts` now return placed, coloured
+`TextMark`s that the overlay maps to JSX and the exporter to `<text>`, so the file matches the
+card for the chrome as well as for the cells.
+
+**A `TextMark` carries its baseline, and absent means alphabetic.** `dominant-baseline: central`
+centres text across its *reading* direction, so on a column label turned -90° it moves the label
+sideways by half a cap height and the whole band drifts off the columns it names. Applying it
+uniformly is the obvious tidy-up and it is wrong; it was caught by pixel-diffing against the
+previous build, since jsdom performs no layout and nothing else here can see a two-pixel move.
+`heatmapPlot.test.ts` pins the row/column distinction.
+
+### Two things measured rather than assumed
+
+- **The ramp is a 512-entry lookup table, and that is not the quantisation `ScatterViewer`
+  refuses.** That viewer declines to quantise a sequential ramp — "quantising would put a colour
+  on screen that `resolveColor` never returned" — so this was checked over 200,000 samples of
+  both scales in both modes. The ramps are piecewise-linear in RGB and the output is 8 bits a
+  channel, so the whole blue ramp is **453 distinct colours** and the diverging scale 621–1,006;
+  against those, 512 steps is within **one** channel value of exact for sequential and **two** for
+  diverging, and 256 measures the same. The scatter's objection is real for a *categorical*
+  palette, where a substituted slot means a different category; here a colour is a magnitude and
+  the substitute is the same magnitude to within a rounding step. Without the table, 285,000
+  `sequentialColor` calls cost **65 ms against 2 ms**, per render.
+- **Cells are batched by ramp bucket, and carried as flat corners.** One path and one fill per
+  bucket, so a bounded number of fills for any number of cells — the scatter's colour+shape
+  batching arrived at from the other direction, since there the sequential ramp defeats the
+  batching and here the ramp *is* the batching. Every cell is the same size, so only `x, y` is
+  stored per cell and the width and height are read off the spec once: that alone took a
+  four-million-cell repaint from **77 ms to 46 ms**, most of the difference being garbage no
+  longer made.
+
+`buckets` is **mode-independent** by construction, so a theme flip re-resolves the ramp's hex and
+repaints rather than re-folding the matrix — and `cornersByBucket` is memoised against the spec in
+a `WeakMap` (`rowFields.ts`'s `slotCache` idiom), so that repaint does not re-walk 900,000 grid
+cells to change nothing but 512 `fillStyle` strings. Measured, it took the four-million-cell
+repaint from 46 ms to 27 ms and made an export cost no third walk.
+
+**`Show values` is applied at render, never in the fold.** It reached `buildHeatmapSpec` only to
+decide one boolean, which put it in the dependency list of a pass that walks every cell — so
+toggling it on a four-million-cell matrix re-scanned the whole thing to compute `false`.
+`labelsFit` is now the size test alone and the param is `&&`-ed in beside it.
+
+### The export
+
+`svg: () => heatmapToSvg(...)` rather than the live element, because the live element no longer
+holds the cells. **A folded picture exports folded** — the cells below a pixel were not on screen,
+so drawing them would be a document claiming detail nobody saw, and one rect per cell of a
+four-million-cell matrix is a file nothing opens. Bucket-batched there too: a 356×356 matrix
+exports as 54 `<path>` elements carrying 82,236 subpaths, 2.0 MB, and parses clean.
+
+**Two pre-existing bugs in the shared export path had to be fixed to get there**, and both are
+the same shape: two owners for one declaration.
+
+`serializeSvg` set the namespace with `setAttribute('xmlns', …)`, which creates an ordinary
+attribute in the *null* namespace that merely happens to be spelled `xmlns` — so `XMLSerializer`
+emitted it beside the declaration it already writes for an element created in the SVG namespace,
+and **every chart this app exported carried `xmlns` twice**. A duplicate attribute is a fatal XML
+well-formedness error rather than something a reader recovers from, and SVG is parsed as XML:
+`DOMParser` returns a `parsererror` document for it. It affected the bar chart, the scatter, the
+network and the dendrogram alike, and it failed to *parse* rather than looking slightly wrong,
+which is why nothing about the string ever caught it.
+
+And `serializeSvg` appended a `<style>` inlining the font **unconditionally**, beside the one each
+builder already appends — measured on a real export: two style blocks, the serializer's saying
+`sans-serif`, because `getComputedStyle` on a *detached* element resolves nothing and a
+synthesised export is always detached. Only document order saved it: `insertBefore` happened to
+put the dead declaration first. Moving that to an append, or a builder dropping its own, would
+have silently stripped the typeface from every exported chart.
+
+**The fix is structural rather than advisory, which is the point.** `setAttributeNS` makes the
+namespace a real declaration so exactly one is written, the font is inlined only when the element
+carries none, and `svgElement.ts`'s **`svgRoot()` has no parameter for `xmlns` or `font` at all** —
+so a fourth builder cannot reintroduce either by copying a third. The first pass fixed this with
+three identical comments saying "do not set xmlns", which was verified to be worthless:
+re-adding the attribute to `networkToSvg` left all 43 builder tests green, because
+`networkDraw.test.ts` asserts `toContain('xmlns="…"')` and that passes just as happily when it is
+written twice. `svgBuilders.test.ts` is the tripwire under it — every builder's output through the
+real `serializeSvg` and a real XML parse — and both halves were confirmed by mutation.
+
+### What was checked in a real browser
+
+Headless Chrome over CDP against `pnpm dev`, because this is the class jsdom cannot see.
+
+- **The small case is unchanged.** The bundled matrix example rendered before and after and
+  pixel-diffed: **cell interiors byte-identical**, and the only differences are the two output
+  pixels the 1px separator straddles, where the canvas and SVG rasterisers weight a sub-pixel
+  edge differently by 1–11 values. 3.6% of the frame, all of it on the separator lines. The same
+  diff was re-run after the shared-chrome refactor and came back at **zero** differing pixels,
+  which is how the baseline regression above was found.
+- A 356 × 356 adjacency (126,736 cells) drawn on a card and expanded, against the old build
+  answering `205 × 356 is too large to draw (72,980 cells)` on the same graph.
+- The tooltip on a folded card, saying `strongest of ~2 cells` and landing under the pointer.
+- The SVG export captured off `URL.createObjectURL` and re-parsed in the page: no `parsererror`,
+  one `xmlns`, 54 paths, labels present.
+- **Light theme, loaded fresh**: labels `#52514e`, the low end resolving to `#cde2fb` and the
+  surface to `#fcfcfb` — all through `currentMode()`, so a viewer computing hex in JS survives.
+
+**A live theme switch does not repaint this viewer, and that is pre-existing** — checked against
+the old build, which left its labels `#ffffff` and its cells `#134789` on a light card in exactly
+the same way. `currentMode()` is read during render and nothing re-renders the card on a theme
+change; any subsequent edit fixes it. Not introduced here and not fixed here, because it is one
+symptom of something several viewers share.
+
+**+6.7 kB raw / +2.5 kB gzipped on the main chunk** (1,002.41 → 1,009.11 kB), measured against a
+build of the same tree with the feature absent. Far under this codebase's bar for a lazy boundary.
+
+Three things were lifted out rather than copied a third time, on the second-consumer rule this
+codebase states repeatedly (`useStable`, `LegendKeys`, `Tiles`, `raster`): `svgElement.ts` holds
+`SVG_NS`, `round`, `element`, `textNode` and `svgRoot` for all three SVG builders; `canvas2d.ts`
+holds the HiDPI setup the scatter and the heatmap share — and it now skips the `canvas.width`
+write when the size is unchanged, which was reallocating a ~16 MB backing store on every theme
+flip; and `labelStep` moved from `dendrogramLayout.ts` to `format.ts` beside `truncateLabel`,
+because two thinning rules that round differently drop different numbers of labels under captions
+that both say `labels thinned`.
+
+What has **not** been looked at is a matrix at the four-million ceiling in a browser — the mock
+connectome tops out at 401 neurons, so the ceiling's cost is measured against synthetic data
+through the real functions rather than through a real graph.
 
 ## Neuroglancer
 

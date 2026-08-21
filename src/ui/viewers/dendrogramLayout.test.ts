@@ -8,11 +8,12 @@
 
 import { describe, expect, it } from 'vitest'
 
+import { labelStep } from '../format'
+
 import type { LinkageValue } from '../../core/values'
 import { makeLinkage } from '../../core/values'
 import {
   dendrogramShape,
-  labelStep,
   linkPath,
   observationsUnder,
   projectPoint,

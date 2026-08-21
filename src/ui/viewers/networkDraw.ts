@@ -14,12 +14,12 @@
  * framing the user never chose.
  */
 
+import { SVG_NS, element, round, svgRoot, textNode } from './svgElement'
 import type { NetworkValue } from '../../core/values'
 import { getColumn } from '../../core/values'
 import type { Legend } from '../encoding'
 import { formatNumber } from '../format'
 
-const SVG_NS = 'http://www.w3.org/2000/svg'
 
 /**
  * How far a reciprocal pair bows apart, as a fraction of the distance between its two
@@ -98,7 +98,6 @@ export function curvePoint(source: Point, target: Point, curvature: number, t: n
   }
 }
 
-const round = (value: number) => Math.round(value * 100) / 100
 
 /** `d` attribute for an edge: a straight line, or a quadratic when it has to bow aside. */
 export function edgePath(source: Point, target: Point, curvature: number): string {
@@ -198,35 +197,6 @@ export interface NetworkSvgSpec {
   title?: string
 }
 
-function element<K extends keyof SVGElementTagNameMap>(
-  tag: K,
-  attributes: Record<string, string | number>,
-): SVGElementTagNameMap[K] {
-  const node = document.createElementNS(SVG_NS, tag)
-  for (const [name, value] of Object.entries(attributes)) {
-    node.setAttribute(name, typeof value === 'number' ? String(round(value)) : value)
-  }
-  return node
-}
-
-function text(
-  content: string,
-  attributes: Record<string, string | number>,
-  outline?: string,
-): SVGTextElement {
-  const node = element('text', attributes)
-  if (outline) {
-    // Halo rather than a backing rect: labels sit on top of links, and a rect per label
-    // would occlude the very geometry the label is annotating.
-    node.setAttribute('stroke', outline)
-    node.setAttribute('stroke-width', '3')
-    node.setAttribute('paint-order', 'stroke')
-    node.setAttribute('stroke-linejoin', 'round')
-  }
-  node.textContent = content
-  return node
-}
-
 /**
  * Build a standalone `<svg>` of a network view.
  *
@@ -239,29 +209,20 @@ export function networkToSvg(spec: NetworkSvgSpec): SVGSVGElement {
   const legendHeight = spec.legend ? LEGEND_HEIGHT : 0
   const width = Math.max(1, Math.round(spec.width))
   const height = Math.max(1, Math.round(spec.height))
-  const total = height + legendHeight
 
-  const svg = element('svg', {
-    xmlns: SVG_NS,
+  const svg = svgRoot({
     width,
-    height: total,
-    viewBox: `0 0 ${width} ${total}`,
-    role: 'img',
+    height,
+    strip: legendHeight,
+    background: spec.background,
+    ...(spec.title ? { title: spec.title } : {}),
   })
-
-  if (spec.title) {
-    const title = document.createElementNS(SVG_NS, 'title')
-    title.textContent = spec.title
-    svg.append(title)
-  }
 
   // The font is inherited from a CSS variable on screen and has to be carried explicitly
   // here; every colour is already a literal hex, which is what keeps this export cheap.
   const style = document.createElementNS(SVG_NS, 'style')
   style.textContent = `text{font-family:${spec.font};}`
   svg.append(style)
-
-  svg.append(element('rect', { x: 0, y: 0, width, height: total, fill: spec.background }))
 
   const clip = document.createElementNS(SVG_NS, 'clipPath')
   clip.setAttribute('id', 'coda-network-plot')
@@ -316,7 +277,7 @@ export function networkToSvg(spec: NetworkSvgSpec): SVGSVGElement {
 
     if (edge.label) {
       const at = curvePoint(source, target, edge.curvature, 0.5)
-      edgeText.append(text(edge.label, { x: at.x, y: at.y }, spec.background))
+      edgeText.append(textNode(edge.label, { x: at.x, y: at.y }, spec.background))
     }
   }
 
@@ -339,7 +300,7 @@ export function networkToSvg(spec: NetworkSvgSpec): SVGSVGElement {
     )
     if (node.label) {
       nodeText.append(
-        text(node.label, { x: node.x + node.radius + 3, y: node.y }, spec.background),
+        textNode(node.label, { x: node.x + node.radius + 3, y: node.y }, spec.background),
       )
     }
   }
@@ -375,7 +336,7 @@ function drawLegend(
       group.append(
         element('rect', { x, y: y - 4, width: 8, height: 8, rx: 2, fill: entry.color }),
       )
-      const label = text(entry.label, { x: x + 12, y })
+      const label = textNode(entry.label, { x: x + 12, y })
       group.append(label)
       // No text metrics without layout, so advance by an estimate; 5.6px per character at
       // 10px is close enough for a strip that only has to avoid collisions.
@@ -397,15 +358,15 @@ function drawLegend(
       }),
     )
   })
-  group.append(text(formatNumber(legend.domain[0]), { x, y: y + 10, 'font-size': 9 }))
+  group.append(textNode(formatNumber(legend.domain[0]), { x, y: y + 10, 'font-size': 9 }))
   group.append(
-    text(formatNumber(legend.domain[1]), {
+    textNode(formatNumber(legend.domain[1]), {
       x: x + barWidth,
       y: y + 10,
       'font-size': 9,
       'text-anchor': 'end',
     }),
   )
-  group.append(text(legend.column, { x: x + barWidth + 10, y }))
+  group.append(textNode(legend.column, { x: x + barWidth + 10, y }))
   return group
 }

@@ -129,6 +129,24 @@ export function niceTicks(max: number, count = 4): number[] {
   return ticks
 }
 
+/**
+ * How many labels to skip so they do not overlap.
+ *
+ * Every `step`th, never a subset chosen by importance: an axis's labels are in a meaningful
+ * order, so thinning by rank would leave a run here and a gap there and read as missing data.
+ * The caption says when this bit, on the Network viewer's reasoning — silent culling is what
+ * makes a viewer look broken.
+ *
+ * Shared by the dendrogram's leaves and the heatmap's two axes, which is why it sits here beside
+ * `truncateLabel` rather than in either viewer: two thinning rules that round differently would
+ * drop different numbers of labels for the same room, under captions that say the same thing.
+ */
+export function labelStep(count: number, room: number, perLabel: number): number {
+  if (count === 0 || room <= 0) return 1
+  const fits = Math.max(1, Math.floor(room / perLabel))
+  return Math.max(1, Math.ceil(count / fits))
+}
+
 /** Truncate a label to fit a pixel width, measured against an average glyph width. */
 export function truncateLabel(label: string, maxWidth: number, charWidth = 6): string {
   const maxChars = Math.max(1, Math.floor(maxWidth / charWidth))

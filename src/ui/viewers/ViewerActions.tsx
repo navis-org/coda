@@ -24,7 +24,15 @@ export interface ExportSource {
    * lazily for the same reason as the CSV.
    */
   graphml?: () => string[]
-  /** Live chart element, for vector and raster export. */
+  /**
+   * The current view as a standalone `<svg>`, for vector and raster export.
+   *
+   * The live element where the picture is in the DOM (the bar chart, the dendrogram), and one
+   * synthesised on demand where it is not — the network is WebGL, and the scatter and the
+   * heatmap paint to a canvas, so all three rebuild the view from the spec they drew it from.
+   * Either way it is the picture *as it stands*, which is what makes the exported file match
+   * the screen rather than being a second drawing of the same data.
+   */
   svg?: () => SVGSVGElement | null
 }
 

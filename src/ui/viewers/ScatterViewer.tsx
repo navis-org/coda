@@ -43,6 +43,7 @@ import {
 import type { ExportSource } from './ViewerActions'
 import { ViewerActions } from './ViewerActions'
 import { tooltipPoint } from './tooltipPoint'
+import { prepareCanvas } from './canvas2d'
 import { useElementSize } from './useElementSize'
 import { useStable } from './useStable'
 
@@ -246,14 +247,8 @@ export function ScatterViewer({
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas || !spec) return
-    const ratio = typeof devicePixelRatio === 'number' ? devicePixelRatio : 1
-    canvas.width = Math.max(1, Math.round(box.width * ratio))
-    canvas.height = Math.max(1, Math.round(box.height * ratio))
-    canvas.style.width = `${box.width}px`
-    canvas.style.height = `${box.height}px`
-    const context = canvas.getContext('2d')
+    const context = prepareCanvas(canvas, box.width, box.height)
     if (!context) return
-    context.setTransform(ratio, 0, 0, ratio, 0, 0)
     drawScatter(context, {
       spec,
       ink,

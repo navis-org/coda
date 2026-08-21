@@ -131,6 +131,20 @@ describe('serializeSvg', () => {
     expect(output).toContain('viewBox="0 0 400 200"')
   })
 
+  it('declares the namespace once, so the file is well-formed XML', () => {
+    /*
+     * `setAttribute('xmlns', …)` writes a null-namespace attribute *beside* the declaration the
+     * serializer already emits, so every exported chart carried it twice — and a duplicate
+     * attribute is a fatal XML error rather than something a reader recovers from. It failed to
+     * parse rather than looking slightly wrong, which is why nothing about the string caught it.
+     */
+    const output = serializeSvg(makeSvg())
+    expect(output.split('xmlns="http://www.w3.org/2000/svg"')).toHaveLength(2)
+    const doc = new DOMParser().parseFromString(output, 'image/svg+xml')
+    expect(doc.querySelector('parsererror')).toBeNull()
+    expect(doc.documentElement.namespaceURI).toBe('http://www.w3.org/2000/svg')
+  })
+
   it('inlines a font-family so text survives without the app stylesheet', () => {
     const output = serializeSvg(makeSvg())
     expect(output).toMatch(/<style>text\{font-family:.+\}<\/style>/)

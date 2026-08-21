@@ -19,6 +19,9 @@ import type { ExportRefusal } from '../export/canExport'
 import { serializeGraph } from '../core/graph'
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
+/** The namespace a namespace *declaration* lives in — see `serializeSvg`. */
+const XMLNS_NS = 'http://www.w3.org/2000/xmlns/'
+const XLINK_NS = 'http://www.w3.org/1999/xlink'
 const CSV_CHUNK_ROWS = 2000
 
 /** RFC 4180: quote when the value contains a delimiter, quote or newline. */
@@ -237,8 +240,25 @@ export function exportBaseName(graphName: string | undefined, nodeLabel: string)
  */
 export function serializeSvg(svg: SVGSVGElement): string {
   const clone = svg.cloneNode(true) as SVGSVGElement
-  clone.setAttribute('xmlns', SVG_NS)
-  clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink')
+  /*
+   * The declarations go in through `setAttributeNS`, and that is not pedantry.
+   *
+   * `setAttribute('xmlns', …)` creates an ordinary attribute in the *null* namespace that
+   * merely happens to be spelled `xmlns` — so `XMLSerializer` emits it beside the namespace
+   * declaration it already writes for an element created in the SVG namespace, and every
+   * exported file carried `xmlns="http://www.w3.org/2000/svg"` **twice**. A duplicate attribute
+   * is a fatal XML well-formedness error rather than something a reader recovers from, and SVG
+   * is parsed as XML: `DOMParser` returns a `parsererror` document for it. Measured before this
+   * changed, on the bar chart, the scatter, the network and the dendrogram alike.
+   *
+   * In the XMLNS namespace it *is* the declaration, so the serializer writes exactly one. And
+   * no builder sets it any more — `scatterToSvg`, `networkToSvg` and `heatmapToSvg` used to,
+   * which is the other half of how the duplicate got in.
+   */
+  clone.setAttributeNS(XMLNS_NS, 'xmlns', SVG_NS)
+  clone.setAttributeNS(XMLNS_NS, 'xmlns:xlink', XLINK_NS)
+  // `svgRoot` is the other half: a synthesised root has no way to express `xmlns`, so a fourth
+  // builder cannot reintroduce the duplicate by copying a third.
 
   const width = svg.getAttribute('width') ?? String(svg.clientWidth || 800)
   const height = svg.getAttribute('height') ?? String(svg.clientHeight || 400)
@@ -246,14 +266,26 @@ export function serializeSvg(svg: SVGSVGElement): string {
   clone.setAttribute('height', height)
   if (!clone.getAttribute('viewBox')) clone.setAttribute('viewBox', `0 0 ${width} ${height}`)
 
-  // The live chart gets its font from a CSS variable that won't travel with the file.
-  const font =
-    typeof getComputedStyle === 'function'
-      ? getComputedStyle(svg).fontFamily || 'sans-serif'
-      : 'sans-serif'
-  const style = document.createElementNS(SVG_NS, 'style')
-  style.textContent = `text{font-family:${font}}`
-  clone.insertBefore(style, clone.firstChild)
+  /*
+   * The live chart gets its font from a CSS variable that will not travel with the file, so it
+   * is inlined here — but **only when the element does not already carry one**.
+   *
+   * A synthesised export (`networkToSvg`, `scatterToSvg`, `heatmapToSvg`) is a *detached*
+   * element, and `getComputedStyle` on one of those resolves nothing: this used to append a
+   * second `<style>` saying `sans-serif` beside the builder's real one, and the only reason the
+   * right font won was that `insertBefore` happened to put the dead declaration first. Moving
+   * this to an append, or a builder dropping its own, would have silently stripped the typeface
+   * from every exported chart. Same shape as the duplicate `xmlns` above, one step behind it.
+   */
+  if (!clone.querySelector('style')) {
+    const font =
+      typeof getComputedStyle === 'function'
+        ? getComputedStyle(svg).fontFamily || 'sans-serif'
+        : 'sans-serif'
+    const style = document.createElementNS(SVG_NS, 'style')
+    style.textContent = `text{font-family:${font}}`
+    clone.insertBefore(style, clone.firstChild)
+  }
 
   return new XMLSerializer().serializeToString(clone)
 }

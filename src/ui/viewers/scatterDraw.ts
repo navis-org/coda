@@ -12,11 +12,11 @@
  * traces directly, because a `Path2D` per point is fifty thousand allocations per frame.
  */
 
+import { SVG_NS, element, round, svgRoot, textNode } from './svgElement'
 import type { MarkerShape, ScatterSpec } from './scatterPlot'
 import { inverse } from './scatterPlot'
 import { formatCompact } from '../format'
 
-const SVG_NS = 'http://www.w3.org/2000/svg'
 
 /** Height of the legend strip appended below an exported plot. */
 const LEGEND_HEIGHT = 26
@@ -106,7 +106,6 @@ function plusVertices(rotation: number): number[][] {
   return base.map(([x, y]) => [x! * cos - y! * sin, x! * sin + y! * cos])
 }
 
-const round = (value: number) => Math.round(value * 100) / 100
 
 /** SVG path data for one mark. */
 export function markPath(shape: MarkerShape, x: number, y: number, r: number): string {
@@ -353,26 +352,6 @@ export interface ScatterSvgSpec {
   ramp?: { label: string; stops: string[]; low: string; high: string }
 }
 
-function element<K extends keyof SVGElementTagNameMap>(
-  tag: K,
-  attributes: Record<string, string | number>,
-): SVGElementTagNameMap[K] {
-  const node = document.createElementNS(SVG_NS, tag)
-  for (const [name, value] of Object.entries(attributes)) {
-    node.setAttribute(name, typeof value === 'number' ? String(round(value)) : value)
-  }
-  return node
-}
-
-function textNode(
-  content: string,
-  attributes: Record<string, string | number>,
-): SVGTextElement {
-  const node = element('text', attributes)
-  node.textContent = content
-  return node
-}
-
 /**
  * A standalone `<svg>` of the current view — pan, zoom, filters and all.
  *
@@ -388,28 +367,19 @@ export function scatterToSvg(options: ScatterSvgSpec): SVGSVGElement {
   const legendHeight = legendItems.length > 0 || options.ramp ? LEGEND_HEIGHT : 0
   const width = Math.max(1, Math.round(options.width))
   const height = Math.max(1, Math.round(options.height))
-  const total = height + legendHeight
 
-  const svg = element('svg', {
-    xmlns: SVG_NS,
+  const svg = svgRoot({
     width,
-    height: total,
-    viewBox: `0 0 ${width} ${total}`,
-    role: 'img',
+    height,
+    strip: legendHeight,
+    background: options.background,
+    ...(options.title ? { title: options.title } : {}),
   })
-
-  if (options.title) {
-    const title = document.createElementNS(SVG_NS, 'title')
-    title.textContent = options.title
-    svg.append(title)
-  }
-
   // The font is a CSS variable on screen and has to travel explicitly; every colour is
   // already a literal hex, which is what keeps this cheap.
   const style = document.createElementNS(SVG_NS, 'style')
   style.textContent = `text{font-family:${options.font};}`
   svg.append(style)
-  svg.append(element('rect', { x: 0, y: 0, width, height: total, fill: options.background }))
 
   // --- grid and axes ------------------------------------------------------
   const grid = element('g', { stroke: ink.grid, 'stroke-width': 1 })

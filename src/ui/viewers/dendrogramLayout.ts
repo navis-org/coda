@@ -133,20 +133,6 @@ export function dendrogramShape(linkage: LinkageValue): DendrogramShape {
   return { leaves, links, maxHeight }
 }
 
-/**
- * How many leaf labels to skip so they do not overlap, and whether any were skipped.
- *
- * Every `step`th label, never a subset chosen by importance: a dendrogram's leaves are in a
- * meaningful order, so thinning by rank would leave a run of labels here and a gap there and
- * read as missing data. The caption says when this bit, on the Network viewer's reasoning —
- * silent culling is what makes a viewer look broken.
- */
-export function labelStep(count: number, room: number, perLabel: number): number {
-  if (count === 0 || room <= 0) return 1
-  const fits = Math.max(1, Math.floor(room / perLabel))
-  return Math.max(1, Math.ceil(count / fits))
-}
-
 /** Unit space to pixels, which is the only thing orientation changes. */
 export function projectPoint(
   point: { at: number; height: number },
