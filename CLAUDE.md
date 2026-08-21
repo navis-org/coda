@@ -1364,6 +1364,17 @@ wins" was picking one of those 104 by arrival order, silently. Now the repeats r
 and a Sort ahead of the Dataset decides which row wins instead of the order the API happened to
 return. `cave.test.ts` pins the downstream collapse, since that is what the providers now lean on.
 
+**And the change did not appear to ship, because the cached table outlived it.** An annotation
+table is kept for a month and the fingerprint was the ref key alone — which says what was *asked
+for* and nothing about how the answer was built, so no change to the shaping rules invalidated a
+single stored entry. A session that had read `main.info` before went on reporting 56,309 rows,
+with `Refresh` on the node the only way through. `SHAPE_FORMAT` in `annotations/registry.ts` is
+now part of the fingerprint: **bump it whenever the providers' shaping changes.** Same trap and
+same fix as `MASK_FORMAT` on the thumbnail cache — an entry that outlived the policy that
+produced it because nothing in it recorded which policy that was. In the fingerprint rather than
+the key, because a fingerprint mismatch is a miss that *overwrites*, and there is only ever one
+current shape.
+
 **`CaveSource` left-joins the chain onto its own neuron list**, and the direction matters: every
 neuron the segmentation knows about comes out, annotated or not. The other way round would let an
 annotation base decide which neurons *exist*, and those bases routinely carry rows for ids that

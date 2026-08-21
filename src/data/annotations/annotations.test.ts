@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { resetCache } from '../cache'
+import { cacheSet, resetCache } from '../cache'
 import { joinAnnotations } from '../../nodes/lib/annotationOps'
 import { makeTable } from '../../core/values'
 import { column, tableSchema } from '../../core/types'
@@ -32,7 +32,8 @@ import {
 } from './seaTable'
 import type { SeaTableConfig, SeaTableTable } from './seaTable'
 import { resetCaveTableState } from './caveTable'
-import { annotationProvider, peekRefColumns } from './registry'
+import { annotationProvider, cachedAnnotationTable, peekRefColumns } from './registry'
+import { refKey } from './types'
 import './index'
 
 const fixture = (name: string) => readFileSync(join(__dirname, '__fixtures__', name), 'utf8')
@@ -258,6 +259,54 @@ describe('shaping SeaTable rows', () => {
      */
     expect(table.data.neuronId).toEqual(['1', '1'])
     expect(table.data.side).toEqual(['left', 'right'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+
+describe('the annotation table cache', () => {
+  const ref = {
+    provider: 'seaTable',
+    config: { host: 'https://h', base: 'main', table: 'info', idColumn: 'root_id', columns: '' },
+  }
+  const built = () =>
+    makeTable(tableSchema(column('neuronId', 'str')), { neuronId: ['1'] })
+
+  it('serves a table it stored, so a base is downloaded once', async () => {
+    let reads = 0
+    const read = () => {
+      reads += 1
+      return Promise.resolve(built())
+    }
+    await cachedAnnotationTable(ref, {}, read)
+    await cachedAnnotationTable(ref, {}, read)
+    // FlyWire's `main.info` is ~79 MB and ungzipped; the whole point of the store is that the
+    // twenty-second wait is once per base rather than once per Run.
+    expect(reads).toBe(1)
+  })
+
+  it('re-reads a table stored by an older shaping pass, rather than serving it for a month', async () => {
+    /*
+     * The regression this fingerprint exists for, and it is not hypothetical — it shipped.
+     * Dropping the providers' duplicate-id collapse changed `main.info` from 56,309 rows to the
+     * 58,340 the base holds, and every session that had already read it kept reporting 56,309:
+     * the entry is kept for a month and the fingerprint was the ref key, which says what was
+     * *asked for* and nothing about how the answer was built. The fix looked like it had not
+     * shipped, and `Refresh` was the only way through.
+     *
+     * Seeded here under exactly the old fingerprint — the bare key — because that is what is
+     * sitting in real browsers, and being a *miss* is the whole claim.
+     */
+    const key = `annotations:${refKey(ref)}`
+    await cacheSet(key, makeTable(tableSchema(column('neuronId', 'str')), { neuronId: ['stale'] }), key)
+
+    let reads = 0
+    const table = await cachedAnnotationTable(ref, {}, () => {
+      reads += 1
+      return Promise.resolve(built())
+    })
+    expect(reads).toBe(1)
+    expect(table.data.neuronId).toEqual(['1'])
   })
 })
 

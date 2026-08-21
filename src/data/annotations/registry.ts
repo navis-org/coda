@@ -60,14 +60,37 @@ export const subscribeAnnotationsLearned = learned.subscribe
 // ---------------------------------------------------------------------------
 
 /**
+ * How the providers shape a fetched table into a Coda one. **Bump it when that changes.**
+ *
+ * A cached table is kept for a month, and the fingerprint used to be the ref key alone — which
+ * says what was *asked for* and nothing about how the answer was built. So a change to the
+ * shaping rules did not invalidate a single stored table: every browser that had already read a
+ * base kept being served the old shape, for up to a month, with nothing anywhere to say why.
+ *
+ * It bit immediately. Dropping the providers' duplicate-id collapse changed FlyTable's
+ * `main.info` from 56,309 rows to the 58,340 the base actually holds — and a session that had
+ * read it before the change went on reporting 56,309, so the fix looked like it had not shipped.
+ * `Refresh` on the node was the only way through, which is a workaround somebody has to be told
+ * about rather than a cache that knows it is stale.
+ *
+ * Same trap, and same fix, as `MASK_FORMAT` on the thumbnail cache — an entry that outlived the
+ * policy that produced it, because nothing in it recorded which policy that was. In the
+ * *fingerprint* rather than the key, deliberately: a fingerprint mismatch is a miss that
+ * overwrites, and there is only ever one current shape, so the old entry should be replaced
+ * rather than kept beside its replacement.
+ */
+const SHAPE_FORMAT = 2
+
+/**
  * Read a ref's table, from the cache where possible.
  *
  * `loadCachedTable`'s wrapper with the key rule folded in, so both providers state the cache
  * policy — the key prefix, the fingerprint, the expiry, the in-flight sharing — once rather than
  * twice. They had copied it line for line, including the `void cacheSet` and its reasoning.
  *
- * The fingerprint *is* the key, which is right for a ref: a ref names its columns, so a
- * differently-configured ref is a different key rather than the same key with a different shape.
+ * The key is the ref, which is right: a ref names its columns, so a differently-configured ref is
+ * a different entry rather than the same entry with a different shape. The fingerprint is that
+ * plus `SHAPE_FORMAT`, which is the half the key cannot carry.
  */
 export function cachedAnnotationTable(
   ref: AnnotationRef,
@@ -77,7 +100,7 @@ export function cachedAnnotationTable(
   const key = `annotations:${refKey(ref)}`
   return loadCachedTable({
     key,
-    fingerprint: key,
+    fingerprint: `${key}|shape=${SHAPE_FORMAT}`,
     ...(options.refresh ? { refresh: options.refresh } : {}),
     fetch: read,
   })
