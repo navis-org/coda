@@ -1375,10 +1375,28 @@ plugin `/np/` uses — one handler, because the SSRF guard is the part that must
 **The relay is a development answer, not a fix.** A static deploy serves nothing at that path,
 so the published build cannot reach FlyTable until the deployment sends the headers.
 `docs/flytable-cors.md` is the nginx config, and the four things in it each fail silently on
-their own — the preflight answered before authentication, `Authorization` in the allow list,
+their own — the preflight answered before authentication (a browser sends `OPTIONS` with no
+`Authorization`, which is why it reaches Django and 403s), `Authorization` in the allow list,
 `always` so the headers survive a 401 (without which `reportAuthFailure` cannot read the status
 and a rejected token reads as an unreachable host), and per-`location` repetition, since
 `add_header` does not inherit into a block that has one of its own.
+
+**Two things about that config were got wrong first, and both are worth knowing before touching
+another deployment.** `/dtable-server/` and `/dtable-db/` **already send their own CORS
+headers**, so adding a second is not belt-and-braces — two `Access-Control-Allow-Origin` headers
+on one response make a browser reject it, which would break the half that works. And the
+endpoint SeaTable's own documentation points a browser at, `/api/v2.1/dtable/app-access-token/`,
+is not the one Coda calls: it takes a token minted **for one base** and answers an account token
+`403 Permission denied`. So the two locations that need opening are `= /api/v2.1/workspaces/`
+and an anchored regex for `/api/v2.1/workspace/{ws}/dtable/{base}/access-token/` — pinned rather
+than a `/api/` prefix, which would expose the whole of seahub's v2.1 API.
+
+**The `*` is load-bearing and must not become an echoed origin.** These endpoints also accept a
+Django session cookie, and a literal `*` makes a browser refuse to attach cookies at all — so
+the cookie path is structurally unavailable rather than merely unused, and only the
+`Authorization: Token …` flow works. An echoed origin plus `Allow-Credentials` would let any
+permitted origin mint tokens for a logged-in user, and `SameSite=Lax` is no backstop on this
+host: `ac.uk` is a public suffix, so every `*.cam.ac.uk` server counts as same-site.
 
 Verified in a real browser over CDP against `pnpm dev`, which is the only thing that could:
 direct throws `TypeError: Failed to fetch`, the relay returns the data, `cloud.seatable.io`
