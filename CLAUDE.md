@@ -1369,11 +1369,30 @@ table is kept for a month and the fingerprint was the ref key alone — which sa
 for* and nothing about how the answer was built, so no change to the shaping rules invalidated a
 single stored entry. A session that had read `main.info` before went on reporting 56,309 rows,
 with `Refresh` on the node the only way through. `SHAPE_FORMAT` in `annotations/registry.ts` is
-now part of the fingerprint: **bump it whenever the providers' shaping changes.** Same trap and
-same fix as `MASK_FORMAT` on the thumbnail cache — an entry that outlived the policy that
-produced it because nothing in it recorded which policy that was. In the fingerprint rather than
-the key, because a fingerprint mismatch is a miss that *overwrites*, and there is only ever one
-current shape.
+now part of the fingerprint. Same trap and same fix as `MASK_FORMAT` on the thumbnail cache — an
+entry that outlived the policy that produced it because nothing in it recorded which policy that
+was. In the fingerprint rather than the key, because a fingerprint mismatch is a miss that
+*overwrites*, and there is only ever one current shape.
+
+**"Shaping" is a precise thing, and the rule is: bump when the same reply would now produce a
+different table.** Which rows survive, what the columns are called, what dtype each gets, how a
+cell is narrowed, whether a long table is folded. *Not* how the fetch was made — paging, routes,
+retries and credentials all leave the same table behind, and none of them belong in the
+fingerprint.
+
+**And it is coupled rather than remembered.** `shapeRows`, `wideRows` and `pivotRows` each have
+their decisions asserted in `annotations.test.ts` — those blocks *are* the operative definition —
+and one test in the same file asserts `SHAPE_FORMAT` itself. So changing shaping fails a test,
+and bumping the constant alone fails a different one that points back at the blocks. Both
+directions were confirmed by mutation. Without that pairing the constant is a comment, and a
+version somebody has to remember to bump makes the cache look guarded when it is not. It is also
+what made `pivotRows` and `wideRows` worth exporting: `shapeRows` already was, and a shaping rule
+nobody can call is a shaping rule nobody can pin.
+
+Note the asymmetry those tests record. `wideRows` keeps a repeated root id; `pivotRows` cannot,
+because many rows per neuron is its *input* shape — one row per (neuron, kind, value) is what
+`pivotOn` exists to fold, so the Map keyed by id is the operation rather than a dedup on top of
+it.
 
 **`CaveSource` left-joins the chain onto its own neuron list**, and the direction matters: every
 neuron the segmentation knows about comes out, annotated or not. The other way round would let an

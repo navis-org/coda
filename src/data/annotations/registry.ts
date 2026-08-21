@@ -62,6 +62,18 @@ export const subscribeAnnotationsLearned = learned.subscribe
 /**
  * How the providers shape a fetched table into a Coda one. **Bump it when that changes.**
  *
+ * "Shaping" is precise rather than a gesture: it is every decision that turns the bytes a server
+ * sent into a `TableValue`, so the rule is **bump when the same reply would now produce a
+ * different table**. Which rows survive, what the columns are called, what dtype each gets, how a
+ * cell is narrowed, whether a long table is folded. Not how the fetch was made — paging, routes,
+ * retries and credentials all leave the same table behind and none of them belong here.
+ *
+ * `annotations.test.ts` is the operative definition. `shapeRows`, `wideRows` and `pivotRows` each
+ * have their decisions asserted there, and one test in that file asserts *this constant*, so a
+ * change to any of them fails a test that names it. That is deliberate: a version somebody has to
+ * remember to bump is a discipline, and a discipline honoured at a fraction of its sites is worse
+ * than none — it makes the cache look guarded when it is not.
+ *
  * A cached table is kept for a month, and the fingerprint used to be the ref key alone — which
  * says what was *asked for* and nothing about how the answer was built. So a change to the
  * shaping rules did not invalidate a single stored table: every browser that had already read a
@@ -79,7 +91,7 @@ export const subscribeAnnotationsLearned = learned.subscribe
  * overwrites, and there is only ever one current shape, so the old entry should be replaced
  * rather than kept beside its replacement.
  */
-const SHAPE_FORMAT = 2
+export const SHAPE_FORMAT = 2
 
 /**
  * Read a ref's table, from the cache where possible.

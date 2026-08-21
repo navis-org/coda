@@ -31,8 +31,14 @@ import {
   shapeRows,
 } from './seaTable'
 import type { SeaTableConfig, SeaTableTable } from './seaTable'
-import { resetCaveTableState } from './caveTable'
-import { annotationProvider, cachedAnnotationTable, peekRefColumns } from './registry'
+import type { CaveTableConfig } from './caveTable'
+import { pivotRows, resetCaveTableState, wideRows } from './caveTable'
+import {
+  SHAPE_FORMAT,
+  annotationProvider,
+  cachedAnnotationTable,
+  peekRefColumns,
+} from './registry'
 import { refKey } from './types'
 import './index'
 
@@ -264,7 +270,80 @@ describe('shaping SeaTable rows', () => {
 
 // ---------------------------------------------------------------------------
 
+describe('what the CAVE table provider shapes', () => {
+  const config = (over: Partial<CaveTableConfig> = {}): CaveTableConfig => ({
+    dataset: 'flywire_fafb_public:783',
+    table: 'nuclei_v1',
+    idColumn: 'pt_root_id',
+    pivotOn: '',
+    valueColumn: '',
+    columns: '',
+    ...over,
+  })
+
+  it('takes a wide table as it stands, keeping a root id the table carries twice', () => {
+    const table = wideRows(
+      [
+        { pt_root_id: '720575940628857210', volume: 41, cell_type: 'LC4' },
+        { pt_root_id: null, volume: 9, cell_type: 'x' },
+        { pt_root_id: '720575940628857210', volume: 38, cell_type: 'LC4' },
+      ],
+      config(),
+      ['volume', 'cell_type'],
+    )
+    // `cell_type` renamed and everything else passed through, the same two rules `shapeRows`
+    // follows — and a repeat kept, because a table keyed by a *point* carries one wherever a
+    // segment holds two nuclei, which is a fact about the data rather than a defect in it.
+    expect(table.schema.columns.map((c) => `${c.name}:${c.dtype}`)).toEqual([
+      'neuronId:str',
+      'volume:i64',
+      'type:str',
+    ])
+    expect(table.data.neuronId).toEqual(['720575940628857210', '720575940628857210'])
+    expect(table.data.volume).toEqual([41, 38])
+  })
+
+  it('pivots a long table to one row per neuron, which is not the same act', () => {
+    /*
+     * The asymmetry worth stating: `wideRows` keeps repeats and this cannot, because many rows
+     * per neuron is the *input shape* here — one row per (neuron, kind, value) is what `pivotOn`
+     * exists to fold. So a Map keyed by id is the operation rather than a dedup on top of it,
+     * and a later row for one kind overwrites an earlier one.
+     */
+    const table = pivotRows(
+      [
+        ['cell_type', [{ pt_root_id: '1', label: 'LC4' }, { pt_root_id: '2', label: 'LC6' }]],
+        ['side', [{ pt_root_id: '1', label: 'left' }]],
+      ],
+      config({ pivotOn: 'classification_system', valueColumn: 'label' }),
+    )
+    expect(table.schema.columns.map((c) => c.name)).toEqual(['neuronId', 'type', 'side'])
+    expect(table.data.neuronId).toEqual(['1', '2'])
+    // Neuron 2 has no `side` row: a null rather than a dropped neuron, since the other kind
+    // said something about it.
+    expect(table.data.side).toEqual(['left', null])
+  })
+})
+
+// ---------------------------------------------------------------------------
+
 describe('the annotation table cache', () => {
+  it('tracks a SHAPE_FORMAT the tests above were written against', () => {
+    /*
+     * The coupling, and the whole reason the constant is trustworthy. A cached table lives for a
+     * month and its fingerprint carries `SHAPE_FORMAT`, so shaping that changes without it being
+     * bumped is served stale to everybody who had already read the base — which is not
+     * hypothetical: dropping the duplicate-id collapse took `main.info` from 56,309 rows to
+     * 58,340 and every session that had read it kept reporting 56,309.
+     *
+     * So: **if you changed any expectation in `what a SeaTable base becomes` or `what the CAVE
+     * table provider shapes`, bump `SHAPE_FORMAT` and this number with it.** Those blocks are the
+     * operative definition of "shaping"; this line is what stops them drifting from the version
+     * that describes them. A constant nothing checks is a comment.
+     */
+    expect(SHAPE_FORMAT).toBe(2)
+  })
+
   const ref = {
     provider: 'seaTable',
     config: { host: 'https://h', base: 'main', table: 'info', idColumn: 'root_id', columns: '' },

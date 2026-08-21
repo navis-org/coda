@@ -202,7 +202,7 @@ class CaveTableProvider implements AnnotationProvider {
 
 
 /** Long form to one row per neuron, a column per kind. */
-function pivotRows(
+export function pivotRows(
   perKind: ReadonlyArray<readonly [string, CaveRow[]]>,
   config: CaveTableConfig,
 ): TableValue {
@@ -241,7 +241,7 @@ function pivotRows(
 }
 
 /** Wide form, taken as it stands. */
-function wideRows(
+export function wideRows(
   rows: readonly CaveRow[],
   config: CaveTableConfig,
   named: readonly string[],
