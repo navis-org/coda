@@ -255,6 +255,97 @@ interface WorkspaceListing {
 }
 
 /**
+ * The account's bases, fetched at most once per host.
+ *
+ * The promise is memoised rather than the value, so two nodes resolving a workspace a tick apart
+ * issue one listing — `datastackRecord`'s idiom, and it matters more here because every ref that
+ * leaves `Workspace` empty needs this before it can open anything. A rejection is not kept, so
+ * the next caller retries rather than inheriting a failure forever.
+ */
+const listings = new Map<string, Promise<SeaTableBase[]>>()
+
+/** The settled value, for the edit-time check. Never starts a fetch — see `peekBases`. */
+const listed = new Map<string, SeaTableBase[]>()
+
+function basesFor(host: string, signal?: AbortSignal): Promise<SeaTableBase[]> {
+  const root = normaliseHost(host)
+  let pending = listings.get(root)
+  if (!pending) {
+    pending = listBases(root, signal)
+      .then((bases) => {
+        listed.set(root, bases)
+        // A workspace that could not be resolved a moment ago now can, and `validate` reads the
+        // settled listing — the same channel a landed column list uses.
+        reportAnnotationsLearned()
+        return bases
+      })
+      .catch((error: unknown) => {
+        listings.delete(root)
+        throw error
+      })
+    listings.set(root, pending)
+  }
+  return pending
+}
+
+/**
+ * The listing if it has already landed, without asking for one.
+ *
+ * Deliberately does **not** start a fetch, unlike every other peek here. `validate` runs on every
+ * graph mutation and this one would fire a listing — and, with no token, an auth-failure popup —
+ * for a node somebody is still typing into. It has nothing to say until something else has asked,
+ * which in practice is the moment `peekColumns` resolves the same base.
+ */
+export function peekBases(host: string): SeaTableBase[] | undefined {
+  return listed.get(normaliseHost(host))
+}
+
+/**
+ * Which workspace a base lives in.
+ *
+ * **Empty means "work it out"**, which is the ordinary case: a base is addressed by workspace and
+ * name, but a name is very nearly always unique across an account, and making somebody look up a
+ * numeric workspace id to read a table they can see is asking them to do the API's bookkeeping.
+ * The id is still there to be set — it is the only thing that can disambiguate — and the failure
+ * when it is needed says so rather than picking one.
+ *
+ * Exact match first, then case-insensitively, because a base name is something people retype.
+ * Ambiguity is reported the same way in either pass, so the second is a convenience that cannot
+ * quietly choose between two bases.
+ */
+export function resolveWorkspace(bases: readonly SeaTableBase[], base: string): string[] {
+  const exact = bases.filter((b) => b.name === base)
+  if (exact.length > 0) return [...new Set(exact.map((b) => b.workspaceId))]
+  const folded = base.toLowerCase()
+  return [...new Set(bases.filter((b) => b.name.toLowerCase() === folded).map((b) => b.workspaceId))]
+}
+
+/** The one workspace holding `base`, or an error explaining which half of that failed. */
+async function workspaceFor(
+  host: string,
+  base: string,
+  signal: AbortSignal | undefined,
+): Promise<string> {
+  const bases = await basesFor(host, signal)
+  const found = resolveWorkspace(bases, base)
+  if (found.length === 1) return found[0]!
+  if (found.length === 0) {
+    const names = [...new Set(bases.map((b) => b.name))]
+    throw new SeaTableError(
+      `No base called "${base}" on ${normaliseHost(host)}. The account can see: ` +
+        `${names.slice(0, 12).join(', ')}${names.length > 12 ? `, and ${names.length - 12} more` : ''}.`,
+    )
+  }
+  const where = bases
+    .filter((b) => resolveWorkspace([b], base).length === 1)
+    .map((b) => `${b.workspaceName} (${b.workspaceId})`)
+  throw new SeaTableError(
+    `${found.length} bases are called "${base}" on ${normaliseHost(host)} — in ${where.join(', ')}. ` +
+      `Set Workspace to the one you mean.`,
+  )
+}
+
+/**
  * Every base the account can see, flattened.
  *
  * Flattened because a base is addressed by `(workspace, name)` and the workspace is bookkeeping
@@ -298,8 +389,9 @@ async function openBase(
   signal?: AbortSignal,
 ): Promise<BaseAccess> {
   const root = normaliseHost(host)
+  const ws = workspace || (await workspaceFor(root, base, signal))
   const access = await request<BaseAccess>(
-    `${root}/api/v2.1/workspace/${encodeURIComponent(workspace)}/dtable/${encodeURIComponent(base)}/access-token/`,
+    `${root}/api/v2.1/workspace/${encodeURIComponent(ws)}/dtable/${encodeURIComponent(base)}/access-token/`,
     requireToken(root),
     signal,
   )
@@ -476,8 +568,22 @@ class SeaTableProvider implements AnnotationProvider {
     return undefined
   }
 
-  fetch(ref: AnnotationRef, options: AnnotationFetchOptions): Promise<TableValue> {
-    return cachedAnnotationTable(ref, options, () => this.read(ref.config as SeaTableConfig, options))
+  async fetch(ref: AnnotationRef, options: AnnotationFetchOptions): Promise<TableValue> {
+    const config = ref.config as SeaTableConfig
+    /*
+     * Resolved **before** the cache key is taken, so `main` and `5 / main` are one entry rather
+     * than two. That is not tidiness: FlyWire's `main.info` is 58,340 rows over 60 columns at
+     * ~79 MB ungzipped, so two spellings of one base is a second 20-second download and a second
+     * copy in IndexedDB. The key is what the ref *means*, not what somebody typed.
+     */
+    // A ref that names its workspace never lists at all: that is a whole round trip, and an
+    // account whose `/workspaces/` is slow or forbidden can still open a base it has the id for.
+    const workspace =
+      config.workspace || (await workspaceFor(config.host, config.base, options.signal))
+    const resolved: AnnotationRef = { ...ref, config: { ...config, workspace } }
+    return cachedAnnotationTable(resolved, options, () =>
+      this.read(resolved.config as SeaTableConfig, options),
+    )
   }
 
   private async read(
@@ -560,4 +666,6 @@ registerAnnotationProvider(new SeaTableProvider())
 /** Test seam: drop discovered metadata between suites. In-flight reads are `resetIndexLoads`'. */
 export function resetSeaTableState(): void {
   discovery.clear()
+  listings.clear()
+  listed.clear()
 }

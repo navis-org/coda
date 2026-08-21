@@ -30,6 +30,7 @@ import {
   refKey,
 } from '../../data/annotations'
 import { SEATABLE_HOSTS } from '../../data/annotations/credentials'
+import { peekBases, resolveWorkspace } from '../../data/annotations/seaTable'
 import { joinAnnotations, joinedSchema } from '../lib/annotationOps'
 import { ANNOTATIONS_INPUT, annotationSchemaFrom } from '../lib/annotationParams'
 import { refreshParam } from '../../core/node'
@@ -269,8 +270,8 @@ function buildSeaTableNode(spec: { key: string; label: string; host: string; gui
         id: 'workspace',
         kind: 'string',
         label: 'Workspace',
-        placeholder: '5',
-        help: 'Workspace the base sits in. A base is addressed by workspace and name, and the same name can appear in two.',
+        placeholder: 'usually not needed',
+        help: 'Empty works it out from the base name, which is enough unless two workspaces hold a base of the same name — then this says which, and the error names them.',
         default: '',
         advanced: true,
       },
@@ -290,17 +291,34 @@ function buildSeaTableNode(spec: { key: string; label: string; host: string; gui
     }),
 
     validate: (ctx) => {
-      if (!String(ctx.params.base ?? '').trim()) return ['Name a base']
+      const base = String(ctx.params.base ?? '').trim()
+      if (!base) return ['Name a base']
       if (!String(ctx.params.table ?? '').trim()) return ['Name a table inside the base']
+      /*
+       * The workspace is **not** required. It used to be, which was wrong twice over: a base name
+       * is very nearly always unique across an account, and the field is `advanced`, so the card
+       * demanded something it does not draw.
+       *
+       * Only ambiguity is reported, and only from a listing already in hand — `peekBases` starts
+       * no fetch, because `validate` runs on every graph mutation and would otherwise issue a
+       * listing, and an auth-failure popup, for a node somebody is still typing into. In practice
+       * it is loaded by the time this matters, since `peekColumns` resolves the same base.
+       */
       if (!String(ctx.params.workspace ?? '').trim()) {
-        return ['Name the workspace the base sits in — a base is addressed by workspace and name']
+        const bases = peekBases(String(ctx.params.host ?? '') || spec.host)
+        const found = bases ? resolveWorkspace(bases, base) : []
+        if (found.length > 1) {
+          return [
+            `${found.length} workspaces hold a base called "${base}" — set Workspace to say which`,
+          ]
+        }
       }
       return []
     },
 
     evaluate: async (ctx) => {
       const ref = seaRef(ctx.params, spec.host)
-      if (!ref) throw new Error('Name a workspace, a base and a table')
+      if (!ref) throw new Error('Name a base and a table')
       return { annotations: await resolve(ctx, ref) }
     },
   })
@@ -312,13 +330,15 @@ function seaRef(
 ): AnnotationRef | undefined {
   const base = String(params.base ?? '').trim()
   const table = String(params.table ?? '').trim()
-  const workspace = String(params.workspace ?? '').trim()
-  if (!base || !table || !workspace) return undefined
+  // No workspace needed to name a ref: it is resolved from the base when it is empty, and a ref
+  // that could not be built until somebody supplied one would leave the column picker empty on
+  // exactly the configuration that is now the ordinary one.
+  if (!base || !table) return undefined
   return {
     provider: SEATABLE_PROVIDER,
     config: {
       host: String(params.host ?? '').trim() || fallbackHost,
-      workspace,
+      workspace: String(params.workspace ?? '').trim(),
       base,
       table,
       idColumn: String(params.idColumn ?? 'root_id').trim() || 'root_id',

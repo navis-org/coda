@@ -22,10 +22,12 @@ import {
   subscribeAuthFailure,
 } from './credentials'
 import {
+  SEATABLE_PROVIDER,
   forgetSeaTableRoutes,
   listBases,
   readMetadata,
   resetSeaTableState,
+  resolveWorkspace,
   shapeRows,
 } from './seaTable'
 import type { SeaTableConfig, SeaTableTable } from './seaTable'
@@ -426,5 +428,100 @@ describe('routes', () => {
     // their server never sent.
     await expect(listBases(HOST)).rejects.toThrow(/cross-origin|CORS/)
     await expect(listBases(HOST)).rejects.toThrow(/pnpm dev|static deploy/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Working the workspace out
+// ---------------------------------------------------------------------------
+
+/**
+ * A base is addressed by workspace **and** name, which is the API's bookkeeping rather than
+ * anybody's question: a name is very nearly always unique across an account. So an empty
+ * Workspace is resolved from the listing, and only genuine ambiguity is refused.
+ */
+describe('resolving a workspace', () => {
+  const config = (over: Partial<SeaTableConfig> = {}): SeaTableConfig => ({
+    host: HOST,
+    workspace: '5',
+    base: 'main',
+    table: 'info',
+    idColumn: 'root_id',
+    columns: '',
+    ...over,
+  })
+
+  const bases = [
+    { workspaceId: '5', workspaceName: 'FlyWire', name: 'main' },
+    { workspaceId: '4', workspaceName: 'Testing', name: 'dtable_test' },
+    { workspaceId: '9', workspaceName: 'Other', name: 'main_v2' },
+  ]
+
+  it('finds the one workspace holding a base', () => {
+    expect(resolveWorkspace(bases, 'main')).toEqual(['5'])
+  })
+
+  it('matches case-insensitively when nothing matches exactly', () => {
+    // A base name is something people retype. The ambiguity rule below guards the second pass,
+    // so this cannot quietly choose between two bases.
+    expect(resolveWorkspace(bases, 'MAIN')).toEqual(['5'])
+  })
+
+  it('prefers an exact match over a case-folded one', () => {
+    const clash = [
+      { workspaceId: '1', workspaceName: 'A', name: 'Info' },
+      { workspaceId: '2', workspaceName: 'B', name: 'info' },
+    ]
+    expect(resolveWorkspace(clash, 'info')).toEqual(['2'])
+  })
+
+  it('reports every workspace when the name is genuinely ambiguous', () => {
+    const twice = [...bases, { workspaceId: '7', workspaceName: 'Copy', name: 'main' }]
+    expect(resolveWorkspace(twice, 'main')).toEqual(['5', '7'])
+  })
+
+  it('finds nothing for a base the account cannot see', () => {
+    expect(resolveWorkspace(bases, 'nope')).toEqual([])
+  })
+
+  it('names the workspaces when it cannot choose, rather than picking one', async () => {
+    installFetch({
+      '/api/v2.1/workspaces/': JSON.stringify({
+        workspace_list: [
+          { id: 5, name: 'FlyWire', table_list: [{ name: 'main' }] },
+          { id: 7, name: 'Copy', table_list: [{ name: 'main' }] },
+        ],
+      }),
+    })
+    const provider = annotationProvider(SEATABLE_PROVIDER)
+    await expect(
+      provider?.fetch(
+        { provider: SEATABLE_PROVIDER, config: config({ workspace: '' }) },
+        {},
+      ),
+    ).rejects.toThrow(/FlyWire \(5\).*Copy \(7\)|Set Workspace/s)
+  })
+
+  it('never lists at all when the ref names its workspace', async () => {
+    const captured = installFetch()
+    const provider = annotationProvider(SEATABLE_PROVIDER)
+    await provider?.fetch({ provider: SEATABLE_PROVIDER, config: config({ workspace: '5' }) }, {})
+    // A whole round trip, and an account whose `/workspaces/` is forbidden can still open a base
+    // it has the id for.
+    expect(captured.filter((c) => c.url.endsWith('/api/v2.1/workspaces/'))).toHaveLength(0)
+  })
+
+  it('caches on the resolved base, so two spellings are one download', async () => {
+    const captured = installFetch()
+    const provider = annotationProvider(SEATABLE_PROVIDER)
+    await provider?.fetch({ provider: SEATABLE_PROVIDER, config: config({ workspace: '' }) }, {})
+    const reads = captured.filter((c) => c.url.includes('/rows/')).length
+    await provider?.fetch({ provider: SEATABLE_PROVIDER, config: config({ workspace: '5' }) }, {})
+    /*
+     * FlyWire's `main.info` is 58,340 rows over 60 columns at ~79 MB ungzipped, so keying on
+     * what somebody typed rather than on what it means is a second twenty-second download and a
+     * second copy in IndexedDB.
+     */
+    expect(captured.filter((c) => c.url.includes('/rows/')).length).toBe(reads)
   })
 })

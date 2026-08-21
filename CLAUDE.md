@@ -1376,6 +1376,26 @@ GET  {server}/api/v1/dtables/{uuid}/rows/?table_name=…&limit=…  → the rows
   nothing.
 - **Pages are sequential, not concurrent.** `start` is an offset into a base that is being edited
   while you read it; firing six at once is how a page gets read twice and another missed.
+- **The workspace is worked out, not asked for.** A base is addressed by workspace *and* name,
+  which is the API's bookkeeping rather than anybody's question — measured on the real FlyTable
+  account, **46 bases across 13 workspaces and not one duplicated name**, so the field was never
+  once needed there. Empty now resolves from the listing and only genuine ambiguity is refused,
+  naming the workspaces rather than picking one. Exact match first, then case-insensitively,
+  because a base name is something people retype; the ambiguity rule guards both passes, so the
+  second cannot quietly choose between two bases.
+
+  Three things about it. The **resolution happens before the cache key is taken**, so `main` and
+  `5 / main` are one entry — `main.info` is ~79 MB, so keying on what somebody typed rather than
+  on what it means is a second twenty-second download and a second copy in IndexedDB. A ref that
+  *names* its workspace **never lists at all**, which is a round trip saved and an account whose
+  `/workspaces/` is slow or forbidden still able to open a base it has the id for. And
+  `peekBases` — which `validate` reads — is the one peek here that **starts no fetch**: it runs on
+  every graph mutation and would otherwise issue a listing, and with no token an auth-failure
+  popup, for a node somebody is still typing into. In practice it is loaded by the time it
+  matters, because `peekColumns` resolves the same base.
+
+  It also fixes a card refusing over something it does not draw: `workspace` is `advanced`, so
+  the old requirement was a badge pointing at an inspector-only field.
 
 **FlyTable cannot be read from a browser at all, and the live test could not see it.**
 `live.test.ts` runs in Node, where `fetch` does no CORS enforcement — so "probed live" covered

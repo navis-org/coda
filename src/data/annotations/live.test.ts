@@ -18,7 +18,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { SEATABLE_HOSTS, resetSeaTableCredentials, setToken } from './credentials'
-import { listBases, readMetadata } from './seaTable'
+import { listBases, readMetadata, resolveWorkspace } from './seaTable'
 import { annotationProvider } from './registry'
 import './index'
 
@@ -82,4 +82,32 @@ live('FlyTable, live', () => {
     const unrepresentable = ids.filter((id) => String(Number(id)) !== id)
     expect(unrepresentable.length).toBeGreaterThan(ids.length / 2)
   }, 300_000)
+})
+
+/**
+ * The workspace worked out, against the real account.
+ *
+ * 46 bases across 14 workspaces is exactly the case the field was tedious for — and the only
+ * place the uniqueness assumption can actually be checked.
+ */
+describe.skipIf(!TOKEN)('FlyTable, live — resolving a workspace', () => {
+  it('reads a base named without its workspace, and agrees with the explicit form', async () => {
+    setToken(HOST, TOKEN!)
+    const bases = await listBases(HOST)
+    const names = bases.map((b) => b.name)
+    const unique = names.filter((n) => names.filter((m) => m === n).length === 1)
+    expect(unique.length).toBeGreaterThan(0)
+
+    // Resolution agrees with the listing for every base whose name is unique — the property the
+    // whole feature rests on, checked across the account rather than on one example.
+    for (const name of unique) {
+      const found = resolveWorkspace(bases, name)
+      expect(found).toEqual([bases.find((b) => b.name === name)!.workspaceId])
+    }
+
+    // And a base actually opens without one. `main` is FlyWire's annotations base.
+    const target = unique.includes('main') ? 'main' : unique[0]!
+    const tables = await readMetadata(HOST, '', target)
+    expect(tables.length).toBeGreaterThan(0)
+  }, 60_000)
 })

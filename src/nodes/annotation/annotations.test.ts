@@ -323,10 +323,22 @@ describe('annotation nodes — refusals', () => {
     expect(issues(pivoted, 'cave')).toContain('value')
   })
 
-  it('asks a SeaTable node for the workspace, which a base name alone does not address', () => {
+  it('does not ask a SeaTable node for a workspace it can work out', () => {
     let g = emptyGraph('x')
     g = addNode(g, node('fly', 'annotation.flyTable', { base: 'main', table: 'info' }))
-    // The same base name can appear in two workspaces, so the pair is the address.
-    expect(issues(g, 'fly')).toContain('workspace')
+    /*
+     * It used to demand one, which was wrong twice: a base name is very nearly always unique
+     * across an account, and the field is `advanced`, so the card was refusing over something it
+     * does not draw. The address is still workspace-and-name; what changed is who supplies it.
+     */
+    expect(issues(g, 'fly')).toBe('')
+  })
+
+  it('names a ref with no workspace, so the column picker still fills in', () => {
+    // Before the resolution existed, `seaRef` returned undefined without one — so the ordinary
+    // configuration published no schema at all and every picker downstream sat empty.
+    let g = emptyGraph('x')
+    g = addNode(g, node('fly', 'annotation.flyTable', { base: 'main', table: 'info' }))
+    expect(columnNames(published(g, 'fly'))).toEqual(['neuronId', 'type', 'side', 'hemilineage'])
   })
 })
