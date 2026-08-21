@@ -480,6 +480,32 @@ describe('resolving a workspace', () => {
     expect(resolveWorkspace(twice, 'main')).toEqual(['5', '7'])
   })
 
+  it('names exactly the workspaces it counted, and no more', async () => {
+    /*
+     * The message used to re-run the matcher per base on a one-element array, where the
+     * case-folded pass always succeeds — so a `MAIN` beside two `main`s was named as a third
+     * workspace for an ambiguity that had just been counted as two.
+     */
+    installFetch({
+      '/api/v2.1/workspaces/': JSON.stringify({
+        workspace_list: [
+          { id: 5, name: 'FlyWire', table_list: [{ name: 'main' }] },
+          { id: 7, name: 'Copy', table_list: [{ name: 'main' }] },
+          { id: 9, name: 'Shouty', table_list: [{ name: 'MAIN' }] },
+        ],
+      }),
+    })
+    const provider = annotationProvider(SEATABLE_PROVIDER)
+    const error = await provider
+      ?.fetch({ provider: SEATABLE_PROVIDER, config: config({ workspace: '' }) }, {})
+      .then(() => undefined)
+      .catch((e: unknown) => String((e as Error).message))
+    expect(error).toContain('2 bases')
+    expect(error).toContain('FlyWire (5)')
+    expect(error).toContain('Copy (7)')
+    expect(error).not.toContain('Shouty')
+  })
+
   it('finds nothing for a base the account cannot see', () => {
     expect(resolveWorkspace(bases, 'nope')).toEqual([])
   })
@@ -509,6 +535,23 @@ describe('resolving a workspace', () => {
     // A whole round trip, and an account whose `/workspaces/` is forbidden can still open a base
     // it has the id for.
     expect(captured.filter((c) => c.url.endsWith('/api/v2.1/workspaces/'))).toHaveLength(0)
+  })
+
+  it('warms the peek’s metadata, so inference does not re-open the base', async () => {
+    /*
+     * `discovery` used to be keyed on the workspace *as typed*, so a peek (`host||main`) and a
+     * run (`host|5|main`) never met — and with the workspace now usually empty, that is the
+     * ordinary configuration. Inference then paid its own access-token plus `/metadata/` chain
+     * per base for an entry the run had already filled.
+     */
+    const captured = installFetch()
+    const provider = annotationProvider(SEATABLE_PROVIDER)
+    await provider?.fetch({ provider: SEATABLE_PROVIDER, config: config({ workspace: '' }) }, {})
+    const before = captured.filter((c) => c.url.includes('/metadata/')).length
+
+    // The peek, on the typed config, now answers from what the run stored.
+    expect(peekRefColumns({ provider: SEATABLE_PROVIDER, config: config({ workspace: '' }) })).toBeTruthy()
+    expect(captured.filter((c) => c.url.includes('/metadata/')).length).toBe(before)
   })
 
   it('caches on the resolved base, so two spellings are one download', async () => {

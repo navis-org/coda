@@ -16,6 +16,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import type { AnnotationsValue, TableValue } from '../../core/values'
 import { getSource } from '../../data/source'
+import { chainKey } from '../../data/annotations/types'
 import { errorMessage } from '../../core/errors'
 
 export interface NeuronProfileData {
@@ -143,7 +144,7 @@ function profileKey(
   annotations: AnnotationsValue | undefined,
 ): string | undefined {
   if (!sourceId || !datasetId || neuronId === undefined || neuronId === '') return undefined
-  return `${sourceId}|${datasetId}|${annotations?.sources.join('+') ?? ''}|${neuronId}`
+  return `${sourceId}|${datasetId}|${chainKey(annotations)}|${neuronId}`
 }
 
 export function useNeuronProfile(

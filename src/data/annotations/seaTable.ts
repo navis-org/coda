@@ -40,7 +40,8 @@ import { ID_COLUMN_NAME } from '../../core/ids'
 import type { CellValue, ColumnData, TableValue } from '../../core/values'
 import { makeTable } from '../../core/values'
 import { errorMessage } from '../../core/errors'
-import { readStorage, writeStorage } from '../localStore'
+import type { RouteKind } from '../routeMemory'
+import { makeRouteMemory } from '../routeMemory'
 import { getToken, normaliseHost, reportAuthFailure } from './credentials'
 import {
   cachedAnnotationTable,
@@ -86,78 +87,36 @@ export interface SeaTableConfig extends Record<string, string> {
 /** Path prefix of the dev proxy that relays a named SeaTable host. See `vite.config.ts`. */
 const PROXY_PREFIX = '/st'
 
-/** `direct` is the deployment itself and needs CORS; `proxy` is a same-origin relay. */
-type RouteKind = 'direct' | 'proxy'
-
-const ROUTE_KEY = 'coda.seatable.routes.v1'
-let routeMemory: Map<string, RouteKind> | undefined
-
-function memory(): Map<string, RouteKind> {
-  if (routeMemory) return routeMemory
-  routeMemory = new Map()
-  try {
-    const stored = readStorage(ROUTE_KEY)
-    if (stored) {
-      for (const [host, kind] of Object.entries(JSON.parse(stored) as Record<string, RouteKind>)) {
-        if (kind === 'direct' || kind === 'proxy') routeMemory.set(host, kind)
-      }
-    }
-  } catch {
-    // A corrupt entry is not worth failing a fetch over; re-probing costs one request.
-  }
-  return routeMemory
-}
-
 /**
- * Remember how a host answered — **only on a 2xx**.
+ * Which route last reached a host. Shared machinery; see `data/routeMemory.ts` for the rules.
  *
- * `neuprint/client.ts`'s rule and it matters for the same reason: a 404 is what a static host
- * answers for a proxy path nobody serves, so remembering it would pin a deployment to a route
- * that can never work, and would outlive the day that deployment gains CORS.
+ * FlyTable sends no `Access-Control-*` header for any origin — checked against four different
+ * `Origin` values, so it is an absence rather than an allowlist — while `cloud.seatable.io`
+ * answers a preflight 204 with `Access-Control-Allow-Origin: *`. The two deployments differ
+ * entirely in this, so the code cannot assume either and has to try.
  */
-function rememberRoute(origin: string, kind: RouteKind): void {
-  const map = memory()
-  if (map.get(origin) === kind) return
-  map.set(origin, kind)
-  writeStorage(ROUTE_KEY, JSON.stringify(Object.fromEntries(map)))
-}
+const memory = makeRouteMemory('coda.seatable.routes.v1')
 
 /** Drop what is known about how to reach a host, so the next request re-probes. */
-export function forgetSeaTableRoutes(origin?: string): void {
-  const map = memory()
-  if (origin) map.delete(new URL(normaliseHost(origin)).origin)
-  else map.clear()
-  writeStorage(ROUTE_KEY, map.size ? JSON.stringify(Object.fromEntries(map)) : undefined)
+export function forgetSeaTableRoutes(): void {
+  memory.forget()
 }
 
 /**
  * The URLs worth trying for one request, best first.
  *
- * **Direct first, proxy as the fallback**, which is `routesForServer`'s order and for the same
- * reason: `cloud.seatable.io` answers a preflight 204 carrying
- * `Access-Control-Allow-Origin: *`, so the hosted service needs no relay at all and asking for
- * one would be slower and would fail on a static deploy. FlyTable sends no `Access-Control-*`
- * header for any origin — checked against four different `Origin` values, so it is an absence
- * rather than an allowlist — and a browser cannot tell that from a dead host, since both arrive
- * as an opaque `TypeError`. So the only way to know is to try, and the answer is remembered per
- * origin because otherwise every request in a proxied session pays a failed preflight first.
- *
- * The remembered route is *preferred*, not used exclusively: a dev server that has stopped
- * running, or a deployment that has since gained CORS, still resolves without anybody clearing
- * anything.
+ * **Direct first**, because the hosted service needs no relay at all and asking for one would be
+ * slower and would fail on a static deploy.
  */
-function routesFor(url: string): Array<{ url: string; kind: RouteKind }> {
+function routesFor(url: string): readonly { url: string; kind: RouteKind }[] {
   const parsed = new URL(url)
-  const routes: Array<{ url: string; kind: RouteKind }> = [
-    { url, kind: 'direct' },
+  return memory.prefer(parsed.origin, [
+    { url, kind: 'direct' as const },
     {
       url: `${PROXY_PREFIX}/${encodeURIComponent(parsed.origin)}${parsed.pathname}${parsed.search}`,
-      kind: 'proxy',
+      kind: 'proxy' as const,
     },
-  ]
-  const preferred = memory().get(parsed.origin)
-  if (!preferred) return routes
-  return [...routes].sort((a, b) => Number(b.kind === preferred) - Number(a.kind === preferred))
+  ])
 }
 
 async function request<T>(url: string, token: string, signal?: AbortSignal): Promise<T> {
@@ -187,7 +146,7 @@ async function request<T>(url: string, token: string, signal?: AbortSignal): Pro
       response = undefined
       continue
     }
-    if (response.ok) rememberRoute(origin, route.kind)
+    if (response.ok) memory.remember(origin, route.kind)
     break
   }
 
@@ -313,11 +272,16 @@ export function peekBases(host: string): SeaTableBase[] | undefined {
  * Ambiguity is reported the same way in either pass, so the second is a convenience that cannot
  * quietly choose between two bases.
  */
-export function resolveWorkspace(bases: readonly SeaTableBase[], base: string): string[] {
+export function basesNamed(bases: readonly SeaTableBase[], base: string): SeaTableBase[] {
   const exact = bases.filter((b) => b.name === base)
-  if (exact.length > 0) return [...new Set(exact.map((b) => b.workspaceId))]
+  if (exact.length > 0) return exact
   const folded = base.toLowerCase()
-  return [...new Set(bases.filter((b) => b.name.toLowerCase() === folded).map((b) => b.workspaceId))]
+  return bases.filter((b) => b.name.toLowerCase() === folded)
+}
+
+/** The workspaces holding a base of that name. One id unless it is genuinely ambiguous. */
+export function resolveWorkspace(bases: readonly SeaTableBase[], base: string): string[] {
+  return [...new Set(basesNamed(bases, base).map((b) => b.workspaceId))]
 }
 
 /** The one workspace holding `base`, or an error explaining which half of that failed. */
@@ -327,7 +291,12 @@ async function workspaceFor(
   signal: AbortSignal | undefined,
 ): Promise<string> {
   const bases = await basesFor(host, signal)
-  const found = resolveWorkspace(bases, base)
+  // The matched bases, not a second evaluation of the rule: `resolveWorkspace([b], base)` per
+  // base re-ran the exact-then-folded matcher on a one-element array, where the folded pass
+  // always succeeds — so on `main`, `main`, `MAIN` the message named three workspaces for a
+  // two-way ambiguity it had just counted as two.
+  const matched = basesNamed(bases, base)
+  const found = [...new Set(matched.map((b) => b.workspaceId))]
   if (found.length === 1) return found[0]!
   if (found.length === 0) {
     const names = [...new Set(bases.map((b) => b.name))]
@@ -336,9 +305,7 @@ async function workspaceFor(
         `${names.slice(0, 12).join(', ')}${names.length > 12 ? `, and ${names.length - 12} more` : ''}.`,
     )
   }
-  const where = bases
-    .filter((b) => resolveWorkspace([b], base).length === 1)
-    .map((b) => `${b.workspaceName} (${b.workspaceId})`)
+  const where = matched.map((b) => `${b.workspaceName} (${b.workspaceId})`)
   throw new SeaTableError(
     `${found.length} bases are called "${base}" on ${normaliseHost(host)} — in ${where.join(', ')}. ` +
       `Set Workspace to the one you mean.`,
@@ -529,8 +496,17 @@ function keptColumns(config: SeaTableConfig, available: SeaTableTable | undefine
  */
 const discovery = new Map<string, SeaTableTable[] | undefined>()
 
+/**
+ * What a base's metadata is a fact about — **not** including the workspace as typed.
+ *
+ * It used to, and that made `read()`'s warm-up dead the day the workspace became optional: the
+ * peek runs on the typed config (`host||main`) and the run on the *resolved* one (`host|5|main`),
+ * so the two never met and inference paid its own access-token-plus-metadata round trip per base.
+ * A base name is what the workspace is resolved *from*, and a name that is ambiguous is refused
+ * rather than resolved — so the name alone identifies whatever was successfully opened.
+ */
 function baseKey(config: SeaTableConfig): string {
-  return `${normaliseHost(config.host)}|${config.workspace}|${config.base}`
+  return `${normaliseHost(config.host)}|${config.base}`
 }
 
 class SeaTableProvider implements AnnotationProvider {

@@ -22,6 +22,8 @@ import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
 import type { AnnotationsValue, TableValue } from '../core/values'
 import { errorMessage } from '../core/errors'
 import { getSource } from '../data/source'
+import { neuronIndexKey } from '../data/neuronIndex'
+import { chainKey } from '../data/annotations/types'
 
 export type NeuronIndexState =
   /** No dataset resolved yet — usually an unconnected Dataset input. */
@@ -63,13 +65,20 @@ interface Entry {
 
 const entries = new Map<string, Entry>()
 
-/** What a shared entry is a fact about: the dataset, and the chain labelling it. */
+/**
+ * What a shared entry is a fact about: the dataset, and the chain labelling it.
+ *
+ * Through `neuronIndexKey`, which `data/neuronIndex.ts` documents as "one place, so a reader and
+ * a writer agree" and which already takes exactly this variant. Derived here instead, this map
+ * and the persistent cache could disagree about what makes two indexes different — the memo
+ * handing the first table looked at to the second widget while IndexedDB kept them apart.
+ */
 function entryKey(
   sourceId: string,
   datasetId: string,
   annotations: AnnotationsValue | undefined,
 ): string {
-  return `${sourceId}:${datasetId}:${annotations?.sources.join('+') ?? ''}`
+  return neuronIndexKey(sourceId, datasetId, chainKey(annotations))
 }
 
 function entryFor(key: string): Entry {

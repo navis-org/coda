@@ -22,7 +22,7 @@
  * datastack without one refuses rather than downloading 244 million synapse rows to count them.
  */
 
-import { ID_COLUMN_NAME } from '../../core/ids'
+import { ID_COLUMN_NAME, idText } from '../../core/ids'
 import type { TableSchema } from '../../core/types'
 import type { NeuronId } from '../../core/ids'
 import type {
@@ -79,9 +79,10 @@ import {
   versionsMetadata,
 } from './api'
 import { getServer } from './credentials'
-import { caveServerFor, datastackRecord } from './datastack'
+import { caveServerFor, datastackRecord, usableVersions } from './datastack'
 import { codaColumn, defaultSchemas, neuronSchemaFor, schemasFor } from './schema'
 import { withAnnotations } from '../annotations/schema'
+import { chainKey } from '../annotations/types'
 import { caveScene } from './scene'
 import type { NgScene } from '../neuroglancer/scene'
 import type { DatastackSpec, NeuronTableSpec, SynapseTableSpec } from './spec'
@@ -284,10 +285,10 @@ export class CaveSource implements DataSource {
   ): Promise<DatasetInfo[]> {
     const info = await datastackRecord(spec.datastack, options)
     const versions = await versionsMetadata(info.local_server, spec.datastack, options)
-    return versions
-      .filter((v) => v.valid !== false && (v.status ?? 'AVAILABLE') === 'AVAILABLE')
-      .sort((a, b) => b.version - a.version)
-      .map((v) => datasetInfoFor(spec, v.version, v.time_stamp, v.expires_on, info.viewer_site))
+    // The same filter the materialization dropdown applies — see `usableVersions`.
+    return usableVersions(versions).map((v) =>
+      datasetInfoFor(spec, v.version, v.time_stamp, v.expires_on, info.viewer_site),
+    )
   }
 
   // -------------------------------------------------------------------------
@@ -362,7 +363,7 @@ export class CaveSource implements DataSource {
       ? withAnnotations(this.schemasFor(req.datasetId), annotations.table.schema).neurons
       : await this.neuronSchema(spec)
     return loadCachedTable({
-      key: neuronIndexKey(this.id, req.datasetId, annotations?.sources.join('|')),
+      key: neuronIndexKey(this.id, req.datasetId, chainKey(annotations)),
       fingerprint: schema.columns.map((c) => c.name).join(','),
       ...(req.refresh ? { refresh: req.refresh } : {}),
       fetch: () => this.buildIndex(spec, version, schema, req),
@@ -393,19 +394,16 @@ export class CaveSource implements DataSource {
        * population — which is not the same decision reversed, it is the only list there is.
        */
       req.onProgress?.(0.1, spec.neurons ? 'loading neurons' : 'reading annotations')
-      const order = spec.neurons
-        ? orderOf(
-            await this.readNeuronRows(
-              spec,
-              spec.neurons,
-              version,
-              await this.serverFor(spec),
-              options,
-              true,
-            ),
-            spec.neurons,
-          )
-        : idsFromChain(req.annotations.table)
+      // Narrowed to a local, because the await between the check and the read loses it.
+      const neurons = spec.neurons
+      let order: string[]
+      if (neurons) {
+        const server = await this.serverFor(spec)
+        const rows = await this.readNeuronRows(spec, neurons, version, server, options, true)
+        order = dedupedIds(rows.map((row) => row[neurons.idColumn]))
+      } else {
+        order = dedupedIds(req.annotations.table.data[ID_COLUMN_NAME] ?? [])
+      }
       req.onProgress?.(0.9, 'building index')
       return this.finish(spec, version, joinIndex(order, req.annotations.table, schema), req)
     }
@@ -462,7 +460,7 @@ export class CaveSource implements DataSource {
     }
 
     req.onProgress?.(0.9, 'building index')
-    return this.finish(spec, version, labelIndex(orderOf(neuronRows, neurons), annotations, schema), req)
+    return this.finish(spec, version, labelIndex(dedupedIds(neuronRows.map((row) => row[neurons.idColumn])), annotations, schema), req)
   }
 
   /**
@@ -777,23 +775,22 @@ export class CaveSource implements DataSource {
      * invariant 8's grammar, so `|` cannot occur in one and the join is unambiguous — the
      * separator collision `uploads.ts` records is not reachable here.
      */
-    const counts = new Map<string, number>()
+    const counts = new Map<string, Edge>()
     for (const row of rows) {
-      const pre = row[synapses.preColumn]
-      const post = row[synapses.postColumn]
-      if (pre === null || pre === undefined || post === null || post === undefined) continue
-      const key = `${String(pre)}|${String(post)}`
-      counts.set(key, (counts.get(key) ?? 0) + 1)
+      const pre = idText(row[synapses.preColumn] ?? null)
+      const post = idText(row[synapses.postColumn] ?? null)
+      if (pre === null || post === null) continue
+      const key = `${pre}|${post}`
+      const seen = counts.get(key)
+      if (seen) seen.weight += 1
+      else counts.set(key, { pre, post, weight: 1 })
     }
 
-    const edges: Edge[] = []
-    for (const [key, weight] of counts) {
-      // After counting, never before: there is no synapse-level equivalent of a weight cut.
-      if (minWeight && minWeight > 1 && weight < minWeight) continue
-      const [pre = '', post = ''] = key.split('|')
-      edges.push({ pre, post, weight })
-    }
-    return edges
+    // The key is never read back — the edge holds its own ends — so `|` only has to keep two
+    // pairs apart, which digits do. After counting, never before: there is no synapse-level
+    // equivalent of a weight cut.
+    const floor = minWeight && minWeight > 1 ? minWeight : 0
+    return [...counts.values()].filter((edge) => edge.weight >= floor)
   }
 
   /**
@@ -1101,51 +1098,31 @@ export class CaveSource implements DataSource {
 // ---------------------------------------------------------------------------
 
 /**
- * The neurons a datastack has, in server order, deduplicated.
+ * Ids in the order given, deduplicated, first occurrence winning.
  *
  * Server order rather than a sort: it is stable across calls, and sorting eighteen-digit text
- * would put the neurons in an order nobody asked for. Deduplicated because a CAVE neuron table
- * is keyed by a *point* — a soma, a nucleus, a representative vertex — so one segment carrying
- * two of them is two rows for one neuron, and a repeat is double-counted by everything
- * downstream that sums a weight.
+ * would put the neurons in an order nobody asked for. Deduplicated because both sources of a
+ * neuron list can repeat one — a CAVE neuron table is keyed by a *point*, so one segment
+ * carrying two of them is two rows, and an annotation base is somebody's spreadsheet — and a
+ * repeat is double-counted by everything downstream that sums a weight.
+ *
+ * Through `idText`, which is the cell rule (invariant 8) rather than `String()`: it refuses a
+ * number too wide to be exact instead of propagating the rounded form, which on this path is a
+ * different neuron.
  */
-function orderOf(neuronRows: readonly CaveRow[], neurons: NeuronTableSpec): string[] {
+function dedupedIds(cells: Iterable<CellValue | undefined>): string[] {
   const order: string[] = []
   const seen = new Set<string>()
-  for (const row of neuronRows) {
-    const rootId = row[neurons.idColumn]
-    if (rootId === null || rootId === undefined) continue
-    const id = String(rootId)
-    if (seen.has(id)) continue
+  for (const cell of cells) {
+    const id = idText(cell ?? null)
+    if (id === null || seen.has(id)) continue
     seen.add(id)
     order.push(id)
   }
   return order
 }
 
-/**
- * The neuron list a chain carries, for a datastack that publishes none of its own.
- *
- * Deduplicated for `orderOf`'s reason rather than by analogy: an annotation base can perfectly
- * well hold two rows for one neuron — a SeaTable base is somebody's spreadsheet — and a repeated
- * id is double-counted by everything downstream that sums a weight. First occurrence wins, which
- * is the rule `labelsToNeurons` already follows and the one `annotationIndex` resolves to.
- *
- * Order is the chain's own, which is the join order of whatever was wired. Stable across calls
- * for the same reason the datastack's is: it is what the source returned, not a sort.
- */
-function idsFromChain(annotations: TableValue): string[] {
-  const order: string[] = []
-  const seen = new Set<string>()
-  for (const cell of annotations.data[ID_COLUMN_NAME] ?? []) {
-    if (cell === null || cell === undefined) continue
-    const id = String(cell)
-    if (!id || seen.has(id)) continue
-    seen.add(id)
-    order.push(id)
-  }
-  return order
-}
+
 
 /**
  * The built-in path's table: the datastack's own labels, by root id.

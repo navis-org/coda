@@ -179,6 +179,22 @@ export function buildScene(published: NgScene | undefined, options: SceneOptions
  * discards the camera, the panel layout and every runtime tweak. Use `scenePatchUrl` for an
  * update to a viewer someone is already looking through.
  */
+/**
+ * Which deployment to open, given what somebody chose and what the dataset asks for.
+ *
+ * One resolver because there are two consumers and they had already drifted: `out.neuroglancer`
+ * learned to prefer the dataset's own viewer and `NeuroglancerProfileFrame` did not, so the
+ * Profile 3D tile on a CAVE dataset drew the EM volume with no segmentation in it — precisely
+ * the failure `DatasetInfo.viewerSite` exists to prevent, on the other one of its two callers.
+ *
+ * Empty means the dataset's own and then the built-in default, which `sceneUrl` applies. A CAVE
+ * segmentation is `graphene://middleauth+…`, which only a spelunker-flavoured viewer
+ * authenticates.
+ */
+export function viewerBaseFor(chosen: string | undefined, viewerSite: string | undefined): string {
+  return chosen?.trim() || viewerSite || ''
+}
+
 export function sceneUrl(viewerBase: string | undefined, scene: NgScene): string {
   return `${viewerRoot(viewerBase)}/#!${encodeURIComponent(JSON.stringify(scene))}`
 }

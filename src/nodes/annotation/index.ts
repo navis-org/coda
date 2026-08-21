@@ -305,7 +305,10 @@ function buildSeaTableNode(spec: { key: string; label: string; host: string; gui
        * it is loaded by the time this matters, since `peekColumns` resolves the same base.
        */
       if (!String(ctx.params.workspace ?? '').trim()) {
-        const bases = peekBases(String(ctx.params.host ?? '') || spec.host)
+        // Through the ref, so `validate` and `evaluate` cannot disagree about which deployment
+        // this node points at — these were two spellings and one was missing the other's trim,
+        // so a whitespace-only host sent them to different hosts.
+        const bases = peekBases(seaRef(ctx.params, spec.host)?.config.host ?? spec.host)
         const found = bases ? resolveWorkspace(bases, base) : []
         if (found.length > 1) {
           return [

@@ -41,7 +41,16 @@ import { useNeuronIndex } from '../useNeuronIndex'
 const DEBOUNCE_MS = 140
 
 export function ExploreBody({ node, ctx, compact, inputValues, setParam }: NodeBodyProps) {
-  const ref = datasetRef(ctx.inputs.dataset)
+  /*
+   * The value's dataset id when there is one, the type's otherwise — never one paired with the
+   * other's chain. A dataset node on "Latest" publishes no id until its listing lands, so the
+   * type's can be absent or older than the value's, and an index fetched for one while carrying
+   * the other's labels would be cached under a key claiming a pairing that never existed. Same
+   * reasoning as `datasetRequest`, which exists so a call site cannot supply one without the
+   * other.
+   */
+  const value = inputValues?.dataset
+  const ref = isDatasetValue(value) ? value : datasetRef(ctx.inputs.dataset)
   /*
    * The chain comes off the *value*, not the type.
    *
@@ -55,9 +64,30 @@ export function ExploreBody({ node, ctx, compact, inputValues, setParam }: NodeB
    * to what cannot be had otherwise: with nothing wired, or before a run, it behaves exactly as
    * it always did.
    */
-  const dataset = inputValues?.dataset
-  const annotations = isDatasetValue(dataset) ? dataset.annotations : undefined
-  const { state, reload } = useNeuronIndex(ref?.sourceId, ref?.datasetId, annotations)
+  const annotations = isDatasetValue(value) ? value.annotations : undefined
+
+  /*
+   * **A chain wired but not yet run means wait, not load.**
+   *
+   * The *type* says a chain is there the moment the wire is drawn; only the value carries its
+   * table. Loading anyway downloads the whole index under the unannotated key and then a second
+   * time under the annotated one the instant a Run lands — on FlyWire that is 139,255 rows and
+   * about seven seconds thrown away, and both tables are then retained for the life of the tab,
+   * since the shared entry map is never evicted. It is also the *wrong* list to show: the labels
+   * are the backend's, which is the gap the chain was wired to close.
+   *
+   * Read off the type rather than off the source's refusal. It used to match the text of
+   * `CaveSource`'s "publishes no table listing its neurons", which coupled this empty state to
+   * the wording of a sentence in `src/data` and recognised only CAVE's phrasing.
+   */
+  const type = ctx.inputs.dataset
+  const chainWired = type?.kind === 'dataset' && type.annotations !== undefined
+  const awaitingRun = chainWired && !annotations
+  const { state, reload } = useNeuronIndex(
+    awaitingRun ? undefined : ref?.sourceId,
+    awaitingRun ? undefined : ref?.datasetId,
+    annotations,
+  )
 
   const committed = String(node.params.query ?? '')
   const [text, setText] = useState(committed)
@@ -102,18 +132,7 @@ export function ExploreBody({ node, ctx, compact, inputValues, setParam }: NodeB
 
   const table = state.status === 'ready' ? state.table : undefined
 
-  /*
-   * The one refusal that is a *state* rather than a fault: a datastack with no neuron table and
-   * no chain in hand yet. Recognised by the source's own sentence rather than by asking the
-   * source anything, because `SourceCapabilities` is per-source and this is per-dataset — the
-   * per-dataset capability that would answer it properly is not written. Matching on message
-   * text is the thing `reportAuthFailure` exists to avoid, so it is deliberately narrow: it only
-   * softens the wording, and a real refusal still shows through if the sentence ever changes.
-   */
-  const needsRun =
-    state.status === 'error' &&
-    !annotations &&
-    state.message.includes('publishes no table listing its neurons')
+
   // Through `ctx.columns`, never `ctx.params.chips`: that is what filters the stored list
   // against the schema actually arriving, so a graph repointed at another dataset drops the
   // fields it no longer has instead of showing a column of blanks.
@@ -345,24 +364,22 @@ export function ExploreBody({ node, ctx, compact, inputValues, setParam }: NodeB
           </span>
         </div>
       )}
-      {state.status === 'error' &&
-        (needsRun ? (
-          /*
-           * Not an error: the datastack publishes no neuron table, so its neuron list *is* the
-           * annotation chain — and a chain's table only exists once a Run has fetched it. Saying
-           * "publishes no table listing its neurons" here would send somebody to look at the
-           * dataset, when the fix is to press Run.
-           */
-          <div className="explore__empty">
-            Press Run to load this dataset&rsquo;s neurons.
-            <span className="explore__hint">
-              {ref?.datasetId?.split(':')[0] ?? 'This datastack'} lists no neurons of its own, so
-              the wired Annotations source is the list — and it has not been fetched yet.
-            </span>
-          </div>
-        ) : (
-          <div className="explore__error">{state.message}</div>
-        ))}
+      {awaitingRun && (
+        /*
+         * A state rather than a fault, so it reads as an instruction. The chain's table is a
+         * fetch a Run pays for; until then there is either nothing to list (a datastack with no
+         * neuron table of its own) or only the backend's labels, which is the list the chain was
+         * wired to replace.
+         */
+        <div className="explore__empty">
+          Press Run to load this dataset&rsquo;s neurons.
+          <span className="explore__hint">
+            An Annotations source is wired, and its labels are this list — they arrive with the
+            first Run.
+          </span>
+        </div>
+      )}
+      {state.status === 'error' && <div className="explore__error">{state.message}</div>}
 
       {table && (
         <>

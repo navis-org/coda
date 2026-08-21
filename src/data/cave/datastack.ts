@@ -15,6 +15,7 @@
  */
 
 import type { DatastackInfo } from './api'
+import type { VersionInfo } from './api'
 import { datastackInfo, versionsMetadata } from './api'
 import type { CaveRequestOptions } from './client'
 import { getServer } from './credentials'
@@ -22,18 +23,36 @@ import { reportSourceLearned } from '../source'
 
 const records = new Map<string, Promise<DatastackInfo>>()
 
-/** Which global server the memo was filled from, so a changed setting drops it. */
+/**
+ * Which global server everything here was filled from.
+ *
+ * **One clock for all four maps**, because the materializations are derived from the records —
+ * `load` reads `datastackRecord` — so two generations could clear one and keep the other, and
+ * did: each was checked only by its own entry point.
+ */
 let filledFrom: string | undefined
+
+/**
+ * Drop everything learned from a global server that is no longer the configured one, and answer
+ * which server is current — so a caller cannot read `filledFrom` before it has been set.
+ */
+function currentServer(): string {
+  const server = getServer()
+  if (filledFrom !== server) {
+    records.clear()
+    materializations.clear()
+    loading.clear()
+    asked.clear()
+    filledFrom = server
+  }
+  return server
+}
 
 export function datastackRecord(
   datastack: string,
   options: CaveRequestOptions = {},
 ): Promise<DatastackInfo> {
-  const server = getServer()
-  if (filledFrom !== server) {
-    records.clear()
-    filledFrom = server
-  }
+  const server = currentServer()
   let record = records.get(datastack)
   if (!record) {
     record = datastackInfo(server, datastack, options).catch((error: unknown) => {
@@ -71,7 +90,7 @@ export async function caveServerFor(
  * this module is for.
  */
 export function peekMaterializations(datastack: string): number[] | undefined {
-  forgetOnServerChange()
+  currentServer()
   const known = materializations.get(datastack)
   if (known || !datastack || asked.has(datastack)) return known
   asked.add(datastack)
@@ -96,13 +115,12 @@ export function materializationsFor(
   datastack: string,
   options: CaveRequestOptions = {},
 ): Promise<number[]> {
-  forgetOnServerChange()
-  const server = materializationsFrom
+  const server = currentServer()
   let pending = loading.get(datastack)
   if (!pending) {
     pending = load(datastack, options)
       .then((versions) => {
-        if (server === materializationsFrom) {
+        if (server === filledFrom) {
           materializations.set(datastack, versions)
           // Not a data-changed event: nothing cached is invalidated and no run is scheduled. It
           // only tells inference that a dropdown it drew empty can be filled in.
@@ -120,31 +138,30 @@ export function materializationsFor(
 
 async function load(datastack: string, options: CaveRequestOptions): Promise<number[]> {
   const info = await datastackRecord(datastack, options)
-  const versions = await versionsMetadata(info.local_server, datastack, options)
-  return (
-    versions
-      // The same filter `CaveSource.listOne` applies: an expired or invalid materialization is
-      // one a query against it would fail on, so offering it is offering a broken choice.
-      .filter((v) => v.valid !== false && (v.status ?? 'AVAILABLE') === 'AVAILABLE')
-      .map((v) => v.version)
-      .sort((a, b) => b - a)
+  return usableVersions(await versionsMetadata(info.local_server, datastack, options)).map(
+    (v) => v.version,
   )
 }
 
-/** A changed global server invalidates every datastack fact, this one included. */
-function forgetOnServerChange(): void {
-  const server = getServer()
-  if (materializationsFrom === server) return
-  materializations.clear()
-  loading.clear()
-  asked.clear()
-  materializationsFrom = server
+/**
+ * The materializations worth offering, newest first.
+ *
+ * One statement because two surfaces read it and they must not part company: this feeds the
+ * Custom CAVE dropdown and `evaluate`'s "latest", while `CaveSource.listOne` feeds every family
+ * dataset node's dropdown and *its* "latest". An expired or invalid materialization is one a
+ * query against it would fail on, so offering it is offering a broken choice — and two nodes on
+ * one datastack disagreeing about which versions exist is the shape nothing type-checks.
+ */
+export function usableVersions(versions: readonly VersionInfo[]): VersionInfo[] {
+  return [...versions]
+    .filter((v) => v.valid !== false && (v.status ?? 'AVAILABLE') === 'AVAILABLE')
+    .sort((a, b) => b.version - a.version)
 }
+
 
 const materializations = new Map<string, number[]>()
 const loading = new Map<string, Promise<number[]>>()
 const asked = new Set<string>()
-let materializationsFrom: string | undefined
 
 /** Test seam: drop what is remembered between suites. */
 export function resetDatastackRecords(): void {
@@ -153,5 +170,4 @@ export function resetDatastackRecords(): void {
   loading.clear()
   asked.clear()
   filledFrom = undefined
-  materializationsFrom = undefined
 }

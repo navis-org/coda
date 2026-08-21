@@ -21,7 +21,7 @@ import type { CypherResponse } from './decode'
 import type { Route, RouteKind } from './servers'
 import { normaliseServer, routesForServer } from './servers'
 import { errorMessage } from '../../core/errors'
-import { readStorage, writeStorage } from '../localStore'
+import { makeRouteMemory } from '../routeMemory'
 
 export class NeuPrintError extends Error {
   readonly status: number
@@ -51,68 +51,27 @@ export interface RequestOptions {
   token?: string | undefined
 }
 
-const ROUTE_KEY = 'coda.neuprint.routes'
-
 /**
  * Which route last answered, per deployment.
  *
- * Persisted, because without it every request in a session where the proxy is the working
- * route pays a failed cross-origin attempt first — and a CORS refusal costs a preflight, so
- * that is a real round trip per query rather than a branch.
- *
- * **Only a route that produced a 2xx is remembered.** A 404 is not evidence a route works: it
- * is what a static host answers for a proxy path nobody is serving, and remembering that would
- * pin a deployment to a route that cannot ever succeed. Not remembering merely costs a re-probe,
- * which is also what lets a deployment that gains CORS later stop being reached through a relay.
+ * Persisted, because without it every request in a session where the proxy is the working route
+ * pays a failed cross-origin attempt first — and a CORS refusal costs a preflight, so that is a
+ * real round trip per query rather than a branch. The memory itself is shared with SeaTable's
+ * client; the rules it enforces are stated once in `routeMemory.ts`.
  */
-const routeMemory = new Map<string, RouteKind>()
-let memoryLoaded = false
-
-function loadMemory(): void {
-  if (memoryLoaded) return
-  memoryLoaded = true
-  const raw = readStorage(ROUTE_KEY)
-  if (!raw) return
-  try {
-    for (const [server, kind] of Object.entries(JSON.parse(raw) as Record<string, RouteKind>)) {
-      if (kind === 'direct' || kind === 'proxy') routeMemory.set(server, kind)
-    }
-  } catch {
-    // Corrupt: start from scratch and re-probe.
-  }
-}
-
-function rememberRoute(server: string, kind: RouteKind): void {
-  loadMemory()
-  if (routeMemory.get(server) === kind) return
-  routeMemory.set(server, kind)
-  writeStorage(ROUTE_KEY, JSON.stringify(Object.fromEntries(routeMemory)))
-}
+const memory = makeRouteMemory('coda.neuprint.routes')
 
 /** Drop what is known about how to reach a deployment, so the next request re-probes. */
 export function forgetRoutes(server?: string): void {
-  loadMemory()
-  if (server) routeMemory.delete(normaliseServer(server))
-  else routeMemory.clear()
-  writeStorage(
-    ROUTE_KEY,
-    routeMemory.size ? JSON.stringify(Object.fromEntries(routeMemory)) : undefined,
-  )
+  memory.forget(server ? normaliseServer(server) : undefined)
 }
 
 /** How each deployment is currently being reached. Surfaced by the Sources panel. */
 export function neuPrintRoutes(): Record<string, RouteKind> {
-  loadMemory()
-  return Object.fromEntries(routeMemory)
+  return memory.all()
 }
 
-/**
- * The routes to try, in order, with whatever answered last time first.
- *
- * The remembered route is preferred rather than used exclusively: if it has stopped working —
- * a dev server that is no longer running, a proxy that has gone away — the others are still
- * there. That costs nothing when the memory is right, which is the common case.
- */
+/** The routes to try, in order, with whatever answered last time first. */
 function candidateRoutes(options: RequestOptions): {
   server: string
   routes: readonly Route[]
@@ -126,16 +85,7 @@ function candidateRoutes(options: RequestOptions): {
       ],
     }
   }
-  loadMemory()
-  const routes = routesForServer(options.server)
-  const preferred = routeMemory.get(server)
-  if (!preferred || routes.length < 2) return { server, routes }
-  return {
-    server,
-    routes: [...routes].sort(
-      (a, b) => Number(b.kind === preferred) - Number(a.kind === preferred),
-    ),
-  }
+  return { server, routes: memory.prefer(server, routesForServer(options.server)) }
 }
 
 /**
@@ -193,7 +143,7 @@ async function request<T>(
       lastError = error
       continue
     }
-    if (response.ok) rememberRoute(server, route.kind)
+    if (response.ok) memory.remember(server, route.kind)
     return await readResponse<T>(response, route, mode)
   }
 

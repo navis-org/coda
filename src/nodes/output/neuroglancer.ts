@@ -31,7 +31,12 @@ import { T } from '../../core/types'
 import type { TableValue } from '../../core/values'
 import { isTableValue, str } from '../../core/values'
 import type { NgLayerSet, NgLayout } from '../../data/neuroglancer/scene'
-import { DEFAULT_NEUROGLANCER_URL, buildScene, sceneUrl } from '../../data/neuroglancer/scene'
+import {
+  DEFAULT_NEUROGLANCER_URL,
+  buildScene,
+  sceneUrl,
+  viewerBaseFor,
+} from '../../data/neuroglancer/scene'
 /*
  * The one import from `src/ui` in the node pack, and it is the palette resolver on purpose:
  * "never re-implement colour mapping in a viewer" applies just as much to an external one.
@@ -225,16 +230,10 @@ export const neuroglancerNode = registerNode({
       showSlices: ctx.params.showSlices === true,
     })
 
-    /*
-     * Empty means the dataset's own deployment, and only then the built-in default. Not a
-     * convenience: a CAVE segmentation is `graphene://middleauth+…`, which a
-     * spelunker-flavoured viewer authenticates and mainline neuroglancer does not — so the old
-     * default drew the EM volume with no neurons in it and nothing saying why.
-     */
-    const viewer =
-      String(ctx.params.viewer ?? '').trim() ||
-      source.peekDataset(dataset.datasetId)?.viewerSite ||
-      ''
+    const viewer = viewerBaseFor(
+      String(ctx.params.viewer ?? ''),
+      source.peekDataset(dataset.datasetId)?.viewerSite,
+    )
     return { url: str(sceneUrl(viewer, scene)) }
   },
 })

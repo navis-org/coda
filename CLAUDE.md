@@ -1308,6 +1308,15 @@ and returned the backend's, both morphology nodes did the same, and a second com
 index was built and cached under the unannotated key. Invariant 3 across a seam, silent, and only
 findable by reading every caller — which is why the id and the labels now travel as one thing.
 
+**A chain wired but not yet run means the widget waits, rather than loading.** The *type* says a
+chain is there the moment the wire is drawn; only the value carries its table. Loading anyway
+downloads the whole index under the unannotated key and again under the annotated one the instant
+a Run lands — on FlyWire, 139,255 rows and about seven seconds thrown away, both retained for the
+life of the tab since the shared entry map is never evicted — and the list it shows meanwhile
+carries the backend's labels, which is the gap the chain was wired to close. Read off the type,
+which also retired a match on the *text* of `CaveSource`'s refusal: that coupled the empty state
+to a sentence in `src/data` and recognised only CAVE's phrasing.
+
 **The Explore widget reads the chain off the _value_, one run later than the ports do.** A
 dataset *type* carries the chain's schema; only a `DatasetValue` carries its table, because that
 table is a fetch somebody's Run paid for. So `NodeBodyProps` gained `inputValues` — the same
@@ -1417,6 +1426,12 @@ GET  {server}/api/v1/dtables/{uuid}/rows/?table_name=…&limit=…  → the rows
   because a base name is something people retype; the ambiguity rule guards both passes, so the
   second cannot quietly choose between two bases.
 
+  `discovery` is keyed on `host|base` and deliberately **not** on the workspace as typed: the peek
+  runs on the typed config and the run on the *resolved* one, so with the workspace usually empty
+  the two never met and inference paid its own access-token-plus-metadata round trip per base for
+  an entry the run had already filled. A base name that is ambiguous is refused rather than
+  resolved, so the name alone identifies whatever was successfully opened.
+
   Three things about it. The **resolution happens before the cache key is taken**, so `main` and
   `5 / main` are one entry — `main.info` is ~79 MB, so keying on what somebody typed rather than
   on what it means is a second twenty-second download and a second copy in IndexedDB. A ref that
@@ -1440,8 +1455,12 @@ middleware could run. Not an allowlist — four different `Origin` values produc
 `Access-Control-Allow-Origin: *`, so the two deployments differ entirely in this and the code
 cannot assume either.
 
-So `request` **tries and remembers**, which is `neuprint/client.ts`'s machinery and
-`transport.ts`'s before it, with all three of its rules: only a *thrown* fetch moves on (a
+So `request` **tries and remembers**. That machinery is now **one module**, `data/routeMemory.ts`
+— it was written by hand three times (neuPrint's client, this one, and `transport.ts`'s in-memory
+variant), which is three statements of rules whose violation is invisible. What is shared is the
+memory and the preference ordering; the *loop* stays with each caller, because what a status
+means, which errors travel on the auth channel and what a failure should say are per-backend. The
+three rules: only a *thrown* fetch moves on (a
 response of any status means the request arrived), only a **2xx** is remembered (a 404 is what a
 static host answers for a relay path nobody serves, and pinning that would outlive the day the
 deployment gains CORS), and an `AbortError` is never answered by trying elsewhere. Direct is

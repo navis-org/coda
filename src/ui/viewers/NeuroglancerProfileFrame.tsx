@@ -16,7 +16,7 @@
 import { useEffect, useState } from 'react'
 
 import type { NgScene } from '../../data/neuroglancer/scene'
-import { buildScene, sceneUrl } from '../../data/neuroglancer/scene'
+import { buildScene, sceneUrl, viewerBaseFor } from '../../data/neuroglancer/scene'
 import { getSource } from '../../data/source'
 import type { ColorSpec } from '../../nodes/lib/encodingParams'
 import { NeuroglancerViewer } from './NeuroglancerViewer'
@@ -133,7 +133,13 @@ export function NeuroglancerProfileFrame({
 
   return (
     <NeuroglancerViewer
-      url={sceneUrl('', scene)}
+      // The dataset's own deployment, through the same resolver `out.neuroglancer` uses. This
+      // was a bare `''`, so a CAVE dataset opened in mainline neuroglancer — which does not
+      // speak `middleauth+`, and drew the EM volume with no segmentation.
+      url={sceneUrl(
+        viewerBaseFor('', getSource(sourceId ?? '')?.peekDataset(datasetId ?? '')?.viewerSite),
+        scene,
+      )}
       color={SEGMENT_COLOR}
       compact
       onError={onError}

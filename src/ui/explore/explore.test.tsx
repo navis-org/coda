@@ -29,6 +29,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { availableColumns, makeInferContext } from '../../core/node'
 import type { ParamValue, ParamValues } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
+import type { TableSchema } from '../../core/types'
 import { T } from '../../core/types'
 import { MockSource } from '../../data/mock/MockSource'
 import type { Value } from '../../core/values'
@@ -110,6 +111,8 @@ function setup(
   initial: ParamValues = {},
   sourceId = 'mock',
   inputValues?: Record<string, Value | undefined>,
+  /** The chain's schema on the dataset *type* — present the moment the wire is drawn. */
+  chainSchema?: TableSchema,
 ) {
   const def = requireNodeDef('neuron.explore')
   const params: ParamValues = { ...defaults(def.params), ...initial }
@@ -120,7 +123,9 @@ function setup(
   function Harness() {
     const [current, setCurrent] = useState(params)
     external = (paramId, value) => setCurrent((held) => ({ ...held, [paramId]: value }))
-    const ctx = makeInferContext(def, current, { dataset: T.dataset(sourceId, DATASET) })
+    const ctx = makeInferContext(def, current, {
+      dataset: T.dataset(sourceId, DATASET, chainSchema),
+    })
     return (
       <ExploreBody
         node={{ id: 'n1', type: 'neuron.explore', position: { x: 0, y: 0 }, params: current }}
@@ -538,12 +543,28 @@ describe('an annotated dataset', () => {
     await waitFor(() => expect(screen.getByText(/2 neurons/)).toBeTruthy())
   })
 
-  it('asks for a Run rather than reporting the source’s refusal as a fault', async () => {
-    registerSource(annotatedSource('mock-bare2'))
-    // What the card looks like before anything has run: the dataset value carries no chain yet.
-    setup({}, 'mock-bare2')
+  it('waits for the Run rather than downloading a list it is about to replace', async () => {
+    /*
+     * The type says a chain is wired the moment the wire is drawn; only the value carries its
+     * table. Loading anyway fetches the whole index under the unannotated key and again under
+     * the annotated one the instant a Run lands — and the first list carries the backend's
+     * labels, which is the gap the chain was wired to close.
+     */
+    let asked = 0
+    registerSource(
+      Object.assign(Object.create(new MockSource({ latencyMs: 0 })) as DataSource, {
+        id: 'mock-waits',
+        neuronIndex: async () => {
+          asked += 1
+          return makeTable(tableSchema(column('neuronId', 'str')), { neuronId: ['1'] }, 'neurons')
+        },
+      }),
+    )
+
+    setup({}, 'mock-waits', undefined, tableSchema(column('neuronId', 'str'), column('lab', 'str')))
     await waitFor(() => expect(screen.getByText(/Press Run/)).toBeTruthy())
-    // The raw sentence would send somebody to look at the dataset, where the fix is a keypress.
+    // Nothing fetched, and no refusal shown — this is a state, not a fault.
+    expect(asked).toBe(0)
     expect(screen.queryByText(/publishes no table listing/)).toBeNull()
   })
 })
