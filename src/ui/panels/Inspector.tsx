@@ -19,6 +19,16 @@ import { ParamField } from '../params/ParamField'
 import { familyColorVar, socketStyle } from '../socketStyle'
 import { ValuePreview } from '../viewers/ValuePreview'
 
+/**
+ * How many rows the result view draws in the inspector.
+ *
+ * `.inspector__viewer` is 300px tall and a row is about 19px at this font size, so a dozen are
+ * on screen and this is a little over two screens of scroll before the pager. The number is
+ * here rather than in the viewer because it is a fact about *this panel's box*, and the card
+ * and the overlay have their own.
+ */
+const INSPECTOR_MAX_ROWS = 25
+
 export function Inspector() {
   const open = useGraphStore((s) => s.panels.inspector)
   const togglePanel = useGraphStore((s) => s.togglePanel)
@@ -202,10 +212,22 @@ export function Inspector() {
               {info?.durationMs !== undefined && ` · ${formatDuration(info.durationMs)}`}
             </div>
             <div className="inspector__viewer">
+              {/*
+                * `compact`, and a row cap, because this box is 320 × 300 — the smallest surface
+                * a viewer is drawn on, smaller than the card. It was neither, so an annotation
+                * table drew a full page of 100 rows across 60 columns into a space that shows
+                * about a dozen rows and three columns: some six thousand cells, of which around
+                * forty are visible, laid out on every change of selection.
+                *
+                * `compact` also withholds the rows-per-page selector, which is the one control
+                * that could put the cost straight back.
+                */}
               <ValuePreview
                 node={node}
                 value={outputValue}
                 ctx={ctx}
+                compact
+                maxRows={INSPECTOR_MAX_ROWS}
                 baseName={exportBaseName(graphName, node.title ?? def.label)}
                 onExpand={() => expandNode(node.id)}
                 onError={setNotice}

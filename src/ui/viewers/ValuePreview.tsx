@@ -60,6 +60,18 @@ export interface ValuePreviewProps {
   onSelectionChange?: (ids: string[]) => void
   /** Realised values on the node's input ports, for viewers that draw several at once. */
   inputValues?: Record<string, Value | undefined>
+  /**
+   * A ceiling on how many rows a table view draws here, for a surface that knows its own box.
+   *
+   * The node's `pageSize` param is a setting for the card and the overlay, where there is room
+   * for it; the inspector is 320 × 300 and shows about a dozen rows, so honouring a page of 100
+   * — or of 500, which the param allows — is thousands of cells laid out where three columns
+   * fit. Measured on a 58,340 × 60 annotation table: 113 ms of render at 100 rows against 26 ms
+   * at 25, before the browser lays out a single cell.
+   *
+   * A *cap* rather than a value, so a node whose param is already small keeps it.
+   */
+  maxRows?: number
 }
 
 /**
@@ -95,6 +107,7 @@ function ValuePreviewInner({
   onParamChange,
   onSelectionChange,
   inputValues,
+  maxRows,
 }: ValuePreviewProps) {
   // Forwarded to every viewer; kept in one place so a new viewer can't forget export.
   const shared = {
@@ -428,7 +441,10 @@ function ValuePreviewInner({
     return (
       <TableViewer
         table={value}
-        pageSize={Number.isFinite(pageSize) && pageSize > 0 ? pageSize : 100}
+        pageSize={Math.min(
+          Number.isFinite(pageSize) && pageSize > 0 ? pageSize : 100,
+          maxRows ?? Number.POSITIVE_INFINITY,
+        )}
         {...filtering}
         {...shared}
       />

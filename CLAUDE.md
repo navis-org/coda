@@ -2216,6 +2216,33 @@ by playwright against the dev server: both themes at 1440px and a 420px phone st
 errors, no sideways body scroll, the preview card correct for a 33-setting node and for a text
 note, the help disclosure opening, and a search dimming 44 of 49 tiles without moving one.
 
+### The inspector draws the smallest box, and was drawing the most
+
+`.inspector__viewer` is **320 × 300** — smaller than a card, and the smallest surface a viewer is
+drawn on. It was passing neither `compact` nor any ceiling, so a node's own `pageSize` decided
+what it drew: on a real annotation table that is **100 rows × 60 columns, six thousand cells, of
+which about forty are visible**, laid out again on every change of selection. Reported as the app
+freezing while zoom and pan kept working, which is the signature of a long layout rather than a
+stuck script.
+
+Measured in jsdom, which performs no layout and so isolates the *JavaScript* half: a 58,340 × 60
+table renders in **113 ms** at 100 rows and **26 ms** at 25, and the cost is linear in
+`rows drawn × columns` — flat in table length, so the paging was working and the row count was
+never the problem. A selection switch went 101/48/73 ms to 47/24/36 ms. Twenty-four switches in a
+row settle at 15 ms with no growth, so there is no leak; the cost is per-switch and bounded.
+
+`ValuePreview.maxRows` is a **cap** rather than a value, so a node whose page size is already
+small keeps it, and `compact` comes with it — which also withholds the rows-per-page selector,
+the one control that could put the cost straight back.
+
+**What is measured and what is not.** The four-fold cut in cells is measured; the *browser*
+half — `table-layout: auto` with `width: max-content`, which forces an intrinsic-width pass over
+every cell in every column — is the remaining suspect and could not be measured here, since jsdom
+lays nothing out. It is the classic pathological combination for a wide table, and `fixed` would
+remove it at the cost of columns no longer sizing to their content. Left alone deliberately: it
+is a guess until somebody points a browser at it, and this codebase's habit is to measure before
+changing something that decides how a thing looks.
+
 ## Collapsible panels
 
 The inspector and the minimap are both **closed by default** and remembered in `localStorage`

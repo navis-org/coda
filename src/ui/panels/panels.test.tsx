@@ -141,6 +141,46 @@ describe('the inspector', () => {
     fireEvent.keyDown(window, { key: 'I', shiftKey: true })
     expect(inspector()).toBeNull()
   })
+
+  it('draws a bounded page of a large table, not the node’s own page size', async () => {
+    /*
+     * `.inspector__viewer` is 320 × 300 — the smallest surface a viewer is drawn on, smaller
+     * than the card — so about a dozen rows and three columns are visible. It was drawing the
+     * node's full `pageSize` across every column: on a real annotation table, 100 × 60 is six
+     * thousand cells laid out per change of selection, of which forty are on screen. Measured at
+     * 113 ms of render before the browser lays out a single cell.
+     *
+     * A generous page size is set here deliberately: the assertion is that the *panel's* ceiling
+     * wins over the node's setting, which is the half a smaller default would not prove.
+     */
+    render(<App />)
+    fireEvent.click(inspectorToggle())
+
+    const store = useGraphStore.getState()
+    const ds = store.addNode('neuron.dataset', { x: 0, y: 0 })
+    const find = useGraphStore.getState().addNode('neuron.findNeurons', { x: 200, y: 0 })
+    const view = useGraphStore.getState().addNode('out.table', { x: 400, y: 0 })
+    act(() => {
+      const s = useGraphStore.getState()
+      s.setParam(ds, 'dataset', 'optic-lobe-mini')
+      s.connect({ source: ds, sourceHandle: 'dataset', target: find, targetHandle: 'dataset' })
+      s.connect({ source: find, sourceHandle: 'neurons', target: view, targetHandle: 'in' })
+      s.setParam(view, 'pageSize', 500)
+    })
+    await act(async () => {
+      await useGraphStore.getState().runAll()
+    })
+    act(() => {
+      useGraphStore.getState().setSelection([view])
+    })
+
+    const rows = () => inspector()?.querySelectorAll('.data-table tbody tr').length ?? 0
+    // The table has to be big enough for the cap to be the thing being measured — otherwise
+    // this passes on a table that was short anyway, which is no assertion at all.
+    const total = useGraphStore.getState().nodeOutput(view, 'out')
+    expect(total && 'length' in total ? total.length : 0).toBeGreaterThan(25)
+    expect(rows()).toBe(25)
+  })
 })
 
 describe('the minimap', () => {
