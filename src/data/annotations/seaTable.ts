@@ -40,6 +40,7 @@ import { ID_COLUMN_NAME } from '../../core/ids'
 import type { CellValue, ColumnData, TableValue } from '../../core/values'
 import { makeTable } from '../../core/values'
 import { errorMessage } from '../../core/errors'
+import { readStorage, writeStorage } from '../localStore'
 import { getToken, normaliseHost, reportAuthFailure } from './credentials'
 import {
   cachedAnnotationTable,
@@ -82,20 +83,122 @@ export interface SeaTableConfig extends Record<string, string> {
 // Transport
 // ---------------------------------------------------------------------------
 
-async function request<T>(url: string, token: string, signal?: AbortSignal): Promise<T> {
-  let response: Response
+/** Path prefix of the dev proxy that relays a named SeaTable host. See `vite.config.ts`. */
+const PROXY_PREFIX = '/st'
+
+/** `direct` is the deployment itself and needs CORS; `proxy` is a same-origin relay. */
+type RouteKind = 'direct' | 'proxy'
+
+const ROUTE_KEY = 'coda.seatable.routes.v1'
+let routeMemory: Map<string, RouteKind> | undefined
+
+function memory(): Map<string, RouteKind> {
+  if (routeMemory) return routeMemory
+  routeMemory = new Map()
   try {
-    response = await fetch(url, {
-      // `Token`, not `Bearer` — a Bearer JWT answers 403 `invalid token`, which blames the
-      // credential rather than the scheme.
-      headers: { Authorization: `Token ${token}`, Accept: 'application/json' },
-      ...(signal ? { signal } : {}),
-    })
-  } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') throw error
+    const stored = readStorage(ROUTE_KEY)
+    if (stored) {
+      for (const [host, kind] of Object.entries(JSON.parse(stored) as Record<string, RouteKind>)) {
+        if (kind === 'direct' || kind === 'proxy') routeMemory.set(host, kind)
+      }
+    }
+  } catch {
+    // A corrupt entry is not worth failing a fetch over; re-probing costs one request.
+  }
+  return routeMemory
+}
+
+/**
+ * Remember how a host answered — **only on a 2xx**.
+ *
+ * `neuprint/client.ts`'s rule and it matters for the same reason: a 404 is what a static host
+ * answers for a proxy path nobody serves, so remembering it would pin a deployment to a route
+ * that can never work, and would outlive the day that deployment gains CORS.
+ */
+function rememberRoute(origin: string, kind: RouteKind): void {
+  const map = memory()
+  if (map.get(origin) === kind) return
+  map.set(origin, kind)
+  writeStorage(ROUTE_KEY, JSON.stringify(Object.fromEntries(map)))
+}
+
+/** Drop what is known about how to reach a host, so the next request re-probes. */
+export function forgetSeaTableRoutes(origin?: string): void {
+  const map = memory()
+  if (origin) map.delete(new URL(normaliseHost(origin)).origin)
+  else map.clear()
+  writeStorage(ROUTE_KEY, map.size ? JSON.stringify(Object.fromEntries(map)) : undefined)
+}
+
+/**
+ * The URLs worth trying for one request, best first.
+ *
+ * **Direct first, proxy as the fallback**, which is `routesForServer`'s order and for the same
+ * reason: `cloud.seatable.io` answers a preflight 204 carrying
+ * `Access-Control-Allow-Origin: *`, so the hosted service needs no relay at all and asking for
+ * one would be slower and would fail on a static deploy. FlyTable sends no `Access-Control-*`
+ * header for any origin — checked against four different `Origin` values, so it is an absence
+ * rather than an allowlist — and a browser cannot tell that from a dead host, since both arrive
+ * as an opaque `TypeError`. So the only way to know is to try, and the answer is remembered per
+ * origin because otherwise every request in a proxied session pays a failed preflight first.
+ *
+ * The remembered route is *preferred*, not used exclusively: a dev server that has stopped
+ * running, or a deployment that has since gained CORS, still resolves without anybody clearing
+ * anything.
+ */
+function routesFor(url: string): Array<{ url: string; kind: RouteKind }> {
+  const parsed = new URL(url)
+  const routes: Array<{ url: string; kind: RouteKind }> = [
+    { url, kind: 'direct' },
+    {
+      url: `${PROXY_PREFIX}/${encodeURIComponent(parsed.origin)}${parsed.pathname}${parsed.search}`,
+      kind: 'proxy',
+    },
+  ]
+  const preferred = memory().get(parsed.origin)
+  if (!preferred) return routes
+  return [...routes].sort((a, b) => Number(b.kind === preferred) - Number(a.kind === preferred))
+}
+
+async function request<T>(url: string, token: string, signal?: AbortSignal): Promise<T> {
+  const origin = new URL(url).origin
+  const headers = {
+    // `Token`, not `Bearer` — a Bearer JWT answers 403 `invalid token`, which blames the
+    // credential rather than the scheme.
+    Authorization: `Token ${token}`,
+    Accept: 'application/json',
+  }
+
+  /*
+   * Only a *thrown* fetch moves on to the next route — `neuprint/client.ts`'s rule and
+   * `transport.ts`'s before it. A response of any status means the request plainly arrived, so a
+   * 404 is SeaTable saying 404 rather than this route being wrong.
+   */
+  let response: Response | undefined
+  let lastError: unknown
+  for (const route of routesFor(url)) {
+    try {
+      response = await fetch(route.url, { headers, ...(signal ? { signal } : {}) })
+    } catch (error) {
+      // An AbortError is the scheduler cancelling. It must stay an AbortError, and must never be
+      // answered by issuing the request the cancellation was meant to stop.
+      if (error instanceof DOMException && error.name === 'AbortError') throw error
+      lastError = error
+      response = undefined
+      continue
+    }
+    if (response.ok) rememberRoute(origin, route.kind)
+    break
+  }
+
+  if (!response) {
     throw new SeaTableError(
-      `Could not reach ${new URL(url).origin}. It could not be read cross-origin, or the host ` +
-        `is down — a browser reports both the same way. (${errorMessage(error)})`,
+      `Could not reach ${origin}. It could not be read cross-origin, or the host is down — a ` +
+        `browser reports both the same way. FlyTable currently sends no CORS headers at all, so ` +
+        `a browser blocks the request before it is sent; the relay Coda falls back to comes from ` +
+        `vite.config.ts, which means \`pnpm dev\` or \`pnpm preview\` serve it and a static ` +
+        `deploy serves nothing there. The real fix is one CORS header on the deployment. ` +
+        `(${errorMessage(lastError)})`,
     )
   }
 

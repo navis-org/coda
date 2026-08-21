@@ -399,7 +399,7 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `data/cave/cave.test.ts`                 | CAVE against recorded bodies: a wide root id kept exactly, the string-aware scan, the annotation pivot, an anchored pattern, and every refusal |
 | `nodes/lib/datasetFamilies.test.ts`      | (also) that every CAVE family names a datastack spec and every spec a family — the join key nothing else checks |
 | `data/cave/live.test.ts`                 | the same source against the real services, skipped without `CAVE_TOKEN` — the only thing that notices an endpoint shape changing, plus the mesh and synapse clouds proved to share one nanometre frame |
-| `data/annotations/annotations.test.ts`   | annotation sources: the `Token` scheme, the pseudo-workspaces dropped, a wide id kept as text, the outer join and the later source winning |
+| `data/annotations/annotations.test.ts`   | annotation sources: the `Token` scheme, the pseudo-workspaces dropped, a wide id kept as text, the outer join and the later source winning — plus the route fallback's three rules |
 | `data/annotations/live.test.ts`          | the same against real FlyTable, skipped without `SEATABLE_TOKEN` — including the ids proved to be beyond double precision |
 | `nodes/annotation/annotations.test.ts`   | the three source nodes: the two halves of one join asserted against each other, half a chain published as nothing, and the datastack named rather than wired |
 | `nodes/query/morphology.test.ts`         | the shared `Max neurons` ceiling and what its refusal message blames                                                             |
@@ -1352,6 +1352,38 @@ GET  {server}/api/v1/dtables/{uuid}/rows/?table_name=…&limit=…  → the rows
   nothing.
 - **Pages are sequential, not concurrent.** `start` is an offset into a base that is being edited
   while you read it; firing six at once is how a page gets read twice and another missed.
+
+**FlyTable cannot be read from a browser at all, and the live test could not see it.**
+`live.test.ts` runs in Node, where `fetch` does no CORS enforcement — so "probed live" covered
+every endpoint shape and none of the browser's actual constraint. Measured against the
+deployment: **zero `Access-Control-*` headers on any response**, and the `OPTIONS` preflight
+reaching Django and answering `403 Authentication credentials were not provided` before any CORS
+middleware could run. Not an allowlist — four different `Origin` values produce the same nothing.
+`cloud.seatable.io`, the same software hosted, answers the preflight 204 with
+`Access-Control-Allow-Origin: *`, so the two deployments differ entirely in this and the code
+cannot assume either.
+
+So `request` **tries and remembers**, which is `neuprint/client.ts`'s machinery and
+`transport.ts`'s before it, with all three of its rules: only a *thrown* fetch moves on (a
+response of any status means the request arrived), only a **2xx** is remembered (a 404 is what a
+static host answers for a relay path nobody serves, and pinning that would outlive the day the
+deployment gains CORS), and an `AbortError` is never answered by trying elsewhere. Direct is
+first, because the hosted service needs no relay and asking for one would fail on a static
+deploy. The relay is `/st/<encoded-origin>/<path>`, served by the **same** `vite.config.ts`
+plugin `/np/` uses — one handler, because the SSRF guard is the part that must not be copied.
+
+**The relay is a development answer, not a fix.** A static deploy serves nothing at that path,
+so the published build cannot reach FlyTable until the deployment sends the headers.
+`docs/flytable-cors.md` is the nginx config, and the four things in it each fail silently on
+their own — the preflight answered before authentication, `Authorization` in the allow list,
+`always` so the headers survive a 401 (without which `reportAuthFailure` cannot read the status
+and a rejected token reads as an unreachable host), and per-`location` repetition, since
+`add_header` does not inherit into a block that has one of its own.
+
+Verified in a real browser over CDP against `pnpm dev`, which is the only thing that could:
+direct throws `TypeError: Failed to fetch`, the relay returns the data, `cloud.seatable.io`
+direct answers without one, and the full client path — `listBases` 46 bases and `readMetadata`
+through the `/dtable-server/` prefix — works with the route remembered as `proxy`.
 
 ### The CAVE table provider, and where its line falls
 

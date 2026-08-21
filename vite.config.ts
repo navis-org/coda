@@ -75,25 +75,42 @@ const NEUPRINT_PROXY = {
 }
 
 /**
- * Proxy for neuPrint deployments other than the default one.
+ * Proxy for a host named by the page rather than by this file.
  *
- * The `/neuprint` rule above is bound to a single target at config time, which is fine while
- * there is one server but not once a node can name its own. This forwards
- * `/np/<encoded-deployment>/<path>` to that deployment, so the Custom neuPrint node's Server
- * field does something in development. `src/data/neuprint/servers.ts` builds the URLs.
+ * The rules above are each bound to one target at config time, which is fine while a backend has
+ * one server and not once a node can name its own. This forwards `/<prefix>/<encoded-origin>/<path>`
+ * to that origin. Two prefixes use it, and they are the two backends whose host is a *setting*:
+ *
+ *  - `/np/` — neuPrint deployments other than the default, so the Custom neuPrint node's Server
+ *    field does something in development. `src/data/neuprint/servers.ts` builds the URLs.
+ *  - `/st/` — SeaTable deployments. `cloud.seatable.io` answers a preflight 204 with
+ *    `Access-Control-Allow-Origin: *` and needs none of this; **FlyTable sends no
+ *    `Access-Control-*` header at all**, for any origin, so a browser blocks the request before
+ *    it is sent and reports the opaque `TypeError` that means both "no CORS" and "host is down".
+ *    Verified against the live deployment; the same API answers a non-browser client perfectly
+ *    with the same token, which is what makes it a browser problem rather than a credential one.
+ *    `src/data/annotations/seaTable.ts` builds the URLs.
+ *
+ * One handler rather than two, because the SSRF guard below is the part that must not be
+ * copied — and the header forwarding is already exactly what both need.
  *
  * **It refuses anything but https to a public host.** A dev server that will forward to any URL
  * a page names is a server-side request forgery hole pointed at the developer's own machine and
  * network — localhost dashboards, cloud metadata endpoints. The allowance is deliberately narrow
  * rather than convenient.
+ *
+ * Note what it does **not** cover: a static deploy serves nothing at these paths, so a
+ * deployment without CORS is unreachable there whatever this does. The fix for that is one
+ * nginx block on the deployment, which is what Janelia did for `neuprint-test`.
  */
 function deploymentProxy(): PluginOption {
   const BLOCKED =
     /^(localhost$|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|\[?::1\]?$)/i
+  const PREFIXES = ['/np/', '/st/']
 
   const handler = async (req: IncomingMessage, res: ServerResponse, next: () => void) => {
     const url = req.url ?? ''
-    if (!url.startsWith('/np/')) return next()
+    if (!PREFIXES.some((prefix) => url.startsWith(prefix))) return next()
 
     const [, , encoded = '', ...rest] = url.split('/')
     let target: URL
@@ -121,7 +138,8 @@ function deploymentProxy(): PluginOption {
       const upstream = await fetch(`${target.origin}/${rest.join('/')}`, {
         method: req.method ?? 'GET',
         headers: {
-          // Only what neuPrint needs. Forwarding the browser's Host or Origin makes it 400.
+          // Only what these APIs need. Forwarding the browser's Host or Origin makes neuPrint
+          // answer 400, and SeaTable needs neither.
           ...(req.headers.authorization
             ? { authorization: String(req.headers.authorization) }
             : {}),
@@ -142,7 +160,7 @@ function deploymentProxy(): PluginOption {
   }
 
   return {
-    name: 'coda:neuprint-deployment-proxy',
+    name: 'coda:named-host-proxy',
     configureServer: (server) => {
       server.middlewares.use(handler)
     },

@@ -21,7 +21,13 @@ import {
   setToken,
   subscribeAuthFailure,
 } from './credentials'
-import { listBases, readMetadata, resetSeaTableState, shapeRows } from './seaTable'
+import {
+  forgetSeaTableRoutes,
+  listBases,
+  readMetadata,
+  resetSeaTableState,
+  shapeRows,
+} from './seaTable'
 import type { SeaTableConfig, SeaTableTable } from './seaTable'
 import { resetCaveTableState } from './caveTable'
 import { annotationProvider, peekRefColumns } from './registry'
@@ -63,6 +69,8 @@ beforeEach(() => {
   // and a peek that has already resolved cannot demonstrate what an unresolved one answers.
   resetSeaTableState()
   resetCaveTableState()
+  // Which route reached a host is module state too, and it is deliberately sticky in production.
+  forgetSeaTableRoutes()
   setToken(HOST, 'account-token')
 })
 
@@ -327,5 +335,96 @@ describe('joining a chain', () => {
   it('falls back to the earlier source where the later one has no value', () => {
     const joined = joinAnnotations(t(['1'], 'type', ['old']), t(['1'], 'type', [null]))
     expect(joined.data.type).toEqual(['old'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Reaching a deployment that a browser cannot read
+// ---------------------------------------------------------------------------
+
+/**
+ * FlyTable sends **no** `Access-Control-*` header, for any origin — probed live against four
+ * different `Origin` values, so it is an absence rather than an allowlist, and the same API
+ * answers a non-browser client perfectly with the same token. A browser therefore blocks the
+ * request before it is sent and reports the opaque `TypeError` that also means "host is down".
+ *
+ * So the client tries direct, falls back to a same-origin relay, and remembers. `neuprint`'s
+ * three rules come with it, and each would be a distinct failure if dropped.
+ */
+describe('routes', () => {
+  /** A fetch that throws for anything not matching `reachable`, as a CORS refusal does. */
+  function installRoutedFetch(reachable: (url: string) => boolean): string[] {
+    const tried: string[] = []
+    vi.stubGlobal('fetch', (url: string) => {
+      tried.push(String(url))
+      if (!reachable(String(url))) return Promise.reject(new TypeError('NetworkError'))
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        text: () => Promise.resolve(fixture('workspaces.json')),
+      } as Response)
+    })
+    return tried
+  }
+
+  it('tries the deployment first, since the hosted service needs no relay', async () => {
+    const tried = installRoutedFetch(() => true)
+    await listBases(HOST)
+    expect(tried).toHaveLength(1)
+    expect(tried[0]).toBe(`${HOST}/api/v2.1/workspaces/`)
+  })
+
+  it('falls back to a same-origin relay when the browser refuses the read', async () => {
+    const tried = installRoutedFetch((url) => url.startsWith('/st/'))
+    await listBases(HOST)
+    // The origin is encoded whole, so the relay needs no per-deployment rule — and the path
+    // survives, which is what lets `dtable-server` calls take the same route.
+    expect(tried[1]).toBe(
+      `/st/${encodeURIComponent(HOST)}/api/v2.1/workspaces/`,
+    )
+  })
+
+  it('remembers the relay, so a proxied session pays one failed preflight and not one per call', async () => {
+    installRoutedFetch((url) => url.startsWith('/st/'))
+    await listBases(HOST)
+    const second = installRoutedFetch((url) => url.startsWith('/st/'))
+    await listBases(HOST)
+    // One attempt, not two: the direct route is no longer tried first.
+    expect(second).toHaveLength(1)
+    expect(second[0]?.startsWith('/st/')).toBe(true)
+  })
+
+  it('remembers only a 2xx, so a static host’s 404 does not pin an unusable route', async () => {
+    // What a static deploy answers for a relay path nobody serves. It *arrives*, so it is not a
+    // route failure — and remembering it would outlive the day the deployment gains CORS.
+    vi.stubGlobal('fetch', (url: string) =>
+      String(url).startsWith('/st/')
+        ? Promise.resolve({ ok: false, status: 404, text: () => Promise.resolve('') } as Response)
+        : Promise.reject(new TypeError('NetworkError')),
+    )
+    await expect(listBases(HOST)).rejects.toThrow(/404/)
+
+    const tried = installRoutedFetch(() => true)
+    await listBases(HOST)
+    expect(tried[0]).toBe(`${HOST}/api/v2.1/workspaces/`)
+  })
+
+  it('never answers a cancellation by issuing the request it was meant to stop', async () => {
+    const tried: string[] = []
+    vi.stubGlobal('fetch', (url: string) => {
+      tried.push(String(url))
+      return Promise.reject(new DOMException('aborted', 'AbortError'))
+    })
+    await expect(listBases(HOST)).rejects.toThrow(/aborted/)
+    expect(tried).toHaveLength(1)
+  })
+
+  it('names both causes and the relay when nothing answers', async () => {
+    installRoutedFetch(() => false)
+    // A browser cannot tell a CORS refusal from a dead host, and the two fixes are nothing
+    // alike — so saying only "network error" sends somebody to check their wifi over a header
+    // their server never sent.
+    await expect(listBases(HOST)).rejects.toThrow(/cross-origin|CORS/)
+    await expect(listBases(HOST)).rejects.toThrow(/pnpm dev|static deploy/)
   })
 })
