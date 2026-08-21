@@ -315,6 +315,20 @@ export interface EvalContext<P extends ParamValues = ParamValues> {
   columns(paramId: string): string[]
   /** Look up a registered data source by id (from a DatasetValue). */
   resolveSource(sourceId: string): DataSource
+  /**
+   * This run was asked to ignore any persistent data cache for this node.
+   *
+   * Set by **Clear Cache** on the node, and read by whatever `evaluate` does its fetching
+   * through — `loadCachedTable`'s `refresh`, in practice. It is a fact about *this run* rather
+   * than about the document, which is the whole difference from the `refresh` nonce it replaced:
+   * a nonce had to live in the saved graph and take part in the provenance key, so re-fetching
+   * was an edit, it travelled to whoever you sent the file to, and every node wanting the
+   * ability grew its own param.
+   *
+   * Only nodes declaring `dataCache` read it, and the flag is what makes the button appear —
+   * one statement, so a node cannot offer Clear Cache and quietly ignore it.
+   */
+  refresh: boolean
   /** Aborted when the run is superseded or cancelled. Long loops should check it. */
   signal: AbortSignal
   /** Report 0..1 progress for the node's status bar. */
@@ -343,6 +357,21 @@ export interface NodeDefinition<P extends ParamValues = ParamValues> {
    */
   guide?: string
   cost: NodeCost
+  /**
+   * `evaluate` reads through a persistent data cache, so a run may answer from storage rather
+   * than from the server.
+   *
+   * Two things at once, deliberately paired. It puts **Clear Cache** on the node's menu and in
+   * the inspector, and it declares that `evaluate` honours `ctx.refresh` — a node offering the
+   * button and ignoring the flag is a control that does nothing, which is exactly what the
+   * `refresh` nonce's absence used to look like from the outside ("Invalidate" cleared the
+   * result and the re-run came back instantly from IndexedDB).
+   *
+   * Not the scheduler's own result cache, which every node has and `Invalidate Results` covers.
+   * This is the second layer: `loadCachedTable`'s IndexedDB store, kept for a month and keyed by
+   * what was fetched rather than by the graph.
+   */
+  dataCache?: boolean
   /**
    * Tabs for a grouped styling panel, in display order; a param's `group` names one.
    *

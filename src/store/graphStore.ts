@@ -337,6 +337,14 @@ export interface GraphState {
   runNode(nodeId: string): Promise<void>
   cancelRun(): void
   invalidateNode(nodeId: string): void
+  /**
+   * Forget the *data* this node fetched, so its next run reaches the server.
+   *
+   * `invalidateNode`'s second layer. See `Scheduler.clearNodeCache`: dropping a result makes a
+   * node re-run, and on a node that fetches through `loadCachedTable` the re-run answers from
+   * IndexedDB in milliseconds with the same bytes.
+   */
+  clearNodeCache(nodeId: string): void
   /** Drop every cached result, so the next Run re-fetches from scratch. */
   clearResults(): void
   /** True when running this node would actually do work. */
@@ -1161,6 +1169,10 @@ export const useGraphStore = create<GraphState>((set, get) => {
 
     invalidateNode: (nodeId) => {
       scheduler.invalidateNode(get().graph, nodeId)
+    },
+
+    clearNodeCache: (nodeId) => {
+      scheduler.clearNodeCache(get().graph, nodeId)
     },
 
     clearResults: () => {

@@ -109,6 +109,7 @@ function evalContext(
   }
   return {
     params,
+    refresh: false,
     input: (portId) => inputs[portId],
     inputKey: (portId) => (inputs[portId] ? `${portId}-key` : undefined),
     column: (paramId) => {

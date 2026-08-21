@@ -92,6 +92,13 @@ export interface SchedulerHost {
 export class Scheduler {
   private cache = new Map<string, CacheEntry>()
   private states = new Map<string, NodeRunInfo>()
+  /**
+   * Nodes asked to ignore their persistent data cache on the next run they actually execute.
+   *
+   * Session state, never the document — see `clearNodeCache`. Spent on execution rather than on
+   * the run, so a request made against an expensive node survives every cheap pass in between.
+   */
+  private forceRefresh = new Set<string>()
   private abort: AbortController | undefined
   /** Bumped on every run; results from a superseded run are discarded. */
   private generation = 0
@@ -192,6 +199,7 @@ export class Scheduler {
   invalidateAll(): void {
     this.cache.clear()
     this.states.clear()
+    this.forceRefresh.clear()
     this.host.onStateChange?.()
   }
 
@@ -199,6 +207,26 @@ export class Scheduler {
     this.cache.delete(nodeId)
     for (const id of descendantsOf(graph, nodeId)) this.cache.delete(id)
     this.refreshStates(graph)
+  }
+
+  /**
+   * Ask a node to ignore its persistent data cache the next time it runs, and drop the results
+   * that came from it.
+   *
+   * Two layers, and only the first is `invalidateNode`'s. Dropping the *result* makes the node
+   * run again; it does not make the run reach the network, because `evaluate` fetches through
+   * `loadCachedTable`, whose IndexedDB entry is keyed by what was fetched rather than by the
+   * graph and is kept for a month. So "Invalidate" cleared the card and the re-run came back
+   * instantly with the same bytes — a control that looked like it had worked.
+   *
+   * The flag is held here rather than in the document because it is a fact about *this session*:
+   * it must not be saved, must not travel to whoever you send the file to, and must not take part
+   * in the provenance key. It survives until the node actually executes, so asking for it on an
+   * expensive node and then running the cheap pass does not quietly spend it.
+   */
+  clearNodeCache(graph: CodaGraph, nodeId: string): void {
+    this.forceRefresh.add(nodeId)
+    this.invalidateNode(graph, nodeId)
   }
 
   cancel(): void {
@@ -329,6 +357,9 @@ export class Scheduler {
       const nodeStarted = performance.now()
       try {
         const inputTypes = inference.nodes[nodeId]?.inputs ?? {}
+        // Spent here rather than at the top of the run: a node that was deferred by the cheap
+        // pass has not had its chance to honour the request yet.
+        const refresh = this.forceRefresh.delete(nodeId)
         const ctx = this.makeEvalContext(
           def,
           node.params,
@@ -337,6 +368,7 @@ export class Scheduler {
           inputTypes,
           controller.signal,
           nodeId,
+          refresh,
         )
         const outputs = await def.evaluate(ctx)
 
@@ -459,10 +491,12 @@ export class Scheduler {
     inputTypes: Readonly<Record<string, unknown>>,
     signal: AbortSignal,
     nodeId: string,
+    refresh: boolean,
   ): EvalContext {
     const types = inputTypes as Record<string, never>
     return {
       params,
+      refresh,
       input: (portId) => inputs[portId],
       inputKey: (portId) => inputKeys[portId],
       column: (paramId) => {
@@ -494,6 +528,8 @@ export class Scheduler {
     const alive = new Set(graph.nodes.map((n) => n.id))
     for (const id of [...this.cache.keys()]) if (!alive.has(id)) this.cache.delete(id)
     for (const id of [...this.states.keys()]) if (!alive.has(id)) this.states.delete(id)
+    // A deleted node's pending request would otherwise be spent by whatever reused its id.
+    for (const id of [...this.forceRefresh]) if (!alive.has(id)) this.forceRefresh.delete(id)
   }
 }
 

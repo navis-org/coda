@@ -28,6 +28,7 @@ export function Inspector() {
   const setParam = useGraphStore((s) => s.setParam)
   const runNode = useGraphStore((s) => s.runNode)
   const invalidateNode = useGraphStore((s) => s.invalidateNode)
+  const clearNodeCache = useGraphStore((s) => s.clearNodeCache)
   const expandNode = useGraphStore((s) => s.expandNode)
   const nodeInputs = useGraphStore((s) => s.nodeInputs)
   const setNotice = useGraphStore((s) => s.setNotice)
@@ -220,11 +221,26 @@ export function Inspector() {
               <button
                 type="button"
                 className="btn btn--ghost"
-                title="Drop cached results here and downstream"
+                title="Drop the results here and downstream, so they are computed again"
                 onClick={() => invalidateNode(node.id)}
               >
                 Invalidate
               </button>
+              {/*
+                * Only where there is a second cache to clear. `dataCache` is the node's own
+                * declaration that it fetches through one *and* honours the flag, so a button
+                * cannot appear on a node that would ignore it.
+                */}
+              {def?.dataCache && (
+                <button
+                  type="button"
+                  className="btn btn--ghost"
+                  title="Forget the data this node downloaded, so the next run fetches it again"
+                  onClick={() => clearNodeCache(node.id)}
+                >
+                  Clear Cache
+                </button>
+              )}
             </div>
           </div>
         )}

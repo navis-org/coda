@@ -39,7 +39,6 @@ import { SEATABLE_HOSTS } from '../../data/annotations/credentials'
 import { peekBases, resolveWorkspace } from '../../data/annotations/seaTable'
 import { joinAnnotations, joinedSchema } from '../lib/annotationOps'
 import { ANNOTATIONS_INPUT, annotationSchemaFrom } from '../lib/annotationParams'
-import { refreshParam } from '../../core/node'
 import { datasetRef } from '../../core/types'
 
 /**
@@ -69,11 +68,6 @@ function chainSchema(
   return upstream ? joinedSchema(upstream, mine) : mine
 }
 
-/** One nonce for all three provider nodes: they refresh for the same reason. */
-const ANNOTATION_REFRESH = refreshParam(
-  'Forces a re-read even when nothing else changed. Annotation bases are edited daily and cache keys cannot see that.',
-)
-
 // ---------------------------------------------------------------------------
 // CAVE table
 // ---------------------------------------------------------------------------
@@ -93,6 +87,7 @@ export const caveTableNode = registerNode({
     'than one row per neuron. What comes out is an ordinary neuron table, so a Filter or a Sort ' +
     'can sit between here and the Dataset, and a Table node beside it shows what you actually got.',
   cost: 'expensive',
+  dataCache: true,
   /*
    * The Dataset input is **optional**, and that is what keeps the ordinary wiring possible at
    * all. It was required, which made the wiring this node's own guide describes — a datastack's
@@ -162,7 +157,6 @@ export const caveTableNode = registerNode({
       advanced: true,
       visibleIf: (params) => Boolean(String(params.pivotOn ?? '')),
     },
-    ANNOTATION_REFRESH,
   ],
 
   inferOutputs: (ctx) => ({
@@ -239,6 +233,7 @@ function buildSeaTableNode(spec: { key: string; label: string; host: string; gui
     description: `Neuron labels from a ${spec.label} base.`,
     guide: spec.guide,
     cost: 'expensive',
+    dataCache: true,
     inputs: [ANNOTATIONS_INPUT],
     outputs: [{ id: 'annotations', label: 'Annotations', type: T.neurons() }],
     params: [
@@ -290,8 +285,7 @@ function buildSeaTableNode(spec: { key: string; label: string; host: string; gui
         help: 'SeaTable deployment. FlyTable and cloud.seatable.io are the same software with unrelated accounts, so each needs its own token.',
         advanced: true,
       },
-      ANNOTATION_REFRESH,
-    ],
+      ],
 
     inferOutputs: (ctx) => ({
       annotations: T.neurons(chainSchema(ctx.inputs.annotations, seaRef(ctx.params, spec.host))),
@@ -401,13 +395,16 @@ async function resolve(ctx: EvalContext, ref: AnnotationRef): Promise<TableValue
 
   ctx.progress(0.05, provider.label)
   /*
-   * `refresh` is a nonce — the node re-runs because the number changed, and the provider has to
-   * be told to skip its cache or the control spends a join and returns the same table. It was
-   * not passed at all, which made a param whose help says "forces a re-read" do nothing but
-   * invalidate downstream.
+   * `ctx.refresh` is Clear Cache reaching the second layer. A base is read through IndexedDB and
+   * kept for a month, so without this the node re-runs and answers in milliseconds with the same
+   * bytes — which is what Invalidate on its own does, and what made it look broken.
+   *
+   * It replaced a `refresh` nonce param. A nonce works, and its cost is that re-fetching becomes
+   * an *edit*: in the provenance key, in the saved file, and carried to whoever the graph is sent
+   * to. This is a fact about one run.
    */
   const table = await provider.fetch(ref, {
-    ...(Number(ctx.params.refresh ?? 0) > 0 ? { refresh: true } : {}),
+    ...(ctx.refresh ? { refresh: true } : {}),
     onProgress: ctx.progress,
     ...(ctx.signal ? { signal: ctx.signal } : {}),
   })

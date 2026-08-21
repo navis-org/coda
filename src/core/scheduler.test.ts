@@ -6,10 +6,11 @@ import '../nodes'
 import type { CodaGraph, GraphNode } from './graph'
 import { addEdge, addNode, emptyGraph, setNodeParam } from './graph'
 import { inferGraph } from './inference'
+import { T, column, tableSchema } from './types'
 import { defaultParams } from './node'
-import { requireNodeDef } from './registry'
+import { registerNode, requireNodeDef } from './registry'
 import { Scheduler } from './scheduler'
-import { isTableValue } from './values'
+import { isTableValue, tableFromRows } from './values'
 
 /** Zero-latency source so tests don't wait on the simulated round trip. */
 const source: DataSource = new MockSource({ latencyMs: 0 })
@@ -291,5 +292,113 @@ describe('schema propagation', () => {
     })
     const issues = inferGraph(graph).nodes.norm?.issues ?? []
     expect(issues.some((i) => i.severity === 'error' && /Matrix/.test(i.message))).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+
+/**
+ * Clear Cache — the second cache layer, and the one "Invalidate" never reached.
+ *
+ * Dropping a node's *result* makes it run again; it does not make the run reach the network,
+ * because a fetching node reads through `loadCachedTable`, whose IndexedDB entry is keyed by what
+ * was fetched rather than by the graph and is kept for a month. So Invalidate cleared the card
+ * and the re-run answered in milliseconds with identical bytes — a control that looked like it
+ * had worked. `ctx.refresh` is what crosses that gap, and these pin the four things about it that
+ * are not obvious from its type.
+ */
+describe('clearing a node’s data cache', () => {
+  let seen: boolean[] = []
+
+  /*
+   * Registered once, at collection: `registerNode` refuses a duplicate type, which is the right
+   * rule for a registry a saved graph resolves against.
+   */
+  for (const cost of ['cheap', 'expensive'] as const) {
+    registerNode({
+      type: `test.refresh.${cost}`,
+      label: `refresh ${cost}`,
+      category: 'utility',
+      cost,
+      dataCache: true,
+      inputs: [],
+      outputs: [{ id: 'out', label: 'Out', type: T.table() }],
+      inferOutputs: () => ({ out: T.table() }),
+      evaluate: (ctx) => {
+        seen.push(ctx.refresh)
+        return { out: tableFromRows(tableSchema(column('x', 'i64')), [{ x: 1 }]) }
+      },
+    })
+  }
+
+  /** A one-node graph over the recorder of the given cost. */
+  function recorder(cost: 'cheap' | 'expensive') {
+    const type = `test.refresh.${cost}`
+    let g = emptyGraph('refresh-test')
+    g = addNode(g, { id: 'n', type, position: { x: 0, y: 0 }, params: {} })
+    return { type, graph: g }
+  }
+
+  beforeEach(() => {
+    seen = []
+  })
+
+  it('is false on an ordinary run, so nothing re-fetches by accident', async () => {
+    const { graph } = recorder('cheap')
+    const sched = makeScheduler()
+    await sched.run(graph, { mode: 'full' })
+    expect(seen).toEqual([false])
+  })
+
+  it('reaches the next execution, and is spent once', async () => {
+    const { graph } = recorder('cheap')
+    const sched = makeScheduler()
+    await sched.run(graph, { mode: 'full' })
+
+    sched.clearNodeCache(graph, 'n')
+    await sched.run(graph, { mode: 'full' })
+    // Invalidated as well as flagged, or there would be nothing to re-run: a fresh result is
+    // served from the scheduler's own cache without `evaluate` being called at all.
+    expect(seen).toEqual([false, true])
+
+    // Spent. A request that stuck would make every later run re-download, which on a 79 MB
+    // annotation base is a twenty-second wait somebody asked for exactly once.
+    sched.invalidateNode(graph, 'n')
+    await sched.run(graph, { mode: 'full' })
+    expect(seen).toEqual([false, true, false])
+  })
+
+  it('survives a pass that defers the node, rather than being spent by it', async () => {
+    /*
+     * The reason the flag is spent at *execution* rather than at the top of a run. An expensive
+     * node is deferred by the cheap pass, which is the pass that fires on every keystroke — so a
+     * request cleared there would be gone before the node ever got its chance, and Clear Cache
+     * would work or not depending on whether anybody typed in between.
+     */
+    const { graph } = recorder('expensive')
+    const sched = makeScheduler()
+    sched.clearNodeCache(graph, 'n')
+
+    await sched.run(graph, { mode: 'auto' })
+    expect(seen).toEqual([])
+
+    await sched.run(graph, { mode: 'full' })
+    expect(seen).toEqual([true])
+  })
+
+  it('does not outlive the node it was asked for', async () => {
+    // Ids are reused across loads, so a pending request left behind by a deleted node would be
+    // spent by whatever took its place — a re-download nobody asked for, on a different node.
+    const { graph, type } = recorder('cheap')
+    const sched = makeScheduler()
+    sched.clearNodeCache(graph, 'n')
+
+    // What the store does on any graph change, including a delete.
+    sched.refreshStates(emptyGraph('empty'))
+
+    let replaced = emptyGraph('refresh-test')
+    replaced = addNode(replaced, { id: 'n', type, position: { x: 0, y: 0 }, params: {} })
+    await sched.run(replaced, { mode: 'full' })
+    expect(seen).toEqual([false])
   })
 })

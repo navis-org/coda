@@ -429,6 +429,7 @@ function evalContext(def: NodeDefinition, params: ParamValues, edges: TableValue
   const types: Record<string, CodaType | undefined> = { edges: T.table(edges.schema) }
   return {
     params,
+    refresh: false,
     input: (portId) => (portId === 'edges' ? edges : undefined),
     inputKey: (portId) => (portId === 'edges' ? 'edges-key' : undefined),
     column: (paramId) => {

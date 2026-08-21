@@ -472,6 +472,7 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `nodes/annotation/note.test.ts`          | that a text note is never executed, deferred, stalled or counted, and round-trips                                                |
 | `store/links.test.ts`                    | breaking and re-routing links: one undo step, the id kept, and what a refused rewire leaves                                      |
 | `ui/panels/edgeMenu.test.tsx`            | the link menu: that its header names the wire it is about, and that deleting leaves the nodes                                    |
+| `ui/panels/nodeMenu.test.tsx`            | the node menu's two caches: Results rather than "cache", and Clear Cache gated on the node declaring one                        |
 | `ui/nodes/noteCard.test.tsx`             | the note card: markdown as prose, no node chrome, Escape abandoning an edit, the frame toggle                                    |
 | `nodes/lib/connectivityOps.test.ts`      | the traversal: the pre→post swap, the both-ends dedupe, no re-expansion, minWeight pruning                                       |
 | `nodes/query/connectivity.test.ts`       | the node: that it advertises the columns it builds, and that Hops reaches the source                                             |
@@ -1670,6 +1671,43 @@ methods it needs already exist and are what the Connections tab's Test button us
 
 Not looked at in a browser: the tints, the tile pips and the chain on a real canvas. Same
 standing as the WebGL viewers.
+
+## Two caches, and the two controls that clear them
+
+`Invalidate Results` and `Clear Cache`, in the node's context menu and side by side in the
+inspector. They are different layers and the difference is not cosmetic:
+
+| | what it holds | keyed by | cleared by |
+| --- | --- | --- | --- |
+| the scheduler's result cache | what `evaluate` returned | provenance — `hash(type, params, upstream)` | Invalidate Results |
+| the data cache (`loadCachedTable` → IndexedDB) | what a *server* returned | what was fetched | Clear Cache |
+
+**Only the first was reachable, and the menu claimed otherwise.** The item read `Invalidate
+cache` with a tooltip saying "forcing a re-fetch" — and on a FlyTable node the card cleared, the
+node re-ran, and the answer came back in milliseconds with the same 79 MB of rows, because the
+second layer is keyed by the ref and kept for a month. A control that looks like it worked.
+
+**`ctx.refresh` is what crosses the gap.** `Scheduler.clearNodeCache` invalidates the result *and*
+arms a flag; `evaluate` reads it and passes it down to whatever fetches. Session state, never the
+document — it must not be saved, must not travel to whoever you send the file to, and must not
+take part in the provenance key.
+
+Two things about *when* it is spent. It goes at **execution**, not at the top of a run: an
+expensive node is deferred by the cheap pass, which fires on every keystroke, so a flag cleared
+there would be gone before the node ever had its chance — Clear Cache would work or not depending
+on whether anybody typed in between. And `pruneCache` drops it with its node, since ids are reused
+across loads and a stranded request would be spent by whatever took the id.
+
+**`NodeDefinition.dataCache` is one declaration meaning two things**: the button appears, and
+`evaluate` honours `ctx.refresh`. Paired deliberately — a node offering the button and ignoring
+the flag is exactly the control-that-does-nothing this replaced, and a button on a Filter would
+promise a re-fetch with no fetch behind it.
+
+**It replaced the annotation nodes' `refresh` nonce.** A nonce works, and invariant 4 is why they
+exist at all; what it costs is that re-fetching becomes an **edit** — in the provenance key, in the
+saved file, and carried to whoever you send the graph to — and that every node wanting the ability
+grows its own param. `dataset.*` and `core.tableFromUrl` still carry theirs; they are the obvious
+next candidates, and `refreshParam` stays for them.
 
 ## Auto-run
 

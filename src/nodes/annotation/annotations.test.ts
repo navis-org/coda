@@ -387,6 +387,46 @@ describe('annotation nodes — what a chain returns', () => {
     expect(issuesOf(inferGraph(dropped), 'ds')).toContain('neuronId')
   })
 
+  it('carries Clear Cache through to the provider, which the Refresh param used to do', async () => {
+    /*
+     * The gap that made "Invalidate" look broken: it drops the node's *result*, so `evaluate`
+     * runs again — and a re-run reads the base back out of IndexedDB in milliseconds, because
+     * that entry is keyed by what was fetched rather than by the graph. `ctx.refresh` is the only
+     * thing that crosses to the second layer.
+     *
+     * It replaced a `refresh` nonce param, whose cost was that re-fetching became an *edit*: in
+     * the provenance key, in the saved file, and carried to whoever the graph was sent to. So
+     * `dataCache` is asserted here too — it is what puts the button on the card, and a node
+     * offering it while ignoring the flag is a control that does nothing.
+     */
+    const asked: Array<boolean | undefined> = []
+    registerAnnotationProvider({
+      ...stub(SEATABLE_PROVIDER),
+      fetch: (_ref, options) => {
+        asked.push(options.refresh)
+        return Promise.resolve(TABLES.info!)
+      },
+    })
+
+    let g = emptyGraph('refresh')
+    g = addNode(g, node('fly', 'annotation.flyTable', { base: 'main', table: 'info' }))
+
+    const sched = scheduler()
+    await sched.run(g, { mode: 'full' })
+    expect(asked).toEqual([undefined])
+
+    sched.clearNodeCache(g, 'fly')
+    await sched.run(g, { mode: 'full' })
+    expect(asked).toEqual([undefined, true])
+
+    for (const type of ['annotation.flyTable', 'annotation.seaTable', 'annotation.caveTable']) {
+      expect(requireNodeDef(type).dataCache).toBe(true)
+      // And the nonce is gone rather than left beside its replacement, which would be two ways
+      // to say one thing with only one of them wired up.
+      expect((requireNodeDef(type).params ?? []).some((p) => p.id === 'refresh')).toBe(false)
+    }
+  })
+
   it('refuses a table it cannot match to neurons, rather than running without the labels', async () => {
     /*
      * `validate` only ever produces *warnings*, so the edit-time report above does not stop the
