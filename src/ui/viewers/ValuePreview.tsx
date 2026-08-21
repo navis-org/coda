@@ -64,12 +64,12 @@ export interface ValuePreviewProps {
    * A ceiling on how many rows a table view draws here, for a surface that knows its own box.
    *
    * The node's `pageSize` param is a setting for the card and the overlay, where there is room
-   * for it; the inspector is 320 × 300 and shows about a dozen rows, so honouring a page of 100
-   * — or of 500, which the param allows — is thousands of cells laid out where three columns
-   * fit. Measured on a 58,340 × 60 annotation table: 113 ms of render at 100 rows against 26 ms
-   * at 25, before the browser lays out a single cell.
+   * for it. The inspector is 320 × 300 and asks for **one row** — it owes a feel for the result,
+   * not a reading of it — so honouring a page of 100, or of 500 which the param allows, is
+   * thousands of cells laid out where three columns fit. Measured on a 58,340 × 60 annotation
+   * table: 113 ms of render at 100 rows against 26 ms at 25, before the browser lays out a cell.
    *
-   * A *cap* rather than a value, so a node whose param is already small keeps it.
+   * A *cap* rather than a value, so a node whose param is already smaller keeps it.
    */
   maxRows?: number
 }

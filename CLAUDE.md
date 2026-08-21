@@ -2216,7 +2216,27 @@ by playwright against the dev server: both themes at 1440px and a 420px phone st
 errors, no sideways body scroll, the preview card correct for a 33-setting node and for a text
 note, the help disclosure opening, and a search dimming 44 of 49 tiles without moving one.
 
-### The inspector draws the smallest box, and was drawing the most
+### The inspector shows one row
+
+`.inspector__viewer` is **320 × 300** — the smallest surface a viewer is drawn on, smaller than a
+card. It drew whatever the node's `pageSize` said, which on an annotation table is 100 rows across
+60 columns: six thousand cells laid out per change of selection, of which about forty are visible.
+
+It now draws **one row**, and that is a decision about what the panel is *for* rather than a
+tuning. There is a Table node and a full-size overlay for reading a table; what the inspector owes
+is a feel for what came out, which one row beside its column headers gives completely. It was 25
+first, sized to the box — still the wrong question, because the box is not the constraint, the
+panel's job is. The pager underneath reads `1–1 of 58,340` on its own, so nothing has to say
+separately that the view is a sample.
+
+`ValuePreview.maxRows` is a **cap** rather than a value, so a node whose page size is already
+smaller keeps it, and `compact` travels with it — which also withholds the rows-per-page selector,
+the one control that could put the cost straight back.
+
+Note what this does **not** bound: the header still spans every column, so a 60-column table draws
+60 cells whatever the row count is.
+
+### What was measured, and what is still unexplained
 
 `.inspector__viewer` is **320 × 300** — smaller than a card, and the smallest surface a viewer is
 drawn on. It was passing neither `compact` nor any ceiling, so a node's own `pageSize` decided
@@ -2229,7 +2249,28 @@ Measured in jsdom, which performs no layout and so isolates the *JavaScript* hal
 table renders in **113 ms** at 100 rows and **26 ms** at 25, and the cost is linear in
 `rows drawn × columns` — flat in table length, so the paging was working and the row count was
 never the problem. A selection switch went 101/48/73 ms to 47/24/36 ms. Twenty-four switches in a
-row settle at 15 ms with no growth, so there is no leak; the cost is per-switch and bounded.
+row settle at 15 ms with no growth.
+
+**The reported failure is memory, and it is not explained by any of that.** A real graph —
+FlyTable → Filter → Sort → Deduplicate, with a Table tapping the Sort — reaches about 0.5 GB after
+a run, which is four full copies and expected. With the inspector *closed*, switching selection
+costs nothing. With it *open*, each switch adds roughly **a gigabyte**, and the tab is unusable at
+5.4 GB.
+
+Ruled out, each by measurement rather than by reading: **JS-side retention** — the same chain over
+a 58,340 × 60 table, the real store and the real `Inspector`, ten switches with forced GC between,
+sits dead flat at 198 → 215 → 214 MB; **re-evaluation**, since `setSelection` is a bare `set` with
+no commit and no run; **eager export**, since the CSV builder is only ever referenced
+(`if (source.csv)`) and never called; and **drawn cells as the cause** — the strongest clue, since
+cutting them four-fold moved the memory not at all.
+
+So it is browser-side, proportional to something other than what is drawn, and invisible to Node.
+The remaining suspects are the 60 sticky `<th>` cells and `width: max-content` with
+`table-layout: auto`, which forces an intrinsic-width pass over every cell — but neither
+plausibly reaches a gigabyte, and `fixed` would change how every column in the app sizes. Left
+alone deliberately: it is a guess until somebody points a browser at it, and Chrome's own Task
+Manager splits it in one reading — if **JavaScript memory** tracks the footprint it is retention,
+and if it stays flat while the footprint climbs it is DOM, layout or compositing.
 
 `ValuePreview.maxRows` is a **cap** rather than a value, so a node whose page size is already
 small keeps it, and `compact` comes with it — which also withholds the rows-per-page selector,

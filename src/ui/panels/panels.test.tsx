@@ -142,16 +142,16 @@ describe('the inspector', () => {
     expect(inspector()).toBeNull()
   })
 
-  it('draws a bounded page of a large table, not the node’s own page size', async () => {
+  it('draws one row of a table, not the node’s own page size', async () => {
     /*
-     * `.inspector__viewer` is 320 × 300 — the smallest surface a viewer is drawn on, smaller
-     * than the card — so about a dozen rows and three columns are visible. It was drawing the
-     * node's full `pageSize` across every column: on a real annotation table, 100 × 60 is six
-     * thousand cells laid out per change of selection, of which forty are on screen. Measured at
-     * 113 ms of render before the browser lays out a single cell.
+     * The inspector gives a *feel* for the result; the Table node and the full-size overlay are
+     * where a table is read. It used to draw the node's whole `pageSize` across every column —
+     * on a real annotation table, 100 × 60 is six thousand cells laid out per change of
+     * selection, of which about forty are on screen.
      *
      * A generous page size is set here deliberately: the assertion is that the *panel's* ceiling
-     * wins over the node's setting, which is the half a smaller default would not prove.
+     * wins over the node's setting, which is the half a smaller default would not prove. And the
+     * table has to be longer than the ceiling, or this passes on a table that was short anyway.
      */
     render(<App />)
     fireEvent.click(inspectorToggle())
@@ -175,11 +175,12 @@ describe('the inspector', () => {
     })
 
     const rows = () => inspector()?.querySelectorAll('.data-table tbody tr').length ?? 0
-    // The table has to be big enough for the cap to be the thing being measured — otherwise
-    // this passes on a table that was short anyway, which is no assertion at all.
     const total = useGraphStore.getState().nodeOutput(view, 'out')
-    expect(total && 'length' in total ? total.length : 0).toBeGreaterThan(25)
-    expect(rows()).toBe(25)
+    expect(total && 'length' in total ? total.length : 0).toBeGreaterThan(1)
+    expect(rows()).toBe(1)
+    // Every column is still there — the reduction is rows, and a column picker's worth of
+    // headers is what makes one row tell you anything.
+    expect(inspector()?.querySelectorAll('.data-table thead th').length ?? 0).toBeGreaterThan(3)
   })
 })
 

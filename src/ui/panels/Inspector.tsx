@@ -20,14 +20,25 @@ import { familyColorVar, socketStyle } from '../socketStyle'
 import { ValuePreview } from '../viewers/ValuePreview'
 
 /**
- * How many rows the result view draws in the inspector.
+ * How many rows the result view draws in the inspector: **one**.
  *
- * `.inspector__viewer` is 300px tall and a row is about 19px at this font size, so a dozen are
- * on screen and this is a little over two screens of scroll before the pager. The number is
- * here rather than in the viewer because it is a fact about *this panel's box*, and the card
- * and the overlay have their own.
+ * Not a performance tuning so much as a decision about what this panel is for. It is 320 × 300,
+ * the smallest surface a viewer is drawn on, and there is a Table node and a full-size overlay
+ * for reading a table properly — so what the inspector owes is a *feel* for what came out, which
+ * one row beside its column headers gives completely. Everything past it was cost with no reader.
+ *
+ * It began as 25, sized to the box (300px tall, a row about 19px, so a dozen visible). That was
+ * still the wrong question: the box is not the constraint, the panel's job is.
+ *
+ * The pager underneath says `1–1 of 58,340` on its own, which is the admission that the view is
+ * a sample rather than the table — so nothing here has to say it twice.
+ *
+ * Note what this does *not* bound: the header still spans every column, so a 60-column table
+ * draws 60 cells whatever this is. Cells were measured at 113 ms per render for a 58,340 × 60
+ * table at 25 rows against 26 ms — real, and not the whole story, since capping rows four-fold
+ * did not move the memory this was reported for. See CLAUDE.md.
  */
-const INSPECTOR_MAX_ROWS = 25
+const INSPECTOR_ROWS = 1
 
 export function Inspector() {
   const open = useGraphStore((s) => s.panels.inspector)
@@ -213,21 +224,17 @@ export function Inspector() {
             </div>
             <div className="inspector__viewer">
               {/*
-                * `compact`, and a row cap, because this box is 320 × 300 — the smallest surface
-                * a viewer is drawn on, smaller than the card. It was neither, so an annotation
-                * table drew a full page of 100 rows across 60 columns into a space that shows
-                * about a dozen rows and three columns: some six thousand cells, of which around
-                * forty are visible, laid out on every change of selection.
-                *
-                * `compact` also withholds the rows-per-page selector, which is the one control
-                * that could put the cost straight back.
+                * `compact`, and one row. See `INSPECTOR_ROWS`: this panel gives a feel for the
+                * result, and the Table node and the overlay are where a table is read. `compact`
+                * also withholds the rows-per-page selector, which is the one control that could
+                * put the cost straight back.
                 */}
               <ValuePreview
                 node={node}
                 value={outputValue}
                 ctx={ctx}
                 compact
-                maxRows={INSPECTOR_MAX_ROWS}
+                maxRows={INSPECTOR_ROWS}
                 baseName={exportBaseName(graphName, node.title ?? def.label)}
                 onExpand={() => expandNode(node.id)}
                 onError={setNotice}
