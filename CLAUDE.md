@@ -3979,9 +3979,40 @@ with a fabricated join. And **a single-chunk neuron answers `undefined` before t
 asked**, which is `readGrapheneMesh`'s answer to the same shape of question and saves a round
 trip on a common case.
 
-`MAX_L2_SKELETON_NEURONS` is 100 — far above `MAX_MESH_NEURONS`' 20, because a skeleton is two
-requests where a graphene mesh is several hundred, and far below the 500 a source publishing
-ready-made skeletons allows.
+**The attributes call is batched across the whole request, and that is the shape of the fetch.**
+It is keyed by *table*, not by root id, so the union of every neuron's chunks goes in a handful
+of requests however many neurons were asked for — a hundred neurons is a hundred chunk-graph
+reads plus about three attribute reads, rather than two hundred round trips. Measured: 1,177
+chunks (twelve neurons' worth) answered in **one 1.64 s request**, against roughly that for each
+of the twelve separately. The cost is that progress reports in two phases rather than per neuron.
+
+**`L2_CONCURRENCY` is 16, and it is set by correctness rather than by the curve.** Measured
+against BANC, 40 neurons: 14.5 s at 8, 4.6–6.0 s at 16, 3.9–4.9 s at 32, 5.2 s at 48 — three
+times faster at 16 and flat after. But **past 16 the server starts dropping requests silently**:
+two of three runs at 32 returned 38 and 39 skeletons of 40, and one at 48 returned 39, where
+every run at 8 and 16 returned all 40. `mapWithConcurrency` turns a failed neuron into an
+`undefined` indistinguishable from a neuron that genuinely has no skeleton, so the missing ones
+do not announce themselves.
+
+`MAX_L2_SKELETON_NEURONS` is 100 — far above `MAX_MESH_NEURONS`' 20, because a skeleton is one
+chunk-graph read where a graphene mesh is several hundred requests, and far below the 500 a
+source publishing ready-made skeletons allows.
+
+**Points come out in visit order, so a parent always precedes its child.** That is the contract
+`SkeletonGeometry.parents` states and that `neuprint/decode.ts` does real work to honour;
+emitting in chunk-id order would satisfy the type and break every consumer that walks the array
+once, the SWC writer included. The test for it uses edges whose *encounter* order differs from
+their *visit* order, because on a chain listed front to back the two coincide and a test built on
+one passes whichever the code emits.
+
+**`capabilityOf(source, datasetId, key)` is how a capability is read**, never
+`source.capabilities[key]` directly. The per-dataset override is useless to a reader that skips
+it, and the two halves of a gate usually sit in different layers — `validate` refuses at edit
+time and `evaluate` at run time — so a bypassing reader makes them disagree with nothing
+type-checking the pair. Six readers did exactly that when the override was introduced; they all
+go through the resolver now. `starters.ts` passes no dataset id and gets the source-level answer,
+which is honest there: a starter is a node type and some params, and which dataset it resolves to
+is not known until the node runs.
 
 **The skeleton is coarse and the docstring says so.** One node per level-2 chunk is tens to a few
 hundred for a whole neuron, where a traced skeleton is thousands. It is the right shape for

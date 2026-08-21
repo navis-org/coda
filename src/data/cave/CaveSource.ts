@@ -33,7 +33,6 @@ import type {
   MeshGeometry,
   MeshesValue,
   PointsValue,
-  SkeletonGeometry,
   SkeletonsValue,
   TableValue,
 } from '../../core/values'
@@ -81,11 +80,10 @@ import {
   versionsMetadata,
 } from './api'
 import { getServer } from './credentials'
-import { caveServerFor, datastackRecord, l2CacheFor, peekL2Cache, usableVersions } from './datastack'
+import { caveServerFor, datastackRecord, l2SourceFor, peekL2Cache, usableVersions } from './datastack'
 import { codaColumn, defaultSchemas, neuronSchemaFor, schemasFor } from './schema'
 import { withAnnotations } from '../annotations/schema'
-import { parseGrapheneSource } from './graphene'
-import { L2_CONCURRENCY, MAX_L2_SKELETON_NEURONS, readL2Skeleton } from './l2'
+import { MAX_L2_SKELETON_NEURONS, readL2Skeletons } from './l2'
 import { chainKey } from '../annotations/types'
 import { caveScene } from './scene'
 import type { NgScene } from '../neuroglancer/scene'
@@ -937,15 +935,15 @@ export class CaveSource implements DataSource {
     if (req.neuronIds.length > MAX_L2_SKELETON_NEURONS) {
       throw new CaveError(
         `${req.neuronIds.length} neurons is too many skeletons to build from ${spec.label}. ` +
-          `Each one is two requests against the chunkedgraph — the ceiling here is ` +
+          `Each one is a chunk-graph read against the chunkedgraph — the ceiling here is ` +
           `${MAX_L2_SKELETON_NEURONS}, against 500 on a source that publishes them ready-made.`,
       )
     }
 
-    const graphene = parseGrapheneSource(
-      (await datastackRecord(spec.datastack, options)).segmentation_source,
-    )
-    if (!graphene || !(await l2CacheFor(spec.datastack, options))) {
+    // The gate hands back what it resolved, so the segmentation URL is parsed once rather than
+    // here and again inside the check.
+    const source = await l2SourceFor(spec.datastack, options)
+    if (!source) {
       throw new CaveError(
         `${spec.label} has no level-2 cache, so Coda cannot build skeletons for it. That is a ` +
           `fact about the datastack rather than about this graph — meshes and synapses are ` +
@@ -953,14 +951,17 @@ export class CaveSource implements DataSource {
       )
     }
 
-    let done = 0
-    const raw = await mapWithConcurrency(req.neuronIds, L2_CONCURRENCY, async (neuronId) => {
-      const skeleton = await readL2Skeleton(graphene.server, graphene.table, neuronId, options)
-      req.onProgress?.(++done / req.neuronIds.length, `${done}/${req.neuronIds.length} skeletons`)
-      return skeleton
-    })
+    /*
+     * Warmed before the skeletons rather than awaited after them. The attribute table's
+     * expensive half is `typeLookup`, which depends only on the request and can be the full
+     * 139,255-row index download on a Skeletons node fed by an id list that never went through
+     * Find Neurons. `loadCachedTable` shares an in-flight promise, so starting it here cannot
+     * double-fetch — it just overlaps the whole skeleton fetch instead of following it. Skipped
+     * where a chain is wired, because `morphologyAttributes` does not consult the index then.
+     */
+    if (!req.annotations) void this.typeLookup(req).catch(() => undefined)
 
-    const items = raw.filter((s): s is SkeletonGeometry => s !== undefined)
+    const items = await readL2Skeletons(source, req.neuronIds, options, req.onProgress)
     return {
       kind: 'skeletons',
       items,
@@ -969,6 +970,7 @@ export class CaveSource implements DataSource {
       // The cache publishes `rep_coord_nm`, so no conversion happens anywhere.
       units: 'nm',
     }
+
   }
 
   /**

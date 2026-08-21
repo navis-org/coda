@@ -32,7 +32,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { CaveSource } from './CaveSource'
 import { resetCredentials, setToken } from './credentials'
-import { datastackRecord, l2CacheFor, materializationsFor } from './datastack'
+import { datastackRecord, l2SourceFor, materializationsFor } from './datastack'
 import { caveScene } from './scene'
 import { segmentationLayerIndex } from '../neuroglancer/scene'
 import { registerDatastackSpec } from './spec'
@@ -312,12 +312,12 @@ describe.skipIf(!TOKEN)('CAVE, live — a built neuroglancer scene', () => {
 describe.skipIf(!TOKEN)('CAVE, live — L2 skeletons', () => {
   it('knows which datastacks can answer, and builds a real tree for one that can', async () => {
     setToken(TOKEN!)
-    expect(await l2CacheFor('brain_and_nerve_cord_public')).toBe(true)
+    expect(await l2SourceFor('brain_and_nerve_cord_public')).toBeTruthy()
     // A populated cache and no skeleton service at all — the datastack the service route misses.
-    expect(await l2CacheFor('wclee_aedes_brain')).toBe(true)
+    expect(await l2SourceFor('wclee_aedes_brain')).toBeTruthy()
     // Declares a skeleton service and has no cache, which is why that service is empty: it
     // generates from this. The one Coda ships a node for, and it genuinely cannot answer.
-    expect(await l2CacheFor('flywire_fafb_public')).toBe(false)
+    expect(await l2SourceFor('flywire_fafb_public')).toBeUndefined()
 
     registerDatastackSpec({
       datastack: 'brain_and_nerve_cord_public',

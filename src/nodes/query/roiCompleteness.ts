@@ -2,7 +2,7 @@ import { registerNode } from '../../core/registry'
 import { T } from '../../core/types'
 import type { TableValue } from '../../core/values'
 import { getColumn, selectRows } from '../../core/values'
-import { ROI_COMPLETENESS_SCHEMA } from '../../data/source'
+import { ROI_COMPLETENESS_SCHEMA, capabilityOf } from '../../data/source'
 import { requireDataset, sourceLabel, sourceSupports } from '../lib/datasetParam'
 
 /**
@@ -69,7 +69,7 @@ export const roiCompletenessNode = registerNode({
     const dataset = requireDataset(ctx.input('dataset'))
     const source = ctx.resolveSource(dataset.sourceId)
     const fetch = source.fetchRoiCompleteness?.bind(source)
-    if (!fetch || !source.capabilities.roiSummary) {
+    if (!fetch || !capabilityOf(source, dataset.datasetId, 'roiSummary')) {
       throw new Error(`${source.label} does not publish a per-region completeness summary`)
     }
 

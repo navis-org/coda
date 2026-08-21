@@ -18,7 +18,7 @@ import { useEffect, useState } from 'react'
 
 import { errorMessage } from '../../core/errors'
 import type { TableValue } from '../../core/values'
-import { getSource } from '../../data/source'
+import { capabilityOf, getSource } from '../../data/source'
 
 export type RoiCompletenessState =
   /** No dataset, or a source that does not publish this. */
@@ -45,7 +45,7 @@ export function useRoiCompleteness(
     const fetch = source?.fetchRoiCompleteness?.bind(source)
     // Not an error: a source that cannot answer this is one whose tile is simply absent, the
     // same way a dataset without `superclass` draws one chart fewer.
-    if (!source || !fetch || !source.capabilities.roiSummary) {
+    if (!source || !fetch || !capabilityOf(source, datasetId, 'roiSummary')) {
       setState(NONE)
       return
     }

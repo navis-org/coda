@@ -18,7 +18,7 @@ import type {
   SourceSchemas,
 } from '../../data/source'
 import { withAnnotations } from '../../data/annotations/schema'
-import { CANONICAL_SCHEMAS, allSources, getSource } from '../../data/source'
+import { CANONICAL_SCHEMAS, allSources, capabilityOf, getSource } from '../../data/source'
 
 /** Source referenced by a dataset-typed socket, if it is registered. */
 export function sourceFromType(type: CodaType | undefined): DataSource | undefined {
@@ -39,17 +39,8 @@ export function sourceSupports(
   ctx: { inputs: Record<string, CodaType | undefined> },
   capability: keyof SourceCapabilities,
 ): boolean {
-  const ref = datasetRef(ctx.inputs['dataset'])
-  const source = ref?.sourceId ? getSource(ref.sourceId) : undefined
-  if (!source) return true
-  /*
-   * The dataset's answer wins where it has one. `capabilities` is per source, and one source can
-   * serve datasets that genuinely differ — a CAVE datastack's skeletons depend on whether its
-   * chunkedgraph has an L2 cache. `undefined` means "same as the source", which is every dataset
-   * of every other backend.
-   */
-  const forDataset = ref?.datasetId ? source.capabilitiesFor?.(ref.datasetId) : undefined
-  return forDataset?.[capability] ?? source.capabilities[capability]
+  const type = ctx.inputs['dataset']
+  return capabilityOf(sourceFromType(type), datasetRef(type)?.datasetId, capability)
 }
 
 /** The source behind a Dataset socket, for a message that names it. */

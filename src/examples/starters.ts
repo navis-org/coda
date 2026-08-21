@@ -36,7 +36,7 @@ import { addEdge, emptyGraph } from '../core/graph'
 import type { ParamValues } from '../core/node'
 import { defaultParams } from '../core/node'
 import { requireNodeDef } from '../core/registry'
-import { getSource } from '../data/source'
+import { capabilityOf, getSource } from '../data/source'
 
 export interface StarterSpec {
   /** Dataset node type to open with, e.g. `dataset.malecns`. */
@@ -79,7 +79,15 @@ export function buildStarter(spec: StarterSpec): CodaGraph {
     },
   }
 
-  const withScene = spec.sourceId ? getSource(spec.sourceId)?.capabilities.viewerScene : false
+  /*
+   * No dataset id: a starter is a node type and some params, and which dataset that resolves to
+   * is not known until the node runs. So this gets the source-level answer, which is the honest
+   * one here — through `capabilityOf` rather than `capabilities.viewerScene` so it picks up a
+   * per-dataset override the day a starter can name its dataset.
+   */
+  const withScene = spec.sourceId
+    ? capabilityOf(getSource(spec.sourceId), undefined, 'viewerScene')
+    : false
 
   for (const node of [
     place('dataset', spec.nodeType, 0, { ...(spec.params ? { params: spec.params } : {}) }),

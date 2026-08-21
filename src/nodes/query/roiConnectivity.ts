@@ -2,7 +2,7 @@ import { registerNode } from '../../core/registry'
 import { T } from '../../core/types'
 import type { MatrixValue, TableValue } from '../../core/values'
 import { getColumn, makeMatrix } from '../../core/values'
-import { ROI_CONNECTIVITY_SCHEMA } from '../../data/source'
+import { ROI_CONNECTIVITY_SCHEMA, capabilityOf } from '../../data/source'
 import { requireDataset, sourceLabel, sourceSupports } from '../lib/datasetParam'
 
 /**
@@ -79,7 +79,7 @@ export const roiConnectivityNode = registerNode({
     const dataset = requireDataset(ctx.input('dataset'))
     const source = ctx.resolveSource(dataset.sourceId)
     const fetch = source.fetchRoiConnectivity?.bind(source)
-    if (!fetch || !source.capabilities.roiSummary) {
+    if (!fetch || !capabilityOf(source, dataset.datasetId, 'roiSummary')) {
       throw new Error(`${source.label} does not publish a region connectivity summary`)
     }
 

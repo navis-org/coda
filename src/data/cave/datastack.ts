@@ -20,6 +20,7 @@ import { datastackInfo, versionsMetadata } from './api'
 import type { CaveRequestOptions } from './client'
 import { getServer } from './credentials'
 import { reportSourceLearned } from '../source'
+import type { GrapheneSource } from './graphene'
 import { parseGrapheneSource } from './graphene'
 import { l2TableMapping, resetL2Cache } from './l2'
 
@@ -42,12 +43,7 @@ function currentServer(): string {
   const server = getServer()
   if (filledFrom !== server) {
     records.clear()
-    materializations.clear()
-    loading.clear()
-    asked.clear()
-    l2Support.clear()
-    l2Asked.clear()
-    resetL2Cache()
+    clearLearned()
     filledFrom = server
   }
   return server
@@ -168,15 +164,27 @@ const materializations = new Map<string, number[]>()
 const loading = new Map<string, Promise<number[]>>()
 const asked = new Set<string>()
 
-/** Test seam: drop what is remembered between suites. */
-export function resetDatastackRecords(): void {
+/**
+ * Everything learned from one global server, dropped together.
+ *
+ * One list rather than two hand-kept ones: `currentServer` and the test seam both cleared these
+ * and the diff that added the third fact had to edit both in lockstep, with nothing catching a
+ * half-edit. That is the failure this module's header already records — "two generations could
+ * clear one and keep the other, and did".
+ */
+function clearLearned(): void {
   records.clear()
   materializations.clear()
   loading.clear()
   asked.clear()
-  l2Support.clear()
-  l2Asked.clear()
+  l2Sources.clear()
+  l2Loading.clear()
   resetL2Cache()
+}
+
+/** Test seam: drop what is remembered between suites. */
+export function resetDatastackRecords(): void {
+  clearLearned()
   filledFrom = undefined
 }
 
@@ -184,45 +192,77 @@ export function resetDatastackRecords(): void {
 // Whether a datastack's chunkedgraph has an L2 cache
 // ---------------------------------------------------------------------------
 
-const l2Support = new Map<string, boolean>()
-const l2Asked = new Set<string>()
+/**
+ * Whether a datastack's chunkedgraph has an L2 cache, and the source it was resolved from.
+ *
+ * `null` for "checked, and it has none" — so the map's own membership answers "has this been
+ * asked?" and no second `asked` set is needed. Holding the resolved `GrapheneSource` rather than
+ * a boolean is what stops `fetchSkeletons` deriving it a second time: the gate has already read
+ * the datastack record and parsed the segmentation URL, and throwing that away only to re-derive
+ * it one line later is the duplication `graphene.ts` was extracted to prevent.
+ */
+const l2Sources = new Map<string, GrapheneSource | null>()
+const l2Loading = new Map<string, Promise<GrapheneSource | undefined>>()
 
 /**
  * Whether skeletons can be built for this datastack — synchronously, if it is known.
  *
- * `peekMaterializations`' contract again, and for the same reason: `validate` asks on every
- * graph mutation and may not await, so the first look answers `undefined` and
- * `reportSourceLearned` re-infers when the answer lands. Asked once per datastack.
- *
- * Six of the thirteen datastacks the info service lists have a cache. It is the honest gate for
- * skeletons — a flat `false` told every FlyWire-production user a falsehood, and the skeleton
- * *service* is no better a gate, since it generates from this same cache.
+ * `peekMaterializations`' contract again: `validate` asks on every graph mutation and may not
+ * await, so the first look answers `undefined` and `reportSourceLearned` re-infers when the
+ * answer lands. Six of the thirteen datastacks the info service lists have a cache, which is why
+ * a per-source answer was wrong for somebody whichever way it was set.
  */
 export function peekL2Cache(datastack: string): boolean | undefined {
   currentServer()
-  const known = l2Support.get(datastack)
-  if (known !== undefined || !datastack || l2Asked.has(datastack)) return known
-  l2Asked.add(datastack)
+  if (l2Sources.has(datastack)) return l2Sources.get(datastack) !== null
+  if (!datastack || l2Loading.has(datastack)) return undefined
   // Swallowed: a peek has no caller to report to, and a 401 travels on its own channel.
-  void l2CacheFor(datastack).catch(() => undefined)
+  void l2SourceFor(datastack).catch(() => undefined)
   return undefined
 }
 
-/** The same, awaited — what `fetchSkeletons` uses before it starts. */
-export async function l2CacheFor(
+/**
+ * The graphene source to build skeletons from, or undefined where there is no cache.
+ *
+ * The promise is memoised, not the value — the rule this module's header states — so two nodes
+ * asking a tick apart issue one table-mapping read rather than two.
+ */
+export function l2SourceFor(
   datastack: string,
   options: CaveRequestOptions = {},
-): Promise<boolean> {
+): Promise<GrapheneSource | undefined> {
   const server = currentServer()
+  const known = l2Sources.get(datastack)
+  if (known !== undefined) return Promise.resolve(known ?? undefined)
+
+  let pending = l2Loading.get(datastack)
+  if (!pending) {
+    pending = resolveL2(datastack, options)
+      .then((source) => {
+        if (server !== filledFrom) return source
+        const before = l2Sources.get(datastack)
+        l2Sources.set(datastack, source ?? null)
+        // Only when the answer *changed*, which for a memoised fact means only the first time.
+        // Fired unconditionally it costs a whole-graph re-inference per Run of a Skeletons node.
+        if (before === undefined) reportSourceLearned('cave')
+        return source
+      })
+      .finally(() => {
+        l2Loading.delete(datastack)
+      })
+    l2Loading.set(datastack, pending)
+  }
+  return pending
+}
+
+async function resolveL2(
+  datastack: string,
+  options: CaveRequestOptions,
+): Promise<GrapheneSource | undefined> {
   const info = await datastackRecord(datastack, options)
   const graphene = parseGrapheneSource(info.segmentation_source)
   // Not a chunkedgraph at all — `caveclient.has_cache` refuses on the same test, first.
-  const has = graphene
-    ? graphene.table in (await l2TableMapping(graphene.server, options))
-    : false
-  if (server === filledFrom) {
-    l2Support.set(datastack, has)
-    reportSourceLearned('cave')
-  }
-  return has
+  if (!graphene) return undefined
+  const mapping = await l2TableMapping(graphene.server, options)
+  return graphene.table in mapping ? graphene : undefined
 }

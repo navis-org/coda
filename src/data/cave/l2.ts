@@ -20,17 +20,26 @@
 
 import type { NeuronId } from '../../core/ids'
 import type { SkeletonGeometry } from '../../core/values'
+import { mapWithConcurrency } from '../concurrency'
 import { caveGet, cavePost } from './client'
+import type { GrapheneSource } from './graphene'
 import type { CaveRequestOptions } from './client'
 
 /**
  * How many neurons are built at once.
  *
- * The work is two small requests per neuron against a shared production chunkedgraph, so this is
- * a latency budget rather than a bandwidth one — the same shape as `FRAGMENT_CONCURRENCY`, at a
- * quieter number because these hit the graph service rather than an object store.
+ * Pure latency — two small requests per neuron — so this is the number that decides the wait.
+ * Measured against BANC, 40 neurons: **14.5 s at 8, 4.6–6.0 s at 16, 3.9–4.9 s at 32, 5.2 s at
+ * 48**. Three times faster at 16 and flat after it.
+ *
+ * **Past 16 the server starts dropping requests, and the loss is silent.** Two of three runs at
+ * 32 returned 38 and 39 skeletons of 40 asked for, and one at 48 returned 39, where every run at
+ * 8 and 16 returned all 40. `mapWithConcurrency` turns a failed neuron into an `undefined` that
+ * is indistinguishable from a neuron that genuinely has no skeleton, so the missing ones do not
+ * announce themselves — which is why the ceiling here is set by *correctness* rather than by the
+ * point where the curve flattens.
  */
-export const L2_CONCURRENCY = 8
+export const L2_CONCURRENCY = 16
 
 /**
  * The ceiling, enforced in the source because it is a fact about this route.
@@ -85,75 +94,129 @@ export function resetL2Cache(): void {
 }
 
 /**
- * One neuron's skeleton, or undefined where it cannot be built.
+ * How many chunk ids go in one attributes request.
  *
- * Undefined rather than an error for `readGrapheneMesh`'s reason: a segment made of a single
- * level-2 chunk has no edges and so no tree, which is an ordinary state for a small or
- * newly-edited body and must not fail the other neurons in the request.
+ * The call is keyed by **table**, not by root id, so every neuron in a request can share it —
+ * which is the difference between two round trips per neuron and one per neuron plus a handful.
+ * Measured: 1,177 chunks (twelve neurons' worth) answered in one 1.64 s request against roughly
+ * 1.6 s for *each* of twelve, and 2,000 ids in 1.98 s. `caveclient.l2cache.get_l2data` chunks for
+ * the same reason; 5,000 is comfortably inside what was measured to answer quickly.
  */
-export async function readL2Skeleton(
-  server: string,
-  table: string,
-  rootId: NeuronId,
+const ATTRIBUTE_BATCH = 5_000
+
+/**
+ * Skeletons for a set of neurons.
+ *
+ * **Two phases rather than two requests per neuron**, and that is the whole shape of this
+ * function. The chunk graph is per neuron and has to be asked for one at a time; the attributes
+ * are per *table*, so the union of every neuron's chunks goes in a handful of requests however
+ * many neurons were asked for. A hundred neurons is a hundred graph reads plus about three
+ * attribute reads, rather than two hundred round trips against a shared production chunkedgraph.
+ *
+ * The cost is that progress is reported in two phases rather than smoothly per neuron, which is
+ * what the note argument is for.
+ */
+export async function readL2Skeletons(
+  source: GrapheneSource,
+  neuronIds: readonly NeuronId[],
   options: CaveRequestOptions = {},
-): Promise<SkeletonGeometry | undefined> {
-  const graph = await caveGet<{ edge_graph?: unknown } | unknown[]>(
-    `${server}/segmentation/api/v1/table/${table}/node/${rootId}/lvl2_graph`,
+  onProgress?: (fraction: number, note?: string) => void,
+): Promise<SkeletonGeometry[]> {
+  let read = 0
+  const graphs = await mapWithConcurrency(neuronIds, L2_CONCURRENCY, async (neuronId) => {
+    const edges = await readChunkGraph(source, neuronId, options)
+    onProgress?.((++read / neuronIds.length) * 0.8, `${read}/${neuronIds.length} chunk graphs`)
+    return { neuronId, edges }
+  })
+
+  const wanted = [...new Set(graphs.flatMap((g) => g?.edges.flat() ?? []))]
+  onProgress?.(0.85, `${wanted.length} chunks`)
+  const attributes = await readAttributes(source, wanted, options)
+
+  onProgress?.(1)
+  return graphs
+    .map((g) => (g && g.edges.length > 0 ? skeletonFrom(g.neuronId, g.edges, attributes) : undefined))
+    .filter((s): s is SkeletonGeometry => s !== undefined)
+}
+
+/** One neuron's level-2 chunk graph, as deduplicated undirected edges. */
+async function readChunkGraph(
+  source: GrapheneSource,
+  neuronId: NeuronId,
+  options: CaveRequestOptions,
+): Promise<Array<[string, string]>> {
+  const graph = await caveGet<{ edge_graph?: unknown[] }>(
+    `${source.server}/segmentation/api/v1/table/${source.table}/node/${neuronId}/lvl2_graph`,
     options,
   )
-  const raw = Array.isArray(graph) ? graph : ((graph.edge_graph ?? []) as unknown[])
-  const edges = raw
-    .map((edge) => (Array.isArray(edge) ? [String(edge[0]), String(edge[1])] : undefined))
-    .filter((edge): edge is [string, string] => edge !== undefined && edge[0] !== edge[1])
-  if (edges.length === 0) return undefined
+  return (graph.edge_graph ?? [])
+    .map((edge) => (Array.isArray(edge) ? ([String(edge[0]), String(edge[1])] as const) : undefined))
+    .filter((edge): edge is readonly [string, string] => edge !== undefined && edge[0] !== edge[1])
+    .map((edge) => [edge[0], edge[1]])
+}
 
-  const ids = [...new Set(edges.flat())].sort()
-  const attributes = await cavePost<Record<string, L2Entry>>(
-    `${server}/l2cache/api/v1/table/${table}/attributes`,
-    { l2_ids: ids, attribute_names: ATTRIBUTES },
-    options,
+/** Every chunk's representative coordinate and radius, in as few requests as it takes. */
+async function readAttributes(
+  source: GrapheneSource,
+  ids: readonly string[],
+  options: CaveRequestOptions,
+): Promise<Record<string, L2Entry>> {
+  const batches: string[][] = []
+  for (let at = 0; at < ids.length; at += ATTRIBUTE_BATCH) {
+    batches.push(ids.slice(at, at + ATTRIBUTE_BATCH))
+  }
+  const answered = await mapWithConcurrency(batches, 4, (batch) =>
+    cavePost<Record<string, L2Entry>>(
+      `${source.server}/l2cache/api/v1/table/${source.table}/attributes`,
+      { l2_ids: batch, attribute_names: ATTRIBUTES },
+      options,
+    ),
   )
-
-  return skeletonFrom(rootId, ids, edges, attributes)
+  return Object.assign({}, ...answered.filter(Boolean)) as Record<string, L2Entry>
 }
 
 /**
  * The graph, as a tree.
  *
- * Three steps, and the middle one is the whole of it:
+ * Four rules, each a wrong picture if lost:
  *
- *  1. **Chunks with no cache entry are dropped.** `get_l2_skeleton`'s `drop_missing`, and its
- *     reasoning: a chunk absent from the cache has only its *chunk-grid* position, which is the
- *     corner of a box tens of microns across, so keeping it puts a node somewhere the neuron is
- *     not. Both datastacks sampled had every chunk populated, so this is the rare path.
- *  2. **A spanning forest, breadth-first.** The L2 graph is undirected and can hold cycles;
- *     a skeleton is a tree. BFS from an arbitrary node yields parents pointing back at a root,
- *     and every component gets its own root — a neuron split by an edit is two trees, not one
- *     tree with a fabricated join.
- *  3. Positions and radii come straight from the cache.
- *
- * Dropping happens *before* the walk rather than after, which is what keeps the tree connected:
- * removing a node from a finished tree orphans its children, where excluding it from the graph
- * lets the walk route around it through whatever else it touched. `navis.remove_nodes` reparents
- * for the same reason; doing it up front needs no reparenting at all.
+ *  1. **Chunks with no cache entry are dropped, before the walk rather than after.** That is
+ *     `get_l2_skeleton`'s `drop_missing`, and its reasoning: a chunk absent from the cache has
+ *     only its *chunk-grid* position, the corner of a box tens of microns across, so keeping it
+ *     puts a node where the neuron is not. Dropping before the walk is what keeps the tree
+ *     connected — removing a node from a finished tree orphans its children, where excluding it
+ *     from the graph lets the walk route around through whatever else it touched.
+ *     (`navis.remove_nodes` reparents for the same reason; doing it up front needs no
+ *     reparenting at all.)
+ *  2. **A spanning forest, breadth-first**, because the L2 graph is undirected and can hold
+ *     cycles while a skeleton is a tree. A cycle surviving into `parents` makes every consumer
+ *     that walks to a root loop forever.
+ *  3. **Each component gets its own root**, so a neuron split by an edit is two trees rather
+ *     than one with a fabricated join.
+ *  4. **Points come out in visit order, so a parent always precedes its child.** That is the
+ *     contract `SkeletonGeometry.parents` states and that `neuprint/decode.ts` does real work to
+ *     honour; emitting in chunk-id order instead would satisfy the type and break every consumer
+ *     written to walk the array once, the SWC writer included.
  */
 function skeletonFrom(
-  rootId: NeuronId,
-  ids: readonly string[],
+  neuronId: NeuronId,
   edges: ReadonlyArray<readonly [string, string]>,
   attributes: Readonly<Record<string, L2Entry>>,
 ): SkeletonGeometry | undefined {
-  const kept: string[] = []
   const index = new Map<string, number>()
-  for (const id of ids) {
-    const at = attributes[id]?.rep_coord_nm
+  const points: Array<{ at: readonly number[]; radius: number }> = []
+  for (const id of new Set(edges.flat())) {
+    const entry = attributes[id]
+    const at = entry?.rep_coord_nm
     if (!at || at.length < 3) continue
-    index.set(id, kept.length)
-    kept.push(id)
+    index.set(id, points.length)
+    // `max_dt_nm` is the largest distance-transform value in the chunk, which is what
+    // `get_l2_skeleton` uses as the radius. Absent on a very small chunk; 0 rather than a guess.
+    points.push({ at, radius: entry.max_dt_nm ?? 0 })
   }
-  if (kept.length === 0) return undefined
+  if (points.length === 0) return undefined
 
-  const neighbours: number[][] = kept.map(() => [])
+  const neighbours: number[][] = points.map(() => [])
   for (const [a, b] of edges) {
     const from = index.get(a)
     const to = index.get(b)
@@ -162,37 +225,35 @@ function skeletonFrom(
     neighbours[to]!.push(from)
   }
 
-  const parents = new Int32Array(kept.length).fill(-1)
-  const seen = new Uint8Array(kept.length)
-  for (let start = 0; start < kept.length; start++) {
-    if (seen[start]) continue
-    seen[start] = 1
-    const queue = [start]
-    for (let head = 0; head < queue.length; head++) {
-      const node = queue[head]!
+  // Visit order, and the slot each node takes in the emitted arrays. BFS reaches a parent before
+  // its children, so slots increase down every branch — rule 4.
+  const visited: number[] = []
+  const slot = new Int32Array(points.length).fill(-1)
+  const parents = new Int32Array(points.length).fill(-1)
+  for (let start = 0; start < points.length; start++) {
+    if (slot[start] !== -1) continue
+    slot[start] = visited.length
+    visited.push(start)
+    for (let head = visited.length - 1; head < visited.length; head++) {
+      const node = visited[head]!
       for (const next of neighbours[node]!) {
-        if (seen[next]) continue
-        seen[next] = 1
-        parents[next] = node
-        queue.push(next)
+        if (slot[next] !== -1) continue
+        slot[next] = visited.length
+        visited.push(next)
+        parents[slot[next]!] = slot[node]!
       }
     }
   }
 
-  const positions = new Float32Array(kept.length * 3)
-  const radii = new Float32Array(kept.length)
-  for (let i = 0; i < kept.length; i++) {
-    const entry = attributes[kept[i]!]!
-    const at = entry.rep_coord_nm!
-    positions[i * 3] = at[0]
-    positions[i * 3 + 1] = at[1]
-    positions[i * 3 + 2] = at[2]
-    // `max_dt_nm` is the largest distance-transform value in the chunk, which is what
-    // `get_l2_skeleton` uses as the radius. Absent on a very small chunk; 0 rather than a guess.
-    radii[i] = entry.max_dt_nm ?? 0
+  const positions = new Float32Array(points.length * 3)
+  const radii = new Float32Array(points.length)
+  for (let i = 0; i < visited.length; i++) {
+    const point = points[visited[i]!]!
+    positions[i * 3] = point.at[0]!
+    positions[i * 3 + 1] = point.at[1]!
+    positions[i * 3 + 2] = point.at[2]!
+    radii[i] = point.radius
   }
 
-  return { id: String(rootId), positions, radii, parents }
+  return { id: neuronId, positions, radii, parents }
 }
-
-

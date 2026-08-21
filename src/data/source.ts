@@ -689,6 +689,25 @@ const learnedListeners = new Set<(sourceId: string) => void>()
  * Fire it only for things inference reads. It is not a data-changed event — nothing here
  * invalidates a cached result.
  */
+/**
+ * What a source can do **for one dataset**, which is the only way capabilities should be read.
+ *
+ * `capabilities` is per source and `capabilitiesFor` is the per-dataset override; reading the
+ * first directly skips the second. That matters because the two halves of a gate are usually in
+ * different layers — `validate` refuses at edit time and `evaluate` at run time — so a reader
+ * that bypasses the override makes them disagree, with nothing type-checking the pair. Six
+ * readers did exactly that when the override was introduced.
+ */
+export function capabilityOf(
+  source: DataSource | undefined,
+  datasetId: string | undefined,
+  capability: keyof SourceCapabilities,
+): boolean {
+  if (!source) return true
+  const forDataset = datasetId ? source.capabilitiesFor?.(datasetId) : undefined
+  return forDataset?.[capability] ?? source.capabilities[capability]
+}
+
 export function reportSourceLearned(sourceId: string): void {
   for (const listener of learnedListeners) listener(sourceId)
 }

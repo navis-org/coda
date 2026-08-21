@@ -22,6 +22,7 @@
  * picture is what the Network node's presentational params are for.
  */
 
+import { capabilityOf } from '../../data/source'
 import { registerNode } from '../../core/registry'
 import { T } from '../../core/types'
 import type { TableValue } from '../../core/values'
@@ -168,7 +169,7 @@ export const pathsNode = registerNode({
     const dataset = requireDataset(ctx.input('dataset'))
     const source = ctx.resolveSource(dataset.sourceId)
     const fetchStep = source.fetchPathStep?.bind(source)
-    if (!fetchStep || !source.capabilities.paths) {
+    if (!fetchStep || !capabilityOf(source, dataset.datasetId, 'paths')) {
       throw new Error(`${source.label} cannot trace paths`)
     }
 
