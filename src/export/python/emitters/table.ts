@@ -181,6 +181,27 @@ registerEmitter('core.select', (ctx) => {
 })
 
 // ---------------------------------------------------------------------------
+// Deduplicate
+// ---------------------------------------------------------------------------
+
+/** Coda's `keep` and pandas' are the same three answers; only `none` is spelled differently. */
+const KEEP_ARG: Record<string, string> = { first: "'first'", last: "'last'", none: 'False' }
+
+registerEmitter('core.dedupe', (ctx) => {
+  const src = ctx.wired('in')
+  ctx.require('pandas')
+
+  const out = ctx.output('out')
+  const names = ctx.columns('columns')
+  const keep = KEEP_ARG[String(ctx.params.keep ?? 'first')] ?? "'first'"
+  // Omitted rather than passed as an empty list: `subset=[]` compares on *no* columns, which
+  // makes every row a duplicate of the first. Absent is pandas' own "compare whole rows", which
+  // is what an empty picker means here.
+  const subset = names.length > 0 ? `subset=${pyList(names)}, ` : ''
+  return [`${out} = ${src}.drop_duplicates(${subset}keep=${keep})`]
+})
+
+// ---------------------------------------------------------------------------
 // Group By
 // ---------------------------------------------------------------------------
 

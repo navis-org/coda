@@ -496,6 +496,7 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `nodes/lib/tableFilter.test.ts`          | a header cell's grammar: a bare value following the column's dtype, the null rule, and every clause it drops rather than applies |
 | `nodes/output/table.test.ts`             | the two ports: the tap kept whole, filtering staling the node while paging does not, and a bad clause refusing nothing           |
 | `nodes/table/sample.test.ts`             | the four sampling modes, a draw reproduced from its seed, and the seed costing nothing in the other three                        |
+| `nodes/table/dedupe.test.ts`             | the three `keep` modes, an empty picker comparing whole rows, row order kept, and a null told apart from the text "null"       |
 | `data/csv.test.ts`                       | reading somebody else's file: quoting, delimiter-by-consistency, header bias, and every value the parse refuses to widen         |
 | `data/uploads.test.ts`                   | the store against real IndexedDB: content addressing incl. a separator collision, a write that rejects, and the peek's one read  |
 | `nodes/table/upload.test.ts`             | the node: the schema arriving by peek, the neuronId rename, what a graph opened elsewhere says, and the filename costing nothing   |
@@ -4714,6 +4715,51 @@ Two small things fall out of a matrix axis being labels rather than data. The la
 came from because `joinTables` keys on `String(cell)`. And a column label colliding with the
 row field's name is suffixed (`type`, `type_2`) rather than dropped, the same call
 `joinedColumns` makes.
+
+## Deduplicate
+
+`core.dedupe`, `Add ▸ Transform ▸ Deduplicate`. `pandas.drop_duplicates`: name the columns to
+compare on, and `Keep` decides which row of a repeated set survives — `first`, `last`, or `none`.
+
+**It exists because the providers stopped deciding.** Measured against FlyTable's `main.info`:
+58,340 rows, 56,309 distinct root ids, 1,089 neurons with more than one row, and one segment
+appearing 104 times with its `side` reading left, center and center among them. That used to be
+collapsed silently inside `shapeRows`; now it reaches the canvas, and this is the node that
+decides what to do about it in a place somebody can see.
+
+**`none` is a different question, not a third flavour.** `first`/`last` answer "one row per
+neuron" and differ only in which row a Sort upstream put where; `none` answers "only the rows
+nobody disagrees about", which is the conservative read when a repeat is a *conflict* rather than
+a copy. That is `keep=False`, and it is the mode worth knowing about.
+
+**Empty compares whole rows**, which is `drop_duplicates()`'s own default and `Select`'s reading
+of an empty picker — so an unconfigured node answers "this file has exact duplicates in it" with
+nothing set. A column that is *named* but absent is refused rather than dropped, `groupByTable`'s
+rule: comparing on fewer columns than were asked for silently keeps **more** rows, which on a
+table whose upstream schema moved reads as a dedupe that did not work.
+
+**Row order is the input's in all three modes.** A row kept because it was *last* stays where it
+was rather than moving to the end — pandas does the same, and a dedupe that also reordered would
+be two operations wearing one name. Note the trap in the implementation: `lastAt.values()` is in
+*first*-occurrence order, so the second pass walks the rows again rather than reading the Map.
+
+**`rowKey` is shared with `groupByTable`** rather than written twice — the second-consumer rule,
+and the two characters in it are the whole of its correctness. `\u0001` separates columns, so
+`["ab","c"]` and `["a","bc"]` are different rows (the collision `uploads.ts` records for its own
+content address); `\u0000` stands for a missing value, so a null is not the four-letter string
+`"null"`, which a `str` column of somebody's annotation base very plausibly contains. Both are
+mutation-checked, because both fail as a *plausible wrong table* rather than as an error.
+
+**Not Group By**, which is the neighbouring control and collapses rows into an aggregate. This
+keeps whole rows, so every column comes through with the value it had; that difference is what
+stops the two being one node with a mode.
+
+The R emitter is the one place in that file that leaves dplyr, and it says why: `distinct()` keeps
+the **first** row and has no argument for the other two, where `duplicated(..., fromLast = TRUE)`
+is exactly `last` and OR-ing both directions is exactly `none` — one idiom covering all three,
+preserving row order, and needing no library. Python is `drop_duplicates`, with `subset` **omitted**
+rather than passed empty: `subset=[]` compares on no columns, which makes every row a duplicate of
+the first.
 
 ## Upload Table and Table from URL: somebody else's data
 

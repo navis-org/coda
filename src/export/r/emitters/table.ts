@@ -169,6 +169,41 @@ registerEmitter('core.selectOne', (ctx) => {
 })
 
 // ---------------------------------------------------------------------------
+// Deduplicate
+// ---------------------------------------------------------------------------
+
+registerEmitter('core.dedupe', (ctx) => {
+  const src = ctx.wired('in')
+  const out = ctx.output('out')
+  const names = ctx.columns('columns')
+  const keep = String(ctx.params.keep ?? 'first')
+
+  /*
+   * Base R's `duplicated()` rather than `dplyr::distinct()`, which is the house verb everywhere
+   * else in this file. Three reasons, and they only apply to this node:
+   *
+   *  - `distinct()` keeps the **first** row of a set and has no argument for the other two.
+   *    `duplicated(..., fromLast = TRUE)` is exactly Coda's `last`, and OR-ing the two directions
+   *    is exactly `none` — one idiom covering all three, against a `group_by`/`slice`/`arrange`
+   *    contortion for the second.
+   *  - It **preserves row order**, where grouping reorders rows into group order. A dedupe that
+   *    also reordered would be two operations wearing one name, and the difference is invisible
+   *    until something downstream depends on the order.
+   *  - It needs no library at all, so this chunk is honest about depending on nothing.
+   */
+  const subject = names.length > 0 ? `${src}[${rVector(names)}]` : src
+  if (keep === 'none') {
+    // Both directions: a row is dropped when anything before *or* after it matches, which leaves
+    // only the rows that were already unique.
+    return [
+      `${out} <- ${src}[!(duplicated(${subject}) | duplicated(${subject}, fromLast = TRUE)), ]`,
+    ]
+  }
+  const fromLast = keep === 'last' ? ', fromLast = TRUE' : ''
+  return [`${out} <- ${src}[!duplicated(${subject}${fromLast}), ]`]
+})
+
+// ---------------------------------------------------------------------------
 // Group By
 // ---------------------------------------------------------------------------
 

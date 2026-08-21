@@ -173,6 +173,117 @@ function makePredicate(
 }
 
 // ---------------------------------------------------------------------------
+// Row identity, shared
+// ---------------------------------------------------------------------------
+
+/**
+ * A string identifying one row by the given columns, for grouping or matching.
+ *
+ * Built in place rather than through a `map` and a `join`: this runs over whole neuron indexes —
+ * 165k rows on male-CNS — where that form allocates an array and a string per row.
+ *
+ * Two characters carry the rules and both matter. `\u0001` separates the columns, so `["ab","c"]`
+ * and `["a","bc"]` are different rows — the collision `uploads.ts` records for its own content
+ * address. `\u0000` stands for a *missing* value, so a null is not the four-letter string "null",
+ * which a `str` column of somebody's annotation base very plausibly contains. Written as escapes
+ * rather than as literal control characters, for `uploads.ts`' reason: a raw one is invisible to
+ * every reader and to `grep`.
+ *
+ * Compared as text, the `joinTables` rule — within one table a column has one dtype, so the only
+ * case that could bite is the null one above.
+ */
+export function rowKey(columns: ReadonlyArray<ColumnData>, row: number): string {
+  let key = ''
+  for (let k = 0; k < columns.length; k++) {
+    const cell = columns[k]![row]
+    if (k > 0) key += '\u0001'
+    key += cell === null || cell === undefined ? '\u0000' : String(cell)
+  }
+  return key
+}
+
+// ---------------------------------------------------------------------------
+// Deduplicate
+// ---------------------------------------------------------------------------
+
+/** Which row of a duplicate set survives. `pandas.drop_duplicates`' `keep`. */
+export type KeepMode = 'first' | 'last' | 'none'
+
+export const KEEP_OPTIONS: Array<{ value: KeepMode; label: string }> = [
+  { value: 'first', label: 'first' },
+  { value: 'last', label: 'last' },
+  { value: 'none', label: 'none (drop them all)' },
+]
+
+/** Deduplicating never changes the schema. */
+export function dedupeSchema(schema: TableSchema | undefined): TableSchema | undefined {
+  return schema
+}
+
+/**
+ * Drop rows that repeat, comparing on the named columns.
+ *
+ * **Empty means every column**, which is `pandas.drop_duplicates()`'s own default and `Select`'s
+ * reading of an empty picker: an unconfigured node compares whole rows, which is the answer to
+ * "this table has exact duplicates in it" and needs nothing set.
+ *
+ * **`none` drops every row of a repeated set, not one of them.** That is `keep=False`, and it
+ * answers a different question from the other two: `first`/`last` are "one row per neuron", where
+ * `none` is "only the neurons nobody disagrees about" — which on an annotation base is the
+ * conservative read, since a root id carrying two different `side` values is a conflict rather
+ * than a copy.
+ *
+ * **Row order is the input's**, whichever mode. A row kept because it was *last* stays where it
+ * was rather than moving to the end; pandas does the same, and a dedupe that also reordered would
+ * be two operations wearing one name.
+ */
+export function dedupeTable(
+  table: TableValue,
+  columns: readonly string[],
+  keep: KeepMode,
+): TableValue {
+  /*
+   * A named-but-absent column is refused rather than ignored, `groupByTable`'s rule: comparing on
+   * fewer columns than were asked for silently keeps *more* rows, and on a table whose upstream
+   * schema moved that reads as a dedupe that did not work.
+   */
+  const named = columns.filter((n) => findColumn(table.schema, n))
+  if (columns.length > 0 && named.length === 0) {
+    throw new Error(
+      `Deduplicate: none of the chosen columns are in this table (${columns.join(', ')})`,
+    )
+  }
+  const names = named.length > 0 ? named : table.schema.columns.map((c) => c.name)
+  const keyData = names.map((n) => getColumn(table, n))
+
+  // Built once. All three modes need every row's key, and two of them need a second pass over
+  // it, so recomputing would double the only expensive part of this.
+  const keys: string[] = new Array(table.length)
+  for (let i = 0; i < table.length; i++) keys[i] = rowKey(keyData, i)
+
+  const kept: number[] = []
+  if (keep === 'first') {
+    const seen = new Set<string>()
+    for (let i = 0; i < keys.length; i++) {
+      if (seen.has(keys[i]!)) continue
+      seen.add(keys[i]!)
+      kept.push(i)
+    }
+  } else if (keep === 'last') {
+    const lastAt = new Map<string, number>()
+    for (let i = 0; i < keys.length; i++) lastAt.set(keys[i]!, i)
+    // Walked forward again rather than reading the Map's values, whose order is
+    // *first*-occurrence — which would emit the kept rows in the wrong places.
+    for (let i = 0; i < keys.length; i++) if (lastAt.get(keys[i]!) === i) kept.push(i)
+  } else {
+    const counts = new Map<string, number>()
+    for (const key of keys) counts.set(key, (counts.get(key) ?? 0) + 1)
+    for (let i = 0; i < keys.length; i++) if (counts.get(keys[i]!) === 1) kept.push(i)
+  }
+  return selectRows(table, kept)
+}
+
+// ---------------------------------------------------------------------------
 // Sort / limit
 // ---------------------------------------------------------------------------
 
@@ -689,18 +800,9 @@ export function groupByTable(
   const buckets = new Map<string, Bucket>()
 
   for (let i = 0; i < table.length; i++) {
-    /*
-     * Concatenated in place rather than through two `map`s and a `join`. This is the one loop
-     * here that runs over a whole neuron index — 165k rows on male-CNS — where the old form
-     * allocated two arrays and a string per row; and `keys` was only ever read when a *new*
-     * bucket appeared, so it is materialised in that branch instead of for every row.
-     */
-    let hash = ''
-    for (let k = 0; k < keyData.length; k++) {
-      const cell = keyData[k]![i]
-      if (k > 0) hash += '\u0001'
-      hash += cell === null || cell === undefined ? '\u0000' : String(cell)
-    }
+    // `keys` is only ever read when a *new* bucket appears, so it is materialised in that
+    // branch rather than for every row.
+    const hash = rowKey(keyData, i)
     let bucket = buckets.get(hash)
     if (!bucket) {
       bucket = {

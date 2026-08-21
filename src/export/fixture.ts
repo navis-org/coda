@@ -242,36 +242,44 @@ export function everythingGraph(): CodaGraph {
       params: { mode: 'random', count: 200, seed: 7 },
     },
     {
+      id: 'dedupe',
+      type: 'core.dedupe',
+      col: 6,
+      // `last` rather than the default, so the golden records the argument that differs from
+      // pandas' own default — a fixture on `first` would pass with the parameter omitted.
+      params: { columns: ['preType', 'postType'], keep: 'last' },
+    },
+    {
       id: 'group',
       type: 'core.groupBy',
-      col: 6,
+      col: 7,
       params: { by: ['preType', 'postType'], agg: 'sum', value: 'weight' },
     },
     {
       id: 'select',
       type: 'core.select',
-      col: 7,
+      col: 8,
       params: { columns: ['preType', 'postType', 'sum_weight'] },
     },
     {
       id: 'join',
       type: 'core.join',
-      col: 8,
+      col: 9,
       params: { leftKey: 'preType', rightKey: 'preType', how: 'left', suffix: '_r' },
     },
     {
       id: 'stack',
       type: 'core.stack',
-      col: 9,
+      col: 10,
       params: { sourceColumn: 'origin', topLabel: 'Direct', bottomLabel: 'Indirect' },
     },
     {
       id: 'pivot',
       type: 'core.pivot',
-      col: 10,
+      col: 11,
       params: { rows: 'preType', columns: 'postType', value: 'weight', agg: 'sum' },
     },
-    { id: 'norm', type: 'core.normalize', col: 11, params: { mode: 'row' } },
+    { id: 'norm', type: 'core.normalize', col: 12, params: { mode: 'row' } },
 
     /*
      * Twice, and that is not redundancy: the emitter branches on the input's *kind*, because a
@@ -457,7 +465,8 @@ export function everythingGraph(): CodaGraph {
     ['conn', 'connections', 'filter', 'in'],
     ['filter', 'out', 'sort', 'in'],
     ['sort', 'out', 'sample', 'in'],
-    ['sample', 'out', 'group', 'in'],
+    ['sample', 'out', 'dedupe', 'in'],
+    ['dedupe', 'out', 'group', 'in'],
     ['sort', 'out', 'pick', 'in'],
     ['skel', 'skeletons', 'pickSkel', 'in'],
     ['group', 'out', 'select', 'in'],

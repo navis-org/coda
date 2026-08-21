@@ -801,11 +801,9 @@ cut_tree_2_tree <- linkage_tree
 cut_tree_2_tree_clusters <- cl_
 ```
 
-```{r group-by-df}
-# ── Group By ──
-group_by_df <- sample_df |>
-  group_by(`preType`, `postType`) |>
-  summarise(n = n(), `sum_weight` = sum(`weight`), .groups = "drop")
+```{r deduplicate}
+# ── Deduplicate ──
+deduplicate <- sample_df[!duplicated(sample_df[c("preType", "postType")], fromLast = TRUE), ]
 ```
 
 ```{r dendrogram}
@@ -846,6 +844,25 @@ clusters_to_neurons <- find_neurons |>
     suffix = c("", "_c"),
   ) |>
   select(-key_)
+```
+
+```{r group-by-df}
+# ── Group By ──
+group_by_df <- deduplicate |>
+  group_by(`preType`, `postType`) |>
+  summarise(n = n(), `sum_weight` = sum(`weight`), .groups = "drop")
+```
+
+```{r selected-to-neurons}
+# ── Selected to Neurons ──
+# NOTE: No neuron table is wired on the canvas, so the labels are read as
+# neuron ids. They stay `numeric` rather than becoming `integer`: R integers
+# are 32-bit and a neuron id can exceed that, where a double is exact to
+# 2^53 — which is Coda's own representation.
+selected_to_neurons <- dendrogram_selected |>
+  mutate(neuronId = suppressWarnings(as.numeric(`label`))) |>
+  filter(!is.na(neuronId)) |>
+  select(neuronId, everything(), -`label`)
 ```
 
 ```{r select-columns}
@@ -891,18 +908,6 @@ build_network <- graph_from_data_frame(
   links,
   directed = TRUE
 )
-```
-
-```{r selected-to-neurons}
-# ── Selected to Neurons ──
-# NOTE: No neuron table is wired on the canvas, so the labels are read as
-# neuron ids. They stay `numeric` rather than becoming `integer`: R integers
-# are 32-bit and a neuron id can exceed that, where a double is exact to
-# 2^53 — which is Coda's own representation.
-selected_to_neurons <- dendrogram_selected |>
-  mutate(neuronId = suppressWarnings(as.numeric(`label`))) |>
-  filter(!is.na(neuronId)) |>
-  select(neuronId, everything(), -`label`)
 ```
 
 ```{r join}
