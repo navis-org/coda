@@ -611,6 +611,7 @@ function CodaNodeViewImpl({
               node={node}
               ctx={ctx}
               compact
+              inputValues={nodeInputs(id)}
               setParam={(paramId, value) => setParam(id, paramId, value)}
               onError={setNotice}
             />

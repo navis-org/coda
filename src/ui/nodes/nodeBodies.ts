@@ -18,6 +18,7 @@
 import type { ComponentType } from 'react'
 
 import type { GraphNode } from '../../core/graph'
+import type { Value } from '../../core/values'
 import type { InferContext, ParamValue } from '../../core/node'
 import { DATASET_FAMILIES } from '../../nodes/lib/datasetFamilies'
 import { ExploreBody } from '../explore/ExploreBody'
@@ -35,6 +36,16 @@ export interface NodeBodyProps {
   node: GraphNode
   /** Resolves the node's column params and carries its resolved input types. */
   ctx: InferContext
+  /**
+   * The values on this node's input ports, where a run has produced them.
+   *
+   * The same thing `ValuePreview` is handed, and for a related reason — a body that draws data
+   * rather than configuration needs what actually arrived, not only its type. Explore is the case
+   * that forced it: a `DatasetValue` carries the annotation chain's *table*, where the dataset
+   * *type* carries only its schema, and on a datastack that publishes no neuron table that table
+   * is the neuron list. Undefined per port until whatever feeds it has run.
+   */
+  inputValues?: Record<string, Value | undefined>
   /** True inside the node card, false in the full-size overlay. */
   compact: boolean
   setParam: (paramId: string, value: ParamValue) => void

@@ -1290,11 +1290,26 @@ and returned the backend's, both morphology nodes did the same, and a second com
 index was built and cached under the unannotated key. Invariant 3 across a seam, silent, and only
 findable by reading every caller — which is why the id and the labels now travel as one thing.
 
-**Known gap, stated rather than papered over:** the Explore *widget* still shows the datastack's
-own labels. It loads independently of any run by design, so all it has is the dataset type, which
-carries the chain's schema and not its table. The node's ports are annotated; the list beside them
-is not. Closing it means the widget reading a run's value, which is the thing its independence was
-built to avoid.
+**The Explore widget reads the chain off the _value_, one run later than the ports do.** A
+dataset *type* carries the chain's schema; only a `DatasetValue` carries its table, because that
+table is a fetch somebody's Run paid for. So `NodeBodyProps` gained `inputValues` — the same
+thing `ValuePreview` is handed, from the `nodeInputs(id)` the card already computed — and
+`useNeuronIndex` takes the chain and keys its shared entry on it, for `neuronIndexKey`'s reason.
+
+That is a real departure from "this widget loads independently of any run", and it was forced
+rather than chosen. It began as a labelling gap — an annotated CAVE dataset listed the backend's
+`type` while the wire carried the chain's columns — and became a **hard failure** the moment
+`DatastackSpec.neurons` was allowed to be absent: on a datastack that publishes no neuron table
+the chain *is* the list, so the widget had nothing to list and the source refused. Aedes is
+exactly that datastack, and it is the case the whole feature exists for.
+
+The departure is bounded to what cannot be had otherwise: with nothing wired, or before a run,
+the widget behaves exactly as it always did. And the pre-run state is drawn as an instruction —
+`Press Run to load this dataset's neurons` — rather than as the source's own sentence, which
+would send somebody to look at the dataset when the fix is a keypress. That recognition matches
+on the refusal's *text*, which is the thing `reportAuthFailure` exists to avoid; it is
+deliberately narrow (it only softens wording, and a real refusal still shows through) and the
+honest fix is the per-dataset capability that is still unwritten.
 
 **The Profile widget looked like the same gap and was not**, which is worth the sentence: it
 fetches per neuron rather than loading an index, and `ValuePreview` hands it a whole

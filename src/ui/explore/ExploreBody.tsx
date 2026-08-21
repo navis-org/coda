@@ -18,6 +18,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 
 import { datasetRef } from '../../core/types'
+import { isDatasetValue } from '../../core/values'
 import { MAX_SELECT_ALL } from '../../nodes/query/explore'
 import {
   completeSearch,
@@ -38,9 +39,24 @@ import { useNeuronIndex } from '../useNeuronIndex'
  */
 const DEBOUNCE_MS = 140
 
-export function ExploreBody({ node, ctx, compact, setParam }: NodeBodyProps) {
+export function ExploreBody({ node, ctx, compact, inputValues, setParam }: NodeBodyProps) {
   const ref = datasetRef(ctx.inputs.dataset)
-  const { state, reload } = useNeuronIndex(ref?.sourceId, ref?.datasetId)
+  /*
+   * The chain comes off the *value*, not the type.
+   *
+   * A dataset **type** carries the annotation chain's schema; only the `DatasetValue` carries its
+   * table, because that table is a fetch somebody's Run paid for. On a datastack that publishes a
+   * neuron table this is a labelling improvement — the list shows the chain's names instead of
+   * the backend's. On one that publishes none it is the difference between working and not, since
+   * there the chain *is* the neuron list.
+   *
+   * That is a real departure from "this widget loads independently of any run", and it is bounded
+   * to what cannot be had otherwise: with nothing wired, or before a run, it behaves exactly as
+   * it always did.
+   */
+  const dataset = inputValues?.dataset
+  const annotations = isDatasetValue(dataset) ? dataset.annotations : undefined
+  const { state, reload } = useNeuronIndex(ref?.sourceId, ref?.datasetId, annotations)
 
   const committed = String(node.params.query ?? '')
   const [text, setText] = useState(committed)
@@ -84,6 +100,19 @@ export function ExploreBody({ node, ctx, compact, setParam }: NodeBodyProps) {
   }, [text, applied, committed, setParam])
 
   const table = state.status === 'ready' ? state.table : undefined
+
+  /*
+   * The one refusal that is a *state* rather than a fault: a datastack with no neuron table and
+   * no chain in hand yet. Recognised by the source's own sentence rather than by asking the
+   * source anything, because `SourceCapabilities` is per-source and this is per-dataset — the
+   * per-dataset capability that would answer it properly is not written. Matching on message
+   * text is the thing `reportAuthFailure` exists to avoid, so it is deliberately narrow: it only
+   * softens the wording, and a real refusal still shows through if the sentence ever changes.
+   */
+  const needsRun =
+    state.status === 'error' &&
+    !annotations &&
+    state.message.includes('publishes no table listing its neurons')
   // Through `ctx.columns`, never `ctx.params.chips`: that is what filters the stored list
   // against the schema actually arriving, so a graph repointed at another dataset drops the
   // fields it no longer has instead of showing a column of blanks.
@@ -299,7 +328,24 @@ export function ExploreBody({ node, ctx, compact, setParam }: NodeBodyProps) {
           </span>
         </div>
       )}
-      {state.status === 'error' && <div className="explore__error">{state.message}</div>}
+      {state.status === 'error' &&
+        (needsRun ? (
+          /*
+           * Not an error: the datastack publishes no neuron table, so its neuron list *is* the
+           * annotation chain — and a chain's table only exists once a Run has fetched it. Saying
+           * "publishes no table listing its neurons" here would send somebody to look at the
+           * dataset, when the fix is to press Run.
+           */
+          <div className="explore__empty">
+            Press Run to load this dataset&rsquo;s neurons.
+            <span className="explore__hint">
+              {ref?.datasetId?.split(':')[0] ?? 'This datastack'} lists no neurons of its own, so
+              the wired Annotations source is the list — and it has not been fetched yet.
+            </span>
+          </div>
+        ) : (
+          <div className="explore__error">{state.message}</div>
+        ))}
 
       {table && (
         <>

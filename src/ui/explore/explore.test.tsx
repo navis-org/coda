@@ -31,6 +31,7 @@ import type { ParamValue, ParamValues } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
 import { T } from '../../core/types'
 import { MockSource } from '../../data/mock/MockSource'
+import type { Value } from '../../core/values'
 import { makeTable } from '../../core/values'
 import { column, tableSchema } from '../../core/types'
 import { MAX_SELECT_ALL } from '../../nodes/query/explore'
@@ -105,7 +106,11 @@ afterEach(cleanup)
  * Render the widget against a live mock dataset, holding params in local state the way the
  * store would, so a param write is visible on the next render.
  */
-function setup(initial: ParamValues = {}, sourceId = 'mock') {
+function setup(
+  initial: ParamValues = {},
+  sourceId = 'mock',
+  inputValues?: Record<string, Value | undefined>,
+) {
   const def = requireNodeDef('neuron.explore')
   const params: ParamValues = { ...defaults(def.params), ...initial }
   const writes: Array<[string, ParamValue]> = []
@@ -121,6 +126,7 @@ function setup(initial: ParamValues = {}, sourceId = 'mock') {
         node={{ id: 'n1', type: 'neuron.explore', position: { x: 0, y: 0 }, params: current }}
         ctx={ctx}
         compact={false}
+        {...(inputValues ? { inputValues } : {})}
         setParam={(id, value) => {
           writes.push([id, value])
           setCurrent((held) => ({ ...held, [id]: value }))
@@ -461,6 +467,55 @@ describe('ExploreBody', () => {
  * raising the byte ceiling from 128 kB to 2 MB: every neuron the old one turned down stayed a
  * placeholder through any number of reloads, because nothing asked again.
  */
+/**
+ * The annotation chain reaching the widget.
+ *
+ * It reaches the node's *ports* through `evaluate`, which has the values. The widget has only
+ * the inferred types, so the chain arrives one Run later — a labelling difference on a datastack
+ * with a neuron table, and the difference between working and not on one without, where the
+ * chain *is* the list.
+ */
+describe('an annotated dataset', () => {
+  const CHAIN = {
+    kind: 'annotations' as const,
+    sources: ['seaTable:base=main&table=info'],
+    table: makeTable(
+      tableSchema(column('neuronId', 'i64'), column('lab', 'str')),
+      { neuronId: [1, 2], lab: ['ours', 'theirs'] },
+      'neurons',
+    ),
+  }
+
+  function annotatedSource(id: string): DataSource {
+    const base: DataSource = new MockSource({ latencyMs: 0 })
+    return Object.assign(Object.create(base) as DataSource, {
+      id,
+      // Answers only when the chain arrives — a datastack with no neuron table of its own.
+      neuronIndex: async (req: { annotations?: typeof CHAIN }) => {
+        if (!req.annotations) throw new Error('publishes no table listing its neurons')
+        return req.annotations.table
+      },
+    })
+  }
+
+  it('lists the chain’s neurons on a datastack that has none of its own', async () => {
+    registerSource(annotatedSource('mock-bare'))
+    setup({}, 'mock-bare', {
+      dataset: { kind: 'dataset', sourceId: 'mock-bare', datasetId: DATASET, label: 'bare', annotations: CHAIN },
+    })
+    await waitFor(() => expect(screen.getByText(/2 neurons/)).toBeTruthy())
+  })
+
+  it('asks for a Run rather than reporting the source’s refusal as a fault', async () => {
+    registerSource(annotatedSource('mock-bare2'))
+    // What the card looks like before anything has run: the dataset value carries no chain yet.
+    setup({}, 'mock-bare2')
+    await waitFor(() => expect(screen.getByText(/Press Run/)).toBeTruthy())
+    // The raw sentence would send somebody to look at the dataset, where the fix is a keypress.
+    expect(screen.queryByText(/publishes no table listing/)).toBeNull()
+  })
+})
+
 describe('thumbnail caching', () => {
   const BODY = getConnectome(DATASET)!.neurons[0]!.neuronId
   /** Displayed at 76, rasterised at 2x — the key carries the raster size. */
