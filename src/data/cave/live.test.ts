@@ -32,7 +32,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { CaveSource } from './CaveSource'
 import { resetCredentials, setToken } from './credentials'
-import { datastackRecord, materializationsFor } from './datastack'
+import { datastackRecord, l2CacheFor, materializationsFor } from './datastack'
 import { caveScene } from './scene'
 import { segmentationLayerIndex } from '../neuroglancer/scene'
 import { registerDatastackSpec } from './spec'
@@ -300,4 +300,57 @@ describe.skipIf(!TOKEN)('CAVE, live — a built neuroglancer scene', () => {
       expect(info.viewer_site).toMatch(/^https:\/\//)
     }
   }, 60_000)
+})
+
+/**
+ * Skeletons from the level-2 cache, and the per-datastack gate in front of them.
+ *
+ * The gate is the point: six of the thirteen datastacks the info service lists have a cache, so
+ * a flat answer is wrong for somebody whichever way it is set. These three are one of each kind
+ * — a cache and a skeleton service, a cache and no service, and a service with no cache.
+ */
+describe.skipIf(!TOKEN)('CAVE, live — L2 skeletons', () => {
+  it('knows which datastacks can answer, and builds a real tree for one that can', async () => {
+    setToken(TOKEN!)
+    expect(await l2CacheFor('brain_and_nerve_cord_public')).toBe(true)
+    // A populated cache and no skeleton service at all — the datastack the service route misses.
+    expect(await l2CacheFor('wclee_aedes_brain')).toBe(true)
+    // Declares a skeleton service and has no cache, which is why that service is empty: it
+    // generates from this. The one Coda ships a node for, and it genuinely cannot answer.
+    expect(await l2CacheFor('flywire_fafb_public')).toBe(false)
+
+    registerDatastackSpec({
+      datastack: 'brain_and_nerve_cord_public',
+      label: 'BANC',
+      description: 'live',
+      neurons: { table: 'cell_info', idColumn: 'pt_root_id' },
+    })
+    const cave = new CaveSource()
+    const version = (await materializationsFor('brain_and_nerve_cord_public'))[0]
+    const dataset = `brain_and_nerve_cord_public:${version}`
+    const ids = (
+      (await cave.findNeurons({ datasetId: dataset, limit: 6 })).data[ID_COLUMN_NAME] as string[]
+    ).slice(0, 5)
+
+    const skeletons = await cave.fetchSkeletons!({ datasetId: dataset, neuronIds: ids })
+    expect(skeletons.items.length).toBeGreaterThan(0)
+    // Nanometres by publication, not by conversion — `rep_coord_nm` is already nm.
+    expect(skeletons.units).toBe('nm')
+
+    for (const item of skeletons.items) {
+      expect(item.positions.length).toBe(item.parents.length * 3)
+      expect(item.radii.length).toBe(item.parents.length)
+      // A forest: every parent is a real index, and following them always terminates.
+      for (let i = 0; i < item.parents.length; i++) {
+        let steps = 0
+        for (let at = item.parents[i]!; at !== -1; at = item.parents[at]!) {
+          expect(at).toBeLessThan(item.parents.length)
+          if (++steps > item.parents.length) throw new Error(`cycle in ${item.id}`)
+        }
+      }
+    }
+    // At least one is a neuron rather than a fragment. Measured: 739, 69 and 2 nodes on the
+    // first three, so a lower bound of ten is well clear of the noise.
+    expect(Math.max(...skeletons.items.map((i) => i.parents.length))).toBeGreaterThan(10)
+  }, 180_000)
 })

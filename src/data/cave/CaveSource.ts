@@ -33,6 +33,8 @@ import type {
   MeshGeometry,
   MeshesValue,
   PointsValue,
+  SkeletonGeometry,
+  SkeletonsValue,
   TableValue,
 } from '../../core/values'
 import {
@@ -79,9 +81,11 @@ import {
   versionsMetadata,
 } from './api'
 import { getServer } from './credentials'
-import { caveServerFor, datastackRecord, usableVersions } from './datastack'
+import { caveServerFor, datastackRecord, l2CacheFor, peekL2Cache, usableVersions } from './datastack'
 import { codaColumn, defaultSchemas, neuronSchemaFor, schemasFor } from './schema'
 import { withAnnotations } from '../annotations/schema'
+import { parseGrapheneSource } from './graphene'
+import { L2_CONCURRENCY, MAX_L2_SKELETON_NEURONS, readL2Skeleton } from './l2'
 import { chainKey } from '../annotations/types'
 import { caveScene } from './scene'
 import type { NgScene } from '../neuroglancer/scene'
@@ -117,6 +121,11 @@ const CAVE_CAPABILITIES: SourceCapabilities = {
    * `exists: false` for every one, and a queued generation had not landed after five minutes.
    * A fetch therefore blocks on generation, per neuron, against a node whose ceiling is 500.
    * Claiming the capability would make every Skeletons run hang instead of decline.
+   */
+  /*
+   * Per **dataset**, through `capabilitiesFor`. `false` is the source-level answer because it is
+   * the safe one for a datastack nothing is known about yet; six of the thirteen the info
+   * service lists have a level-2 cache and override this to true.
    */
   skeletons: false,
   meshes: true,
@@ -289,6 +298,19 @@ export class CaveSource implements DataSource {
     return usableVersions(versions).map((v) =>
       datasetInfoFor(spec, v.version, v.time_stamp, v.expires_on, info.viewer_site),
     )
+  }
+
+  /**
+   * What this datastack can do, where it differs from the source.
+   *
+   * Skeletons only, and only when the peek has landed — `undefined` while it has not, which
+   * `sourceSupports` reads as "same as the source", i.e. the safe `false`. `reportSourceLearned`
+   * re-infers when the answer arrives, so the node stops refusing on its own.
+   */
+  capabilitiesFor(datasetId: string): Partial<SourceCapabilities> | undefined {
+    const parsed = splitDatasetId(datasetId)
+    const has = parsed ? peekL2Cache(parsed.datastack) : undefined
+    return has === undefined ? undefined : { skeletons: has }
   }
 
   // -------------------------------------------------------------------------
@@ -897,6 +919,59 @@ export class CaveSource implements DataSource {
   }
 
   /**
+   * Skeletons from the level-2 chunk graph.
+   *
+   * Two requests per neuron — the chunk graph, then the cache's representative coordinates — and
+   * about 1.6 s. See `l2.ts` for why this rather than the skeleton service several datastacks
+   * also publish.
+   *
+   * The gate is per **dataset**, not per source: six of thirteen datastacks have a cache, so a
+   * flat answer is wrong for somebody whichever way it is set. `capabilitiesFor` is what carries
+   * that to the node, and this refuses again at run time because a peek can be `undefined` when
+   * the node was configured.
+   */
+  async fetchSkeletons(req: GeometryRequest): Promise<SkeletonsValue> {
+    const { spec } = this.require(req.datasetId)
+    const options: CaveRequestOptions = req.signal ? { signal: req.signal } : {}
+
+    if (req.neuronIds.length > MAX_L2_SKELETON_NEURONS) {
+      throw new CaveError(
+        `${req.neuronIds.length} neurons is too many skeletons to build from ${spec.label}. ` +
+          `Each one is two requests against the chunkedgraph — the ceiling here is ` +
+          `${MAX_L2_SKELETON_NEURONS}, against 500 on a source that publishes them ready-made.`,
+      )
+    }
+
+    const graphene = parseGrapheneSource(
+      (await datastackRecord(spec.datastack, options)).segmentation_source,
+    )
+    if (!graphene || !(await l2CacheFor(spec.datastack, options))) {
+      throw new CaveError(
+        `${spec.label} has no level-2 cache, so Coda cannot build skeletons for it. That is a ` +
+          `fact about the datastack rather than about this graph — meshes and synapses are ` +
+          `unaffected.`,
+      )
+    }
+
+    let done = 0
+    const raw = await mapWithConcurrency(req.neuronIds, L2_CONCURRENCY, async (neuronId) => {
+      const skeleton = await readL2Skeleton(graphene.server, graphene.table, neuronId, options)
+      req.onProgress?.(++done / req.neuronIds.length, `${done}/${req.neuronIds.length} skeletons`)
+      return skeleton
+    })
+
+    const items = raw.filter((s): s is SkeletonGeometry => s !== undefined)
+    return {
+      kind: 'skeletons',
+      items,
+      attributes: await this.morphologyAttributes(req, items),
+      bounds: boundsOf(items.map((i) => i.positions)),
+      // The cache publishes `rep_coord_nm`, so no conversion happens anywhere.
+      units: 'nm',
+    }
+  }
+
+  /**
    * A neuron's synapses as a point cloud, straight out of the synapse table.
    *
    * The cheapest capability on this source and the one that needed no new transport: it is
@@ -1003,8 +1078,11 @@ export class CaveSource implements DataSource {
    * offering nothing. The index is already in hand by the time anyone fetches morphology.
    */
   private async morphologyAttributes(
+    // Only the id and the point count are read, which both geometry kinds carry — so meshes and
+    // skeletons share this rather than each building an attribute table that could disagree
+    // about which columns a morphology row has.
     req: GeometryRequest,
-    items: readonly MeshGeometry[],
+    items: ReadonlyArray<{ id: string; positions: Float32Array }>,
   ): Promise<TableValue> {
     /*
      * With a chain wired its labels *are* the labels, so `type` comes from `labelsFor` and the

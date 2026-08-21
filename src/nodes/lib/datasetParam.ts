@@ -39,8 +39,17 @@ export function sourceSupports(
   ctx: { inputs: Record<string, CodaType | undefined> },
   capability: keyof SourceCapabilities,
 ): boolean {
-  const source = sourceFromType(ctx.inputs['dataset'])
-  return source ? source.capabilities[capability] : true
+  const ref = datasetRef(ctx.inputs['dataset'])
+  const source = ref?.sourceId ? getSource(ref.sourceId) : undefined
+  if (!source) return true
+  /*
+   * The dataset's answer wins where it has one. `capabilities` is per source, and one source can
+   * serve datasets that genuinely differ — a CAVE datastack's skeletons depend on whether its
+   * chunkedgraph has an L2 cache. `undefined` means "same as the source", which is every dataset
+   * of every other backend.
+   */
+  const forDataset = ref?.datasetId ? source.capabilitiesFor?.(ref.datasetId) : undefined
+  return forDataset?.[capability] ?? source.capabilities[capability]
 }
 
 /** The source behind a Dataset socket, for a message that names it. */

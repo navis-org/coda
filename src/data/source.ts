@@ -454,6 +454,20 @@ export interface DataSource {
 
   /** Morphology. Optional: a source may expose connectivity without geometry. */
   fetchSkeletons?(req: GeometryRequest): Promise<SkeletonsValue>
+  /**
+   * What *this dataset* can do, where it differs from the source.
+   *
+   * **Synchronous, and `undefined` means "same as the source"** — `schemasFor`'s contract, and
+   * it is read from `validate` on every graph mutation, so an implementation may start a fetch
+   * but must never await one.
+   *
+   * It exists because `capabilities` is per **source** and one source can serve datasets that
+   * genuinely differ. CAVE is the case: a datastack's skeletons depend on whether its
+   * chunkedgraph has an L2 cache, which six of thirteen do — so a flat `skeletons: false` told
+   * every FlyWire-production user a falsehood, and a flat `true` would tell every Aedes user the
+   * opposite one. Only the keys that differ need be returned.
+   */
+  capabilitiesFor?(datasetId: string): Partial<SourceCapabilities> | undefined
   fetchMeshes?(req: GeometryRequest): Promise<MeshesValue>
   fetchSynapses?(req: SynapseRequest): Promise<PointsValue>
 

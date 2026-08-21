@@ -77,9 +77,15 @@ export const skeletonsNode = registerNode({
   }),
 
   validate: (ctx) => {
-    const source = ctx.inputs.dataset
-    if (source && !sourceSupports(ctx, 'skeletons'))
-      return ['This data source has no skeletons']
+    /*
+     * "This *dataset*", not "this source". `sourceSupports` now asks the dataset first, and CAVE
+     * answers per datastack — six of thirteen have the level-2 cache a skeleton is built from —
+     * so a message naming the backend was telling a FlyWire-production user something false
+     * about a datastack that can perfectly well answer.
+     */
+    if (ctx.inputs.dataset && !sourceSupports(ctx, 'skeletons')) {
+      return ['This dataset has no skeletons']
+    }
     return []
   },
 

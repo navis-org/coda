@@ -3883,8 +3883,8 @@ which CAVE has no endpoint for), no `rawQuery`, no `viewerScene`, and none of th
 flags — FlyWire's neuropil assignments are a reference table on *synapses*, so there is no
 per-region completeness table to read, and a per-neuron breakdown would mean reading a neuron's
 synapses and grouping them, which is the work the connection roll-up exists to avoid.
-`neuronIndex`, `meshes`, `synapses` and `viewerScene` are the ones that are true; see
-**Morphology** below for why `skeletons` is not.
+`neuronIndex`, `meshes`, `synapses` and `viewerScene` are true for the source; `skeletons` is
+answered **per dataset** through `capabilitiesFor` — see **Skeletons** below.
 
 **The scene is built rather than fetched, and that is the whole of `viewerScene` here.** neuPrint
 publishes a curated state per dataset — EM, ROI shells, synapse layers, a framing — which
@@ -3940,8 +3940,57 @@ honest state rather than a control that would match nothing.
 
 ### Morphology: meshes and synapses, but not skeletons
 
-**Skeletons are the one thing CAVE publishes that Coda cannot use, and the blocker is the
-service rather than the format.** `skeleton_source` is a standard `neuroglancer_skeletons`
+### Skeletons come from the level-2 cache, and the capability is per dataset
+
+**A CAVE datastack's skeletons depend on its chunkedgraph, not on the backend**, so
+`capabilities.skeletons` — which is per *source* — was telling every FlyWire-production user
+something false. `DataSource.capabilitiesFor(datasetId)` is the seam that fixes it: synchronous,
+`undefined` meaning "same as the source", read by `sourceSupports` ahead of the source's own
+answer. Only CAVE implements it, and only for `skeletons`; the Skeletons node's refusal now says
+"This **dataset** has no skeletons".
+
+**The route is the level-2 chunk graph, which is `fafbseg.flywire.get_l2_skeleton()`'s method.**
+Two requests per neuron: the graph of which level-2 chunks touch which, then the L2 cache's
+`rep_coord_nm` and `max_dt_nm` per chunk. Measured on BANC: five neurons concurrently in 3.2 s —
+which is one neuron's latency, since they overlap — and trees of 739, 69 and 2 nodes with radii.
+
+**The skeleton *service* several datastacks also publish is not used, and that is measured
+rather than assumed.** It generates from this same cache, so it covers no datastack the L2 route
+does not: `flywire_fafb_public` declares a service and has no cache, which is exactly why its
+skeleton cache was found empty in the phase before this. On one BANC neuron the service took
+10–45 s to generate against 1.6 s here, and returned 74 vertices against 146 chunks. It is also
+blind to `wclee_aedes_brain`, which has a populated cache and publishes no service at all.
+`caveclient.l2cache.has_cache()`'s rule is the gate — the table mapping lists the chunkedgraph
+tables the cache knows, and membership is the answer — verified against the live refusal
+("Dataset flywire_public does not have an L2 Cache") rather than trusted.
+
+Six of the thirteen datastacks have a cache: BANC, FANC production, FlyWire *production*,
+minnie65 public, Aedes and zheng_ca3. **`flywire_fafb_public` does not**, so the node Coda ships
+still declines — correctly, and now for the right reason.
+
+Four things in the tree building, each a wrong picture if lost. **Chunks with no cache entry are
+dropped, and dropped _before_ the walk** — after it they would orphan their children, where
+excluding them lets the walk route around through whatever else they touched (`navis.remove_nodes`
+reparents for the same reason; doing it up front needs no reparenting). **A breadth-first
+spanning forest**, because the L2 graph is undirected and can hold cycles while a skeleton is a
+tree — a cycle surviving into `parents` makes every consumer that walks to a root loop forever.
+**Each component gets its own root**, so a neuron split by an edit is two trees rather than one
+with a fabricated join. And **a single-chunk neuron answers `undefined` before the cache is
+asked**, which is `readGrapheneMesh`'s answer to the same shape of question and saves a round
+trip on a common case.
+
+`MAX_L2_SKELETON_NEURONS` is 100 — far above `MAX_MESH_NEURONS`' 20, because a skeleton is two
+requests where a graphene mesh is several hundred, and far below the 500 a source publishing
+ready-made skeletons allows.
+
+**The skeleton is coarse and the docstring says so.** One node per level-2 chunk is tens to a few
+hundred for a whole neuron, where a traced skeleton is thousands. It is the right shape for
+NBLAST, a 3D overview and cable length; it is not a morphometric reconstruction.
+
+#### The earlier finding, kept because it explains the shape
+
+**The skeleton service is the one thing CAVE publishes that Coda still cannot use, and the
+blocker is the service rather than the format.** `skeleton_source` is a standard `neuroglancer_skeletons`
 precomputed endpoint — its `/info` declares `radius` and `compartment`, which is exactly what
 `SkeletonGeometry` wants, and it is CORS-open. But it is a **cache that generates on demand**,
 and for `flywire_fafb_public` it is empty: 100 proofread root ids sampled from two places in the

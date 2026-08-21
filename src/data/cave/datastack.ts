@@ -20,6 +20,8 @@ import { datastackInfo, versionsMetadata } from './api'
 import type { CaveRequestOptions } from './client'
 import { getServer } from './credentials'
 import { reportSourceLearned } from '../source'
+import { parseGrapheneSource } from './graphene'
+import { l2TableMapping, resetL2Cache } from './l2'
 
 const records = new Map<string, Promise<DatastackInfo>>()
 
@@ -43,6 +45,9 @@ function currentServer(): string {
     materializations.clear()
     loading.clear()
     asked.clear()
+    l2Support.clear()
+    l2Asked.clear()
+    resetL2Cache()
     filledFrom = server
   }
   return server
@@ -169,5 +174,55 @@ export function resetDatastackRecords(): void {
   materializations.clear()
   loading.clear()
   asked.clear()
+  l2Support.clear()
+  l2Asked.clear()
+  resetL2Cache()
   filledFrom = undefined
+}
+
+// ---------------------------------------------------------------------------
+// Whether a datastack's chunkedgraph has an L2 cache
+// ---------------------------------------------------------------------------
+
+const l2Support = new Map<string, boolean>()
+const l2Asked = new Set<string>()
+
+/**
+ * Whether skeletons can be built for this datastack — synchronously, if it is known.
+ *
+ * `peekMaterializations`' contract again, and for the same reason: `validate` asks on every
+ * graph mutation and may not await, so the first look answers `undefined` and
+ * `reportSourceLearned` re-infers when the answer lands. Asked once per datastack.
+ *
+ * Six of the thirteen datastacks the info service lists have a cache. It is the honest gate for
+ * skeletons — a flat `false` told every FlyWire-production user a falsehood, and the skeleton
+ * *service* is no better a gate, since it generates from this same cache.
+ */
+export function peekL2Cache(datastack: string): boolean | undefined {
+  currentServer()
+  const known = l2Support.get(datastack)
+  if (known !== undefined || !datastack || l2Asked.has(datastack)) return known
+  l2Asked.add(datastack)
+  // Swallowed: a peek has no caller to report to, and a 401 travels on its own channel.
+  void l2CacheFor(datastack).catch(() => undefined)
+  return undefined
+}
+
+/** The same, awaited — what `fetchSkeletons` uses before it starts. */
+export async function l2CacheFor(
+  datastack: string,
+  options: CaveRequestOptions = {},
+): Promise<boolean> {
+  const server = currentServer()
+  const info = await datastackRecord(datastack, options)
+  const graphene = parseGrapheneSource(info.segmentation_source)
+  // Not a chunkedgraph at all — `caveclient.has_cache` refuses on the same test, first.
+  const has = graphene
+    ? graphene.table in (await l2TableMapping(graphene.server, options))
+    : false
+  if (server === filledFrom) {
+    l2Support.set(datastack, has)
+    reportSourceLearned('cave')
+  }
+  return has
 }

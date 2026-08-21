@@ -26,6 +26,7 @@ import { CAVE_MAX_ROWS } from './client'
 import { resetDatastackRecords } from './datastack'
 import { registerDatastackSpec, resetRuntimeSpecs } from './spec'
 import { caveScene } from './scene'
+import { readL2Skeleton } from './l2'
 import { segmentationLayerIndex } from '../neuroglancer/scene'
 import { MAX_MESH_NEURONS, decimateGridFor, fragmentConcurrencyFor } from './meshes'
 import { quoteWideIntegers, parseCaveJson } from './json'
@@ -1093,5 +1094,112 @@ describe('building a neuroglancer scene', () => {
     const scene = caveScene('aedes', INFO)
     expect(scene?.layout).toBeUndefined()
     expect(scene?.showSlices).toBeUndefined()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Skeletons from the level-2 chunk graph
+// ---------------------------------------------------------------------------
+
+/**
+ * `fafbseg.flywire.get_l2_skeleton()`'s method: the graph of which level-2 chunks touch which,
+ * plus a representative coordinate per chunk. The only real algorithm is turning an undirected,
+ * possibly cyclic graph into a tree, and the three rules below are each a wrong picture if lost.
+ */
+describe('building a skeleton from the L2 graph', () => {
+  const L2 = 'https://cave.fanc-fly.com'
+  const TABLE = 'wclee_fly_cns_001_public'
+
+  /** `a—b—c—d`, a straight chain. */
+  const CHAIN = { edge_graph: [['1', '2'], ['2', '3'], ['3', '4']] }
+  const at = (n: number) => ({ rep_coord_nm: [n * 10, 0, 0], max_dt_nm: n })
+  const COORDS = { '1': at(1), '2': at(2), '3': at(3), '4': at(4) }
+
+  function install(graph: unknown, coords: unknown): void {
+    vi.stubGlobal('fetch', (url: string) =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        text: () =>
+          Promise.resolve(JSON.stringify(String(url).includes('/lvl2_graph') ? graph : coords)),
+      } as Response),
+    )
+  }
+
+  it('turns the chunk graph into a tree with one root', async () => {
+    install(CHAIN, COORDS)
+    const sk = await readL2Skeleton(L2, TABLE, '1')
+    expect(sk?.parents).toHaveLength(4)
+    // Exactly one root, and every other node's parent is a real index.
+    expect([...sk!.parents].filter((p) => p === -1)).toHaveLength(1)
+    for (const p of sk!.parents) expect(p).toBeLessThan(4)
+  })
+
+  it('carries the cache’s coordinates and radius, in nanometres', async () => {
+    install(CHAIN, COORDS)
+    const sk = await readL2Skeleton(L2, TABLE, '1')
+    // `rep_coord_nm` straight through — nothing is scaled anywhere on this path.
+    expect([...sk!.positions.slice(0, 3)]).toEqual([10, 0, 0])
+    // `max_dt_nm`, which is what `get_l2_skeleton` uses as the radius.
+    expect([...sk!.radii]).toEqual([1, 2, 3, 4])
+  })
+
+  it('breaks a cycle rather than emitting one', async () => {
+    // The L2 graph is undirected and can hold cycles; a skeleton is a tree, so one edge of the
+    // loop has to go. A cycle survived into `parents` would make every consumer that walks to a
+    // root loop forever.
+    install({ edge_graph: [['1', '2'], ['2', '3'], ['3', '1']] }, COORDS)
+    const sk = await readL2Skeleton(L2, TABLE, '1')
+    expect(sk?.parents).toHaveLength(3)
+    for (let i = 0; i < sk!.parents.length; i++) {
+      let steps = 0
+      for (let at = sk!.parents[i]!; at !== -1; at = sk!.parents[at]!) {
+        if (++steps > sk!.parents.length) throw new Error('parents form a cycle')
+      }
+    }
+  })
+
+  it('gives each disconnected component its own root', async () => {
+    // A neuron split by an edit is two trees. Joining them would draw a branch through empty
+    // space between two pieces that are not connected.
+    install({ edge_graph: [['1', '2'], ['3', '4']] }, COORDS)
+    const sk = await readL2Skeleton(L2, TABLE, '1')
+    expect([...sk!.parents].filter((p) => p === -1)).toHaveLength(2)
+  })
+
+  it('drops a chunk the cache has never heard of, keeping the rest connected', async () => {
+    /*
+     * `drop_missing`: a chunk absent from the cache has only its chunk-grid position, which is
+     * the corner of a box tens of microns across. Dropped *before* the walk rather than after,
+     * so the tree routes around it — removing it from a finished tree would orphan its children.
+     */
+    install(CHAIN, { '1': at(1), '2': at(2), '4': at(4) })
+    const sk = await readL2Skeleton(L2, TABLE, '1')
+    expect(sk?.parents).toHaveLength(3)
+    // 3 is gone, so 4 is its own root rather than hanging off nothing.
+    expect([...sk!.parents].filter((p) => p === -1)).toHaveLength(2)
+  })
+
+  it('answers nothing for a neuron of a single chunk, without asking the cache', async () => {
+    /*
+     * `get_l2_skeleton` raises here; undefined is `readGrapheneMesh`'s answer to the same shape
+     * of question, and it must not fail the other neurons in the request.
+     *
+     * The request count is the assertion that bites: without the early return the coordinates
+     * are fetched for a graph with no chunks in it, and the result is `undefined` either way —
+     * so an assertion on the return value alone passes against a wasted round trip per
+     * single-chunk neuron, and those are common enough to have their own error message upstream.
+     */
+    const urls: string[] = []
+    vi.stubGlobal('fetch', (url: string) => {
+      urls.push(String(url))
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        text: () => Promise.resolve(JSON.stringify({ edge_graph: [] })),
+      } as Response)
+    })
+    expect(await readL2Skeleton(L2, TABLE, '1')).toBeUndefined()
+    expect(urls.filter((u) => u.includes('/attributes'))).toHaveLength(0)
   })
 })

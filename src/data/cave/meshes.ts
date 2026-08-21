@@ -40,6 +40,7 @@ import { decodeDracoFragment } from '../precomputed/draco'
 import { fetchBytes, objectStoreUrl } from '../precomputed/transport'
 import type { CaveRequestOptions } from './client'
 import { caveGet } from './client'
+import { parseGrapheneSource } from './graphene'
 
 /**
  * How many neurons a mesh request will take.
@@ -149,21 +150,18 @@ interface SegmentationInfo {
 /**
  * Resolve a `graphene://` segmentation source into the two URLs meshes need.
  *
- * The scheme prefix carries the server *and* the table name — `graphene://https://host/segmentation/1.0/<table>`
- * — and the meshing API is keyed by that table rather than by the datastack, which are different
- * strings on FlyWire (`flywire_public` against `flywire_fafb_public`). Taking the datastack name
- * here would 404, so the table is read out of the URL that named it.
+ * The meshing API is keyed by the chunkedgraph *table* rather than by the datastack — see
+ * `parseGrapheneSource`, which is where that distinction now lives.
  */
 export async function openGrapheneMeshes(
   segmentationSource: string,
   options: CaveRequestOptions = {},
 ): Promise<GrapheneMeshSource | undefined> {
-  const url = segmentationSource.replace(/^graphene:\/\//, '')
-  const match = /^(https?:\/\/[^/]+)\/segmentation\/[^/]+\/([^/?#]+)/.exec(url)
-  if (!match) return undefined
-  const [, server, table] = match
+  const parsed = parseGrapheneSource(segmentationSource)
+  if (!parsed) return undefined
+  const { server, table, base } = parsed
 
-  const info = await caveGet<SegmentationInfo>(`${url.replace(/\/+$/, '')}/info`, options)
+  const info = await caveGet<SegmentationInfo>(`${base}/info`, options)
   if (!info.data_dir || !info.mesh) return undefined
 
   // `objectStoreUrl` refuses a scheme it does not know rather than guessing — not every CAVE
