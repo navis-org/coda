@@ -124,6 +124,24 @@ bundled corepack, so pnpm was installed with `npm i -g pnpm`.
    the copies had already drifted: two accepted a leading `-` and two did not, while the type's
    own documentation asserted a grammar no function enforced.
 
+   **And it kept being written a fifth time, in the UI, where nothing enforces it.** Three sites
+   converted an id to a `number` and were found together after one was reported: Explore's
+   `neuronIdAt` (`Number(cell)`, so an eighteen-digit root id went into the `selection` param as
+   `…857200`), `PartnerRow.neuronId` in `profileStats` (`toNumber`, and then
+   `a.neuronId - b.neuronId` as a tie-break, which reports two adjacent wide ids as *equal*), and
+   `NeuroglancerProfileFrame`'s `neuronId: number`, which becomes a neuroglancer segment.
+
+   The Explore one is the instructive symptom, because it is precise and points nowhere near the
+   cause: **`Hits` works and `Selected` is empty**. `Hits` is `selectRows(index, capped)` and never
+   goes through the selection; `Selected` is `rowsWithIds(index, selection)`, matching a rounded
+   string against exact ones. Worse, the *checkbox stayed ticked* — the widget compared its own
+   rounded id against its own rounded id, so only the value crossing to `evaluate` was wrong.
+   neuPrint's nine-to-eleven-digit ids are exact as doubles, which is why all three survived.
+
+   The one remaining `Number(...)` on an id is `inputIds`' unwired branch, which is deliberate and
+   documented there: `ID_ONLY_SCHEMA` declares `i64`, invariant 3 says the halves must agree, and
+   `validate` warns about the ids that cannot survive it.
+
    **`idText` is the cell-level rule**, shared by `idColumn`, the connectivity traversal and the
    path decoder, so the ids a query is _built from_ cannot disagree with the ids a result is
    _keyed by_ — that disagreement shows up as edges silently missing from a hop rather than as

@@ -32,7 +32,8 @@ export interface NeuronRowProps {
    * function for the whole page — a fresh `() => toggle(id)` per row defeated `memo`
    * outright, and every row re-rendered (thumbnail subtree included) on every tick.
    */
-  onToggle: (neuronId: number) => void
+  /** Text, never a number: a wide root id does not survive a double. See invariant 8. */
+  onToggle: (neuronId: string) => void
   /** Inside a node card rather than the full-size overlay: a smaller thumbnail. */
   compact: boolean
 }
@@ -56,7 +57,6 @@ function NeuronRowImpl({
   // `idText` keeps a wide id exactly; `Number(cell)` would round it before the thumbnail
   // cache key and the 3D fetch ever see it.
   const neuronIdText = idText(cellOf(table, 'neuronId', row)) ?? ''
-  const neuronId = Number(neuronIdText)
   const primary = fields.primary ? cellOf(table, fields.primary, row) : null
   /*
    * The card shows the same chips as the overlay, and `compact` reaches only the thumbnail.
@@ -87,7 +87,7 @@ function NeuronRowImpl({
   return (
     <div className="explore-row" data-selected={selected || undefined}>
       <label className="explore-row__pick" title={selected ? 'Deselect' : 'Select'}>
-        <input type="checkbox" checked={selected} onChange={() => onToggle(neuronId)} />
+        <input type="checkbox" checked={selected} onChange={() => onToggle(neuronIdText)} />
       </label>
 
       <NeuronThumbnail

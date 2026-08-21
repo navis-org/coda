@@ -277,6 +277,38 @@ describe('ExploreBody', () => {
     await waitFor(() => expect(screen.getByText(/1 selected/)).toBeTruthy())
   })
 
+  it('writes a wide root id exactly, where a double would round it', async () => {
+    /*
+     * Invariant 8, in the widget. This was `Number(cell)`: an eighteen-digit CAVE root id went
+     * into the param as `…857200` and `rowsWithIds` matched it against nothing, so `Selected`
+     * came out empty while `Hits` — which never goes through the selection — worked. The
+     * checkbox looked right throughout, because the widget compared its own rounded id against
+     * its own rounded id and only the value crossing to `evaluate` was wrong.
+     */
+    const WIDE = '720575940628857210'
+    registerSource(
+      Object.assign(Object.create(new MockSource({ latencyMs: 0 })) as DataSource, {
+        id: 'mock-wide',
+        neuronIndex: async () =>
+          makeTable(
+            tableSchema(column('neuronId', 'str'), column('type', 'str')),
+            { neuronId: [WIDE, '720575940628857211'], type: ['LC4', 'LC6'] },
+            'neurons',
+          ),
+      }),
+    )
+
+    const { writes } = setup({}, 'mock-wide')
+    await waitFor(() => expect(rows().length).toBe(2))
+    fireEvent.click(within(rows()[0] as HTMLElement).getByRole('checkbox'))
+
+    const selection = writes.filter(([id]) => id === 'selection').at(-1)?.[1] as string[]
+    expect(selection).toEqual([WIDE])
+    // Not merely "18 digits": the rounded form differs in the last two, so an assertion on
+    // length or on a prefix would pass against the bug.
+    expect(selection[0]).not.toBe(String(Number(WIDE)))
+  })
+
   it('selects every neuron on the page', async () => {
     const { writes } = setup({ pageSize: 5 })
     await ready()

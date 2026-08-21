@@ -25,7 +25,8 @@ import { errorMessage } from '../../core/errors'
 export interface NeuroglancerProfileFrameProps {
   sourceId: string | undefined
   datasetId: string | undefined
-  neuronId: number | undefined
+  /** Text, never a number: it becomes a neuroglancer segment. See invariant 8. */
+  neuronId: string | undefined
   onError?: (message: string) => void
 }
 

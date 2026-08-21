@@ -125,6 +125,32 @@ describe('partnerTypes', () => {
 })
 
 describe('topPartners', () => {
+  it('keeps a wide partner id exactly, and still breaks a tie by it', () => {
+    /*
+     * Invariant 8: this was `toNumber`, so an eighteen-digit CAVE root id was rounded before the
+     * widget printed it — a partner that does not exist — and `a.neuronId - b.neuronId` then
+     * compared two adjacent ids as *equal*, so the tie-break silently stopped being one.
+     */
+    const wide: [string, string] = ['720575940628857210', '720575940628857211']
+    const table = tableFromRows(
+      tableSchema(
+        column('neuronId', 'str'),
+        column('partnerId', 'str'),
+        column('partnerType', 'str'),
+        column('weight', 'i64'),
+      ),
+      [
+        { neuronId: '1', partnerId: wide[1], partnerType: 'b', weight: 5 },
+        { neuronId: '1', partnerId: wide[0], partnerType: 'a', weight: 5 },
+      ],
+    )
+    const rows = topPartners(table, { minWeight: 1, topN: 10 })
+    expect(rows.map((r) => r.neuronId)).toEqual(wide)
+    // Not "18 digits": the rounded pair collapses to one value, so a length assertion passes
+    // against the bug.
+    expect(new Set(rows.map((r) => r.neuronId)).size).toBe(2)
+  })
+
   it('ranks individual neurons by weight', () => {
     const rows = topPartners(
       connectivity([
@@ -132,7 +158,7 @@ describe('topPartners', () => {
         { partnerId: 11, partnerType: 'Tm1', weight: 50 },
       ]),
     )
-    expect(rows.map((r) => r.neuronId)).toEqual([11, 10])
+    expect(rows.map((r) => r.neuronId)).toEqual(['11', '10'])
     expect(rows[0]?.share).toBeCloseTo(50 / 55)
   })
 })

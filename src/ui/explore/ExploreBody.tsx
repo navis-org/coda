@@ -17,6 +17,7 @@
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 
+import { idText } from '../../core/ids'
 import { datasetRef } from '../../core/types'
 import { isDatasetValue } from '../../core/values'
 import { MAX_SELECT_ALL } from '../../nodes/query/explore'
@@ -160,25 +161,41 @@ export function ExploreBody({ node, ctx, compact, inputValues, setParam }: NodeB
   const selectionRef = useRef(selection)
   selectionRef.current = selection
   const toggle = useCallback(
-    (neuronId: number) => {
+    (neuronId: string) => {
       const next = new Set(selectionRef.current)
-      const key = String(neuronId)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
+      if (next.has(neuronId)) next.delete(neuronId)
+      else next.add(neuronId)
       setParam('selection', [...next])
     },
     [setParam],
   )
 
+  /**
+   * A row's neuron id, as **text**.
+   *
+   * Invariant 8, and this widget broke it: it was `Number(cell)`, so an eighteen-digit CAVE root
+   * id was rounded on its way into the `selection` param — `720575940628857210` stored as
+   * `…200`, which `rowsWithIds` then matched against nothing. The symptom is precise and was
+   * reported as such: `Hits` works and `Selected` is empty, because `Hits` never goes through
+   * the selection. Worse, the *checkbox* looked right, since the widget compared its own rounded
+   * id against its own rounded id and only the value crossing to `evaluate` was wrong.
+   *
+   * neuPrint's nine-to-eleven-digit ids are exact as doubles, which is why it survived this long.
+   */
   const neuronIdAt = useCallback(
-    (row: number) => Number(table?.data['neuronId']?.[row] ?? 0),
+    (row: number) => idText(table?.data['neuronId']?.[row] ?? null),
     [table],
   )
 
   const selectRowsInto = useCallback(
     (rows: readonly number[]) => {
       const next = new Set(selection)
-      for (const row of rows) next.add(String(neuronIdAt(row)))
+      for (const row of rows) {
+        const id = neuronIdAt(row)
+        // A row whose id is null or unreadable is skipped rather than added as "null" — the
+        // grammar's job, and `idText` is the one place that decides it.
+        if (id) next.add(id)
+      }
       setParam('selection', [...next])
     },
     [selection, neuronIdAt, setParam],
@@ -357,16 +374,16 @@ export function ExploreBody({ node, ctx, compact, inputValues, setParam }: NodeB
               </div>
             ) : (
               visible.map((row) => {
-                const neuronId = neuronIdAt(row)
+                const neuronId = neuronIdAt(row) ?? ''
                 return (
                   <NeuronRow
-                    key={neuronId}
+                    key={neuronId || row}
                     table={table}
                     row={row}
                     fields={fields}
                     sourceId={ref?.sourceId}
                     datasetId={ref?.datasetId}
-                    selected={selection.has(String(neuronId))}
+                    selected={selection.has(neuronId)}
                     onToggle={toggle}
                     compact={compact}
                   />

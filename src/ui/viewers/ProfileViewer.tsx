@@ -34,7 +34,7 @@ import {
   topPartners,
   transmitterReading,
 } from '../../nodes/lib/profileStats'
-import type { PartnerTypeRow, RegionRow } from '../../nodes/lib/profileStats'
+import type { PartnerRow, PartnerTypeRow, RegionRow } from '../../nodes/lib/profileStats'
 import { CHART_INK, currentMode, seriesColor } from '../colors'
 import { chipKey, chipSlots, rowFields } from '../explore/rowFields'
 import { NeuronThumbnail } from '../explore/NeuronThumbnail'
@@ -277,7 +277,9 @@ export function ProfileViewer({
             <NeuroglancerProfileFrame
               sourceId={sourceId}
               datasetId={datasetId}
-              neuronId={neuronId !== null ? Number(neuronId) : undefined}
+              // Text: a wide root id does not survive a double, and this one becomes a
+              // neuroglancer segment. Invariant 8.
+              neuronId={idText(neuronId) ?? undefined}
               onError={onError}
             />
           )}
@@ -518,7 +520,7 @@ function PartnerList({
   rows,
   total,
 }: {
-  rows: Array<{ neuronId: number; type: string | null; weight: number; share: number }>
+  rows: readonly PartnerRow[]
   total: number
 }) {
   return (
