@@ -17,6 +17,9 @@
  */
 
 import type { NodeCategory, NodeDefinition, PortDef } from '../../core/node'
+
+import type { DatasetBackend } from '../../nodes/lib/datasetFamilies'
+import { BACKENDS, backendForNodeType } from '../../nodes/lib/datasetFamilies'
 import { socketStyle } from '../socketStyle'
 import type { SocketShape } from '../socketStyle'
 import { plural } from '../format'
@@ -34,7 +37,14 @@ export interface NodeThumbnailProps {
 export function NodeThumbnail({ def }: NodeThumbnailProps) {
   const inputs = (def.inputs ?? []).slice(0, MAX_DOTS)
   const outputs = (def.outputs ?? []).slice(0, MAX_DOTS)
-  const tint = `var(--cat-${def.category})`
+  /*
+   * A dataset tile is tinted by *backend*, matching its card. Falls through to the category
+   * token for everything else, and for a backend nobody has styled yet.
+   */
+  const backend = backendForNodeType(def.type)
+  const tint = backend
+    ? `var(--cat-dataset-${backend.id}, var(--cat-dataset))`
+    : `var(--cat-${def.category})`
 
   /*
    * An annotation is drawn as what it is on the canvas: a framed box of text, no header strip
@@ -103,6 +113,7 @@ export function NodeThumbnail({ def }: NodeThumbnailProps) {
       />
 
       <CategoryGlyph def={def} />
+      {backend && <BackendMark backend={backend} />}
 
       {inputs.map((port, index) => (
         <SocketDot key={`in-${port.id}`} port={port} x={1} y={dotY(index, inputs.length)} />
@@ -326,6 +337,46 @@ function CategoryGlyph({ def }: { def: NodeDefinition }) {
       className="node-thumb__glyph"
     >
       {nodeGlyph(def.type, def.category)}
+    </g>
+  )
+}
+
+/**
+ * Which pip a backend lights, derived from `BACKENDS` rather than restated.
+ *
+ * That table's comment promises a fourth backend is "one entry here rather than four edits spread
+ * across the UI", and a second map keyed by the same ids in a second file was the fourth edit.
+ */
+const BACKEND_IDS = Object.keys(BACKENDS)
+
+/**
+ * A small mark on a dataset tile saying which backend serves it.
+ *
+ * Colour is never the only channel here — the socket palette's rule — and this is the non-colour
+ * half of it in the one surface where the node's *name* is small: a browser grid shows dozens of
+ * tiles at once, and two greens a stop apart are a weaker signal at that size than on a card.
+ *
+ * Pips rather than a letter, because the tile is 22px of glyph and a legible letter would compete
+ * with it. One lit pip in a fixed slot, so the mark is positional rather than a count to read.
+ */
+function BackendMark({ backend }: { backend: DatasetBackend }) {
+  // Always found: `backend` only ever arrives from `backendForNodeType`, which returns values out
+  // of the very table `BACKEND_IDS` is the keys of.
+  const slot = BACKEND_IDS.indexOf(backend.id)
+  const gap = 4.4
+  const right = WIDTH - 6
+  return (
+    <g aria-hidden="true">
+      {BACKEND_IDS.map((_id, i) => (
+        <circle
+          key={i}
+          cx={right - (BACKEND_IDS.length - 1 - i) * gap}
+          cy={HEADER_HEIGHT / 2}
+          r={1.6}
+          fill="var(--text-inverse)"
+          opacity={i === slot ? 0.95 : 0.25}
+        />
+      ))}
     </g>
   )
 }

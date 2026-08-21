@@ -157,8 +157,8 @@ describe('the credential promise', () => {
   })
 })
 
-describe('the three sections', () => {
-  it('offers Data sources, AI assistant and Sharing as the top level, opening on data', () => {
+describe('the sections', () => {
+  it('offers each kind of connection as the top level, opening on data', () => {
     render(<SourcesPanel />)
     open()
 
@@ -166,8 +166,30 @@ describe('the three sections', () => {
       within(screen.getByRole('tablist', { name: 'Connection kind' }))
         .getAllByRole('tab')
         .map((el) => el.textContent),
-    ).toEqual(['Data sources', 'AI assistant', 'Sharing'])
+    ).toEqual(['Data sources', 'AI assistant', 'Annotations', 'Sharing'])
     expect(section('Data sources').getAttribute('aria-selected')).toBe('true')
+  })
+
+  /*
+   * The same split the API key gets, and for the same reason: an annotation base is somebody's
+   * spreadsheet of labels joined onto a connectome, not a fourth backend you could query for
+   * neurons. Filing FlyTable under Data sources would say it was one.
+   */
+  it('keeps the annotation deployments out of the source list', () => {
+    render(<SourcesPanel />)
+    open()
+    expect(
+      sourceTabs()
+        .getAllByRole('tab')
+        .map((el) => el.textContent),
+    ).not.toContain('FlyTable')
+
+    fireEvent.click(section('Annotations'))
+    expect(
+      within(screen.getByRole('tablist', { name: 'Annotations' }))
+        .getAllByRole('tab')
+        .map((el) => el.textContent),
+    ).toEqual(['FlyTable', 'SeaTable'])
   })
 
   it('keeps the API key out of the source list entirely', () => {

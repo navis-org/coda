@@ -23,8 +23,12 @@
  */
 
 import { ID_COLUMN_NAME } from '../../core/ids'
+import type { TableSchema } from '../../core/types'
 import type { NeuronId } from '../../core/ids'
 import type {
+  AnnotationsValue,
+  CellValue,
+  ColumnData,
   MatrixValue,
   MeshGeometry,
   MeshesValue,
@@ -65,10 +69,8 @@ import {
 } from './meshes'
 import { DEFAULT_TRIANGLE_BUDGET } from '../precomputed'
 import type { CaveRequestOptions, CaveRow } from './client'
-import { CAVE_MAX_ROWS, CaveError } from './client'
-import type { DatastackInfo } from './api'
+import { CaveError, refuseIfCapped } from './client'
 import {
-  datastackInfo,
   listDatastacks,
   queryTable,
   queryView,
@@ -76,7 +78,9 @@ import {
   versionsMetadata,
 } from './api'
 import { getServer } from './credentials'
+import { caveServerFor, datastackRecord } from './datastack'
 import { codaColumn, defaultSchemas, neuronSchemaFor, schemasFor } from './schema'
+import { withAnnotations } from '../annotations/schema'
 import type { ConnectionViewSpec, DatastackSpec, SynapseTableSpec } from './spec'
 import { DATASTACK_SPECS, datasetIdFor, specFor, splitDatasetId } from './spec'
 
@@ -129,14 +133,6 @@ const MESH_CONCURRENCY = 3
 
 /** Per-datastack state: where it is served from, and what its neuron table looks like. */
 interface DatastackState {
-  /**
-   * The datastack's info record, in flight or resolved.
-   *
-   * The *promise* rather than the value, which is the point: two Meshes nodes on one dataset
-   * used to issue this document twice over, and the listing had already fetched it once and kept
-   * one field. Same idiom as `this.listing ??=` and `state.discovering ??=` below.
-   */
-  info?: Promise<DatastackInfo>
   /** Where this datastack's mesh fragments live, resolved once. */
   meshes?: Promise<GrapheneMeshSource>
   schemas?: SourceSchemas
@@ -157,6 +153,11 @@ interface DatastackState {
    */
   discoveryRequested?: boolean
 }
+
+/** What a truncated read costs here, in the words `refuseIfCapped` appends to. */
+const INCOMPLETE_INDEX =
+  'the neuron index would be incomplete. This datastack is too large to read in one request, ' +
+  'and Coda cannot page it yet'
 
 export class CaveSource implements DataSource {
   readonly id = 'cave'
@@ -241,7 +242,7 @@ export class CaveSource implements DataSource {
     spec: DatastackSpec,
     options: CaveRequestOptions,
   ): Promise<DatasetInfo[]> {
-    const info = await this.infoFor(spec, options)
+    const info = await datastackRecord(spec.datastack, options)
     const versions = await versionsMetadata(info.local_server, spec.datastack, options)
     return versions
       .filter((v) => v.valid !== false && (v.status ?? 'AVAILABLE') === 'AVAILABLE')
@@ -309,9 +310,19 @@ export class CaveSource implements DataSource {
    */
   async neuronIndex(req: NeuronIndexRequest): Promise<TableValue> {
     const { spec, version } = this.require(req.datasetId)
-    const schema = await this.neuronSchema(spec)
+
+    /*
+     * A wired annotation chain **replaces** the datastack's own labels, so it changes both what
+     * the index contains and what it is keyed by. The key carries the chain, or two datasets
+     * differing only in their annotations would share one cached table — and the *first* one
+     * fetched would win, silently, for the rest of the session.
+     */
+    const annotations = req.annotations
+    const schema = annotations
+      ? withAnnotations(this.schemasFor(req.datasetId), annotations.table.schema).neurons
+      : await this.neuronSchema(spec)
     return loadCachedTable({
-      key: neuronIndexKey(this.id, req.datasetId),
+      key: neuronIndexKey(this.id, req.datasetId, annotations?.sources.join('|')),
       fingerprint: schema.columns.map((c) => c.name).join(','),
       ...(req.refresh ? { refresh: req.refresh } : {}),
       fetch: () => this.buildIndex(spec, version, schema, req),
@@ -328,37 +339,32 @@ export class CaveSource implements DataSource {
     const options: CaveRequestOptions = req.signal ? { signal: req.signal } : {}
 
     /*
-     * Both legs at once. The annotation queries depend on nothing from the neuron one — only on
-     * the server and the discovered kinds, both already in hand — so awaiting the neuron table
-     * first cost a full round trip plus the transfer of 139,255 rows out of a ~6.7 s first load.
-     * Peak memory is unchanged: every annotation array is held until the batch resolves either
-     * way.
+     * A wired chain replaces the datastack's labels, so its path fetches only the neuron list —
+     * the built-in annotations would be five queries of up to 139,255 rows discarded a line
+     * later. Two straight paths rather than one braided through three flags: the shared tail
+     * below is what a single interleaved version kept losing, and did, for a phase.
      */
+    if (req.annotations) {
+      req.onProgress?.(0.1, 'loading neurons')
+      const neuronRows = await this.readNeuronRows(spec, version, server, options, true)
+      req.onProgress?.(0.9, 'building index')
+      return this.finish(spec, version, joinIndex(orderOf(neuronRows, spec), req.annotations.table, schema), req)
+    }
+
     req.onProgress?.(0.1, 'loading neurons and annotations')
     const [neuronRows, perSystem] = await Promise.all([
-      queryTable(
-        server,
-        spec.datastack,
-        version,
-        { table: spec.neurons.table, columns: ['id', spec.neurons.idColumn] },
-        options,
-      ),
+      this.readNeuronRows(spec, version, server, options, false),
       this.loadAnnotations(spec, version, server, options),
     ])
-    refuseIfCapped(neuronRows.length, spec.neurons.table)
 
     /*
-     * Root id by the annotation table's reference key, plus the order the index is built in.
-     * Server order rather than a sort: it is stable across calls, and sorting eighteen-digit
-     * text would put the neurons in an order nobody asked for.
+     * Root id by the annotation table's reference key. Only this path needs it: the wired one
+     * joins on the root id directly, because the chain is already keyed by `neuronId`.
      */
     const rootById = new Map<string, string>()
-    const order: string[] = []
     for (const row of neuronRows) {
       const rootId = row[spec.neurons.idColumn]
-      if (rootId === null || rootId === undefined) continue
-      rootById.set(String(row.id), String(rootId))
-      order.push(String(rootId))
+      if (rootId !== null && rootId !== undefined) rootById.set(String(row.id), String(rootId))
     }
 
     const annotations = new Map<string, Record<string, string>>()
@@ -370,26 +376,55 @@ export class CaveSource implements DataSource {
           const rootId = rootById.get(String(row[refColumn]))
           const value = row[valueColumn]
           if (!rootId || value === null || value === undefined) continue
-          const record = annotations.get(rootId) ?? {}
+          let record = annotations.get(rootId)
+          if (!record) {
+            record = {}
+            annotations.set(rootId, record)
+          }
           record[name] = String(value)
-          annotations.set(rootId, record)
         }
       }
     }
 
     req.onProgress?.(0.9, 'building index')
-    /*
-     * Deduplicated on the root id. A CAVE neuron table is keyed by a *point* — a soma, a
-     * nucleus, a representative vertex — so one segment carrying two of them is two rows for
-     * one neuron, and a repeated row is double-counted by everything downstream that sums a
-     * weight.
-     */
-    const seen = new Set<string>()
-    const rows = order
-      .filter((rootId) => !seen.has(rootId) && seen.add(rootId))
-      .map((rootId) => ({ [ID_COLUMN_NAME]: rootId, ...annotations.get(rootId) }))
+    return this.finish(spec, version, labelIndex(orderOf(neuronRows, spec), annotations, schema), req)
+  }
 
-    const table = tableFromRows(schema, rows, 'neurons')
+  /**
+   * The neuron list.
+   *
+   * `id` is only fetched where it is read: the built-in path joins the annotation table through
+   * it, and the wired one never touches it — about a third of a 6.5 MB response at 139,255 rows,
+   * plus its share of `quoteWideIntegers` and the parse.
+   */
+  private async readNeuronRows(
+    spec: DatastackSpec,
+    version: number,
+    server: string,
+    options: CaveRequestOptions,
+    idsOnly: boolean,
+  ): Promise<CaveRow[]> {
+    const rows = await queryTable(
+      server,
+      spec.datastack,
+      version,
+      {
+        table: spec.neurons.table,
+        columns: idsOnly ? [spec.neurons.idColumn] : ['id', spec.neurons.idColumn],
+      },
+      options,
+    )
+    refuseIfCapped(rows.length, spec.neurons.table, INCOMPLETE_INDEX)
+    return rows
+  }
+
+  /** The tail both paths share: the count the card reads, and the last progress tick. */
+  private finish(
+    spec: DatastackSpec,
+    version: number,
+    table: TableValue,
+    req: NeuronIndexRequest,
+  ): TableValue {
     this.noteNeuronCount(spec, version, table.length)
     req.onProgress?.(1, 'ready')
     return table
@@ -431,7 +466,7 @@ export class CaveSource implements DataSource {
           },
           options,
         )
-        refuseIfCapped(rows.length, `${table} (${system})`)
+        refuseIfCapped(rows.length, `${table} (${system})`, INCOMPLETE_INDEX)
         return [system, rows] as const
       }),
     )
@@ -456,6 +491,10 @@ export class CaveSource implements DataSource {
   async findNeurons(req: FindNeuronsRequest): Promise<TableValue> {
     const index = await this.neuronIndex({
       datasetId: req.datasetId,
+      // Forwarded, or a wired chain reaches the *type* and never the rows: three query nodes
+      // advertised its columns and returned the datastack's, and a second whole index was built
+      // and cached under the unannotated key.
+      ...(req.annotations ? { annotations: req.annotations } : {}),
       ...(req.signal ? { signal: req.signal } : {}),
     })
 
@@ -530,7 +569,7 @@ export class CaveSource implements DataSource {
         req.minWeight,
         req.signal,
       ),
-      this.typeLookup(req.datasetId, req.signal),
+      this.typeLookup(req),
     ])
     return tableFromRows(
       this.schemasFor(req.datasetId).connectivity,
@@ -563,7 +602,7 @@ export class CaveSource implements DataSource {
         undefined,
         req.signal,
       ),
-      req.groupByType ? this.typeLookup(req.datasetId, req.signal) : undefined,
+      req.groupByType ? this.typeLookup(req) : undefined,
     ])
     // An untyped neuron keeps its own id as its key rather than joining a bucket called "null" —
     // the rule `profileStats` follows, and for its reason: merging them puts a fictitious type
@@ -639,7 +678,7 @@ export class CaveSource implements DataSource {
     return {
       kind: 'meshes',
       items,
-      attributes: await this.morphologyAttributes(req.datasetId, items, req.signal),
+      attributes: await this.morphologyAttributes(req, items),
       bounds: boundsOf(items.map((i) => i.positions)),
       /*
        * One level, and decimated — which the caption has to say. Graphene publishes supervoxel
@@ -707,7 +746,7 @@ export class CaveSource implements DataSource {
           },
           req.signal ? { signal: req.signal } : {},
         )
-        refuseIfCapped(rows.length, `${synapses.table} (${side})`)
+        refuseIfCapped(rows.length, `${synapses.table} (${side})`, INCOMPLETE_INDEX)
         return [side, rows] as const
       }),
     )
@@ -725,7 +764,7 @@ export class CaveSource implements DataSource {
     const state = this.state(spec.datastack)
     const options: CaveRequestOptions = signal ? { signal } : {}
     state.meshes ??= (async () => {
-      const info = await this.infoFor(spec, options)
+      const info = await datastackRecord(spec.datastack, options)
       // The two absences are said apart: a datastack that names no segmentation at all, and one
       // whose segmentation names a bucket this cannot read. One message for both would assert
       // something false about whichever case it was not written for.
@@ -755,16 +794,23 @@ export class CaveSource implements DataSource {
    * offering nothing. The index is already in hand by the time anyone fetches morphology.
    */
   private async morphologyAttributes(
-    datasetId: string,
+    req: GeometryRequest,
     items: readonly MeshGeometry[],
-    signal: AbortSignal | undefined,
   ): Promise<TableValue> {
-    const types = await this.typeLookup(datasetId, signal)
+    /*
+     * With a chain wired its labels *are* the labels, so `type` comes from `labelsFor` and the
+     * datastack's index is neither needed nor consulted. It was awaited unconditionally and then
+     * overwrote the chain's own `type` one line later — the opposite of what the socket promises,
+     * and on a cold path (Meshes fed by an id list that never went through Find Neurons) it built
+     * a whole 139,255-row index to label twenty meshes.
+     */
+    const types = req.annotations ? undefined : await this.typeLookup(req)
     return tableFromRows(
-      this.schemasFor(datasetId).morphology,
+      withAnnotations(this.schemasFor(req.datasetId), req.annotations?.table.schema).morphology,
       items.map((item) => ({
         [ID_COLUMN_NAME]: item.id,
-        type: types.get(item.id) ?? null,
+        ...labelsFor(req.annotations, item.id),
+        ...(types ? { type: types.get(item.id) ?? null } : {}),
         points: item.positions.length / 3,
       })),
     )
@@ -785,10 +831,13 @@ export class CaveSource implements DataSource {
    * `searchIndexFor`/`statsFor` case exactly.
    */
   private async typeLookup(
-    datasetId: string,
-    signal: AbortSignal | undefined,
+    req: { datasetId: string; annotations?: AnnotationsValue; signal?: AbortSignal },
   ): Promise<Map<string, string>> {
-    const index = await this.neuronIndex({ datasetId, ...(signal ? { signal } : {}) })
+    const index = await this.neuronIndex({
+      datasetId: req.datasetId,
+      ...(req.annotations ? { annotations: req.annotations } : {}),
+      ...(req.signal ? { signal: req.signal } : {}),
+    })
     return typesOf(index)
   }
 
@@ -831,29 +880,136 @@ export class CaveSource implements DataSource {
     return (this.state(spec.datastack).schemas ?? this.schemas).neurons
   }
 
-  /**
-   * The datastack's info record, fetched at most once per instance.
-   *
-   * Every caller wants a different field of it — the listing wants `local_server`, the mesh
-   * reader wants `segmentation_source` — and each used to fetch the whole document and keep one.
-   */
-  private infoFor(spec: DatastackSpec, options: CaveRequestOptions = {}): Promise<DatastackInfo> {
-    const state = this.state(spec.datastack)
-    state.info ??= datastackInfo(getServer(), spec.datastack, options).catch((error) => {
-      // Not cached, so the next caller retries rather than inheriting a rejection forever.
-      state.info = undefined
-      throw error
-    })
-    return state.info
-  }
-
   /** The server a datastack is served from. */
-  private async serverFor(spec: DatastackSpec): Promise<string> {
-    return (await this.infoFor(spec)).local_server
+  private serverFor(spec: DatastackSpec): Promise<string> {
+    return caveServerFor(spec.datastack)
   }
 }
 
 // ---------------------------------------------------------------------------
+
+/**
+ * The neurons a datastack has, in server order, deduplicated.
+ *
+ * Server order rather than a sort: it is stable across calls, and sorting eighteen-digit text
+ * would put the neurons in an order nobody asked for. Deduplicated because a CAVE neuron table
+ * is keyed by a *point* — a soma, a nucleus, a representative vertex — so one segment carrying
+ * two of them is two rows for one neuron, and a repeat is double-counted by everything
+ * downstream that sums a weight.
+ */
+function orderOf(neuronRows: readonly CaveRow[], spec: DatastackSpec): string[] {
+  const order: string[] = []
+  const seen = new Set<string>()
+  for (const row of neuronRows) {
+    const rootId = row[spec.neurons.idColumn]
+    if (rootId === null || rootId === undefined) continue
+    const id = String(rootId)
+    if (seen.has(id)) continue
+    seen.add(id)
+    order.push(id)
+  }
+  return order
+}
+
+/**
+ * The built-in path's table: the datastack's own labels, by root id.
+ *
+ * Column-wise for `joinIndex`'s reason — 139,255 row objects handed to `tableFromRows`, which
+ * then re-reads every key, is two walks and a per-row allocation for a table this already holds
+ * every value of.
+ */
+function labelIndex(
+  order: readonly string[],
+  labels: ReadonlyMap<string, Record<string, string>>,
+  schema: TableSchema,
+): TableValue {
+  const data: Record<string, ColumnData> = {}
+  for (const col of schema.columns) data[col.name] = []
+  const ids = data[ID_COLUMN_NAME]!
+  const targets = schema.columns
+    .filter((c) => c.name !== ID_COLUMN_NAME)
+    .map((c) => ({ name: c.name, into: data[c.name]! }))
+
+  for (const rootId of order) {
+    ids.push(rootId)
+    const record = labels.get(rootId)
+    for (const { name, into } of targets) into.push(record?.[name] ?? null)
+  }
+  return makeTable(schema, data, 'neurons')
+}
+
+/**
+ * The datastack's neurons, labelled from the chain.
+ *
+ * A **left** join on the datastack's own order: every neuron the segmentation knows about comes
+ * out, annotated or not. The other direction would let an annotation base decide which neurons
+ * exist — and those bases routinely carry rows for ids that have since been edited away, which
+ * would put neurons in the index that the connectome cannot answer a single query about.
+ */
+function joinIndex(
+  order: readonly string[],
+  annotations: TableValue,
+  schema: TableSchema,
+): TableValue {
+  const at = annotationIndex(annotations)
+
+  // Column arrays resolved once, not looked up by name per cell: 139,255 rows times a chain's
+  // columns is millions of string-keyed loads otherwise. The hoist `findNeurons` already carries.
+  const data: Record<string, ColumnData> = {}
+  for (const col of schema.columns) data[col.name] = []
+  const ids = data[ID_COLUMN_NAME]!
+  const targets = schema.columns
+    .filter((c) => c.name !== ID_COLUMN_NAME)
+    .map((c) => ({ into: data[c.name]!, from: annotations.data[c.name] }))
+
+  for (const rootId of order) {
+    ids.push(rootId)
+    const row = at.get(rootId)
+    for (const { into, from } of targets) {
+      into.push(row === undefined ? null : (from?.[row] ?? null))
+    }
+  }
+  return makeTable(schema, data, 'neurons')
+}
+
+/** One neuron's labels out of a chain, by id. */
+function labelsFor(
+  annotations: AnnotationsValue | undefined,
+  id: string,
+): Record<string, CellValue> {
+  if (!annotations) return {}
+  const index = annotationIndex(annotations.table)
+  const row = index.get(id)
+  if (row === undefined) return {}
+  const labels: Record<string, CellValue> = {}
+  for (const col of annotations.table.schema.columns) {
+    if (col.name === ID_COLUMN_NAME) continue
+    labels[col.name] = annotations.table.data[col.name]?.[row] ?? null
+  }
+  return labels
+}
+
+/**
+ * Row index of an annotation table, built once per table.
+ *
+ * A `WeakMap` on the table itself, `typesOf`'s idiom: `labelsFor` is called per item, and
+ * rebuilding a 58,000-entry map twenty times over to place twenty meshes is the case that memo
+ * exists for.
+ */
+const annotationRows = new WeakMap<TableValue, Map<string, number>>()
+
+function annotationIndex(table: TableValue): Map<string, number> {
+  const cached = annotationRows.get(table)
+  if (cached) return cached
+  const index = new Map<string, number>()
+  const ids = table.data[ID_COLUMN_NAME] ?? []
+  for (let i = 0; i < table.length; i++) {
+    const id = String(ids[i] ?? '')
+    if (id && !index.has(id)) index.set(id, i)
+  }
+  annotationRows.set(table, index)
+  return index
+}
 
 /**
  * Synapse rows to a point cloud, with one attribute row per point.
@@ -1009,20 +1165,4 @@ function queryLinks(
   )
 }
 
-/**
- * A result the size of the server's cap is not a result.
- *
- * The materialization engine truncates at `CAVE_MAX_ROWS` and says so in a `warning` header its
- * CORS policy does not expose, so a browser can only count. A short index is not a visible
- * failure — it is a dataset that silently lacks neurons, and every query against it would be
- * quietly wrong rather than broken.
- */
-function refuseIfCapped(rows: number, table: string): void {
-  if (rows < CAVE_MAX_ROWS) return
-  throw new CaveError(
-    `CAVE truncated "${table}" at ${CAVE_MAX_ROWS.toLocaleString()} rows, so the neuron index ` +
-      `would be incomplete. This datastack is too large to read in one request, and Coda ` +
-      `cannot page it yet.`,
-  )
-}
 

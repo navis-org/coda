@@ -237,6 +237,30 @@ export interface IdsParam extends ParamBase {
 export type ParamDef =
   NumberParam | StringParam | BooleanParam | EnumParam | ColumnParam | ColumnsParam | IdsParam
 
+/**
+ * The `refresh` nonce a node carries when its data can change under fixed params.
+ *
+ * Cache keys are provenance, so nothing downstream can see that a server's rows changed. This is
+ * the sanctioned escape hatch, and it is `internal` because bumping it by hand is not the point —
+ * `hiddenParams.test.tsx` asserts every `refresh` in the registry carries that flag, so a copy
+ * that dropped it fails in a file about something else.
+ *
+ * `help` differs per node because what "changed" means differs — a dataset listing against an
+ * annotation base edited daily — so it is an argument rather than a fixed string.
+ */
+export function refreshParam(help: string) {
+  return {
+    id: 'refresh',
+    kind: 'int',
+    label: 'Refresh',
+    help,
+    default: 0,
+    min: 0,
+    advanced: true,
+    internal: true,
+  } as const
+}
+
 export type ParamValue = number | string | boolean | string[]
 export type ParamValues = Record<string, ParamValue>
 

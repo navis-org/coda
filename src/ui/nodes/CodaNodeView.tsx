@@ -11,6 +11,8 @@
  */
 
 import { Handle, NodeResizer, Position, useStore, useUpdateNodeInternals } from '@xyflow/react'
+
+import { backendForNodeType } from '../../nodes/lib/datasetFamilies'
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 
 import type { GraphNode } from '../../core/graph'
@@ -183,6 +185,8 @@ function CodaNodeViewImpl({
   }, [id, portsOnHeader, updateNodeInternals])
 
   const def = getNodeDef(node.type)
+  // Dataset cards are tinted by backend; every other category falls through to its own token.
+  const backend = backendForNodeType(node.type)
   const types = inference.nodes[id]
   const ctx = useMemo(
     () => (def ? makeInferContext(def, node.params, types?.inputs ?? {}) : undefined),
@@ -352,7 +356,12 @@ function CodaNodeViewImpl({
             : undefined
         }
       >
-        <div className="coda-node__header" data-category={def.category} title={def.description}>
+        <div
+          className="coda-node__header"
+          data-category={def.category}
+          {...(backend ? { 'data-backend': backend.id } : {})}
+          title={def.description}
+        >
           <span
             className="state-badge"
             data-state={info.state}

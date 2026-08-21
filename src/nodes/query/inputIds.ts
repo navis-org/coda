@@ -1,4 +1,5 @@
 import { numericId } from '../../core/ids'
+import { datasetRequest } from '../lib/datasetParam'
 import { registerNode } from '../../core/registry'
 import { T } from '../../core/types'
 import { isDatasetValue, isTableValue, tableFromRows } from '../../core/values'
@@ -149,7 +150,7 @@ export const inputIdsNode = registerNode({
      * lets a column picker downstream be set up before a single id has been typed.
      */
     const schema = dataset
-      ? schemasForDataset(ctx.resolveSource(dataset.sourceId), dataset.datasetId).neurons
+      ? schemasForDataset(ctx.resolveSource(dataset.sourceId), dataset).neurons
       : ID_ONLY_SCHEMA
 
     /*
@@ -184,7 +185,7 @@ export const inputIdsNode = registerNode({
 
     ctx.progress(0.2, 'looking up')
     const table = await ctx.resolveSource(dataset.sourceId).findNeurons({
-      datasetId: dataset.datasetId,
+      ...datasetRequest(dataset),
       neuronIds: collected.ids,
       signal: ctx.signal,
     })

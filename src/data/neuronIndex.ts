@@ -21,11 +21,13 @@
  *     columns disagree with the type the editor is advertising downstream.
  */
 
-import type { TableValue } from '../core/values'
+import type { AnnotationsValue, TableValue } from '../core/values'
 import { cacheGet, cacheSet } from './cache'
 
 export interface NeuronIndexRequest {
   datasetId: string
+  /** Labels replacing the dataset's own — see `FindNeuronsRequest.annotations`. */
+  annotations?: AnnotationsValue
   /** Ignore any cached copy and re-fetch. Wired to the Explore node's `refresh` param. */
   refresh?: boolean
   /**
@@ -88,9 +90,17 @@ export function loadCachedTable(spec: CachedTableSpec): Promise<TableValue> {
   return load
 }
 
-/** Cache key for a source's neuron index. One place, so a reader and a writer agree. */
-export function neuronIndexKey(sourceId: string, datasetId: string): string {
-  return `neuron-index:${sourceId}:${datasetId}`
+/**
+ * Cache key for a source's neuron index. One place, so a reader and a writer agree.
+ *
+ * `variant` is for a source whose index depends on something outside the dataset id — CAVE's,
+ * where a wired annotation chain replaces the labels, so two graphs on one datastack hold
+ * genuinely different tables. It is part of the key rather than of the fingerprint because a
+ * fingerprint mismatch is a *miss that overwrites*: the second chain would evict the first, and
+ * the two would take turns re-fetching for the rest of the session.
+ */
+export function neuronIndexKey(sourceId: string, datasetId: string, variant = ''): string {
+  return `neuron-index:${sourceId}:${datasetId}${variant && `:${variant}`}`
 }
 
 /**

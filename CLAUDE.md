@@ -399,6 +399,9 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `data/cave/cave.test.ts`                 | CAVE against recorded bodies: a wide root id kept exactly, the string-aware scan, the annotation pivot, an anchored pattern, and every refusal |
 | `nodes/lib/datasetFamilies.test.ts`      | (also) that every CAVE family names a datastack spec and every spec a family — the join key nothing else checks |
 | `data/cave/live.test.ts`                 | the same source against the real services, skipped without `CAVE_TOKEN` — the only thing that notices an endpoint shape changing, plus the mesh and synapse clouds proved to share one nanometre frame |
+| `data/annotations/annotations.test.ts`   | annotation sources: the `Token` scheme, the pseudo-workspaces dropped, a wide id kept as text, the outer join and the later source winning |
+| `data/annotations/live.test.ts`          | the same against real FlyTable, skipped without `SEATABLE_TOKEN` — including the ids proved to be beyond double precision |
+| `nodes/annotation/annotations.test.ts`   | the three source nodes: the two halves of one join asserted against each other, half a chain published as nothing, and the datastack named rather than wired |
 | `nodes/query/morphology.test.ts`         | the shared `Max neurons` ceiling and what its refusal message blames                                                             |
 | `ui/nodes/nodeRunRing.test.tsx`          | run-indicator arithmetic: dash fractions, the zero floor, indeterminate mode                                                     |
 | `ui/nodes/runRing.placement.test.tsx`    | that the outline renders outside the clipped card (slow mock, so 'running' is observable)                                        |
@@ -439,7 +442,7 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `nodes/lib/profileStats.test.ts`         | the profile roll-ups: distinct partners, nested-ROI filtering, the last-parenthesis side rule, NT column matching                |
 | `nodes/lib/networkOps.test.ts`           | filter order, ranking after the weight cut, and the recomputed degree roll-ups                                                   |
 | `nodes/output/profile.test.ts`           | that Profile is a tap, and that paging is free while pinning is not                                                              |
-| `ui/viewers/profileViewer.test.tsx`      | the widget: pager clamping, absent tiles vs dashes, the threshold reaching a heading, card-vs-overlay                            |
+| `ui/viewers/profileViewer.test.tsx`      | the widget: pager clamping, absent tiles vs dashes, the threshold reaching a heading, card-vs-overlay, and the annotation chain reaching both fetches and the cache key |
 | `ui/markdown.test.ts`                    | the markdown subset against the real published blurbs, plus what a hostile one cannot do                                         |
 | `store/companion.test.ts`                | that a dataset node brings its Description card, as one undo step, and which families opt out                                    |
 | `store/autowire.test.ts`                 | that a new node's Dataset socket arrives fed, and every case where it must not — ambiguity, load, an existing wire               |
@@ -1229,6 +1232,186 @@ which is the only reason a viewer computing hex in JS survives a theme switch at
 
 What has **not** been looked at is a tree at the few-hundred-leaf end, where the label thinning
 actually bites, and the `Ordered` matrix beside a Heatmap at a size where the blocks matter.
+
+## Annotations, and telling backends apart
+
+Two things landed together because the second is what the first made necessary: neuron labels
+can now come from somewhere other than the connectome, and a dataset node now says which backend
+serves it.
+
+### Where a neuron's labels come from
+
+`src/data/annotations/`. A **CAVE dataset node has an Annotations socket**, and what is wired to
+it *replaces* the datastack's own labels. Sources **chain** — each has its own optional
+Annotations input — so `CAVEtable → FlyTable → Dataset` is one socket on the dataset and a
+visible sequence on the canvas, with a later source winning a name collision.
+
+**neuPrint has no such socket**, and that is `DatasetBackend.acceptsAnnotations` rather than a
+type check: neuPrint carries its cell typing as properties on the neuron, so there is nothing for
+a source to replace and the control would change nothing. A CAVE datastack takes its labels from
+a table — which is exactly what an annotation source *is* — and for several datastacks there is
+no such table at all. Aedes publishes synapses and nuclei and no annotations whatsoever.
+
+**Three nodes over two providers**, which is `labelsToNeurons`' call again: `FlyTable` and
+`SeaTable` are the *same API at two hosts*, so they share a client and differ in the host they
+default to and the name somebody looks for.
+
+**Two column names are Coda's, and a chain has to land on both.** `neuronId` was obvious — an id
+column is whatever the base calls it and every provider renamed onto it from the start. `type` was
+not, and missing it is entirely silent: `typesOf` reads `index.data.type` by literal name, so a
+chain publishing `cell_type` leaves `neuronType`/`partnerType` null on **every** connectivity row
+while the schema still declares them, Explore's `PRIMARY = ['type', 'instance']` falls through to
+a guess, and Profile's type roll-ups empty. `annotationColumn` in `annotations/types.ts` is the
+rule, applied by both providers — the same statement `data/cave/schema.ts` makes for the
+datastack's own table (`{ pt_root_id: neuronId, cell_type: 'type' }`), since an annotation chain
+is just the other route to the same neuron table. Deliberately only those two: everything else is
+a passthrough only a column picker ever names, which is what neuPrint's `PROPERTY_NAMES` does for
+`cellBodyFiber` and `somaSide`.
+
+**What a chain does to a schema is one function, `withAnnotations`**, and it lives in `src/data`
+because both halves of the seam need it: the edit-time half runs in `src/nodes` (`schemasFromType`,
+so a picker knows what to offer) and the run-time half in `CaveSource` (so the table it builds
+matches), and `src/data` may not import `src/nodes`. Written twice they had already drifted — one
+took the id column off the source's own schema and the other hardcoded `str`, agreeing only
+because every CAVE schema happens to declare `str` today. Invariant 3 in the direction nothing
+type-checks. `chainSchema` and `joinAnnotations` are the same pairing one level up, and share
+`joinedSchema` for the same reason.
+
+**The chain reaches the source, not the graph.** Every request that names a dataset carries it —
+find, index, connectivity, adjacency, geometry — because a `DataSource` has no view of the graph
+and the chain is a fact about the wiring. `datasetRequest(dataset)` returns the **id and the
+annotations together**, so a call site cannot supply one without the other.
+
+That pairing is the fix for a real failure rather than a precaution. The first pass threaded the
+chain into the *type* and only partly into the values: `findNeurons` never forwarded it at all,
+`schemasForDataset` did not substitute where `schemasFromType` did, and the morphology attribute
+table was built from the datastack's schema. So three query nodes advertised the chain's columns
+and returned the backend's, both morphology nodes did the same, and a second complete 139,255-row
+index was built and cached under the unannotated key. Invariant 3 across a seam, silent, and only
+findable by reading every caller — which is why the id and the labels now travel as one thing.
+
+**Known gap, stated rather than papered over:** the Explore *widget* still shows the datastack's
+own labels. It loads independently of any run by design, so all it has is the dataset type, which
+carries the chain's schema and not its table. The node's ports are annotated; the list beside them
+is not. Closing it means the widget reading a run's value, which is the thing its independence was
+built to avoid.
+
+**The Profile widget looked like the same gap and was not**, which is worth the sentence: it
+fetches per neuron rather than loading an index, and `ValuePreview` hands it a whole
+`DatasetValue` and then peeled two strings off it. So the chain now rides along, and the profile
+cache key carries it for `neuronIndexKey`'s reason — two graphs on one datastack with different
+annotations hold different answers, and without it the first one looked at is served to the other
+for the session. It matters on precisely this card because it is the one surface that prints a
+partner's *type* in words beside ports carrying the chain's.
+
+**`CaveSource` left-joins the chain onto its own neuron list**, and the direction matters: every
+neuron the segmentation knows about comes out, annotated or not. The other way round would let an
+annotation base decide which neurons *exist*, and those bases routinely carry rows for ids that
+have since been edited away — putting neurons in the index the connectome cannot answer a single
+query about. The index cache key carries the chain, or two datasets differing only in their
+annotations would share one cached table and the first one fetched would win for the session.
+
+**The CAVE table node's Dataset input is optional, and that is not a convenience.** It was
+required, which made the wiring the node's own guide describes — a datastack's table handed back
+to that datastack as its labels — a **cycle**: `Dataset → CAVE table → Dataset` is two edges
+between one pair in opposite directions, so `topoSort` returns both nodes in `cyclic` and the pair
+goes dark with no result and nothing naming the cause. So the datastack is a param
+(`flywire_fafb_public:783`, the `datasetIdFor` grammar) and the socket is the *override*: wired, it
+names a different datastack to read the table out of, which is the cross-datastack case and the
+only one the wire was ever needed for. Found by writing the node's first test, which is exactly
+the gap invariant 5's corollary records about `out.barChart`.
+
+### SeaTable, verified rather than read
+
+Everything here was probed live against FlyTable. Four calls, and the auth scheme is **`Token`**,
+not `Bearer`, on every one — a Bearer JWT gets `403 invalid token`, which blames the credential
+rather than the scheme.
+
+```text
+GET  {host}/api/v2.1/workspaces/                                → bases, by workspace
+GET  {host}/api/v2.1/workspace/{ws}/dtable/{base}/access-token/ → JWT + uuid + dtable_server
+GET  {server}/api/v1/dtables/{uuid}/metadata/                   → tables and their columns
+GET  {server}/api/v1/dtables/{uuid}/rows/?table_name=…&limit=…  → the rows
+```
+
+- **An account token, not a base API token**, and the distinction cost four failed probes. The
+  documented "app access token" exchange takes a token minted *for one base*; an account token
+  answers `Permission denied` there and works everywhere else. It is also the better credential
+  to ask for: one reaches every base the account can see. The message says so, because the
+  server's does not.
+- **The rows endpoint has no column selection, and the one that does cannot be reached from a
+  browser.** `/dtable-db/api/v1/query/` takes SQL and answers 200 — with no ACAO header. So a
+  whole-table read is every column: FlyWire's `main.info` is 58,340 rows over 60 columns at
+  **~79 MB**, in six pages of 10,000, and **SeaTable does not gzip**. The node's `Columns` param
+  changes what is *kept*, not what is transferred. Cached in IndexedDB, so it is paid once per
+  base; measured end to end at **19.8 s**.
+- **Ids are already text.** `root_id` comes back as `"720575940621522189"`, so it round-trips
+  exactly and meets CAVE's string ids with no conversion. That is the half of invariant 8 that
+  was free, and it is why these two backends join at all — the live test asserts most of a
+  sample is genuinely beyond double precision, because an id merely *ending* in zeroes proves
+  nothing.
+- **Pages are sequential, not concurrent.** `start` is an offset into a base that is being edited
+  while you read it; firing six at once is how a page gets read twice and another missed.
+
+### The CAVE table provider, and where its line falls
+
+It reads a table carrying a root id **directly**, wide or long — `pivotOn` turns a
+one-row-per-(neuron, kind, value) table into columns, reusing the per-kind split `CaveSource`
+already needed for the 500,000-row cap. FlyWire's `hierarchical_neuron_annotations` is *not* such
+a table: it is keyed by `target_id` into `proofread_neurons`, so reading it needs a join only the
+datastack's own spec knows how to write. That stays in `CaveSource` as the built-in, which is
+what a dataset uses when nothing is wired — and keeping it there is what lets this provider be
+about *tables* rather than about FlyWire.
+
+**`peekColumns` is synchronous and answers `undefined` until it knows**, the same contract
+`schemasFor` has and for the same reason. A wide table answers immediately from the ref; a long
+one has to ask the server what its kinds are, and does it once per ref through the 52 kB
+`unique_string_values` call. `reportAnnotationsLearned` is the third thing wired to
+`afterSourceLearned` — dataset listings, upload schemas, and now these: three asynchronous facts
+that inference reads synchronously, one handler.
+
+### Backends, told apart
+
+`BACKENDS` in `datasetFamilies.ts` — a table, because "which backend" is now three things a
+reader needs and a fourth backend should be one entry rather than four edits.
+
+- **The backend is in the name**: `MaleCNS (neuPrint)`, `FlyWire FAFB (CAVE)`. Not decoration —
+  one dataset can be published on more than one backend, and without the suffix two nodes in the
+  Add menu would read identically and behave differently. A backend with an empty label adds
+  nothing, which is what keeps `Hemibrain (mini)` from becoming `Hemibrain (mini) (Mock)`. **The
+  node type ids are untouched**: that is what a saved graph carries.
+- **The card is tinted by backend**, through `--cat-dataset-<id>`. A *lightness* step within the
+  one green, not a second hue: deuteranopia and protanopia collapse red-green hue differences and
+  leave lightness intact, so two greens a stop apart separate for every reader while a green and
+  a teal separate for only some — and the category palette was validated as a set, so a genuinely
+  new hue would mean re-running the validator against the sockets too. The step is deliberately
+  large; a small one reads as a rendering artefact.
+- **The browser tile carries a pip**, which is the non-colour channel. A grid shows dozens of
+  tiles at once and two greens are a weaker signal at that size than on a card. One lit pip in a
+  fixed slot, so it is positional rather than a count to read.
+- **`Custom CAVE`** joins `Custom neuPrint`, and needs more than it: a datastack has no
+  privileged table, so the node names its neuron table and registers a spec through
+  `registerDatastackSpec` — synchronously and with no network, `neuPrintSourceFor`'s rule.
+
+**The Annotations socket takes the dataset hue and the `diamond` shape** — the one that family
+had left, square being the dataset itself and circle/hex/dot the three geometry kinds. A seventh
+chromatic family would fail the all-pairs colourblind gate.
+
+**Connections gained a fourth section rather than two more source tabs.** The top level there is
+*what kind of connection*, and an annotation base is somebody's spreadsheet of labels joined onto
+a connectome — filing FlyTable under Data sources would say it was a fourth backend you could
+query for neurons. Same split, same reasoning, as the AI key.
+
+### What is not done
+
+Neither exporter emits any of it: `dataset.cave` and the three annotation nodes are named in each
+`NO_EMITTER`, because the notebooks are built on neuprint-python and neuprintr and there is no
+caveclient emitter yet. A node body for the annotation sources — a base and table picker fed by
+`listBases`/`readMetadata` rather than two text fields — is the obvious next thing; the client
+methods it needs already exist and are what the Connections tab's Test button uses.
+
+Not looked at in a browser: the tints, the tile pips and the chain on a real canvas. Same
+standing as the WebGL viewers.
 
 ## Auto-run
 

@@ -1,4 +1,5 @@
 import { registerNode } from '../../core/registry'
+import { datasetRequest } from '../lib/datasetParam'
 import { T } from '../../core/types'
 import { isTableValue, tableFromRows } from '../../core/values'
 import {
@@ -146,7 +147,7 @@ export const idsFromLabelNode = registerNode({
   evaluate: async (ctx) => {
     const dataset = requireDataset(ctx.input('dataset'))
     const source = ctx.resolveSource(dataset.sourceId)
-    const schema = schemasForDataset(source, dataset.datasetId).neurons
+    const schema = schemasForDataset(source, dataset).neurons
 
     const wired = ctx.input('labels')
     if (wired !== undefined && !isTableValue(wired))
@@ -179,7 +180,7 @@ export const idsFromLabelNode = registerNode({
     ctx.progress(0.1, `${labels.length} label${labels.length === 1 ? '' : 's'}`)
 
     const neurons = await source.findNeurons({
-      datasetId: dataset.datasetId,
+      ...datasetRequest(dataset),
       labels: match,
       statuses: status ? [status] : undefined,
       signal: ctx.signal,

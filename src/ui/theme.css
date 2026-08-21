@@ -100,6 +100,21 @@
 
   /* --- node category header tints (decorative, low chroma) --------------- */
   --cat-dataset: #1baf7a;
+  /*
+   * Per-backend dataset tints.
+   *
+   * A *lightness* step within one hue, not a second hue. Deuteranopia and protanopia collapse
+   * red-green hue differences and leave lightness intact, so two greens a stop apart separate
+   * for every reader while a green and a teal separate for only some — and the category palette
+   * was validated as a set, so a genuinely new hue would mean re-running the validator against
+   * the sockets too. The step is deliberately large: a small one reads as a rendering artefact
+   * rather than as a distinction.
+   *
+   * Colour is not the only channel either way. The backend is in the node's *name* and on its
+   * browser tile, which is the rule the socket palette follows for the same reason.
+   */
+  --cat-dataset-cave: #0b6b48;
+  --cat-dataset-mock: #7fb3a0;
   --cat-query: #2a78d6;
   --cat-transform: #898781;
   --cat-analysis: #4a3aa7;
@@ -187,6 +202,8 @@
     --chip-7: #9085e9;
     --chip-8: #e66767;
     --cat-dataset: #199e70;
+    --cat-dataset-cave: #3fd6a0;
+    --cat-dataset-mock: #6f9686;
     --cat-query: #3987e5;
     --cat-transform: #898781;
     --cat-analysis: #9085e9;
@@ -245,6 +262,8 @@
   --chip-7: #9085e9;
   --chip-8: #e66767;
   --cat-dataset: #199e70;
+  --cat-dataset-cave: #3fd6a0;
+  --cat-dataset-mock: #6f9686;
   --cat-query: #3987e5;
   --cat-transform: #898781;
   --cat-analysis: #9085e9;

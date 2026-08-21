@@ -23,7 +23,7 @@
 
 import { useMemo } from 'react'
 
-import type { CellValue, TableValue } from '../../core/values'
+import type { AnnotationsValue, CellValue, TableValue } from '../../core/values'
 import { idText } from '../../core/ids'
 import { getRow } from '../../core/values'
 import {
@@ -50,6 +50,8 @@ export interface ProfileViewerProps {
   /** The incoming neuron table. Paged through, one row at a time. */
   neurons: TableValue | undefined
   sourceId: string | undefined
+  /** The wired annotation chain, so a partner's type is the one the ports carry. */
+  annotations?: AnnotationsValue
   datasetId: string | undefined
   /** Row index shown. Clamped here, never trusted. */
   page: number
@@ -73,6 +75,7 @@ const SILHOUETTE_SIZE = 104
 export function ProfileViewer({
   neurons,
   sourceId,
+  annotations,
   datasetId,
   page,
   onPage,
@@ -104,7 +107,7 @@ export function ProfileViewer({
    */
   const neuronId = row ? idText(row['neuronId']) : null
 
-  const profile = useNeuronProfile(sourceId, datasetId, neuronId ?? undefined)
+  const profile = useNeuronProfile(sourceId, datasetId, neuronId ?? undefined, annotations)
   const data = profile.status === 'ready' ? profile.data : undefined
 
   /*

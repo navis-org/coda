@@ -1,4 +1,5 @@
 import { registerNode } from '../../core/registry'
+import { datasetRequest } from '../lib/datasetParam'
 import { T } from '../../core/types'
 import { isTableValue } from '../../core/values'
 import { idColumn } from '../lib/tableOps'
@@ -117,7 +118,7 @@ export const connectivityNode = registerNode({
       direction,
       hops,
       schema: connectivityOutputSchema(
-        schemasForDataset(source, dataset.datasetId).connectivity,
+        schemasForDataset(source, dataset).connectivity,
       ),
       signal: ctx.signal,
       // A hop's cost is unknown until its frontier is known, so progress is per round rather
@@ -129,7 +130,7 @@ export const connectivityNode = registerNode({
         ),
       fetch: (frontier, hopDirection) =>
         source.fetchConnectivity({
-          datasetId: dataset.datasetId,
+          ...datasetRequest(dataset),
           neuronIds: frontier,
           direction: hopDirection,
           minWeight,

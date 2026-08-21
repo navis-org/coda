@@ -1,0 +1,25 @@
+{
+  "rows": [
+    {
+      "root_id": "720575940621522189",
+      "side": "right",
+      "cell_type": null,
+      "super_class": "not_a_neuron",
+      "top_nt": "acetylcholine"
+    },
+    {
+      "root_id": "720575940628857210",
+      "side": "left",
+      "cell_type": "PS180",
+      "super_class": "central",
+      "top_nt": "acetylcholine"
+    },
+    {
+      "root_id": "720575940626838909",
+      "side": "right",
+      "cell_type": "CB0924",
+      "super_class": "central",
+      "top_nt": "acetylcholine"
+    }
+  ]
+}

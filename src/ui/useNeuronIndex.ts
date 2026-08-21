@@ -134,6 +134,19 @@ function ensureLoaded(key: string, sourceId: string, datasetId: string): void {
     })
 }
 
+/**
+ * **Known gap: this shows the dataset's *own* labels, even when an annotation chain is wired.**
+ *
+ * The node's ports are annotated — `explore.ts`'s `evaluate` threads the chain into
+ * `neuronIndex` — but this widget loads independently of any run, by design, so all it has is
+ * the dataset *type*. That carries the chain's schema, not its table, and a table is what an
+ * index needs. Closing it means the widget reading a run's value, which is the thing its
+ * independence was built to avoid.
+ *
+ * So an annotated CAVE dataset shows `type`/`status` in the list and the chain's columns on the
+ * wire. Visible rather than silent, and stated here because the alternative — a parameter
+ * nothing can supply — would read as though it were handled.
+ */
 export function useNeuronIndex(
   sourceId: string | undefined,
   datasetId: string | undefined,

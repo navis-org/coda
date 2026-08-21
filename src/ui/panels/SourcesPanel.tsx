@@ -36,6 +36,13 @@ import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 
 
 import { ConnectionsIcon } from '../Icons'
 
+import { listBases } from '../../data/annotations'
+import {
+  SEATABLE_HOSTS,
+  getToken as getSeaTableToken,
+  setToken as setSeaTableToken,
+  subscribeAuthFailure as subscribeSeaTableAuthFailure,
+} from '../../data/annotations/credentials'
 import { listDatastacks } from '../../data/cave/api'
 import {
   DEFAULT_CAVE_SERVER,
@@ -129,7 +136,42 @@ const SOURCE_TABS: readonly [SourceTab, ...SourceTab[]] = [
   { id: 'mock', label: 'Mock connectome', render: () => <MockTab /> },
 ]
 
-type SectionId = 'data' | 'ai' | 'sharing'
+/**
+ * The annotation deployments, as a tab bar over one form.
+ *
+ * A section of its own rather than two more entries under Data sources, because the top level
+ * there is *what kind of connection* and an annotation base is not a connectome — it is
+ * somebody's spreadsheet of labels, joined onto one. Filing it under the sources would make
+ * FlyTable read as a fourth backend you could query for neurons.
+ */
+const ANNOTATION_TABS: readonly [SourceTab, ...SourceTab[]] = [
+  {
+    id: 'flytable',
+    label: 'FlyTable',
+    render: ({ onClose }) => (
+      <SeaTableTab
+        key="flytable"
+        host={SEATABLE_HOSTS.flytable}
+        note="The LMB&rsquo;s SeaTable deployment, and where FlyWire&rsquo;s live cell typing lives."
+        onSaved={onClose}
+      />
+    ),
+  },
+  {
+    id: 'seatable',
+    label: 'SeaTable',
+    render: ({ onClose }) => (
+      <SeaTableTab
+        key="seatable"
+        host={SEATABLE_HOSTS.seatable}
+        note="The hosted service at cloud.seatable.io, for a base of your own."
+        onSaved={onClose}
+      />
+    ),
+  },
+]
+
+type SectionId = 'data' | 'ai' | 'annotations' | 'sharing'
 
 interface Section {
   id: SectionId
@@ -143,14 +185,26 @@ interface Section {
    */
   privacy: ReactNode
   /**
-   * The section's own body, the same shape `SOURCE_TABS` already uses.
+   * The section's own body, for a section that is one page.
    *
    * A `render` member rather than a chain of `section.id === …` checks in the JSX: with the id
    * chain, adding the third section meant widening the union, adding the entry, adding a
    * subscription and adding a ternary arm — four edits, three of which fail silently if the id
    * is typed wrong. `aria-label` comes off `label`, so a section's name is stated once.
+   *
+   * Exactly one of this and `tabs`.
    */
-  render: (props: SectionProps) => ReactNode
+  render?: (props: SectionProps) => ReactNode
+  /**
+   * …or the tabs it is a bar over, for a section that is several pages.
+   *
+   * The list itself rather than a `tabbed: true` flag beside a `render` that draws the bar. That
+   * flag existed only to say "this body supplies its own `tabpanel`", which is a fact about
+   * *having tabs* — so it was derivable, and a section that gained tabs without remembering it
+   * would have been wrapped twice, with two elements claiming the same role. The label is the
+   * section's own, rather than a second string passed to the bar.
+   */
+  tabs?: readonly [SourceTab, ...SourceTab[]]
   /**
    * The auth-failure channel that opens the dialog *on this section*.
    *
@@ -164,14 +218,6 @@ interface Section {
    * rather than as the panel being on the wrong page.
    */
   subscribe: (onFailure: (message: string, tab?: string) => void) => () => void
-  /**
-   * This section draws its own tab bar, so it supplies its own `tabpanel` wrapper.
-   *
-   * An explicit flag rather than the presence of some other field. It used to be read off
-   * `authTab`, which is a fact about *auth failures* — so a tabbed section that happened not to
-   * name one would have been wrapped twice, with two elements claiming the same role.
-   */
-  tabbed?: boolean
 }
 
 /** What a section body is handed. Every one ignores most of it; see `SourceTabProps`. */
@@ -185,7 +231,6 @@ const SECTIONS: readonly [Section, ...Section[]] = [
   {
     id: 'data',
     label: 'Data sources',
-    tabbed: true,
     subscribe: (onFailure) => {
       const stops = [
         subscribeAuthFailure((message) => onFailure(message, 'neuprint')),
@@ -193,7 +238,7 @@ const SECTIONS: readonly [Section, ...Section[]] = [
       ]
       return () => stops.forEach((stop) => stop())
     },
-    render: (props) => <DataSourceTabs {...props} />,
+    tabs: SOURCE_TABS,
     privacy: (
       <>
         <strong>Credentials stay in this browser.</strong> Tokens are held in this
@@ -217,6 +262,26 @@ const SECTIONS: readonly [Section, ...Section[]] = [
         provider you pick, with no server of ours in between. Whatever you ask the assistant,
         and the graph on your canvas when you ask, are sent to that provider as part of the
         request. A local provider sends nothing off the machine at all.
+      </>
+    ),
+  },
+  {
+    id: 'annotations',
+    label: 'Annotations',
+    subscribe: (onFailure) =>
+      subscribeSeaTableAuthFailure((message) =>
+        // Which *tab* is decided by the host the failure names, because one channel serves both
+        // deployments — they are the same software and share a client.
+        onFailure(message, message.includes('seatable.io') ? 'seatable' : 'flytable'),
+      ),
+    tabs: ANNOTATION_TABS,
+    privacy: (
+      <>
+        <strong>One token per deployment, kept in this browser.</strong> FlyTable and
+        cloud.seatable.io run the same software with unrelated accounts, so each needs its own.
+        Tokens are held in this browser&rsquo;s local storage on this machine only, are never
+        written into a saved graph or an export, and are never sent to us — each goes only to the
+        deployment it belongs to. Coda reads bases; it never writes to one.
       </>
     ),
   },
@@ -345,17 +410,28 @@ export function SourcesPanel() {
 }
 
 /**
- * The Data sources section: a tab bar over the registered backends, and the active one's body.
+ * A section's second level: a tab bar and the active tab's body.
  *
- * Its own component because it is the one section with a second level; the other two are a
- * single form. Keyed by tab so switching remounts, which re-runs the token field's focus.
+ * One component for both sections, because the a11y contract — the `tablist`, the `aria-selected`
+ * on each button, the `tabpanel` keyed by the active id — is the part worth stating once. The
+ * two copies had already diverged on the one thing `SourceTab.render` documents: which props a
+ * tab may see.
+ *
+ * `tabId`/`setTabId` are destructured away and **not** forwarded, because a tab "has no business
+ * reading the tab bar's own state" — the rule the render signature states.
  */
-function DataSourceTabs({ tabId, setTabId, ...tabProps }: SectionProps) {
-  const active = SOURCE_TABS.find((tab) => tab.id === tabId) ?? SOURCE_TABS[0]
+function TabBar({
+  tabs,
+  label,
+  tabId,
+  setTabId,
+  ...tabProps
+}: SectionProps & { tabs: readonly [SourceTab, ...SourceTab[]]; label: string }) {
+  const active = tabs.find((tab) => tab.id === tabId) ?? tabs[0]
   return (
     <>
-      <div className="sources__tabs" role="tablist" aria-label="Data sources">
-        {SOURCE_TABS.map((tab) => (
+      <div className="sources__tabs" role="tablist" aria-label={label}>
+        {tabs.map((tab) => (
           <button
             key={tab.id}
             type="button"
@@ -443,17 +519,17 @@ function Dialog({ onClose, reason, ...tabProps }: DialogProps) {
 }
 
 /**
- * A section's body, wrapped in a `tabpanel` unless it draws its own.
+ * A section's body: its own tab bar, or one page wrapped in a `tabpanel`.
  *
- * The wrapper is the only difference, so the render call is written once: as a ternary it was
- * two identical four-key literals that had to be kept in step.
+ * Written once for the reason the ternary this replaced was not — as two arms it was two
+ * identical four-key literals that had to be kept in step. A tab bar supplies its own panel, so
+ * a wrapper here would be a second element claiming the same role.
  */
 function renderSection(section: Section, props: SectionProps): ReactNode {
-  const body = section.render(props)
-  if (section.tabbed) return body
+  if (section.tabs) return <TabBar tabs={section.tabs} label={section.label} {...props} />
   return (
     <div className="sources__body" role="tabpanel" aria-label={section.label}>
-      {body}
+      {section.render?.(props)}
     </div>
   )
 }
@@ -800,6 +876,128 @@ function CaveTab({ onSaved }: { onSaved: () => void }) {
         <p className="sources__result" data-tone="ok">
           Connected — {probe.datasets} datastacks ({probe.names.join(', ')}
           {probe.datasets > probe.names.length ? ', …' : ''})
+        </p>
+      )}
+      {probe.state === 'failed' && (
+        <p className="sources__result" data-tone="error">
+          {probe.message}
+        </p>
+      )}
+    </section>
+  )
+}
+
+
+/**
+ * One SeaTable deployment's token.
+ *
+ * Its own state, the call `CaveTab` and `SharingTab` already make. What it tests with is the
+ * *base listing*, which is the useful probe here rather than a bare ping: it proves the token
+ * works and shows what it can reach, and "which bases can I see" is the question somebody
+ * configuring one of these nodes is about to ask anyway.
+ */
+function SeaTableTab({
+  host,
+  note,
+  onSaved,
+}: {
+  host: string
+  note: string
+  onSaved: () => void
+}) {
+  const [token, setTokenField] = useState(() => getSeaTableToken(host) ?? '')
+  const [probe, setProbe] = useState<Probe<{ bases: number; names: string[] }>>({ state: 'idle' })
+  const fieldRef = useRef<HTMLInputElement>(null)
+  useEffect(() => fieldRef.current?.focus(), [])
+
+  const test = useCallback(async () => {
+    setProbe({ state: 'testing' })
+    /*
+     * Written first and rolled back on failure, because `listBases` reads the store — the
+     * alternative is a second code path taking a token as an argument, which is how the tested
+     * request and the real one come to differ. `SharingTab`'s trade exactly.
+     */
+    const previous = getSeaTableToken(host)
+    setSeaTableToken(host, token)
+    try {
+      const bases = await listBases(host)
+      setProbe({
+        state: 'ok',
+        bases: bases.length,
+        names: bases.slice(0, 6).map((b) => b.name),
+      })
+    } catch (error) {
+      setSeaTableToken(host, previous)
+      setProbe({ state: 'failed', message: errorMessage(error) })
+    }
+  }, [host, token])
+
+  return (
+    <section className="sources__source">
+      <p className="sources__note">
+        {note} Get an <strong>account</strong> token from your profile at{' '}
+        <a href={host} target="_blank" rel="noreferrer">
+          {new URL(host).host}
+        </a>
+        .
+      </p>
+
+      <label className="sources__field">
+        <span>Account token</span>
+        <input
+          ref={fieldRef}
+          className="field field--mono"
+          value={token}
+          spellCheck={false}
+          placeholder="a1b2c3…"
+          onChange={(e) => setTokenField(e.target.value)}
+        />
+      </label>
+      <p className="sources__note sources__note--tight">
+        <strong>An account token, not a base API token.</strong> The two look alike and only one
+        works: a base token is minted for a single base and is refused by the listing this needs,
+        with a message that blames the token rather than its kind. An account token reaches every
+        base the account can see.
+      </p>
+
+      <div className="sources__actions">
+        <button
+          type="button"
+          className="btn btn--ghost"
+          onClick={() => void test()}
+          disabled={!token.trim() || probe.state === 'testing'}
+        >
+          {probe.state === 'testing' ? 'Testing…' : 'Test'}
+        </button>
+        <button
+          type="button"
+          className="btn btn--ghost"
+          onClick={() => {
+            setSeaTableToken(host, undefined)
+            setTokenField('')
+            setProbe({ state: 'idle' })
+          }}
+          disabled={!token}
+        >
+          Forget
+        </button>
+        <div className="toolbar__spacer" />
+        <button
+          type="button"
+          className="btn btn--primary"
+          onClick={() => {
+            setSeaTableToken(host, token)
+            onSaved()
+          }}
+        >
+          Save
+        </button>
+      </div>
+
+      {probe.state === 'ok' && (
+        <p className="sources__result" data-tone="ok">
+          Connected — {probe.bases} bases ({probe.names.join(', ')}
+          {probe.bases > probe.names.length ? ', …' : ''})
         </p>
       )}
       {probe.state === 'failed' && (

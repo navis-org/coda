@@ -45,6 +45,7 @@ import { NeuPrintSource } from '../data/neuprint/NeuPrintSource'
 import { CaveSource } from '../data/cave/CaveSource'
 import { registerSource, requireSource, subscribeSourceLearned } from '../data/source'
 import { subscribeUploadLearned } from '../data/uploads'
+import { subscribeAnnotationsLearned } from '../data/annotations'
 import { getExample } from '../examples'
 import type { StarterSpec } from '../examples/starters'
 import { buildStarter } from '../examples/starters'
@@ -603,6 +604,12 @@ export const useGraphStore = create<GraphState>((set, get) => {
    * right for exactly the same reasons.
    */
   subscribeUploadLearned(afterSourceLearned)
+  /*
+   * And an annotation provider's columns, for the third time and the same reason: `peekColumns`
+   * is synchronous, so a base's metadata lands after inference has already run against nothing.
+   * Same handler again — three asynchronous facts that inference reads synchronously, one rule.
+   */
+  subscribeAnnotationsLearned(afterSourceLearned)
 
   return {
     graph: initialGraph,

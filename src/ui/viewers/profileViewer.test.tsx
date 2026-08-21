@@ -411,3 +411,52 @@ describe('loading', () => {
     await waitFor(() => expect(screen.getAllByText('Loading…').length).toBeGreaterThan(0))
   })
 })
+
+describe('the annotation chain', () => {
+  /** A chain of `n` sources over the same table — only `sources` is read here. */
+  function chain(...sources: string[]) {
+    return { kind: 'annotations' as const, sources, table: INPUTS }
+  }
+
+  it('rides along to the source, so a partner’s type is the one the ports carry', async () => {
+    const seen: unknown[] = []
+    registerSource(
+      stubSource({
+        fetchConnectivity: async (req) => {
+          seen.push(req.annotations)
+          return req.direction === 'inputs' ? INPUTS : OUTPUTS
+        },
+      }),
+    )
+    const annotations = chain('flytable|main|info')
+    view({ annotations })
+    await waitFor(() => expect(screen.getByTitle(/Tm9 — 50 synapses/)).toBeTruthy())
+
+    // Both directions, or half the card would name types from the datastack and half from the
+    // chain — which is worse than either on its own.
+    expect(seen).toEqual([annotations, annotations])
+  })
+
+  it('keys the cache by the chain, so two datasets do not share one answer', async () => {
+    let calls = 0
+    registerSource(
+      stubSource({
+        fetchConnectivity: async (req) => {
+          calls += 1
+          return req.direction === 'inputs' ? INPUTS : OUTPUTS
+        },
+      }),
+    )
+
+    const first = view({ annotations: chain('a') })
+    await waitFor(() => expect(screen.getByTitle(/Tm9 — 50 synapses/)).toBeTruthy())
+    const after = calls
+    first.unmount()
+
+    // Same source, same dataset, same neuron — a different chain. Without the chain in the key
+    // this answers from the first one's cache and shows the wrong labels for the session.
+    view({ annotations: chain('b') })
+    await waitFor(() => expect(screen.getByTitle(/Tm9 — 50 synapses/)).toBeTruthy())
+    expect(calls).toBeGreaterThan(after)
+  })
+})

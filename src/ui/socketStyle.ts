@@ -56,6 +56,15 @@ export function socketStyle(type: CodaType | undefined): SocketStyle {
     // colourblind gate; see colors.ts.
     case 'linkage':
       return { family: 'matrix', shape: 'ring' }
+    /*
+     * Annotations take the dataset hue, because that is what they are about — a dataset's label
+     * half, arriving from somewhere else. `diamond` is the one shape that family had left:
+     * square is the dataset itself and circle/hex/dot are the three geometry kinds that already
+     * share the hue. A seventh chromatic family would fail the all-pairs colourblind gate; see
+     * colors.ts.
+     */
+    case 'annotations':
+      return { family: 'dataset', shape: 'diamond' }
     case 'number':
     case 'string':
     case 'boolean':

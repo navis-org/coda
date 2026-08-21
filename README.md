@@ -55,6 +55,10 @@ dropdown defaulting to the newest release the server reports (named, so it reads
 `Add ▶ Dataset ▶ Custom neuPrint` takes a server and a dataset id by hand, for a deployment or
 release this build has never heard of.
 
+Every dataset node says which backend serves it — `MaleCNS (neuPrint)`, `FlyWire FAFB (CAVE)` —
+because one dataset can be published on more than one and they do not behave alike. The card is
+tinted and the browser tile marked to match.
+
 **FlyWire comes through [CAVE](https://caveclient.readthedocs.io/) rather than neuPrint**, so it
 wants a CAVE token (Connections ▸ CAVE — the same one `caveclient` keeps in
 `~/.cloudvolume/secrets`) and its version dropdown names a **materialization** rather than a
@@ -65,6 +69,13 @@ skeleton service generates on demand and has nothing cached for this dataset, so
 declines instead of hanging. Paths and per-region counts have no CAVE equivalent at all. Meshes
 are capped at 20 neurons — a graphene mesh has no level of detail, so each one is several hundred
 requests.
+
+**Labels can come from somewhere other than the connectome.** A CAVE dataset node has an
+**Annotations** socket: wire a `CAVE table`, `FlyTable` or `SeaTable` node to it and that becomes
+the neuron table's label half, replacing whatever the datastack publishes. They chain, so several
+sources stack into one socket and a later one wins a name collision. This is how FlyWire's live
+cell typing gets in — it lives in FlyTable, not in CAVE — and the only way Aedes gets any labels
+at all. Each deployment needs its own **account** token (Connections ▸ Annotations).
 
 Every published dataset node arrives with a small **Description** card wired to it: what the
 dataset covers, the project's landing page and companion viewers, and the papers its authors ask

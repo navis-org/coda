@@ -1,4 +1,5 @@
 import { registerNode } from '../../core/registry'
+import { datasetRequest } from '../lib/datasetParam'
 import { selectRows } from '../../core/values'
 import { T } from '../../core/types'
 import {
@@ -215,7 +216,7 @@ export const exploreNode = registerNode({
 
     ctx.progress(0.05, 'index')
     const index = await source.neuronIndex({
-      datasetId: dataset.datasetId,
+      ...datasetRequest(dataset),
       refresh,
       // Compressed into the first three quarters: the local search that follows is
       // milliseconds, so letting it own a quarter of the bar would just look stuck at 75%.

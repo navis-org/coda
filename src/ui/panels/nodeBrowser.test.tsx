@@ -66,6 +66,10 @@ const lastListedDef = () => {
   const groups = nodeDefsByCategory()
   return groups[groups.length - 1]!.defs.at(-1)!
 }
+/** The first row the browser lists, derived rather than named. */
+const firstListedDef = () => nodeDefsByCategory()[0]!.defs[0]!
+/** The second, which is what one ArrowDown lands on. */
+const secondListedDef = () => nodeDefsByCategory()[0]!.defs[1]!
 
 /** The nodes the browser lists under one chip, in the order it lists them. */
 const defsIn = (category: string) =>
@@ -84,8 +88,11 @@ describe('NodeBrowser layout', () => {
     expect(rowNames()).toHaveLength(listableNodeDefs().length)
     expect(allNodeDefs().length).toBeGreaterThan(listableNodeDefs().length)
     // Dataset first, utility last — the registry's category order. Both ends are derived
-    // rather than named, so adding a node to either category is not a failing test.
-    expect(rowNames()[0]).toBe('Custom neuPrint')
+    // rather than named, so adding a node to either category is not a failing test. The first
+    // end used to be spelled out despite that comment, and adding an annotation node duly broke
+    // it: `CAVE table` sorts above `Custom neuPrint`.
+    expect(firstListedDef().category).toBe('dataset')
+    expect(rowNames()[0]).toBe(firstListedDef().label)
     expect(lastListedDef().category).toBe('utility')
     expect(rowNames().at(-1)).toBe(lastListedDef().label)
   })
@@ -245,9 +252,9 @@ describe('NodeBrowser selection', () => {
     const input = screen.getByLabelText('Search nodes')
     fireEvent.keyDown(input, { key: 'ArrowDown' })
     fireEvent.keyDown(input, { key: 'Enter' })
-    // Second row in registry order: the Dataset category, alphabetically after Custom neuPrint.
+    // Second row in registry order — derived, so adding a dataset node does not break it.
     expect(onPick).toHaveBeenCalledTimes(1)
-    expect(onPick.mock.calls[0]![0]).toBe(requireNodeDef('dataset.description').type)
+    expect(onPick.mock.calls[0]![0]).toBe(secondListedDef().type)
   })
 
   it('wraps around at the ends', () => {

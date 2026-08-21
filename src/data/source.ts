@@ -20,6 +20,7 @@
 import type { TableSchema } from '../core/types'
 import { column, tableSchema } from '../core/types'
 import type {
+  AnnotationsValue,
   MatrixValue,
   MeshesValue,
   PointsValue,
@@ -106,6 +107,15 @@ export interface LabelMatch {
 
 export interface FindNeuronsRequest {
   datasetId: string
+  /**
+   * Labels *replacing* the dataset's own, when a source is wired to the Dataset node.
+   *
+   * A source that has its own annotation (neuPrint's are properties on the neuron) ignores this;
+   * one that reads them from a table uses it instead of the table its spec names. Threaded here
+   * rather than resolved from the dataset id, because a source has no view of the graph and the
+   * chain is a fact about the wiring rather than about the dataset.
+   */
+  annotations?: AnnotationsValue
   /** Regex matched against neuron type. Empty means "any". */
   typePattern?: string
   /** Regex matched against instance name. */
@@ -131,6 +141,8 @@ export interface FindNeuronsRequest {
 
 export interface ConnectivityRequest {
   datasetId: string
+  /** Labels replacing the dataset's own — see `FindNeuronsRequest.annotations`. */
+  annotations?: AnnotationsValue
   neuronIds: NeuronId[]
   direction: ConnectionDirection
   minWeight?: number
@@ -177,6 +189,8 @@ export interface PathStepRequest {
 
 export interface AdjacencyRequest {
   datasetId: string
+  /** Labels replacing the dataset's own — see `FindNeuronsRequest.annotations`. */
+  annotations?: AnnotationsValue
   sourceIds: NeuronId[]
   targetIds: NeuronId[]
   /** Aggregate per-neuron weights up to type level before building the matrix. */
@@ -193,6 +207,14 @@ export interface RoiCountsRequest {
 
 export interface GeometryRequest {
   datasetId: string
+  /**
+   * Labels replacing the dataset's own — see `FindNeuronsRequest.annotations`.
+   *
+   * Geometry carries an attribute row per item, and that row is what every 3D colour encoding
+   * reads. Without this a Meshes node would advertise the chain's columns and hand back the
+   * datastack's, which is invariant 3 across the seam.
+   */
+  annotations?: AnnotationsValue
   neuronIds: NeuronId[]
   /**
    * Target triangle count for the whole set, for sources with levels of detail. The source

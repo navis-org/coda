@@ -1,4 +1,5 @@
 import { registerNode } from '../../core/registry'
+import { datasetRequest } from '../lib/datasetParam'
 import { T } from '../../core/types'
 import { isTableValue } from '../../core/values'
 import {
@@ -109,7 +110,7 @@ export const findNeuronsNode = registerNode({
 
     ctx.progress(0.1, 'querying')
     const neurons = await source.findNeurons({
-      datasetId: dataset.datasetId,
+      ...datasetRequest(dataset),
       typePattern: String(ctx.params.typePattern ?? '') || undefined,
       instancePattern: String(ctx.params.instancePattern ?? '') || undefined,
       statuses: status ? [status] : undefined,

@@ -321,6 +321,21 @@
 .coda-node__header[data-category='dataset'] {
   --cat: var(--cat-dataset);
 }
+/*
+ * A dataset card is tinted by *backend*, because two of them behave differently enough that
+ * reading a graph means knowing which you are looking at.
+ *
+ * Only the backends that differ *from* the default get a rule: neuPrint's tint is the plain
+ * dataset green, so a token and a rule for it would be six declarations that change nothing and
+ * a pair to keep in sync. A backend nobody has styled falls through to the same green, which is
+ * what makes it visible before anyone gets to it.
+ */
+.coda-node__header[data-backend='cave'] {
+  --cat: var(--cat-dataset-cave);
+}
+.coda-node__header[data-backend='mock'] {
+  --cat: var(--cat-dataset-mock);
+}
 .coda-node__header[data-category='query'] {
   --cat: var(--cat-query);
 }

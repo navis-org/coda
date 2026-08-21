@@ -266,6 +266,9 @@ function ValuePreviewInner({
         neurons={isTableValue(neurons) ? neurons : undefined}
         sourceId={isDatasetValue(dataset) ? dataset.sourceId : undefined}
         datasetId={isDatasetValue(dataset) ? dataset.datasetId : undefined}
+        // The chain, not just the id: this card names a partner's *type* in words, so without
+        // it the tiles would disagree with the ports an inch away.
+        annotations={isDatasetValue(dataset) ? dataset.annotations : undefined}
         page={Number(node.params.page ?? 0)}
         onPage={(next) => onParamChange?.('page', next)}
         pinned={selection}
@@ -465,7 +468,7 @@ function ValuePreviewInner({
   return (
     <div className="viewer">
       <div className="viewer__empty">
-        {value.kind === 'layout' || value.kind === 'linkage'
+        {value.kind === 'layout' || value.kind === 'linkage' || value.kind === 'annotations'
           ? describeValue(value)
           : String(value.value)}
       </div>

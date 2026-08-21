@@ -147,8 +147,35 @@ export const DATASTACK_SPECS: readonly DatastackSpec[] = [
   },
 ]
 
+/**
+ * Datastacks named by hand, registered at edit time.
+ *
+ * `Custom CAVE` is the escape hatch for a datastack this build has no entry for, and it has to
+ * supply what the table above would have: which of its tables is the neuron set, and what the id
+ * column is called. So the node registers a spec from its own params, the same way
+ * `neuPrintSourceFor` registers a deployment — synchronously and with no network, which is what
+ * makes it safe to call from `inferOutputs`.
+ *
+ * Separate from the static table rather than merged into it, because the two have different
+ * lifetimes: this one is rebuilt from a node's params on every graph load and must not
+ * accumulate, while the table above is what the Add menu is built from.
+ */
+const runtimeSpecs = new Map<string, DatastackSpec>()
+
+export function registerDatastackSpec(spec: DatastackSpec): DatastackSpec {
+  runtimeSpecs.set(spec.datastack, spec)
+  return spec
+}
+
 export function specFor(datastack: string): DatastackSpec | undefined {
-  return DATASTACK_SPECS.find((s) => s.datastack === datastack)
+  return (
+    DATASTACK_SPECS.find((s) => s.datastack === datastack) ?? runtimeSpecs.get(datastack)
+  )
+}
+
+/** Test seam: drop hand-named datastacks between suites. */
+export function resetRuntimeSpecs(): void {
+  runtimeSpecs.clear()
 }
 
 /**

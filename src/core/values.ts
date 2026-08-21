@@ -52,6 +52,33 @@ export interface DatasetValue {
   readonly sourceId: string
   readonly datasetId: string
   readonly label: string
+  /**
+   * Annotations *replacing* the dataset's own, when a source is wired to it.
+   *
+   * Absent means the dataset uses whatever labels its backend publishes — which for neuPrint is
+   * properties on the neuron and for CAVE is the table its spec names. Present, this is the
+   * neuron table's label half instead, and the backend contributes only identity.
+   *
+   * Carried on the value rather than resolved from the graph because a source has no view of the
+   * graph: `findNeurons` is handed a dataset and has to know, and the alternative is every query
+   * node threading an extra argument through the seam.
+   */
+  readonly annotations?: AnnotationsValue
+}
+
+/**
+ * A neuron annotation table, and where it came from.
+ *
+ * `sources` are the stable keys of the chain that produced it, in order. Keys rather than the
+ * refs themselves because a ref is a `src/data` concept and `src/core` may not import that —
+ * and keys are all anything here needs: the neuron index that gets built from this table keys
+ * its cache on them, and two chains that stringify the same really are the same chain.
+ */
+export interface AnnotationsValue {
+  readonly kind: 'annotations'
+  readonly sources: readonly string[]
+  /** `neuronId` plus the chain's columns, one row per neuron. */
+  readonly table: TableValue
 }
 
 export interface ScalarValue {
@@ -266,6 +293,7 @@ export type Value =
   | TableValue
   | MatrixValue
   | DatasetValue
+  | AnnotationsValue
   | ScalarValue
   | NetworkValue
   | SkeletonsValue
@@ -601,6 +629,10 @@ export function describeValue(v: Value | undefined): string {
       const text = String(v.value)
       return text.length > 60 ? `${text.slice(0, 59)}…` : text
     }
+    case 'annotations':
+      return `${v.table.length.toLocaleString()} annotated · ${
+        v.table.schema.columns.length - 1
+      } columns`
     default:
       return String(v.value)
   }

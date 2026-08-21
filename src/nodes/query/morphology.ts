@@ -7,6 +7,7 @@
  */
 
 import type { Value } from '../../core/values'
+import { datasetRequest } from '../lib/datasetParam'
 import { registerNode } from '../../core/registry'
 import { T } from '../../core/types'
 import { isTableValue } from '../../core/values'
@@ -94,7 +95,7 @@ export const skeletonsNode = registerNode({
     )
     ctx.progress(0.02, `${neuronIds.length} neurons`)
     const skeletons = await source.fetchSkeletons({
-      datasetId: dataset.datasetId,
+      ...datasetRequest(dataset),
       neuronIds,
       onProgress: ctx.progress,
       signal: ctx.signal,
@@ -172,7 +173,7 @@ export const meshesNode = registerNode({
     )
     ctx.progress(0.02, `${neuronIds.length} neurons`)
     const meshes = await source.fetchMeshes({
-      datasetId: dataset.datasetId,
+      ...datasetRequest(dataset),
       neuronIds,
       triangleBudget: Number(ctx.params.detail ?? 1_500_000) || 1_500_000,
       onProgress: ctx.progress,
@@ -252,7 +253,7 @@ export const synapsesNode = registerNode({
     ctx.progress(0.1, `${neuronIds.length} neurons`)
 
     const points = await source.fetchSynapses({
-      datasetId: dataset.datasetId,
+      ...datasetRequest(dataset),
       neuronIds,
       onProgress: ctx.progress,
       ...(polarity === 'pre' || polarity === 'post' ? { polarity } : {}),

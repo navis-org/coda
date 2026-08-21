@@ -45,6 +45,25 @@ export class CaveError extends Error {
  */
 export const CAVE_MAX_ROWS = 500_000
 
+/**
+ * A result the size of the server's cap is not a result.
+ *
+ * The engine truncates at `CAVE_MAX_ROWS` and says so in a `warning` header its CORS policy does
+ * not expose (see above), so a browser can only count. A short table is not a visible failure —
+ * it is a dataset that silently lacks neurons or labels, and every query against it comes back
+ * quietly wrong rather than broken.
+ *
+ * The caller supplies the *consequence* because that is the whole of what differs between them,
+ * and it is the half a reader acts on: "the neuron index would be incomplete" sends somebody to a
+ * different datastack, "these annotations would be incomplete" to a narrower table.
+ */
+export function refuseIfCapped(rows: number, table: string, consequence: string): void {
+  if (rows < CAVE_MAX_ROWS) return
+  throw new CaveError(
+    `CAVE truncated "${table}" at ${CAVE_MAX_ROWS.toLocaleString()} rows, so ${consequence}.`,
+  )
+}
+
 export interface CaveRequestOptions {
   signal?: AbortSignal | undefined
   token?: string | undefined

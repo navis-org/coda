@@ -25,6 +25,17 @@ import { getEmitter, registeredEmitterTypes } from './registry'
  * of a long list is that the exporter is unfinished.
  */
 const NO_EMITTER: Record<string, string> = {
+  'dataset.cave':
+    'A CAVE datastack named by hand, so it has the same reason as `dataset.flywire`: this ' +
+    'notebook is built on neuprint-python and there is no caveclient emitter yet.',
+  'annotation.caveTable':
+    'An annotation source. It has no neuPrint counterpart at all — neuPrint carries its cell ' +
+    'typing as properties on the neuron, so there is nothing for a generated cell to fetch ' +
+    'separately. It reaches a notebook when the CAVE emitters do.',
+  'annotation.flyTable':
+    'An annotation source — see annotation.caveTable. Its API is SeaTable\u2019s, which no ' +
+    'library in this notebook\u2019s stack speaks.',
+  'annotation.seaTable': 'An annotation source \u2014 see annotation.flyTable.',
   'dataset.flywire':
     'A CAVE datastack rather than a neuPrint one. This notebook is built on neuprint-python, ' +
     'and a faithful translation needs caveclient plus a materialization version — see ' +

@@ -41,7 +41,13 @@ export type CodaType =
    * and dataset metadata (ROI lists, statuses) before anything executes. Absent means
    * "some dataset, not yet known".
    */
-  | { kind: 'dataset'; sourceId?: string; datasetId?: string }
+  | {
+      kind: 'dataset'
+      sourceId?: string
+      datasetId?: string
+      /** Columns a wired annotation chain publishes, replacing the dataset's own labels. */
+      annotations?: TableSchema
+    }
   /** Columnar table. */
   | { kind: 'table'; schema?: TableSchema }
   /** A table guaranteed to have a `neuronId` column. Subtype of `table`. */
@@ -78,6 +84,7 @@ export type CodaType =
    * and be quietly destroyed by an upstream Sort. See `LinkageValue`.
    */
   | { kind: 'linkage' }
+  | { kind: 'annotations'; schema?: TableSchema }
 
 export type TypeKind = CodaType['kind']
 
@@ -90,11 +97,22 @@ export const T = {
   number: (): CodaType => ({ kind: 'number' }),
   string: (): CodaType => ({ kind: 'string' }),
   boolean: (): CodaType => ({ kind: 'boolean' }),
-  dataset: (sourceId?: string, datasetId?: string): CodaType => ({
+  /**
+   * A dataset handle.
+   *
+   * `annotations` is the schema a wired annotation chain publishes, and it is on the *type*
+   * rather than only on the value because it decides what every column picker downstream
+   * offers — which is an edit-time question. Absent means the dataset's own labels.
+   */
+  dataset: (sourceId?: string, datasetId?: string, annotations?: TableSchema): CodaType => ({
     kind: 'dataset',
     ...(sourceId ? { sourceId } : {}),
     ...(datasetId ? { datasetId } : {}),
+    ...(annotations ? { annotations } : {}),
   }),
+  /** A neuron annotation table. `schema` is the columns it carries beside `neuronId`. */
+  annotations: (schema?: TableSchema): CodaType =>
+    schema ? { kind: 'annotations', schema } : { kind: 'annotations' },
   table: (schema?: TableSchema): CodaType =>
     schema ? { kind: 'table', schema } : { kind: 'table' },
   neurons: (schema?: TableSchema): CodaType =>

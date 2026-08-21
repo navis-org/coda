@@ -12,9 +12,9 @@
  * already carries every column schema discovery found.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
-import type { TableValue } from '../../core/values'
+import type { AnnotationsValue, TableValue } from '../../core/values'
 import { getSource } from '../../data/source'
 import { errorMessage } from '../../core/errors'
 
@@ -98,6 +98,7 @@ async function load(
   sourceId: string,
   datasetId: string,
   neuronId: string,
+  annotations: AnnotationsValue | undefined,
 ): Promise<NeuronProfileData> {
   const source = getSource(sourceId)
   if (!source) throw new Error(`Data source "${sourceId}" is not registered`)
@@ -110,10 +111,16 @@ async function load(
    * it must not cost a fetch. One request at weight 1 serves every threshold above it,
    * filtered locally in `profileStats`.
    */
+  /*
+   * The annotation chain rides along, or the card would name a partner's type out of the
+   * datastack's own labels while the ports an inch away carry the chain's — the disagreement
+   * phase 4 exists to avoid, on the one surface that shows a type in words.
+   */
+  const dataset = { datasetId, ...(annotations ? { annotations } : {}) }
   const [inputs, outputs, regions] = await Promise.all([
-    source.fetchConnectivity({ datasetId, neuronIds: [neuronId], direction: 'inputs' }),
-    source.fetchConnectivity({ datasetId, neuronIds: [neuronId], direction: 'outputs' }),
-    source.fetchRoiCounts?.({ datasetId, neuronIds: [neuronId] }),
+    source.fetchConnectivity({ ...dataset, neuronIds: [neuronId], direction: 'inputs' }),
+    source.fetchConnectivity({ ...dataset, neuronIds: [neuronId], direction: 'outputs' }),
+    source.fetchRoiCounts?.({ ...dataset, neuronIds: [neuronId] }),
   ])
 
   // Read after the await: discovery may well have landed while these were in flight, and the
@@ -121,21 +128,40 @@ async function load(
   return { inputs, outputs, regions, primaryRois: source.peekDataset(datasetId)?.primaryRois }
 }
 
+/**
+ * What one cached profile is a fact about.
+ *
+ * The chain is in it for `neuronIndexKey`'s reason: two graphs on one datastack with different
+ * annotations hold genuinely different answers, and without it the first one looked at would be
+ * served to the other for the rest of the session. It is also the whole of what the effect needs
+ * to watch — a chain with the same sources is the same request whatever the object identity.
+ */
 function profileKey(
   sourceId: string | undefined,
   datasetId: string | undefined,
   neuronId: string | undefined,
+  annotations: AnnotationsValue | undefined,
 ): string | undefined {
   if (!sourceId || !datasetId || neuronId === undefined || neuronId === '') return undefined
-  return `${sourceId}|${datasetId}|${neuronId}`
+  return `${sourceId}|${datasetId}|${annotations?.sources.join('+') ?? ''}|${neuronId}`
 }
 
 export function useNeuronProfile(
   sourceId: string | undefined,
   datasetId: string | undefined,
   neuronId: string | undefined,
+  annotations?: AnnotationsValue,
 ): NeuronProfileState {
-  const key = profileKey(sourceId, datasetId, neuronId)
+  const key = profileKey(sourceId, datasetId, neuronId, annotations)
+
+  /*
+   * Held in a ref rather than a dependency: `ValuePreview` peels it off a fresh `DatasetValue`
+   * on every store tick, so the object identity churns while the *chain* does not — and the key
+   * above already says which chain it is. Watching the object would refetch on every unrelated
+   * edit; watching the key refetches exactly when the answer would differ.
+   */
+  const chain = useRef(annotations)
+  chain.current = annotations
 
   // Seeded from the cache so paging back to a neuron already seen paints on the first render
   // rather than flashing a spinner for a frame.
@@ -157,7 +183,7 @@ export function useNeuronProfile(
     setState({ status: 'loading' })
 
     const timer = setTimeout(() => {
-      const shared = pending.get(key) ?? load(sourceId, datasetId, neuronId)
+      const shared = pending.get(key) ?? load(sourceId, datasetId, neuronId, chain.current)
       pending.set(key, shared)
 
       shared

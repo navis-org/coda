@@ -441,7 +441,14 @@ describe('CommandPalette', () => {
 })
 
 describe('breadcrumbs on the real item list', () => {
-  /** Renders the actual palette contents and reads back a row as plain text. */
+  /**
+   * Renders the actual palette contents and reads back one row as plain text.
+   *
+   * Searched for rather than taken from the unfiltered list, because the palette caps at
+   * `MAX_RESULTS` and the registry keeps growing — four annotation nodes pushed `Filter` past
+   * row sixty, which failed a test that is about *breadcrumb formatting* and has nothing to say
+   * about how long the list is.
+   */
   function rowFor(label: string): string {
     const all = [
       ...buildCommandItems({ store: useGraphStore.getState(), fitView: () => {} }),
@@ -450,6 +457,7 @@ describe('breadcrumbs on the real item list', () => {
     render(
       <CommandPalette
         items={all}
+        initialQuery={label}
         screenPosition={{ x: 10, y: 10 }}
         onPick={() => {}}
         onClose={() => {}}

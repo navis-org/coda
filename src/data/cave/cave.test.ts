@@ -16,11 +16,15 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { column, tableSchema } from '../../core/types'
+import { makeTable } from '../../core/values'
 import type { DataSource } from '../source'
 import { resetCache } from '../cache'
 import { resetIndexLoads } from '../neuronIndex'
 import { CaveSource } from './CaveSource'
 import { CAVE_MAX_ROWS } from './client'
+import { resetDatastackRecords } from './datastack'
+import { resetRuntimeSpecs } from './spec'
 import { MAX_MESH_NEURONS, decimateGridFor, fragmentConcurrencyFor } from './meshes'
 import { quoteWideIntegers, parseCaveJson } from './json'
 import { reportAuthFailure, resetCredentials, setToken, subscribeAuthFailure } from './credentials'
@@ -89,6 +93,11 @@ beforeEach(() => {
   resetCredentials()
   resetCache()
   resetIndexLoads()
+  // The datastack record is memoised at module level now that the annotation providers share
+  // it, so it outlives a test file without this.
+  resetDatastackRecords()
+  // Custom CAVE registers a spec from a node's params; it is module state like the rest.
+  resetRuntimeSpecs()
   setToken('test-token')
 })
 
@@ -610,6 +619,63 @@ it('turns the triangle budget into a decimation grid, since graphene has no leve
     await expect(
       new CaveSource().fetchMeshes({ datasetId: DATASET, neuronIds: ids }),
     ).rejects.toThrow(/no level of detail, so each one is several hundred requests/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+
+describe('a wired annotation chain', () => {
+  const chain = {
+    kind: 'annotations' as const,
+    sources: ['seaTable:base=main&table=info'],
+    table: makeTable(
+      tableSchema(column('neuronId', 'str'), column('side', 'str')),
+      {
+        neuronId: ['720575940628857210', '720575940626838909', '999'],
+        side: ['left', 'right', 'nobody'],
+      },
+    ),
+  }
+
+  it('replaces the datastack’s labels in the rows, not just in the type', async () => {
+    installFetch()
+    const table = await new CaveSource().findNeurons({ datasetId: DATASET, annotations: chain })
+
+    /*
+     * The whole feature, and it was inert: `findNeurons` did not forward `req.annotations`, so
+     * three query nodes advertised the chain's columns and returned the datastack's — and a
+     * second complete index was built and cached under the unannotated key.
+     */
+    expect(table.schema.columns.map((c) => c.name)).toEqual(['neuronId', 'side'])
+    expect(table.data.side).toEqual(['left', 'right', null, null])
+  })
+
+  it('keeps every neuron the segmentation has, annotated or not', async () => {
+    installFetch()
+    const table = await new CaveSource().findNeurons({ datasetId: DATASET, annotations: chain })
+    // A left join on the datastack's own list. The other direction would let an annotation base
+    // decide which neurons *exist* — and those bases carry rows for ids edited away since.
+    expect(table.length).toBe(4)
+    expect(table.data.neuronId).not.toContain('999')
+  })
+
+  it('keys the index on the chain, so two datasets do not share one cached table', async () => {
+    const captured = installFetch()
+    const cave = new CaveSource()
+    await cave.findNeurons({ datasetId: DATASET })
+    const plain = captured.filter((c) => c.url.includes('/query?')).length
+    await cave.findNeurons({ datasetId: DATASET, annotations: chain })
+    // A second, differently-labelled index — not the first one handed back under its key.
+    expect(captured.filter((c) => c.url.includes('/query?')).length).toBeGreaterThan(plain)
+  })
+
+  it('does not fetch the built-in annotations it is about to discard', async () => {
+    const captured = installFetch()
+    await new CaveSource().findNeurons({ datasetId: DATASET, annotations: chain })
+    // Five queries of up to 139,255 rows, thrown away a line later.
+    expect(
+      captured.filter((c) => c.url.includes('/table/hierarchical_neuron_annotations/query')),
+    ).toHaveLength(0)
   })
 })
 

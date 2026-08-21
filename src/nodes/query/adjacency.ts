@@ -1,4 +1,5 @@
 import { registerNode } from '../../core/registry'
+import { datasetRequest } from '../lib/datasetParam'
 import { T } from '../../core/types'
 import { isTableValue } from '../../core/values'
 import { requireDataset } from '../lib/datasetParam'
@@ -49,7 +50,7 @@ export const adjacencyNode = registerNode({
 
     ctx.progress(0.2, `${sourceIds.length} × ${targetIds.length}`)
     const matrix = await source.fetchAdjacency({
-      datasetId: dataset.datasetId,
+      ...datasetRequest(dataset),
       sourceIds,
       targetIds,
       groupByType: ctx.params.groupByType !== false,
