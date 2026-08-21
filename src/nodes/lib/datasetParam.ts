@@ -9,7 +9,7 @@
 
 import type { CodaType } from '../../core/types'
 import { datasetRef } from '../../core/types'
-import type { AnnotationsValue, DatasetValue, Value } from '../../core/values'
+import type { DatasetAnnotations, DatasetValue, Value } from '../../core/values'
 import { isDatasetValue } from '../../core/values'
 import type {
   DataSource,
@@ -149,7 +149,7 @@ export const ANY_OPTION = { value: '', label: 'Any' }
  */
 export function datasetRequest(dataset: DatasetValue): {
   datasetId: string
-  annotations?: AnnotationsValue
+  annotations?: DatasetAnnotations
 } {
   return {
     datasetId: dataset.datasetId,

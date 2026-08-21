@@ -63,20 +63,27 @@ export interface DatasetValue {
    * graph: `findNeurons` is handed a dataset and has to know, and the alternative is every query
    * node threading an extra argument through the seam.
    */
-  readonly annotations?: AnnotationsValue
+  readonly annotations?: DatasetAnnotations
 }
 
 /**
- * A neuron annotation table, and where it came from.
+ * A neuron annotation table, and one string identifying it.
  *
- * `sources` are the stable keys of the chain that produced it, in order. Keys rather than the
- * refs themselves because a ref is a `src/data` concept and `src/core` may not import that —
- * and keys are all anything here needs: the neuron index that gets built from this table keys
- * its cache on them, and two chains that stringify the same really are the same chain.
+ * **Not a `Value`**, deliberately: annotations travel between nodes as an ordinary neuron table,
+ * so a Filter or a Sort can sit in the chain. What a wire cannot carry is *which* table this is,
+ * and something has to — the neuron index built from it, the Explore widget's shared entry and
+ * the profile cache are all keyed by it, and two datasets differing only in their annotations
+ * sharing one cached table means the first one fetched wins for the session.
+ *
+ * So the dataset node pairs the table with `ctx.inputKey('annotations')`, which is the
+ * scheduler's own provenance for whatever arrived on that port — `hash(type, params, upstream)`,
+ * so it changes exactly when the table would and is a fact about the *pipeline* rather than
+ * about the rows. It used to be the annotation refs, which could only describe a chain nothing
+ * was allowed to edit.
  */
-export interface AnnotationsValue {
-  readonly kind: 'annotations'
-  readonly sources: readonly string[]
+export interface DatasetAnnotations {
+  /** Provenance of whatever produced the table. Empty is a distinct key from any pipeline's. */
+  readonly key: string
   /** `neuronId` plus the chain's columns, one row per neuron. */
   readonly table: TableValue
 }
@@ -293,7 +300,6 @@ export type Value =
   | TableValue
   | MatrixValue
   | DatasetValue
-  | AnnotationsValue
   | ScalarValue
   | NetworkValue
   | SkeletonsValue
@@ -629,10 +635,6 @@ export function describeValue(v: Value | undefined): string {
       const text = String(v.value)
       return text.length > 60 ? `${text.slice(0, 59)}…` : text
     }
-    case 'annotations':
-      return `${v.table.length.toLocaleString()} annotated · ${
-        v.table.schema.columns.length - 1
-      } columns`
     default:
       return String(v.value)
   }

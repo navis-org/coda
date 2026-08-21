@@ -468,7 +468,7 @@ function ValuePreviewInner({
   return (
     <div className="viewer">
       <div className="viewer__empty">
-        {value.kind === 'layout' || value.kind === 'linkage' || value.kind === 'annotations'
+        {value.kind === 'layout' || value.kind === 'linkage'
           ? describeValue(value)
           : String(value.value)}
       </div>

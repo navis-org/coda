@@ -629,8 +629,7 @@ it('turns the triangle budget into a decimation grid, since graphene has no leve
 
 describe('a wired annotation chain', () => {
   const chain = {
-    kind: 'annotations' as const,
-    sources: ['seaTable:base=main&table=info'],
+    key: 'seaTable:base=main&table=info',
     table: makeTable(
       tableSchema(column('neuronId', 'str'), column('side', 'str')),
       {
@@ -850,8 +849,7 @@ describe('a datastack with no neuron table', () => {
   const DATASET_BARE = `${BARE}:1`
 
   const chain = {
-    kind: 'annotations' as const,
-    sources: ['seaTable:base=main&table=info'],
+    key: 'seaTable:base=main&table=info',
     table: makeTable(
       tableSchema(column('neuronId', 'str'), column('side', 'str')),
       {

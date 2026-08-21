@@ -23,7 +23,7 @@
 
 import { useMemo } from 'react'
 
-import type { AnnotationsValue, CellValue, TableValue } from '../../core/values'
+import type { DatasetAnnotations, CellValue, TableValue } from '../../core/values'
 import { idText } from '../../core/ids'
 import { getRow } from '../../core/values'
 import {
@@ -51,7 +51,7 @@ export interface ProfileViewerProps {
   neurons: TableValue | undefined
   sourceId: string | undefined
   /** The wired annotation chain, so a partner's type is the one the ports carry. */
-  annotations?: AnnotationsValue
+  annotations?: DatasetAnnotations
   datasetId: string | undefined
   /** Row index shown. Clamped here, never trusted. */
   page: number

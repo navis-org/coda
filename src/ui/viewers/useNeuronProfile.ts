@@ -14,9 +14,8 @@
 
 import { useEffect, useRef, useState } from 'react'
 
-import type { AnnotationsValue, TableValue } from '../../core/values'
+import type { DatasetAnnotations, TableValue } from '../../core/values'
 import { getSource } from '../../data/source'
-import { chainKey } from '../../data/annotations/types'
 import { errorMessage } from '../../core/errors'
 
 export interface NeuronProfileData {
@@ -99,7 +98,7 @@ async function load(
   sourceId: string,
   datasetId: string,
   neuronId: string,
-  annotations: AnnotationsValue | undefined,
+  annotations: DatasetAnnotations | undefined,
 ): Promise<NeuronProfileData> {
   const source = getSource(sourceId)
   if (!source) throw new Error(`Data source "${sourceId}" is not registered`)
@@ -141,17 +140,17 @@ function profileKey(
   sourceId: string | undefined,
   datasetId: string | undefined,
   neuronId: string | undefined,
-  annotations: AnnotationsValue | undefined,
+  annotations: DatasetAnnotations | undefined,
 ): string | undefined {
   if (!sourceId || !datasetId || neuronId === undefined || neuronId === '') return undefined
-  return `${sourceId}|${datasetId}|${chainKey(annotations)}|${neuronId}`
+  return `${sourceId}|${datasetId}|${annotations?.key ?? ''}|${neuronId}`
 }
 
 export function useNeuronProfile(
   sourceId: string | undefined,
   datasetId: string | undefined,
   neuronId: string | undefined,
-  annotations?: AnnotationsValue,
+  annotations?: DatasetAnnotations,
 ): NeuronProfileState {
   const key = profileKey(sourceId, datasetId, neuronId, annotations)
 

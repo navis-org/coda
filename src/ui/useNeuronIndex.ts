@@ -19,11 +19,10 @@
 
 import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
 
-import type { AnnotationsValue, TableValue } from '../core/values'
+import type { DatasetAnnotations, TableValue } from '../core/values'
 import { errorMessage } from '../core/errors'
 import { getSource } from '../data/source'
 import { neuronIndexKey } from '../data/neuronIndex'
-import { chainKey } from '../data/annotations/types'
 
 export type NeuronIndexState =
   /** No dataset resolved yet — usually an unconnected Dataset input. */
@@ -76,9 +75,9 @@ const entries = new Map<string, Entry>()
 function entryKey(
   sourceId: string,
   datasetId: string,
-  annotations: AnnotationsValue | undefined,
+  annotations: DatasetAnnotations | undefined,
 ): string {
-  return neuronIndexKey(sourceId, datasetId, chainKey(annotations))
+  return neuronIndexKey(sourceId, datasetId, annotations?.key ?? '')
 }
 
 function entryFor(key: string): Entry {
@@ -110,7 +109,7 @@ function ensureLoaded(
   key: string,
   sourceId: string,
   datasetId: string,
-  annotations: AnnotationsValue | undefined,
+  annotations: DatasetAnnotations | undefined,
 ): void {
   const entry = entryFor(key)
   if (entry.loading) return
@@ -180,7 +179,7 @@ function ensureLoaded(
 export function useNeuronIndex(
   sourceId: string | undefined,
   datasetId: string | undefined,
-  annotations?: AnnotationsValue,
+  annotations?: DatasetAnnotations,
 ): NeuronIndexHandle {
   const key = sourceId && datasetId ? entryKey(sourceId, datasetId, annotations) : undefined
 

@@ -12,6 +12,12 @@
  * the order on screen mean something. What the chain produces *replaces* the datastack's own
  * annotations rather than adding to them; see `data/annotations/types.ts`.
  *
+ * **What travels is an ordinary neuron table**, which is what lets a Filter, a Sort or a Select
+ * stand anywhere in that chain — an annotation base is somebody's spreadsheet and routinely
+ * wants a row dropped or forty columns narrowed to four before a connectome is labelled by it.
+ * There used to be an `annotations` socket type, which stated the contract exactly and made
+ * every one of those impossible; `annotationParams.ts` records what replaced it.
+ *
  * **`expensive`, all of them.** A base is tens of megabytes and the params are text fields;
  * `cheap` would fire a download per keystroke. Invariant 6 in its plainest form.
  */
@@ -20,14 +26,14 @@ import type { EvalContext } from '../../core/node'
 import { registerNode } from '../../core/registry'
 import type { CodaType, TableSchema } from '../../core/types'
 import { T } from '../../core/types'
-import type { AnnotationsValue } from '../../core/values'
+import type { TableValue } from '../../core/values'
+import { isTableValue } from '../../core/values'
 import type { AnnotationRef } from '../../data/annotations'
 import {
   CAVE_TABLE_PROVIDER,
   SEATABLE_PROVIDER,
   annotationProvider,
   peekRefColumns,
-  refKey,
 } from '../../data/annotations'
 import { SEATABLE_HOSTS } from '../../data/annotations/credentials'
 import { peekBases, resolveWorkspace } from '../../data/annotations/seaTable'
@@ -57,7 +63,7 @@ function chainSchema(
   // An unwired socket is not an unknown one: nothing upstream is a complete answer. A wired one
   // whose columns have not landed is not — publishing half a chain is the partial schema every
   // picker downstream would then be configured against.
-  if (inputType?.kind === 'annotations' && !upstream) return undefined
+  if (inputType && !upstream) return undefined
   // The same merge `joinAnnotations` performs on the values, so the claim and the result cannot
   // disagree about which side wins a collision or where the id column sits.
   return upstream ? joinedSchema(upstream, mine) : mine
@@ -84,7 +90,8 @@ export const caveTableNode = registerNode({
     'wired both ways round is a cycle. The table has to carry a root id column directly; the datastack’s ' +
     'built-in typing, which is keyed through a reference table, is what a Dataset uses when ' +
     'nothing is wired. Set Pivot on for a table that is one row per (neuron, kind, value) rather ' +
-    'than one row per neuron.',
+    'than one row per neuron. What comes out is an ordinary neuron table, so a Filter or a Sort ' +
+    'can sit between here and the Dataset, and a Table node beside it shows what you actually got.',
   cost: 'expensive',
   /*
    * The Dataset input is **optional**, and that is what keeps the ordinary wiring possible at
@@ -102,7 +109,7 @@ export const caveTableNode = registerNode({
     { id: 'dataset', label: 'Dataset', type: T.dataset(), required: false },
     ANNOTATIONS_INPUT,
   ],
-  outputs: [{ id: 'annotations', label: 'Annotations', type: T.annotations() }],
+  outputs: [{ id: 'annotations', label: 'Annotations', type: T.neurons() }],
   params: [
     {
       id: 'datastack',
@@ -159,7 +166,7 @@ export const caveTableNode = registerNode({
   ],
 
   inferOutputs: (ctx) => ({
-    annotations: T.annotations(
+    annotations: T.neurons(
       chainSchema(
         ctx.inputs.annotations,
         caveRef(datasetRef(ctx.inputs.dataset)?.datasetId, ctx.params),
@@ -233,7 +240,7 @@ function buildSeaTableNode(spec: { key: string; label: string; host: string; gui
     guide: spec.guide,
     cost: 'expensive',
     inputs: [ANNOTATIONS_INPUT],
-    outputs: [{ id: 'annotations', label: 'Annotations', type: T.annotations() }],
+    outputs: [{ id: 'annotations', label: 'Annotations', type: T.neurons() }],
     params: [
       {
         id: 'base',
@@ -287,7 +294,7 @@ function buildSeaTableNode(spec: { key: string; label: string; host: string; gui
     ],
 
     inferOutputs: (ctx) => ({
-      annotations: T.annotations(chainSchema(ctx.inputs.annotations, seaRef(ctx.params, spec.host))),
+      annotations: T.neurons(chainSchema(ctx.inputs.annotations, seaRef(ctx.params, spec.host))),
     }),
 
     validate: (ctx) => {
@@ -359,7 +366,8 @@ export const flyTableNode = buildSeaTableNode({
     'actually lives — and the only place Aedes has any at all. Reading a base takes an account ' +
     'token (Connections ▸ FlyTable) and downloads the whole table: the endpoint that can select ' +
     'columns sends no CORS headers, so a browser has to take every column. It is cached, so the ' +
-    'wait is once per base.',
+    'wait is once per base. What comes out is an ordinary neuron table — wire a Table node to ' +
+    'see it, and a Filter or Select between here and the Dataset to tidy it first.',
 })
 
 export const seaTableNode = buildSeaTableNode({
@@ -380,8 +388,14 @@ export const seaTableNode = buildSeaTableNode({
  * The join is an outer one on `neuronId`, so a neuron annotated by only one source in the chain
  * keeps its labels rather than being dropped — which is the common case the moment two bases
  * cover different populations.
+ *
+ * What arrives is now an ordinary table rather than a chain of refs, so a Filter or a Sort can
+ * sit between two sources and the join still means what it meant. Nothing is carried about
+ * *where* it came from: identifying an annotation table is the dataset node's job, through
+ * `ctx.inputKey`, because a ref list stopped being able to describe one the moment something
+ * else was allowed to edit it.
  */
-async function resolve(ctx: EvalContext, ref: AnnotationRef): Promise<AnnotationsValue> {
+async function resolve(ctx: EvalContext, ref: AnnotationRef): Promise<TableValue> {
   const provider = annotationProvider(ref.provider)
   if (!provider) throw new Error(`No annotation provider "${ref.provider}"`)
 
@@ -399,12 +413,16 @@ async function resolve(ctx: EvalContext, ref: AnnotationRef): Promise<Annotation
   })
 
   const upstream = ctx.input('annotations')
-  if (upstream?.kind !== 'annotations') {
-    return { kind: 'annotations', sources: [refKey(ref)], table }
-  }
-  return {
-    kind: 'annotations',
-    sources: [...upstream.sources, refKey(ref)],
-    table: joinAnnotations(upstream.table, table),
-  }
+  /*
+   * `neurons` rather than `table`, which is the provider contract made into a socket type: every
+   * one of them renames its id column onto `neuronId` and hands it over as text (invariant 8),
+   * and `joinAnnotations` keys on that same column. Asserted here, at the one point where the
+   * guarantee becomes something the editor will let people wire — a `{...t, kind}` spread rather
+   * than a rebuild, so no column data is copied.
+   */
+  return asNeurons(isTableValue(upstream) ? joinAnnotations(upstream, table) : table)
+}
+
+function asNeurons(table: TableValue): TableValue {
+  return table.kind === 'neurons' ? table : { ...table, kind: 'neurons' }
 }

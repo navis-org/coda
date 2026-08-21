@@ -430,6 +430,7 @@ function evalContext(def: NodeDefinition, params: ParamValues, edges: TableValue
   return {
     params,
     input: (portId) => (portId === 'edges' ? edges : undefined),
+    inputKey: (portId) => (portId === 'edges' ? 'edges-key' : undefined),
     column: (paramId) => {
       const p = findParam(def, paramId)
       return p && p.kind === 'column' ? resolveColumn(p, params, types) : undefined

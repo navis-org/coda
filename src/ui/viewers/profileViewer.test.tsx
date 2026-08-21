@@ -413,9 +413,9 @@ describe('loading', () => {
 })
 
 describe('the annotation chain', () => {
-  /** A chain of `n` sources over the same table — only `sources` is read here. */
-  function chain(...sources: string[]) {
-    return { kind: 'annotations' as const, sources, table: INPUTS }
+  /** Annotations over the same table — only the provenance key is read here. */
+  function chain(key: string) {
+    return { key, table: INPUTS }
   }
 
   it('rides along to the source, so a partner’s type is the one the ports carry', async () => {

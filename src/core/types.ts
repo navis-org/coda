@@ -84,7 +84,6 @@ export type CodaType =
    * and be quietly destroyed by an upstream Sort. See `LinkageValue`.
    */
   | { kind: 'linkage' }
-  | { kind: 'annotations'; schema?: TableSchema }
 
 export type TypeKind = CodaType['kind']
 
@@ -110,9 +109,6 @@ export const T = {
     ...(datasetId ? { datasetId } : {}),
     ...(annotations ? { annotations } : {}),
   }),
-  /** A neuron annotation table. `schema` is the columns it carries beside `neuronId`. */
-  annotations: (schema?: TableSchema): CodaType =>
-    schema ? { kind: 'annotations', schema } : { kind: 'annotations' },
   table: (schema?: TableSchema): CodaType =>
     schema ? { kind: 'table', schema } : { kind: 'table' },
   neurons: (schema?: TableSchema): CodaType =>

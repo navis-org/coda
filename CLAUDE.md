@@ -419,7 +419,7 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `data/cave/live.test.ts`                 | the same source against the real services, skipped without `CAVE_TOKEN` — the only thing that notices an endpoint shape changing, the mesh and synapse clouds proved to share one nanometre frame, Aedes' edge list built by counting with nothing configured, and a loadable scene assembled for all three datastacks |
 | `data/annotations/annotations.test.ts`   | annotation sources: the `Token` scheme, the pseudo-workspaces dropped, a wide id kept as text, the outer join and the later source winning — plus the route fallback's three rules |
 | `data/annotations/live.test.ts`          | the same against real FlyTable, skipped without `SEATABLE_TOKEN` — including the ids proved to be beyond double precision |
-| `nodes/annotation/annotations.test.ts`   | the three source nodes: the two halves of one join asserted against each other, half a chain published as nothing, and the datastack named rather than wired |
+| `nodes/annotation/annotations.test.ts`   | the three source nodes: the two halves of one join asserted against each other, half a chain published as nothing, a Select in the chain (the case that decides the socket type), and a table with no `neuronId` refused twice |
 | `nodes/query/morphology.test.ts`         | the shared `Max neurons` ceiling and what its refusal message blames                                                             |
 | `ui/nodes/nodeRunRing.test.tsx`          | run-indicator arithmetic: dash fractions, the zero floor, indeterminate mode                                                     |
 | `ui/nodes/runRing.placement.test.tsx`    | that the outline renders outside the clipped card (slow mock, so 'running' is observable)                                        |
@@ -1262,7 +1262,10 @@ serves it.
 `src/data/annotations/`. A **CAVE dataset node has an Annotations socket**, and what is wired to
 it *replaces* the datastack's own labels. Sources **chain** — each has its own optional
 Annotations input — so `CAVEtable → FlyTable → Dataset` is one socket on the dataset and a
-visible sequence on the canvas, with a later source winning a name collision.
+visible sequence on the canvas, with a later source winning a name collision. What travels is an
+ordinary neuron table, so a Filter, a Sort or a Select can stand anywhere in that chain and a
+Table node beside it shows what actually arrived; see **the Annotations socket** below for why
+that is not a bespoke type.
 
 **neuPrint has no such socket**, and that is `DatasetBackend.acceptsAnnotations` rather than a
 type check: neuPrint carries its cell typing as properties on the neuron, so there is nothing for
@@ -1562,9 +1565,50 @@ reader needs and a fourth backend should be one entry rather than four edits.
   that already has a node — and asking for a neuron table first answers a question that does not
   matter.
 
-**The Annotations socket takes the dataset hue and the `diamond` shape** — the one that family
-had left, square being the dataset itself and circle/hex/dot the three geometry kinds. A seventh
-chromatic family would fail the all-pairs colourblind gate.
+**The Annotations socket takes an ordinary table, and used to be its own type.** It had the
+dataset hue and the `diamond` shape and described the contract exactly — and that is what made it
+wrong. An annotation base is somebody's spreadsheet: it routinely wants a row dropped or sixty
+columns narrowed to four *before* a connectome is labelled by it, and a bespoke socket type meant
+no table op could touch one. `FlyTable → Filter → Sort → Dataset` is now an ordinary wire, and so
+is `Upload Table → Dataset` for a lab's own cell typing, which was impossible outright. The socket
+takes the table hue, which is honest.
+
+**`T.table()` and not `T.neurons()`, though every source does guarantee a `neuronId`.** Filter,
+Sort, Sample, Stack and `out.table` all *preserve* neurons-ness — checked, and each says so — so
+the stricter socket accepts every op somebody names first and then refuses `core.select`, which
+publishes a plain `table` because a selection *may* drop the id. Narrowing sixty columns to four
+is as ordinary a clean-up as dropping a row, so that is the case the type has to admit. "Has this
+column" is not a question assignability answers here; `types.ts` says so outright, and the
+requirement moved to `validate`, where it can name the column. `annotations.test.ts` pins the
+Select case specifically, because the Filter case passes under *either* socket type — a test
+built on it would have looked like it was defending the choice while defending nothing.
+
+**And `validate` only warns, so `annotationsFrom` refuses at run time as well.** The two things a
+run could do instead are both silent: ignoring the wire is the control that quietly does nothing,
+and carrying it on leaves `withAnnotations` merging a schema with no id column, so every neuron
+comes back unlabelled with the connectome to blame. One funnel, so the two dataset nodes cannot
+disagree about which.
+
+**What identifies an annotation table is now provenance, not the refs that fetched it.**
+`AnnotationsValue` was `{kind, sources, table}` and is now `DatasetAnnotations` — `{key, table}`,
+a field of `DatasetValue` rather than a member of the `Value` union. `sources` was the chain's
+`refKey`s, and the moment a Filter is allowed to stand in the chain those stop describing the
+table: two graphs filtering one base differently would share a cached neuron index, and the first
+one fetched would win for the session — precisely the failure the chain key was added to prevent.
+So the dataset node pairs the table with **`ctx.inputKey('annotations')`**, the scheduler's own
+`hash(type, params, upstream)` for whatever arrived on that port. It keys the CAVE neuron index,
+the Explore widget's shared entry and the profile cache, exactly as `chainKey` did.
+
+**`ctx.inputKey(portId)` is new on `EvalContext`**, and the scheduler was already computing it —
+`desiredKeys` builds `${key}:${handle}` per port to fold into the hash, and `upstreamKey` is now
+that one spelling shared by both. Deliberately *per port* rather than the node's own key, which
+would fold in params of this node that say nothing about the value on that port.
+
+It also closed a latent bug rather than only enabling the feature. `refKey` is `provider:config`
+and `refresh` is in neither `seaRef` nor `caveRef`, so bumping an annotation node's Refresh
+re-downloaded the base and re-ran the dataset — and then `neuronIndex` hit the same `chainKey`
+with the same column fingerprint and served the stale index. Traced rather than reproduced;
+provenance keying makes it structurally impossible.
 
 **Connections gained a fourth section rather than two more source tabs.** The top level there is
 *what kind of connection*, and an annotation base is somebody's spreadsheet of labels joined onto

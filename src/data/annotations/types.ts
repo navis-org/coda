@@ -113,21 +113,6 @@ const CODA_NAMES: Record<string, string> = {
   celltype: 'type',
 }
 
-/**
- * What identifies a chain, for anything keyed on which labels it carries.
- *
- * Three call sites derived this independently and two separators were already in use (`+` and
- * `|`), so a change to what makes two chains different — a `refKey` component, an ordering rule
- * — had to be found in three files. What it keys is real: two graphs on one datastack with
- * different annotations hold genuinely different tables, and sharing an entry serves the first
- * one looked at to the other for the session.
- *
- * Empty for no chain, which is a distinct key from any chain's.
- */
-export function chainKey(annotations: { sources: readonly string[] } | undefined): string {
-  return annotations?.sources.join('+') ?? ''
-}
-
 /** What Coda calls an annotation column. Identity for everything but the cell type. */
 export function annotationColumn(name: string): string {
   return CODA_NAMES[name] ?? name

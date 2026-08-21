@@ -514,8 +514,7 @@ describe('ExploreBody', () => {
  */
 describe('an annotated dataset', () => {
   const CHAIN = {
-    kind: 'annotations' as const,
-    sources: ['seaTable:base=main&table=info'],
+    key: 'seaTable:base=main&table=info',
     table: makeTable(
       tableSchema(column('neuronId', 'i64'), column('lab', 'str')),
       { neuronId: [1, 2], lab: ['ours', 'theirs'] },

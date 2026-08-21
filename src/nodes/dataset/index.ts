@@ -33,7 +33,12 @@ import {
 } from '../lib/datasetFamilies'
 import { DATASTACK_SPECS, datasetIdFor, registerDatastackSpec } from '../../data/cave/spec'
 import { materializationsFor, peekMaterializations } from '../../data/cave/datastack'
-import { ANNOTATIONS_INPUT, annotationSchemaFrom, annotationsFrom } from '../lib/annotationParams'
+import {
+  ANNOTATIONS_INPUT,
+  annotationIssues,
+  annotationSchemaFrom,
+  annotationsFrom,
+} from '../lib/annotationParams'
 import { refreshParam } from '../../core/node'
 
 /** The `refresh` nonce every dataset node carries. See `refreshParam`. */
@@ -121,7 +126,7 @@ function buildDatasetNode(family: DatasetFamily) {
           `${familyLabel(family)} ${chosen} is not on this server — it offers ${versions.map((v) => v.version).join(', ')}`,
         ]
       }
-      return []
+      return annotationIssues(ctx.inputs.annotations)
     },
 
     evaluate: async (ctx) => {
@@ -140,7 +145,7 @@ function buildDatasetNode(family: DatasetFamily) {
         sourceId: family.sourceId,
         datasetId: info.id,
         label: info.label,
-        ...annotationsFrom(ctx.input('annotations')),
+        ...annotationsFrom(ctx.input('annotations'), ctx.inputKey('annotations')),
       }
       return { dataset: value }
     },
@@ -318,7 +323,7 @@ export const customCaveNode = registerNode({
           : `${datastack} reports no usable materializations`,
       ]
     }
-    return []
+    return annotationIssues(ctx.inputs.annotations)
   },
 
   evaluate: async (ctx) => {
@@ -350,7 +355,7 @@ export const customCaveNode = registerNode({
         sourceId: 'cave',
         datasetId,
         label: `${datastack} ${version}`,
-        ...annotationsFrom(ctx.input('annotations')),
+        ...annotationsFrom(ctx.input('annotations'), ctx.inputKey('annotations')),
       } satisfies DatasetValue,
     }
   },

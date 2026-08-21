@@ -293,6 +293,12 @@ export class Scheduler {
 
       // Gather inputs; bail out if any required upstream is unavailable.
       const inputs: Record<string, Value | undefined> = {}
+      /*
+       * The provenance of what arrived on each port, spelled exactly as `desiredKeys` spells it
+       * — same string, so a node publishing one as an identity cannot disagree with the key the
+       * scheduler used to decide it should run.
+       */
+      const inputKeys: Record<string, string> = {}
       let blocked = false
       for (const port of def.inputs ?? []) {
         const edge = inbound.get(portKey(nodeId, port.id))
@@ -305,6 +311,7 @@ export class Scheduler {
           continue
         }
         inputs[port.id] = this.cache.get(edge.source)?.outputs[edge.sourceHandle]
+        inputKeys[port.id] = upstreamKey(keys, edge.source, edge.sourceHandle)
       }
       if (blocked) {
         this.setState(nodeId, { state: 'blocked' })
@@ -326,6 +333,7 @@ export class Scheduler {
           def,
           node.params,
           inputs,
+          inputKeys,
           inputTypes,
           controller.signal,
           nodeId,
@@ -411,7 +419,7 @@ export class Scheduler {
         const edge = inbound.get(portKey(nodeId, port.id))
         upstream.push([
           port.id,
-          edge ? `${keys.get(edge.source) ?? 'unresolved'}:${edge.sourceHandle}` : null,
+          edge ? upstreamKey(keys, edge.source, edge.sourceHandle) : null,
         ])
       }
       keys.set(
@@ -447,6 +455,7 @@ export class Scheduler {
     def: NodeDefinition,
     params: ParamValues,
     inputs: Record<string, Value | undefined>,
+    inputKeys: Record<string, string>,
     inputTypes: Readonly<Record<string, unknown>>,
     signal: AbortSignal,
     nodeId: string,
@@ -455,6 +464,7 @@ export class Scheduler {
     return {
       params,
       input: (portId) => inputs[portId],
+      inputKey: (portId) => inputKeys[portId],
       column: (paramId) => {
         const p = findParam(def, paramId)
         return p && p.kind === 'column' ? resolveColumn(p, params, types) : undefined
@@ -485,6 +495,18 @@ export class Scheduler {
     for (const id of [...this.cache.keys()]) if (!alive.has(id)) this.cache.delete(id)
     for (const id of [...this.states.keys()]) if (!alive.has(id)) this.states.delete(id)
   }
+}
+
+/**
+ * How one port's upstream is named in a provenance key.
+ *
+ * One spelling, because two consumers depend on it meaning the same thing: `desiredKeys` folds
+ * it into the hash that decides whether a node re-runs, and `ctx.inputKey` hands it to a node
+ * that publishes it as the identity of what arrived. If those parted company, a value would
+ * claim an identity the scheduler had never keyed anything by — and nothing would say so.
+ */
+function upstreamKey(keys: Map<string, string>, source: string, handle: string): string {
+  return `${keys.get(source) ?? 'unresolved'}:${handle}`
 }
 
 /**

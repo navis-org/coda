@@ -110,6 +110,7 @@ function evalContext(
   return {
     params,
     input: (portId) => inputs[portId],
+    inputKey: (portId) => (inputs[portId] ? `${portId}-key` : undefined),
     column: (paramId) => {
       const p = findParam(def, paramId)
       return p && p.kind === 'column' ? resolveColumn(p, params, types) : undefined

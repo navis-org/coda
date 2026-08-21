@@ -21,13 +21,13 @@
  *     columns disagree with the type the editor is advertising downstream.
  */
 
-import type { AnnotationsValue, TableValue } from '../core/values'
+import type { DatasetAnnotations, TableValue } from '../core/values'
 import { cacheGet, cacheSet } from './cache'
 
 export interface NeuronIndexRequest {
   datasetId: string
   /** Labels replacing the dataset's own — see `FindNeuronsRequest.annotations`. */
-  annotations?: AnnotationsValue
+  annotations?: DatasetAnnotations
   /** Ignore any cached copy and re-fetch. Wired to the Explore node's `refresh` param. */
   refresh?: boolean
   /**

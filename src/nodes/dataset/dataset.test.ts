@@ -298,7 +298,7 @@ describe('Custom CAVE', () => {
     const wired = makeInferContext(
       def,
       { ...defaultParams(def), datastack: 'somewhere' },
-      { annotations: T.annotations() },
+      { annotations: T.neurons() },
     )
     expect(def.validate?.(wired)).toEqual([])
   })

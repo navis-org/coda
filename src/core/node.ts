@@ -296,6 +296,20 @@ export interface EvalContext<P extends ParamValues = ParamValues> {
   params: P
   /** Realised value on an input port, or undefined when unconnected. */
   input(portId: string): Value | undefined
+  /**
+   * The provenance key of what arrived on a port — undefined when nothing is wired.
+   *
+   * For a node that has to publish an *identity* for a value it passes on, so something further
+   * down can key a cache by it. The chain of annotation sources is the case: what identifies an
+   * annotation table is no longer the refs that fetched it, because a Filter may sit in between,
+   * and the honest answer is the same one the scheduler already computed to decide this node
+   * should run at all — `hash(type, params, upstream)`, which is provenance rather than content
+   * (invariant 4) and changes exactly when the table would.
+   *
+   * Not the node's *own* key, which would fold in params of this node that have nothing to do
+   * with the value on that port.
+   */
+  inputKey(portId: string): string | undefined
   /** Same resolution as `InferContext.column`, so infer and eval never disagree. */
   column(paramId: string): string | undefined
   columns(paramId: string): string[]

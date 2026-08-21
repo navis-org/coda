@@ -26,7 +26,7 @@ import { ID_COLUMN_NAME, idText } from '../../core/ids'
 import type { TableSchema } from '../../core/types'
 import type { NeuronId } from '../../core/ids'
 import type {
-  AnnotationsValue,
+  DatasetAnnotations,
   CellValue,
   ColumnData,
   MatrixValue,
@@ -84,7 +84,6 @@ import { caveServerFor, datastackRecord, l2SourceFor, peekL2Cache, usableVersion
 import { codaColumn, defaultSchemas, neuronSchemaFor, schemasFor } from './schema'
 import { withAnnotations } from '../annotations/schema'
 import { MAX_L2_SKELETON_NEURONS, readL2Skeletons } from './l2'
-import { chainKey } from '../annotations/types'
 import { caveScene } from './scene'
 import type { NgScene } from '../neuroglancer/scene'
 import type { DatastackSpec, NeuronTableSpec, SynapseTableSpec } from './spec'
@@ -383,7 +382,7 @@ export class CaveSource implements DataSource {
       ? withAnnotations(this.schemasFor(req.datasetId), annotations.table.schema).neurons
       : await this.neuronSchema(spec)
     return loadCachedTable({
-      key: neuronIndexKey(this.id, req.datasetId, chainKey(annotations)),
+      key: neuronIndexKey(this.id, req.datasetId, annotations?.key ?? ''),
       fingerprint: schema.columns.map((c) => c.name).join(','),
       ...(req.refresh ? { refresh: req.refresh } : {}),
       fetch: () => this.buildIndex(spec, version, schema, req),
@@ -1120,7 +1119,7 @@ export class CaveSource implements DataSource {
    * `searchIndexFor`/`statsFor` case exactly.
    */
   private async typeLookup(
-    req: { datasetId: string; annotations?: AnnotationsValue; signal?: AbortSignal },
+    req: { datasetId: string; annotations?: DatasetAnnotations; signal?: AbortSignal },
   ): Promise<Map<string, string>> {
     const index = await this.neuronIndex({
       datasetId: req.datasetId,
@@ -1267,7 +1266,7 @@ function joinIndex(
 
 /** One neuron's labels out of a chain, by id. */
 function labelsFor(
-  annotations: AnnotationsValue | undefined,
+  annotations: DatasetAnnotations | undefined,
   id: string,
 ): Record<string, CellValue> {
   if (!annotations) return {}
