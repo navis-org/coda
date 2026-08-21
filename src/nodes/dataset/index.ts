@@ -32,6 +32,7 @@ import {
   versionsFor,
 } from '../lib/datasetFamilies'
 import { DATASTACK_SPECS, datasetIdFor, registerDatastackSpec } from '../../data/cave/spec'
+import { materializationsFor, peekMaterializations } from '../../data/cave/datastack'
 import { ANNOTATIONS_INPUT, annotationSchemaFrom, annotationsFrom } from '../lib/annotationParams'
 import { refreshParam } from '../../core/node'
 
@@ -189,11 +190,44 @@ export const customCaveNode = registerNode({
     },
     {
       id: 'version',
-      kind: 'string',
+      kind: 'enum',
       label: 'Materialization',
-      placeholder: '783',
-      help: 'Materialization number. These expire — pin one you have checked.',
+      help: 'Which materialization to query. Empty tracks the newest the datastack reports. These expire, so a pinned one eventually stops working — the card says so when it does.',
       default: '',
+      /*
+       * Filled from `peekMaterializations`, which is empty until the datastack has been named
+       * *and* its metadata has landed. Both intermediate states are real and are said in words
+       * rather than left as an empty select: a dropdown with nothing in it reads as a broken
+       * control, where "name a datastack first" reads as an instruction.
+       */
+      options: (ctx) => {
+        const datastack = String(ctx.params.datastack ?? '').trim()
+        const chosen = String(ctx.params.version ?? '').trim()
+        if (!datastack) return [{ value: '', label: 'Name a datastack first' }]
+        const known = peekMaterializations(datastack)
+        if (!known) {
+          return [
+            { value: '', label: 'Latest' },
+            // The stored value is kept as an option while the list is unknown, which the family
+            // nodes do not need to do: their listing is one call that every dataset node shares,
+            // where this is per-datastack and so is absent on *every* reload. Without it a
+            // pinned materialization shows an empty select for a second and reads as having been
+            // forgotten.
+            ...(chosen ? [{ value: chosen, label: chosen }] : []),
+          ]
+        }
+        return [
+          // Named rather than blank, for `resolveDatasetId`'s reason: a "Latest" that does not
+          // say which one is a provenance question mark on every graph anyone shares.
+          { value: '', label: known[0] ? `Latest (${known[0]})` : 'Latest' },
+          ...known.map((v) => ({ value: String(v), label: String(v) })),
+          // A pinned materialization the datastack no longer lists is kept rather than silently
+          // dropped, so the select still shows what the graph says. `validate` reports it.
+          ...(chosen && !known.includes(Number(chosen))
+            ? [{ value: chosen, label: `${chosen} (not listed)` }]
+            : []),
+        ]
+      },
     },
     {
       id: 'neuronTable',
@@ -242,33 +276,61 @@ export const customCaveNode = registerNode({
   validate: (ctx) => {
     const datastack = String(ctx.params.datastack ?? '').trim()
     if (!datastack) return ['Name a datastack, e.g. flywire_fafb_public']
-    const version = String(ctx.params.version ?? '').trim()
-    if (!version) return ['Name a materialization, e.g. 783']
-    if (!Number.isInteger(Number(version))) {
-      return [`"${version}" is not a materialization number — CAVE numbers them, e.g. 783`]
-    }
-    if (!String(ctx.params.neuronTable ?? '').trim()) {
-      return ['Name the table listing this datastack’s neurons, e.g. proofread_neurons']
-    }
     /*
-     * A built-in datastack wins, and silently. `specFor` prefers the static table over anything
-     * registered by hand, which is the right precedence — a shipped node's spec is checked and a
-     * typed one is not — but it makes every setting on this card inert while the card still shows
-     * them being edited. That reads as the fields not working, so it is said rather than fixed:
-     * the node those settings belong to is one menu entry away.
+     * Checked before anything else on the card, because it makes everything else on the card
+     * moot: `specFor` prefers the static table over a hand-registered spec — the right
+     * precedence, since a shipped spec is checked and a typed one is not — so every setting here
+     * is inert for a datastack that already has one. Asking for a neuron table first would be
+     * answering a question that does not matter.
      */
     if (DATASTACK_SPECS.some((spec) => spec.datastack === datastack)) {
       return [
-        `Coda ships a node for "${datastack}" — use it instead; this card’s table and column ` +
+        `Coda ships a node for "${datastack}" — use it instead; this card's table and column ` +
           `settings are ignored for a datastack that already has a spec.`,
+      ]
+    }
+    const version = String(ctx.params.version ?? '').trim()
+    if (version && !Number.isInteger(Number(version))) {
+      return [`"${version}" is not a materialization number — CAVE numbers them, e.g. 783`]
+    }
+    if (!String(ctx.params.neuronTable ?? '').trim()) {
+      return ['Name the table listing this datastack\u2019s neurons, e.g. proofread_neurons']
+    }
+    /*
+     * Undefined means the metadata has not arrived, which is not a problem to report — the same
+     * silence `versionsFor` keeps for a listing in flight, since otherwise every Custom CAVE
+     * card in the graph warns for the first second of every load.
+     */
+    const known = peekMaterializations(datastack)
+    if (known && version && !known.includes(Number(version))) {
+      return [
+        known.length
+          ? `Materialization ${version} is not on ${datastack} — it offers ${known.slice(0, 8).join(', ')}${known.length > 8 ? ', \u2026' : ''}`
+          : `${datastack} reports no usable materializations`,
       ]
     }
     return []
   },
 
   evaluate: async (ctx) => {
-    const datasetId = customCaveDatasetId(ctx.params)
-    if (!datasetId) throw new Error('Name a datastack and a materialization')
+    const datastack = String(ctx.params.datastack ?? '').trim()
+    if (!datastack) throw new Error('Name a datastack, e.g. flywire_fafb_public')
+    const pinned = String(ctx.params.version ?? '').trim()
+    /*
+     * Resolved by *fetching* rather than by peeking. `evaluate` may await where inference may
+     * not, so an unpinned node runs on the first press rather than failing because the metadata
+     * had not landed — which is what a peek here would do, and it would look like the datastack
+     * name being wrong. Both halves read one memo, so the materialization the dropdown shows and
+     * the one this uses cannot disagree.
+     */
+    const version = pinned ? Number(pinned) : (await materializationsFor(datastack))[0]
+    if (version === undefined || !Number.isInteger(version)) {
+      throw new Error(
+        `${datastack} reports no usable materializations. Check the datastack name, or that ` +
+          `your token can see it.`,
+      )
+    }
+    const datasetId = datasetIdFor(datastack, version)
     registerCustomCaveSpec(ctx.params)
     // Not checked against the listing, unlike the named families: a private datastack the
     // account can query need not appear in the public one, and refusing on that would make the
@@ -278,19 +340,31 @@ export const customCaveNode = registerNode({
         kind: 'dataset',
         sourceId: 'cave',
         datasetId,
-        label: `${String(ctx.params.datastack ?? '')} ${String(ctx.params.version ?? '')}`.trim(),
+        label: `${datastack} ${version}`,
         ...annotationsFrom(ctx.input('annotations')),
       } satisfies DatasetValue,
     }
   },
 })
 
+/**
+ * The dataset id this node stands for, or undefined while it cannot say.
+ *
+ * Empty means **latest**, the same as every family dataset node — and resolved through the same
+ * peek the dropdown is built from, so the label somebody picked and the id that runs cannot
+ * disagree. Unresolvable until the metadata lands, which is invariant 2's ordinary state: the
+ * node publishes a Dataset type with no id for a moment and `reportSourceLearned` re-infers.
+ */
 function customCaveDatasetId(params: Record<string, unknown>): string | undefined {
   const datastack = String(params.datastack ?? '').trim()
-  const version = Number(String(params.version ?? '').trim())
+  if (!datastack) return undefined
+  const pinned = String(params.version ?? '').trim()
+  const version = pinned ? Number(pinned) : peekMaterializations(datastack)?.[0]
   // Through `datasetIdFor`, which `splitDatasetId` is the reader for — a third spelling of the
   // `datastack:materialization` grammar is a third place it can drift.
-  return datastack && Number.isInteger(version) ? datasetIdFor(datastack, version) : undefined
+  return version !== undefined && Number.isInteger(version)
+    ? datasetIdFor(datastack, version)
+    : undefined
 }
 
 function registerCustomCaveSpec(params: Record<string, unknown>): void {

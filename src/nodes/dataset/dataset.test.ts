@@ -6,7 +6,7 @@
  * pinned version survives, and that the legacy generic node still loads.
  */
 
-import { beforeAll, describe, expect, it } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { inferGraph } from '../../core/inference'
 import { addEdge, addNode, emptyGraph } from '../../core/graph'
@@ -20,6 +20,10 @@ import { MockSource } from '../../data/mock/MockSource'
 import { registerSource, requireSource } from '../../data/source'
 import { NeuPrintSource } from '../../data/neuprint/NeuPrintSource'
 import { DEFAULT_SERVER } from '../../data/neuprint/servers'
+import { resetDatastackRecords } from '../../data/cave/datastack'
+import { DATASTACK_SPECS } from '../../data/cave/spec'
+import { CaveSource } from '../../data/cave/CaveSource'
+import { resetCredentials as resetCaveCredentials, setToken } from '../../data/cave/credentials'
 import '../index'
 
 beforeAll(async () => {
@@ -45,10 +49,12 @@ function node(type: string, params: ParamValues = {}) {
 }
 
 /** The `version` param's options, resolved against the live registry. */
-function versionOptions(type: string): EnumOption[] {
+function versionOptions(type: string, params: ParamValues = {}): EnumOption[] {
   const param = (requireNodeDef(type).params ?? []).find((p) => p.id === 'version')
   if (!param || param.kind !== 'enum') throw new Error(`${type} has no version enum`)
-  return typeof param.options === 'function' ? param.options(ctxFor(type)) : param.options
+  return typeof param.options === 'function'
+    ? param.options(ctxFor(type, params))
+    : param.options
 }
 
 describe('per-dataset nodes', () => {
@@ -185,5 +191,106 @@ describe('the superseded generic node', () => {
     const sched = new Scheduler({ resolveSource: (id) => requireSource(id) })
     await sched.run(graph, { mode: 'full' })
     expect(isDatasetValue(sched.output('ds', 'dataset'))).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Custom CAVE
+// ---------------------------------------------------------------------------
+
+/**
+ * The materialization dropdown.
+ *
+ * A datastack a user has just typed is not in `listDatasets` and never will be — that lists
+ * only datastacks with a spec in the static table — so this control is fed by a per-datastack
+ * peek instead, which is invariant 2's shape and fails in invariant 2's way: silently, as an
+ * empty picker that reads as a broken control.
+ */
+describe('Custom CAVE', () => {
+  beforeEach(() => {
+    resetDatastackRecords()
+  })
+
+  it('says to name a datastack rather than offering an empty list', () => {
+    // An empty select reads as a control that does not work; a sentence reads as an instruction.
+    expect(versionOptions('dataset.cave').map((o) => o.label)).toEqual(['Name a datastack first'])
+  })
+
+  it('offers Latest and keeps a pinned value while the metadata is in flight', () => {
+    const options = versionOptions('dataset.cave', { datastack: 'somewhere', version: '783' })
+    // Not an empty select: the list is per-datastack, so it is unknown on *every* reload, and a
+    // pinned materialization vanishing for a second reads as having been forgotten.
+    expect(options.map((o) => o.value)).toEqual(['', '783'])
+  })
+
+  it('publishes no dataset id until it can name a materialization', () => {
+    // Invariant 2's ordinary state: a typed socket with no id, refilled by `reportSourceLearned`.
+    const out = ctxFor('dataset.cave', { datastack: 'somewhere' })
+    const type = requireNodeDef('dataset.cave').inferOutputs?.(out)?.['dataset']
+    expect(type?.kind).toBe('dataset')
+    expect(datasetRef(type)?.datasetId).toBeUndefined()
+  })
+
+  it('takes the id from the pinned materialization, through the shared grammar', () => {
+    const out = ctxFor('dataset.cave', { datastack: 'somewhere', version: '783' })
+    const type = requireNodeDef('dataset.cave').inferOutputs?.(out)?.['dataset']
+    expect(datasetRef(type)?.datasetId).toBe('somewhere:783')
+  })
+
+  it('refuses a materialization that is not a number, and accepts an empty one', () => {
+    const def = requireNodeDef('dataset.cave')
+    const bad = def.validate?.(ctxFor('dataset.cave', { datastack: 'x', neuronTable: 'n', version: 'latest' })) ?? []
+    expect(bad.join(' ')).toContain('not a materialization number')
+    // Empty is "latest", as it is on every family dataset node — not a missing value.
+    expect(def.validate?.(ctxFor('dataset.cave', { datastack: 'x', neuronTable: 'n', version: '' }))).toEqual([])
+  })
+
+  it('resolves an unpinned materialization by fetching, so the first Run works', async () => {
+    /*
+     * The half a peek cannot cover, and the most important one: an unpinned node has no
+     * materialization at edit time by construction, so if `evaluate` read the peek it would fail
+     * on the first press and succeed on the second — the "runs twice, answers differently"
+     * signature this codebase keeps being caught by.
+     */
+    setToken('test-token')
+    vi.stubGlobal('fetch', (url: string) => {
+      const body = String(url).includes('/info/api/v2/datastack/full/')
+        ? { local_server: 'https://local.example', segmentation_source: '' }
+        : [
+            { version: 42, valid: true, status: 'AVAILABLE' },
+            { version: 91, valid: true, status: 'AVAILABLE' },
+            // Expired and invalid ones must not win "latest" — a query against either fails.
+            { version: 99, valid: true, status: 'EXPIRED' },
+            { version: 95, valid: false },
+          ]
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        text: () => Promise.resolve(JSON.stringify(body)),
+      } as Response)
+    })
+    registerSource(new CaveSource())
+
+    const scheduler = new Scheduler({ resolveSource: (id) => requireSource(id) })
+    let g = emptyGraph('custom-cave')
+    g = addNode(g, node('dataset.cave', { datastack: 'somewhere', neuronTable: 'n' }))
+    await scheduler.run(g, { mode: 'full' })
+
+    const value = scheduler.output('ds', 'dataset')
+    if (!isDatasetValue(value)) throw new Error(scheduler.info('ds').error ?? 'no dataset')
+    expect(value.datasetId).toBe('somewhere:91')
+    vi.unstubAllGlobals()
+    resetCaveCredentials()
+  })
+
+  it('warns about a shipped datastack before asking for anything else on the card', () => {
+    // `specFor` prefers the static table, so every other setting here is inert — and asking for
+    // a neuron table first answers a question that does not matter. Deliberately checked with
+    // the rest of the card empty, which is what it is a second after the node is added.
+    const issues =
+      requireNodeDef('dataset.cave').validate?.(
+        ctxFor('dataset.cave', { datastack: DATASTACK_SPECS[0]?.datastack ?? '' }),
+      ) ?? []
+    expect(issues.join(' ')).toContain('ships a node')
   })
 })

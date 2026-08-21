@@ -1443,6 +1443,29 @@ reader needs and a fourth backend should be one entry rather than four edits.
   privileged table, so the node names its neuron table and registers a spec through
   `registerDatastackSpec` — synchronously and with no network, `neuPrintSourceFor`'s rule.
 
+  **Its Materialization is a dropdown fed by a per-datastack peek**, not by the listing. That is
+  forced rather than chosen: `listDatasets` lists only datastacks with a spec in the *static*
+  table, so a datastack somebody has just typed is not in it and never will be.
+  `peekMaterializations` is `schemasFor`'s contract again — synchronous, `undefined` until it
+  knows, starts the fetch once per datastack and re-infers through `reportSourceLearned` — with
+  `materializationsFor` as its awaited half, which `evaluate` uses. One memo behind both, so the
+  materialization the dropdown *shows* and the one a run *uses* cannot disagree.
+
+  Three things about it, each of which is a state somebody actually sees. **The empty select is
+  said in words**: `Name a datastack first` before one is typed, because a dropdown with nothing
+  in it reads as a broken control. **A pinned value is kept as an option while the list is
+  unknown** — the family nodes need no such thing, since their listing is one call every dataset
+  node shares, where this one is per-datastack and so absent on *every* reload; without it a
+  pinned materialization blanks for a second and reads as forgotten. And **`evaluate` resolves
+  "latest" by fetching rather than by peeking**, or an unpinned node fails on the first press and
+  works on the second — the runs-twice-answers-differently signature this codebase keeps being
+  caught by. `dataset.test.ts` pins all three, and the last two were confirmed by mutation.
+
+  The `validate` order matters too: the shipped-datastack collision is checked **first**, because
+  `specFor` prefers the static table, so every other setting on the card is inert for a datastack
+  that already has a node — and asking for a neuron table first answers a question that does not
+  matter.
+
 **The Annotations socket takes the dataset hue and the `diamond` shape** — the one that family
 had left, square being the dataset itself and circle/hex/dot the three geometry kinds. A seventh
 chromatic family would fail the all-pairs colourblind gate.

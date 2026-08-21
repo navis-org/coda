@@ -104,14 +104,17 @@ function paramsOf(def: NodeDefinition): GuideParam[] {
  *
  * An enum prints its *option's* label rather than the stored value, because that is what the
  * picker shows and a guide that said `outputs` where the app says `downstream (outputs)` would
- * be describing a different control. Options can be a function of the resolved input types
- * (Filter's operator list is dtype-aware), and those cannot be evaluated without a graph — so
- * they resolve to the honest answer rather than to a guess.
+ * be describing a different control. Options can be computed rather than fixed — from the
+ * resolved input types (Filter's operator list is dtype-aware), from a dataset listing that has
+ * not arrived (every Version picker), or from another param (Custom CAVE's Materialization
+ * follows its Datastack). None can be evaluated without a graph, so they resolve to the honest
+ * answer rather than to a guess. Deliberately not "depends on the input", which was true of the
+ * first case and of neither of the others.
  */
 function defaultLabel(p: ParamDef): string {
   switch (p.kind) {
     case 'enum': {
-      if (typeof p.options === 'function') return 'depends on the input'
+      if (typeof p.options === 'function') return 'resolved live'
       const hit = p.options.find((o) => o.value === p.default)
       return hit?.label ?? p.options[0]?.label ?? '—'
     }
