@@ -84,6 +84,23 @@ export interface ConnectionViewSpec {
  * — so a client that took the raw column would put every synapse a factor out, with nothing
  * failing, because the cloud is internally consistent either way.
  */
+/**
+ * The column names of CAVE's standard `synapse` schema.
+ *
+ * Not a guess: a table whose registered schema is `synapse` has these by *definition* —
+ * `emannotationschemas` defines the type — and both a declared table (`wclee_aedes_brain`'s
+ * `synapses`) and a configured one (`flywire_fafb_public`'s `synapses_nt_v1`) were checked
+ * against it live. `ctr_pt_position` is the cleft centre, which is the honest place to draw a
+ * synapse; FlyWire's spec picks `pre_pt_position` instead, which is a choice rather than a
+ * correction. `scoreColumn` is deliberately absent — a confidence column is per-table
+ * (`cleft_score` on FlyWire, nothing comparable on Aedes, which has `size`).
+ */
+export const STANDARD_SYNAPSE_COLUMNS = {
+  preColumn: 'pre_pt_root_id',
+  postColumn: 'post_pt_root_id',
+  positionColumn: 'ctr_pt_position',
+} as const
+
 export interface SynapseTableSpec {
   table: string
   preColumn: string

@@ -398,7 +398,7 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `data/precomputed/precomputed.test.ts`   | shard lookup, multi-LOD manifest, Draco decode, legacy fragments, CORS fallback                                                  |
 | `data/cave/cave.test.ts`                 | CAVE against recorded bodies: a wide root id kept exactly, the string-aware scan, the annotation pivot, an anchored pattern, and every refusal |
 | `nodes/lib/datasetFamilies.test.ts`      | (also) that every CAVE family names a datastack spec and every spec a family — the join key nothing else checks |
-| `data/cave/live.test.ts`                 | the same source against the real services, skipped without `CAVE_TOKEN` — the only thing that notices an endpoint shape changing, plus the mesh and synapse clouds proved to share one nanometre frame |
+| `data/cave/live.test.ts`                 | the same source against the real services, skipped without `CAVE_TOKEN` — the only thing that notices an endpoint shape changing, the mesh and synapse clouds proved to share one nanometre frame, and Aedes' edge list built by counting with nothing configured |
 | `data/annotations/annotations.test.ts`   | annotation sources: the `Token` scheme, the pseudo-workspaces dropped, a wide id kept as text, the outer join and the later source winning — plus the route fallback's three rules |
 | `data/annotations/live.test.ts`          | the same against real FlyTable, skipped without `SEATABLE_TOKEN` — including the ids proved to be beyond double precision |
 | `nodes/annotation/annotations.test.ts`   | the three source nodes: the two halves of one join asserted against each other, half a chain published as nothing, and the datastack named rather than wired |
@@ -3732,14 +3732,38 @@ the same problem. **A datastack with no entry is not offered** — the info serv
 and most would fail on the first Run, and a dataset that appears in the picker and then fails is
 worse than one that is absent.
 
-**Connectivity is that view, and it is the finding that makes CAVE affordable.**
-`synapses_nt_v1` is 244,358,226 rows and the query API has no `GROUP BY`, so an edge list built
-from synapses means downloading a hemisphere's worth of them to count. `valid_connection_v2` is
-the server having done it once: one row per ordered (pre, post) pair with `n_syn`, filterable by
-root id *and* by `n_syn` — so a minimum weight is applied before anything is sent. On one
-neuron's outputs that is 4,818 rows / 410 kB unfiltered against 183 rows / 16 kB at `n_syn >= 5`.
-A datastack without such a view says so rather than pretending, which is the honest state for
-Aedes.
+**Connectivity prefers that view and falls back to counting synapses**, which is `connecto`'s
+shape and arrived at for its reason. `valid_connection_v2` is the server having done the
+aggregation once: one row per ordered (pre, post) pair with `n_syn`, filterable by root id *and*
+by `n_syn`, so a minimum weight is applied before anything is sent — on one neuron's outputs,
+4,818 rows / 410 kB unfiltered against 183 / 16 kB at `n_syn >= 5`.
+
+Where there is no such view — **which is most datastacks; FlyWire's is the exception** — the
+edge list is built by asking the synapse table for its two id columns and counting locally. The
+query API has no `GROUP BY`, so neither the grouping nor the weight cut can be pushed down: every
+synapse of every queried neuron is transferred, and `minWeight` is applied *after* counting.
+That is still worth having by a long way, because the alternative is not a cheaper query but no
+connectivity at all. Measured against Aedes, exactly that case: one neuron's 719 synapses arrive
+in 1.1 s and 111 kB and collapse to 508 partners.
+
+Two things about the synapse path were established live rather than assumed. **`select_columns`
+sends more than it is asked for** — naming a `*_pt_root_id` returns the whole bound point, so the
+supervoxel id rides along and the transfer is about twice what two columns suggest. And
+**`refuseIfCapped` is the real bound**: a hub neuron or a large seed set can reach the 500,000-row
+truncation, where the view path is one row per pair and cannot.
+
+**Which synapse table is three answers in order, and the order matters.** A configured
+`spec.synapses` wins, because it can name a curated table and the column that scores it —
+FlyWire's `synapses_nt_v1` with `cleft_score`, on a datastack that declares
+`synapse_table: null`. Otherwise the datastack's **own declaration**, which is what makes a
+hand-named datastack work with no configuration at all: 7 of the 13 the info service lists set
+it, `wclee_aedes_brain` among them. Its columns are `STANDARD_SYNAPSE_COLUMNS`, which is a
+definition rather than a guess — a table whose registered schema is `synapse` has
+`pre_pt_root_id`, `post_pt_root_id` and `ctr_pt_position` by `emannotationschemas`, checked
+against both a declared and a configured table. `fetchSynapses` resolves the same way, so a
+datastack that can answer connectivity by aggregation can also draw the synapses it aggregated;
+`positionColumn` is a *stem* the API splits into `_x`/`_y`/`_z`, verified to behave identically
+on both.
 
 ### Endpoint shapes that are not what a reasonable person would guess
 

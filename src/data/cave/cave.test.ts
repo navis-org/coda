@@ -680,6 +680,158 @@ describe('a wired annotation chain', () => {
 })
 
 // ---------------------------------------------------------------------------
+// Connectivity without a roll-up view
+// ---------------------------------------------------------------------------
+
+/**
+ * Most CAVE datastacks publish only a synapse table — `valid_connection_v2` is FlyWire having
+ * done the aggregation once, and it is the exception. So the view is a fast path rather than a
+ * requirement, and the general path counts synapses, which is `connecto`'s shape.
+ */
+describe('connectivity with no connection view', () => {
+  const SYNAPTIC = 'synaptic_stack'
+  const DATASET_SYN = `${SYNAPTIC}:1`
+
+  /** The neuron list these ids live in — `typeLookup` runs beside every connectivity query. */
+  const NUCLEI = JSON.stringify([
+    { pt_root_id: 111, id: 1 },
+    { pt_root_id: 222, id: 2 },
+    { pt_root_id: 333, id: 3 },
+  ])
+
+  /** Three synapses A→B, one A→C: enough to show counting and a weight cut. */
+  const SYNAPSE_ROWS = JSON.stringify([
+    { pre_pt_root_id: 111, post_pt_root_id: 222 },
+    { pre_pt_root_id: 111, post_pt_root_id: 222 },
+    { pre_pt_root_id: 111, post_pt_root_id: 222 },
+    { pre_pt_root_id: 111, post_pt_root_id: 333 },
+  ])
+
+  beforeEach(() => {
+    registerDatastackSpec({
+      datastack: SYNAPTIC,
+      label: SYNAPTIC,
+      description: 'synapses only',
+      neurons: { table: 'nuclei', idColumn: 'pt_root_id' },
+      synapses: {
+        table: 'synapses',
+        preColumn: 'pre_pt_root_id',
+        postColumn: 'post_pt_root_id',
+        positionColumn: 'ctr_pt_position',
+      },
+    })
+  })
+
+  it('counts synapses into weights when there is no view to ask', async () => {
+    installFetch({ '/table/synapses/query': SYNAPSE_ROWS, '/table/nuclei/query': NUCLEI })
+    const table = await new CaveSource().fetchConnectivity({
+      datasetId: DATASET_SYN,
+      neuronIds: ['111'],
+      direction: 'outputs',
+    })
+    expect(table.data.partnerId).toEqual(['222', '333'])
+    expect(table.data.weight).toEqual([3, 1])
+  })
+
+  it('asks for only the two id columns, which is what makes it affordable', async () => {
+    const captured = installFetch({ '/table/synapses/query': SYNAPSE_ROWS, '/table/nuclei/query': NUCLEI })
+    await new CaveSource().fetchConnectivity({
+      datasetId: DATASET_SYN,
+      neuronIds: ['111'],
+      direction: 'outputs',
+    })
+    const body = captured.find((c) => c.url.includes('/table/synapses/query'))?.body as {
+      select_columns?: string[]
+    }
+    expect(body?.select_columns).toEqual(['pre_pt_root_id', 'post_pt_root_id'])
+  })
+
+  it('cuts the weight after counting, since no server can do it before', async () => {
+    installFetch({ '/table/synapses/query': SYNAPSE_ROWS, '/table/nuclei/query': NUCLEI })
+    const table = await new CaveSource().fetchConnectivity({
+      datasetId: DATASET_SYN,
+      neuronIds: ['111'],
+      direction: 'outputs',
+      minWeight: 2,
+    })
+    // The A→C edge is gone, and nothing was pushed down — the view path's `atLeast` has no
+    // synapse-level equivalent, so the whole table is transferred either way.
+    expect(table.data.partnerId).toEqual(['222'])
+  })
+
+  it('filters on the queried end, so direction still means what it says', async () => {
+    const captured = installFetch({ '/table/synapses/query': SYNAPSE_ROWS, '/table/nuclei/query': NUCLEI })
+    await new CaveSource().fetchConnectivity({
+      datasetId: DATASET_SYN,
+      neuronIds: ['222'],
+      direction: 'inputs',
+    })
+    const body = captured.find((c) => c.url.includes('/table/synapses/query'))?.body as {
+      filter_in_dict?: unknown
+    }
+    expect(body?.filter_in_dict).toEqual({ synapses: { post_pt_root_id: ['222'] } })
+  })
+
+  it('prefers the view where one exists, rather than counting anyway', async () => {
+    const captured = installFetch()
+    await new CaveSource().fetchConnectivity({
+      datasetId: DATASET,
+      neuronIds: ['720575940628857210'],
+      direction: 'outputs',
+    })
+    // FlyWire's roll-up is orders of magnitude cheaper and can push the weight cut down with it.
+    expect(captured.some((c) => c.url.includes('/views/valid_connection_v2/query'))).toBe(true)
+    expect(captured.some((c) => c.url.includes('/table/synapses_nt_v1/query'))).toBe(false)
+  })
+
+  it('refuses when there is neither, naming both', async () => {
+    registerDatastackSpec({
+      datastack: 'bare',
+      label: 'bare',
+      description: 'nothing',
+      neurons: { table: 'nuclei', idColumn: 'pt_root_id' },
+    })
+    installFetch({
+      '/info/api/v2/datastack/full/': JSON.stringify({ local_server: 'https://x' }),
+      '/table/nuclei/query': NUCLEI,
+    })
+    await expect(
+      new CaveSource().fetchConnectivity({
+        datasetId: 'bare:1',
+        neuronIds: ['1'],
+        direction: 'outputs',
+      }),
+    ).rejects.toThrow(/roll-up nor a synapse table/)
+  })
+
+  it('takes the datastack’s own declared synapse table when the spec names none', async () => {
+    registerDatastackSpec({
+      datastack: 'declared',
+      label: 'declared',
+      description: 'declares its own',
+      neurons: { table: 'nuclei', idColumn: 'pt_root_id' },
+    })
+    const captured = installFetch({
+      // 7 of 13 datastacks set this, Aedes among them — which is what lets one work with no
+      // configuration at all.
+      '/info/api/v2/datastack/full/': JSON.stringify({
+        local_server: 'https://x',
+        synapse_table: 'synapses',
+      }),
+      '/table/synapses/query': SYNAPSE_ROWS,
+      '/table/nuclei/query': NUCLEI,
+    })
+    const table = await new CaveSource().fetchConnectivity({
+      datasetId: 'declared:1',
+      neuronIds: ['111'],
+      direction: 'outputs',
+    })
+    expect(table.data.weight).toEqual([3, 1])
+    expect(captured.some((c) => c.url.includes('/table/synapses/query'))).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
 // A datastack that publishes no neuron table
 // ---------------------------------------------------------------------------
 

@@ -32,6 +32,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { CaveSource } from './CaveSource'
 import { resetCredentials, setToken } from './credentials'
+import { materializationsFor } from './datastack'
+import { registerDatastackSpec } from './spec'
+import { ID_COLUMN_NAME } from '../../core/ids'
 
 const TOKEN = process.env.CAVE_TOKEN
 const DATASET = 'flywire_fafb_public:783'
@@ -200,4 +203,55 @@ live('CAVE, live', () => {
     expect(matrix.colLabels).toEqual(targets)
     expect([...matrix.values].every((v) => v >= 50)).toBe(true)
   }, 300_000)
+})
+
+/**
+ * Aedes: a datastack with **no** connection roll-up and no configured synapse table.
+ *
+ * The case most CAVE datastacks are in, and the whole reason the fallback exists. Nothing about
+ * it is configured here — `wclee_aedes_brain` declares `synapse_table: "synapses"` in its own
+ * info record, and its columns are the standard `synapse` schema's, so the spec names only the
+ * neuron table.
+ */
+describe.skipIf(!TOKEN)('CAVE, live — connectivity by aggregation', () => {
+  it('builds an edge list from raw synapses on a datastack with no view', async () => {
+    setToken(TOKEN!)
+    registerDatastackSpec({
+      datastack: 'wclee_aedes_brain',
+      label: 'Aedes',
+      description: 'live',
+      neurons: { table: 'nuclei_v1_aedes', idColumn: 'pt_root_id' },
+    })
+    const cave = new CaveSource()
+    const versions = await materializationsFor('wclee_aedes_brain')
+    const dataset = `wclee_aedes_brain:${versions[0]}`
+
+    // A real root id off the nuclei table rather than a literal: root ids change with edits, so
+    // a hardcoded one is a test that rots into a false negative.
+    const neurons = await cave.findNeurons({ datasetId: dataset, limit: 1 })
+    const seed = String(neurons.data[ID_COLUMN_NAME]?.[0])
+    expect(seed).toMatch(/^\d+$/)
+
+    const edges = await cave.fetchConnectivity({
+      datasetId: dataset,
+      neuronIds: [seed],
+      direction: 'outputs',
+    })
+    expect(edges.length).toBeGreaterThan(0)
+
+    // Counted, not read: every weight is a positive integer and the seed is on every row.
+    const weights = edges.data.weight as number[]
+    expect(weights.every((w) => Number.isInteger(w) && w > 0)).toBe(true)
+    expect(new Set(edges.data[ID_COLUMN_NAME] as string[])).toEqual(new Set([seed]))
+
+    // The cut is applied after counting, so a higher threshold is a strict subset.
+    const strong = await cave.fetchConnectivity({
+      datasetId: dataset,
+      neuronIds: [seed],
+      direction: 'outputs',
+      minWeight: 3,
+    })
+    expect(strong.length).toBeLessThan(edges.length)
+    expect((strong.data.weight as number[]).every((w) => w >= 3)).toBe(true)
+  }, 120_000)
 })

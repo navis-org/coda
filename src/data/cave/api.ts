@@ -45,6 +45,17 @@ export interface DatastackInfo {
    * has to be asked for. See `meshes.ts`.
    */
   segmentation_source?: string
+  /**
+   * The datastack's own synapse table, where it declares one.
+   *
+   * **7 of the 13 datastacks the info service lists set this**, including `wclee_aedes_brain`,
+   * `brain_and_nerve_cord_public` and `minnie65_public` — and `flywire_fafb_public` does *not*,
+   * which is why `spec.synapses` exists and takes precedence. Reading it is what lets a datastack
+   * with nothing but a synapse table answer connectivity with no configuration at all.
+   *
+   * Null rather than absent on a datastack that has none, so the type admits both.
+   */
+  synapse_table?: string | null
 }
 
 /** One materialization's metadata. `expires_on` is why a CAVE version dropdown ages. */

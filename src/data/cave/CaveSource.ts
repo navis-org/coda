@@ -81,8 +81,14 @@ import { getServer } from './credentials'
 import { caveServerFor, datastackRecord } from './datastack'
 import { codaColumn, defaultSchemas, neuronSchemaFor, schemasFor } from './schema'
 import { withAnnotations } from '../annotations/schema'
-import type { ConnectionViewSpec, DatastackSpec, NeuronTableSpec, SynapseTableSpec } from './spec'
-import { DATASTACK_SPECS, datasetIdFor, specFor, splitDatasetId } from './spec'
+import type { DatastackSpec, NeuronTableSpec, SynapseTableSpec } from './spec'
+import {
+  DATASTACK_SPECS,
+  STANDARD_SYNAPSE_COLUMNS,
+  datasetIdFor,
+  specFor,
+  splitDatasetId,
+} from './spec'
 
 /**
  * What CAVE can do today, and every `false` is a node that refuses cleanly rather than a
@@ -154,7 +160,34 @@ interface DatastackState {
   discoveryRequested?: boolean
 }
 
+/** One connection, normalised out of whichever source answered. */
+interface Edge {
+  pre: string
+  post: string
+  weight: number
+}
+
+/**
+ * The `IN` filters for one edge query, in whichever table's column names.
+ *
+ * Shared by both paths so a filter cannot be built for the view's columns and sent to the
+ * synapse table — which would not error, it would filter on a column that does not exist.
+ */
+function idFilters(
+  columns: { preColumn: string; postColumn: string },
+  ids: { pre?: readonly NeuronId[]; post?: readonly NeuronId[] },
+): Record<string, Array<string | number>> {
+  return {
+    ...(ids.pre ? { [columns.preColumn]: [...ids.pre] } : {}),
+    ...(ids.post ? { [columns.postColumn]: [...ids.post] } : {}),
+  }
+}
+
 /** What a truncated read costs here, in the words `refuseIfCapped` appends to. */
+const INCOMPLETE_EDGES =
+  'the edge list would be incomplete. Ask about fewer neurons, or use a datastack that ' +
+  'publishes a connection roll-up'
+
 const INCOMPLETE_INDEX =
   'the neuron index would be incomplete. This datastack is too large to read in one request, ' +
   'and Coda cannot page it yet'
@@ -586,25 +619,19 @@ export class CaveSource implements DataSource {
 
   async fetchConnectivity(req: ConnectivityRequest): Promise<TableValue> {
     const { spec, version } = this.require(req.datasetId)
-    const links = requireConnections(spec)
-    const server = await this.serverFor(spec)
 
     // Query-relative, which is what the seam promises: `neuronId` is always the neuron that was
     // asked about, whichever way the synapse points. The Connectivity node re-orients into
     // pre/post itself — see `nodes/lib/connectivityOps.ts`.
     const outputs = req.direction === 'outputs'
-    const queried = outputs ? links.preColumn : links.postColumn
-    const partner = outputs ? links.postColumn : links.preColumn
 
     // Together: the type lookup may have to download the index, and there is no reason for the
     // connectivity query to wait behind it.
-    const [rows, types] = await Promise.all([
-      queryLinks(
-        server,
-        spec.datastack,
+    const [edges, types] = await Promise.all([
+      this.edges(
+        spec,
         version,
-        links,
-        { [queried]: req.neuronIds },
+        outputs ? { pre: req.neuronIds } : { post: req.neuronIds },
         req.minWeight,
         req.signal,
       ),
@@ -612,15 +639,15 @@ export class CaveSource implements DataSource {
     ])
     return tableFromRows(
       this.schemasFor(req.datasetId).connectivity,
-      rows.map((row) => {
-        const neuronId = String(row[queried])
-        const partnerId = String(row[partner])
+      edges.map((edge) => {
+        const neuronId = outputs ? edge.pre : edge.post
+        const partnerId = outputs ? edge.post : edge.pre
         return {
           [ID_COLUMN_NAME]: neuronId,
           neuronType: types.get(neuronId) ?? null,
           partnerId,
           partnerType: types.get(partnerId) ?? null,
-          weight: Number(row[links.weightColumn] ?? 0),
+          weight: edge.weight,
         }
       }),
     )
@@ -628,16 +655,12 @@ export class CaveSource implements DataSource {
 
   async fetchAdjacency(req: AdjacencyRequest): Promise<MatrixValue> {
     const { spec, version } = this.require(req.datasetId)
-    const links = requireConnections(spec)
-    const server = await this.serverFor(spec)
 
-    const [rows, types] = await Promise.all([
-      queryLinks(
-        server,
-        spec.datastack,
+    const [edges, types] = await Promise.all([
+      this.edges(
+        spec,
         version,
-        links,
-        { [links.preColumn]: req.sourceIds, [links.postColumn]: req.targetIds },
+        { pre: req.sourceIds, post: req.targetIds },
         undefined,
         req.signal,
       ),
@@ -653,14 +676,136 @@ export class CaveSource implements DataSource {
     const colAtKey = new Map(colKeys.map((k, i) => [k, i]))
 
     const values = new Float64Array(rowKeys.length * colKeys.length)
-    for (const row of rows) {
-      const r = rowAtKey.get(key(String(row[links.preColumn])))
-      const c = colAtKey.get(key(String(row[links.postColumn])))
+    for (const edge of edges) {
+      const r = rowAtKey.get(key(edge.pre))
+      const c = colAtKey.get(key(edge.post))
       if (r === undefined || c === undefined) continue
       const at = r * colKeys.length + c
-      values[at] = (values[at] ?? 0) + Number(row[links.weightColumn] ?? 0)
+      values[at] = (values[at] ?? 0) + edge.weight
     }
     return makeMatrix(rowKeys, colKeys, values, 'synapses', 'count')
+  }
+
+  /**
+   * An edge list, from the roll-up view if there is one and from the synapses if not.
+   *
+   * **Two paths that answer the same question at very different prices**, which is why the view
+   * is preferred wherever it exists rather than being one option among two. FlyWire's
+   * `valid_connection_v2` is the server having done this aggregation once, and it can push the
+   * weight cut down with it: on one neuron's outputs that is 183 rows at 16 kB against 4,818 at
+   * 410 kB. The synapse path can push neither — CAVE's query API has no `GROUP BY`, so every
+   * synapse of every queried neuron is transferred and counted here, and `minWeight` can only be
+   * applied *after* counting.
+   *
+   * It is still worth having, and by a long way: most CAVE datastacks publish no roll-up at all,
+   * so the alternative is not a cheaper query but no connectivity. Measured on Aedes, which is
+   * exactly that case — one neuron's 719 synapses arrive in 1.1 s and 111 kB and collapse to 508
+   * partners. The shape is `connecto`'s, which solved this first.
+   */
+  private async edges(
+    spec: DatastackSpec,
+    version: number,
+    ids: { pre?: readonly NeuronId[]; post?: readonly NeuronId[] },
+    minWeight: number | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<Edge[]> {
+    const server = await this.serverFor(spec)
+    const options: CaveRequestOptions = signal ? { signal } : {}
+
+    if (spec.connections) {
+      const links = spec.connections
+      const rows = await queryView(
+        server,
+        spec.datastack,
+        version,
+        {
+          view: links.view,
+          filters: {
+            in: idFilters(links, ids),
+            // Applied by the server, before anything is sent.
+            ...(minWeight && minWeight > 1
+              ? { atLeast: { [links.weightColumn]: minWeight } }
+              : {}),
+          },
+          columns: [links.preColumn, links.postColumn, links.weightColumn],
+        },
+        options,
+      )
+      return rows.map((row) => ({
+        pre: String(row[links.preColumn]),
+        post: String(row[links.postColumn]),
+        weight: Number(row[links.weightColumn] ?? 0),
+      }))
+    }
+
+    const synapses = await this.synapsesFor(spec, options)
+    if (!synapses) {
+      throw new CaveError(
+        `${spec.label} publishes neither a connection roll-up nor a synapse table, so Coda ` +
+          `cannot build an edge list from it.`,
+      )
+    }
+
+    /*
+     * Only the two id columns are asked for, which is what makes this affordable. Note the
+     * server sends more than that anyway: `select_columns` on a `*_pt_root_id` returns the whole
+     * bound point, so the supervoxel id comes along and the transfer is about twice what the two
+     * columns suggest. Measured rather than assumed, on Aedes.
+     */
+    const rows = await queryTable(
+      server,
+      spec.datastack,
+      version,
+      {
+        table: synapses.table,
+        filters: { in: idFilters(synapses, ids) },
+        columns: [synapses.preColumn, synapses.postColumn],
+      },
+      options,
+    )
+    refuseIfCapped(rows.length, synapses.table, INCOMPLETE_EDGES)
+
+    /*
+     * Counted with a joined key rather than a nested map: a neuron id is decimal digits by
+     * invariant 8's grammar, so `|` cannot occur in one and the join is unambiguous — the
+     * separator collision `uploads.ts` records is not reachable here.
+     */
+    const counts = new Map<string, number>()
+    for (const row of rows) {
+      const pre = row[synapses.preColumn]
+      const post = row[synapses.postColumn]
+      if (pre === null || pre === undefined || post === null || post === undefined) continue
+      const key = `${String(pre)}|${String(post)}`
+      counts.set(key, (counts.get(key) ?? 0) + 1)
+    }
+
+    const edges: Edge[] = []
+    for (const [key, weight] of counts) {
+      // After counting, never before: there is no synapse-level equivalent of a weight cut.
+      if (minWeight && minWeight > 1 && weight < minWeight) continue
+      const [pre = '', post = ''] = key.split('|')
+      edges.push({ pre, post, weight })
+    }
+    return edges
+  }
+
+  /**
+   * Which table holds this datastack's synapses, if any.
+   *
+   * Three answers in order, and the order is the point. **A configured spec wins**, because it
+   * can name a curated table and the column that scores it — FlyWire's `synapses_nt_v1` with
+   * `cleft_score`, which the datastack itself declares as `synapse_table: null`. **Otherwise the
+   * datastack's own declaration**, which is what makes a hand-named datastack work with no
+   * configuration: 7 of the 13 the info service lists set it, Aedes among them. Its columns are
+   * the standard `synapse` schema's, which is a definition rather than a guess.
+   */
+  private async synapsesFor(
+    spec: DatastackSpec,
+    options: CaveRequestOptions,
+  ): Promise<SynapseTableSpec | undefined> {
+    if (spec.synapses) return spec.synapses
+    const declared = (await datastackRecord(spec.datastack, options)).synapse_table
+    return declared ? { table: declared, ...STANDARD_SYNAPSE_COLUMNS } : undefined
   }
 
   // -------------------------------------------------------------------------
@@ -741,7 +886,12 @@ export class CaveSource implements DataSource {
    */
   async fetchSynapses(req: SynapseRequest): Promise<PointsValue> {
     const { spec, version } = this.require(req.datasetId)
-    const synapses = spec.synapses
+    const options: CaveRequestOptions = req.signal ? { signal: req.signal } : {}
+    // The same resolution the edge list uses, so a datastack that can answer connectivity by
+    // aggregation can also draw the synapses it aggregated. `positionColumn` is a *stem* the API
+    // splits into `_x`/`_y`/`_z` — checked to behave identically on a declared table and a
+    // configured one, which is what makes the standard columns usable here as well.
+    const synapses = await this.synapsesFor(spec, options)
     if (!synapses) {
       throw new CaveError(`${spec.label} publishes no synapse table.`)
     }
@@ -1189,43 +1339,6 @@ function datasetInfoFor(
   }
 }
 
-function requireConnections(spec: DatastackSpec): ConnectionViewSpec {
-  if (spec.connections) return spec.connections
-  throw new CaveError(
-    `${spec.label} publishes no connection roll-up, so Coda cannot build an edge list from it. ` +
-      `Building one from raw synapses would mean downloading the whole synapse table.`,
-  )
-}
 
-function queryLinks(
-  server: string,
-  datastack: string,
-  version: number,
-  links: ConnectionViewSpec,
-  // Root ids go out as **text** and come back as text: CAVE casts a quoted integer in a filter,
-  // verified against v783, so no id is ever a JS number on either leg.
-  inFilters: Record<string, readonly NeuronId[]>,
-  minWeight: number | undefined,
-  signal: AbortSignal | undefined,
-): Promise<CaveRow[]> {
-  return queryView(
-    server,
-    datastack,
-    version,
-    {
-      view: links.view,
-      filters: {
-        in: Object.fromEntries(Object.entries(inFilters).map(([k, v]) => [k, [...v]])),
-        // Applied by the server, before anything is sent. On one FlyWire neuron that is the
-        // difference between 4,818 rows at 410 kB and 183 rows at 16 kB.
-        ...(minWeight && minWeight > 1
-          ? { atLeast: { [links.weightColumn]: minWeight } }
-          : {}),
-      },
-      columns: [links.preColumn, links.postColumn, links.weightColumn],
-    },
-    signal ? { signal } : {},
-  )
-}
 
 
