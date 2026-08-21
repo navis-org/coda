@@ -22,7 +22,8 @@ import { parseTypedLabels } from '../../../nodes/lib/labelLookup'
 import { rLongVector, rStr, rVector } from '../r'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
-import { bodyIds } from './common'
+import { neuprintProperty } from '../../../data/neuprint/schema'
+import { neuronIds } from './common'
 
 /** What "neuPrint" means unless a node says otherwise. */
 const DEFAULT_DEPLOYMENT = 'https://neuprint.janelia.org'
@@ -212,7 +213,7 @@ registerEmitter('neuron.inputIds', (ctx) => {
   if (parsed.error && !wired)
     return ctx.todo(`The pasted id list is not valid: ${parsed.error}`)
 
-  const column = ctx.column('column') ?? 'bodyId'
+  const column = ctx.column('column') ?? 'neuronId'
   const lines: string[] = []
 
   if (parsed.ids.length > 0 && wired) {
@@ -238,7 +239,7 @@ registerEmitter('neuron.inputIds', (ctx) => {
       ...ctx.note(
         'No Dataset is wired, so this is the ids alone — exactly what the node emits.',
       ),
-      `${out} <- tibble(bodyId = ids)`,
+      `${out} <- tibble(neuronId = ids)`,
     ]
   }
   ctx.library('neuprintr')
@@ -278,7 +279,9 @@ registerEmitter('neuron.idsFromLabel', (ctx) => {
   lines.push(
     `${out} <- neuprint_search(`,
     `  ${pattern},`,
-    `  field = ${rStr(field)},`,
+    // neuPrint's own spelling, not Coda's — `neuprint_search(field = "neuronId")` matches
+    // nothing at all, silently. Same seam `labelClause` applies to the built query.
+    `  field = ${rStr(neuprintProperty(field))},`,
     `  meta = TRUE,`,
     `  conn = ${conn}`,
     `) |> coda_neurons()`,
@@ -313,8 +316,8 @@ registerEmitter('neuron.adjacency', (ctx) => {
 
   const lines = [
     `${out} <- neuprint_get_adjacency_matrix(`,
-    `  inputids = ${bodyIds(sources)},`,
-    `  outputids = ${bodyIds(targets)},`,
+    `  inputids = ${neuronIds(sources)},`,
+    `  outputids = ${neuronIds(targets)},`,
     `  conn = ${conn}`,
     `)`,
   ]
@@ -339,7 +342,7 @@ registerEmitter('neuron.roiCounts', (ctx) => {
       'These counts nest: a synapse in LO(R) is counted again in its parent OL(R). Filter to ' +
         'neuprint_ROIs(superLevel = FALSE) before summing, or the totals roughly double.',
     ),
-    `${ctx.output('counts')} <- neuprint_get_roiInfo(${bodyIds(neurons)}, conn = ${conn}) |>`,
+    `${ctx.output('counts')} <- neuprint_get_roiInfo(${neuronIds(neurons)}, conn = ${conn}) |>`,
     `  coda_neurons()`,
   ]
 })
@@ -396,7 +399,7 @@ registerEmitter('neuron.skeletons', (ctx) => {
   ctx.library('neuprintr')
   ctx.library('nat')
   const limit = Number(ctx.params.limit ?? 0)
-  const ids = limit > 0 ? `head(${bodyIds(neurons)}, ${limit})` : bodyIds(neurons)
+  const ids = limit > 0 ? `head(${neuronIds(neurons)}, ${limit})` : neuronIds(neurons)
   // Returns a nat neuronlist, which is what every downstream nat call wants — the same
   // relationship navis has to the Python side, since navis is nat's port.
   return [`${ctx.output('skeletons')} <- neuprint_read_neurons(${ids}, conn = ${conn})`]
@@ -417,7 +420,7 @@ registerEmitter('neuron.synapses', (ctx) => {
   ctx.library('neuprintr')
   const polarity = String(ctx.params.polarity ?? '')
   const args = [
-    bodyIds(neurons),
+    neuronIds(neurons),
     ...(polarity ? [`prepost = ${rStr(polarity.toUpperCase())}`] : []),
   ]
   return [

@@ -77,7 +77,7 @@ export const NODE_BODIES: Record<string, NodeBodyEntry> = {
   'neuron.idsFromLabel': { Component: IdsFromLabelBody, width: 300 },
   /*
    * The same width as its sibling above, and for the same reason: the IDs field is a paste
-   * target, and a list of body ids wrapped into a 232px box is unreadable. Not `expandable` —
+   * target, and a list of neuron ids wrapped into a 232px box is unreadable. Not `expandable` —
    * the readout is one line and the fields are two.
    */
   'neuron.inputIds': { Component: InputIdsBody, width: 300 },

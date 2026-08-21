@@ -32,19 +32,19 @@ import {
 } from './tableOps'
 
 const CONNECTIVITY = tableSchema(
-  column('bodyId', 'i64'),
+  column('neuronId', 'i64'),
   column('partnerType', 'str'),
   column('weight', 'i64', 'synapses'),
 )
 
 function conn(): TableValue {
   return tableFromRows(CONNECTIVITY, [
-    { bodyId: 1, partnerType: 'DNp02', weight: 30 },
-    { bodyId: 1, partnerType: 'DNp02', weight: 10 },
-    { bodyId: 1, partnerType: 'PVLP002', weight: 5 },
-    { bodyId: 2, partnerType: 'DNp02', weight: 20 },
-    { bodyId: 2, partnerType: 'PVLP002', weight: 15 },
-    { bodyId: 3, partnerType: 'PLP003', weight: 2 },
+    { neuronId: 1, partnerType: 'DNp02', weight: 30 },
+    { neuronId: 1, partnerType: 'DNp02', weight: 10 },
+    { neuronId: 1, partnerType: 'PVLP002', weight: 5 },
+    { neuronId: 2, partnerType: 'DNp02', weight: 20 },
+    { neuronId: 2, partnerType: 'PVLP002', weight: 15 },
+    { neuronId: 3, partnerType: 'PLP003', weight: 2 },
   ])
 }
 
@@ -95,21 +95,21 @@ describe('sort', () => {
 
   it('is stable for equal keys', () => {
     const table = tableFromRows(CONNECTIVITY, [
-      { bodyId: 7, partnerType: 'a', weight: 1 },
-      { bodyId: 8, partnerType: 'b', weight: 1 },
-      { bodyId: 9, partnerType: 'c', weight: 1 },
+      { neuronId: 7, partnerType: 'a', weight: 1 },
+      { neuronId: 8, partnerType: 'b', weight: 1 },
+      { neuronId: 9, partnerType: 'c', weight: 1 },
     ])
-    expect(sortTable(table, 'weight', true, 0).data.bodyId).toEqual([7, 8, 9])
+    expect(sortTable(table, 'weight', true, 0).data.neuronId).toEqual([7, 8, 9])
   })
 
   it('sorts nulls last in both directions', () => {
     const table = tableFromRows(CONNECTIVITY, [
-      { bodyId: 1, partnerType: 'a', weight: 5 },
-      { bodyId: 2, partnerType: 'b', weight: null },
-      { bodyId: 3, partnerType: 'c', weight: 9 },
+      { neuronId: 1, partnerType: 'a', weight: 5 },
+      { neuronId: 2, partnerType: 'b', weight: null },
+      { neuronId: 3, partnerType: 'c', weight: 9 },
     ])
-    expect(sortTable(table, 'weight', true, 0).data.bodyId).toEqual([3, 1, 2])
-    expect(sortTable(table, 'weight', false, 0).data.bodyId).toEqual([1, 3, 2])
+    expect(sortTable(table, 'weight', true, 0).data.neuronId).toEqual([3, 1, 2])
+    expect(sortTable(table, 'weight', false, 0).data.neuronId).toEqual([1, 3, 2])
   })
 })
 
@@ -123,8 +123,8 @@ describe('sample', () => {
   })
 
   it('takes from the top and from the bottom', () => {
-    expect(sampleTable(conn(), spec({ mode: 'head', count: 2 })).data.bodyId).toEqual([1, 1])
-    expect(sampleTable(conn(), spec({ mode: 'tail', count: 2 })).data.bodyId).toEqual([2, 3])
+    expect(sampleTable(conn(), spec({ mode: 'head', count: 2 })).data.neuronId).toEqual([1, 1])
+    expect(sampleTable(conn(), spec({ mode: 'tail', count: 2 })).data.neuronId).toEqual([2, 3])
   })
 
   it('strides from the first row', () => {
@@ -172,7 +172,7 @@ describe('sample', () => {
   it('preserves the schema, and neurons-ness with it', () => {
     const out = sampleTable(conn(), spec({ mode: 'stride', step: 2 }))
     expectSchemaAgreement(sampleSchema(CONNECTIVITY), out)
-    expect(out.data.bodyId).toEqual([1, 1, 2])
+    expect(out.data.neuronId).toEqual([1, 1, 2])
   })
 })
 
@@ -192,7 +192,7 @@ describe('upload shaping', () => {
     const declared = uploadShapeSchema(UPLOAD, 'root_id', [])
     const out = uploadShapeTable(upload(), 'root_id', [])
     expectSchemaAgreement(declared, out)
-    expect(out.data.bodyId).toEqual([101, 102])
+    expect(out.data.neuronId).toEqual([101, 102])
     expect(out.kind).toBe('neurons')
   })
 
@@ -207,17 +207,17 @@ describe('upload shaping', () => {
   })
 
   it('gives the chosen column the name, and suffixes the one that had it', () => {
-    const clash = tableSchema(column('root_id', 'i64'), column('bodyId', 'str'))
+    const clash = tableSchema(column('root_id', 'i64'), column('neuronId', 'str'))
     const declared = uploadShapeSchema(clash, 'root_id', [])
     const out = uploadShapeTable(
-      tableFromRows(clash, [{ root_id: 1, bodyId: 'x' }]),
+      tableFromRows(clash, [{ root_id: 1, neuronId: 'x' }]),
       'root_id',
       [],
     )
     expectSchemaAgreement(declared, out)
-    expect(columnNames(out.schema)).toEqual(['bodyId', 'bodyId_2'])
-    expect(out.data.bodyId).toEqual([1])
-    expect(out.data.bodyId_2).toEqual(['x'])
+    expect(columnNames(out.schema)).toEqual(['neuronId', 'neuronId_2'])
+    expect(out.data.neuronId).toEqual([1])
+    expect(out.data.neuronId_2).toEqual(['x'])
   })
 
   it('leaves the table alone when nothing is configured', () => {
@@ -228,7 +228,7 @@ describe('upload shaping', () => {
 
   it('does not claim neurons-ness for a column that is not there', () => {
     // The predicate both halves share: a schema half saying `neurons` over a value half that
-    // is a plain table breaks the bodyId guarantee downstream only after a run.
+    // is a plain table breaks the neuronId guarantee downstream only after a run.
     expect(uploadIsNeurons(UPLOAD, 'root_id')).toBe(true)
     expect(uploadIsNeurons(UPLOAD, 'missing')).toBe(false)
     expect(uploadIsNeurons(UPLOAD, '')).toBe(false)
@@ -238,17 +238,17 @@ describe('upload shaping', () => {
 })
 
 describe('stack', () => {
-  const LEFT = tableSchema(column('bodyId', 'i64'), column('type', 'str'))
-  const RIGHT = tableSchema(column('bodyId', 'i64'), column('hemilineage', 'str'))
-  const left = () => tableFromRows(LEFT, [{ bodyId: 1, type: 'LC4' }])
-  const right = () => tableFromRows(RIGHT, [{ bodyId: 2, hemilineage: '0B' }])
+  const LEFT = tableSchema(column('neuronId', 'i64'), column('type', 'str'))
+  const RIGHT = tableSchema(column('neuronId', 'i64'), column('hemilineage', 'str'))
+  const left = () => tableFromRows(LEFT, [{ neuronId: 1, type: 'LC4' }])
+  const right = () => tableFromRows(RIGHT, [{ neuronId: 2, hemilineage: '0B' }])
 
   it('puts the rows end to end and agrees with its schema half', () => {
     const declared = stackSchema(LEFT, LEFT)
     const out = stackTables(left(), left())
     expectSchemaAgreement(declared, out)
     expect(out.length).toBe(2)
-    expect(out.data.bodyId).toEqual([1, 1])
+    expect(out.data.neuronId).toEqual([1, 1])
   })
 
   it('keeps every column, filling the gaps with null', () => {
@@ -257,7 +257,7 @@ describe('stack', () => {
     const declared = stackSchema(LEFT, RIGHT)
     const out = stackTables(left(), right())
     expectSchemaAgreement(declared, out)
-    expect(columnNames(out.schema)).toEqual(['bodyId', 'type', 'hemilineage'])
+    expect(columnNames(out.schema)).toEqual(['neuronId', 'type', 'hemilineage'])
     expect(out.data.type).toEqual(['LC4', null])
     expect(out.data.hemilineage).toEqual([null, '0B'])
   })
@@ -266,17 +266,17 @@ describe('stack', () => {
     const out = stackTables(left(), left())
     expect(out.length).toBe(2)
     const ordered = stackTables(right(), left())
-    expect(ordered.data.bodyId).toEqual([2, 1])
+    expect(ordered.data.neuronId).toEqual([2, 1])
   })
 
   it('widens i64 onto f64 without comment', () => {
     // The same kind of thing: a count stacked onto a ratio is still a number.
-    const floats = tableSchema(column('bodyId', 'i64'), column('score', 'f64'))
-    const ints = tableSchema(column('bodyId', 'i64'), column('score', 'i64'))
+    const floats = tableSchema(column('neuronId', 'i64'), column('score', 'f64'))
+    const ints = tableSchema(column('neuronId', 'i64'), column('score', 'i64'))
     const merged = stackColumns(floats, ints)
     expect(merged.conflicts).toEqual([])
     expect(merged.columns.map((c) => `${c.name}:${c.dtype}`)).toEqual([
-      'bodyId:i64',
+      'neuronId:i64',
       'score:f64',
     ])
   })
@@ -284,15 +284,15 @@ describe('stack', () => {
   it('reports a real dtype clash rather than throwing, so infer can read it', () => {
     // Returned rather than thrown because `inferOutputs` may not throw (invariant 2) and
     // `validate` returns strings. Only `stackTables` refuses, and on exactly this list.
-    const asText = tableSchema(column('bodyId', 'str'))
+    const asText = tableSchema(column('neuronId', 'str'))
     const clash = stackColumns(LEFT, asText)
-    expect(clash.conflicts).toEqual([{ name: 'bodyId', top: 'i64', bottom: 'str' }])
+    expect(clash.conflicts).toEqual([{ name: 'neuronId', top: 'i64', bottom: 'str' }])
     // The rest of the schema stays readable, which is what keeps the other pickers usable.
-    expect(columnNames({ columns: clash.columns })).toEqual(['bodyId', 'type'])
+    expect(columnNames({ columns: clash.columns })).toEqual(['neuronId', 'type'])
   })
 
   it('refuses to build a table over a dtype clash, naming both readings', () => {
-    const asText = tableFromRows(tableSchema(column('bodyId', 'str')), [{ bodyId: 'x' }])
+    const asText = tableFromRows(tableSchema(column('neuronId', 'str')), [{ neuronId: 'x' }])
     expect(() => stackTables(left(), asText)).toThrow(/i64 above and str below/)
   })
 
@@ -311,7 +311,7 @@ describe('stack', () => {
     const out = stackTables(left(), right(), options)
     expectSchemaAgreement(declared, out)
     // Last rather than first: it is this node's annotation, not part of either table.
-    expect(columnNames(out.schema)).toEqual(['bodyId', 'type', 'hemilineage', 'source'])
+    expect(columnNames(out.schema)).toEqual(['neuronId', 'type', 'hemilineage', 'source'])
     expect(out.data.source).toEqual(['A', 'B'])
   })
 
@@ -322,8 +322,8 @@ describe('stack', () => {
   })
 
   it('is Neurons only when both sides are', () => {
-    // A `neurons` kind is a claim about the ids; a plain table carrying a bodyId never made it.
-    const neurons = tableFromRows(LEFT, [{ bodyId: 1, type: 'LC4' }], 'neurons')
+    // A `neurons` kind is a claim about the ids; a plain table carrying a neuronId never made it.
+    const neurons = tableFromRows(LEFT, [{ neuronId: 1, type: 'LC4' }], 'neurons')
     expect(stackTables(neurons, neurons).kind).toBe('neurons')
     expect(stackTables(neurons, left()).kind).toBe('table')
   })
@@ -370,21 +370,21 @@ describe('groupBy', () => {
   })
 
   it('emits only n for count', () => {
-    const declared = groupBySchema(CONNECTIVITY, ['bodyId'], undefined, 'count')
-    const out = groupByTable(conn(), ['bodyId'], undefined, 'count')
+    const declared = groupBySchema(CONNECTIVITY, ['neuronId'], undefined, 'count')
+    const out = groupByTable(conn(), ['neuronId'], undefined, 'count')
     expectSchemaAgreement(declared, out)
-    expect(out.schema.columns.map((c) => c.name)).toEqual(['bodyId', 'n'])
+    expect(out.schema.columns.map((c) => c.name)).toEqual(['neuronId', 'n'])
     expect(aggColumnName('count', 'weight')).toBe('n')
   })
 
   it('groups on multiple keys', () => {
-    const out = groupByTable(conn(), ['bodyId', 'partnerType'], 'weight', 'sum')
+    const out = groupByTable(conn(), ['neuronId', 'partnerType'], 'weight', 'sum')
     expect(out.length).toBe(5)
   })
 
   it('counts distinct values', () => {
-    const out = groupByTable(conn(), ['bodyId'], 'partnerType', 'countDistinct')
-    const idx = (out.data.bodyId as number[]).indexOf(1)
+    const out = groupByTable(conn(), ['neuronId'], 'partnerType', 'countDistinct')
+    const idx = (out.data.neuronId as number[]).indexOf(1)
     expect((out.data.countDistinct_partnerType as number[])[idx]).toBe(2)
   })
 
@@ -396,10 +396,10 @@ describe('groupBy', () => {
 
 describe('select', () => {
   it('keeps the requested columns in order and agrees with its schema', () => {
-    const declared = selectSchema(CONNECTIVITY, ['weight', 'bodyId'])
-    const out = selectTable(conn(), ['weight', 'bodyId'])
-    expect(out.schema.columns.map((c) => c.name)).toEqual(['weight', 'bodyId'])
-    expect(declared!.columns.map((c) => c.name)).toEqual(['weight', 'bodyId'])
+    const declared = selectSchema(CONNECTIVITY, ['weight', 'neuronId'])
+    const out = selectTable(conn(), ['weight', 'neuronId'])
+    expect(out.schema.columns.map((c) => c.name)).toEqual(['weight', 'neuronId'])
+    expect(declared!.columns.map((c) => c.name)).toEqual(['weight', 'neuronId'])
   })
 
   it('passes everything through when nothing is selected', () => {
@@ -408,23 +408,23 @@ describe('select', () => {
 })
 
 describe('join', () => {
-  const NEURONS = tableSchema(column('bodyId', 'i64'), column('type', 'str'))
+  const NEURONS = tableSchema(column('neuronId', 'i64'), column('type', 'str'))
   const neurons = () =>
     tableFromRows(
       NEURONS,
       [
-        { bodyId: 1, type: 'LC4' },
-        { bodyId: 2, type: 'LC6' },
+        { neuronId: 1, type: 'LC4' },
+        { neuronId: 2, type: 'LC6' },
       ],
       'neurons',
     )
 
   it('annotates the left table and matches its declared schema', () => {
-    const declared = joinSchema(CONNECTIVITY, NEURONS, 'bodyId', '_r')
-    const out = joinTables(conn(), neurons(), 'bodyId', 'bodyId', 'left')
+    const declared = joinSchema(CONNECTIVITY, NEURONS, 'neuronId', '_r')
+    const out = joinTables(conn(), neurons(), 'neuronId', 'neuronId', 'left')
     expect(out.schema.columns.map((c) => c.name)).toEqual(declared!.columns.map((c) => c.name))
     expect(out.schema.columns.map((c) => c.name)).toEqual([
-      'bodyId',
+      'neuronId',
       'partnerType',
       'weight',
       'type',
@@ -432,23 +432,23 @@ describe('join', () => {
   })
 
   it('keeps unmatched left rows as null on a left join', () => {
-    const out = joinTables(conn(), neurons(), 'bodyId', 'bodyId', 'left')
+    const out = joinTables(conn(), neurons(), 'neuronId', 'neuronId', 'left')
     expect(out.length).toBe(6)
-    const idx = (out.data.bodyId as number[]).indexOf(3)
+    const idx = (out.data.neuronId as number[]).indexOf(3)
     expect((out.data.type as (string | null)[])[idx]).toBeNull()
   })
 
   it('drops unmatched left rows on an inner join', () => {
-    const out = joinTables(conn(), neurons(), 'bodyId', 'bodyId', 'inner')
+    const out = joinTables(conn(), neurons(), 'neuronId', 'neuronId', 'inner')
     expect(out.length).toBe(5)
-    expect(out.data.bodyId).not.toContain(3)
+    expect(out.data.neuronId).not.toContain(3)
   })
 
   it('suffixes colliding column names rather than dropping them', () => {
-    const right = tableFromRows(tableSchema(column('bodyId', 'i64'), column('weight', 'i64')), [
-      { bodyId: 1, weight: 999 },
+    const right = tableFromRows(tableSchema(column('neuronId', 'i64'), column('weight', 'i64')), [
+      { neuronId: 1, weight: 999 },
     ])
-    const out = joinTables(conn(), right, 'bodyId', 'bodyId', 'left')
+    const out = joinTables(conn(), right, 'neuronId', 'neuronId', 'left')
     expect(out.schema.columns.map((c) => c.name)).toContain('weight_r')
     expect(out.schema.columns.map((c) => c.name)).toContain('weight')
   })
@@ -521,7 +521,7 @@ describe('pivot ceilings', () => {
 
 describe('pivot', () => {
   it('builds a labelled matrix with sorted labels', () => {
-    const m = pivotTable(conn(), 'bodyId', 'partnerType', 'weight', 'sum')
+    const m = pivotTable(conn(), 'neuronId', 'partnerType', 'weight', 'sum')
     expect(m.rowLabels).toEqual(['1', '2', '3'])
     expect(m.colLabels).toEqual(['DNp02', 'PLP003', 'PVLP002'])
     const at = (r: number, c: number) => m.values[r * m.colLabels.length + c]
@@ -532,7 +532,7 @@ describe('pivot', () => {
   })
 
   it('counts rows when asked to', () => {
-    const m = pivotTable(conn(), 'bodyId', 'partnerType', undefined, 'count')
+    const m = pivotTable(conn(), 'neuronId', 'partnerType', undefined, 'count')
     expect(m.values[0]).toBe(2)
   })
 
@@ -542,14 +542,14 @@ describe('pivot', () => {
    * describing different pivots.
    */
   it('reshapes the same pivot into a wide table', () => {
-    const m = pivotTable(conn(), 'bodyId', 'partnerType', 'weight', 'sum')
-    const wide = matrixToTable(m, 'bodyId')
+    const m = pivotTable(conn(), 'neuronId', 'partnerType', 'weight', 'sum')
+    const wide = matrixToTable(m, 'neuronId')
 
-    expect(wide.schema.columns.map((c) => c.name)).toEqual(['bodyId', ...m.colLabels])
+    expect(wide.schema.columns.map((c) => c.name)).toEqual(['neuronId', ...m.colLabels])
     expect(wide.length).toBe(m.rowLabels.length)
     // Row labels are a matrix axis, so they arrive as text even from an i64 column.
     expect(wide.schema.columns[0]!.dtype).toBe('str')
-    expect(wide.data.bodyId).toEqual(['1', '2', '3'])
+    expect(wide.data.neuronId).toEqual(['1', '2', '3'])
 
     const cols = m.colLabels.length
     for (let r = 0; r < m.rowLabels.length; r++) {
@@ -572,11 +572,11 @@ describe('pivot', () => {
   it('reshapes an empty pivot to a table of the same width', () => {
     const empty = tableFromRows(CONNECTIVITY, [])
     const wide = matrixToTable(
-      pivotTable(empty, 'bodyId', 'partnerType', 'weight', 'sum'),
-      'bodyId',
+      pivotTable(empty, 'neuronId', 'partnerType', 'weight', 'sum'),
+      'neuronId',
     )
     expect(wide.length).toBe(0)
-    expect(wide.schema.columns.map((c) => c.name)).toEqual(['bodyId'])
+    expect(wide.schema.columns.map((c) => c.name)).toEqual(['neuronId'])
   })
 })
 
@@ -617,13 +617,13 @@ describe('normalizeMatrix', () => {
  * needed and every CAVE root id does.
  */
 describe('idColumn', () => {
-  const NUM_IDS = tableSchema(column('bodyId', 'i64'), column('type', 'str'))
-  const TEXT_IDS = tableSchema(column('bodyId', 'str'), column('type', 'str'))
+  const NUM_IDS = tableSchema(column('neuronId', 'i64'), column('type', 'str'))
+  const TEXT_IDS = tableSchema(column('neuronId', 'str'), column('type', 'str'))
 
   it('reads a numeric id column as text', () => {
     const t = tableFromRows(NUM_IDS, [
-      { bodyId: 1158187240, type: 'LC4' },
-      { bodyId: 10001, type: 'DNp01' },
+      { neuronId: 1158187240, type: 'LC4' },
+      { neuronId: 10001, type: 'DNp01' },
     ])
     expect(idColumn(t)).toEqual(['1158187240', '10001'])
   })
@@ -631,8 +631,8 @@ describe('idColumn', () => {
   it('passes a text id column through untouched, keeping every digit', () => {
     // Reading these as numbers first would round both, which is the entire point.
     const t = tableFromRows(TEXT_IDS, [
-      { bodyId: '648518347529750614', type: 'KC' },
-      { bodyId: '720575940379279312', type: 'LC4' },
+      { neuronId: '648518347529750614', type: 'KC' },
+      { neuronId: '720575940379279312', type: 'LC4' },
     ])
     expect(idColumn(t)).toEqual(['648518347529750614', '720575940379279312'])
     expect(idColumn(t)[0]).not.toBe(String(Number('648518347529750614')))
@@ -640,9 +640,9 @@ describe('idColumn', () => {
 
   it('skips a null rather than emitting one, as it always has', () => {
     const t = tableFromRows(NUM_IDS, [
-      { bodyId: 1, type: 'a' },
-      { bodyId: null, type: 'b' },
-      { bodyId: 2, type: 'c' },
+      { neuronId: 1, type: 'a' },
+      { neuronId: null, type: 'b' },
+      { neuronId: 2, type: 'c' },
     ])
     expect(idColumn(t)).toEqual(['1', '2'])
   })
@@ -652,9 +652,9 @@ describe('idColumn', () => {
     // time it is a float64 there is nothing to recover, so printing it would be a confident
     // wrong id — worse than a missing one.
     const t = tableFromRows(NUM_IDS, [
-      { bodyId: 1, type: 'a' },
-      { bodyId: Number.MAX_SAFE_INTEGER + 2, type: 'b' },
-      { bodyId: 1.5, type: 'c' },
+      { neuronId: 1, type: 'a' },
+      { neuronId: Number.MAX_SAFE_INTEGER + 2, type: 'b' },
+      { neuronId: 1.5, type: 'c' },
     ])
     expect(idColumn(t)).toEqual(['1'])
   })

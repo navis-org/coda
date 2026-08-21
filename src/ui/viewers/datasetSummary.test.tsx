@@ -39,7 +39,7 @@ import '../../nodes'
 const DATASET = 'hemibrain:v1.2.1'
 
 const NEURONS = tableSchema(
-  column('bodyId', 'i64'),
+  column('neuronId', 'i64'),
   column('type', 'str'),
   column('status', 'str'),
   column('class', 'str'),
@@ -52,10 +52,10 @@ function index(rows: Array<Record<string, CellValue>>): TableValue {
 }
 
 const INDEX = index([
-  { bodyId: 1, type: 'LC4', status: 'Traced', class: 'optic', pre: 90, post: 40 },
-  { bodyId: 2, type: 'LC4', status: 'Traced', class: 'optic', pre: 10, post: 30 },
-  { bodyId: 3, type: 'Tm9', status: 'Traced', class: 'central', pre: 5, post: 7 },
-  { bodyId: 4, type: null, status: 'Assign', class: null, pre: 1, post: 1 },
+  { neuronId: 1, type: 'LC4', status: 'Traced', class: 'optic', pre: 90, post: 40 },
+  { neuronId: 2, type: 'LC4', status: 'Traced', class: 'optic', pre: 10, post: 30 },
+  { neuronId: 3, type: 'Tm9', status: 'Traced', class: 'central', pre: 5, post: 7 },
+  { neuronId: 4, type: null, status: 'Assign', class: null, pre: 1, post: 1 },
 ])
 
 const COMPLETENESS = tableFromRows(ROI_COMPLETENESS_SCHEMA, [
@@ -296,7 +296,7 @@ describe('tiles', () => {
   it('pages through a long attribute rather than hiding the tail behind a residual', async () => {
     stub.index = index(
       Array.from({ length: 30 }, (_, i) => ({
-        bodyId: i,
+        neuronId: i,
         type: `T${i}`,
         status: 'Traced',
         class: `c${i}`,
@@ -340,7 +340,7 @@ describe('rings versus bars', () => {
   it('draws a long tail as bars instead', async () => {
     stub.index = index(
       Array.from({ length: 12 }, (_, i) => ({
-        bodyId: i,
+        neuronId: i,
         type: 'T',
         status: `s${i}`,
         class: 'optic',
@@ -356,8 +356,8 @@ describe('rings versus bars', () => {
 
   it('gives each chart its own colour, so eight charts do not read as one', async () => {
     stub.index = index([
-      { bodyId: 1, type: 'LC4', status: 'Traced', class: 'optic', pre: 1, post: 1 },
-      { bodyId: 2, type: 'Tm9', status: 'Assign', class: 'central', pre: 1, post: 1 },
+      { neuronId: 1, type: 'LC4', status: 'Traced', class: 'optic', pre: 1, post: 1 },
+      { neuronId: 2, type: 'Tm9', status: 'Assign', class: 'central', pre: 1, post: 1 },
     ])
     show()
     await waitFor(() => expect(tile('Top cell types')).toBeTruthy())

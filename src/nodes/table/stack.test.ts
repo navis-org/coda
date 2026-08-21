@@ -5,7 +5,7 @@
  * mostly about is *when it knows things*. A stacked schema depends on both inputs, so it cannot
  * be published from one; a dtype clash cannot throw at edit time but must be visible before a
  * Run; and neurons-ness is a claim that has to be made the same way by the type and by the value,
- * or a downstream node's bodyId guarantee holds in inference and not in the data.
+ * or a downstream node's neuronId guarantee holds in inference and not in the data.
  *
  * The scheduler assertions matter because the alternative failures are quiet: a node that
  * published half a schema leaves a picker downstream configured against a shape that never
@@ -59,7 +59,7 @@ function pipeline(params: Record<string, unknown> = {}): CodaGraph {
   g = addNode(g, node('a', 'neuron.findNeurons', { typePattern: 'LC4', status: 'Traced' }))
   g = addNode(g, node('b', 'neuron.findNeurons', { typePattern: 'LC6', status: 'Traced' }))
   g = addNode(g, node('stack', 'core.stack', params))
-  g = addNode(g, node('sort', 'core.sort', { column: 'bodyId' }))
+  g = addNode(g, node('sort', 'core.sort', { column: 'neuronId' }))
   g = addEdge(g, {
     source: 'ds',
     sourceHandle: 'dataset',
@@ -102,11 +102,11 @@ function narrowed(columns: string[], params: Record<string, unknown> = {}): Coda
 
 describe('core.stack — types', () => {
   it('advertises the union of both inputs’ columns', () => {
-    const g = narrowed(['bodyId', 'type'])
+    const g = narrowed(['neuronId', 'type'])
     const out = inferGraph(g).nodes['stack']?.outputs['out']
     // The top's full neuron schema, with nothing lost because the bottom was narrowed.
     expect(columnNames(schemaOf(out))).toContain('status')
-    expect(columnNames(schemaOf(out))).toContain('bodyId')
+    expect(columnNames(schemaOf(out))).toContain('neuronId')
   })
 
   it('publishes nothing until both sides are known', () => {
@@ -122,7 +122,7 @@ describe('core.stack — types', () => {
   })
 
   it('drops to Table when one side never claimed to be neurons', () => {
-    // `core.select` keeping bodyId still emits a plain table here only if it drops the claim;
+    // `core.select` keeping neuronId still emits a plain table here only if it drops the claim;
     // an upload is the clearer case — nothing verified its ids belong to this dataset.
     let g = pipeline()
     g = addNode(g, node('up', 'core.uploadTable'))
@@ -160,12 +160,12 @@ describe('core.stack — evaluate', () => {
     expect(bottom.length).toBeGreaterThan(0)
     expect(out.length).toBe(top.length + bottom.length)
     expect(out.kind).toBe('neurons')
-    expect(out.data['bodyId']?.slice(0, top.length)).toEqual(top.data['bodyId'])
+    expect(out.data['neuronId']?.slice(0, top.length)).toEqual(top.data['neuronId'])
   })
 
   it('fills a column the other side does not have with null', async () => {
     const scheduler = makeScheduler()
-    await scheduler.run(narrowed(['bodyId', 'type']), { mode: 'full' })
+    await scheduler.run(narrowed(['neuronId', 'type']), { mode: 'full' })
 
     const out = scheduler.output('stack', 'out')
     const top = scheduler.output('a', 'neurons')
@@ -310,7 +310,7 @@ describe('core.stack — validation', () => {
 
   it('says nothing about two tables that stack cleanly', () => {
     expect(issues(pipeline())).toBe('')
-    expect(issues(narrowed(['bodyId', 'type']))).toBe('')
+    expect(issues(narrowed(['neuronId', 'type']))).toBe('')
   })
 
   it('checks the source column against a known schema, and only a known one', () => {

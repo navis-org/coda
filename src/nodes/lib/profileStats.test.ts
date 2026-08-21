@@ -23,15 +23,15 @@ import {
 } from './profileStats'
 
 const CONNECTIVITY = tableSchema(
-  column('bodyId', 'i64'),
-  column('bodyType', 'str'),
+  column('neuronId', 'i64'),
+  column('neuronType', 'str'),
   column('partnerId', 'i64'),
   column('partnerType', 'str'),
   column('weight', 'i64', 'synapses'),
 )
 
 const ROI_COUNTS = tableSchema(
-  column('bodyId', 'i64'),
+  column('neuronId', 'i64'),
   column('type', 'str'),
   column('roi', 'str'),
   column('pre', 'i64', 'synapses'),
@@ -43,14 +43,14 @@ function connectivity(
 ) {
   return tableFromRows(
     CONNECTIVITY,
-    rows.map((row) => ({ bodyId: 1, bodyType: 'CT1', ...row })),
+    rows.map((row) => ({ neuronId: 1, neuronType: 'CT1', ...row })),
   )
 }
 
 function roiCounts(rows: Array<{ roi: string; pre: number; post: number }>) {
   return tableFromRows(
     ROI_COUNTS,
-    rows.map((row) => ({ bodyId: 1, type: 'CT1', ...row })),
+    rows.map((row) => ({ neuronId: 1, type: 'CT1', ...row })),
   )
 }
 
@@ -132,7 +132,7 @@ describe('topPartners', () => {
         { partnerId: 11, partnerType: 'Tm1', weight: 50 },
       ]),
     )
-    expect(rows.map((r) => r.bodyId)).toEqual([11, 10])
+    expect(rows.map((r) => r.neuronId)).toEqual([11, 10])
     expect(rows[0]?.share).toBeCloseTo(50 / 55)
   })
 })

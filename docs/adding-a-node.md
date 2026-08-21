@@ -86,7 +86,7 @@ downstream of your node work before anything has executed.
   missing or inconsistent.
 - If your node changes the column set (aggregate, pivot, select, join), compute the new
   schema here. If it preserves it, pass the input schema through.
-- Preserve `neurons`-ness when your node preserves the `bodyId` column — that's what keeps
+- Preserve `neurons`-ness when your node preserves the `neuronId` column — that's what keeps
   a filtered neuron table pluggable into `Connectivity`:
 
 ```ts

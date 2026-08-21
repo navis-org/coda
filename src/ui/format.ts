@@ -54,7 +54,7 @@ const AGG_PREFIXES = AGG_OPTIONS.map((option) => `${option.value}_`)
  * one the upload node's `Text columns` exists for, so the answer here is theirs: the *name*.
  *
  * The rule is the name's **last word**, split on separators and camelCase boundaries. That
- * covers `bodyId`, `preId`/`postId`, `partnerId`, `sourceId`/`targetId` and the `root_id` /
+ * covers `neuronId`, `preId`/`postId`, `partnerId`, `sourceId`/`targetId` and the `root_id` /
  * `pt_root_id` spellings an uploaded CSV arrives under, with no list of them to keep in step —
  * and it is why a plain `endsWith('id')` is not enough, since `centroid` and `valid` are words
  * that happen to end that way rather than columns of ids.
@@ -62,7 +62,7 @@ const AGG_PREFIXES = AGG_OPTIONS.map((option) => `${option.value}_`)
  * An **aggregate of** an id column is a quantity again, and is excluded by its prefix:
  * `countDistinct_partnerId` counts partners and does want its separator. The cost is a column
  * somebody else called `max_id`, which reads as an aggregate and keeps its grouping — taken
- * deliberately, because `sum_bodyId` is a name Coda's own `groupBy` generates where `max_id`
+ * deliberately, because `sum_neuronId` is a name Coda's own `groupBy` generates where `max_id`
  * can only arrive in somebody's CSV.
  *
  * Memoised, because this is asked once per *cell*: a 500-row page of ten numeric columns is

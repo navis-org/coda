@@ -23,7 +23,7 @@ beforeAll(() => installJsdomStubs({ width: 600, height: 400 }))
 afterEach(cleanup)
 
 const SCHEMA = tableSchema(
-  column('bodyId', 'i64'),
+  column('neuronId', 'i64'),
   column('pre', 'i64', 'synapses'),
   column('post', 'i64', 'synapses'),
   column('type', 'str'),
@@ -37,7 +37,7 @@ function neurons(
   return tableFromRows(
     SCHEMA,
     Array.from({ length: count }, (_, i) => ({
-      bodyId: 1000 + i,
+      neuronId: 1000 + i,
       pre: i + 1,
       post: (i + 1) * 2,
       type: i % 2 === 0 ? 'LC4' : 'LC6',
@@ -59,7 +59,7 @@ function draw(table: TableValue, props: Partial<Parameters<typeof ScatterViewer>
       aspect="fit"
       color={{ mode: 'constant', column: undefined, constant: '0' }}
       size={{ column: undefined, min: 3, max: 12 }}
-      idColumn="bodyId"
+      idColumn="neuronId"
       opacity={0.8}
       maxPoints={50000}
       trend="none"
@@ -163,7 +163,7 @@ describe('empty states', () => {
   it('says an empty table is empty', () => {
     const empty = makeTable(
       SCHEMA,
-      { bodyId: [], pre: [], post: [], type: [], side: [] },
+      { neuronId: [], pre: [], post: [], type: [], side: [] },
       'neurons',
     )
     draw(empty)

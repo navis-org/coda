@@ -157,7 +157,7 @@ sockets that may appear side by side (validated, not guessed — see
 ### Collections
 
 Every node operates on the **whole collection** by default — a Connectivity node fed 500
-bodyIds issues one batched request. Per-item logic is meant to be an explicit `ForEach`
+neuronIds issues one batched request. Per-item logic is meant to be an explicit `ForEach`
 node wrapping a subgraph (not yet built; nothing needs it yet).
 
 ### Data sources
@@ -384,7 +384,7 @@ actually rendered.
 ### Neuroglancer
 
 The **Neuroglancer** node takes a dataset and a neuron table and emits a _link_: the
-scene that dataset already publishes, pointed at those body ids and coloured by a column.
+scene that dataset already publishes, pointed at those neuron ids and coloured by a column.
 The node body is an iframe on that link — a live viewer on the canvas, not a button that
 opens one. Drag its corner to make it as big as you need; the size is saved with the graph.
 
@@ -479,8 +479,8 @@ This is the one place data flows backwards from a viewer, so the selection is de
 provenance key. Restyling never invalidates anything; selecting does, because it genuinely
 changes an output.
 
-Network node ids are strings — body ids at neuron level, type names at type level — so the
-selection's `bodyId` column is null for a type-level pick. That fails loudly at the next
+Network node ids are strings — neuron ids at neuron level, type names at type level — so the
+selection's `neuronId` column is null for a type-level pick. That fails loudly at the next
 query rather than fabricating an id.
 
 ## Layout
@@ -561,7 +561,7 @@ Being explicit, because the milestone was deliberately scoped to the editor:
   or nothing, and the Meshes node says so rather than failing mid-run.
 - **Synapse partners are not resolved.** neuPrint models a synapse as a point that _has_
   partners; joining them is a much heavier query, so the synapse table carries
-  `bodyId/type/polarity/confidence` and no `partnerId`.
+  `neuronId/type/polarity/confidence` and no `partnerId`.
 - **No `ForEach` node.** The collection semantics it belongs to are implemented; the
   subgraph node and its nested-editing UI are not.
 - **Tables are plain columnar arrays**, not Arrow. The accessors in

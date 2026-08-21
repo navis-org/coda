@@ -83,7 +83,7 @@ export const tableFromUrlNode = registerNode({
       id: 'idColumn',
       kind: 'enum',
       label: 'ID column',
-      help: 'Renamed to bodyId, which is the name every neuron node looks for.',
+      help: 'Renamed to neuronId, which is the name every neuron node looks for.',
       default: '',
       /*
        * An enum rather than a `column` param, for the reason spelled out on the upload node: an

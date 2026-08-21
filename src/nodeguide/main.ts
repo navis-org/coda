@@ -91,7 +91,7 @@ const CAT_LABEL: Record<GuideNode['category'], string> = {
  */
 const LEGEND: ReadonlyArray<[fam: string, shape: string, name: string, why: string]> = [
   ['dataset', 'square', 'Dataset', 'a connectome to query'],
-  ['table', 'circle', 'Neurons', 'a table guaranteed to have body IDs'],
+  ['table', 'circle', 'Neurons', 'a table guaranteed to have neuron IDs'],
   ['table', 'ring', 'Table', 'rows and typed columns'],
   ['matrix', 'diamond', 'Matrix', 'labelled rows × columns'],
   ['matrix', 'hex', 'Network', 'nodes and links'],

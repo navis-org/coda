@@ -1,5 +1,5 @@
 /**
- * Bounded-concurrency map, shared by every source that fans out over body ids.
+ * Bounded-concurrency map, shared by every source that fans out over neuron ids.
  *
  * Lives here rather than in either caller because the failure rule below is the load-bearing
  * part, and it was written twice — once for Cypher, once for the object stores — which meant

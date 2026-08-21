@@ -53,7 +53,7 @@ beforeEach(() => {
 afterEach(cleanup)
 
 const SCHEMA = tableSchema(
-  column('bodyId', 'i64'),
+  column('neuronId', 'i64'),
   column('pre', 'i64'),
   column('post', 'i64'),
   column('type', 'str'),
@@ -62,7 +62,7 @@ const SCHEMA = tableSchema(
 const table = tableFromRows(
   SCHEMA,
   Array.from({ length: 40 }, (_, i) => ({
-    bodyId: 1000 + i,
+    neuronId: 1000 + i,
     pre: i + 1,
     post: (i + 1) * 2,
     type: i % 2 === 0 ? 'LC4' : 'LC6',
@@ -81,7 +81,7 @@ function props(): ScatterViewerProps {
     aspect: 'fit',
     color: { mode: 'categorical', column: 'type', constant: '0' },
     size: { column: 'pre', min: 3, max: 12 },
-    idColumn: 'bodyId',
+    idColumn: 'neuronId',
     opacity: 0.8,
     maxPoints: 50000,
     trend: 'none',

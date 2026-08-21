@@ -18,7 +18,7 @@ import { isMeshesValue, isPointsValue, isSkeletonsValue, makeTable } from '../..
 import { colorParams } from '../lib/encodingParams'
 import { rowsWithIds } from '../lib/tableOps'
 
-const FALLBACK_SCHEMA: TableSchema = tableSchema(column('bodyId', 'i64'))
+const FALLBACK_SCHEMA: TableSchema = tableSchema(column('neuronId', 'i64'))
 
 /** The attribute table the selection is drawn from — skeletons first, then meshes. */
 function selectionSourceSchema(ctx: InferContext): TableSchema {
@@ -150,7 +150,7 @@ export const viewer3dNode = registerNode({
         : undefined
 
     if (!attributes) {
-      return { selected: makeTable(FALLBACK_SCHEMA, { bodyId: [] }, 'neurons') }
+      return { selected: makeTable(FALLBACK_SCHEMA, { neuronId: [] }, 'neurons') }
     }
     return { selected: rowsWithIds(attributes, ctx.params.selection) }
   },

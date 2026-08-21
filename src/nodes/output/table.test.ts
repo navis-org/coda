@@ -70,7 +70,7 @@ function pipeline(params: Record<string, unknown> = {}): CodaGraph {
 describe('out.table — types', () => {
   it('advertises both ports as what arrived, kind included', () => {
     // A subset of neurons is still neurons: downgrading either port to Table would cost every
-    // node after it the bodyId guarantee its column pickers rely on.
+    // node after it the neuronId guarantee its column pickers rely on.
     const inference = inferGraph(pipeline())
     expect(inference.nodes['tbl']?.outputs['out']?.kind).toBe('neurons')
     expect(inference.nodes['tbl']?.outputs['filtered']?.kind).toBe('neurons')
@@ -191,7 +191,7 @@ describe('out.table — provenance', () => {
    */
   it('reaches a node wired to the untouched Table port as well', async () => {
     let graph = pipeline()
-    graph = addNode(graph, node('sort', 'core.sort', { column: 'bodyId' }))
+    graph = addNode(graph, node('sort', 'core.sort', { column: 'neuronId' }))
     graph = addEdge(graph, {
       source: 'tbl',
       sourceHandle: 'out',

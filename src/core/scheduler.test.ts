@@ -220,7 +220,7 @@ describe('schema propagation', () => {
     const columns =
       filterInput && 'schema' in filterInput ? filterInput.schema?.columns : undefined
     expect(columns?.map((c) => c.name)).toEqual([
-      'bodyId',
+      'neuronId',
       'type',
       'instance',
       'status',

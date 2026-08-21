@@ -85,7 +85,7 @@ function layerList(scene: NgScene): NgLayer[] {
  * Matched by name, exactly as the mesh-source resolver does: every state checked names that
  * layer after the dataset (`manc:v1.2.3`), and the *other* segmentation layers are ROI
  * shells, nuclei and cross-dataset mesh overlays — male-CNS ships thirty of them, and
- * writing body ids into `brain-shell` would display nothing with no visible cause.
+ * writing neuron ids into `brain-shell` would display nothing with no visible cause.
  *
  * Falling back to the first segmentation layer keeps a differently-named state usable.
  * Returns -1 when the scene has no segmentation layer at all.

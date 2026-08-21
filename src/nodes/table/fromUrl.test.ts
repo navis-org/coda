@@ -108,7 +108,7 @@ describe('core.tableFromUrl — fetching', () => {
     // The same shaping pair the upload node uses, so the two nodes cannot drift on what an
     // ID column or a text column means.
     expect(out.kind).toBe('neurons')
-    expect(out.data['bodyId']).toEqual([101, 102])
+    expect(out.data['neuronId']).toEqual([101, 102])
     expect(out.data['cluster']).toEqual(['3', '1'])
   })
 
@@ -343,8 +343,8 @@ describe('core.tableFromUrl — refusals', () => {
   })
 
   it('names the columns it did get when the ID column is wrong', async () => {
-    const message = await errorFrom(pipeline({ idColumn: 'bodyId' }))
-    expect(message).toContain('bodyId')
+    const message = await errorFrom(pipeline({ idColumn: 'neuronId' }))
+    expect(message).toContain('neuronId')
     expect(message).toContain('root_id')
   })
 })

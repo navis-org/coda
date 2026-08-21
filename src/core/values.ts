@@ -104,17 +104,20 @@ export type GeometryUnits = 'nm' | 'voxels'
 /** One neuron's branching morphology, SWC-style, in parallel typed arrays. */
 export interface SkeletonGeometry {
   /**
-   * **Still a number, and the one place invariant 8 is not yet finished.**
+   * What this item is keyed by and called — a `NeuronId` for a neuron, text either way.
    *
-   * Ids cross the `DataSource` seam as `NeuronId` text so a wide one survives; this and
-   * `MeshGeometry.bodyId` are the remaining numbers, so a source publishing ids that do not fit
-   * in a double hands back a *rounded* copy here while its attribute table keeps the exact one.
-   * Benign today — neuPrint and the mock both fit — and a trap the moment one does not, because
-   * several consumers join the two by string equality: `viewer3d`'s selection through
-   * `rowsWithIds`, the SWC/OBJ filenames and header in `exportValue.ts`, and NBLAST's match
-   * table. Widening these two is the next step, not a nicety.
+   * Text because that is what invariant 8 requires of anything an id is *compared* by, and
+   * several consumers do compare these: `viewer3d`'s selection through `rowsWithIds`, the SWC
+   * and OBJ filenames in `exportValue.ts`, and NBLAST's match table. Held as a number this was
+   * a rounded copy of the attribute table's exact id on any source whose ids do not fit in a
+   * double — benign on neuPrint and the mock, and a silently empty selection on CAVE.
+   *
+   * Note it is still a *draw and export key*, not the identity: identity lives in the attribute
+   * table's row, which is the one that can carry a type, a status and everything else. The two
+   * are index-aligned, so a consumer that wants the exact published value should read the
+   * column rather than re-deriving it from here.
    */
-  readonly bodyId: number
+  readonly id: string
   /** Point coordinates, xyz interleaved: `positions[i * 3 + 0..2]`. */
   readonly positions: Float32Array
   readonly radii: Float32Array
@@ -125,26 +128,25 @@ export interface SkeletonGeometry {
 export interface SkeletonsValue {
   readonly kind: 'skeletons'
   readonly items: SkeletonGeometry[]
-  /** One row per item, in the same order. Must contain `bodyId`. */
+  /** One row per item, in the same order. Must contain `neuronId`. */
   readonly attributes: TableValue
   readonly bounds: Bounds3
   readonly units?: GeometryUnits
 }
 
 export interface MeshGeometry {
-  readonly bodyId: number
   /**
-   * What this mesh is called, where a number is not what it is called.
+   * What this item is keyed by and called: a `NeuronId` for a neuron, `ME(R)` for a region.
    *
-   * Every mesh here was a neuron until region meshes arrived, and a region has no body id —
-   * `ME(R)` is its name. `bodyId` stays required because everything that draws or exports a
-   * mesh set keys on it, and for a region it carries the item's ordinal, which is an index and
-   * not an identifier. Identity lives where it always has, in the attribute table's row.
+   * One field rather than the `neuronId: number` plus optional `label: string` this used to be,
+   * and the merge is what widening to text bought. Every mesh here was a neuron until region
+   * meshes arrived, and a region has no neuron id — so `neuronId` was set to `0` for all of them
+   * while `label` carried the real one, and every consumer without exception wrote
+   * `label ?? String(neuronId)`. A distinction erased at every use site is not one.
    *
-   * The one thing that genuinely needs the name is the export: without this, a set of region
-   * meshes writes itself out as `regions-3.obj`.
+   * See `SkeletonGeometry.id` for why it is text, and for the identity-versus-key line.
    */
-  readonly label?: string
+  readonly id: string
   /** xyz interleaved. */
   readonly positions: Float32Array
   /** Triangle indices into `positions`. */

@@ -194,12 +194,12 @@ function SceneContents({
       )}
       {meshes?.items.map((item, index) => (
         <MeshItem
-          key={`${item.bodyId}-${index}`}
+          key={`${item.id}-${index}`}
           positions={item.positions}
           indices={item.indices}
           color={meshColors.at(index)}
           opacity={meshOpacity}
-          dimmed={selected.size > 0 && !selected.has(String(item.bodyId))}
+          dimmed={selected.size > 0 && !selected.has(item.id)}
         />
       ))}
       {points && <PointCloud points={points} colorAt={pointColors.at} size={pointSize} />}
@@ -266,8 +266,8 @@ function SkeletonLines({
     const dimming = selected.size > 0
     for (let s = 0; s < built.segments; s++) {
       const itemIndex = built.segmentItem[s]!
-      const bodyId = String(skeletons.items[itemIndex]?.bodyId ?? '')
-      const rgb = dimming && !selected.has(bodyId) ? DIMMED : hexToRgbFloat(colorAt(itemIndex))
+      const neuronId = skeletons.items[itemIndex]?.id ?? ''
+      const rgb = dimming && !selected.has(neuronId) ? DIMMED : hexToRgbFloat(colorAt(itemIndex))
       for (let v = 0; v < 2; v++) {
         buffer[s * 6 + v * 3] = rgb[0]
         buffer[s * 6 + v * 3 + 1] = rgb[1]
@@ -297,13 +297,13 @@ function SkeletonLines({
     const segment = Math.floor(vertexIndex / 2)
     const itemIndex = built.segmentItem[segment]
     if (itemIndex === undefined) return
-    const bodyId = String(skeletons.items[itemIndex]?.bodyId ?? '')
-    if (!bodyId) return
+    const neuronId = skeletons.items[itemIndex]?.id ?? ''
+    if (!neuronId) return
     event.stopPropagation()
     onSelectionChange(
-      selection.includes(bodyId)
-        ? selection.filter((id) => id !== bodyId)
-        : [...selection, bodyId],
+      selection.includes(neuronId)
+        ? selection.filter((id) => id !== neuronId)
+        : [...selection, neuronId],
     )
   }
 

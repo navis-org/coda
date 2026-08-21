@@ -34,13 +34,13 @@ export const roiCountsNode = registerNode({
     const neurons = ctx.input('neurons')
     if (!isTableValue(neurons)) throw new Error('Neurons input is not a table')
 
-    const bodyIds = idColumn(neurons, 'bodyId')
-    if (bodyIds.length === 0) throw new Error('No bodyIds in the incoming neuron table')
+    const neuronIds = idColumn(neurons, 'neuronId')
+    if (neuronIds.length === 0) throw new Error('No neuronIds in the incoming neuron table')
 
-    ctx.progress(0.2, `${bodyIds.length} neurons`)
+    ctx.progress(0.2, `${neuronIds.length} neurons`)
     const counts = await source.fetchRoiCounts({
       datasetId: dataset.datasetId,
-      bodyIds,
+      neuronIds,
       signal: ctx.signal,
     })
 

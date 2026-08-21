@@ -87,7 +87,7 @@ export const nblastNode = registerNode({
       from: 'query',
       default: '',
       optional: true,
-      help: 'Which attribute names each row. Body ids where this is empty or unset.',
+      help: 'Which attribute names each row. Neuron ids where this is empty or unset.',
     },
     {
       id: 'k',
@@ -169,7 +169,7 @@ export const nblastNode = registerNode({
         result,
         nblastLabels(query, label),
         // The target's rows are its own, and a column picked on the Query port names a column
-        // the Target may not even have — so the far side falls back to body ids rather than
+        // the Target may not even have — so the far side falls back to neuron ids rather than
         // silently labelling one set with another's idea of a name.
         targetValue ? nblastLabels(targetValue, undefined) : nblastLabels(query, label),
       ),

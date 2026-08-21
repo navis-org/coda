@@ -10,7 +10,7 @@
 
 import { rStr } from '../r'
 import { registerEmitter, registerHelper } from '../registry'
-import { bodyIds } from './common'
+import { neuronIds } from './common'
 
 registerEmitter('neuron.connectivity', (ctx) => {
   const conn = ctx.wired('dataset')
@@ -27,7 +27,7 @@ registerEmitter('neuron.connectivity', (ctx) => {
     ctx.helper('coda_traverse_connectivity')
     return [
       `${out} <- coda_traverse_connectivity(`,
-      `  ${bodyIds(neurons)},`,
+      `  ${neuronIds(neurons)},`,
       `  direction = ${rStr(direction)},`,
       `  hops = ${hops},`,
       `  min_weight = ${minWeight},`,
@@ -40,7 +40,7 @@ registerEmitter('neuron.connectivity', (ctx) => {
   const prepost = direction === 'inputs' ? 'PRE' : direction === 'both' ? 'BOTH' : 'POST'
   return [
     `${out} <- coda_edge_list(`,
-    `  ${bodyIds(neurons)},`,
+    `  ${neuronIds(neurons)},`,
     `  prepost = ${rStr(prepost)},`,
     `  min_weight = ${minWeight},`,
     `  conn = ${conn}`,

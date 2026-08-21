@@ -19,7 +19,7 @@ import type { CodaType, TableSchema } from './types'
 import { T, column, tableSchema } from './types'
 
 const SCHEMA: TableSchema = tableSchema(
-  column('bodyId', 'i64'),
+  column('neuronId', 'i64'),
   column('type', 'str'),
   column('pre', 'i64'),
 )
@@ -150,7 +150,7 @@ describe('a stored column that has disappeared', () => {
     // A stored value still equal to the definition's declared default is a suggestion, not a
     // decision, so it does fall back — and says so.
     expect(issues(def(picker({ default: 'weight' })), { col: 'weight' }, table)).toEqual([
-      'Column "weight" is gone — using "bodyId"',
+      'Column "weight" is gone — using "neuronId"',
     ])
   })
 
@@ -171,13 +171,13 @@ describe('a stored column that has disappeared', () => {
   it('says nothing when the stored value is still the definition’s own default', () => {
     /*
      * A default is the definition's suggestion, not a decision to report drift on.
-     * `out.scatter` declares `bodyId` so a neuron table needs no configuring at all, and on a
+     * `out.scatter` declares `neuronId` so a neuron table needs no configuring at all, and on a
      * table without one it means row positions — the node working, rather than a column
      * anybody has to re-pick.
      */
     const noIds = T.table(tableSchema(column('type', 'str'), column('L', 'f64')))
     expect(
-      issues(def(picker({ optional: true, default: 'bodyId' })), { col: 'bodyId' }, noIds),
+      issues(def(picker({ optional: true, default: 'neuronId' })), { col: 'neuronId' }, noIds),
     ).toEqual([])
   })
 
@@ -219,20 +219,20 @@ describe('resolving a column', () => {
   })
 
   it('keeps a chosen name the schema does not list, rather than substituting', () => {
-    // The schema may simply not have arrived. Answering "bodyId" here is not a degraded
+    // The schema may simply not have arrived. Answering "neuronId" here is not a degraded
     // answer to the question asked — it is a confident answer to a different one.
     expect(pick({}, 'somaSide')).toBe('somaSide')
   })
 
   it('falls back for an empty default, which means decide for me', () => {
-    expect(pick({}, '')).toBe('bodyId')
+    expect(pick({}, '')).toBe('neuronId')
     expect(pick({ dtypes: ['str'] }, '')).toBe('type')
   })
 
   it('falls back for a named default, which is a suggestion rather than a decision', () => {
     // `out.scatter` opens on `pre`/`post` so a neuron table needs no configuring; on a table
     // without them it must still find something to plot.
-    expect(pick({ default: 'somaSide' }, 'somaSide')).toBe('bodyId')
+    expect(pick({ default: 'somaSide' }, 'somaSide')).toBe('neuronId')
   })
 
   it('answers off for an optional picker, before any of that', () => {

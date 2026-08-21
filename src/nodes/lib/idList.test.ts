@@ -23,9 +23,9 @@ import { column, tableSchema } from '../../core/types'
 import { tableFromRows } from '../../core/values'
 import { collectIds, parseIdList, unmatchedIds } from './idList'
 
-const IDS = tableSchema(column('bodyId', 'i64'), column('type', 'str'))
+const IDS = tableSchema(column('neuronId', 'i64'), column('type', 'str'))
 /** A CAVE-shaped table: the id column is text, because eighteen digits cannot be a number. */
-const TEXT_IDS = tableSchema(column('bodyId', 'str'), column('type', 'str'))
+const TEXT_IDS = tableSchema(column('neuronId', 'str'), column('type', 'str'))
 
 describe('parseIdList', () => {
   it('reads ids separated however they arrive', () => {
@@ -66,8 +66,8 @@ describe('parseIdList', () => {
   it('names the pasted header, because that is the usual cause', () => {
     // The accepted cost of refusing rather than skipping: copying a column out of a spreadsheet
     // brings its header. The message has to make the fix obvious rather than just correct.
-    const result = parseIdList('bodyId\n1234\n5678')
-    expect(result.error).toContain('"bodyId"')
+    const result = parseIdList('neuronId\n1234\n5678')
+    expect(result.error).toContain('"neuronId"')
     expect(result.error).toContain('delete its header line')
   })
 
@@ -140,21 +140,21 @@ describe('parseIdList', () => {
 describe('collectIds', () => {
   const table = () =>
     tableFromRows(IDS, [
-      { bodyId: 5678, type: 'LC6' },
-      { bodyId: 9012, type: 'LC4' },
+      { neuronId: 5678, type: 'LC6' },
+      { neuronId: 9012, type: 'LC4' },
     ])
 
   it('unions the typed list with the wired column, typed first', () => {
     // A union rather than one overriding the other: a node that dropped the text field the
     // moment a wire arrived would look correct, because the result is a valid table either way.
-    const out = collectIds({ typed: '1234, 5678', table: table(), column: 'bodyId' })
+    const out = collectIds({ typed: '1234, 5678', table: table(), column: 'neuronId' })
     expect(out.ids).toEqual(['1234', '5678', '9012'])
     expect(out.error).toBeUndefined()
   })
 
   it('works from either half alone', () => {
     expect(collectIds({ typed: '1234' }).ids).toEqual(['1234'])
-    expect(collectIds({ typed: '', table: table(), column: 'bodyId' }).ids).toEqual([
+    expect(collectIds({ typed: '', table: table(), column: 'neuronId' }).ids).toEqual([
       '5678',
       '9012',
     ])
@@ -163,7 +163,7 @@ describe('collectIds', () => {
 
   it('collects nothing at all when the typed half is refused', () => {
     // The refusal is about the whole list, so a wired table cannot quietly stand in for it.
-    const out = collectIds({ typed: 'LC4', table: table(), column: 'bodyId' })
+    const out = collectIds({ typed: 'LC4', table: table(), column: 'neuronId' })
     expect(out.ids).toEqual([])
     expect(out.error).toContain('"LC4"')
   })
@@ -173,14 +173,14 @@ describe('collectIds', () => {
     // wired column is data, and refusing to run over one null row would make the node unusable
     // — which is why `idColumn()` has always skipped them too.
     const ragged = tableFromRows(IDS, [
-      { bodyId: 1234, type: 'a' },
-      { bodyId: null, type: 'b' },
+      { neuronId: 1234, type: 'a' },
+      { neuronId: null, type: 'b' },
       // Computed, not written: the literal would lose precision in this source file too. As a
       // *number* its digits are already gone, so there is nothing to recover and it is dropped
       // — which is exactly the case the text column below does not have.
-      { bodyId: Number.MAX_SAFE_INTEGER + 2, type: 'c' },
+      { neuronId: Number.MAX_SAFE_INTEGER + 2, type: 'c' },
     ])
-    const out = collectIds({ typed: '', table: ragged, column: 'bodyId' })
+    const out = collectIds({ typed: '', table: ragged, column: 'neuronId' })
     expect(out.ids).toEqual(['1234'])
     expect(out.error).toBeUndefined()
     expect(out.dropped).toBe(1)
@@ -190,20 +190,20 @@ describe('collectIds', () => {
     // The counterpart of the case above: the same width, but never routed through a number, so
     // every digit is still there and nothing is dropped.
     const wide = tableFromRows(TEXT_IDS, [
-      { bodyId: '648518347529750614', type: 'KC' },
-      { bodyId: '648518347481448779', type: 'ALIN' },
+      { neuronId: '648518347529750614', type: 'KC' },
+      { neuronId: '648518347481448779', type: 'ALIN' },
     ])
-    const out = collectIds({ typed: '', table: wide, column: 'bodyId' })
+    const out = collectIds({ typed: '', table: wide, column: 'neuronId' })
     expect(out.ids).toEqual(['648518347529750614', '648518347481448779'])
     expect(out.dropped).toBe(0)
   })
 
   it('drops a text cell that is not digits, rather than refusing', () => {
     const odd = tableFromRows(TEXT_IDS, [
-      { bodyId: '1234', type: 'a' },
-      { bodyId: 'not-an-id', type: 'b' },
+      { neuronId: '1234', type: 'a' },
+      { neuronId: 'not-an-id', type: 'b' },
     ])
-    const out = collectIds({ typed: '', table: odd, column: 'bodyId' })
+    const out = collectIds({ typed: '', table: odd, column: 'neuronId' })
     expect(out.ids).toEqual(['1234'])
     expect(out.dropped).toBe(1)
   })
@@ -215,7 +215,7 @@ describe('collectIds', () => {
 })
 
 describe('unmatchedIds', () => {
-  const result = () => tableFromRows(IDS, [{ bodyId: 1234, type: 'LC4' }])
+  const result = () => tableFromRows(IDS, [{ neuronId: 1234, type: 'LC4' }])
 
   it('names the ids the dataset did not return', () => {
     expect(unmatchedIds(['1234', '5678'], result())).toEqual(['5678'])
@@ -223,9 +223,9 @@ describe('unmatchedIds', () => {
   })
 
   it('matches a numeric result column against ids held as text', () => {
-    // The result's `bodyId` is `i64` on neuPrint and `str` on CAVE; the comparison has to be
+    // The result's `neuronId` is `i64` on neuPrint and `str` on CAVE; the comparison has to be
     // the same either way, or every id would report as missing on one of them.
-    const asText = tableFromRows(TEXT_IDS, [{ bodyId: '1234', type: 'LC4' }])
+    const asText = tableFromRows(TEXT_IDS, [{ neuronId: '1234', type: 'LC4' }])
     expect(unmatchedIds(['1234', '5678'], asText)).toEqual(['5678'])
   })
 
@@ -235,7 +235,7 @@ describe('unmatchedIds', () => {
     expect(unmatchedIds(['1234', '5678'], undefined)).toEqual([])
   })
 
-  it('says nothing about a result carrying no bodyId', () => {
+  it('says nothing about a result carrying no neuronId', () => {
     // "None of these exist" over a table full of neurons is a specific and wrong claim, where
     // saying nothing is merely unhelpful.
     const odd = tableFromRows(tableSchema(column('type', 'str')), [{ type: 'LC4' }])

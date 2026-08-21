@@ -40,17 +40,17 @@ import {
   xmlText,
 } from './exportValue'
 
-const NEURONS = tableSchema(column('bodyId', 'i64'), column('type', 'str'))
+const NEURONS = tableSchema(column('neuronId', 'i64'), column('type', 'str'))
 const table = () =>
   tableFromRows(NEURONS, [
-    { bodyId: 1, type: 'LC4' },
-    { bodyId: 2, type: 'LC6' },
+    { neuronId: 1, type: 'LC4' },
+    { neuronId: 2, type: 'LC6' },
   ])
 
 /** A three-point skeleton: a root and two children, the second hanging off the first child. */
-function skeleton(bodyId = 101) {
+function skeleton(id = '101') {
   return {
-    bodyId,
+    id,
     positions: new Float32Array([0, 0, 0, 10, 0, 0, 20, 5, 0]),
     radii: new Float32Array([3, 2, 1]),
     parents: new Int32Array([-1, 0, 1]),
@@ -58,13 +58,13 @@ function skeleton(bodyId = 101) {
 }
 
 function skeletons(count = 1): SkeletonsValue {
-  const items = Array.from({ length: count }, (_, i) => skeleton(100 + i))
+  const items = Array.from({ length: count }, (_, i) => skeleton(String(100 + i)))
   return {
     kind: 'skeletons',
     items,
     attributes: tableFromRows(
-      tableSchema(column('bodyId', 'i64')),
-      items.map((s) => ({ bodyId: s.bodyId })),
+      tableSchema(column('neuronId', 'i64')),
+      items.map((s) => ({ neuronId: Number(s.id) })),
     ),
     bounds: EMPTY_BOUNDS,
   }
@@ -72,7 +72,7 @@ function skeletons(count = 1): SkeletonsValue {
 
 function meshes(count = 1): MeshesValue {
   const items = Array.from({ length: count }, (_, i) => ({
-    bodyId: 200 + i,
+    id: String(200 + i),
     positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
     indices: new Uint32Array([0, 1, 2]),
   }))
@@ -80,8 +80,8 @@ function meshes(count = 1): MeshesValue {
     kind: 'meshes',
     items,
     attributes: tableFromRows(
-      tableSchema(column('bodyId', 'i64')),
-      items.map((m) => ({ bodyId: m.bodyId })),
+      tableSchema(column('neuronId', 'i64')),
+      items.map((m) => ({ neuronId: Number(m.id) })),
     ),
     bounds: EMPTY_BOUNDS,
   }
@@ -144,8 +144,8 @@ describe('OBJ', () => {
     expect(lines).not.toContain('f 0 1 2')
   })
 
-  it('names the object by body id', () => {
-    expect(meshToObj(meshes().items[0]!)).toContain('o body_200')
+  it('names the object by neuron id', () => {
+    expect(meshToObj(meshes().items[0]!)).toContain('o 200')
   })
 })
 
@@ -163,7 +163,7 @@ describe('JSON', () => {
 
   it('round-trips a plain table unchanged', () => {
     const parsed = JSON.parse(valueToJson(table())) as { data: Record<string, unknown[]> }
-    expect(parsed.data['bodyId']).toEqual([1, 2])
+    expect(parsed.data['neuronId']).toEqual([1, 2])
   })
 })
 
@@ -366,7 +366,7 @@ describe('planExport — auto', () => {
   it('writes a table as one CSV', () => {
     const plan = planExport(table(), 'auto', base)
     expect(plan.files.map((f) => f.name)).toEqual(['out.csv'])
-    expect(plan.files[0]!.parts.join('')).toContain('bodyId,type')
+    expect(plan.files[0]!.parts.join('')).toContain('neuronId,type')
   })
 
   it('writes a network as two CSVs, nodes and links', () => {
@@ -385,7 +385,7 @@ describe('planExport — auto', () => {
     ])
   })
 
-  it('writes one file per neuron for skeletons, named by body id', () => {
+  it('writes one file per neuron for skeletons, named by neuron id', () => {
     // A concatenated SWC has repeating ids and parses as one impossible tree.
     expect(planExport(skeletons(3), 'auto', base).files.map((f) => f.name)).toEqual([
       'out-100.swc',

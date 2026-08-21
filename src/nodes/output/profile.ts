@@ -63,7 +63,7 @@ export const profileNode = registerNode({
     /*
      * Typed `table` rather than `neurons`, so a plain Table connects too — `neurons` is a
      * subtype, so both are accepted by one port. What the profile actually needs is a
-     * `bodyId` column, and that is reported by `validate` with a message naming the columns
+     * `neuronId` column, and that is reported by `validate` with a message naming the columns
      * the table does have, which is far easier to act on than a link the editor silently
      * refuses to make.
      */
@@ -161,12 +161,12 @@ export const profileNode = registerNode({
   validate: (ctx) => {
     const input = ctx.inputs.neurons
     // Only complain when the schema is actually known — an unknown one (a raw Cypher result,
-    // say) may well have a bodyId, and refusing it before anything has run would be a guess.
+    // say) may well have a neuronId, and refusing it before anything has run would be a guess.
     if (!isTabular(input) || !input.schema) return []
     const names = columnNames(input.schema)
-    if (names.includes('bodyId')) return []
+    if (names.includes('neuronId')) return []
     return [
-      `Profile needs a "bodyId" column to identify a neuron. This table has: ${
+      `Profile needs a "neuronId" column to identify a neuron. This table has: ${
         names.length ? names.join(', ') : '(no columns)'
       }`,
     ]

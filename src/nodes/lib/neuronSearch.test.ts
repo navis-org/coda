@@ -30,7 +30,7 @@ import {
 } from './neuronSearch'
 
 const SCHEMA = tableSchema(
-  column('bodyId', 'i64'),
+  column('neuronId', 'i64'),
   column('type', 'str'),
   column('instance', 'str'),
   column('status', 'str'),
@@ -46,7 +46,7 @@ const NEURONS: TableValue = tableFromRows(
   SCHEMA,
   [
     {
-      bodyId: 10,
+      neuronId: 10,
       type: 'DNp01',
       instance: 'DNp01_L',
       status: 'Traced',
@@ -54,7 +54,7 @@ const NEURONS: TableValue = tableFromRows(
       post: 1200,
     },
     {
-      bodyId: 20,
+      neuronId: 20,
       type: 'DNp17',
       instance: 'DNp17_R',
       status: 'Traced',
@@ -62,7 +62,7 @@ const NEURONS: TableValue = tableFromRows(
       post: 300,
     },
     {
-      bodyId: 30,
+      neuronId: 30,
       type: 'LC4',
       instance: 'LC4_R',
       status: 'Traced',
@@ -70,17 +70,17 @@ const NEURONS: TableValue = tableFromRows(
       post: 90,
     },
     {
-      bodyId: 40,
+      neuronId: 40,
       type: 'LC6',
       instance: 'LC6_L',
       status: 'Anchor',
       class: 'visual projection',
       post: 40,
     },
-    { bodyId: 50, type: 'KCg', instance: 'KCg_x', status: 'Traced', class: null, post: 7 },
-    { bodyId: 60, type: null, instance: 'unnamed', status: null, class: 'descending', post: 0 },
+    { neuronId: 50, type: 'KCg', instance: 'KCg_x', status: 'Traced', class: null, post: 7 },
+    { neuronId: 60, type: null, instance: 'unnamed', status: null, class: 'descending', post: 0 },
     {
-      bodyId: 70,
+      neuronId: 70,
       type: 'aDNp01x',
       instance: 'weird',
       status: 'Traced',
@@ -102,7 +102,7 @@ function types(query: string): Array<string | null> {
 }
 
 function ids(query: string): number[] {
-  return search(query).rows.map((row) => NEURONS.data['bodyId']![row] as number)
+  return search(query).rows.map((row) => NEURONS.data['neuronId']![row] as number)
 }
 
 // ---------------------------------------------------------------------------
@@ -262,7 +262,7 @@ describe('fuzzy fallback', () => {
     // 'dscnding' is not a substring of anything but is a subsequence of 'descending'.
     const result = search('dscnding')
     expect(result.fuzzy).toBe(true)
-    expect(result.rows.map((r) => NEURONS.data['bodyId']![r])).toEqual([10, 20, 60, 70])
+    expect(result.rows.map((r) => NEURONS.data['neuronId']![r])).toEqual([10, 20, 60, 70])
   })
 
   it('stays exact when a substring hit exists, however few', () => {
@@ -294,7 +294,7 @@ describe('ranking', () => {
     expect(types('dnp01')).toEqual(['DNp01', 'aDNp01x'])
   })
 
-  it('searches body ids as text, so pasting an id finds its neuron', () => {
+  it('searches neuron ids as text, so pasting an id finds its neuron', () => {
     expect(ids('10')).toEqual([10])
   })
 
@@ -400,8 +400,8 @@ describe('completeSearch', () => {
     expect([result.from, result.to]).toEqual([7, 11])
   })
 
-  it('does not offer bodyId as a field', () => {
-    // Body ids are found by typing the number; completing them is meaningless.
+  it('does not offer neuronId as a field', () => {
+    // Neuron ids are found by typing the number; completing them is meaningless.
     expect(labels('body')).toEqual([])
   })
 })

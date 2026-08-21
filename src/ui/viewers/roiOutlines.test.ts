@@ -109,8 +109,7 @@ describe('buildRoiOutlines', () => {
       kind: 'meshes' as const,
       items: [
         {
-          bodyId: 0,
-          label: 'nothing',
+          id: 'nothing',
           positions: new Float32Array(0),
           indices: new Uint32Array(0),
         },

@@ -397,11 +397,11 @@ export function fetchRoiConnectivity(
 /** SWC for one body, as `{columns: [rowId,x,y,z,radius,link], data}`. */
 export function fetchSkeleton(
   dataset: string,
-  bodyId: string,
+  neuronId: string,
   options?: RequestOptions,
 ): Promise<CypherResponse> {
   return get<CypherResponse>(
-    `/api/skeletons/skeleton/${datasetSegment(dataset)}/${bodyId}`,
+    `/api/skeletons/skeleton/${datasetSegment(dataset)}/${neuronId}`,
     options,
   )
 }

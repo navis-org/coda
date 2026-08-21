@@ -60,7 +60,7 @@ export function pyList(values: readonly ParamValue[]): string {
 /**
  * A list literal wrapped across lines once it stops fitting.
  *
- * An `ids` param routinely holds thousands of body ids, and a single line that long is a
+ * An `ids` param routinely holds thousands of neuron ids, and a single line that long is a
  * cell nobody can read and no diff can show. Returns lines rather than a string, since the
  * caller has to indent them into whatever expression it is building.
  */

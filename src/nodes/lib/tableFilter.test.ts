@@ -27,26 +27,26 @@ import {
 } from './tableFilter'
 
 const SCHEMA = tableSchema(
-  column('bodyId', 'i64'),
+  column('neuronId', 'i64'),
   column('type', 'str'),
   column('weight', 'i64'),
   column('flag', 'bool'),
 )
 
 const ROWS = [
-  { bodyId: 1, type: 'LC4', weight: 40, flag: true },
-  { bodyId: 2, type: 'LC6', weight: 5, flag: false },
-  { bodyId: 3, type: 'DNp01', weight: 100, flag: true },
-  { bodyId: 4, type: null, weight: null, flag: null },
-  { bodyId: 5, type: 'lc11', weight: 10, flag: false },
+  { neuronId: 1, type: 'LC4', weight: 40, flag: true },
+  { neuronId: 2, type: 'LC6', weight: 5, flag: false },
+  { neuronId: 3, type: 'DNp01', weight: 100, flag: true },
+  { neuronId: 4, type: null, weight: null, flag: null },
+  { neuronId: 5, type: 'lc11', weight: 10, flag: false },
 ]
 
 const table = () => tableFromRows(SCHEMA, ROWS)
 
-/** Which bodyIds survive — the readable form of an index list. */
+/** Which neuronIds survive — the readable form of an index list. */
 function kept(clauses: FilterClause[]): number[] {
   const t = table()
-  const ids = t.data['bodyId'] as number[]
+  const ids = t.data['neuronId'] as number[]
   // `undefined` is the "every row" sentinel, so an unfiltered answer reads as the whole list.
   const rows = filterRowIndices(t, clauses).rows ?? ids.map((_, i) => i)
   return rows.map((row) => ids[row]!)

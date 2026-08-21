@@ -65,9 +65,9 @@ const DATASET = 'hemibrain-mini'
 function oversizedSource(): DataSource {
   const rows = MAX_SELECT_ALL + 1
   const index = makeTable(
-    tableSchema(column('bodyId', 'i64'), column('type', 'str')),
+    tableSchema(column('neuronId', 'i64'), column('type', 'str')),
     {
-      bodyId: Array.from({ length: rows }, (_, i) => 1000 + i),
+      neuronId: Array.from({ length: rows }, (_, i) => 1000 + i),
       type: Array.from({ length: rows }, (_, i) => (i % 2 ? 'KCg' : 'PN')),
     },
     'neurons',
@@ -322,7 +322,7 @@ describe('ExploreBody', () => {
     // that is missing on big datasets.
     const { writes } = setup({ pageSize: 5 }, 'mock-huge')
     await ready()
-    await type('bodyId==1000')
+    await type('neuronId==1000')
 
     const button = screen.getByText('+ all') as HTMLButtonElement
     await waitFor(() => expect(button.disabled).toBe(false))
@@ -462,12 +462,12 @@ describe('ExploreBody', () => {
  * placeholder through any number of reloads, because nothing asked again.
  */
 describe('thumbnail caching', () => {
-  const BODY = getConnectome(DATASET)!.neurons[0]!.bodyId
+  const BODY = getConnectome(DATASET)!.neurons[0]!.neuronId
   /** Displayed at 76, rasterised at 2x — the key carries the raster size. */
   const KEY = `thumb:mock:${DATASET}:${BODY}:152`
 
   function renderThumb(sourceId = 'mock') {
-    render(<NeuronThumbnail sourceId={sourceId} datasetId={DATASET} bodyId={String(BODY)} size={76} />)
+    render(<NeuronThumbnail sourceId={sourceId} datasetId={DATASET} neuronId={String(BODY)} size={76} />)
   }
 
   it('ignores an entry written by an older encoder, refusals included', async () => {
@@ -515,13 +515,13 @@ describe('thumbnail caching', () => {
 describe('annotation chips', () => {
   const table = makeTable(
     tableSchema(
-      column('bodyId', 'i64'),
+      column('neuronId', 'i64'),
       column('type', 'str'),
       column('class', 'str'),
       column('somaSide', 'str'),
       column('rootSide', 'str'),
     ),
-    { bodyId: [1], type: ['DNp01'], class: ['descending'], somaSide: ['L'], rootSide: ['R'] },
+    { neuronId: [1], type: ['DNp01'], class: ['descending'], somaSide: ['L'], rootSide: ['R'] },
     'neurons',
   )
 
@@ -555,7 +555,7 @@ describe('annotation chips', () => {
     // is smaller, not a different set of fields; chips wrap.
     const maleCns = makeTable(
       tableSchema(
-        column('bodyId', 'i64'),
+        column('neuronId', 'i64'),
         column('type', 'str'),
         ...[
           'class',
@@ -568,7 +568,7 @@ describe('annotation chips', () => {
         ].map((n) => column(n, 'str')),
       ),
       {
-        bodyId: [1],
+        neuronId: [1],
         type: ['DNp01'],
         class: ['descending'],
         subclass: ['DN'],

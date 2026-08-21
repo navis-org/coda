@@ -168,7 +168,7 @@ describe('hexToRgb', () => {
 describe('rowFields', () => {
   /** Shaped after male-CNS, which has more chip-eligible columns than a row can hold. */
   const maleCns = tableSchema(
-    column('bodyId', 'i64'),
+    column('neuronId', 'i64'),
     column('type', 'str'),
     column('instance', 'str'),
     ...[
@@ -188,7 +188,7 @@ describe('rowFields', () => {
   )
 
   const hemibrain = tableSchema(
-    column('bodyId', 'i64'),
+    column('neuronId', 'i64'),
     column('type', 'str'),
     column('instance', 'str'),
     column('status', 'str'),
@@ -203,7 +203,7 @@ describe('rowFields', () => {
   })
 
   it('never repeats the headline on the line beneath it', () => {
-    const noType = tableSchema(column('bodyId', 'i64'), column('instance', 'str'))
+    const noType = tableSchema(column('neuronId', 'i64'), column('instance', 'str'))
     const fields = rowFields(noType)
     expect(fields.primary).toBe('instance')
     expect(fields.secondary).not.toContain('instance')
@@ -214,7 +214,7 @@ describe('rowFields', () => {
     // male-CNS has superclass, and the row component knows none of those names.
     expect(rowFields(hemibrain).chips).toContain('cellBodyFiber')
     const manc = tableSchema(
-      column('bodyId', 'i64'),
+      column('neuronId', 'i64'),
       column('type', 'str'),
       column('hemilineage', 'str'),
     )
@@ -223,7 +223,7 @@ describe('rowFields', () => {
 
   it('caps the automatic chip list at the size of the palette', () => {
     const wide = tableSchema(
-      column('bodyId', 'i64'),
+      column('neuronId', 'i64'),
       column('type', 'str'),
       ...[
         'class',
@@ -254,7 +254,7 @@ describe('rowFields', () => {
 
   it('falls back to the other name for a fact when the first is absent', () => {
     const manc = tableSchema(
-      column('bodyId', 'i64'),
+      column('neuronId', 'i64'),
       column('type', 'str'),
       column('hemilineage', 'str'),
       column('predictedNt', 'str'),
@@ -289,7 +289,7 @@ describe('rowFields', () => {
     // and the `chips` param is how someone asks for the other.
     expect(rowFields(maleCns).chips).not.toContain('trumanHl')
     const manc = tableSchema(
-      column('bodyId', 'i64'),
+      column('neuronId', 'i64'),
       column('type', 'str'),
       column('hemilineage', 'str'),
     )
@@ -313,7 +313,7 @@ describe('rowFields', () => {
   it('drops a chosen field the dataset does not have', () => {
     // The param outlives the dataset it was set on. Repointed at hemibrain, `superclass`
     // should disappear rather than render a column of blanks.
-    const hemibrainish = tableSchema(column('bodyId', 'i64'), column('cellBodyFiber', 'str'))
+    const hemibrainish = tableSchema(column('neuronId', 'i64'), column('cellBodyFiber', 'str'))
     expect(rowFields(hemibrainish, ['superclass', 'cellBodyFiber']).chips).toEqual([
       'cellBodyFiber',
     ])
@@ -322,12 +322,12 @@ describe('rowFields', () => {
   it('treats a numerically-named column as a stat only when it is numeric', () => {
     // A source that types `pre` as a string must not land in the figure column, where it
     // would be formatted as a number and render as an em dash.
-    const odd = tableSchema(column('bodyId', 'i64'), column('pre', 'str'))
+    const odd = tableSchema(column('neuronId', 'i64'), column('pre', 'str'))
     expect(rowFields(odd).stats).toEqual([])
   })
 
   it('survives a schema it knows nothing about', () => {
-    const alien = tableSchema(column('bodyId', 'i64'), column('weird', 'str'))
+    const alien = tableSchema(column('neuronId', 'i64'), column('weird', 'str'))
     const fields = rowFields(alien)
     expect(fields.primary).toBe('weird')
     expect(fields.chips).toEqual([])

@@ -89,7 +89,7 @@ export function clearProfileCache(): void {
 async function load(
   sourceId: string,
   datasetId: string,
-  bodyId: string,
+  neuronId: string,
 ): Promise<NeuronProfileData> {
   const source = getSource(sourceId)
   if (!source) throw new Error(`Data source "${sourceId}" is not registered`)
@@ -103,9 +103,9 @@ async function load(
    * filtered locally in `profileStats`.
    */
   const [inputs, outputs, regions] = await Promise.all([
-    source.fetchConnectivity({ datasetId, bodyIds: [bodyId], direction: 'inputs' }),
-    source.fetchConnectivity({ datasetId, bodyIds: [bodyId], direction: 'outputs' }),
-    source.fetchRoiCounts({ datasetId, bodyIds: [bodyId] }),
+    source.fetchConnectivity({ datasetId, neuronIds: [neuronId], direction: 'inputs' }),
+    source.fetchConnectivity({ datasetId, neuronIds: [neuronId], direction: 'outputs' }),
+    source.fetchRoiCounts({ datasetId, neuronIds: [neuronId] }),
   ])
 
   // Read after the await: discovery may well have landed while these were in flight, and the
@@ -116,25 +116,25 @@ async function load(
 function profileKey(
   sourceId: string | undefined,
   datasetId: string | undefined,
-  bodyId: string | undefined,
+  neuronId: string | undefined,
 ): string | undefined {
-  if (!sourceId || !datasetId || bodyId === undefined || bodyId === '') return undefined
-  return `${sourceId}|${datasetId}|${bodyId}`
+  if (!sourceId || !datasetId || neuronId === undefined || neuronId === '') return undefined
+  return `${sourceId}|${datasetId}|${neuronId}`
 }
 
 export function useNeuronProfile(
   sourceId: string | undefined,
   datasetId: string | undefined,
-  bodyId: string | undefined,
+  neuronId: string | undefined,
 ): NeuronProfileState {
-  const key = profileKey(sourceId, datasetId, bodyId)
+  const key = profileKey(sourceId, datasetId, neuronId)
 
   // Seeded from the cache so paging back to a neuron already seen paints on the first render
   // rather than flashing a spinner for a frame.
   const [state, setState] = useState<NeuronProfileState>(() => initial(key))
 
   useEffect(() => {
-    if (!key || !sourceId || !datasetId || bodyId === undefined) {
+    if (!key || !sourceId || !datasetId || neuronId === undefined) {
       setState({ status: 'none' })
       return
     }
@@ -149,7 +149,7 @@ export function useNeuronProfile(
     setState({ status: 'loading' })
 
     const timer = setTimeout(() => {
-      const shared = pending.get(key) ?? load(sourceId, datasetId, bodyId)
+      const shared = pending.get(key) ?? load(sourceId, datasetId, neuronId)
       pending.set(key, shared)
 
       shared
@@ -175,7 +175,7 @@ export function useNeuronProfile(
       live = false
       clearTimeout(timer)
     }
-  }, [key, sourceId, datasetId, bodyId])
+  }, [key, sourceId, datasetId, neuronId])
 
   return state
 }

@@ -71,7 +71,7 @@ function node(id: string, type: string, params: Record<string, unknown> = {}): G
 function pipeline(params: Record<string, unknown> = {}, withDataset = false): CodaGraph {
   let g = emptyGraph('input-ids-test')
   g = addNode(g, node('ids', 'neuron.inputIds', params))
-  g = addNode(g, node('sort', 'core.sort', { column: 'bodyId' }))
+  g = addNode(g, node('sort', 'core.sort', { column: 'neuronId' }))
   g = addEdge(g, { source: 'ids', sourceHandle: 'neurons', target: 'sort', targetHandle: 'in' })
   if (withDataset) {
     g = addNode(g, node('ds', 'neuron.dataset', { dataset: DATASET }))
@@ -88,7 +88,7 @@ function pipeline(params: Record<string, unknown> = {}, withDataset = false): Co
 /** Some real ids from the mock connectome, so the lookup has something to find. */
 async function realIds(count: number): Promise<string[]> {
   const table = await new MockSource({ latencyMs: 0 }).findNeurons({ datasetId: DATASET })
-  return (table.data['bodyId'] ?? []).slice(0, count).map(String)
+  return (table.data['neuronId'] ?? []).slice(0, count).map(String)
 }
 
 describe('neuron.inputIds — without a dataset', () => {
@@ -99,9 +99,9 @@ describe('neuron.inputIds — without a dataset', () => {
     const out = scheduler.output('ids', 'neurons')
     if (!isTableValue(out)) throw new Error('expected a table')
     expect(out.kind).toBe('neurons')
-    expect(columnNames(out.schema)).toEqual(['bodyId'])
+    expect(columnNames(out.schema)).toEqual(['neuronId'])
     // Numbers, because this branch builds the table itself and `ID_ONLY_SCHEMA` says `i64`.
-    expect(out.data['bodyId']).toEqual([1234, 5678, 9012])
+    expect(out.data['neuronId']).toEqual([1234, 5678, 9012])
     // The whole point of the optional input: no dataset, no query, ids that need not exist.
     expect(findNeurons).not.toHaveBeenCalled()
   })
@@ -111,11 +111,11 @@ describe('neuron.inputIds — without a dataset', () => {
     // delivers — invariant 3's failure, arrived at through the wiring rather than an op.
     const out = inferGraph(pipeline()).nodes['ids']?.outputs['neurons']
     expect(out?.kind).toBe('neurons')
-    expect(columnNames(schemaOf(out))).toEqual(['bodyId'])
+    expect(columnNames(schemaOf(out))).toEqual(['neuronId'])
   })
 
   it('is a Neurons table, so it reaches the nodes a list of ids is for', () => {
-    // Connectivity, Skeletons, Meshes, Synapses and ROI Counts all read `bodyId` and nothing
+    // Connectivity, Skeletons, Meshes, Synapses and ROI Counts all read `neuronId` and nothing
     // else off the row, which is why the id column alone is a complete input for them.
     let g = pipeline({ ids: '1234' })
     g = addNode(g, node('skel', 'neuron.skeletons'))
@@ -143,7 +143,7 @@ describe('neuron.inputIds — without a dataset', () => {
     if (!isTableValue(out)) throw new Error('expected a table')
     expect(out.length).toBe(0)
     // An empty table of the *right shape*, so a picker downstream works before anything is typed.
-    expect(columnNames(out.schema)).toEqual(['bodyId'])
+    expect(columnNames(out.schema)).toEqual(['neuronId'])
   })
 })
 
@@ -161,8 +161,8 @@ describe('neuron.inputIds — with a dataset', () => {
      * because `idList` splices the digits in as an integer literal. `n.bodyId IN ['123']` is
      * false in Neo4j, and that is an empty result with no error anywhere to explain it.
      */
-    expect(req.bodyIds).toEqual(ids)
-    expect(req.bodyIds?.every((v) => typeof v === 'string')).toBe(true)
+    expect(req.neuronIds).toEqual(ids)
+    expect(req.neuronIds?.every((v) => typeof v === 'string')).toBe(true)
   })
 
   it('does not filter by status, unlike every other query node here', async () => {
@@ -186,15 +186,15 @@ describe('neuron.inputIds — with a dataset', () => {
     expect(columnNames(out.schema)).toContain('type')
     expect(columnNames(out.schema)).toContain('status')
     // Compared as text on both sides: `realIds` is exact decimal text, and the result's own
-    // `bodyId` is whatever dtype the source publishes.
-    expect(new Set((out.data['bodyId'] ?? []).map(String))).toEqual(new Set(ids))
+    // `neuronId` is whatever dtype the source publishes.
+    expect(new Set((out.data['neuronId'] ?? []).map(String))).toEqual(new Set(ids))
   })
 
   it('advertises the dataset’s schema the moment one is wired', () => {
     const names = columnNames(
       schemaOf(inferGraph(pipeline({}, true)).nodes['ids']?.outputs['neurons']),
     )
-    expect(names).toContain('bodyId')
+    expect(names).toContain('neuronId')
     expect(names).toContain('type')
   })
 
@@ -249,7 +249,7 @@ describe('neuron.inputIds — the wired IDs table', () => {
     await scheduler.run(g, { mode: 'full' })
     const out = scheduler.output('ids', 'neurons')
     if (!isTableValue(out)) throw new Error('expected a table')
-    return (out.data['bodyId'] ?? []).map(Number)
+    return (out.data['neuronId'] ?? []).map(Number)
   }
 
   it('unions the wired column with the typed list, typed first', async () => {
@@ -301,13 +301,13 @@ describe('neuron.inputIds — refusals', () => {
     expect(scheduler.info('ids').state).not.toBe('error')
     expect(findNeurons).toHaveBeenCalledTimes(1)
     const req = findNeurons.mock.calls[0]![0] as FindNeuronsRequest
-    expect(req.bodyIds).toEqual([wide])
+    expect(req.neuronIds).toEqual([wide])
     // The thing the old refusal existed to prevent, asserted directly.
-    expect(String(req.bodyIds?.[0])).not.toBe(String(Number(wide)))
+    expect(String(req.neuronIds?.[0])).not.toBe(String(Number(wide)))
   })
 
   it('warns rather than rounds when a wide id has no dataset to go to', () => {
-    // With no Dataset the ids *are* the output, and that table's `bodyId` is an `i64` column —
+    // With no Dataset the ids *are* the output, and that table's `neuronId` is an `i64` column —
     // so this is the one place the width still bites, and it says so instead of rounding.
     const issue = issues({ ids: '720575940379279312' })
     expect(issue).toContain('720575940379279312')

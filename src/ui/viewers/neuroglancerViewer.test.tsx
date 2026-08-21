@@ -27,11 +27,11 @@ afterEach(() => {
 })
 
 const NEURONS = tableFromRows(
-  tableSchema(column('bodyId', 'i64'), column('type', 'str')),
+  tableSchema(column('neuronId', 'i64'), column('type', 'str')),
   [
-    { bodyId: 1, type: 'DNa02' },
-    { bodyId: 2, type: 'DNa02' },
-    { bodyId: 3, type: 'DNp01' },
+    { neuronId: 1, type: 'DNa02' },
+    { neuronId: 2, type: 'DNa02' },
+    { neuronId: 3, type: 'DNp01' },
   ],
   'neurons',
 )
@@ -348,7 +348,7 @@ describe('the caption', () => {
     expect(screen.getByText(/no neurons connected/)).toBeTruthy()
 
     const empty = tableFromRows(
-      tableSchema(column('bodyId', 'i64'), column('type', 'str')),
+      tableSchema(column('neuronId', 'i64'), column('type', 'str')),
       [],
       'neurons',
     )

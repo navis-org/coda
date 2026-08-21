@@ -14,7 +14,7 @@
 import { decodeClauses, resolveFilters, usesRegex } from '../../../nodes/lib/tableFilter'
 import { pyList, pyStr } from '../py'
 import { registerEmitter } from '../registry'
-import { selectionIds } from './common'
+import { codaNeurons, selectionIds } from './common'
 import { filterMasks } from './tableFilters'
 
 // ---------------------------------------------------------------------------
@@ -273,11 +273,11 @@ registerEmitter('out.viewer3d', (ctx) => {
   ctx.require('pandas')
   const lines = [`navis.plot3d([${wired.join(', ')}])`, '']
   if (selection.length > 0) {
-    lines.push(`${selected} = pd.DataFrame({'bodyId': ${pyList(selection)}})`)
+    lines.push(`${selected} = pd.DataFrame({'neuronId': ${pyList(selection)}})`)
   } else {
     lines.push(
       ...ctx.note('Nothing is picked in the viewer, so Selected is empty.'),
-      `${selected} = pd.DataFrame({'bodyId': []})`,
+      `${selected} = pd.DataFrame({'neuronId': []})`,
     )
   }
   return lines
@@ -383,6 +383,7 @@ registerEmitter('out.datasetSummary', (ctx) => {
             ':Neuron the dataset publishes, not only the Traced ones.',
         )),
     `${neurons}, _ = fetch_neurons(${criteria}, client=${c})`,
+    codaNeurons(ctx, neurons),
     ``,
     `# How many neurons carry each value of an attribute. dropna=False would count the`,
     `# missing ones as a category; the card reports them apart instead.`,

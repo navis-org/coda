@@ -25,7 +25,7 @@ import { errorMessage } from '../../core/errors'
 export interface NeuroglancerProfileFrameProps {
   sourceId: string | undefined
   datasetId: string | undefined
-  bodyId: number | undefined
+  neuronId: number | undefined
   onError?: (message: string) => void
 }
 
@@ -100,7 +100,7 @@ function usePublishedScene(
 export function NeuroglancerProfileFrame({
   sourceId,
   datasetId,
-  bodyId,
+  neuronId,
   onError,
 }: NeuroglancerProfileFrameProps) {
   const state = usePublishedScene(sourceId, datasetId)
@@ -124,7 +124,7 @@ export function NeuroglancerProfileFrame({
    */
   const scene = buildScene(state.scene, {
     datasetId: datasetId ?? '',
-    segments: bodyId === undefined ? [] : [bodyId],
+    segments: neuronId === undefined ? [] : [neuronId],
     segmentDefaultColor: '#3987e5',
     layout: '3d',
     layers: 'all',

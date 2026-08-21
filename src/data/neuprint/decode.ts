@@ -11,6 +11,7 @@
  * to be unpacked into rows.
  */
 
+import type { NeuronId } from '../../core/ids'
 import type { ColumnSchema, DType, TableSchema } from '../../core/types'
 import { column, tableSchema } from '../../core/types'
 import type { CellValue, ColumnData, SkeletonGeometry, TableValue } from '../../core/values'
@@ -83,7 +84,13 @@ export function inferTableFromCypher(response: CypherResponse): TableValue {
   return makeTable(schema, data)
 }
 
-/** `n.bodyId` reads as `bodyId` in a column picker; `count(*)` has to stay as it is. */
+/**
+ * `n.bodyId` reads as `bodyId` in a column picker; `count(*)` has to stay as it is.
+ *
+ * Note this yields neuPrint's spelling, not Coda's: every *built* query is mapped positionally
+ * onto a schema that calls the id column `neuronId`, but a Raw Cypher node is named after what
+ * the user typed. `RETURN n.bodyId AS neuronId` is what makes one meet a Neurons socket.
+ */
 function cleanColumnName(raw: string): string {
   const trimmed = raw.trim()
   const match = /^[A-Za-z_][A-Za-z0-9_]*\.(.+)$/.exec(trimmed)
@@ -127,7 +134,7 @@ function flatten(value: unknown): unknown {
 // ---------------------------------------------------------------------------
 
 export const ROI_COUNTS_SCHEMA = tableSchema(
-  column('bodyId', 'i64'),
+  column('neuronId', 'i64'),
   column('type', 'str'),
   column('roi', 'str'),
   column('pre', 'i64', 'synapses'),
@@ -144,7 +151,7 @@ export const ROI_COUNTS_SCHEMA = tableSchema(
  */
 export function roiCountsFromCypher(response: CypherResponse, rois?: string[]): TableValue {
   const wanted = rois?.length ? new Set(rois) : undefined
-  const bodyId: ColumnData = []
+  const neuronId: ColumnData = []
   const type: ColumnData = []
   const roi: ColumnData = []
   const pre: ColumnData = []
@@ -156,14 +163,14 @@ export function roiCountsFromCypher(response: CypherResponse, rois?: string[]): 
     const info = parseRoiInfo(row[2])
     for (const [name, counts] of Object.entries(info)) {
       if (wanted && !wanted.has(name)) continue
-      bodyId.push(id)
+      neuronId.push(id)
       type.push(neuronType)
       roi.push(name)
       pre.push(coerce(counts.pre ?? 0, 'i64'))
       post.push(coerce(counts.post ?? 0, 'i64'))
     }
   }
-  return makeTable(ROI_COUNTS_SCHEMA, { bodyId, type, roi, pre, post })
+  return makeTable(ROI_COUNTS_SCHEMA, { neuronId, type, roi, pre, post })
 }
 
 interface RoiCounts {
@@ -205,7 +212,7 @@ export interface SwcResponse {
  * Defensive about real files: a `link` pointing at a missing row becomes a root, and a
  * cycle terminates because a point is only ever visited once.
  */
-export function skeletonFromSwc(bodyId: number, response: SwcResponse): SkeletonGeometry {
+export function skeletonFromSwc(id: NeuronId, response: SwcResponse): SkeletonGeometry {
   const index = new Map<string, number>()
   response.columns.forEach((name, i) => index.set(name.toLowerCase(), i))
   const at = (row: unknown[], name: string, fallback: number) => {
@@ -270,7 +277,7 @@ export function skeletonFromSwc(bodyId: number, response: SwcResponse): Skeleton
   }
 
   return {
-    bodyId,
+    id,
     positions: positions.subarray(0, emitted * 3),
     radii: radii.subarray(0, emitted),
     parents: parents.subarray(0, emitted),

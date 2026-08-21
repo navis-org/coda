@@ -30,7 +30,7 @@ const SEPARATORS = /[\s,;[\]()'"]+/
 
 /**
  * Digits only, for *typed* text. Stricter than `isNeuronId`, which is the transport grammar
- * and allows a sign: a negative body id somebody typed is a typo, most often a `123-456` range.
+ * and allows a sign: a negative neuron id somebody typed is a typo, most often a `123-456` range.
  */
 const DIGITS = /^\d+$/
 
@@ -197,13 +197,13 @@ export function collectIds(sources: IdSources): CollectedIds {
  *
  * Derived from the run rather than reported by it — same reasoning as `unmatchedLabels`, and the
  * same two refusals. No result means the node has not run, so nothing is missing from anything;
- * a result with no `bodyId` column means silence, because "none of these exist" over a table
+ * a result with no `neuronId` column means silence, because "none of these exist" over a table
  * full of neurons is a specific and wrong claim where saying nothing is merely unhelpful.
  */
 export function unmatchedIds(
   ids: readonly string[],
   result: TableValue | undefined,
-  columnName = 'bodyId',
+  columnName = 'neuronId',
 ): string[] {
   if (ids.length === 0 || !result) return []
   const values = result.data[columnName]

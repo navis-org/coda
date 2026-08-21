@@ -245,7 +245,7 @@ export function tipColumns(
 function showCell(table: TableValue, name: string, row: number): string {
   const value = table.data[name]?.[row]
   // `formatCell` rather than a third copy of the number/string branch — and it is what knows
-  // that a tooltip row for `bodyId` is a name and not a count.
+  // that a tooltip row for `neuronId` is a name and not a count.
   return value === '' ? '—' : formatCell(value ?? null, name)
 }
 

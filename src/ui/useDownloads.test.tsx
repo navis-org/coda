@@ -104,7 +104,7 @@ describe('downloading on a run', () => {
     await waitFor(() => expect(downloads).toHaveLength(1))
     expect(downloads[0]!.filename).toBe('sweep_download.csv')
     // The pass-through value, as CSV — `auto` on a neuron table.
-    await expect(downloads[0]!.text()).resolves.toContain('bodyId')
+    await expect(downloads[0]!.text()).resolves.toContain('neuronId')
   })
 
   it('writes nothing for a second Run over an unchanged graph', async () => {

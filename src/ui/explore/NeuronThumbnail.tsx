@@ -11,7 +11,7 @@
  *  - **A concurrency gate.** Each thumbnail is two range requests plus a Draco decode, so they
  *    are queued a few at a time rather than fired as a burst of fifty.
  *  - **Two layers of cache, and only one of them remembers a refusal.** An in-memory map for
- *    this session and IndexedDB across sessions, keyed by dataset, body id and raster size. The
+ *    this session and IndexedDB across sessions, keyed by dataset, neuron id and raster size. The
  *    mask is stored, not pixels, so it survives a theme change — a cached RGBA tile would be
  *    the wrong colour after one.
  *
@@ -38,7 +38,7 @@ import { coverageFraction, hexToRgb, rasteriseSilhouette, silhouetteToRgba } fro
 export interface NeuronThumbnailProps {
   sourceId: string | undefined
   datasetId: string | undefined
-  bodyId: string
+  neuronId: string
   /** Rendered size in CSS pixels. The mask is rasterised at `RASTER_SCALE` times this. */
   size?: number
 }
@@ -89,8 +89,8 @@ function release(): void {
 }
 
 /** Keyed by the *raster* size, not the displayed one, so a change of scale invalidates. */
-function keyFor(sourceId: string, datasetId: string, bodyId: string, pixels: number): string {
-  return `thumb:${sourceId}:${datasetId}:${bodyId}:${pixels}`
+function keyFor(sourceId: string, datasetId: string, neuronId: string, pixels: number): string {
+  return `thumb:${sourceId}:${datasetId}:${neuronId}:${pixels}`
 }
 
 /** Stored shape. A plain object and a `Uint8Array` both survive a structured clone. */
@@ -112,10 +112,10 @@ const MASK_FORMAT = 'coverage-8bit-1'
 async function loadSilhouette(
   sourceId: string,
   datasetId: string,
-  bodyId: string,
+  neuronId: string,
   pixels: number,
 ): Promise<Entry> {
-  const key = keyFor(sourceId, datasetId, bodyId, pixels)
+  const key = keyFor(sourceId, datasetId, neuronId, pixels)
   const held = memory.get(key)
   if (held !== undefined) return held
   const inFlight = pending.get(key)
@@ -139,7 +139,7 @@ async function loadSilhouette(
 
     await acquire()
     try {
-      const geometry = await source.fetchCoarseGeometry({ datasetId, bodyId })
+      const geometry = await source.fetchCoarseGeometry({ datasetId, neuronId })
       if (!geometry) {
         memory.set(key, null)
         return null
@@ -151,7 +151,7 @@ async function loadSilhouette(
       if (entry) void cacheSet(key, { size: pixels, coverage: entry.coverage }, MASK_FORMAT)
       return entry
     } catch {
-      // A missing mesh is ordinary — not every body id has one. Remember the miss so a page
+      // A missing mesh is ordinary — not every neuron id has one. Remember the miss so a page
       // of un-meshed neurons does not retry on every render.
       memory.set(key, null)
       return null
@@ -169,7 +169,7 @@ async function loadSilhouette(
 export function NeuronThumbnail({
   sourceId,
   datasetId,
-  bodyId,
+  neuronId,
   size = 76,
 }: NeuronThumbnailProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -182,13 +182,13 @@ export function NeuronThumbnail({
     }
     let live = true
     setEntry(undefined)
-    void loadSilhouette(sourceId, datasetId, bodyId, size * RASTER_SCALE).then((result) => {
+    void loadSilhouette(sourceId, datasetId, neuronId, size * RASTER_SCALE).then((result) => {
       if (live) setEntry(result)
     })
     return () => {
       live = false
     }
-  }, [sourceId, datasetId, bodyId, size])
+  }, [sourceId, datasetId, neuronId, size])
 
   useEffect(() => {
     const canvas = canvasRef.current

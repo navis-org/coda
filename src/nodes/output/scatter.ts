@@ -128,7 +128,7 @@ export const scatterNode = registerNode({
       label: 'Colour',
       defaultMode: 'constant',
       // Named rather than left empty: an empty default resolves to the first compatible
-      // column, which on a neuron table is `bodyId` — one value per row, folded into eight
+      // column, which on a neuron table is `neuronId` — one value per row, folded into eight
       // slots plus grey, which reads as category structure where there is none.
       defaultColumn: 'type',
       group: 'points',
@@ -236,9 +236,9 @@ export const scatterNode = registerNode({
         'a row position does not, so this is preferred — with the row index as the fallback ' +
         'when the table carries no usable id, which the caption admits to.',
       from: 'in',
-      // `bodyId` when the table has one; `optional` is what makes the resolver answer
+      // `neuronId` when the table has one; `optional` is what makes the resolver answer
       // "nothing" rather than reaching for the first column when it does not.
-      default: 'bodyId',
+      default: 'neuronId',
       optional: true,
       advanced: true,
     },

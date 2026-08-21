@@ -63,7 +63,7 @@ const lastRefresh = new Map<string, number>()
  *
  * A selection is provenance, not a view: it lands in the saved file and in the cache key of
  * every node downstream, so `stableStringify` walks the whole array on every graph edit. Ten
- * thousand body ids is ~110 kB of string per key computation, which is affordable; the whole
+ * thousand neuron ids is ~110 kB of string per key computation, which is affordable; the whole
  * of male-CNS is 165,122 of them and about 1.9 MB, which is not — it would make typing in an
  * unrelated node stutter.
  *

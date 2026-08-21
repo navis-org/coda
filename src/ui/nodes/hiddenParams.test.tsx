@@ -139,7 +139,7 @@ describe('what counts as changed', () => {
   it('compares array params by contents', () => {
     const cols = p({ kind: 'columns', from: 'in', default: [] })
     expect(changedParams([cols], { x: [] })).toHaveLength(0)
-    expect(changedParams([cols], { x: ['bodyId'] })).toHaveLength(1)
+    expect(changedParams([cols], { x: ['neuronId'] })).toHaveLength(1)
   })
 })
 

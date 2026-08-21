@@ -218,11 +218,11 @@ registerEmitter('out.viewer3d', (ctx) => {
 
   const lines = [`plot3d(${wired.join(', ')})`, '']
   if (selection.length > 0) {
-    lines.push(`${selected} <- tibble(bodyId = ${rVector(selection)})`)
+    lines.push(`${selected} <- tibble(neuronId = ${rVector(selection)})`)
   } else {
     lines.push(
       ...ctx.note('Nothing is picked in the viewer, so Selected is empty.'),
-      `${selected} <- tibble(bodyId = numeric(0))`,
+      `${selected} <- tibble(neuronId = numeric(0))`,
     )
   }
   return lines
@@ -293,7 +293,7 @@ registerEmitter('out.datasetSummary', (ctx) => {
     ),
     `${neurons} <- neuprint_fetch_custom(`,
     // Aliased: neuprint_fetch_custom names columns after the RETURN expressions.
-    `  "MATCH (n:Neuron) RETURN n.bodyId AS bodyId, n.type AS type,`,
+    `  "MATCH (n:Neuron) RETURN n.bodyId AS neuronId, n.type AS type,`,
     `   n.status AS status, n.pre AS pre, n.post AS post",`,
     `  conn = ${conn}`,
     `)`,

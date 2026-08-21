@@ -89,20 +89,20 @@ function skeletonsFixture(): SkeletonsValue {
     kind: 'skeletons',
     items: [
       {
-        bodyId: 11,
+        id: '11',
         positions: new Float32Array([0, 0, 0, 1000, 2000, 3000]),
         radii: new Float32Array([1, 1]),
         parents: new Int32Array([-1, 0]),
       },
       {
-        bodyId: 22,
+        id: '22',
         positions: new Float32Array([5000, 0, 0]),
         radii: new Float32Array([1]),
         parents: new Int32Array([-1]),
       },
     ],
-    attributes: makeTable(tableSchema(column('bodyId', 'i64'), column('type', 'str')), {
-      bodyId: [11, 22],
+    attributes: makeTable(tableSchema(column('neuronId', 'i64'), column('type', 'str')), {
+      neuronId: [11, 22],
       type: ['LC4', null],
     }),
     bounds: { min: [0, 0, 0], max: [5000, 2000, 3000] },
@@ -138,7 +138,7 @@ describe('nblastOps — the flattening', () => {
     expect(set.offsets.length - 1).toBe(2)
   })
 
-  it('labels by body id, by a column, and by body id again where that column is empty', () => {
+  it('labels by neuron id, by a column, and by neuron id again where that column is empty', () => {
     const skeletons = skeletonsFixture()
     expect(nblastLabels(skeletons, undefined)).toEqual(['11', '22'])
     expect(nblastLabels(skeletons, 'type')).toEqual(['LC4', '22'])

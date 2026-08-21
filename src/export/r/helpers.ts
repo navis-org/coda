@@ -84,14 +84,14 @@ registerHelper({
 /**
  * neuprintr's column names to Coda's.
  *
- * **neuprintr returns `bodyid`; every Coda table uses `bodyId`.** Verified against the
+ * **neuprintr returns `bodyid`; every Coda table uses `neuronId`.** Verified against the
  * package reference, not assumed — and it matters more than a spelling usually would, because
- * `df$bodyId` on a tibble is `NULL` rather than an error, so the mismatch travels silently
+ * `df$neuronId` on a tibble is `NULL` rather than an error, so the mismatch travels silently
  * until something downstream reports zero neurons. Every emitter that calls a neuprintr
  * function that returns neurons passes the result through this, so the rest of the document
  * addresses the same column names the canvas does.
  *
- * Left alone when the frame already uses `bodyId`, so a table from an upload or a Cypher
+ * Left alone when the frame already uses `neuronId`, so a table from an upload or a Cypher
  * query with an explicit alias passes through untouched.
  */
 registerHelper({
@@ -99,11 +99,11 @@ registerHelper({
   requires: ['dplyr'],
   source: [
     'coda_neurons <- function(df) {',
-    '  # neuprintr publishes `bodyid`; Coda uses `bodyId` everywhere. `df$bodyId` on a tibble',
-    '  # is NULL rather than an error, so an unrenamed frame reports zero neurons somewhere',
-    '  # far from here.',
-    '  if (!is.null(df) && "bodyid" %in% names(df) && !("bodyId" %in% names(df))) {',
-    '    df <- dplyr::rename(df, bodyId = bodyid)',
+    '  # neuprintr publishes `bodyid`; Coda calls the id column `neuronId` everywhere.',
+    '  # `df$neuronId` on a tibble is NULL rather than an error, so an unrenamed frame',
+    '  # reports zero neurons somewhere far from here.',
+    '  if (!is.null(df) && "bodyid" %in% names(df) && !("neuronId" %in% names(df))) {',
+    '    df <- dplyr::rename(df, neuronId = bodyid)',
     '  }',
     '  df',
     '}',

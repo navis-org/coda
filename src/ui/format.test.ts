@@ -2,7 +2,7 @@
  * What a number is allowed to look like.
  *
  * The rule under test is `isIdentifierColumn`, and the reason it has a file of its own is that
- * both of its failure modes are silent: a grouped body id (`527,536`) is a plausible-looking
+ * both of its failure modes are silent: a grouped neuron id (`527,536`) is a plausible-looking
  * string that no query accepts, and an ungrouped synapse count is merely untidy. Only the
  * first is a correctness problem, which is why the cases below lean on the names Coda's own
  * nodes generate rather than on a tidy pair of examples.
@@ -14,10 +14,10 @@ import { formatCell, formatNumber, isIdentifierColumn } from './format'
 
 describe('isIdentifierColumn', () => {
   it('takes the names every query node publishes', () => {
-    // bodyId is the contract name; the rest are what Connectivity, Profile and BuildNetwork
+    // neuronId is the contract name; the rest are what Connectivity, Profile and BuildNetwork
     // emit, and `id`/`root_id` are what an uploaded CSV arrives under.
     for (const name of [
-      'bodyId',
+      'neuronId',
       'preId',
       'postId',
       'partnerId',
@@ -25,7 +25,7 @@ describe('isIdentifierColumn', () => {
       'targetId',
       'id',
       'ID',
-      'bodyIds',
+      'neuronIds',
       'root_id',
       'pt_root_id',
       'supervoxel_id',
@@ -53,7 +53,7 @@ describe('isIdentifierColumn', () => {
    */
   it('reads an aggregate of an id column as a quantity again', () => {
     expect(isIdentifierColumn('countDistinct_partnerId')).toBe(false)
-    expect(isIdentifierColumn('sum_bodyId')).toBe(false)
+    expect(isIdentifierColumn('sum_neuronId')).toBe(false)
     expect(isIdentifierColumn('max_preId')).toBe(false)
     expect(formatCell(12345, 'countDistinct_partnerId')).toBe(formatNumber(12345))
   })
@@ -61,7 +61,7 @@ describe('isIdentifierColumn', () => {
 
 describe('formatCell', () => {
   it('prints an id as it would be typed back', () => {
-    expect(formatCell(527536, 'bodyId')).toBe('527536')
+    expect(formatCell(527536, 'neuronId')).toBe('527536')
     expect(formatCell(1158187240, 'preId')).toBe('1158187240')
   })
 
@@ -75,7 +75,7 @@ describe('formatCell', () => {
    * disagree with the cell under it — which is the actual bug, rather than the grouping.
    */
   it('agrees with the title the table already shows', () => {
-    expect(formatCell(527536, 'bodyId')).toBe(String(527536))
+    expect(formatCell(527536, 'neuronId')).toBe(String(527536))
   })
 
   it('says nothing about a value it was given no column for', () => {
@@ -85,9 +85,9 @@ describe('formatCell', () => {
   })
 
   it('leaves null, text and booleans where they were', () => {
-    expect(formatCell(null, 'bodyId')).toBe('—')
+    expect(formatCell(null, 'neuronId')).toBe('—')
     expect(formatCell('LC4', 'type')).toBe('LC4')
     expect(formatCell(true, 'traced')).toBe('true')
-    expect(formatCell(1.5, 'bodyId')).toBe('1.5')
+    expect(formatCell(1.5, 'neuronId')).toBe('1.5')
   })
 })

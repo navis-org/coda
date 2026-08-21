@@ -28,7 +28,7 @@ import { ProfileViewer } from './ProfileViewer'
 import { clearProfileCache } from './useNeuronProfile'
 
 const NEURONS = tableSchema(
-  column('bodyId', 'i64'),
+  column('neuronId', 'i64'),
   column('type', 'str'),
   column('instance', 'str'),
   column('status', 'str'),
@@ -38,15 +38,15 @@ const NEURONS = tableSchema(
 )
 
 const CONNECTIVITY = tableSchema(
-  column('bodyId', 'i64'),
-  column('bodyType', 'str'),
+  column('neuronId', 'i64'),
+  column('neuronType', 'str'),
   column('partnerId', 'i64'),
   column('partnerType', 'str'),
   column('weight', 'i64', 'synapses'),
 )
 
 const ROI_COUNTS = tableSchema(
-  column('bodyId', 'i64'),
+  column('neuronId', 'i64'),
   column('type', 'str'),
   column('roi', 'str'),
   column('pre', 'i64', 'synapses'),
@@ -58,7 +58,7 @@ function neurons(extra: Array<Record<string, CellValue>> = []) {
     NEURONS,
     [
       {
-        bodyId: 1,
+        neuronId: 1,
         type: 'CT1',
         instance: 'CT1_L',
         status: 'Traced',
@@ -67,7 +67,7 @@ function neurons(extra: Array<Record<string, CellValue>> = []) {
         post: 40,
       },
       {
-        bodyId: 2,
+        neuronId: 2,
         type: 'Tm9',
         instance: 'Tm9_R',
         status: 'Traced',
@@ -76,7 +76,7 @@ function neurons(extra: Array<Record<string, CellValue>> = []) {
         post: 30,
       },
       {
-        bodyId: 3,
+        neuronId: 3,
         type: 'T4a',
         instance: 'T4a_R',
         status: 'Traced',
@@ -91,21 +91,21 @@ function neurons(extra: Array<Record<string, CellValue>> = []) {
 }
 
 const INPUTS = tableFromRows(CONNECTIVITY, [
-  { bodyId: 1, bodyType: 'CT1', partnerId: 10, partnerType: 'Tm9', weight: 30 },
-  { bodyId: 1, bodyType: 'CT1', partnerId: 11, partnerType: 'Tm9', weight: 20 },
-  { bodyId: 1, bodyType: 'CT1', partnerId: 12, partnerType: 'Tm1', weight: 3 },
+  { neuronId: 1, neuronType: 'CT1', partnerId: 10, partnerType: 'Tm9', weight: 30 },
+  { neuronId: 1, neuronType: 'CT1', partnerId: 11, partnerType: 'Tm9', weight: 20 },
+  { neuronId: 1, neuronType: 'CT1', partnerId: 12, partnerType: 'Tm1', weight: 3 },
 ])
 
 const OUTPUTS = tableFromRows(CONNECTIVITY, [
-  { bodyId: 1, bodyType: 'CT1', partnerId: 20, partnerType: 'T5a', weight: 70 },
+  { neuronId: 1, neuronType: 'CT1', partnerId: 20, partnerType: 'T5a', weight: 70 },
 ])
 
 const REGIONS = tableFromRows(ROI_COUNTS, [
-  { bodyId: 1, type: 'CT1', roi: 'LO(R)', pre: 60, post: 30 },
-  { bodyId: 1, type: 'CT1', roi: 'ME(L)', pre: 20, post: 10 },
+  { neuronId: 1, type: 'CT1', roi: 'LO(R)', pre: 60, post: 30 },
+  { neuronId: 1, type: 'CT1', roi: 'ME(L)', pre: 20, post: 10 },
   // The parent of LO(R). Present in roiInfo and absent from primaryRois, so it must not be
   // summed — this is the row that makes the double-counting visible if the filter is dropped.
-  { bodyId: 1, type: 'CT1', roi: 'OL(R)', pre: 60, post: 30 },
+  { neuronId: 1, type: 'CT1', roi: 'OL(R)', pre: 60, post: 30 },
 ])
 
 const DATASET: DatasetInfo = {
@@ -280,14 +280,14 @@ describe('tiles', () => {
 
   it('shows the transmitter tile where the columns exist', () => {
     const schema = tableSchema(
-      column('bodyId', 'i64'),
+      column('neuronId', 'i64'),
       column('type', 'str'),
       column('consensusNt', 'str'),
       column('ntGabaProb', 'f64'),
     )
     view({
       neurons: tableFromRows(schema, [
-        { bodyId: 1, type: 'CT1', consensusNt: 'gaba', ntGabaProb: 0.66 },
+        { neuronId: 1, type: 'CT1', consensusNt: 'gaba', ntGabaProb: 0.66 },
       ]),
     })
     const tile = screen.getByText('Transmitter').closest('.tile')

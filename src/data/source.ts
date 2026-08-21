@@ -120,7 +120,7 @@ export interface FindNeuronsRequest {
    * neurons**, never "no filter": an unconfigured node firing an unbounded `MATCH (n:Neuron)`
    * at a shared production Neo4j is a hazard, not a default.
    */
-  bodyIds?: readonly NeuronId[]
+  neuronIds?: readonly NeuronId[]
   statuses?: string[]
   minSize?: number
   /** ROI the neuron must innervate. */
@@ -131,7 +131,7 @@ export interface FindNeuronsRequest {
 
 export interface ConnectivityRequest {
   datasetId: string
-  bodyIds: NeuronId[]
+  neuronIds: NeuronId[]
   direction: ConnectionDirection
   minWeight?: number
   signal?: AbortSignal
@@ -150,7 +150,7 @@ export interface ConnectivityRequest {
  * groups — and collapses to a few hundred type→type rows. Doing it client-side would mean
  * downloading the former to compute the latter, per hop.
  *
- * The frontier arrives as two lists because a group key is a type *or* a body id: a neuron
+ * The frontier arrives as two lists because a group key is a type *or* a neuron id: a neuron
  * with no type cannot be collapsed into one, so it stands as its own node. Passing the two
  * separately keeps both halves of the `WHERE` index-backed, where a
  * `coalesce(n.type, toString(n.bodyId)) IN [...]` would force a label scan.
@@ -159,8 +159,8 @@ export interface PathStepRequest {
   datasetId: string
   /** Frontier cell types. Empty (or absent) when the traversal is at neuron level. */
   types?: string[]
-  /** Frontier body ids — every neuron when not collapsing, the untyped ones when collapsing. */
-  bodyIds?: NeuronId[]
+  /** Frontier neuron ids — every neuron when not collapsing, the untyped ones when collapsing. */
+  neuronIds?: NeuronId[]
   direction: ConnectionDirection
   /** Group by cell type before aggregating. False keeps one node per neuron. */
   collapseTypes: boolean
@@ -186,14 +186,14 @@ export interface AdjacencyRequest {
 
 export interface RoiCountsRequest {
   datasetId: string
-  bodyIds: NeuronId[]
+  neuronIds: NeuronId[]
   rois?: string[]
   signal?: AbortSignal
 }
 
 export interface GeometryRequest {
   datasetId: string
-  bodyIds: NeuronId[]
+  neuronIds: NeuronId[]
   /**
    * Target triangle count for the whole set, for sources with levels of detail. The source
    * picks the finest level that fits; a source with one level ignores it.
@@ -229,7 +229,7 @@ export interface ViewerSceneRequest {
 
 export interface CoarseGeometryRequest {
   datasetId: string
-  bodyId: NeuronId
+  neuronId: NeuronId
   signal?: AbortSignal
 }
 
@@ -241,7 +241,7 @@ export interface CoarseGeometry {
 }
 
 export interface SourceSchemas {
-  /** Output of findNeurons. Must include a `bodyId` column. */
+  /** Output of findNeurons. Must include a `neuronId` column. */
   neurons: TableSchema
   /** Output of fetchConnectivity. */
   connectivity: TableSchema
@@ -281,7 +281,7 @@ export interface SourceCapabilities {
    * Whether the source can describe a dataset's *regions* without being asked about neurons —
    * per-ROI traced-vs-total synapse counts, and region-to-region connectivity.
    *
-   * Separate from `meshes` and from `fetchRoiCounts`, which both need a body id list. These
+   * Separate from `meshes` and from `fetchRoiCounts`, which both need a neuron id list. These
    * are facts about the whole volume, which is why they can answer a dataset node with
    * nothing else wired to it. A source without them makes the two ROI nodes refuse with a
    * message rather than fall back to summing a per-neuron fetch, which would mean downloading
@@ -295,7 +295,7 @@ export interface SourceCapabilities {
    * different places and a source can plausibly have one without the other: neuPrint serves
    * the summaries from a cached endpoint and the geometry from another, and mushroombody
    * answers the first with zero rows. Separate from `meshes` for the reason `roiSummary` is
-   * separate from `fetchRoiCounts` — that one needs a body id list, and this is a fact about
+   * separate from `fetchRoiCounts` — that one needs a neuron id list, and this is a fact about
    * the volume, which is what lets it answer a dataset node with nothing else wired.
    */
   roiMeshes: boolean
@@ -371,8 +371,6 @@ export interface DataSource {
    * about it ride in the attribute table, where every colour encoding already knows how to
    * find them.
    *
-   * Items carry `label` rather than a meaningful `bodyId`; see `MeshGeometry`.
-   *
    * **Geometry is nanometres, like everything else here.** A source whose meshes arrive in
    * voxels has to scale them, or the shells sit a whole factor away from the neurons anyone
    * draws beside them — with nothing failing, because both sets are internally consistent.
@@ -427,7 +425,7 @@ export interface DataSource {
  * because a row may stand for hundreds of neurons.
  *
  * `sourceId`/`targetId` are null exactly when the key names a *type*, which is what tells the
- * caller whether to feed the key back as a type or as a body id. `pairs` is how many
+ * caller whether to feed the key back as a type or as a neuron id. `pairs` is how many
  * neuron→neuron connections were merged into the row — the honest denominator for a
  * type-level weight, and 1 at neuron level.
  */
@@ -529,8 +527,8 @@ export const ROI_CONNECTIVITY_SCHEMA: TableSchema = tableSchema(
 /**
  * What a source says about each region mesh it hands back, one row per item.
  *
- * Deliberately small. `roi` is the identity — `MeshGeometry.bodyId` is an ordinal for a region
- * — and `primary` is the one qualifier a caller cannot work out for itself. Everything else the
+ * Deliberately small. `roi` is the identity, and `MeshGeometry.id` carries the same string —
+ * and `primary` is the one qualifier a caller cannot work out for itself. Everything else the
  * ROIs widget shows is either derived from the geometry (volume, surface area) or lives in the
  * completeness table, and joining those in here would make one endpoint's answer depend on
  * another's having landed.
@@ -544,7 +542,7 @@ export const ROI_MESH_SCHEMA: TableSchema = tableSchema(
 
 export const CANONICAL_SCHEMAS: SourceSchemas = {
   neurons: tableSchema(
-    column('bodyId', 'i64'),
+    column('neuronId', 'i64'),
     column('type', 'str'),
     column('instance', 'str'),
     column('status', 'str'),
@@ -553,21 +551,21 @@ export const CANONICAL_SCHEMAS: SourceSchemas = {
     column('post', 'i64', 'synapses'),
   ),
   connectivity: tableSchema(
-    column('bodyId', 'i64'),
-    column('bodyType', 'str'),
+    column('neuronId', 'i64'),
+    column('neuronType', 'str'),
     column('partnerId', 'i64'),
     column('partnerType', 'str'),
     column('weight', 'i64', 'synapses'),
   ),
   roiCounts: tableSchema(
-    column('bodyId', 'i64'),
+    column('neuronId', 'i64'),
     column('type', 'str'),
     column('roi', 'str'),
     column('pre', 'i64', 'synapses'),
     column('post', 'i64', 'synapses'),
   ),
   morphology: tableSchema(
-    column('bodyId', 'i64'),
+    column('neuronId', 'i64'),
     column('type', 'str'),
     column('instance', 'str'),
     column('status', 'str'),
@@ -578,7 +576,7 @@ export const CANONICAL_SCHEMAS: SourceSchemas = {
     column('cableLength', 'f64', 'nm'),
   ),
   synapses: tableSchema(
-    column('bodyId', 'i64'),
+    column('neuronId', 'i64'),
     column('type', 'str'),
     column('partnerId', 'i64'),
     column('partnerType', 'str'),

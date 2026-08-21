@@ -11,7 +11,7 @@
  * **Why they are needed at all.** A `LinkageValue` knows its leaves only by label, because that
  * is all a `MatrixValue` axis carries. So a Dendrogram's `Selected` and a Cut Tree's `Clusters`
  * are tables of *names*, and everything that draws neurons — Neuroglancer, the 3D view,
- * Skeletons — wants `T.neurons()`, a table with a `bodyId`. These cross that gap.
+ * Skeletons — wants `T.neurons()`, a table with a `neuronId`. These cross that gap.
  *
  * **Local, never a query.** The neurons come from a table already on the canvas — the one that
  * fed the Skeletons that fed the NBLAST — so a clade of three cell types resolves to the
@@ -64,7 +64,7 @@ function define(flavour: Flavour): NodeDefinition {
         default: 'label',
         help:
           'Which column names the neurons. Both the Dendrogram and Cut Tree call it "label", ' +
-          'which is what a matrix axis carried — a body id unless NBLAST was told to label by ' +
+          'which is what a matrix axis carried — a neuron id unless NBLAST was told to label by ' +
           'something else.',
       },
       {
@@ -72,7 +72,7 @@ function define(flavour: Flavour): NodeDefinition {
         kind: 'column',
         label: 'Match on',
         from: 'neurons',
-        default: 'bodyId',
+        default: 'neuronId',
         help:
           'Which column of the wired neuron table a label is compared with. Set this to the ' +
           'same column NBLAST used for "Label by" — `type` where the tree is labelled by cell ' +
@@ -97,7 +97,7 @@ function define(flavour: Flavour): NodeDefinition {
       const labels = schemaOf(ctx.inputs.labels)
       const neurons = isTabular(ctx.inputs.neurons) ? schemaOf(ctx.inputs.neurons) : undefined
       // A wired-but-unknown neuron schema is not the same as no neuron table: the first is a
-      // shape that has not arrived, and guessing `bodyId` for it would advertise a one-column
+      // shape that has not arrived, and guessing `neuronId` for it would advertise a one-column
       // result the run will not produce. Same unknown-is-not-empty rule as `columnSchemaFor`.
       if (ctx.inputs.neurons && !neurons) return { neurons: T.neurons() }
       const schema = labelsToNeuronsSchema(
@@ -124,11 +124,11 @@ function define(flavour: Flavour): NodeDefinition {
             `it. Wire the Clusters output of a Cut Tree.`,
         )
       }
-      // Without a neuron table the labels have to *be* body ids, which is only true when
+      // Without a neuron table the labels have to *be* neuron ids, which is only true when
       // NBLAST was left to label by id. Said here because the alternative is an empty result.
       if (!ctx.inputs.neurons) {
         issues.push(
-          'No Neurons wired, so the labels are read as body ids. Wire the neuron table that ' +
+          'No Neurons wired, so the labels are read as neuron ids. Wire the neuron table that ' +
             'was clustered if the tree is labelled by anything else.',
         )
       }
@@ -165,7 +165,7 @@ export const selectedToNeuronsNode = define({
     'knows about its leaves. This turns those names back into neurons, so the clade you picked ' +
     'can go to a Neuroglancer link, a 3D view or a Skeletons fetch. Wire the neuron table that ' +
     'was clustered into Neurons and set "Match on" to whatever NBLAST used for "Label by"; if ' +
-    'the tree is labelled by body id, which is the default, you can leave Neurons unwired and ' +
+    'the tree is labelled by neuron id, which is the default, you can leave Neurons unwired and ' +
     'the ids are read straight off. Every column of the matched neurons comes through.',
 })
 

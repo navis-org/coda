@@ -38,7 +38,7 @@ type Edge = [string, string, number]
 function node(key: string): PathNode {
   // Every key in these fixtures is a type name, i.e. the collapsed case. The neuron-level
   // case differs only in what the *source* returns, which `paths.test.ts` covers end to end.
-  return { key, type: key, bodyId: null }
+  return { key, type: key, neuronId: null }
 }
 
 /**
@@ -54,7 +54,7 @@ function fakeSource(edges: Edge[], minWeight = 0) {
     direction: ConnectionDirection,
   ): Promise<TableValue> => {
     calls.push({
-      frontier: { types: [...frontier.types], bodyIds: [...frontier.bodyIds] },
+      frontier: { types: [...frontier.types], neuronIds: [...frontier.neuronIds] },
       direction,
     })
     const wanted = new Set(frontier.types)

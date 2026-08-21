@@ -232,11 +232,11 @@ export interface SearchIndex {
  * Fields worth ranking a hit in. `type` and `instance` are what people search by name, so a
  * hit there should outrank the same string appearing in, say, a neurotransmitter prediction.
  */
-const PRIMARY_CANDIDATES = ['type', 'instance', 'bodyId']
+const PRIMARY_CANDIDATES = ['type', 'instance', 'neuronId']
 
 /** Columns folded into the free-text haystack: identifiers and every string field. */
 function searchableColumns(schema: TableSchema): ColumnSchema[] {
-  return schema.columns.filter((c) => c.dtype === 'str' || c.name === 'bodyId')
+  return schema.columns.filter((c) => c.dtype === 'str' || c.name === 'neuronId')
 }
 
 /**
@@ -418,7 +418,7 @@ export interface SearchResult {
  * Run a parsed query.
  *
  * Ordering: exact body-id hit, then hits in `type`/`instance`, then substring hits anywhere,
- * then subsequence-only hits, and `bodyId` order within each tier. An empty query returns
+ * then subsequence-only hits, and `neuronId` order within each tier. An empty query returns
  * every row in the table's own order and does no ranking work at all.
  */
 export function runSearch(
@@ -493,7 +493,7 @@ function tierOf(table: TableValue, index: SearchIndex, row: number, needle: stri
  * 21,264 male-CNS neurons as a subsequence, so a 20k cut-off left the actual DNp01 neurons
  * unranked and buried thousands of rows deep, which reads as "fuzzy search does not work".
  *
- * Hits arrive in the table's own order (body id) and buckets preserve it, so the result is a
+ * Hits arrive in the table's own order (neuron id) and buckets preserve it, so the result is a
  * total order: the same query always yields the same rows in the same sequence.
  */
 function rankHits(
@@ -639,7 +639,7 @@ export function completeSearch(
   const split = splitOperator(bare)
 
   if (!split) {
-    const names = table.schema.columns.filter((c) => c.name !== 'bodyId').map((c) => c.name)
+    const names = table.schema.columns.filter((c) => c.name !== 'neuronId').map((c) => c.name)
     const dtypeOf = new Map(table.schema.columns.map((c) => [c.name, c.dtype]))
     return {
       from: token.from,

@@ -13,8 +13,8 @@ import { column, tableSchema } from './types'
 import type { Bounds3, MeshesValue, PointsValue, SkeletonsValue } from './values'
 import { describeValue, emptyTable, makeTable, unitsLabel } from './values'
 
-const SCHEMA = tableSchema(column('bodyId', 'i64'))
-const attributes = makeTable(SCHEMA, { bodyId: [7] })
+const SCHEMA = tableSchema(column('neuronId', 'i64'))
+const attributes = makeTable(SCHEMA, { neuronId: [7] })
 const BOUNDS: Bounds3 = { min: [0, 0, 0], max: [1, 1, 1] }
 
 function skeletons(units?: SkeletonsValue['units']): SkeletonsValue {
@@ -22,7 +22,7 @@ function skeletons(units?: SkeletonsValue['units']): SkeletonsValue {
     kind: 'skeletons',
     items: [
       {
-        bodyId: 7,
+        id: '7',
         positions: new Float32Array([0, 0, 0, 1, 1, 1]),
         radii: new Float32Array([1, 1]),
         parents: new Int32Array([-1, 0]),
@@ -57,7 +57,7 @@ describe('describeValue — geometry', () => {
       kind: 'meshes',
       items: [
         {
-          bodyId: 7,
+          id: '7',
           positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
           indices: new Uint32Array([0, 1, 2]),
         },

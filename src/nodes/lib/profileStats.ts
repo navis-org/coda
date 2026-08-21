@@ -34,7 +34,7 @@ export interface PartnerTypeRow {
 
 /** One row of the "top partners" list — an individual neuron, not a type. */
 export interface PartnerRow {
-  bodyId: number
+  neuronId: number
   type: string | null
   weight: number
   /** Share of all synapses in this direction, 0..1. */
@@ -161,13 +161,13 @@ export function topPartners(
     .map((row) => {
       const w = toNumber(weight[row])
       return {
-        bodyId: toNumber(partnerId[row]),
+        neuronId: toNumber(partnerId[row]),
         type: asType(partnerType[row]),
         weight: w,
         share: total > 0 ? w / total : 0,
       }
     })
-    .sort((a, b) => b.weight - a.weight || a.bodyId - b.bodyId)
+    .sort((a, b) => b.weight - a.weight || a.neuronId - b.neuronId)
 
   return capped(out, options.topN)
 }

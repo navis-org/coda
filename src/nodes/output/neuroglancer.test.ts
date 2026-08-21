@@ -27,7 +27,7 @@ import { readColorSpec } from '../lib/encodingParams'
 import '../index'
 
 const NEURON_SCHEMA = tableSchema(
-  column('bodyId', 'i64'),
+  column('neuronId', 'i64'),
   column('type', 'str'),
   column('size', 'i64', 'voxels'),
 )
@@ -53,10 +53,10 @@ const DATASET: DatasetValue = {
   label: 'manc v1.2.3',
 }
 
-function neurons(rows: Array<{ bodyId: number; type: string; size?: number }>): TableValue {
+function neurons(rows: Array<{ neuronId: number; type: string; size?: number }>): TableValue {
   return tableFromRows(
     NEURON_SCHEMA,
-    rows.map((r) => ({ bodyId: r.bodyId, type: r.type, size: r.size ?? 100 })),
+    rows.map((r) => ({ neuronId: r.neuronId, type: r.type, size: r.size ?? 100 })),
     'neurons',
   )
 }
@@ -127,9 +127,9 @@ const def = () => requireNodeDef('out.neuroglancer')
 async function sceneFrom(
   overrides: Record<string, unknown> = {},
   table: TableValue | null = neurons([
-    { bodyId: 10001, type: 'DNa02' },
-    { bodyId: 10002, type: 'DNa02' },
-    { bodyId: 10003, type: 'DNp01' },
+    { neuronId: 10001, type: 'DNa02' },
+    { neuronId: 10002, type: 'DNa02' },
+    { neuronId: 10003, type: 'DNp01' },
   ]),
   source = stubSource(),
 ): Promise<{ url: string; scene: NgScene }> {
@@ -156,7 +156,7 @@ beforeAll(() => {
 })
 
 describe('the scene it builds', () => {
-  it('puts the body ids on the dataset layer and keeps the published camera', () => {
+  it('puts the neuron ids on the dataset layer and keeps the published camera', () => {
     return sceneFrom().then(({ scene }) => {
       expect(layersOf(scene)[1]!['segments']).toEqual(['10001', '10002', '10003'])
       expect(layersOf(scene)[2]!['segments']).toBeUndefined()
@@ -170,9 +170,9 @@ describe('the scene it builds', () => {
     const { scene } = await sceneFrom(
       {},
       neurons([
-        { bodyId: 7, type: 'A' },
-        { bodyId: 7, type: 'A' },
-        { bodyId: 8, type: 'B' },
+        { neuronId: 7, type: 'A' },
+        { neuronId: 7, type: 'A' },
+        { neuronId: 8, type: 'B' },
       ]),
     )
     expect(layersOf(scene)[1]!['segments']).toEqual(['7', '8'])
@@ -244,8 +244,8 @@ describe('with no neurons', () => {
 })
 
 describe('colour', () => {
-  it('starts on a label column, not on bodyId', async () => {
-    // `bodyId` is the first compatible column, and a categorical encoding over it caps at
+  it('starts on a label column, not on neuronId', async () => {
+    // `neuronId` is the first compatible column, and a categorical encoding over it caps at
     // eight slots plus grey — so unrelated neurons share a hue and read as a group.
     const { scene } = await sceneFrom()
     const colors = layersOf(scene)[1]!['segmentColors'] as Record<string, string>
@@ -258,9 +258,9 @@ describe('colour', () => {
     // The point of borrowing `resolveColor` rather than mapping hues here: one neuron, one
     // colour, whichever viewer is looking at it.
     const table = neurons([
-      { bodyId: 1, type: 'DNa02' },
-      { bodyId: 2, type: 'DNa02' },
-      { bodyId: 3, type: 'DNp01' },
+      { neuronId: 1, type: 'DNa02' },
+      { neuronId: 2, type: 'DNa02' },
+      { neuronId: 3, type: 'DNp01' },
     ])
     const { scene } = await sceneFrom(
       { segmentColorMode: 'categorical', segmentColorBy: 'type' },
@@ -312,7 +312,7 @@ describe('guard rails', () => {
   it('refuses more neurons than the limit, and blames the right cost', async () => {
     // Not a fetch limit — nothing is downloaded here. Saying so is what stops this being
     // read as the morphology nodes' ceiling.
-    const many = neurons(Array.from({ length: 6 }, (_, i) => ({ bodyId: i + 1, type: 'A' })))
+    const many = neurons(Array.from({ length: 6 }, (_, i) => ({ neuronId: i + 1, type: 'A' })))
     await expect(sceneFrom({ limit: 5 }, many)).rejects.toThrow(
       /exceeds this node's Max neurons \(5\)/,
     )
@@ -320,7 +320,7 @@ describe('guard rails', () => {
   })
 
   it('says so when the dataset publishes no scene', async () => {
-    const table = neurons([{ bodyId: 1, type: 'A' }])
+    const table = neurons([{ neuronId: 1, type: 'A' }])
     await expect(sceneFrom({}, table, stubSource(null))).rejects.toThrow(
       /publishes no neuroglancer scene/,
     )
@@ -374,8 +374,8 @@ describe('provenance', () => {
 
   it('changes the link when the colour column changes', async () => {
     const table = neurons([
-      { bodyId: 1, type: 'A', size: 10 },
-      { bodyId: 2, type: 'B', size: 20 },
+      { neuronId: 1, type: 'A', size: 10 },
+      { neuronId: 2, type: 'B', size: 20 },
     ])
     const byType = await sceneFrom(
       { segmentColorMode: 'categorical', segmentColorBy: 'type' },

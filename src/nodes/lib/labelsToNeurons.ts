@@ -11,7 +11,7 @@
  * The reason they exist at all is a type mismatch with a real cause behind it. A `LinkageValue`
  * knows its leaves only by *label*, because that is all a `MatrixValue` axis carries — so a
  * Dendrogram's `Selected` and a Cut Tree's `Clusters` are plain tables of names, and a
- * Neuroglancer or a 3D view wants `T.neurons()`, a table with a `bodyId`. Something has to
+ * Neuroglancer or a 3D view wants `T.neurons()`, a table with a `neuronId`. Something has to
  * cross that gap, and it needs the neuron table to do it whenever the labels are not ids.
  */
 
@@ -27,7 +27,7 @@ export interface LabelMatchRequest {
   labels: TableValue
   /** Which column of `labels` holds the name. */
   labelColumn: string
-  /** The neurons to match against. Absent means the labels are body ids themselves. */
+  /** The neurons to match against. Absent means the labels are neuron ids themselves. */
   neurons?: TableValue | undefined
   /** Which column of `neurons` a label is compared with. */
   matchColumn?: string | undefined
@@ -41,7 +41,7 @@ export interface LabelMatchResult {
   /** How many of them named at least one neuron. */
   matched: number
   /**
-   * Label rows dropped for not being usable body ids. Only ever non-zero on the unwired path,
+   * Label rows dropped for not being usable neuron ids. Only ever non-zero on the unwired path,
    * where a label has to *be* an id — which is what a cell type is not.
    */
   dropped: number
@@ -55,7 +55,7 @@ export interface LabelMatchResult {
  *
  * The label column itself is **dropped**, exactly as `joinTables` drops its right key: it holds
  * the same value the match column already does, under a second name. On the unwired path it is
- * not so much dropped as *converted* — it becomes the `bodyId` the whole node exists to produce.
+ * not so much dropped as *converted* — it becomes the `neuronId` the whole node exists to produce.
  */
 export function labelsToNeuronsSchema(
   labels: TableSchema | undefined,
@@ -77,7 +77,7 @@ export function labelsToNeuronsSchema(
  *
  * **Matched by text, like every other key comparison here.** `joinTables` keys on
  * `String(cell)`, and it has to: a pivot's label column is `str` even when pivoted from an
- * `i64`, and an NBLAST labelled by body id produces the *string* "722817260" against an `i64`
+ * `i64`, and an NBLAST labelled by neuron id produces the *string* "722817260" against an `i64`
  * column. Comparing by value would fail on exactly the default case.
  *
  * **The neuron table drives the row order and the row count.** One label naming six neurons
@@ -137,7 +137,7 @@ function labelIndex(labels: TableValue, labelColumn: string): Map<string, number
 }
 
 /**
- * A cell as a body id, or undefined where it cannot be one.
+ * A cell as a neuron id, or undefined where it cannot be one.
  *
  * The rule `idsFromColumn` applies: an id past the safe range is stored as a *different*
  * integer and would identify a different neuron, so it is not usable rather than merely large.
@@ -206,9 +206,9 @@ function matchAgainst(
 }
 
 /**
- * Labels read as body ids, for the case where that is what they are.
+ * Labels read as neuron ids, for the case where that is what they are.
  *
- * The default NBLAST labels a matrix with body ids, so a Dendrogram hanging off one needs no
+ * The default NBLAST labels a matrix with neuron ids, so a Dendrogram hanging off one needs no
  * neuron table at all — which is worth the branch, because it is the arrangement somebody has
  * before they have thought about any of this.
  *
@@ -244,7 +244,7 @@ function fromIds(
     rows.push(row)
   }
 
-  const data: Record<string, ColumnData> = { bodyId: ids }
+  const data: Record<string, ColumnData> = { neuronId: ids }
   for (const { source, out } of rightNames) {
     const src = getColumn(labels, source)
     data[out] = rows.map((i) => src[i] ?? null)

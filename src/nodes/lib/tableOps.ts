@@ -16,7 +16,7 @@ import type { ColumnSchema, DType, TableSchema } from '../../core/types'
 import { column, findColumn, isNumericDType, pickColumns, tableSchema } from '../../core/types'
 import type { CellValue, ColumnData, MatrixValue, TableValue } from '../../core/values'
 import { getColumn, makeMatrix, makeTable, selectRows } from '../../core/values'
-import { idText } from '../../core/ids'
+import { ID_COLUMN_NAME, idText } from '../../core/ids'
 
 // ---------------------------------------------------------------------------
 // Filter
@@ -338,21 +338,11 @@ export function sampleTable(table: TableValue, spec: SampleSpec): TableValue {
 // ---------------------------------------------------------------------------
 
 /**
- * The name a neuron table has to use.
- *
- * Nodes address columns by name — `out.profile` validates on it, `idColumn()` above defaults
- * to it, Connectivity and Skeletons read it — so an uploaded file whose author called the
- * column `root_id` cannot meet neuron data until it is renamed. That rename is the whole
- * reason the upload node's ID column picker exists rather than merely tagging the type.
- */
-const ID_COLUMN_NAME = 'bodyId'
-
-/**
- * Whether a shaped upload carries a body id, and may therefore call itself Neurons.
+ * Whether a shaped upload carries a neuron id, and may therefore call itself Neurons.
  *
  * One predicate rather than the same condition written twice, because the schema half and the
  * value half must agree about the *kind* as strictly as they agree about the columns: a table
- * typed `neurons` whose values arrive as a plain table breaks every downstream node's bodyId
+ * typed `neurons` whose values arrive as a plain table breaks every downstream node's neuronId
  * guarantee only after a run.
  */
 export function uploadIsNeurons(schema: TableSchema | undefined, idColumn: string): boolean {
@@ -386,7 +376,7 @@ function renamedColumns(names: readonly string[], idColumn: string): string[] {
  *    anything ambiguous as text. This is for a column that is genuinely numeric and genuinely
  *    not a *quantity* — a cluster label, a layer index — which has no business offering itself
  *    to a size encoding or being averaged.
- *  - `idColumn` renames one column to `bodyId`. See `ID_COLUMN_NAME`.
+ *  - `idColumn` renames one column to `neuronId`. See `ID_COLUMN_NAME`.
  */
 export function uploadShapeSchema(
   schema: TableSchema | undefined,
@@ -450,7 +440,7 @@ export function selectTable(table: TableValue, names: string[]): TableValue {
   return makeTable(
     schema,
     data,
-    table.kind === 'neurons' && wanted.includes('bodyId') ? 'neurons' : 'table',
+    table.kind === 'neurons' && wanted.includes('neuronId') ? 'neurons' : 'table',
   )
 }
 
@@ -477,7 +467,7 @@ export interface DTypeConflict {
  *
  * `i64` and `f64` widen to `f64` without comment: those are the same kind of thing, and a count
  * stacked onto a ratio is still a number. Everything else is a genuine disagreement about what
- * the column *is* — `bodyId` as a number in one table and text in the other is two different
+ * the column *is* — `neuronId` as a number in one table and text in the other is two different
  * columns wearing one name, and merging them either way would be a decision this node has no
  * grounds to make.
  */
@@ -613,7 +603,7 @@ export function stackTables(
 
   /*
    * Neurons only when *both* inputs are. A neuron table stacked onto a plain one that happens to
-   * carry a `bodyId` is not a neuron table: the plain one never claimed its ids were neurons of
+   * carry a `neuronId` is not a neuron table: the plain one never claimed its ids were neurons of
    * this dataset, and a `neurons` kind is exactly that claim.
    */
   const kind = top.kind === 'neurons' && bottom.kind === 'neurons' ? 'neurons' : 'table'
@@ -1018,7 +1008,7 @@ export function pivotTable(
  * ordering, one pass over the data.
  *
  * Two things follow from a matrix axis being labels rather than data. `labelColumn` is `str`
- * even when it was pivoted from `bodyId` — harmless downstream, since `joinTables` keys on
+ * even when it was pivoted from `neuronId` — harmless downstream, since `joinTables` keys on
  * `String(cell)` and so still joins it back against the numeric column it came from. And a
  * missing pair reads as 0 here exactly as it does in the matrix, rather than as null: the
  * absent cell is what `pivotTable` already decided, and disagreeing about it in the table half
@@ -1138,7 +1128,7 @@ export function normalizeMatrix(matrix: MatrixValue, mode: NormalizeMode): Matri
  * be unusable. What a caller loses is counted by comparing the result's length against the
  * table's, which is what the Input IDs card does.
  */
-export function idColumn(table: TableValue, columnName = 'bodyId'): string[] {
+export function idColumn(table: TableValue, columnName = ID_COLUMN_NAME): string[] {
   const data = getColumn(table, columnName)
   const out: string[] = []
   for (const cell of data) {
@@ -1149,13 +1139,13 @@ export function idColumn(table: TableValue, columnName = 'bodyId'): string[] {
 }
 
 /** Schema for a single-column table of ids, used by stub/passthrough paths. */
-export const ID_ONLY_SCHEMA: TableSchema = tableSchema(column('bodyId', 'i64'))
+export const ID_ONLY_SCHEMA: TableSchema = tableSchema(column(ID_COLUMN_NAME, 'i64'))
 
 /**
  * Rows whose id column appears in a selection.
  *
  * Compared as strings because an `ids` param is a string array — it has to be, since that is
- * what survives a round trip through the saved file — while `bodyId` is `i64`. That rule was
+ * what survives a round trip through the saved file — while `neuronId` is `i64`. That rule was
  * written out three times, in Explore, Profile and the 3D viewer, each with its own copy of
  * the column-by-column materialisation `selectRows` already does.
  *
@@ -1166,7 +1156,7 @@ export function rowsWithIds(
   table: TableValue,
   selection: unknown,
   kind: TableValue['kind'] = 'neurons',
-  columnName = 'bodyId',
+  columnName = ID_COLUMN_NAME,
 ): TableValue {
   const wanted = new Set((Array.isArray(selection) ? selection : []).map(String))
   const rows: number[] = []

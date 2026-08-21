@@ -11,7 +11,7 @@
  *
  * 1. **IndexedDB, not `localStorage`.** The autosave in `persistence.ts` already keeps a full
  *    copy of the working graph inside the ~5 MB origin budget, and a graph can be big — an
- *    Explore select-all is capped at 10,000 body ids, which is ~110 kB of params in one node.
+ *    Explore select-all is capped at 10,000 neuron ids, which is ~110 kB of params in one node.
  *    A handful of saved workflows would hit quota, and `saveAutosave` swallows that failure by
  *    design. IndexedDB has no such ceiling.
  *

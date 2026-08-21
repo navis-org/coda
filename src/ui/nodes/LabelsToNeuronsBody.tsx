@@ -6,7 +6,7 @@
  * block rather than each having one.
  *
  * **It exists for one silent failure.** A label matches on a column somebody chose, and the
- * wrong choice — `bodyId` where the tree was labelled by `type` — produces an empty table with
+ * wrong choice — `neuronId` where the tree was labelled by `type` — produces an empty table with
  * every count in the footer correct and nothing anywhere pointing at the cause. Saying `0 of 4
  * labels matched` next to the `Match on` picker turns a dead end into a control to change.
  *
@@ -125,7 +125,7 @@ export function LabelsToNeuronsBody({ node, ctx, compact, setParam }: NodeBodyPr
             <span title="Rows in the result">{formatNumber(summary.rows)} neurons</span>
           )}
           {summary.dropped > 0 && (
-            <span title="Label rows that were not usable body ids — wire the neuron table that was clustered">
+            <span title="Label rows that were not usable neuron ids — wire the neuron table that was clustered">
               {formatNumber(summary.dropped)} not an ID
             </span>
           )}

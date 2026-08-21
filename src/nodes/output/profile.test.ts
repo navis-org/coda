@@ -72,7 +72,7 @@ function pipeline(params: Record<string, unknown> = {}): CodaGraph {
 describe('out.profile — types', () => {
   it('passes a Neurons edge through as Neurons, not Table', () => {
     // A viewer dropped mid-chain must not downgrade the edge, or every node after it loses
-    // the bodyId guarantee its column pickers rely on.
+    // the neuronId guarantee its column pickers rely on.
     const inference = inferGraph(pipeline())
     expect(inference.nodes['prof']?.outputs['out']?.kind).toBe('neurons')
     expect(inference.nodes['prof']?.outputs['current']?.kind).toBe('neurons')
@@ -82,13 +82,13 @@ describe('out.profile — types', () => {
     const inference = inferGraph(pipeline())
     expect(
       schemaOf(inference.nodes['prof']?.outputs['out'])?.columns.map((c) => c.name),
-    ).toContain('bodyId')
+    ).toContain('neuronId')
     expect(
       schemaOf(inference.nodes['prof']?.outputs['current'])?.columns.map((c) => c.name),
     ).toContain('type')
   })
 
-  it('accepts a plain Table, since bodyId is a validation question and not a type one', () => {
+  it('accepts a plain Table, since neuronId is a validation question and not a type one', () => {
     const def = requireNodeDef('out.profile')
     expect(def.inputs?.find((p) => p.id === 'neurons')?.type.kind).toBe('table')
   })
@@ -104,11 +104,11 @@ describe('out.profile — validation', () => {
     return (inferGraph(graph).nodes[id]?.issues ?? []).map((issue) => issue.message)
   }
 
-  it('says nothing when the incoming table has a bodyId', () => {
+  it('says nothing when the incoming table has a neuronId', () => {
     expect(issues(pipeline(), 'prof')).toEqual([])
   })
 
-  it('names the columns the table does have when bodyId is missing', () => {
+  it('names the columns the table does have when neuronId is missing', () => {
     let g = pipeline()
     g = addNode(g, node('sel', 'core.select', { columns: ['type'] }))
     g = addEdge(g, {
@@ -130,13 +130,13 @@ describe('out.profile — validation', () => {
 
     const reported = issues(g, 'prof')
     expect(reported).toHaveLength(1)
-    expect(reported[0]).toContain('bodyId')
+    expect(reported[0]).toContain('neuronId')
     // The point of the message is that it says what you *do* have, so the fix is obvious.
     expect(reported[0]).toContain('type')
   })
 
   it('stays quiet on an unknown schema rather than guessing', () => {
-    // A raw Cypher result may well have a bodyId. Refusing it before anything has run would
+    // A raw Cypher result may well have a neuronId. Refusing it before anything has run would
     // be a guess dressed up as an error.
     let g = emptyGraph('unknown-schema')
     g = addNode(g, node('ds', 'neuron.dataset', { dataset: 'optic-lobe-mini' }))
@@ -181,7 +181,7 @@ describe('out.profile — evaluate', () => {
     await scheduler.run(pipeline(), { mode: 'full' })
     const table = scheduler.output('find', 'neurons')
     if (!isTableValue(table)) throw new Error('expected a table')
-    const pinned = String(table.data['bodyId']?.[1])
+    const pinned = String(table.data['neuronId']?.[1])
 
     const second = makeScheduler()
     await second.run(pipeline({ selection: [pinned] }), { mode: 'full' })
@@ -189,7 +189,7 @@ describe('out.profile — evaluate', () => {
     if (!isTableValue(current)) throw new Error('expected a table')
 
     expect(current.length).toBe(1)
-    expect(String(current.data['bodyId']?.[0])).toBe(pinned)
+    expect(String(current.data['neuronId']?.[0])).toBe(pinned)
     // Full width, not just the id — the whole point is that Current is usable downstream.
     expect(current.schema.columns.length).toBe(table.schema.columns.length)
     expect(current.kind).toBe('neurons')

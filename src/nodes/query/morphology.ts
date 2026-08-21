@@ -23,16 +23,16 @@ import { idColumn } from '../lib/tableOps'
 export const MAX_NEURONS = 500
 
 /**
- * Read body ids off the incoming table, refusing an oversized set.
+ * Read neuron ids off the incoming table, refusing an oversized set.
  *
  * `cost` names what actually gets expensive, because it differs per node and the limit is
  * otherwise unexplainable. The old message blamed "this viewer", which was wrong twice
  * over: the viewer has no cap of its own, and drawing is not the constraint — fetching is.
  */
-function bodyIdsFrom(value: Value | undefined, limit: number, cost: string): string[] {
+function neuronIdsFrom(value: Value | undefined, limit: number, cost: string): string[] {
   if (!isTableValue(value)) throw new Error('Neurons input is not a table')
-  const ids = idColumn(value, 'bodyId')
-  if (ids.length === 0) throw new Error('No bodyIds in the incoming neuron table')
+  const ids = idColumn(value, 'neuronId')
+  if (ids.length === 0) throw new Error('No neuronIds in the incoming neuron table')
   if (ids.length > limit) {
     throw new Error(
       `${ids.length} neurons exceeds this node's Max neurons (${limit}). ${cost} ` +
@@ -87,15 +87,15 @@ export const skeletonsNode = registerNode({
     const source = ctx.resolveSource(dataset.sourceId)
     if (!source.fetchSkeletons) throw new Error(`${source.label} does not provide skeletons`)
 
-    const bodyIds = bodyIdsFrom(
+    const neuronIds = neuronIdsFrom(
       ctx.input('neurons'),
       Number(ctx.params.limit ?? 100),
       'Each skeleton is a separate request.',
     )
-    ctx.progress(0.02, `${bodyIds.length} neurons`)
+    ctx.progress(0.02, `${neuronIds.length} neurons`)
     const skeletons = await source.fetchSkeletons({
       datasetId: dataset.datasetId,
-      bodyIds,
+      neuronIds,
       onProgress: ctx.progress,
       signal: ctx.signal,
     })
@@ -165,15 +165,15 @@ export const meshesNode = registerNode({
     const source = ctx.resolveSource(dataset.sourceId)
     if (!source.fetchMeshes) throw new Error(`${source.label} does not provide meshes`)
 
-    const bodyIds = bodyIdsFrom(
+    const neuronIds = neuronIdsFrom(
       ctx.input('neurons'),
       Number(ctx.params.limit ?? MAX_NEURONS),
       'Each mesh is a separate fetch, and a source without levels of detail sends full resolution.',
     )
-    ctx.progress(0.02, `${bodyIds.length} neurons`)
+    ctx.progress(0.02, `${neuronIds.length} neurons`)
     const meshes = await source.fetchMeshes({
       datasetId: dataset.datasetId,
-      bodyIds,
+      neuronIds,
       triangleBudget: Number(ctx.params.detail ?? 1_500_000) || 1_500_000,
       onProgress: ctx.progress,
       signal: ctx.signal,
@@ -243,17 +243,17 @@ export const synapsesNode = registerNode({
     const source = ctx.resolveSource(dataset.sourceId)
     if (!source.fetchSynapses) throw new Error(`${source.label} does not provide synapses`)
 
-    const bodyIds = bodyIdsFrom(
+    const neuronIds = neuronIdsFrom(
       ctx.input('neurons'),
       Number(ctx.params.limit ?? 100),
       'These arrive in one query, but it returns a row per synapse — thousands per neuron.',
     )
     const polarity = String(ctx.params.polarity ?? '')
-    ctx.progress(0.1, `${bodyIds.length} neurons`)
+    ctx.progress(0.1, `${neuronIds.length} neurons`)
 
     const points = await source.fetchSynapses({
       datasetId: dataset.datasetId,
-      bodyIds,
+      neuronIds,
       onProgress: ctx.progress,
       ...(polarity === 'pre' || polarity === 'post' ? { polarity } : {}),
       minWeight: Number(ctx.params.minWeight ?? 1),

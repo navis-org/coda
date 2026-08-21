@@ -61,7 +61,7 @@ export const sampleNode = registerNode({
     },
   ],
 
-  // Sampling takes rows away and leaves every column alone — including `bodyId`, so a
+  // Sampling takes rows away and leaves every column alone — including `neuronId`, so a
   // sampled neuron table is still pluggable into Connectivity.
   inferOutputs: (ctx) => {
     const input = ctx.inputs.in

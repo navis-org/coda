@@ -16,7 +16,7 @@ import {
 beforeAll(() => installJsdomStubs())
 
 const SCHEMA = tableSchema(
-  column('bodyId', 'i64'),
+  column('neuronId', 'i64'),
   column('type', 'str'),
   column('weight', 'i64', 'synapses'),
 )
@@ -24,17 +24,17 @@ const SCHEMA = tableSchema(
 describe('tableToCsv', () => {
   it('writes a header row from the schema and one row per record', () => {
     const table = tableFromRows(SCHEMA, [
-      { bodyId: 1, type: 'LC4', weight: 34 },
-      { bodyId: 2, type: 'LC6', weight: 12 },
+      { neuronId: 1, type: 'LC4', weight: 34 },
+      { neuronId: 2, type: 'LC6', weight: 12 },
     ])
-    expect(tableToCsv(table)).toBe('bodyId,type,weight\n1,LC4,34\n2,LC6,12\n')
+    expect(tableToCsv(table)).toBe('neuronId,type,weight\n1,LC4,34\n2,LC6,12\n')
   })
 
   it('quotes values containing a comma, quote or newline', () => {
     const table = tableFromRows(SCHEMA, [
-      { bodyId: 1, type: 'a,b', weight: 1 },
-      { bodyId: 2, type: 'say "hi"', weight: 2 },
-      { bodyId: 3, type: 'line\nbreak', weight: 3 },
+      { neuronId: 1, type: 'a,b', weight: 1 },
+      { neuronId: 2, type: 'say "hi"', weight: 2 },
+      { neuronId: 3, type: 'line\nbreak', weight: 3 },
     ])
     const lines = tableToCsv(table).split('\n')
     expect(lines[1]).toBe('1,"a,b",1')
@@ -44,18 +44,18 @@ describe('tableToCsv', () => {
   })
 
   it('writes nulls as empty fields, not the text "null"', () => {
-    const table = tableFromRows(SCHEMA, [{ bodyId: 1, type: null, weight: null }])
-    expect(tableToCsv(table)).toBe('bodyId,type,weight\n1,,\n')
+    const table = tableFromRows(SCHEMA, [{ neuronId: 1, type: null, weight: null }])
+    expect(tableToCsv(table)).toBe('neuronId,type,weight\n1,,\n')
   })
 
   it('handles an empty table', () => {
-    expect(tableToCsv(tableFromRows(SCHEMA, []))).toBe('bodyId,type,weight\n')
+    expect(tableToCsv(tableFromRows(SCHEMA, []))).toBe('neuronId,type,weight\n')
   })
 
   it('chunks large tables instead of building one giant string', () => {
     const table = tableFromRows(
       SCHEMA,
-      Array.from({ length: 5000 }, (_, i) => ({ bodyId: i, type: 't', weight: i })),
+      Array.from({ length: 5000 }, (_, i) => ({ neuronId: i, type: 't', weight: i })),
     )
     const parts = tableToCsvParts(table)
     // Header plus ceil(5000 / 2000) chunks.

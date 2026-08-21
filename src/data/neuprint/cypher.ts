@@ -22,7 +22,7 @@ import type {
   SynapseRequest,
 } from '../source'
 import { isNeuronId } from '../../core/ids'
-import { CORE_NEURON_COLUMNS } from './schema'
+import { CORE_NEURON_COLUMNS, neuprintProperty } from './schema'
 
 /**
  * A Cypher single-quoted string literal.
@@ -77,7 +77,7 @@ function stringList(values: readonly string[]): string {
  * the decoder matches this order against the schema's and throws on a count mismatch — but
  * an *order* change in one list alone would mis-map every row in silence.
  */
-const NEURON_COLUMNS = CORE_NEURON_COLUMNS.map((c) => `n.${c.name}`)
+const NEURON_COLUMNS = CORE_NEURON_COLUMNS.map((c) => `n.${neuprintProperty(c.name)}`)
 
 /**
  * Extra per-dataset properties appended to the standard seven.
@@ -104,7 +104,7 @@ const NEURON_COLUMNS = CORE_NEURON_COLUMNS.map((c) => `n.${c.name}`)
  * only true. `toLower(null)` is null as well, so the case-insensitive form needs no guard.
  */
 function labelClause(match: LabelMatch): string {
-  const prop = `n.${escapeIdentifier(match.field)}`
+  const prop = `n.${escapeIdentifier(neuprintProperty(match.field))}`
   if (match.regex) {
     // `(?i)` is Java's inline flag, which is what Neo4j's regex engine reads. Prefixed per
     // pattern rather than wrapped around a group, so an anchor the user wrote still applies
@@ -140,7 +140,7 @@ export function findNeuronsCypher(
    * is safe there only because the node guards it; relying on a caller's guard for a clause that
    * would otherwise return the entire dataset is not a trade worth repeating.
    */
-  if (req.bodyIds) where.push(`n.bodyId IN ${idList(req.bodyIds)}`)
+  if (req.neuronIds) where.push(`n.bodyId IN ${idList(req.neuronIds)}`)
   if (req.statuses?.length) where.push(`n.status IN ${stringList(req.statuses)}`)
   if (req.minSize && req.minSize > 0) where.push(`n.size >= ${Math.floor(req.minSize)}`)
   // A neuron carries one boolean property per ROI it innervates, so presence is the test.
@@ -168,7 +168,7 @@ export function findNeuronsCypher(
  * total output weight.
  */
 export function connectivityCypher(req: ConnectivityRequest): string {
-  const ids = idList(req.bodyIds)
+  const ids = idList(req.neuronIds)
   const pattern =
     req.direction === 'outputs'
       ? `MATCH (n:Neuron)-[w:ConnectsTo]->(p)\nWHERE n.bodyId IN ${ids}`
@@ -213,7 +213,7 @@ export function pathStepCypher(req: PathStepRequest): string {
 
   const clauses: string[] = []
   if (req.types?.length) clauses.push(`a.type IN ${stringList(req.types)}`)
-  if (req.bodyIds?.length) clauses.push(`a.bodyId IN ${idList(req.bodyIds)}`)
+  if (req.neuronIds?.length) clauses.push(`a.bodyId IN ${idList(req.neuronIds)}`)
   // No frontier is not a query worth sending, and an absent WHERE would match the dataset.
   if (clauses.length === 0) clauses.push('false')
 
@@ -263,14 +263,14 @@ export function adjacencyCypher(req: AdjacencyRequest): string {
 export function roiCountsCypher(req: RoiCountsRequest): string {
   return [
     'MATCH (n:Neuron)',
-    `WHERE n.bodyId IN ${idList(req.bodyIds)}`,
+    `WHERE n.bodyId IN ${idList(req.neuronIds)}`,
     'RETURN n.bodyId, n.type, n.roiInfo',
     'ORDER BY n.bodyId',
   ].join('\n')
 }
 
 export function synapsesCypher(req: SynapseRequest): string {
-  const where = [`n.bodyId IN ${idList(req.bodyIds)}`]
+  const where = [`n.bodyId IN ${idList(req.neuronIds)}`]
   if (req.polarity) where.push(`s.type = ${escapeString(req.polarity)}`)
   if (req.minWeight && req.minWeight > 0) where.push(`s.confidence >= ${req.minWeight}`)
   return [

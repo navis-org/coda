@@ -2,7 +2,7 @@
  * Neuroglancer viewer node.
  *
  * Takes a dataset and a neuron table and emits a **URL**: the dataset's own published
- * neuroglancer scene, pointed at those body ids and coloured by a column. The widget beside
+ * neuroglancer scene, pointed at those neuron ids and coloured by a column. The widget beside
  * it is an iframe on that URL, so the workhorse rendering — EM, segmentation, ROI meshes,
  * synapse layers, all at full resolution and lazily paged — is done by neuroglancer rather
  * than by us. The `3D View` node stays for scenes Coda builds itself.
@@ -49,7 +49,7 @@ import { colorParams, readColorSpec } from '../lib/encodingParams'
  * A different guard rail from the morphology nodes' `Max neurons`, which bounds what *Coda*
  * fetches. Nothing is fetched here — the cost is neuroglancer's own mesh loading plus URL
  * length, and the URL is the harder limit in practice: male-CNS publishes a 38 kB state
- * before a single body id is added, and each coloured segment costs ~40 bytes more.
+ * before a single neuron id is added, and each coloured segment costs ~40 bytes more.
  */
 const MAX_SEGMENTS = 1000
 
@@ -93,7 +93,7 @@ export const neuroglancerNode = registerNode({
       from: 'neurons',
       label: 'Colour',
       defaultMode: 'categorical',
-      // Not the first compatible column, which is `bodyId`: colouring by it caps at eight
+      // Not the first compatible column, which is `neuronId`: colouring by it caps at eight
       // slots plus grey, so two unrelated neurons share a hue and look like a group.
       defaultColumn: 'type',
       // Baked into the URL — see the header.
@@ -248,7 +248,7 @@ function colorFields(
 }
 
 /**
- * Body ids and their colours, in table order.
+ * Neuron ids and their colours, in table order.
  *
  * Row order is preserved and duplicates keep their first colour, so the assignment matches
  * what the same encoding would draw in the 3D view — `resolveColor` ranks categories by
@@ -263,8 +263,8 @@ function segmentColors(
   if (!neurons) return { segments: [], colors: {} }
 
   const resolved = resolveColor(neurons, spec, VIEWER_MODE)
-  const ids = neurons.data['bodyId']
-  if (!ids) throw new Error('Neurons input has no bodyId column')
+  const ids = neurons.data['neuronId']
+  if (!ids) throw new Error('Neurons input has no neuronId column')
 
   const segments: string[] = []
   const colors: Record<string, string> = {}

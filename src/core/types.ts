@@ -44,7 +44,7 @@ export type CodaType =
   | { kind: 'dataset'; sourceId?: string; datasetId?: string }
   /** Columnar table. */
   | { kind: 'table'; schema?: TableSchema }
-  /** A table guaranteed to have a `bodyId` column. Subtype of `table`. */
+  /** A table guaranteed to have a `neuronId` column. Subtype of `table`. */
   | { kind: 'neurons'; schema?: TableSchema }
   /** Labelled 2D numeric array — adjacency, correlation, pivot output. */
   | { kind: 'matrix' }

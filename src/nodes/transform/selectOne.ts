@@ -39,7 +39,7 @@
  * ## `any` in, `any` out
  *
  * The type system cannot say "a table, skeletons or meshes", so the port says `any` and the
- * refusal is a validation question — the same call `out.profile` makes about needing a `bodyId`.
+ * refusal is a validation question — the same call `out.profile` makes about needing a `neuronId`.
  * The output type is the input type untouched: one row of a Neurons table is still Neurons with
  * the same columns, so nothing downstream loses a column picker when this node is dropped in.
  */

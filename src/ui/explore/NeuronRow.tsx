@@ -21,18 +21,18 @@ import { chipKey, chipSlots, statUnit } from './rowFields'
 
 export interface NeuronRowProps {
   table: TableValue
-  /** Row index into the index table, not a body id. */
+  /** Row index into the index table, not a neuron id. */
   row: number
   fields: RowFields
   sourceId: string | undefined
   datasetId: string | undefined
   selected: boolean
   /**
-   * Takes the body id rather than closing over it, so the parent can pass one stable
+   * Takes the neuron id rather than closing over it, so the parent can pass one stable
    * function for the whole page — a fresh `() => toggle(id)` per row defeated `memo`
    * outright, and every row re-rendered (thumbnail subtree included) on every tick.
    */
-  onToggle: (bodyId: number) => void
+  onToggle: (neuronId: number) => void
   /** Inside a node card rather than the full-size overlay: a smaller thumbnail. */
   compact: boolean
 }
@@ -55,8 +55,8 @@ function NeuronRowImpl({
 }: NeuronRowProps) {
   // `idText` keeps a wide id exactly; `Number(cell)` would round it before the thumbnail
   // cache key and the 3D fetch ever see it.
-  const bodyIdText = idText(cellOf(table, 'bodyId', row)) ?? ''
-  const bodyId = Number(bodyIdText)
+  const neuronIdText = idText(cellOf(table, 'neuronId', row)) ?? ''
+  const neuronId = Number(neuronIdText)
   const primary = fields.primary ? cellOf(table, fields.primary, row) : null
   /*
    * The card shows the same chips as the overlay, and `compact` reaches only the thumbnail.
@@ -87,13 +87,13 @@ function NeuronRowImpl({
   return (
     <div className="explore-row" data-selected={selected || undefined}>
       <label className="explore-row__pick" title={selected ? 'Deselect' : 'Select'}>
-        <input type="checkbox" checked={selected} onChange={() => onToggle(bodyId)} />
+        <input type="checkbox" checked={selected} onChange={() => onToggle(neuronId)} />
       </label>
 
       <NeuronThumbnail
         sourceId={sourceId}
         datasetId={datasetId}
-        bodyId={bodyIdText}
+        neuronId={neuronIdText}
         size={compact ? 56 : 76}
       />
 
@@ -106,7 +106,7 @@ function NeuronRowImpl({
               ? 'untyped'
               : formatCell(primary, fields.primary)}
           </strong>
-          <span className="explore-row__id">{bodyIdText}</span>
+          <span className="explore-row__id">{neuronIdText}</span>
         </div>
         {secondary.length > 0 && (
           <div className="explore-row__sub">{secondary.join(' · ')}</div>

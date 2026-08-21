@@ -131,9 +131,9 @@ export function ExploreBody({ node, ctx, compact, setParam }: NodeBodyProps) {
   const selectionRef = useRef(selection)
   selectionRef.current = selection
   const toggle = useCallback(
-    (bodyId: number) => {
+    (neuronId: number) => {
       const next = new Set(selectionRef.current)
-      const key = String(bodyId)
+      const key = String(neuronId)
       if (next.has(key)) next.delete(key)
       else next.add(key)
       setParam('selection', [...next])
@@ -141,18 +141,18 @@ export function ExploreBody({ node, ctx, compact, setParam }: NodeBodyProps) {
     [setParam],
   )
 
-  const bodyIdAt = useCallback(
-    (row: number) => Number(table?.data['bodyId']?.[row] ?? 0),
+  const neuronIdAt = useCallback(
+    (row: number) => Number(table?.data['neuronId']?.[row] ?? 0),
     [table],
   )
 
   const selectRowsInto = useCallback(
     (rows: readonly number[]) => {
       const next = new Set(selection)
-      for (const row of rows) next.add(String(bodyIdAt(row)))
+      for (const row of rows) next.add(String(neuronIdAt(row)))
       setParam('selection', [...next])
     },
-    [selection, bodyIdAt, setParam],
+    [selection, neuronIdAt, setParam],
   )
 
   const selectVisible = useCallback(() => selectRowsInto(visible), [selectRowsInto, visible])
@@ -311,16 +311,16 @@ export function ExploreBody({ node, ctx, compact, setParam }: NodeBodyProps) {
               </div>
             ) : (
               visible.map((row) => {
-                const bodyId = bodyIdAt(row)
+                const neuronId = neuronIdAt(row)
                 return (
                   <NeuronRow
-                    key={bodyId}
+                    key={neuronId}
                     table={table}
                     row={row}
                     fields={fields}
                     sourceId={ref?.sourceId}
                     datasetId={ref?.datasetId}
-                    selected={selection.has(String(bodyId))}
+                    selected={selection.has(String(neuronId))}
                     onToggle={toggle}
                     compact={compact}
                   />

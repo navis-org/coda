@@ -52,7 +52,7 @@ registerEmitter('net.build', (ctx) => {
   )
 
   if (nodes) {
-    const nodeKey = ctx.column('nodeKey') ?? 'bodyId'
+    const nodeKey = ctx.column('nodeKey') ?? 'neuronId'
     lines.push(
       ``,
       // The node join is one row per node, so every column rides along — unlike the link
@@ -124,7 +124,7 @@ function shapingLines(ctx: EmitContext, out: string): string[] {
   if (idColumn) {
     // Nodes address columns by name, so a file whose author wrote `root_id` cannot meet
     // neuron data until it is renamed.
-    lines.push(`${out} = ${out}.rename(columns={${pyStr(idColumn)}: 'bodyId'})`)
+    lines.push(`${out} = ${out}.rename(columns={${pyStr(idColumn)}: 'neuronId'})`)
   }
   if (textColumns.length > 0) {
     // Widening only, and null stays null: `str(None)` is the four-letter word "None", which
@@ -181,8 +181,8 @@ registerEmitter('neuron.paths', (ctx) => {
         'reproduced here, so this is the unranked set.',
     ),
     `${out} = fetch_paths(`,
-    `    ${sources}['bodyId'].tolist(),`,
-    `    ${targets}['bodyId'].tolist(),`,
+    `    ${sources}['neuronId'].tolist(),`,
+    `    ${targets}['neuronId'].tolist(),`,
     `    min_weight=${minWeight},`,
     `    max_path_length=${maxHops},`,
     `    client=${c},`,
@@ -280,7 +280,7 @@ registerEmitter('neuron.nblast', (ctx) => {
   if (label) {
     lines.push(
       ...ctx.note(
-        `Coda labels the rows by "${label}"; this frame is indexed by body id, which is what ` +
+        `Coda labels the rows by "${label}"; this frame is indexed by neuron id, which is what ` +
           `every other navis call takes.`,
       ),
     )
@@ -566,8 +566,8 @@ registerEmitter('out.dendrogram', (ctx) => {
  * the node is one operation under two names.
  *
  * **`merge` compares by value and Coda compares as text**, which is the whole care in this
- * cell. An NBLAST labelled by body id produces the *string* `"722817260"` against an `int64`
- * column, so a plain `left_on='bodyId', right_on='label'` merges nothing at all — zero rows,
+ * cell. An NBLAST labelled by neuron id produces the *string* `"722817260"` against an `int64`
+ * column, so a plain `left_on='neuronId', right_on='label'` merges nothing at all — zero rows,
  * no error, on the single most common wiring. Both sides are cast to `str` into a scratch key
  * for that reason, which reproduces `joinTables`' `String(cell)` rule exactly.
  *
@@ -588,25 +588,25 @@ function labelsToNeuronsEmitter(ctx: EmitContext): string[] {
     ctx.require('numpy')
     return [
       ...ctx.note(
-        'No neuron table is wired on the canvas, so the labels are read as body ids — which ' +
+        'No neuron table is wired on the canvas, so the labels are read as neuron ids — which ' +
           'is what they are unless NBLAST was told to label by something else. Rows that are ' +
           'not usable ids are dropped, as they are in Coda.',
       ),
       `${out} = ${labels}.copy()`,
-      `${out}['bodyId'] = pd.to_numeric(${out}[${pyStr(labelColumn)}], errors='coerce')`,
-      `${out} = ${out}[${out}['bodyId'].notna()].drop(columns=[${pyStr(labelColumn)}])`,
-      `${out}['bodyId'] = ${out}['bodyId'].astype('int64')`,
-      // bodyId first, as the node emits it — a column order nothing depends on but everything
+      `${out}['neuronId'] = pd.to_numeric(${out}[${pyStr(labelColumn)}], errors='coerce')`,
+      `${out} = ${out}[${out}['neuronId'].notna()].drop(columns=[${pyStr(labelColumn)}])`,
+      `${out}['neuronId'] = ${out}['neuronId'].astype('int64')`,
+      // neuronId first, as the node emits it — a column order nothing depends on but everything
       // downstream is read by a person.
-      `${out} = ${out}[['bodyId'] + [c for c in ${out}.columns if c != 'bodyId']]`,
+      `${out} = ${out}[['neuronId'] + [c for c in ${out}.columns if c != 'neuronId']]`,
     ]
   }
 
-  const matchColumn = ctx.column('matchColumn') ?? 'bodyId'
+  const matchColumn = ctx.column('matchColumn') ?? 'neuronId'
   return [
     ...ctx.note(
       'Coda matches labels as text, so both sides go through a string key: an NBLAST labelled ' +
-        'by body id gives "722817260" against an int64 column, and merging those directly ' +
+        'by neuron id gives "722817260" against an int64 column, and merging those directly ' +
         'returns nothing at all.',
     ),
     `_left = ${neurons}.assign(_key=${neurons}[${pyStr(matchColumn)}].astype(str))`,

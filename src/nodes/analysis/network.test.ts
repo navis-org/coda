@@ -131,7 +131,7 @@ describe('BuildNetwork', () => {
       'hop',
       'direction',
     ])
-    // Merged across many neuron pairs, so there is no single body id behind this link. It is
+    // Merged across many neuron pairs, so there is no single neuron id behind this link. It is
     // emphatically *not* the sum of them, which is what summing numerics used to produce.
     expect(network.edges.data['preId']?.[0]).toBeNull()
 
@@ -238,7 +238,7 @@ describe('network viewer selection', () => {
     expect(selected.schema.columns.map((c) => c.name)).toContain('weightOut')
   })
 
-  it('nulls bodyId for a type-level selection rather than faking neurons', async () => {
+  it('nulls neuronId for a type-level selection rather than faking neurons', async () => {
     const sched = scheduler()
     let graph = pipeline()
     await sched.run(graph, { mode: 'full' })
@@ -247,9 +247,9 @@ describe('network viewer selection', () => {
 
     const selected = sched.output('view', 'selected')
     if (!isTableValue(selected)) throw new Error('expected a table')
-    // "LC4" is not a body id. Emitting null is honest; a fabricated id would fail silently
+    // "LC4" is not a neuron id. Emitting null is honest; a fabricated id would fail silently
     // three nodes downstream.
-    expect(selected.data.bodyId?.[0]).toBeNull()
+    expect(selected.data.neuronId?.[0]).toBeNull()
   })
 
   it('is NOT presentational — a selection change invalidates the node', async () => {

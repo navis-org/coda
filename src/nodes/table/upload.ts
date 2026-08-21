@@ -42,7 +42,7 @@ export const uploadTableNode = registerNode({
   category: 'utility',
   description: 'Bring in a CSV of your own — annotations, cell types, an embedding.',
   guide:
-    'Your own CSV: annotations, custom cell types, an embedding. The only node here with no inputs and no data source behind it. Delimiter, header and each column’s type are worked out from the file rather than configured, and naming an ID column renames it to bodyId so the result meets the rest of the app as neurons. The rows live in this browser rather than in the graph, so a .coda.json sent to a colleague arrives without them — the card says which file is missing and offers to pick it again.',
+    'Your own CSV: annotations, custom cell types, an embedding. The only node here with no inputs and no data source behind it. Delimiter, header and each column’s type are worked out from the file rather than configured, and naming an ID column renames it to neuronId so the result meets the rest of the app as neurons. The rows live in this browser rather than in the graph, so a .coda.json sent to a colleague arrives without them — the card says which file is missing and offers to pick it again.',
   // No network and no parse: `evaluate` is one IndexedDB read of an already-parsed table.
   cost: 'cheap',
   inputs: [],
@@ -73,14 +73,14 @@ export const uploadTableNode = registerNode({
       id: 'idColumn',
       kind: 'enum',
       label: 'ID column',
-      help: 'Renamed to bodyId, which is the name every neuron node looks for.',
+      help: 'Renamed to neuronId, which is the name every neuron node looks for.',
       default: '',
       options: (ctx) => {
         const schema = peekUploadSchema(String(ctx.params.dataId ?? ''))
         return [
           { value: '', label: 'none (plain table)' },
           // Identifiers only. A float is a measurement and a boolean is a flag; offering
-          // either would invite a Neurons table whose body ids are neither.
+          // either would invite a Neurons table whose neuron ids are neither.
           ...(schema?.columns ?? [])
             .filter((c) => c.dtype === 'i64' || c.dtype === 'str')
             .map((c) => ({ value: c.name, label: c.name })),

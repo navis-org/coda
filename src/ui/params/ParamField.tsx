@@ -405,7 +405,7 @@ interface IdsFieldProps {
  * Read-only summary of a viewer-written selection, plus a way to clear it.
  *
  * Deliberately not editable by hand: the ids come from clicking in a viewer, and a text
- * box inviting someone to type body ids would imply an editing path that does not exist.
+ * box inviting someone to type neuron ids would imply an editing path that does not exist.
  */
 function IdsField({ label, noun, ids, onChange }: IdsFieldProps) {
   return (

@@ -16,14 +16,14 @@ import { labelsToNeurons, labelsToNeuronsSchema } from './labelsToNeurons'
 /** Six neurons of three types, the shape an NBLAST labelled by type is clustered from. */
 function neurons(): TableValue {
   return tableFromRows(
-    tableSchema(column('bodyId', 'i64'), column('type', 'str'), column('status', 'str')),
+    tableSchema(column('neuronId', 'i64'), column('type', 'str'), column('status', 'str')),
     [
-      { bodyId: 11, type: 'LC4', status: 'Traced' },
-      { bodyId: 12, type: 'LC4', status: 'Traced' },
-      { bodyId: 21, type: 'LC6', status: 'Traced' },
-      { bodyId: 31, type: 'DNp01', status: 'Traced' },
-      { bodyId: 32, type: 'DNp01', status: 'Assign' },
-      { bodyId: 41, type: 'APL', status: 'Traced' },
+      { neuronId: 11, type: 'LC4', status: 'Traced' },
+      { neuronId: 12, type: 'LC4', status: 'Traced' },
+      { neuronId: 21, type: 'LC6', status: 'Traced' },
+      { neuronId: 31, type: 'DNp01', status: 'Traced' },
+      { neuronId: 32, type: 'DNp01', status: 'Assign' },
+      { neuronId: 41, type: 'APL', status: 'Traced' },
     ],
     'neurons',
   )
@@ -55,13 +55,13 @@ describe('matching against a neuron table', () => {
     // The point of the whole node when the tree is labelled by type: a clade of three types is
     // five neurons, and it is the neurons somebody wants in a 3D view.
     const out = run().neurons
-    expect(getColumn(out, 'bodyId')).toEqual([11, 12, 21, 31, 32])
+    expect(getColumn(out, 'neuronId')).toEqual([11, 12, 21, 31, 32])
   })
 
   it('carries every neuron column and every extra label column', () => {
     const out = run().neurons
     expect(out.schema.columns.map((c) => c.name)).toEqual([
-      'bodyId',
+      'neuronId',
       'type',
       'status',
       'cluster',
@@ -93,7 +93,7 @@ describe('matching against a neuron table', () => {
       neurons: neurons(),
       matchColumn: 'type',
     }).neurons
-    expect(getColumn(out, 'bodyId')).toEqual([11, 12, 31, 32])
+    expect(getColumn(out, 'neuronId')).toEqual([11, 12, 31, 32])
   })
 
   it('reports how many labels found anything, so a wrong Match on is visible', () => {
@@ -105,7 +105,7 @@ describe('matching against a neuron table', () => {
 
   it('matches as text, which is what makes a body-id label work at all', () => {
     /*
-     * An NBLAST labelled by body id produces the *string* "11" against an `i64` column. This is
+     * An NBLAST labelled by neuron id produces the *string* "11" against an `i64` column. This is
      * the default wiring, so comparing by value would fail on the common case rather than an
      * exotic one — the same `String(cell)` rule `joinTables` follows.
      */
@@ -117,9 +117,9 @@ describe('matching against a neuron table', () => {
       labels: byId,
       labelColumn: 'label',
       neurons: neurons(),
-      matchColumn: 'bodyId',
+      matchColumn: 'neuronId',
     }).neurons
-    expect(getColumn(out, 'bodyId')).toEqual([11, 41])
+    expect(getColumn(out, 'neuronId')).toEqual([11, 41])
   })
 
   it('takes the first row for a repeated label rather than multiplying neurons', () => {
@@ -179,13 +179,13 @@ describe('with no neuron table, the labels are ids', () => {
   it('reads them straight off, which is the default NBLAST wiring', () => {
     const out = labelsToNeurons({ labels: byId(), labelColumn: 'label' }).neurons
     expect(out.kind).toBe('neurons')
-    expect(getColumn(out, 'bodyId')).toEqual([722817260, 11])
+    expect(getColumn(out, 'neuronId')).toEqual([722817260, 11])
     expect(getColumn(out, 'cluster')).toEqual([1, 2])
   })
 
-  it('puts bodyId first, since that is the column it exists to produce', () => {
+  it('puts neuronId first, since that is the column it exists to produce', () => {
     expect(labelsToNeurons({ labels: byId(), labelColumn: 'label' }).neurons.schema.columns[0]!.name).toBe(
-      'bodyId',
+      'neuronId',
     )
   })
 
@@ -200,7 +200,7 @@ describe('with no neuron table, the labels are ids', () => {
       { label: '11' },
     ])
     const result = labelsToNeurons({ labels: types, labelColumn: 'label' })
-    expect(getColumn(result.neurons, 'bodyId')).toEqual([11])
+    expect(getColumn(result.neurons, 'neuronId')).toEqual([11])
     expect(result.dropped).toBe(1)
     expect(result.matched).toBe(1)
   })
@@ -238,7 +238,7 @@ describe('the schema, which infer and evaluate share', () => {
     const inferred = labelsToNeuronsSchema(clusters().schema, 'label', undefined, '_c')
     const ran = labelsToNeurons({ labels: clusters(), labelColumn: 'label' }).neurons
     expect(inferred?.columns.map((c) => c.name)).toEqual(ran.schema.columns.map((c) => c.name))
-    expect(inferred?.columns[0]!.name).toBe('bodyId')
+    expect(inferred?.columns[0]!.name).toBe('neuronId')
   })
 
   it('answers nothing when the labels table is not known yet', () => {

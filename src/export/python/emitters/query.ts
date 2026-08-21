@@ -21,7 +21,8 @@ import type { EmitContext } from '../types'
 
 /** What "neuPrint" means unless a node says otherwise. */
 const DEFAULT_DEPLOYMENT = 'https://neuprint.janelia.org'
-import { bodyIds } from './common'
+import { neuprintProperty } from '../../../data/neuprint/schema'
+import { codaNeurons, neuronIds } from './common'
 
 // ---------------------------------------------------------------------------
 // Dataset
@@ -153,6 +154,7 @@ registerEmitter('neuron.findNeurons', (ctx) => {
   criteria.push(`client=${c}`)
 
   const lines: string[] = []
+  // The ternary is only about line wrapping, so the normalisation sits outside it.
   const call =
     criteria.length <= 2
       ? [`${out}, _ = fetch_neurons(NeuronCriteria(${criteria.join(', ')}), client=${c})`]
@@ -164,7 +166,7 @@ registerEmitter('neuron.findNeurons', (ctx) => {
           `    client=${c},`,
           `)`,
         ]
-  lines.push(...call)
+  lines.push(...call, codaNeurons(ctx, out))
 
   if (minSize > 0) {
     // NeuronCriteria has no size field, so Coda's server-side cut becomes a filter on the
@@ -198,14 +200,14 @@ registerEmitter('neuron.inputIds', (ctx) => {
 
   if (literal && wired) {
     ctx.require('pandas')
-    const column = ctx.column('column') ?? 'bodyId'
+    const column = ctx.column('column') ?? 'neuronId'
     lines.push(
       `_ids = sorted(set(`,
       ...pyLongIntList(parsed.ids).map((l) => `    ${l}`),
       `) | set(${wired}[${pyStr(column)}].dropna().astype(int)))`,
     )
   } else if (wired) {
-    const column = ctx.column('column') ?? 'bodyId'
+    const column = ctx.column('column') ?? 'neuronId'
     lines.push(`_ids = ${wired}[${pyStr(column)}].dropna().astype(int).tolist()`)
   } else {
     lines.push(`_ids = `.concat(pyLongIntList(parsed.ids).join('\n')))
@@ -213,14 +215,14 @@ registerEmitter('neuron.inputIds', (ctx) => {
 
   if (!c) {
     // Unwired, the node is a one-column table of the ids themselves — which is enough for
-    // everything downstream that reaches its ids through `bodyId` and reads nothing else.
+    // everything downstream that reaches its ids through `neuronId` and reads nothing else.
     ctx.require('pandas')
     return [
       ...lines,
       ...ctx.note(
         'No Dataset is wired, so this is the ids alone — exactly what the node emits.',
       ),
-      `${out} = pd.DataFrame({'bodyId': _ids})`,
+      `${out} = pd.DataFrame({'neuronId': _ids})`,
     ]
   }
 
@@ -228,6 +230,7 @@ registerEmitter('neuron.inputIds', (ctx) => {
   return [
     ...lines,
     `${out}, _ = fetch_neurons(NeuronCriteria(bodyId=_ids, client=${c}), client=${c})`,
+    codaNeurons(ctx, out),
   ]
 })
 
@@ -259,9 +262,14 @@ registerEmitter('neuron.idsFromLabel', (ctx) => {
     lines.push(`_labels = ${pyList(typed)}`)
   }
 
-  // NeuronCriteria's kwargs are the neuron's own properties, so the field chosen on the node
-  // becomes the keyword. `class` is spelled `class_` in the Python API.
-  const kw = field === 'class' ? 'class_' : field
+  /*
+   * NeuronCriteria's kwargs are the neuron's own *neuPrint* properties, so the field chosen on
+   * the node has to cross the same vocabulary seam `labelClause` puts it through — the id column
+   * is `neuronId` here and `bodyId` there, and `NeuronCriteria(neuronId=…)` is a TypeError.
+   * `class_` is a separate and genuinely local concern: a Python reserved word, not a rename.
+   */
+  const property = neuprintProperty(field)
+  const kw = property === 'class' ? 'class_' : property
   const criteria = [`${kw}=_labels`]
   if (status) criteria.push(`status=${pyStr(status)}`)
   if (regex) criteria.push('regex=True')
@@ -281,6 +289,7 @@ registerEmitter('neuron.idsFromLabel', (ctx) => {
     `    NeuronCriteria(${criteria.join(', ')}),`,
     `    client=${c},`,
     `)`,
+    codaNeurons(ctx, out),
   )
   return lines
 })
@@ -304,12 +313,15 @@ registerEmitter('neuron.adjacency', (ctx) => {
   )
   const out = ctx.output('matrix')
   const byType = ctx.params.groupByType !== false
+  // neuprint-python's own vocabulary, not Coda's: `connection_table_to_matrix` appends
+  // `_pre`/`_post` to this itself, and the columns it is indexing are `fetch_adjacencies`'
+  // output — which `merge_neuron_properties` has just written `bodyId_pre`/`bodyId_post` into.
   const group = byType ? 'type' : 'bodyId'
 
   return [
     `_neurons, _conn = fetch_adjacencies(`,
-    `    NeuronCriteria(bodyId=${bodyIds(sources)}, client=${c}),`,
-    `    NeuronCriteria(bodyId=${bodyIds(targets)}, client=${c}),`,
+    `    NeuronCriteria(bodyId=${neuronIds(sources)}, client=${c}),`,
+    `    NeuronCriteria(bodyId=${neuronIds(targets)}, client=${c}),`,
     `    client=${c},`,
     `)`,
     `_conn = merge_neuron_properties(_neurons, _conn, ['type'])`,
@@ -337,9 +349,10 @@ registerEmitter('neuron.roiCounts', (ctx) => {
         'to `fetch_primary_rois(client=...)` before summing, or the totals roughly double.',
     ),
     `_, ${out} = fetch_neurons(`,
-    `    NeuronCriteria(bodyId=${bodyIds(neurons)}, client=${c}),`,
+    `    NeuronCriteria(bodyId=${neuronIds(neurons)}, client=${c}),`,
     `    client=${c},`,
     `)`,
+    codaNeurons(ctx, out),
   ]
 })
 
@@ -382,7 +395,7 @@ registerEmitter('neuron.skeletons', (ctx) => {
   ctx.require('navisNeuprint')
   const out = ctx.output('skeletons')
   const limit = Number(ctx.params.limit ?? 0)
-  const ids = limit > 0 ? `${neurons}['bodyId'].head(${limit}).tolist()` : bodyIds(neurons)
+  const ids = limit > 0 ? `${neurons}['neuronId'].head(${limit}).tolist()` : neuronIds(neurons)
 
   return [
     `${out} = neu.fetch_skeletons(`,
@@ -401,7 +414,7 @@ registerEmitter('neuron.meshes', (ctx) => {
   ctx.require('navisNeuprint')
   const out = ctx.output('meshes')
   const limit = Number(ctx.params.limit ?? 0)
-  const ids = limit > 0 ? `${neurons}['bodyId'].head(${limit}).tolist()` : bodyIds(neurons)
+  const ids = limit > 0 ? `${neurons}['neuronId'].head(${limit}).tolist()` : neuronIds(neurons)
 
   return [
     // Coda's `Detail` is a triangle budget it spends across the batch, choosing the finest
@@ -435,10 +448,11 @@ registerEmitter('neuron.synapses', (ctx) => {
 
   return [
     `${out} = fetch_synapses(`,
-    `    NeuronCriteria(bodyId=${bodyIds(neurons)}, client=${c}),`,
+    `    NeuronCriteria(bodyId=${neuronIds(neurons)}, client=${c}),`,
     `    SynapseCriteria(${synCriteria.join(', ')}),`,
     `    client=${c},`,
     `)`,
+    codaNeurons(ctx, out),
   ]
 })
 

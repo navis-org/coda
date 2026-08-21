@@ -4686,7 +4686,7 @@ a.viewer-actions__btn {
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  /* Shrinks before the name does: a body id is recoverable from the pin, a name is what you
+  /* Shrinks before the name does: a neuron id is recoverable from the pin, a name is what you
      are reading. */
   overflow: hidden;
   text-overflow: ellipsis;

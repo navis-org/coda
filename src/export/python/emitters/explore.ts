@@ -10,7 +10,7 @@
 
 import { pyLongList, pyStr } from '../py'
 import { registerEmitter, registerHelper } from '../registry'
-import { selectionIds } from './common'
+import { codaNeurons, selectionIds } from './common'
 
 registerEmitter('neuron.explore', (ctx) => {
   const c = ctx.wired('dataset')
@@ -32,6 +32,7 @@ registerEmitter('neuron.explore', (ctx) => {
         'that is around 165,000 rows; expect this cell to take a few seconds.',
     ),
     `${all}, _ = fetch_neurons(NeuronCriteria(client=${c}), client=${c})`,
+    codaNeurons(ctx, all),
   ]
 
   if (query) {
@@ -69,7 +70,7 @@ registerEmitter('neuron.explore', (ctx) => {
     // refining a search must not drop a neuron somebody already chose.
     lines.push(
       `_selected_ids = ${pyLongList(selection).join('\n')}`,
-      `${selected} = ${all}[${all}['bodyId'].isin(_selected_ids)]`,
+      `${selected} = ${all}[${all}['neuronId'].isin(_selected_ids)]`,
     )
   }
 
@@ -169,11 +170,11 @@ registerHelper({
     'def _coda_haystack(df):',
     '    """Lowercase text of every searchable column, one string per row.',
     '',
-    '    String columns and bodyId only -- so a bare "1200" finds a body id and does not',
+    '    String columns and neuronId only -- so a bare "1200" finds a neuron id and does not',
     '    also match every neuron with 1200 synapses.',
     '    """',
     '    cols = [c for c in df.columns',
-    '            if df[c].dtype == object or str(c) == "bodyId"]',
+    '            if df[c].dtype == object or str(c) == "neuronId"]',
     '    if not cols:',
     '        return pd.Series([""] * len(df), index=df.index)',
     '    parts = [df[c].fillna("").astype(str) for c in cols]',

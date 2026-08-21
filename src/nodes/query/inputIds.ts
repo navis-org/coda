@@ -17,7 +17,7 @@ import { ID_ONLY_SCHEMA } from '../lib/tableOps'
  *
  * Unwired, the node emits the ids as a one-column `Neurons` table and touches no network. That
  * is already enough for most of what a list of ids is *for*: `Connectivity`, `Skeletons`,
- * `Meshes`, `Synapses` and `ROI Counts` all reach their ids through `idColumn(table, 'bodyId')`
+ * `Meshes`, `Synapses` and `ROI Counts` all reach their ids through `idColumn(table, 'neuronId')`
  * and read nothing else off the row.
  *
  * Wired, it fetches the full neuron rows, which buys two things the id column cannot: the
@@ -44,7 +44,7 @@ export const inputIdsNode = registerNode({
   category: 'query',
   description: 'A list of neuron IDs, typed or pasted, as a table.',
   guide:
-    'Body IDs you already have — from a paper, a spreadsheet, a colleague. Paste them in any form; brackets, quotes, commas and newlines are all separators, so a Python list or a spreadsheet column goes straight in. The Dataset input is optional: without it the IDs come out as a one-column table, which is already enough for Connectivity or Skeletons; with it you get the full neuron rows and, more usefully, a count of which IDs the dataset has never heard of.',
+    'Neuron IDs you already have — from a paper, a spreadsheet, a colleague. Paste them in any form; brackets, quotes, commas and newlines are all separators, so a Python list or a spreadsheet column goes straight in. The Dataset input is optional: without it the IDs come out as a one-column table, which is already enough for Connectivity or Skeletons; with it you get the full neuron rows and, more usefully, a count of which IDs the dataset has never heard of.',
   cost: 'expensive',
   inputs: [
     // Optional on both: a typed list alone is a complete question, and a node unusable until
@@ -69,7 +69,7 @@ export const inputIdsNode = registerNode({
       label: 'ID column',
       help: 'Which column of the wired table holds the ids.',
       from: 'ids',
-      default: 'bodyId',
+      default: 'neuronId',
       optional: true,
     },
   ],
@@ -101,7 +101,7 @@ export const inputIdsNode = registerNode({
     // empty table of the right schema, and this line says which of the two it is.
     if (parsed.ids.length === 0 && !ctx.inputs.ids) return ['No IDs yet — type or paste some']
     /*
-     * With no Dataset the ids *are* the output, and that output's `bodyId` is an `i64` column —
+     * With no Dataset the ids *are* the output, and that output's `neuronId` is an `i64` column —
      * a JS number — so an id wider than `Number.MAX_SAFE_INTEGER` cannot be held exactly and
      * would identify a different neuron downstream. Wired, nothing here rounds: the id crosses
      * the seam as text and the source publishes whatever dtype it uses.
@@ -154,7 +154,7 @@ export const inputIdsNode = registerNode({
 
     /*
      * Empty is empty, never everything — the inversion `IDs from Label` documents, and the
-     * reason `FindNeuronsRequest.bodyIds` says so at the seam as well. An unconfigured node
+     * reason `FindNeuronsRequest.neuronIds` says so at the seam as well. An unconfigured node
      * firing an unbounded `MATCH (n:Neuron)` at a shared production Neo4j is a hazard, not a
      * default. Answered here without a query at all.
      */
@@ -171,12 +171,12 @@ export const inputIdsNode = registerNode({
     if (!dataset) {
       ctx.progress(1)
       return {
-        // `Number`, because `ID_ONLY_SCHEMA` declares `bodyId` as `i64` and invariant 3 is
+        // `Number`, because `ID_ONLY_SCHEMA` declares `neuronId` as `i64` and invariant 3 is
         // that the schema half and the value half agree. Exact for every id this branch can
         // usefully carry; `validate` warns about the ones it cannot.
         neurons: tableFromRows(
           ID_ONLY_SCHEMA,
-          collected.ids.map((bodyId) => ({ bodyId: Number(bodyId) })),
+          collected.ids.map((neuronId) => ({ neuronId: Number(neuronId) })),
           'neurons',
         ),
       }
@@ -185,7 +185,7 @@ export const inputIdsNode = registerNode({
     ctx.progress(0.2, 'looking up')
     const table = await ctx.resolveSource(dataset.sourceId).findNeurons({
       datasetId: dataset.datasetId,
-      bodyIds: collected.ids,
+      neuronIds: collected.ids,
       signal: ctx.signal,
     })
     ctx.progress(1)

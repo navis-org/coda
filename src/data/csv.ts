@@ -167,7 +167,7 @@ function looksNumeric(text: string): boolean {
  * An integer only when the text survives a round trip.
  *
  * `007` and `0012` are how a zero-padded code is written, and reading them as 7 and 12 loses
- * the thing that made them identifiers; body ids past `Number.MAX_SAFE_INTEGER` come back as a
+ * the thing that made them identifiers; neuron ids past `Number.MAX_SAFE_INTEGER` come back as a
  * different number entirely. Both round-trip badly, so both stay text — which is lossless, and
  * is why the `Text columns` override never has to rescue a value, only a *reading* of one.
  */
@@ -269,7 +269,7 @@ function uniqueNames(raw: string[]): string[] {
  */
 export function parseDelimited(text: string): ParsedTable {
   // A BOM survives every editor and would otherwise become part of the first column's name,
-  // so a file saved from Excel has a `bodyId` nothing matches.
+  // so a file saved from Excel has a first column no picker can find.
   const body = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text
 
   const delimiter = detectDelimiter(body)

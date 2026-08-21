@@ -671,7 +671,7 @@ export function validateColumnParams(def: NodeDefinition, ctx: InferContext): st
          * An optional picker answers *off*, so naming a fallback would be a false statement
          * rather than merely a loud one — and a stored value still equal to the definition's
          * own default was never a decision anybody made, so there is no drift to report.
-         * `out.scatter` declares `bodyId` so a neuron table needs no configuring; on a table
+         * `out.scatter` declares `neuronId` so a neuron table needs no configuring; on a table
          * without one it means row positions, which is the node working.
          *
          * A name somebody chose is now *kept* rather than substituted, so the singular says

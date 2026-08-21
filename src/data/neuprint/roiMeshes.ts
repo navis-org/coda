@@ -141,8 +141,7 @@ export async function fetchRoiMeshSet(
       done++
       options.onProgress?.(done / Math.max(1, rois.length), roi)
       return {
-        bodyId: 0,
-        label: roi,
+        id: roi,
         // In place: `decimateMesh` returned a fresh array unless it had nothing to merge, and in
         // that case the array is the parse's own and equally ours to scale.
         positions: scalePositions(reduced.positions, scale),

@@ -360,7 +360,7 @@ function shapingLines(ctx: EmitContext, out: string): string[] {
 
   if (idColumn) {
     ctx.library('dplyr')
-    lines.push(`${out} <- ${out} |> rename(bodyId = ${col(idColumn)})`)
+    lines.push(`${out} <- ${out} |> rename(neuronId = ${col(idColumn)})`)
   }
   if (textColumns.length > 0) {
     ctx.library('dplyr')

@@ -75,7 +75,7 @@ const MANC: NgScene = {
 describe('finding the layer that holds neurons', () => {
   it('picks the layer named after the dataset, not the first segmentation layer', () => {
     // male-CNS ships thirty segmentation layers — ROI shells, nuclei, cross-dataset mesh
-    // overlays. Writing body ids into `brain-shell` displays nothing, with nothing to blame.
+    // overlays. Writing neuron ids into `brain-shell` displays nothing, with nothing to blame.
     const scene: NgScene = {
       layers: [
         {
@@ -166,7 +166,7 @@ describe('pointing a scene at segments', () => {
   })
 
   it('can strip back to the neuron layer alone', () => {
-    // male-CNS publishes 38 kB of state before a single body id is added. Worth having
+    // male-CNS publishes 38 kB of state before a single neuron id is added. Worth having
     // until you want to paste the link somewhere.
     const scene = buildScene(MANC, {
       datasetId: 'manc:v1.2.3',

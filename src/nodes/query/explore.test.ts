@@ -93,7 +93,7 @@ describe('Explore: the All port', () => {
 
   it('does not disturb the two ports every existing graph is wired to', async () => {
     const { hits, selected, all } = await ports({ query: 'LC4' })
-    const ids = (t: TableValue) => (t.data.bodyId ?? []).slice(0, 2)
+    const ids = (t: TableValue) => (t.data.neuronId ?? []).slice(0, 2)
     // Nothing ticked, so Selected stays empty however much the other two carry.
     expect(selected.length).toBe(0)
     expect(hits.length).toBeGreaterThan(0)

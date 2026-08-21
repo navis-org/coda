@@ -152,19 +152,12 @@ export function elementLabel(v: IterableValue, index: number): string {
   if (isTableValue(v)) return labelFromRow(v, i)
 
   /*
-   * The geometry's own `bodyId` first, not the attribute table's — because the two are
-   * index-aligned here and the geometry cannot be re-ordered by something upstream, where an
-   * attribute table can, and a silhouette labelled with the wrong neuron's id is worse than
-   * one labelled with none.
-   *
-   * Note this is a *label*, not an identity. Identity lives in the attribute table's row (see
-   * `MeshGeometry.bodyId` and invariant 8): the geometry's `bodyId` is a number, so on a source
-   * whose ids do not fit in one it is the rounded copy. Fine for a readout, wrong for a join —
-   * do not read this comment as licence to key anything on it.
+   * The geometry's own id first, not the attribute table's — the two are index-aligned here
+   * and the geometry cannot be re-ordered by something upstream, where an attribute table can,
+   * and a silhouette labelled with the wrong neuron's id is worse than one labelled with none.
    */
-  const bodyId = v.items[i]?.bodyId
-  const name = labelFromRow(v.attributes, i, ['bodyId'])
-  const id = bodyId === undefined ? '' : String(bodyId)
+  const id = v.items[i]?.id ?? ''
+  const name = labelFromRow(v.attributes, i, ['neuronId'])
   return name && name !== id ? `${name} ${id}`.trim() : id
 }
 
@@ -176,9 +169,9 @@ function labelFromRow(table: TableValue, index: number, skip: string[] = []): st
     const value = row[name]
     if (value !== null && value !== undefined && value !== '') return String(value)
   }
-  if (!skip.includes('bodyId')) {
-    const bodyId = row['bodyId']
-    if (bodyId !== null && bodyId !== undefined && bodyId !== '') return String(bodyId)
+  if (!skip.includes('neuronId')) {
+    const neuronId = row['neuronId']
+    if (neuronId !== null && neuronId !== undefined && neuronId !== '') return String(neuronId)
   }
   for (const col of table.schema.columns) {
     if (skip.includes(col.name)) continue

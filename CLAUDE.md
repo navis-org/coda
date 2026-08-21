@@ -81,7 +81,7 @@ bundled corepack, so pnpm was installed with `npm i -g pnpm`.
    vanished, so the ordinary `is gone — using "x"` names a fallback that will not be taken,
    which is a false statement rather than a loud one. **A default was never a decision:** an
    optional picker still holding the value the definition declared has no drift to report,
-   which is what lets `out.scatter` declare `idColumn: 'bodyId'` — configuring nothing on a
+   which is what lets `out.scatter` declare `idColumn: 'neuronId'` — configuring nothing on a
    neuron table, meaning row positions elsewhere — without a badge either way. A column
    somebody _chose_ is still reported, optional or not: `out.network`'s link label drawing
    nothing is exactly the silent failure the check exists for.
@@ -96,7 +96,7 @@ bundled corepack, so pnpm was installed with `npm i -g pnpm`.
 
 8. **A neuron id crosses the `DataSource` seam as text, never as a number.** `NeuronId` in
    `data/source.ts` is a `string` of decimal digits, and every request field that names neurons
-   (`bodyIds`, `sourceIds`, `targetIds`, `bodyId`) is typed with it.
+   (`neuronIds`, `sourceIds`, `targetIds`, `neuronId`) is typed with it.
 
    `CellValue` is a JS number, so an `i64` column is really a float64. neuPrint's ids are nine
    to eleven digits and comfortably exact; a CAVE root id is eighteen and is not —
@@ -133,17 +133,102 @@ bundled corepack, so pnpm was installed with `npm i -g pnpm`.
    length-then-lexicographic: numeric order for non-negative integers of any width, where
    `Number(a) - Number(b)` reports two adjacent wide ids as equal.
 
-   What this does **not** change is what a source _publishes_. neuPrint still declares `bodyId`
-   as `i64` and pushes numbers into it, because for its ids that is exact and true; a CAVE
-   source will declare `str`. `idColumn` reads either. The still-open half is that
-   `SkeletonGeometry.bodyId` and `MeshGeometry.bodyId` remain numbers — they are draw and
-   export keys, and identity lives in the attribute table row, which is why that is a separate
-   change rather than this one.
+   What this does **not** change is what a source _publishes_ as a **dtype**. neuPrint's ids are
+   exact as doubles, so its `neuronId` column is `i64` and holds numbers; a CAVE source will
+   declare `str`. `idColumn` reads either.
+
+   **The column is called `neuronId`, and that is Coda's word rather than any backend's.** It
+   used to be `bodyId`, which is neuPrint's property name, and it is the one column every node
+   addresses *by name* — `out.profile` validates on it, Connectivity, Skeletons, Meshes and
+   Synapses all reach their ids through `idColumn(table, 'neuronId')` — so it is the one that has
+   to be Coda's vocabulary. Everything else in a neuron table is a passthrough that only a column
+   picker ever names. The precedent is `preId`/`postId`, which Coda has always coined: neuPrint
+   answers `RETURN n.bodyId, n.type, p.bodyId, p.type, w.weight` and nobody reads those two as
+   neuPrint-flavoured.
+
+   The name itself is `ID_COLUMN_NAME` in `core/ids.ts`, beside the grammar and for the same
+   reason: the *name* is a cross-layer agreement exactly as the *format* is, and a disagreement is
+   silent. It links only the places where that silence bites — `idColumn` and `rowsWithIds`
+   default to it, `ID_ONLY_SCHEMA` is made of it, Upload Table renames onto it, and
+   `neuprint/schema.ts` keys its property table on it. It is deliberately **not** threaded through
+   every `'neuronId'` in the tree: a node's param default is a value somebody may change rather
+   than a definition, and a constant honoured at a fifth of its sites implies a discipline nobody
+   keeps. (It cannot live in `tableOps.ts`, where it started — `src/data` may not import
+   `src/nodes`, so it could not reach the neuPrint seam from there.)
+
+   **Each backend maps into it at its own edge**, which is invariant 8's shape again and the same
+   thing Upload Table's `ID column` has always done. For neuPrint that seam is one table,
+   `PROPERTY_NAMES` in `neuprint/schema.ts`, read in **both** directions because each fails
+   silently on its own: `neuprintProperty` builds the `RETURN` list — and `RETURN n.neuronId` is
+   valid Cypher against a property that does not exist, so every id comes back `null` — while
+   `CORE_NAMES` carries both spellings, which stops discovery offering `bodyId` as a *newly
+   found* property and putting the id in every neuron table twice under two names.
+   `NEURON_COLUMNS` derives that `RETURN` list from the canonical schema rather than restating
+   it, so it broke the instant the column was renamed; `neuprint.test.ts` asserts the query text,
+   which is what caught it.
+
+   **`neuprintProperty` has four call sites and two of them are in the exporters**, which is the
+   easy half to miss: `NEURON_COLUMNS` and `labelClause` in `cypher.ts`, plus the `idsFromLabel`
+   emitter in each language, because `neuprint_search(field = …)` and `NeuronCriteria(<field>=…)`
+   both take a *picked column name* straight to a neuPrint API. Unreachable on neuPrint today —
+   that picker offers `str` columns and the id is `i64` — and live the moment a CAVE source
+   publishes a `str` id, where R's version matches nothing at all with no error. Those two are
+   the first `src/export → src/data` imports in the tree; one table beats a third copy.
+
+   **Raw Cypher is deliberately exempt**: `inferTableFromCypher` names columns after the
+   expression the user typed, so `RETURN n.bodyId` really does yield a column called `bodyId`.
+   `RETURN n.bodyId AS neuronId` is what makes one meet a Neurons socket, and the node's own
+   example does exactly that.
+
+   The cost was taken knowingly: a saved graph loses any column param somebody had explicitly set
+   to `bodyId`. It fails loudly rather than silently — `resolveColumn`'s rule 2 keeps the stored
+   name and `validateColumnParams` reports `Missing column: bodyId` — and a value still equal to
+   a declared default falls back on its own, so `out.scatter`'s `idColumn` self-heals. There is
+   no migration shim, on the doctrine that a shim is how a symbol acquires a second spelling.
+
+   **Geometry carries the id too, as plain `id`, and the rename there is the interesting half.**
+   `SkeletonGeometry` and `MeshGeometry` held a `number`, which was the rounded copy of the
+   attribute table's exact id on any source whose ids do not fit in a double — benign on neuPrint
+   and the mock, and an empty selection on CAVE, because `Viewer3D` compares it by string against
+   `rowsWithIds` and both morphology exporters key filenames on it. It is still a **draw and
+   export key** and not the identity; that stays in the attribute row, which is the only place a
+   type, a status and a unit can ride along. It is `id` rather than `neuronId` because a region
+   mesh is not a neuron.
+
+   `MeshGeometry.label` is gone, absorbed into that field. A region mesh has no neuron id, so the
+   number was `0` for every one of them while `label` carried `ME(R)` — and every consumer
+   without exception wrote `label ?? String(bodyId)`. A distinction erased at every use site is
+   not one, and it only collapsed once the id had become text.
+
+   The one knock-on worth knowing is `knnTable`, which builds `queryId`/`targetId` from a
+   skeleton set. It reads them out of the **attribute table** rather than off the geometry, and
+   takes that column's dtype with them, so a `queryId` is the same value _and type_ as the
+   `neuronId` that fed it. Deciding a dtype here instead would mean choosing between rounding a
+   wide id back into an `i64` and handing every neuPrint user a text column where a number used
+   to be — which changes what a bare `527536` means in a Table filter and how the column sorts.
+   `inferOutputs` reads the same dtype off the input _type_, which is invariant 3 across a seam
+   the source rather than the node decides.
 
    Both emitters had to learn it too, and each fails silently otherwise: `pyLongIntList` emits
    unquoted Python integers because `NeuronCriteria(bodyId=['1001'])` matches nothing, and the R
    emitter emits a **character** vector because R's default numeric is a double. The golden
    files caught both.
+
+   Both also normalise the id column at their own seam, and `coda_neurons` is now a helper in
+   **each** language rather than only in R. On the Python side it goes through
+   `codaNeurons(ctx, frame)` in `emitters/common.ts`, which declares the helper *and* emits the
+   call, because those are two separate acts at a call site and `resolveHelpers` only writes out
+   what was asked for — so a site that emits the call and forgets `ctx.helper` produces a notebook
+   referring to a function nothing defines, invisible to the golden file because some other node
+   in the fixture happened to request it. `neuron.roiCounts` had already lost the pairing that
+   way. The rule: neuprint-python publishes `bodyId` and neuprintr
+   publishes `bodyid`, so an unrenamed frame meets the next generated cell — a Filter, a Group
+   By, anything carrying a column param — addressing a column it does not have. Note the
+   asymmetry that keeps the emitted code readable: the *argument* stays the library's, so a call
+   reads `NeuronCriteria(bodyId=df['neuronId'].tolist())`. Coda's column goes in, neuPrint's
+   parameter takes it. `bodyId_pre`/`bodyId_post` are untouched for the same reason — they are
+   pandas suffixes on `fetch_adjacencies`' own frame — and so is
+   `connection_table_to_matrix(conn, 'bodyId')`, which appends `_pre`/`_post` itself.
 
 ## Gotchas found the hard way
 
@@ -309,14 +394,14 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `ui/viewers/networkDraw.test.ts`         | reciprocal curvature, arrow geometry, the exported SVG                                                                           |
 | `ui/viewers/networkStyle.test.ts`        | focus/ego sets, dimming (hue kept, theme-flipped), and what a tooltip decides to say                                             |
 | `ui/viewers/networkViewer.test.tsx`      | the caption: counts, the label-thinning admission, size refusal                                                                  |
-| `data/neuprint/neuprint.test.ts`         | Cypher building/escaping, response decoding, schema discovery, mesh-source resolution, nm conversion                             |
+| `data/neuprint/neuprint.test.ts`         | Cypher building/escaping, response decoding, both halves of the `bodyId`→`neuronId` seam, schema discovery, mesh-source resolution, nm conversion |
 | `data/precomputed/precomputed.test.ts`   | shard lookup, multi-LOD manifest, Draco decode, legacy fragments, CORS fallback                                                  |
 | `nodes/query/morphology.test.ts`         | the shared `Max neurons` ceiling and what its refusal message blames                                                             |
 | `ui/nodes/nodeRunRing.test.tsx`          | run-indicator arithmetic: dash fractions, the zero floor, indeterminate mode                                                     |
 | `ui/nodes/runRing.placement.test.tsx`    | that the outline renders outside the clipped card (slow mock, so 'running' is observable)                                        |
 | `nodes/analysis/network.test.ts`         | BuildNetwork semantics + the selection round-trip                                                                                |
 | `nodes/analysis/nblast.test.ts`          | the units conversion above all, plus the flattening, the labels, the ceiling, the voxel refusal, and every control reaching the request |
-| `nodes/analysis/nblastKnn.test.ts`       | the k-NN shape: the rectangle laid out long, the padding dropped and counted, and the id columns named so a body id is not a quantity |
+| `nodes/analysis/nblastKnn.test.ts`       | the k-NN shape: the rectangle laid out long, the padding dropped and counted, and the id columns named so a neuron id is not a quantity |
 | `core/values.test.ts`                    | what a node footer says about a geometry value: its units printed always, and voxels-vs-unknown told apart                        |
 | `nodes/lib/linkageOps.test.ts`           | the tree ops: the square-but-not-one-population refusal, exactly-k against a tie, clusters numbered in leaf order, the copied buffer |
 | `nodes/analysis/linkage.test.ts`         | the three nodes: every control reaching the request, the cut carried on the pass-through, and a restyle costing no run             |
@@ -387,7 +472,7 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `nodes/table/sample.test.ts`             | the four sampling modes, a draw reproduced from its seed, and the seed costing nothing in the other three                        |
 | `data/csv.test.ts`                       | reading somebody else's file: quoting, delimiter-by-consistency, header bias, and every value the parse refuses to widen         |
 | `data/uploads.test.ts`                   | the store against real IndexedDB: content addressing incl. a separator collision, a write that rejects, and the peek's one read  |
-| `nodes/table/upload.test.ts`             | the node: the schema arriving by peek, the bodyId rename, what a graph opened elsewhere says, and the filename costing nothing   |
+| `nodes/table/upload.test.ts`             | the node: the schema arriving by peek, the neuronId rename, what a graph opened elsewhere says, and the filename costing nothing   |
 | `ui/nodes/uploadBody.test.tsx`           | the card's four states — and that 'looking' is never printed as 'not here' — plus the size ceiling refusing before it reads      |
 | `nodes/table/fromUrl.test.ts`            | the fetch: deferred by the auto pass, Refresh as the only re-fetch, the schema keyed by URL, and what each refusal blames        |
 | `nodes/lib/idList.test.ts`               | reading pasted ids: every separator, a bad token refusing the list, an eighteen-digit id kept exactly, and the 19-digit ceiling  |
@@ -500,7 +585,7 @@ Three findings, each of which was a wrong answer before it was checked:
   before being believed.
 - **`coda_search` was cross-checked against `runSearch`** over 23 queries covering the rules
   that are easy to lose: a missing value satisfying `!=` and nothing else, unanchored regex,
-  negation, `1200` matching a body id but not a synapse count. Zero divergence. It is
+  negation, `1200` matching a neuron id but not a synapse count. Zero divergence. It is
   deliberately **matching only** — no relevance ranking and no fuzzy fallback — and the
   docstring says so, because both change which rows come back where a result is capped.
 - **`import navis` does not expose `navis.interfaces.neuprint`.** The package root does not
@@ -578,7 +663,7 @@ not neurons, so `neuron.meshes` emits a TODO pointing at the Skeletons node.
 
 Four R-specific traps, each of which produces a document that looks right:
 
-- **`neuprintr` publishes `bodyid`; every Coda table uses `bodyId`.** `df$bodyId` on a tibble is
+- **`neuprintr` publishes `bodyid`; every Coda table uses `neuronId`.** `df$neuronId` on a tibble is
   `NULL` rather than an error, so the mismatch travels silently until something reports zero
   neurons far from the cause. `coda_neurons()` normalises at every neuprintr seam; the helpers
   that read raw `neuprint_connection_table()` output keep its own names, which is the one place
@@ -1036,7 +1121,7 @@ have — and the cost is paid once rather than as two implementations that drift
 **Matched locally, never queried.** The neurons come from a table already on the canvas, so a
 clade of three cell types resolves to the neurons that were *clustered* rather than to every
 neuron of those types in the connectome. That is a different question and `IDs from Label` is
-the node that asks it. With no Neurons wired the labels are read as body ids, which is what
+the node that asks it. With no Neurons wired the labels are read as neuron ids, which is what
 they are unless NBLAST was told to label by something else.
 
 Four things in it that each produce a plausible wrong table:
@@ -1159,7 +1244,7 @@ stale until you touch something reads as the setting not working.
 
 Testing note: the Filter node is `cheap`, so editing it proves nothing about auto-run — the
 ordinary pass re-runs it either way. Only an expensive node's param distinguishes the modes.
-And a `typePattern` matching nothing makes Connectivity error ("No bodyIds…") and blocks
+And a `typePattern` matching nothing makes Connectivity error ("No neuronIds…") and blocks
 everything downstream, so a test that waits for zero stale nodes will hang on it.
 
 ## Framing a graph that was just opened
@@ -1918,7 +2003,7 @@ next dataset-shaped node will grow one and nothing else would catch it.
 
 `align-self: flex-end` puts it under the _fields_ rather than the labels, since it is about what
 is missing from the right-hand column, and the tooltip **names** the params — marking the changed
-ones — rather than printing their values, which an `ids` param holding four thousand body ids
+ones — rather than printing their values, which an `ids` param holding four thousand neuron ids
 would not survive. The click reads the store through `getState()` rather than subscribing, or
 every card re-renders whenever the inspector is toggled from anywhere; and it checks
 `panels.inspector` before flipping it, because `togglePanel` is the only setter there is and a
@@ -2143,7 +2228,7 @@ only one that carries Coda's attribute tables *with their types*. A `<key>` decl
 up front, so `i64` arrives as a long and `f64` as a double rather than as whatever the reader
 infers from the first literal it meets, and an absent value is an omitted element rather than a
 zero somebody has to notice. GML implies types by literal syntax and restricts key names to
-something `sum_bodyId` survives and `pt root id` does not.
+something `sum_neuronId` survives and `pt root id` does not.
 
 **Attributes only — no positions, no colours.** So the Network viewer and Build Network write
 byte-identical files for the same network, and the document says what the data says rather than
@@ -2219,7 +2304,7 @@ so before this the hover and the cell under it disagreed on every id.
 `BuildNetwork`'s merge rule documents — "summing added `preId` up to 24093454514" — and the one
 the upload node's `Text columns` exists for; `isIdentifierColumn` in `ui/format.ts` is those
 two answers applied to the formatter. It reads the name's **last word**, split on separators
-and camelCase, which covers `bodyId`, `preId`/`postId`, `partnerId`, `sourceId`/`targetId` and
+and camelCase, which covers `neuronId`, `preId`/`postId`, `partnerId`, `sourceId`/`targetId` and
 the `root_id` / `pt_root_id` spellings an uploaded CSV arrives under with no list to keep in
 step. A plain `endsWith('id')` is not the same rule and is wrong: `centroid` and `valid` are
 words that happen to end that way.
@@ -2228,7 +2313,7 @@ words that happen to end that way.
 from `AGG_OPTIONS` rather than typed out. `groupBy` writes `<agg>_<column>`, so a count of
 distinct partners is literally called `countDistinct_partnerId` — five figures on male-CNS, and
 it does want its separator. What that costs is a column somebody else called `max_id`, which
-reads as an aggregate and keeps its grouping; taken deliberately, since `sum_bodyId` is a name
+reads as an aggregate and keeps its grouping; taken deliberately, since `sum_neuronId` is a name
 Coda generates and `max_id` can only arrive in a file.
 
 **The name is optional and absent means "a quantity"**, which is what every caller did before
@@ -2723,7 +2808,7 @@ same twice. The caption says `showing 50,000 of 165,122`, in the same idiom as
 **Selection is by id, with the row index as an admitted fallback.** `nodes/lib/rowIds.ts` owns
 it and _both_ the viewer and the node import it — what a selected point is called has to mean
 the same thing to the code writing the ids and the code resolving them, and two agreeing
-implementations drift the first time either is touched. `idColumn` defaults to `bodyId`
+implementations drift the first time either is touched. `idColumn` defaults to `neuronId`
 through `optional: true`, which is what makes the resolver answer "nothing" rather than
 reaching for the first column when the table has none. The fallback exists because the tables
 least likely to carry an id — an uploaded CSV of embeddings, a `groupBy` roll-up — are exactly
@@ -3015,7 +3100,7 @@ because they are not uniform and the differences are load-bearing:
 | `hemibrain:v1.2.1` | `{ layers }` and nothing else — no dimensions, position or layout              |
 | `hemibrain:v1.1`   | `{ layers, badlayers }`; `badlayers` is Explorer bookkeeping, not viewer state |
 | `manc:v1.2.3`      | full state, `layout: "3d"`, and a stray `segmentColors` for one body           |
-| `male-cns:v0.9`    | full state, 38 layers, 38 kB before a single body id is added                  |
+| `male-cns:v0.9`    | full state, 38 layers, 38 kB before a single neuron id is added                  |
 
 So the module supplies `layout` and `showSlices` when absent — neuroglancer's own defaults
 open hemibrain in 4-panel with EM planes cutting through the neurons — clears manc's stray
@@ -3031,7 +3116,7 @@ panel the user has since opened. Note that neuroglancer drops `visible` from its
 serialisation once it is false, since that is its default — so a round-trip will not show it.
 
 **Find the neuron layer by name, not by type.** male-CNS ships thirty segmentation layers:
-ROI shells, nuclei, cross-dataset mesh overlays. Writing body ids into `brain-shell` renders
+ROI shells, nuclei, cross-dataset mesh overlays. Writing neuron ids into `brain-shell` renders
 nothing with nothing to blame. Same family-name rule as `meshSourceFromState`.
 
 **This is the one node with no presentational params, and that is the invariant.** Its output
@@ -3238,7 +3323,9 @@ map, so values must go through `escapeString` / `idList` / `escapeIdentifier` in
 **Column mapping is positional.** neuPrint names columns after the expression (`n.bodyId`),
 so the decoder matches `RETURN` order against schema order and throws on a count mismatch.
 If you add a column to one, add it to the other — the builder and its schema are written
-together for this reason.
+together for this reason. It is also what lets Coda's column name differ from neuPrint's
+property name without a lookup per row: `n.bodyId` lands in `neuronId` because it is first in
+both lists. See `PROPERTY_NAMES` in `schema.ts` for the one place that mapping is stated.
 
 **Don't percent-encode a dataset id in a path.** Every id contains a colon
 (`hemibrain:v1.2.1`) and neuPrint's router matches the raw segment; `%3A` gets a 400. Use
@@ -3624,7 +3711,7 @@ dragged off the node starts there, and the footer — which summarises the first
 says `N × M`.
 
 Two small things fall out of a matrix axis being labels rather than data. The label column is
-`str` even when pivoted from `bodyId`, which still joins back against the numeric column it
+`str` even when pivoted from `neuronId`, which still joins back against the numeric column it
 came from because `joinTables` keys on `String(cell)`. And a column label colliding with the
 row field's name is suffixed (`type`, `type_2`) rather than dropped, the same call
 `joinedColumns` makes.
@@ -3759,12 +3846,12 @@ and never disagree with the rows already stored. The pair lives in `tableOps.ts`
 `uploadShapeSchema`/`uploadShapeTable`, with `uploadIsNeurons` shared between them so the schema
 half and the value half cannot disagree about the _kind_ either.
 
-- **`ID column` renames the chosen column to `bodyId`**, and the output becomes Neurons. Nodes
+- **`ID column` renames the chosen column to `neuronId`**, and the output becomes Neurons. Nodes
   address columns by name — `out.profile` validates on it, Connectivity and Skeletons read it — so
   a file whose author wrote `root_id` cannot meet neuron data until it is renamed. A column that
-  merely already held the name is suffixed (`bodyId_2`), the same call `joinedColumns` makes. Only
+  merely already held the name is suffixed (`neuronId_2`), the same call `joinedColumns` makes. Only
   `i64` and `str` columns are offered: a float is a measurement and a boolean is a flag, and
-  offering either invites a Neurons table whose body ids are neither.
+  offering either invites a Neurons table whose neuron ids are neither.
 - **`Text columns` widens a column to `str`**, and never the reverse. Reading text as a number is
   where data is lost, and the parser's round-trip rule has already kept anything ambiguous as
   text — so this is for a column that is genuinely numeric and genuinely not a _quantity_, like a
@@ -3869,7 +3956,7 @@ so in words, naming the position and the length — "emitting nothing" alone rea
 
 **`any` in, `any` out.** The type system cannot say "a table, skeletons or meshes", so the port
 says `any` and the refusal is a validation question — the same call `out.profile` makes about
-needing a `bodyId`. The output type is the input type untouched, so one row of a Neurons table is
+needing a `neuronId`. The output type is the input type untouched, so one row of a Neurons table is
 still Neurons with the same columns and nothing downstream loses a column picker.
 
 ### What an iterable is
@@ -3946,7 +4033,7 @@ alternative, keeping only the columns both have, silently discards data that was
 two neuron tables from different datasets that can be most of the columns with nothing on screen
 saying so. Same call `Join` makes when it suffixes a colliding name rather than dropping it.
 
-**A dtype clash is refused, not reconciled.** `bodyId` as a number above and text below is two
+**A dtype clash is refused, not reconciled.** `neuronId` as a number above and text below is two
 different columns wearing one name. Widening both to text keeps every value and removes the column
 from every numeric picker downstream; coercing text to a number loses values outright
 (`Number('n/a')`). Neither is a decision this node has grounds to make, so it names the column,
@@ -3972,7 +4059,7 @@ on the same list, and it keeps the other columns pickable while somebody fixes t
 clashes.
 
 **Neurons only when both inputs are.** A `neurons` kind is a claim that the ids are neurons of a
-dataset; a plain table that happens to carry a `bodyId` never made it. The type half and the value
+dataset; a plain table that happens to carry a `neuronId` never made it. The type half and the value
 half decide it the same way.
 
 **Two inputs, chained for more**, exactly `Join`'s shape. Note the consequence for the source
@@ -4107,7 +4194,7 @@ node _emits_, which is the part to read before touching it.
 `postId`/`postType`, plus `hop` and `direction`. Every row is oriented the way the synapse
 points, always, so `Build Network` with source `preId` and target `postId` is correct for every
 combination of params with nothing to think about. The old query-relative shape
-(`bodyId` = the neuron you asked about, whichever way the arrow went) cannot survive either
+(`neuronId` = the neuron you asked about, whichever way the arrow went) cannot survive either
 addition: a `both` result mixes in-edges and out-edges, so half a network's arrows come out
 backwards, and past one hop "the neuron you asked about" is not a thing a row can name — it is
 whatever the previous hop reached.
@@ -4186,7 +4273,7 @@ frontier type and collapses to a few hundred rows; doing that client-side would 
 downloading the former to compute the latter, per hop. `pathStepCypher` does it in one `WITH`.
 
 **The frontier is two lists, not one.** A neuron with no type stands as its own node — there is
-nothing to collapse it into — so a frontier is a mix of type names and body ids, and
+nothing to collapse it into — so a frontier is a mix of type names and neuron ids, and
 `sourceId`/`targetId` are null exactly when the key names a type. Both halves of the `WHERE`
 are then index-backed, where a `coalesce(n.type, toString(n.bodyId)) IN [...]` would express the
 same set and force a label scan of every `:Neuron` in the dataset.
@@ -4407,13 +4494,13 @@ control that was never added. `idsFromLabelBody.test.tsx` asserts the list.
 
 ## Input IDs: the ids themselves
 
-`neuron.inputIds`, `Add ▸ Query ▸ Input IDs`. Somebody has body ids from a paper, a spreadsheet
+`neuron.inputIds`, `Add ▸ Query ▸ Input IDs`. Somebody has neuron ids from a paper, a spreadsheet
 or a colleague. `IDs from Label` resolves a _named_ set; this takes the ids.
 
 **The Dataset input is optional, and that is the whole design.** Unwired, the node emits the ids
 as a one-column `Neurons` table and touches no network — already enough for most of what a list
 of ids is _for_, since `Connectivity`, `Skeletons`, `Meshes`, `Synapses` and `ROI Counts` all
-reach their ids through `idColumn(table, 'bodyId')` and read nothing else off the row. Wired, it
+reach their ids through `idColumn(table, 'neuronId')` and read nothing else off the row. Wired, it
 fetches the full neuron rows, which buys the columns every downstream picker wants and — the part
 worth having — the ability to say **which ids the dataset has never heard of**, which is how a
 mistyped id is caught and is otherwise uncatchable.
@@ -4468,7 +4555,7 @@ so there is nothing to lose, and the refusal is a nineteen-digit width — a sig
 which is what both Neo4j and CAVE actually store.
 
 Note what did _not_ move. With **no Dataset wired** the ids are the node's own output, and that
-table's `bodyId` is an `i64` column, so the width still bites there — `validate` warns and names
+table's `neuronId` is an `i64` column, so the width still bites there — `validate` warns and names
 the id rather than rounding it, and says to wire the Dataset that was almost certainly meant.
 
 **The wired column drops what it cannot use instead of refusing**, and the asymmetry is
@@ -4486,11 +4573,11 @@ unmatched report prints in, so a report and the list that produced it read again
 `evaluate` raise the _same sentence_. A badge and an error describing one problem differently is
 how somebody concludes there are two.
 
-### `FindNeuronsRequest.bodyIds`
+### `FindNeuronsRequest.neuronIds`
 
-A new field at the source seam rather than a `LabelMatch` on `bodyId`, and the reason is not
+A new field at the source seam rather than a `LabelMatch` on `neuronId`, and the reason is not
 stylistic: `labelClause` compiles to a list of **string** literals, and `123 IN ['123']` is false
-in Cypher — an empty result, with no error anywhere to explain it. `bodyIds` goes through
+in Cypher — an empty result, with no error anywhere to explain it. `neuronIds` goes through
 `idList`, which emits the digits as an unquoted integer literal.
 
 **Present-and-empty means no neurons, never "no filter".** Deliberately unlike the label clause
@@ -4565,14 +4652,14 @@ count off by three orders of magnitude is its own lie. As a fallback it still ca
 (`mechnosensory` → `mechanosensory`) without inflating every count.
 
 **Ranking is a bucket partition, not a sort.** Five tiers (exact / prefix / substring in
-`type`|`instance`|`bodyId` / substring anywhere / subsequence), so it is O(n) and can rank
+`type`|`instance`|`neuronId` / substring anywhere / subsequence), so it is O(n) and can rank
 _every_ hit. An earlier version gave up above a threshold, which left the real DNp01 neurons
 thousands of rows deep in a 21k-row fuzzy set — i.e. "fuzzy search does not work".
 
 Non-obvious rules pinned by tests: a missing value satisfies `!=` and nothing else (so
 `status!=Traced` finds the untraced _and_ the unlabelled, where SQL's three-valued logic drops
 both, silently); regexes are **unanchored**, deliberately unlike neuPrint's `=~`, because this
-search is local and has no server semantic to match; and only `bodyId` and string columns join
+search is local and has no server semantic to match; and only `neuronId` and string columns join
 the free-text haystack, so `1200` does not match a synapse count.
 
 **A thumbnail cache remembers masks and never refusals.** A mask is a fact about the geometry;
@@ -4608,7 +4695,7 @@ suite.
 
 **Select-all is capped at `MAX_SELECT_ALL` (10,000) and refuses rather than truncates.** A
 selection is provenance — it is in the saved file and in every downstream cache key — so
-`stableStringify` walks the whole array on every graph edit: 10k body ids is ~110 kB per key
+`stableStringify` walks the whole array on every graph edit: 10k neuron ids is ~110 kB per key
 computation, the whole of male-CNS is ~1.9 MB and would make typing in an unrelated node
 stutter. The button stays rendered while refused (a limit reads as a limit; a missing button
 reads as a missing feature) and its title says what to do. The ceiling is on the _click_, not
@@ -4770,7 +4857,7 @@ from one out of a region that is 91%.
 It ships with two ordinary query nodes rather than swallowing their data privately:
 `neuron.roiCompleteness` → Table and `neuron.roiConnectivity` → Matrix + Table. Both take nothing
 but a Dataset — they are the only query nodes here that ask about the **volume** rather than
-about a body id list — and both flow into the Heatmap, the Bar Chart, Filter, Download and the
+about a neuron id list — and both flow into the Heatmap, the Bar Chart, Filter, Download and the
 notebook exporter for free. The Summary's own region tiles read the same source methods, so the
 card and the nodes cannot disagree.
 
@@ -5402,7 +5489,7 @@ of any of this.
 The numbers are what settle it. Measured across the five bundled examples, **deflate + base64url
 is 1,540–2,004 characters** against 4,282–4,786 for the same graph as literal JSON — 2.8×, and
 the difference between a workflow that pastes anywhere and one that does not. The case that
-genuinely needs the gist is an Explore select-all: 10,000 body ids pack to **~56,000**, which
+genuinely needs the gist is an Explore select-all: 10,000 neuron ids pack to **~56,000**, which
 mail and chat clients cut short.
 
 ### The grammar

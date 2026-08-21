@@ -37,8 +37,8 @@ export const rawCypherNode = registerNode({
       label: 'Cypher',
       multiline: true,
       default:
-        'MATCH (n:Neuron)\nWHERE n.type = "LC4"\nRETURN n.bodyId, n.type, n.pre, n.post\nLIMIT 25',
-      placeholder: 'MATCH (n:Neuron) RETURN n.bodyId LIMIT 10',
+        'MATCH (n:Neuron)\nWHERE n.type = "LC4"\nRETURN n.bodyId AS neuronId, n.type, n.pre, n.post\nLIMIT 25',
+      placeholder: 'MATCH (n:Neuron) RETURN n.bodyId AS neuronId LIMIT 10',
       help: 'Runs as-is against the connected dataset. Column names come back from the server.',
     },
   ],

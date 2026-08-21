@@ -5,7 +5,7 @@
  * rectangular arrays padded to `k`, and what leaves this node is a tidy table with the padding
  * dropped and counted — get that wrong and a neighbour called -1 with a score of negative
  * infinity reaches somebody's chart. And the **names**: `queryId`/`targetId` rather than navis's
- * `query`/`target`, because a column whose last word is not "id" prints a body id with thousand
+ * `query`/`target`, because a column whose last word is not "id" prints a neuron id with thousand
  * separators.
  *
  * The Python is mocked here for the reason it is in `nblast.test.ts` — vitest has no Pyodide.
@@ -21,8 +21,10 @@ import { inferGraph } from '../../core/inference'
 import { defaultParams } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
 import { Scheduler } from '../../core/scheduler'
-import { attributeSchema } from '../../core/types'
-import { getColumn, isTableValue } from '../../core/values'
+import type { DType } from '../../core/types'
+import { attributeSchema, column, tableSchema } from '../../core/types'
+import type { CellValue, SkeletonsValue } from '../../core/values'
+import { EMPTY_BOUNDS, getColumn, isTableValue, tableFromRows } from '../../core/values'
 import { MockSource } from '../../data/mock/MockSource'
 import type { DataSource } from '../../data/source'
 import type { NblastKnnRequest } from '../../pyodide/nblast'
@@ -81,13 +83,37 @@ function knnResult(rows: number, k: number, padFrom = k): {
   return { idx, scores, rows, k }
 }
 
+/**
+ * A skeleton set carrying nothing but its ids, which is all `knnTable` reads off it.
+ *
+ * The ids go in the *attribute table* rather than only on the geometry, because that is the
+ * copy `knnTable` uses — it takes the published cell and the published dtype together, so the
+ * `queryId` it emits is the same value and type as the `neuronId` that fed it.
+ */
+function idSet(ids: readonly CellValue[], dtype: DType = 'i64'): SkeletonsValue {
+  return {
+    kind: 'skeletons',
+    items: ids.map((id) => ({
+      id: String(id),
+      positions: new Float32Array(),
+      radii: new Float32Array(),
+      parents: new Int32Array(),
+    })),
+    attributes: tableFromRows(
+      tableSchema(column('neuronId', dtype)),
+      ids.map((neuronId) => ({ neuronId })),
+    ),
+    bounds: EMPTY_BOUNDS,
+  }
+}
+
 beforeEach(() => {
   mockedKnn.mockReset()
 })
 
 describe('knnTable — the shape fastcore answers in', () => {
   it('lays the rectangle out long, best first, one-based', () => {
-    const table = knnTable(knnResult(3, 2), [10, 11, 12], [10, 11, 12])
+    const table = knnTable(knnResult(3, 2), idSet([10, 11, 12]), idSet([10, 11, 12]))
     expect(table.length).toBe(6)
     expect(getColumn(table, 'rank')).toEqual([1, 2, 1, 2, 1, 2])
     // Row 0's best match is index 1, which is body 11 — the ids are resolved through the
@@ -98,18 +124,18 @@ describe('knnTable — the shape fastcore answers in', () => {
 
   it('drops the padding rather than emitting neighbour -1', () => {
     // fastcore pads a short row with -1 / -inf to keep the arrays rectangular. Carried
-    // through, that is a body id of -1 with a score of negative infinity in a chart. What is
+    // through, that is a neuron id of -1 with a score of negative infinity in a chart. What is
     // left is a short table, which is the honest artefact.
-    const table = knnTable(knnResult(3, 4, 2), [10, 11, 12], [10, 11, 12])
+    const table = knnTable(knnResult(3, 4, 2), idSet([10, 11, 12]), idSet([10, 11, 12]))
     expect(table.length).toBe(6)
     expect(getColumn(table, 'targetId')).not.toContain(-1)
     expect(getColumn(table, 'score')?.every((s) => Number.isFinite(Number(s)))).toBe(true)
   })
 
-  it('names the id columns so a body id is not printed as a quantity', () => {
+  it('names the id columns so a neuron id is not printed as a quantity', () => {
     // navis calls these `query` and `target`. `isIdentifierColumn` reads a name's last word,
     // so those would print body 527536 as "527,536" — the bug `ui/format.ts` exists for.
-    const table = knnTable(knnResult(1, 1), [527536], [527536])
+    const table = knnTable(knnResult(1, 1), idSet([527536]), idSet([527536]))
     expect(table.schema.columns.map((c) => c.name)).toEqual([
       'queryId',
       'targetId',
@@ -118,9 +144,32 @@ describe('knnTable — the shape fastcore answers in', () => {
     ])
   })
 
+  it('carries a wide id through exactly, in the dtype its own table published', () => {
+    /*
+     * Why `knnTable` reads the attribute table rather than `SkeletonGeometry.id`, and why it
+     * does not pick a dtype of its own. A CAVE root id is eighteen digits, so its source
+     * publishes `neuronId` as `str`; forcing these columns to `i64` would round it to a
+     * *different neuron* here while the table an inch upstream still held the right one.
+     */
+    const wide = '648518347529750614'
+    expect(Number(wide).toString()).not.toBe(wide)
+    const table = knnTable(knnResult(1, 1), idSet([wide], 'str'), idSet([wide], 'str'))
+    expect(getColumn(table, 'queryId')?.[0]).toBe(wide)
+    expect(table.schema.columns.find((c) => c.name === 'targetId')?.dtype).toBe('str')
+  })
+
+  it('leaves an i64 source an i64 column, so nothing about neuPrint moves', () => {
+    // The other half of the rule: mirroring is what makes the wide case work *without* handing
+    // every existing user a text column, where a bare `527536` in a Table filter would stop
+    // meaning `== 527536` and start meaning "contains".
+    const table = knnTable(knnResult(1, 1), idSet([527536]), idSet([527536]))
+    expect(table.schema.columns.find((c) => c.name === 'queryId')?.dtype).toBe('i64')
+    expect(getColumn(table, 'queryId')?.[0]).toBe(527536)
+  })
+
   it('carries a label per side only when one was asked for', () => {
     const labels = { query: ['LC4', 'LC6'], target: ['LC4', 'LC6'] }
-    const table = knnTable(knnResult(2, 1), [10, 11], [10, 11], labels)
+    const table = knnTable(knnResult(2, 1), idSet([10, 11]), idSet([10, 11]), labels)
     expect(table.schema.columns.map((c) => c.name)).toContain('queryLabel')
     expect(getColumn(table, 'targetLabel')?.[0]).toBe('LC6')
   })

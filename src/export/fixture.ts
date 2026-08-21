@@ -206,7 +206,7 @@ export function everythingGraph(): CodaGraph {
     // A selection set, since that is the branch whose emitted frame is not simply empty.
     /*
      * The two label-to-neuron nodes, one on each branch of their shared emitter: `sel` has no
-     * Neurons wired, so its labels are read as body ids, and `clu` has one, so it matches as
+     * Neurons wired, so its labels are read as neuron ids, and `clu` has one, so it matches as
      * text and carries the cluster number across. One node would record only whichever branch
      * happened to be wired — the same reason there are two NBLAST nodes and two Select Ones.
      */
@@ -365,7 +365,7 @@ export function everythingGraph(): CodaGraph {
         xLog: true,
         yLog: true,
         trend: 'linear',
-        idColumn: 'bodyId',
+        idColumn: 'neuronId',
         selection: ['1001'],
       },
     },

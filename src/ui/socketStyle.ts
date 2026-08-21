@@ -6,7 +6,7 @@
  * So the mapping is deliberately many-to-one on colour and distinguished by SHAPE, with
  * the socket's text label always visible beside it as the third channel.
  *
- *   filled circle  Neurons  (a table guaranteed to have bodyId)
+ *   filled circle  Neurons  (a table guaranteed to have neuronId)
  *   hollow ring    Table    (same family, different shape)
  *   diamond        Matrix
  *   square         Dataset

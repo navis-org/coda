@@ -174,7 +174,7 @@ export function projectRegions(
     if (rings.length === 0) continue
     regions.push({
       index,
-      label: mesh.label ?? String(mesh.bodyId),
+      label: mesh.id,
       rings,
       centre: [item.cx, item.cy],
       depth: item.depth,

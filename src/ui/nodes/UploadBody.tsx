@@ -188,7 +188,7 @@ export function UploadBody({ node, ctx, compact, setParam, onError }: NodeBodyPr
             rows={PASTE_ROWS}
             value={pasted}
             aria-label="Paste delimited rows"
-            placeholder={'bodyId,cellType\n1234,LC4\n5678,LC6'}
+            placeholder={'neuronId,cellType\n1234,LC4\n5678,LC6'}
             onChange={(e) => setPasted(e.target.value)}
           />
           <button type="button" onClick={commitPaste} disabled={!pasted.trim() || busy}>
