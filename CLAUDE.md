@@ -475,6 +475,7 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `store/splice.test.ts`                   | that the move and the rewire undo as one gesture, and that a node which does not fit is still moved                          |
 | `ui/panels/edgeMenu.test.tsx`            | the link menu: that its header names the wire it is about, and that deleting leaves the nodes                                    |
 | `ui/panels/nodeMenu.test.tsx`            | the node menu's two caches: Results rather than "cache", and Clear Cache gated on the node declaring one                        |
+| `ui/viewers/tableSummary.test.tsx`       | the inspector's text readout: every column listed, an id kept whole, a long value cut but recoverable, and no dash for no rows |
 | `ui/nodes/cacheAge.test.tsx`             | `cached 3d ago ⟳`: the age surviving a restored result, the click reaching both caches, and no threshold hiding a fresh one     |
 | `ui/nodes/noteCard.test.tsx`             | the note card: markdown as prose, no node chrome, Escape abandoning an edit, the frame toggle                                    |
 | `nodes/lib/connectivityOps.test.ts`      | the traversal: the pre→post swap, the both-ends dedupe, no re-expansion, minWeight pruning                                       |
@@ -2216,25 +2217,32 @@ by playwright against the dev server: both themes at 1440px and a 420px phone st
 errors, no sideways body scroll, the preview card correct for a 33-setting node and for a text
 note, the help disclosure opening, and a search dimming 44 of 49 tiles without moving one.
 
-### The inspector shows one row
+### The inspector shows a table as text, not as a table
 
 `.inspector__viewer` is **320 × 300** — the smallest surface a viewer is drawn on, smaller than a
 card. It drew whatever the node's `pageSize` said, which on an annotation table is 100 rows across
-60 columns: six thousand cells laid out per change of selection, of which about forty are visible.
+60 columns: six thousand cells laid out per change of selection, of which about forty are visible,
+behind a sideways scrollbar.
 
-It now draws **one row**, and that is a decision about what the panel is *for* rather than a
-tuning. There is a Table node and a full-size overlay for reading a table; what the inspector owes
-is a feel for what came out, which one row beside its column headers gives completely. It was 25
-first, sized to the box — still the wrong question, because the box is not the constraint, the
-panel's job is. The pager underneath reads `1–1 of 58,340` on its own, so nothing has to say
-separately that the view is a sample.
+`ValuePreview.summary` replaces that with `TableSummary` — **one line per column, carrying its
+name, its type and the first row's value**. The same information turned ninety degrees, and the
+whole schema fits where three columns did. It is a *schema readout with an example* rather than a
+sample of the data: what somebody selecting a node mid-pipeline wants to know is which columns
+arrived and what a value looks like, and reading the table itself is the Table node's job and the
+overlay's.
 
-`ValuePreview.maxRows` is a **cap** rather than a value, so a node whose page size is already
-smaller keeps it, and `compact` travels with it — which also withholds the rows-per-page selector,
-the one control that could put the cost straight back.
+Deliberately **no `<table>`**: no intrinsic-width pass over every cell, no sticky header per
+column, no horizontal scroll container — ordinary block layout in a narrow column, which is what a
+narrow column is for.
 
-Note what this does **not** bound: the header still spans every column, so a 60-column table draws
-60 cells whatever the row count is.
+Two intermediate versions are worth recording, because each was a smaller idea than the one that
+worked. First a **row cap sized to the box** (25 rows, from 300px at ~19px a row). Then **one
+row** — better, because the box was never the constraint, the panel's *job* was. Both were still a
+table: the one-row version was reported back as *"the table still reads 1–1 of 58,340"*, which is
+the point — a table shrunk is a table, and the panel was never the place for one.
+
+Only the fallback table branch honours `summary`. A node with a viewer of its own — a scatter, a
+heatmap, a profile — keeps it, since those already draw something sized to their box.
 
 ### What was measured, and what is still unexplained
 

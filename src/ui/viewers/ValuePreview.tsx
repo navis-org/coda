@@ -33,6 +33,7 @@ import { DendrogramViewer } from './DendrogramViewer'
 import type { LayoutName } from './networkLayout'
 import type { FilterClause } from '../../nodes/lib/tableFilter'
 import { decodeClauses, encodeClauses } from '../../nodes/lib/tableFilter'
+import { TableSummary } from './TableSummary'
 import { TableViewer } from './TableViewer'
 
 export interface ValuePreviewProps {
@@ -61,17 +62,17 @@ export interface ValuePreviewProps {
   /** Realised values on the node's input ports, for viewers that draw several at once. */
   inputValues?: Record<string, Value | undefined>
   /**
-   * A ceiling on how many rows a table view draws here, for a surface that knows its own box.
+   * Draw a tabular value as a text readout rather than as a table.
    *
-   * The node's `pageSize` param is a setting for the card and the overlay, where there is room
-   * for it. The inspector is 320 × 300 and asks for **one row** — it owes a feel for the result,
-   * not a reading of it — so honouring a page of 100, or of 500 which the param allows, is
-   * thousands of cells laid out where three columns fit. Measured on a 58,340 × 60 annotation
-   * table: 113 ms of render at 100 rows against 26 ms at 25, before the browser lays out a cell.
+   * For a surface with no room for one — the inspector, at 320 × 300. A 60-column annotation
+   * table there is a horizontally scrolling grid showing about three columns at a time, where
+   * `TableSummary` turns the same information ninety degrees and fits it. Reading the table
+   * itself is the Table node's job, and the overlay's.
    *
-   * A *cap* rather than a value, so a node whose param is already smaller keeps it.
+   * Only the *fallback* table branch honours it: a node with a viewer of its own — a scatter, a
+   * heatmap, a profile — keeps it, because those already draw something sized to their box.
    */
-  maxRows?: number
+  summary?: boolean
 }
 
 /**
@@ -107,7 +108,7 @@ function ValuePreviewInner({
   onParamChange,
   onSelectionChange,
   inputValues,
-  maxRows,
+  summary,
 }: ValuePreviewProps) {
   // Forwarded to every viewer; kept in one place so a new viewer can't forget export.
   const shared = {
@@ -438,13 +439,11 @@ function ValuePreviewInner({
             onShowFiltersChange: (show: boolean) => onParamChange?.('showFilters', show),
           }
         : {}
+    if (summary) return <TableSummary table={value} />
     return (
       <TableViewer
         table={value}
-        pageSize={Math.min(
-          Number.isFinite(pageSize) && pageSize > 0 ? pageSize : 100,
-          maxRows ?? Number.POSITIVE_INFINITY,
-        )}
+        pageSize={Number.isFinite(pageSize) && pageSize > 0 ? pageSize : 100}
         {...filtering}
         {...shared}
       />

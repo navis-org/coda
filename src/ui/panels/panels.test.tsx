@@ -142,16 +142,15 @@ describe('the inspector', () => {
     expect(inspector()).toBeNull()
   })
 
-  it('draws one row of a table, not the node’s own page size', async () => {
+  it('summarises a table as text rather than drawing one', async () => {
     /*
-     * The inspector gives a *feel* for the result; the Table node and the full-size overlay are
-     * where a table is read. It used to draw the node's whole `pageSize` across every column —
-     * on a real annotation table, 100 × 60 is six thousand cells laid out per change of
-     * selection, of which about forty are on screen.
+     * This panel is 320 × 300, the smallest surface a viewer is drawn on. A 60-column annotation
+     * table there was a grid showing about three columns behind a sideways scrollbar — so it was
+     * both unreadable and the most expensive thing on screen, laid out again on every change of
+     * selection. Turned ninety degrees the whole schema fits.
      *
-     * A generous page size is set here deliberately: the assertion is that the *panel's* ceiling
-     * wins over the node's setting, which is the half a smaller default would not prove. And the
-     * table has to be longer than the ceiling, or this passes on a table that was short anyway.
+     * A generous page size is set deliberately: the node's own setting must not bring the grid
+     * back, which is the half a small one would not prove.
      */
     render(<App />)
     fireEvent.click(inspectorToggle())
@@ -174,13 +173,18 @@ describe('the inspector', () => {
       useGraphStore.getState().setSelection([view])
     })
 
-    const rows = () => inspector()?.querySelectorAll('.data-table tbody tr').length ?? 0
-    const total = useGraphStore.getState().nodeOutput(view, 'out')
-    expect(total && 'length' in total ? total.length : 0).toBeGreaterThan(1)
-    expect(rows()).toBe(1)
-    // Every column is still there — the reduction is rows, and a column picker's worth of
-    // headers is what makes one row tell you anything.
-    expect(inspector()?.querySelectorAll('.data-table thead th').length ?? 0).toBeGreaterThan(3)
+    const panel = inspector()!
+    // No grid at all — not a short one. `1–1 of 58,340` under a one-row table was the report
+    // that this replaced: a table shrunk is still a table.
+    expect(panel.querySelectorAll('.data-table').length).toBe(0)
+
+    // One line per column, each naming its type, and the first row's value beside it.
+    const rows = panel.querySelectorAll('.table-summary__row')
+    const table = useGraphStore.getState().nodeOutput(view, 'out')
+    const columns = table && 'schema' in table ? table.schema.columns.length : 0
+    expect(columns).toBeGreaterThan(3)
+    expect(rows.length).toBe(columns)
+    expect(panel.textContent).toContain('neuronId')
   })
 })
 

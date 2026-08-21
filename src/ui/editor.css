@@ -6097,3 +6097,45 @@ details[open] > summary.tile__label {
   stroke: var(--text-primary) !important;
   stroke-width: 3.2 !important;
 }
+
+/*
+ * A table shown as text, for the inspector — one line per column. No `<table>` on purpose: no
+ * intrinsic-width pass over every cell, no sticky header per column, no sideways scrolling.
+ */
+.table-summary {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.table-summary__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1.2fr);
+  gap: 6px;
+  align-items: baseline;
+  padding: 1px 2px;
+  border-bottom: 1px solid var(--border);
+}
+.table-summary__row:last-child {
+  border-bottom: 0;
+}
+.table-summary__name {
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.table-summary__type {
+  color: var(--text-muted);
+  font-size: 9px;
+}
+/* The example value, which is data — tabular figures so a column of ids reads as one. */
+.table-summary__value {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}

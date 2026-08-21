@@ -19,26 +19,6 @@ import { ParamField } from '../params/ParamField'
 import { familyColorVar, socketStyle } from '../socketStyle'
 import { ValuePreview } from '../viewers/ValuePreview'
 
-/**
- * How many rows the result view draws in the inspector: **one**.
- *
- * Not a performance tuning so much as a decision about what this panel is for. It is 320 × 300,
- * the smallest surface a viewer is drawn on, and there is a Table node and a full-size overlay
- * for reading a table properly — so what the inspector owes is a *feel* for what came out, which
- * one row beside its column headers gives completely. Everything past it was cost with no reader.
- *
- * It began as 25, sized to the box (300px tall, a row about 19px, so a dozen visible). That was
- * still the wrong question: the box is not the constraint, the panel's job is.
- *
- * The pager underneath says `1–1 of 58,340` on its own, which is the admission that the view is
- * a sample rather than the table — so nothing here has to say it twice.
- *
- * Note what this does *not* bound: the header still spans every column, so a 60-column table
- * draws 60 cells whatever this is. Cells were measured at 113 ms per render for a 58,340 × 60
- * table at 25 rows against 26 ms — real, and not the whole story, since capping rows four-fold
- * did not move the memory this was reported for. See CLAUDE.md.
- */
-const INSPECTOR_ROWS = 1
 
 export function Inspector() {
   const open = useGraphStore((s) => s.panels.inspector)
@@ -224,17 +204,21 @@ export function Inspector() {
             </div>
             <div className="inspector__viewer">
               {/*
-                * `compact`, and one row. See `INSPECTOR_ROWS`: this panel gives a feel for the
-                * result, and the Table node and the overlay are where a table is read. `compact`
-                * also withholds the rows-per-page selector, which is the one control that could
-                * put the cost straight back.
+                * `summary`, so a table arrives as a text readout — one line per column with its
+                * type and the first row's value — rather than as a grid. This panel is 320 × 300,
+                * the smallest a viewer is drawn on, and a 60-column table there was three columns
+                * behind a sideways scrollbar. Turned ninety degrees the whole schema fits, which
+                * is what somebody selecting a node in the middle of a pipeline wants to see.
+                *
+                * Reading the table is the Table node's job and the overlay's. `compact` still
+                * travels, for the viewers that keep drawing themselves here.
                 */}
               <ValuePreview
                 node={node}
                 value={outputValue}
                 ctx={ctx}
                 compact
-                maxRows={INSPECTOR_ROWS}
+                summary
                 baseName={exportBaseName(graphName, node.title ?? def.label)}
                 onExpand={() => expandNode(node.id)}
                 onError={setNotice}
