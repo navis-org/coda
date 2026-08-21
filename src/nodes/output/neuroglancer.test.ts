@@ -244,10 +244,30 @@ describe('with no neurons', () => {
 })
 
 describe('colour', () => {
-  it('starts on a label column, not on neuronId', async () => {
-    // `neuronId` is the first compatible column, and a categorical encoding over it caps at
-    // eight slots plus grey — so unrelated neurons share a hue and read as a group.
+  it('sends no colours at all by default, letting neuroglancer hash them', async () => {
+    /*
+     * The mode that suits what this node emits. Coda's palette caps at eight slots and folds
+     * the rest into one achromatic bucket — right for a chart legend, wrong for a scene, where
+     * past the eighth type every remaining neuron is the same grey. Neuroglancer gives every
+     * segment a distinct colour of its own, and it is the shortest link there is: no colour
+     * data travels.
+     */
     const { scene } = await sceneFrom()
+    const layer = layersOf(scene)[1]!
+    // Empty rather than absent, and that is `buildScene` doing its job: it writes an empty map
+    // to clear the stray `segmentColors` manc publishes for one body, which would otherwise
+    // survive as a colour nobody chose.
+    expect(layer['segmentColors']).toEqual({})
+    expect(layer['segmentDefaultColor']).toBeUndefined()
+    // The segments themselves still travel — this is about colour, not about content.
+    expect(layer['segments']).toBeTruthy()
+  })
+
+  it('starts on a label column, not on neuronId, once a data-driven mode is picked', async () => {
+    // `neuronId` is the first compatible column, and a categorical encoding over it caps at
+    // eight slots plus grey — so unrelated neurons share a hue and read as a group. The column
+    // is only reached once somebody switches off the default mode, which is what this asserts.
+    const { scene } = await sceneFrom({ segmentColorMode: 'categorical' })
     const colors = layersOf(scene)[1]!['segmentColors'] as Record<string, string>
     // 10001 and 10002 are both DNa02; 10003 is not.
     expect(colors['10001']).toBe(colors['10002'])

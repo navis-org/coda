@@ -97,9 +97,22 @@ export const neuroglancerNode = registerNode({
       allowLiteral: true,
       from: 'neurons',
       label: 'Colour',
-      defaultMode: 'categorical',
-      // Not the first compatible column, which is `neuronId`: colouring by it caps at eight
-      // slots plus grey, so two unrelated neurons share a hue and look like a group.
+      /*
+       * Neuroglancer's own hash colouring, not Coda's categorical palette.
+       *
+       * It is the mode that suits what this node emits. Coda's palette caps at eight slots and
+       * folds the rest into one achromatic bucket, which is right for a chart legend and wrong
+       * for a scene: past the eighth type every remaining neuron is the same grey, and colouring
+       * by `neuronId` would give two unrelated neurons one hue and make them look like a group.
+       * Neuroglancer gives every segment a distinct colour and needs no legend to do it.
+       *
+       * It is also the shortest link there is — no colour data travels at all, which matters on
+       * a node whose whole output is a URL people paste into mail.
+       */
+      defaultMode: 'default',
+      // Only reached once somebody picks a data-driven mode, and then this is the column worth
+      // starting on: `neuronId` is the first compatible one and is the wrong answer, for the
+      // eight-slot reason above.
       defaultColumn: 'type',
       // Baked into the URL — see the header.
       presentational: false,

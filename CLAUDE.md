@@ -3521,10 +3521,22 @@ consequence: these params are _not_ presentational, so they never appear in the 
 rail either — the inspector is the only place they live.
 
 **Colour mode `default` sends nothing at all** and lets neuroglancer hash-colour each
-segment. Distinct from `constant`, which sends one `segmentDefaultColor`; the point is that
-no colour data travels, which is also the shortest link. `colorParams` only offers the mode
-when a caller opts in with `allowDefault`, because no in-app viewer can honour it —
-`resolveColor` degrades it to the flat colour so it is harmless if it ever leaks.
+segment, and it is **this node's default**. Distinct from `constant`, which sends one
+`segmentDefaultColor`; the point is that no colour data travels, which is also the shortest
+link — and this is the one node whose entire output is a URL somebody pastes into mail.
+
+It is the right default rather than merely the cheapest, and the reason is the palette's own
+rule: Coda caps a categorical encoding at eight slots and folds everything past them into one
+achromatic bucket, because in a legend a repeated hue claims two series are the same thing. A
+scene has no legend, and past the eighth cell type every remaining neuron would be the same
+grey. Neuroglancer gives every segment a distinct colour and needs no legend to do it.
+`defaultColumn: 'type'` is still there for the moment somebody picks a data-driven mode —
+`neuronId` is the first compatible column and is the wrong answer for the same eight-slot
+reason.
+
+`colorParams` only offers the mode when a caller opts in with `allowDefault`, because no in-app
+viewer can honour it — `resolveColor` degrades it to the flat colour so it is harmless if it
+ever leaks.
 
 **Updates go through neuroglancer's `#!+` merge form, and this is the load-bearing part.**
 The plain `#!` form makes neuroglancer `reset()` before restoring, so every upstream edit threw
