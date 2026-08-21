@@ -47,6 +47,21 @@ export interface DatasetFamily {
    * connectome asks for, and there is nobody to cite for a connectome Coda made up on load.
    */
   synthetic?: boolean
+  /**
+   * Which client library a generated notebook would be built on. Absent means none can be.
+   *
+   * Stated once here rather than tested at each site that cares, because there are three and
+   * they used to disagree: both dataset emitters keyed on the *source id* while
+   * `canExportNotebook` refused on `synthetic` alone — so a CAVE graph passed the refusal, its
+   * dataset cell emitted a TODO, and every node after it cascaded to "nothing upstream produced
+   * a value". The Save menu offered an export that produces a document of nothing but TODOs,
+   * which is exactly the outcome `canExport.ts` exists to prevent.
+   *
+   * Deliberately not derived from `sourceId`: what decides this is whether an emitter has been
+   * written, not which backend the data comes from, and those part company the day a caveclient
+   * emitter lands.
+   */
+  notebook?: 'neuprint'
 }
 
 /**
@@ -58,6 +73,7 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
   {
     key: 'malecns',
     sourceId: 'neuprint',
+    notebook: 'neuprint',
     family: 'male-cns',
     label: 'MaleCNS',
     description:
@@ -69,6 +85,7 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
   {
     key: 'hemibrain',
     sourceId: 'neuprint',
+    notebook: 'neuprint',
     family: 'hemibrain',
     label: 'Hemibrain',
     description:
@@ -80,6 +97,7 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
   {
     key: 'manc',
     sourceId: 'neuprint',
+    notebook: 'neuprint',
     family: 'manc',
     label: 'MANC',
     description: 'Male adult nerve cord — the ventral nerve cord, motor and premotor circuits.',
@@ -90,6 +108,7 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
   {
     key: 'opticlobe',
     sourceId: 'neuprint',
+    notebook: 'neuprint',
     family: 'optic-lobe',
     label: 'Optic Lobe',
     description:
@@ -101,6 +120,7 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
   {
     key: 'fib19',
     sourceId: 'neuprint',
+    notebook: 'neuprint',
     family: 'fib19',
     label: 'FIB-19',
     description:
@@ -112,6 +132,7 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
   {
     key: 'mushroombody',
     sourceId: 'neuprint',
+    notebook: 'neuprint',
     family: 'mushroombody',
     label: 'Mushroom Body',
     description: 'Mushroom body reconstruction. Carries no version in its dataset id.',
@@ -149,7 +170,37 @@ const MOCK_FAMILIES: DatasetFamily[] = [
   },
 ]
 
-export const DATASET_FAMILIES: DatasetFamily[] = [...NEUPRINT_FAMILIES, ...MOCK_FAMILIES]
+/**
+ * CAVE's families.
+ *
+ * One entry, and the pairing with `src/data/cave/spec.ts` is deliberate rather than redundant:
+ * that table says which of a datastack's tables mean neurons and connections, this one says how
+ * the datastack is *presented*. A datastack needs both to appear here, which is what stops the
+ * picker offering one that would fail on the first Run.
+ *
+ * The version half of a CAVE dataset id is a **materialization number** rather than a release
+ * name — `flywire_fafb_public:783` — and it needs no new control: `compareVersions` orders bare
+ * integers correctly, so the existing dropdown reads `Latest (783)` and a pinned 630 stays 630.
+ */
+const CAVE_FAMILIES: DatasetFamily[] = [
+  {
+    key: 'flywire',
+    sourceId: 'cave',
+    family: 'flywire_fafb_public',
+    label: 'FlyWire FAFB',
+    description:
+      'Whole adult female fly brain, publicly released. Proofread neurons with hierarchical cell annotations.',
+    guide:
+      'The public FlyWire segmentation of a whole female brain, read through CAVE rather than neuPrint — so it needs a CAVE token rather than a neuPrint one, and its version dropdown names a materialization rather than a release. Coda downloads its cell annotations once per dataset and searches them locally, so the first query waits and every one after it is immediate. Connectivity comes from a server-side roll-up of the synapse table; skeletons, meshes, synapses, paths and per-region counts are not wired up yet and the nodes that need them decline rather than failing.',
+    glyph: 'brain',
+  },
+]
+
+export const DATASET_FAMILIES: DatasetFamily[] = [
+  ...NEUPRINT_FAMILIES,
+  ...CAVE_FAMILIES,
+  ...MOCK_FAMILIES,
+]
 
 /** Node types are `dataset.<family key>`. Never change it; it is in every saved file. */
 export const DATASET_NODE_PREFIX = 'dataset.'

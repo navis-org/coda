@@ -9,9 +9,10 @@ Short term: an alternative frontend for [neuPrint](https://neuprint.janelia.org/
 term: a full analysis pipeline including morphometrics.
 
 > **Status: prototype.** The node editor and evaluation engine are real and tested, and
-> **neuPrint is connected** — hemibrain, MANC, optic-lobe and male-CNS, live. A synthetic
-> in-browser connectome is still the default so the examples run with no token and no
-> network. See [What's not built](#whats-not-built).
+> **two backends are connected** — neuPrint (hemibrain, MANC, optic-lobe, male-CNS) and
+> CAVE (public FlyWire FAFB), both live. A synthetic in-browser connectome is still the
+> default so the examples run with no token and no network. See
+> [What's not built](#whats-not-built).
 
 ## Quickstart
 
@@ -48,10 +49,19 @@ at build time, so it cannot drift from the app — see
 `Dataset → Explore → Table`.
 
 Dataset nodes are per dataset — `Add ▶ Dataset ▶ MaleCNS`, `▶ Hemibrain`, `▶ MANC`,
-`▶ Optic Lobe` — so there is no backend to choose. Each has a **version** dropdown defaulting to
-the newest release the server reports (named, so it reads `Latest (v1.2.3)` rather than leaving
-you to guess), and a preview slot at the top. `Add ▶ Dataset ▶ Custom neuPrint` takes a server
-and a dataset id by hand, for a deployment or release this build has never heard of.
+`▶ Optic Lobe`, `▶ FlyWire FAFB` — so there is no backend to choose. Each has a **version**
+dropdown defaulting to the newest release the server reports (named, so it reads
+`Latest (v1.2.3)` rather than leaving you to guess), and a preview slot at the top.
+`Add ▶ Dataset ▶ Custom neuPrint` takes a server and a dataset id by hand, for a deployment or
+release this build has never heard of.
+
+**FlyWire comes through [CAVE](https://caveclient.readthedocs.io/) rather than neuPrint**, so it
+wants a CAVE token (Connections ▸ CAVE — the same one `caveclient` keeps in
+`~/.cloudvolume/secrets`) and its version dropdown names a **materialization** rather than a
+release. Coda downloads its cell annotations once per dataset and searches them locally, so the
+first query waits a few seconds and every one after it is immediate. Neurons and connectivity
+work; skeletons, meshes, synapses, paths and per-region counts are not wired up yet, and the
+nodes that need them say so rather than failing.
 
 Every published dataset node arrives with a small **Description** card wired to it: what the
 dataset covers, the project's landing page and companion viewers, and the papers its authors ask
@@ -162,9 +172,12 @@ node wrapping a subgraph (not yet built; nothing needs it yet).
 
 ### Data sources
 
-Nodes never talk to neuPrint directly. They resolve a `Dataset` value to a `DataSource`
-([`src/data/source.ts`](src/data/source.ts)) and call that interface. Adding neuPrint —
-or CAVE/FlyWire later — means implementing the interface, not touching node code.
+Nodes never talk to a backend directly. They resolve a `Dataset` value to a `DataSource`
+([`src/data/source.ts`](src/data/source.ts)) and call that interface. There are three —
+the synthetic connectome, neuPrint and CAVE — and adding a fourth means implementing the
+interface, not touching node code. What a source *cannot* do it declares in
+`SourceCapabilities`, and the nodes that need it decline at edit time rather than failing at
+run time: that is why CAVE arrived with no skeletons and nothing else had to learn about it.
 
 The one non-obvious requirement: a source must declare its column schemas **statically and
 synchronously**, because schema inference runs at edit time. A source that only learns its

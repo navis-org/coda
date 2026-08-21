@@ -27,7 +27,6 @@ import type {
   DataSource,
   DatasetInfo,
   FindNeuronsRequest,
-  LabelMatch,
   GeometryRequest,
   NeuronIndexRequest,
   PathStepRequest,
@@ -48,6 +47,7 @@ import {
   throwIfAborted,
 } from '../source'
 import { loadCachedTable, neuronIndexKey } from '../neuronIndex'
+import { compileLabelMatch, compileRegex } from '../neuronFilter'
 import type { MockConnection, MockConnectome } from './generate'
 import { getConnectome, mockDatasetIds, mockDatasetMeta } from './generate'
 import {
@@ -99,6 +99,7 @@ export class MockSource implements DataSource {
     // lets the bundled examples, the node tests and a token-less session exercise these paths
     // at all. The capability flag is for a source that genuinely cannot, not a way of leaving
     // the mock behind.
+    roiCounts: true,
     roiSummary: true,
     roiMeshes: true,
   }
@@ -683,67 +684,6 @@ export class MockSource implements DataSource {
     }
     labels.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
     return { labels, keyOf }
-  }
-}
-
-/**
- * Compile a user-supplied regex, anchored to the whole string.
- *
- * Anchoring matters for fidelity: Neo4j's `=~` (and therefore neuPrint's type search)
- * matches the *entire* value, so `LC.*` selects LC4/LC6/LC9 but not LPLC1. An unanchored
- * mock would train the wrong intuition and then silently change results the day a real
- * neuPrint source is plugged in behind this interface.
- */
-/**
- * The mock's half of `LabelMatch`, kept beside `compileRegex` because it has to agree with it.
- *
- * Two agreements are load-bearing and neither is checkable by a type. The regex form wraps in
- * `^(?:…)$` exactly as `compileRegex` does, because neuPrint's `=~` anchors and the mock exists
- * to behave the same way. And a null or absent property fails every mode, matching Cypher's
- * three-valued `WHERE` — a missing `hemilineage` is not a match for the empty string.
- *
- * Undefined for an absent or empty match, which is the caller's signal to apply no filter at
- * all; an empty `values` never reaches here, because a lookup of nothing is answered before
- * the request is built.
- */
-function compileLabelMatch(
-  match: LabelMatch | undefined,
-): ((row: Record<string, unknown>) => boolean) | undefined {
-  if (!match || match.values.length === 0) return undefined
-  const { field, ignoreCase } = match
-
-  if (match.regex) {
-    const flags = ignoreCase ? 'i' : ''
-    const res = match.values.map((v) => {
-      try {
-        return new RegExp(`^(?:${v})$`, flags)
-      } catch (err) {
-        throw new Error(`Invalid ${field} pattern /${v}/: ${(err as Error).message}`)
-      }
-    })
-    return (row) => {
-      const value = row[field]
-      if (value === null || value === undefined) return false
-      const text = String(value)
-      return res.some((re) => re.test(text))
-    }
-  }
-
-  const wanted = new Set(match.values.map((v) => (ignoreCase ? v.toLowerCase() : v)))
-  return (row) => {
-    const value = row[field]
-    if (value === null || value === undefined) return false
-    const text = String(value)
-    return wanted.has(ignoreCase ? text.toLowerCase() : text)
-  }
-}
-
-function compileRegex(pattern: string | undefined, field: string): RegExp | undefined {
-  if (!pattern) return undefined
-  try {
-    return new RegExp(`^(?:${pattern})$`)
-  } catch (err) {
-    throw new Error(`Invalid ${field} pattern /${pattern}/: ${(err as Error).message}`)
   }
 }
 

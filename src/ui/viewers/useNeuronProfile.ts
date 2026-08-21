@@ -23,8 +23,16 @@ export interface NeuronProfileData {
   inputs: TableValue
   /** Downstream partners. */
   outputs: TableValue
-  /** Per-ROI pre/post counts, nested ROIs included; filter before summing. */
-  regions: TableValue
+  /**
+   * Per-ROI pre/post counts, nested ROIs included; filter before summing.
+   *
+   * Undefined where the source publishes none — `capabilities.roiCounts`. That has to be a
+   * *missing tile* rather than a failed card: a rejection inside the `Promise.all` below took
+   * the two connectivity legs down with it, so every tile reported an error on a neuron whose
+   * partners had loaded perfectly well. `regionRows` already answers `[]` for undefined, which
+   * is the widget's own "a tile renders only when its data exists" rule.
+   */
+  regions: TableValue | undefined
   /**
    * The dataset's non-overlapping ROI list, or undefined when discovery has not answered.
    *
@@ -105,7 +113,7 @@ async function load(
   const [inputs, outputs, regions] = await Promise.all([
     source.fetchConnectivity({ datasetId, neuronIds: [neuronId], direction: 'inputs' }),
     source.fetchConnectivity({ datasetId, neuronIds: [neuronId], direction: 'outputs' }),
-    source.fetchRoiCounts({ datasetId, neuronIds: [neuronId] }),
+    source.fetchRoiCounts?.({ datasetId, neuronIds: [neuronId] }),
   ])
 
   // Read after the await: discovery may well have landed while these were in flight, and the

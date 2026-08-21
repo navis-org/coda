@@ -25,6 +25,12 @@ import { getEmitter, registeredEmitterTypes } from './registry'
  * of a long list is that the exporter is unfinished.
  */
 const NO_EMITTER: Record<string, string> = {
+  'dataset.flywire':
+    'A CAVE datastack rather than a neuPrint one. This notebook is built on neuprint-python, ' +
+    'and a faithful translation needs caveclient plus a materialization version — see ' +
+    'src/data/cave. Until that is written it degrades to a TODO, which is the honest outcome: ' +
+    'emitting neuPrint code against a dataset neuPrint has never heard of would produce a ' +
+    'document that runs and answers nothing.',
   'note.text': 'An annotation. It becomes a markdown cell, which the walk does directly.',
   'dataset.mock.hemibrain':
     'Synthetic, so a graph holding one is refused before the walk starts. An emitter here ' +

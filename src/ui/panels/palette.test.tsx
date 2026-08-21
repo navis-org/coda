@@ -94,6 +94,27 @@ describe('buildCommandItems', () => {
     expect(item.hint).toContain('Jupyter notebook')
   })
 
+  /*
+   * The second refusal, and it is the one that was missing: the emitters skipped a CAVE family
+   * while `canExportNotebook` refused on `synthetic` alone, so the row lit, the dataset cell
+   * emitted a TODO and every node after it cascaded to "nothing upstream produced a value".
+   */
+  it('disables Export as Jupyter Notebook on a dataset no emitter is written for', () => {
+    act(() => {
+      let graph = emptyGraph('FlyWire')
+      graph = addNode(graph, {
+        id: 'ds',
+        type: 'dataset.flywire',
+        position: { x: 0, y: 0 },
+        params: { version: '783' },
+      })
+      useGraphStore.getState().loadGraph(graph)
+    })
+    const item = byId(commands(), 'cmd:export-notebook')
+    expect(item.disabled).toBe(true)
+    expect(item.hint).toContain('no notebook can be built for it yet')
+  })
+
   it('disables Export as Jupyter Notebook on an empty canvas', () => {
     act(() => useGraphStore.getState().newGraph())
     expect(byId(commands(), 'cmd:export-notebook').disabled).toBe(true)

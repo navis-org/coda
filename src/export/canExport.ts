@@ -59,6 +59,24 @@ export function syntheticDatasetNodes(graph: CodaGraph): GraphNode[] {
   return graph.nodes.filter((node) => familyForNodeType(node.type)?.synthetic === true)
 }
 
+/**
+ * Dataset nodes from a backend no emitter has been written for.
+ *
+ * The second refusal, and it exists for the same reason as the first rather than as an
+ * exception to it: the dataset cell is the one with nothing behind it, and `emit.ts` cascades a
+ * TODO to every node downstream — so what comes out is a document of nothing but TODOs. Both
+ * exporters already skip these families; this is the half that stops the menu offering it.
+ *
+ * `synthetic` is excluded so the two refusals cannot both fire on one node: a mock family has no
+ * `notebook` either, and its own message is the more useful one.
+ */
+export function untranslatableDatasetNodes(graph: CodaGraph): GraphNode[] {
+  return graph.nodes.filter((node) => {
+    const family = familyForNodeType(node.type)
+    return family !== undefined && !family.synthetic && family.notebook === undefined
+  })
+}
+
 /** The refusal, or undefined when the graph can be exported. */
 export function canExportNotebook(graph: CodaGraph): ExportRefusal | undefined {
   if (graph.nodes.length === 0) {
@@ -81,6 +99,20 @@ export function canExportNotebook(graph: CodaGraph): ExportRefusal | undefined {
         'Coda generates these connectomes in the browser, so there is no server for a ' +
         'notebook to query. Replace them with a real dataset node and export again.',
       fix: 'generated in the browser — swap in a real dataset first',
+    }
+  }
+  const untranslatable = untranslatableDatasetNodes(graph)
+  if (untranslatable.length > 0) {
+    const names = untranslatable.map((n) => `“${nodeLabel(n)}”`)
+    return {
+      reason:
+        names.length === 1
+          ? `${names[0]} is not a neuPrint dataset`
+          : `${names.join(', ')} are not neuPrint datasets`,
+      detail:
+        'The generated notebook is built on neuprint-python and neuprintr, and there is no ' +
+        'emitter for this backend yet — so every cell after the dataset would be a TODO.',
+      fix: 'not a neuPrint dataset — no notebook can be built for it yet',
     }
   }
   return undefined

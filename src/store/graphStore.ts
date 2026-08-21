@@ -42,6 +42,7 @@ import type { Value } from '../core/values'
 import { isTableValue } from '../core/values'
 import { MockSource } from '../data/mock/MockSource'
 import { NeuPrintSource } from '../data/neuprint/NeuPrintSource'
+import { CaveSource } from '../data/cave/CaveSource'
 import { registerSource, requireSource, subscribeSourceLearned } from '../data/source'
 import { subscribeUploadLearned } from '../data/uploads'
 import { getExample } from '../examples'
@@ -83,6 +84,7 @@ import '../nodes'
 // for a fresh graph: the examples must open and run with no token and no network.
 registerSource(new MockSource())
 registerSource(new NeuPrintSource())
+registerSource(new CaveSource())
 
 const AUTO_RUN_DELAY_MS = 180
 

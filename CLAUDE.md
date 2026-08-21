@@ -396,6 +396,9 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `ui/viewers/networkViewer.test.tsx`      | the caption: counts, the label-thinning admission, size refusal                                                                  |
 | `data/neuprint/neuprint.test.ts`         | Cypher building/escaping, response decoding, both halves of the `bodyId`→`neuronId` seam, schema discovery, mesh-source resolution, nm conversion |
 | `data/precomputed/precomputed.test.ts`   | shard lookup, multi-LOD manifest, Draco decode, legacy fragments, CORS fallback                                                  |
+| `data/cave/cave.test.ts`                 | CAVE against recorded bodies: a wide root id kept exactly, the string-aware scan, the annotation pivot, an anchored pattern, and every refusal |
+| `nodes/lib/datasetFamilies.test.ts`      | (also) that every CAVE family names a datastack spec and every spec a family — the join key nothing else checks |
+| `data/cave/live.test.ts`                 | the same source against the real services, skipped without `CAVE_TOKEN` — the only thing that notices an endpoint shape changing |
 | `nodes/query/morphology.test.ts`         | the shared `Max neurons` ceiling and what its refusal message blames                                                             |
 | `ui/nodes/nodeRunRing.test.tsx`          | run-indicator arithmetic: dash fractions, the zero floor, indeterminate mode                                                     |
 | `ui/nodes/runRing.placement.test.tsx`    | that the outline renders outside the clipped card (slow mock, so 'running' is observable)                                        |
@@ -544,12 +547,22 @@ command there already follows. Getting this backwards would put a lit row in the
 closes it and does nothing, and on a bundled example that is the usual state rather than an
 edge case.
 
-**A synthetic dataset is refused, and it is the only refusal.** Every other gap emits a TODO,
+**Two things are refused; everything else is a TODO.** Every other gap emits a TODO,
 because the surrounding cells are still worth having. A `dataset.mock.*` connectome is generated
 in the browser: no server, no token, no id that means anything outside the tab — so the _first_
 cell is the one with nothing behind it, and what would come out is a notebook nobody can fix
 without knowing which real dataset was meant. Note the consequence: **all five bundled examples
 are refused**, which is why the golden files are built on `fixture.ts` rather than on them.
+
+**The second is a dataset from a backend no emitter has been written for**, which today means
+CAVE. The same reasoning arriving from the other direction: the dataset cell is the one with
+nothing behind it, and the walk cascades a TODO to every node downstream, so what comes out is a
+document of nothing but TODOs. `DatasetFamily.notebook` is the single statement of which families
+a notebook can be built for, read by `canExportNotebook` and by both dataset emitter loops — it
+had to be, because those two used to disagree: the loops keyed on the *source id* while the
+refusal tested `synthetic` alone, so a FlyWire graph passed the check and produced exactly that
+document. It is deliberately not derived from `sourceId`, since what decides it is whether an
+emitter exists, not where the data comes from.
 
 **The walk decides whether an input arrived; emitters never ask.** `ctx.wired(port)` returns a
 plain `string` because the walk refuses to call an emitter whose _required_ ports are unwired or
@@ -3344,6 +3357,218 @@ because errors cross the scheduler as strings and matching on message text rots 
 
 **Tests use recorded fixtures** in `__fixtures__/`, all real trimmed responses. The
 transport is not covered — it cannot be without a network — but it fails loudly.
+
+## CAVE
+
+`src/data/cave/`, and the second backend. FlyWire and everything else served by CAVE — the
+info service that lists datastacks, a materialization engine that answers queries against a
+frozen snapshot, and per-datastack annotation tables. Nothing above `src/data` knows it exists;
+a CAVE dataset node is `dataset.flywire`, built from `DATASET_FAMILIES` exactly as the neuPrint
+ones are.
+
+**Everything below was probed live against `global.daf-apis.com` and `prod.flywire-daf.com`
+rather than recalled**, and `live.test.ts` is that pass institutionalised — skipped without
+`CAVE_TOKEN`, the standing `scripts/check-export.py` has when navis is absent.
+
+### neuPrint is queried; CAVE is downloaded
+
+The single decision the whole module follows from. neuPrint runs Cypher against a shared
+production Neo4j, so `findNeurons` compiles a pattern into a query and every question is a round
+trip. CAVE's query API has **no regex worth using, no `GROUP BY`, and a 500,000-row cap** — but
+its annotations are a few tens of megabytes and are *already* what the Explore widget wants. So
+`CaveSource` fetches the neuron index once per dataset through the machinery Explore already
+has, pivots it, and answers `findNeurons` from memory: 139,255 neurons in **6.7 s**, then every
+query after that is local. The cost is that the first one waits.
+
+That is why `data/neuronFilter.ts` exists. Filtering locally means *Coda* decides what a pattern
+means, and it has to decide the same thing the mock does and the same thing Neo4j's `=~` does —
+`^(?:…)$`, so `LC.*` matches `LC4` and not `LPLC1` — or one graph pointed at two backends
+quietly returns two answers. `compileRegex` and `compileLabelMatch` moved out of `MockSource`
+when CAVE became their second consumer; a copy is how the two drift.
+
+### The 64-bit problem, at the other end of the seam
+
+Invariant 8 was written for this. A FlyWire root id is eighteen digits, and **`JSON.parse`
+rounds it**:
+
+```text
+raw text   "pt_root_id":720575940628857210
+JSON.parse  720575940628857200   ✗ a different neuron, silently
+json.ts    "720575940628857210"  ✓ matches the bytes on the wire
+```
+
+No reviver helps — a reviver is handed the value *after* parsing, so the digits are already
+gone. The exact value exists only in the response text, so `json.ts` quotes every integer
+literal too wide for a double before the parser sees it. Four things about it:
+
+- **The scan matches a complete string literal first**, so it never looks inside one. The
+  obvious `raw.replace(/:(\d{16,})/g, ':"$1"')` is wrong on real data: `neuron_information_v2`
+  is free-text user annotation, so a tag reading `root:720575940628857210` gets quotes spliced
+  into the middle of a string and the document stops parsing.
+- **The decision is per match, by `Number.isSafeInteger`.** A 16-digit value that is genuinely
+  exact stays a number; only what a double cannot hold becomes text.
+- **The delimiter is part of the match** rather than a lookbehind, which is also what stops the
+  fractional digits of `0.1234567890123456789` starting a match.
+- **721 ms on the real 64 MB index response**, against 108 ms for a naive parse. Paid once per
+  dataset behind the IndexedDB cache and against ~6 s of network — but worth knowing before
+  anyone puts it on a hot path.
+
+**The other leg is free, and that was checked rather than assumed: CAVE accepts a *quoted*
+eighteen-digit id in `filter_in_dict`** and answers identically to an unquoted one. So ids go
+out as text and come back as text, and no number is ever formed on either side. Had it not, the
+request body would have needed the mirror image of the same rewrite.
+
+### The 500,000-row cap, and why counting is the only tell
+
+The materialization engine truncates a result at 500,000 rows and says so in a `warning`
+header — which its `Access-Control-Expose-Headers` does **not** list, so a browser cannot read
+it. Truncation is therefore detected by counting, and refused rather than returned: a short
+index is not a visible failure, it is a dataset that silently lacks neurons.
+
+**`hierarchical_neuron_annotations` is over the cap**, which is why the index reads it **one
+`classification_system` at a time** — five queries of 17k to 139k rows instead of one that comes
+back quietly short. The kinds come from discovery, which has already run, so the split costs no
+extra round trip.
+
+That was found by `live.test.ts` on its first run, and it is exactly the class of bug the fixture
+suite cannot see. Note the tell that pointed the wrong way: the `table/{t}/count` endpoint reports
+**377,699** for that table and **127,978** for `proofread_neurons`, while the tables themselves
+yield over 500,000 rows and 139,255 distinct root ids. Whatever it counts, it is not the rows a
+query returns — which is also why `DatasetInfo.neuronCount` is filled in from the index after the
+fact rather than asked for at listing time.
+
+### A datastack does not describe itself
+
+neuPrint's graph has a `:Neuron` label with properties on it. A CAVE datastack is a bag of
+annotation tables with no privileged one — `flywire_fafb_public` publishes six, of which
+`proofread_neurons` is the neuron set, `hierarchical_neuron_annotations` is the cell typing, and
+`valid_connection_v2` is a **view** rather than a table. Nothing in the metadata says so; the
+schema types (`representative_point`, `cell_type_reference`) describe the shape of a row, not
+the role of the table.
+
+So `spec.ts` holds one entry per datastack, static for the reason `datasetFamilies.ts` is
+static, and it is a deliberately faithful port of the idea `connecto` arrived at in Python for
+the same problem. **A datastack with no entry is not offered** — the info service lists thirteen
+and most would fail on the first Run, and a dataset that appears in the picker and then fails is
+worse than one that is absent.
+
+**Connectivity is that view, and it is the finding that makes CAVE affordable.**
+`synapses_nt_v1` is 244,358,226 rows and the query API has no `GROUP BY`, so an edge list built
+from synapses means downloading a hemisphere's worth of them to count. `valid_connection_v2` is
+the server having done it once: one row per ordered (pre, post) pair with `n_syn`, filterable by
+root id *and* by `n_syn` — so a minimum weight is applied before anything is sent. On one
+neuron's outputs that is 4,818 rows / 410 kB unfiltered against 183 rows / 16 kB at `n_syn >= 5`.
+A datastack without such a view says so rather than pretending, which is the honest state for
+Aedes.
+
+### Endpoint shapes that are not what a reasonable person would guess
+
+Read off live responses and cross-checked against `caveclient` 8.0.1's own endpoint table:
+
+- **`arrow_format=false` returns `application/json`**, which is what keeps Arrow, a WASM decoder
+  and anything new in the main chunk out of this entirely. The cost is `json.ts`.
+- **`tables` sits on a v2 path inside the v3 API.** caveclient's v3 map points it at `mat_v2_api`
+  while everything around it moved; the v3 spelling 404s.
+- **`select_columns` and `select_column_map` are not interchangeable, and each endpoint takes
+  exactly one.** A single-table or view query rejects the map —
+  `{"schema_errors":{"select_columns":["Not a valid list."]}}` — and a *join* accepts the list
+  while warning that it "will attempt to select the first column it finds of this name in any
+  table, but if there are more than one such column it will not select both", which is a
+  silently wrong column rather than an error.
+- **One `/metadata` call lists every materialization with its timestamps**, where `versions`
+  returns bare integers and a per-version call turns a listing into a request per entry.
+- **`unique_string_values` is the cheap half of discovery**: 52 kB and about a second, against
+  tens of megabytes for the annotations. That is what lets discovery run from inference
+  (invariant 2) while the index waits until something actually asks for neurons.
+
+### What it costs, and what it declines
+
+**+16.4 kB raw / +5.2 kB gzipped on the main chunk** (1,010.02 → 1,026.39 kB), measured against
+a build of the same tree with the feature stashed out. Far under this codebase's bar for a lazy
+boundary.
+
+`SourceCapabilities` does the rest, and every `false` is a node that declines at edit time rather
+than failing at run time: no skeletons, meshes or synapses (the next phase — FlyWire publishes
+precomputed skeletons per materialization and Draco meshes in a CORS-open bucket, so this is
+"not wired up" rather than "not available"), no `paths` (it needs a hop aggregated server-side,
+which CAVE has no endpoint for), no `rawQuery`, no `viewerScene`, and none of the three ROI
+flags — FlyWire's neuropil assignments are a reference table on *synapses*, so there is no
+per-region completeness table to read, and a per-neuron breakdown would mean reading a neuron's
+synapses and grouping them, which is the work the connection roll-up exists to avoid.
+`neuronIndex` is the one that is true.
+
+**`roiCounts` is new, and `fetchRoiCounts` became optional to make room for it.** It was the one
+per-backend method on the seam that was required and ungated, and the cost of that showed up two
+levels away rather than at the node: `out.profile` fetches its regions in a `Promise.all` beside
+two connectivity queries, so a source that rejected there took all three down and **every tile on
+the card reported an error** — on a neuron whose partners had loaded perfectly well. The regions
+leg is now independently absent, which is the widget's own "a tile renders only when its data
+exists" rule, and `neuron.roiCounts` gained the `sourceSupports` gate its two ROI siblings
+already had.
+
+Two absences show up as data rather than as flags. A CAVE dataset reports **no ROIs and no
+statuses**, so Find Neurons' region and status pickers offer nothing to filter by — which is the
+honest state rather than a control that would match nothing.
+
+### Smaller decisions
+
+- **`neuronId` is `str` on this source, and `type` is the only other renamed column.**
+  `pt_root_id` → `neuronId` and the `cell_type` annotation kind → `type`; everything else keeps
+  CAVE's own spelling (`super_class`, `cell_class`), the same call neuPrint's passthroughs make.
+  What `str` costs is numeric sorting of ids and their appearance in numeric pickers, neither of
+  which is a loss.
+- **A failed discovery is asked for once, not once per keystroke.** `schemasFor` runs from
+  edit-time inference and `runDiscovery` sets its schema only on success — so without a
+  `discoveryRequested` flag every failure was retried on every graph mutation: one 52 kB request
+  per keystroke, or one auth-failure popup per keystroke with no token. Exactly the rule
+  `peekDatasets` already states for the listing beside it, and the reason neither flag is cleared
+  on failure. Pressing Run still retries, because the index path calls `discover` regardless.
+- **The index's two legs run together.** The annotation queries depend on nothing from the neuron
+  table — only on the server and the discovered kinds — so awaiting it first cost a round trip
+  plus 139,255 rows of transfer. Measured against live CAVE: 5.76 s to 4.04 s.
+- **`typesOf` is memoised on the index's identity.** `fetchConnectivity` is called once per hop
+  per direction, so `Hops: 3, Direction: both` built the same ~108,000-entry map six times in one
+  Run, and Profile built two per page turn. A `WeakMap` on the `TableValue` is safe rather than
+  merely likely to hit: `cacheGet` promotes a hit into `cache.ts`'s module map and hands back the
+  same object. Same idiom as `searchIndexFor` and `statsFor`.
+- **A dataset id is `datastack:materialization`** — `flywire_fafb_public:783` — following
+  neuPrint's `family:version` convention exactly, which is what lets the existing version
+  dropdown carry a materialization with **no new control**: `compareVersions` orders bare
+  integers, so 783 sorts above 630 and a pinned 630 stays 630.
+- **The index is deduplicated on the root id.** A CAVE neuron table is keyed by a *point* — a
+  soma, a nucleus, a representative vertex — so one segment carrying two of them is two rows for
+  one neuron, and a repeated row is double-counted by everything downstream that sums a weight.
+- **Connectivity types come from the index**, not from a second query. A connectivity table
+  without them is readable by nothing, and by the time anyone runs Connectivity the index is
+  already in hand. A partner outside the annotated set has no type, which is honest rather than
+  a gap.
+- **There is no Base URL field**, unlike neuPrint's, and its absence is the finding: every CAVE
+  service Coda calls answers a browser directly, **including on its 401s**, which is the part
+  `reportAuthFailure` depends on. What the Connections tab does carry is a *global server*,
+  which is a different thing — CAVE splits into one service that knows which datastacks exist
+  and a per-datastack `local_server` that answers queries, and only the first is ever named.
+- **A CAVE 401 opens the CAVE tab.** `reportAuthFailure` carries no source id, so the Connections
+  panel used to declare one `authTab` per section, hardcoded to neuPrint. Harmless while neuPrint
+  was the only credentialed backend and wrong the moment CAVE arrived; the *tab* is now named by
+  whoever subscribes. The `section.authTab ? …` branch that chose whether to wrap a body was
+  reading an auth detail to answer a layout question and is now an explicit `tabbed` flag.
+- **Both exporters skip it, and the export is refused outright.** `dataset.flywire` is named in
+  each `NO_EMITTER` with its reason — the notebooks are built on neuprint-python and neuprintr,
+  and emitting neuPrint code against a dataset neuPrint has never heard of would produce a
+  document that runs and answers nothing. The loops and `canExportNotebook` both read
+  `DatasetFamily.notebook`; see the exporter section above for why that is one field rather than
+  a test repeated at each site.
+
+### What is not done
+
+Morphology (phase 3), the annotation-source abstraction that would let a FlyTable or a GitHub TSV
+join onto root ids (phase 4), and the materialization/annotation dropdowns and per-source
+morphology ceilings (phase 5). Aedes needs phase 4 before it is usable at all: its CAVE datastack
+publishes synapses and nuclei and *no* annotations, so type, class and side live in FlyTable.
+
+Not looked at in a browser yet — the module is headless and both suites are headless, so what has
+not been seen is a FlyWire dataset node on a real canvas with the Explore widget over 139,255
+neurons. Same standing as the WebGL viewers.
 
 ## Precomputed meshes
 

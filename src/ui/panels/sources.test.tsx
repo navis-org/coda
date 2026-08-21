@@ -23,6 +23,10 @@ import {
   setModel,
 } from '../../data/ai/credentials'
 import { MockSource } from '../../data/mock/MockSource'
+import {
+  reportAuthFailure as reportCaveAuthFailure,
+  resetCredentials as resetCaveCredentials,
+} from '../../data/cave/credentials'
 import { reportAuthFailure, resetCredentials } from '../../data/neuprint/credentials'
 import { registerSource } from '../../data/source'
 import { installJsdomStubs } from '../../test/jsdomStubs'
@@ -36,6 +40,7 @@ beforeAll(() => {
 afterEach(() => {
   cleanup()
   resetCredentials()
+  resetCaveCredentials()
   resetAiCredentials()
   vi.unstubAllGlobals()
 })
@@ -59,7 +64,7 @@ describe('source tabs', () => {
       sourceTabs()
         .getAllByRole('tab')
         .map((el) => el.textContent),
-    ).toEqual(['neuPrint', 'Mock connectome'])
+    ).toEqual(['neuPrint', 'CAVE', 'Mock connectome'])
     expect(tab('neuPrint').getAttribute('aria-selected')).toBe('true')
     expect(tokenField()).not.toBeNull()
   })
@@ -89,6 +94,25 @@ describe('source tabs', () => {
     expect(screen.getByText(/rejected the token/)).not.toBeNull()
     // The reason is worth nothing without the field that answers it.
     expect(tokenField()).not.toBeNull()
+  })
+
+  /*
+   * The routing used to be one `authTab` on the section, hardcoded to neuPrint. That was
+   * harmless for exactly as long as neuPrint was the only credentialed backend: with CAVE
+   * registered it would open the neuPrint tab and ask for the wrong token, which reads as the
+   * token being rejected rather than as the panel being on the wrong page. Removing the tab
+   * argument from either `subscribe` fails this.
+   */
+  it('routes a CAVE failure to the CAVE tab, not to neuPrint', () => {
+    render(<SourcesPanel />)
+
+    act(() => reportCaveAuthFailure('CAVE rejected the token (401)'))
+
+    expect(tab('CAVE').getAttribute('aria-selected')).toBe('true')
+    expect(tab('neuPrint').getAttribute('aria-selected')).toBe('false')
+    expect(screen.getByText(/CAVE rejected the token/)).not.toBeNull()
+    // Two credentialed sources now, so the field on screen has to be the one asked for.
+    expect(screen.getByText(/global.daf-apis.com/)).not.toBeNull()
   })
 
   it('opens itself on an auth failure', () => {

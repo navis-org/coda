@@ -1,0 +1,711 @@
+/**
+ * CAVE as a Coda `DataSource`: datastacks, materializations, neurons and connectivity.
+ *
+ * The three modules beside this one carry the parts that are easy to get silently wrong —
+ * `json.ts` the 64-bit ids, `api.ts` the endpoint shapes, `spec.ts` which table means what.
+ * What is left here is the economics, and they are the opposite of neuPrint's:
+ *
+ * **neuPrint is queried; CAVE is downloaded.** neuPrint runs Cypher against a shared production
+ * Neo4j, so every question is a round trip and `findNeurons` compiles a pattern into a query.
+ * CAVE's query API has no regex worth using, no `GROUP BY`, and a 500,000-row cap it cannot
+ * report to a browser — but the annotations are only a few tens of megabytes and are *already*
+ * what the Explore widget wants. So this source fetches the neuron index once per dataset,
+ * pivots it, caches it through the machinery Explore already has, and answers `findNeurons`
+ * from memory. Every query after the first is instant, which is a genuine gain rather than a
+ * consolation; the cost is that the first one waits for the download.
+ *
+ * That is also why `neuronFilter.ts` exists: filtering locally means Coda decides what a
+ * pattern means, and it has to decide the same thing the mock does and the same thing
+ * neuPrint's `=~` does, or one graph pointed at two backends quietly returns two answers.
+ *
+ * **Connectivity is a view, not an aggregation done here.** See `ConnectionViewSpec`. A
+ * datastack without one refuses rather than downloading 244 million synapse rows to count them.
+ */
+
+import { ID_COLUMN_NAME } from '../../core/ids'
+import type { NeuronId } from '../../core/ids'
+import type { MatrixValue, TableValue } from '../../core/values'
+import { getRow, makeMatrix, selectRows, tableFromRows } from '../../core/values'
+import type {
+  AdjacencyRequest,
+  ConnectivityRequest,
+  DataSource,
+  DatasetInfo,
+  FindNeuronsRequest,
+  SourceCapabilities,
+  SourceSchemas,
+} from '../source'
+import { reportSourceLearned } from '../source'
+import type { NeuronIndexRequest } from '../neuronIndex'
+import { loadCachedTable, neuronIndexKey } from '../neuronIndex'
+import { compileLabelMatch, compileRegex } from '../neuronFilter'
+import type { CaveRequestOptions, CaveRow } from './client'
+import { CAVE_MAX_ROWS, CaveError } from './client'
+import {
+  datastackInfo,
+  listDatastacks,
+  queryTable,
+  queryView,
+  uniqueStringValues,
+  versionsMetadata,
+} from './api'
+import { getServer } from './credentials'
+import { codaColumn, defaultSchemas, neuronSchemaFor, schemasFor } from './schema'
+import type { ConnectionViewSpec, DatastackSpec } from './spec'
+import { DATASTACK_SPECS, datasetIdFor, specFor, splitDatasetId } from './spec'
+
+/**
+ * What CAVE can do today, and every `false` is a node that refuses cleanly rather than a
+ * feature quietly missing.
+ *
+ * Morphology (skeletons, meshes, synapses) is the next phase and is genuinely available —
+ * FlyWire publishes precomputed skeletons per materialization and Draco meshes in a CORS-open
+ * bucket — it is simply not wired up yet, and claiming it would make the 3D nodes fail at run
+ * time instead of declining at edit time. `paths` is a real absence: it needs a hop aggregated
+ * server-side, which CAVE has no endpoint for. So are all three ROI flags — FlyWire's neuropil
+ * assignments are a reference table on *synapses*, so there is no per-region completeness table
+ * to read and a per-neuron breakdown would mean reading a neuron's synapses and grouping them,
+ * which is the work the connection roll-up exists to avoid.
+ */
+const CAVE_CAPABILITIES: SourceCapabilities = {
+  rawQuery: false,
+  skeletons: false,
+  meshes: false,
+  synapses: false,
+  neuronIndex: true,
+  roiCounts: false,
+  paths: false,
+  viewerScene: false,
+  roiSummary: false,
+  roiMeshes: false,
+}
+
+/** Per-datastack state: where it is served from, and what its neuron table looks like. */
+interface DatastackState {
+  server?: string
+  schemas?: SourceSchemas
+  /** Annotation kinds in CAVE's own spelling — what the index pages by. */
+  systems?: string[]
+  discovering?: Promise<void>
+  /**
+   * Whether inference has already asked for discovery. Never cleared on failure.
+   *
+   * The same rule, and the same reason, as `listingRequested`: inference runs on every graph
+   * mutation, so a discovery that failed and was retried from there is a request per keystroke —
+   * or, with no token, an auth-failure popup per keystroke. `runDiscovery` sets `schemas` only
+   * on the success path, so without this flag every failure is retried forever.
+   *
+   * The *Run* path (`neuronSchema`) deliberately calls `discover` regardless, so pressing Run is
+   * still what retries. That is the same shape as the Sources panel being the recovery for a
+   * failed listing.
+   */
+  discoveryRequested?: boolean
+}
+
+export class CaveSource implements DataSource {
+  readonly id = 'cave'
+  readonly label = 'CAVE'
+  readonly description =
+    'FlyWire and other CAVE-hosted connectomes. Needs a CAVE token; every dataset is pinned to a materialization.'
+  readonly capabilities = CAVE_CAPABILITIES
+  readonly schemas: SourceSchemas = defaultSchemas()
+
+  private datasets: DatasetInfo[] | undefined
+  private listing: Promise<DatasetInfo[]> | undefined
+  private listingRequested = false
+  /** Which global server produced `datasets`. A changed setting invalidates everything. */
+  private listedFrom: string | undefined
+  private readonly states = new Map<string, DatastackState>()
+
+  // -------------------------------------------------------------------------
+  // Datasets
+  // -------------------------------------------------------------------------
+
+  async listDatasets(signal?: AbortSignal): Promise<DatasetInfo[]> {
+    const server = getServer()
+    if (this.listedFrom !== server) this.reset(server)
+    // Concurrent callers share one listing — a graph can hold several dataset nodes and each
+    // one's inference peeks. Unlike the neuron index this is not persisted: it is small, and it
+    // is the one thing that would tell us a materialization has expired.
+    this.listing ??= this.runListing(server, signal).finally(() => {
+      this.listing = undefined
+    })
+    return this.listing
+  }
+
+  peekDatasets(): DatasetInfo[] | undefined {
+    if (!this.datasets && !this.listingRequested) {
+      this.listingRequested = true
+      // Swallowed: a peek has no caller to report to, and a 401 already travels on its own
+      // channel to the Connections panel. Same trade as `NeuPrintSource.peekDatasets`.
+      void this.listDatasets().catch(() => undefined)
+    }
+    return this.datasets
+  }
+
+  peekDataset(datasetId: string): DatasetInfo | undefined {
+    return this.datasets?.find((d) => d.id === datasetId)
+  }
+
+  /**
+   * Forget everything learned from one global server.
+   *
+   * `listing` is cleared with the rest, which is the part that matters: without it a listing for
+   * the old server stays in flight, `listDatasets` hands that promise to a caller asking about
+   * the new one, and the dataset picker quietly shows the previous deployment's datastacks.
+   * `listedFrom` has exactly one writer for the same reason — it used to be re-pinned at the end
+   * of `runListing`, which on that path put it back to the server being replaced.
+   */
+  private reset(server: string): void {
+    this.listedFrom = server
+    this.datasets = undefined
+    this.listing = undefined
+    this.listingRequested = false
+    this.states.clear()
+  }
+
+  private async runListing(server: string, signal?: AbortSignal): Promise<DatasetInfo[]> {
+    const options: CaveRequestOptions = signal ? { signal } : {}
+    const available = new Set(await listDatastacks(server, options))
+    /*
+     * Only datastacks Coda has a spec for. The info service lists thirteen and most of them
+     * would fail on the first Run — see `spec.ts` for why a CAVE datastack cannot describe its
+     * own roles. Offering a dataset that cannot work is worse than not offering it.
+     */
+    const specs = DATASTACK_SPECS.filter((s) => available.has(s.datastack))
+    const perSpec = await Promise.all(
+      specs.map((spec) => this.listOne(server, spec, options).catch(() => [])),
+    )
+    this.datasets = perSpec.flat()
+    reportSourceLearned(this.id)
+    return this.datasets
+  }
+
+  private async listOne(
+    server: string,
+    spec: DatastackSpec,
+    options: CaveRequestOptions,
+  ): Promise<DatasetInfo[]> {
+    const info = await datastackInfo(server, spec.datastack, options)
+    this.state(spec.datastack).server = info.local_server
+    const versions = await versionsMetadata(info.local_server, spec.datastack, options)
+    return versions
+      .filter((v) => v.valid !== false && (v.status ?? 'AVAILABLE') === 'AVAILABLE')
+      .sort((a, b) => b.version - a.version)
+      .map((v) => datasetInfoFor(spec, v.version, v.time_stamp, v.expires_on))
+  }
+
+  // -------------------------------------------------------------------------
+  // Schemas
+  // -------------------------------------------------------------------------
+
+  schemasFor(datasetId: string): SourceSchemas {
+    const parsed = splitDatasetId(datasetId)
+    const spec = parsed ? specFor(parsed.datastack) : undefined
+    if (!spec) return this.schemas
+    const state = this.state(spec.datastack)
+    if (state.schemas) return state.schemas
+    if (!state.discoveryRequested) {
+      state.discoveryRequested = true
+      // Swallowed: inference has no caller to report to, and a 401 already travels on its own
+      // channel to the Connections panel.
+      void this.discover(spec).catch(() => undefined)
+    }
+    return this.schemas
+  }
+
+  /**
+   * Learn a datastack's annotation kinds. Idempotent, deduplicated, and cheap on purpose.
+   *
+   * `unique_string_values` is 52 kB where the annotations themselves are tens of megabytes,
+   * which is what lets this run from inference while the index waits until something actually
+   * asks for neurons.
+   */
+  private discover(spec: DatastackSpec): Promise<void> {
+    const state = this.state(spec.datastack)
+    if (state.schemas) return Promise.resolve()
+    state.discovering ??= this.runDiscovery(spec, state).finally(() => {
+      state.discovering = undefined
+    })
+    return state.discovering
+  }
+
+  private async runDiscovery(spec: DatastackSpec, state: DatastackState): Promise<void> {
+    const server = await this.serverFor(spec)
+    let systems: string[] = []
+    if (spec.annotations) {
+      const values = await uniqueStringValues(server, spec.datastack, spec.annotations.table)
+      systems = [...(values[spec.annotations.systemColumn] ?? [])].sort()
+    }
+    state.systems = systems
+    state.schemas = schemasFor(neuronSchemaFor(systems))
+    reportSourceLearned(this.id)
+  }
+
+  // -------------------------------------------------------------------------
+  // Neurons
+  // -------------------------------------------------------------------------
+
+  /**
+   * The whole neuron table for a dataset, pivoted and cached.
+   *
+   * The fingerprint is the column list, as everywhere else here, so an index cached before
+   * discovery learned about a new annotation kind is a miss rather than a table whose columns
+   * disagree with the type the editor is advertising downstream.
+   */
+  async neuronIndex(req: NeuronIndexRequest): Promise<TableValue> {
+    const { spec, version } = this.require(req.datasetId)
+    const schema = await this.neuronSchema(spec)
+    return loadCachedTable({
+      key: neuronIndexKey(this.id, req.datasetId),
+      fingerprint: schema.columns.map((c) => c.name).join(','),
+      ...(req.refresh ? { refresh: req.refresh } : {}),
+      fetch: () => this.buildIndex(spec, version, schema, req),
+    })
+  }
+
+  private async buildIndex(
+    spec: DatastackSpec,
+    version: number,
+    schema: SourceSchemas['neurons'],
+    req: NeuronIndexRequest,
+  ): Promise<TableValue> {
+    const server = await this.serverFor(spec)
+    const options: CaveRequestOptions = req.signal ? { signal: req.signal } : {}
+
+    /*
+     * Both legs at once. The annotation queries depend on nothing from the neuron one — only on
+     * the server and the discovered kinds, both already in hand — so awaiting the neuron table
+     * first cost a full round trip plus the transfer of 139,255 rows out of a ~6.7 s first load.
+     * Peak memory is unchanged: every annotation array is held until the batch resolves either
+     * way.
+     */
+    req.onProgress?.(0.1, 'loading neurons and annotations')
+    const [neuronRows, perSystem] = await Promise.all([
+      queryTable(
+        server,
+        spec.datastack,
+        version,
+        { table: spec.neurons.table, columns: ['id', spec.neurons.idColumn] },
+        options,
+      ),
+      this.loadAnnotations(spec, version, server, options),
+    ])
+    refuseIfCapped(neuronRows.length, spec.neurons.table)
+
+    /*
+     * Root id by the annotation table's reference key, plus the order the index is built in.
+     * Server order rather than a sort: it is stable across calls, and sorting eighteen-digit
+     * text would put the neurons in an order nobody asked for.
+     */
+    const rootById = new Map<string, string>()
+    const order: string[] = []
+    for (const row of neuronRows) {
+      const rootId = row[spec.neurons.idColumn]
+      if (rootId === null || rootId === undefined) continue
+      rootById.set(String(row.id), String(rootId))
+      order.push(String(rootId))
+    }
+
+    const annotations = new Map<string, Record<string, string>>()
+    if (spec.annotations) {
+      const { refColumn, valueColumn } = spec.annotations
+      for (const [system, rows] of perSystem) {
+        const name = codaColumn(system)
+        for (const row of rows) {
+          const rootId = rootById.get(String(row[refColumn]))
+          const value = row[valueColumn]
+          if (!rootId || value === null || value === undefined) continue
+          const record = annotations.get(rootId) ?? {}
+          record[name] = String(value)
+          annotations.set(rootId, record)
+        }
+      }
+    }
+
+    req.onProgress?.(0.9, 'building index')
+    /*
+     * Deduplicated on the root id. A CAVE neuron table is keyed by a *point* — a soma, a
+     * nucleus, a representative vertex — so one segment carrying two of them is two rows for
+     * one neuron, and a repeated row is double-counted by everything downstream that sums a
+     * weight.
+     */
+    const seen = new Set<string>()
+    const rows = order
+      .filter((rootId) => !seen.has(rootId) && seen.add(rootId))
+      .map((rootId) => ({ [ID_COLUMN_NAME]: rootId, ...annotations.get(rootId) }))
+
+    const table = tableFromRows(schema, rows, 'neurons')
+    this.noteNeuronCount(spec, version, table.length)
+    req.onProgress?.(1, 'ready')
+    return table
+  }
+
+  /**
+   * Every annotation kind, one request each.
+   *
+   * A fix rather than a refinement. `hierarchical_neuron_annotations` is over CAVE's
+   * 500,000-row cap in a single query — found live, on the first run of `live.test.ts`, where
+   * the row-count endpoint had claimed 377,699 — so the whole table cannot be read at once and
+   * `refuseIfCapped` was correctly making FlyWire unusable. Filtering by kind splits it into
+   * five queries of 17k to 139k rows, all comfortably under, and the kinds come from discovery,
+   * which has already run. The refusal stays as the backstop, now naming the kind that
+   * overflowed.
+   *
+   * `Promise.all` rather than `mapWithConcurrency`: a dropped kind is a silently empty column
+   * rather than a visible failure, so fail-fast is the semantics wanted here.
+   */
+  private loadAnnotations(
+    spec: DatastackSpec,
+    version: number,
+    server: string,
+    options: CaveRequestOptions,
+  ): Promise<ReadonlyArray<readonly [string, CaveRow[]]>> {
+    if (!spec.annotations) return Promise.resolve([])
+    const { table, systemColumn, refColumn, valueColumn } = spec.annotations
+    const { systems = [] } = this.state(spec.datastack)
+    return Promise.all(
+      systems.map(async (system) => {
+        const rows = await queryTable(
+          server,
+          spec.datastack,
+          version,
+          {
+            table,
+            filters: { equal: { [systemColumn]: system } },
+            columns: [refColumn, valueColumn],
+          },
+          options,
+        )
+        refuseIfCapped(rows.length, `${table} (${system})`)
+        return [system, rows] as const
+      }),
+    )
+  }
+
+  /**
+   * Fill in the neuron count once the index has actually been read.
+   *
+   * Not asked for at listing time, and that is a finding rather than a saving: the
+   * materialization engine's `table/{t}/count` for `proofread_neurons` at v783 answers 127,978
+   * while the table itself yields 137,181 distinct root ids. Whatever it counts, it is not what
+   * a dataset card would be claiming — so the number comes from the rows Coda holds, and is
+   * absent until then, which `DatasetInfo` already allows for.
+   */
+  private noteNeuronCount(spec: DatastackSpec, version: number, count: number): void {
+    const info = this.datasets?.find((d) => d.id === datasetIdFor(spec.datastack, version))
+    if (!info || info.neuronCount === count) return
+    info.neuronCount = count
+    reportSourceLearned(this.id)
+  }
+
+  async findNeurons(req: FindNeuronsRequest): Promise<TableValue> {
+    const index = await this.neuronIndex({
+      datasetId: req.datasetId,
+      ...(req.signal ? { signal: req.signal } : {}),
+    })
+
+    const typeRe = compileRegex(req.typePattern, 'type')
+    const instanceRe = compileRegex(req.instancePattern, 'instance')
+    const labelTest = compileLabelMatch(req.labels)
+    // Present-and-empty means no neurons, never "no filter" — the seam's documented rule, and
+    // the one an unconfigured node depends on.
+    const wantedIds = req.neuronIds ? new Set<string>(req.neuronIds) : undefined
+    const statuses = req.statuses?.length ? new Set(req.statuses) : undefined
+
+    /*
+     * A filter naming a column this dataset does not publish matches nothing, which is Cypher's
+     * null rule and `compileLabelMatch`'s. A region filter is the whole-query case of that — CAVE
+     * publishes no regions at all — so it is decided once rather than per row. Neither is
+     * reachable from the UI, since both pickers are populated from what the dataset reports; this
+     * is what a graph saved against another backend meets.
+     */
+    if (req.roi) return selectRows(index, [])
+
+    /*
+     * Columns hoisted, and a row record built only where one is genuinely needed. Every filter
+     * but `labels` reads a single cell by a fixed name, so materialising the whole row first cost
+     * 139,255 objects per query — discarded, overwhelmingly, by the very next line.
+     */
+    const ids = index.data[ID_COLUMN_NAME] ?? []
+    const types = index.data.type
+    const instances = index.data.instance
+    const statusValues = index.data.status
+    const sizes = index.data.size
+
+    const matched: number[] = []
+    for (let i = 0; i < index.length; i++) {
+      if (wantedIds && !wantedIds.has(String(ids[i]))) continue
+      if (typeRe && !typeRe.test(String(types?.[i] ?? ''))) continue
+      if (instanceRe && !instanceRe.test(String(instances?.[i] ?? ''))) continue
+      if (statuses && !statuses.has(String(statusValues?.[i] ?? ''))) continue
+      if (req.minSize && Number(sizes?.[i] ?? 0) < req.minSize) continue
+      if (labelTest && !labelTest(getRow(index, i))) continue
+      matched.push(i)
+    }
+
+    const limited = req.limit && req.limit > 0 ? matched.slice(0, req.limit) : matched
+    return selectRows(index, limited)
+  }
+
+  // -------------------------------------------------------------------------
+  // Connectivity
+  // -------------------------------------------------------------------------
+
+  async fetchConnectivity(req: ConnectivityRequest): Promise<TableValue> {
+    const { spec, version } = this.require(req.datasetId)
+    const links = requireConnections(spec)
+    const server = await this.serverFor(spec)
+
+    // Query-relative, which is what the seam promises: `neuronId` is always the neuron that was
+    // asked about, whichever way the synapse points. The Connectivity node re-orients into
+    // pre/post itself — see `nodes/lib/connectivityOps.ts`.
+    const outputs = req.direction === 'outputs'
+    const queried = outputs ? links.preColumn : links.postColumn
+    const partner = outputs ? links.postColumn : links.preColumn
+
+    // Together: the type lookup may have to download the index, and there is no reason for the
+    // connectivity query to wait behind it.
+    const [rows, types] = await Promise.all([
+      queryLinks(
+        server,
+        spec.datastack,
+        version,
+        links,
+        { [queried]: req.neuronIds },
+        req.minWeight,
+        req.signal,
+      ),
+      this.typeLookup(req.datasetId, req.signal),
+    ])
+    return tableFromRows(
+      this.schemasFor(req.datasetId).connectivity,
+      rows.map((row) => {
+        const neuronId = String(row[queried])
+        const partnerId = String(row[partner])
+        return {
+          [ID_COLUMN_NAME]: neuronId,
+          neuronType: types.get(neuronId) ?? null,
+          partnerId,
+          partnerType: types.get(partnerId) ?? null,
+          weight: Number(row[links.weightColumn] ?? 0),
+        }
+      }),
+    )
+  }
+
+  async fetchAdjacency(req: AdjacencyRequest): Promise<MatrixValue> {
+    const { spec, version } = this.require(req.datasetId)
+    const links = requireConnections(spec)
+    const server = await this.serverFor(spec)
+
+    const [rows, types] = await Promise.all([
+      queryLinks(
+        server,
+        spec.datastack,
+        version,
+        links,
+        { [links.preColumn]: req.sourceIds, [links.postColumn]: req.targetIds },
+        undefined,
+        req.signal,
+      ),
+      req.groupByType ? this.typeLookup(req.datasetId, req.signal) : undefined,
+    ])
+    // An untyped neuron keeps its own id as its key rather than joining a bucket called "null" —
+    // the rule `profileStats` follows, and for its reason: merging them puts a fictitious type
+    // at the top of the list.
+    const key = (id: string) => types?.get(id) ?? id
+    const rowKeys = [...new Set(req.sourceIds.map(key))]
+    const colKeys = [...new Set(req.targetIds.map(key))]
+    const rowAtKey = new Map(rowKeys.map((k, i) => [k, i]))
+    const colAtKey = new Map(colKeys.map((k, i) => [k, i]))
+
+    const values = new Float64Array(rowKeys.length * colKeys.length)
+    for (const row of rows) {
+      const r = rowAtKey.get(key(String(row[links.preColumn])))
+      const c = colAtKey.get(key(String(row[links.postColumn])))
+      if (r === undefined || c === undefined) continue
+      const at = r * colKeys.length + c
+      values[at] = (values[at] ?? 0) + Number(row[links.weightColumn] ?? 0)
+    }
+    return makeMatrix(rowKeys, colKeys, values, 'synapses', 'count')
+  }
+
+  /**
+   * Neuron id → cell type, out of the cached index.
+   *
+   * A connectivity table without types is readable by nothing — the Network viewer's labels,
+   * the Connectivity node's `preType`/`postType`, and every Group By downstream all want them —
+   * and by the time anyone runs Connectivity the index is already in hand, because whatever
+   * produced the neuron list needed it. A partner outside the annotated set has no type, which
+   * is the honest answer rather than a gap.
+   *
+   * Memoised on the index's identity by `typesOf`, because this is called once per hop per
+   * direction: `Hops: 3, Direction: both` is six calls in one Run, and Profile pays two per page
+   * turn. Building a hundred thousand entries six times over to get the same answer is the
+   * `searchIndexFor`/`statsFor` case exactly.
+   */
+  private async typeLookup(
+    datasetId: string,
+    signal: AbortSignal | undefined,
+  ): Promise<Map<string, string>> {
+    const index = await this.neuronIndex({ datasetId, ...(signal ? { signal } : {}) })
+    return typesOf(index)
+  }
+
+  // -------------------------------------------------------------------------
+  // Resolution helpers
+  // -------------------------------------------------------------------------
+
+  private state(datastack: string): DatastackState {
+    let state = this.states.get(datastack)
+    if (!state) {
+      state = {}
+      this.states.set(datastack, state)
+    }
+    return state
+  }
+
+  /** Parse and wire a dataset id, or say precisely which half is wrong. */
+  private require(datasetId: string): { spec: DatastackSpec; version: number } {
+    const parsed = splitDatasetId(datasetId)
+    if (!parsed) {
+      throw new CaveError(
+        `"${datasetId}" does not name a CAVE dataset. Expected datastack:materialization, ` +
+          `for example flywire_fafb_public:783.`,
+      )
+    }
+    const spec = specFor(parsed.datastack)
+    if (!spec) {
+      throw new CaveError(
+        `Coda has no wiring for the CAVE datastack "${parsed.datastack}". A datastack has to ` +
+          `say which of its tables are neurons and which are connections — see ` +
+          `src/data/cave/spec.ts.`,
+      )
+    }
+    return { spec, version: parsed.version }
+  }
+
+  /** The neuron schema for a datastack, waiting for discovery if it has not run. */
+  private async neuronSchema(spec: DatastackSpec): Promise<SourceSchemas['neurons']> {
+    await this.discover(spec)
+    return (this.state(spec.datastack).schemas ?? this.schemas).neurons
+  }
+
+  /** The server a datastack is served from, asking the info service once if need be. */
+  private async serverFor(spec: DatastackSpec): Promise<string> {
+    const state = this.state(spec.datastack)
+    if (state.server) return state.server
+    const info = await datastackInfo(getServer(), spec.datastack)
+    state.server = info.local_server
+    return info.local_server
+  }
+}
+
+// ---------------------------------------------------------------------------
+
+/**
+ * Neuron id → cell type for one index, built once per table.
+ *
+ * A `WeakMap` on the table itself, which is safe rather than merely likely to hit: `cacheGet`
+ * promotes a cached table into `cache.ts`'s module-level map and hands back **the same object**,
+ * so repeat `neuronIndex` calls for one dataset return an identical `TableValue`. Same idiom as
+ * `searchIndexFor`, `statsFor` and `cornersByBucket`.
+ */
+const typeCache = new WeakMap<TableValue, Map<string, string>>()
+
+function typesOf(index: TableValue): Map<string, string> {
+  const cached = typeCache.get(index)
+  if (cached) return cached
+  const lookup = new Map<string, string>()
+  const ids = index.data[ID_COLUMN_NAME]
+  const types = index.data.type
+  if (ids && types) {
+    for (let i = 0; i < index.length; i++) {
+      const type = types[i]
+      if (typeof type === 'string' && type) lookup.set(String(ids[i]), type)
+    }
+  }
+  typeCache.set(index, lookup)
+  return lookup
+}
+
+function datasetInfoFor(
+  spec: DatastackSpec,
+  version: number,
+  timestamp?: string,
+  expires?: string,
+): DatasetInfo {
+  const dated = timestamp ? ` materialized ${timestamp.slice(0, 10)}` : ''
+  const ends = expires ? `, expires ${expires.slice(0, 10)}` : ''
+  return {
+    id: datasetIdFor(spec.datastack, version),
+    label: `${spec.label} ${version}`,
+    description: `${spec.description}\n\nMaterialization ${version}${dated}${ends}.`,
+    species: 'Drosophila melanogaster',
+    // No neuropil regions: FlyWire's are annotations on synapses rather than a published region
+    // set, so every ROI-shaped control correctly finds nothing to offer.
+    rois: [],
+    // No status property either, so Find Neurons' status picker offers only "Any" — the honest
+    // state rather than a filter that would match nothing.
+    statuses: [],
+    version: String(version),
+  }
+}
+
+function requireConnections(spec: DatastackSpec): ConnectionViewSpec {
+  if (spec.connections) return spec.connections
+  throw new CaveError(
+    `${spec.label} publishes no connection roll-up, so Coda cannot build an edge list from it. ` +
+      `Building one from raw synapses would mean downloading the whole synapse table.`,
+  )
+}
+
+function queryLinks(
+  server: string,
+  datastack: string,
+  version: number,
+  links: ConnectionViewSpec,
+  // Root ids go out as **text** and come back as text: CAVE casts a quoted integer in a filter,
+  // verified against v783, so no id is ever a JS number on either leg.
+  inFilters: Record<string, readonly NeuronId[]>,
+  minWeight: number | undefined,
+  signal: AbortSignal | undefined,
+): Promise<CaveRow[]> {
+  return queryView(
+    server,
+    datastack,
+    version,
+    {
+      view: links.view,
+      filters: {
+        in: Object.fromEntries(Object.entries(inFilters).map(([k, v]) => [k, [...v]])),
+        // Applied by the server, before anything is sent. On one FlyWire neuron that is the
+        // difference between 4,818 rows at 410 kB and 183 rows at 16 kB.
+        ...(minWeight && minWeight > 1
+          ? { atLeast: { [links.weightColumn]: minWeight } }
+          : {}),
+      },
+      columns: [links.preColumn, links.postColumn, links.weightColumn],
+    },
+    signal ? { signal } : {},
+  )
+}
+
+/**
+ * A result the size of the server's cap is not a result.
+ *
+ * The materialization engine truncates at `CAVE_MAX_ROWS` and says so in a `warning` header its
+ * CORS policy does not expose, so a browser can only count. A short index is not a visible
+ * failure — it is a dataset that silently lacks neurons, and every query against it would be
+ * quietly wrong rather than broken.
+ */
+function refuseIfCapped(rows: number, table: string): void {
+  if (rows < CAVE_MAX_ROWS) return
+  throw new CaveError(
+    `CAVE truncated "${table}" at ${CAVE_MAX_ROWS.toLocaleString()} rows, so the neuron index ` +
+      `would be incomplete. This datastack is too large to read in one request, and Coda ` +
+      `cannot page it yet.`,
+  )
+}
+

@@ -15,26 +15,36 @@
  *
  * **`SECTIONS` is a table, not a set of ids to branch on.** Each entry carries its own body
  * (`render`, the same shape `SOURCE_TABS` already used), its own auth-failure channel
- * (`subscribe`) and, where it has a second level, which tab a failure opens (`authTab`). The
- * third section arrived as an id union widened, an entry added, a hand-wired `subscribe` and a
- * third arm of a `section.id === …` ternary — four edits, three of which fail silently when the
- * id is mistyped. It is one entry now.
+ * (`subscribe`) and whether it draws a second level of tabs (`tabbed`). The third section
+ * arrived as an id union widened, an entry added, a hand-wired `subscribe` and a third arm of a
+ * `section.id === …` ternary — four edits, three of which fail silently when the id is
+ * mistyped. It is one entry now.
  *
  * It opens itself on an auth failure, on whichever section failed. A 401 surfaced only as red
  * text on a node is a dead end — the fix is a credential, and the field should be in front of
  * you when you learn that. One channel per credential store; each section names its own, which
  * is why nothing here has to guess from the text of the failure.
  *
- * The wart this does *not* fix: `reportAuthFailure` still carries no source id, so `authTab`
- * hardcodes that a data-source failure is neuPrint's. That is the thing to fix when a second
- * credentialed backend arrives — the channel would grow an id, the way `reportSourceLearned`
- * already carries one.
+ * Within Data sources the *tab* is named by whoever subscribes, because `reportAuthFailure`
+ * carries no source id and there is one channel per credential store. It used to be a single
+ * `authTab` on the section, hardcoded to neuPrint — harmless while neuPrint was the only
+ * credentialed backend, and wrong the moment CAVE arrived, since a CAVE 401 would open the
+ * neuPrint tab and ask for the wrong token.
  */
 
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 
 import { ConnectionsIcon } from '../Icons'
 
+import { listDatastacks } from '../../data/cave/api'
+import {
+  DEFAULT_CAVE_SERVER,
+  getServer as getCaveServer,
+  getToken as getCaveToken,
+  setServer as setCaveServer,
+  setToken as setCaveToken,
+  subscribeAuthFailure as subscribeCaveAuthFailure,
+} from '../../data/cave/credentials'
 import { fetchDatasets, forgetRoutes } from '../../data/neuprint/client'
 import {
   forgetToken,
@@ -100,12 +110,22 @@ interface SourceTabProps {
 interface SourceTab {
   id: string
   label: string
-  render: (props: SourceTabProps) => ReactNode
+  /**
+   * The credential bundle plus `onClose`, and nothing about the tab bar itself.
+   *
+   * A tab that keeps its own credential state (see `CaveTab`) ignores every field except
+   * `onClose`, because saving should close the dialog exactly as the shared form's Save does —
+   * a second, subtly different dismissal is how one tab comes to behave unlike its neighbour.
+   * Deliberately not the whole `SectionProps`: a tab has no business reading `tabId`/`setTabId`,
+   * which are the bar's own state and belong to the thing drawing it.
+   */
+  render: (props: SourceTabProps & { onClose: () => void }) => ReactNode
 }
 
 // A non-empty tuple, so the fallback below is a `SourceTab` rather than possibly undefined.
 const SOURCE_TABS: readonly [SourceTab, ...SourceTab[]] = [
   { id: 'neuprint', label: 'neuPrint', render: (props) => <NeuPrintTab {...props} /> },
+  { id: 'cave', label: 'CAVE', render: ({ onClose }) => <CaveTab onSaved={onClose} /> },
   { id: 'mock', label: 'Mock connectome', render: () => <MockTab /> },
 ]
 
@@ -135,13 +155,23 @@ interface Section {
    * The auth-failure channel that opens the dialog *on this section*.
    *
    * One per credential store, and each store knows which section it belongs to, so nothing here
-   * reads the text of a failure to work out where to go. Note the wart this does not fix:
-   * `reportAuthFailure` still carries no source id, so `authTab` below hardcodes which tab
-   * within Data sources a failure lands on.
+   * reads the text of a failure to work out where to go.
+   *
+   * A section with tabs names the tab as it subscribes, rather than declaring one `authTab` for
+   * the whole section. That used to be a stated wart and became a real one the moment CAVE
+   * arrived: `reportAuthFailure` carries no source id, so a CAVE 401 opened the neuPrint tab
+   * and asked for the wrong credential — a failure that reads as the token being rejected
+   * rather than as the panel being on the wrong page.
    */
-  subscribe: (onFailure: (message: string) => void) => () => void
-  /** For Data sources only: which tab a failure on this section's channel opens. */
-  authTab?: string
+  subscribe: (onFailure: (message: string, tab?: string) => void) => () => void
+  /**
+   * This section draws its own tab bar, so it supplies its own `tabpanel` wrapper.
+   *
+   * An explicit flag rather than the presence of some other field. It used to be read off
+   * `authTab`, which is a fact about *auth failures* — so a tabbed section that happened not to
+   * name one would have been wrapped twice, with two elements claiming the same role.
+   */
+  tabbed?: boolean
 }
 
 /** What a section body is handed. Every one ignores most of it; see `SourceTabProps`. */
@@ -155,11 +185,15 @@ const SECTIONS: readonly [Section, ...Section[]] = [
   {
     id: 'data',
     label: 'Data sources',
-    subscribe: subscribeAuthFailure,
-    authTab: 'neuprint',
-    render: ({ tabId, setTabId, ...tabProps }) => (
-      <DataSourceTabs {...{ tabId, setTabId }} {...tabProps} />
-    ),
+    tabbed: true,
+    subscribe: (onFailure) => {
+      const stops = [
+        subscribeAuthFailure((message) => onFailure(message, 'neuprint')),
+        subscribeCaveAuthFailure((message) => onFailure(message, 'cave')),
+      ]
+      return () => stops.forEach((stop) => stop())
+    },
+    render: (props) => <DataSourceTabs {...props} />,
     privacy: (
       <>
         <strong>Credentials stay in this browser.</strong> Tokens are held in this
@@ -209,7 +243,9 @@ export function SourcesPanel() {
   const [token, setTokenField] = useState(() => getToken() ?? '')
   const [server, setServerField] = useState(() => getBaseUrlOverride() ?? '')
   const [probe, setProbe] = useState<Probe>({ state: 'idle' })
-  const [reason, setReason] = useState<{ section: SectionId; message: string } | undefined>(
+  const [reason, setReason] = useState<
+    { section: SectionId; message: string; tab?: string } | undefined
+  >(
     undefined,
   )
   const notify = useGraphStore((s) => s.setNotice)
@@ -220,8 +256,8 @@ export function SourcesPanel() {
   // fourth hand-wired subscribe that fails silently if its id is mistyped.
   useEffect(() => {
     const stops = SECTIONS.map((section) =>
-      section.subscribe((message) => {
-        setReason({ section: section.id, message })
+      section.subscribe((message, tab) => {
+        setReason({ section: section.id, message, ...(tab ? { tab } : {}) })
         setOpen(true)
       }),
     )
@@ -314,7 +350,7 @@ export function SourcesPanel() {
  * Its own component because it is the one section with a second level; the other two are a
  * single form. Keyed by tab so switching remounts, which re-runs the token field's focus.
  */
-function DataSourceTabs({ tabId, setTabId, ...tabProps }: Omit<SectionProps, 'onClose'>) {
+function DataSourceTabs({ tabId, setTabId, ...tabProps }: SectionProps) {
   const active = SOURCE_TABS.find((tab) => tab.id === tabId) ?? SOURCE_TABS[0]
   return (
     <>
@@ -341,7 +377,7 @@ function DataSourceTabs({ tabId, setTabId, ...tabProps }: Omit<SectionProps, 'on
 
 interface DialogProps extends SourceTabProps {
   onClose: () => void
-  reason: { section: SectionId; message: string } | undefined
+  reason: { section: SectionId; message: string; tab?: string } | undefined
 }
 
 function Dialog({ onClose, reason, ...tabProps }: DialogProps) {
@@ -349,17 +385,14 @@ function Dialog({ onClose, reason, ...tabProps }: DialogProps) {
   // closed, so every opening starts on the connection you are most likely to have come for.
   const [sectionId, setSectionId] = useState<SectionId>(reason?.section ?? SECTIONS[0].id)
   const section = SECTIONS.find((s) => s.id === sectionId) ?? SECTIONS[0]
-  const [tabId, setTabId] = useState(
-    (reason && SECTIONS.find((s) => s.id === reason.section)?.authTab) ?? SOURCE_TABS[0].id,
-  )
+  const [tabId, setTabId] = useState(reason?.tab ?? SOURCE_TABS[0].id)
 
   // A failure arriving while the dialog is already open would otherwise leave the reason
   // stated above a section that has nothing to do with it.
   useEffect(() => {
     if (!reason) return
     setSectionId(reason.section)
-    const tab = SECTIONS.find((s) => s.id === reason.section)?.authTab
-    if (tab) setTabId(tab)
+    if (reason.tab) setTabId(reason.tab)
   }, [reason])
 
   return (
@@ -403,14 +436,24 @@ function Dialog({ onClose, reason, ...tabProps }: DialogProps) {
          */}
         <p className="sources__privacy">{section.privacy}</p>
 
-        {section.authTab ? (
-          section.render({ ...tabProps, tabId, setTabId, onClose })
-        ) : (
-          <div className="sources__body" role="tabpanel" aria-label={section.label}>
-            {section.render({ ...tabProps, tabId, setTabId, onClose })}
-          </div>
-        )}
+        {renderSection(section, { ...tabProps, tabId, setTabId, onClose })}
       </div>
+    </div>
+  )
+}
+
+/**
+ * A section's body, wrapped in a `tabpanel` unless it draws its own.
+ *
+ * The wrapper is the only difference, so the render call is written once: as a ternary it was
+ * two identical four-key literals that had to be kept in step.
+ */
+function renderSection(section: Section, props: SectionProps): ReactNode {
+  const body = section.render(props)
+  if (section.tabbed) return body
+  return (
+    <div className="sources__body" role="tabpanel" aria-label={section.label}>
+      {body}
     </div>
   )
 }
@@ -618,6 +661,145 @@ function SharingTab({ onSaved }: { onSaved: () => void }) {
       {probe.state === 'ok' && (
         <p className="sources__result" data-tone="ok">
           Signed in as {probe.login}.
+        </p>
+      )}
+      {probe.state === 'failed' && (
+        <p className="sources__result" data-tone="error">
+          {probe.message}
+        </p>
+      )}
+    </section>
+  )
+}
+
+/**
+ * The CAVE token.
+ *
+ * Its own state rather than the shared `SourceTabProps` bundle, the call `SharingTab` and
+ * `AssistantTab` already make and the one that bundle's own comment anticipated: it was written
+ * "while there is one credentialed source", and there are two now. Threading a second token and
+ * a second server through it would give the mock tab four fields belonging to nothing it does.
+ *
+ * There is no Base URL here, and its absence is the finding rather than an omission. neuPrint's
+ * field exists because that deployment historically sent no CORS headers and had to be relayed;
+ * every CAVE service Coda calls answers a browser directly, 401s included. What *is* here is a
+ * global server, which is a different thing entirely — CAVE splits into one service that knows
+ * which datastacks exist and a per-datastack server that answers queries, and only the first is
+ * ever named. The second is discovered.
+ */
+function CaveTab({ onSaved }: { onSaved: () => void }) {
+  const [token, setTokenField] = useState(() => getCaveToken() ?? '')
+  const [server, setServerField] = useState(() => getCaveServer())
+  const [probe, setProbe] = useState<Probe>({ state: 'idle' })
+  const fieldRef = useRef<HTMLTextAreaElement>(null)
+  useEffect(() => fieldRef.current?.focus(), [])
+  const notify = useGraphStore((s) => s.setNotice)
+
+  const test = useCallback(async () => {
+    setProbe({ state: 'testing' })
+    try {
+      // With the values in the fields rather than the stored ones, so a token can be checked
+      // before committing to it — `NeuPrintTab`'s rule, reached the same way.
+      const base = server.trim().replace(/\/+$/, '') || DEFAULT_CAVE_SERVER
+      const names = await listDatastacks(base, {
+        token: token.trim().replace(/^Bearer\s+/i, ''),
+      })
+      setProbe({ state: 'ok', datasets: names.length, names: names.sort().slice(0, 6) })
+    } catch (error) {
+      setProbe({ state: 'failed', message: errorMessage(error) })
+    }
+  }, [token, server])
+
+  return (
+    <section className="sources__source">
+      <p className="sources__note">
+        FlyWire and other CAVE-hosted connectomes. Get a token from{' '}
+        <a
+          href="https://global.daf-apis.com/auth/api/v1/create_token"
+          target="_blank"
+          rel="noreferrer"
+        >
+          global.daf-apis.com
+        </a>{' '}
+        — the same token <code>caveclient</code> stores in{' '}
+        <code>~/.cloudvolume/secrets</code>, so if you already use CAVE from Python you have one.
+      </p>
+
+      <label className="sources__field">
+        <span>Token</span>
+        <textarea
+          ref={fieldRef}
+          className="field field--area field--mono"
+          rows={2}
+          value={token}
+          spellCheck={false}
+          placeholder="a1b2c3d4…"
+          onChange={(e) => setTokenField(e.target.value)}
+        />
+      </label>
+
+      <label className="sources__field">
+        <span>Global server</span>
+        <input
+          className="field field--mono"
+          value={server}
+          spellCheck={false}
+          placeholder={DEFAULT_CAVE_SERVER}
+          onChange={(e) => setServerField(e.target.value)}
+        />
+      </label>
+      <p className="sources__note sources__note--tight">
+        <strong>Leave this alone unless you use a different CAVE deployment.</strong> It is the
+        service that lists datastacks and says which server holds each one; the server that
+        answers the actual queries is read from that listing rather than named here. Not the
+        same thing as a dataset node&rsquo;s version, which names a <em>materialization</em>.
+      </p>
+
+      <div className="sources__actions">
+        <button
+          type="button"
+          className="btn btn--ghost"
+          onClick={() => void test()}
+          disabled={!token.trim() || probe.state === 'testing'}
+        >
+          {probe.state === 'testing' ? 'Testing…' : 'Test'}
+        </button>
+        <button
+          type="button"
+          className="btn btn--ghost"
+          onClick={() => {
+            setCaveToken(undefined)
+            setTokenField('')
+            setProbe({ state: 'idle' })
+          }}
+          disabled={!token}
+        >
+          Forget
+        </button>
+        <div className="toolbar__spacer" />
+        <button
+          type="button"
+          className="btn btn--primary"
+          onClick={() => {
+            setCaveToken(token)
+            setCaveServer(server)
+            // Re-list so the dataset picker fills in without a reload, exactly as saving a
+            // neuPrint token does. Swallowed: the 401 has its own channel back to this panel.
+            void getSource('cave')
+              ?.listDatasets()
+              .then((datasets) => notify(`CAVE connected — ${datasets.length} datasets`))
+              .catch(() => undefined)
+            onSaved()
+          }}
+        >
+          Save
+        </button>
+      </div>
+
+      {probe.state === 'ok' && (
+        <p className="sources__result" data-tone="ok">
+          Connected — {probe.datasets} datastacks ({probe.names.join(', ')}
+          {probe.datasets > probe.names.length ? ', …' : ''})
         </p>
       )}
       {probe.state === 'failed' && (

@@ -183,6 +183,7 @@ export class NeuPrintSource implements DataSource {
     // a dataset with no ROI hierarchy of its own answers with nothing in it — mushroombody
     // returns zero rows and no pairs, which is a dataset that has no regions rather than a
     // failure, and is reported as such.
+    roiCounts: true,
     roiSummary: true,
     roiMeshes: true,
   }

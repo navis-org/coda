@@ -289,6 +289,21 @@ export interface SourceCapabilities {
    */
   roiSummary: boolean
   /**
+   * Whether the source can break one neuron's synapses down by region.
+   *
+   * Separate from `roiSummary`, which is a fact about the whole *volume* and needs no neuron
+   * ids. This is the per-neuron one — and it is a capability rather than a required method
+   * because CAVE has no answer to it at all: FlyWire's neuropil assignments are a reference
+   * table on synapses, so a per-region count means reading a neuron's synapses and grouping
+   * them, which is the work its connection roll-up exists to avoid.
+   *
+   * It was a required method until the second real backend arrived, and the cost of that
+   * showed up two levels away: `out.profile` fetches its regions in a `Promise.all` beside two
+   * connectivity queries, so one rejection took all three down and every tile on the card
+   * reported an error — on a neuron whose connectivity had loaded perfectly well.
+   */
+  roiCounts: boolean
+  /**
    * Whether the source publishes a *mesh* per region — the neuropil shells themselves.
    *
    * Separate from `roiSummary`, which is the numbers, because the two are published in
@@ -344,7 +359,13 @@ export interface DataSource {
    */
   fetchPathStep?(req: PathStepRequest): Promise<TableValue>
   fetchAdjacency(req: AdjacencyRequest): Promise<MatrixValue>
-  fetchRoiCounts(req: RoiCountsRequest): Promise<TableValue>
+  /**
+   * Per-neuron, per-region synapse counts.
+   *
+   * Optional and gated by `capabilities.roiCounts`. A source without it makes the ROI Counts
+   * node decline at edit time, and Profile draw every tile but the regions one.
+   */
+  fetchRoiCounts?(req: RoiCountsRequest): Promise<TableValue>
 
   /**
    * Per-ROI traced-vs-total synapse counts, to `ROI_COMPLETENESS_SCHEMA`.

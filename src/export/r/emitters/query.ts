@@ -93,7 +93,18 @@ function emitDataset(ctx: EmitContext, familyKey: string): string[] {
 }
 
 for (const family of DATASET_FAMILIES) {
-  if (family.synthetic) continue // Refused before the walk; see `canExportNotebook`.
+  /*
+   * Only families a notebook can be built for. These lines build a `neuprint_login`, and the
+   * other two sources need something else entirely — a mock dataset has no server at all,
+   * and a CAVE datastack needs caveclient and a materialization number.
+   *
+   * The test is `DatasetFamily.notebook` rather than `sourceId`, because what decides it is
+   * whether an emitter has been written and not which backend the data came from.
+   * `canExportNotebook` reads the same field, which is what stops the menu offering an
+   * export whose every cell after the first is a TODO; both families are named in
+   * coverage.test.ts's NO_EMITTER as well.
+   */
+  if (family.notebook !== 'neuprint') continue
   registerEmitter(`dataset.${family.key}`, (ctx) => emitDataset(ctx, family.key))
 }
 

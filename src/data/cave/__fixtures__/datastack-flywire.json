@@ -1,0 +1,23 @@
+{
+  "aligned_volume": {
+    "id": 2,
+    "name": "fafb_seung_alignment_v0",
+    "display_name": "FAFB_v14",
+    "description": "The seung lab's realignment of the FAFB dataset",
+    "image_source": "precomputed://gs://flywire_em/aligned/v1"
+  },
+  "segmentation_source": "graphene://https://prod.flywire-daf.com/segmentation/1.0/flywire_public",
+  "skeleton_source": "precomputed://https://prod.flywire-daf.com/skeletoncache/api/v1/flywire_fafb_public/precomputed/skeleton",
+  "analysis_database": null,
+  "viewer_site": "https://ngl.flywire.ai/",
+  "synapse_table": null,
+  "soma_table": "nuclei_v1",
+  "local_server": "https://prod.flywire-daf.com",
+  "description": "The public segmentation for the flywire segmentation\t",
+  "viewer_resolution_x": 4.0,
+  "viewer_resolution_y": 4.0,
+  "viewer_resolution_z": 40.0,
+  "proofreading_status_table": null,
+  "cell_identification_table": null,
+  "proofreading_review_table": null
+}
