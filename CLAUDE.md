@@ -471,6 +471,8 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `ui/panels/sources.test.tsx`             | the sources dialog: a tab per source, the tab an auth failure lands on, and where the credential promise sits                    |
 | `nodes/annotation/note.test.ts`          | that a text note is never executed, deferred, stalled or counted, and round-trips                                                |
 | `store/links.test.ts`                    | breaking and re-routing links: one undo step, the id kept, and what a refused rewire leaves                                      |
+| `core/splice.test.ts`                    | dropping a node on a wire: the downstream check needing the upstream link applied, isolation, and one link left on the port |
+| `store/splice.test.ts`                   | that the move and the rewire undo as one gesture, and that a node which does not fit is still moved                          |
 | `ui/panels/edgeMenu.test.tsx`            | the link menu: that its header names the wire it is about, and that deleting leaves the nodes                                    |
 | `ui/panels/nodeMenu.test.tsx`            | the node menu's two caches: Results rather than "cache", and Clear Cache gated on the node declaring one                        |
 | `ui/nodes/cacheAge.test.tsx`             | `cached 3d ago ⟳`: the age surviving a restored result, the click reaching both caches, and no threshold hiding a fresh one     |
@@ -2571,6 +2573,51 @@ earlier request re-fires it and the widget pops open unprompted.
 Note `fuzzyMatch` tries every occurrence of the query's first character as an anchor rather
 than scanning greedily once — without that, "res" ranks "Clear Results" below an item whose
 _description_ starts with "Rescale", because greedy takes the `r` in "Clea**r**".
+
+## Dropping a node onto a wire
+
+Drag an **unconnected** node over an existing link and let go: `A → B` becomes `A → node → B`.
+The wire highlights while the card is over it, so the drop is never a surprise. `core/splice.ts`
+holds every decision, `ui/spliceHit.ts` the geometry, and the split is the usual one — jsdom
+performs no layout, so a path has no length and the geometry half cannot be tested at all.
+
+**Only an isolated node splices**, and that is not tidiness. A drag across a busy canvas passes
+over many wires, so a node already wired — one somebody is *rearranging* — would rewire the graph
+on any drop that happened to land on one. A node with no links has nothing to lose and is almost
+always one just added.
+
+**The downstream link is judged against a graph with the upstream one already applied**, which is
+the decision the whole thing turns on. A node's output type routinely depends on its input:
+`core.filter` isolated publishes `T.table()` and only becomes `neurons` once something
+neurons-shaped reaches it — so checking both links against the *current* inference refuses a
+Filter dropped on `Find Neurons → Skeletons`, which is the most obvious thing anybody would try.
+One re-inference, then the first compatible output; a node whose *second* input would have worked
+where its first did not is missed, which is the same "first compatible" simplification the
+palette's link-drag already makes.
+
+**The hit test walks the drawn path**, not a line between the sockets. `isPointInStroke` against
+the card's centre was the obvious route — React Flow already draws a fat `interactionWidth` copy
+of every edge — and it makes the target ±10 flow units around a hairline, which is a precise aim
+for a whole card thrown across a canvas. Sampling the path and asking whether it enters the card's
+rectangle is more forgiving and is what "drop it on the wire" means; walking the *rendered* path
+also means an orthogonal step and an ELK route are judged where they are drawn, with no geometry
+of our own. The card's size comes from `offsetWidth` for the reason `useArrange` records at
+length.
+
+**The move and the rewire are one `commit`, under the drag's own gesture tag**, so ⌘Z lands on the
+graph as it was before the drag began. Two commits would be two undo steps, the first of which
+leaves the graph rewired around a card in its new position — a state nobody was ever in. Unlike a
+plain move it *does* re-run, because the dataflow changed.
+
+**The ports are re-derived at the drop rather than carried from the drag.** The candidate was
+computed on a pointer move; positions do not reach inference, so the answer is the same one the
+highlight showed, and passing it would be a second copy of a decision that can only disagree.
+
+One note on `spliceGraph`, because the comment there was wrong first and mutation testing caught
+it: the original link is removed **explicitly**, but `addEdge` would evict it anyway — the
+downstream link targets the same `(node, port)`, which is exactly its eviction rule. So the order
+does not matter, and the removal stays because relying on that coincidence would hold only while
+both links land on one input.
 
 ## Breaking and re-routing links
 

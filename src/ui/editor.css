@@ -6084,3 +6084,16 @@ details[open] > summary.tile__label {
 .assistant__ask .field {
   flex: 1;
 }
+
+/*
+ * The wire a dropped card would be inserted into.
+ *
+ * Marked during the drag rather than only on release: a drop that silently rewires the graph is
+ * a surprise however good the result, and this is the only thing on screen saying it is about to
+ * happen. Achromatic and thickened rather than recoloured — a wire already wears the colour of
+ * the data flowing through it, so a hue here would read as the type having changed.
+ */
+.react-flow__edge.coda-edge--splice .react-flow__edge-path {
+  stroke: var(--text-primary) !important;
+  stroke-width: 3.2 !important;
+}

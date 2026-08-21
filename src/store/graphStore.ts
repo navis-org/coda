@@ -32,6 +32,7 @@ import { autoWireDataset } from '../core/autowire'
 import { addNodeWithCompanion } from '../core/companion'
 import type { InferenceResult } from '../core/inference'
 import { checkConnection, inferGraph } from '../core/inference'
+import { spliceCandidate, spliceGraph } from '../core/splice'
 import type { ParamValue } from '../core/node'
 import { defaultParams } from '../core/node'
 import { getNodeDef, isAnnotation, requireNodeDef } from '../core/registry'
@@ -281,6 +282,21 @@ export interface GraphState {
 
   // --- editing -------------------------------------------------------------
   addNode(type: string, position: { x: number; y: number }): string
+  /**
+   * End a drag by inserting the dragged node into the wire it was dropped on.
+   *
+   * `moveNodes`' committing frame *and* the rewire in one `commit`, which is what makes ⌘Z undo
+   * the whole gesture — the node back where it started and the original link intact. Two commits
+   * would be two undo steps, the first of which leaves the graph rewired around a node in its new
+   * place, which is a state nobody was ever in.
+   *
+   * Unlike a plain move this **does** re-run: the dataflow changed.
+   */
+  spliceNode(
+    nodeId: string,
+    edgeId: string,
+    moves: ReadonlyArray<{ id: string; position: { x: number; y: number } }>,
+  ): void
   moveNodes(
     moves: Array<{ id: string; position: { x: number; y: number } }>,
     commit: boolean,
@@ -896,6 +912,38 @@ export const useGraphStore = create<GraphState>((set, get) => {
       commit((g) => autoWireDataset(addNodeWithCompanion(g, node), node))
       set({ selection: [node.id] })
       return node.id
+    },
+
+    spliceNode: (nodeId, edgeId, moves) => {
+      // A drag ends auto-layout, the same reason `moveNodes` says: the position is one somebody
+      // chose, and the next structural edit would otherwise put the card straight back.
+      if (get().autoLayout) get().setAutoLayout(false)
+      const byId = new Map(moves.map((m) => [m.id, m.position]))
+      commit(
+        (g) => {
+          const edge = g.edges.find((e) => e.id === edgeId)
+          const moved = {
+            ...g,
+            nodes: g.nodes.map((n) => {
+              const position = byId.get(n.id)
+              return position ? { ...n, position } : n
+            }),
+          }
+          /*
+           * The ports are re-derived here rather than carried from the drag. The candidate was
+           * computed on a pointer move and the graph could have moved under it since; and since
+           * positions do not reach inference, the answer is the same one the highlight showed —
+           * so passing them would be a second copy of a decision that can only disagree.
+           */
+          if (!edge) return moved
+          const ports = spliceCandidate(moved, inferGraph(moved), nodeId, edge)
+          if (!ports) return moved
+          return spliceGraph(moved, nodeId, edge, ports)
+        },
+        // The same gesture tag the drag's own frames carried, so the undo entry reaches back to
+        // where the drag began rather than to its last frame.
+        { history: true, tag: 'splice', gesture: 'move' },
+      )
     },
 
     moveNodes: (moves, commitToHistory) => {

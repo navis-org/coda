@@ -41,7 +41,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CodaGraph, GraphNode } from '../core/graph'
 import { getNodeDef, isAnnotation } from '../core/registry'
 import type { CodaType } from '../core/types'
+import { spliceCandidate } from '../core/splice'
 import { useGraphStore } from '../store/graphStore'
+import { edgeUnderRect } from './spliceHit'
 import type { CodaNodeData } from './nodes/CodaNodeView'
 import { CodaNodeView } from './nodes/CodaNodeView'
 import { NoteCard } from './nodes/NoteCard'
@@ -80,6 +82,9 @@ const MINIMAP_SIZE = { width: 180, height: 120 }
  * that component's hooks all subscribe to run state, and a card with none would be paying for
  * every one of them on every scheduler tick.
  */
+/** Shared, so the hit test's `exclude` argument is not a fresh Set on every pointer move. */
+const EMPTY_IDS: ReadonlySet<string> = new Set()
+
 const NODE_TYPES = { coda: CodaNodeView, note: NoteCard }
 
 /**
@@ -139,6 +144,8 @@ function EditorCanvas() {
   const wrapperRef = useRef<HTMLDivElement>(null)
   const pointerRef = useRef({ x: 0, y: 0 })
   const draggingRef = useRef(false)
+  // The wire a drop would insert the dragged card into; drawn highlighted while it is set.
+  const [spliceEdgeId, setSpliceEdgeId] = useState<string | undefined>(undefined)
   const resizingRef = useRef(false)
   const menuSeq = useRef(0)
 
@@ -230,6 +237,13 @@ function EditorCanvas() {
           target: edge.target,
           targetHandle: edge.targetHandle,
           data: { route, step: orthogonal },
+          /*
+           * The wire a dropped card would be inserted into. A class rather than a style, so the
+           * rule lives with the rest of the canvas — and marked during the drag rather than only
+           * on release, because a drop that rewires the graph with no warning is a surprise
+           * whatever it does afterwards.
+           */
+          ...(edge.id === spliceEdgeId ? { className: 'coda-edge--splice' } : {}),
           // Links wear the colour of the data flowing through them, as in Blender.
           style: {
             stroke: typeColorVar(sourceType),
@@ -238,10 +252,51 @@ function EditorCanvas() {
           },
         }
       }),
-    [graph.edges, disabledIds, inference, edgeRouting, arrangeRoutes],
+    [graph.edges, disabledIds, inference, edgeRouting, arrangeRoutes, spliceEdgeId],
   )
 
   // --- change handlers ----------------------------------------------------
+
+  /**
+   * The edge a card at this position would be inserted into, or undefined.
+   *
+   * Two halves, and both have to say yes: the wire has to run under the card (`edgeUnderRect`,
+   * which walks the *drawn* path so a route or an orthogonal step is judged where it is shown),
+   * and the node has to have a pair of ports that fit (`spliceCandidate`, which is where every
+   * decision lives).
+   *
+   * The card's size comes from `offsetWidth`, the rule `useArrange` records at length: React
+   * Flow's `measured` is wiped on every graph edit here, and a bounding rect is in screen pixels
+   * and would shrink with the camera — where a hit test against flow-space path coordinates needs
+   * flow units.
+   */
+  const spliceOn = useCallback(
+    (nodeId: string): string | undefined => {
+      const store = useGraphStore.getState()
+      const node = store.graph.nodes.find((n) => n.id === nodeId)
+      if (!node) return undefined
+      const el = document.querySelector<HTMLElement>(`.react-flow__node[data-id="${nodeId}"]`)
+      if (!el || el.offsetWidth === 0 || el.offsetHeight === 0) return undefined
+
+      const edgeId = edgeUnderRect(
+        {
+          x: node.position.x,
+          y: node.position.y,
+          width: el.offsetWidth,
+          height: el.offsetHeight,
+        },
+        // Nothing to exclude: an isolated node touches no wire, and `spliceCandidate` refuses a
+        // node that is not isolated — so a wire of the dragged node's own can never be a target.
+        EMPTY_IDS,
+      )
+      if (!edgeId) return undefined
+
+      const edge = store.graph.edges.find((e) => e.id === edgeId)
+      if (!edge) return undefined
+      return spliceCandidate(store.graph, store.inference, nodeId, edge) ? edgeId : undefined
+    },
+    [],
+  )
 
   const onNodesChange = useCallback(
     (changes: NodeChange<Node<CodaNodeData>>[]) => {
@@ -274,6 +329,21 @@ function EditorCanvas() {
       }
 
       if (moves.length > 0) {
+        /*
+         * Dropping an isolated card on a wire inserts it there. Only ever one card — splicing a
+         * whole selection into one link means nothing — and only where `spliceCandidate` found a
+         * pair of ports, so an incompatible node dropped on a wire is an ordinary move.
+         */
+        const candidate = moves.length === 1 ? spliceOn(moves[0]!.id) : undefined
+        if (!draggingRef.current) {
+          setSpliceEdgeId(undefined)
+          if (candidate && moves.length === 1) {
+            useGraphStore.getState().spliceNode(moves[0]!.id, candidate, moves)
+            return
+          }
+        } else {
+          setSpliceEdgeId(candidate)
+        }
         // History gets one entry per drag, recorded when the drag ends.
         useGraphStore.getState().moveNodes(moves, !draggingRef.current)
       }
@@ -286,7 +356,7 @@ function EditorCanvas() {
           .setSelection(graph.nodes.filter((n) => nextSelection.has(n.id)).map((n) => n.id))
       }
     },
-    [graph.nodes, selection],
+    [graph.nodes, selection, spliceOn],
   )
 
   const isValidConnection = useCallback<IsValidConnection>((candidate) => {
