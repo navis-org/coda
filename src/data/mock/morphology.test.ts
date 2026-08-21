@@ -27,12 +27,12 @@ beforeAll(() => {
   registerSource(source)
 })
 
-function someBodyIds(count: number): number[] {
+function someBodyIds(count: number): string[] {
   const connectome = getConnectome('optic-lobe-mini')!
   return connectome.neurons
     .filter((n) => n.type === 'LC4')
     .slice(0, count)
-    .map((n) => n.bodyId)
+    .map((n) => String(n.bodyId))
 }
 
 describe('generateSkeleton', () => {

@@ -52,11 +52,13 @@ const TYPES: Record<number, string> = {
 function fakeSource(edges: Edge[], minWeight = 0) {
   const calls: Array<{ bodyIds: number[]; direction: ConnectionDirection }> = []
   const fetch = async (
-    bodyIds: number[],
+    bodyIds: string[],
     direction: ConnectionDirection,
   ): Promise<TableValue> => {
-    calls.push({ bodyIds: [...bodyIds], direction })
-    const wanted = new Set(bodyIds)
+    // Recorded as numbers so the assertions below stay readable against the numeric fixtures;
+    // the traversal itself passes ids as text, which is what `HopFetch` declares.
+    calls.push({ bodyIds: bodyIds.map(Number), direction })
+    const wanted = new Set(bodyIds.map(Number))
     const rows = edges
       .filter(
         ([pre, post, weight]) =>
@@ -84,7 +86,7 @@ function run(
 ) {
   const source = fakeSource(edges, opts.minWeight ?? 0)
   return traverseConnectivity({
-    seeds: opts.seeds,
+    seeds: opts.seeds.map(String),
     direction: opts.direction,
     hops: opts.hops ?? 1,
     schema: OUT_SCHEMA,
@@ -311,7 +313,7 @@ describe('traversal edges', () => {
     controller.abort()
     await expect(
       traverseConnectivity({
-        seeds: [1],
+        seeds: ['1'],
         direction: 'outputs',
         hops: 2,
         schema: OUT_SCHEMA,
@@ -328,7 +330,7 @@ describe('traversal edges', () => {
     ])
     const seen: string[] = []
     await traverseConnectivity({
-      seeds: [1],
+      seeds: ['1'],
       direction: 'outputs',
       hops: 2,
       schema: OUT_SCHEMA,

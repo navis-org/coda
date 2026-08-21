@@ -40,7 +40,7 @@ interface Summary {
   /** Rows in the result, or undefined before the node has run. */
   rows: number | undefined
   /** Requested IDs the dataset did not return. Always empty with no Dataset wired. */
-  missing: number[]
+  missing: string[]
   /** Rows of the wired column that were not usable IDs. */
   dropped: number
 }

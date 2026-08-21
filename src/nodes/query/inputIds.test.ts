@@ -86,9 +86,9 @@ function pipeline(params: Record<string, unknown> = {}, withDataset = false): Co
 }
 
 /** Some real ids from the mock connectome, so the lookup has something to find. */
-async function realIds(count: number): Promise<number[]> {
+async function realIds(count: number): Promise<string[]> {
   const table = await new MockSource({ latencyMs: 0 }).findNeurons({ datasetId: DATASET })
-  return (table.data['bodyId'] ?? []).slice(0, count).map(Number)
+  return (table.data['bodyId'] ?? []).slice(0, count).map(String)
 }
 
 describe('neuron.inputIds — without a dataset', () => {
@@ -100,6 +100,7 @@ describe('neuron.inputIds — without a dataset', () => {
     if (!isTableValue(out)) throw new Error('expected a table')
     expect(out.kind).toBe('neurons')
     expect(columnNames(out.schema)).toEqual(['bodyId'])
+    // Numbers, because this branch builds the table itself and `ID_ONLY_SCHEMA` says `i64`.
     expect(out.data['bodyId']).toEqual([1234, 5678, 9012])
     // The whole point of the optional input: no dataset, no query, ids that need not exist.
     expect(findNeurons).not.toHaveBeenCalled()
@@ -147,17 +148,21 @@ describe('neuron.inputIds — without a dataset', () => {
 })
 
 describe('neuron.inputIds — with a dataset', () => {
-  it('asks for exactly those ids, as numbers', async () => {
+  it('asks for exactly those ids, as exact decimal text', async () => {
     const ids = await realIds(2)
     const scheduler = makeScheduler()
     await scheduler.run(pipeline({ ids: ids.join(', ') }, true), { mode: 'full' })
 
     expect(findNeurons).toHaveBeenCalledTimes(1)
     const req = findNeurons.mock.calls[0]![0] as FindNeuronsRequest
-    // Numbers, not strings: `LabelMatch` would have compiled to `n.bodyId IN ['123']`, which
-    // Neo4j answers with an empty result and no error at all.
+    /*
+     * Text, not numbers — a `NeuronId` crosses the seam as digits so an id of any width
+     * survives it. Note what this does *not* license: the id still reaches Cypher unquoted,
+     * because `idList` splices the digits in as an integer literal. `n.bodyId IN ['123']` is
+     * false in Neo4j, and that is an empty result with no error anywhere to explain it.
+     */
     expect(req.bodyIds).toEqual(ids)
-    expect(req.bodyIds?.every((v) => typeof v === 'number')).toBe(true)
+    expect(req.bodyIds?.every((v) => typeof v === 'string')).toBe(true)
   })
 
   it('does not filter by status, unlike every other query node here', async () => {
@@ -180,7 +185,9 @@ describe('neuron.inputIds — with a dataset', () => {
     expect(out.length).toBe(3)
     expect(columnNames(out.schema)).toContain('type')
     expect(columnNames(out.schema)).toContain('status')
-    expect(new Set((out.data['bodyId'] ?? []).map(Number))).toEqual(new Set(ids))
+    // Compared as text on both sides: `realIds` is exact decimal text, and the result's own
+    // `bodyId` is whatever dtype the source publishes.
+    expect(new Set((out.data['bodyId'] ?? []).map(String))).toEqual(new Set(ids))
   })
 
   it('advertises the dataset’s schema the moment one is wired', () => {
@@ -281,13 +288,30 @@ describe('neuron.inputIds — refusals', () => {
     expect(scheduler.info('sort').state).toBe('blocked')
   })
 
-  it('refuses an id too large to be held exactly', async () => {
+  it('asks for an eighteen-digit id exactly, where it used to refuse', async () => {
+    /*
+     * The rule that inverted. This id is a FlyWire root id: `Number()` of it is a *different*
+     * integer, so while ids were numbers the only honest thing to do was refuse. Carried as
+     * text there is nothing to lose, and the digits reach the source untouched.
+     */
+    const wide = '720575940379279312'
     const scheduler = makeScheduler()
-    await scheduler.run(pipeline({ ids: '720575940379279312' }, true), { mode: 'full' })
-    expect(scheduler.info('ids').state).toBe('error')
-    expect(scheduler.info('ids').error).toContain('different neuron')
-    // And it never got as far as asking, which is the point of refusing rather than warning.
-    expect(findNeurons).not.toHaveBeenCalled()
+    await scheduler.run(pipeline({ ids: wide }, true), { mode: 'full' })
+
+    expect(scheduler.info('ids').state).not.toBe('error')
+    expect(findNeurons).toHaveBeenCalledTimes(1)
+    const req = findNeurons.mock.calls[0]![0] as FindNeuronsRequest
+    expect(req.bodyIds).toEqual([wide])
+    // The thing the old refusal existed to prevent, asserted directly.
+    expect(String(req.bodyIds?.[0])).not.toBe(String(Number(wide)))
+  })
+
+  it('warns rather than rounds when a wide id has no dataset to go to', () => {
+    // With no Dataset the ids *are* the output, and that table's `bodyId` is an `i64` column —
+    // so this is the one place the width still bites, and it says so instead of rounding.
+    const issue = issues({ ids: '720575940379279312' })
+    expect(issue).toContain('720575940379279312')
+    expect(issue).toContain('wire a Dataset')
   })
 
   it('asks for ids when there are none and nothing is wired', () => {

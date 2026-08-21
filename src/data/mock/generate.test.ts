@@ -117,7 +117,7 @@ describe('MockSource', () => {
     const lc4 = await source.findNeurons({ datasetId: 'optic-lobe-mini', typePattern: 'LC4' })
     const conn = await source.fetchConnectivity({
       datasetId: 'optic-lobe-mini',
-      bodyIds: lc4.data.bodyId as number[],
+      bodyIds: lc4.data.bodyId!.map(String),
       direction: 'outputs',
       minWeight: 1,
     })
@@ -133,7 +133,7 @@ describe('MockSource', () => {
     const lc4 = await source.findNeurons({ datasetId: 'optic-lobe-mini', typePattern: 'LC4' })
     const conn = await source.fetchConnectivity({
       datasetId: 'optic-lobe-mini',
-      bodyIds: lc4.data.bodyId as number[],
+      bodyIds: lc4.data.bodyId!.map(String),
       direction: 'outputs',
       minWeight: 20,
     })
@@ -145,8 +145,8 @@ describe('MockSource', () => {
     const dn = await source.findNeurons({ datasetId: 'optic-lobe-mini', typePattern: 'DNp.*' })
     const m = await source.fetchAdjacency({
       datasetId: 'optic-lobe-mini',
-      sourceIds: lc.data.bodyId as number[],
-      targetIds: dn.data.bodyId as number[],
+      sourceIds: lc.data.bodyId!.map(String),
+      targetIds: dn.data.bodyId!.map(String),
       groupByType: true,
     })
     expect(m.rowLabels).toEqual(

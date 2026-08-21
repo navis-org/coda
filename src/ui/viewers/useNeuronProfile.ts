@@ -89,7 +89,7 @@ export function clearProfileCache(): void {
 async function load(
   sourceId: string,
   datasetId: string,
-  bodyId: number,
+  bodyId: string,
 ): Promise<NeuronProfileData> {
   const source = getSource(sourceId)
   if (!source) throw new Error(`Data source "${sourceId}" is not registered`)
@@ -116,17 +116,16 @@ async function load(
 function profileKey(
   sourceId: string | undefined,
   datasetId: string | undefined,
-  bodyId: number | undefined,
+  bodyId: string | undefined,
 ): string | undefined {
-  if (!sourceId || !datasetId || bodyId === undefined || !Number.isFinite(bodyId))
-    return undefined
+  if (!sourceId || !datasetId || bodyId === undefined || bodyId === '') return undefined
   return `${sourceId}|${datasetId}|${bodyId}`
 }
 
 export function useNeuronProfile(
   sourceId: string | undefined,
   datasetId: string | undefined,
-  bodyId: number | undefined,
+  bodyId: string | undefined,
 ): NeuronProfileState {
   const key = profileKey(sourceId, datasetId, bodyId)
 

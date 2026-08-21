@@ -78,6 +78,7 @@ import {
   adjacencyCypher,
   connectivityCypher,
   findNeuronsCypher,
+  idList,
   pathStepCypher,
   metaCypher,
   roiCountsCypher,
@@ -106,6 +107,19 @@ import { mapWithConcurrency } from '../concurrency'
  * fifty sockets against a server other people are using.
  */
 const SKELETON_CONCURRENCY = 6
+
+/**
+ * A body id out of a Cypher response, as the same decimal text a `NeuronId` carries.
+ *
+ * Named rather than inlined because it is an *agreement*: every map here keyed by id is keyed
+ * by this, so a key built from a response and one built from a request must match exactly or
+ * the row is silently dropped from a matrix or an attribute table. `String` is enough only
+ * because neuPrint's ids are nine to eleven digits and survive the JSON round trip; a source
+ * with wider ids has to keep them as text from the wire onwards, which is why `NeuronId` exists.
+ */
+function idKey(raw: unknown): string {
+  return String(raw)
+}
 
 /**
  * Byte ceiling for a single thumbnail's mesh, compressed.
@@ -718,7 +732,7 @@ export class NeuPrintSource implements DataSource {
       mapWithConcurrency(req.bodyIds, SKELETON_CONCURRENCY, async (bodyId) => {
         throwIfAborted(req.signal)
         const swc = await fetchSkeleton(req.datasetId, bodyId, this.options(req.signal))
-        const skeleton = skeletonFromSwc(bodyId, swc)
+        const skeleton = skeletonFromSwc(Number(bodyId), swc)
         // neuPrint returns voxels; the scene is in nanometres so meshes line up.
         scalePositions(skeleton.positions, scale)
         scaleRadii(skeleton.radii, scale)
@@ -738,8 +752,17 @@ export class NeuPrintSource implements DataSource {
       }),
     ])
 
-    const found = items.filter((item): item is SkeletonGeometry => item !== undefined)
-    const byId = new Map(found.map((item) => [item.bodyId, item]))
+    /*
+     * Keyed by the *requested* id rather than by one rebuilt from the geometry.
+     * `mapWithConcurrency` writes `results[index]`, so `items` is index-aligned with
+     * `req.bodyIds` — which means the exact id is already to hand and there is no
+     * `string → number → string` round trip to get back to it.
+     */
+    const byId = new Map<string, SkeletonGeometry>()
+    req.bodyIds.forEach((id, i) => {
+      const item = items[i]
+      if (item) byId.set(id, item)
+    })
     const rows = req.bodyIds.filter((id) => byId.has(id))
 
     const data: Record<string, ColumnData> = {}
@@ -747,7 +770,7 @@ export class NeuPrintSource implements DataSource {
     for (const bodyId of rows) {
       const item = byId.get(bodyId)!
       const meta = attributes.get(bodyId)
-      data['bodyId']!.push(bodyId)
+      data['bodyId']!.push(item.bodyId)
       data['type']!.push(meta?.type ?? null)
       data['instance']!.push(meta?.instance ?? null)
       data['status']!.push(meta?.status ?? null)
@@ -866,7 +889,7 @@ export class NeuPrintSource implements DataSource {
     for (const col of schema.columns) data[col.name] = []
     for (const mesh of result.meshes) {
       const meta = attributes.get(mesh.bodyId)
-      data['bodyId']!.push(mesh.bodyId)
+      data['bodyId']!.push(Number(mesh.bodyId))
       data['type']!.push(meta?.type ?? null)
       data['instance']!.push(meta?.instance ?? null)
       data['status']!.push(meta?.status ?? null)
@@ -879,7 +902,7 @@ export class NeuPrintSource implements DataSource {
     return {
       kind: 'meshes',
       items: result.meshes.map((mesh) => ({
-        bodyId: mesh.bodyId,
+        bodyId: Number(mesh.bodyId),
         positions: mesh.positions,
         indices: mesh.indices,
       })),
@@ -963,11 +986,11 @@ export class NeuPrintSource implements DataSource {
   /** bodyId -> the few neuron columns morphology attributes need. */
   private async fetchNeuronRows(
     datasetId: string,
-    bodyIds: number[],
+    bodyIds: readonly string[],
     signal?: AbortSignal,
   ): Promise<
     Map<
-      number,
+      string,
       {
         type: string | null
         instance: string | null
@@ -976,9 +999,8 @@ export class NeuPrintSource implements DataSource {
       }
     >
   > {
-    const ids = bodyIds.filter((id) => Number.isFinite(id))
     const out = new Map<
-      number,
+      string,
       {
         type: string | null
         instance: string | null
@@ -986,15 +1008,15 @@ export class NeuPrintSource implements DataSource {
         size: number | null
       }
     >()
-    if (ids.length === 0) return out
+    if (bodyIds.length === 0) return out
     const cypher = [
       'MATCH (n:Neuron)',
-      `WHERE n.bodyId IN [${ids.join(',')}]`,
+      `WHERE n.bodyId IN ${idList(bodyIds)}`,
       'RETURN n.bodyId, n.type, n.instance, n.status, n.size',
     ].join('\n')
     const response = await runCypher(cypher, datasetId, this.options(signal))
     for (const row of response.data) {
-      out.set(Number(row[0]), {
+      out.set(idKey(row[0]), {
         type: row[1] === null || row[1] === undefined ? null : String(row[1]),
         instance: row[2] === null || row[2] === undefined ? null : String(row[2]),
         status: row[3] === null || row[3] === undefined ? null : String(row[3]),
@@ -1092,25 +1114,39 @@ function emptyDiscovered(): DiscoveredSchema {
  * missing pair reads as a zero rather than shifting the grid.
  */
 function matrixFromConnections(response: CypherResponse, req: AdjacencyRequest): MatrixValue {
-  const label = new Map<number, string>()
-  for (const row of response.data) {
-    if (typeof row[1] === 'string') label.set(Number(row[0]), row[1])
-    if (typeof row[3] === 'string') label.set(Number(row[2]), row[3])
+  /*
+   * Both endpoint ids are stringified once, here, and indexed by row below.
+   *
+   * The label pass and the matrix pass each need the same two keys, and every id neuPrint
+   * sends is a JSON number — so doing it per pass is two to four `String()` allocations per
+   * row where two will do. On a 2000x2000 adjacency that is a few hundred thousand transient
+   * strings. Two pointer arrays are both cheaper and smaller than the duplicates they replace.
+   */
+  const rows = response.data
+  const srcKeys = new Array<string>(rows.length)
+  const dstKeys = new Array<string>(rows.length)
+  const label = new Map<string, string>()
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]!
+    const src = (srcKeys[i] = idKey(row[0]))
+    const dst = (dstKeys[i] = idKey(row[2]))
+    if (typeof row[1] === 'string') label.set(src, row[1])
+    if (typeof row[3] === 'string') label.set(dst, row[3])
   }
 
   if (req.groupByType) {
-    const key = (id: number) => label.get(id) ?? String(id)
+    const key = (id: string) => label.get(id) ?? id
     const rowKeys = [...new Set(req.sourceIds.map(key))]
     const colKeys = [...new Set(req.targetIds.map(key))]
     const rowIndex = new Map(rowKeys.map((k, i) => [k, i]))
     const colIndex = new Map(colKeys.map((k, i) => [k, i]))
     const values = new Float64Array(rowKeys.length * colKeys.length)
-    for (const row of response.data) {
-      const r = rowIndex.get(key(Number(row[0])))
-      const c = colIndex.get(key(Number(row[2])))
+    for (let i = 0; i < rows.length; i++) {
+      const r = rowIndex.get(key(srcKeys[i]!))
+      const c = colIndex.get(key(dstKeys[i]!))
       if (r === undefined || c === undefined) continue
       values[r * colKeys.length + c] =
-        (values[r * colKeys.length + c] ?? 0) + Number(row[4] ?? 0)
+        (values[r * colKeys.length + c] ?? 0) + Number(rows[i]![4] ?? 0)
     }
     return makeMatrix(rowKeys, colKeys, values, 'synapses')
   }
@@ -1118,15 +1154,15 @@ function matrixFromConnections(response: CypherResponse, req: AdjacencyRequest):
   const rowIndex = new Map(req.sourceIds.map((id, i) => [id, i]))
   const colIndex = new Map(req.targetIds.map((id, i) => [id, i]))
   const values = new Float64Array(req.sourceIds.length * req.targetIds.length)
-  for (const row of response.data) {
-    const r = rowIndex.get(Number(row[0]))
-    const c = colIndex.get(Number(row[2]))
+  for (let i = 0; i < rows.length; i++) {
+    const r = rowIndex.get(srcKeys[i]!)
+    const c = colIndex.get(dstKeys[i]!)
     if (r === undefined || c === undefined) continue
-    values[r * req.targetIds.length + c] = Number(row[4] ?? 0)
+    values[r * req.targetIds.length + c] = Number(rows[i]![4] ?? 0)
   }
-  const name = (id: number) => {
+  const name = (id: string) => {
     const type = label.get(id)
-    return type ? `${type} ${id}` : String(id)
+    return type ? `${type} ${id}` : id
   }
   return makeMatrix(req.sourceIds.map(name), req.targetIds.map(name), values, 'synapses')
 }

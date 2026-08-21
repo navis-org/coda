@@ -38,7 +38,7 @@ import { coverageFraction, hexToRgb, rasteriseSilhouette, silhouetteToRgba } fro
 export interface NeuronThumbnailProps {
   sourceId: string | undefined
   datasetId: string | undefined
-  bodyId: number
+  bodyId: string
   /** Rendered size in CSS pixels. The mask is rasterised at `RASTER_SCALE` times this. */
   size?: number
 }
@@ -89,7 +89,7 @@ function release(): void {
 }
 
 /** Keyed by the *raster* size, not the displayed one, so a change of scale invalidates. */
-function keyFor(sourceId: string, datasetId: string, bodyId: number, pixels: number): string {
+function keyFor(sourceId: string, datasetId: string, bodyId: string, pixels: number): string {
   return `thumb:${sourceId}:${datasetId}:${bodyId}:${pixels}`
 }
 
@@ -112,7 +112,7 @@ const MASK_FORMAT = 'coverage-8bit-1'
 async function loadSilhouette(
   sourceId: string,
   datasetId: string,
-  bodyId: number,
+  bodyId: string,
   pixels: number,
 ): Promise<Entry> {
   const key = keyFor(sourceId, datasetId, bodyId, pixels)

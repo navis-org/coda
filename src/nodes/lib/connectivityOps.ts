@@ -24,6 +24,8 @@ import type { TableSchema } from '../../core/types'
 import { column, tableSchema } from '../../core/types'
 import type { CellValue, TableValue } from '../../core/values'
 import { tableFromRows } from '../../core/values'
+import { compareIds, idText } from '../../core/ids'
+import type { NeuronId } from '../../core/ids'
 import type { ConnectionDirection } from '../../data/source'
 
 /** What the node's `direction` param can be. `both` is not a `ConnectionDirection`. */
@@ -89,13 +91,13 @@ export function connectivityOutputSchema(source: TableSchema | undefined): Table
 
 /** One hop's worth of fetching, in one direction. Injected so the BFS stays headless. */
 export type HopFetch = (
-  bodyIds: number[],
+  bodyIds: NeuronId[],
   direction: ConnectionDirection,
 ) => Promise<TableValue>
 
 export interface TraverseOptions {
   /** Body ids to start from. Never re-expanded; an edge back into them is still reported. */
-  seeds: readonly number[]
+  seeds: readonly NeuronId[]
   direction: TraversalDirection
   /** ≥ 1. 1 is direct partners and issues exactly the queries this node always has. */
   hops: number
@@ -112,8 +114,8 @@ interface EdgeRow {
   hop: number
   direction: EdgeDirection
   weight: number
-  preId: number
-  postId: number
+  preId: string
+  postId: string
 }
 
 /**
@@ -139,12 +141,12 @@ export async function traverseConnectivity(opts: TraverseOptions): Promise<Table
     opts.direction === 'both' ? ['outputs', 'inputs'] : [opts.direction]
 
   const edges = new Map<string, EdgeRow>()
-  const expanded = new Set<number>(opts.seeds)
+  const expanded = new Set<string>(opts.seeds)
   let frontier = [...new Set(opts.seeds)]
 
   for (let hop = 1; hop <= hops && frontier.length > 0; hop++) {
     opts.onHop?.(hop, hops, frontier.length)
-    const next = new Set<number>()
+    const next = new Set<string>()
 
     for (const direction of directions) {
       if (opts.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
@@ -163,7 +165,11 @@ export async function traverseConnectivity(opts: TraverseOptions): Promise<Table
    * reshuffles between identical runs makes every downstream diff unreadable.
    */
   const sorted = [...edges.values()].sort(
-    (a, b) => a.hop - b.hop || b.weight - a.weight || a.preId - b.preId || a.postId - b.postId,
+    (a, b) =>
+      a.hop - b.hop ||
+      b.weight - a.weight ||
+      compareIds(a.preId, b.preId) ||
+      compareIds(a.postId, b.postId),
   )
 
   return tableFromRows(
@@ -182,8 +188,8 @@ function collect(
   direction: ConnectionDirection,
   hop: number,
   edges: Map<string, EdgeRow>,
-  expanded: Set<number>,
-  next: Set<number>,
+  expanded: Set<string>,
+  next: Set<string>,
 ): void {
   const names = renamesFor(direction)
   const found: EdgeDirection = direction === 'outputs' ? 'downstream' : 'upstream'
@@ -198,13 +204,13 @@ function collect(
   const rows = bodyIds.length
 
   for (let row = 0; row < rows; row++) {
-    const bodyId = Number(bodyIds[row])
-    const partnerId = Number(partnerIds[row])
-    if (!Number.isFinite(bodyId) || !Number.isFinite(partnerId)) continue
+    const bodyId = idText(bodyIds[row])
+    const partnerId = idText(partnerIds[row])
+    if (bodyId === null || partnerId === null) continue
 
     const preId = direction === 'outputs' ? bodyId : partnerId
     const postId = direction === 'outputs' ? partnerId : bodyId
-    const key = `${preId} ${postId}`
+    const key = `${preId}\u0000${postId}`
 
     const existing = edges.get(key)
     if (existing) {

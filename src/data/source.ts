@@ -31,6 +31,8 @@ import type { NeuronIndexRequest } from './neuronIndex'
 
 export type { NeuronIndexRequest } from './neuronIndex'
 
+import type { NeuronId } from '../core/ids'
+
 export interface DatasetInfo {
   id: string
   label: string
@@ -118,7 +120,7 @@ export interface FindNeuronsRequest {
    * neurons**, never "no filter": an unconfigured node firing an unbounded `MATCH (n:Neuron)`
    * at a shared production Neo4j is a hazard, not a default.
    */
-  bodyIds?: readonly number[]
+  bodyIds?: readonly NeuronId[]
   statuses?: string[]
   minSize?: number
   /** ROI the neuron must innervate. */
@@ -129,7 +131,7 @@ export interface FindNeuronsRequest {
 
 export interface ConnectivityRequest {
   datasetId: string
-  bodyIds: number[]
+  bodyIds: NeuronId[]
   direction: ConnectionDirection
   minWeight?: number
   signal?: AbortSignal
@@ -158,7 +160,7 @@ export interface PathStepRequest {
   /** Frontier cell types. Empty (or absent) when the traversal is at neuron level. */
   types?: string[]
   /** Frontier body ids — every neuron when not collapsing, the untyped ones when collapsing. */
-  bodyIds?: number[]
+  bodyIds?: NeuronId[]
   direction: ConnectionDirection
   /** Group by cell type before aggregating. False keeps one node per neuron. */
   collapseTypes: boolean
@@ -175,8 +177,8 @@ export interface PathStepRequest {
 
 export interface AdjacencyRequest {
   datasetId: string
-  sourceIds: number[]
-  targetIds: number[]
+  sourceIds: NeuronId[]
+  targetIds: NeuronId[]
   /** Aggregate per-neuron weights up to type level before building the matrix. */
   groupByType?: boolean
   signal?: AbortSignal
@@ -184,14 +186,14 @@ export interface AdjacencyRequest {
 
 export interface RoiCountsRequest {
   datasetId: string
-  bodyIds: number[]
+  bodyIds: NeuronId[]
   rois?: string[]
   signal?: AbortSignal
 }
 
 export interface GeometryRequest {
   datasetId: string
-  bodyIds: number[]
+  bodyIds: NeuronId[]
   /**
    * Target triangle count for the whole set, for sources with levels of detail. The source
    * picks the finest level that fits; a source with one level ignores it.
@@ -227,7 +229,7 @@ export interface ViewerSceneRequest {
 
 export interface CoarseGeometryRequest {
   datasetId: string
-  bodyId: number
+  bodyId: NeuronId
   signal?: AbortSignal
 }
 

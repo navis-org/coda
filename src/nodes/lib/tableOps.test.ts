@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
+import { compareIds, idText, isNeuronId } from '../../core/ids'
 import { column, columnNames, tableSchema } from '../../core/types'
 import type { TableValue } from '../../core/values'
 import { makeMatrix, tableFromRows } from '../../core/values'
 import {
   aggColumnName,
   filterTable,
+  idColumn,
   groupBySchema,
   groupByTable,
   joinSchema,
@@ -603,5 +605,120 @@ describe('normalizeMatrix', () => {
   it('applies log10(1+x)', () => {
     const out = normalizeMatrix(m(), 'log')
     expect(out.values[0]).toBeCloseTo(Math.log10(2))
+  })
+})
+
+
+/*
+ * The bridge into every DataSource call, and the one place a table cell becomes an id.
+ *
+ * The rule is exactness: a `NeuronId` is decimal text precisely so that an id wider than
+ * `Number.MAX_SAFE_INTEGER` survives, which is what neuPrint's nine-to-eleven digit ids never
+ * needed and every CAVE root id does.
+ */
+describe('idColumn', () => {
+  const NUM_IDS = tableSchema(column('bodyId', 'i64'), column('type', 'str'))
+  const TEXT_IDS = tableSchema(column('bodyId', 'str'), column('type', 'str'))
+
+  it('reads a numeric id column as text', () => {
+    const t = tableFromRows(NUM_IDS, [
+      { bodyId: 1158187240, type: 'LC4' },
+      { bodyId: 10001, type: 'DNp01' },
+    ])
+    expect(idColumn(t)).toEqual(['1158187240', '10001'])
+  })
+
+  it('passes a text id column through untouched, keeping every digit', () => {
+    // Reading these as numbers first would round both, which is the entire point.
+    const t = tableFromRows(TEXT_IDS, [
+      { bodyId: '648518347529750614', type: 'KC' },
+      { bodyId: '720575940379279312', type: 'LC4' },
+    ])
+    expect(idColumn(t)).toEqual(['648518347529750614', '720575940379279312'])
+    expect(idColumn(t)[0]).not.toBe(String(Number('648518347529750614')))
+  })
+
+  it('skips a null rather than emitting one, as it always has', () => {
+    const t = tableFromRows(NUM_IDS, [
+      { bodyId: 1, type: 'a' },
+      { bodyId: null, type: 'b' },
+      { bodyId: 2, type: 'c' },
+    ])
+    expect(idColumn(t)).toEqual(['1', '2'])
+  })
+
+  it('skips a number that has already lost its digits', () => {
+    // Computed rather than written, because the literal would round in this file too. By the
+    // time it is a float64 there is nothing to recover, so printing it would be a confident
+    // wrong id — worse than a missing one.
+    const t = tableFromRows(NUM_IDS, [
+      { bodyId: 1, type: 'a' },
+      { bodyId: Number.MAX_SAFE_INTEGER + 2, type: 'b' },
+      { bodyId: 1.5, type: 'c' },
+    ])
+    expect(idColumn(t)).toEqual(['1'])
+  })
+})
+
+describe('idText', () => {
+  it('answers null for everything that is not an id', () => {
+    expect(idText(null)).toBeNull()
+    expect(idText(undefined)).toBeNull()
+    expect(idText('')).toBeNull()
+    expect(idText('   ')).toBeNull()
+    expect(idText(true)).toBeNull()
+    expect(idText(Number.NaN)).toBeNull()
+  })
+
+  it('trims a text cell, since a pasted column carries whitespace', () => {
+    expect(idText('  1234 ')).toBe('1234')
+  })
+})
+
+describe('isNeuronId', () => {
+  /*
+   * The transport grammar, pinned in one place. It was written four times before it was
+   * written once and the copies disagreed about the sign, so the point of this block is that
+   * there is now a single answer for the query builders and both exporters to share.
+   */
+  it('accepts digits at any width', () => {
+    expect(isNeuronId('0')).toBe(true)
+    expect(isNeuronId('1158187240')).toBe(true)
+    expect(isNeuronId('648518347529750614')).toBe(true)
+  })
+
+  it('accepts a sign, because a source may hand one back', () => {
+    // Stricter than the *typed* grammar in `idList.ts`, which refuses `-1` as a mistyped range.
+    // Data is data; authored text is a mistake somebody can fix.
+    expect(isNeuronId('-7')).toBe(true)
+  })
+
+  it('refuses anything that would not splice into a query as an integer', () => {
+    expect(isNeuronId('')).toBe(false)
+    expect(isNeuronId('12a')).toBe(false)
+    expect(isNeuronId('1.5')).toBe(false)
+    expect(isNeuronId('1e3')).toBe(false)
+    expect(isNeuronId('+1')).toBe(false)
+    expect(isNeuronId(' 1')).toBe(false)
+    expect(isNeuronId('1,000')).toBe(false)
+    expect(isNeuronId("1' OR 1=1--")).toBe(false)
+  })
+})
+
+describe('compareIds', () => {
+  it('orders by magnitude rather than lexically', () => {
+    // A plain string sort puts "10" before "9", which would reshuffle every traversal result.
+    expect(['9', '10', '2'].sort(compareIds)).toEqual(['2', '9', '10'])
+  })
+
+  it('stays exact where subtracting two numbers would not', () => {
+    const a = '648518347529750614'
+    const b = '648518347529750615'
+    // Both round to the same float64, so `Number(a) - Number(b)` is 0 — the two would be
+    // reported equal and their order would depend on the sort's stability.
+    expect(Number(a) - Number(b)).toBe(0)
+    expect(compareIds(a, b)).toBeLessThan(0)
+    expect(compareIds(b, a)).toBeGreaterThan(0)
+    expect(compareIds(a, a)).toBe(0)
   })
 })

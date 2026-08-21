@@ -49,7 +49,7 @@ import {
   escapeIdentifier,
   escapeString,
   findNeuronsCypher,
-  numberList,
+  idList,
   pathStepCypher,
   synapsesCypher,
 } from './cypher'
@@ -107,7 +107,7 @@ describe('pathStepCypher', () => {
   })
 
   it('groups by neuron, when not', () => {
-    const query = pathStepCypher({ ...base, collapseTypes: false, bodyIds: [1, 2] })
+    const query = pathStepCypher({ ...base, collapseTypes: false, bodyIds: ['1', '2'] })
     expect(query).toContain('toString(a.bodyId) AS src')
     expect(query).not.toContain('coalesce')
     expect(query).toContain('a.bodyId IN [1,2]')
@@ -122,7 +122,7 @@ describe('pathStepCypher', () => {
   })
 
   it('names the frontier as two indexed lists rather than one computed key', () => {
-    const query = pathStepCypher({ ...base, types: ['LC4', "a'L"], bodyIds: [7] })
+    const query = pathStepCypher({ ...base, types: ['LC4', "a'L"], bodyIds: ['7'] })
     expect(query).toContain("WHERE a.type IN ['LC4','a\\'L'] OR a.bodyId IN [7]")
   })
 
@@ -166,9 +166,27 @@ describe('escaping', () => {
     expect(escapeIdentifier("a'L(R)")).toBe("`a'L(R)`")
   })
 
-  it('drops non-finite ids rather than emitting NaN, which Cypher cannot parse', () => {
-    expect(numberList([1, Number.NaN, 3, Infinity])).toBe('[1,3]')
-    expect(numberList([])).toBe('[]')
+  it('emits ids as unquoted integers, because `1 IN [\'1\']` is false in Cypher', () => {
+    // The failure this prevents is silent: a quoted list is valid Cypher, matches nothing, and
+    // comes back as an empty result with no error anywhere to explain it.
+    expect(idList(['1', '2'])).toBe('[1,2]')
+    expect(idList([])).toBe('[]')
+    expect(idList(['1158187240', '10001'])).toBe('[1158187240,10001]')
+  })
+
+  it('splices a wide id through without forming a float', () => {
+    // The whole reason a `NeuronId` is text. Routed via `Number` this would emit
+    // 648518347529750700 — a different neuron, and nothing about the query would look wrong.
+    const wide = '648518347529750614'
+    expect(idList([wide])).toBe(`[${wide}]`)
+    expect(idList([wide])).not.toContain(String(Number(wide)))
+  })
+
+  it('drops anything that is not a bare integer, keeping the digit grammar closed', () => {
+    // Dropping rather than quoting is also what stops anything reaching the query that could
+    // leave the grammar — there is no escaping path here because nothing non-numeric survives.
+    expect(idList(['1', '2a', '', ' 3', '4.5', "5' OR 1=1--"])).toBe('[1]')
+    expect(idList(['-7'])).toBe('[-7]')
   })
 })
 
@@ -294,7 +312,7 @@ describe('query building', () => {
       // The reason this is a field of its own rather than a `LabelMatch` on `bodyId`: that
       // compiles to `n.bodyId IN ['123']`, and `123 IN ['123']` is false in Cypher — an empty
       // result with no error anywhere to explain it.
-      const query = findNeuronsCypher({ datasetId: 'x', bodyIds: [1158187240, 10001] })
+      const query = findNeuronsCypher({ datasetId: 'x', bodyIds: ['1158187240', '10001'] })
       expect(query).toContain('n.bodyId IN [1158187240,10001]')
       expect(query).not.toContain("'1158187240'")
     })
@@ -308,7 +326,7 @@ describe('query building', () => {
     })
 
     it('composes with the other filters', () => {
-      const query = findNeuronsCypher({ datasetId: 'x', bodyIds: [7], statuses: ['Traced'] })
+      const query = findNeuronsCypher({ datasetId: 'x', bodyIds: ['7'], statuses: ['Traced'] })
       expect(query).toContain("n.bodyId IN [7] AND n.status IN ['Traced']")
     })
   })
@@ -321,8 +339,8 @@ describe('query building', () => {
   })
 
   it('flips the arrow for inputs rather than swapping the returned columns', () => {
-    const out = connectivityCypher({ datasetId: 'x', bodyIds: [1], direction: 'outputs' })
-    const inn = connectivityCypher({ datasetId: 'x', bodyIds: [1], direction: 'inputs' })
+    const out = connectivityCypher({ datasetId: 'x', bodyIds: ['1'], direction: 'outputs' })
+    const inn = connectivityCypher({ datasetId: 'x', bodyIds: ['1'], direction: 'inputs' })
     expect(out).toContain('(n:Neuron)-[w:ConnectsTo]->(p)')
     expect(inn).toContain('(p)-[w:ConnectsTo]->(n:Neuron)')
     // Both RETURN n first, so "bodyId" always means the neuron you asked about.
@@ -333,20 +351,20 @@ describe('query building', () => {
   it('matches a bare node at the far end, so sub-threshold partners still count', () => {
     // `(p)` not `(p:Neuron)`: excluding Segments would silently under-report total weight.
     expect(
-      connectivityCypher({ datasetId: 'x', bodyIds: [1], direction: 'outputs' }),
+      connectivityCypher({ datasetId: 'x', bodyIds: ['1'], direction: 'outputs' }),
     ).toContain('->(p)\n')
   })
 
   it('constrains both ends for adjacency', () => {
-    const query = adjacencyCypher({ datasetId: 'x', sourceIds: [1, 2], targetIds: [3] })
+    const query = adjacencyCypher({ datasetId: 'x', sourceIds: ['1', '2'], targetIds: ['3'] })
     expect(query).toContain('a.bodyId IN [1,2] AND b.bodyId IN [3]')
   })
 
   it('filters synapses by polarity', () => {
-    expect(synapsesCypher({ datasetId: 'x', bodyIds: [1], polarity: 'pre' })).toContain(
+    expect(synapsesCypher({ datasetId: 'x', bodyIds: ['1'], polarity: 'pre' })).toContain(
       "s.type = 'pre'",
     )
-    expect(synapsesCypher({ datasetId: 'x', bodyIds: [1] })).not.toContain('s.type =')
+    expect(synapsesCypher({ datasetId: 'x', bodyIds: ['1'] })).not.toContain('s.type =')
   })
 })
 

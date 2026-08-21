@@ -467,7 +467,7 @@ describe('thumbnail caching', () => {
   const KEY = `thumb:mock:${DATASET}:${BODY}:152`
 
   function renderThumb(sourceId = 'mock') {
-    render(<NeuronThumbnail sourceId={sourceId} datasetId={DATASET} bodyId={BODY} size={76} />)
+    render(<NeuronThumbnail sourceId={sourceId} datasetId={DATASET} bodyId={String(BODY)} size={76} />)
   }
 
   it('ignores an entry written by an older encoder, refusals included', async () => {

@@ -29,7 +29,7 @@ export const MAX_NEURONS = 500
  * otherwise unexplainable. The old message blamed "this viewer", which was wrong twice
  * over: the viewer has no cap of its own, and drawing is not the constraint — fetching is.
  */
-function bodyIdsFrom(value: Value | undefined, limit: number, cost: string): number[] {
+function bodyIdsFrom(value: Value | undefined, limit: number, cost: string): string[] {
   if (!isTableValue(value)) throw new Error('Neurons input is not a table')
   const ids = idColumn(value, 'bodyId')
   if (ids.length === 0) throw new Error('No bodyIds in the incoming neuron table')

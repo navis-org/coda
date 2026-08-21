@@ -24,6 +24,8 @@ import type { TableSchema } from '../../core/types'
 import { T, column, tableSchema } from '../../core/types'
 import type { CellValue, NetworkValue, TableValue } from '../../core/values'
 import { getColumn, makeTable, tableFromRows } from '../../core/values'
+import { idText } from '../../core/ids'
+import type { NeuronId } from '../../core/ids'
 import type { ConnectionDirection } from '../../data/source'
 
 // ---------------------------------------------------------------------------
@@ -41,7 +43,7 @@ import type { ConnectionDirection } from '../../data/source'
 export interface PathNode {
   key: string
   type: string | null
-  bodyId: number | null
+  bodyId: string | null
 }
 
 export interface PathEdge {
@@ -66,13 +68,13 @@ function edgeKey(source: string, target: string): string {
 /** The two lists a source needs to resolve a frontier. See `PathStepRequest`. */
 export interface Frontier {
   types: string[]
-  bodyIds: number[]
+  bodyIds: NeuronId[]
 }
 
 /** Split a set of group keys back into the two halves a query can index on. */
 export function frontierOf(keys: Iterable<string>, graph: PathGraph): Frontier {
   const types: string[] = []
-  const bodyIds: number[] = []
+  const bodyIds: NeuronId[] = []
   for (const key of keys) {
     const node = graph.nodes.get(key)
     const bodyId = node?.bodyId
@@ -129,11 +131,6 @@ function readStep(table: TableValue, graph: PathGraph): PathEdge[] {
   const weight = table.data['weight'] ?? []
   const pairs = table.data['pairs'] ?? []
 
-  const numberOrNull = (cell: CellValue | undefined): number | null => {
-    if (cell === null || cell === undefined || cell === '') return null
-    const parsed = Number(cell)
-    return Number.isFinite(parsed) ? parsed : null
-  }
   const stringOrNull = (cell: CellValue | undefined): string | null =>
     cell === null || cell === undefined || cell === '' ? null : String(cell)
 
@@ -149,14 +146,14 @@ function readStep(table: TableValue, graph: PathGraph): PathEdge[] {
       graph.nodes.set(from, {
         key: from,
         type: stringOrNull(sourceType[i]),
-        bodyId: numberOrNull(sourceId[i]),
+        bodyId: idText(sourceId[i]),
       })
     }
     if (!graph.nodes.has(to)) {
       graph.nodes.set(to, {
         key: to,
         type: stringOrNull(targetType[i]),
-        bodyId: numberOrNull(targetId[i]),
+        bodyId: idText(targetId[i]),
       })
     }
 

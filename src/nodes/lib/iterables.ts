@@ -152,10 +152,15 @@ export function elementLabel(v: IterableValue, index: number): string {
   if (isTableValue(v)) return labelFromRow(v, i)
 
   /*
-   * The geometry's own `bodyId` first, not the attribute table's. They agree by construction,
-   * but the geometry is where the id is authoritative — an attribute table can be rebuilt or
-   * re-ordered by something upstream, and a silhouette labelled with the wrong neuron's id is
-   * worse than one labelled with none.
+   * The geometry's own `bodyId` first, not the attribute table's — because the two are
+   * index-aligned here and the geometry cannot be re-ordered by something upstream, where an
+   * attribute table can, and a silhouette labelled with the wrong neuron's id is worse than
+   * one labelled with none.
+   *
+   * Note this is a *label*, not an identity. Identity lives in the attribute table's row (see
+   * `MeshGeometry.bodyId` and invariant 8): the geometry's `bodyId` is a number, so on a source
+   * whose ids do not fit in one it is the rounded copy. Fine for a readout, wrong for a join —
+   * do not read this comment as licence to key anything on it.
    */
   const bodyId = v.items[i]?.bodyId
   const name = labelFromRow(v.attributes, i, ['bodyId'])

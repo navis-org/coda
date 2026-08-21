@@ -12,6 +12,7 @@
 
 import { memo } from 'react'
 
+import { idText } from '../../core/ids'
 import type { CellValue, TableValue } from '../../core/values'
 import { formatCompact, formatCell } from '../format'
 import { NeuronThumbnail } from './NeuronThumbnail'
@@ -52,7 +53,10 @@ function NeuronRowImpl({
   onToggle,
   compact,
 }: NeuronRowProps) {
-  const bodyId = Number(cellOf(table, 'bodyId', row) ?? 0)
+  // `idText` keeps a wide id exactly; `Number(cell)` would round it before the thumbnail
+  // cache key and the 3D fetch ever see it.
+  const bodyIdText = idText(cellOf(table, 'bodyId', row)) ?? ''
+  const bodyId = Number(bodyIdText)
   const primary = fields.primary ? cellOf(table, fields.primary, row) : null
   /*
    * The card shows the same chips as the overlay, and `compact` reaches only the thumbnail.
@@ -89,7 +93,7 @@ function NeuronRowImpl({
       <NeuronThumbnail
         sourceId={sourceId}
         datasetId={datasetId}
-        bodyId={bodyId}
+        bodyId={bodyIdText}
         size={compact ? 56 : 76}
       />
 
@@ -102,7 +106,7 @@ function NeuronRowImpl({
               ? 'untyped'
               : formatCell(primary, fields.primary)}
           </strong>
-          <span className="explore-row__id">{bodyId}</span>
+          <span className="explore-row__id">{bodyIdText}</span>
         </div>
         {secondary.length > 0 && (
           <div className="explore-row__sub">{secondary.join(' · ')}</div>

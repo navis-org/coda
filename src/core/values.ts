@@ -103,6 +103,17 @@ export type GeometryUnits = 'nm' | 'voxels'
 
 /** One neuron's branching morphology, SWC-style, in parallel typed arrays. */
 export interface SkeletonGeometry {
+  /**
+   * **Still a number, and the one place invariant 8 is not yet finished.**
+   *
+   * Ids cross the `DataSource` seam as `NeuronId` text so a wide one survives; this and
+   * `MeshGeometry.bodyId` are the remaining numbers, so a source publishing ids that do not fit
+   * in a double hands back a *rounded* copy here while its attribute table keeps the exact one.
+   * Benign today — neuPrint and the mock both fit — and a trap the moment one does not, because
+   * several consumers join the two by string equality: `viewer3d`'s selection through
+   * `rowsWithIds`, the SWC/OBJ filenames and header in `exportValue.ts`, and NBLAST's match
+   * table. Widening these two is the next step, not a nicety.
+   */
   readonly bodyId: number
   /** Point coordinates, xyz interleaved: `positions[i * 3 + 0..2]`. */
   readonly positions: Float32Array

@@ -24,6 +24,7 @@
 import { useMemo } from 'react'
 
 import type { CellValue, TableValue } from '../../core/values'
+import { idText } from '../../core/ids'
 import { getRow } from '../../core/values'
 import {
   connectivitySummary,
@@ -96,10 +97,14 @@ export function ProfileViewer({
     () => (neurons && total > 0 ? getRow(neurons, index) : undefined),
     [neurons, index, total],
   )
-  const bodyId = row ? Number(row['bodyId']) : undefined
-  const hasBodyId = bodyId !== undefined && Number.isFinite(bodyId)
+  /*
+   * Read once through `idText`, which keeps a wide id exactly — `Number(cell)` then
+   * `String(...)` round-trips through a float, which is the loss `NeuronId` exists to avoid,
+   * and it would land on the profile fetch and the thumbnail cache key.
+   */
+  const bodyId = row ? idText(row['bodyId']) : null
 
-  const profile = useNeuronProfile(sourceId, datasetId, hasBodyId ? bodyId : undefined)
+  const profile = useNeuronProfile(sourceId, datasetId, bodyId ?? undefined)
   const data = profile.status === 'ready' ? profile.data : undefined
 
   /*
@@ -149,7 +154,7 @@ export function ProfileViewer({
 
   const transmitter = useMemo(() => (row ? transmitterReading(row) : undefined), [row])
 
-  const isPinned = hasBodyId && pinned.includes(String(bodyId))
+  const isPinned = bodyId !== null && pinned.includes(bodyId)
   const exportSource: ExportSource = {
     csv: () => (neurons ? tableToCsvParts(neurons) : []),
   }
@@ -201,9 +206,9 @@ export function ProfileViewer({
         <span className="profile__name" title={name}>
           {name}
         </span>
-        {hasBodyId && <span className="profile__id">{bodyId}</span>}
+        {bodyId !== null && <span className="profile__id">{bodyId}</span>}
         <span className="profile__spacer" />
-        {hasBodyId && (
+        {bodyId !== null && (
           <button
             type="button"
             className="profile__pin"
@@ -247,7 +252,7 @@ export function ProfileViewer({
               <NeuronThumbnail
                 sourceId={sourceId}
                 datasetId={datasetId}
-                bodyId={hasBodyId ? bodyId : 0}
+                bodyId={bodyId ?? ''}
                 size={SILHOUETTE_SIZE}
               />
               <div className="profile__shape-facts">
@@ -269,7 +274,7 @@ export function ProfileViewer({
             <NeuroglancerProfileFrame
               sourceId={sourceId}
               datasetId={datasetId}
-              bodyId={hasBodyId ? bodyId : undefined}
+              bodyId={bodyId !== null ? Number(bodyId) : undefined}
               onError={onError}
             />
           )}

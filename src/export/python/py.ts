@@ -7,6 +7,7 @@
  */
 
 import type { ParamValue } from '../../core/node'
+import { isNeuronId } from '../../core/ids'
 
 /**
  * A Python string literal.
@@ -68,7 +69,35 @@ export function pyLongList(
   indent = '    ',
   width = 88,
 ): string[] {
-  const items = values.map((v) => pyValue(v))
+  return wrapList(
+    values.map((v) => pyValue(v)),
+    indent,
+    width,
+  )
+}
+
+/**
+ * A wrapped list literal of ids, from their exact decimal text.
+ *
+ * Separate from `pyLongList` because a `NeuronId` is a **string**, and `pyValue` would quote
+ * it — `NeuronCriteria(bodyId=['1001'])` matches nothing at all, silently. That is the same
+ * trap `idList` in `data/neuprint/cypher.ts` exists to avoid one layer down, and it produces a
+ * notebook that runs, reports zero neurons, and blames the dataset.
+ *
+ * The digits are spliced through rather than routed via `Number`, so the literal is exact at
+ * any width: a Python integer is arbitrary precision where a JS number is not. Anything that is
+ * not a bare integer is dropped, as every other id builder here drops it.
+ */
+export function pyLongIntList(
+  ids: readonly string[],
+  indent = '    ',
+  width = 88,
+): string[] {
+  return wrapList(ids.filter(isNeuronId), indent, width)
+}
+
+/** The wrapping half of both, over items that are already rendered. */
+function wrapList(items: readonly string[], indent: string, width: number): string[] {
   // Measured rather than built: an Explore select-all is 10,000 ids, and materialising the
   // ~120 kB single-line form purely to read its `.length` is the one allocation here big
   // enough to notice.

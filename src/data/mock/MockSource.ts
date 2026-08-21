@@ -16,6 +16,7 @@ import type {
   SkeletonsValue,
   TableValue,
 } from '../../core/values'
+import { numericId } from '../../core/ids'
 import type { CellValue } from '../../core/values'
 import { boundsOf, cableLength, makeMatrix, tableFromRows } from '../../core/values'
 import type {
@@ -59,6 +60,22 @@ import {
 export interface MockSourceOptions {
   /** Simulated round-trip latency in ms. Set to 0 in tests. */
   latencyMs?: number
+}
+
+/**
+ * Request ids as the numbers the generated connectome is keyed by.
+ *
+ * A `NeuronId` crosses the DataSource seam as text, and each source converts at its own edge;
+ * this is the mock's edge. The conversion is exact here by construction — `generate.ts` mints
+ * small sequential ids, nowhere near `Number.MAX_SAFE_INTEGER`.
+ */
+function numericIds(ids: readonly string[]): number[] {
+  const out: number[] = []
+  for (const id of ids) {
+    const n = numericId(id)
+    if (n !== undefined) out.push(n)
+  }
+  return out
 }
 
 export class MockSource implements DataSource {
@@ -145,7 +162,7 @@ export class MockSource implements DataSource {
     // Present-and-empty means no neurons, matching the seam's documented rule and the Cypher
     // builder's `IN []` — a mock that read it as "no filter" would let a node pass its tests
     // here and return the whole dataset against the real source.
-    const wantedIds = req.bodyIds ? new Set(req.bodyIds) : undefined
+    const wantedIds = req.bodyIds ? new Set(numericIds(req.bodyIds)) : undefined
     const statuses = req.statuses?.length ? new Set(req.statuses) : undefined
     const minSize = req.minSize ?? 0
 
@@ -220,13 +237,14 @@ export class MockSource implements DataSource {
    */
   async fetchCoarseGeometry(req: CoarseGeometryRequest): Promise<CoarseGeometry | undefined> {
     const connectome = this.require(req.datasetId)
-    const neuron = connectome.byId.get(req.bodyId)
+    const bodyId = Number(req.bodyId)
+    const neuron = connectome.byId.get(bodyId)
     if (!neuron) return undefined
     await delay(this.latencyMs / 4, req.signal)
     const rois = connectome.roiCounts
-      .filter((rc) => rc.bodyId === req.bodyId && rc.pre + rc.post > 0)
+      .filter((rc) => rc.bodyId === bodyId && rc.pre + rc.post > 0)
       .map((rc) => rc.roi)
-    const skeleton = generateSkeleton(req.bodyId, rois, { targetPoints: 160 })
+    const skeleton = generateSkeleton(bodyId, rois, { targetPoints: 160 })
     const mesh = skeletonToTubeMesh(skeleton, 3)
     return { positions: mesh.positions, indices: mesh.indices }
   }
@@ -235,7 +253,7 @@ export class MockSource implements DataSource {
     await delay(this.latencyMs, req.signal)
     const connectome = this.require(req.datasetId)
     const minWeight = req.minWeight ?? 1
-    const wanted = new Set(req.bodyIds)
+    const wanted = new Set(numericIds(req.bodyIds))
 
     const rows: Array<Record<string, number | string>> = []
     for (const bodyId of wanted) {
@@ -281,7 +299,7 @@ export class MockSource implements DataSource {
     const connectome = this.require(req.datasetId)
     const outward = req.direction === 'outputs'
     const types = new Set(req.types ?? [])
-    const ids = new Set(req.bodyIds ?? [])
+    const ids = new Set(numericIds(req.bodyIds ?? []))
 
     // Group key of a neuron: its type when collapsing and it has one, else its own body id.
     const keyOf = (bodyId: number): { key: string; type: string | null; id: number | null } => {
@@ -346,15 +364,17 @@ export class MockSource implements DataSource {
     const connectome = this.require(req.datasetId)
     const groupByType = req.groupByType ?? true
 
-    const rowKeys = this.keysFor(connectome, req.sourceIds, groupByType)
-    const colKeys = this.keysFor(connectome, req.targetIds, groupByType)
+    const sourceIds = numericIds(req.sourceIds)
+    const targetIds = numericIds(req.targetIds)
+    const rowKeys = this.keysFor(connectome, sourceIds, groupByType)
+    const colKeys = this.keysFor(connectome, targetIds, groupByType)
     const rowIndex = new Map(rowKeys.labels.map((label, i) => [label, i]))
     const colIndex = new Map(colKeys.labels.map((label, i) => [label, i]))
 
     const values = new Float64Array(rowKeys.labels.length * colKeys.labels.length)
-    const targets = new Set(req.targetIds)
+    const targets = new Set(targetIds)
 
-    for (const bodyId of req.sourceIds) {
+    for (const bodyId of sourceIds) {
       throwIfAborted(req.signal)
       const rowKey = rowKeys.keyOf.get(bodyId)
       if (rowKey === undefined) continue
@@ -377,7 +397,7 @@ export class MockSource implements DataSource {
   async fetchRoiCounts(req: RoiCountsRequest): Promise<TableValue> {
     await delay(this.latencyMs, req.signal)
     const connectome = this.require(req.datasetId)
-    const wanted = new Set(req.bodyIds)
+    const wanted = new Set(numericIds(req.bodyIds))
     const roiFilter = req.rois?.length ? new Set(req.rois) : undefined
 
     const rows = connectome.roiCounts
@@ -536,7 +556,7 @@ export class MockSource implements DataSource {
     const items: SkeletonGeometry[] = []
     const rows: Array<Record<string, number | string>> = []
 
-    for (const bodyId of req.bodyIds) {
+    for (const bodyId of numericIds(req.bodyIds)) {
       throwIfAborted(req.signal)
       const neuron = connectome.byId.get(bodyId)
       if (!neuron) continue
@@ -591,7 +611,7 @@ export class MockSource implements DataSource {
     const positions: number[] = []
     const rows: Array<Record<string, number | string>> = []
 
-    for (const bodyId of req.bodyIds) {
+    for (const bodyId of numericIds(req.bodyIds)) {
       throwIfAborted(req.signal)
       const neuron = connectome.byId.get(bodyId)
       if (!neuron) continue

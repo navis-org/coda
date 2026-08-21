@@ -307,7 +307,7 @@ export function tagQuery(cypher: string): string {
  * Run Cypher against a dataset.
  *
  * neuPrint's custom endpoint takes no parameter map, so values must go through `escapeString`
- * or `numberList` in `cypher.ts` — which is why everything that reaches a query goes through
+ * or `idList` in `cypher.ts` — which is why everything that reaches a query goes through
  * one of them.
  */
 export function runCypher(
@@ -397,7 +397,7 @@ export function fetchRoiConnectivity(
 /** SWC for one body, as `{columns: [rowId,x,y,z,radius,link], data}`. */
 export function fetchSkeleton(
   dataset: string,
-  bodyId: number,
+  bodyId: string,
   options?: RequestOptions,
 ): Promise<CypherResponse> {
   return get<CypherResponse>(

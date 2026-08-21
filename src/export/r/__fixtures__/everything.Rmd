@@ -439,7 +439,7 @@ find_neurons <- find_neurons |> head(200)
 
 ```{r input-ids}
 # ── Input IDs ──
-ids <- c(1001, 1002, 1003)
+ids <- c("1001", "1002", "1003")
 input_ids <- neuprint_get_meta(ids, conn = hemibrain) |> coda_neurons()
 ```
 

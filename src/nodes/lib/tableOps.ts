@@ -16,6 +16,7 @@ import type { ColumnSchema, DType, TableSchema } from '../../core/types'
 import { column, findColumn, isNumericDType, pickColumns, tableSchema } from '../../core/types'
 import type { CellValue, ColumnData, MatrixValue, TableValue } from '../../core/values'
 import { getColumn, makeMatrix, makeTable, selectRows } from '../../core/values'
+import { idText } from '../../core/ids'
 
 // ---------------------------------------------------------------------------
 // Filter
@@ -1127,14 +1128,22 @@ export function normalizeMatrix(matrix: MatrixValue, mode: NormalizeMode): Matri
 // Misc
 // ---------------------------------------------------------------------------
 
-/** Pull a numeric id column out as a plain array — the bridge into DataSource calls. */
-export function idColumn(table: TableValue, columnName = 'bodyId'): number[] {
+/**
+ * Pull an id column out as exact decimal strings — the bridge into DataSource calls.
+ *
+ * The per-cell rule is `idText` in `core/ids.ts`; see there for why a wide id cannot be a
+ * number. This adds only what is about the *column*: a cell that is not an id is skipped, as
+ * a null always has been, rather than throwing. Skipping is the rule `idList.ts` records — a
+ * wired column is *data*, and refusing to run because one upstream row carried a bad id would
+ * be unusable. What a caller loses is counted by comparing the result's length against the
+ * table's, which is what the Input IDs card does.
+ */
+export function idColumn(table: TableValue, columnName = 'bodyId'): string[] {
   const data = getColumn(table, columnName)
-  const out: number[] = []
+  const out: string[] = []
   for (const cell of data) {
-    if (cell === null || cell === undefined) continue
-    const n = Number(cell)
-    if (Number.isFinite(n)) out.push(n)
+    const id = idText(cell)
+    if (id !== null) out.push(id)
   }
   return out
 }

@@ -15,7 +15,7 @@ import {
 } from '../../../nodes/lib/datasetFamilies'
 import { parseIdList } from '../../../nodes/lib/idList'
 import { parseTypedLabels } from '../../../nodes/lib/labelLookup'
-import { pyLongList, pyList, pyStr } from '../py'
+import { pyLongIntList, pyList, pyStr } from '../py'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
 
@@ -201,14 +201,14 @@ registerEmitter('neuron.inputIds', (ctx) => {
     const column = ctx.column('column') ?? 'bodyId'
     lines.push(
       `_ids = sorted(set(`,
-      ...pyLongList(parsed.ids).map((l) => `    ${l}`),
+      ...pyLongIntList(parsed.ids).map((l) => `    ${l}`),
       `) | set(${wired}[${pyStr(column)}].dropna().astype(int)))`,
     )
   } else if (wired) {
     const column = ctx.column('column') ?? 'bodyId'
     lines.push(`_ids = ${wired}[${pyStr(column)}].dropna().astype(int).tolist()`)
   } else {
-    lines.push(`_ids = `.concat(pyLongList(parsed.ids).join('\n')))
+    lines.push(`_ids = `.concat(pyLongIntList(parsed.ids).join('\n')))
   }
 
   if (!c) {

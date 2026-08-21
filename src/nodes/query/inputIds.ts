@@ -1,3 +1,4 @@
+import { numericId } from '../../core/ids'
 import { registerNode } from '../../core/registry'
 import { T } from '../../core/types'
 import { isDatasetValue, isTableValue, tableFromRows } from '../../core/values'
@@ -99,6 +100,30 @@ export const inputIdsNode = registerNode({
     // Nothing typed and nothing wired is an *unconfigured* node, not a broken one: it returns an
     // empty table of the right schema, and this line says which of the two it is.
     if (parsed.ids.length === 0 && !ctx.inputs.ids) return ['No IDs yet — type or paste some']
+    /*
+     * With no Dataset the ids *are* the output, and that output's `bodyId` is an `i64` column —
+     * a JS number — so an id wider than `Number.MAX_SAFE_INTEGER` cannot be held exactly and
+     * would identify a different neuron downstream. Wired, nothing here rounds: the id crosses
+     * the seam as text and the source publishes whatever dtype it uses.
+     *
+     * A warning rather than a refusal, because the fix is to wire the Dataset that was almost
+     * certainly meant, and refusing would block a graph somebody is halfway through building.
+     */
+    if (!ctx.inputs.dataset) {
+      // The dataset check comes first and the scan short-circuits: `validate` runs on every
+      // graph mutation, the ids field can hold ten thousand ids, and with a Dataset wired this
+      // branch cannot fire at all.
+      // `id.length` *is* the digit count — `parseIdList` has stripped leading zeros and
+      // refused signs — and any id of 15 digits or fewer is under the ceiling, so the common
+      // case never reaches `numericId` at all.
+      const tooWide = parsed.ids.find((id) => id.length >= 16 && numericId(id) === undefined)
+      if (tooWide !== undefined) {
+        return [
+          `${tooWide} is too wide to hold in this node's own table — wire a Dataset, or it ` +
+            `will be rounded to a different neuron.`,
+        ]
+      }
+    }
     return []
   },
 
@@ -146,9 +171,12 @@ export const inputIdsNode = registerNode({
     if (!dataset) {
       ctx.progress(1)
       return {
+        // `Number`, because `ID_ONLY_SCHEMA` declares `bodyId` as `i64` and invariant 3 is
+        // that the schema half and the value half agree. Exact for every id this branch can
+        // usefully carry; `validate` warns about the ones it cannot.
         neurons: tableFromRows(
           ID_ONLY_SCHEMA,
-          collected.ids.map((bodyId) => ({ bodyId })),
+          collected.ids.map((bodyId) => ({ bodyId: Number(bodyId) })),
           'neurons',
         ),
       }

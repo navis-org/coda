@@ -195,6 +195,16 @@ registerEmitter('neuron.findNeurons', (ctx) => {
 // Input IDs / IDs from Label
 // ---------------------------------------------------------------------------
 
+/*
+ * Ids are emitted as a **character** vector, not a numeric one, and that was measured rather
+ * than assumed. R has no unsigned 64-bit integer and its default numeric is a double, so
+ * `as.numeric("648518347529750614")` is `648518347529750528` — a different neuron, and wrong
+ * in a different direction from JavaScript's own rounding of the same id. `c(1001, 1002)` is
+ * fine for neuPrint's nine-to-eleven digit ids and silently destroys a CAVE root id, so the
+ * one spelling that is correct everywhere is the quoted one. neuprintr's `neuprint_ids()`
+ * takes character ids for exactly this reason — it is the natverse convention, and why
+ * `bit64::integer64` exists in that stack at all.
+ */
 registerEmitter('neuron.inputIds', (ctx) => {
   const out = ctx.output('neurons')
   const parsed = parseIdList(String(ctx.params.ids ?? ''))

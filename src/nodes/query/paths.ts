@@ -40,6 +40,7 @@ import {
   traversePaths,
 } from '../lib/pathOps'
 import { requireDataset } from '../lib/datasetParam'
+import { idText } from '../../core/ids'
 
 /** Above this the fan-out is worth saying out loud. A warning, never a refusal. */
 const NOISY_HOPS = 4
@@ -58,14 +59,14 @@ export function seedNodes(table: TableValue, collapseTypes: boolean): PathNode[]
   const seen = new Map<string, PathNode>()
 
   for (let i = 0; i < table.length; i++) {
-    const bodyId = Number(bodyIds[i])
-    if (!Number.isFinite(bodyId)) continue
+    const bodyId = idText(bodyIds[i])
+    if (bodyId === null) continue
     const raw = types[i]
     const type = raw === null || raw === undefined || raw === '' ? null : String(raw)
     const node: PathNode =
       collapseTypes && type
         ? { key: type, type, bodyId: null }
-        : { key: String(bodyId), type, bodyId }
+        : { key: bodyId, type, bodyId }
     if (!seen.has(node.key)) seen.set(node.key, node)
   }
   return [...seen.values()]

@@ -72,7 +72,7 @@ export async function openMeshSource(
 }
 
 export interface MeshResult {
-  bodyId: number
+  bodyId: string
   positions: Float32Array
   indices: Uint32Array
 }
@@ -85,7 +85,7 @@ export interface FetchMeshesResult {
   levels?: number | undefined
   triangles: number
   /** Body ids the source had no mesh for. */
-  missing: number[]
+  missing: string[]
 }
 
 /** Default budget. ~1.5M triangles renders comfortably and holds a few dozen neurons coarse. */
@@ -119,7 +119,7 @@ export interface FetchMeshesOptions extends FetchOptions {
  */
 export async function fetchMeshes(
   source: MeshSource,
-  bodyIds: readonly number[],
+  bodyIds: readonly string[],
   options: FetchMeshesOptions = {},
 ): Promise<FetchMeshesResult> {
   const budget = options.triangleBudget ?? DEFAULT_TRIANGLE_BUDGET
@@ -127,7 +127,7 @@ export async function fetchMeshes(
 
   if (source.format === 'legacy') {
     const meshes: MeshResult[] = []
-    const missing: number[] = []
+    const missing: string[] = []
     let done = 0
     await mapWithConcurrency(bodyIds, concurrency, async (bodyId) => {
       const mesh = await readLegacyMesh(source.base, BigInt(bodyId), options)
@@ -145,8 +145,8 @@ export async function fetchMeshes(
   }
 
   const info = source.info!
-  const manifests = new Map<number, MultiResManifest>()
-  const missing: number[] = []
+  const manifests = new Map<string, MultiResManifest>()
+  const missing: string[] = []
   let read = 0
   await mapWithConcurrency(bodyIds, concurrency, async (bodyId) => {
     const manifest = await readManifest(source.base, BigInt(bodyId), info, options)
@@ -191,7 +191,7 @@ async function readLodFragments(
   source: MeshSource,
   info: MultiResInfo,
   manifest: MultiResManifest,
-  bodyId: number,
+  bodyId: string,
   lod: number,
   options: FetchOptions,
 ): Promise<{ positions: Float32Array; indices: Uint32Array } | undefined> {

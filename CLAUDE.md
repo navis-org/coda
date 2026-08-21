@@ -94,6 +94,57 @@ bundled corepack, so pnpm was installed with `npm i -g pnpm`.
    for exactly this reason; returning `{ state: 'idle' }` per call caused an infinite-loop
    warning. Select primitives, or memoise.
 
+8. **A neuron id crosses the `DataSource` seam as text, never as a number.** `NeuronId` in
+   `data/source.ts` is a `string` of decimal digits, and every request field that names neurons
+   (`bodyIds`, `sourceIds`, `targetIds`, `bodyId`) is typed with it.
+
+   `CellValue` is a JS number, so an `i64` column is really a float64. neuPrint's ids are nine
+   to eleven digits and comfortably exact; a CAVE root id is eighteen and is not —
+   `648518347529750614` parses to `648518347529750700`, which is a **different neuron**, with
+   nothing anywhere to say so. Measured in R, the same id becomes `648518347529750528`: not
+   merely lossy but lossy differently per language, so no downstream comparison can be trusted
+   either.
+
+   **Each source converts at its own edge**, and every conversion is now the exact one:
+   `idList` in `neuprint/cypher.ts` splices the digits into Cypher as an integer literal so no
+   float is ever formed; `precomputed/index.ts` hands them to `BigInt`, which is exact from a
+   string and lossy from a number — so the shard hash it feeds was quietly wrong for a wide id
+   before this; `MockSource.numericIds` converts back to the small integers its generated
+   connectome is keyed by.
+
+   **The rule lives in `src/core/ids.ts`, and that placement is the point.** `NeuronId`,
+   `isNeuronId` (the grammar), `idText` (a cell → an id) and `compareIds` are one definition
+   each, plus `numericId` for the inverse direction. They sit in `src/core` because it is the
+   only layer every consumer reaches — the sources need the grammar, the nodes need the cell
+   rule, both exporters need both, and `src/data` may not import `src/nodes` (invariant 1), so
+   anywhere higher leaves somebody out. There is deliberately **no re-export**: a shim is how a
+   symbol acquires a second spelling and then a third.
+
+   That is worth saying because the rule was written four times before it was written once, and
+   the copies had already drifted: two accepted a leading `-` and two did not, while the type's
+   own documentation asserted a grammar no function enforced.
+
+   **`idText` is the cell-level rule**, shared by `idColumn`, the connectivity traversal and the
+   path decoder, so the ids a query is _built from_ cannot disagree with the ids a result is
+   _keyed by_ — that disagreement shows up as edges silently missing from a hop rather than as
+   an error. Note it deliberately does **not** apply the grammar: a `str` column holding `LC4`
+   comes back as `'LC4'`, and callers differ in what they owe about it — `idsFromColumn` counts
+   what it drops, the query builders drop silently. Sorting goes through `compareIds`, which is
+   length-then-lexicographic: numeric order for non-negative integers of any width, where
+   `Number(a) - Number(b)` reports two adjacent wide ids as equal.
+
+   What this does **not** change is what a source _publishes_. neuPrint still declares `bodyId`
+   as `i64` and pushes numbers into it, because for its ids that is exact and true; a CAVE
+   source will declare `str`. `idColumn` reads either. The still-open half is that
+   `SkeletonGeometry.bodyId` and `MeshGeometry.bodyId` remain numbers — they are draw and
+   export keys, and identity lives in the attribute table row, which is why that is a separate
+   change rather than this one.
+
+   Both emitters had to learn it too, and each fails silently otherwise: `pyLongIntList` emits
+   unquoted Python integers because `NeuronCriteria(bodyId=['1001'])` matches nothing, and the R
+   emitter emits a **character** vector because R's default numeric is a double. The golden
+   files caught both.
+
 ## Gotchas found the hard way
 
 - **`defaultSize` sizes React Flow's _wrapper_, and only a viewer's card fills one.** The card
@@ -239,7 +290,7 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | `core/graph.test.ts`                     | topo sort, cycles (incl. two wires between one pair), serialisation, lenient loading                                             |
 | `core/scheduler.test.ts`                 | hybrid eval, caching, invalidation, errors, targeted runs                                                                        |
-| `nodes/lib/tableOps.test.ts`             | each op, plus schema/value agreement                                                                                             |
+| `nodes/lib/tableOps.test.ts`             | each op, plus schema/value agreement — and the id bridge: a wide id kept exactly, a rounded one skipped, ids ordered by magnitude |
 | `data/mock/generate.test.ts`             | determinism, internal consistency, source semantics                                                                              |
 | `examples/examples.test.ts`              | all five examples end to end, inference-clean, non-empty, and their notes' markdown parsing                                      |
 | `ui/App.smoke.test.tsx`                  | real app mounted and driven: Run, live filtering, link rejection, undo, per-node run                                             |
@@ -339,7 +390,7 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `nodes/table/upload.test.ts`             | the node: the schema arriving by peek, the bodyId rename, what a graph opened elsewhere says, and the filename costing nothing   |
 | `ui/nodes/uploadBody.test.tsx`           | the card's four states — and that 'looking' is never printed as 'not here' — plus the size ceiling refusing before it reads      |
 | `nodes/table/fromUrl.test.ts`            | the fetch: deferred by the auto pass, Refresh as the only re-fetch, the schema keyed by URL, and what each refusal blames        |
-| `nodes/lib/idList.test.ts`               | reading pasted ids: every separator, and both refusals — a bad token and an id too big to be exact                               |
+| `nodes/lib/idList.test.ts`               | reading pasted ids: every separator, a bad token refusing the list, an eighteen-digit id kept exactly, and the 19-digit ceiling  |
 | `nodes/query/inputIds.test.ts`           | the node: no dataset means no query, the seam asked in numbers, no status filter, empty never all                                |
 | `ui/nodes/inputIdsBody.test.tsx`         | the card: the counts, the ids named as missing, and that it claims nothing with no Dataset wired                                 |
 | `nodes/table/stack.test.ts`              | the union schema needing both sides, a real dtype clash refused at run time, and the source column                               |
@@ -3181,7 +3232,7 @@ hemibrain, and `IB`/`INP` look nothing like ROIs) and non-scalar properties (man
 five as `point{srid:9157}`).
 
 **Everything is inlined into the query string.** `/api/custom/custom` takes no parameter
-map, so values must go through `escapeString` / `numberList` / `escapeIdentifier` in
+map, so values must go through `escapeString` / `idList` / `escapeIdentifier` in
 `cypher.ts`. Nothing else may build a literal.
 
 **Column mapping is positional.** neuPrint names columns after the expression (`n.bodyId`),
@@ -4104,7 +4155,7 @@ no source should own, and `MockSource` would need its own BFS regardless. Loopin
 `fetchConnectivity` instead means no source changed at all, the mock works for free, the BFS is
 testable against a fake graph with no network, and progress can report per round.
 
-**Known limit: the frontier is inlined into the query.** `numberList` puts every id in an `IN`
+**Known limit: the frontier is inlined into the query.** `idList` puts every id in an `IN`
 list, so a hop-2 frontier of tens of thousands of neurons builds a very large Cypher string. Not
 chunked, because chunking is only worth writing once a real query has actually failed on it — but
 it is the first thing to suspect if a deep traversal errors at the transport rather than timing out.
@@ -4407,12 +4458,18 @@ The cost is real and accepted — pasting a spreadsheet column brings its header
 says _"If you pasted a column, delete its header line"_ when the first token is a word, and only
 then. A hint offered where it cannot be true is noise on top of an error.
 
-**An id past `Number.MAX_SAFE_INTEGER` is refused, naming it.** `CellValue` is a JS number, so an
-`i64` column is really a float64: `720575940379279312` is stored as a _different_ integer and
-would identify a different neuron, with nothing anywhere to say so. neuPrint's ids are nine to
-eleven digits and nowhere near it; FlyWire root ids are eighteen and well past. This costs nothing
-today and is the difference between a clear error and a wrong answer the day somebody pastes
-FlyWire ids into a Coda that has grown a FlyWire source.
+**A wide id is now kept exactly, and the ceiling describes the data rather than JavaScript.**
+This file used to refuse anything past `Number.MAX_SAFE_INTEGER`, on the grounds that `CellValue`
+is a JS number so an `i64` column is really a float64 — `720575940379279312` stored as a
+_different_ integer, identifying a different neuron with nothing anywhere to say so. That was
+right for exactly as long as an id had to become a number on its way to a query, and the day it
+predicted has arrived: see invariant 8 above. Ids are now carried as decimal digits,
+so there is nothing to lose, and the refusal is a nineteen-digit width — a signed 64-bit maximum,
+which is what both Neo4j and CAVE actually store.
+
+Note what did _not_ move. With **no Dataset wired** the ids are the node's own output, and that
+table's `bodyId` is an `i64` column, so the width still bites there — `validate` warns and names
+the id rather than rounding it, and says to wire the Dataset that was almost certainly meant.
 
 **The wired column drops what it cannot use instead of refusing**, and the asymmetry is
 deliberate. Typed text is _authored_ — a bad token is a mistake somebody just made and can fix, so
@@ -4434,7 +4491,7 @@ how somebody concludes there are two.
 A new field at the source seam rather than a `LabelMatch` on `bodyId`, and the reason is not
 stylistic: `labelClause` compiles to a list of **string** literals, and `123 IN ['123']` is false
 in Cypher — an empty result, with no error anywhere to explain it. `bodyIds` goes through
-`numberList`.
+`idList`, which emits the digits as an unquoted integer literal.
 
 **Present-and-empty means no neurons, never "no filter".** Deliberately unlike the label clause
 beside it, which drops itself when empty and so reads an empty set as no filter at all; that is
