@@ -87,6 +87,12 @@ export interface AnnotationProvider {
 export interface AnnotationFetchOptions {
   refresh?: boolean
   onProgress?: (fraction: number, note?: string) => void
+  /**
+   * When the table handed back was actually read from the server — the *stored* time on a cache
+   * hit, which is the whole point: a hit and a fresh read are indistinguishable from the table
+   * alone, and a base somebody edits daily can be served from a month-old copy.
+   */
+  onFetched?: (at: number) => void
   signal?: AbortSignal
 }
 

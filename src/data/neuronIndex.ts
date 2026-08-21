@@ -22,7 +22,7 @@
  */
 
 import type { DatasetAnnotations, TableValue } from '../core/values'
-import { cacheGet, cacheSet } from './cache'
+import { cacheGetEntry, cacheSet } from './cache'
 
 export interface NeuronIndexRequest {
   datasetId: string
@@ -53,6 +53,16 @@ export interface CachedTableSpec {
   /** Shape identifier — a mismatch invalidates. For a table, its column names. */
   fingerprint: string
   refresh?: boolean
+  /**
+   * When the table being returned was actually fetched — `Date.now()` for a fresh read, and the
+   * *stored* time for a hit.
+   *
+   * A callback rather than a widened return type, the shape `onProgress` already has here: every
+   * caller wants the table and only one wants the age, so making it a pair would edit six call
+   * sites to serve one. Not called when an in-flight promise is shared, since the caller that
+   * started it is the one being told.
+   */
+  onFetched?: (at: number) => void
   maxAgeMs?: number
   fetch(): Promise<TableValue>
 }
@@ -73,13 +83,18 @@ export function loadCachedTable(spec: CachedTableSpec): Promise<TableValue> {
 
   const load = (async () => {
     if (!spec.refresh) {
-      const hit = await cacheGet<TableValue>(spec.key, {
+      const hit = await cacheGetEntry<TableValue>(spec.key, {
         fingerprint: spec.fingerprint,
         maxAgeMs: spec.maxAgeMs ?? NEURON_INDEX_MAX_AGE_MS,
       })
-      if (hit) return hit
+      if (hit) {
+        spec.onFetched?.(hit.savedAt)
+        return hit.value
+      }
     }
     const table = await spec.fetch()
+    const at = Date.now()
+    spec.onFetched?.(at)
     void cacheSet(spec.key, table, spec.fingerprint)
     return table
   })().finally(() => {

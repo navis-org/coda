@@ -473,6 +473,7 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `store/links.test.ts`                    | breaking and re-routing links: one undo step, the id kept, and what a refused rewire leaves                                      |
 | `ui/panels/edgeMenu.test.tsx`            | the link menu: that its header names the wire it is about, and that deleting leaves the nodes                                    |
 | `ui/panels/nodeMenu.test.tsx`            | the node menu's two caches: Results rather than "cache", and Clear Cache gated on the node declaring one                        |
+| `ui/nodes/cacheAge.test.tsx`             | `cached 3d ago ⟳`: the age surviving a restored result, the click reaching both caches, and no threshold hiding a fresh one     |
 | `ui/nodes/noteCard.test.tsx`             | the note card: markdown as prose, no node chrome, Escape abandoning an edit, the frame toggle                                    |
 | `nodes/lib/connectivityOps.test.ts`      | the traversal: the pre→post swap, the both-ends dedupe, no re-expansion, minWeight pruning                                       |
 | `nodes/query/connectivity.test.ts`       | the node: that it advertises the columns it builds, and that Hops reaches the source                                             |
@@ -1702,6 +1703,36 @@ across loads and a stranded request would be spent by whatever took the id.
 `evaluate` honours `ctx.refresh`. Paired deliberately — a node offering the button and ignoring
 the flag is exactly the control-that-does-nothing this replaced, and a button on a Filter would
 promise a re-fetch with no fetch behind it.
+
+**The card says how old the data is, and the label is the control.** `cached 3d ago ⟳` in the
+foot of any node that reported a fetch, clearing that node's data cache and running it. A passive
+badge would leave the obvious next act — a fresher copy — two gestures away in a menu, and what
+somebody wants on reading "3d" is not to be told again.
+
+**Shown whenever there is an age, not only when it is large.** `cached 0s ago` is exactly as
+informative as it sounds, and it is what makes the number believable the day it reads `28d` — the
+rule that keeps geometry units printed when they are the expected ones, and the matched half of
+`unmatchedLabels` on screen. There is no threshold and no confirm.
+
+**The age is reported, not derived, and that is forced.** A cache hit and a fresh read are
+indistinguishable from the rows, so `ctx.reportFetched(at)` carries it: `cacheGetEntry` hands
+`savedAt` to `loadCachedTable`, which calls `spec.onFetched` — the `onProgress` idiom, because
+every caller wants the table and only one wants the age, so widening the return type would edit
+six call sites to serve one. The oldest report of a run wins, so a node making several fetches
+says how stale its worst is.
+
+**It lives in the scheduler's `CacheEntry`, not in `NodeRunInfo`**, and that is the whole of why
+it works. A second Run over an unchanged graph re-executes nothing, so a run-time report would be
+gone while the stale table it described stayed on screen — the failure CLAUDE.md already records
+as "there is no channel from `evaluate` to a badge that survives a result being restored from
+cache". This is that channel, and it took a second consumer to justify it: an age is the one thing
+that genuinely cannot be derived from the result, since it is not in the rows.
+
+`formatAge` is deliberately **not** `formatDuration`. That one measures how long a run took and is
+written for the millisecond end (`<1ms`, `142ms`, `2.4s`); this answers a different question and
+rounds rather than refining — nobody deciding whether to re-read a base is served by `2.7d`. It
+**floors**, so nothing is ever reported as older than it is: `23h` stays `23h` until it really is
+a day.
 
 **It replaced the annotation nodes' `refresh` nonce.** A nonce works, and invariant 4 is why they
 exist at all; what it costs is that re-fetching becomes an **edit** — in the provenance key, in the

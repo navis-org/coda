@@ -114,6 +114,29 @@ export function formatDuration(ms: number | undefined): string {
 }
 
 /**
+ * How long ago something happened, to the largest whole unit: `40s`, `12m`, `5h`, `3d`.
+ *
+ * Deliberately not `formatDuration`, which measures how long a *run took* and is written for the
+ * millisecond end — `<1ms`, `142ms`, `2.4s`. This is the other end and answers a different
+ * question, so it rounds rather than refining: nobody deciding whether to re-read an annotation
+ * base is served by `2.7d`, and a second decimal on a number that will be different tomorrow
+ * implies a precision the answer does not have.
+ *
+ * Floors rather than rounds, so a thing is never reported as older than it is — `23h` stays `23h`
+ * until it really is a day. Anything under a second is `0s`, which is honest and, on the surface
+ * this exists for, means the fetch just happened.
+ */
+export function formatAge(ms: number): string {
+  const seconds = Math.max(0, Math.floor(ms / 1000))
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h`
+  return `${Math.floor(hours / 24)}d`
+}
+
+/**
  * Clean axis ticks: 0 / 1,000 / 2,000 rather than 0 / 1,137 / 2,274. Returns at most
  * `count`+1 values covering [0, max].
  */

@@ -10,7 +10,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { formatCell, formatNumber, isIdentifierColumn } from './format'
+import { formatAge, formatCell, formatNumber, isIdentifierColumn } from './format'
 
 describe('isIdentifierColumn', () => {
   it('takes the names every query node publishes', () => {
@@ -89,5 +89,28 @@ describe('formatCell', () => {
     expect(formatCell('LC4', 'type')).toBe('LC4')
     expect(formatCell(true, 'traced')).toBe('true')
     expect(formatCell(1.5, 'neuronId')).toBe('1.5')
+  })
+})
+
+describe('formatAge', () => {
+  it('rounds to the largest whole unit, with no decimals', () => {
+    expect(formatAge(0)).toBe('0s')
+    expect(formatAge(40_000)).toBe('40s')
+    expect(formatAge(12 * 60_000)).toBe('12m')
+    expect(formatAge(5 * 3_600_000)).toBe('5h')
+    expect(formatAge(3 * 86_400_000)).toBe('3d')
+  })
+
+  it('floors, so nothing is reported as older than it is', () => {
+    // 23h59m is not a day. Rounding would call it one, on a surface whose whole job is to say
+    // how stale a copy of somebody's annotation base is.
+    expect(formatAge(86_400_000 - 60_000)).toBe('23h')
+    expect(formatAge(60_000 - 1)).toBe('59s')
+    // And the boundary itself steps exactly once.
+    expect(formatAge(86_400_000)).toBe('1d')
+  })
+
+  it('does not go negative on a clock that moved', () => {
+    expect(formatAge(-5000)).toBe('0s')
   })
 })

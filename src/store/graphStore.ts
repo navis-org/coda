@@ -352,6 +352,13 @@ export interface GraphState {
   nodeInfo(nodeId: string): NodeRunInfo
   nodeOutput(nodeId: string, portId: string): Value | undefined
   /**
+   * When the data behind a node's current result was read from a server, or undefined.
+   *
+   * Read through `runVersion` like `nodeInfo`, since it changes with the scheduler's cache rather
+   * than with the graph.
+   */
+  nodeFetchedAt(nodeId: string): number | undefined
+  /**
    * Realised values arriving at a node's input ports. Viewers with several inputs (the 3D
    * scene takes skeletons, meshes and points) need these, since a node's own output cache
    * only holds what it produced.
@@ -1208,6 +1215,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
       return out
     },
     nodeOutput: (nodeId, portId) => scheduler.output(nodeId, portId),
+    nodeFetchedAt: (nodeId) => scheduler.fetchedAt(nodeId),
     setNotice: (notice) => set({ notice }),
   }
 })

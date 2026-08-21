@@ -77,6 +77,14 @@ export interface RunSummary {
 interface CacheEntry {
   key: string
   outputs: Record<string, Value>
+  /**
+   * When the oldest data behind these outputs was read from a server, if the node said.
+   *
+   * Here rather than in `NodeRunInfo` because this is a property of the *result*: it has to
+   * survive the result being restored from this very cache, which is precisely when a node does
+   * not run and anything recorded in run state would be gone.
+   */
+  fetchedAt?: number
 }
 
 /** Shared instance for nodes with no recorded state — see `Scheduler.info`. */
@@ -233,6 +241,17 @@ export class Scheduler {
     this.abort?.abort()
   }
 
+  /**
+   * When the data behind a node's current result was read from a server, if it said.
+   *
+   * A primitive, so a selector over it is stable by identity (invariant 7). `undefined` means the
+   * node did not report — it has no data cache, or it has not run — which is the same absence to
+   * every caller and prints as nothing.
+   */
+  fetchedAt(nodeId: string): number | undefined {
+    return this.cache.get(nodeId)?.fetchedAt
+  }
+
   // -------------------------------------------------------------------------
   // Execution
   // -------------------------------------------------------------------------
@@ -360,6 +379,9 @@ export class Scheduler {
         // Spent here rather than at the top of the run: a node that was deferred by the cheap
         // pass has not had its chance to honour the request yet.
         const refresh = this.forceRefresh.delete(nodeId)
+        // Collected per execution rather than on the context object, so a node cannot read back
+        // what it reported and nothing survives into the next run.
+        let fetchedAt: number | undefined
         const ctx = this.makeEvalContext(
           def,
           node.params,
@@ -369,6 +391,10 @@ export class Scheduler {
           controller.signal,
           nodeId,
           refresh,
+          (at) => {
+            // Oldest wins: a node making several fetches is only as fresh as its stalest one.
+            fetchedAt = fetchedAt === undefined ? at : Math.min(fetchedAt, at)
+          },
         )
         const outputs = await def.evaluate(ctx)
 
@@ -383,7 +409,11 @@ export class Scheduler {
           break
         }
 
-        this.cache.set(nodeId, { key: keys.get(nodeId)!, outputs })
+        this.cache.set(nodeId, {
+          key: keys.get(nodeId)!,
+          outputs,
+          ...(fetchedAt === undefined ? {} : { fetchedAt }),
+        })
         available.add(nodeId)
         summary.executed.push(nodeId)
         this.setState(nodeId, {
@@ -492,11 +522,13 @@ export class Scheduler {
     signal: AbortSignal,
     nodeId: string,
     refresh: boolean,
+    reportFetched: (at: number) => void,
   ): EvalContext {
     const types = inputTypes as Record<string, never>
     return {
       params,
       refresh,
+      reportFetched,
       input: (portId) => inputs[portId],
       inputKey: (portId) => inputKeys[portId],
       column: (paramId) => {

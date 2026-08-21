@@ -871,6 +871,31 @@ select.field {
   font-variant-numeric: tabular-nums;
   flex: none;
 }
+
+/*
+ * `cached 3d ago ⟳` in the card's foot — how old the data behind the result is, and the control
+ * that replaces it. A button rather than a badge, because what somebody wants on reading "3d" is
+ * a fresher copy; muted, because it is a fact about the result rather than a warning about it,
+ * and it is on screen whenever there is an age at all.
+ */
+.coda-node__cache {
+  /* `flex: none` like the timing beside it — `.coda-node__summary` is `flex: 1` and already
+     absorbs the slack, so a `margin-left: auto` here would be a second thing pushing. */
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.coda-node__cache:hover,
+.coda-node__cache:focus-visible {
+  color: var(--text-primary);
+}
+
 .coda-node__issue {
   padding: 3px 8px 4px calc(8px + var(--state-bar));
   font-size: 10px;

@@ -406,6 +406,10 @@ async function resolve(ctx: EvalContext, ref: AnnotationRef): Promise<TableValue
   const table = await provider.fetch(ref, {
     ...(ctx.refresh ? { refresh: true } : {}),
     onProgress: ctx.progress,
+    // What the card's "cached 3d ago" is built from. A hit and a fresh read look identical from
+    // the table, so the age has to travel with it or nothing can say the base was read a month
+    // ago — see `EvalContext.reportFetched`.
+    onFetched: ctx.reportFetched,
     ...(ctx.signal ? { signal: ctx.signal } : {}),
   })
 

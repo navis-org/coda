@@ -333,6 +333,23 @@ export interface EvalContext<P extends ParamValues = ParamValues> {
   signal: AbortSignal
   /** Report 0..1 progress for the node's status bar. */
   progress(fraction: number, note?: string): void
+  /**
+   * Say when the data behind this result was actually read from a server.
+   *
+   * For a node declaring `dataCache`: a run that answers from `loadCachedTable` is
+   * indistinguishable from one that reached the network, so the card cannot say "this is a
+   * month-old copy of a base somebody edits daily" unless it is told.
+   *
+   * Reported rather than inferred, and kept in the scheduler's **cache entry** rather than in
+   * `NodeRunInfo`, which is what makes it survive a result being restored instead of recomputed —
+   * the distinction `unmatchedLabels` and `PathsBody` both work around by deriving from the
+   * result. There is nothing to derive here: an age is not in the rows.
+   *
+   * The **oldest** report of a run wins, so a node making several fetches says how old the
+   * stalest thing behind its answer is. Ignore it and the card simply says nothing, which is the
+   * honest state for a node that did not fetch.
+   */
+  reportFetched(at: number): void
 }
 
 export interface NodeDefinition<P extends ParamValues = ParamValues> {

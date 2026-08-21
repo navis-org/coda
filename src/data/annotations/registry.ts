@@ -114,6 +114,7 @@ export function cachedAnnotationTable(
     key,
     fingerprint: `${key}|shape=${SHAPE_FORMAT}`,
     ...(options.refresh ? { refresh: options.refresh } : {}),
+    ...(options.onFetched ? { onFetched: options.onFetched } : {}),
     fetch: read,
   })
 }
