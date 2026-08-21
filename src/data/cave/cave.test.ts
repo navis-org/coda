@@ -671,6 +671,37 @@ describe('a wired annotation chain', () => {
     expect(captured.filter((c) => c.url.includes('/query?')).length).toBeGreaterThan(plain)
   })
 
+  it('takes one row per neuron from a chain that repeats one, and takes the first', async () => {
+    /*
+     * The guarantee the providers now rely on rather than duplicating. `shapeRows` used to
+     * collapse a repeated root id before the table ever left the annotation node, which hid a
+     * real property of real data — measured against FlyTable's `main.info`: 58,340 rows over
+     * 56,309 distinct ids, 1,089 neurons carrying more than one, and one segment appearing 104
+     * times with its `side` disagreeing across them (a proofreading merge pulling many old
+     * annotations onto one id).
+     *
+     * Collapsing it there changed nothing a Dataset saw — `dedupedIds` fixes the row order and
+     * `annotationIndex` fixes the cells, both first-occurrence-wins — so all it did was keep the
+     * one person who could resolve the conflict from seeing there was one. That is what this
+     * pins: duplicates in, one row out, and the first row's value.
+     */
+    installFetch()
+    const repeated = {
+      key: 'seaTable:base=main&table=info',
+      table: makeTable(tableSchema(column('neuronId', 'str'), column('side', 'str')), {
+        neuronId: ['720575940628857210', '720575940628857210', '720575940626838909'],
+        side: ['left', 'center', 'right'],
+      }),
+    }
+    const table = await new CaveSource().findNeurons({
+      datasetId: DATASET,
+      annotations: repeated,
+    })
+    // Four neurons, as with the chain that repeats nothing — the extra row is not a neuron.
+    expect(table.length).toBe(4)
+    expect(table.data.side).toEqual(['left', 'right', null, null])
+  })
+
   it('does not fetch the built-in annotations it is about to discard', async () => {
     const captured = installFetch()
     await new CaveSource().findNeurons({ datasetId: DATASET, annotations: chain })

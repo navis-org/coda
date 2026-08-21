@@ -1349,6 +1349,21 @@ annotations hold different answers, and without it the first one looked at is se
 for the session. It matters on precisely this card because it is the one surface that prints a
 partner's *type* in words beside ports carrying the chain's.
 
+**A repeated root id is kept by the providers, and collapsed only where it has to be.** Both
+`shapeRows` and the CAVE table reader used to drop a repeat, on the stated grounds that it "would
+put that neuron in the index twice" — which was already answered downstream and always had been:
+`dedupedIds` fixes the row order and `annotationIndex` fixes the cells, both first-occurrence-wins,
+and `joinAnnotations` does the same per side. So collapsing it at the provider changed nothing a
+Dataset ever saw. What it did was hide, from the only person who could act on it, that their base
+disagrees with itself.
+
+Measured against FlyTable's `main.info`: **58,340 rows over 56,309 distinct ids, 1,089 neurons
+carrying more than one, and one segment appearing 104 times** with its `side` reading left, center
+and center among them — a proofreading merge pulling many old annotations onto one root id. "First
+wins" was picking one of those 104 by arrival order, silently. Now the repeats reach a Table node,
+and a Sort ahead of the Dataset decides which row wins instead of the order the API happened to
+return. `cave.test.ts` pins the downstream collapse, since that is what the providers now lean on.
+
 **`CaveSource` left-joins the chain onto its own neuron list**, and the direction matters: every
 neuron the segmentation knows about comes out, annotated or not. The other way round would let an
 annotation base decide which neurons *exist*, and those bases routinely carry rows for ids that

@@ -271,16 +271,15 @@ function wideRows(
 
   const ids = data[ID_COLUMN_NAME]!
   const targets = columns.map((name) => ({ name, into: data[annotationColumn(name)]! }))
-  const seen = new Set<string>()
   for (const row of rows) {
     const raw = row[config.idColumn]
     if (raw === null || raw === undefined) continue
-    const id = String(raw)
-    // One row per neuron. A CAVE table keyed by a point can carry a root id twice — two nuclei
-    // in one segment — and a repeat would put that neuron in the index twice.
-    if (seen.has(id)) continue
-    seen.add(id)
-    ids.push(id)
+    /*
+     * A repeated root id is kept — a table keyed by a point carries one where a segment holds
+     * two nuclei, and that is a fact about the data worth seeing. `shapeRows` in `seaTable.ts`
+     * records why collapsing it here was redundant rather than protective.
+     */
+    ids.push(String(raw))
     for (const { name, into } of targets) {
       const value = row[name]
       into.push(value === undefined ? null : value)

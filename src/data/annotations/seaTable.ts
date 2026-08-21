@@ -597,6 +597,15 @@ class SeaTableProvider implements AnnotationProvider {
  * rows and this is the shape the loop already has. Rows whose id cell is empty are dropped and
  * not counted — an annotation with no neuron attached is a row somebody has not finished, and
  * there is nothing to join it to.
+ *
+ * **A repeated id is kept**, which this deliberately no longer collapses. The reason it used to
+ * — "a repeat would put that neuron in the index twice" — is answered downstream and always was:
+ * `CaveSource` takes its row order through `dedupedIds` and its cells through `annotationIndex`,
+ * both first-occurrence-wins, and `joinAnnotations` does the same per side when sources chain. So
+ * dropping the duplicate here changed nothing a Dataset ever saw; it only hid, from the one
+ * person who could act on it, that their base has two rows for one neuron. Now that the table
+ * leaves this node as an ordinary table, a Table node shows the repeats and a Sort ahead of the
+ * Dataset decides which row wins instead of leaving it to arrival order.
  */
 export function shapeRows(
   rows: ReadonlyArray<Record<string, unknown>>,
@@ -622,16 +631,10 @@ export function shapeRows(
     into: data[annotationColumn(name)]!,
     dtype: dtypeFor(types.get(name) ?? 'text'),
   }))
-  const seen = new Set<string>()
   for (const row of rows) {
     const raw = row[config.idColumn]
     if (raw === null || raw === undefined || raw === '') continue
-    const id = String(raw)
-    // One row per neuron: a base edited by many people carries duplicates, and a repeated id
-    // would put a neuron in the index twice.
-    if (seen.has(id)) continue
-    seen.add(id)
-    ids.push(id)
+    ids.push(String(raw))
     for (const { name, into, dtype } of targets) into.push(cellFor(row[name], dtype))
   }
   return makeTable(schema, data)

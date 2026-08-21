@@ -238,7 +238,7 @@ describe('shaping SeaTable rows', () => {
     expect(table.data.side).toEqual([null])
   })
 
-  it('drops a row with no id, and keeps one row per neuron', () => {
+  it('drops a row with no id, and keeps a neuron somebody annotated twice', () => {
     const table = shapeRows(
       [
         { root_id: '1', side: 'left' },
@@ -248,10 +248,16 @@ describe('shaping SeaTable rows', () => {
       config({ columns: 'side' }),
       meta,
     )
-    // A base edited by many people carries duplicates; a repeat would put that neuron in the
-    // index twice, and everything downstream that sums a weight would double it.
-    expect(table.data.neuronId).toEqual(['1'])
-    expect(table.data.side).toEqual(['left'])
+    /*
+     * Two different absences. A row with no id is not an annotation *of* a neuron and there is
+     * nothing to join it to, so it goes. A neuron annotated twice is a base edited by many
+     * people, which is a fact about somebody's data rather than a defect in it — and collapsing
+     * it here was redundant, because every consumer that needs one row per neuron takes the
+     * first itself (`dedupedIds`, `annotationIndex`, `joinAnnotations`). Hiding it meant the
+     * one person who could fix it was the only one who could not see it.
+     */
+    expect(table.data.neuronId).toEqual(['1', '1'])
+    expect(table.data.side).toEqual(['left', 'right'])
   })
 })
 
