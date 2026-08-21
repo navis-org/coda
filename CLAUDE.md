@@ -398,7 +398,7 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `data/precomputed/precomputed.test.ts`   | shard lookup, multi-LOD manifest, Draco decode, legacy fragments, CORS fallback                                                  |
 | `data/cave/cave.test.ts`                 | CAVE against recorded bodies: a wide root id kept exactly, the string-aware scan, the annotation pivot, an anchored pattern, and every refusal |
 | `nodes/lib/datasetFamilies.test.ts`      | (also) that every CAVE family names a datastack spec and every spec a family — the join key nothing else checks |
-| `data/cave/live.test.ts`                 | the same source against the real services, skipped without `CAVE_TOKEN` — the only thing that notices an endpoint shape changing, the mesh and synapse clouds proved to share one nanometre frame, and Aedes' edge list built by counting with nothing configured |
+| `data/cave/live.test.ts`                 | the same source against the real services, skipped without `CAVE_TOKEN` — the only thing that notices an endpoint shape changing, the mesh and synapse clouds proved to share one nanometre frame, Aedes' edge list built by counting with nothing configured, and a loadable scene assembled for all three datastacks |
 | `data/annotations/annotations.test.ts`   | annotation sources: the `Token` scheme, the pseudo-workspaces dropped, a wide id kept as text, the outer join and the later source winning — plus the route fallback's three rules |
 | `data/annotations/live.test.ts`          | the same against real FlyTable, skipped without `SEATABLE_TOKEN` — including the ids proved to be beyond double precision |
 | `nodes/annotation/annotations.test.ts`   | the three source nodes: the two halves of one join asserted against each other, half a chain published as nothing, and the datastack named rather than wired |
@@ -3834,8 +3834,41 @@ which CAVE has no endpoint for), no `rawQuery`, no `viewerScene`, and none of th
 flags — FlyWire's neuropil assignments are a reference table on *synapses*, so there is no
 per-region completeness table to read, and a per-neuron breakdown would mean reading a neuron's
 synapses and grouping them, which is the work the connection roll-up exists to avoid.
-`neuronIndex`, `meshes` and `synapses` are the ones that are true; see **Morphology** below for
-why `skeletons` is not.
+`neuronIndex`, `meshes`, `synapses` and `viewerScene` are the ones that are true; see
+**Morphology** below for why `skeletons` is not.
+
+**The scene is built rather than fetched, and that is the whole of `viewerScene` here.** neuPrint
+publishes a curated state per dataset — EM, ROI shells, synapse layers, a framing — which
+`buildScene` edits. CAVE publishes no such document, which is why this reported "publishes no
+neuroglancer scene"; but its info record names every *part* of one, so `cave/scene.ts` assembles
+two layers from it and stops. Anything beyond those two is curation, and inventing it would be
+claiming the datastack said something it did not. `layout` and `showSlices` are left off, because
+`buildScene` supplies them when absent and a second rule here is a second place for the two to
+disagree.
+
+Three things in it, and two of them disagree with `caveclient` on purpose:
+
+- **`graphene://middleauth+…` is what makes the segmentation load at all.** CAVE's segmentation
+  is behind its auth and only a spelunker-flavoured viewer authenticates through that prefix.
+  Transcribed from `format_verbose_graphene` and checked against it, but as an *insertion* rather
+  than the reparse the Python does: `urlparse` reads `graphene://https://host/p` as
+  `netloc='https:'`, and rebuilding from the parts only happens to come out right.
+- **The image source is passed through, where `caveclient` answers `None`.**
+  `format_cave_explorer` routes a `precomputed://` scheme to `format_precomputed_neuroglancer`,
+  which handles `gs://`, `http://` and `https://` and falls through to `None` for a URL that
+  already carries its scheme — established by *running* it, not by reading it. Every datastack
+  probed publishes exactly that form, so porting the formatter faithfully would ship no image
+  layer at all.
+- **`viewer_resolution_*` is nanometres and neuroglancer's dimensions are metres, divided rather
+  than multiplied.** `45 * 1e-9` is `4.5000000000000006e-8` in float64 and that artefact would be
+  serialised into the URL verbatim; `45 / 1e9` is exact. 16, 4, 40 and 8 are unaffected either
+  way, which is why it survived the first reading — 45 and 50 are not.
+
+**`DatasetInfo.viewerSite` came with it**, and it is a fact about the dataset rather than a
+preference: `out.neuroglancer`'s `Viewer` param now defaults to *empty*, meaning the dataset's own
+deployment and only then the built-in. A CAVE scene opened in mainline neuroglancer draws the EM
+volume with no neurons in it and nothing saying why, because mainline does not speak
+`middleauth+`. Absent on every neuPrint dataset, whose states open anywhere.
 
 **`roiCounts` is new, and `fetchRoiCounts` became optional to make room for it.** It was the one
 per-backend method on the seam that was required and ungated, and the cost of that showed up two

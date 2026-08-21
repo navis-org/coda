@@ -53,6 +53,7 @@ import type {
   SourceCapabilities,
   SourceSchemas,
   SynapseRequest,
+  ViewerSceneRequest,
 } from '../source'
 import { reportSourceLearned } from '../source'
 import type { NeuronIndexRequest } from '../neuronIndex'
@@ -81,6 +82,8 @@ import { getServer } from './credentials'
 import { caveServerFor, datastackRecord } from './datastack'
 import { codaColumn, defaultSchemas, neuronSchemaFor, schemasFor } from './schema'
 import { withAnnotations } from '../annotations/schema'
+import { caveScene } from './scene'
+import type { NgScene } from '../neuroglancer/scene'
 import type { DatastackSpec, NeuronTableSpec, SynapseTableSpec } from './spec'
 import {
   DATASTACK_SPECS,
@@ -120,7 +123,11 @@ const CAVE_CAPABILITIES: SourceCapabilities = {
   neuronIndex: true,
   roiCounts: false,
   paths: false,
-  viewerScene: false,
+  /*
+   * Built rather than published: CAVE has no curated state per datastack, but the info record
+   * names every part of one. See `scene.ts`.
+   */
+  viewerScene: true,
   roiSummary: false,
   roiMeshes: false,
 }
@@ -280,7 +287,7 @@ export class CaveSource implements DataSource {
     return versions
       .filter((v) => v.valid !== false && (v.status ?? 'AVAILABLE') === 'AVAILABLE')
       .sort((a, b) => b.version - a.version)
-      .map((v) => datasetInfoFor(spec, v.version, v.time_stamp, v.expires_on))
+      .map((v) => datasetInfoFor(spec, v.version, v.time_stamp, v.expires_on, info.viewer_site))
   }
 
   // -------------------------------------------------------------------------
@@ -809,6 +816,22 @@ export class CaveSource implements DataSource {
   }
 
   // -------------------------------------------------------------------------
+  // Neuroglancer
+  // -------------------------------------------------------------------------
+
+  /**
+   * A scene assembled from the datastack's own info record.
+   *
+   * Cached by `datastackRecord` rather than here — the record is memoised per datastack and this
+   * is pure over it, so the `cheap` node asking on every restyle costs one object.
+   */
+  async fetchViewerScene(req: ViewerSceneRequest): Promise<NgScene | undefined> {
+    const { spec } = this.require(req.datasetId)
+    const options: CaveRequestOptions = req.signal ? { signal: req.signal } : {}
+    return caveScene(spec.datastack, await datastackRecord(spec.datastack, options))
+  }
+
+  // -------------------------------------------------------------------------
   // Morphology
   // -------------------------------------------------------------------------
 
@@ -1321,6 +1344,7 @@ function datasetInfoFor(
   version: number,
   timestamp?: string,
   expires?: string,
+  viewerSite?: string,
 ): DatasetInfo {
   const dated = timestamp ? ` materialized ${timestamp.slice(0, 10)}` : ''
   const ends = expires ? `, expires ${expires.slice(0, 10)}` : ''
@@ -1336,6 +1360,10 @@ function datasetInfoFor(
     // state rather than a filter that would match nothing.
     statuses: [],
     version: String(version),
+    // The datastack's own `viewer_site`. Not decoration: the segmentation is behind CAVE's auth
+    // and only a spelunker-flavoured viewer speaks `middleauth+`, so the built-in default draws
+    // the EM and no neurons.
+    ...(viewerSite ? { viewerSite } : {}),
   }
 }
 

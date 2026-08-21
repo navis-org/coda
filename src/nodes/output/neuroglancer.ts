@@ -172,10 +172,12 @@ export const neuroglancerNode = registerNode({
       id: 'viewer',
       kind: 'string',
       label: 'Viewer',
-      default: DEFAULT_NEUROGLANCER_URL,
+      // Empty rather than the constant, so the *dataset's* own deployment can win — see
+      // `evaluate`. A graph saved with the old explicit default keeps pointing where it did.
+      default: '',
       advanced: true,
       placeholder: DEFAULT_NEUROGLANCER_URL,
-      help: 'Which neuroglancer deployment to open. The whole scene travels in the URL fragment, so this instance never sees your data — but it must allow being embedded.',
+      help: 'Which neuroglancer deployment to open. Empty uses the one the dataset names, and otherwise the default above — a CAVE segmentation only authenticates in its own viewer. The whole scene travels in the URL fragment, so the instance never sees your data, but it must allow being embedded.',
     },
   ],
 
@@ -223,7 +225,17 @@ export const neuroglancerNode = registerNode({
       showSlices: ctx.params.showSlices === true,
     })
 
-    return { url: str(sceneUrl(String(ctx.params.viewer ?? ''), scene)) }
+    /*
+     * Empty means the dataset's own deployment, and only then the built-in default. Not a
+     * convenience: a CAVE segmentation is `graphene://middleauth+…`, which a
+     * spelunker-flavoured viewer authenticates and mainline neuroglancer does not — so the old
+     * default drew the EM volume with no neurons in it and nothing saying why.
+     */
+    const viewer =
+      String(ctx.params.viewer ?? '').trim() ||
+      source.peekDataset(dataset.datasetId)?.viewerSite ||
+      ''
+    return { url: str(sceneUrl(viewer, scene)) }
   },
 })
 

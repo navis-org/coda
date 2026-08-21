@@ -32,7 +32,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { CaveSource } from './CaveSource'
 import { resetCredentials, setToken } from './credentials'
-import { materializationsFor } from './datastack'
+import { datastackRecord, materializationsFor } from './datastack'
+import { caveScene } from './scene'
+import { segmentationLayerIndex } from '../neuroglancer/scene'
 import { registerDatastackSpec } from './spec'
 import { ID_COLUMN_NAME } from '../../core/ids'
 
@@ -254,4 +256,48 @@ describe.skipIf(!TOKEN)('CAVE, live — connectivity by aggregation', () => {
     expect(strong.length).toBeLessThan(edges.length)
     expect((strong.data.weight as number[]).every((w) => w >= 3)).toBe(true)
   }, 120_000)
+})
+
+/**
+ * The scene, against every datastack Coda might build one for.
+ *
+ * The two source transformations were derived from `caveclient` and checked by running it, but
+ * on values fetched at one moment — this is what notices the info record changing shape.
+ */
+describe.skipIf(!TOKEN)('CAVE, live — a built neuroglancer scene', () => {
+  it('assembles a loadable scene from each datastack’s own record', async () => {
+    setToken(TOKEN!)
+    for (const datastack of [
+      'wclee_aedes_brain',
+      'flywire_fafb_public',
+      'brain_and_nerve_cord_public',
+    ]) {
+      const info = await datastackRecord(datastack)
+      const scene = caveScene(datastack, info)
+      if (!scene) throw new Error(`${datastack} built no scene`)
+
+      const layers = scene.layers as Array<Record<string, unknown>>
+      const segmentation = layers.find((l) => l.type === 'segmentation')
+      const image = layers.find((l) => l.type === 'image')
+
+      // Both layers present, and the segmentation authenticated — without the prefix it renders
+      // empty, which is the failure this whole thing exists to avoid.
+      expect(String(segmentation?.source)).toMatch(/^graphene:\/\/middleauth\+https:\/\//)
+      expect(String(image?.source)).toMatch(/^precomputed:\/\//)
+
+      // The neuron ids have somewhere to land.
+      expect(segmentationLayerIndex(scene, `${datastack}:1`)).toBeGreaterThanOrEqual(0)
+
+      // Metres, and small: a nanometre voxel is 1e-9..1e-7 m, so a factor slip is visible here.
+      const dims = scene.dimensions as Record<string, [number, string]>
+      for (const axis of ['x', 'y', 'z']) {
+        expect(dims[axis]?.[1]).toBe('m')
+        expect(dims[axis]?.[0]).toBeGreaterThan(1e-9)
+        expect(dims[axis]?.[0]).toBeLessThan(1e-6)
+      }
+
+      // And a viewer that can authenticate it.
+      expect(info.viewer_site).toMatch(/^https:\/\//)
+    }
+  }, 60_000)
 })

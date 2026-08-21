@@ -25,6 +25,8 @@ import { CaveSource } from './CaveSource'
 import { CAVE_MAX_ROWS } from './client'
 import { resetDatastackRecords } from './datastack'
 import { registerDatastackSpec, resetRuntimeSpecs } from './spec'
+import { caveScene } from './scene'
+import { segmentationLayerIndex } from '../neuroglancer/scene'
 import { MAX_MESH_NEURONS, decimateGridFor, fragmentConcurrencyFor } from './meshes'
 import { quoteWideIntegers, parseCaveJson } from './json'
 import { reportAuthFailure, resetCredentials, setToken, subscribeAuthFailure } from './credentials'
@@ -991,4 +993,105 @@ describe('credentials', () => {
 // A channel with no listener must not throw — a peek has no caller to report to.
 it('survives an auth failure nobody is listening for', () => {
   expect(() => reportAuthFailure('nobody home')).not.toThrow()
+})
+
+// ---------------------------------------------------------------------------
+// A neuroglancer scene, built rather than published
+// ---------------------------------------------------------------------------
+
+/**
+ * CAVE publishes no curated state per datastack, but its info record names every part of one.
+ * Both source transformations here were established by *running* `caveclient`'s own formatters
+ * on the real values, and one of them disagrees with it — see `imageSource`.
+ */
+describe('building a neuroglancer scene', () => {
+  const INFO = {
+    local_server: 'https://cave.fanc-fly.com',
+    segmentation_source: 'graphene://https://cave.fanc-fly.com/segmentation/table/aedes',
+    aligned_volume: { image_source: 'precomputed://gs://zetta_lee_mosquito/img/v2_sharded' },
+    viewer_site: 'https://spelunker.cave-explorer.org/',
+    viewer_resolution_x: 16,
+    viewer_resolution_y: 16,
+    viewer_resolution_z: 45,
+  }
+
+  const layers = (scene: Record<string, unknown> | undefined) =>
+    (scene?.layers ?? []) as Array<Record<string, unknown>>
+
+  it('prefixes the segmentation with middleauth+, which is what makes it load', () => {
+    const scene = caveScene('aedes', INFO)
+    const segmentation = layers(scene).find((l) => l.type === 'segmentation')
+    // Matches `caveclient`'s `format_cave_explorer` on this exact value. Without it the layer is
+    // there and empty, because CAVE's segmentation is behind its auth.
+    expect(segmentation?.source).toBe(
+      'graphene://middleauth+https://cave.fanc-fly.com/segmentation/table/aedes',
+    )
+  })
+
+  it('does not double the prefix on a source that already carries it', () => {
+    const scene = caveScene('aedes', {
+      ...INFO,
+      segmentation_source: 'graphene://middleauth+https://cave.fanc-fly.com/segmentation/table/aedes',
+    })
+    expect(String(layers(scene).find((l) => l.type === 'segmentation')?.source)).not.toContain(
+      'middleauth+middleauth+',
+    )
+  })
+
+  it('passes the image source through, where caveclient answers None', () => {
+    /*
+     * `format_cave_explorer` routes a `precomputed://` scheme to `format_precomputed_neuroglancer`,
+     * which handles `gs://`, `http://` and `https://` and falls through to None for a URL that
+     * already carries its scheme — checked by running it. Every datastack probed publishes
+     * exactly that form, so porting the formatter faithfully would ship no image layer at all.
+     */
+    expect(layers(caveScene('aedes', INFO)).find((l) => l.type === 'image')?.source).toBe(
+      'precomputed://gs://zetta_lee_mosquito/img/v2_sharded',
+    )
+  })
+
+  it('names the segmentation layer after the datastack, so the neuron ids land in it', () => {
+    // `segmentationLayerIndex` matches the dataset id's family by name; anything else is found
+    // only by the "first segmentation layer" fallback, which is luck rather than a rule.
+    const scene = caveScene('aedes', INFO)
+    expect(segmentationLayerIndex(scene!, 'aedes:490')).toBe(
+      layers(scene).findIndex((l) => l.type === 'segmentation'),
+    )
+    expect(layers(scene).find((l) => l.type === 'segmentation')?.name).toBe('aedes')
+  })
+
+  it('converts the viewer resolution from nanometres to metres', () => {
+    // `viewer_resolution_*` is nm per voxel and neuroglancer's dimensions are metres; a factor
+    // out here misplaces everything with nothing failing.
+    expect(caveScene('aedes', INFO)?.dimensions).toEqual({
+      x: [1.6e-8, 'm'],
+      y: [1.6e-8, 'm'],
+      z: [4.5e-8, 'm'],
+    })
+  })
+
+  it('leaves the dimensions out rather than guessing when none are published', () => {
+    const scene = caveScene('aedes', { ...INFO, viewer_resolution_z: undefined })
+    // Neuroglancer reads them off the sources; a partial guess would be silently wrong.
+    expect(scene?.dimensions).toBeUndefined()
+    expect(layers(scene)).toHaveLength(2)
+  })
+
+  it('builds a scene with no image layer rather than no scene', () => {
+    const scene = caveScene('aedes', { ...INFO, aligned_volume: undefined })
+    expect(layers(scene)).toHaveLength(1)
+    expect(layers(scene)[0]?.type).toBe('segmentation')
+  })
+
+  it('answers nothing without a segmentation, which is the one part it cannot invent', () => {
+    expect(caveScene('aedes', { ...INFO, segmentation_source: undefined })).toBeUndefined()
+  })
+
+  it('sets no layout, so a CAVE scene opens the way a neuPrint one does', () => {
+    // `buildScene` supplies `layout` and `showSlices` when absent — a second rule here would be
+    // a second place for the two to disagree.
+    const scene = caveScene('aedes', INFO)
+    expect(scene?.layout).toBeUndefined()
+    expect(scene?.showSlices).toBeUndefined()
+  })
 })

@@ -39,6 +39,16 @@ export interface DatasetInfo {
   label: string
   description?: string
   species?: string
+  /**
+   * Which neuroglancer deployment this dataset is meant to be opened in.
+   *
+   * A fact about the *dataset*, not a preference: CAVE's segmentation is behind its auth and
+   * only a spelunker-flavoured viewer authenticates through `graphene://middleauth+…`, so the
+   * built-in default renders such a scene with no segmentation and nothing saying why. Absent
+   * where the source has no opinion, which is every neuPrint dataset — those states open
+   * anywhere.
+   */
+  viewerSite?: string
   /** ROI names available for per-ROI queries, in a sensible display order. */
   rois: string[]
   /**

@@ -56,6 +56,19 @@ export interface DatastackInfo {
    * Null rather than absent on a datastack that has none, so the type admits both.
    */
   synapse_table?: string | null
+  /**
+   * The EM volume, which lives on the aligned volume rather than on the datastack.
+   *
+   * `caveclient`'s `info.image_source()` reads it from exactly here. Every datastack probed
+   * publishes it as an already-prefixed `precomputed://gs://…`.
+   */
+  aligned_volume?: { image_source?: string }
+  /** Which neuroglancer deployment this datastack is meant to be opened in. */
+  viewer_site?: string
+  /** Nanometres per voxel, as the viewer should show them. See `scene.ts`. */
+  viewer_resolution_x?: number
+  viewer_resolution_y?: number
+  viewer_resolution_z?: number
 }
 
 /** One materialization's metadata. `expires_on` is why a CAVE version dropdown ages. */
