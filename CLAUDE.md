@@ -1311,6 +1311,30 @@ have since been edited away — putting neurons in the index the connectome cann
 query about. The index cache key carries the chain, or two datasets differing only in their
 annotations would share one cached table and the first one fetched would win for the session.
 
+**Where a datastack publishes no neuron table at all, the chain _is_ the list** — which is not
+that decision reversed but the case it does not cover. `DatastackSpec.neurons` is optional, and
+Aedes is the example: synapses and nuclei and nothing that enumerates neurons. With no
+segmentation list there is nothing to left-join onto, so `idsFromChain` takes the order from the
+chain's own `neuronId` column, deduplicated for `orderOf`'s reason — an annotation base is
+somebody's spreadsheet and can hold two rows for one neuron. Combining populations is then two
+annotation nodes chained rather than a setting, because `joinAnnotations` is a full outer join:
+`CAVE table (proofread_neurons) → FlyTable (info)` is the union of both id sets.
+
+**What that table is actually for is worth stating, because it is narrower than it looks.**
+Nothing queries *through* it. It is read for exactly two columns — the root id, which becomes the
+index, and the annotation table's own primary key, which is how `spec.annotations.refColumn`
+joins back — so `spec.annotations` depends on it and a datastack with neither is coherent.
+Connectivity reads the roll-up view by root id, and Skeletons, Meshes and Synapses take ids off a
+table, so `Input IDs → Connectivity` needs no neuron table whatsoever. What its absence costs is
+enumeration: Find Neurons, Explore, and the type names `typesOf` puts on every connectivity row.
+Hence the refusal names the wire to make rather than answering with an empty table, which would
+read as a datastack with no neurons in it.
+
+The node follows: `Neuron table` is no longer required, its help says any table with one row per
+neuron carrying a root id will do, and `validate` asks for **a table or a wire** rather than for
+the table. `registerCustomCaveSpec` registers the spec either way — withholding it for want of a
+neuron table would break the id-driven nodes, which never touch it.
+
 **The CAVE table node's Dataset input is optional, and that is not a convenience.** It was
 required, which made the wiring the node's own guide describes — a datastack's table handed back
 to that datastack as its labels — a **cycle**: `Dataset → CAVE table → Dataset` is two edges

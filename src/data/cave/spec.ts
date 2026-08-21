@@ -98,7 +98,26 @@ export interface DatastackSpec {
   datastack: string
   label: string
   description: string
-  neurons: NeuronTableSpec
+  /**
+   * The table listing which neurons exist, if the datastack publishes one.
+   *
+   * **Optional, and its absence is a real configuration rather than a gap.** Not every datastack
+   * has an equivalent of `proofread_neurons` — Aedes publishes synapses and nuclei and nothing
+   * that enumerates neurons. Where it is absent the *annotation chain* is the neuron list, which
+   * is the honest answer rather than a fallback: a base keyed by root id is exactly an
+   * enumeration of neurons, and somebody wanting the union of two such lists chains two
+   * annotation nodes, since `joinAnnotations` is a full outer join.
+   *
+   * Note what it is **not** needed for. Nothing queries *through* this table: connectivity reads
+   * the roll-up view by root id, and skeletons, meshes and synapses take ids off a table. It is
+   * read for exactly two columns — the root id, which becomes the index, and the annotation
+   * table's own primary key, which is how `annotations.refColumn` joins back. So a datastack
+   * without one still answers `Input IDs → Connectivity`; what it cannot do is enumerate.
+   *
+   * `annotations` therefore depends on it: that spec joins through this table's `id`, so a
+   * datastack with no neuron table can have no built-in annotations either.
+   */
+  neurons?: NeuronTableSpec
   annotations?: AnnotationTableSpec
   connections?: ConnectionViewSpec
   synapses?: SynapseTableSpec

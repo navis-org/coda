@@ -81,7 +81,7 @@ import { getServer } from './credentials'
 import { caveServerFor, datastackRecord } from './datastack'
 import { codaColumn, defaultSchemas, neuronSchemaFor, schemasFor } from './schema'
 import { withAnnotations } from '../annotations/schema'
-import type { ConnectionViewSpec, DatastackSpec, SynapseTableSpec } from './spec'
+import type { ConnectionViewSpec, DatastackSpec, NeuronTableSpec, SynapseTableSpec } from './spec'
 import { DATASTACK_SPECS, datasetIdFor, specFor, splitDatasetId } from './spec'
 
 /**
@@ -335,7 +335,6 @@ export class CaveSource implements DataSource {
     schema: SourceSchemas['neurons'],
     req: NeuronIndexRequest,
   ): Promise<TableValue> {
-    const server = await this.serverFor(spec)
     const options: CaveRequestOptions = req.signal ? { signal: req.signal } : {}
 
     /*
@@ -345,15 +344,51 @@ export class CaveSource implements DataSource {
      * below is what a single interleaved version kept losing, and did, for a phase.
      */
     if (req.annotations) {
-      req.onProgress?.(0.1, 'loading neurons')
-      const neuronRows = await this.readNeuronRows(spec, version, server, options, true)
+      /*
+       * **Which list, and it is a fact about the datastack rather than a preference.** Where one
+       * publishes a neuron table, that is the population and the chain is left-joined onto it:
+       * every neuron the segmentation knows about comes out, annotated or not, and an annotation
+       * base full of ids that have since been edited away cannot put neurons in the index the
+       * connectome can answer nothing about. Where it publishes none, the chain *is* the
+       * population — which is not the same decision reversed, it is the only list there is.
+       */
+      req.onProgress?.(0.1, spec.neurons ? 'loading neurons' : 'reading annotations')
+      const order = spec.neurons
+        ? orderOf(
+            await this.readNeuronRows(
+              spec,
+              spec.neurons,
+              version,
+              await this.serverFor(spec),
+              options,
+              true,
+            ),
+            spec.neurons,
+          )
+        : idsFromChain(req.annotations.table)
       req.onProgress?.(0.9, 'building index')
-      return this.finish(spec, version, joinIndex(orderOf(neuronRows, spec), req.annotations.table, schema), req)
+      return this.finish(spec, version, joinIndex(order, req.annotations.table, schema), req)
     }
 
+    /*
+     * Nothing to enumerate and nothing wired to enumerate it. Refused rather than answered with
+     * an empty table, which would read as a datastack with no neurons in it — and the fix is a
+     * wire rather than anything about the data, so it is worth naming.
+     */
+    const neurons = spec.neurons
+    if (!neurons) {
+      throw new Error(
+        `${spec.datastack} publishes no table listing its neurons, so Coda cannot enumerate ` +
+          `them. Wire an Annotations source to the Dataset — whatever it names becomes the ` +
+          `neuron list. Queries that start from ids you already have (Input IDs, Connectivity, ` +
+          `Skeletons) need no such table.`,
+      )
+    }
+
+    const server = await this.serverFor(spec)
     req.onProgress?.(0.1, 'loading neurons and annotations')
     const [neuronRows, perSystem] = await Promise.all([
-      this.readNeuronRows(spec, version, server, options, false),
+      this.readNeuronRows(spec, neurons, version, server, options, false),
       this.loadAnnotations(spec, version, server, options),
     ])
 
@@ -363,7 +398,7 @@ export class CaveSource implements DataSource {
      */
     const rootById = new Map<string, string>()
     for (const row of neuronRows) {
-      const rootId = row[spec.neurons.idColumn]
+      const rootId = row[neurons.idColumn]
       if (rootId !== null && rootId !== undefined) rootById.set(String(row.id), String(rootId))
     }
 
@@ -387,7 +422,7 @@ export class CaveSource implements DataSource {
     }
 
     req.onProgress?.(0.9, 'building index')
-    return this.finish(spec, version, labelIndex(orderOf(neuronRows, spec), annotations, schema), req)
+    return this.finish(spec, version, labelIndex(orderOf(neuronRows, neurons), annotations, schema), req)
   }
 
   /**
@@ -399,22 +434,26 @@ export class CaveSource implements DataSource {
    */
   private async readNeuronRows(
     spec: DatastackSpec,
+    neurons: NeuronTableSpec,
     version: number,
     server: string,
     options: CaveRequestOptions,
     idsOnly: boolean,
   ): Promise<CaveRow[]> {
+    // Passed narrowed rather than read off `spec`, because `neurons` is optional now and a
+    // method cannot inherit the caller's narrowing — a runtime guard here would be re-checking
+    // something both call sites have already established.
     const rows = await queryTable(
       server,
       spec.datastack,
       version,
       {
-        table: spec.neurons.table,
-        columns: idsOnly ? [spec.neurons.idColumn] : ['id', spec.neurons.idColumn],
+        table: neurons.table,
+        columns: idsOnly ? [neurons.idColumn] : ['id', neurons.idColumn],
       },
       options,
     )
-    refuseIfCapped(rows.length, spec.neurons.table, INCOMPLETE_INDEX)
+    refuseIfCapped(rows.length, neurons.table, INCOMPLETE_INDEX)
     return rows
   }
 
@@ -897,14 +936,38 @@ export class CaveSource implements DataSource {
  * two of them is two rows for one neuron, and a repeat is double-counted by everything
  * downstream that sums a weight.
  */
-function orderOf(neuronRows: readonly CaveRow[], spec: DatastackSpec): string[] {
+function orderOf(neuronRows: readonly CaveRow[], neurons: NeuronTableSpec): string[] {
   const order: string[] = []
   const seen = new Set<string>()
   for (const row of neuronRows) {
-    const rootId = row[spec.neurons.idColumn]
+    const rootId = row[neurons.idColumn]
     if (rootId === null || rootId === undefined) continue
     const id = String(rootId)
     if (seen.has(id)) continue
+    seen.add(id)
+    order.push(id)
+  }
+  return order
+}
+
+/**
+ * The neuron list a chain carries, for a datastack that publishes none of its own.
+ *
+ * Deduplicated for `orderOf`'s reason rather than by analogy: an annotation base can perfectly
+ * well hold two rows for one neuron — a SeaTable base is somebody's spreadsheet — and a repeated
+ * id is double-counted by everything downstream that sums a weight. First occurrence wins, which
+ * is the rule `labelsToNeurons` already follows and the one `annotationIndex` resolves to.
+ *
+ * Order is the chain's own, which is the join order of whatever was wired. Stable across calls
+ * for the same reason the datastack's is: it is what the source returned, not a sort.
+ */
+function idsFromChain(annotations: TableValue): string[] {
+  const order: string[] = []
+  const seen = new Set<string>()
+  for (const cell of annotations.data[ID_COLUMN_NAME] ?? []) {
+    if (cell === null || cell === undefined) continue
+    const id = String(cell)
+    if (!id || seen.has(id)) continue
     seen.add(id)
     order.push(id)
   }

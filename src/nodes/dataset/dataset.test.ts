@@ -14,14 +14,14 @@ import type { EnumOption, ParamValues } from '../../core/node'
 import { defaultParams, makeInferContext } from '../../core/node'
 import { getNodeDef, requireNodeDef } from '../../core/registry'
 import { Scheduler } from '../../core/scheduler'
-import { datasetRef } from '../../core/types'
+import { T, datasetRef } from '../../core/types'
 import { isDatasetValue } from '../../core/values'
 import { MockSource } from '../../data/mock/MockSource'
 import { registerSource, requireSource } from '../../data/source'
 import { NeuPrintSource } from '../../data/neuprint/NeuPrintSource'
 import { DEFAULT_SERVER } from '../../data/neuprint/servers'
 import { resetDatastackRecords } from '../../data/cave/datastack'
-import { DATASTACK_SPECS } from '../../data/cave/spec'
+import { DATASTACK_SPECS, specFor } from '../../data/cave/spec'
 import { CaveSource } from '../../data/cave/CaveSource'
 import { resetCredentials as resetCaveCredentials, setToken } from '../../data/cave/credentials'
 import '../index'
@@ -281,6 +281,36 @@ describe('Custom CAVE', () => {
     expect(value.datasetId).toBe('somewhere:91')
     vi.unstubAllGlobals()
     resetCaveCredentials()
+  })
+
+  it('asks for a neuron table or a wire, and takes either', () => {
+    const def = requireNodeDef('dataset.cave')
+    const bare = ctxFor('dataset.cave', { datastack: 'somewhere' })
+    // Neither: nothing can say which neurons exist, so the node would run and refuse.
+    expect((def.validate?.(bare) ?? []).join(' ')).toContain('Annotations source')
+
+    // A named table is one answer...
+    expect(
+      def.validate?.(ctxFor('dataset.cave', { datastack: 'somewhere', neuronTable: 'nuclei' })),
+    ).toEqual([])
+
+    // ...and a wired chain is the other, for a datastack that publishes no such table at all.
+    const wired = makeInferContext(
+      def,
+      { ...defaultParams(def), datastack: 'somewhere' },
+      { annotations: T.annotations() },
+    )
+    expect(def.validate?.(wired)).toEqual([])
+  })
+
+  it('registers a spec with no neuron table, so the id-driven nodes still work', () => {
+    // Those never touch it — connectivity reads the roll-up view by root id, and skeletons,
+    // meshes and synapses take ids off a table. Withholding the spec would break them too.
+    requireNodeDef('dataset.cave').inferOutputs?.(
+      ctxFor('dataset.cave', { datastack: 'bare_one', version: '1' }),
+    )
+    expect(specFor('bare_one')?.neurons).toBeUndefined()
+    expect(specFor('bare_one')?.datastack).toBe('bare_one')
   })
 
   it('warns about a shipped datastack before asking for anything else on the card', () => {

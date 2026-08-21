@@ -234,7 +234,7 @@ export const customCaveNode = registerNode({
       kind: 'string',
       label: 'Neuron table',
       placeholder: 'proofread_neurons',
-      help: 'The table listing this datastack’s neurons. Nothing in CAVE marks one, so it has to be named.',
+      help: 'Any table with one row per neuron carrying a root id — a proofreading list, a nuclei table. Nothing in CAVE marks one, so it has to be named. Leave empty where the datastack has none: the Annotations source then supplies the neuron list.',
       default: '',
       advanced: true,
     },
@@ -293,8 +293,17 @@ export const customCaveNode = registerNode({
     if (version && !Number.isInteger(Number(version))) {
       return [`"${version}" is not a materialization number — CAVE numbers them, e.g. 783`]
     }
-    if (!String(ctx.params.neuronTable ?? '').trim()) {
-      return ['Name the table listing this datastack\u2019s neurons, e.g. proofread_neurons']
+    /*
+     * A neuron table or a wired chain, but not neither: those are the only two things that can
+     * say which neurons exist, and with neither the node runs and refuses. Deliberately not a
+     * demand for the table — several datastacks publish no equivalent, and for those the chain
+     * is the answer rather than a workaround.
+     */
+    if (!String(ctx.params.neuronTable ?? '').trim() && !ctx.inputs.annotations) {
+      return [
+        'Name a table listing this datastack\u2019s neurons (e.g. proofread_neurons), or wire ' +
+          'an Annotations source to supply the neuron list',
+      ]
     }
     /*
      * Undefined means the metadata has not arrived, which is not a problem to report — the same
@@ -369,14 +378,24 @@ function customCaveDatasetId(params: Record<string, unknown>): string | undefine
 
 function registerCustomCaveSpec(params: Record<string, unknown>): void {
   const datastack = String(params.datastack ?? '').trim()
+  if (!datastack) return
   const table = String(params.neuronTable ?? '').trim()
-  if (!datastack || !table) return
   const view = String(params.connectionView ?? '').trim()
   registerDatastackSpec({
     datastack,
     label: datastack,
     description: 'A CAVE datastack named by hand.',
-    neurons: { table, idColumn: String(params.idColumn ?? 'pt_root_id').trim() || 'pt_root_id' },
+    // Absent where none was named, which is a real configuration: the chain is then the neuron
+    // list. Registering regardless is what makes the datastack usable for the id-driven nodes,
+    // which need a spec but never touch this table.
+    ...(table
+      ? {
+          neurons: {
+            table,
+            idColumn: String(params.idColumn ?? 'pt_root_id').trim() || 'pt_root_id',
+          },
+        }
+      : {}),
     ...(view
       ? {
           connections: {

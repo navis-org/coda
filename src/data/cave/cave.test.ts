@@ -24,7 +24,7 @@ import { resetIndexLoads } from '../neuronIndex'
 import { CaveSource } from './CaveSource'
 import { CAVE_MAX_ROWS } from './client'
 import { resetDatastackRecords } from './datastack'
-import { resetRuntimeSpecs } from './spec'
+import { registerDatastackSpec, resetRuntimeSpecs } from './spec'
 import { MAX_MESH_NEURONS, decimateGridFor, fragmentConcurrencyFor } from './meshes'
 import { quoteWideIntegers, parseCaveJson } from './json'
 import { reportAuthFailure, resetCredentials, setToken, subscribeAuthFailure } from './credentials'
@@ -676,6 +676,77 @@ describe('a wired annotation chain', () => {
     expect(
       captured.filter((c) => c.url.includes('/table/hierarchical_neuron_annotations/query')),
     ).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// A datastack that publishes no neuron table
+// ---------------------------------------------------------------------------
+
+/**
+ * Not every CAVE datastack has an equivalent of `proofread_neurons` — Aedes publishes synapses
+ * and nuclei and nothing that enumerates neurons. There the chain *is* the neuron list, which is
+ * the honest configuration rather than a fallback: a base keyed by root id is exactly an
+ * enumeration, and the union of two such lists is two annotation nodes chained, since
+ * `joinAnnotations` is a full outer join.
+ */
+describe('a datastack with no neuron table', () => {
+  const BARE = 'bare_stack'
+  const DATASET_BARE = `${BARE}:1`
+
+  const chain = {
+    kind: 'annotations' as const,
+    sources: ['seaTable:base=main&table=info'],
+    table: makeTable(
+      tableSchema(column('neuronId', 'str'), column('side', 'str')),
+      {
+        // A repeat, because an annotation base is somebody's spreadsheet and can hold two rows
+        // for one neuron — and a repeated id is double-counted by anything summing a weight.
+        neuronId: ['720575940628857210', '999', '720575940628857210'],
+        side: ['left', 'right', 'left'],
+      },
+    ),
+  }
+
+  beforeEach(() => {
+    registerDatastackSpec({
+      datastack: BARE,
+      label: BARE,
+      description: 'no neuron table',
+      connections: {
+        view: 'valid_connection_v2',
+        preColumn: 'pre_pt_root_id',
+        postColumn: 'post_pt_root_id',
+        weightColumn: 'n_syn',
+      },
+    })
+  })
+
+  it('takes the neuron list from the chain, deduplicated', async () => {
+    installFetch()
+    const table = await new CaveSource().findNeurons({
+      datasetId: DATASET_BARE,
+      annotations: chain,
+    })
+    // Every id the chain names — including `999`, which the FlyWire case deliberately drops.
+    // There is no segmentation list to left-join onto; this *is* the list.
+    expect(table.data.neuronId).toEqual(['720575940628857210', '999'])
+    expect(table.data.side).toEqual(['left', 'right'])
+  })
+
+  it('reads no neuron table at all, since there is none to read', async () => {
+    const captured = installFetch()
+    await new CaveSource().findNeurons({ datasetId: DATASET_BARE, annotations: chain })
+    expect(captured.filter((c) => c.url.includes('/query?'))).toHaveLength(0)
+  })
+
+  it('refuses with the wire to make, rather than answering no neurons', async () => {
+    installFetch()
+    // An empty table would read as a datastack with nothing in it, and the fix is a wire rather
+    // than anything about the data — so it is worth naming.
+    await expect(new CaveSource().findNeurons({ datasetId: DATASET_BARE })).rejects.toThrow(
+      /Annotations source/,
+    )
   })
 })
 
