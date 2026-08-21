@@ -16,6 +16,12 @@
  * Out of CI on purpose — it needs a credential and a network, the standing
  * `scripts/check-export.py` has when navis is absent. It reads only; nothing here writes.
  *
+ * It also covers the morphology CAVE *does* publish. Skeletons are absent on purpose: the
+ * service is a cache that generates on demand and is empty for this datastack — 100 proofread
+ * root ids across skeleton versions 0 to 4 all answered `exists: false`, and a queued generation
+ * had not landed after five minutes — so a test would either hang or assert that the world has
+ * not improved.
+ *
  * It is pointed at materialization **783**, which is a stable public release rather than a
  * moving target: the server reports `expires_on: 2121-11-10`. That is most of why FlyWire
  * public is the pilot datastack — a suite pointed at a materialization that expires in weeks
@@ -32,9 +38,39 @@ const DATASET = 'flywire_fafb_public:783'
 /** One real proofread neuron, used as the seed for every connectivity check below. */
 const SEED = '720575940628857210'
 
+/**
+ * The Draco decoder's wasm, off disk.
+ *
+ * `draco.ts` imports it with `?url`, which resolves to a path only a browser can fetch — so
+ * under Node the mesh path dies before it decodes anything. `precomputed.test.ts` replaces
+ * `fetch` outright for the same reason; here it has to pass everything else through, because
+ * the point of this file is that the requests are real.
+ */
+async function serveDracoWasmFromDisk(): Promise<void> {
+  const real = globalThis.fetch
+  const { readFile } = await import('node:fs/promises')
+  const { createRequire } = await import('node:module')
+  const require = createRequire(import.meta.url)
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).endsWith('draco_decoder.wasm')) {
+      const bytes = await readFile(require.resolve('draco3d/draco_decoder.wasm'))
+      return {
+        ok: true,
+        status: 200,
+        arrayBuffer: async () =>
+          bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+      } as Response
+    }
+    return real(input, init)
+  }) as typeof fetch
+}
+
 const live = TOKEN ? describe : describe.skip
 
-beforeAll(() => setToken(TOKEN))
+beforeAll(async () => {
+  setToken(TOKEN)
+  await serveDracoWasmFromDisk()
+})
 afterAll(() => resetCredentials())
 
 live('CAVE, live', () => {
@@ -94,6 +130,58 @@ live('CAVE, live', () => {
     // Query-relative: `neuronId` is the neuron asked about, whichever way the synapse points.
     expect(new Set(strong.data.neuronId)).toEqual(new Set([SEED]))
   }, 300_000)
+
+/*
+   * The two halves of morphology that work, and the check that ties them together.
+   *
+   * A mesh and a synapse cloud for one neuron have to sit in the same space, and neither is
+   * scaled by anything here — the fragments decode to world nanometres and the synapse query
+   * asks for `desired_resolution: [1, 1, 1]`. If either assumption were wrong the two boxes
+   * would be a whole factor apart, and nothing else would fail: each is internally consistent.
+   */
+  it('reads a synapse cloud and a mesh into the same nanometre frame', async () => {
+    const points = await source.fetchSynapses({
+      datasetId: DATASET,
+      neuronIds: [SEED],
+      polarity: 'pre',
+    })
+    expect(points.units).toBe('nm')
+    expect(points.attributes.length).toBeGreaterThan(1000)
+
+    const meshes = await source.fetchMeshes({ datasetId: DATASET, neuronIds: [SEED] })
+    expect(meshes.units).toBe('nm')
+    expect(meshes.items).toHaveLength(1)
+    expect(meshes.items[0]!.id).toBe(SEED)
+
+    // The mesh encloses the presynaptic cloud, within a micron of slack for the decimation.
+    const slack = 1000
+    for (let axis = 0; axis < 3; axis++) {
+      expect(meshes.bounds.min[axis]!).toBeLessThanOrEqual(points.bounds.min[axis]! + slack)
+      expect(meshes.bounds.max[axis]!).toBeGreaterThanOrEqual(points.bounds.max[axis]! - slack)
+    }
+  }, 600_000)
+
+  /*
+   * The budget is honoured rather than a fixed grid applied, which is the whole reason
+   * `decimateGridFor` exists: graphene publishes one level of detail, so the only way the Meshes
+   * node's `Detail` control can mean anything here is by deciding how hard the fetched mesh is
+   * simplified. One neuron is 1,276,736 triangles before decimation.
+   */
+  it('decimates an arriving mesh to the triangle budget it was given', async () => {
+    const low = await source.fetchMeshes({
+      datasetId: DATASET,
+      neuronIds: [SEED],
+      triangleBudget: 150_000,
+    })
+    const triangles = low.items[0]!.indices.length / 3
+    expect(triangles).toBeLessThanOrEqual(150_000)
+    // Not so aggressive that the arbor goes — `MIN_DECIMATE_GRID` is the floor under it.
+    expect(triangles).toBeGreaterThan(5_000)
+
+    // And it says so: a source with no levels reports that it simplified, not "level 0 of 0".
+    expect(low.detail?.decimated).toBe(true)
+    expect(low.detail?.triangles).toBe(triangles)
+  }, 600_000)
 
   it('builds an adjacency matrix over real root ids', async () => {
     const partners = await source.fetchConnectivity({

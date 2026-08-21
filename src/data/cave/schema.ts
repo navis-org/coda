@@ -70,10 +70,14 @@ export function neuronSchemaFor(systems: readonly string[]): TableSchema {
 /**
  * The full `SourceSchemas` for a datastack.
  *
- * Connectivity is the canonical shape with its two id columns widened to `str`, which is the
- * one edit invariant 8 forces on every table that names a neuron. Everything else is canonical
- * and unreachable: this source declares no morphology, no synapses and no ROI counts yet, so
- * those schemas describe capabilities nothing offers rather than lying about ones it does.
+ * Every table that names a neuron has its id columns widened to `str`, which is the one edit
+ * invariant 8 forces on this source. Beyond that each is the canonical shape minus what CAVE
+ * does not publish, because a schema is a promise about what a query returns: `morphology`
+ * drops `instance`, `status`, `size` and `cableLength` — a graphene mesh carries none of them,
+ * and advertising a column that arrives null on every row breaks every picker that believed it.
+ *
+ * `roiCounts` stays canonical and unreachable: `capabilities.roiCounts` is false, so nothing
+ * ever asks.
  */
 export function schemasFor(neurons: TableSchema): SourceSchemas {
   return {
@@ -85,6 +89,27 @@ export function schemasFor(neurons: TableSchema): SourceSchemas {
       column('partnerId', 'str'),
       column('partnerType', 'str'),
       column('weight', 'i64', 'synapses'),
+    ),
+    morphology: tableSchema(
+      column(ID_COLUMN_NAME, 'str'),
+      column('type', 'str'),
+      column('points', 'i64'),
+    ),
+    /*
+     * Narrowed to the four columns a CAVE synapse row can actually fill — no `type` or
+     * `partnerType`, which the synapse table does not carry and which would arrive null on every
+     * row of a cloud with tens of thousands of them. Two dead entries in every colour picker on
+     * a Synapses node, for the sake of matching a canonical shape. `neuprint/schema.ts` narrows
+     * its own for the same reason.
+     */
+    synapses: tableSchema(
+      column(ID_COLUMN_NAME, 'str'),
+      column('partnerId', 'str'),
+      column('polarity', 'str'),
+      // The cleft score, where the table has one: a per-synapse confidence rather than a count,
+      // which is what `weight` means on a *connection*. Named `weight` because that is the
+      // column every encoding and every viewer already reaches for on a point cloud.
+      column('weight', 'f64'),
     ),
   }
 }

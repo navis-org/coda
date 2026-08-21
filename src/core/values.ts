@@ -167,6 +167,17 @@ export interface MeshDetail {
   /** How many levels the source offered. */
   levels: number
   triangles: number
+  /**
+   * Simplified on arrival rather than fetched at a published level.
+   *
+   * A source with no levels of detail can still hit a triangle budget, by decimating what it
+   * was given — which is what CAVE does, because a graphene manifest lists supervoxel fragments
+   * at full resolution and there is nothing coarser to ask for. `lod`/`levels` describe nothing
+   * in that case, so the caption needs this to say what actually happened: the alternative is a
+   * viewer reporting "level 0 of 0" while 98% of the triangles have been merged away, which is
+   * the silent-thinning failure `labels thinned` and `cells merged` both exist to prevent.
+   */
+  decimated?: boolean
 }
 
 export interface MeshesValue {

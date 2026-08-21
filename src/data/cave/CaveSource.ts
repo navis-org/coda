@@ -24,23 +24,49 @@
 
 import { ID_COLUMN_NAME } from '../../core/ids'
 import type { NeuronId } from '../../core/ids'
-import type { MatrixValue, TableValue } from '../../core/values'
-import { getRow, makeMatrix, selectRows, tableFromRows } from '../../core/values'
+import type {
+  MatrixValue,
+  MeshGeometry,
+  MeshesValue,
+  PointsValue,
+  TableValue,
+} from '../../core/values'
+import {
+  boundsOf,
+  getRow,
+  makeMatrix,
+  makeTable,
+  selectRows,
+  tableFromRows,
+} from '../../core/values'
 import type {
   AdjacencyRequest,
   ConnectivityRequest,
   DataSource,
   DatasetInfo,
   FindNeuronsRequest,
+  GeometryRequest,
   SourceCapabilities,
   SourceSchemas,
+  SynapseRequest,
 } from '../source'
 import { reportSourceLearned } from '../source'
 import type { NeuronIndexRequest } from '../neuronIndex'
 import { loadCachedTable, neuronIndexKey } from '../neuronIndex'
 import { compileLabelMatch, compileRegex } from '../neuronFilter'
+import { mapWithConcurrency } from '../concurrency'
+import type { GrapheneMeshSource } from './meshes'
+import {
+  MAX_MESH_NEURONS,
+  decimateGridFor,
+  fragmentConcurrencyFor,
+  openGrapheneMeshes,
+  readGrapheneMesh,
+} from './meshes'
+import { DEFAULT_TRIANGLE_BUDGET } from '../precomputed'
 import type { CaveRequestOptions, CaveRow } from './client'
 import { CAVE_MAX_ROWS, CaveError } from './client'
+import type { DatastackInfo } from './api'
 import {
   datastackInfo,
   listDatastacks,
@@ -51,27 +77,36 @@ import {
 } from './api'
 import { getServer } from './credentials'
 import { codaColumn, defaultSchemas, neuronSchemaFor, schemasFor } from './schema'
-import type { ConnectionViewSpec, DatastackSpec } from './spec'
+import type { ConnectionViewSpec, DatastackSpec, SynapseTableSpec } from './spec'
 import { DATASTACK_SPECS, datasetIdFor, specFor, splitDatasetId } from './spec'
 
 /**
  * What CAVE can do today, and every `false` is a node that refuses cleanly rather than a
  * feature quietly missing.
  *
- * Morphology (skeletons, meshes, synapses) is the next phase and is genuinely available —
- * FlyWire publishes precomputed skeletons per materialization and Draco meshes in a CORS-open
- * bucket — it is simply not wired up yet, and claiming it would make the 3D nodes fail at run
- * time instead of declining at edit time. `paths` is a real absence: it needs a hop aggregated
- * server-side, which CAVE has no endpoint for. So are all three ROI flags — FlyWire's neuropil
- * assignments are a reference table on *synapses*, so there is no per-region completeness table
- * to read and a per-neuron breakdown would mean reading a neuron's synapses and grouping them,
- * which is the work the connection roll-up exists to avoid.
+ * Meshes and synapses are live; skeletons are not, and the reason is recorded on the flag
+ * itself because it is a fact about the *service* rather than about this code. `paths` is a
+ * real absence: it needs a hop aggregated server-side, which CAVE has no endpoint for. So are
+ * all three ROI flags — FlyWire's neuropil assignments are a reference table on *synapses*, so
+ * there is no per-region completeness table to read and a per-neuron breakdown would mean
+ * reading a neuron's synapses and grouping them, which is the work the connection roll-up
+ * exists to avoid.
  */
 const CAVE_CAPABILITIES: SourceCapabilities = {
   rawQuery: false,
+  /**
+   * Skeletons are the one morphology CAVE has and Coda cannot use yet, and the blocker is the
+   * service rather than the format. `skeleton_source` is a standard `neuroglancer_skeletons`
+   * precomputed endpoint declaring `radius` and `compartment` — but it is a *cache that
+   * generates on demand*, and for `flywire_fafb_public` it is empty: 100 proofread root ids
+   * sampled from two places in the table, across skeleton versions 0 through 4, came back
+   * `exists: false` for every one, and a queued generation had not landed after five minutes.
+   * A fetch therefore blocks on generation, per neuron, against a node whose ceiling is 500.
+   * Claiming the capability would make every Skeletons run hang instead of decline.
+   */
   skeletons: false,
-  meshes: false,
-  synapses: false,
+  meshes: true,
+  synapses: true,
   neuronIndex: true,
   roiCounts: false,
   paths: false,
@@ -80,9 +115,30 @@ const CAVE_CAPABILITIES: SourceCapabilities = {
   roiMeshes: false,
 }
 
+/** Nanometres, which is what every geometry value in Coda is in. */
+const NANOMETRES = [1, 1, 1] as const
+
+/**
+ * How many neurons' meshes are in flight at once.
+ *
+ * Each is itself a fan-out of several hundred fragment requests, so this is one factor of what
+ * reaches the bucket — `fragmentConcurrencyFor` divides the fragment budget by it, and
+ * `MAX_MESH_NEURONS` bounds the queue behind it.
+ */
+const MESH_CONCURRENCY = 3
+
 /** Per-datastack state: where it is served from, and what its neuron table looks like. */
 interface DatastackState {
-  server?: string
+  /**
+   * The datastack's info record, in flight or resolved.
+   *
+   * The *promise* rather than the value, which is the point: two Meshes nodes on one dataset
+   * used to issue this document twice over, and the listing had already fetched it once and kept
+   * one field. Same idiom as `this.listing ??=` and `state.discovering ??=` below.
+   */
+  info?: Promise<DatastackInfo>
+  /** Where this datastack's mesh fragments live, resolved once. */
+  meshes?: Promise<GrapheneMeshSource>
   schemas?: SourceSchemas
   /** Annotation kinds in CAVE's own spelling — what the index pages by. */
   systems?: string[]
@@ -174,7 +230,7 @@ export class CaveSource implements DataSource {
      */
     const specs = DATASTACK_SPECS.filter((s) => available.has(s.datastack))
     const perSpec = await Promise.all(
-      specs.map((spec) => this.listOne(server, spec, options).catch(() => [])),
+      specs.map((spec) => this.listOne(spec, options).catch(() => [])),
     )
     this.datasets = perSpec.flat()
     reportSourceLearned(this.id)
@@ -182,12 +238,10 @@ export class CaveSource implements DataSource {
   }
 
   private async listOne(
-    server: string,
     spec: DatastackSpec,
     options: CaveRequestOptions,
   ): Promise<DatasetInfo[]> {
-    const info = await datastackInfo(server, spec.datastack, options)
-    this.state(spec.datastack).server = info.local_server
+    const info = await this.infoFor(spec, options)
     const versions = await versionsMetadata(info.local_server, spec.datastack, options)
     return versions
       .filter((v) => v.valid !== false && (v.status ?? 'AVAILABLE') === 'AVAILABLE')
@@ -531,6 +585,191 @@ export class CaveSource implements DataSource {
     return makeMatrix(rowKeys, colKeys, values, 'synapses', 'count')
   }
 
+  // -------------------------------------------------------------------------
+  // Morphology
+  // -------------------------------------------------------------------------
+
+  /**
+   * Neuron meshes, one graphene manifest and several hundred Draco fragments apiece.
+   *
+   * The ceiling is enforced here rather than on the node, because it is a fact about graphene
+   * and not about the Meshes node: the same node against neuPrint's multi-resolution meshes is
+   * fine at 500, where this is 492 requests and ~1.2 MB for *one* neuron. `MAX_MESH_NEURONS`
+   * and the message name the reason, in the idiom `neuronIdsFrom` uses one layer up.
+   */
+  async fetchMeshes(req: GeometryRequest): Promise<MeshesValue> {
+    // No materialization here, deliberately: a graphene mesh is keyed by root id, and a root id
+    // names one immutable agglomeration — an edit mints a new one — so the mesh for an id from
+    // v783 is the same mesh whichever version named it.
+    const { spec } = this.require(req.datasetId)
+    if (req.neuronIds.length > MAX_MESH_NEURONS) {
+      throw new CaveError(
+        `${req.neuronIds.length} neurons is too many meshes to fetch from ${spec.label}. A ` +
+          `graphene mesh has no level of detail, so each one is several hundred requests and ` +
+          `about a megabyte — the ceiling here is ${MAX_MESH_NEURONS}, against 500 on a source ` +
+          `that publishes multi-resolution meshes.`,
+      )
+    }
+
+    const source = await this.meshSource(spec, req.signal)
+    const options: CaveRequestOptions = req.signal ? { signal: req.signal } : {}
+
+    /*
+     * The caller's triangle budget decides how hard each mesh is decimated — see
+     * `decimateGridFor`. This is the one source in the tree that can honour `triangleBudget`
+     * exactly rather than snapping to a published level, because graphene has no levels but
+     * `decimateMesh` has a continuous knob.
+     */
+    const inFlight = Math.min(MESH_CONCURRENCY, req.neuronIds.length)
+    const grid = decimateGridFor(req.triangleBudget ?? DEFAULT_TRIANGLE_BUDGET, req.neuronIds.length)
+    const fragmentLimit = fragmentConcurrencyFor(inFlight)
+
+    let done = 0
+    const raw = await mapWithConcurrency(req.neuronIds, MESH_CONCURRENCY, async (neuronId) => {
+      const mesh = await readGrapheneMesh(source, neuronId, grid, fragmentLimit, options)
+      req.onProgress?.(++done / req.neuronIds.length, `${done}/${req.neuronIds.length} meshes`)
+      return mesh ? { id: neuronId, positions: mesh.positions, indices: mesh.indices } : undefined
+    })
+
+    // One list carrying its own id, rather than a second list of ids zipped by index — the shape
+    // `NeuPrintSource.fetchMeshes` already uses, and the one that cannot fall out of step.
+    const items = raw.filter((m): m is MeshGeometry => m !== undefined)
+    const triangles = items.reduce((sum, item) => sum + item.indices.length / 3, 0)
+
+    return {
+      kind: 'meshes',
+      items,
+      attributes: await this.morphologyAttributes(req.datasetId, items, req.signal),
+      bounds: boundsOf(items.map((i) => i.positions)),
+      /*
+       * One level, and decimated — which the caption has to say. Graphene publishes supervoxel
+       * fragments at full resolution, so `lod`/`levels` describe nothing here; what a reader
+       * needs to know is that 98% of the triangles were merged away, on the same rule that keeps
+       * `labels thinned` and `cells merged` on screen.
+       */
+      detail: { lod: 0, levels: 1, triangles, decimated: true },
+      // Nanometres, and not by conversion: a graphene fragment decodes to world coordinates.
+      units: 'nm',
+    }
+  }
+
+  /**
+   * A neuron's synapses as a point cloud, straight out of the synapse table.
+   *
+   * The cheapest capability on this source and the one that needed no new transport: it is
+   * `queryTable` with a root-id filter, which is the same call connectivity makes. Positions
+   * come back in nanometres because the request asks for them that way — see
+   * `SynapseTableSpec`.
+   */
+  async fetchSynapses(req: SynapseRequest): Promise<PointsValue> {
+    const { spec, version } = this.require(req.datasetId)
+    const synapses = spec.synapses
+    if (!synapses) {
+      throw new CaveError(`${spec.label} publishes no synapse table.`)
+    }
+    const server = await this.serverFor(spec)
+
+    /*
+     * `polarity` picks which end of the synapse the neuron is, which is also which end the
+     * position describes. Undefined means both, so both queries run and the clouds are
+     * concatenated — CAVE has no "either end" filter, and an `IN` on both columns would be an
+     * AND rather than an OR.
+     */
+    const sides: Array<'pre' | 'post'> = req.polarity ? [req.polarity] : ['pre', 'post']
+    const columns = [synapses.preColumn, synapses.postColumn, synapses.positionColumn]
+    if (synapses.scoreColumn) columns.push(synapses.scoreColumn)
+
+    /*
+     * `minWeight` is applied by the *server*, which is the only place it is worth anything: it is
+     * the one filter that cuts the download, against a query whose only other backstop is
+     * `refuseIfCapped` at half a million rows. The same `atLeast` clause the connection view uses.
+     * It reads the table's confidence column, so a source whose spec names none simply cannot
+     * honour it — and says nothing, because the node's default of 1 excludes nothing anyway.
+     */
+    const cut = req.minWeight && req.minWeight > 1 && synapses.scoreColumn
+    req.onProgress?.(0.15, 'querying')
+
+    const perSide = await Promise.all(
+      sides.map(async (side) => {
+        const column = side === 'pre' ? synapses.preColumn : synapses.postColumn
+        const rows = await queryTable(
+          server,
+          spec.datastack,
+          version,
+          {
+            table: synapses.table,
+            filters: {
+              in: { [column]: [...req.neuronIds] },
+              ...(cut ? { atLeast: { [synapses.scoreColumn!]: req.minWeight! } } : {}),
+            },
+            columns,
+            resolution: NANOMETRES,
+          },
+          req.signal ? { signal: req.signal } : {},
+        )
+        refuseIfCapped(rows.length, `${synapses.table} (${side})`)
+        return [side, rows] as const
+      }),
+    )
+
+    const total = perSide.reduce((sum, [, rows]) => sum + rows.length, 0)
+    req.onProgress?.(0.7, `${total} synapses`)
+    return synapsePoints(perSide, synapses, this.schemasFor(req.datasetId).synapses)
+  }
+
+  /** Where a datastack's meshes live, asked for once. */
+  private meshSource(
+    spec: DatastackSpec,
+    signal: AbortSignal | undefined,
+  ): Promise<GrapheneMeshSource> {
+    const state = this.state(spec.datastack)
+    const options: CaveRequestOptions = signal ? { signal } : {}
+    state.meshes ??= (async () => {
+      const info = await this.infoFor(spec, options)
+      // The two absences are said apart: a datastack that names no segmentation at all, and one
+      // whose segmentation names a bucket this cannot read. One message for both would assert
+      // something false about whichever case it was not written for.
+      if (!info.segmentation_source) {
+        throw new CaveError(`${spec.label} names no segmentation, so it has no neuron meshes.`)
+      }
+      const source = await openGrapheneMeshes(info.segmentation_source, options)
+      if (!source) {
+        throw new CaveError(
+          `${spec.label}'s segmentation (${info.segmentation_source}) is not a graphene source ` +
+            `Coda can read meshes from.`,
+        )
+      }
+      return source
+    })().catch((error: unknown) => {
+      state.meshes = undefined
+      throw error
+    })
+    return state.meshes
+  }
+
+  /**
+   * The attribute row per fetched item, joined from the index.
+   *
+   * A `MeshesValue` pairs geometry with one row apiece, and that table is what every colour
+   * encoding reads — so a mesh set with no type column would draw in one colour with a picker
+   * offering nothing. The index is already in hand by the time anyone fetches morphology.
+   */
+  private async morphologyAttributes(
+    datasetId: string,
+    items: readonly MeshGeometry[],
+    signal: AbortSignal | undefined,
+  ): Promise<TableValue> {
+    const types = await this.typeLookup(datasetId, signal)
+    return tableFromRows(
+      this.schemasFor(datasetId).morphology,
+      items.map((item) => ({
+        [ID_COLUMN_NAME]: item.id,
+        type: types.get(item.id) ?? null,
+        points: item.positions.length / 3,
+      })),
+    )
+  }
+
   /**
    * Neuron id → cell type, out of the cached index.
    *
@@ -592,17 +831,95 @@ export class CaveSource implements DataSource {
     return (this.state(spec.datastack).schemas ?? this.schemas).neurons
   }
 
-  /** The server a datastack is served from, asking the info service once if need be. */
-  private async serverFor(spec: DatastackSpec): Promise<string> {
+  /**
+   * The datastack's info record, fetched at most once per instance.
+   *
+   * Every caller wants a different field of it — the listing wants `local_server`, the mesh
+   * reader wants `segmentation_source` — and each used to fetch the whole document and keep one.
+   */
+  private infoFor(spec: DatastackSpec, options: CaveRequestOptions = {}): Promise<DatastackInfo> {
     const state = this.state(spec.datastack)
-    if (state.server) return state.server
-    const info = await datastackInfo(getServer(), spec.datastack)
-    state.server = info.local_server
-    return info.local_server
+    state.info ??= datastackInfo(getServer(), spec.datastack, options).catch((error) => {
+      // Not cached, so the next caller retries rather than inheriting a rejection forever.
+      state.info = undefined
+      throw error
+    })
+    return state.info
+  }
+
+  /** The server a datastack is served from. */
+  private async serverFor(spec: DatastackSpec): Promise<string> {
+    return (await this.infoFor(spec)).local_server
   }
 }
 
 // ---------------------------------------------------------------------------
+
+/**
+ * Synapse rows to a point cloud, with one attribute row per point.
+ *
+ * `polarity` is what a caller asked for and also what each row *is*, so it rides in the
+ * attributes: a cloud fetched for both ends is two populations in one buffer, and without the
+ * column nothing downstream could colour them apart.
+ *
+ * The neuron the cloud is *about* is the end that matched the filter, and the partner is the
+ * other — the same query-relative rule `fetchConnectivity` follows, so a Synapses node and a
+ * Connectivity node on one neuron agree about which id is whose.
+ */
+function synapsePoints(
+  perSide: ReadonlyArray<readonly ['pre' | 'post', CaveRow[]]>,
+  spec: SynapseTableSpec,
+  schema: SourceSchemas['synapses'],
+): PointsValue {
+  const total = perSide.reduce((sum, [, rows]) => sum + rows.length, 0)
+  const positions = new Float32Array(total * 3)
+
+  /*
+   * Column arrays filled by index, not row objects handed to `tableFromRows` — whose own
+   * docstring says "not hot paths", and this is one: a cloud is bounded by `CAVE_MAX_ROWS`, and
+   * the row-object form measured 128 ms against 9 ms at that size. The loop below already has
+   * every value, so there is nothing to gain by materialising a record first.
+   */
+  const neuronIds = new Array<string>(total)
+  const partnerIds = new Array<string>(total)
+  const polarities = new Array<string>(total)
+  const weights = new Array<number>(total)
+
+  // Hoisted: the API splits a position column into three, and rebuilding these three strings per
+  // row is a fresh key and a fresh lookup for every synapse.
+  const xKey = `${spec.positionColumn}_x`
+  const yKey = `${spec.positionColumn}_y`
+  const zKey = `${spec.positionColumn}_z`
+
+  let at = 0
+  for (const [side, sideRows] of perSide) {
+    const own = side === 'pre' ? spec.preColumn : spec.postColumn
+    const other = side === 'pre' ? spec.postColumn : spec.preColumn
+    for (const row of sideRows) {
+      positions[at * 3] = Number(row[xKey] ?? 0)
+      positions[at * 3 + 1] = Number(row[yKey] ?? 0)
+      positions[at * 3 + 2] = Number(row[zKey] ?? 0)
+      neuronIds[at] = String(row[own])
+      partnerIds[at] = String(row[other])
+      polarities[at] = side
+      weights[at] = spec.scoreColumn ? Number(row[spec.scoreColumn] ?? 0) : 1
+      at++
+    }
+  }
+
+  return {
+    kind: 'points',
+    positions,
+    attributes: makeTable(schema, {
+      [ID_COLUMN_NAME]: neuronIds,
+      partnerId: partnerIds,
+      polarity: polarities,
+      weight: weights,
+    }),
+    bounds: boundsOf([positions]),
+    units: 'nm',
+  }
+}
 
 /**
  * Neuron id → cell type for one index, built once per table.

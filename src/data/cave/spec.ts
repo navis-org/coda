@@ -75,6 +75,25 @@ export interface ConnectionViewSpec {
   weightColumn: string
 }
 
+/**
+ * A synapse table: one row per synapse, with a position and a root id at each end.
+ *
+ * Positions are requested at `desired_resolution: [1, 1, 1]`, which is CAVE's own answer to
+ * Coda's "geometry is nanometres" rule and is why nothing here scales anything. The table
+ * stores 4x4x40 nm voxels — verified by asking for both and watching the values divide exactly
+ * — so a client that took the raw column would put every synapse a factor out, with nothing
+ * failing, because the cloud is internally consistent either way.
+ */
+export interface SynapseTableSpec {
+  table: string
+  preColumn: string
+  postColumn: string
+  /** Position column *stem*: the API splits it into `<stem>_x`, `_y`, `_z`. */
+  positionColumn: string
+  /** Per-synapse confidence, where the table has one. Offered as an attribute column. */
+  scoreColumn?: string
+}
+
 export interface DatastackSpec {
   datastack: string
   label: string
@@ -82,6 +101,7 @@ export interface DatastackSpec {
   neurons: NeuronTableSpec
   annotations?: AnnotationTableSpec
   connections?: ConnectionViewSpec
+  synapses?: SynapseTableSpec
 }
 
 /**
@@ -116,6 +136,13 @@ export const DATASTACK_SPECS: readonly DatastackSpec[] = [
       preColumn: 'pre_pt_root_id',
       postColumn: 'post_pt_root_id',
       weightColumn: 'n_syn',
+    },
+    synapses: {
+      table: 'synapses_nt_v1',
+      preColumn: 'pre_pt_root_id',
+      postColumn: 'post_pt_root_id',
+      positionColumn: 'pre_pt_position',
+      scoreColumn: 'cleft_score',
     },
   },
 ]

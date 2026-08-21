@@ -18,6 +18,8 @@
  *    takes exactly one.** A single-table or view query rejects the map outright —
  *    `{"schema_errors":{"select_columns":["Not a valid list."]}}` — and a *join* accepts the
  *    list while silently taking the wrong column. See `CaveQuery.columns`.
+ *  - **`desired_resolution` is where geometry gets its units**, and it is why nothing on this
+ *    source scales coordinates the way `neuprint/units.ts` does.
  *  - **`arrow_format=false` is what makes any of this possible.** It returns
  *    `application/json`, so there is no Arrow dependency and nothing new in the main chunk.
  *    The cost is `json.ts`.
@@ -29,14 +31,20 @@ import { caveGet, cavePost } from './client'
 /**
  * A datastack's info record, as far as Coda reads it.
  *
- * One field today, and deliberately not more: the record also carries `segmentation_source`,
- * `skeleton_source`, `viewer_site` and the soma/synapse table names, all of which the morphology
- * and viewer-scene phases will want — declaring them now would be a shape nothing checks against
- * a server nothing has asked.
+ * Two fields, and deliberately not the rest: the record also carries `skeleton_source`,
+ * `viewer_site` and the soma/synapse table names, which the skeleton and viewer-scene work will
+ * want — declaring them now would be a shape nothing checks against a server nothing has asked.
  */
 export interface DatastackInfo {
   /** Which server answers queries for this datastack. Not the global one. */
   local_server: string
+  /**
+   * `graphene://…` — where the segmentation lives, and the only route to neuron meshes.
+   *
+   * Not a bucket you can read by id: a root id is a dynamic agglomeration, so the fragment list
+   * has to be asked for. See `meshes.ts`.
+   */
+  segmentation_source?: string
 }
 
 /** One materialization's metadata. `expires_on` is why a CAVE version dropdown ages. */
@@ -137,6 +145,16 @@ function filterBody(table: string, filters: CaveFilters | undefined): Record<str
 export interface CaveQuery {
   filters?: CaveFilters
   /**
+   * Units to return position columns in. `[1, 1, 1]` is nanometres.
+   *
+   * Passed explicitly wherever geometry is read rather than relying on the server's default,
+   * which happens to be nanometres for FlyWire's synapse table today. The table stores 4x4x40 nm
+   * voxels — asking for both and watching the values divide by exactly 4, 4 and 40 is how that
+   * was established — so a default that moved would put every synapse a factor out of the scene
+   * with nothing failing.
+   */
+  resolution?: readonly [number, number, number]
+  /**
    * Columns to return, as a **list**.
    *
    * Both endpoints below reject the table-keyed `select_column_map` outright. That map is the
@@ -171,6 +189,7 @@ function runQuery(
     {
       ...filterBody(name, query.filters),
       ...(query.columns ? { select_columns: query.columns } : {}),
+      ...(query.resolution ? { desired_resolution: [...query.resolution] } : {}),
     },
     options,
   )

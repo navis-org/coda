@@ -59,9 +59,12 @@ release this build has never heard of.
 wants a CAVE token (Connections ▸ CAVE — the same one `caveclient` keeps in
 `~/.cloudvolume/secrets`) and its version dropdown names a **materialization** rather than a
 release. Coda downloads its cell annotations once per dataset and searches them locally, so the
-first query waits a few seconds and every one after it is immediate. Neurons and connectivity
-work; skeletons, meshes, synapses, paths and per-region counts are not wired up yet, and the
-nodes that need them say so rather than failing.
+first query waits a few seconds and every one after it is immediate. Neurons, connectivity,
+meshes and synapses work. **Skeletons do not**, and that is CAVE's side rather than ours: the
+skeleton service generates on demand and has nothing cached for this dataset, so the node
+declines instead of hanging. Paths and per-region counts have no CAVE equivalent at all. Meshes
+are capped at 20 neurons — a graphene mesh has no level of detail, so each one is several hundred
+requests.
 
 Every published dataset node arrives with a small **Description** card wired to it: what the
 dataset covers, the project's landing page and companion viewers, and the papers its authors ask

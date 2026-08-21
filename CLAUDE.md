@@ -398,7 +398,7 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `data/precomputed/precomputed.test.ts`   | shard lookup, multi-LOD manifest, Draco decode, legacy fragments, CORS fallback                                                  |
 | `data/cave/cave.test.ts`                 | CAVE against recorded bodies: a wide root id kept exactly, the string-aware scan, the annotation pivot, an anchored pattern, and every refusal |
 | `nodes/lib/datasetFamilies.test.ts`      | (also) that every CAVE family names a datastack spec and every spec a family — the join key nothing else checks |
-| `data/cave/live.test.ts`                 | the same source against the real services, skipped without `CAVE_TOKEN` — the only thing that notices an endpoint shape changing |
+| `data/cave/live.test.ts`                 | the same source against the real services, skipped without `CAVE_TOKEN` — the only thing that notices an endpoint shape changing, plus the mesh and synapse clouds proved to share one nanometre frame |
 | `nodes/query/morphology.test.ts`         | the shared `Max neurons` ceiling and what its refusal message blames                                                             |
 | `ui/nodes/nodeRunRing.test.tsx`          | run-indicator arithmetic: dash fractions, the zero floor, indeterminate mode                                                     |
 | `ui/nodes/runRing.placement.test.tsx`    | that the outline renders outside the clipped card (slow mock, so 'running' is observable)                                        |
@@ -3495,7 +3495,8 @@ which CAVE has no endpoint for), no `rawQuery`, no `viewerScene`, and none of th
 flags — FlyWire's neuropil assignments are a reference table on *synapses*, so there is no
 per-region completeness table to read, and a per-neuron breakdown would mean reading a neuron's
 synapses and grouping them, which is the work the connection roll-up exists to avoid.
-`neuronIndex` is the one that is true.
+`neuronIndex`, `meshes` and `synapses` are the ones that are true; see **Morphology** below for
+why `skeletons` is not.
 
 **`roiCounts` is new, and `fetchRoiCounts` became optional to make room for it.** It was the one
 per-backend method on the seam that was required and ungated, and the cost of that showed up two
@@ -3509,6 +3510,111 @@ already had.
 Two absences show up as data rather than as flags. A CAVE dataset reports **no ROIs and no
 statuses**, so Find Neurons' region and status pickers offer nothing to filter by — which is the
 honest state rather than a control that would match nothing.
+
+### Morphology: meshes and synapses, but not skeletons
+
+**Skeletons are the one thing CAVE publishes that Coda cannot use, and the blocker is the
+service rather than the format.** `skeleton_source` is a standard `neuroglancer_skeletons`
+precomputed endpoint — its `/info` declares `radius` and `compartment`, which is exactly what
+`SkeletonGeometry` wants, and it is CORS-open. But it is a **cache that generates on demand**,
+and for `flywire_fafb_public` it is empty: 100 proofread root ids sampled from two places in the
+table, across skeleton versions 0 through 4, came back `exists: false` for every one, and a
+queued bulk generation had not landed after five minutes. So a fetch blocks on generation, per
+neuron, against a node whose ceiling is 500. `capabilities.skeletons` is false and says so on
+the flag; claiming it would make every Skeletons run hang instead of decline.
+
+Two endpoint notes for whoever picks this up when the cache fills. `exists` answers as a **POST**
+(`{skeleton_version, root_ids}`) — the GET form 502s — and it is what makes the whole thing
+usable, because it turns "will this hang?" into a question you can ask first. And omitting the
+skeleton version from a fetch URL routes to a generate rather than 404ing, which is why the first
+probe here simply never returned.
+
+**Synapses are the cheapest capability on this source and needed no new transport.** It is
+`queryTable` with a root-id filter — the same call connectivity makes — over `synapses_nt_v1`.
+Measured: 14,986 synapses for one neuron in 1.8 s.
+
+- **`desired_resolution: [1, 1, 1]` is where the nanometres come from**, and it is passed
+  explicitly rather than inherited. The table stores **4x4x40 nm voxels**, established by asking
+  for both resolutions and watching the values divide by exactly 4, 4 and 40. The server's
+  current default for this table happens to *be* nanometres, so omitting it looks perfectly fine
+  and would put every synapse a factor out of the scene the day that default moved — with
+  nothing failing, because the cloud is internally consistent either way. This is the CAVE-native
+  answer to the rule `neuprint/units.ts` implements by scaling.
+- **No polarity means two queries, not one.** CAVE has no either-end filter, and an `IN` on both
+  columns of one query is an AND — which is the synapses a neuron makes onto *itself*.
+- **The cloud is query-relative**, like `fetchConnectivity`: `neuronId` is the end that matched
+  the filter and `partnerId` the other, so a Synapses node and a Connectivity node on one neuron
+  agree about which id is whose. `polarity` rides in the attribute table because a cloud fetched
+  for both ends is two populations in one buffer.
+
+**Meshes work, and cost requests rather than bytes.** A CAVE segmentation is `graphene://`, which
+is not a bucket you can read by id: a root id is a dynamic agglomeration, so the fragment list has
+to be asked for. `meshes.ts` asks the meshing API, then hands the fragments to
+`src/data/precomputed` unchanged — `decodeDracoFragment` and `concatMeshes` needed no edit at all.
+
+**A manifest failure is deliberately *not* swallowed**, which is the opposite of `readLegacyMesh`
+beside it. That one reads a static bucket where a 404 genuinely means "this body has no mesh";
+this calls an API whose 404 means the *table name* is wrong — the trap named just below. Letting
+it throw is what lets `mapWithConcurrency` do its job: one bad neuron still becomes `undefined`
+and costs the others nothing, but a systematically broken call fails every neuron and is
+rethrown, rather than handing back an empty scene under a green node.
+
+**The bucket mapping is `objectStoreUrl` in `precomputed/transport.ts`**, shared with
+`neuprint/nglayers.ts`, which is where the second consumer put it. The first copy here mapped an
+*unrecognised* scheme onto the GCS host — a confidently wrong URL rather than a refusal, and 404s
+per fragment that read as neurons with no mesh. Not every CAVE datastack is on GCS.
+
+Four things established live, each of which would otherwise be a plausible wrong picture:
+
+- **`verify=True` is not optional.** Without it the manifest answers a single fragment named
+  after the root id itself, which does not exist in the bucket — the unverified form is a promise
+  about what *would* be meshed rather than a list of files. With it, one FlyWire neuron is **492
+  fragments**.
+- **The meshing API is keyed by the graphene *table*, not by the datastack**, and on FlyWire
+  those are different strings: `flywire_public` against `flywire_fafb_public`. Taking the
+  datastack name 404s, so the table is parsed out of the `segmentation_source` URL that named it.
+- **Fragments decode straight to world nanometres.** Measured on a real one: x spans
+  474,201–474,810. So none of `multires.ts`'s `fragmentOffset`/`fragmentTransform` machinery
+  applies, and nothing scales anything — the decoder is called with an identity transform.
+- **The bucket is CORS-open** (`storage.googleapis.com`, `access-control-allow-origin: *`), so
+  this works from a static deploy with no proxy.
+
+**What it costs, all measured on one neuron:** 492 requests, ~1.2 MB, **13.3 s**, and 1,276,736
+triangles before decimation. There is no level of detail to trade against — a graphene manifest
+lists supervoxel fragments at full resolution, where neuPrint's multi-resolution meshes answer in
+a handful at a chosen LOD. Three constants follow from that, and each is a measurement rather
+than a guess:
+
+- **`MAX_MESH_NEURONS` is 20**, against the Skeletons node's shared 500. Enforced in the *source*
+  rather than on the node, because it is a fact about graphene: the same Meshes node against
+  neuPrint is fine at 500. (A per-source ceiling on the seam is the honest fix and is a later
+  phase; the refusal names the number and the reason meanwhile.)
+- **`FRAGMENT_CONCURRENCY` is 32.** The work is latency, not bytes — 492 fragments averaging
+  2.4 kB — so this is the number that decides the wait: 18.9 s at 12, 13.3 s at 32, 11.3 s at 64.
+  Past 32 the gain is small and it is a lot of parallel requests at one host. Measured from Node,
+  where nothing caps connections, so a browser will do no better.
+- **`MESH_DECIMATE_GRID` is 192**, through the same `decimateMesh` the ROI shells use. Much finer
+  than their 32, because a neuron is a thin arbor inside a box the size of the brain and that
+  grid would erase it: from 1,276,736 triangles, grid 96 gives 6,308, 192 gives 25,548, 256 gives
+  44,091. A full set of 20 is then about half a million triangles, inside the 1.5M budget the
+  Meshes node works to. It reduces memory and draw cost, not the wait — the requests are already
+  paid by then.
+
+**`fetchCoarseGeometry` stays unimplemented, and that is the right answer rather than a gap.**
+There is no cheap representation to draw a thumbnail from, and the interface's own docstring says
+an absent one beats quietly downloading full detail to fill a list. So Explore on a CAVE dataset
+draws placeholders.
+
+**The cross-check that ties it together** is in `live.test.ts`: a neuron's mesh has to enclose its
+own presynaptic cloud. Neither is scaled by anything here — the fragments arrive in world
+nanometres and the synapse query asks for them — so if either assumption were wrong the two boxes
+would be a whole factor apart, and nothing else would fail, because each is internally consistent.
+Measured: mesh 400,953–603,981 against synapses 402,596–602,328. Same shape as the neuPrint rule
+that a mesh bbox must enclose its skeleton's.
+
+**The morphology schema is narrowed rather than canonical.** `neuronId`, `type` and `points`, and
+no `instance`, `status`, `size` or `cableLength` — a graphene mesh carries none of them, and a
+column that arrives null on every row breaks every picker that believed it.
 
 ### Smaller decisions
 
@@ -3561,14 +3667,17 @@ honest state rather than a control that would match nothing.
 
 ### What is not done
 
-Morphology (phase 3), the annotation-source abstraction that would let a FlyTable or a GitHub TSV
-join onto root ids (phase 4), and the materialization/annotation dropdowns and per-source
-morphology ceilings (phase 5). Aedes needs phase 4 before it is usable at all: its CAVE datastack
-publishes synapses and nuclei and *no* annotations, so type, class and side live in FlyTable.
+Skeletons, until the skeleton cache has anything in it (above). The annotation-source
+abstraction that would let a FlyTable or a GitHub TSV join onto root ids, and the
+materialization/annotation dropdowns and per-source morphology ceilings. Aedes needs the
+annotation half before it is usable at all: its CAVE datastack publishes synapses and nuclei and
+*no* annotations, so type, class and side live in FlyTable.
 
 Not looked at in a browser yet — the module is headless and both suites are headless, so what has
-not been seen is a FlyWire dataset node on a real canvas with the Explore widget over 139,255
-neurons. Same standing as the WebGL viewers.
+not been seen is a FlyWire dataset node on a real canvas: the Explore widget over 139,255 neurons,
+and twenty decimated meshes with their synapses in the 3D view. Same standing as the WebGL
+viewers, and the mesh path is the half most worth looking at, since a decimation grid is a
+judgement about a picture.
 
 ## Precomputed meshes
 

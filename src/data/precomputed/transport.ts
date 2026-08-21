@@ -98,6 +98,29 @@ async function attempt(url: string, options: FetchOptions): Promise<ArrayBuffer>
 }
 
 /**
+ * `gs://bucket/path` or `s3://bucket/path` → a URL a browser can fetch.
+ *
+ * Here rather than in either backend because there are two of them now: neuPrint reads a
+ * `precomputed://gs://…` out of a neuroglancer state, and CAVE reads a bare `gs://` out of a
+ * graphene segmentation's `data_dir`. The rule is the same and the mistake is the same — the
+ * first copy of this quietly mapped an unrecognised scheme onto the GCS host, which produces a
+ * confidently wrong URL rather than a refusal, and 404s that read as missing neurons.
+ *
+ * **Undefined for anything else**, deliberately. Not every CAVE datastack is on GCS.
+ */
+export function objectStoreUrl(uri: string): string | undefined {
+  const match = /^(gs|s3):\/\/(.+)$/.exec(uri.trim())
+  if (!match) return undefined
+  const [, scheme, path] = match
+  const clean = path!.replace(/\/+$/, '')
+  if (scheme === 'gs') return `https://storage.googleapis.com/${clean}`
+  // Virtual-hosted style: the path-style endpoint 301-redirects, and fetch will not follow a
+  // redirect that drops CORS headers.
+  const [bucket, ...rest] = clean.split('/')
+  return `https://${bucket}.s3.amazonaws.com/${rest.join('/')}`
+}
+
+/**
  * Fetch bytes, falling back to a proxy for hosts that refuse cross-origin reads.
  *
  * A non-2xx response is *not* retried through the proxy: the request plainly arrived, and

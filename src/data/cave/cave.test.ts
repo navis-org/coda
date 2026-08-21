@@ -21,6 +21,7 @@ import { resetCache } from '../cache'
 import { resetIndexLoads } from '../neuronIndex'
 import { CaveSource } from './CaveSource'
 import { CAVE_MAX_ROWS } from './client'
+import { MAX_MESH_NEURONS, decimateGridFor, fragmentConcurrencyFor } from './meshes'
 import { quoteWideIntegers, parseCaveJson } from './json'
 import { reportAuthFailure, resetCredentials, setToken, subscribeAuthFailure } from './credentials'
 
@@ -70,6 +71,11 @@ function installFetch(overrides: Record<string, string> = {}): Captured[] {
       )
     }
     if (url.includes('/views/valid_connection_v2/query')) return answer(fixture('connections.txt'))
+    if (url.includes('/table/synapses_nt_v1/query')) return answer(fixture('synapses.txt'))
+    if (url.includes('/segmentation/1.0/flywire_public/info'))
+      return answer(fixture('segmentation.json'))
+    if (url.includes('/meshing/api/v1/table/flywire_public/manifest/'))
+      return answer(fixture('mesh-manifest.json'))
     return Promise.resolve({
       ok: false,
       status: 404,
@@ -409,6 +415,206 @@ describe('connectivity', () => {
 
 // ---------------------------------------------------------------------------
 
+describe('synapses', () => {
+  it('asks for nanometres rather than trusting the server default', async () => {
+    const captured = installFetch()
+    await new CaveSource().fetchSynapses({
+      datasetId: DATASET,
+      neuronIds: ['720575940628857210'],
+      polarity: 'pre',
+    })
+
+    const query = captured.find((c) => c.url.includes('/table/synapses_nt_v1/query'))!
+    /*
+     * The table stores 4x4x40 nm voxels — established by asking for both resolutions and
+     * watching the values divide by exactly 4, 4 and 40. The server's current default happens to
+     * be nanometres, so omitting this looks fine and would put every synapse a factor out of the
+     * scene the day that moved, with nothing failing.
+     */
+    expect((query.body as { desired_resolution?: number[] }).desired_resolution).toEqual([1, 1, 1])
+  })
+
+  it('reads positions as a point cloud in nanometres, one attribute row apiece', async () => {
+    installFetch()
+    const points = await new CaveSource().fetchSynapses({
+      datasetId: DATASET,
+      neuronIds: ['720575940628857210'],
+      polarity: 'pre',
+    })
+
+    expect(points.units).toBe('nm')
+    expect(points.attributes.length).toBe(3)
+    expect(points.positions.length).toBe(9)
+    expect([...points.positions.slice(0, 3)]).toEqual([561124, 235604, 142360])
+  })
+
+  it('keeps both root ids exact and orients them query-relative', async () => {
+    installFetch()
+    const cave = new CaveSource()
+    const pre = await cave.fetchSynapses({
+      datasetId: DATASET,
+      neuronIds: ['720575940628857210'],
+      polarity: 'pre',
+    })
+    // `neuronId` is the end that matched the filter, whichever way the synapse points — the same
+    // rule fetchConnectivity follows, so the two nodes agree about which id is whose.
+    expect(pre.attributes.data.neuronId?.[0]).toBe('720575940628857210')
+    expect(pre.attributes.data.partnerId?.[0]).toBe('720575940618002747')
+    expect(pre.attributes.data.polarity?.[0]).toBe('pre')
+
+    const post = await cave.fetchSynapses({
+      datasetId: DATASET,
+      neuronIds: ['720575940618002747'],
+      polarity: 'post',
+    })
+    expect(post.attributes.data.neuronId?.[0]).toBe('720575940618002747')
+    expect(post.attributes.data.partnerId?.[0]).toBe('720575940628857210')
+  })
+
+it('applies the weight cut on the server, where it saves the download', async () => {
+    const captured = installFetch()
+    await new CaveSource().fetchSynapses({
+      datasetId: DATASET,
+      neuronIds: ['720575940628857210'],
+      polarity: 'pre',
+      minWeight: 50,
+    })
+
+    // The node has always sent this and both other sources honour it; dropping it left a visible
+    // control doing nothing against the query whose only backstop is the 500,000-row cap.
+    const query = captured.find((c) => c.url.includes('/table/synapses_nt_v1/query'))!
+    expect(query.body).toMatchObject({
+      filter_greater_equal_dict: { synapses_nt_v1: { cleft_score: 50 } },
+    })
+  })
+
+  it('sends no weight clause at the default, which excludes nothing', async () => {
+    const captured = installFetch()
+    await new CaveSource().fetchSynapses({
+      datasetId: DATASET,
+      neuronIds: ['720575940628857210'],
+      polarity: 'pre',
+      minWeight: 1,
+    })
+    const query = captured.find((c) => c.url.includes('/table/synapses_nt_v1/query'))!
+    expect(query.body).not.toHaveProperty('filter_greater_equal_dict')
+  })
+
+  it('reports progress, so the run ring does not sit at the node’s own 10%', async () => {
+    installFetch()
+    const seen: number[] = []
+    await new CaveSource().fetchSynapses({
+      datasetId: DATASET,
+      neuronIds: ['720575940628857210'],
+      polarity: 'pre',
+      onProgress: (fraction) => seen.push(fraction),
+    })
+    expect(seen.length).toBeGreaterThan(1)
+  })
+
+  it('advertises only the columns a synapse row can fill', async () => {
+    installFetch()
+    const points = await new CaveSource().fetchSynapses({
+      datasetId: DATASET,
+      neuronIds: ['720575940628857210'],
+      polarity: 'pre',
+    })
+    // No `type`/`partnerType`: the synapse table carries neither, and a column that is null on
+    // every row is a dead entry in every picker on the node.
+    expect(points.attributes.schema.columns.map((c) => c.name)).toEqual([
+      'neuronId',
+      'partnerId',
+      'polarity',
+      'weight',
+    ])
+  })
+
+  it('queries both ends when no polarity is named, because CAVE has no either-end filter', async () => {
+    const captured = installFetch()
+    await new CaveSource().fetchSynapses({
+      datasetId: DATASET,
+      neuronIds: ['720575940628857210'],
+    })
+    const queries = captured.filter((c) => c.url.includes('/table/synapses_nt_v1/query'))
+    expect(queries).toHaveLength(2)
+    // An `IN` on both columns of one query is an AND, which is the synapses a neuron makes onto
+    // itself rather than the synapses it makes at all.
+    const filtered = (c: Captured) =>
+      Object.keys(
+        (c.body as { filter_in_dict: Record<string, Record<string, unknown>> }).filter_in_dict
+          .synapses_nt_v1 ?? {},
+      )
+    expect(filtered(queries[0]!)).toEqual(['pre_pt_root_id'])
+    expect(filtered(queries[1]!)).toEqual(['post_pt_root_id'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+
+describe('meshes', () => {
+  it('asks the meshing API with verify, and reads fragments from the bucket', async () => {
+    const captured = installFetch()
+    await new CaveSource()
+      .fetchMeshes({ datasetId: DATASET, neuronIds: ['720575940628857210'] })
+      .catch(() => undefined)
+
+    /*
+     * `verify=True` is not optional: without it the manifest answers a single fragment named
+     * after the root id, which does not exist in the bucket — the unverified form is a promise
+     * about what would be meshed rather than a list of files.
+     */
+    const manifest = captured.find((c) => c.url.includes('/meshing/api/v1/'))!
+    expect(manifest.url).toContain('/manifest/720575940628857210:0?verify=True')
+
+    // The table name comes out of the segmentation URL, not from the datastack: FlyWire calls
+    // them `flywire_public` and `flywire_fafb_public`, and taking the wrong one 404s.
+    expect(manifest.url).toContain('/table/flywire_public/')
+
+    const fragment = captured.find((c) => c.url.includes('storage.googleapis.com'))!
+    expect(fragment.url).toContain(
+      '/seunglab2/drosophila_v0/ws_190410_FAFB_v02_ws_size_threshold_200/fly_v31_meshes_v2_062619/',
+    )
+  })
+
+it('turns the triangle budget into a decimation grid, since graphene has no levels', async () => {
+    // The seam says a source with one level ignores `triangleBudget`; that is written for a
+    // publisher whose levels are fixed. Graphene has one level and a continuous knob, so it is
+    // the only source that can hit an arbitrary budget exactly — and the Meshes node's `Detail`
+    // control is otherwise dead here.
+    expect(decimateGridFor(1_500_000, 20)).toBeGreaterThan(decimateGridFor(150_000, 20))
+    expect(decimateGridFor(1_500_000, 1)).toBeGreaterThan(decimateGridFor(1_500_000, 20))
+    // Never so coarse that the arbor goes: `low` against a full set still clears the floor.
+    expect(decimateGridFor(150_000, 20)).toBeGreaterThanOrEqual(48)
+  })
+
+  it('divides the fragment budget between the neurons in flight', async () => {
+    // 32 was measured on *one* neuron. Three neurons at 32 apiece is 96 concurrent requests to
+    // one host, past the point the measurement describes.
+    expect(fragmentConcurrencyFor(1)).toBe(32)
+    expect(fragmentConcurrencyFor(3)).toBeLessThan(32)
+    expect(fragmentConcurrencyFor(3) * 3).toBeLessThanOrEqual(32)
+  })
+
+  it('refuses a set no graphene segmentation could serve, and says why', async () => {
+    installFetch()
+    /*
+     * Built as text, not by adding to a number: `720575940000000000 + i` is past
+     * `Number.MAX_SAFE_INTEGER`, so every element came out as the same string — invariant 8's
+     * exact trap, reproduced inside a CAVE test. It passed, because only `.length` is read.
+     */
+    const ids = Array.from(
+      { length: MAX_MESH_NEURONS + 1 },
+      (_, i) => `7205759406288${String(57000 + i)}`,
+    )
+    expect(new Set(ids).size).toBe(ids.length)
+    await expect(
+      new CaveSource().fetchMeshes({ datasetId: DATASET, neuronIds: ids }),
+    ).rejects.toThrow(/no level of detail, so each one is several hundred requests/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+
 describe('what it declines', () => {
   /*
    * Absent rather than throwing, which is what stops one missing capability taking a whole card
@@ -423,13 +629,21 @@ describe('what it declines', () => {
     expect(source.fetchRoiCounts).toBeUndefined()
   })
 
-  it('declares no morphology, no paths and no raw query', () => {
+  it('declares meshes and synapses but not skeletons, paths or raw query', () => {
     const { capabilities } = new CaveSource()
     // Every false is a node that declines at edit time rather than failing at run time.
     expect(capabilities.paths).toBe(false)
-    expect(capabilities.skeletons).toBe(false)
     expect(capabilities.rawQuery).toBe(false)
+    expect(capabilities.meshes).toBe(true)
+    expect(capabilities.synapses).toBe(true)
     expect(capabilities.neuronIndex).toBe(true)
+    /*
+     * Skeletons are the one morphology CAVE has and this cannot use: the format is standard, but
+     * the service is a cache that generates on demand and is empty for this datastack — 100
+     * proofread root ids across skeleton versions 0 to 4 all answered `exists: false`. Claiming
+     * it would make every Skeletons run hang rather than decline.
+     */
+    expect(capabilities.skeletons).toBe(false)
   })
 
   it('names the datastack when a dataset id has no wiring', async () => {
