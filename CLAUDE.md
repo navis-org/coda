@@ -3882,6 +3882,12 @@ Three things in it, and two of them disagree with `caveclient` on purpose:
   serialised into the URL verbatim; `45 / 1e9` is exact. 16, 4, 40 and 8 are unaffected either
   way, which is why it survived the first reading — 45 and 50 are not.
 
+**The `#!+` merge works in spelunker too**, which was the open question the moment a CAVE dataset
+started opening there rather than in mainline neuroglancer — the merge form was established
+against the deployed Google viewer. Confirmed by reading spelunker's own bundle: its
+`updateFromUrlHash` branches on `#!+` *before* the `#!` case and calls `restoreState` with no
+`reset()`, which is exactly the semantic the camera-preserving update depends on.
+
 **`DatasetInfo.viewerSite` came with it**, and it is a fact about the dataset rather than a
 preference: `out.neuroglancer`'s `Viewer` param now defaults to *empty*, meaning the dataset's own
 deployment and only then the built-in. A CAVE scene opened in mainline neuroglancer draws the EM
