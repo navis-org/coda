@@ -4,12 +4,12 @@ import { column, tableSchema } from '../../core/types'
 import { tableFromRows } from '../../core/values'
 import { collectLabels, labelMatch, parseTypedLabels, unmatchedLabels } from './labelLookup'
 
-const NEURONS = tableSchema(column('bodyId', 'i64'), column('type', 'str'))
+const NEURONS = tableSchema(column('neuronId', 'i64'), column('type', 'str'))
 
 function neurons(types: Array<string | null>) {
   return tableFromRows(
     NEURONS,
-    types.map((type, i) => ({ bodyId: 1000 + i, type })),
+    types.map((type, i) => ({ neuronId: 1000 + i, type })),
   )
 }
 

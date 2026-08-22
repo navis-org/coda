@@ -17,11 +17,12 @@
  * half stays in `src/data`, which is headless and knows nothing about any of this.
  */
 
-import { useCallback, useEffect, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
 
-import type { TableValue } from '../core/values'
+import type { DatasetAnnotations, TableValue } from '../core/values'
 import { errorMessage } from '../core/errors'
 import { getSource } from '../data/source'
+import { neuronIndexKey } from '../data/neuronIndex'
 
 export type NeuronIndexState =
   /** No dataset resolved yet — usually an unconnected Dataset input. */
@@ -63,6 +64,22 @@ interface Entry {
 
 const entries = new Map<string, Entry>()
 
+/**
+ * What a shared entry is a fact about: the dataset, and the chain labelling it.
+ *
+ * Through `neuronIndexKey`, which `data/neuronIndex.ts` documents as "one place, so a reader and
+ * a writer agree" and which already takes exactly this variant. Derived here instead, this map
+ * and the persistent cache could disagree about what makes two indexes different — the memo
+ * handing the first table looked at to the second widget while IndexedDB kept them apart.
+ */
+function entryKey(
+  sourceId: string,
+  datasetId: string,
+  annotations: DatasetAnnotations | undefined,
+): string {
+  return neuronIndexKey(sourceId, datasetId, annotations?.key ?? '')
+}
+
 function entryFor(key: string): Entry {
   let entry = entries.get(key)
   if (!entry) {
@@ -88,7 +105,12 @@ function publish(entry: Entry, state: NeuronIndexState): void {
  * last widget has gone is paid for and kept rather than wasted, and one that is abandoned
  * half-way has to start from zero next time.
  */
-function ensureLoaded(key: string, sourceId: string, datasetId: string): void {
+function ensureLoaded(
+  key: string,
+  sourceId: string,
+  datasetId: string,
+  annotations: DatasetAnnotations | undefined,
+): void {
   const entry = entryFor(key)
   if (entry.loading) return
   if (entry.state.status === 'ready' || entry.state.status === 'error') return
@@ -113,6 +135,7 @@ function ensureLoaded(key: string, sourceId: string, datasetId: string): void {
   source
     .neuronIndex({
       datasetId,
+      ...(annotations ? { annotations } : {}),
       refresh: reloads > 0,
       onProgress: (_fraction, note) => {
         // Notes only, no percentage: the response is gzipped, so `Content-Length` describes the
@@ -134,11 +157,40 @@ function ensureLoaded(key: string, sourceId: string, datasetId: string): void {
     })
 }
 
+/**
+ * The index for a dataset, optionally as an annotation chain labels it.
+ *
+ * `annotations` comes off the **value** on the widget's Dataset input, not off the type: a type
+ * carries the chain's schema and only a `DatasetValue` carries its table, because that table is
+ * a fetch somebody's Run paid for. So a chain reaches this widget one run later than it reaches
+ * the node's ports, and with nothing wired the widget behaves exactly as it always did.
+ *
+ * That is a bounded departure from "loads independently of any run", and it was forced rather
+ * than chosen. It began as a labelling gap — an annotated CAVE dataset listed the backend's
+ * `type` while the wire carried the chain's columns — and became a hard failure the moment
+ * `DatastackSpec.neurons` was allowed to be absent: on a datastack that publishes no neuron
+ * table the chain *is* the neuron list, so without it there is nothing to list at all and the
+ * source refuses. `wclee_aedes_brain` is exactly that datastack.
+ *
+ * The entry is keyed by the chain, for `neuronIndexKey`'s reason: two graphs on one datastack
+ * with different annotations hold genuinely different tables, and sharing one entry would serve
+ * the first one looked at to the other for the session.
+ */
 export function useNeuronIndex(
   sourceId: string | undefined,
   datasetId: string | undefined,
+  annotations?: DatasetAnnotations,
 ): NeuronIndexHandle {
-  const key = sourceId && datasetId ? `${sourceId}:${datasetId}` : undefined
+  const key = sourceId && datasetId ? entryKey(sourceId, datasetId, annotations) : undefined
+
+  /*
+   * Held in a ref rather than a dependency: the value comes off a `DatasetValue` the store mints
+   * afresh on every tick, so the object identity churns while the *chain* does not — and `key`
+   * above already says which chain it is. Watching the object would reload the index on every
+   * unrelated edit; watching the key reloads exactly when the answer would differ.
+   */
+  const chain = useRef(annotations)
+  chain.current = annotations
 
   const subscribe = useCallback(
     (onChange: () => void) => {
@@ -166,7 +218,7 @@ export function useNeuronIndex(
    * paints the table on its first frame without this effect having run.
    */
   useEffect(() => {
-    if (key && sourceId && datasetId) ensureLoaded(key, sourceId, datasetId)
+    if (key && sourceId && datasetId) ensureLoaded(key, sourceId, datasetId, chain.current)
   }, [key, sourceId, datasetId])
 
   const reload = useCallback(() => {
@@ -175,7 +227,7 @@ export function useNeuronIndex(
     entry.reloads++
     entry.loading = false
     entry.state = NONE
-    ensureLoaded(key, sourceId, datasetId)
+    ensureLoaded(key, sourceId, datasetId, chain.current)
   }, [key, sourceId, datasetId])
 
   return { state, reload }

@@ -8,8 +8,8 @@
  * ("n.bodyId"), so a reordered RETURN silently reshapes the table.
  *
  * neuPrint's `/api/custom/custom` takes only `{cypher, dataset}` — there is no parameter
- * map — so every value is inlined and therefore must be escaped here. `escapeString` and
- * `numberList` are the only sanctioned ways to get a value into a query.
+ * map — so every value is inlined and therefore must be escaped here. `escapeString`,
+ * `stringList` and `idList` are the only sanctioned ways to get a value into a query.
  */
 
 import type {
@@ -21,7 +21,8 @@ import type {
   RoiCountsRequest,
   SynapseRequest,
 } from '../source'
-import { CORE_NEURON_COLUMNS } from './schema'
+import { isNeuronId } from '../../core/ids'
+import { CORE_NEURON_COLUMNS, neuprintProperty } from './schema'
 
 /**
  * A Cypher single-quoted string literal.
@@ -48,11 +49,21 @@ export function escapeIdentifier(name: string): string {
 }
 
 /**
- * A list literal of numbers. Anything non-finite is dropped rather than emitted as `NaN`,
- * which Cypher does not parse — a bad id should not take the whole query down with it.
+ * A list literal of ids, emitted as Cypher **integer** literals from their decimal text.
+ *
+ * Not a numeric list, and not `stringList` either — the two failures are opposite and both
+ * silent. `bodyId` is an integer property, so `1 IN ['1']` is false in Cypher and a quoted
+ * list matches nothing at all. And routing an id through `Number` first would round any id
+ * wider than `Number.MAX_SAFE_INTEGER` before it ever reached the string, which is the whole
+ * reason `NeuronId` is text. Splicing the digits through untouched means no float is ever
+ * formed, so this builder is exact for an id of any width the server can hold.
+ *
+ * Anything that is not a bare integer literal is dropped: one malformed id
+ * should not take the whole query down with it. Dropping rather than quoting also
+ * keeps the injection surface closed — nothing here can leave the digit grammar.
  */
-export function numberList(values: readonly number[]): string {
-  return `[${values.filter((v) => Number.isFinite(v)).join(',')}]`
+export function idList(values: readonly string[]): string {
+  return `[${values.filter(isNeuronId).join(',')}]`
 }
 
 function stringList(values: readonly string[]): string {
@@ -66,7 +77,7 @@ function stringList(values: readonly string[]): string {
  * the decoder matches this order against the schema's and throws on a count mismatch — but
  * an *order* change in one list alone would mis-map every row in silence.
  */
-const NEURON_COLUMNS = CORE_NEURON_COLUMNS.map((c) => `n.${c.name}`)
+const NEURON_COLUMNS = CORE_NEURON_COLUMNS.map((c) => `n.${neuprintProperty(c.name)}`)
 
 /**
  * Extra per-dataset properties appended to the standard seven.
@@ -93,7 +104,7 @@ const NEURON_COLUMNS = CORE_NEURON_COLUMNS.map((c) => `n.${c.name}`)
  * only true. `toLower(null)` is null as well, so the case-insensitive form needs no guard.
  */
 function labelClause(match: LabelMatch): string {
-  const prop = `n.${escapeIdentifier(match.field)}`
+  const prop = `n.${escapeIdentifier(neuprintProperty(match.field))}`
   if (match.regex) {
     // `(?i)` is Java's inline flag, which is what Neo4j's regex engine reads. Prefixed per
     // pattern rather than wrapped around a group, so an anchor the user wrote still applies
@@ -120,15 +131,16 @@ export function findNeuronsCypher(
   // Empty values matches nothing, so the caller is expected not to send one — see `LabelMatch`.
   if (req.labels && req.labels.values.length > 0) where.push(labelClause(req.labels))
   /*
-   * `numberList`, never `stringList`: `bodyId` is an integer property, and `1 IN ['1']` is false
-   * in Cypher — a string list here returns an empty result with no error to explain it.
+   * `idList`, never `stringList`: `bodyId` is an integer property, and `1 IN ['1']` is false
+   * in Cypher — a string list here returns an empty result with no error to explain it. Note
+   * that an id *arrives* as a string and is emitted unquoted; see `idList`.
    *
    * Present-and-empty produces `IN []`, which matches nothing. Deliberately unlike the label
    * clause above, which skips itself when empty and so reads an empty set as "no filter". That
    * is safe there only because the node guards it; relying on a caller's guard for a clause that
    * would otherwise return the entire dataset is not a trade worth repeating.
    */
-  if (req.bodyIds) where.push(`n.bodyId IN ${numberList(req.bodyIds)}`)
+  if (req.neuronIds) where.push(`n.bodyId IN ${idList(req.neuronIds)}`)
   if (req.statuses?.length) where.push(`n.status IN ${stringList(req.statuses)}`)
   if (req.minSize && req.minSize > 0) where.push(`n.size >= ${Math.floor(req.minSize)}`)
   // A neuron carries one boolean property per ROI it innervates, so presence is the test.
@@ -156,7 +168,7 @@ export function findNeuronsCypher(
  * total output weight.
  */
 export function connectivityCypher(req: ConnectivityRequest): string {
-  const ids = numberList(req.bodyIds)
+  const ids = idList(req.neuronIds)
   const pattern =
     req.direction === 'outputs'
       ? `MATCH (n:Neuron)-[w:ConnectsTo]->(p)\nWHERE n.bodyId IN ${ids}`
@@ -201,7 +213,7 @@ export function pathStepCypher(req: PathStepRequest): string {
 
   const clauses: string[] = []
   if (req.types?.length) clauses.push(`a.type IN ${stringList(req.types)}`)
-  if (req.bodyIds?.length) clauses.push(`a.bodyId IN ${numberList(req.bodyIds)}`)
+  if (req.neuronIds?.length) clauses.push(`a.bodyId IN ${idList(req.neuronIds)}`)
   // No frontier is not a query worth sending, and an absent WHERE would match the dataset.
   if (clauses.length === 0) clauses.push('false')
 
@@ -236,7 +248,7 @@ export function pathStepCypher(req: PathStepRequest): string {
 export function adjacencyCypher(req: AdjacencyRequest): string {
   return [
     'MATCH (a:Neuron)-[w:ConnectsTo]->(b:Neuron)',
-    `WHERE a.bodyId IN ${numberList(req.sourceIds)} AND b.bodyId IN ${numberList(req.targetIds)}`,
+    `WHERE a.bodyId IN ${idList(req.sourceIds)} AND b.bodyId IN ${idList(req.targetIds)}`,
     'RETURN a.bodyId, a.type, b.bodyId, b.type, w.weight',
   ].join('\n')
 }
@@ -251,14 +263,14 @@ export function adjacencyCypher(req: AdjacencyRequest): string {
 export function roiCountsCypher(req: RoiCountsRequest): string {
   return [
     'MATCH (n:Neuron)',
-    `WHERE n.bodyId IN ${numberList(req.bodyIds)}`,
+    `WHERE n.bodyId IN ${idList(req.neuronIds)}`,
     'RETURN n.bodyId, n.type, n.roiInfo',
     'ORDER BY n.bodyId',
   ].join('\n')
 }
 
 export function synapsesCypher(req: SynapseRequest): string {
-  const where = [`n.bodyId IN ${numberList(req.bodyIds)}`]
+  const where = [`n.bodyId IN ${idList(req.neuronIds)}`]
   if (req.polarity) where.push(`s.type = ${escapeString(req.polarity)}`)
   if (req.minWeight && req.minWeight > 0) where.push(`s.confidence >= ${req.minWeight}`)
   return [

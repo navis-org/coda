@@ -20,11 +20,11 @@ import { inferDType, parseDelimited } from './csv'
 
 describe('splitting', () => {
   it('reads a plain comma file with a header', () => {
-    const { table, delimiter, hasHeader } = parseDelimited('bodyId,type\n1,LC4\n2,LC6\n')
+    const { table, delimiter, hasHeader } = parseDelimited('neuronId,type\n1,LC4\n2,LC6\n')
     expect(delimiter).toBe(',')
     expect(hasHeader).toBe(true)
-    expect(table.schema.columns.map((c) => c.name)).toEqual(['bodyId', 'type'])
-    expect(table.data['bodyId']).toEqual([1, 2])
+    expect(table.schema.columns.map((c) => c.name)).toEqual(['neuronId', 'type'])
+    expect(table.data['neuronId']).toEqual([1, 2])
     expect(table.data['type']).toEqual(['LC4', 'LC6'])
   })
 
@@ -46,10 +46,10 @@ describe('splitting', () => {
   })
 
   it('strips a BOM rather than baking it into the first column name', () => {
-    // Excel writes one, it survives every editor, and the symptom is a `bodyId` that no
+    // Excel writes one, it survives every editor, and the symptom is a `neuronId` that no
     // column picker downstream ever matches.
-    const { table } = parseDelimited('﻿bodyId,type\n1,LC4\n')
-    expect(table.schema.columns[0]!.name).toBe('bodyId')
+    const { table } = parseDelimited('﻿neuronId,type\n1,LC4\n')
+    expect(table.schema.columns[0]!.name).toBe('neuronId')
   })
 })
 
@@ -70,9 +70,9 @@ describe('delimiter detection', () => {
   })
 
   it('falls back to a comma for a single-column file', () => {
-    const { table } = parseDelimited('bodyId\n1\n2\n')
-    expect(table.schema.columns.map((c) => c.name)).toEqual(['bodyId'])
-    expect(table.data['bodyId']).toEqual([1, 2])
+    const { table } = parseDelimited('neuronId\n1\n2\n')
+    expect(table.schema.columns.map((c) => c.name)).toEqual(['neuronId'])
+    expect(table.data['neuronId']).toEqual([1, 2])
   })
 })
 
@@ -99,6 +99,19 @@ describe('header detection', () => {
     expect(hasHeader).toBe(true)
     expect(table.schema.columns.map((c) => c.name)).toEqual(['type', 'type_2'])
     expect(table.length).toBe(1)
+  })
+
+  it('does not suffix one column onto another that already carries the name', () => {
+    /*
+     * The case a *counting* deduplicator gets wrong, and it was writing one: numbering
+     * occurrences turns `a, a, a_2` into `a, a_2, a_2` — a collision produced by the very
+     * function that exists to prevent one, and then a ragged table or a silently dropped column
+     * downstream. `uniqueName` probes for the first *free* name, so it cannot.
+     */
+    const { table } = parseDelimited('a,a,a_2\n1,2,3\n')
+    expect(table.schema.columns.map((c) => c.name)).toEqual(['a', 'a_2', 'a_2_2'])
+    expect(table.data.a_2).toEqual([2])
+    expect(table.data.a_2_2).toEqual([3])
   })
 })
 
@@ -145,7 +158,7 @@ describe('dtype inference', () => {
 
 describe('values', () => {
   it('reads a blank cell as null, never as zero', () => {
-    const { table } = parseDelimited('bodyId,pre\n1,5\n2,\n3,7\n')
+    const { table } = parseDelimited('neuronId,pre\n1,5\n2,\n3,7\n')
     expect(table.schema.columns[1]!.dtype).toBe('i64')
     expect(table.data['pre']).toEqual([5, null, 7])
   })

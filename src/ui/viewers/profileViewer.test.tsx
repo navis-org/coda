@@ -28,7 +28,7 @@ import { ProfileViewer } from './ProfileViewer'
 import { clearProfileCache } from './useNeuronProfile'
 
 const NEURONS = tableSchema(
-  column('bodyId', 'i64'),
+  column('neuronId', 'i64'),
   column('type', 'str'),
   column('instance', 'str'),
   column('status', 'str'),
@@ -38,15 +38,15 @@ const NEURONS = tableSchema(
 )
 
 const CONNECTIVITY = tableSchema(
-  column('bodyId', 'i64'),
-  column('bodyType', 'str'),
+  column('neuronId', 'i64'),
+  column('neuronType', 'str'),
   column('partnerId', 'i64'),
   column('partnerType', 'str'),
   column('weight', 'i64', 'synapses'),
 )
 
 const ROI_COUNTS = tableSchema(
-  column('bodyId', 'i64'),
+  column('neuronId', 'i64'),
   column('type', 'str'),
   column('roi', 'str'),
   column('pre', 'i64', 'synapses'),
@@ -58,7 +58,7 @@ function neurons(extra: Array<Record<string, CellValue>> = []) {
     NEURONS,
     [
       {
-        bodyId: 1,
+        neuronId: 1,
         type: 'CT1',
         instance: 'CT1_L',
         status: 'Traced',
@@ -67,7 +67,7 @@ function neurons(extra: Array<Record<string, CellValue>> = []) {
         post: 40,
       },
       {
-        bodyId: 2,
+        neuronId: 2,
         type: 'Tm9',
         instance: 'Tm9_R',
         status: 'Traced',
@@ -76,7 +76,7 @@ function neurons(extra: Array<Record<string, CellValue>> = []) {
         post: 30,
       },
       {
-        bodyId: 3,
+        neuronId: 3,
         type: 'T4a',
         instance: 'T4a_R',
         status: 'Traced',
@@ -91,21 +91,21 @@ function neurons(extra: Array<Record<string, CellValue>> = []) {
 }
 
 const INPUTS = tableFromRows(CONNECTIVITY, [
-  { bodyId: 1, bodyType: 'CT1', partnerId: 10, partnerType: 'Tm9', weight: 30 },
-  { bodyId: 1, bodyType: 'CT1', partnerId: 11, partnerType: 'Tm9', weight: 20 },
-  { bodyId: 1, bodyType: 'CT1', partnerId: 12, partnerType: 'Tm1', weight: 3 },
+  { neuronId: 1, neuronType: 'CT1', partnerId: 10, partnerType: 'Tm9', weight: 30 },
+  { neuronId: 1, neuronType: 'CT1', partnerId: 11, partnerType: 'Tm9', weight: 20 },
+  { neuronId: 1, neuronType: 'CT1', partnerId: 12, partnerType: 'Tm1', weight: 3 },
 ])
 
 const OUTPUTS = tableFromRows(CONNECTIVITY, [
-  { bodyId: 1, bodyType: 'CT1', partnerId: 20, partnerType: 'T5a', weight: 70 },
+  { neuronId: 1, neuronType: 'CT1', partnerId: 20, partnerType: 'T5a', weight: 70 },
 ])
 
 const REGIONS = tableFromRows(ROI_COUNTS, [
-  { bodyId: 1, type: 'CT1', roi: 'LO(R)', pre: 60, post: 30 },
-  { bodyId: 1, type: 'CT1', roi: 'ME(L)', pre: 20, post: 10 },
+  { neuronId: 1, type: 'CT1', roi: 'LO(R)', pre: 60, post: 30 },
+  { neuronId: 1, type: 'CT1', roi: 'ME(L)', pre: 20, post: 10 },
   // The parent of LO(R). Present in roiInfo and absent from primaryRois, so it must not be
   // summed — this is the row that makes the double-counting visible if the filter is dropped.
-  { bodyId: 1, type: 'CT1', roi: 'OL(R)', pre: 60, post: 30 },
+  { neuronId: 1, type: 'CT1', roi: 'OL(R)', pre: 60, post: 30 },
 ])
 
 const DATASET: DatasetInfo = {
@@ -280,14 +280,14 @@ describe('tiles', () => {
 
   it('shows the transmitter tile where the columns exist', () => {
     const schema = tableSchema(
-      column('bodyId', 'i64'),
+      column('neuronId', 'i64'),
       column('type', 'str'),
       column('consensusNt', 'str'),
       column('ntGabaProb', 'f64'),
     )
     view({
       neurons: tableFromRows(schema, [
-        { bodyId: 1, type: 'CT1', consensusNt: 'gaba', ntGabaProb: 0.66 },
+        { neuronId: 1, type: 'CT1', consensusNt: 'gaba', ntGabaProb: 0.66 },
       ]),
     })
     const tile = screen.getByText('Transmitter').closest('.tile')
@@ -409,5 +409,54 @@ describe('loading', () => {
     expect(screen.getByText('Connectivity')).toBeTruthy()
     expect(screen.getByText('Top input types')).toBeTruthy()
     await waitFor(() => expect(screen.getAllByText('Loading…').length).toBeGreaterThan(0))
+  })
+})
+
+describe('the annotation chain', () => {
+  /** Annotations over the same table — only the provenance key is read here. */
+  function chain(key: string) {
+    return { key, table: INPUTS }
+  }
+
+  it('rides along to the source, so a partner’s type is the one the ports carry', async () => {
+    const seen: unknown[] = []
+    registerSource(
+      stubSource({
+        fetchConnectivity: async (req) => {
+          seen.push(req.annotations)
+          return req.direction === 'inputs' ? INPUTS : OUTPUTS
+        },
+      }),
+    )
+    const annotations = chain('flytable|main|info')
+    view({ annotations })
+    await waitFor(() => expect(screen.getByTitle(/Tm9 — 50 synapses/)).toBeTruthy())
+
+    // Both directions, or half the card would name types from the datastack and half from the
+    // chain — which is worse than either on its own.
+    expect(seen).toEqual([annotations, annotations])
+  })
+
+  it('keys the cache by the chain, so two datasets do not share one answer', async () => {
+    let calls = 0
+    registerSource(
+      stubSource({
+        fetchConnectivity: async (req) => {
+          calls += 1
+          return req.direction === 'inputs' ? INPUTS : OUTPUTS
+        },
+      }),
+    )
+
+    const first = view({ annotations: chain('a') })
+    await waitFor(() => expect(screen.getByTitle(/Tm9 — 50 synapses/)).toBeTruthy())
+    const after = calls
+    first.unmount()
+
+    // Same source, same dataset, same neuron — a different chain. Without the chain in the key
+    // this answers from the first one's cache and shows the wrong labels for the session.
+    view({ annotations: chain('b') })
+    await waitFor(() => expect(screen.getByTitle(/Tm9 — 50 synapses/)).toBeTruthy())
+    expect(calls).toBeGreaterThan(after)
   })
 })

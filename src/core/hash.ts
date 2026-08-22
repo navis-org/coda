@@ -15,7 +15,7 @@
  * Serialised form of every array and object this has already seen.
  *
  * Keys are computed for the whole graph on every mutation, and the expensive input is an
- * Explore selection: at the documented `MAX_SELECT_ALL` of 10,000 body ids one param alone
+ * Explore selection: at the documented `MAX_SELECT_ALL` of 10,000 neuron ids one param alone
  * is ~130 kB of string to build and hash, twice per settled edit, on a keystroke that did
  * not touch it. `setNodeParam` spreads the params record but keeps the *array* reference for
  * every param it did not write, so an unrelated edit hits this memo.

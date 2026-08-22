@@ -5,13 +5,14 @@ import type { EmitContext } from '../types'
 /**
  * The neuron ids a Neurons input stands for.
  *
- * `$bodyId` rather than `[["bodyId"]]`: neuprintr returns data frames with a `bodyid` column
- * in some places and `bodyId` in others, so the *column name Coda uses* is the one to write,
- * and a partial-match `$` would quietly resolve `bodyId` to `bodyid` — which is why this is one
+ * `$neuronId` rather than `[["neuronId"]]`: neuprintr returns data frames with a `bodyid`
+ * column, so the *column name Coda uses* is the one to write — and `coda_neurons()` is what
+ * guarantees it is there. A partial-match `$` cannot resolve `neuronId` to `bodyid`, unlike the
+ * `bodyId`/`bodyid` pair this used to face, but the rule is the same and this is still one
  * expression in one place rather than written out per emitter.
  */
-export function bodyIds(frame: string): string {
-  return `${frame}$bodyId`
+export function neuronIds(frame: string): string {
+  return `${frame}$neuronId`
 }
 
 /** A viewer's `ids` selection param, as numbers. */

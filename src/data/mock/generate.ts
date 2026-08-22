@@ -9,7 +9,7 @@
  */
 
 export interface MockNeuron {
-  bodyId: number
+  neuronId: number
   type: string
   instance: string
   status: string
@@ -20,15 +20,15 @@ export interface MockNeuron {
 }
 
 export interface MockConnection {
-  /** Presynaptic (upstream) body id. */
+  /** Presynaptic (upstream) neuron id. */
   pre: number
-  /** Postsynaptic (downstream) body id. */
+  /** Postsynaptic (downstream) neuron id. */
   post: number
   weight: number
 }
 
 export interface MockRoiCount {
-  bodyId: number
+  neuronId: number
   roi: string
   pre: number
   post: number
@@ -45,11 +45,11 @@ export interface MockConnectome {
   neurons: MockNeuron[]
   connections: MockConnection[]
   roiCounts: MockRoiCount[]
-  /** bodyId -> neuron */
+  /** neuronId -> neuron */
   byId: Map<number, MockNeuron>
-  /** bodyId -> outgoing connections */
+  /** neuronId -> outgoing connections */
   out: Map<number, MockConnection[]>
-  /** bodyId -> incoming connections */
+  /** neuronId -> incoming connections */
   in: Map<number, MockConnection[]>
 }
 
@@ -681,7 +681,7 @@ function build(def: (typeof DEFINITIONS)[number]): MockConnectome {
       const statusRoll = rand()
       const status = statusRoll < 0.88 ? 'Traced' : statusRoll < 0.96 ? 'Anchor' : 'Assign'
       const neuron: MockNeuron = {
-        bodyId: idCursor,
+        neuronId: idCursor,
         type: spec.type,
         instance: `${spec.type}_${String(i + 1).padStart(2, '0')}(R)`,
         status,
@@ -706,11 +706,11 @@ function build(def: (typeof DEFINITIONS)[number]): MockConnectome {
         const targets = byType.get(tt.type) ?? []
         for (const a of sources) {
           for (const b of targets) {
-            if (a.bodyId === b.bodyId) continue
+            if (a.neuronId === b.neuronId) continue
             if (rand() >= rule.prob) continue
             connections.push({
-              pre: a.bodyId,
-              post: b.bodyId,
+              pre: a.neuronId,
+              post: b.neuronId,
               weight: skewed(rand, rule.weight),
             })
           }
@@ -720,7 +720,7 @@ function build(def: (typeof DEFINITIONS)[number]): MockConnectome {
   }
 
   // --- indices + synapse totals -------------------------------------------
-  const byId = new Map<number, MockNeuron>(neurons.map((n) => [n.bodyId, n]))
+  const byId = new Map<number, MockNeuron>(neurons.map((n) => [n.neuronId, n]))
   const out = new Map<number, MockConnection[]>()
   const inn = new Map<number, MockConnection[]>()
   const push = (map: Map<number, MockConnection[]>, key: number, c: MockConnection): void => {
@@ -757,7 +757,7 @@ function build(def: (typeof DEFINITIONS)[number]): MockConnectome {
       assignedPre += pre
       assignedPost += post
       roiCounts.push({
-        bodyId: n.bodyId,
+        neuronId: n.neuronId,
         roi,
         pre: Math.max(0, pre),
         post: Math.max(0, post),

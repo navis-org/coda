@@ -31,11 +31,11 @@ const TYPE = 'cluster.clustersToNeurons'
 
 function neurons(): TableValue {
   return tableFromRows(
-    tableSchema(column('bodyId', 'i64'), column('type', 'str')),
+    tableSchema(column('neuronId', 'i64'), column('type', 'str')),
     [
-      { bodyId: 11, type: 'LC4' },
-      { bodyId: 12, type: 'LC4' },
-      { bodyId: 21, type: 'LC6' },
+      { neuronId: 11, type: 'LC4' },
+      { neuronId: 12, type: 'LC4' },
+      { neuronId: 21, type: 'LC6' },
     ],
     'neurons',
   )
@@ -94,10 +94,10 @@ function draw(options: {
 
 describe('the labels-to-neurons readout', () => {
   it('says how many labels named nothing, which is what a wrong Match on looks like', () => {
-    // `bodyId` against a tree labelled by type: nothing matches, and the empty table alone
+    // `neuronId` against a tree labelled by type: nothing matches, and the empty table alone
     // says nothing about why.
     draw({
-      params: { matchColumn: 'bodyId' },
+      params: { matchColumn: 'neuronId' },
       labels: clusters(),
       neuronTable: neurons(),
       result: tableFromRows(neurons().schema, [], 'neurons'),
@@ -110,7 +110,7 @@ describe('the labels-to-neurons readout', () => {
       params: { matchColumn: 'type' },
       labels: clusters(),
       neuronTable: neurons(),
-      result: tableFromRows(neurons().schema, [{ bodyId: 11, type: 'LC4' }], 'neurons'),
+      result: tableFromRows(neurons().schema, [{ neuronId: 11, type: 'LC4' }], 'neurons'),
     })
     // LC4 and LC6 match; GONE does not.
     expect(screen.getByText(/1 matched nothing/)).toBeTruthy()
@@ -124,16 +124,16 @@ describe('the labels-to-neurons readout', () => {
       params: { matchColumn: 'type' },
       labels: all,
       neuronTable: neurons(),
-      result: tableFromRows(neurons().schema, [{ bodyId: 11, type: 'LC4' }], 'neurons'),
+      result: tableFromRows(neurons().schema, [{ neuronId: 11, type: 'LC4' }], 'neurons'),
     })
     expect(screen.queryByText(/matched nothing/)).toBeNull()
   })
 
-  it('counts labels that are not body ids when no neuron table is wired', () => {
+  it('counts labels that are not neuron ids when no neuron table is wired', () => {
     // The other way to get an empty result, and it wants a different fix — wire the table.
     draw({
       labels: clusters(),
-      result: tableFromRows(tableSchema(column('bodyId', 'i64')), [], 'neurons'),
+      result: tableFromRows(tableSchema(column('neuronId', 'i64')), [], 'neurons'),
     })
     expect(screen.getByText(/3 not an ID/)).toBeTruthy()
   })

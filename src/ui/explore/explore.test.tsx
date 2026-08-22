@@ -29,8 +29,10 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { availableColumns, makeInferContext } from '../../core/node'
 import type { ParamValue, ParamValues } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
+import type { TableSchema } from '../../core/types'
 import { T } from '../../core/types'
 import { MockSource } from '../../data/mock/MockSource'
+import type { Value } from '../../core/values'
 import { makeTable } from '../../core/values'
 import { column, tableSchema } from '../../core/types'
 import { MAX_SELECT_ALL } from '../../nodes/query/explore'
@@ -65,9 +67,9 @@ const DATASET = 'hemibrain-mini'
 function oversizedSource(): DataSource {
   const rows = MAX_SELECT_ALL + 1
   const index = makeTable(
-    tableSchema(column('bodyId', 'i64'), column('type', 'str')),
+    tableSchema(column('neuronId', 'i64'), column('type', 'str')),
     {
-      bodyId: Array.from({ length: rows }, (_, i) => 1000 + i),
+      neuronId: Array.from({ length: rows }, (_, i) => 1000 + i),
       type: Array.from({ length: rows }, (_, i) => (i % 2 ? 'KCg' : 'PN')),
     },
     'neurons',
@@ -105,7 +107,13 @@ afterEach(cleanup)
  * Render the widget against a live mock dataset, holding params in local state the way the
  * store would, so a param write is visible on the next render.
  */
-function setup(initial: ParamValues = {}, sourceId = 'mock') {
+function setup(
+  initial: ParamValues = {},
+  sourceId = 'mock',
+  inputValues?: Record<string, Value | undefined>,
+  /** The chain's schema on the dataset *type* — present the moment the wire is drawn. */
+  chainSchema?: TableSchema,
+) {
   const def = requireNodeDef('neuron.explore')
   const params: ParamValues = { ...defaults(def.params), ...initial }
   const writes: Array<[string, ParamValue]> = []
@@ -115,12 +123,15 @@ function setup(initial: ParamValues = {}, sourceId = 'mock') {
   function Harness() {
     const [current, setCurrent] = useState(params)
     external = (paramId, value) => setCurrent((held) => ({ ...held, [paramId]: value }))
-    const ctx = makeInferContext(def, current, { dataset: T.dataset(sourceId, DATASET) })
+    const ctx = makeInferContext(def, current, {
+      dataset: T.dataset(sourceId, DATASET, chainSchema),
+    })
     return (
       <ExploreBody
         node={{ id: 'n1', type: 'neuron.explore', position: { x: 0, y: 0 }, params: current }}
         ctx={ctx}
         compact={false}
+        {...(inputValues ? { inputValues } : {})}
         setParam={(id, value) => {
           writes.push([id, value])
           setCurrent((held) => ({ ...held, [id]: value }))
@@ -271,6 +282,38 @@ describe('ExploreBody', () => {
     await waitFor(() => expect(screen.getByText(/1 selected/)).toBeTruthy())
   })
 
+  it('writes a wide root id exactly, where a double would round it', async () => {
+    /*
+     * Invariant 8, in the widget. This was `Number(cell)`: an eighteen-digit CAVE root id went
+     * into the param as `…857200` and `rowsWithIds` matched it against nothing, so `Selected`
+     * came out empty while `Hits` — which never goes through the selection — worked. The
+     * checkbox looked right throughout, because the widget compared its own rounded id against
+     * its own rounded id and only the value crossing to `evaluate` was wrong.
+     */
+    const WIDE = '720575940628857210'
+    registerSource(
+      Object.assign(Object.create(new MockSource({ latencyMs: 0 })) as DataSource, {
+        id: 'mock-wide',
+        neuronIndex: async () =>
+          makeTable(
+            tableSchema(column('neuronId', 'str'), column('type', 'str')),
+            { neuronId: [WIDE, '720575940628857211'], type: ['LC4', 'LC6'] },
+            'neurons',
+          ),
+      }),
+    )
+
+    const { writes } = setup({}, 'mock-wide')
+    await waitFor(() => expect(rows().length).toBe(2))
+    fireEvent.click(within(rows()[0] as HTMLElement).getByRole('checkbox'))
+
+    const selection = writes.filter(([id]) => id === 'selection').at(-1)?.[1] as string[]
+    expect(selection).toEqual([WIDE])
+    // Not merely "18 digits": the rounded form differs in the last two, so an assertion on
+    // length or on a prefix would pass against the bug.
+    expect(selection[0]).not.toBe(String(Number(WIDE)))
+  })
+
   it('selects every neuron on the page', async () => {
     const { writes } = setup({ pageSize: 5 })
     await ready()
@@ -322,7 +365,7 @@ describe('ExploreBody', () => {
     // that is missing on big datasets.
     const { writes } = setup({ pageSize: 5 }, 'mock-huge')
     await ready()
-    await type('bodyId==1000')
+    await type('neuronId==1000')
 
     const button = screen.getByText('+ all') as HTMLButtonElement
     await waitFor(() => expect(button.disabled).toBe(false))
@@ -461,13 +504,99 @@ describe('ExploreBody', () => {
  * raising the byte ceiling from 128 kB to 2 MB: every neuron the old one turned down stayed a
  * placeholder through any number of reloads, because nothing asked again.
  */
+/**
+ * The annotation chain reaching the widget.
+ *
+ * It reaches the node's *ports* through `evaluate`, which has the values. The widget has only
+ * the inferred types, so the chain arrives one Run later — a labelling difference on a datastack
+ * with a neuron table, and the difference between working and not on one without, where the
+ * chain *is* the list.
+ */
+describe('an annotated dataset', () => {
+  const CHAIN = {
+    key: 'seaTable:base=main&table=info',
+    table: makeTable(
+      tableSchema(column('neuronId', 'i64'), column('lab', 'str')),
+      { neuronId: [1, 2], lab: ['ours', 'theirs'] },
+      'neurons',
+    ),
+  }
+
+  function annotatedSource(id: string): DataSource {
+    const base: DataSource = new MockSource({ latencyMs: 0 })
+    return Object.assign(Object.create(base) as DataSource, {
+      id,
+      // Answers only when the chain arrives — a datastack with no neuron table of its own.
+      neuronIndex: async (req: { annotations?: typeof CHAIN }) => {
+        if (!req.annotations) throw new Error('publishes no table listing its neurons')
+        return req.annotations.table
+      },
+    })
+  }
+
+  it('lists the chain’s neurons on a datastack that has none of its own', async () => {
+    registerSource(annotatedSource('mock-bare'))
+    setup({}, 'mock-bare', {
+      dataset: {
+        kind: 'dataset',
+        sourceId: 'mock-bare',
+        datasetId: DATASET,
+        label: 'bare',
+        annotations: CHAIN,
+      },
+    })
+    await waitFor(() => expect(screen.getByText(/2 neurons/)).toBeTruthy())
+  })
+
+  it('waits for the Run rather than downloading a list it is about to replace', async () => {
+    /*
+     * The type says a chain is wired the moment the wire is drawn; only the value carries its
+     * table. Loading anyway fetches the whole index under the unannotated key and again under
+     * the annotated one the instant a Run lands — and the first list carries the backend's
+     * labels, which is the gap the chain was wired to close.
+     */
+    let asked = 0
+    registerSource(
+      Object.assign(Object.create(new MockSource({ latencyMs: 0 })) as DataSource, {
+        id: 'mock-waits',
+        neuronIndex: async () => {
+          asked += 1
+          return makeTable(
+            tableSchema(column('neuronId', 'str')),
+            { neuronId: ['1'] },
+            'neurons',
+          )
+        },
+      }),
+    )
+
+    setup(
+      {},
+      'mock-waits',
+      undefined,
+      tableSchema(column('neuronId', 'str'), column('lab', 'str')),
+    )
+    await waitFor(() => expect(screen.getByText(/Press Run/)).toBeTruthy())
+    // Nothing fetched, and no refusal shown — this is a state, not a fault.
+    expect(asked).toBe(0)
+    expect(screen.queryByText(/publishes no table listing/)).toBeNull()
+  })
+})
+
 describe('thumbnail caching', () => {
-  const BODY = getConnectome(DATASET)!.neurons[0]!.bodyId
+  const BODY = getConnectome(DATASET)!.neurons[0]!.neuronId
   /** Displayed at 76, rasterised at 2x — the key carries the raster size. */
   const KEY = `thumb:mock:${DATASET}:${BODY}:152`
 
   function renderThumb(sourceId = 'mock') {
-    render(<NeuronThumbnail sourceId={sourceId} datasetId={DATASET} bodyId={BODY} size={76} />)
+    render(
+      <NeuronThumbnail
+        sourceId={sourceId}
+        datasetId={DATASET}
+        neuronId={String(BODY)}
+        size={76}
+      />,
+    )
   }
 
   it('ignores an entry written by an older encoder, refusals included', async () => {
@@ -515,13 +644,13 @@ describe('thumbnail caching', () => {
 describe('annotation chips', () => {
   const table = makeTable(
     tableSchema(
-      column('bodyId', 'i64'),
+      column('neuronId', 'i64'),
       column('type', 'str'),
       column('class', 'str'),
       column('somaSide', 'str'),
       column('rootSide', 'str'),
     ),
-    { bodyId: [1], type: ['DNp01'], class: ['descending'], somaSide: ['L'], rootSide: ['R'] },
+    { neuronId: [1], type: ['DNp01'], class: ['descending'], somaSide: ['L'], rootSide: ['R'] },
     'neurons',
   )
 
@@ -555,7 +684,7 @@ describe('annotation chips', () => {
     // is smaller, not a different set of fields; chips wrap.
     const maleCns = makeTable(
       tableSchema(
-        column('bodyId', 'i64'),
+        column('neuronId', 'i64'),
         column('type', 'str'),
         ...[
           'class',
@@ -568,7 +697,7 @@ describe('annotation chips', () => {
         ].map((n) => column(n, 'str')),
       ),
       {
-        bodyId: [1],
+        neuronId: [1],
         type: ['DNp01'],
         class: ['descending'],
         subclass: ['DN'],

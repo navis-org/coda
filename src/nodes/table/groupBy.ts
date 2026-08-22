@@ -40,7 +40,14 @@ export const groupByNode = registerNode({
       kind: 'column',
       label: 'Of column',
       from: 'in',
-      dtypes: NUMERIC_DTYPES,
+      /*
+       * Numeric for every aggregation but `join`, which takes text — a rule rather than a list,
+       * which is what keeps this one *stored* param. It was briefly two, made exclusive by
+       * `visibleIf`, and the split leaked immediately: the emitters were corrected to say "needs
+       * a value column" while `validate` here still said "numeric".
+       */
+      dtypes: (params) => (params.agg === 'join' ? undefined : NUMERIC_DTYPES),
+      help: 'For "join text": distinct values, joined with "; " in the order they first appear. Absences are skipped and a repeat is folded away — this cell is meant to be read.',
       default: '',
       visibleIf: (params) => params.agg !== 'count',
     },
@@ -60,7 +67,7 @@ export const groupByNode = registerNode({
     }
     const agg = String(ctx.params.agg ?? 'sum') as AggFn
     if (agg !== 'count' && !ctx.column('value')) {
-      return [`"${agg}" needs a numeric value column`]
+      return [`"${agg}" needs a value column`]
     }
     return []
   },

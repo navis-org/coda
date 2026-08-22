@@ -21,7 +21,7 @@ import {
 } from './datasetStats'
 
 const NEURON_SCHEMA = tableSchema(
-  column('bodyId', 'i64'),
+  column('neuronId', 'i64'),
   column('type', 'str'),
   column('class', 'str'),
   column('pre', 'i64'),
@@ -140,7 +140,7 @@ describe('attributeCounts', () => {
 describe('summaryAttributes', () => {
   it('picks the categorical columns a dataset actually has, in priority order', () => {
     const schema = tableSchema(
-      column('bodyId', 'i64'),
+      column('neuronId', 'i64'),
       column('class', 'str'),
       column('superclass', 'str'),
       column('pre', 'i64'),
@@ -215,18 +215,18 @@ describe('summaryAttributes', () => {
 
 describe('datasetTotals', () => {
   it('counts what the table has and stays silent about what it does not', () => {
-    // A table that has been through Select may carry nothing but a bodyId, and reporting zeros
+    // A table that has been through Select may carry nothing but a neuronId, and reporting zeros
     // there would read as measurements rather than as absences.
     const totals = datasetTotals(
       neurons([
-        { bodyId: 1, type: 'LC4', pre: 10, post: 20 },
-        { bodyId: 2, type: 'LC4', pre: 5, post: 1 },
-        { bodyId: 3, type: null, pre: null, post: 4 },
+        { neuronId: 1, type: 'LC4', pre: 10, post: 20 },
+        { neuronId: 2, type: 'LC4', pre: 5, post: 1 },
+        { neuronId: 3, type: null, pre: null, post: 4 },
       ]),
     )
     expect(totals).toEqual({ neurons: 3, typed: 2, distinctTypes: 1, pre: 15, post: 25 })
 
-    const bare = makeTable(tableSchema(column('bodyId', 'i64')), { bodyId: [1, 2] })
+    const bare = makeTable(tableSchema(column('neuronId', 'i64')), { neuronId: [1, 2] })
     expect(datasetTotals(bare)).toEqual({ neurons: 2 })
   })
 })

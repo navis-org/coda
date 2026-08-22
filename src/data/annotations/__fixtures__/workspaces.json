@@ -1,0 +1,45 @@
+{
+  "workspace_list": [
+    {
+      "name": "starred",
+      "type": "starred",
+      "table_list": [
+        {
+          "name": "main"
+        }
+      ]
+    },
+    {
+      "name": "shared",
+      "type": "shared",
+      "table_list": [
+        {
+          "name": "main"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "name": "Flywire",
+      "type": "group",
+      "table_list": [
+        {
+          "name": "main"
+        },
+        {
+          "name": "hemibrain"
+        }
+      ]
+    },
+    {
+      "id": 148,
+      "name": "aedeswt",
+      "type": "group",
+      "table_list": [
+        {
+          "name": "aedes"
+        }
+      ]
+    }
+  ]
+}

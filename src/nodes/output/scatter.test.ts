@@ -77,7 +77,7 @@ describe('out.scatter — types', () => {
     const inference = inferGraph(pipeline())
     for (const port of ['out', 'selected']) {
       const names = schemaOf(inference.nodes['plot']?.outputs[port])?.columns.map((c) => c.name)
-      expect(names, port).toContain('bodyId')
+      expect(names, port).toContain('neuronId')
       expect(names, port).toContain('pre')
     }
   })
@@ -119,7 +119,7 @@ describe('out.scatter — evaluate', () => {
     await scheduler.run(pipeline(), { mode: 'full' })
     const table = scheduler.output('find', 'neurons')
     if (!isTableValue(table)) throw new Error('expected a table')
-    const picked = [String(table.data['bodyId']?.[2]), String(table.data['bodyId']?.[5])]
+    const picked = [String(table.data['neuronId']?.[2]), String(table.data['neuronId']?.[5])]
 
     const second = makeScheduler()
     await second.run(pipeline({ selection: picked }), { mode: 'full' })
@@ -127,7 +127,7 @@ describe('out.scatter — evaluate', () => {
     if (!isTableValue(selected)) throw new Error('expected a table')
 
     expect(selected.length).toBe(2)
-    expect(selected.data['bodyId']?.map(String).sort()).toEqual([...picked].sort())
+    expect(selected.data['neuronId']?.map(String).sort()).toEqual([...picked].sort())
     // Full width, not just the id — the point is that Selected is usable downstream.
     expect(selected.schema.columns.length).toBe(table.schema.columns.length)
     expect(selected.kind).toBe('neurons')
@@ -144,8 +144,8 @@ describe('out.scatter — evaluate', () => {
     if (!isTableValue(all)) throw new Error('expected a table')
 
     expect(selected.length).toBe(2)
-    expect(selected.data['bodyId']?.[0]).toBe(all.data['bodyId']?.[0])
-    expect(selected.data['bodyId']?.[1]).toBe(all.data['bodyId']?.[3])
+    expect(selected.data['neuronId']?.[0]).toBe(all.data['neuronId']?.[0])
+    expect(selected.data['neuronId']?.[1]).toBe(all.data['neuronId']?.[3])
   })
 
   it('emits nothing rather than everything when nothing is selected', async () => {
@@ -156,14 +156,14 @@ describe('out.scatter — evaluate', () => {
     if (!isTableValue(selected)) throw new Error('expected a table')
     expect(selected.length).toBe(0)
     // Of the right schema, so a downstream column picker still populates.
-    expect(selected.schema.columns.map((c) => c.name)).toContain('bodyId')
+    expect(selected.schema.columns.map((c) => c.name)).toContain('neuronId')
   })
 
   it('keeps the table order, so two ways of picking the same set agree', async () => {
     await scheduler.run(pipeline(), { mode: 'full' })
     const table = scheduler.output('find', 'neurons')
     if (!isTableValue(table)) throw new Error('expected a table')
-    const ids = [String(table.data['bodyId']?.[4]), String(table.data['bodyId']?.[1])]
+    const ids = [String(table.data['neuronId']?.[4]), String(table.data['neuronId']?.[1])]
 
     const forwards = makeScheduler()
     await forwards.run(pipeline({ selection: ids }), { mode: 'full' })
@@ -173,7 +173,7 @@ describe('out.scatter — evaluate', () => {
     const a = forwards.output('plot', 'selected')
     const b = backwards.output('plot', 'selected')
     if (!isTableValue(a) || !isTableValue(b)) throw new Error('expected tables')
-    expect(a.data['bodyId']).toEqual(b.data['bodyId'])
+    expect(a.data['neuronId']).toEqual(b.data['neuronId'])
   })
 })
 
@@ -338,9 +338,9 @@ describe('out.scatter — an input whose schema is not known yet', () => {
     const messages = (warm.nodes['plot']?.issues ?? []).map((i) => i.message)
     // The mock has one status, so the pivot comes out one numeric column wide.
     expect(messages).toContain('Only "Traced" is numeric — X and Y would be the same column')
-    // And nothing about the ID column, which is optional: with no `bodyId` here it means
+    // And nothing about the ID column, which is optional: with no `neuronId` here it means
     // row positions, not drift to be reported.
-    expect(messages.some((m) => m.includes('bodyId'))).toBe(false)
+    expect(messages.some((m) => m.includes('neuronId'))).toBe(false)
   })
 })
 

@@ -19,6 +19,7 @@ import { ParamField } from '../params/ParamField'
 import { familyColorVar, socketStyle } from '../socketStyle'
 import { ValuePreview } from '../viewers/ValuePreview'
 
+
 export function Inspector() {
   const open = useGraphStore((s) => s.panels.inspector)
   const togglePanel = useGraphStore((s) => s.togglePanel)
@@ -28,6 +29,7 @@ export function Inspector() {
   const setParam = useGraphStore((s) => s.setParam)
   const runNode = useGraphStore((s) => s.runNode)
   const invalidateNode = useGraphStore((s) => s.invalidateNode)
+  const clearNodeCache = useGraphStore((s) => s.clearNodeCache)
   const expandNode = useGraphStore((s) => s.expandNode)
   const nodeInputs = useGraphStore((s) => s.nodeInputs)
   const setNotice = useGraphStore((s) => s.setNotice)
@@ -201,10 +203,22 @@ export function Inspector() {
               {info?.durationMs !== undefined && ` · ${formatDuration(info.durationMs)}`}
             </div>
             <div className="inspector__viewer">
+              {/*
+                * `summary`, so a table arrives as a text readout — one line per column with its
+                * type and the first row's value — rather than as a grid. This panel is 320 × 300,
+                * the smallest a viewer is drawn on, and a 60-column table there was three columns
+                * behind a sideways scrollbar. Turned ninety degrees the whole schema fits, which
+                * is what somebody selecting a node in the middle of a pipeline wants to see.
+                *
+                * Reading the table is the Table node's job and the overlay's. `compact` still
+                * travels, for the viewers that keep drawing themselves here.
+                */}
               <ValuePreview
                 node={node}
                 value={outputValue}
                 ctx={ctx}
+                compact
+                summary
                 baseName={exportBaseName(graphName, node.title ?? def.label)}
                 onExpand={() => expandNode(node.id)}
                 onError={setNotice}
@@ -220,11 +234,26 @@ export function Inspector() {
               <button
                 type="button"
                 className="btn btn--ghost"
-                title="Drop cached results here and downstream"
+                title="Drop the results here and downstream, so they are computed again"
                 onClick={() => invalidateNode(node.id)}
               >
                 Invalidate
               </button>
+              {/*
+                * Only where there is a second cache to clear. `dataCache` is the node's own
+                * declaration that it fetches through one *and* honours the flag, so a button
+                * cannot appear on a node that would ignore it.
+                */}
+              {def?.dataCache && (
+                <button
+                  type="button"
+                  className="btn btn--ghost"
+                  title="Forget the data this node downloaded, so the next run fetches it again"
+                  onClick={() => clearNodeCache(node.id)}
+                >
+                  Clear Cache
+                </button>
+              )}
             </div>
           </div>
         )}

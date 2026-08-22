@@ -185,7 +185,7 @@ export async function downloadNotebook(
   graph: CodaGraph,
   options: { now?: string; appVersion?: string } = {},
 ): Promise<{ ok: true; warnings: string[] } | ({ ok: false } & ExportRefusal)> {
-  const refusal = canExportNotebook(graph)
+  const refusal = canExportNotebook(graph, 'python')
   if (refusal) return { ok: false, ...refusal }
 
   const { exportNotebook, serializeNotebook } = await import('../export/python/exporter')
@@ -203,15 +203,15 @@ export async function downloadNotebook(
  * Save the working graph as an R Markdown document.
  *
  * The sibling of `downloadNotebook`, and lazy for the same measured reason — the R emitters are
- * a second chunk of inert string-building nobody loads unless they ask for it. The refusal is
- * checked first and comes from the same `canExportNotebook`, so the two formats cannot disagree
- * about which graphs are exportable.
+ * a second chunk of inert string-building nobody loads unless they ask for it. The refusal comes
+ * from the same `canExportNotebook`, asked for `'r'` — one policy, two answers, because the two
+ * exporters no longer cover the same backends.
  */
 export async function downloadRmd(
   graph: CodaGraph,
   options: { now?: string; appVersion?: string } = {},
 ): Promise<{ ok: true; warnings: string[] } | ({ ok: false } & ExportRefusal)> {
-  const refusal = canExportNotebook(graph)
+  const refusal = canExportNotebook(graph, 'r')
   if (refusal) return { ok: false, ...refusal }
 
   const { exportRmd } = await import('../export/r/exporter')

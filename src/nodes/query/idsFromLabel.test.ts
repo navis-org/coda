@@ -88,7 +88,7 @@ describe('IDs from Label', () => {
     expect(table.length).toBeGreaterThan(0)
     expect(typesIn(table)).toEqual(['T4a'])
     // The point of the node: ids, and every one of them distinct.
-    const ids = (table.data['bodyId'] ?? []).map(Number)
+    const ids = (table.data['neuronId'] ?? []).map(Number)
     expect(new Set(ids).size).toBe(ids.length)
   })
 
@@ -152,7 +152,7 @@ describe('IDs from Label', () => {
     const table = await run()
     expect(table.length).toBe(0)
     // Empty of the right shape, so downstream column pickers populate before anyone types.
-    expect(table.schema.columns.map((c) => c.name)).toContain('bodyId')
+    expect(table.schema.columns.map((c) => c.name)).toContain('neuronId')
   })
 
   it('matches on a field other than type', async () => {

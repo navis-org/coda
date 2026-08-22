@@ -8,6 +8,7 @@
 
 import { beforeAll, describe, expect, it } from 'vitest'
 
+import { DATASTACK_SPECS } from '../../data/cave/spec'
 import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import {
@@ -195,5 +196,34 @@ describe('deployment URLs', () => {
 
   it('labels a deployment by host', () => {
     expect(serverLabel('https://neuprint.janelia.org')).toBe('neuprint.janelia.org')
+  })
+})
+
+/*
+ * Two tables have to agree for a CAVE family to work at all, and nothing else checks it.
+ * `family.family` is the join key into `DATASTACK_SPECS`; get it wrong and `versionsFor` filters
+ * to nothing, `resolveDatasetId` answers undefined, the dropdown is empty and the node publishes
+ * no dataset id — with no error anywhere. Same tripwire idiom as the exporters' coverage tests.
+ */
+describe('CAVE families and datastack specs', () => {
+  it('name each other, both ways', () => {
+    const specs = DATASTACK_SPECS.map((s) => s.datastack).sort()
+    const families = DATASET_FAMILIES.filter((f) => f.sourceId === 'cave')
+      .map((f) => f.family)
+      .sort()
+    expect(families).toEqual(specs)
+  })
+
+  it('names a notebook client per language, since the two exporters differ here', () => {
+    /*
+     * The field is what both dataset emitter loops and `canExportNotebook` read, and it is per
+     * language because the exporters no longer cover the same backends: caveclient in Python,
+     * nothing in R. One flag for both would either refuse an export Python can produce or offer
+     * an R document of nothing but TODOs.
+     */
+    for (const family of DATASET_FAMILIES.filter((f) => f.sourceId === 'cave')) {
+      expect(family.notebook?.python).toBe('caveclient')
+      expect(family.notebook?.r).toBeUndefined()
+    }
   })
 })

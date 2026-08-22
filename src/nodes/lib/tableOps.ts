@@ -13,9 +13,18 @@
  */
 
 import type { ColumnSchema, DType, TableSchema } from '../../core/types'
-import { column, findColumn, isNumericDType, pickColumns, tableSchema } from '../../core/types'
+import {
+  column,
+  findColumn,
+  isNumericDType,
+  pickColumns,
+  tableSchema,
+  uniqueName,
+} from '../../core/types'
 import type { CellValue, ColumnData, MatrixValue, TableValue } from '../../core/values'
-import { getColumn, makeMatrix, makeTable, selectRows } from '../../core/values'
+import { JOIN_SEPARATOR, getColumn, makeMatrix, makeTable, selectRows } from '../../core/values'
+import { ID_COLUMN_NAME, idText } from '../../core/ids'
+import { TYPE_COLUMN_NAME } from '../../data/annotations/types'
 
 // ---------------------------------------------------------------------------
 // Filter
@@ -169,6 +178,117 @@ function makePredicate(
     default:
       throw new Error(`Operator "${op}" does not apply to text columns`)
   }
+}
+
+// ---------------------------------------------------------------------------
+// Row identity, shared
+// ---------------------------------------------------------------------------
+
+/**
+ * A string identifying one row by the given columns, for grouping or matching.
+ *
+ * Built in place rather than through a `map` and a `join`: this runs over whole neuron indexes —
+ * 165k rows on male-CNS — where that form allocates an array and a string per row.
+ *
+ * Two characters carry the rules and both matter. `\u0001` separates the columns, so `["ab","c"]`
+ * and `["a","bc"]` are different rows — the collision `uploads.ts` records for its own content
+ * address. `\u0000` stands for a *missing* value, so a null is not the four-letter string "null",
+ * which a `str` column of somebody's annotation base very plausibly contains. Written as escapes
+ * rather than as literal control characters, for `uploads.ts`' reason: a raw one is invisible to
+ * every reader and to `grep`.
+ *
+ * Compared as text, the `joinTables` rule — within one table a column has one dtype, so the only
+ * case that could bite is the null one above.
+ */
+export function rowKey(columns: ReadonlyArray<ColumnData>, row: number): string {
+  let key = ''
+  for (let k = 0; k < columns.length; k++) {
+    const cell = columns[k]![row]
+    if (k > 0) key += '\u0001'
+    key += cell === null || cell === undefined ? '\u0000' : String(cell)
+  }
+  return key
+}
+
+// ---------------------------------------------------------------------------
+// Deduplicate
+// ---------------------------------------------------------------------------
+
+/** Which row of a duplicate set survives. `pandas.drop_duplicates`' `keep`. */
+export type KeepMode = 'first' | 'last' | 'none'
+
+export const KEEP_OPTIONS: Array<{ value: KeepMode; label: string }> = [
+  { value: 'first', label: 'first' },
+  { value: 'last', label: 'last' },
+  { value: 'none', label: 'none (drop them all)' },
+]
+
+/** Deduplicating never changes the schema. */
+export function dedupeSchema(schema: TableSchema | undefined): TableSchema | undefined {
+  return schema
+}
+
+/**
+ * Drop rows that repeat, comparing on the named columns.
+ *
+ * **Empty means every column**, which is `pandas.drop_duplicates()`'s own default and `Select`'s
+ * reading of an empty picker: an unconfigured node compares whole rows, which is the answer to
+ * "this table has exact duplicates in it" and needs nothing set.
+ *
+ * **`none` drops every row of a repeated set, not one of them.** That is `keep=False`, and it
+ * answers a different question from the other two: `first`/`last` are "one row per neuron", where
+ * `none` is "only the neurons nobody disagrees about" — which on an annotation base is the
+ * conservative read, since a root id carrying two different `side` values is a conflict rather
+ * than a copy.
+ *
+ * **Row order is the input's**, whichever mode. A row kept because it was *last* stays where it
+ * was rather than moving to the end; pandas does the same, and a dedupe that also reordered would
+ * be two operations wearing one name.
+ */
+export function dedupeTable(
+  table: TableValue,
+  columns: readonly string[],
+  keep: KeepMode,
+): TableValue {
+  /*
+   * A named-but-absent column is refused rather than ignored, `groupByTable`'s rule: comparing on
+   * fewer columns than were asked for silently keeps *more* rows, and on a table whose upstream
+   * schema moved that reads as a dedupe that did not work.
+   */
+  const named = columns.filter((n) => findColumn(table.schema, n))
+  if (columns.length > 0 && named.length === 0) {
+    throw new Error(
+      `Deduplicate: none of the chosen columns are in this table (${columns.join(', ')})`,
+    )
+  }
+  const names = named.length > 0 ? named : table.schema.columns.map((c) => c.name)
+  const keyData = names.map((n) => getColumn(table, n))
+
+  // Built once. All three modes need every row's key, and two of them need a second pass over
+  // it, so recomputing would double the only expensive part of this.
+  const keys: string[] = new Array(table.length)
+  for (let i = 0; i < table.length; i++) keys[i] = rowKey(keyData, i)
+
+  const kept: number[] = []
+  if (keep === 'first') {
+    const seen = new Set<string>()
+    for (let i = 0; i < keys.length; i++) {
+      if (seen.has(keys[i]!)) continue
+      seen.add(keys[i]!)
+      kept.push(i)
+    }
+  } else if (keep === 'last') {
+    const lastAt = new Map<string, number>()
+    for (let i = 0; i < keys.length; i++) lastAt.set(keys[i]!, i)
+    // Walked forward again rather than reading the Map's values, whose order is
+    // *first*-occurrence — which would emit the kept rows in the wrong places.
+    for (let i = 0; i < keys.length; i++) if (lastAt.get(keys[i]!) === i) kept.push(i)
+  } else {
+    const counts = new Map<string, number>()
+    for (const key of keys) counts.set(key, (counts.get(key) ?? 0) + 1)
+    for (let i = 0; i < keys.length; i++) if (counts.get(keys[i]!) === 1) kept.push(i)
+  }
+  return selectRows(table, kept)
 }
 
 // ---------------------------------------------------------------------------
@@ -337,66 +457,96 @@ export function sampleTable(table: TableValue, spec: SampleSpec): TableValue {
 // ---------------------------------------------------------------------------
 
 /**
- * The name a neuron table has to use.
- *
- * Nodes address columns by name — `out.profile` validates on it, `idColumn()` above defaults
- * to it, Connectivity and Skeletons read it — so an uploaded file whose author called the
- * column `root_id` cannot meet neuron data until it is renamed. That rename is the whole
- * reason the upload node's ID column picker exists rather than merely tagging the type.
- */
-const ID_COLUMN_NAME = 'bodyId'
-
-/**
- * Whether a shaped upload carries a body id, and may therefore call itself Neurons.
+ * Whether a shaped upload carries a neuron id, and may therefore call itself Neurons.
  *
  * One predicate rather than the same condition written twice, because the schema half and the
  * value half must agree about the *kind* as strictly as they agree about the columns: a table
- * typed `neurons` whose values arrive as a plain table breaks every downstream node's bodyId
+ * typed `neurons` whose values arrive as a plain table breaks every downstream node's neuronId
  * guarantee only after a run.
  */
 export function uploadIsNeurons(schema: TableSchema | undefined, idColumn: string): boolean {
   return Boolean(idColumn) && Boolean(findColumn(schema, idColumn))
 }
 
-/** Rename the chosen id column, evicting a different column already holding the name. */
-function renamedColumns(names: readonly string[], idColumn: string): string[] {
-  if (!idColumn || !names.includes(idColumn)) return [...names]
-  const taken = new Set(names.filter((n) => n !== idColumn))
+/**
+ * Apply a set of renames, suffixing any column that merely already held a target name.
+ *
+ * `[from, to]` pairs rather than one id column, because there are two names Coda addresses a
+ * table by — `neuronId` and `type` — and they are applied in one pass so a column cannot be
+ * both the source of one rename and the collision victim of the other. The first pair naming
+ * a source wins, so the same column picked twice is the id rather than half of each.
+ */
+function renamedColumns(
+  names: readonly string[],
+  renames: ReadonlyArray<readonly [string, string]>,
+): string[] {
+  const from = new Map<string, string>()
+  for (const [source, target] of renames) {
+    if (source && names.includes(source) && !from.has(source)) from.set(source, target)
+  }
+  if (from.size === 0) return [...names]
+
+  const targets = new Set(from.values())
+  // Everything that survives untouched, so a suffix search never lands on one of them.
+  const taken = new Set(names.filter((n) => !from.has(n)))
   return names.map((name) => {
-    if (name === idColumn) return ID_COLUMN_NAME
+    const target = from.get(name)
+    if (target !== undefined) return target
     // The chosen column wins the name; a column that merely already had it is suffixed, the
     // same call `joinedColumns` and the wide pivot make about a collision.
-    if (name !== ID_COLUMN_NAME) return name
-    let n = 2
-    while (taken.has(`${ID_COLUMN_NAME}_${n}`)) n++
-    return `${ID_COLUMN_NAME}_${n}`
+    return targets.has(name) ? uniqueName(taken, name) : name
   })
 }
 
 /**
- * What an upload's stored table looks like once the node's two controls are applied.
+ * The two import nodes' controls, as one argument.
  *
- * Both are lossless by construction, which is what lets them be applied *after* parsing rather
- * than during it — so changing either costs no re-parse and cannot disagree with the rows the
- * uploads store already holds.
+ * An object rather than three positional arguments, because two of them are column names and
+ * a caller that swapped them would type-check, run, and rename the wrong column.
+ */
+export interface UploadShape {
+  /** Renamed to `neuronId`. Empty renames nothing. */
+  idColumn?: string
+  /** Renamed to `type`. Empty renames nothing. */
+  typeColumn?: string
+  /** Widened to `str`. */
+  textColumns?: readonly string[]
+}
+
+function renamesOf(shape: UploadShape): Array<readonly [string, string]> {
+  return [
+    [shape.idColumn ?? '', ID_COLUMN_NAME] as const,
+    [shape.typeColumn ?? '', TYPE_COLUMN_NAME] as const,
+  ]
+}
+
+/**
+ * What an import's table looks like once the node's controls are applied.
+ *
+ * All three are lossless by construction, which is what lets them be applied *after* parsing
+ * rather than during it — so changing any of them costs no re-parse and cannot disagree with
+ * the rows the uploads store already holds.
  *
  *  - `textColumns` widens a column to `str`. Widening only, and never the reverse: reading
  *    text as a number is where data is lost, and the parser's round-trip rule has already kept
  *    anything ambiguous as text. This is for a column that is genuinely numeric and genuinely
  *    not a *quantity* — a cluster label, a layer index — which has no business offering itself
  *    to a size encoding or being averaged.
- *  - `idColumn` renames one column to `bodyId`. See `ID_COLUMN_NAME`.
+ *  - `idColumn` renames one column to `neuronId`. See `ID_COLUMN_NAME`.
+ *  - `typeColumn` renames one column to `type`. See `TYPE_COLUMN_NAME`, and note that the two
+ *    are a pair rather than a symmetry: an id makes the table *Neurons*, where a type makes it
+ *    legible — `typesOf` reads `type` by literal name, so a chain publishing `cell_type` leaves
+ *    every connectivity row's type null with the schema still declaring it.
  */
 export function uploadShapeSchema(
   schema: TableSchema | undefined,
-  idColumn: string,
-  textColumns: readonly string[],
+  shape: UploadShape,
 ): TableSchema | undefined {
   if (!schema) return undefined
-  const text = new Set(textColumns)
+  const text = new Set(shape.textColumns ?? [])
   const names = renamedColumns(
     schema.columns.map((c) => c.name),
-    idColumn,
+    renamesOf(shape),
   )
   return {
     columns: schema.columns.map((c, i) =>
@@ -406,13 +556,9 @@ export function uploadShapeSchema(
   }
 }
 
-export function uploadShapeTable(
-  table: TableValue,
-  idColumn: string,
-  textColumns: readonly string[],
-): TableValue {
-  const schema = uploadShapeSchema(table.schema, idColumn, textColumns)!
-  const text = new Set(textColumns)
+export function uploadShapeTable(table: TableValue, shape: UploadShape): TableValue {
+  const schema = uploadShapeSchema(table.schema, shape)!
+  const text = new Set(shape.textColumns ?? [])
   const data: Record<string, ColumnData> = {}
   for (let i = 0; i < table.schema.columns.length; i++) {
     const from = table.schema.columns[i]!.name
@@ -424,7 +570,175 @@ export function uploadShapeTable(
       ? source.map((cell) => (cell === null ? null : String(cell)))
       : source
   }
-  return makeTable(schema, data, uploadIsNeurons(table.schema, idColumn) ? 'neurons' : 'table')
+  return makeTable(
+    schema,
+    data,
+    uploadIsNeurons(table.schema, shape.idColumn ?? '') ? 'neurons' : 'table',
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Combine columns
+// ---------------------------------------------------------------------------
+
+export interface CombineSpec {
+  /** The columns to draw from, in priority order. The first with a value wins. */
+  columns: readonly string[]
+  /** Name for the result. */
+  into: string
+  /** Column naming which input each value came from. Empty adds none. */
+  sourceColumn?: string
+}
+
+/**
+ * A cell that counts as absent.
+ *
+ * Null and the empty string are one absence, which is the call `datasetStats.ts` already makes
+ * and for the same reason: a base publishes both for one thing depending on how it was edited,
+ * so a coalesce stopping at the first `''` would answer "no type" for a neuron that has one two
+ * columns over. Whitespace is deliberately *not* trimmed — `" "` is odd data rather than absent
+ * data, and a trim rule invented here would drop it with nothing saying so.
+ */
+function absent(cell: CellValue): boolean {
+  return cell === null || cell === ''
+}
+
+/**
+ * The dtype a combined column takes: the shared one, or `str`.
+ *
+ * Widening rather than refusing, which is the opposite of `stackColumns` and the difference is
+ * real. A stack meeting two dtypes under one name has found two different columns wearing it;
+ * here the picker *is* somebody saying these columns hold one fact, so the honest merge keeps
+ * every value — and `str` keeps all of them, the same trade `textColumns` makes. `i64` with
+ * `f64` is the one pair that reconciles without leaving numbers behind.
+ */
+function combinedDType(schema: TableSchema | undefined, columns: readonly string[]): DType {
+  const found = columns
+    .map((n) => findColumn(schema, n)?.dtype)
+    .filter((d): d is DType => d !== undefined)
+  if (found.length === 0) return 'str'
+  // `mergedDType` is the one statement of "can these two reconcile" — the same question
+  // `stackColumns` asks. What differs is only what each caller does with a *no*: a stack has
+  // found two different columns wearing one name and refuses, where this picker is somebody
+  // saying these hold one fact, so it widens to the type that keeps every value.
+  return found.reduce((a, b) => mergedDType(a, b) ?? 'str')
+}
+
+export interface CombineLayout {
+  /** One output name per input column, in order. */
+  renamed: string[]
+  /** Whether the result takes an existing column's place rather than being appended. */
+  replaced: boolean
+  /** The source column's final name, once a collision has been settled. */
+  sourceName?: string
+}
+
+/**
+ * Where the result sits, and what happens to a column already holding its name.
+ *
+ * Two clauses. **A result named after one of the picked columns replaces it in place**, which
+ * is the backfill case and the common one: `[cell_type, hemibrain_type] → cell_type` should
+ * leave a table with exactly the columns it arrived with. Otherwise the result is appended
+ * last, and any *other* column already holding the name is suffixed rather than overwritten —
+ * `renamedColumns`' rule, and `joinedColumns`' before it.
+ */
+export function combineLayout(names: readonly string[], spec: CombineSpec): CombineLayout {
+  const replaced = spec.columns.includes(spec.into)
+  const taken = new Set(names)
+  const renamed = replaced
+    ? [...names]
+    : names.map((name) => (name === spec.into ? uniqueName(taken, name) : name))
+  taken.add(spec.into)
+
+  // Appended last, and a collision suffixed, on `stackColumns`' reasoning: it is this node's
+  // annotation about the table rather than part of it.
+  const sourceName = spec.sourceColumn ? uniqueName(taken, spec.sourceColumn) : undefined
+  return { renamed, replaced, sourceName }
+}
+
+/**
+ * Everything both halves need, derived once.
+ *
+ * The schema half and the value half were each computing `combinedDType` and `combineLayout`
+ * from the same inputs — two derivations of one answer that nothing checked against each other,
+ * which is the drift invariant 3 exists to prevent, inside a single op. Undefined where there is
+ * nothing to do, which is what makes both entry points a one-line guard.
+ */
+export interface CombinePlan extends CombineLayout {
+  schema: TableSchema
+  dtype: DType
+}
+
+export function combinePlan(
+  schema: TableSchema | undefined,
+  spec: CombineSpec,
+): CombinePlan | undefined {
+  if (!schema || !spec.into || spec.columns.length === 0) return undefined
+
+  const dtype = combinedDType(schema, spec.columns)
+  const layout = combineLayout(
+    schema.columns.map((c) => c.name),
+    spec,
+  )
+  const columns: ColumnSchema[] = schema.columns.map((c, i) =>
+    // The unit does not survive: the values now come from several columns, and one of them
+    // carrying nanometres says nothing about the result.
+    layout.replaced && c.name === spec.into
+      ? column(spec.into, dtype)
+      : { ...c, name: layout.renamed[i]! },
+  )
+  if (!layout.replaced) columns.push(column(spec.into, dtype))
+  if (layout.sourceName) columns.push(column(layout.sourceName, 'str'))
+  return { ...layout, schema: { columns }, dtype }
+}
+
+export function combineSchema(
+  schema: TableSchema | undefined,
+  spec: CombineSpec,
+): TableSchema | undefined {
+  return combinePlan(schema, spec)?.schema ?? schema
+}
+
+export function combineTable(table: TableValue, spec: CombineSpec): TableValue {
+  const plan = combinePlan(table.schema, spec)
+  if (!plan) return table
+
+  /*
+   * Only the columns the table actually has, and a missing one is skipped rather than refused:
+   * this is a coalesce, so a name the schema lost is one fewer place to look rather than a
+   * question that can no longer be answered. `groupByTable` refuses the same case because
+   * grouping on fewer columns silently keeps *more* rows; here it keeps fewer values, which
+   * the result column shows.
+   */
+  const sources = spec.columns
+    .filter((n) => findColumn(table.schema, n))
+    .map((n) => ({ name: n, data: getColumn(table, n) }))
+
+  const values: CellValue[] = new Array(table.length).fill(null)
+  // Only where one was asked for. Unset is the default, and this is a whole extra column's
+  // worth of allocation and one store per row on tables that run to six figures.
+  const from: CellValue[] | undefined = plan.sourceName
+    ? new Array<CellValue>(table.length).fill(null)
+    : undefined
+  for (let row = 0; row < table.length; row++) {
+    for (const source of sources) {
+      const cell = source.data[row] ?? null
+      if (absent(cell)) continue
+      values[row] = plan.dtype === 'str' && typeof cell !== 'string' ? String(cell) : cell
+      if (from) from[row] = source.name
+      break
+    }
+  }
+
+  const data: Record<string, ColumnData> = {}
+  table.schema.columns.forEach((c, i) => {
+    data[plan.renamed[i]!] = getColumn(table, c.name)
+  })
+  // After the pass above, so a replaced column takes the result rather than keeping its own.
+  data[spec.into] = values
+  if (plan.sourceName && from) data[plan.sourceName] = from
+
+  return makeTable(plan.schema, data, table.kind)
 }
 
 // ---------------------------------------------------------------------------
@@ -449,7 +763,7 @@ export function selectTable(table: TableValue, names: string[]): TableValue {
   return makeTable(
     schema,
     data,
-    table.kind === 'neurons' && wanted.includes('bodyId') ? 'neurons' : 'table',
+    table.kind === 'neurons' && wanted.includes('neuronId') ? 'neurons' : 'table',
   )
 }
 
@@ -476,7 +790,7 @@ export interface DTypeConflict {
  *
  * `i64` and `f64` widen to `f64` without comment: those are the same kind of thing, and a count
  * stacked onto a ratio is still a number. Everything else is a genuine disagreement about what
- * the column *is* — `bodyId` as a number in one table and text in the other is two different
+ * the column *is* — `neuronId` as a number in one table and text in the other is two different
  * columns wearing one name, and merging them either way would be a decision this node has no
  * grounds to make.
  */
@@ -612,7 +926,7 @@ export function stackTables(
 
   /*
    * Neurons only when *both* inputs are. A neuron table stacked onto a plain one that happens to
-   * carry a `bodyId` is not a neuron table: the plain one never claimed its ids were neurons of
+   * carry a `neuronId` is not a neuron table: the plain one never claimed its ids were neurons of
    * this dataset, and a `neurons` kind is exactly that claim.
    */
   const kind = top.kind === 'neurons' && bottom.kind === 'neurons' ? 'neurons' : 'table'
@@ -623,7 +937,7 @@ export function stackTables(
 // Group by + aggregate
 // ---------------------------------------------------------------------------
 
-export type AggFn = 'sum' | 'mean' | 'min' | 'max' | 'count' | 'countDistinct'
+export type AggFn = 'sum' | 'mean' | 'min' | 'max' | 'count' | 'countDistinct' | 'join'
 
 export const AGG_OPTIONS: Array<{ value: AggFn; label: string }> = [
   { value: 'sum', label: 'sum' },
@@ -632,7 +946,20 @@ export const AGG_OPTIONS: Array<{ value: AggFn; label: string }> = [
   { value: 'max', label: 'max' },
   { value: 'count', label: 'count rows' },
   { value: 'countDistinct', label: 'count distinct' },
+  { value: 'join', label: 'join text' },
 ]
+
+/**
+ * The aggregations a **matrix** can hold, which is not all of them.
+ *
+ * A `MatrixValue` cell is a `Float64Array` slot, so `core.pivot` can only offer aggregations
+ * whose result is a number. Derived from `aggDType` rather than listed, so a future text
+ * aggregation is excluded by arriving rather than by somebody remembering this line — the
+ * failure otherwise is a dropdown entry that produces a matrix of zeroes.
+ */
+export const NUMERIC_AGG_OPTIONS: Array<{ value: AggFn; label: string }> = AGG_OPTIONS.filter(
+  (option) => isNumericDType(aggDType(option.value, undefined)),
+)
 
 /** Name of the column an aggregation produces. Kept in one place so both halves agree. */
 export function aggColumnName(agg: AggFn, valueColumn: string | undefined): string {
@@ -644,6 +971,8 @@ export function aggColumnName(agg: AggFn, valueColumn: string | undefined): stri
 function aggDType(agg: AggFn, source: DType | undefined): DType {
   if (agg === 'count' || agg === 'countDistinct') return 'i64'
   if (agg === 'mean') return 'f64'
+  // `join` is the one aggregation whose result is not a number, whatever it was given.
+  if (agg === 'join') return 'str'
   return source && isNumericDType(source) ? source : 'f64'
 }
 
@@ -660,7 +989,9 @@ export function groupBySchema(
   const out: ColumnSchema[] = [...keyColumns, column('n', 'i64')]
   if (agg !== 'count') {
     const src = valueColumn ? findColumn(schema, valueColumn) : undefined
-    const unit = src?.unit
+    // A unit belongs to a quantity: `join` produces text, so nanometres joined with semicolons
+    // are no longer nanometres — the call `textColumns` makes one op over.
+    const unit = agg === 'join' ? undefined : src?.unit
     out.push(
       unit
         ? column(aggColumnName(agg, valueColumn), aggDType(agg, src?.dtype), unit)
@@ -694,22 +1025,14 @@ export function groupByTable(
     min: number
     max: number
     distinct?: Set<string>
+    texts?: Set<string>
   }
   const buckets = new Map<string, Bucket>()
 
   for (let i = 0; i < table.length; i++) {
-    /*
-     * Concatenated in place rather than through two `map`s and a `join`. This is the one loop
-     * here that runs over a whole neuron index — 165k rows on male-CNS — where the old form
-     * allocated two arrays and a string per row; and `keys` was only ever read when a *new*
-     * bucket appeared, so it is materialised in that branch instead of for every row.
-     */
-    let hash = ''
-    for (let k = 0; k < keyData.length; k++) {
-      const cell = keyData[k]![i]
-      if (k > 0) hash += '\u0001'
-      hash += cell === null || cell === undefined ? '\u0000' : String(cell)
-    }
+    // `keys` is only ever read when a *new* bucket appears, so it is materialised in that
+    // branch rather than for every row.
+    const hash = rowKey(keyData, i)
     let bucket = buckets.get(hash)
     if (!bucket) {
       bucket = {
@@ -719,6 +1042,7 @@ export function groupByTable(
         min: Number.POSITIVE_INFINITY,
         max: Number.NEGATIVE_INFINITY,
         ...(agg === 'countDistinct' ? { distinct: new Set<string>() } : {}),
+        ...(agg === 'join' ? { texts: new Set<string>() } : {}),
       }
       buckets.set(hash, bucket)
     }
@@ -727,6 +1051,21 @@ export function groupByTable(
       const raw = valueData[i]
       if (agg === 'countDistinct') {
         bucket.distinct!.add(raw === null || raw === undefined ? '\u0000' : String(raw))
+      } else if (agg === 'join') {
+        /*
+         * **Distinct**, in first-appearance order, absences skipped.
+         *
+         * A `Set` rather than an array, and that is the departure from `string_agg` /
+         * `paste(collapse=)`. This cell exists to be *read* — it is what a community-annotation
+         * table folds into, and two people adding the same tag is the ordinary case there — so a
+         * repeat is noise in every use this has. Leaving it to a Deduplicate upstream was the
+         * first call and the wrong one: it puts a node on the main path to remove something
+         * nobody wanted. Exact string match, deliberately: `DA?` and `da?` are different text
+         * somebody typed, and folding them would be an editorial decision this cannot make.
+         *
+         * JS `Set` iterates in insertion order, which is what keeps "first appearance" true.
+         */
+        if (raw !== null && raw !== undefined && raw !== '') bucket.texts!.add(String(raw))
       } else if (raw !== null && raw !== undefined) {
         const v = Number(raw)
         if (Number.isFinite(v)) {
@@ -750,7 +1089,12 @@ export function groupByTable(
       data[name]!.push(bucket.keys[idx] ?? null)
     })
     data['n']!.push(bucket.n)
-    if (agg !== 'count') {
+    if (agg === 'join') {
+      // Empty rather than an empty string: a neuron nobody tagged has no tags, which is an
+      // absence, and `String(null)` is the four-letter word every picker downstream would read
+      // as a value.
+      data[outName]!.push(bucket.texts!.size ? [...bucket.texts!].join(JOIN_SEPARATOR) : null)
+    } else if (agg !== 'count') {
       let value: number
       switch (agg) {
         case 'sum':
@@ -1017,7 +1361,7 @@ export function pivotTable(
  * ordering, one pass over the data.
  *
  * Two things follow from a matrix axis being labels rather than data. `labelColumn` is `str`
- * even when it was pivoted from `bodyId` — harmless downstream, since `joinTables` keys on
+ * even when it was pivoted from `neuronId` — harmless downstream, since `joinTables` keys on
  * `String(cell)` and so still joins it back against the numeric column it came from. And a
  * missing pair reads as 0 here exactly as it does in the matrix, rather than as null: the
  * absent cell is what `pivotTable` already decided, and disagreeing about it in the table half
@@ -1047,13 +1391,6 @@ export function matrixToTable(matrix: MatrixValue, labelColumn: string): TableVa
 }
 
 /** First free name, so a column label colliding with the row field keeps both columns. */
-function uniqueName(taken: Set<string>, name: string): string {
-  let out = name
-  for (let n = 2; taken.has(out); n++) out = `${name}_${n}`
-  taken.add(out)
-  return out
-}
-
 function labelOf(cell: CellValue | undefined): string {
   return cell === null || cell === undefined ? '—' : String(cell)
 }
@@ -1127,26 +1464,34 @@ export function normalizeMatrix(matrix: MatrixValue, mode: NormalizeMode): Matri
 // Misc
 // ---------------------------------------------------------------------------
 
-/** Pull a numeric id column out as a plain array — the bridge into DataSource calls. */
-export function idColumn(table: TableValue, columnName = 'bodyId'): number[] {
+/**
+ * Pull an id column out as exact decimal strings — the bridge into DataSource calls.
+ *
+ * The per-cell rule is `idText` in `core/ids.ts`; see there for why a wide id cannot be a
+ * number. This adds only what is about the *column*: a cell that is not an id is skipped, as
+ * a null always has been, rather than throwing. Skipping is the rule `idList.ts` records — a
+ * wired column is *data*, and refusing to run because one upstream row carried a bad id would
+ * be unusable. What a caller loses is counted by comparing the result's length against the
+ * table's, which is what the Input IDs card does.
+ */
+export function idColumn(table: TableValue, columnName = ID_COLUMN_NAME): string[] {
   const data = getColumn(table, columnName)
-  const out: number[] = []
+  const out: string[] = []
   for (const cell of data) {
-    if (cell === null || cell === undefined) continue
-    const n = Number(cell)
-    if (Number.isFinite(n)) out.push(n)
+    const id = idText(cell)
+    if (id !== null) out.push(id)
   }
   return out
 }
 
 /** Schema for a single-column table of ids, used by stub/passthrough paths. */
-export const ID_ONLY_SCHEMA: TableSchema = tableSchema(column('bodyId', 'i64'))
+export const ID_ONLY_SCHEMA: TableSchema = tableSchema(column(ID_COLUMN_NAME, 'i64'))
 
 /**
  * Rows whose id column appears in a selection.
  *
  * Compared as strings because an `ids` param is a string array — it has to be, since that is
- * what survives a round trip through the saved file — while `bodyId` is `i64`. That rule was
+ * what survives a round trip through the saved file — while `neuronId` is `i64`. That rule was
  * written out three times, in Explore, Profile and the 3D viewer, each with its own copy of
  * the column-by-column materialisation `selectRows` already does.
  *
@@ -1157,7 +1502,7 @@ export function rowsWithIds(
   table: TableValue,
   selection: unknown,
   kind: TableValue['kind'] = 'neurons',
-  columnName = 'bodyId',
+  columnName = ID_COLUMN_NAME,
 ): TableValue {
   const wanted = new Set((Array.isArray(selection) ? selection : []).map(String))
   const rows: number[] = []

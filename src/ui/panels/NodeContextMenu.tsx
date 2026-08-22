@@ -1,6 +1,6 @@
 import { useRef } from 'react'
 
-import { isAnnotation } from '../../core/registry'
+import { getNodeDef, isAnnotation } from '../../core/registry'
 import { useGraphStore } from '../../store/graphStore'
 import { useDismissOnOutside } from '../useDismiss'
 
@@ -29,6 +29,7 @@ export function NodeContextMenu({ screenPosition, nodeId, onClose }: NodeContext
    * un-collapse from. Duplicate and Delete are the whole menu for a text note.
    */
   const dataflow = !isAnnotation(node.type)
+  const def = getNodeDef(node.type)
 
   const act = (fn: () => void) => () => {
     fn()
@@ -57,11 +58,26 @@ export function NodeContextMenu({ screenPosition, nodeId, onClose }: NodeContext
           <button
             type="button"
             className="context-menu__item"
-            title="Drop cached results here and downstream, forcing a re-fetch"
+            title="Drop the results here and downstream, so they are computed again"
             onClick={act(() => store.invalidateNode(nodeId))}
           >
-            Invalidate cache
+            Invalidate Results
           </button>
+          {/*
+            * The second layer, and only on a node that has one. The title above used to say
+            * "forcing a re-fetch", which was the false half: a node fetching through
+            * `loadCachedTable` re-ran from IndexedDB in milliseconds with the same bytes.
+            */}
+          {def?.dataCache && (
+            <button
+              type="button"
+              className="context-menu__item"
+              title="Forget the data this node downloaded, so the next run fetches it again"
+              onClick={act(() => store.clearNodeCache(nodeId))}
+            >
+              Clear Cache
+            </button>
+          )}
           <div className="context-menu__sep" />
           <button
             type="button"

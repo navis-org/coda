@@ -15,6 +15,8 @@ import type { CompanionSpec } from '../../core/companion'
 import { registerNode } from '../../core/registry'
 import { T } from '../../core/types'
 import type { DatasetValue } from '../../core/values'
+import { ID_COLUMN_NAME, idText } from '../../core/ids'
+import { peekRootCheck, startRootCheck } from '../../data/cave/rootIds'
 import { getSource } from '../../data/source'
 import { neuPrintSourceFor } from '../../data/neuprint/registry'
 import {
@@ -24,26 +26,27 @@ import {
   sourceIdForServer,
 } from '../../data/neuprint/servers'
 import type { DatasetFamily } from '../lib/datasetFamilies'
-import { DATASET_FAMILIES, resolveDatasetId, versionsFor } from '../lib/datasetFamilies'
+import {
+  BACKENDS,
+  DATASET_FAMILIES,
+  familyLabel,
+  resolveDatasetId,
+  versionsFor,
+} from '../lib/datasetFamilies'
+import { DATASTACK_SPECS, datasetIdFor, registerDatastackSpec } from '../../data/cave/spec'
+import { materializationsFor, peekMaterializations } from '../../data/cave/datastack'
+import {
+  ANNOTATIONS_INPUT,
+  annotationIssues,
+  annotationSchemaFrom,
+  annotationsFrom,
+} from '../lib/annotationParams'
+import { refreshParam } from '../../core/node'
 
-/**
- * The `refresh` nonce every dataset node carries.
- *
- * Cache keys are provenance, so nothing downstream can see that a server's data changed. This is
- * the sanctioned escape hatch, and it is `advanced` because bumping it by hand is not the point —
- * the node body has a button.
- */
-const REFRESH_PARAM = {
-  id: 'refresh',
-  kind: 'int',
-  label: 'Refresh',
-  help: 'Forces a re-fetch even when nothing else changed. Cache keys are provenance-based and cannot see server-side changes.',
-  default: 0,
-  min: 0,
-  advanced: true,
-  // Machinery: the node body's reload button writes it. See `ParamBase.internal`.
-  internal: true,
-} as const
+/** The `refresh` nonce every dataset node carries. See `refreshParam`. */
+const REFRESH_PARAM = refreshParam(
+  'Forces a re-fetch even when nothing else changed. Cache keys are provenance-based and cannot see server-side changes.',
+)
 
 /**
  * The Description card every published dataset arrives with.
@@ -65,7 +68,10 @@ const DESCRIPTION_COMPANION: CompanionSpec = {
 function buildDatasetNode(family: DatasetFamily) {
   return registerNode({
     type: `dataset.${family.key}`,
-    label: family.label,
+    // The backend is part of the name, because one dataset can be published on more than one and
+    // they do not behave alike — see `familyLabel`. The *type id* is untouched: it is what a
+    // saved graph carries, and renaming one would drop the node from every file that has it.
+    label: familyLabel(family),
     category: 'dataset',
     description: family.description,
     guide: family.guide,
@@ -73,6 +79,8 @@ function buildDatasetNode(family: DatasetFamily) {
     // Cheap: it only resolves metadata, so switching version updates every downstream column
     // picker instantly while the actual queries stay stale until Run.
     cost: 'cheap',
+    // Only the backends whose labels come from a table — see `DatasetBackend.acceptsAnnotations`.
+    ...(BACKENDS[family.backend]?.acceptsAnnotations ? { inputs: [ANNOTATIONS_INPUT] } : {}),
     outputs: [{ id: 'dataset', label: 'Dataset', type: T.dataset() }],
     params: [
       {
@@ -100,7 +108,11 @@ function buildDatasetNode(family: DatasetFamily) {
     ],
 
     inferOutputs: (ctx) => ({
-      dataset: T.dataset(family.sourceId, resolveDatasetId(family, ctx.params.version)),
+      dataset: T.dataset(
+        family.sourceId,
+        resolveDatasetId(family, ctx.params.version),
+        annotationSchemaFrom(ctx.inputs.annotations),
+      ),
     }),
 
     validate: (ctx) => {
@@ -113,10 +125,13 @@ function buildDatasetNode(family: DatasetFamily) {
       const chosen = String(ctx.params.version ?? '')
       if (chosen && !versions.some((v) => v.version === chosen)) {
         return [
-          `${family.label} ${chosen} is not on this server — it offers ${versions.map((v) => v.version).join(', ')}`,
+          `${familyLabel(family)} ${chosen} is not on this server — it offers ${versions.map((v) => v.version).join(', ')}`,
         ]
       }
-      return []
+      return [
+        ...annotationIssues(ctx.inputs.annotations),
+        ...rootDriftIssues(resolveDatasetId(family, ctx.params.version)),
+      ]
     },
 
     evaluate: async (ctx) => {
@@ -127,7 +142,7 @@ function buildDatasetNode(family: DatasetFamily) {
       const info = datasets.find((d) => d.id === datasetId)
       if (!info) {
         throw new Error(
-          `${family.label}: no dataset "${datasetId ?? '(none)'}" on ${source.label}. Available: ${datasets.map((d) => d.id).join(', ')}`,
+          `${familyLabel(family)}: no dataset "${datasetId ?? '(none)'}" on ${source.label}. Available: ${datasets.map((d) => d.id).join(', ')}`,
         )
       }
       const value: DatasetValue = {
@@ -135,9 +150,342 @@ function buildDatasetNode(family: DatasetFamily) {
         sourceId: family.sourceId,
         datasetId: info.id,
         label: info.label,
+        ...annotationsFrom(ctx.input('annotations'), ctx.inputKey('annotations')),
       }
+      watchRootDrift(value)
       return { dataset: value }
     },
+  })
+}
+
+/**
+ * `Custom CAVE` — a datastack named by hand, and the CAVE twin of `Custom neuPrint`.
+ *
+ * It has to carry more than its neuPrint counterpart, and the reason is the difference between
+ * the two backends rather than an inconsistency. A neuPrint dataset id is enough to query,
+ * because the server knows what a `:Neuron` is; a CAVE datastack is a bag of tables with no
+ * privileged one, so the node has to say which of them is the neuron set — which is exactly what
+ * `DATASTACK_SPECS` says for the datastacks Coda ships an entry for. `registerDatastackSpec`
+ * takes it from the params.
+ *
+ * The rest is left off deliberately. Annotations come from whatever is wired to the Annotations
+ * socket, so there is nothing to name here; connectivity needs a server-side roll-up view, which
+ * a datastack either publishes or does not, and naming one that is not there would turn a clean
+ * refusal into a 404. Both are `advanced` params rather than absent, because somebody who knows
+ * their datastack has them should not need a code change.
+ */
+export const customCaveNode = registerNode({
+  type: 'dataset.cave',
+  label: 'Custom CAVE',
+  category: 'dataset',
+  description: 'Any CAVE datastack and materialization, named by hand.',
+  guide:
+    'The escape hatch for a CAVE datastack Coda ships no node for. Unlike its neuPrint twin it ' +
+    'needs more than a name: a datastack is a segmentation plus whatever tables somebody ' +
+    'attached to it, with nothing marking one of them as the neurons — so name that table and ' +
+    'the column its root ids are in. Annotations come from an Annotations source wired to the ' +
+    'socket rather than from here. Version is a materialization number, and materializations ' +
+    'expire, so pin one you have checked.',
+  companion: DESCRIPTION_COMPANION,
+  cost: 'cheap',
+  inputs: [ANNOTATIONS_INPUT],
+  outputs: [{ id: 'dataset', label: 'Dataset', type: T.dataset() }],
+  params: [
+    {
+      id: 'datastack',
+      kind: 'string',
+      label: 'Datastack',
+      placeholder: 'flywire_fafb_public',
+      help: 'Datastack name exactly as the CAVE info service lists it.',
+      default: '',
+    },
+    {
+      id: 'version',
+      kind: 'enum',
+      label: 'Materialization',
+      help: 'Which materialization to query. Empty tracks the newest the datastack reports. These expire, so a pinned one eventually stops working — the card says so when it does.',
+      default: '',
+      /*
+       * Filled from `peekMaterializations`, which is empty until the datastack has been named
+       * *and* its metadata has landed. Both intermediate states are real and are said in words
+       * rather than left as an empty select: a dropdown with nothing in it reads as a broken
+       * control, where "name a datastack first" reads as an instruction.
+       */
+      options: (ctx) => {
+        const datastack = String(ctx.params.datastack ?? '').trim()
+        const chosen = String(ctx.params.version ?? '').trim()
+        if (!datastack) return [{ value: '', label: 'Name a datastack first' }]
+        const known = peekMaterializations(datastack)
+        if (!known) {
+          return [
+            { value: '', label: 'Latest' },
+            // The stored value is kept as an option while the list is unknown, which the family
+            // nodes do not need to do: their listing is one call that every dataset node shares,
+            // where this is per-datastack and so is absent on *every* reload. Without it a
+            // pinned materialization shows an empty select for a second and reads as having been
+            // forgotten.
+            ...(chosen ? [{ value: chosen, label: chosen }] : []),
+          ]
+        }
+        return [
+          // Named rather than blank, for `resolveDatasetId`'s reason: a "Latest" that does not
+          // say which one is a provenance question mark on every graph anyone shares.
+          { value: '', label: known[0] ? `Latest (${known[0]})` : 'Latest' },
+          ...known.map((v) => ({ value: String(v), label: String(v) })),
+          // A pinned materialization the datastack no longer lists is kept rather than silently
+          // dropped, so the select still shows what the graph says. `validate` reports it.
+          ...(chosen && !known.includes(Number(chosen))
+            ? [{ value: chosen, label: `${chosen} (not listed)` }]
+            : []),
+        ]
+      },
+    },
+    {
+      id: 'neuronTable',
+      kind: 'string',
+      label: 'Neuron table',
+      placeholder: 'proofread_neurons',
+      help: 'Any table with one row per neuron carrying a root id — a proofreading list, a nuclei table. Nothing in CAVE marks one, so it has to be named. Leave empty where the datastack has none: the Annotations source then supplies the neuron list.',
+      default: '',
+      advanced: true,
+    },
+    {
+      id: 'idColumn',
+      kind: 'string',
+      label: 'ID column',
+      placeholder: 'pt_root_id',
+      help: 'Column holding the root id. `pt_root_id` on every CAVE table Coda has seen.',
+      default: 'pt_root_id',
+      advanced: true,
+    },
+    {
+      id: 'connectionView',
+      kind: 'string',
+      label: 'Connection view',
+      placeholder: 'valid_connection_v2',
+      help: 'A server-side roll-up of synapses into connections, if this datastack publishes one. Without it, Connectivity declines.',
+      default: '',
+      advanced: true,
+    },
+    REFRESH_PARAM,
+  ],
+
+  inferOutputs: (ctx) => {
+    const datasetId = customCaveDatasetId(ctx.params)
+    // Registers the spec if this is the first sight of the datastack. Synchronous and
+    // network-free, which is what makes it safe from inference — `neuPrintSourceFor`'s rule.
+    registerCustomCaveSpec(ctx.params)
+    return {
+      dataset: T.dataset(
+        'cave',
+        datasetId,
+        annotationSchemaFrom(ctx.inputs.annotations),
+      ),
+    }
+  },
+
+  validate: (ctx) => {
+    const datastack = String(ctx.params.datastack ?? '').trim()
+    if (!datastack) return ['Name a datastack, e.g. flywire_fafb_public']
+    /*
+     * Checked before anything else on the card, because it makes everything else on the card
+     * moot: `specFor` prefers the static table over a hand-registered spec — the right
+     * precedence, since a shipped spec is checked and a typed one is not — so every setting here
+     * is inert for a datastack that already has one. Asking for a neuron table first would be
+     * answering a question that does not matter.
+     */
+    if (DATASTACK_SPECS.some((spec) => spec.datastack === datastack)) {
+      return [
+        `Coda ships a node for "${datastack}" — use it instead; this card's table and column ` +
+          `settings are ignored for a datastack that already has a spec.`,
+      ]
+    }
+    const version = String(ctx.params.version ?? '').trim()
+    if (version && !Number.isInteger(Number(version))) {
+      return [`"${version}" is not a materialization number — CAVE numbers them, e.g. 783`]
+    }
+    /*
+     * A neuron table or a wired chain, but not neither: those are the only two things that can
+     * say which neurons exist, and with neither the node runs and refuses. Deliberately not a
+     * demand for the table — several datastacks publish no equivalent, and for those the chain
+     * is the answer rather than a workaround.
+     */
+    if (!String(ctx.params.neuronTable ?? '').trim() && !ctx.inputs.annotations) {
+      return [
+        'Name a table listing this datastack\u2019s neurons (e.g. proofread_neurons), or wire ' +
+          'an Annotations source to supply the neuron list',
+      ]
+    }
+    /*
+     * Undefined means the metadata has not arrived, which is not a problem to report — the same
+     * silence `versionsFor` keeps for a listing in flight, since otherwise every Custom CAVE
+     * card in the graph warns for the first second of every load.
+     */
+    const known = peekMaterializations(datastack)
+    if (known && version && !known.includes(Number(version))) {
+      return [
+        known.length
+          ? `Materialization ${version} is not on ${datastack} — it offers ${known.slice(0, 8).join(', ')}${known.length > 8 ? ', \u2026' : ''}`
+          : `${datastack} reports no usable materializations`,
+      ]
+    }
+    return [
+      ...annotationIssues(ctx.inputs.annotations),
+      // Through the same resolver the node's own id goes through, unpinned case included — a
+      // second spelling of the `datastack:materialization` grammar is a second place to drift.
+      ...rootDriftIssues(customCaveDatasetId(ctx.params)),
+    ]
+  },
+
+  evaluate: async (ctx) => {
+    const datastack = String(ctx.params.datastack ?? '').trim()
+    if (!datastack) throw new Error('Name a datastack, e.g. flywire_fafb_public')
+    const pinned = String(ctx.params.version ?? '').trim()
+    /*
+     * Resolved by *fetching* rather than by peeking. `evaluate` may await where inference may
+     * not, so an unpinned node runs on the first press rather than failing because the metadata
+     * had not landed — which is what a peek here would do, and it would look like the datastack
+     * name being wrong. Both halves read one memo, so the materialization the dropdown shows and
+     * the one this uses cannot disagree.
+     */
+    const version = pinned ? Number(pinned) : (await materializationsFor(datastack))[0]
+    if (version === undefined || !Number.isInteger(version)) {
+      throw new Error(
+        `${datastack} reports no usable materializations. Check the datastack name, or that ` +
+          `your token can see it.`,
+      )
+    }
+    const datasetId = datasetIdFor(datastack, version)
+    registerCustomCaveSpec(ctx.params)
+    // Not checked against the listing, unlike the named families: a private datastack the
+    // account can query need not appear in the public one, and refusing on that would make the
+    // escape hatch useless for the case it exists for.
+    const value = {
+      kind: 'dataset',
+      sourceId: 'cave',
+      datasetId,
+      label: `${datastack} ${version}`,
+      ...annotationsFrom(ctx.input('annotations'), ctx.inputKey('annotations')),
+    } satisfies DatasetValue
+    watchRootDrift(value)
+    return { dataset: value }
+  },
+})
+
+
+/**
+ * Ask, in the background, whether the wired annotations' root ids were still current when this
+ * materialization was frozen.
+ *
+ * A CAVE root id is retired by any proofreading edit that touches its segment, so an annotation
+ * base drifts out of step with a *pinned* materialization on its own. Nothing fails when it does:
+ * the labels stop matching, those rows join to nothing, and the dataset reads as under-annotated.
+ *
+ * **Fired and forgotten, deliberately.** It costs a few seconds against a shared service for a
+ * large base, and none of it is needed to build the value — so `evaluate` starts it and returns.
+ * The answer arrives on `subscribeRootCheck`, which re-runs inference, and `validate` reads it.
+ * Asked once per (dataset, chain) and cached per (segmentation, timestamp) beyond that; see
+ * `data/cave/rootIds.ts`, where the answer being permanently true is what makes it cheap.
+ *
+ * **The chain's key travels with the ids**, and it is what makes the warning answer to the canvas
+ * rather than to whatever was wired first. Without it the report was keyed on the dataset alone
+ * and taken once per session, so inserting an `Update root IDs` left the warning up and removing
+ * one left it down — the check never being re-asked in either direction.
+ *
+ * Called for a CAVE dataset **whether or not annotations are wired**, since unplugging them has to
+ * clear the answer too. neuPrint is excluded outright: an id there is a property on a node and
+ * does not move, and a datastack's own table is materialised with the version by construction.
+ */
+function watchRootDrift(value: DatasetValue): void {
+  if (value.sourceId !== 'cave') return
+  const chain = value.annotations
+  const ids = chain?.table.data[ID_COLUMN_NAME] ?? []
+  startRootCheck(
+    value.datasetId,
+    chain?.key,
+    ids.map((cell) => idText(cell) ?? '').filter(Boolean),
+  )
+}
+
+/**
+ * What that check found, as an edit-time warning — or nothing, which is the ordinary state.
+ *
+ * A *warning*: an id that has moved on is a fact about somebody's base rather than a mistake in
+ * this graph, and the run it describes has already produced a perfectly good dataset. Refusing
+ * would be refusing over data the node did not fetch.
+ *
+ * Keyed on the dataset id, which is all `validate` can see — so two dataset nodes on one
+ * datastack and materialization with *different* annotation chains share one entry, and whichever
+ * ran last owns it. Uncommon, and the message says what was checked rather than whose it was.
+ */
+function rootDriftIssues(datasetId: string | undefined): string[] {
+  const check = datasetId ? peekRootCheck(datasetId) : undefined
+  if (!check || check.stale === 0) return []
+  const some = check.examples.join(', ')
+  const part = check.checked < check.total ? ` of the first ${check.checked.toLocaleString()}` : ''
+  /*
+   * Names the node that repairs it. A warning that states a problem and leaves somebody to work
+   * out the remedy is half a warning — and the remedy here is not obvious, since it turns on a
+   * supervoxel column most people have never had a reason to look at.
+   */
+  return [
+    `${check.stale.toLocaleString()}${part} annotation ids are not current at this ` +
+      `materialization (e.g. ${some}) — those rows will not match a neuron. Use "Update root ` +
+      `IDs" to bring them forward from their supervoxel ids, or pin a materialization from ` +
+      `after the base was updated.`,
+  ]
+}
+
+/**
+ * The dataset id this node stands for, or undefined while it cannot say.
+ *
+ * Empty means **latest**, the same as every family dataset node — and resolved through the same
+ * peek the dropdown is built from, so the label somebody picked and the id that runs cannot
+ * disagree. Unresolvable until the metadata lands, which is invariant 2's ordinary state: the
+ * node publishes a Dataset type with no id for a moment and `reportSourceLearned` re-infers.
+ */
+function customCaveDatasetId(params: Record<string, unknown>): string | undefined {
+  const datastack = String(params.datastack ?? '').trim()
+  if (!datastack) return undefined
+  const pinned = String(params.version ?? '').trim()
+  const version = pinned ? Number(pinned) : peekMaterializations(datastack)?.[0]
+  // Through `datasetIdFor`, which `splitDatasetId` is the reader for — a third spelling of the
+  // `datastack:materialization` grammar is a third place it can drift.
+  return version !== undefined && Number.isInteger(version)
+    ? datasetIdFor(datastack, version)
+    : undefined
+}
+
+function registerCustomCaveSpec(params: Record<string, unknown>): void {
+  const datastack = String(params.datastack ?? '').trim()
+  if (!datastack) return
+  const table = String(params.neuronTable ?? '').trim()
+  const view = String(params.connectionView ?? '').trim()
+  registerDatastackSpec({
+    datastack,
+    label: datastack,
+    description: 'A CAVE datastack named by hand.',
+    // Absent where none was named, which is a real configuration: the chain is then the neuron
+    // list. Registering regardless is what makes the datastack usable for the id-driven nodes,
+    // which need a spec but never touch this table.
+    ...(table
+      ? {
+          neurons: {
+            table,
+            idColumn: String(params.idColumn ?? 'pt_root_id').trim() || 'pt_root_id',
+          },
+        }
+      : {}),
+    ...(view
+      ? {
+          connections: {
+            view,
+            preColumn: 'pre_pt_root_id',
+            postColumn: 'post_pt_root_id',
+            weightColumn: 'n_syn',
+          },
+        }
+      : {}),
   })
 }
 

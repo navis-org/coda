@@ -321,6 +321,24 @@
 .coda-node__header[data-category='dataset'] {
   --cat: var(--cat-dataset);
 }
+/*
+ * A dataset card is tinted by *backend*, because two of them behave differently enough that
+ * reading a graph means knowing which you are looking at.
+ *
+ * Only the backends that differ *from* the default get a rule: neuPrint's tint is the plain
+ * dataset green, so a token and a rule for it would be six declarations that change nothing and
+ * a pair to keep in sync. A backend nobody has styled falls through to the same green, which is
+ * what makes it visible before anyone gets to it.
+ */
+.coda-node__header[data-backend='cave'] {
+  --cat: var(--cat-dataset-cave);
+}
+.coda-node__header[data-backend='catmaid'] {
+  --cat: var(--cat-dataset-catmaid);
+}
+.coda-node__header[data-backend='mock'] {
+  --cat: var(--cat-dataset-mock);
+}
 .coda-node__header[data-category='query'] {
   --cat: var(--cat-query);
 }
@@ -856,6 +874,31 @@ select.field {
   font-variant-numeric: tabular-nums;
   flex: none;
 }
+
+/*
+ * `cached 3d ago ⟳` in the card's foot — how old the data behind the result is, and the control
+ * that replaces it. A button rather than a badge, because what somebody wants on reading "3d" is
+ * a fresher copy; muted, because it is a fact about the result rather than a warning about it,
+ * and it is on screen whenever there is an age at all.
+ */
+.coda-node__cache {
+  /* `flex: none` like the timing beside it — `.coda-node__summary` is `flex: 1` and already
+     absorbs the slack, so a `margin-left: auto` here would be a second thing pushing. */
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.coda-node__cache:hover,
+.coda-node__cache:focus-visible {
+  color: var(--text-primary);
+}
+
 .coda-node__issue {
   padding: 3px 8px 4px calc(8px + var(--state-bar));
   font-size: 10px;
@@ -1419,6 +1462,48 @@ select.field {
   gap: 3px;
 }
 /*
+ * Community tags: free-form text somebody typed against a neuron, not a controlled vocabulary.
+ *
+ * Deliberately unlike `.explore-chip` in every channel that matters, because they are a
+ * different *kind* of claim and a reader has to be able to tell at a glance. Their own row below
+ * the chips, smaller type, no hue at all, and a hairline border rather than a fill — a tinted
+ * chip here would say these came from a known field, which is exactly what they did not.
+ *
+ * `nowrap` on the row, not `wrap`: the count is capped in `NeuronRow`, so what is left must fit
+ * on one line or the row stops being the same height as its neighbours, which is what makes a
+ * list scannable. Each tag ellipsises at `max-width`, with the whole of it in `title`.
+ */
+.explore-row__tags {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: baseline;
+  gap: 3px;
+  margin-top: 2px;
+  overflow: hidden;
+}
+.explore-tag {
+  font-size: 9px;
+  line-height: 1.5;
+  padding: 0 3px;
+  border-radius: 3px;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  background: none;
+  max-width: 14ch;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* The one thing that must not shrink away: a tag clipped to nothing is worse than absent. */
+  flex: 0 1 auto;
+}
+/* The counter is the one item that never ellipsises — it is the admission that there are more. */
+.explore-tag--more {
+  border-color: transparent;
+  flex: 0 0 auto;
+  max-width: none;
+}
+
+/*
  * One annotation chip, tinted by which *field* it came from — `class` is the same blue on
  * every dataset and every row, so a column of them can be scanned without reading each one.
  *
@@ -1700,6 +1785,14 @@ select.field {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/*
+ * A row that works but whose subject is incomplete — an export that will come out with TODOs in
+ * it. Distinct from `:disabled`, which dims the whole row because pressing it does nothing.
+ * `--status-warn` is per-mode and was measured for prose on a panel: 5.41:1 light, 9.78:1 dark.
+ */
+.add-menu__desc--warn {
+  color: var(--status-warn);
 }
 .add-menu__empty {
   padding: 14px 10px;
@@ -2963,6 +3056,37 @@ a.dropdown__item {
   color: var(--text-muted);
   line-height: 1.4;
 }
+/*
+ * The item still works — this says what the export will be *missing*, which is why it sits under
+ * the description rather than replacing the row. Not `white-space: nowrap`: it names nodes, so it
+ * has to be allowed to wrap inside the menu's width.
+ */
+.dropdown__item .dropdown__warn {
+  color: var(--status-warn);
+  margin-top: 2px;
+}
+/*
+ * A format this graph cannot be exported as. The row is disabled, and only the row *above* the
+ * reason dims: taking a 4.5:1 colour to half strength is how a message nobody can read ends up
+ * on screen, and this one is the only thing on the row worth reading.
+ *
+ * `--status-refused` rather than `--status-error`, which is one value for both modes and drops
+ * to 3.73:1 on the dark panel — see the token, which records why prose needs its own.
+ */
+.dropdown__item .dropdown__refused {
+  color: var(--status-refused);
+  margin-top: 2px;
+}
+.dropdown__item:disabled {
+  cursor: default;
+}
+.dropdown__item:disabled:hover {
+  background: transparent;
+}
+.dropdown__item:disabled strong,
+.dropdown__item:disabled > span:not(.dropdown__refused) {
+  opacity: 0.45;
+}
 
 /*
  * Scrolls, because the New menu lists every dataset of every source — neuPrint alone publishes
@@ -3648,6 +3772,48 @@ a.viewer-actions__btn {
 }
 .sources__result[data-tone='warn'] {
   color: var(--status-warn);
+}
+
+/*
+ * The CATMAID instance list.
+ *
+ * The only tab holding *several* credentials, so its rows need a visible boundary — every other
+ * one is a single form and the panel's own padding is enough. A card rather than a rule between
+ * rows, because each row carries a nested disclosure and an actions bar of its own, and a hairline
+ * leaves those reading as though they belong to the row below.
+ */
+.sources__list {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.sources__row {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 10px 8px;
+  background: var(--surface-2);
+}
+/* The last field in a row sits against the actions bar, which has its own spacing. */
+.sources__row .sources__field:last-of-type {
+  margin-bottom: 6px;
+}
+.sources__more {
+  margin: 0 0 8px;
+}
+.sources__more > summary {
+  font-size: 10px;
+  color: var(--text-muted);
+  cursor: pointer;
+  /* A dotted underline is this app's mark for "there is more behind this" — see the node guide. */
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  margin-bottom: 6px;
+}
+.sources__more > summary:hover {
+  color: var(--text-primary);
 }
 
 /* --------------------------------------------------------------------------
@@ -4686,7 +4852,7 @@ a.viewer-actions__btn {
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  /* Shrinks before the name does: a body id is recoverable from the pin, a name is what you
+  /* Shrinks before the name does: a neuron id is recoverable from the pin, a name is what you
      are reading. */
   overflow: hidden;
   text-overflow: ellipsis;
@@ -6043,4 +6209,71 @@ details[open] > summary.tile__label {
 }
 .assistant__ask .field {
   flex: 1;
+}
+
+/*
+ * The wire a dropped card would be inserted into.
+ *
+ * Marked during the drag rather than only on release: a drop that silently rewires the graph is
+ * a surprise however good the result, and this is the only thing on screen saying it is about to
+ * happen. Achromatic and thickened rather than recoloured — a wire already wears the colour of
+ * the data flowing through it, so a hue here would read as the type having changed.
+ */
+.react-flow__edge.coda-edge--splice .react-flow__edge-path {
+  stroke: var(--text-primary) !important;
+  stroke-width: 3.2 !important;
+}
+
+/*
+ * A table shown as text, for the inspector — one line per column. No `<table>` on purpose: no
+ * intrinsic-width pass over every cell, no sticky header per column, no sideways scrolling.
+ */
+.table-summary {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.table-summary__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1.2fr);
+  gap: 6px;
+  align-items: baseline;
+  padding: 1px 2px;
+  border-bottom: 1px solid var(--border);
+}
+.table-summary__row:last-child {
+  border-bottom: 0;
+}
+.table-summary__name {
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.table-summary__type {
+  color: var(--text-muted);
+  font-size: 9px;
+}
+/* The example value, which is data — tabular figures so a column of ids reads as one. */
+.table-summary__value {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+
+/*
+ * A reference edge: a wire that names a node rather than carrying its output.
+ *
+ * Dotted rather than recoloured — a wire already wears the colour of the data flowing through it,
+ * and a hue here would read as a type. What it has to say is that *nothing* flows, which is what
+ * a broken line says without a legend.
+ */
+.react-flow__edge.coda-edge--reference .react-flow__edge-path {
+  stroke-dasharray: 2 4;
+  opacity: 0.75;
 }

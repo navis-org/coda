@@ -15,26 +15,52 @@
  *
  * **`SECTIONS` is a table, not a set of ids to branch on.** Each entry carries its own body
  * (`render`, the same shape `SOURCE_TABS` already used), its own auth-failure channel
- * (`subscribe`) and, where it has a second level, which tab a failure opens (`authTab`). The
- * third section arrived as an id union widened, an entry added, a hand-wired `subscribe` and a
- * third arm of a `section.id === …` ternary — four edits, three of which fail silently when the
- * id is mistyped. It is one entry now.
+ * (`subscribe`) and whether it draws a second level of tabs (`tabbed`). The third section
+ * arrived as an id union widened, an entry added, a hand-wired `subscribe` and a third arm of a
+ * `section.id === …` ternary — four edits, three of which fail silently when the id is
+ * mistyped. It is one entry now.
  *
  * It opens itself on an auth failure, on whichever section failed. A 401 surfaced only as red
  * text on a node is a dead end — the fix is a credential, and the field should be in front of
  * you when you learn that. One channel per credential store; each section names its own, which
  * is why nothing here has to guess from the text of the failure.
  *
- * The wart this does *not* fix: `reportAuthFailure` still carries no source id, so `authTab`
- * hardcodes that a data-source failure is neuPrint's. That is the thing to fix when a second
- * credentialed backend arrives — the channel would grow an id, the way `reportSourceLearned`
- * already carries one.
+ * Within Data sources the *tab* is named by whoever subscribes, because `reportAuthFailure`
+ * carries no source id and there is one channel per credential store. It used to be a single
+ * `authTab` on the section, hardcoded to neuPrint — harmless while neuPrint was the only
+ * credentialed backend, and wrong the moment CAVE arrived, since a CAVE 401 would open the
+ * neuPrint tab and ask for the wrong token.
  */
 
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 
 import { ConnectionsIcon } from '../Icons'
 
+import { listBases } from '../../data/annotations'
+import {
+  SEATABLE_HOSTS,
+  getToken as getSeaTableToken,
+  setToken as setSeaTableToken,
+  subscribeAuthFailure as subscribeSeaTableAuthFailure,
+} from '../../data/annotations/credentials'
+import { listProjects } from '../../data/catmaid/api'
+import type { CatmaidInstance } from '../../data/catmaid/credentials'
+import {
+  DEFAULT_CATMAID_SERVER,
+  hostPattern,
+  listInstances,
+  setInstances,
+  subscribeAuthFailure as subscribeCatmaidAuthFailure,
+} from '../../data/catmaid/credentials'
+import { listDatastacks } from '../../data/cave/api'
+import {
+  DEFAULT_CAVE_SERVER,
+  getServer as getCaveServer,
+  getToken as getCaveToken,
+  setServer as setCaveServer,
+  setToken as setCaveToken,
+  subscribeAuthFailure as subscribeCaveAuthFailure,
+} from '../../data/cave/credentials'
 import { fetchDatasets, forgetRoutes } from '../../data/neuprint/client'
 import {
   forgetToken,
@@ -100,16 +126,102 @@ interface SourceTabProps {
 interface SourceTab {
   id: string
   label: string
-  render: (props: SourceTabProps) => ReactNode
+  /**
+   * The credential bundle plus `onClose`, and nothing about the tab bar itself.
+   *
+   * A tab that keeps its own credential state (see `CaveTab`) ignores every field except
+   * `onClose`, because saving should close the dialog exactly as the shared form's Save does —
+   * a second, subtly different dismissal is how one tab comes to behave unlike its neighbour.
+   * Deliberately not the whole `SectionProps`: a tab has no business reading `tabId`/`setTabId`,
+   * which are the bar's own state and belong to the thing drawing it.
+   */
+  render: (props: SourceTabProps & { onClose: () => void }) => ReactNode
+  /**
+   * The auth-failure channel for *this* tab's credential store.
+   *
+   * On the tab rather than fanned in by the section, because the section's version repeated
+   * every tab's id as a bare string literal (`onFailure(message, 'catmaid')`) in a second array
+   * — two edits per backend joined by a string nothing checks. A typo or an omission is silent,
+   * and what it produces is the 401 opening whichever tab was last selected rather than the one
+   * holding the credential: exactly the CAVE-opens-neuPrint bug this pairing was introduced to
+   * fix. Optional, since `MockTab` has no credential and so no channel.
+   */
+  subscribe?: (onFailure: (message: string) => void) => () => void
 }
 
 // A non-empty tuple, so the fallback below is a `SourceTab` rather than possibly undefined.
 const SOURCE_TABS: readonly [SourceTab, ...SourceTab[]] = [
-  { id: 'neuprint', label: 'neuPrint', render: (props) => <NeuPrintTab {...props} /> },
+  {
+    id: 'neuprint',
+    label: 'neuPrint',
+    render: (props) => <NeuPrintTab {...props} />,
+    subscribe: subscribeAuthFailure,
+  },
+  {
+    id: 'cave',
+    label: 'CAVE',
+    render: ({ onClose }) => <CaveTab onSaved={onClose} />,
+    subscribe: subscribeCaveAuthFailure,
+  },
+  {
+    id: 'catmaid',
+    label: 'CATMAID',
+    render: ({ onClose }) => <CatmaidTab onSaved={onClose} />,
+    subscribe: subscribeCatmaidAuthFailure,
+  },
   { id: 'mock', label: 'Mock connectome', render: () => <MockTab /> },
 ]
 
-type SectionId = 'data' | 'ai' | 'sharing'
+/**
+ * The annotation deployments, as a tab bar over one form.
+ *
+ * A section of its own rather than two more entries under Data sources, because the top level
+ * there is *what kind of connection* and an annotation base is not a connectome — it is
+ * somebody's spreadsheet of labels, joined onto one. Filing it under the sources would make
+ * FlyTable read as a fourth backend you could query for neurons.
+ */
+const ANNOTATION_TABS: readonly [SourceTab, ...SourceTab[]] = [
+  {
+    id: 'flytable',
+    label: 'FlyTable',
+    render: ({ onClose }) => (
+      <SeaTableTab
+        key="flytable"
+        host={SEATABLE_HOSTS.flytable}
+        note="The LMB&rsquo;s SeaTable deployment, and where FlyWire&rsquo;s live cell typing lives."
+        onSaved={onClose}
+      />
+    ),
+  },
+  {
+    id: 'seatable',
+    label: 'SeaTable',
+    render: ({ onClose }) => (
+      <SeaTableTab
+        key="seatable"
+        host={SEATABLE_HOSTS.seatable}
+        note="The hosted service at cloud.seatable.io, for a base of your own."
+        onSaved={onClose}
+      />
+    ),
+  },
+]
+
+/**
+ * Fan a tab bar's own channels in, each naming the tab it belongs to.
+ *
+ * Derived from the table rather than written beside it, so a tab that declares a channel is
+ * routed to itself by construction and one that does not is skipped.
+ */
+function subscribeTabs(
+  tabs: readonly SourceTab[],
+  onFailure: (message: string, tab?: string) => void,
+): () => void {
+  const stops = tabs.map((tab) => tab.subscribe?.((message) => onFailure(message, tab.id)))
+  return () => stops.forEach((stop) => stop?.())
+}
+
+type SectionId = 'data' | 'ai' | 'annotations' | 'sharing'
 
 interface Section {
   id: SectionId
@@ -123,25 +235,39 @@ interface Section {
    */
   privacy: ReactNode
   /**
-   * The section's own body, the same shape `SOURCE_TABS` already uses.
+   * The section's own body, for a section that is one page.
    *
    * A `render` member rather than a chain of `section.id === …` checks in the JSX: with the id
    * chain, adding the third section meant widening the union, adding the entry, adding a
    * subscription and adding a ternary arm — four edits, three of which fail silently if the id
    * is typed wrong. `aria-label` comes off `label`, so a section's name is stated once.
+   *
+   * Exactly one of this and `tabs`.
    */
-  render: (props: SectionProps) => ReactNode
+  render?: (props: SectionProps) => ReactNode
+  /**
+   * …or the tabs it is a bar over, for a section that is several pages.
+   *
+   * The list itself rather than a `tabbed: true` flag beside a `render` that draws the bar. That
+   * flag existed only to say "this body supplies its own `tabpanel`", which is a fact about
+   * *having tabs* — so it was derivable, and a section that gained tabs without remembering it
+   * would have been wrapped twice, with two elements claiming the same role. The label is the
+   * section's own, rather than a second string passed to the bar.
+   */
+  tabs?: readonly [SourceTab, ...SourceTab[]]
   /**
    * The auth-failure channel that opens the dialog *on this section*.
    *
    * One per credential store, and each store knows which section it belongs to, so nothing here
-   * reads the text of a failure to work out where to go. Note the wart this does not fix:
-   * `reportAuthFailure` still carries no source id, so `authTab` below hardcodes which tab
-   * within Data sources a failure lands on.
+   * reads the text of a failure to work out where to go.
+   *
+   * A section with tabs names the tab as it subscribes, rather than declaring one `authTab` for
+   * the whole section. That used to be a stated wart and became a real one the moment CAVE
+   * arrived: `reportAuthFailure` carries no source id, so a CAVE 401 opened the neuPrint tab
+   * and asked for the wrong credential — a failure that reads as the token being rejected
+   * rather than as the panel being on the wrong page.
    */
-  subscribe: (onFailure: (message: string) => void) => () => void
-  /** For Data sources only: which tab a failure on this section's channel opens. */
-  authTab?: string
+  subscribe: (onFailure: (message: string, tab?: string) => void) => () => void
 }
 
 /** What a section body is handed. Every one ignores most of it; see `SourceTabProps`. */
@@ -155,18 +281,17 @@ const SECTIONS: readonly [Section, ...Section[]] = [
   {
     id: 'data',
     label: 'Data sources',
-    subscribe: subscribeAuthFailure,
-    authTab: 'neuprint',
-    render: ({ tabId, setTabId, ...tabProps }) => (
-      <DataSourceTabs {...{ tabId, setTabId }} {...tabProps} />
-    ),
+    subscribe: (onFailure) => subscribeTabs(SOURCE_TABS, onFailure),
+    tabs: SOURCE_TABS,
     privacy: (
       <>
-        <strong>Credentials stay in this browser.</strong> Tokens are held in this
-        browser&rsquo;s local storage on this machine only. They are never written into a saved
-        graph or an export, never sent to us, and never shared with any third party — they go
-        only to the service they authenticate, through the same-origin proxy that request has to
-        travel through.
+        <strong>Credentials stay in this browser.</strong> Tokens — and a CATMAID
+        instance&rsquo;s HTTP basic password, if you set one — are held in this browser&rsquo;s
+        local storage on this machine only, in the clear. They are never written into a saved
+        graph or an export, never sent to us, and never shared with any third party: each goes
+        only to the deployment it belongs to, directly where that deployment allows a browser to
+        reach it and otherwise through a same-origin relay. A password is worth more care than a
+        scoped API token, so prefer a token where the instance offers one.
       </>
     ),
   },
@@ -183,6 +308,26 @@ const SECTIONS: readonly [Section, ...Section[]] = [
         provider you pick, with no server of ours in between. Whatever you ask the assistant,
         and the graph on your canvas when you ask, are sent to that provider as part of the
         request. A local provider sends nothing off the machine at all.
+      </>
+    ),
+  },
+  {
+    id: 'annotations',
+    label: 'Annotations',
+    subscribe: (onFailure) =>
+      subscribeSeaTableAuthFailure((message) =>
+        // Which *tab* is decided by the host the failure names, because one channel serves both
+        // deployments — they are the same software and share a client.
+        onFailure(message, message.includes('seatable.io') ? 'seatable' : 'flytable'),
+      ),
+    tabs: ANNOTATION_TABS,
+    privacy: (
+      <>
+        <strong>One token per deployment, kept in this browser.</strong> FlyTable and
+        cloud.seatable.io run the same software with unrelated accounts, so each needs its own.
+        Tokens are held in this browser&rsquo;s local storage on this machine only, are never
+        written into a saved graph or an export, and are never sent to us — each goes only to
+        the deployment it belongs to. Coda reads bases; it never writes to one.
       </>
     ),
   },
@@ -209,9 +354,9 @@ export function SourcesPanel() {
   const [token, setTokenField] = useState(() => getToken() ?? '')
   const [server, setServerField] = useState(() => getBaseUrlOverride() ?? '')
   const [probe, setProbe] = useState<Probe>({ state: 'idle' })
-  const [reason, setReason] = useState<{ section: SectionId; message: string } | undefined>(
-    undefined,
-  )
+  const [reason, setReason] = useState<
+    { section: SectionId; message: string; tab?: string } | undefined
+  >(undefined)
   const notify = useGraphStore((s) => s.setNotice)
 
   // The store outlives this component, but no failure channel replays — a subscription started
@@ -220,8 +365,8 @@ export function SourcesPanel() {
   // fourth hand-wired subscribe that fails silently if its id is mistyped.
   useEffect(() => {
     const stops = SECTIONS.map((section) =>
-      section.subscribe((message) => {
-        setReason({ section: section.id, message })
+      section.subscribe((message, tab) => {
+        setReason({ section: section.id, message, ...(tab ? { tab } : {}) })
         setOpen(true)
       }),
     )
@@ -309,17 +454,28 @@ export function SourcesPanel() {
 }
 
 /**
- * The Data sources section: a tab bar over the registered backends, and the active one's body.
+ * A section's second level: a tab bar and the active tab's body.
  *
- * Its own component because it is the one section with a second level; the other two are a
- * single form. Keyed by tab so switching remounts, which re-runs the token field's focus.
+ * One component for both sections, because the a11y contract — the `tablist`, the `aria-selected`
+ * on each button, the `tabpanel` keyed by the active id — is the part worth stating once. The
+ * two copies had already diverged on the one thing `SourceTab.render` documents: which props a
+ * tab may see.
+ *
+ * `tabId`/`setTabId` are destructured away and **not** forwarded, because a tab "has no business
+ * reading the tab bar's own state" — the rule the render signature states.
  */
-function DataSourceTabs({ tabId, setTabId, ...tabProps }: Omit<SectionProps, 'onClose'>) {
-  const active = SOURCE_TABS.find((tab) => tab.id === tabId) ?? SOURCE_TABS[0]
+function TabBar({
+  tabs,
+  label,
+  tabId,
+  setTabId,
+  ...tabProps
+}: SectionProps & { tabs: readonly [SourceTab, ...SourceTab[]]; label: string }) {
+  const active = tabs.find((tab) => tab.id === tabId) ?? tabs[0]
   return (
     <>
-      <div className="sources__tabs" role="tablist" aria-label="Data sources">
-        {SOURCE_TABS.map((tab) => (
+      <div className="sources__tabs" role="tablist" aria-label={label}>
+        {tabs.map((tab) => (
           <button
             key={tab.id}
             type="button"
@@ -341,7 +497,7 @@ function DataSourceTabs({ tabId, setTabId, ...tabProps }: Omit<SectionProps, 'on
 
 interface DialogProps extends SourceTabProps {
   onClose: () => void
-  reason: { section: SectionId; message: string } | undefined
+  reason: { section: SectionId; message: string; tab?: string } | undefined
 }
 
 function Dialog({ onClose, reason, ...tabProps }: DialogProps) {
@@ -349,17 +505,14 @@ function Dialog({ onClose, reason, ...tabProps }: DialogProps) {
   // closed, so every opening starts on the connection you are most likely to have come for.
   const [sectionId, setSectionId] = useState<SectionId>(reason?.section ?? SECTIONS[0].id)
   const section = SECTIONS.find((s) => s.id === sectionId) ?? SECTIONS[0]
-  const [tabId, setTabId] = useState(
-    (reason && SECTIONS.find((s) => s.id === reason.section)?.authTab) ?? SOURCE_TABS[0].id,
-  )
+  const [tabId, setTabId] = useState(reason?.tab ?? SOURCE_TABS[0].id)
 
   // A failure arriving while the dialog is already open would otherwise leave the reason
   // stated above a section that has nothing to do with it.
   useEffect(() => {
     if (!reason) return
     setSectionId(reason.section)
-    const tab = SECTIONS.find((s) => s.id === reason.section)?.authTab
-    if (tab) setTabId(tab)
+    if (reason.tab) setTabId(reason.tab)
   }, [reason])
 
   return (
@@ -403,14 +556,24 @@ function Dialog({ onClose, reason, ...tabProps }: DialogProps) {
          */}
         <p className="sources__privacy">{section.privacy}</p>
 
-        {section.authTab ? (
-          section.render({ ...tabProps, tabId, setTabId, onClose })
-        ) : (
-          <div className="sources__body" role="tabpanel" aria-label={section.label}>
-            {section.render({ ...tabProps, tabId, setTabId, onClose })}
-          </div>
-        )}
+        {renderSection(section, { ...tabProps, tabId, setTabId, onClose })}
       </div>
+    </div>
+  )
+}
+
+/**
+ * A section's body: its own tab bar, or one page wrapped in a `tabpanel`.
+ *
+ * Written once for the reason the ternary this replaced was not — as two arms it was two
+ * identical four-key literals that had to be kept in step. A tab bar supplies its own panel, so
+ * a wrapper here would be a second element claiming the same role.
+ */
+function renderSection(section: Section, props: SectionProps): ReactNode {
+  if (section.tabs) return <TabBar tabs={section.tabs} label={section.label} {...props} />
+  return (
+    <div className="sources__body" role="tabpanel" aria-label={section.label}>
+      {section.render?.(props)}
     </div>
   )
 }
@@ -618,6 +781,504 @@ function SharingTab({ onSaved }: { onSaved: () => void }) {
       {probe.state === 'ok' && (
         <p className="sources__result" data-tone="ok">
           Signed in as {probe.login}.
+        </p>
+      )}
+      {probe.state === 'failed' && (
+        <p className="sources__result" data-tone="error">
+          {probe.message}
+        </p>
+      )}
+    </section>
+  )
+}
+
+/**
+ * The CAVE token.
+ *
+ * Its own state rather than the shared `SourceTabProps` bundle, the call `SharingTab` and
+ * `AssistantTab` already make and the one that bundle's own comment anticipated: it was written
+ * "while there is one credentialed source", and there are two now. Threading a second token and
+ * a second server through it would give the mock tab four fields belonging to nothing it does.
+ *
+ * There is no Base URL here, and its absence is the finding rather than an omission. neuPrint's
+ * field exists because that deployment historically sent no CORS headers and had to be relayed;
+ * every CAVE service Coda calls answers a browser directly, 401s included. What *is* here is a
+ * global server, which is a different thing entirely — CAVE splits into one service that knows
+ * which datastacks exist and a per-datastack server that answers queries, and only the first is
+ * ever named. The second is discovered.
+ */
+/**
+ * CATMAID: a list of instances rather than one credential, which is the shape the backend forces.
+ *
+ * Every other tab here holds one token, because neuPrint has a canonical deployment and CAVE has
+ * a global service. CATMAID is *software* — VFB, the LMB's instances, a lab server — and a token
+ * is per user **and** per instance, so a single field would send whichever was saved last to all
+ * of them. Hence a list, and hence `server` being a *pattern*: one deployment often answers on
+ * several hostnames, and `*.virtualflybrain.org` is one row rather than five.
+ *
+ * Two credentials per row, and they are not alternatives. `Token` is CATMAID's own, on
+ * `X-Authorization`; the HTTP-basic pair is the *web server's*, on `Authorization`. CATMAID
+ * picked a non-standard header precisely so both fit on one request — its middleware says so —
+ * and an instance behind nginx auth needs both.
+ */
+interface InstanceRow extends CatmaidInstance {
+  /** Local only. Rows are added and removed, so an index is not a stable React key. */
+  key: string
+}
+
+let nextRowKey = 0
+const withKey = (entry: CatmaidInstance): InstanceRow => ({
+  ...entry,
+  key: `row-${nextRowKey++}`,
+})
+
+function CatmaidTab({ onSaved }: { onSaved: () => void }) {
+  const [rows, setRows] = useState<InstanceRow[]>(() => listInstances().map(withKey))
+  const [probes, setProbes] = useState<Record<string, Probe>>({})
+  const notify = useGraphStore((s) => s.setNotice)
+
+  /** One setter for every probe transition; `undefined` clears, which absorbs the edit case. */
+  const setProbe = useCallback((key: string, probe: Probe | undefined) => {
+    setProbes((current) => {
+      if (!probe) {
+        if (!current[key]) return current
+        const next = { ...current }
+        delete next[key]
+        return next
+      }
+      return { ...current, [key]: probe }
+    })
+  }, [])
+
+  const patch = useCallback(
+    (key: string, change: Partial<CatmaidInstance>) => {
+      setRows((current) =>
+        current.map((row) => (row.key === key ? { ...row, ...change } : row)),
+      )
+      // A row that has been edited has not been tested, and a stale green tick beside a changed
+      // token is the one thing a Test button must never show.
+      setProbe(key, undefined)
+    },
+    [setProbe],
+  )
+
+  const test = useCallback(
+    async (row: InstanceRow) => {
+      setProbe(row.key, { state: 'testing' })
+      const host = hostPattern(row.server)
+      if (!host || host.includes('*')) {
+        // A pattern names no single host, so there is nothing to call. Said rather than
+        // disabled, or the button reads as broken on exactly the rows this feature is for.
+        setProbe(row.key, {
+          state: 'failed',
+          message: host
+            ? 'A wildcard covers several hosts, so there is nothing to test. Type one host to check it, then widen it again.'
+            : 'Name a server first.',
+        })
+        return
+      }
+      try {
+        const projects = await listProjects(`https://${host}`, {
+          credentials: { ...row, server: host },
+        })
+        setProbe(row.key, {
+          state: 'ok',
+          datasets: projects.length,
+          names: projects.map((project) => project.title).slice(0, 6),
+        })
+      } catch (error) {
+        setProbe(row.key, { state: 'failed', message: errorMessage(error) })
+      }
+    },
+    [setProbe],
+  )
+
+  return (
+    <section className="sources__source">
+      <p className="sources__note">
+        CATMAID instances. Reading a public one needs no credentials at all — every{' '}
+        <code>GET</code> is answered anonymously — but connectivity and neuron names go over{' '}
+        <code>POST</code>, which a browser cannot send anonymously, so those need a token. Get
+        one from your instance: hover your name, then <em>Get API token</em>.
+      </p>
+
+      {rows.length === 0 ? (
+        <p className="sources__hint">
+          No instances configured. Coda still reads{' '}
+          <code>{hostPattern(DEFAULT_CATMAID_SERVER)}</code> without one; add a row when an
+          instance asks for a credential.
+        </p>
+      ) : null}
+
+      <ul className="sources__list">
+        {rows.map((row) => {
+          const probe = probes[row.key] ?? { state: 'idle' as const }
+          return (
+            <li key={row.key} className="sources__row">
+              <label className="sources__field">
+                <span>Server</span>
+                <input
+                  className="field field--mono"
+                  value={row.server}
+                  spellCheck={false}
+                  placeholder="catmaid.example.org  or  *.example.org"
+                  onChange={(e) => patch(row.key, { server: e.target.value })}
+                />
+              </label>
+
+              <label className="sources__field">
+                <span>API token</span>
+                <input
+                  className="field field--mono"
+                  type="password"
+                  value={row.token ?? ''}
+                  spellCheck={false}
+                  placeholder="9944b09199c62bcf9418ad846dd0e4bbdfc6ee4b"
+                  onChange={(e) => patch(row.key, { token: e.target.value })}
+                />
+              </label>
+
+              <details className="sources__more">
+                <summary>HTTP basic auth (only if the server asks for it)</summary>
+                <p className="sources__hint">
+                  The <em>web server&rsquo;s</em> login, not CATMAID&rsquo;s — the browser
+                  dialog some instances show before CATMAID loads. It is sent alongside the
+                  token rather than instead of it.
+                </p>
+                <label className="sources__field">
+                  <span>User</span>
+                  <input
+                    className="field field--mono"
+                    value={row.httpUser ?? ''}
+                    spellCheck={false}
+                    autoComplete="off"
+                    onChange={(e) => patch(row.key, { httpUser: e.target.value })}
+                  />
+                </label>
+                <label className="sources__field">
+                  <span>Password</span>
+                  <input
+                    className="field field--mono"
+                    type="password"
+                    value={row.httpPassword ?? ''}
+                    autoComplete="off"
+                    onChange={(e) => patch(row.key, { httpPassword: e.target.value })}
+                  />
+                </label>
+              </details>
+
+              <div className="sources__actions">
+                <button
+                  type="button"
+                  className="btn btn--ghost"
+                  onClick={() => void test(row)}
+                  disabled={probe.state === 'testing'}
+                >
+                  {probe.state === 'testing' ? 'Testing…' : 'Test'}
+                </button>
+                <div className="toolbar__spacer" />
+                <button
+                  type="button"
+                  className="btn btn--ghost"
+                  onClick={() => setRows((current) => current.filter((r) => r.key !== row.key))}
+                >
+                  Remove
+                </button>
+              </div>
+
+              {probe.state === 'ok' ? (
+                <p className="sources__result" data-tone="ok">
+                  Reached it — {probe.datasets} project{probe.datasets === 1 ? '' : 's'}
+                  {probe.names.length ? `: ${probe.names.join(', ')}` : ''}
+                </p>
+              ) : null}
+              {probe.state === 'failed' ? (
+                <p className="sources__result" data-tone="error">
+                  {probe.message}
+                </p>
+              ) : null}
+            </li>
+          )
+        })}
+      </ul>
+
+      <div className="sources__actions">
+        <button
+          type="button"
+          className="btn btn--ghost"
+          onClick={() =>
+            setRows((current) => [
+              ...current,
+              // Prefilled with VFB's host on the first row only: it is the instance Coda ships a
+              // dataset node for, and typing a hostname from memory is the step people get wrong.
+              withKey({ server: current.length ? '' : hostPattern(DEFAULT_CATMAID_SERVER) }),
+            ])
+          }
+        >
+          + Add instance
+        </button>
+        <div className="toolbar__spacer" />
+        <button
+          type="button"
+          className="btn btn--primary"
+          onClick={() => {
+            setInstances(rows)
+            // Re-read, because `setInstances` drops rows with no host or no credential — showing
+            // the stored list is what makes that visible rather than silent.
+            const stored = listInstances()
+            const dropped = rows.length - stored.length
+            const saved = `Saved ${stored.length} CATMAID instance${stored.length === 1 ? '' : 's'}`
+            notify(
+              dropped > 0
+                ? `${saved} — ${dropped} incomplete row${dropped === 1 ? '' : 's'} dropped.`
+                : `${saved}.`,
+            )
+            onSaved()
+          }}
+        >
+          Save
+        </button>
+      </div>
+    </section>
+  )
+}
+
+function CaveTab({ onSaved }: { onSaved: () => void }) {
+  const [token, setTokenField] = useState(() => getCaveToken() ?? '')
+  const [server, setServerField] = useState(() => getCaveServer())
+  const [probe, setProbe] = useState<Probe>({ state: 'idle' })
+  const fieldRef = useRef<HTMLTextAreaElement>(null)
+  useEffect(() => fieldRef.current?.focus(), [])
+  const notify = useGraphStore((s) => s.setNotice)
+
+  const test = useCallback(async () => {
+    setProbe({ state: 'testing' })
+    try {
+      // With the values in the fields rather than the stored ones, so a token can be checked
+      // before committing to it — `NeuPrintTab`'s rule, reached the same way.
+      const base = server.trim().replace(/\/+$/, '') || DEFAULT_CAVE_SERVER
+      const names = await listDatastacks(base, {
+        token: token.trim().replace(/^Bearer\s+/i, ''),
+      })
+      setProbe({ state: 'ok', datasets: names.length, names: names.sort().slice(0, 6) })
+    } catch (error) {
+      setProbe({ state: 'failed', message: errorMessage(error) })
+    }
+  }, [token, server])
+
+  return (
+    <section className="sources__source">
+      <p className="sources__note">
+        FlyWire and other CAVE-hosted connectomes. Get a token from{' '}
+        <a
+          href="https://global.daf-apis.com/auth/api/v1/create_token"
+          target="_blank"
+          rel="noreferrer"
+        >
+          global.daf-apis.com
+        </a>{' '}
+        — the same token <code>caveclient</code> stores in <code>~/.cloudvolume/secrets</code>,
+        so if you already use CAVE from Python you have one.
+      </p>
+
+      <label className="sources__field">
+        <span>Token</span>
+        <textarea
+          ref={fieldRef}
+          className="field field--area field--mono"
+          rows={2}
+          value={token}
+          spellCheck={false}
+          placeholder="a1b2c3d4…"
+          onChange={(e) => setTokenField(e.target.value)}
+        />
+      </label>
+
+      <label className="sources__field">
+        <span>Global server</span>
+        <input
+          className="field field--mono"
+          value={server}
+          spellCheck={false}
+          placeholder={DEFAULT_CAVE_SERVER}
+          onChange={(e) => setServerField(e.target.value)}
+        />
+      </label>
+      <p className="sources__note sources__note--tight">
+        <strong>Leave this alone unless you use a different CAVE deployment.</strong> It is the
+        service that lists datastacks and says which server holds each one; the server that
+        answers the actual queries is read from that listing rather than named here. Not the
+        same thing as a dataset node&rsquo;s version, which names a <em>materialization</em>.
+      </p>
+
+      <div className="sources__actions">
+        <button
+          type="button"
+          className="btn btn--ghost"
+          onClick={() => void test()}
+          disabled={!token.trim() || probe.state === 'testing'}
+        >
+          {probe.state === 'testing' ? 'Testing…' : 'Test'}
+        </button>
+        <button
+          type="button"
+          className="btn btn--ghost"
+          onClick={() => {
+            setCaveToken(undefined)
+            setTokenField('')
+            setProbe({ state: 'idle' })
+          }}
+          disabled={!token}
+        >
+          Forget
+        </button>
+        <div className="toolbar__spacer" />
+        <button
+          type="button"
+          className="btn btn--primary"
+          onClick={() => {
+            setCaveToken(token)
+            setCaveServer(server)
+            // Re-list so the dataset picker fills in without a reload, exactly as saving a
+            // neuPrint token does. Swallowed: the 401 has its own channel back to this panel.
+            void getSource('cave')
+              ?.listDatasets()
+              .then((datasets) => notify(`CAVE connected — ${datasets.length} datasets`))
+              .catch(() => undefined)
+            onSaved()
+          }}
+        >
+          Save
+        </button>
+      </div>
+
+      {probe.state === 'ok' && (
+        <p className="sources__result" data-tone="ok">
+          Connected — {probe.datasets} datastacks ({probe.names.join(', ')}
+          {probe.datasets > probe.names.length ? ', …' : ''})
+        </p>
+      )}
+      {probe.state === 'failed' && (
+        <p className="sources__result" data-tone="error">
+          {probe.message}
+        </p>
+      )}
+    </section>
+  )
+}
+
+/**
+ * One SeaTable deployment's token.
+ *
+ * Its own state, the call `CaveTab` and `SharingTab` already make. What it tests with is the
+ * *base listing*, which is the useful probe here rather than a bare ping: it proves the token
+ * works and shows what it can reach, and "which bases can I see" is the question somebody
+ * configuring one of these nodes is about to ask anyway.
+ */
+function SeaTableTab({
+  host,
+  note,
+  onSaved,
+}: {
+  host: string
+  note: string
+  onSaved: () => void
+}) {
+  const [token, setTokenField] = useState(() => getSeaTableToken(host) ?? '')
+  const [probe, setProbe] = useState<Probe<{ bases: number; names: string[] }>>({
+    state: 'idle',
+  })
+  const fieldRef = useRef<HTMLInputElement>(null)
+  useEffect(() => fieldRef.current?.focus(), [])
+
+  const test = useCallback(async () => {
+    setProbe({ state: 'testing' })
+    /*
+     * Written first and rolled back on failure, because `listBases` reads the store — the
+     * alternative is a second code path taking a token as an argument, which is how the tested
+     * request and the real one come to differ. `SharingTab`'s trade exactly.
+     */
+    const previous = getSeaTableToken(host)
+    setSeaTableToken(host, token)
+    try {
+      const bases = await listBases(host)
+      setProbe({
+        state: 'ok',
+        bases: bases.length,
+        names: bases.slice(0, 6).map((b) => b.name),
+      })
+    } catch (error) {
+      setSeaTableToken(host, previous)
+      setProbe({ state: 'failed', message: errorMessage(error) })
+    }
+  }, [host, token])
+
+  return (
+    <section className="sources__source">
+      <p className="sources__note">
+        {note} Get an <strong>account</strong> token from your profile at{' '}
+        <a href={host} target="_blank" rel="noreferrer">
+          {new URL(host).host}
+        </a>
+        .
+      </p>
+
+      <label className="sources__field">
+        <span>Account token</span>
+        <input
+          ref={fieldRef}
+          className="field field--mono"
+          value={token}
+          spellCheck={false}
+          placeholder="a1b2c3…"
+          onChange={(e) => setTokenField(e.target.value)}
+        />
+      </label>
+      <p className="sources__note sources__note--tight">
+        <strong>An account token, not a base API token.</strong> The two look alike and only one
+        works: a base token is minted for a single base and is refused by the listing this
+        needs, with a message that blames the token rather than its kind. An account token
+        reaches every base the account can see.
+      </p>
+
+      <div className="sources__actions">
+        <button
+          type="button"
+          className="btn btn--ghost"
+          onClick={() => void test()}
+          disabled={!token.trim() || probe.state === 'testing'}
+        >
+          {probe.state === 'testing' ? 'Testing…' : 'Test'}
+        </button>
+        <button
+          type="button"
+          className="btn btn--ghost"
+          onClick={() => {
+            setSeaTableToken(host, undefined)
+            setTokenField('')
+            setProbe({ state: 'idle' })
+          }}
+          disabled={!token}
+        >
+          Forget
+        </button>
+        <div className="toolbar__spacer" />
+        <button
+          type="button"
+          className="btn btn--primary"
+          onClick={() => {
+            setSeaTableToken(host, token)
+            onSaved()
+          }}
+        >
+          Save
+        </button>
+      </div>
+
+      {probe.state === 'ok' && (
+        <p className="sources__result" data-tone="ok">
+          Connected — {probe.bases} bases ({probe.names.join(', ')}
+          {probe.bases > probe.names.length ? ', …' : ''})
         </p>
       )}
       {probe.state === 'failed' && (

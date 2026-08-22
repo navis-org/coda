@@ -1,0 +1,8 @@
+{
+  "data_dir": "gs://seunglab2/drosophila_v0/ws_190410_FAFB_v02_ws_size_threshold_200",
+  "mesh": "fly_v31_meshes_v2_062619",
+  "mesh_metadata": {
+    "max_meshed_layer": 6,
+    "uniform_draco_grid_size": 21
+  }
+}

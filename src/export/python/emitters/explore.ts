@@ -8,73 +8,110 @@
  * that costs something are stated where they cost it rather than in a comment nobody reads.
  */
 
-import { pyLongList, pyStr } from '../py'
+import { pyStr } from '../py'
 import { registerEmitter, registerHelper } from '../registry'
-import { selectionIds } from './common'
+import { caveLabels, codaNeurons, isCaveDataset, pySelection, selectionIds } from './common'
 
-registerEmitter('neuron.explore', (ctx) => {
-  const c = ctx.wired('dataset')
+/**
+ * Explore, on either backend.
+ *
+ * The node is a whole neuron table plus a local search, and **only the first half is
+ * backend-specific**: `coda_search` is a port of Coda's own matcher and does not care where the
+ * frame came from. So the CAVE branch is one line — the datastack's index, which
+ * `CodaCaveDataset.labels` already builds for exactly this — rather than a second emitter.
+ *
+ * That also makes it the cheapest CAVE query node there is, which is why it is the first one
+ * written: on a FlyWire graph it is usually the *only* thing between the dataset and everything
+ * else, so a TODO here blocked the whole notebook.
+ */
+registerEmitter(
+  'neuron.explore',
+  (ctx) => {
+    const c = ctx.wired('dataset')
+    const cave = isCaveDataset(ctx)
 
-  ctx.require('neuprint', 'NeuronCriteria', 'fetch_neurons')
-  const all = ctx.output('all')
-  const hits = ctx.output('hits')
-  const selected = ctx.output('selected')
+    const all = ctx.output('all')
+    const hits = ctx.output('hits')
+    const selected = ctx.output('selected')
 
-  const query = String(ctx.params.query ?? '').trim()
-  const limit = Number(ctx.params.limit ?? 0)
-  const selection = selectionIds(ctx)
+    const query = String(ctx.params.query ?? '').trim()
+    const limit = Number(ctx.params.limit ?? 0)
+    const selection = selectionIds(ctx)
 
-  const lines: string[] = [
-    // `All` is the index handed on unchanged, and it is the download every other port is
-    // sliced out of — one query rather than one per port.
-    ...ctx.note(
-      'Explore downloads the whole neuron table once and searches it locally. On male-CNS ' +
-        'that is around 165,000 rows; expect this cell to take a few seconds.',
-    ),
-    `${all}, _ = fetch_neurons(NeuronCriteria(client=${c}), client=${c})`,
-  ]
+    // `All` is the index handed on unchanged, and it is the download every other port is sliced
+    // out of — one read rather than one per port.
+    const lines: string[] = cave
+      ? [
+          ...ctx.note(
+            'Explore searches the whole neuron table locally. This is the datastack\u2019s own ' +
+              'index — its neuron table joined to its annotations, or whatever is wired to the ' +
+              'Dataset\u2019s Annotations socket — fetched the first time anything asks for it. ' +
+              'On FlyWire that is 139,255 rows and takes a few seconds.',
+          ),
+          `${all} = ${caveLabels(c)}`,
+        ]
+      : [
+          ...ctx.note(
+            'Explore downloads the whole neuron table once and searches it locally. On male-CNS ' +
+              'that is around 165,000 rows; expect this cell to take a few seconds.',
+          ),
+          `${all}, _ = fetch_neurons(NeuronCriteria(client=${c}), client=${c})`,
+          codaNeurons(ctx, all),
+        ]
+    if (!cave) ctx.require('neuprint', 'NeuronCriteria', 'fetch_neurons')
 
-  if (query) {
-    ctx.helper('coda_search')
-    lines.push('', `${hits} = coda_search(${all}, ${pyStr(query)})`)
-    if (limit > 0) {
+    if (query) {
+      ctx.helper('coda_search')
+      lines.push('', `${hits} = coda_search(${all}, ${pyStr(query)})`)
+      if (limit > 0) {
+        lines.push(
+          ...ctx.note(
+            `Coda caps this at ${limit} hits and keeps the ${limit} most *relevant*; the ` +
+              'relevance ranking is not ported, so this keeps the first ' +
+              limit +
+              ' matches ' +
+              'in table order instead. The rows may differ from the canvas.',
+          ),
+          `${hits} = ${hits}.head(${limit})`,
+        )
+      }
+    } else {
+      // An empty search is every neuron, which is what the node's own `Hits` port answers.
       lines.push(
-        ...ctx.note(
-          `Coda caps this at ${limit} hits and keeps the ${limit} most *relevant*; the ` +
-            'relevance ranking is not ported, so this keeps the first ' +
-            limit +
-            ' matches ' +
-            'in table order instead. The rows may differ from the canvas.',
-        ),
-        `${hits} = ${hits}.head(${limit})`,
+        '',
+        ...ctx.note('The search box is empty, so Hits is the whole table.'),
+        `${hits} = ${all}`,
       )
     }
-  } else {
-    // An empty search is every neuron, which is what the node's own `Hits` port answers.
-    lines.push(
-      '',
-      ...ctx.note('The search box is empty, so Hits is the whole table.'),
-      `${hits} = ${all}`,
-    )
-  }
 
-  lines.push('')
-  if (selection.length === 0) {
-    lines.push(
-      ...ctx.note('Nothing is ticked on the canvas, so Selected is empty.'),
-      `${selected} = ${all}.iloc[0:0]`,
-    )
-  } else {
-    // Resolved against the whole table rather than against `hits`, exactly as the node does:
-    // refining a search must not drop a neuron somebody already chose.
-    lines.push(
-      `_selected_ids = ${pyLongList(selection).join('\n')}`,
-      `${selected} = ${all}[${all}['bodyId'].isin(_selected_ids)]`,
-    )
-  }
+    lines.push('')
+    if (selection.length === 0) {
+      lines.push(
+        ...ctx.note('Nothing is ticked on the canvas, so Selected is empty.'),
+        `${selected} = ${all}.iloc[0:0]`,
+      )
+    } else {
+      // Resolved against the whole table rather than against `hits`, exactly as the node does:
+      // refining a search must not drop a neuron somebody already chose.
+      lines.push(
+        `_selected_ids = ${pySelection(selection)}`,
+        /*
+         * Compared as **text** on CAVE, where the id column is `str` — an eighteen-digit root id
+         * is not exact as a float, so a datastack publishes them as text and `isin` against a
+         * list of Python ints matches nothing at all. neuPrint's ids are an `i64` column and are
+         * compared as they are, which is also what keeps the common cell short.
+         */
+        cave
+          ? `${selected} = ${all}[${all}['neuronId'].astype(str).isin(` +
+            `[str(_i) for _i in _selected_ids])]`
+          : `${selected} = ${all}[${all}['neuronId'].isin(_selected_ids)]`,
+      )
+    }
 
-  return lines
-})
+    return lines
+  },
+  { backends: ['neuprint', 'cave'] },
+)
 
 /**
  * Coda's neuron search, matching only.
@@ -169,11 +206,11 @@ registerHelper({
     'def _coda_haystack(df):',
     '    """Lowercase text of every searchable column, one string per row.',
     '',
-    '    String columns and bodyId only -- so a bare "1200" finds a body id and does not',
+    '    String columns and neuronId only -- so a bare "1200" finds a neuron id and does not',
     '    also match every neuron with 1200 synapses.',
     '    """',
     '    cols = [c for c in df.columns',
-    '            if df[c].dtype == object or str(c) == "bodyId"]',
+    '            if df[c].dtype == object or str(c) == "neuronId"]',
     '    if not cols:',
     '        return pd.Series([""] * len(df), index=df.index)',
     '    parts = [df[c].fillna("").astype(str) for c in cols]',

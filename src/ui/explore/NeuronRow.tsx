@@ -12,29 +12,40 @@
 
 import { memo } from 'react'
 
+import { idText } from '../../core/ids'
 import type { CellValue, TableValue } from '../../core/values'
-import { formatCompact, formatCell } from '../format'
+import { formatCell, formatExact, formatMeasure } from '../format'
 import { NeuronThumbnail } from './NeuronThumbnail'
 import type { RowFields } from './rowFields'
-import { chipKey, chipSlots, statUnit } from './rowFields'
+import { chipKey, chipSlots, splitTags, statUnit } from './rowFields'
 
 export interface NeuronRowProps {
   table: TableValue
-  /** Row index into the index table, not a body id. */
+  /** Row index into the index table, not a neuron id. */
   row: number
   fields: RowFields
   sourceId: string | undefined
   datasetId: string | undefined
   selected: boolean
   /**
-   * Takes the body id rather than closing over it, so the parent can pass one stable
+   * Takes the neuron id rather than closing over it, so the parent can pass one stable
    * function for the whole page — a fresh `() => toggle(id)` per row defeated `memo`
    * outright, and every row re-rendered (thumbnail subtree included) on every tick.
    */
-  onToggle: (bodyId: number) => void
+  /** Text, never a number: a wide root id does not survive a double. See invariant 8. */
+  onToggle: (neuronId: string) => void
   /** Inside a node card rather than the full-size overlay: a smaller thumbnail. */
   compact: boolean
 }
+
+/**
+ * How many tags a row draws before it starts counting.
+ *
+ * Small on purpose. These are the least structured thing on the row and the least likely to be
+ * what somebody is scanning for, so they get the least width — four is about what fits beside a
+ * name without the row becoming a paragraph.
+ */
+const MAX_ROW_TAGS = 4
 
 function cellOf(table: TableValue, name: string, row: number): CellValue {
   const column = table.data[name]
@@ -52,7 +63,9 @@ function NeuronRowImpl({
   onToggle,
   compact,
 }: NeuronRowProps) {
-  const bodyId = Number(cellOf(table, 'bodyId', row) ?? 0)
+  // `idText` keeps a wide id exactly; `Number(cell)` would round it before the thumbnail
+  // cache key and the 3D fetch ever see it.
+  const neuronIdText = idText(cellOf(table, 'neuronId', row)) ?? ''
   const primary = fields.primary ? cellOf(table, fields.primary, row) : null
   /*
    * The card shows the same chips as the overlay, and `compact` reaches only the thumbnail.
@@ -80,16 +93,28 @@ function NeuronRowImpl({
     .map((name) => cellOf(table, name, row))
     .filter((value): value is string => typeof value === 'string' && value.length > 0)
 
+  /*
+   * Community tags: free-form text somebody typed, not a controlled vocabulary.
+   *
+   * Capped rather than wrapped, so every row in the list keeps the same height — which is the
+   * whole reason a list is scannable, and a neuron with forty tags would otherwise push several
+   * others off the page. The counter says how many were held back and carries all of them in
+   * its `title`, so nothing is hidden without saying so.
+   */
+  const tags = fields.tags ? splitTags(cellOf(table, fields.tags, row)) : []
+  const shownTags = tags.slice(0, MAX_ROW_TAGS)
+  const hiddenTags = tags.length - shownTags.length
+
   return (
     <div className="explore-row" data-selected={selected || undefined}>
       <label className="explore-row__pick" title={selected ? 'Deselect' : 'Select'}>
-        <input type="checkbox" checked={selected} onChange={() => onToggle(bodyId)} />
+        <input type="checkbox" checked={selected} onChange={() => onToggle(neuronIdText)} />
       </label>
 
       <NeuronThumbnail
         sourceId={sourceId}
         datasetId={datasetId}
-        bodyId={bodyId}
+        neuronId={neuronIdText}
         size={compact ? 56 : 76}
       />
 
@@ -102,7 +127,7 @@ function NeuronRowImpl({
               ? 'untyped'
               : formatCell(primary, fields.primary)}
           </strong>
-          <span className="explore-row__id">{bodyId}</span>
+          <span className="explore-row__id">{neuronIdText}</span>
         </div>
         {secondary.length > 0 && (
           <div className="explore-row__sub">{secondary.join(' · ')}</div>
@@ -124,16 +149,45 @@ function NeuronRowImpl({
             ))}
           </div>
         )}
+        {shownTags.length > 0 && (
+          <div className="explore-row__tags">
+            {shownTags.map((tag, at) => (
+              // Keyed by position as well as text: a base can hold the same tag twice, and two
+              // children with one key is a React warning and a dropped node.
+              <span key={`${at}:${tag}`} className="explore-tag" title={tag}>
+                {tag}
+              </span>
+            ))}
+            {hiddenTags > 0 && (
+              <span className="explore-tag explore-tag--more" title={tags.join('\n')}>
+                +{hiddenTags} more
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="explore-row__stats">
         {fields.stats.map((name) => {
           const value = cellOf(table, name, row)
           const unit = statUnit(table.schema, name)
+          /*
+           * Glanceable on screen, exact on hover. The figure is scaled into the unit a reader
+           * thinks in — a cable length is millimetres of arbor, not three million nanometres —
+           * and the title carries the stored number **verbatim**, which is the one to copy into
+           * anything else: `formatNumber` would group and round it, so the hover would answer
+           * the one question it exists for with a different number.
+           *
+           * The unit stays on the label rather than after the value, so it survives an absent
+           * one. What a column is *in* is the one thing an empty cell can still say, and it is
+           * what the title said before any of this.
+           */
+          const label = unit ? `${name} (${unit})` : name
+          const title = typeof value === 'number' ? `${label}: ${formatExact(value)}` : label
           return (
-            <span key={name} className="explore-stat" title={unit ? `${name} (${unit})` : name}>
+            <span key={name} className="explore-stat" title={title}>
               <span className="explore-stat__value">
-                {typeof value === 'number' ? formatCompact(value) : '—'}
+                {typeof value === 'number' ? formatMeasure(value, unit) : '—'}
               </span>
               <span className="explore-stat__label">{name}</span>
             </span>

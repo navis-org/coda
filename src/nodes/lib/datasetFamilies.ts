@@ -21,6 +21,69 @@
 import type { DatasetInfo } from '../../data/source'
 import { getSource } from '../../data/source'
 
+/**
+ * The backends a dataset can be served by.
+ *
+ * A table rather than a flag, because "which backend" is now three separate things a reader
+ * needs — the suffix in the node's name, the tint on its card, and the mark on its browser tile
+ * — and a fourth backend should be one entry here rather than four edits spread across the UI.
+ *
+ * It exists at all because the backends stopped being interchangeable. A neuPrint dataset
+ * carries its own annotation and answers a path query server-side; a CAVE datastack has neither
+ * and takes its labels from whatever is wired to it. Those are different enough that reading a
+ * graph means knowing which you are looking at — and **one dataset can be served by both**, so
+ * the name has to say.
+ */
+export interface DatasetBackend {
+  /** Stable id. Also the `data-backend` attribute, and the CSS token suffix. */
+  id: string
+  /** What goes in a node's name: `MaleCNS (neuPrint)`. Empty adds no suffix. */
+  label: string
+  /**
+   * Whether its dataset nodes take an Annotations socket.
+   *
+   * neuPrint carries its own cell typing as properties on the neuron, so there is nothing for a
+   * source to replace and a socket would be a control that changes nothing. A CAVE datastack
+   * takes its labels from a table, which is exactly the thing an annotation source *is* — and
+   * for several datastacks there is no such table at all.
+   */
+  acceptsAnnotations?: boolean
+}
+
+export const BACKENDS: Record<string, DatasetBackend> = {
+  neuprint: {
+    id: 'neuprint',
+    label: 'neuPrint',
+  },
+  cave: {
+    id: 'cave',
+    label: 'CAVE',
+    acceptsAnnotations: true,
+  },
+  /*
+   * CATMAID takes no Annotations socket, which puts it with neuPrint rather than with CAVE.
+   * The distinction `acceptsAnnotations` draws is whether a dataset's labels come from a table
+   * something else could supply: CAVE reads them from an annotation table, so replacing it is
+   * meaningful, while neuPrint carries them as properties on the neuron. CATMAID carries them as
+   * annotations *on* the neuron — intrinsic in the same way, and derived through its own
+   * meta-annotation layer (see `data/catmaid/annotations.ts`), so there is nothing for an
+   * external table to replace.
+   */
+  catmaid: {
+    id: 'catmaid',
+    label: 'CATMAID',
+  },
+  /*
+   * The synthetic families get a backend too, and its label is deliberately empty: `Hemibrain
+   * (mini)` already says what it is, and `Hemibrain (mini) (Mock)` is the kind of name a rule
+   * produces when nobody checked it against the values. The tint and the tile mark still apply.
+   */
+  mock: {
+    id: 'mock',
+    label: '',
+  },
+}
+
 /** Which silhouette the node's thumbnail placeholder draws. Falls back to `specimen`. */
 export type DatasetGlyph = 'brain' | 'vnc' | 'cns' | 'optic' | 'specimen'
 
@@ -29,6 +92,13 @@ export interface DatasetFamily {
   key: string
   /** Registered source this family lives in. */
   sourceId: string
+  /**
+   * Which backend serves it — a key of `BACKENDS`.
+   *
+   * Separate from `sourceId`, which names a *registered instance*: two neuPrint deployments are
+   * two sources and one backend, and the distinction a reader cares about is the second.
+   */
+  backend: string
   /**
    * Family half of a `family:version` dataset id — `male-cns` for `male-cns:v1.0`. For sources
    * whose ids carry no version (the mock), this is the whole id.
@@ -47,7 +117,42 @@ export interface DatasetFamily {
    * connectome asks for, and there is nobody to cite for a connectome Coda made up on load.
    */
   synthetic?: boolean
+  /**
+   * Which client library each exporter builds on. A language absent means it cannot emit this
+   * family at all, and `canExportNotebook` refuses that format.
+   *
+   * Stated once here rather than tested at each site that cares, because there are three and
+   * they used to disagree: both dataset emitters keyed on the *source id* while
+   * `canExportNotebook` refused on `synthetic` alone — so a CAVE graph passed the refusal, its
+   * dataset cell emitted a TODO, and every node after it cascaded to "nothing upstream produced
+   * a value". The Save menu offered an export that produces a document of nothing but TODOs,
+   * which is exactly the outcome `canExport.ts` exists to prevent.
+   *
+   * **Per language, which it was not at first**, and the day the comment here predicted has
+   * arrived: FlyWire emits caveclient in Python and nothing in R, because R's route in is
+   * `fafbseg` rather than the natverse's neuPrint client and no emitter has been written for it.
+   * One flag for both formats would either refuse an export Python can produce or offer an R
+   * document of nothing but TODOs.
+   *
+   * Deliberately not derived from `sourceId`: what decides this is whether an emitter has been
+   * written, not which backend the data comes from.
+   */
+  notebook?: ExportClients
 }
+
+/** The two things a graph can be exported as. */
+export type ExportLanguage = 'python' | 'r'
+
+/**
+ * The client library each exporter builds on, keyed by language.
+ *
+ * The *value* is what a refusal message names, so it is a closed set rather than a free string:
+ * a family exported through a library nobody has named here is a library nobody installed.
+ */
+export type ExportClients = Partial<Record<ExportLanguage, 'neuprint' | 'caveclient'>>
+
+/** Both exporters are built on the neuPrint clients, which is every family but FlyWire. */
+const NEUPRINT_NOTEBOOK: ExportClients = { python: 'neuprint', r: 'neuprint' }
 
 /**
  * neuPrint's families, as published at `/api/dbmeta/datasets`. Verified against the live
@@ -58,6 +163,8 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
   {
     key: 'malecns',
     sourceId: 'neuprint',
+    backend: 'neuprint',
+    notebook: NEUPRINT_NOTEBOOK,
     family: 'male-cns',
     label: 'MaleCNS',
     description:
@@ -69,6 +176,8 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
   {
     key: 'hemibrain',
     sourceId: 'neuprint',
+    backend: 'neuprint',
+    notebook: NEUPRINT_NOTEBOOK,
     family: 'hemibrain',
     label: 'Hemibrain',
     description:
@@ -80,6 +189,8 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
   {
     key: 'manc',
     sourceId: 'neuprint',
+    backend: 'neuprint',
+    notebook: NEUPRINT_NOTEBOOK,
     family: 'manc',
     label: 'MANC',
     description: 'Male adult nerve cord — the ventral nerve cord, motor and premotor circuits.',
@@ -90,6 +201,8 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
   {
     key: 'opticlobe',
     sourceId: 'neuprint',
+    backend: 'neuprint',
+    notebook: NEUPRINT_NOTEBOOK,
     family: 'optic-lobe',
     label: 'Optic Lobe',
     description:
@@ -101,6 +214,8 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
   {
     key: 'fib19',
     sourceId: 'neuprint',
+    backend: 'neuprint',
+    notebook: NEUPRINT_NOTEBOOK,
     family: 'fib19',
     label: 'FIB-19',
     description:
@@ -112,6 +227,8 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
   {
     key: 'mushroombody',
     sourceId: 'neuprint',
+    backend: 'neuprint',
+    notebook: NEUPRINT_NOTEBOOK,
     family: 'mushroombody',
     label: 'Mushroom Body',
     description: 'Mushroom body reconstruction. Carries no version in its dataset id.',
@@ -126,6 +243,7 @@ const MOCK_FAMILIES: DatasetFamily[] = [
   {
     key: 'mock.hemibrain',
     sourceId: 'mock',
+    backend: 'mock',
     family: 'hemibrain-mini',
     label: 'Hemibrain (mini)',
     description:
@@ -138,6 +256,7 @@ const MOCK_FAMILIES: DatasetFamily[] = [
   {
     key: 'mock.opticlobe',
     sourceId: 'mock',
+    backend: 'mock',
     family: 'optic-lobe-mini',
     label: 'Optic Lobe (mini)',
     description:
@@ -149,7 +268,79 @@ const MOCK_FAMILIES: DatasetFamily[] = [
   },
 ]
 
-export const DATASET_FAMILIES: DatasetFamily[] = [...NEUPRINT_FAMILIES, ...MOCK_FAMILIES]
+/**
+ * CAVE's families.
+ *
+ * One entry, and the pairing with `src/data/cave/spec.ts` is deliberate rather than redundant:
+ * that table says which of a datastack's tables mean neurons and connections, this one says how
+ * the datastack is *presented*. A datastack needs both to appear here, which is what stops the
+ * picker offering one that would fail on the first Run.
+ *
+ * The version half of a CAVE dataset id is a **materialization number** rather than a release
+ * name — `flywire_fafb_public:783` — and it needs no new control: `compareVersions` orders bare
+ * integers correctly, so the existing dropdown reads `Latest (783)` and a pinned 630 stays 630.
+ */
+const CAVE_FAMILIES: DatasetFamily[] = [
+  {
+    key: 'flywire',
+    sourceId: 'cave',
+    backend: 'cave',
+    family: 'flywire_fafb_public',
+    label: 'FlyWire FAFB',
+    description:
+      'Whole adult female fly brain, publicly released. Proofread neurons with hierarchical cell annotations.',
+    guide:
+      'The public FlyWire segmentation of a whole female brain, read through CAVE rather than neuPrint — so it needs a CAVE token rather than a neuPrint one, and its version dropdown names a materialization rather than a release. Coda downloads its cell annotations once per dataset and searches them locally, so the first query waits and every one after it is immediate. Connectivity comes from a server-side roll-up of the synapse table; skeletons, meshes, synapses, paths and per-region counts are not wired up yet and the nodes that need them decline rather than failing.',
+    glyph: 'brain',
+    /*
+     * Python only. `caveclient` is a faithful route in — the dataset cell is a real `CAVEclient`
+     * pinned to the materialization the node resolved — where R's would be `fafbseg`, which wraps
+     * FlyWire specifically rather than CAVE generally and has no emitter here yet.
+     */
+    notebook: { python: 'caveclient' },
+  },
+]
+
+/**
+ * CATMAID's families.
+ *
+ * A CATMAID dataset is a **project**, and its id is the project's number as text — per-instance
+ * rather than portable, because CATMAID is software rather than a service and there is no
+ * cross-instance name to use. `1` is FAFB on Virtual Fly Brain's deployment and something else
+ * on anyone's lab server; the *source* id carries which server, which is what keeps the two
+ * apart. There is no version half, so `resolveDatasetId` takes the mock's branch.
+ *
+ * Neither exporter emits it. pymaid is the obvious Python route and `natverse`'s `catmaid` the R
+ * one, but no emitter has been written for either, so both languages refuse rather than
+ * producing a document of TODOs — `DatasetFamily.notebook` absent is what says so.
+ */
+const CATMAID_FAMILIES: DatasetFamily[] = [
+  {
+    /*
+     * Backend-scoped, like `mock.hemibrain`. Family keys are a permanent flat namespace — the
+     * node type is `dataset.<key>` and it is in every saved file — and FAFB is the *volume*
+     * rather than this reconstruction of it: `dataset.flywire` is already "FlyWire FAFB" on the
+     * same EM. A bare `fafb` would claim the volume's name for one of its two backends.
+     */
+    key: 'catmaid.fafb',
+    sourceId: 'catmaid',
+    backend: 'catmaid',
+    family: '1',
+    label: 'FAFB',
+    description:
+      'Whole adult female fly brain, manually traced. Public tracings published on Virtual Fly Brain.',
+    guide:
+      'The FAFB volume as traced in CATMAID and published by Virtual Fly Brain — a few thousand carefully reconstructed neurons rather than a whole-brain segmentation, which is the opposite trade from FlyWire on the same EM. CATMAID has no cell-type field, so Coda derives type and instance from the annotations a neuron carries, and everything else it carries lands in one searchable `annotations` column. The whole instance is indexed in about two seconds, so Explore is immediate; skeletons are densely traced and large, so the Skeletons node has a lower ceiling here than elsewhere. Reading needs no token, but CATMAID answers connectivity only over POST, which a browser cannot do anonymously — see docs/catmaid_vfb.md.',
+    glyph: 'brain',
+  },
+]
+
+export const DATASET_FAMILIES: DatasetFamily[] = [
+  ...NEUPRINT_FAMILIES,
+  ...CAVE_FAMILIES,
+  ...CATMAID_FAMILIES,
+  ...MOCK_FAMILIES,
+]
 
 /** Node types are `dataset.<family key>`. Never change it; it is in every saved file. */
 export const DATASET_NODE_PREFIX = 'dataset.'
@@ -188,6 +379,40 @@ export interface DatasetVersion {
 export function splitDataset(id: string): [family: string, version: string] {
   const at = id.indexOf(':')
   return at === -1 ? [id, ''] : [id.slice(0, at), id.slice(at + 1)]
+}
+
+/**
+ * What a dataset node is called: the family's name, and which backend serves it.
+ *
+ * The suffix is not decoration. One dataset can be published on more than one backend — MANC is
+ * on neuPrint today and is a plausible CAVE datastack tomorrow — so without it two nodes in the
+ * Add menu would read identically and behave differently. A backend with an empty label adds
+ * nothing, which is what keeps `Hemibrain (mini)` from becoming `Hemibrain (mini) (Mock)`.
+ */
+export function familyLabel(family: DatasetFamily): string {
+  const backend = BACKENDS[family.backend]
+  return backend?.label ? `${family.label} (${backend.label})` : family.label
+}
+
+/** The backend behind a node type, for the card tint and the browser tile. */
+export function backendForNodeType(type: string): DatasetBackend | undefined {
+  const family = familyForNodeType(type)
+  if (family) return BACKENDS[family.backend]
+  return CUSTOM_BACKENDS[type]
+}
+
+/**
+ * The custom nodes, which are not families and still have a backend.
+ *
+ * `Custom neuPrint` and `Custom CAVE` name their own server and dataset by hand, so there is no
+ * table entry to read a backend off — but a reader looking at the canvas needs the same signal
+ * from them as from a named one.
+ */
+const CUSTOM_BACKENDS: Record<string, DatasetBackend | undefined> = {
+  'dataset.neuprint': BACKENDS.neuprint,
+  'dataset.cave': BACKENDS.cave,
+  // The superseded generic picker, still registered so a saved graph loads.
+  'neuron.dataset': BACKENDS.neuprint,
 }
 
 /**

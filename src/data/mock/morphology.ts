@@ -6,10 +6,11 @@
  * arbor and an axonal arbor, tapering radii, and points that live where the neuron's ROIs
  * are. That gives real branch structure to prune, measure and colour by.
  *
- * Everything is seeded off the body id, so a neuron's shape is stable across reloads and
+ * Everything is seeded off the neuron id, so a neuron's shape is stable across reloads and
  * the provenance cache stays valid.
  */
 
+import { numericId } from '../../core/ids'
 import type { MeshGeometry, SkeletonGeometry } from '../../core/values'
 import { mulberry32 } from './generate'
 
@@ -104,8 +105,7 @@ export function generateRoiMesh(roi: string, options: RoiMeshOptions = {}): Mesh
   }
 
   return {
-    bodyId: 0,
-    label: roi,
+    id: roi,
     positions: new Float32Array(positions),
     indices: new Uint32Array(indices),
   }
@@ -169,11 +169,11 @@ interface Branch {
  * compartment" node would have something to find.
  */
 export function generateSkeleton(
-  bodyId: number,
+  neuronId: number,
   rois: string[],
   options: MorphologyOptions = {},
 ): SkeletonGeometry {
-  const rand = mulberry32(bodyId >>> 0)
+  const rand = mulberry32(neuronId >>> 0)
   const targetPoints = options.targetPoints ?? 420
 
   const positions: number[] = []
@@ -289,7 +289,7 @@ export function generateSkeleton(
   }
 
   return {
-    bodyId,
+    id: String(neuronId),
     positions: Float32Array.from(positions),
     radii: Float32Array.from(radii),
     parents: Int32Array.from(parents),
@@ -366,7 +366,7 @@ export function skeletonToTubeMesh(
   }
 
   return {
-    bodyId: skeleton.bodyId,
+    id: skeleton.id,
     positions: Float32Array.from(positions),
     indices: Uint32Array.from(indices),
   }
@@ -395,7 +395,7 @@ function cross(
 // ---------------------------------------------------------------------------
 
 /**
- * Place a synapse on a skeleton, deterministically for a given (bodyId, index) pair so the
+ * Place a synapse on a skeleton, deterministically for a given (id, index) pair so the
  * same connection always lands in the same place.
  */
 export function synapsePosition(
@@ -404,7 +404,9 @@ export function synapsePosition(
 ): [number, number, number] {
   const count = skeleton.parents.length
   if (count === 0) return [0, 0, 0]
-  const rand = mulberry32((skeleton.bodyId ^ (index * 2654435761)) >>> 0)
+  // The mock mints its own ids as small integers, so this is exact — it is the same edge
+  // `numericIds` converts at, for the same reason.
+  const rand = mulberry32(((numericId(skeleton.id) ?? 0) ^ (index * 2654435761)) >>> 0)
   // Bias away from the soma: synapses sit on the arbor, not on the cell body.
   const at = Math.min(count - 1, Math.floor(count * (0.2 + rand() * 0.8)))
   const jitter = () => (rand() - 0.5) * 90

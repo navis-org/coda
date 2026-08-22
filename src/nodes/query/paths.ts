@@ -22,6 +22,7 @@
  * picture is what the Network node's presentational params are for.
  */
 
+import { capabilityOf } from '../../data/source'
 import { registerNode } from '../../core/registry'
 import { T } from '../../core/types'
 import type { TableValue } from '../../core/values'
@@ -40,6 +41,7 @@ import {
   traversePaths,
 } from '../lib/pathOps'
 import { requireDataset } from '../lib/datasetParam'
+import { idText } from '../../core/ids'
 
 /** Above this the fan-out is worth saying out loud. A warning, never a refusal. */
 const NOISY_HOPS = 4
@@ -48,24 +50,24 @@ const NOISY_HOPS = 4
  * Group keys for the neurons arriving on a port.
  *
  * Collapsing is decided here rather than by the source, because the *seed* has to be named in
- * the same vocabulary the hops will answer in — a seed of body id 1234 and a first hop
- * reporting `LC4` would never meet. A neuron with no type keeps its body id as its key even
+ * the same vocabulary the hops will answer in — a seed of neuron id 1234 and a first hop
+ * reporting `LC4` would never meet. A neuron with no type keeps its neuron id as its key even
  * when collapsing, since there is nothing to collapse it into.
  */
 export function seedNodes(table: TableValue, collapseTypes: boolean): PathNode[] {
-  const bodyIds = getColumn(table, 'bodyId')
+  const neuronIds = getColumn(table, 'neuronId')
   const types = table.data['type'] ?? []
   const seen = new Map<string, PathNode>()
 
   for (let i = 0; i < table.length; i++) {
-    const bodyId = Number(bodyIds[i])
-    if (!Number.isFinite(bodyId)) continue
+    const neuronId = idText(neuronIds[i])
+    if (neuronId === null) continue
     const raw = types[i]
     const type = raw === null || raw === undefined || raw === '' ? null : String(raw)
     const node: PathNode =
       collapseTypes && type
-        ? { key: type, type, bodyId: null }
-        : { key: String(bodyId), type, bodyId }
+        ? { key: type, type, neuronId: null }
+        : { key: neuronId, type, neuronId }
     if (!seen.has(node.key)) seen.set(node.key, node)
   }
   return [...seen.values()]
@@ -167,7 +169,7 @@ export const pathsNode = registerNode({
     const dataset = requireDataset(ctx.input('dataset'))
     const source = ctx.resolveSource(dataset.sourceId)
     const fetchStep = source.fetchPathStep?.bind(source)
-    if (!fetchStep || !source.capabilities.paths) {
+    if (!fetchStep || !capabilityOf(source, dataset.datasetId, 'paths')) {
       throw new Error(`${source.label} cannot trace paths`)
     }
 
@@ -183,8 +185,8 @@ export const pathsNode = registerNode({
 
     const sources = seedNodes(sourceTable, collapseTypes)
     const targets = seedNodes(targetTable, collapseTypes)
-    if (sources.length === 0) throw new Error('No bodyIds in the incoming Sources table')
-    if (targets.length === 0) throw new Error('No bodyIds in the incoming Targets table')
+    if (sources.length === 0) throw new Error('No neuronIds in the incoming Sources table')
+    if (targets.length === 0) throw new Error('No neuronIds in the incoming Targets table')
 
     ctx.progress(0.05, `${sources.length} to ${targets.length}`)
     const graph = await traversePaths({
@@ -203,7 +205,7 @@ export const pathsNode = registerNode({
         fetchStep({
           datasetId: dataset.datasetId,
           types: frontier.types,
-          bodyIds: frontier.bodyIds,
+          neuronIds: frontier.neuronIds,
           direction,
           collapseTypes,
           minWeight,

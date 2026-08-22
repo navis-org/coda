@@ -22,11 +22,11 @@ const BOTH = ['cluster.selectedToNeurons', 'cluster.clustersToNeurons']
 
 function neurons(): TableValue {
   return tableFromRows(
-    tableSchema(column('bodyId', 'i64'), column('type', 'str')),
+    tableSchema(column('neuronId', 'i64'), column('type', 'str')),
     [
-      { bodyId: 11, type: 'LC4' },
-      { bodyId: 12, type: 'LC4' },
-      { bodyId: 21, type: 'LC6' },
+      { neuronId: 11, type: 'LC4' },
+      { neuronId: 12, type: 'LC4' },
+      { neuronId: 21, type: 'LC6' },
     ],
     'neurons',
   )
@@ -46,7 +46,7 @@ function run(type: string, params: Record<string, unknown>, wired = true): Recor
     input: (port: string) =>
       port === 'labels' ? labels() : wired ? neurons() : undefined,
     column: (id: string) =>
-      id === 'labelColumn' ? 'label' : ((params.matchColumn as string) ?? 'bodyId'),
+      id === 'labelColumn' ? 'label' : ((params.matchColumn as string) ?? 'neuronId'),
     columns: () => [],
     progress: () => {},
     signal: undefined,
@@ -57,7 +57,7 @@ describe.each(BOTH)('%s', (type) => {
   it('emits neurons carrying the label table’s other columns', () => {
     const out = run(type, { matchColumn: 'type' }).neurons as TableValue
     expect(out.kind).toBe('neurons')
-    expect(getColumn(out, 'bodyId')).toEqual([11, 12])
+    expect(getColumn(out, 'neuronId')).toEqual([11, 12])
     expect(getColumn(out, 'cluster')).toEqual([1, 1])
     // The colour the branch was drawn in, carried to whatever draws the neurons.
     expect(getColumn(out, 'color')).toEqual(['#3987e5', '#3987e5'])
@@ -79,7 +79,7 @@ describe.each(BOTH)('%s', (type) => {
       column: () => undefined,
       columns: () => [],
     } as never)
-    expect(issues.join(' ')).toMatch(/read as body ids/)
+    expect(issues.join(' ')).toMatch(/read as neuron ids/)
   })
 
   it('refuses a labels input that is not a table', () => {
@@ -151,7 +151,7 @@ describe('inference', () => {
 
   it('does not guess a one-column result for a neuron table whose schema is unknown', () => {
     /*
-     * Wired-but-unknown is not the same as unwired. Guessing `bodyId` for the first would
+     * Wired-but-unknown is not the same as unwired. Guessing `neuronId` for the first would
      * advertise a shape the run will not produce — the unknown-is-not-empty rule
      * `columnSchemaFor` draws.
      */

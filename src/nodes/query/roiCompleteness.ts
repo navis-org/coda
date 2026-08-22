@@ -2,13 +2,13 @@ import { registerNode } from '../../core/registry'
 import { T } from '../../core/types'
 import type { TableValue } from '../../core/values'
 import { getColumn, selectRows } from '../../core/values'
-import { ROI_COMPLETENESS_SCHEMA } from '../../data/source'
+import { ROI_COMPLETENESS_SCHEMA, capabilityOf } from '../../data/source'
 import { requireDataset, sourceLabel, sourceSupports } from '../lib/datasetParam'
 
 /**
  * How completely each region of a dataset has been reconstructed.
  *
- * The one query node here that asks about the *volume* rather than about neurons: no body id
+ * The one query node here that asks about the *volume* rather than about neurons: no neuron id
  * list, no pattern, nothing wired but a Dataset. neuPrint precomputes it, so a whole connectome
  * comes back in 9 kB for hemibrain — the answer to "where in here can I trust the numbers?",
  * which is otherwise not askable at all.
@@ -69,7 +69,7 @@ export const roiCompletenessNode = registerNode({
     const dataset = requireDataset(ctx.input('dataset'))
     const source = ctx.resolveSource(dataset.sourceId)
     const fetch = source.fetchRoiCompleteness?.bind(source)
-    if (!fetch || !source.capabilities.roiSummary) {
+    if (!fetch || !capabilityOf(source, dataset.datasetId, 'roiSummary')) {
       throw new Error(`${source.label} does not publish a per-region completeness summary`)
     }
 

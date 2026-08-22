@@ -22,7 +22,8 @@ import { parseTypedLabels } from '../../../nodes/lib/labelLookup'
 import { rLongVector, rStr, rVector } from '../r'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
-import { bodyIds } from './common'
+import { neuprintProperty } from '../../../data/neuprint/schema'
+import { neuronIds } from './common'
 
 /** What "neuPrint" means unless a node says otherwise. */
 const DEFAULT_DEPLOYMENT = 'https://neuprint.janelia.org'
@@ -92,7 +93,18 @@ function emitDataset(ctx: EmitContext, familyKey: string): string[] {
 }
 
 for (const family of DATASET_FAMILIES) {
-  if (family.synthetic) continue // Refused before the walk; see `canExportNotebook`.
+  /*
+   * Only families a notebook can be built for. These lines build a `neuprint_login`, and the
+   * other two sources need something else entirely — a mock dataset has no server at all,
+   * and a CAVE datastack needs caveclient and a materialization number.
+   *
+   * The test is `DatasetFamily.notebook` rather than `sourceId`, because what decides it is
+   * whether an emitter has been written and not which backend the data came from.
+   * `canExportNotebook` reads the same field, which is what stops the menu offering an
+   * export whose every cell after the first is a TODO; both families are named in
+   * coverage.test.ts's NO_EMITTER as well.
+   */
+  if (family.notebook?.r !== 'neuprint') continue
   registerEmitter(`dataset.${family.key}`, (ctx) => emitDataset(ctx, family.key))
 }
 
@@ -195,6 +207,16 @@ registerEmitter('neuron.findNeurons', (ctx) => {
 // Input IDs / IDs from Label
 // ---------------------------------------------------------------------------
 
+/*
+ * Ids are emitted as a **character** vector, not a numeric one, and that was measured rather
+ * than assumed. R has no unsigned 64-bit integer and its default numeric is a double, so
+ * `as.numeric("648518347529750614")` is `648518347529750528` — a different neuron, and wrong
+ * in a different direction from JavaScript's own rounding of the same id. `c(1001, 1002)` is
+ * fine for neuPrint's nine-to-eleven digit ids and silently destroys a CAVE root id, so the
+ * one spelling that is correct everywhere is the quoted one. neuprintr's `neuprint_ids()`
+ * takes character ids for exactly this reason — it is the natverse convention, and why
+ * `bit64::integer64` exists in that stack at all.
+ */
 registerEmitter('neuron.inputIds', (ctx) => {
   const out = ctx.output('neurons')
   const parsed = parseIdList(String(ctx.params.ids ?? ''))
@@ -202,7 +224,7 @@ registerEmitter('neuron.inputIds', (ctx) => {
   if (parsed.error && !wired)
     return ctx.todo(`The pasted id list is not valid: ${parsed.error}`)
 
-  const column = ctx.column('column') ?? 'bodyId'
+  const column = ctx.column('column') ?? 'neuronId'
   const lines: string[] = []
 
   if (parsed.ids.length > 0 && wired) {
@@ -228,7 +250,7 @@ registerEmitter('neuron.inputIds', (ctx) => {
       ...ctx.note(
         'No Dataset is wired, so this is the ids alone — exactly what the node emits.',
       ),
-      `${out} <- tibble(bodyId = ids)`,
+      `${out} <- tibble(neuronId = ids)`,
     ]
   }
   ctx.library('neuprintr')
@@ -268,7 +290,9 @@ registerEmitter('neuron.idsFromLabel', (ctx) => {
   lines.push(
     `${out} <- neuprint_search(`,
     `  ${pattern},`,
-    `  field = ${rStr(field)},`,
+    // neuPrint's own spelling, not Coda's — `neuprint_search(field = "neuronId")` matches
+    // nothing at all, silently. Same seam `labelClause` applies to the built query.
+    `  field = ${rStr(neuprintProperty(field))},`,
     `  meta = TRUE,`,
     `  conn = ${conn}`,
     `) |> coda_neurons()`,
@@ -303,8 +327,8 @@ registerEmitter('neuron.adjacency', (ctx) => {
 
   const lines = [
     `${out} <- neuprint_get_adjacency_matrix(`,
-    `  inputids = ${bodyIds(sources)},`,
-    `  outputids = ${bodyIds(targets)},`,
+    `  inputids = ${neuronIds(sources)},`,
+    `  outputids = ${neuronIds(targets)},`,
     `  conn = ${conn}`,
     `)`,
   ]
@@ -329,7 +353,7 @@ registerEmitter('neuron.roiCounts', (ctx) => {
       'These counts nest: a synapse in LO(R) is counted again in its parent OL(R). Filter to ' +
         'neuprint_ROIs(superLevel = FALSE) before summing, or the totals roughly double.',
     ),
-    `${ctx.output('counts')} <- neuprint_get_roiInfo(${bodyIds(neurons)}, conn = ${conn}) |>`,
+    `${ctx.output('counts')} <- neuprint_get_roiInfo(${neuronIds(neurons)}, conn = ${conn}) |>`,
     `  coda_neurons()`,
   ]
 })
@@ -386,7 +410,7 @@ registerEmitter('neuron.skeletons', (ctx) => {
   ctx.library('neuprintr')
   ctx.library('nat')
   const limit = Number(ctx.params.limit ?? 0)
-  const ids = limit > 0 ? `head(${bodyIds(neurons)}, ${limit})` : bodyIds(neurons)
+  const ids = limit > 0 ? `head(${neuronIds(neurons)}, ${limit})` : neuronIds(neurons)
   // Returns a nat neuronlist, which is what every downstream nat call wants — the same
   // relationship navis has to the Python side, since navis is nat's port.
   return [`${ctx.output('skeletons')} <- neuprint_read_neurons(${ids}, conn = ${conn})`]
@@ -407,7 +431,7 @@ registerEmitter('neuron.synapses', (ctx) => {
   ctx.library('neuprintr')
   const polarity = String(ctx.params.polarity ?? '')
   const args = [
-    bodyIds(neurons),
+    neuronIds(neurons),
     ...(polarity ? [`prepost = ${rStr(polarity.toUpperCase())}`] : []),
   ]
   return [

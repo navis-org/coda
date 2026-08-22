@@ -16,7 +16,7 @@
  *  - `Sort` puts nulls last in **both** directions, where `sort_values` follows the direction.
  */
 
-import { aggColumnName } from '../../../nodes/lib/tableOps'
+import { aggColumnName, combineLayout } from '../../../nodes/lib/tableOps'
 import type { AggFn } from '../../../nodes/lib/tableOps'
 import { findColumn, isNumericDType } from '../../../core/types'
 import { pyList, pyStr, pyValue } from '../py'
@@ -181,10 +181,78 @@ registerEmitter('core.select', (ctx) => {
 })
 
 // ---------------------------------------------------------------------------
+// Deduplicate
+// ---------------------------------------------------------------------------
+
+/** Coda's `keep` and pandas' are the same three answers; only `none` is spelled differently. */
+const KEEP_ARG: Record<string, string> = { first: "'first'", last: "'last'", none: 'False' }
+
+registerEmitter('core.dedupe', (ctx) => {
+  const src = ctx.wired('in')
+  ctx.require('pandas')
+
+  const out = ctx.output('out')
+  const names = ctx.columns('columns')
+  const keep = KEEP_ARG[String(ctx.params.keep ?? 'first')] ?? "'first'"
+  // Omitted rather than passed as an empty list: `subset=[]` compares on *no* columns, which
+  // makes every row a duplicate of the first. Absent is pandas' own "compare whole rows", which
+  // is what an empty picker means here.
+  const subset = names.length > 0 ? `subset=${pyList(names)}, ` : ''
+  return [`${out} = ${src}.drop_duplicates(${subset}keep=${keep})`]
+})
+
+// ---------------------------------------------------------------------------
+// Combine Columns
+// ---------------------------------------------------------------------------
+
+registerEmitter('core.combineColumns', (ctx) => {
+  const src = ctx.wired('in')
+  const out = ctx.output('out')
+  const columns = ctx.columns('columns')
+  const into = String(ctx.params.into ?? '').trim()
+  const sourceColumn = String(ctx.params.sourceColumn ?? '').trim()
+  if (!into || columns.length === 0) {
+    // Not configured, and the node passes its input through in exactly that case.
+    return [`${out} = ${src}`]
+  }
+
+  ctx.require('pandas')
+  ctx.helper('coda_combine')
+
+  /*
+   * A column already holding the result's name is renamed rather than overwritten, which is the
+   * node's own rule and pandas' opposite — `df['type'] = ...` replaces silently. Taken from
+   * `combineLayout`, the same function the node's own halves use, rather than reconstructed by
+   * diffing `combineSchema`'s output positionally — which bound this to two array-order facts
+   * ("the result is appended last", "the source column is last") that nothing stated. Where the
+   * input schema is unknown (downstream of a Pivot, say) there is nothing to predict and the
+   * assignment simply lands as pandas would have it.
+   */
+  const inNames = ctx.schema('in')?.columns.map((c) => c.name) ?? []
+  const layout = combineLayout(inNames, { columns, into, sourceColumn })
+  const renames = inNames.flatMap((name, i) =>
+    layout.renamed[i] === name ? [] : [`${pyStr(name)}: ${pyStr(layout.renamed[i]!)}`],
+  )
+
+  const lines = [
+    renames.length > 0
+      ? `${out} = ${src}.rename(columns={${renames.join(', ')}})`
+      : `${out} = ${src}.copy()`,
+    `${out}[${pyStr(into)}] = coda_combine(${src}, ${pyList(columns)})`,
+  ]
+  if (sourceColumn) {
+    const name = layout.sourceName ?? sourceColumn
+    lines.push(`${out}[${pyStr(name)}] = coda_combine(${src}, ${pyList(columns)}, source=True)`)
+  }
+  return lines
+})
+
+// ---------------------------------------------------------------------------
 // Group By
 // ---------------------------------------------------------------------------
 
-const AGG_FUNCS: Record<AggFn, string> = {
+/** `join` is absent on purpose: it is a callable rather than a pandas method name. */
+const AGG_FUNCS: Record<Exclude<AggFn, 'join'>, string> = {
   sum: 'sum',
   mean: 'mean',
   min: 'min',
@@ -202,12 +270,17 @@ registerEmitter('core.groupBy', (ctx) => {
   const out = ctx.output('out')
   const agg = String(ctx.params.agg ?? 'sum') as AggFn
   const value = agg === 'count' ? undefined : ctx.column('value')
-  if (agg !== 'count' && !value) return ctx.todo(`"${agg}" needs a numeric value column.`)
+  if (agg !== 'count' && !value) return ctx.todo(`"${agg}" needs a value column.`)
 
   // `n` rides along with every aggregation, exactly as the node emits it — you almost always
   // want to know whether a mean came from 2 rows or 200.
   const aggs = [`n=(${pyStr(value ?? by[0]!)}, 'size')`]
-  if (agg !== 'count') {
+  if (agg === 'join') {
+    // A callable, not a method name: pandas takes either in a named-aggregation tuple, and
+    // Coda's rule about absences and empties is not one `', '.join` expresses.
+    ctx.helper('coda_join')
+    aggs.push(`${aggColumnName(agg, value)}=(${pyStr(value!)}, coda_join)`)
+  } else if (agg !== 'count') {
     aggs.push(`${aggColumnName(agg, value)}=(${pyStr(value!)}, ${pyStr(AGG_FUNCS[agg])})`)
   }
 
@@ -333,6 +406,11 @@ registerEmitter('core.pivot', (ctx) => {
   const value = ctx.column('value')
   const matrix = ctx.output('matrix')
   const table = ctx.output('table')
+
+  // Unreachable through the picker, which offers `NUMERIC_AGG_OPTIONS`; a hand-edited file is
+  // the only way here, and `pivot_table` would answer a frame of zeroes rather than fail.
+  if (agg === 'join')
+    return ctx.todo('A pivot cannot aggregate text — a matrix cell is a number.')
 
   const args = [
     `index=${pyStr(rows)}`,

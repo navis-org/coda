@@ -6,7 +6,7 @@ import { clusterColor } from '../../../ui/encoding'
 import { rCol as col, rStr, rVector } from '../r'
 import { registerEmitter, registerHelper } from '../registry'
 import type { EmitContext } from '../types'
-import { bodyIds, selectionIds } from './common'
+import { neuronIds, selectionIds } from './common'
 
 // ---------------------------------------------------------------------------
 // Build Network
@@ -80,8 +80,8 @@ registerEmitter('neuron.paths', (ctx) => {
         'is the unranked set.',
     ),
     `${ctx.output('paths')} <- neuprint_get_paths(`,
-    `  ${bodyIds(sources)},`,
-    `  ${bodyIds(targets)},`,
+    `  ${neuronIds(sources)},`,
+    `  ${neuronIds(targets)},`,
     `  n = ${maxHops},`,
     `  weightT = ${minWeight},`,
     `  conn = ${conn}`,
@@ -112,7 +112,8 @@ registerEmitter('neuron.explore', (ctx) => {
     `${all} <- neuprint_fetch_custom(`,
     // Aliased, because neuprint_fetch_custom names its columns after the RETURN expressions
     // — without `AS` the column is literally called `n.bodyId`, which nothing downstream finds.
-    `  "MATCH (n:Neuron) RETURN n.bodyId AS bodyId, n.type AS type, n.instance AS instance,`,
+    // The alias is also the id-column seam: neuPrint's property is `bodyId`, Coda's is `neuronId`.
+    `  "MATCH (n:Neuron) RETURN n.bodyId AS neuronId, n.type AS type, n.instance AS instance,`,
     `   n.status AS status, n.pre AS pre, n.post AS post",`,
     `  conn = ${conn}`,
     `)`,
@@ -147,7 +148,7 @@ registerEmitter('neuron.explore', (ctx) => {
   } else {
     // Resolved against the whole table rather than against hits, exactly as the node does:
     // refining a search must not drop a neuron somebody already chose.
-    lines.push(`${selected} <- ${all} |> filter(bodyId %in% ${rVector(selection)})`)
+    lines.push(`${selected} <- ${all} |> filter(neuronId %in% ${rVector(selection)})`)
   }
   return lines
 })
@@ -206,7 +207,7 @@ registerHelper({
     '    if (is.null(field)) {',
     '      if (is.null(haystack)) {',
     '        cols <- names(df)[vapply(df, function(x) is.character(x) || is.factor(x), TRUE)]',
-    '        cols <- union(cols, intersect("bodyId", names(df)))',
+    '        cols <- union(cols, intersect("neuronId", names(df)))',
     '        haystack <- tolower(do.call(paste, c(lapply(df[cols], function(x)',
     '          ifelse(is.na(x), "", as.character(x))), sep = " ")))',
     '      }',
@@ -260,7 +261,7 @@ registerEmitter('out.profile', (ctx) => {
 
   const lines: string[] = [`${out} <- ${src}`]
   if (selection.length > 0) {
-    lines.push(`${current} <- ${out} |> filter(bodyId %in% ${rVector(selection)})`)
+    lines.push(`${current} <- ${out} |> filter(neuronId %in% ${rVector(selection)})`)
   } else {
     lines.push(
       ...ctx.note('No neuron is pinned on the canvas, so Current is empty.'),
@@ -279,7 +280,7 @@ registerEmitter('out.profile', (ctx) => {
   }
 
   ctx.helper('coda_profile')
-  const ids = selection.length > 0 ? rVector(selection) : bodyIds(out)
+  const ids = selection.length > 0 ? rVector(selection) : neuronIds(out)
   lines.push(
     ``,
     `profile <- coda_profile(`,
@@ -670,7 +671,7 @@ registerEmitter('out.dendrogram', (ctx) => {
 
 /**
  * `Selected to Neurons` / `Clusters to Neurons`, with the same two fidelity concerns the
- * notebook emitter records: **matched as text**, because a tree labelled by body id carries
+ * notebook emitter records: **matched as text**, because a tree labelled by neuron id carries
  * strings against a numeric column, and **first match wins**, because `inner_join` would
  * otherwise emit the cross product for a repeated label.
  *
@@ -690,22 +691,22 @@ function labelsToNeuronsEmitter(ctx: EmitContext): string[] {
   if (!neurons) {
     return [
       ...ctx.note(
-        'No neuron table is wired on the canvas, so the labels are read as body ids. They stay ' +
-          '`numeric` rather than becoming `integer`: R integers are 32-bit and a body id can ' +
+        'No neuron table is wired on the canvas, so the labels are read as neuron ids. They stay ' +
+          '`numeric` rather than becoming `integer`: R integers are 32-bit and a neuron id can ' +
           'exceed that, where a double is exact to 2^53 — which is Coda\'s own representation.',
       ),
       `${out} <- ${labels} |>`,
-      `  mutate(bodyId = suppressWarnings(as.numeric(${col(labelColumn)}))) |>`,
-      `  filter(!is.na(bodyId)) |>`,
-      `  select(bodyId, everything(), -${col(labelColumn)})`,
+      `  mutate(neuronId = suppressWarnings(as.numeric(${col(labelColumn)}))) |>`,
+      `  filter(!is.na(neuronId)) |>`,
+      `  select(neuronId, everything(), -${col(labelColumn)})`,
     ]
   }
 
-  const matchColumn = ctx.column('matchColumn') ?? 'bodyId'
+  const matchColumn = ctx.column('matchColumn') ?? 'neuronId'
   return [
     ...ctx.note(
       'Coda matches labels as text, so both sides go through a character key — a tree labelled ' +
-        'by body id carries "722817260" against a numeric column, and joining those directly ' +
+        'by neuron id carries "722817260" against a numeric column, and joining those directly ' +
         'matches nothing.',
     ),
     `${out} <- ${neurons} |>`,

@@ -211,7 +211,7 @@ export function buildRoiOutlines(
     if (!drawn) continue
 
     regions.push({
-      roi: item.label ?? String(index),
+      roi: item.id,
       primary: primaryColumn ? primaryColumn[index] !== false : true,
       volume: meshVolume(item.positions, item.indices),
       surfaceArea: meshSurfaceArea(item.positions, item.indices),

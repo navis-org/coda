@@ -125,8 +125,8 @@ describe('hops', () => {
       await connections({ hops: 2 })
       expect(spy.mock.calls.length).toBe(2)
       // The second round asks about the neurons the first one found, not the seeds again.
-      const first = new Set(spy.mock.calls[0]?.[0].bodyIds)
-      const second = spy.mock.calls[1]?.[0].bodyIds ?? []
+      const first = new Set(spy.mock.calls[0]?.[0].neuronIds)
+      const second = spy.mock.calls[1]?.[0].neuronIds ?? []
       expect(second.length).toBeGreaterThan(0)
       expect(second.some((id) => !first.has(id))).toBe(true)
     } finally {

@@ -232,19 +232,31 @@ export interface SearchIndex {
  * Fields worth ranking a hit in. `type` and `instance` are what people search by name, so a
  * hit there should outrank the same string appearing in, say, a neurotransmitter prediction.
  */
-const PRIMARY_CANDIDATES = ['type', 'instance', 'bodyId']
+const PRIMARY_CANDIDATES = ['type', 'instance', 'neuronId']
 
-/** Columns folded into the free-text haystack: identifiers and every string field. */
-function searchableColumns(schema: TableSchema): ColumnSchema[] {
-  return schema.columns.filter((c) => c.dtype === 'str' || c.name === 'bodyId')
+/**
+ * Columns folded into the free-text haystack: identifiers and every string field.
+ *
+ * `exclude` is how a column stays *shown* without being *searched*, which is what Explore's
+ * `Search tags` opt-out is. It only reaches the free-text half — a field term naming the column
+ * still matches it, because `prepareFieldTerms` reads the table rather than this index, and
+ * asking for a column by name is an explicit act rather than a stray word in a search box.
+ */
+function searchableColumns(schema: TableSchema, exclude: ReadonlySet<string>): ColumnSchema[] {
+  return schema.columns.filter(
+    (c) => (c.dtype === 'str' || c.name === 'neuronId') && !exclude.has(c.name),
+  )
 }
 
 /**
  * Build the concatenated lowercase haystacks. ~55 ms and ~24 MB for 165k neurons, so this is
  * memoised per table by `searchIndexFor` rather than rebuilt per query.
  */
-export function buildSearchIndex(table: TableValue): SearchIndex {
-  const columns = searchableColumns(table.schema)
+export function buildSearchIndex(
+  table: TableValue,
+  exclude: readonly string[] = [],
+): SearchIndex {
+  const columns = searchableColumns(table.schema, new Set(exclude))
   const arrays = columns.map((c) => table.data[c.name] ?? [])
   const haystacks = new Array<string>(table.length)
 
@@ -265,17 +277,43 @@ export function buildSearchIndex(table: TableValue): SearchIndex {
   }
 }
 
-const indexCache = new WeakMap<TableValue, SearchIndex>()
+const indexCache = new WeakMap<TableValue, Map<string, SearchIndex>>()
 
 /** Memoised `buildSearchIndex`. Keyed by table identity, which is how values flow anyway. */
-export function searchIndexFor(table: TableValue): SearchIndex {
-  let index = indexCache.get(table)
+export function searchIndexFor(
+  table: TableValue,
+  exclude: readonly string[] = [],
+): SearchIndex {
+  // Keyed on the exclusion as well as the table: the haystack *is* the exclusion, so one entry
+  // per table would hand a widget that excludes tags the index a node built without excluding
+  // them. Sorted, so two spellings of one exclusion share an entry rather than building the
+  // whole 24 MB haystack twice.
+  const key = [...exclude].sort().join('\u0001')
+  let byExclusion = indexCache.get(table)
+  if (!byExclusion) {
+    byExclusion = new Map<string, SearchIndex>()
+    indexCache.set(table, byExclusion)
+  }
+  let index = byExclusion.get(key)
   if (!index) {
-    index = buildSearchIndex(table)
-    indexCache.set(table, index)
+    /*
+     * Bounded, because the `WeakMap` protects nothing here: `cacheGet` promotes a hit into
+     * `cache.ts`'s module map, so the neuron index is held for the life of the tab and every
+     * distinct exclusion would accumulate a haystack that is never collected — 24 MB apiece at
+     * 165k neurons. Two is what the honest case needs (two Explore nodes on one dataset,
+     * configured differently); a single slot would thrash between them at 55 ms a swap.
+     */
+    if (byExclusion.size >= MAX_CACHED_INDEXES) {
+      byExclusion.delete(byExclusion.keys().next().value!)
+    }
+    index = buildSearchIndex(table, exclude)
+    byExclusion.set(key, index)
   }
   return index
 }
+
+/** Haystacks kept per table. See the note in `searchIndexFor`. */
+const MAX_CACHED_INDEXES = 3
 
 // ---------------------------------------------------------------------------
 // Matching
@@ -418,7 +456,7 @@ export interface SearchResult {
  * Run a parsed query.
  *
  * Ordering: exact body-id hit, then hits in `type`/`instance`, then substring hits anywhere,
- * then subsequence-only hits, and `bodyId` order within each tier. An empty query returns
+ * then subsequence-only hits, and `neuronId` order within each tier. An empty query returns
  * every row in the table's own order and does no ranking work at all.
  */
 export function runSearch(
@@ -493,7 +531,7 @@ function tierOf(table: TableValue, index: SearchIndex, row: number, needle: stri
  * 21,264 male-CNS neurons as a subsequence, so a 20k cut-off left the actual DNp01 neurons
  * unranked and buried thousands of rows deep, which reads as "fuzzy search does not work".
  *
- * Hits arrive in the table's own order (body id) and buckets preserve it, so the result is a
+ * Hits arrive in the table's own order (neuron id) and buckets preserve it, so the result is a
  * total order: the same query always yields the same rows in the same sequence.
  */
 function rankHits(
@@ -639,7 +677,7 @@ export function completeSearch(
   const split = splitOperator(bare)
 
   if (!split) {
-    const names = table.schema.columns.filter((c) => c.name !== 'bodyId').map((c) => c.name)
+    const names = table.schema.columns.filter((c) => c.name !== 'neuronId').map((c) => c.name)
     const dtypeOf = new Map(table.schema.columns.map((c) => [c.name, c.dtype]))
     return {
       from: token.from,

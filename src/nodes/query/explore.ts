@@ -1,4 +1,6 @@
 import { registerNode } from '../../core/registry'
+import type { ParamValues } from '../../core/node'
+import { datasetRequest } from '../lib/datasetParam'
 import { selectRows } from '../../core/values'
 import { T } from '../../core/types'
 import {
@@ -63,7 +65,7 @@ const lastRefresh = new Map<string, number>()
  *
  * A selection is provenance, not a view: it lands in the saved file and in the cache key of
  * every node downstream, so `stableStringify` walks the whole array on every graph edit. Ten
- * thousand body ids is ~110 kB of string per key computation, which is affordable; the whole
+ * thousand neuron ids is ~110 kB of string per key computation, which is affordable; the whole
  * of male-CNS is 165,122 of them and about 1.9 MB, which is not — it would make typing in an
  * unrelated node stutter.
  *
@@ -72,6 +74,25 @@ const lastRefresh = new Map<string, number>()
  * refused is the one gesture that can add six figures of ids without meaning to.
  */
 export const MAX_SELECT_ALL = 10_000
+
+/**
+ * The column kept out of the free-text haystack, if any.
+ *
+ * One function because two surfaces read it — `evaluate`, whose answer reaches `Hits`, and the
+ * widget, which filters live as you type. Two spellings would be a list showing rows the port
+ * does not carry, which is the disagreement the live-widget/committed-param split exists to
+ * avoid rather than to create.
+ *
+ * Takes the *resolved* column rather than resolving it: both callers already have it in hand,
+ * and both need it for the row spec anyway. Answers one name rather than a list, so a memo can
+ * key on it directly instead of encoding an array that can never hold two.
+ */
+export function excludedFromSearch(
+  params: ParamValues,
+  tagColumn: string | undefined,
+): string | undefined {
+  return params.searchTags === false ? tagColumn || undefined : undefined
+}
 
 export const exploreNode = registerNode({
   type: 'neuron.explore',
@@ -123,16 +144,54 @@ export const exploreNode = registerNode({
        */
       id: 'chips',
       kind: 'columns',
-      label: 'Tags',
+      // "Fields", not "Tags": the value is a list of *columns*, and the widget now also has an
+      // `Additional tags` control naming a column whose *values* are tags. Two controls called
+      // Tags meaning opposite halves of one row is the confusion this avoids. The id stays
+      // `chips` — that is what a saved graph carries.
+      label: 'Fields',
       from: 'dataset',
       // A Dataset socket carries a source id, not a schema, so the picker is handed the
       // lookup: same neuron schema the outputs are inferred from, so the options are exactly
       // the columns the rows will have.
       schemaFrom: (inputs) => schemasFromType(inputs.dataset).neurons,
-      help: 'Fields shown as tags on each neuron. Leave empty to choose automatically.',
+      help: 'Which columns are shown as chips on each neuron. Leave empty to choose automatically.',
       default: [],
       presentational: true,
       advanced: true,
+    },
+    {
+      /*
+       * A column whose *values* are free-form tags — a CAVE community-annotation table folded
+       * into one cell per neuron, which is what Group By's `join` produces.
+       *
+       * **Not presentational**, unlike `chips`, and the reason is `searchTags` below: together
+       * they decide which column is kept out of the free-text haystack, and that changes which
+       * rows `Hits` returns. A picker that quietly changed a port's contents while claiming to
+       * be a drawing knob is exactly what `presentational` must never mean.
+       */
+      id: 'tagColumn',
+      kind: 'column',
+      label: 'Additional tags',
+      from: 'dataset',
+      schemaFrom: (inputs) => schemasFromType(inputs.dataset).neurons,
+      help: 'A column holding several free-form tags per neuron, joined with "; " — what Group By’s "join text" produces. Drawn as a separate muted row, apart from the fields above.',
+      default: '',
+      optional: true,
+      advanced: true,
+    },
+    {
+      /*
+       * On by default, because a tag nobody can search for is a tag nobody finds. It is the
+       * *free-text* half only: a field term naming the column still matches, since that is an
+       * explicit act rather than a stray word in a search box.
+       */
+      id: 'searchTags',
+      kind: 'boolean',
+      label: 'Search tags',
+      help: 'Whether the search box matches tag text. Off keeps free-form community text out of the hit count, and a field term naming the column still works.',
+      default: true,
+      advanced: true,
+      visibleIf: (params) => Boolean(params.tagColumn),
     },
     {
       id: 'page',
@@ -215,7 +274,7 @@ export const exploreNode = registerNode({
 
     ctx.progress(0.05, 'index')
     const index = await source.neuronIndex({
-      datasetId: dataset.datasetId,
+      ...datasetRequest(dataset),
       refresh,
       // Compressed into the first three quarters: the local search that follows is
       // milliseconds, so letting it own a quarter of the bar would just look stuck at 75%.
@@ -225,7 +284,10 @@ export const exploreNode = registerNode({
 
     ctx.progress(0.8, 'searching')
     const parsed = parseSearch(String(ctx.params.query ?? ''))
-    const { rows } = runSearch(index, searchIndexFor(index), parsed)
+    // Through `ctx.column`, never `ctx.params` — invariant 5, and it is what keeps the column
+    // excluded here the same one the provenance key was taken over.
+    const excluded = excludedFromSearch(ctx.params, ctx.column('tagColumn'))
+    const { rows } = runSearch(index, searchIndexFor(index, excluded ? [excluded] : []), parsed)
     const limit = Number(ctx.params.limit ?? 0)
     const capped = limit > 0 ? rows.slice(0, limit) : rows
 

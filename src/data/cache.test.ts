@@ -15,12 +15,12 @@ import { tableFromRows } from '../core/values'
 import { cacheDelete, cacheGet, cacheSet, resetCache } from './cache'
 import { loadCachedTable, neuronIndexKey, resetIndexLoads } from './neuronIndex'
 
-const SCHEMA = tableSchema(column('bodyId', 'i64'), column('type', 'str'))
+const SCHEMA = tableSchema(column('neuronId', 'i64'), column('type', 'str'))
 
 function table(rows: number): TableValue {
   return tableFromRows(
     SCHEMA,
-    Array.from({ length: rows }, (_, i) => ({ bodyId: i, type: `T${i}` })),
+    Array.from({ length: rows }, (_, i) => ({ neuronId: i, type: `T${i}` })),
     'neurons',
   )
 }
@@ -71,7 +71,7 @@ describe('loadCachedTable', () => {
   it('fetches once and serves the same object afterwards', async () => {
     const value = table(3)
     const fetch = vi.fn(async () => value)
-    const spec = { key: 'idx', fingerprint: 'bodyId,type', fetch }
+    const spec = { key: 'idx', fingerprint: 'neuronId,type', fetch }
 
     expect(await loadCachedTable(spec)).toBe(value)
     expect(await loadCachedTable(spec)).toBe(value)

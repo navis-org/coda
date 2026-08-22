@@ -35,11 +35,11 @@
  */
 
 import { registerNode } from '../../core/registry'
-import type { ColumnSchemaSource } from '../../core/node'
 import type { TableSchema } from '../../core/types'
 import { T, columnNames, findColumn } from '../../core/types'
 import { parseDelimited } from '../../data/csv'
 import { MAX_UPLOAD_BYTES, reportUploadLearned } from '../../data/uploads'
+import { importShapeIssues, importShapeParams, readImportShape } from '../lib/importParams'
 import { uploadIsNeurons, uploadShapeSchema, uploadShapeTable } from '../lib/tableOps'
 
 /**
@@ -51,9 +51,6 @@ import { uploadIsNeurons, uploadShapeSchema, uploadShapeTable } from '../lib/tab
  * and re-added has not learned anything new.
  */
 const schemaByUrl = new Map<string, TableSchema>()
-
-const fetchedSchema: ColumnSchemaSource = (_inputs, params) =>
-  schemaByUrl.get(String(params.url ?? '').trim())
 
 /** Test seam, and the reason the map is not exported directly. */
 export function resetFetchedSchemas(): void {
@@ -79,45 +76,10 @@ export const tableFromUrlNode = registerNode({
       help: 'A CSV, TSV or semicolon-separated file. The host must allow cross-origin reads.',
       default: '',
     },
-    {
-      id: 'idColumn',
-      kind: 'enum',
-      label: 'ID column',
-      help: 'Renamed to bodyId, which is the name every neuron node looks for.',
-      default: '',
-      /*
-       * An enum rather than a `column` param, for the reason spelled out on the upload node: an
-       * enum's stored value reaches the provenance key verbatim, where a column param's is
-       * resolved against the available schema first — and a schema that is empty before the
-       * first fetch and full after it would key the node two different ways either side of a
-       * run it had just finished.
-       */
-      options: (ctx) => [
-        { value: '', label: 'none (plain table)' },
-        // Identifiers only: a float is a measurement and a boolean is a flag.
-        ...(schemaByUrl.get(String(ctx.params.url ?? '').trim())?.columns ?? [])
-          .filter((c) => c.dtype === 'i64' || c.dtype === 'str')
-          .map((c) => ({ value: c.name, label: c.name })),
-      ],
-    },
-    {
-      id: 'textColumns',
-      kind: 'columns',
-      label: 'Text columns',
-      help: 'Read these as text rather than numbers — a cluster id is a label, not a quantity.',
-      /*
-       * No port to read: the schema comes from what this URL last returned. Safe against the
-       * key only because `resolveColumns` now keeps a chosen list while the schema is unknown —
-       * before that it collapsed to empty before the first fetch and to the real list after,
-       * changing the key of a node that had just finished fetching and sending it back to the
-       * host to do it again.
-       */
-      from: '',
-      schemaFrom: fetchedSchema,
-      default: [],
-      optional: true,
-      advanced: true,
-    },
+    ...importShapeParams({
+      read: (params) => schemaByUrl.get(String(params.url ?? '').trim()),
+      textAdvanced: true,
+    }),
     {
       id: 'refresh',
       kind: 'int',
@@ -132,10 +94,10 @@ export const tableFromUrlNode = registerNode({
 
   inferOutputs: (ctx) => {
     const known = schemaByUrl.get(String(ctx.params.url ?? '').trim())
-    const idColumn = String(ctx.params.idColumn ?? '')
-    const shaped = uploadShapeSchema(known, idColumn, ctx.columns('textColumns'))
+    const shape = readImportShape(ctx)
+    const shaped = uploadShapeSchema(known, shape)
     return {
-      out: uploadIsNeurons(known, idColumn) ? T.neurons(shaped) : T.table(shaped),
+      out: uploadIsNeurons(known, shape.idColumn ?? '') ? T.neurons(shaped) : T.table(shaped),
     }
   },
 
@@ -164,7 +126,9 @@ export const tableFromUrlNode = registerNode({
     if (parsed.protocol === 'http:') {
       return ['An http URL will be blocked by the browser when this app is served over https']
     }
-    return []
+    // Once the URL has answered once, the same checks the upload node makes — including the
+    // "not in this file" pair, which this node used to skip while its twin reported them.
+    return importShapeIssues(ctx, schemaByUrl.get(url), 'what this URL returned')
   },
 
   evaluate: async (ctx) => {
@@ -247,6 +211,6 @@ export const tableFromUrlNode = registerNode({
     }
 
     ctx.progress(1)
-    return { out: uploadShapeTable(parsed.table, idColumn, ctx.columns('textColumns')) }
+    return { out: uploadShapeTable(parsed.table, readImportShape(ctx)) }
   },
 })

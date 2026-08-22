@@ -22,6 +22,7 @@ import { BarChartViewer } from './BarChartViewer'
 import { HeatmapViewer } from './HeatmapViewer'
 import { LazyNetworkViewer, LazyViewer3D } from './LazyViewers'
 import { NeuroglancerViewer } from './NeuroglancerViewer'
+import { chosenViewerKind } from '../../nodes/output/neuroglancer'
 import { DatasetSummaryViewer } from './DatasetSummaryViewer'
 import { RoisViewer } from './RoisViewer'
 import type { RoiColorMode, RoiLabelMode } from './RoisViewer'
@@ -33,6 +34,7 @@ import { DendrogramViewer } from './DendrogramViewer'
 import type { LayoutName } from './networkLayout'
 import type { FilterClause } from '../../nodes/lib/tableFilter'
 import { decodeClauses, encodeClauses } from '../../nodes/lib/tableFilter'
+import { TableSummary } from './TableSummary'
 import { TableViewer } from './TableViewer'
 
 export interface ValuePreviewProps {
@@ -60,6 +62,18 @@ export interface ValuePreviewProps {
   onSelectionChange?: (ids: string[]) => void
   /** Realised values on the node's input ports, for viewers that draw several at once. */
   inputValues?: Record<string, Value | undefined>
+  /**
+   * Draw a tabular value as a text readout rather than as a table.
+   *
+   * For a surface with no room for one — the inspector, at 320 × 300. A 60-column annotation
+   * table there is a horizontally scrolling grid showing about three columns at a time, where
+   * `TableSummary` turns the same information ninety degrees and fits it. Reading the table
+   * itself is the Table node's job, and the overlay's.
+   *
+   * Only the *fallback* table branch honours it: a node with a viewer of its own — a scatter, a
+   * heatmap, a profile — keeps it, because those already draw something sized to their box.
+   */
+  summary?: boolean
 }
 
 /**
@@ -95,6 +109,7 @@ function ValuePreviewInner({
   onParamChange,
   onSelectionChange,
   inputValues,
+  summary,
 }: ValuePreviewProps) {
   // Forwarded to every viewer; kept in one place so a new viewer can't forget export.
   const shared = {
@@ -266,6 +281,9 @@ function ValuePreviewInner({
         neurons={isTableValue(neurons) ? neurons : undefined}
         sourceId={isDatasetValue(dataset) ? dataset.sourceId : undefined}
         datasetId={isDatasetValue(dataset) ? dataset.datasetId : undefined}
+        // The chain, not just the id: this card names a partner's *type* in words, so without
+        // it the tiles would disagree with the ports an inch away.
+        annotations={isDatasetValue(dataset) ? dataset.annotations : undefined}
         page={Number(node.params.page ?? 0)}
         onPage={(next) => onParamChange?.('page', next)}
         pinned={selection}
@@ -288,6 +306,7 @@ function ValuePreviewInner({
         neurons={isTableValue(neurons) ? neurons : undefined}
         color={readColorSpec('segment', node.params, ctx.column)}
         scale={Number(node.params.uiScale ?? 0.75)}
+        viewerType={chosenViewerKind(node.params)}
         {...shared}
       />
     )
@@ -422,6 +441,7 @@ function ValuePreviewInner({
             onShowFiltersChange: (show: boolean) => onParamChange?.('showFilters', show),
           }
         : {}
+    if (summary) return <TableSummary table={value} />
     return (
       <TableViewer
         table={value}

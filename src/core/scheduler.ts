@@ -22,7 +22,9 @@ import { hasErrors, inferGraph } from './inference'
 import type { EvalContext, NodeDefinition, ParamValues } from './node'
 import { findParam, resolveColumn, resolveColumns } from './node'
 import { getNodeDef } from './registry'
+import type { CodaType } from './types'
 import type { Value } from './values'
+import { datasetIdentity } from './values'
 import type { DataSource } from '../data/source'
 import { errorMessage } from './errors'
 
@@ -77,6 +79,14 @@ export interface RunSummary {
 interface CacheEntry {
   key: string
   outputs: Record<string, Value>
+  /**
+   * When the oldest data behind these outputs was read from a server, if the node said.
+   *
+   * Here rather than in `NodeRunInfo` because this is a property of the *result*: it has to
+   * survive the result being restored from this very cache, which is precisely when a node does
+   * not run and anything recorded in run state would be gone.
+   */
+  fetchedAt?: number
 }
 
 /** Shared instance for nodes with no recorded state — see `Scheduler.info`. */
@@ -92,6 +102,13 @@ export interface SchedulerHost {
 export class Scheduler {
   private cache = new Map<string, CacheEntry>()
   private states = new Map<string, NodeRunInfo>()
+  /**
+   * Nodes asked to ignore their persistent data cache on the next run they actually execute.
+   *
+   * Session state, never the document — see `clearNodeCache`. Spent on execution rather than on
+   * the run, so a request made against an expensive node survives every cheap pass in between.
+   */
+  private forceRefresh = new Set<string>()
   private abort: AbortController | undefined
   /** Bumped on every run; results from a superseded run are discarded. */
   private generation = 0
@@ -192,6 +209,7 @@ export class Scheduler {
   invalidateAll(): void {
     this.cache.clear()
     this.states.clear()
+    this.forceRefresh.clear()
     this.host.onStateChange?.()
   }
 
@@ -201,8 +219,39 @@ export class Scheduler {
     this.refreshStates(graph)
   }
 
+  /**
+   * Ask a node to ignore its persistent data cache the next time it runs, and drop the results
+   * that came from it.
+   *
+   * Two layers, and only the first is `invalidateNode`'s. Dropping the *result* makes the node
+   * run again; it does not make the run reach the network, because `evaluate` fetches through
+   * `loadCachedTable`, whose IndexedDB entry is keyed by what was fetched rather than by the
+   * graph and is kept for a month. So "Invalidate" cleared the card and the re-run came back
+   * instantly with the same bytes — a control that looked like it had worked.
+   *
+   * The flag is held here rather than in the document because it is a fact about *this session*:
+   * it must not be saved, must not travel to whoever you send the file to, and must not take part
+   * in the provenance key. It survives until the node actually executes, so asking for it on an
+   * expensive node and then running the cheap pass does not quietly spend it.
+   */
+  clearNodeCache(graph: CodaGraph, nodeId: string): void {
+    this.forceRefresh.add(nodeId)
+    this.invalidateNode(graph, nodeId)
+  }
+
   cancel(): void {
     this.abort?.abort()
+  }
+
+  /**
+   * When the data behind a node's current result was read from a server, if it said.
+   *
+   * A primitive, so a selector over it is stable by identity (invariant 7). `undefined` means the
+   * node did not report — it has no data cache, or it has not run — which is the same absence to
+   * every caller and prints as nothing.
+   */
+  fetchedAt(nodeId: string): number | undefined {
+    return this.cache.get(nodeId)?.fetchedAt
   }
 
   // -------------------------------------------------------------------------
@@ -293,6 +342,12 @@ export class Scheduler {
 
       // Gather inputs; bail out if any required upstream is unavailable.
       const inputs: Record<string, Value | undefined> = {}
+      /*
+       * The provenance of what arrived on each port, spelled exactly as `desiredKeys` spells it
+       * — same string, so a node publishing one as an identity cannot disagree with the key the
+       * scheduler used to decide it should run.
+       */
+      const inputKeys: Record<string, string> = {}
       let blocked = false
       for (const port of def.inputs ?? []) {
         const edge = inbound.get(portKey(nodeId, port.id))
@@ -300,11 +355,24 @@ export class Scheduler {
           if (port.required !== false) blocked = true
           continue
         }
+        /*
+         * A reference names a node; it does not consume its output. So it never blocks — the
+         * source may be *downstream* of this node and quite unable to run first, which is the
+         * arrangement references exist to allow — and the value handed over is built from the
+         * inferred type rather than read from a run that may never have happened.
+         */
+        if (port.reference) {
+          const type = inference.nodes[nodeId]?.inputs[port.id]
+          inputs[port.id] = datasetIdentity(type)
+          inputKeys[port.id] = referenceKey(type)
+          continue
+        }
         if (!available.has(edge.source)) {
           blocked = true
           continue
         }
         inputs[port.id] = this.cache.get(edge.source)?.outputs[edge.sourceHandle]
+        inputKeys[port.id] = upstreamKey(keys, edge.source, edge.sourceHandle)
       }
       if (blocked) {
         this.setState(nodeId, { state: 'blocked' })
@@ -322,13 +390,25 @@ export class Scheduler {
       const nodeStarted = performance.now()
       try {
         const inputTypes = inference.nodes[nodeId]?.inputs ?? {}
+        // Spent here rather than at the top of the run: a node that was deferred by the cheap
+        // pass has not had its chance to honour the request yet.
+        const refresh = this.forceRefresh.delete(nodeId)
+        // Collected per execution rather than on the context object, so a node cannot read back
+        // what it reported and nothing survives into the next run.
+        let fetchedAt: number | undefined
         const ctx = this.makeEvalContext(
           def,
           node.params,
           inputs,
+          inputKeys,
           inputTypes,
           controller.signal,
           nodeId,
+          refresh,
+          (at) => {
+            // Oldest wins: a node making several fetches is only as fresh as its stalest one.
+            fetchedAt = fetchedAt === undefined ? at : Math.min(fetchedAt, at)
+          },
         )
         const outputs = await def.evaluate(ctx)
 
@@ -343,7 +423,11 @@ export class Scheduler {
           break
         }
 
-        this.cache.set(nodeId, { key: keys.get(nodeId)!, outputs })
+        this.cache.set(nodeId, {
+          key: keys.get(nodeId)!,
+          outputs,
+          ...(fetchedAt === undefined ? {} : { fetchedAt }),
+        })
         available.add(nodeId)
         summary.executed.push(nodeId)
         this.setState(nodeId, {
@@ -409,9 +493,22 @@ export class Scheduler {
       const upstream: Array<[string, string | null]> = []
       for (const port of def?.inputs ?? []) {
         const edge = inbound.get(portKey(nodeId, port.id))
+        /*
+         * A reference contributes the *type* it resolved to rather than the upstream node's key,
+         * and it has to: that node is excluded from the order, so its key may not be computed
+         * yet — `keys.get` would answer `'unresolved'` and this node would re-run forever.
+         *
+         * It is also the more honest key. A dataset's identity is what a reference reads, so
+         * changing its version re-keys this node and changing its *annotations* does not — which
+         * is right, because this node never sees them.
+         */
+        if (edge && port.reference) {
+          upstream.push([port.id, referenceKey(inputTypes[port.id])])
+          continue
+        }
         upstream.push([
           port.id,
-          edge ? `${keys.get(edge.source) ?? 'unresolved'}:${edge.sourceHandle}` : null,
+          edge ? upstreamKey(keys, edge.source, edge.sourceHandle) : null,
         ])
       }
       keys.set(
@@ -447,14 +544,20 @@ export class Scheduler {
     def: NodeDefinition,
     params: ParamValues,
     inputs: Record<string, Value | undefined>,
+    inputKeys: Record<string, string>,
     inputTypes: Readonly<Record<string, unknown>>,
     signal: AbortSignal,
     nodeId: string,
+    refresh: boolean,
+    reportFetched: (at: number) => void,
   ): EvalContext {
     const types = inputTypes as Record<string, never>
     return {
       params,
+      refresh,
+      reportFetched,
       input: (portId) => inputs[portId],
+      inputKey: (portId) => inputKeys[portId],
       column: (paramId) => {
         const p = findParam(def, paramId)
         return p && p.kind === 'column' ? resolveColumn(p, params, types) : undefined
@@ -484,7 +587,37 @@ export class Scheduler {
     const alive = new Set(graph.nodes.map((n) => n.id))
     for (const id of [...this.cache.keys()]) if (!alive.has(id)) this.cache.delete(id)
     for (const id of [...this.states.keys()]) if (!alive.has(id)) this.states.delete(id)
+    // A deleted node's pending request would otherwise be spent by whatever reused its id.
+    for (const id of [...this.forceRefresh]) if (!alive.has(id)) this.forceRefresh.delete(id)
   }
+}
+
+/**
+ * How one port's upstream is named in a provenance key.
+ *
+ * One spelling, because two consumers depend on it meaning the same thing: `desiredKeys` folds
+ * it into the hash that decides whether a node re-runs, and `ctx.inputKey` hands it to a node
+ * that publishes it as the identity of what arrived. If those parted company, a value would
+ * claim an identity the scheduler had never keyed anything by — and nothing would say so.
+ */
+function upstreamKey(keys: Map<string, string>, source: string, handle: string): string {
+  return `${keys.get(source) ?? 'unresolved'}:${handle}`
+}
+
+/**
+ * How a `reference` port's upstream is named — the resolved *type*, not the source node's key.
+ *
+ * It has to be the type: the referenced node is excluded from the order, so its key may not be
+ * computed when this is read, and `keys.get` would answer `'unresolved'` forever. It is also the
+ * better key, since a dataset's identity is all a reference reads.
+ *
+ * One spelling, for `upstreamKey`'s reason and in the same two consumers — `desiredKeys` folds it
+ * into the hash that decides whether a node re-runs, and `ctx.inputKey` hands it to the node as
+ * the identity of what arrived. Written out twice, they drift into a node that either re-runs
+ * forever or never invalidates, with nothing type-checking the pair.
+ */
+function referenceKey(type: CodaType | undefined): string {
+  return `ref:${hashValue(type ?? null)}`
 }
 
 /**

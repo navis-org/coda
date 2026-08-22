@@ -13,7 +13,7 @@
 
 import { pyStr } from '../py'
 import { registerEmitter, registerHelper } from '../registry'
-import { bodyIds } from './common'
+import { neuronIds } from './common'
 
 /**
  * neuprint's adjacency columns → Coda's edge-list names. Both paths share it.
@@ -40,7 +40,7 @@ registerEmitter('neuron.connectivity', (ctx) => {
   const direction = String(ctx.params.direction ?? 'outputs')
   const hops = Math.max(1, Number(ctx.params.hops ?? 1))
   const minWeight = Math.max(1, Number(ctx.params.minWeight ?? 1))
-  const ids = bodyIds(neurons)
+  const ids = neuronIds(neurons)
 
   ctx.require('neuprint', 'NeuronCriteria', 'fetch_adjacencies', 'merge_neuron_properties')
 

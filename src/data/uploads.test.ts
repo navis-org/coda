@@ -40,16 +40,16 @@ import {
   uploadsAvailable,
 } from './uploads'
 
-const SCHEMA = tableSchema(column('bodyId', 'i64'), column('cellType', 'str'))
+const SCHEMA = tableSchema(column('neuronId', 'i64'), column('cellType', 'str'))
 
-function annotations(rows: Array<{ bodyId: number; cellType: string }>): TableValue {
+function annotations(rows: Array<{ neuronId: number; cellType: string }>): TableValue {
   return tableFromRows(SCHEMA, rows)
 }
 
 const SAMPLE = () =>
   annotations([
-    { bodyId: 1, cellType: 'LC4' },
-    { bodyId: 2, cellType: 'LC6' },
+    { neuronId: 1, cellType: 'LC4' },
+    { neuronId: 2, cellType: 'LC6' },
   ])
 
 beforeEach(() => {
@@ -66,7 +66,7 @@ describe('storing', () => {
     const back = await getUpload(id)
     expect(back?.length).toBe(2)
     expect(back?.data['cellType']).toEqual(['LC4', 'LC6'])
-    expect(back?.schema.columns.map((c) => c.name)).toEqual(['bodyId', 'cellType'])
+    expect(back?.schema.columns.map((c) => c.name)).toEqual(['neuronId', 'cellType'])
   })
 
   it('keeps a descriptor that can be read without the rows', async () => {
@@ -75,7 +75,7 @@ describe('storing', () => {
     expect(meta?.name).toBe('annotations.csv')
     expect(meta?.rows).toBe(2)
     expect(meta?.bytes).toBe(4096)
-    expect(meta?.schema.columns.map((c) => c.name)).toEqual(['bodyId', 'cellType'])
+    expect(meta?.schema.columns.map((c) => c.name)).toEqual(['neuronId', 'cellType'])
   })
 
   it('resolves to nothing for an id this browser does not have', async () => {
@@ -98,8 +98,8 @@ describe('content addressing', () => {
     const changed = await putUpload(
       'a.csv',
       annotations([
-        { bodyId: 1, cellType: 'LC4' },
-        { bodyId: 2, cellType: 'LC9' },
+        { neuronId: 1, cellType: 'LC4' },
+        { neuronId: 2, cellType: 'LC9' },
       ]),
       42,
     )
@@ -109,9 +109,9 @@ describe('content addressing', () => {
   it('distinguishes files differing only in their schema', async () => {
     // Same values, different column names: a downstream picker points at a name that is now
     // gone, so this must not be read as the same import.
-    const other = tableFromRows(tableSchema(column('bodyId', 'i64'), column('type', 'str')), [
-      { bodyId: 1, type: 'LC4' },
-      { bodyId: 2, type: 'LC6' },
+    const other = tableFromRows(tableSchema(column('neuronId', 'i64'), column('type', 'str')), [
+      { neuronId: 1, type: 'LC4' },
+      { neuronId: 2, type: 'LC6' },
     ])
     expect(await putUpload('a.csv', other, 42)).not.toBe(await putUpload('a.csv', SAMPLE(), 42))
   })
@@ -136,7 +136,7 @@ describe('the peek', () => {
     expect(uploadPeekSettled(id)).toBe(false)
 
     await vi.waitFor(() => expect(uploadPeekSettled(id)).toBe(true))
-    expect(peekUploadSchema(id)?.columns.map((c) => c.name)).toEqual(['bodyId', 'cellType'])
+    expect(peekUploadSchema(id)?.columns.map((c) => c.name)).toEqual(['neuronId', 'cellType'])
     expect(peekUploadMeta(id)?.rows).toBe(2)
   })
 

@@ -21,11 +21,13 @@
  *     columns disagree with the type the editor is advertising downstream.
  */
 
-import type { TableValue } from '../core/values'
-import { cacheGet, cacheSet } from './cache'
+import type { DatasetAnnotations, TableValue } from '../core/values'
+import { cacheGetEntry, cacheSet } from './cache'
 
 export interface NeuronIndexRequest {
   datasetId: string
+  /** Labels replacing the dataset's own — see `FindNeuronsRequest.annotations`. */
+  annotations?: DatasetAnnotations
   /** Ignore any cached copy and re-fetch. Wired to the Explore node's `refresh` param. */
   refresh?: boolean
   /**
@@ -51,6 +53,16 @@ export interface CachedTableSpec {
   /** Shape identifier — a mismatch invalidates. For a table, its column names. */
   fingerprint: string
   refresh?: boolean
+  /**
+   * When the table being returned was actually fetched — `Date.now()` for a fresh read, and the
+   * *stored* time for a hit.
+   *
+   * A callback rather than a widened return type, the shape `onProgress` already has here: every
+   * caller wants the table and only one wants the age, so making it a pair would edit six call
+   * sites to serve one. Not called when an in-flight promise is shared, since the caller that
+   * started it is the one being told.
+   */
+  onFetched?: (at: number) => void
   maxAgeMs?: number
   fetch(): Promise<TableValue>
 }
@@ -71,13 +83,18 @@ export function loadCachedTable(spec: CachedTableSpec): Promise<TableValue> {
 
   const load = (async () => {
     if (!spec.refresh) {
-      const hit = await cacheGet<TableValue>(spec.key, {
+      const hit = await cacheGetEntry<TableValue>(spec.key, {
         fingerprint: spec.fingerprint,
         maxAgeMs: spec.maxAgeMs ?? NEURON_INDEX_MAX_AGE_MS,
       })
-      if (hit) return hit
+      if (hit) {
+        spec.onFetched?.(hit.savedAt)
+        return hit.value
+      }
     }
     const table = await spec.fetch()
+    const at = Date.now()
+    spec.onFetched?.(at)
     void cacheSet(spec.key, table, spec.fingerprint)
     return table
   })().finally(() => {
@@ -88,9 +105,17 @@ export function loadCachedTable(spec: CachedTableSpec): Promise<TableValue> {
   return load
 }
 
-/** Cache key for a source's neuron index. One place, so a reader and a writer agree. */
-export function neuronIndexKey(sourceId: string, datasetId: string): string {
-  return `neuron-index:${sourceId}:${datasetId}`
+/**
+ * Cache key for a source's neuron index. One place, so a reader and a writer agree.
+ *
+ * `variant` is for a source whose index depends on something outside the dataset id — CAVE's,
+ * where a wired annotation chain replaces the labels, so two graphs on one datastack hold
+ * genuinely different tables. It is part of the key rather than of the fingerprint because a
+ * fingerprint mismatch is a *miss that overwrites*: the second chain would evict the first, and
+ * the two would take turns re-fetching for the rest of the session.
+ */
+export function neuronIndexKey(sourceId: string, datasetId: string, variant = ''): string {
+  return `neuron-index:${sourceId}:${datasetId}${variant && `:${variant}`}`
 }
 
 /**

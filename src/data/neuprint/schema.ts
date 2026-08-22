@@ -18,6 +18,7 @@
  *    one, so it is dropped rather than stringified into something no encoding can read.
  */
 
+import { ID_COLUMN_NAME } from '../../core/ids'
 import type { DType, TableSchema } from '../../core/types'
 import { column, tableSchema } from '../../core/types'
 import type { SourceSchemas } from '../source'
@@ -33,7 +34,35 @@ import { CANONICAL_SCHEMAS } from '../source'
  */
 export const CORE_NEURON_COLUMNS = CANONICAL_SCHEMAS.neurons.columns
 
-const CORE_NAMES = new Set(CORE_NEURON_COLUMNS.map((c) => c.name))
+/**
+ * Coda's column name → neuPrint's property name, wherever the two differ.
+ *
+ * One entry, and it is the whole of the seam. Coda calls the id column `neuronId` on every
+ * source, because it is the one column every node addresses *by name* and so the one that has to
+ * be Coda's vocabulary rather than a backend's; neuPrint's property is `bodyId`.
+ *
+ * Both directions are read from this table, and each fails silently on its own:
+ *
+ *  - **Forward**, `neuprintProperty` builds the `RETURN` list — and `RETURN n.neuronId` is
+ *    perfectly valid Cypher against a property that does not exist, so every id comes back
+ *    `null` with nothing anywhere to say why. `NEURON_COLUMNS` derives that list from
+ *    `CORE_NEURON_COLUMNS` rather than restating it, so it went wrong the moment the column
+ *    was renamed; `neuprint.test.ts` asserts the query text, which is what caught it.
+ *  - **Backward**, `CORE_NAMES` carries both spellings, which keeps discovery from offering
+ *    `bodyId` as a *newly found* property. Without that, the name is not recognised as one the
+ *    core schema already covers and every neuron table carries its id twice under two names.
+ */
+const PROPERTY_NAMES: Record<string, string> = { [ID_COLUMN_NAME]: 'bodyId' }
+
+/** What neuPrint calls a column Coda names `column`. Identity for everything but the id. */
+export function neuprintProperty(column: string): string {
+  return PROPERTY_NAMES[column] ?? column
+}
+
+/** Both spellings of every core column: Coda's, and the backend's where they differ. */
+const CORE_NAMES = new Set(
+  CORE_NEURON_COLUMNS.flatMap((c) => [c.name, neuprintProperty(c.name)]),
+)
 
 /**
  * Never offered as a column, whatever the dataset says.
@@ -148,7 +177,7 @@ export function schemasFor(discovered: DiscoveredSchema): SourceSchemas {
     ...CANONICAL_SCHEMAS,
     neurons: discovered.neurons,
     synapses: tableSchema(
-      column('bodyId', 'i64'),
+      column('neuronId', 'i64'),
       column('type', 'str'),
       column('polarity', 'str'),
       column('confidence', 'f64'),

@@ -11,6 +11,8 @@
  */
 
 import { Handle, NodeResizer, Position, useStore, useUpdateNodeInternals } from '@xyflow/react'
+
+import { backendForNodeType } from '../../nodes/lib/datasetFamilies'
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 
 import type { GraphNode } from '../../core/graph'
@@ -34,6 +36,7 @@ import { formatDuration } from '../format'
 import { ParamField } from '../params/ParamField'
 import { socketStyle } from '../socketStyle'
 import { ValuePreview } from '../viewers/ValuePreview'
+import { CacheAge } from './CacheAge'
 import { nodeBody } from './nodeBodies'
 import { NodeRunRing } from './NodeRunRing'
 import { ResultDownload } from './ResultDownload'
@@ -136,6 +139,12 @@ function CodaNodeViewImpl({
     const port = (getNodeDef(node.type)?.outputs ?? [])[0]
     return port ? s.nodeOutput(id, port.id) : undefined
   })
+  // A number or undefined, so the snapshot is a primitive — invariant 7.
+  const fetchedAt = useGraphStore((s) => {
+    void s.runVersion
+    return s.nodeFetchedAt(id)
+  })
+  const clearNodeCache = useGraphStore((s) => s.clearNodeCache)
   // Only the multi-input viewers need these, so they are resolved lazily per render rather
   // than subscribed to; `runVersion` above already ties this component to scheduler ticks.
   const nodeInputs = useGraphStore((s) => s.nodeInputs)
@@ -183,6 +192,8 @@ function CodaNodeViewImpl({
   }, [id, portsOnHeader, updateNodeInternals])
 
   const def = getNodeDef(node.type)
+  // Dataset cards are tinted by backend; every other category falls through to its own token.
+  const backend = backendForNodeType(node.type)
   const types = inference.nodes[id]
   const ctx = useMemo(
     () => (def ? makeInferContext(def, node.params, types?.inputs ?? {}) : undefined),
@@ -352,7 +363,12 @@ function CodaNodeViewImpl({
             : undefined
         }
       >
-        <div className="coda-node__header" data-category={def.category} title={def.description}>
+        <div
+          className="coda-node__header"
+          data-category={def.category}
+          {...(backend ? { 'data-backend': backend.id } : {})}
+          title={def.description}
+        >
           <span
             className="state-badge"
             data-state={info.state}
@@ -602,6 +618,7 @@ function CodaNodeViewImpl({
               node={node}
               ctx={ctx}
               compact
+              inputValues={nodeInputs(id)}
               setParam={(paramId, value) => setParam(id, paramId, value)}
               onError={setNotice}
             />
@@ -647,6 +664,19 @@ function CodaNodeViewImpl({
             {info.durationMs !== undefined && info.state === 'ok' && (
               <span className="coda-node__timing">{formatDuration(info.durationMs)}</span>
             )}
+            {/*
+              * How old the data behind this result is, and the control that replaces it. Absent
+              * unless the node reported a fetch, so it never appears on a node with nothing to
+              * re-read — and it says so even when the answer is `0s`, because a line that shows
+              * up only when something is wrong is one nobody learns to look at.
+              */}
+            <CacheAge
+              fetchedAt={fetchedAt}
+              onRefresh={() => {
+                clearNodeCache(id)
+                void runNode(id)
+              }}
+            />
             {/*
               * Write this node's result to a file, for the cards that have no viewer to ask.
               *

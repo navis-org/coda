@@ -7,7 +7,8 @@
  * Nodes must treat columns as immutable — always build new arrays.
  */
 
-import type { TableSchema } from './types'
+import type { CodaType, TableSchema } from './types'
+import { datasetRef } from './types'
 
 export type CellValue = number | string | boolean | null
 export type ColumnData = CellValue[]
@@ -52,6 +53,67 @@ export interface DatasetValue {
   readonly sourceId: string
   readonly datasetId: string
   readonly label: string
+  /**
+   * Annotations *replacing* the dataset's own, when a source is wired to it.
+   *
+   * Absent means the dataset uses whatever labels its backend publishes — which for neuPrint is
+   * properties on the neuron and for CAVE is the table its spec names. Present, this is the
+   * neuron table's label half instead, and the backend contributes only identity.
+   *
+   * Carried on the value rather than resolved from the graph because a source has no view of the
+   * graph: `findNeurons` is handed a dataset and has to know, and the alternative is every query
+   * node threading an extra argument through the seam.
+   */
+  readonly annotations?: DatasetAnnotations
+}
+
+/**
+ * A neuron annotation table, and one string identifying it.
+ *
+ * **Not a `Value`**, deliberately: annotations travel between nodes as an ordinary neuron table,
+ * so a Filter or a Sort can sit in the chain. What a wire cannot carry is *which* table this is,
+ * and something has to — the neuron index built from it, the Explore widget's shared entry and
+ * the profile cache are all keyed by it, and two datasets differing only in their annotations
+ * sharing one cached table means the first one fetched wins for the session.
+ *
+ * So the dataset node pairs the table with `ctx.inputKey('annotations')`, which is the
+ * scheduler's own provenance for whatever arrived on that port — `hash(type, params, upstream)`,
+ * so it changes exactly when the table would and is a fact about the *pipeline* rather than
+ * about the rows. It used to be the annotation refs, which could only describe a chain nothing
+ * was allowed to edit.
+ */
+export interface DatasetAnnotations {
+  /** Provenance of whatever produced the table. Empty is a distinct key from any pipeline's. */
+  readonly key: string
+  /** `neuronId` plus the chain's columns, one row per neuron. */
+  readonly table: TableValue
+}
+
+/**
+ * The identity half of a dataset, as a value — what a `reference` port is handed.
+ *
+ * Here rather than in the scheduler, which is where it started: this is the projection from a
+ * dataset *type* to a dataset *value*, and both halves of that pairing live in this file and
+ * `types.ts`. Two layers away it was a `DatasetValue` nobody reading `DatasetValue` would find,
+ * and the day this interface gains a field the person adding it looks here.
+ *
+ * **Deliberately partial, in two ways worth knowing.** There are no `annotations` — a reference
+ * reader is usually the node about to supply them. And `label` is the dataset id rather than the
+ * human name a run would carry (`"MaleCNS v0.9"`), because a type does not know it; a node fed by
+ * a reference therefore sees a plainer label than the same node fed by an ordinary wire.
+ *
+ * `undefined` when the type is not a dataset or has not resolved an id yet, which is the ordinary
+ * state on a fresh session and not an error.
+ */
+export function datasetIdentity(type: CodaType | undefined): DatasetValue | undefined {
+  const ref = datasetRef(type)
+  if (!ref?.sourceId || !ref.datasetId) return undefined
+  return {
+    kind: 'dataset',
+    sourceId: ref.sourceId,
+    datasetId: ref.datasetId,
+    label: ref.datasetId,
+  }
 }
 
 export interface ScalarValue {
@@ -103,7 +165,21 @@ export type GeometryUnits = 'nm' | 'voxels'
 
 /** One neuron's branching morphology, SWC-style, in parallel typed arrays. */
 export interface SkeletonGeometry {
-  readonly bodyId: number
+  /**
+   * What this item is keyed by and called — a `NeuronId` for a neuron, text either way.
+   *
+   * Text because that is what invariant 8 requires of anything an id is *compared* by, and
+   * several consumers do compare these: `viewer3d`'s selection through `rowsWithIds`, the SWC
+   * and OBJ filenames in `exportValue.ts`, and NBLAST's match table. Held as a number this was
+   * a rounded copy of the attribute table's exact id on any source whose ids do not fit in a
+   * double — benign on neuPrint and the mock, and a silently empty selection on CAVE.
+   *
+   * Note it is still a *draw and export key*, not the identity: identity lives in the attribute
+   * table's row, which is the one that can carry a type, a status and everything else. The two
+   * are index-aligned, so a consumer that wants the exact published value should read the
+   * column rather than re-deriving it from here.
+   */
+  readonly id: string
   /** Point coordinates, xyz interleaved: `positions[i * 3 + 0..2]`. */
   readonly positions: Float32Array
   readonly radii: Float32Array
@@ -114,26 +190,25 @@ export interface SkeletonGeometry {
 export interface SkeletonsValue {
   readonly kind: 'skeletons'
   readonly items: SkeletonGeometry[]
-  /** One row per item, in the same order. Must contain `bodyId`. */
+  /** One row per item, in the same order. Must contain `neuronId`. */
   readonly attributes: TableValue
   readonly bounds: Bounds3
   readonly units?: GeometryUnits
 }
 
 export interface MeshGeometry {
-  readonly bodyId: number
   /**
-   * What this mesh is called, where a number is not what it is called.
+   * What this item is keyed by and called: a `NeuronId` for a neuron, `ME(R)` for a region.
    *
-   * Every mesh here was a neuron until region meshes arrived, and a region has no body id —
-   * `ME(R)` is its name. `bodyId` stays required because everything that draws or exports a
-   * mesh set keys on it, and for a region it carries the item's ordinal, which is an index and
-   * not an identifier. Identity lives where it always has, in the attribute table's row.
+   * One field rather than the `neuronId: number` plus optional `label: string` this used to be,
+   * and the merge is what widening to text bought. Every mesh here was a neuron until region
+   * meshes arrived, and a region has no neuron id — so `neuronId` was set to `0` for all of them
+   * while `label` carried the real one, and every consumer without exception wrote
+   * `label ?? String(neuronId)`. A distinction erased at every use site is not one.
    *
-   * The one thing that genuinely needs the name is the export: without this, a set of region
-   * meshes writes itself out as `regions-3.obj`.
+   * See `SkeletonGeometry.id` for why it is text, and for the identity-versus-key line.
    */
-  readonly label?: string
+  readonly id: string
   /** xyz interleaved. */
   readonly positions: Float32Array
   /** Triangle indices into `positions`. */
@@ -154,6 +229,17 @@ export interface MeshDetail {
   /** How many levels the source offered. */
   levels: number
   triangles: number
+  /**
+   * Simplified on arrival rather than fetched at a published level.
+   *
+   * A source with no levels of detail can still hit a triangle budget, by decimating what it
+   * was given — which is what CAVE does, because a graphene manifest lists supervoxel fragments
+   * at full resolution and there is nothing coarser to ask for. `lod`/`levels` describe nothing
+   * in that case, so the caption needs this to say what actually happened: the alternative is a
+   * viewer reporting "level 0 of 0" while 98% of the triangles have been merged away, which is
+   * the silent-thinning failure `labels thinned` and `cells merged` both exist to prevent.
+   */
+  decimated?: boolean
 }
 
 export interface MeshesValue {
@@ -494,7 +580,9 @@ export function makeLinkage(
     )
   }
   if (order.length !== labels.length) {
-    throw new Error(`makeLinkage: ${labels.length} labels but ${order.length} in the leaf order`)
+    throw new Error(
+      `makeLinkage: ${labels.length} labels but ${order.length} in the leaf order`,
+    )
   }
   if (extra.clusters && extra.clusters.length !== labels.length) {
     throw new Error(
@@ -581,3 +669,26 @@ export function describeValue(v: Value | undefined): string {
       return String(v.value)
   }
 }
+
+/**
+ * What `join` puts between values, and what anything reading the result splits on.
+ *
+ * One constant because it is a *contract* rather than a formatting choice: a community-tag table
+ * folded into one cell here is split back into chips by the Explore widget, and two spellings of
+ * the separator would be a row of tags nobody could read.
+ *
+ * `'; '` rather than a control character, because the cell is read by people too — it lands in a
+ * Table node, in a CSV and in a notebook. The cost is stated rather than engineered away: a value
+ * that itself contains `'; '` splits into two on the way back out. That is cosmetic, the whole
+ * cell is one hover away, and the alternative is a column of invisible bytes.
+ *
+ * **It lives in `src/core` because a *source* now produces one.** It began in `tableOps.ts`
+ * beside the Group By aggregation that writes it, which was right while a node was the only
+ * thing that could — and `CatmaidSource` folds a neuron's remaining annotations into one cell
+ * exactly as that aggregation folds community tags, so it needs the separator the Explore widget
+ * will split on. `src/data` may not import `src/nodes` (invariant 1), so the agreement had to
+ * move to the layer every consumer reaches. Same reasoning and same destination as
+ * `ID_COLUMN_NAME`, and deliberately no re-export from where it was: a shim is how a symbol
+ * acquires a second spelling and then a third.
+ */
+export const JOIN_SEPARATOR = '; '

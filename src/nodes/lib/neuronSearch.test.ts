@@ -30,7 +30,7 @@ import {
 } from './neuronSearch'
 
 const SCHEMA = tableSchema(
-  column('bodyId', 'i64'),
+  column('neuronId', 'i64'),
   column('type', 'str'),
   column('instance', 'str'),
   column('status', 'str'),
@@ -46,7 +46,7 @@ const NEURONS: TableValue = tableFromRows(
   SCHEMA,
   [
     {
-      bodyId: 10,
+      neuronId: 10,
       type: 'DNp01',
       instance: 'DNp01_L',
       status: 'Traced',
@@ -54,7 +54,7 @@ const NEURONS: TableValue = tableFromRows(
       post: 1200,
     },
     {
-      bodyId: 20,
+      neuronId: 20,
       type: 'DNp17',
       instance: 'DNp17_R',
       status: 'Traced',
@@ -62,7 +62,7 @@ const NEURONS: TableValue = tableFromRows(
       post: 300,
     },
     {
-      bodyId: 30,
+      neuronId: 30,
       type: 'LC4',
       instance: 'LC4_R',
       status: 'Traced',
@@ -70,17 +70,24 @@ const NEURONS: TableValue = tableFromRows(
       post: 90,
     },
     {
-      bodyId: 40,
+      neuronId: 40,
       type: 'LC6',
       instance: 'LC6_L',
       status: 'Anchor',
       class: 'visual projection',
       post: 40,
     },
-    { bodyId: 50, type: 'KCg', instance: 'KCg_x', status: 'Traced', class: null, post: 7 },
-    { bodyId: 60, type: null, instance: 'unnamed', status: null, class: 'descending', post: 0 },
+    { neuronId: 50, type: 'KCg', instance: 'KCg_x', status: 'Traced', class: null, post: 7 },
     {
-      bodyId: 70,
+      neuronId: 60,
+      type: null,
+      instance: 'unnamed',
+      status: null,
+      class: 'descending',
+      post: 0,
+    },
+    {
+      neuronId: 70,
       type: 'aDNp01x',
       instance: 'weird',
       status: 'Traced',
@@ -102,7 +109,7 @@ function types(query: string): Array<string | null> {
 }
 
 function ids(query: string): number[] {
-  return search(query).rows.map((row) => NEURONS.data['bodyId']![row] as number)
+  return search(query).rows.map((row) => NEURONS.data['neuronId']![row] as number)
 }
 
 // ---------------------------------------------------------------------------
@@ -262,7 +269,7 @@ describe('fuzzy fallback', () => {
     // 'dscnding' is not a substring of anything but is a subsequence of 'descending'.
     const result = search('dscnding')
     expect(result.fuzzy).toBe(true)
-    expect(result.rows.map((r) => NEURONS.data['bodyId']![r])).toEqual([10, 20, 60, 70])
+    expect(result.rows.map((r) => NEURONS.data['neuronId']![r])).toEqual([10, 20, 60, 70])
   })
 
   it('stays exact when a substring hit exists, however few', () => {
@@ -294,7 +301,7 @@ describe('ranking', () => {
     expect(types('dnp01')).toEqual(['DNp01', 'aDNp01x'])
   })
 
-  it('searches body ids as text, so pasting an id finds its neuron', () => {
+  it('searches neuron ids as text, so pasting an id finds its neuron', () => {
     expect(ids('10')).toEqual([10])
   })
 
@@ -400,8 +407,8 @@ describe('completeSearch', () => {
     expect([result.from, result.to]).toEqual([7, 11])
   })
 
-  it('does not offer bodyId as a field', () => {
-    // Body ids are found by typing the number; completing them is meaningless.
+  it('does not offer neuronId as a field', () => {
+    // Neuron ids are found by typing the number; completing them is meaningless.
     expect(labels('body')).toEqual([])
   })
 })
@@ -422,5 +429,57 @@ describe('rankStrings', () => {
 
   it('honours the limit and returns the head of the list when the query is empty', () => {
     expect(rankStrings('', ['a', 'b', 'c'], 2)).toEqual(['a', 'b'])
+  })
+})
+
+/**
+ * Keeping a column *shown* without letting it be *searched*.
+ *
+ * Explore's `Search tags` opt-out. Free-form community text is exactly the thing somebody might
+ * not want folded into a hit count they then quote — and it is exactly the thing somebody else
+ * wants to find neurons by, which is why the default is on and this is a control rather than a
+ * rule.
+ */
+describe('excluding a column from the free-text haystack', () => {
+  const SCHEMA = tableSchema(
+    column('neuronId', 'str'),
+    column('type', 'str'),
+    column('community', 'str'),
+  )
+  const table = () =>
+    tableFromRows(SCHEMA, [
+      { neuronId: '1', type: 'DNp01', community: 'putative giant fibre' },
+      { neuronId: '2', type: 'LC4', community: 'checked' },
+    ])
+
+  const hits = (query: string, exclude: string[] = []) =>
+    runSearch(table(), searchIndexFor(table(), exclude), parseSearch(query)).rows
+
+  it('matches the column by default', () => {
+    expect(hits('giant')).toEqual([0])
+  })
+
+  it('stops matching it once excluded, and leaves every other column alone', () => {
+    expect(hits('giant', ['community'])).toEqual([])
+    expect(hits('DNp01', ['community'])).toEqual([0])
+  })
+
+  it('still answers a field term naming the column', () => {
+    /*
+     * The exclusion is the *free-text* half only. Asking for a column by name is an explicit
+     * act rather than a stray word in a search box, and `prepareFieldTerms` reads the table
+     * rather than this index — so the opt-out costs nothing anybody deliberately asked for.
+     */
+    expect(hits('community~giant', ['community'])).toEqual([0])
+  })
+
+  it('does not serve one exclusion’s index to another', () => {
+    // The memo is per table *and* per exclusion: one entry per table would hand the widget the
+    // index a node built without the exclusion, and the list would show rows Hits does not.
+    const t = table()
+    expect(searchIndexFor(t).searched).toContain('community')
+    expect(searchIndexFor(t, ['community']).searched).not.toContain('community')
+    // And back again, from the same cached table.
+    expect(searchIndexFor(t).searched).toContain('community')
   })
 })

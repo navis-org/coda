@@ -1,0 +1,16 @@
+{
+  "classification_system": [
+    "cell_class",
+    "cell_sub_class",
+    "cell_type",
+    "flow",
+    "super_class"
+  ],
+  "cell_type": [
+    "CB3281",
+    "CB1550",
+    "CB2816",
+    "CB1862",
+    "CB3523"
+  ]
+}

@@ -1,4 +1,5 @@
 import { registerNode } from '../../core/registry'
+import { datasetRequest } from '../lib/datasetParam'
 import { T } from '../../core/types'
 import { isTableValue } from '../../core/values'
 import { idColumn } from '../lib/tableOps'
@@ -104,20 +105,20 @@ export const connectivityNode = registerNode({
     const neurons = ctx.input('neurons')
     if (!isTableValue(neurons)) throw new Error('Neurons input is not a table')
 
-    const bodyIds = idColumn(neurons, 'bodyId')
-    if (bodyIds.length === 0) throw new Error('No bodyIds in the incoming neuron table')
+    const neuronIds = idColumn(neurons, 'neuronId')
+    if (neuronIds.length === 0) throw new Error('No neuronIds in the incoming neuron table')
 
     const direction = readDirection(ctx.params.direction)
     const hops = Math.max(1, Math.floor(Number(ctx.params.hops ?? 1)))
     const minWeight = Number(ctx.params.minWeight ?? 1)
 
-    ctx.progress(0.15, `${bodyIds.length} neurons`)
+    ctx.progress(0.15, `${neuronIds.length} neurons`)
     const connections = await traverseConnectivity({
-      seeds: bodyIds,
+      seeds: neuronIds,
       direction,
       hops,
       schema: connectivityOutputSchema(
-        schemasForDataset(source, dataset.datasetId).connectivity,
+        schemasForDataset(source, dataset).connectivity,
       ),
       signal: ctx.signal,
       // A hop's cost is unknown until its frontier is known, so progress is per round rather
@@ -129,8 +130,8 @@ export const connectivityNode = registerNode({
         ),
       fetch: (frontier, hopDirection) =>
         source.fetchConnectivity({
-          datasetId: dataset.datasetId,
-          bodyIds: frontier,
+          ...datasetRequest(dataset),
+          neuronIds: frontier,
           direction: hopDirection,
           minWeight,
           signal: ctx.signal,

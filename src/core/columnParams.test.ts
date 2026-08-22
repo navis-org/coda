@@ -14,12 +14,18 @@
 import { describe, expect, it } from 'vitest'
 
 import type { NodeDefinition, ParamDef } from './node'
-import { makeInferContext, resolveColumn, resolveColumns, validateColumnParams } from './node'
+import {
+  availableColumns,
+  makeInferContext,
+  resolveColumn,
+  resolveColumns,
+  validateColumnParams,
+} from './node'
 import type { CodaType, TableSchema } from './types'
 import { T, column, tableSchema } from './types'
 
 const SCHEMA: TableSchema = tableSchema(
-  column('bodyId', 'i64'),
+  column('neuronId', 'i64'),
   column('type', 'str'),
   column('pre', 'i64'),
 )
@@ -150,7 +156,7 @@ describe('a stored column that has disappeared', () => {
     // A stored value still equal to the definition's declared default is a suggestion, not a
     // decision, so it does fall back — and says so.
     expect(issues(def(picker({ default: 'weight' })), { col: 'weight' }, table)).toEqual([
-      'Column "weight" is gone — using "bodyId"',
+      'Column "weight" is gone — using "neuronId"',
     ])
   })
 
@@ -171,13 +177,13 @@ describe('a stored column that has disappeared', () => {
   it('says nothing when the stored value is still the definition’s own default', () => {
     /*
      * A default is the definition's suggestion, not a decision to report drift on.
-     * `out.scatter` declares `bodyId` so a neuron table needs no configuring at all, and on a
+     * `out.scatter` declares `neuronId` so a neuron table needs no configuring at all, and on a
      * table without one it means row positions — the node working, rather than a column
      * anybody has to re-pick.
      */
     const noIds = T.table(tableSchema(column('type', 'str'), column('L', 'f64')))
     expect(
-      issues(def(picker({ optional: true, default: 'bodyId' })), { col: 'bodyId' }, noIds),
+      issues(def(picker({ optional: true, default: 'neuronId' })), { col: 'neuronId' }, noIds),
     ).toEqual([])
   })
 
@@ -219,20 +225,20 @@ describe('resolving a column', () => {
   })
 
   it('keeps a chosen name the schema does not list, rather than substituting', () => {
-    // The schema may simply not have arrived. Answering "bodyId" here is not a degraded
+    // The schema may simply not have arrived. Answering "neuronId" here is not a degraded
     // answer to the question asked — it is a confident answer to a different one.
     expect(pick({}, 'somaSide')).toBe('somaSide')
   })
 
   it('falls back for an empty default, which means decide for me', () => {
-    expect(pick({}, '')).toBe('bodyId')
+    expect(pick({}, '')).toBe('neuronId')
     expect(pick({ dtypes: ['str'] }, '')).toBe('type')
   })
 
   it('falls back for a named default, which is a suggestion rather than a decision', () => {
     // `out.scatter` opens on `pre`/`post` so a neuron table needs no configuring; on a table
     // without them it must still find something to plot.
-    expect(pick({ default: 'somaSide' }, 'somaSide')).toBe('bodyId')
+    expect(pick({ default: 'somaSide' }, 'somaSide')).toBe('neuronId')
   })
 
   it('answers off for an optional picker, before any of that', () => {
@@ -243,5 +249,122 @@ describe('resolving a column', () => {
     expect(
       resolveColumn(picker({}) as never, { col: '' } as never, { in: T.table() }),
     ).toBeUndefined()
+  })
+})
+
+/**
+ * The singular against the same gap, which it did not have and the plural did.
+ *
+ * "The first compatible column" is computed from a list, and a port carrying no schema has an
+ * empty one — so a picker still holding its *declared default* answered nothing before the
+ * schema arrived and the right column after it. That is the runs-twice-answers-differently
+ * signature, and it lands in the provenance key.
+ *
+ * Reported on `Table from URL → Combine Columns → Update root IDs`: `Table from URL` keeps its
+ * schema per URL in a session-scoped map, so on a fresh session it publishes none.
+ */
+describe('resolveColumn against a schema that has not arrived', () => {
+  // `ParamDef` is a union, so its `default` widens to `string | string[]`; this fixture only
+  // ever builds a `column` picker.
+  const named = (extra: Record<string, unknown> = {}) =>
+    picker({ default: 'neuronId', ...extra } as Partial<ParamDef>) as Parameters<
+      typeof resolveColumn
+    >[0]
+
+  it('keeps a picker sitting on its declared default', () => {
+    // The asymmetry that hides this: rule 2 already carried a value *differing* from the
+    // default through, so it only ever bit a picker nobody had touched.
+    expect(resolveColumn(named(), { col: 'neuronId' }, { in: T.table() })).toBe('neuronId')
+    expect(resolveColumn(named(), { col: 'other' }, { in: T.table() })).toBe('other')
+  })
+
+  it('answers the same before and after the schema lands', () => {
+    // The point of the guard: the resolved value must not *change* when inference re-runs, or
+    // the node's key changes under a result that was already correct.
+    const before = resolveColumn(named(), { col: 'neuronId' }, { in: T.table() })
+    const after = resolveColumn(named(), { col: 'neuronId' }, { in: T.table(SCHEMA) })
+    expect(before).toBe(after)
+  })
+
+  it('reads an unset required picker as its declared default', () => {
+    // A required picker has no "none", so empty is *unset* — which is what `defaultParams`
+    // fills with the default at creation. Without this a default naming a real column resolves
+    // to that column once the schema arrives and to nothing before, which is the same
+    // disagreement one test up.
+    expect(resolveColumn(named(), { col: '' }, { in: T.table() })).toBe('neuronId')
+    expect(resolveColumn(named(), { col: '' }, { in: T.table(SCHEMA) })).toBe('neuronId')
+  })
+
+  it('leaves an optional picker off, because there empty is a choice', () => {
+    /*
+     * `out.scatter`'s `idColumn: ''` means "identify points by row index rather than by neuron
+     * id", against a declared default of `neuronId`. Reading it as unset hands back the column
+     * and quietly undoes the choice — which is a lasso selecting different rows.
+     */
+    expect(resolveColumn(named({ optional: true }), { col: '' }, { in: T.table(SCHEMA) })).toBe(
+      undefined,
+    )
+    expect(resolveColumn(named({ optional: true }), { col: '' }, { in: T.table() })).toBe(
+      undefined,
+    )
+  })
+
+  it('still means "decide for me" where the default names nothing', () => {
+    // Most pickers, `out.barChart`'s Category among them: an empty default opens on the first
+    // compatible column, and nothing here changes that.
+    expect(
+      resolveColumn(
+        picker() as Parameters<typeof resolveColumn>[0],
+        { col: '' },
+        {
+          in: T.table(SCHEMA),
+        },
+      ),
+    ).toBe('neuronId')
+    expect(
+      resolveColumn(
+        picker() as Parameters<typeof resolveColumn>[0],
+        { col: '' },
+        {
+          in: T.table(),
+        },
+      ),
+    ).toBe(undefined)
+  })
+})
+
+/**
+ * `dtypes` as a rule rather than a list.
+ *
+ * Group By's value picker is numeric for every aggregation but `join`, which takes text.
+ * Expressing that with a static list needed *two stored params* made exclusive by `visibleIf`,
+ * plus an indirection saying which was live — and the split leaked immediately, leaving one of
+ * three sites saying "needs a numeric value column" about a text one. `schemaFrom` was already
+ * function-valued for the same reason.
+ */
+describe('a dtype restriction that depends on the other params', () => {
+  const MIXED = tableSchema(column('n', 'i64'), column('label', 'str'))
+  const dynamic = picker({
+    dtypes: (params: Record<string, unknown>) => (params.agg === 'join' ? undefined : ['i64']),
+  }) as Parameters<typeof resolveColumn>[0]
+
+  it('narrows or opens the picker with the value it depends on', () => {
+    const inputs = { in: T.table(MIXED) }
+    expect(availableColumns(dynamic, inputs, { agg: 'sum' } as never)).toEqual(['n'])
+    expect(availableColumns(dynamic, inputs, { agg: 'join' } as never)).toEqual(['n', 'label'])
+  })
+
+  it('resolves through the same rule, so the key and the picker agree', () => {
+    const inputs = { in: T.table(MIXED) }
+    expect(resolveColumn(dynamic, { col: 'label', agg: 'sum' }, inputs)).not.toBe(undefined)
+    expect(resolveColumn(dynamic, { col: 'label', agg: 'join' }, inputs)).toBe('label')
+  })
+
+  it('is honoured by the message that names the restriction', () => {
+    // `No columns of type i64 available for "Column"` must not be reported for an aggregation
+    // that does not restrict — the second reader of `dtypes`, which had to learn it too.
+    const onlyText = T.table(tableSchema(column('label', 'str')))
+    expect(issues(def(dynamic as never), { agg: 'sum' }, onlyText).join(' ')).toContain('i64')
+    expect(issues(def(dynamic as never), { agg: 'join' }, onlyText)).toEqual([])
   })
 })

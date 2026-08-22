@@ -24,6 +24,8 @@ import type { TableSchema } from '../../core/types'
 import { T, column, tableSchema } from '../../core/types'
 import type { CellValue, NetworkValue, TableValue } from '../../core/values'
 import { getColumn, makeTable, tableFromRows } from '../../core/values'
+import { idText } from '../../core/ids'
+import type { NeuronId } from '../../core/ids'
 import type { ConnectionDirection } from '../../data/source'
 
 // ---------------------------------------------------------------------------
@@ -33,15 +35,15 @@ import type { ConnectionDirection } from '../../data/source'
 /**
  * One node of the traversal graph.
  *
- * `key` is the identity — a cell type name when collapsing, a body id as a string otherwise.
- * `bodyId` is present exactly when the key names a single neuron, which is how a caller tells
+ * `key` is the identity — a cell type name when collapsing, a neuron id as a string otherwise.
+ * `neuronId` is present exactly when the key names a single neuron, which is how a caller tells
  * whether to feed the key back to the source as a type or as an id. A neuron with no type
  * stands as its own node even when collapsing, because there is nothing to collapse it into.
  */
 export interface PathNode {
   key: string
   type: string | null
-  bodyId: number | null
+  neuronId: string | null
 }
 
 export interface PathEdge {
@@ -66,20 +68,20 @@ function edgeKey(source: string, target: string): string {
 /** The two lists a source needs to resolve a frontier. See `PathStepRequest`. */
 export interface Frontier {
   types: string[]
-  bodyIds: number[]
+  neuronIds: NeuronId[]
 }
 
 /** Split a set of group keys back into the two halves a query can index on. */
 export function frontierOf(keys: Iterable<string>, graph: PathGraph): Frontier {
   const types: string[] = []
-  const bodyIds: number[] = []
+  const neuronIds: NeuronId[] = []
   for (const key of keys) {
     const node = graph.nodes.get(key)
-    const bodyId = node?.bodyId
-    if (bodyId !== null && bodyId !== undefined) bodyIds.push(bodyId)
+    const neuronId = node?.neuronId
+    if (neuronId !== null && neuronId !== undefined) neuronIds.push(neuronId)
     else types.push(key)
   }
-  return { types, bodyIds }
+  return { types, neuronIds }
 }
 
 /** One hop's worth of fetching. Injected so the traversal stays headless. */
@@ -129,11 +131,6 @@ function readStep(table: TableValue, graph: PathGraph): PathEdge[] {
   const weight = table.data['weight'] ?? []
   const pairs = table.data['pairs'] ?? []
 
-  const numberOrNull = (cell: CellValue | undefined): number | null => {
-    if (cell === null || cell === undefined || cell === '') return null
-    const parsed = Number(cell)
-    return Number.isFinite(parsed) ? parsed : null
-  }
   const stringOrNull = (cell: CellValue | undefined): string | null =>
     cell === null || cell === undefined || cell === '' ? null : String(cell)
 
@@ -149,14 +146,14 @@ function readStep(table: TableValue, graph: PathGraph): PathEdge[] {
       graph.nodes.set(from, {
         key: from,
         type: stringOrNull(sourceType[i]),
-        bodyId: numberOrNull(sourceId[i]),
+        neuronId: idText(sourceId[i]),
       })
     }
     if (!graph.nodes.has(to)) {
       graph.nodes.set(to, {
         key: to,
         type: stringOrNull(targetType[i]),
-        bodyId: numberOrNull(targetId[i]),
+        neuronId: idText(targetId[i]),
       })
     }
 
@@ -605,7 +602,7 @@ export function rankPaths(
 export const PATH_NODE_SCHEMA: TableSchema = tableSchema(
   column('id', 'str'),
   column('type', 'str'),
-  column('bodyId', 'i64'),
+  column('neuronId', 'i64'),
   // Where the node sits in the circuit: `source`, `target` or `via`. A categorical colour
   // straight off this is the one encoding every path picture wants.
   column('role', 'str'),
@@ -682,7 +679,7 @@ export function pathsToNetwork(
   const nodeData: Record<string, CellValue[]> = {
     id: [],
     type: [],
-    bodyId: [],
+    neuronId: [],
     role: [],
     hop: [],
     paths: [],
@@ -695,7 +692,7 @@ export function pathsToNetwork(
     const node = graph.nodes.get(key)
     push(nodeData, 'id', key)
     push(nodeData, 'type', node?.type ?? null)
-    push(nodeData, 'bodyId', node?.bodyId ?? null)
+    push(nodeData, 'neuronId', node?.neuronId ?? null)
     push(
       nodeData,
       'role',

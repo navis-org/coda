@@ -20,12 +20,13 @@
  */
 
 import { registerNode } from '../../core/registry'
-import { T } from '../../core/types'
+import { T, attributeSchema } from '../../core/types'
 import type { NblastSymmetry } from '../../pyodide/nblast'
 import { runNblastKnn } from '../../pyodide/nblast'
 import {
   SYMMETRY_OPTIONS,
   dotpropSetFrom,
+  idTypeOf,
   knnSchema,
   knnTable,
   nblastIssues,
@@ -84,7 +85,7 @@ export const nblastKnnNode = registerNode({
       from: 'query',
       default: '',
       optional: true,
-      help: 'Adds a name for each side of a match. Body ids where this is empty or unset.',
+      help: 'Adds a name for each side of a match. Neuron ids where this is empty or unset.',
     },
     {
       id: 'resample',
@@ -157,8 +158,20 @@ export const nblastKnnNode = registerNode({
   /*
    * The label columns are conditional on the picker, so the schema is answered from the same
    * resolution `evaluate` uses — invariant 5, and the reason this is not just `knnSchema(true)`.
+   *
+   * The id columns are the same argument one seam further out: their dtype is whatever the
+   * Query's own `neuronId` is, which the *source* decides, so reading it here is what keeps the
+   * advertised schema equal to the one `evaluate` builds. Unwired there is nothing to read and
+   * it falls back to the `i64` the ports declare.
    */
-  inferOutputs: (ctx) => ({ matches: T.table(knnSchema(ctx.column('labelColumn') !== undefined)) }),
+  inferOutputs: (ctx) => ({
+    matches: T.table(
+      knnSchema(
+        ctx.column('labelColumn') !== undefined,
+        idTypeOf(attributeSchema(ctx.inputs.query, 'nodes')),
+      ),
+    ),
+  }),
 
   validate: (ctx) => nblastIssues(Number(ctx.params.resample ?? 1)),
 
@@ -190,12 +203,12 @@ export const nblastKnnNode = registerNode({
     return {
       matches: knnTable(
         result,
-        query.items.map((item) => item.bodyId),
-        neighbours.items.map((item) => item.bodyId),
+        query,
+        neighbours,
         label
           ? {
               query: nblastLabels(query, label),
-              // Resolved against the far side's own attributes, falling back to body ids for a
+              // Resolved against the far side's own attributes, falling back to neuron ids for a
               // column it does not carry — the same rule `nblastLabels` applies per neuron.
               target: nblastLabels(neighbours, label),
             }

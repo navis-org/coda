@@ -1,14 +1,14 @@
 /**
  * Multi-hop connectivity traversal, and the pre→post reorientation that goes with it.
  *
- * `DataSource.fetchConnectivity` answers *query-relative*: `bodyId` is the neuron you asked
+ * `DataSource.fetchConnectivity` answers *query-relative*: `neuronId` is the neuron you asked
  * about and `partnerId` is whatever it is wired to, whichever way the arrow points. That is
  * the right shape for the Profile widget — "these are my upstream partners" — and
  * `profileStats.ts` reads it directly, which is why the source contract is left alone.
  *
  * It is the wrong shape for an *edge list*. A `both` result mixes in-edges and out-edges, so
- * `bodyId → partnerId` is no longer a consistent direction of travel and a network built from
- * it draws half its arrows backwards. And past one hop `bodyId` is not "the neuron you asked
+ * `neuronId → partnerId` is no longer a consistent direction of travel and a network built from
+ * it draws half its arrows backwards. And past one hop `neuronId` is not "the neuron you asked
  * about" at all — it is whatever the last hop reached.
  *
  * So the node emits `preId`/`postId`: every row is presynaptic → postsynaptic, always, and
@@ -24,6 +24,8 @@ import type { TableSchema } from '../../core/types'
 import { column, tableSchema } from '../../core/types'
 import type { CellValue, TableValue } from '../../core/values'
 import { tableFromRows } from '../../core/values'
+import { compareIds, idText } from '../../core/ids'
+import type { NeuronId } from '../../core/ids'
 import type { ConnectionDirection } from '../../data/source'
 
 /** What the node's `direction` param can be. `both` is not a `ConnectionDirection`. */
@@ -49,16 +51,16 @@ export const DIRECTION_COLUMN = 'direction'
 
 /** Source column → output column, for a row fetched `outputs`-wise (body is presynaptic). */
 const DOWNSTREAM_NAMES: Record<string, string> = {
-  bodyId: PRE_ID,
-  bodyType: PRE_TYPE,
+  neuronId: PRE_ID,
+  neuronType: PRE_TYPE,
   partnerId: POST_ID,
   partnerType: POST_TYPE,
 }
 
 /** The same for an `inputs` row, where the body is the *post*synaptic end. */
 const UPSTREAM_NAMES: Record<string, string> = {
-  bodyId: POST_ID,
-  bodyType: POST_TYPE,
+  neuronId: POST_ID,
+  neuronType: POST_TYPE,
   partnerId: PRE_ID,
   partnerType: PRE_TYPE,
 }
@@ -89,13 +91,13 @@ export function connectivityOutputSchema(source: TableSchema | undefined): Table
 
 /** One hop's worth of fetching, in one direction. Injected so the BFS stays headless. */
 export type HopFetch = (
-  bodyIds: number[],
+  neuronIds: NeuronId[],
   direction: ConnectionDirection,
 ) => Promise<TableValue>
 
 export interface TraverseOptions {
-  /** Body ids to start from. Never re-expanded; an edge back into them is still reported. */
-  seeds: readonly number[]
+  /** Neuron ids to start from. Never re-expanded; an edge back into them is still reported. */
+  seeds: readonly NeuronId[]
   direction: TraversalDirection
   /** ≥ 1. 1 is direct partners and issues exactly the queries this node always has. */
   hops: number
@@ -112,8 +114,8 @@ interface EdgeRow {
   hop: number
   direction: EdgeDirection
   weight: number
-  preId: number
-  postId: number
+  preId: string
+  postId: string
 }
 
 /**
@@ -139,12 +141,12 @@ export async function traverseConnectivity(opts: TraverseOptions): Promise<Table
     opts.direction === 'both' ? ['outputs', 'inputs'] : [opts.direction]
 
   const edges = new Map<string, EdgeRow>()
-  const expanded = new Set<number>(opts.seeds)
+  const expanded = new Set<string>(opts.seeds)
   let frontier = [...new Set(opts.seeds)]
 
   for (let hop = 1; hop <= hops && frontier.length > 0; hop++) {
     opts.onHop?.(hop, hops, frontier.length)
-    const next = new Set<number>()
+    const next = new Set<string>()
 
     for (const direction of directions) {
       if (opts.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
@@ -163,7 +165,11 @@ export async function traverseConnectivity(opts: TraverseOptions): Promise<Table
    * reshuffles between identical runs makes every downstream diff unreadable.
    */
   const sorted = [...edges.values()].sort(
-    (a, b) => a.hop - b.hop || b.weight - a.weight || a.preId - b.preId || a.postId - b.postId,
+    (a, b) =>
+      a.hop - b.hop ||
+      b.weight - a.weight ||
+      compareIds(a.preId, b.preId) ||
+      compareIds(a.postId, b.postId),
   )
 
   return tableFromRows(
@@ -182,8 +188,8 @@ function collect(
   direction: ConnectionDirection,
   hop: number,
   edges: Map<string, EdgeRow>,
-  expanded: Set<number>,
-  next: Set<number>,
+  expanded: Set<string>,
+  next: Set<string>,
 ): void {
   const names = renamesFor(direction)
   const found: EdgeDirection = direction === 'outputs' ? 'downstream' : 'upstream'
@@ -192,19 +198,19 @@ function collect(
     to: names[col.name] ?? col.name,
     data: table.data[col.name] ?? [],
   }))
-  const bodyIds = table.data['bodyId'] ?? []
+  const neuronIds = table.data['neuronId'] ?? []
   const partnerIds = table.data['partnerId'] ?? []
   const weights = table.data['weight'] ?? []
-  const rows = bodyIds.length
+  const rows = neuronIds.length
 
   for (let row = 0; row < rows; row++) {
-    const bodyId = Number(bodyIds[row])
-    const partnerId = Number(partnerIds[row])
-    if (!Number.isFinite(bodyId) || !Number.isFinite(partnerId)) continue
+    const neuronId = idText(neuronIds[row])
+    const partnerId = idText(partnerIds[row])
+    if (neuronId === null || partnerId === null) continue
 
-    const preId = direction === 'outputs' ? bodyId : partnerId
-    const postId = direction === 'outputs' ? partnerId : bodyId
-    const key = `${preId} ${postId}`
+    const preId = direction === 'outputs' ? neuronId : partnerId
+    const postId = direction === 'outputs' ? partnerId : neuronId
+    const key = `${preId}\u0000${postId}`
 
     const existing = edges.get(key)
     if (existing) {

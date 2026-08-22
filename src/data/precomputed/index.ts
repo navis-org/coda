@@ -3,7 +3,7 @@
  *
  * The format is discovered from the mesh directory's `info` rather than configured, because
  * it varies across the datasets that matter: hemibrain, MANC and optic-lobe publish sharded
- * multi-resolution Draco; male-CNS publishes flat legacy meshes. A caller asks for body ids
+ * multi-resolution Draco; male-CNS publishes flat legacy meshes. A caller asks for neuron ids
  * and a triangle budget and gets geometry in physical nanometres.
  *
  * Nothing here knows about neuPrint — this layer is reusable for any neuroglancer source,
@@ -72,7 +72,7 @@ export async function openMeshSource(
 }
 
 export interface MeshResult {
-  bodyId: number
+  neuronId: string
   positions: Float32Array
   indices: Uint32Array
 }
@@ -84,8 +84,8 @@ export interface FetchMeshesResult {
   /** Levels the source offered, so the UI can say "3 of 4". */
   levels?: number | undefined
   triangles: number
-  /** Body ids the source had no mesh for. */
-  missing: number[]
+  /** Neuron ids the source had no mesh for. */
+  missing: string[]
 }
 
 /** Default budget. ~1.5M triangles renders comfortably and holds a few dozen neurons coarse. */
@@ -111,7 +111,7 @@ export interface FetchMeshesOptions extends FetchOptions {
 }
 
 /**
- * Fetch meshes for a set of body ids.
+ * Fetch meshes for a set of neuron ids.
  *
  * For a multi-resolution source this reads every manifest first — they are a few hundred
  * bytes each — then picks a single detail level for the whole batch so the scene is
@@ -119,7 +119,7 @@ export interface FetchMeshesOptions extends FetchOptions {
  */
 export async function fetchMeshes(
   source: MeshSource,
-  bodyIds: readonly number[],
+  neuronIds: readonly string[],
   options: FetchMeshesOptions = {},
 ): Promise<FetchMeshesResult> {
   const budget = options.triangleBudget ?? DEFAULT_TRIANGLE_BUDGET
@@ -127,15 +127,15 @@ export async function fetchMeshes(
 
   if (source.format === 'legacy') {
     const meshes: MeshResult[] = []
-    const missing: number[] = []
+    const missing: string[] = []
     let done = 0
-    await mapWithConcurrency(bodyIds, concurrency, async (bodyId) => {
-      const mesh = await readLegacyMesh(source.base, BigInt(bodyId), options)
-      options.onProgress?.(++done, bodyIds.length, 'fragments')
-      if (!mesh) missing.push(bodyId)
-      else meshes.push({ bodyId, ...mesh })
+    await mapWithConcurrency(neuronIds, concurrency, async (neuronId) => {
+      const mesh = await readLegacyMesh(source.base, BigInt(neuronId), options)
+      options.onProgress?.(++done, neuronIds.length, 'fragments')
+      if (!mesh) missing.push(neuronId)
+      else meshes.push({ neuronId, ...mesh })
     })
-    meshes.sort((a, b) => bodyIds.indexOf(a.bodyId) - bodyIds.indexOf(b.bodyId))
+    meshes.sort((a, b) => neuronIds.indexOf(a.neuronId) - neuronIds.indexOf(b.neuronId))
     return {
       meshes,
       levels: 1,
@@ -145,38 +145,38 @@ export async function fetchMeshes(
   }
 
   const info = source.info!
-  const manifests = new Map<number, MultiResManifest>()
-  const missing: number[] = []
+  const manifests = new Map<string, MultiResManifest>()
+  const missing: string[] = []
   let read = 0
-  await mapWithConcurrency(bodyIds, concurrency, async (bodyId) => {
-    const manifest = await readManifest(source.base, BigInt(bodyId), info, options)
-    options.onProgress?.(++read, bodyIds.length, 'manifests')
-    if (manifest) manifests.set(bodyId, manifest)
-    else missing.push(bodyId)
+  await mapWithConcurrency(neuronIds, concurrency, async (neuronId) => {
+    const manifest = await readManifest(source.base, BigInt(neuronId), info, options)
+    options.onProgress?.(++read, neuronIds.length, 'manifests')
+    if (manifest) manifests.set(neuronId, manifest)
+    else missing.push(neuronId)
   })
 
-  const present = bodyIds.filter((id) => manifests.has(id))
+  const present = neuronIds.filter((id) => manifests.has(id))
   const lod = chooseLod([...manifests.values()], budget)
   const levels = Math.max(1, ...[...manifests.values()].map((m) => m.levels.length))
 
   const meshes: MeshResult[] = []
   let done = 0
-  await mapWithConcurrency(present, concurrency, async (bodyId) => {
-    const manifest = manifests.get(bodyId)!
+  await mapWithConcurrency(present, concurrency, async (neuronId) => {
+    const manifest = manifests.get(neuronId)!
     const level = Math.min(lod, manifest.levels.length - 1)
     if (
       options.maxBytesPerBody !== undefined &&
       (manifest.levels[level]?.totalBytes ?? 0) > options.maxBytesPerBody
     ) {
-      missing.push(bodyId)
+      missing.push(neuronId)
       options.onProgress?.(++done, present.length, 'fragments')
       return
     }
-    const mesh = await readLodFragments(source, info, manifest, bodyId, level, options)
+    const mesh = await readLodFragments(source, info, manifest, neuronId, level, options)
     options.onProgress?.(++done, present.length, 'fragments')
-    if (mesh) meshes.push({ bodyId, ...mesh })
+    if (mesh) meshes.push({ neuronId, ...mesh })
   })
-  meshes.sort((a, b) => bodyIds.indexOf(a.bodyId) - bodyIds.indexOf(b.bodyId))
+  meshes.sort((a, b) => neuronIds.indexOf(a.neuronId) - neuronIds.indexOf(b.neuronId))
 
   return {
     meshes,
@@ -191,13 +191,13 @@ async function readLodFragments(
   source: MeshSource,
   info: MultiResInfo,
   manifest: MultiResManifest,
-  bodyId: number,
+  neuronId: string,
   lod: number,
   options: FetchOptions,
 ): Promise<{ positions: Float32Array; indices: Uint32Array } | undefined> {
   const level = manifest.levels[lod]
   if (!level || level.sizes.length === 0) return undefined
-  const url = shardUrl(source.base, BigInt(bodyId), info.sharding!)
+  const url = shardUrl(source.base, BigInt(neuronId), info.sharding!)
 
   // One Range request spanning the whole level, then sliced locally: the fragments are
   // contiguous, and one request for 300 kB beats forty for 8 kB each.

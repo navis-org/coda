@@ -47,8 +47,7 @@ function merge(label: string, parts: Array<ReturnType<typeof plate>>): MeshGeome
     for (const i of part.indices) indices.push(base + i)
   }
   return {
-    bodyId: 0,
-    label,
+    id: label,
     positions: new Float32Array(positions),
     indices: new Uint32Array(indices),
   }
@@ -285,7 +284,7 @@ describe('the explode is symmetrical', () => {
       positions[i + 1] = base.positions[i + 1]! + shift[1]
       positions[i + 2] = base.positions[i + 2]! + shift[2]
     }
-    return { ...base, label, positions }
+    return { ...base, id: label, positions }
   }
 
   function brain(): MeshGeometry[] {
@@ -435,7 +434,7 @@ describe('fitFrame', () => {
 describe('what a mesh knows about itself', () => {
   /** Unit cube, consistently wound. */
   const cube: MeshGeometry = {
-    bodyId: 0,
+    id: 'cube',
     positions: new Float32Array([
       0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1,
     ]),

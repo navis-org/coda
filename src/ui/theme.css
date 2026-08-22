@@ -98,8 +98,36 @@
    */
   --status-warn: #8a5e00;
 
+  /*
+   * A refusal beside it: this cannot be done at all, said in prose on a panel.
+   *
+   * `--status-error` is one value for both modes, which is fine for the badge dot and the short
+   * status line it was picked for and **not** for a sentence: #d03b3b is 4.56:1 on the light
+   * panel and 3.73:1 on the dark one, under the 4.5:1 floor for 10.5px text exactly where the
+   * dark-mode reader is. As with the gold above, no single red clears it on both — a red light
+   * enough for the dark panel is 3.4:1 on the light one — so it is per-mode. #c22f2f is 5.32:1
+   * light; #e05c5c is 5.00:1 dark, and both stay in --status-error's own hue.
+   */
+  --status-refused: #c22f2f;
+
   /* --- node category header tints (decorative, low chroma) --------------- */
   --cat-dataset: #1baf7a;
+  /*
+   * Per-backend dataset tints.
+   *
+   * A *lightness* step within one hue, not a second hue. Deuteranopia and protanopia collapse
+   * red-green hue differences and leave lightness intact, so two greens a stop apart separate
+   * for every reader while a green and a teal separate for only some — and the category palette
+   * was validated as a set, so a genuinely new hue would mean re-running the validator against
+   * the sockets too. The step is deliberately large: a small one reads as a rendering artefact
+   * rather than as a distinction.
+   *
+   * Colour is not the only channel either way. The backend is in the node's *name* and on its
+   * browser tile, which is the rule the socket palette follows for the same reason.
+   */
+  --cat-dataset-cave: #0b6b48;
+  --cat-dataset-catmaid: #12885d;
+  --cat-dataset-mock: #7fb3a0;
   --cat-query: #2a78d6;
   --cat-transform: #898781;
   --cat-analysis: #4a3aa7;
@@ -160,6 +188,7 @@
     /* Bright gold reads at 10.2:1 on this canvas; the light value would be 1.5:1. */
     --status-running-ring: #fab219;
     --status-warn: #fab219;
+    --status-refused: #e05c5c;
     --accent: #3987e5;
     --accent-soft: rgba(57, 135, 229, 0.2);
     --socket-table: #3987e5;
@@ -187,6 +216,9 @@
     --chip-7: #9085e9;
     --chip-8: #e66767;
     --cat-dataset: #199e70;
+    --cat-dataset-cave: #3fd6a0;
+    --cat-dataset-catmaid: #2ab98a;
+    --cat-dataset-mock: #6f9686;
     --cat-query: #3987e5;
     --cat-transform: #898781;
     --cat-analysis: #9085e9;
@@ -218,6 +250,7 @@
   --grid: #2c2c2a;
   --status-running-ring: #fab219;
   --status-warn: #fab219;
+  --status-refused: #e05c5c;
   --accent: #3987e5;
   --accent-soft: rgba(57, 135, 229, 0.2);
   --socket-table: #3987e5;
@@ -245,6 +278,9 @@
   --chip-7: #9085e9;
   --chip-8: #e66767;
   --cat-dataset: #199e70;
+  --cat-dataset-cave: #3fd6a0;
+  --cat-dataset-catmaid: #2ab98a;
+  --cat-dataset-mock: #6f9686;
   --cat-query: #3987e5;
   --cat-transform: #898781;
   --cat-analysis: #9085e9;

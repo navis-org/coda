@@ -7,8 +7,9 @@
  * blanking the editor.
  */
 
-import type { CodaGraph } from './graph'
-import { inboundIndex, nodesById, portKey, topoSort } from './graph'
+import type { CodaGraph, GraphNode } from './graph'
+import { inboundIndex, nodesById, portKey, topoSort, wouldCreateCycle } from './graph'
+import type { InferContext, NodeDefinition } from './node'
 import { makeInferContext, validateColumnParams } from './node'
 import { getNodeDef } from './registry'
 import type { CodaType, TableSchema } from './types'
@@ -53,6 +54,55 @@ export interface InferOptions {
   observedSchemas?: Readonly<Record<string, TableSchema | undefined>>
 }
 
+/**
+ * A node's output types: the declared ones, overlaid with whatever `inferOutputs` says.
+ *
+ * One statement of the three rules — seed from `def.outputs`, let `inferOutputs` override, never
+ * throw — because there are two callers and they had already parted company. The walk merged with
+ * `if (type)` while `referenceType` used `?? declared`; identical for the object types in play
+ * today, different the moment one is falsy, and nothing type-checks the pair. The walk also
+ * passes `observedSchemas` where the reference path must not, which is a real difference and now
+ * a visible one: it rides on the context the caller builds.
+ *
+ * `error` rather than a thrown one, so the walk can turn it into an issue on the node and the
+ * reference path — which has no node to report against — can ignore it. `inferOutputs` must never
+ * throw (invariant 2), and this is what keeps a node that does from taking the pass down.
+ */
+function outputTypesFor(
+  def: NodeDefinition,
+  ctx: InferContext,
+): { outputs: Record<string, CodaType>; error?: string } {
+  const outputs: Record<string, CodaType> = {}
+  for (const port of def.outputs ?? []) outputs[port.id] = port.type
+  if (!def.inferOutputs) return { outputs }
+  try {
+    for (const [portId, type] of Object.entries(def.inferOutputs(ctx))) {
+      if (type) outputs[portId] = type
+    }
+    return { outputs }
+  } catch (err) {
+    return { outputs, error: (err as Error).message }
+  }
+}
+
+/**
+ * What a node publishes on a port when nothing is wired to it — the half of its output that is a
+ * function of its params alone.
+ *
+ * Only for `reference` inputs; see `PortDef.reference`. Isolated by construction, since it is
+ * handed no inputs, so it cannot reach back into the walk that called it — and no `observed`
+ * schema either, which would be a fact from a *run* rather than from the params.
+ *
+ * Through `outputTypesFor`, so "a reference is the same node inferred with no inputs" is literally
+ * true rather than a second implementation that resembles it.
+ */
+function referenceType(node: GraphNode | undefined, portId: string): CodaType | undefined {
+  if (!node) return undefined
+  const def = getNodeDef(node.type)
+  if (!def) return undefined
+  return outputTypesFor(def, makeInferContext(def, node.params, {})).outputs[portId]
+}
+
 export function inferGraph(graph: CodaGraph, options: InferOptions = {}): InferenceResult {
   const { order, cyclic } = topoSort(graph)
   const nodes = nodesById(graph)
@@ -88,7 +138,20 @@ export function inferGraph(graph: CodaGraph, options: InferOptions = {}): Infere
         }
         continue
       }
-      const upstream = result[edge.source]?.outputs[edge.sourceHandle]
+      /*
+       * A reference names a node rather than consuming its output, so the source may not have
+       * been ordered yet — it is excluded from `topoSort`, which is the whole point. Its type is
+       * therefore computed *in isolation*: the source node's own `inferOutputs` with **no inputs
+       * at all**.
+       *
+       * That cannot recurse, so the walk still terminates, and for a dataset it yields exactly
+       * the identity — `sourceId` and `datasetId`, which come from that node's params — without
+       * the annotations schema, which comes from its input. Which is the honest answer as well as
+       * the terminating one: a node cannot read the annotations it is itself about to supply.
+       */
+      const upstream = port.reference
+        ? referenceType(nodes.get(edge.source), edge.sourceHandle)
+        : result[edge.source]?.outputs[edge.sourceHandle]
       inputs[port.id] = upstream
       if (upstream && !isAssignable(upstream, port.type)) {
         issues.push({
@@ -106,21 +169,9 @@ export function inferGraph(graph: CodaGraph, options: InferOptions = {}): Infere
       inputs,
       def.observesOutputSchema ? options.observedSchemas?.[nodeId] : undefined,
     )
-    const outputs: Record<string, CodaType> = {}
-    for (const port of def.outputs ?? []) outputs[port.id] = port.type
-
-    if (def.inferOutputs) {
-      try {
-        const inferred = def.inferOutputs(ctx)
-        for (const [portId, type] of Object.entries(inferred)) {
-          if (type) outputs[portId] = type
-        }
-      } catch (err) {
-        issues.push({
-          severity: 'warning',
-          message: `Type inference failed: ${(err as Error).message}`,
-        })
-      }
+    const { outputs, error } = outputTypesFor(def, ctx)
+    if (error) {
+      issues.push({ severity: 'warning', message: `Type inference failed: ${error}` })
     }
 
     // 3. Node-specific and generic param validation.
@@ -209,23 +260,16 @@ export function checkConnection(
     }
   }
 
-  // Reachability check: target must not already reach source.
-  if (createsCycle(graph, from.nodeId, to.nodeId)) {
+  /*
+   * Reachability: the target must not already reach the source. Through `wouldCreateCycle`
+   * rather than a walk of its own — this was a second implementation of one question, and they
+   * had to be found together the moment `reference` edges stopped counting as dependencies. One
+   * of them knew and the other refused every wire the change existed to allow.
+   */
+  if (wouldCreateCycle(graph, from.nodeId, to.nodeId, to.portId)) {
     return { ok: false, reason: 'Would create a cycle' }
   }
 
   return { ok: true }
 }
 
-function createsCycle(graph: CodaGraph, source: string, target: string): boolean {
-  const seen = new Set<string>()
-  const stack = [target]
-  while (stack.length) {
-    const id = stack.pop()!
-    if (id === source) return true
-    if (seen.has(id)) continue
-    seen.add(id)
-    for (const e of graph.edges) if (e.source === id) stack.push(e.target)
-  }
-  return false
-}

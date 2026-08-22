@@ -1,6 +1,14 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import type { CodaGraph } from '../../core/graph'
+import { canExportNotebook } from '../../export/canExport'
+import type { ExportLanguage } from '../../nodes/lib/datasetFamilies'
 import { CodaMark } from '../CodaMark'
+import {
+  peekExportWarnings,
+  requestExportWarnings,
+  useExportWarnings,
+} from '../exportWarnings'
 import { AssistantIcon, InspectorIcon, ShareIcon } from '../Icons'
 import { getSource } from '../../data/source'
 import { EXAMPLES } from '../../examples'
@@ -634,7 +642,15 @@ function SaveMenu({ close }: { close: () => void }) {
   const library = useGraphStore((s) => s.library)
   const loaded = useGraphStore((s) => s.libraryLoaded)
   const [confirming, setConfirming] = useState(false)
-  const [refusal, setRefusal] = useState<{ reason: string; detail: string } | undefined>()
+
+  /*
+   * How much of the graph the exporters cannot translate, worked out by running them. Started
+   * here because this component is mounted only while the menu is open — the `Dropdown` renders
+   * its children behind `open` — and the answer arrives on a channel, so `useExportWarnings` is
+   * what brings it to the rows below rather than to the next unrelated re-render.
+   */
+  useExportWarnings()
+  useEffect(() => requestExportWarnings(graph), [graph])
 
   const name = (graph.meta?.name ?? '').trim() || 'Untitled'
   const conflict = findByName(library, name)
@@ -710,55 +726,79 @@ function SaveMenu({ close }: { close: () => void }) {
         </button>
 
         {/*
-         * The refusal is shown *in the menu* rather than as a dialog, and stays until the menu
-         * closes. A graph on a synthetic dataset cannot be exported at all, so the useful
-         * thing is a sentence naming what to change — a modal saying the same would put
-         * browser chrome in front of the canvas the user has to go and edit.
+         * Both formats, each answering for itself. They no longer agree about what is
+         * exportable — a CAVE dataset builds a notebook and no R document — so a refusal has to
+         * be a fact about *this row* rather than a sentence replacing the whole block, which is
+         * what it was when one answer served both.
          */}
-        {refusal ? (
-          <div className="dropdown__confirm">
-            <p>
-              Cannot export: {refusal.reason}. {refusal.detail}
-            </p>
-            <div>
-              <button type="button" className="btn" onClick={() => setRefusal(undefined)}>
-                OK
-              </button>
-            </div>
-          </div>
-        ) : (
-          <button
-            type="button"
-            className="dropdown__item"
-            onClick={() => {
-              void downloadNotebook(graph, { appVersion: __APP_VERSION__ }).then((result) => {
-                if (result.ok) close()
-                else setRefusal(result)
-              })
-            }}
-          >
-            <strong>Export as Jupyter Notebook</strong>
-            <span>A Jupyter notebook using neuprint-python, pandas and navis</span>
-          </button>
-        )}
-
-        {refusal ? null : (
-          <button
-            type="button"
-            className="dropdown__item"
-            onClick={() => {
-              void downloadRmd(graph, { appVersion: __APP_VERSION__ }).then((result) => {
-                if (result.ok) close()
-                else setRefusal(result)
-              })
-            }}
-          >
-            <strong>Export as R Markdown</strong>
-            <span>An .Rmd using neuprintr, dplyr and nat</span>
-          </button>
-        )}
+        <ExportItem
+          label="Export as Jupyter Notebook"
+          description="A Jupyter notebook using neuprint-python, pandas and navis"
+          graph={graph}
+          language="python"
+          onExport={() => downloadNotebook(graph, { appVersion: __APP_VERSION__ })}
+          close={close}
+        />
+        <ExportItem
+          label="Export as R Markdown"
+          description="An .Rmd using neuprintr, dplyr and nat"
+          graph={graph}
+          language="r"
+          onExport={() => downloadRmd(graph, { appVersion: __APP_VERSION__ })}
+          close={close}
+        />
       </div>
     </>
+  )
+}
+
+/**
+ * One export format's row: what it makes, whether it can, and what it will be missing.
+ *
+ * **The refusal is shown before the click, not after it.** The Save menu used to let the click
+ * through and replace the whole export block with a sentence — right while one answer served
+ * both formats, and wrong now that they can disagree, because it also hid the format that
+ * *would* have worked. A disabled row with the reason under it says the same thing without
+ * taking the other row away, and it is what the palette has always done with less room.
+ *
+ * The reason is rendered at full strength while the row above it dims, so a disabled row is
+ * still legible where it matters. Dimming the whole button would take a 4.5:1 colour to about
+ * half that.
+ */
+function ExportItem({
+  label,
+  description,
+  graph,
+  language,
+  onExport,
+  close,
+}: {
+  label: string
+  description: string
+  graph: CodaGraph
+  language: ExportLanguage
+  onExport: () => Promise<{ ok: boolean }>
+  close: () => void
+}) {
+  const refusal = canExportNotebook(graph, language)
+  const warning = peekExportWarnings(graph, language)
+  return (
+    <button
+      type="button"
+      className="dropdown__item"
+      disabled={refusal !== undefined}
+      onClick={() => void onExport().then((result) => result.ok && close())}
+    >
+      <strong>{label}</strong>
+      <span>{description}</span>
+      {refusal ? (
+        <span className="dropdown__refused">
+          Cannot export: {refusal.reason}. {refusal.detail}
+        </span>
+      ) : (
+        warning && <span className="dropdown__warn">⚠ {warning.detail}</span>
+      )}
+    </button>
   )
 }
 

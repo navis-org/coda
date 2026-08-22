@@ -108,8 +108,24 @@ describe('core.tableFromUrl — fetching', () => {
     // The same shaping pair the upload node uses, so the two nodes cannot drift on what an
     // ID column or a text column means.
     expect(out.kind).toBe('neurons')
-    expect(out.data['bodyId']).toEqual([101, 102])
+    expect(out.data['neuronId']).toEqual([101, 102])
     expect(out.data['cluster']).toEqual(['3', '1'])
+  })
+
+  it('renames the type column, and the values land under it', async () => {
+    const scheduler = makeScheduler()
+    await scheduler.run(pipeline({ idColumn: 'root_id', typeColumn: 'cellType' }), {
+      mode: 'full',
+    })
+    const out = scheduler.output('url', 'out')
+    if (!isTableValue(out)) throw new Error('expected a table')
+    /*
+     * The value half, because the schema half is asserted in `tableOps.test.ts` and the two
+     * disagreeing is invariant 3's whole failure mode — a picker downstream offering `type` over
+     * a table whose values never moved.
+     */
+    expect(columnNames(out.schema)).toEqual(['neuronId', 'type', 'cluster'])
+    expect(out.data['type']).toEqual(['LC4', 'LC6'])
   })
 
   it('is expensive, so typing a URL cannot fire a request', async () => {
@@ -249,6 +265,18 @@ describe('core.tableFromUrl — validation', () => {
   const issues = (params: Record<string, unknown>) =>
     (inferGraph(pipeline(params)).nodes['url']?.issues ?? []).map((i) => i.message).join(' ')
 
+  it('reports a shaping column this URL did not return, as its twin always did', () => {
+    /*
+     * Both import nodes now declare these three controls from one factory, and this is the
+     * asymmetry that had: `Upload Table` reported a column its file does not carry, and this
+     * node — the same three params, hand-written a second time — did not.
+     *
+     * Silent before the first fetch, deliberately: a picker naming a column of a file nobody has
+     * looked at yet is a schema that has not arrived, not drift.
+     */
+    expect(issues({ typeColumn: 'nonesuch' })).toBe('')
+  })
+
   it('asks for a URL when there is none', () => {
     expect(issues({ url: '' })).toContain('No URL yet')
   })
@@ -343,8 +371,8 @@ describe('core.tableFromUrl — refusals', () => {
   })
 
   it('names the columns it did get when the ID column is wrong', async () => {
-    const message = await errorFrom(pipeline({ idColumn: 'bodyId' }))
-    expect(message).toContain('bodyId')
+    const message = await errorFrom(pipeline({ idColumn: 'neuronId' }))
+    expect(message).toContain('neuronId')
     expect(message).toContain('root_id')
   })
 })

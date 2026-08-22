@@ -19,7 +19,12 @@ import { fileURLToPath } from 'node:url'
 
 import { MAX_SERIES, seriesColor } from '../colors'
 import type { Mode } from '../colors'
-import { chipKey, chipSlots } from './rowFields'
+import { chipKey, chipSlots, rowFields, splitTags } from './rowFields'
+import { column, tableSchema } from '../../core/types'
+
+/** Columns as `str`, plus one numeric so `stats` has something to find. */
+const schema = (...names: string[]) =>
+  tableSchema(...names.map((n) => column(n, 'str')), column('pre', 'i64'))
 
 const THEME = readFileSync(fileURLToPath(new URL('../theme.css', import.meta.url)), 'utf8')
 
@@ -137,5 +142,167 @@ describe('chipKey', () => {
   it('leaves a self-describing value alone', () => {
     expect(chipKey('class')).toBeUndefined()
     expect(chipKey('hemilineage')).toBeUndefined()
+  })
+})
+
+/**
+ * Which chips a dataset gets by default, on both vocabularies.
+ *
+ * The list was neuPrint's alone, so a CAVE row drew **no chips at all** — the same facts are
+ * published in snake_case out of an annotation table, and none of the names matched. That is
+ * not only the annotation-chain case: FlyWire's *built-in* annotations are exactly
+ * `cell_class`, `cell_sub_class`, `super_class`, `flow` and `cell_type`, so the shipped dataset
+ * had never had one either.
+ *
+ * What has to hold is both halves: the CAVE spellings resolve, and neuPrint's answer is
+ * untouched by having gained a family.
+ */
+describe('the automatic chip list', () => {
+  it('gives a FlyWire dataset its built-in annotations', () => {
+    // `type` is the headline, so it is never also a chip.
+    const { chips, primary } = rowFields(
+      schema('neuronId', 'type', 'cell_class', 'cell_sub_class', 'super_class', 'flow'),
+    )
+    expect(primary).toBe('type')
+    expect(chips).toEqual(['cell_class', 'cell_sub_class', 'super_class', 'flow'])
+  })
+
+  it('gives an annotation chain the rest of them, in the same priority order', () => {
+    // The published FlyWire annotations, as they arrive through `Table from URL → Dataset`.
+    const { chips } = rowFields(
+      schema(
+        'neuronId',
+        'type',
+        'flow',
+        'super_class',
+        'cell_class',
+        'cell_sub_class',
+        'supertype',
+        'ito_lee_hemilineage',
+        'hartenstein_hemilineage',
+        'top_nt',
+        'known_nt',
+        'side',
+        'nerve',
+        'status',
+        'dimorphism',
+        'synonyms',
+      ),
+    )
+    expect(chips).toEqual([
+      'cell_class',
+      'cell_sub_class',
+      'super_class',
+      'side',
+      'flow',
+      'ito_lee_hemilineage',
+      'top_nt',
+      'nerve',
+    ])
+    // One name per fact: the second nomenclature is left to the `chips` param, exactly as
+    // `trumanHl` is on male-CNS.
+    expect(chips).not.toContain('hartenstein_hemilineage')
+  })
+
+  it('leaves a neuPrint dataset’s chips exactly as they were', () => {
+    // The regression guard on the edit itself: `class`, `superclass` and `somaSide` gained a
+    // family they did not have, and a family is what makes a chip *disappear*.
+    const { chips } = rowFields(
+      schema(
+        'neuronId',
+        'type',
+        'instance',
+        'class',
+        'subclass',
+        'superclass',
+        'somaSide',
+        'rootSide',
+        'itoleeHl',
+        'consensusNt',
+        'predictedNt',
+        'cellBodyFiber',
+      ),
+    )
+    expect(chips).toEqual([
+      'class',
+      'subclass',
+      'superclass',
+      'somaSide',
+      'rootSide',
+      'itoleeHl',
+      'consensusNt',
+      'cellBodyFiber',
+    ])
+  })
+
+  it('shows one chip where a dataset somehow published both spellings', () => {
+    // What the families buy, and the reason they are families rather than separate entries:
+    // two chips saying one thing spend two of eight slots and push off one that says something
+    // new — how `consensusNt` went missing on male-CNS.
+    const { chips } = rowFields(schema('neuronId', 'class', 'cell_class', 'side', 'somaSide'))
+    expect(chips).toEqual(['class', 'somaSide'])
+  })
+
+  it('still takes a chosen list literally, both spellings included', () => {
+    // The escape hatch, for an annotation base whose columns this table never anticipated.
+    const { chips } = rowFields(schema('neuronId', 'supertype', 'hartenstein_hemilineage'), [
+      'supertype',
+      'hartenstein_hemilineage',
+    ])
+    expect(chips).toEqual(['supertype', 'hartenstein_hemilineage'])
+  })
+})
+
+/**
+ * Community tags: a column whose *values* are several free-form strings, as a CAVE
+ * `neuron_information_v2` table folds into once Group By's `join` has gathered it.
+ *
+ * They are a different kind of claim from the chips above them — somebody's prose against a
+ * neuron, not a controlled vocabulary — so what has to hold is that they stay *apart*: their own
+ * field on the spec, and out of the three lists that would otherwise draw the same cell twice.
+ */
+describe('the additional tags column', () => {
+  it('is reported apart from the chips, and drawn by neither list', () => {
+    const f = rowFields(schema('neuronId', 'type', 'cell_class', 'community'), [], 'community')
+    expect(f.tags).toBe('community')
+    expect(f.chips).not.toContain('community')
+    expect(f.secondary).not.toContain('community')
+  })
+
+  it('does not claim a column the current dataset lacks', () => {
+    // The param outlives the dataset it was set on, exactly as `chips` does.
+    expect(rowFields(schema('neuronId', 'type'), [], 'community').tags).toBeUndefined()
+    expect(rowFields(schema('neuronId', 'type'), []).tags).toBeUndefined()
+  })
+
+  it('wins the cell when somebody named it in both controls', () => {
+    // Naming one column in both is a mistake rather than a request to draw it twice, and the
+    // tag row is the more specific statement.
+    const f = rowFields(schema('neuronId', 'type', 'community'), ['community'], 'community')
+    expect(f.chips).toEqual([])
+    expect(f.tags).toBe('community')
+  })
+
+  it('does not displace a status line that is a different column', () => {
+    const f = rowFields(schema('neuronId', 'type', 'status', 'community'), [], 'community')
+    expect(f.secondary).toContain('status')
+  })
+})
+
+describe('splitting a joined tag cell', () => {
+  it('splits on the separator the join wrote, trimming and dropping blanks', () => {
+    expect(splitTags('left; putative giant fibre; DA?')).toEqual([
+      'left',
+      'putative giant fibre',
+      'DA?',
+    ])
+    expect(splitTags('a;  ; b')).toEqual(['a', 'b'])
+  })
+
+  it('answers nothing for an absence rather than one empty tag', () => {
+    expect(splitTags(null)).toEqual([])
+    expect(splitTags('')).toEqual([])
+    // A number in the column is not text somebody typed; nothing to split.
+    expect(splitTags(42)).toEqual([])
   })
 })

@@ -49,7 +49,7 @@ import {
   escapeIdentifier,
   escapeString,
   findNeuronsCypher,
-  numberList,
+  idList,
   pathStepCypher,
   synapsesCypher,
 } from './cypher'
@@ -65,6 +65,7 @@ import {
   CORE_NEURON_COLUMNS,
   MAX_EXTRA_COLUMNS,
   discoverNeuronSchema,
+  neuprintProperty,
   schemasFor,
 } from './schema'
 import type { RoiConnectivityResponse } from './client'
@@ -107,7 +108,7 @@ describe('pathStepCypher', () => {
   })
 
   it('groups by neuron, when not', () => {
-    const query = pathStepCypher({ ...base, collapseTypes: false, bodyIds: [1, 2] })
+    const query = pathStepCypher({ ...base, collapseTypes: false, neuronIds: ['1', '2'] })
     expect(query).toContain('toString(a.bodyId) AS src')
     expect(query).not.toContain('coalesce')
     expect(query).toContain('a.bodyId IN [1,2]')
@@ -122,7 +123,7 @@ describe('pathStepCypher', () => {
   })
 
   it('names the frontier as two indexed lists rather than one computed key', () => {
-    const query = pathStepCypher({ ...base, types: ['LC4', "a'L"], bodyIds: [7] })
+    const query = pathStepCypher({ ...base, types: ['LC4', "a'L"], neuronIds: ['7'] })
     expect(query).toContain("WHERE a.type IN ['LC4','a\\'L'] OR a.bodyId IN [7]")
   })
 
@@ -166,9 +167,27 @@ describe('escaping', () => {
     expect(escapeIdentifier("a'L(R)")).toBe("`a'L(R)`")
   })
 
-  it('drops non-finite ids rather than emitting NaN, which Cypher cannot parse', () => {
-    expect(numberList([1, Number.NaN, 3, Infinity])).toBe('[1,3]')
-    expect(numberList([])).toBe('[]')
+  it('emits ids as unquoted integers, because `1 IN [\'1\']` is false in Cypher', () => {
+    // The failure this prevents is silent: a quoted list is valid Cypher, matches nothing, and
+    // comes back as an empty result with no error anywhere to explain it.
+    expect(idList(['1', '2'])).toBe('[1,2]')
+    expect(idList([])).toBe('[]')
+    expect(idList(['1158187240', '10001'])).toBe('[1158187240,10001]')
+  })
+
+  it('splices a wide id through without forming a float', () => {
+    // The whole reason a `NeuronId` is text. Routed via `Number` this would emit
+    // 648518347529750700 — a different neuron, and nothing about the query would look wrong.
+    const wide = '648518347529750614'
+    expect(idList([wide])).toBe(`[${wide}]`)
+    expect(idList([wide])).not.toContain(String(Number(wide)))
+  })
+
+  it('drops anything that is not a bare integer, keeping the digit grammar closed', () => {
+    // Dropping rather than quoting is also what stops anything reaching the query that could
+    // leave the grammar — there is no escaping path here because nothing non-numeric survives.
+    expect(idList(['1', '2a', '', ' 3', '4.5', "5' OR 1=1--"])).toBe('[1]')
+    expect(idList(['-7'])).toBe('[-7]')
   })
 })
 
@@ -289,12 +308,12 @@ describe('query building', () => {
     })
   })
 
-  describe('lookup by body id', () => {
+  describe('lookup by neuron id', () => {
     it('builds a number list, never a string list', () => {
-      // The reason this is a field of its own rather than a `LabelMatch` on `bodyId`: that
+      // The reason this is a field of its own rather than a `LabelMatch` on `neuronId`: that
       // compiles to `n.bodyId IN ['123']`, and `123 IN ['123']` is false in Cypher — an empty
       // result with no error anywhere to explain it.
-      const query = findNeuronsCypher({ datasetId: 'x', bodyIds: [1158187240, 10001] })
+      const query = findNeuronsCypher({ datasetId: 'x', neuronIds: ['1158187240', '10001'] })
       expect(query).toContain('n.bodyId IN [1158187240,10001]')
       expect(query).not.toContain("'1158187240'")
     })
@@ -303,12 +322,12 @@ describe('query building', () => {
       // Deliberately unlike the label clause above. Relying on a caller's guard is safe there
       // because the node has one; a clause that would otherwise return the whole dataset is
       // not something to leave to a future caller remembering.
-      const query = findNeuronsCypher({ datasetId: 'x', bodyIds: [] })
+      const query = findNeuronsCypher({ datasetId: 'x', neuronIds: [] })
       expect(query).toContain('n.bodyId IN []')
     })
 
     it('composes with the other filters', () => {
-      const query = findNeuronsCypher({ datasetId: 'x', bodyIds: [7], statuses: ['Traced'] })
+      const query = findNeuronsCypher({ datasetId: 'x', neuronIds: ['7'], statuses: ['Traced'] })
       expect(query).toContain("n.bodyId IN [7] AND n.status IN ['Traced']")
     })
   })
@@ -321,11 +340,11 @@ describe('query building', () => {
   })
 
   it('flips the arrow for inputs rather than swapping the returned columns', () => {
-    const out = connectivityCypher({ datasetId: 'x', bodyIds: [1], direction: 'outputs' })
-    const inn = connectivityCypher({ datasetId: 'x', bodyIds: [1], direction: 'inputs' })
+    const out = connectivityCypher({ datasetId: 'x', neuronIds: ['1'], direction: 'outputs' })
+    const inn = connectivityCypher({ datasetId: 'x', neuronIds: ['1'], direction: 'inputs' })
     expect(out).toContain('(n:Neuron)-[w:ConnectsTo]->(p)')
     expect(inn).toContain('(p)-[w:ConnectsTo]->(n:Neuron)')
-    // Both RETURN n first, so "bodyId" always means the neuron you asked about.
+    // Both RETURN n first, so "neuronId" always means the neuron you asked about.
     expect(out).toContain('RETURN n.bodyId, n.type, p.bodyId, p.type, w.weight')
     expect(inn).toContain('RETURN n.bodyId, n.type, p.bodyId, p.type, w.weight')
   })
@@ -333,20 +352,20 @@ describe('query building', () => {
   it('matches a bare node at the far end, so sub-threshold partners still count', () => {
     // `(p)` not `(p:Neuron)`: excluding Segments would silently under-report total weight.
     expect(
-      connectivityCypher({ datasetId: 'x', bodyIds: [1], direction: 'outputs' }),
+      connectivityCypher({ datasetId: 'x', neuronIds: ['1'], direction: 'outputs' }),
     ).toContain('->(p)\n')
   })
 
   it('constrains both ends for adjacency', () => {
-    const query = adjacencyCypher({ datasetId: 'x', sourceIds: [1, 2], targetIds: [3] })
+    const query = adjacencyCypher({ datasetId: 'x', sourceIds: ['1', '2'], targetIds: ['3'] })
     expect(query).toContain('a.bodyId IN [1,2] AND b.bodyId IN [3]')
   })
 
   it('filters synapses by polarity', () => {
-    expect(synapsesCypher({ datasetId: 'x', bodyIds: [1], polarity: 'pre' })).toContain(
+    expect(synapsesCypher({ datasetId: 'x', neuronIds: ['1'], polarity: 'pre' })).toContain(
       "s.type = 'pre'",
     )
-    expect(synapsesCypher({ datasetId: 'x', bodyIds: [1] })).not.toContain('s.type =')
+    expect(synapsesCypher({ datasetId: 'x', neuronIds: ['1'] })).not.toContain('s.type =')
   })
 })
 
@@ -360,7 +379,7 @@ describe('decoding a neuron query', () => {
     expect(table.kind).toBe('neurons')
     expect(table.length).toBe(neurons.data.length)
     expect(table.schema.columns.map((c) => c.name)).toEqual([
-      'bodyId',
+      'neuronId',
       'type',
       'instance',
       'status',
@@ -371,7 +390,7 @@ describe('decoding a neuron query', () => {
       'somaRadius',
     ])
     expect(table.data.type?.[0]).toBe('LC4')
-    expect(typeof table.data.bodyId?.[0]).toBe('number')
+    expect(typeof table.data.neuronId?.[0]).toBe('number')
   })
 
   it('refuses a response whose column count disagrees with the schema', () => {
@@ -389,7 +408,7 @@ describe('decoding a neuron query', () => {
       { columns: ['n.bodyId', 'n.type'], data: [[null, null]] },
       twoColumns,
     )
-    expect(table.data.bodyId?.[0]).toBeNull()
+    expect(table.data.neuronId?.[0]).toBeNull()
     expect(table.data.type?.[0]).toBeNull()
   })
 })
@@ -397,6 +416,9 @@ describe('decoding a neuron query', () => {
 describe('decoding an undeclared query (Raw Cypher)', () => {
   it('strips the variable prefix so columns read as names', () => {
     const table = inferTableFromCypher(connectivity)
+    // neuPrint's spelling, not Coda's, and deliberately: a raw query's columns are named after
+    // what was typed rather than mapped onto a schema. `RETURN n.bodyId AS neuronId` is what
+    // makes one meet a Neurons socket — the node's own example does exactly that.
     expect(table.schema.columns.map((c) => c.name)).toEqual([
       'bodyId',
       'type',
@@ -436,13 +458,13 @@ describe('roiInfo', () => {
     const table = roiCountsFromCypher(roiInfo)
     expect(table.length).toBeGreaterThan(1)
     expect(table.schema.columns.map((c) => c.name)).toEqual([
-      'bodyId',
+      'neuronId',
       'type',
       'roi',
       'pre',
       'post',
     ])
-    expect(new Set(table.data.bodyId as number[]).size).toBe(1)
+    expect(new Set(table.data.neuronId as number[]).size).toBe(1)
     expect(table.data.roi).toContain('LO(R)')
   })
 
@@ -644,10 +666,10 @@ describe('ROI connectivity', () => {
 })
 
 describe('skeletons', () => {
-  const parsed = skeletonFromSwc(1158187240, skeleton)
+  const parsed = skeletonFromSwc('1158187240', skeleton)
 
   it('reads a real SWC response into parallel arrays', () => {
-    expect(parsed.bodyId).toBe(1158187240)
+    expect(parsed.id).toBe('1158187240')
     expect(parsed.parents.length).toBe(skeleton.data.length)
     expect(parsed.positions.length).toBe(parsed.parents.length * 3)
     expect(parsed.radii.length).toBe(parsed.parents.length)
@@ -666,7 +688,7 @@ describe('skeletons', () => {
   })
 
   it('treats a link to a missing row as a root rather than dropping the point', () => {
-    const orphaned = skeletonFromSwc(1, {
+    const orphaned = skeletonFromSwc('1', {
       columns: ['rowId', 'x', 'y', 'z', 'radius', 'link'],
       data: [
         [1, 0, 0, 0, 1, -1],
@@ -678,7 +700,7 @@ describe('skeletons', () => {
   })
 
   it('terminates on a cycle instead of hanging, and keeps every point', () => {
-    const cyclic = skeletonFromSwc(1, {
+    const cyclic = skeletonFromSwc('1', {
       columns: ['rowId', 'x', 'y', 'z', 'radius', 'link'],
       data: [
         [1, 0, 0, 0, 1, 2],
@@ -689,7 +711,7 @@ describe('skeletons', () => {
   })
 
   it('measures cable along the tree, not across it', () => {
-    const straight = skeletonFromSwc(1, {
+    const straight = skeletonFromSwc('1', {
       columns: ['rowId', 'x', 'y', 'z', 'radius', 'link'],
       data: [
         [1, 0, 0, 0, 1, -1],
@@ -713,7 +735,7 @@ describe('per-dataset schema discovery', () => {
   it('always starts with the seven columns every dataset has', () => {
     const { neurons: schema } = discoverNeuronSchema({})
     expect(schema.columns.map((c) => c.name)).toEqual([
-      'bodyId',
+      'neuronId',
       'type',
       'instance',
       'status',
@@ -721,6 +743,40 @@ describe('per-dataset schema discovery', () => {
       'pre',
       'post',
     ])
+  })
+
+  it('maps Coda\'s id column onto neuPrint\'s property, and nothing else', () => {
+    /*
+     * The forward half of the seam, asserted directly because its three call sites are each a
+     * one-liner: `NEURON_COLUMNS` (checked through the query text above), `labelClause`, and one
+     * emitter in each exporter. Those last three take a *picked* field, so on neuPrint they are
+     * unreachable today — the picker offers `str` columns and the id is `i64` — but a CAVE source
+     * publishes a `str` id, and then `neuprint_search(field = "neuronId")` matches nothing at all
+     * with no error, which is exactly what this table exists to stop.
+     */
+    expect(neuprintProperty('neuronId')).toBe('bodyId')
+    for (const passthrough of ['type', 'instance', 'status', 'class', 'hemilineage']) {
+      expect(neuprintProperty(passthrough)).toBe(passthrough)
+    }
+  })
+
+  it('does not offer neuPrint\'s bodyId beside Coda\'s neuronId', () => {
+    /*
+     * The backward half of the property-name seam. `bodyId` is a real neuPrint property and
+     * shows up in both a `Meta.neuronProperties` declaration and a sampled neuron — but it
+     * already reaches the table as `neuronId`, so without `RENAMED` it is not in `CORE_NAMES`,
+     * discovery reads it as newly found, and every neuron table carries its id twice under two
+     * names. Checked live against hemibrain and male-CNS as well; this is what keeps it.
+     */
+    const { neurons: schema, extras } = discoverNeuronSchema({
+      declared: { bodyId: 'long', cellBodyFiber: 'string' },
+      sampled: [{ bodyId: 1158187240, type: 'LC4' }],
+    })
+    const names = schema.columns.map((c) => c.name)
+    expect(names.filter((n) => n === 'neuronId' || n === 'bodyId')).toEqual(['neuronId'])
+    expect(extras).not.toContain('bodyId')
+    // And the property it *should* have found is still there, so this is not a blanket drop.
+    expect(extras).toContain('cellBodyFiber')
   })
 
   it('maps declared neuPrint types onto Coda dtypes', () => {
@@ -792,7 +848,7 @@ describe('per-dataset schema discovery', () => {
     // neuPrint models a synapse as a point; resolving partners is a much heavier query.
     const { synapses } = schemasFor(discoverNeuronSchema({}))
     expect(synapses.columns.map((c) => c.name)).toEqual([
-      'bodyId',
+      'neuronId',
       'type',
       'polarity',
       'confidence',
@@ -1383,7 +1439,7 @@ describe('warming what inference reads', () => {
     countingFetch()
     const source = new NeuPrintSource()
     expect(source.schemasFor('male-cns:v1.0').neurons.columns.map((c) => c.name)).toContain(
-      'bodyId',
+      'neuronId',
     )
   })
 })
@@ -1479,8 +1535,8 @@ describe('neuPrint region meshes', () => {
       expect(Array.from(item.indices)).toEqual([0, 1, 2])
       expect(item.positions).toHaveLength(9)
     }
-    // Identity is the region's name; `bodyId` is meaningless for a region.
-    expect(result.items.map((m) => m.label)).toEqual(['ME(R)', 'AL(L)'])
+    // Identity is the region's name; `neuronId` is meaningless for a region.
+    expect(result.items.map((m) => m.id)).toEqual(['ME(R)', 'AL(L)'])
   })
 
   it('scales voxels to nanometres, like skeletons', async () => {
@@ -1503,7 +1559,7 @@ describe('neuPrint region meshes', () => {
       ['ME(R)', 'VNC-unspecified'],
       IDENTITY_SCALE,
     )
-    expect(result.items.map((m) => m.label)).toEqual(['ME(R)'])
+    expect(result.items.map((m) => m.id)).toEqual(['ME(R)'])
     expect(result.missing).toEqual(['VNC-unspecified'])
   })
 

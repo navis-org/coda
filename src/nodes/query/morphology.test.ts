@@ -11,11 +11,13 @@ import { beforeAll, describe, expect, it } from 'vitest'
 
 import { addEdge, addNode, emptyGraph, setNodeParam } from '../../core/graph'
 import type { CodaGraph, GraphNode } from '../../core/graph'
-import { defaultParams } from '../../core/node'
+import { defaultParams, makeInferContext } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
 import { Scheduler } from '../../core/scheduler'
 import { MockSource } from '../../data/mock/MockSource'
+import type { DataSource, SourceCapabilities } from '../../data/source'
 import { registerSource, requireSource } from '../../data/source'
+import { T } from '../../core/types'
 import '../index'
 
 beforeAll(() => {
@@ -115,5 +117,54 @@ describe('refusing an oversized set', () => {
     const sched = new Scheduler({ resolveSource: (id) => requireSource(id) })
     await sched.run(pipeline('neuron.meshes', 500), { mode: 'full' })
     expect(sched.info('geo').state).toBe('ok')
+  })
+})
+
+/**
+ * The per-dataset capability.
+ *
+ * `SourceCapabilities` is per **source**, and one source can serve datasets that genuinely
+ * differ: a CAVE datastack's skeletons depend on whether its chunkedgraph has a level-2 cache,
+ * which six of thirteen do. A flat answer is wrong for somebody whichever way it is set.
+ */
+describe('a capability that differs per dataset', () => {
+  const def = requireNodeDef('neuron.skeletons')
+
+  function withCapabilities(id: string, per: Record<string, Partial<SourceCapabilities>>) {
+    const base = new MockSource({ latencyMs: 0 })
+    registerSource(
+      Object.assign(Object.create(base) as DataSource, {
+        id,
+        capabilities: { ...base.capabilities, skeletons: false },
+        capabilitiesFor: (datasetId: string) => per[datasetId],
+      }),
+    )
+  }
+
+  const issues = (sourceId: string, datasetId: string) =>
+    (
+      def.validate?.(
+        makeInferContext(def, defaultParams(def), { dataset: T.dataset(sourceId, datasetId) }),
+      ) ?? []
+    ).join(' ')
+
+  it('lets a dataset answer for itself where the source cannot', () => {
+    withCapabilities('per-dataset', { 'has:1': { skeletons: true } })
+    // The source says no; this dataset says yes and wins.
+    expect(issues('per-dataset', 'has:1')).toBe('')
+  })
+
+  it('falls back to the source for a dataset with nothing to say', () => {
+    withCapabilities('per-dataset-2', { 'has:1': { skeletons: true } })
+    // `undefined` is "same as the source", which is every dataset of every other backend — and
+    // the safe answer while a peek has not landed.
+    expect(issues('per-dataset-2', 'other:1')).toContain('no skeletons')
+  })
+
+  it('blames the dataset rather than the backend', () => {
+    withCapabilities('per-dataset-3', {})
+    // "This data source has no skeletons" told a FlyWire-production user something false about
+    // a datastack that can perfectly well answer.
+    expect(issues('per-dataset-3', 'other:1')).toContain('This dataset')
   })
 })

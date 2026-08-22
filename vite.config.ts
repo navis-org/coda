@@ -75,25 +75,97 @@ const NEUPRINT_PROXY = {
 }
 
 /**
- * Proxy for neuPrint deployments other than the default one.
+ * Proxy for a host named by the page rather than by this file.
  *
- * The `/neuprint` rule above is bound to a single target at config time, which is fine while
- * there is one server but not once a node can name its own. This forwards
- * `/np/<encoded-deployment>/<path>` to that deployment, so the Custom neuPrint node's Server
- * field does something in development. `src/data/neuprint/servers.ts` builds the URLs.
+ * The rules above are each bound to one target at config time, which is fine while a backend has
+ * one server and not once a node can name its own. This forwards `/<prefix>/<encoded-origin>/<path>`
+ * to that origin. Two prefixes use it, and they are the two backends whose host is a *setting*:
+ *
+ *  - `/np/` — neuPrint deployments other than the default, so the Custom neuPrint node's Server
+ *    field does something in development. `src/data/neuprint/servers.ts` builds the URLs.
+ *  - `/st/` — SeaTable deployments. `cloud.seatable.io` answers a preflight 204 with
+ *    `Access-Control-Allow-Origin: *` and needs none of this; **FlyTable sends no
+ *    `Access-Control-*` header at all**, for any origin, so a browser blocks the request before
+ *    it is sent and reports the opaque `TypeError` that means both "no CORS" and "host is down".
+ *    Verified against the live deployment; the same API answers a non-browser client perfectly
+ *    with the same token, which is what makes it a browser problem rather than a credential one.
+ *    `src/data/annotations/seaTable.ts` builds the URLs.
+ *
+ * One handler rather than two, because the SSRF guard below is the part that must not be
+ * copied — and the header forwarding is already exactly what both need.
  *
  * **It refuses anything but https to a public host.** A dev server that will forward to any URL
  * a page names is a server-side request forgery hole pointed at the developer's own machine and
  * network — localhost dashboards, cloud metadata endpoints. The allowance is deliberately narrow
  * rather than convenient.
+ *
+ * Note what it does **not** cover: a static deploy serves nothing at these paths, so a
+ * deployment without CORS is unreachable there whatever this does. The fix for that is one
+ * nginx block on the deployment, which is what Janelia did for `neuprint-test`.
  */
 function deploymentProxy(): PluginOption {
   const BLOCKED =
     /^(localhost$|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|\[?::1\]?$)/i
+  /**
+   * What each relay prefix forwards, and whether it needs a handshake first.
+   *
+   * A table rather than a membership list plus `startsWith` branches inside the handler: the
+   * header allowlist was a *union* applied to every prefix, so CATMAID's `x-authorization` was
+   * being forwarded on neuPrint's and SeaTable's relays too. Each backend's need widening what
+   * every other backend forwards is the wrong direction for a thing whose whole job is to be a
+   * narrow hole in the dev server.
+   */
+  const PREFIXES: Record<string, { forward: readonly string[]; csrf?: boolean }> = {
+    // neuPrint and SeaTable both authenticate with a plain `Authorization` header.
+    '/np/': { forward: ['authorization'] },
+    '/st/': { forward: ['authorization'] },
+    // CATMAID's token rides on its own header, and an *anonymous* POST needs the CSRF
+    // handshake below — which is the only thing here that is more than a forward.
+    '/cm/': { forward: ['x-authorization'], csrf: true },
+  }
+
+  /*
+   * CATMAID's CSRF pair, per origin, for the `/cm/` prefix.
+   *
+   * This is the one relay here that does more than forward, and the reason is that CATMAID's
+   * read endpoints are POST-only behind Django's CSRF: a browser cannot satisfy it, because
+   * `Referer` is a forbidden header name and the `csrftoken` cookie is SameSite=Lax. A server
+   * can. So one GET to the instance root yields the cookie and the token, and every POST after
+   * it carries both plus a same-origin Referer.
+   *
+   * **The cookie name is per-instance** — `csrftoken_6666cd76f96956469e7be39d750cc7d9`, not
+   * `csrftoken` — so it is matched by prefix rather than assumed. See `docs/catmaid_vfb.md`,
+   * which is also where the upstream fix that would make this whole block unnecessary is
+   * written down.
+   */
+  const csrf = new Map<string, { cookie: string; token: string }>()
+
+  const csrfFor = async (
+    origin: string,
+  ): Promise<{ cookie: string; token: string } | undefined> => {
+    const held = csrf.get(origin)
+    if (held) return held
+    try {
+      const response = await fetch(`${origin}/`, { headers: { accept: 'text/html' } })
+      const cookies = response.headers.getSetCookie?.() ?? []
+      const found = cookies
+        .map((line) => line.split(';')[0] ?? '')
+        .find((pair) => pair.startsWith('csrftoken'))
+      if (!found) return undefined
+      const token = found.slice(found.indexOf('=') + 1)
+      const pair = { cookie: found, token }
+      csrf.set(origin, pair)
+      return pair
+    } catch {
+      return undefined
+    }
+  }
 
   const handler = async (req: IncomingMessage, res: ServerResponse, next: () => void) => {
     const url = req.url ?? ''
-    if (!url.startsWith('/np/')) return next()
+    const prefix = Object.keys(PREFIXES).find((candidate) => url.startsWith(candidate))
+    const rules = prefix ? PREFIXES[prefix] : undefined
+    if (!rules) return next()
 
     const [, , encoded = '', ...rest] = url.split('/')
     let target: URL
@@ -118,20 +190,45 @@ function deploymentProxy(): PluginOption {
           })
 
     try {
-      const upstream = await fetch(`${target.origin}/${rest.join('/')}`, {
-        method: req.method ?? 'GET',
-        headers: {
-          // Only what neuPrint needs. Forwarding the browser's Host or Origin makes it 400.
-          ...(req.headers.authorization
-            ? { authorization: String(req.headers.authorization) }
-            : {}),
-          ...(req.headers['content-type']
-            ? { 'content-type': String(req.headers['content-type']) }
-            : {}),
-          accept: 'application/json',
-        },
-        ...(body && body.length ? { body } : {}),
-      })
+      // Only for the methods that need it: a GET is answered anonymously.
+      const needsCsrf = Boolean(rules.csrf) && req.method === 'POST'
+
+      const send = async (pair: { cookie: string; token: string } | undefined) =>
+        fetch(`${target.origin}/${rest.join('/')}`, {
+          method: req.method ?? 'GET',
+          headers: {
+            ...(pair
+              ? { cookie: pair.cookie, 'x-csrftoken': pair.token, referer: `${target.origin}/` }
+              : {}),
+            // CATMAID takes its token under this name, and a request carrying one skips CSRF
+            // entirely — so a user with a token is relayed unchanged and needs none of the above.
+            ...(req.headers['x-authorization']
+              ? { 'x-authorization': String(req.headers['x-authorization']) }
+              : {}),
+            // Only what these APIs need. Forwarding the browser's Host or Origin makes neuPrint
+            // answer 400, and SeaTable needs neither.
+            ...(req.headers.authorization
+              ? { authorization: String(req.headers.authorization) }
+              : {}),
+            ...(req.headers['content-type']
+              ? { 'content-type': String(req.headers['content-type']) }
+              : {}),
+            accept: 'application/json',
+          },
+          ...(body && body.length ? { body } : {}),
+        })
+
+      let upstream = await send(needsCsrf ? await csrfFor(target.origin) : undefined)
+      /*
+       * One retry with a fresh CSRF pair. Django's anonymous token is stable for a year, so this
+       * is not the common path — but a cached pair that has gone stale would otherwise wedge the
+       * relay for the life of the dev server, and the symptom (every POST 403s while GETs work)
+       * points nowhere near a cache.
+       */
+      if (needsCsrf && upstream.status === 403) {
+        csrf.delete(target.origin)
+        upstream = await send(await csrfFor(target.origin))
+      }
       res.statusCode = upstream.status
       res.setHeader('content-type', upstream.headers.get('content-type') ?? 'application/json')
       res.end(Buffer.from(await upstream.arrayBuffer()))
@@ -142,7 +239,7 @@ function deploymentProxy(): PluginOption {
   }
 
   return {
-    name: 'coda:neuprint-deployment-proxy',
+    name: 'coda:named-host-proxy',
     configureServer: (server) => {
       server.middlewares.use(handler)
     },
@@ -152,8 +249,50 @@ function deploymentProxy(): PluginOption {
   }
 }
 
+/**
+ * Switch off React's development Performance Tracks, in the dev server only.
+ *
+ * React 19's dev build logs a "Components ⚛" track to Chrome's performance timeline. To label
+ * each entry it **deep-diffs the component's old and new props** and serialises them — and for an
+ * array of primitives that is `JSON.stringify(value)` with **no length cap**
+ * (`addValueToProperties`, `react-dom-client.development.js`). A Coda `TableValue` is an object of
+ * one array per column, so handing one to a component costs a full JSON serialisation of the
+ * table, twice, on every render where its identity changes.
+ *
+ * Measured against a real annotation base — 58,340 rows over 60 columns — selecting between two
+ * nodes holding one spent **five seconds of CPU and 1.5 GB**, which reads as the tab freezing.
+ * `addValueToProperties` and `logComponentRender` were 94% of a heap profile of it.
+ *
+ * The gate is `console.timeStamp && performance.measure`, evaluated when `react-dom` initialises,
+ * so this has to run before any module script — hence `head-prepend` rather than anything in
+ * `src/`. **jsdom has no `console.timeStamp`**, which is why none of this is reachable from the
+ * test suite and why the whole thing was invisible for four rounds of measurement.
+ *
+ * `apply: 'serve'`: the production build of `react-dom` contains none of this machinery, so the
+ * deployed app never had the problem and nothing needs disabling there.
+ *
+ * What it costs is React's own track in a performance recording. Set
+ * `localStorage['coda.reactTracks'] = '1'` and reload to get it back — worth doing when profiling
+ * React itself, and worth undoing before opening a large table again.
+ */
+function reactTracksOff(): PluginOption {
+  return {
+    name: 'coda-react-tracks-off',
+    apply: 'serve',
+    transformIndexHtml() {
+      return [
+        {
+          tag: 'script',
+          injectTo: 'head-prepend',
+          children: `try{if(!localStorage.getItem('coda.reactTracks'))console.timeStamp=undefined}catch(e){console.timeStamp=undefined}`,
+        },
+      ]
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [react(), deploymentProxy(), nodeGuideData()],
+  plugins: [react(), reactTracksOff(), deploymentProxy(), nodeGuideData()],
   define: { __APP_VERSION__: JSON.stringify(version) },
   // Relative base so the built bundle works from a subpath (GitHub Pages) as well as root.
   base: './',

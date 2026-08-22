@@ -1,6 +1,9 @@
 # The libraries the generated notebooks import. They are installed in CI so
-# `check-export.py --strict` can resolve attribute chains against the real packages;
-# nothing is ever executed, so there is no token and no network beyond the install.
+# `check-export.py --strict` can resolve attribute chains against the real packages.
+#
+# Nothing that would reach a *service* is ever executed — no token, no network beyond the
+# install. `probe-py-helpers.py` does run the generated pandas helpers, against a stub
+# client, which is why pandas is listed rather than merely arriving with navis.
 #
 # This file exists to be a file: `actions/setup-python`'s pip cache is keyed on a
 # dependency manifest and fails outright when it can find none. Naming it here also
@@ -8,3 +11,11 @@
 # workflow step.
 neuprint-python
 navis
+# The CAVE half. `caveclient` is what a FlyWire notebook is built on, and `pandas` is named
+# explicitly because `probe-py-helpers.py` *runs* the generated helpers rather than only
+# resolving their names — the one check here that executes anything.
+caveclient
+pandas
+# SeaTable, for the annotation sources. The distribution is `sea-serpent` and the module
+# `seaserpent`, which is the mismatch `MODULES` exists to record.
+sea-serpent

@@ -99,7 +99,7 @@ describe('settings', () => {
      without a graph. Saying so beats printing whatever the first option happens to be. */
   it('admits when an enum has no static option list', () => {
     const op = byType.get('core.filter')!.params.find((p) => p.id === 'op')!
-    expect(op.value).toBe('depends on the input')
+    expect(op.value).toBe('resolved live')
   })
 
   it('carries help text where the definition has it', () => {

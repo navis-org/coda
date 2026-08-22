@@ -1,7 +1,7 @@
 import { registerNode } from '../../core/registry'
 import { T } from '../../core/types'
 import { isTableValue } from '../../core/values'
-import { requireDataset, schemasFromType } from '../lib/datasetParam'
+import { requireDataset, schemasFromType, sourceLabel, sourceSupports } from '../lib/datasetParam'
 import { idColumn } from '../lib/tableOps'
 
 /**
@@ -28,19 +28,37 @@ export const roiCountsNode = registerNode({
     counts: T.table(schemasFromType(ctx.inputs.dataset).roiCounts),
   }),
 
+  /*
+   * Gated like the two volume-level ROI nodes beside it, and it was the one that was not — so a
+   * source with no per-region counts said nothing at edit time and failed at Run. `sourceSupports`
+   * answers true for an unwired socket, which is what keeps a node that has not been given a
+   * dataset from complaining about one.
+   */
+  validate: (ctx) => {
+    if (!sourceSupports(ctx, 'roiCounts')) {
+      const label = sourceLabel(ctx.inputs.dataset) ?? 'This source'
+      return [`${label} does not publish per-region synapse counts`]
+    }
+    return []
+  },
+
   evaluate: async (ctx) => {
     const dataset = requireDataset(ctx.input('dataset'))
     const source = ctx.resolveSource(dataset.sourceId)
     const neurons = ctx.input('neurons')
     if (!isTableValue(neurons)) throw new Error('Neurons input is not a table')
 
-    const bodyIds = idColumn(neurons, 'bodyId')
-    if (bodyIds.length === 0) throw new Error('No bodyIds in the incoming neuron table')
+    const neuronIds = idColumn(neurons, 'neuronId')
+    if (neuronIds.length === 0) throw new Error('No neuronIds in the incoming neuron table')
 
-    ctx.progress(0.2, `${bodyIds.length} neurons`)
+    if (!source.fetchRoiCounts) {
+      throw new Error(`${source.label} does not publish per-region synapse counts`)
+    }
+
+    ctx.progress(0.2, `${neuronIds.length} neurons`)
     const counts = await source.fetchRoiCounts({
       datasetId: dataset.datasetId,
-      bodyIds,
+      neuronIds,
       signal: ctx.signal,
     })
 

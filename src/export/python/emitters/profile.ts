@@ -12,9 +12,9 @@
  * a plausible wrong number rather than an error, so each is called out where it is applied.
  */
 
-import { pyList } from '../py'
+import {  } from '../py'
 import { registerEmitter, registerHelper } from '../registry'
-import { bodyIds, selectionIds } from './common'
+import { neuronIds, pySelection, selectionIds } from './common'
 
 registerEmitter('out.profile', (ctx) => {
   const src = ctx.wired('neurons')
@@ -31,7 +31,7 @@ registerEmitter('out.profile', (ctx) => {
 
   // The pinned row, which is the node's `Current` output whether or not the metrics run.
   if (selection.length > 0) {
-    lines.push(`${current} = ${out}[${out}['bodyId'].isin(${pyList(selection)})]`)
+    lines.push(`${current} = ${out}[${out}['neuronId'].isin(${pySelection(selection)})]`)
   } else {
     lines.push(
       ...ctx.note('No neuron is pinned on the canvas, so Current is empty.'),
@@ -50,7 +50,7 @@ registerEmitter('out.profile', (ctx) => {
   }
 
   ctx.helper('coda_profile')
-  const ids = selection.length > 0 ? pyList(selection) : bodyIds(out)
+  const ids = selection.length > 0 ? pySelection(selection) : neuronIds(out)
 
   lines.push(
     ``,
@@ -77,6 +77,10 @@ registerEmitter('out.profile', (ctx) => {
 
 registerHelper({
   name: 'coda_profile',
+  // `neurons` and `roi_counts` come straight off `fetch_neurons`, so they arrive carrying
+  // neuprint-python's `bodyId` while every roll-up below groups and merges on Coda's
+  // `neuronId`. Without the rename each of those is a `KeyError` inside a generated helper.
+  needs: ['coda_neurons'],
   requires: [
     ['pandas'],
     [
@@ -121,7 +125,7 @@ registerHelper({
     '                           synapse_share=0.0, partner_share=0.0).iloc[0:0]',
     '',
     '    out = []',
-    '    for body, group in conn.groupby("bodyId", sort=False):',
+    '    for body, group in conn.groupby("neuronId", sort=False):',
     '        total_syn = group["weight"].sum()',
     '        total_partners = group["partnerId"].nunique()',
     '        rolled = (',
@@ -130,7 +134,7 @@ registerHelper({
     '            .reset_index()',
     '            .rename(columns={"partnerType": "type"})',
     '        )',
-    '        rolled["bodyId"] = body',
+    '        rolled["neuronId"] = body',
     '        rolled["synapse_share"] = rolled["synapses"] / total_syn if total_syn else 0.0',
     '        rolled["partner_share"] = (',
     '            rolled["partners"] / total_partners if total_partners else 0.0',
@@ -140,7 +144,7 @@ registerHelper({
     '        )',
     '        out.append(rolled.head(top_n) if top_n else rolled)',
     '',
-    '    cols = ["bodyId", "type", "synapses", "partners", "synapse_share", "partner_share"]',
+    '    cols = ["neuronId", "type", "synapses", "partners", "synapse_share", "partner_share"]',
     '    return pd.concat(out, ignore_index=True)[cols]',
     '',
     '',
@@ -150,26 +154,26 @@ registerHelper({
     '        return conn.assign(share=0.0).iloc[0:0]',
     '',
     '    out = []',
-    '    for body, group in conn.groupby("bodyId", sort=False):',
+    '    for body, group in conn.groupby("neuronId", sort=False):',
     '        total = group["weight"].sum()',
     '        rows = group.copy()',
     '        rows["share"] = rows["weight"] / total if total else 0.0',
     '        rows = rows.sort_values(["weight", "partnerId"], ascending=[False, True])',
     '        out.append(rows.head(top_n) if top_n else rows)',
     '',
-    '    cols = ["bodyId", "partnerId", "partnerType", "weight", "share"]',
+    '    cols = ["neuronId", "partnerId", "partnerType", "weight", "share"]',
     '    return pd.concat(out, ignore_index=True)[cols]',
     '',
     '',
-    'def _coda_connectivity(body_ids, direction, min_weight, client):',
+    'def _coda_connectivity(neuron_ids, direction, min_weight, client):',
     '    """One direction of partners, in the query-relative shape the roll-ups expect.',
     '',
-    '    bodyId is always the neuron being profiled and partnerId is whatever it is wired to,',
+    '    neuronId is always the neuron being profiled and partnerId is whatever it is wired to,',
     "    whichever way the arrow points -- which is the *opposite* convention to Coda's",
     '    Connectivity node, and the right one here: "these are my upstream partners" is the',
     '    question a profile asks.',
     '    """',
-    '    criteria = NeuronCriteria(bodyId=list(body_ids), client=client)',
+    '    criteria = NeuronCriteria(bodyId=list(neuron_ids), client=client)',
     '    if direction == "downstream":',
     '        neurons, conn = fetch_adjacencies(',
     '            criteria, None, min_total_weight=min_weight,',
@@ -185,17 +189,17 @@ registerHelper({
     '',
     '    if conn.empty:',
     '        return pd.DataFrame(',
-    '            columns=["bodyId", "partnerId", "partnerType", "weight"]',
+    '            columns=["neuronId", "partnerId", "partnerType", "weight"]',
     '        )',
     '',
     '    conn = merge_neuron_properties(neurons, conn, ["type"])',
     '    partner_type = "type_post" if mine == "bodyId_pre" else "type_pre"',
     '    return conn.rename(columns={',
-    '        mine: "bodyId", theirs: "partnerId", partner_type: "partnerType",',
-    '    })[["bodyId", "partnerId", "partnerType", "weight"]]',
+    '        mine: "neuronId", theirs: "partnerId", partner_type: "partnerType",',
+    '    })[["neuronId", "partnerId", "partnerType", "weight"]]',
     '',
     '',
-    'def coda_profile(body_ids, client, min_weight=1, top_n=10):',
+    'def coda_profile(neuron_ids, client, min_weight=1, top_n=10):',
     '    """Everything Coda\'s Profile card shows, as a dict of DataFrames.',
     '',
     '    Keys mirror the tiles: summary, upstream_types, downstream_types, top_upstream,',
@@ -207,18 +211,19 @@ registerHelper({
     '',
     '    min_weight drops connections below a threshold; top_n caps each list (0 keeps all).',
     '    """',
-    '    body_ids = [int(b) for b in body_ids]',
-    '    if not body_ids:',
+    '    neuron_ids = [int(b) for b in neuron_ids]',
+    '    if not neuron_ids:',
     '        empty = pd.DataFrame()',
     '        return {k: empty for k in ("summary", "upstream_types", "downstream_types",',
     '                                   "top_upstream", "top_downstream", "regions",',
     '                                   "hemispheres")}',
     '',
     '    neurons, roi_counts = fetch_neurons(',
-    '        NeuronCriteria(bodyId=body_ids, client=client), client=client,',
+    '        NeuronCriteria(bodyId=neuron_ids, client=client), client=client,',
     '    )',
-    '    up = _coda_connectivity(body_ids, "upstream", min_weight, client)',
-    '    down = _coda_connectivity(body_ids, "downstream", min_weight, client)',
+    '    neurons, roi_counts = coda_neurons(neurons), coda_neurons(roi_counts)',
+    '    up = _coda_connectivity(neuron_ids, "upstream", min_weight, client)',
+    '    down = _coda_connectivity(neuron_ids, "downstream", min_weight, client)',
     '',
     '    # roiInfo NESTS: a synapse in LO(R) is counted again in its parent OL(R), so summing',
     "    # the raw breakdown reports roughly twice the neuron's synapses. Only the primary ROIs",
@@ -226,16 +231,16 @@ registerHelper({
     '    primary = set(fetch_primary_rois(client=client))',
     '    regions = roi_counts[roi_counts["roi"].isin(primary)].copy()',
     '    regions = (',
-    '        regions.groupby(["bodyId", "roi"], as_index=False)[["pre", "post"]].sum()',
+    '        regions.groupby(["neuronId", "roi"], as_index=False)[["pre", "post"]].sum()',
     '    )',
     '    regions["total"] = regions["pre"] + regions["post"]',
     '    regions = regions[regions["total"] > 0].sort_values(',
-    '        ["bodyId", "total", "roi"], ascending=[True, False, True],',
+    '        ["neuronId", "total", "roi"], ascending=[True, False, True],',
     '    )',
     '',
     '    sides = regions.assign(side=regions["roi"].map(_coda_roi_side))',
     '    hemispheres = (',
-    '        sides.pivot_table(index="bodyId", columns="side", values="total",',
+    '        sides.pivot_table(index="neuronId", columns="side", values="total",',
     '                          aggfunc="sum", fill_value=0)',
     '        .rename(columns={"L": "left", "R": "right"})',
     '        .reset_index()',
@@ -249,18 +254,18 @@ registerHelper({
     '',
     '    def totals(conn, prefix):',
     '        if conn.empty:',
-    '            return pd.DataFrame(columns=["bodyId", f"{prefix}_synapses",',
+    '            return pd.DataFrame(columns=["neuronId", f"{prefix}_synapses",',
     '                                         f"{prefix}_partners"])',
     '        return (',
-    '            conn.groupby("bodyId", as_index=False)',
+    '            conn.groupby("neuronId", as_index=False)',
     '            .agg(**{f"{prefix}_synapses": ("weight", "sum"),',
     '                    f"{prefix}_partners": ("partnerId", "nunique")})',
     '        )',
     '',
-    '    summary = neurons.merge(totals(up, "upstream"), on="bodyId", how="left")',
-    '    summary = summary.merge(totals(down, "downstream"), on="bodyId", how="left")',
+    '    summary = neurons.merge(totals(up, "upstream"), on="neuronId", how="left")',
+    '    summary = summary.merge(totals(down, "downstream"), on="neuronId", how="left")',
     '    summary = summary.merge(',
-    '        hemispheres[["bodyId", "left", "right", "center"]], on="bodyId", how="left",',
+    '        hemispheres[["neuronId", "left", "right", "center"]], on="neuronId", how="left",',
     '    )',
     '',
     '    return {',

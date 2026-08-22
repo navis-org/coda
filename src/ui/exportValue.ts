@@ -16,6 +16,7 @@ import type {
   CellValue,
   LinkageValue,
   MatrixValue,
+  MeshGeometry,
   MeshesValue,
   NetworkValue,
   PointsValue,
@@ -152,7 +153,7 @@ function linkageToCsv(linkage: LinkageValue): string {
 export function skeletonToSwc(skeleton: SkeletonGeometry): string {
   const count = skeleton.radii.length
   const lines: string[] = [
-    `# Coda export — bodyId ${skeleton.bodyId}`,
+    `# Coda export — neuron ${skeleton.id}`,
     '# Coordinates and radii are in nanometres.',
     '# id type x y z radius parent',
   ]
@@ -184,19 +185,13 @@ export function skeletonToSwc(skeleton: SkeletonGeometry): string {
  * No normals and no material: the sources publish neither, and a `vn` computed here would be a
  * guess at smoothing that every viewer recomputes anyway.
  */
-export function meshToObj(mesh: {
-  bodyId: number
-  label?: string
-  positions: Float32Array
-  indices: Uint32Array
-}): string {
-  // A region mesh has a name and no body id; a neuron has the reverse. Naming the object after
-  // whichever it actually has is the difference between `o ME(R)` and `o body_3`.
-  const name = mesh.label ?? `body_${mesh.bodyId}`
+export function meshToObj(mesh: MeshGeometry): string {
+  // Whitespace only, unlike the *filename* below: an OBJ object name may carry the parens and
+  // quote a region name like `a'L(R)` has, and `o ME(R)` is more use than `o ME_R_`.
   const lines: string[] = [
-    `# Coda export — ${mesh.label ?? `bodyId ${mesh.bodyId}`}`,
+    `# Coda export — ${mesh.id}`,
     '# Coordinates are in nanometres.',
-    `o ${name.replace(/\s+/g, '_')}`,
+    `o ${mesh.id.replace(/\s+/g, '_')}`,
   ]
   for (let i = 0; i < mesh.positions.length; i += 3) {
     lines.push(`v ${mesh.positions[i]} ${mesh.positions[i + 1]} ${mesh.positions[i + 2]}`)
@@ -268,7 +263,7 @@ function pointsToCsv(points: PointsValue): string[] {
  * so an `i64` arrives as a long and an `f64` as a double rather than as whatever the reader
  * infers from the first literal it meets, and an absent value is an omitted element rather than
  * a zero somebody has to notice. GML implies types by literal syntax and restricts key names to
- * something a column called `sum_bodyId` survives and one called `pt root id` does not.
+ * something a column called `sum_neuronId` survives and one called `pt root id` does not.
  *
  * **Attributes only — no positions and no colours.** So the two nodes offering this produce
  * byte-identical files for the same network, and the file says what the data says rather than
@@ -516,7 +511,7 @@ function graphmlFiles(network: NetworkValue, base: string): ExportFile[] {
 }
 
 /**
- * One file per neuron, named by body id.
+ * One file per neuron, named by neuron id.
  *
  * SWC and OBJ both describe a single object, so a set of twenty neurons is twenty files rather
  * than one concatenation — a concatenated SWC has repeating ids and parses as one impossible
@@ -527,34 +522,32 @@ function graphmlFiles(network: NetworkValue, base: string): ExportFile[] {
 export const MAX_MORPHOLOGY_FILES = 50
 
 function skeletonFiles(value: SkeletonsValue, base: string): ExportFile[] {
-  return value.items
-    .slice(0, MAX_MORPHOLOGY_FILES)
-    .map((item) => ({
-      name: `${base}-${item.bodyId}.swc`,
-      parts: [skeletonToSwc(item)],
-      mime: TEXT,
-    }))
+  return value.items.slice(0, MAX_MORPHOLOGY_FILES).map((item) => ({
+    name: `${base}-${fileStem(item.id)}.swc`,
+    parts: [skeletonToSwc(item)],
+    mime: TEXT,
+  }))
 }
 
 function meshFiles(value: MeshesValue, base: string): ExportFile[] {
   return value.items.slice(0, MAX_MORPHOLOGY_FILES).map((item) => ({
-    name: `${base}-${meshFileStem(item)}.obj`,
+    name: `${base}-${fileStem(item.id)}.obj`,
     parts: [meshToObj(item)],
     mime: TEXT,
   }))
 }
 
 /**
- * What one mesh's file is called.
+ * What one geometry item's file is called.
  *
- * A region's name is the useful stem and is also somebody else's string: `a'L(R)` and `ME(R)`
- * carry a quote, parens and a slash on other datasets, none of which belong in a filename on
- * every platform this runs on. Anything outside the safe set becomes an underscore rather than
- * being dropped, so two regions cannot collapse to one filename and silently overwrite.
+ * A geometry id is a neuron id for a neuron and a region's own name for a shell, and the latter
+ * is somebody else's string: `a'L(R)` and `ME(R)` carry a quote, parens and a slash on other
+ * datasets, none of which belong in a filename on every platform this runs on. Anything outside
+ * the safe set becomes an underscore rather than being dropped, so two regions cannot collapse
+ * to one filename and silently overwrite. A neuron's digits pass through untouched.
  */
-function meshFileStem(item: { bodyId: number; label?: string }): string {
-  if (!item.label) return String(item.bodyId)
-  return item.label.replace(/[^A-Za-z0-9._-]+/g, '_')
+function fileStem(id: string): string {
+  return id.replace(/[^A-Za-z0-9._-]+/g, '_')
 }
 
 export interface ExportPlan {

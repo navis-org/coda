@@ -32,6 +32,7 @@ import { autoWireDataset } from '../core/autowire'
 import { addNodeWithCompanion } from '../core/companion'
 import type { InferenceResult } from '../core/inference'
 import { checkConnection, inferGraph } from '../core/inference'
+import { spliceCandidate, spliceGraph } from '../core/splice'
 import type { ParamValue } from '../core/node'
 import { defaultParams } from '../core/node'
 import { getNodeDef, isAnnotation, requireNodeDef } from '../core/registry'
@@ -42,8 +43,12 @@ import type { Value } from '../core/values'
 import { isTableValue } from '../core/values'
 import { MockSource } from '../data/mock/MockSource'
 import { NeuPrintSource } from '../data/neuprint/NeuPrintSource'
+import { catmaidSourceFor } from '../data/catmaid/registry'
+import { CaveSource } from '../data/cave/CaveSource'
 import { registerSource, requireSource, subscribeSourceLearned } from '../data/source'
 import { subscribeUploadLearned } from '../data/uploads'
+import { subscribeAnnotationsLearned } from '../data/annotations'
+import { subscribeRootCheck } from '../data/cave/rootIds'
 import { getExample } from '../examples'
 import type { StarterSpec } from '../examples/starters'
 import { buildStarter } from '../examples/starters'
@@ -83,6 +88,8 @@ import '../nodes'
 // for a fresh graph: the examples must open and run with no token and no network.
 registerSource(new MockSource())
 registerSource(new NeuPrintSource())
+registerSource(new CaveSource())
+catmaidSourceFor(undefined)
 
 const AUTO_RUN_DELAY_MS = 180
 
@@ -278,6 +285,21 @@ export interface GraphState {
 
   // --- editing -------------------------------------------------------------
   addNode(type: string, position: { x: number; y: number }): string
+  /**
+   * End a drag by inserting the dragged node into the wire it was dropped on.
+   *
+   * `moveNodes`' committing frame *and* the rewire in one `commit`, which is what makes ⌘Z undo
+   * the whole gesture — the node back where it started and the original link intact. Two commits
+   * would be two undo steps, the first of which leaves the graph rewired around a node in its new
+   * place, which is a state nobody was ever in.
+   *
+   * Unlike a plain move this **does** re-run: the dataflow changed.
+   */
+  spliceNode(
+    nodeId: string,
+    edgeId: string,
+    moves: ReadonlyArray<{ id: string; position: { x: number; y: number } }>,
+  ): void
   moveNodes(
     moves: Array<{ id: string; position: { x: number; y: number } }>,
     commit: boolean,
@@ -334,12 +356,27 @@ export interface GraphState {
   runNode(nodeId: string): Promise<void>
   cancelRun(): void
   invalidateNode(nodeId: string): void
+  /**
+   * Forget the *data* this node fetched, so its next run reaches the server.
+   *
+   * `invalidateNode`'s second layer. See `Scheduler.clearNodeCache`: dropping a result makes a
+   * node re-run, and on a node that fetches through `loadCachedTable` the re-run answers from
+   * IndexedDB in milliseconds with the same bytes.
+   */
+  clearNodeCache(nodeId: string): void
   /** Drop every cached result, so the next Run re-fetches from scratch. */
   clearResults(): void
   /** True when running this node would actually do work. */
   needsRun(nodeId: string): boolean
   nodeInfo(nodeId: string): NodeRunInfo
   nodeOutput(nodeId: string, portId: string): Value | undefined
+  /**
+   * When the data behind a node's current result was read from a server, or undefined.
+   *
+   * Read through `runVersion` like `nodeInfo`, since it changes with the scheduler's cache rather
+   * than with the graph.
+   */
+  nodeFetchedAt(nodeId: string): number | undefined
   /**
    * Realised values arriving at a node's input ports. Viewers with several inputs (the 3D
    * scene takes skeletons, meshes and points) need these, since a node's own output cache
@@ -601,6 +638,18 @@ export const useGraphStore = create<GraphState>((set, get) => {
    * right for exactly the same reasons.
    */
   subscribeUploadLearned(afterSourceLearned)
+  /*
+   * And an annotation provider's columns, for the third time and the same reason: `peekColumns`
+   * is synchronous, so a base's metadata lands after inference has already run against nothing.
+   * Same handler again — three asynchronous facts that inference reads synchronously, one rule.
+   */
+  subscribeAnnotationsLearned(afterSourceLearned)
+  /*
+   * The fourth: whether a CAVE annotation's root ids were still current at the materialization.
+   * Same terms as the three above — it is not a data-changed event, invalidates nothing and
+   * schedules no run; it only tells `validate` that an answer it drew nothing from has arrived.
+   */
+  subscribeRootCheck(afterSourceLearned)
 
   return {
     graph: initialGraph,
@@ -872,6 +921,38 @@ export const useGraphStore = create<GraphState>((set, get) => {
       commit((g) => autoWireDataset(addNodeWithCompanion(g, node), node))
       set({ selection: [node.id] })
       return node.id
+    },
+
+    spliceNode: (nodeId, edgeId, moves) => {
+      // A drag ends auto-layout, the same reason `moveNodes` says: the position is one somebody
+      // chose, and the next structural edit would otherwise put the card straight back.
+      if (get().autoLayout) get().setAutoLayout(false)
+      const byId = new Map(moves.map((m) => [m.id, m.position]))
+      commit(
+        (g) => {
+          const edge = g.edges.find((e) => e.id === edgeId)
+          const moved = {
+            ...g,
+            nodes: g.nodes.map((n) => {
+              const position = byId.get(n.id)
+              return position ? { ...n, position } : n
+            }),
+          }
+          /*
+           * The ports are re-derived here rather than carried from the drag. The candidate was
+           * computed on a pointer move and the graph could have moved under it since; and since
+           * positions do not reach inference, the answer is the same one the highlight showed —
+           * so passing them would be a second copy of a decision that can only disagree.
+           */
+          if (!edge) return moved
+          const ports = spliceCandidate(moved, inferGraph(moved), nodeId, edge)
+          if (!ports) return moved
+          return spliceGraph(moved, nodeId, edge, ports)
+        },
+        // The same gesture tag the drag's own frames carried, so the undo entry reaches back to
+        // where the drag began rather than to its last frame.
+        { history: true, tag: 'splice', gesture: 'move' },
+      )
     },
 
     moveNodes: (moves, commitToHistory) => {
@@ -1154,6 +1235,10 @@ export const useGraphStore = create<GraphState>((set, get) => {
       scheduler.invalidateNode(get().graph, nodeId)
     },
 
+    clearNodeCache: (nodeId) => {
+      scheduler.clearNodeCache(get().graph, nodeId)
+    },
+
     clearResults: () => {
       scheduler.invalidateAll()
       afterGraphChange(get().graph, { autoRun: false })
@@ -1187,6 +1272,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
       return out
     },
     nodeOutput: (nodeId, portId) => scheduler.output(nodeId, portId),
+    nodeFetchedAt: (nodeId) => scheduler.fetchedAt(nodeId),
     setNotice: (notice) => set({ notice }),
   }
 })

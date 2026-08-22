@@ -19,17 +19,17 @@ import { colorParams, sizeParams } from '../lib/encodingParams'
 import { filterNetwork } from '../lib/networkOps'
 
 /**
- * Selection output schema: a `bodyId` column in front of the network's own node attributes.
+ * Selection output schema: a `neuronId` column in front of the network's own node attributes.
  *
- * The output is typed `Neurons`, which promises `bodyId`, but network node ids are strings
- * — they may be body ids at neuron level or type names at type level. So bodyId is derived
+ * The output is typed `Neurons`, which promises `neuronId`, but network node ids are strings
+ * — they may be neuron ids at neuron level or type names at type level. So neuronId is derived
  * by parsing the id, and is null when it isn't numeric. A type-level selection therefore
  * flows downstream as nulls and fails loudly at the next query rather than silently
  * pretending to be neurons.
  */
 function selectionSchema(nodeSchema: TableSchema | undefined): TableSchema {
-  const extra = (nodeSchema?.columns ?? []).filter((c) => c.name !== 'bodyId')
-  return tableSchema(column('bodyId', 'i64'), ...extra)
+  const extra = (nodeSchema?.columns ?? []).filter((c) => c.name !== 'neuronId')
+  return tableSchema(column('neuronId', 'i64'), ...extra)
 }
 
 export const networkViewNode = registerNode({
@@ -484,12 +484,12 @@ export const networkViewNode = registerNode({
     // Emit a neurons-shaped table so the selection plugs straight into Connectivity et al.
     const schema = selectionSchema(network.nodes.schema)
     const data: Record<string, ColumnData> = {}
-    data['bodyId'] = keep.map((index) => {
+    data['neuronId'] = keep.map((index) => {
       const parsed = Number(ids[index])
       return Number.isFinite(parsed) ? parsed : null
     })
     for (const col of schema.columns) {
-      if (col.name === 'bodyId') continue
+      if (col.name === 'neuronId') continue
       const source = network.nodes.data[col.name] ?? []
       data[col.name] = keep.map((index) => source[index] ?? null)
     }

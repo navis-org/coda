@@ -94,12 +94,12 @@ function pipeline(
 describe('core.selectOne — types', () => {
   it('passes the input type through, so nothing downstream loses a column picker', () => {
     // Taking one element changes the length, never the kind or the schema. A Neurons edge that
-    // came out as a plain Table would cost every node after it the bodyId guarantee.
+    // came out as a plain Table would cost every node after it the neuronId guarantee.
     const inference = inferGraph(pipeline())
     expect(inference.nodes['pick']?.outputs['item']?.kind).toBe('neurons')
     expect(
       schemaOf(inference.nodes['pick']?.outputs['item'])?.columns.map((c) => c.name),
-    ).toContain('bodyId')
+    ).toContain('neuronId')
   })
 
   it('carries a geometry kind through as itself', () => {
@@ -141,7 +141,7 @@ describe('core.selectOne — validation', () => {
 
   it('names the kind when what arrived has no elements', () => {
     // The refusal is a validation question rather than a link the editor silently declines,
-    // which is the same call `out.profile` makes about needing a bodyId.
+    // which is the same call `out.profile` makes about needing a neuronId.
     let g = emptyGraph('matrix-in')
     g = addNode(g, node('ds', 'neuron.dataset', { dataset: 'optic-lobe-mini' }))
     g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC.*' }))
@@ -202,7 +202,7 @@ describe('core.selectOne — evaluate', () => {
     if (!isTableValue(all) || !isTableValue(item)) throw new Error('expected tables')
 
     expect(item.length).toBe(1)
-    expect(item.data['bodyId']?.[0]).toBe(all.data['bodyId']?.[2])
+    expect(item.data['neuronId']?.[0]).toBe(all.data['neuronId']?.[2])
     // Full width, not just an id — the point is that the element is usable downstream.
     expect(item.schema.columns.length).toBe(all.schema.columns.length)
     expect(item.kind).toBe('neurons')
@@ -227,10 +227,10 @@ describe('core.selectOne — evaluate', () => {
 
     expect(all.items.length).toBeGreaterThan(1)
     expect(item.items.length).toBe(1)
-    expect(item.items[0]?.bodyId).toBe(all.items[1]?.bodyId)
+    expect(item.items[0]?.id).toBe(all.items[1]?.id)
     // The attribute table is one row per item in the same order, so both halves must move.
     expect(item.attributes.length).toBe(1)
-    expect(item.attributes.data['bodyId']?.[0]).toBe(all.attributes.data['bodyId']?.[1])
+    expect(item.attributes.data['neuronId']?.[0]).toBe(all.attributes.data['neuronId']?.[1])
     /*
      * Bounds are a roll-up, exactly as a network's degrees are. One skeleton still claiming the
      * box of the four it came from frames a 3D viewer on empty space around it, which reads as

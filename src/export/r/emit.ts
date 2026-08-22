@@ -14,13 +14,14 @@
  */
 
 import type { CodaGraph, GraphNode } from '../../core/graph'
-import { inboundIndex, nodesById, portKey, topoSort } from '../../core/graph'
+import { inboundIndex, nodesById, portKey } from '../../core/graph'
+import { exportOrder } from '../order'
 import { inferGraph } from '../../core/inference'
 import type { NodeDefinition, ParamValues } from '../../core/node'
 import { defaultParams, makeInferContext } from '../../core/node'
 import { getNodeDef, isAnnotation } from '../../core/registry'
 import type { CodaType } from '../../core/types'
-import type { ExportRefusal } from '../canExport'
+import type { ExportRefusal, TodoStep } from '../canExport'
 import { canExportNotebook, nodeLabel } from '../canExport'
 import { renderRmd } from './rmarkdown'
 import { chunkLabel, rComment, rIdent } from './r'
@@ -40,7 +41,8 @@ export interface ExportOptions {
 }
 
 export type ExportResult =
-  { ok: true; source: string; warnings: string[] } | ({ ok: false } & ExportRefusal)
+  | { ok: true; source: string; warnings: string[]; todos: TodoStep[] }
+  | ({ ok: false } & ExportRefusal)
 
 /** `"a"`, `"a" and "b"`, `"a", "b" and "c"` — for a message listing ports or nodes. */
 function quoted(names: readonly string[]): string {
@@ -96,16 +98,20 @@ function outputName(base: string, def: NodeDefinition, portId: string): string {
 // ---------------------------------------------------------------------------
 
 export function exportRmd(graph: CodaGraph, options: ExportOptions = {}): ExportResult {
-  const refusal = canExportNotebook(graph)
+  const refusal = canExportNotebook(graph, 'r')
   if (refusal) return { ok: false, ...refusal }
 
-  const { order, cyclic } = topoSort(graph)
+  // Referenced nodes first — see `exportOrder`; `topoSort` alone is the running order, which
+  // is the opposite of the writing order.
+  const { order, cyclic } = exportOrder(graph)
   const nodes = nodesById(graph)
   const inbound = inboundIndex(graph)
   const inference = inferGraph(graph)
   const names = assignNames(order, nodes)
 
   const warnings: string[] = []
+  /** Nodes whose cell came out as a TODO, in walk order. See `TodoStep`. */
+  const todos: TodoStep[] = []
   const packages = new Set<RPackage>()
   const helpers = new Set<string>()
   /** Output port → variable, for ports that actually produced one. */
@@ -131,6 +137,9 @@ export function exportRmd(graph: CodaGraph, options: ExportOptions = {}): Export
 
     if (!def) {
       warnings.push(`Unknown node type "${node.type}" — emitted as a comment.`)
+      // It binds nothing, so everything downstream is blocked — which is exactly what a TODO
+      // step is, and a surface warning about them would otherwise miss the worst case there is.
+      todos.push({ nodeId, label: node.title || node.type })
       bodyCells.push({
         kind: 'code',
         label: `unknown-${bodyCells.length}`,
@@ -235,16 +244,26 @@ export function exportRmd(graph: CodaGraph, options: ExportOptions = {}): Export
         continue
       }
       if (bound.has(portKey(edge.source, edge.sourceHandle))) continue
+      /*
+       * A reference is not a value dependency, so an unbound one is not a blockage. It can only
+       * be unbound when the referenced node comes *later* — which `referencesFirst` avoids where
+       * it can and cannot avoid at all for the wiring references exist for, since there the
+       * dataset consumes the very node referencing it. An emitter reading a reference falls back
+       * to the referenced node's type, which is all a reference ever promised.
+       */
+      if (port.reference === true) continue
       blockedBy.push(nodeLabel(nodes.get(edge.source)))
     }
 
     let body: string[]
+    let blockedHere = false
     if (unwired.length > 0) {
       body = ctx.todo(
         `${quoted(unwired)} ${unwired.length === 1 ? 'is' : 'are'} not wired on this ` +
           `${def.label}, so there is nothing to translate.`,
       )
     } else if (blockedBy.length > 0) {
+      blockedHere = true
       body = ctx.todo(
         `nothing upstream produced a value — ${quoted([...new Set(blockedBy)])} ` +
           `${blockedBy.length === 1 ? 'was' : 'were'} not translated.`,
@@ -268,6 +287,10 @@ export function exportRmd(graph: CodaGraph, options: ExportOptions = {}): Export
     // Only bind the outputs if the emitter actually produced code. A TODO binds nothing, so
     // downstream sees an unconnected input and says so, rather than referring to a variable
     // that does not exist.
+    if (emittedTodo) {
+      todos.push({ nodeId, label: nodeLabel(node), ...(blockedHere ? { blocked: true } : {}) })
+    }
+
     if (!emittedTodo && body.length > 0) {
       for (const port of def.outputs ?? []) {
         bound.set(portKey(nodeId, port.id), outputName(varName, def, port.id))
@@ -297,7 +320,7 @@ export function exportRmd(graph: CodaGraph, options: ExportOptions = {}): Export
     title: graph.meta?.name?.trim() || 'Untitled workflow',
     ...(options.now ? { date: options.now } : {}),
   })
-  return { ok: true, source, warnings }
+  return { ok: true, source, warnings, todos }
 }
 
 // ---------------------------------------------------------------------------

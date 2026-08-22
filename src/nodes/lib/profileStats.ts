@@ -12,6 +12,8 @@
  * them, so there is no schema for a value to disagree with.
  */
 
+import type { NeuronId } from '../../core/ids'
+import { compareIds, idText } from '../../core/ids'
 import type { CellValue, TableValue } from '../../core/values'
 import { getColumn } from '../../core/values'
 
@@ -34,7 +36,12 @@ export interface PartnerTypeRow {
 
 /** One row of the "top partners" list — an individual neuron, not a type. */
 export interface PartnerRow {
-  bodyId: number
+  /**
+   * Text, never a number. Invariant 8: `toNumber` here rounded an eighteen-digit CAVE root id,
+   * so the widget printed a partner that does not exist and the tie-break sorted two adjacent
+   * ids as equal. neuPrint's are exact as doubles, which is why it read as correct.
+   */
+  neuronId: NeuronId
   type: string | null
   weight: number
   /** Share of all synapses in this direction, 0..1. */
@@ -161,13 +168,17 @@ export function topPartners(
     .map((row) => {
       const w = toNumber(weight[row])
       return {
-        bodyId: toNumber(partnerId[row]),
+        // `idText`, the cell-level rule — so a `str` id column and an `i64` one produce the
+        // same text, and an unreadable cell is empty rather than 0.
+        neuronId: idText(partnerId[row]) ?? '',
         type: asType(partnerType[row]),
         weight: w,
         share: total > 0 ? w / total : 0,
       }
     })
-    .sort((a, b) => b.weight - a.weight || a.bodyId - b.bodyId)
+    // `compareIds`, which is length-then-lexicographic: `Number(a) - Number(b)` reports two
+    // adjacent wide ids as equal, so the tie-break stopped being one.
+    .sort((a, b) => b.weight - a.weight || compareIds(a.neuronId, b.neuronId))
 
   return capped(out, options.topN)
 }

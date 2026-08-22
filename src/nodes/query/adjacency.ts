@@ -1,4 +1,5 @@
 import { registerNode } from '../../core/registry'
+import { datasetRequest } from '../lib/datasetParam'
 import { T } from '../../core/types'
 import { isTableValue } from '../../core/values'
 import { requireDataset } from '../lib/datasetParam'
@@ -29,7 +30,7 @@ export const adjacencyNode = registerNode({
       id: 'groupByType',
       kind: 'boolean',
       label: 'Group by type',
-      help: 'On: one row/column per neuron type, weights summed. Off: one per body id.',
+      help: 'On: one row/column per neuron type, weights summed. Off: one per neuron id.',
       default: true,
     },
   ],
@@ -42,14 +43,14 @@ export const adjacencyNode = registerNode({
     if (!isTableValue(sources)) throw new Error('Sources input is not a table')
     if (!isTableValue(targets)) throw new Error('Targets input is not a table')
 
-    const sourceIds = idColumn(sources, 'bodyId')
-    const targetIds = idColumn(targets, 'bodyId')
-    if (sourceIds.length === 0) throw new Error('Sources table has no bodyIds')
-    if (targetIds.length === 0) throw new Error('Targets table has no bodyIds')
+    const sourceIds = idColumn(sources, 'neuronId')
+    const targetIds = idColumn(targets, 'neuronId')
+    if (sourceIds.length === 0) throw new Error('Sources table has no neuronIds')
+    if (targetIds.length === 0) throw new Error('Targets table has no neuronIds')
 
     ctx.progress(0.2, `${sourceIds.length} × ${targetIds.length}`)
     const matrix = await source.fetchAdjacency({
-      datasetId: dataset.datasetId,
+      ...datasetRequest(dataset),
       sourceIds,
       targetIds,
       groupByType: ctx.params.groupByType !== false,

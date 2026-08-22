@@ -26,8 +26,8 @@ import { resetNeuronIndexState, useNeuronIndex } from './useNeuronIndex'
 const DATASET = 'hemibrain-mini'
 
 const TABLE: TableValue = makeTable(
-  tableSchema(column('bodyId', 'i64'), column('type', 'str')),
-  { bodyId: [1, 2], type: ['LC4', 'LC6'] },
+  tableSchema(column('neuronId', 'i64'), column('type', 'str')),
+  { neuronId: [1, 2], type: ['LC4', 'LC6'] },
   'neurons',
 )
 

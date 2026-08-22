@@ -207,6 +207,7 @@ export function ViewerOverlay() {
                 node={node}
                 ctx={ctx}
                 compact={false}
+                inputValues={nodeInputs(node.id)}
                 setParam={(paramId, next) => setParam(node.id, paramId, next)}
                 onError={setNotice}
               />

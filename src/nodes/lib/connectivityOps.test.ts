@@ -24,8 +24,8 @@ import {
 } from './connectivityOps'
 
 const SOURCE_SCHEMA = tableSchema(
-  column('bodyId', 'i64'),
-  column('bodyType', 'str'),
+  column('neuronId', 'i64'),
+  column('neuronType', 'str'),
   column('partnerId', 'i64'),
   column('partnerType', 'str'),
   column('weight', 'i64', 'synapses'),
@@ -46,17 +46,19 @@ const TYPES: Record<number, string> = {
 }
 
 /**
- * A fake source answering query-relative, exactly as `fetchConnectivity` does: `bodyId` is
+ * A fake source answering query-relative, exactly as `fetchConnectivity` does: `neuronId` is
  * always the neuron asked about, whichever way the arrow points.
  */
 function fakeSource(edges: Edge[], minWeight = 0) {
-  const calls: Array<{ bodyIds: number[]; direction: ConnectionDirection }> = []
+  const calls: Array<{ neuronIds: number[]; direction: ConnectionDirection }> = []
   const fetch = async (
-    bodyIds: number[],
+    neuronIds: string[],
     direction: ConnectionDirection,
   ): Promise<TableValue> => {
-    calls.push({ bodyIds: [...bodyIds], direction })
-    const wanted = new Set(bodyIds)
+    // Recorded as numbers so the assertions below stay readable against the numeric fixtures;
+    // the traversal itself passes ids as text, which is what `HopFetch` declares.
+    calls.push({ neuronIds: neuronIds.map(Number), direction })
+    const wanted = new Set(neuronIds.map(Number))
     const rows = edges
       .filter(
         ([pre, post, weight]) =>
@@ -66,8 +68,8 @@ function fakeSource(edges: Edge[], minWeight = 0) {
         const body = direction === 'outputs' ? pre : post
         const partner = direction === 'outputs' ? post : pre
         return {
-          bodyId: body,
-          bodyType: TYPES[body] ?? null,
+          neuronId: body,
+          neuronType: TYPES[body] ?? null,
           partnerId: partner,
           partnerType: TYPES[partner] ?? null,
           weight,
@@ -84,7 +86,7 @@ function run(
 ) {
   const source = fakeSource(edges, opts.minWeight ?? 0)
   return traverseConnectivity({
-    seeds: opts.seeds,
+    seeds: opts.seeds.map(String),
     direction: opts.direction,
     hops: opts.hops ?? 1,
     schema: OUT_SCHEMA,
@@ -141,12 +143,12 @@ describe('one hop', () => {
     )
     // Strongest first, and every row is hop 1.
     expect(shape(table)).toEqual(['1>3@1:downstream', '1>2@1:downstream'])
-    expect(calls).toEqual([{ bodyIds: [1], direction: 'outputs' }])
+    expect(calls).toEqual([{ neuronIds: [1], direction: 'outputs' }])
   })
 
   it('swaps the ends for upstream, so a row still reads pre → post', async () => {
     const { table } = await run([[9, 1, 5]], { seeds: [1], direction: 'inputs' })
-    // The source answers bodyId: 1 (the neuron asked about), partnerId: 9 (its input).
+    // The source answers neuronId: 1 (the neuron asked about), partnerId: 9 (its input).
     // The edge is 9 → 1, and that is what has to come out.
     expect(shape(table)).toEqual(['9>1@1:upstream'])
     expect(table.data.preId?.[0]).toBe(9)
@@ -215,8 +217,8 @@ describe('multiple hops', () => {
     expect(shape(table)).toEqual(['1>2@1:downstream', '2>3@2:downstream'])
     // 3 was reached but never expanded, so 3→4 is absent and there is no third query.
     expect(calls).toEqual([
-      { bodyIds: [1], direction: 'outputs' },
-      { bodyIds: [2], direction: 'outputs' },
+      { neuronIds: [1], direction: 'outputs' },
+      { neuronIds: [2], direction: 'outputs' },
     ])
   })
 
@@ -259,7 +261,7 @@ describe('multiple hops', () => {
       { seeds: [1], direction: 'both', hops: 2 },
     )
     expect(shape(table)).toContain('9>5@2:downstream')
-    expect(calls.map((c) => `${c.direction}:${c.bodyIds.join(',')}`)).toEqual([
+    expect(calls.map((c) => `${c.direction}:${c.neuronIds.join(',')}`)).toEqual([
       'outputs:1',
       'inputs:1',
       // The frontier is in discovery order: the downstream pass ran first, so 2 precedes 9.
@@ -280,7 +282,7 @@ describe('multiple hops', () => {
     // 1→3 is below the cut, so 3 is neither a row nor a reason to expand — 3→4 never
     // appears despite being the strongest edge in the graph.
     expect(shape(table)).toEqual(['1>2@1:downstream'])
-    expect(calls[1]?.bodyIds).toEqual([2])
+    expect(calls[1]?.neuronIds).toEqual([2])
   })
 
   it('stops early when the frontier runs dry', async () => {
@@ -299,7 +301,7 @@ describe('traversal edges', () => {
 
   it('deduplicates the seed list before querying', async () => {
     const { calls } = await run([[1, 2, 5]], { seeds: [1, 1, 1], direction: 'outputs' })
-    expect(calls[0]?.bodyIds).toEqual([1])
+    expect(calls[0]?.neuronIds).toEqual([1])
   })
 
   it('aborts between hops', async () => {
@@ -311,7 +313,7 @@ describe('traversal edges', () => {
     controller.abort()
     await expect(
       traverseConnectivity({
-        seeds: [1],
+        seeds: ['1'],
         direction: 'outputs',
         hops: 2,
         schema: OUT_SCHEMA,
@@ -328,7 +330,7 @@ describe('traversal edges', () => {
     ])
     const seen: string[] = []
     await traverseConnectivity({
-      seeds: [1],
+      seeds: ['1'],
       direction: 'outputs',
       hops: 2,
       schema: OUT_SCHEMA,

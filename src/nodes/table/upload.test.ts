@@ -8,7 +8,7 @@
  *    graph publishes `T.table()` and fills in when the read lands. Both halves are asserted,
  *    because the second one arriving is what makes every column picker downstream work.
  *  - **The ID column is a rename, not a tag.** Nodes address columns by name, so a file whose
- *    author wrote `root_id` cannot reach Profile or Skeletons until it is called `bodyId`.
+ *    author wrote `root_id` cannot reach Profile or Skeletons until it is called `neuronId`.
  *  - **Missing rows are an instruction, not a crash.** This is what a graph opened on another
  *    machine does, and the message has to name the file rather than the content hash.
  *  - **The content address is the provenance.** Re-picking the same file must re-run nothing;
@@ -105,7 +105,34 @@ describe('core.uploadTable — inference', () => {
     // Both halves matter: the name is what Profile and Skeletons look for, and the kind is
     // what lets the wire reach a Neurons socket at all.
     expect(out?.kind).toBe('neurons')
-    expect(columnNames(schemaOf(out))).toEqual(['bodyId', 'cellType', 'cluster'])
+    expect(columnNames(schemaOf(out))).toEqual(['neuronId', 'cellType', 'cluster'])
+  })
+
+  it('renames the type column too, and both renames land in one pass', async () => {
+    const id = await stored()
+    const out = inferGraph(
+      pipeline({ dataId: id, idColumn: 'root_id', typeColumn: 'cellType' }),
+    ).nodes['up']?.outputs['out']
+    /*
+     * `type` is the second name Coda addresses a table by, and missing it is entirely silent:
+     * `typesOf` reads `type` by literal name, so a chain publishing `cellType` leaves every
+     * connectivity row's type null with the schema still declaring one.
+     */
+    expect(columnNames(schemaOf(out))).toEqual(['neuronId', 'type', 'cluster'])
+    expect(out?.kind).toBe('neurons')
+  })
+
+  it('does not offer the ID column as the type column', async () => {
+    const id = await stored()
+    const def = requireNodeDef('core.uploadTable')
+    const param = def.params?.find((p) => p.id === 'typeColumn')
+    if (param?.kind !== 'enum' || typeof param.options !== 'function') {
+      throw new Error('typeColumn is not a dynamic enum')
+    }
+    const ctx = { params: { dataId: id, idColumn: 'root_id' } } as never
+    // One column cannot be renamed to two names, and the id claims it first — so offering it
+    // here would be a control that silently does nothing.
+    expect(param.options(ctx).map((o) => o.value)).toEqual(['', 'cellType', 'cluster'])
   })
 
   it('stays a plain table with no ID column chosen', async () => {
@@ -117,7 +144,7 @@ describe('core.uploadTable — inference', () => {
   it('reaches the schema downstream, which is the point of the peek', async () => {
     const id = await stored()
     const sorted = inferGraph(pipeline({ dataId: id, idColumn: 'root_id' })).nodes['sort']
-    expect(columnNames(schemaOf(sorted?.outputs['out']))).toContain('bodyId')
+    expect(columnNames(schemaOf(sorted?.outputs['out']))).toContain('neuronId')
   })
 
   it('offers only identifier-shaped columns as the ID column', async () => {
@@ -130,7 +157,7 @@ describe('core.uploadTable — inference', () => {
     const ctx = { params: { dataId: id } } as never
     const values = param.options(ctx).map((o) => o.value)
     // '' is "none (plain table)". A float is a measurement and a bool is a flag; neither can
-    // be a body id, and offering them invites a Neurons table whose ids are neither.
+    // be a neuron id, and offering them invites a Neurons table whose ids are neither.
     expect(values).toEqual(['', 'root_id', 'cellType', 'cluster'])
   })
 })
@@ -141,6 +168,18 @@ describe('core.uploadTable — validation', () => {
 
   it('asks for a file when there is none', () => {
     expect(issues(pipeline()).join(' ')).toContain('No file chosen')
+  })
+
+  it('reports either shaping column when the file does not have it', async () => {
+    // Both nodes declare these from one factory now, and this is what that is for: the same
+    // three controls used to be hand-written twice, and only one of the two reported this.
+    const id = await stored()
+    expect(issues(pipeline({ dataId: id, typeColumn: 'nonesuch' })).join(' ')).toContain(
+      'Type column "nonesuch"',
+    )
+    expect(issues(pipeline({ dataId: id, idColumn: 'nonesuch' })).join(' ')).toContain(
+      'ID column "nonesuch"',
+    )
   })
 
   it('says nothing at all while the peek has not settled', async () => {
@@ -164,7 +203,9 @@ describe('core.uploadTable — validation', () => {
 
   it('reports an ID column the file does not have', async () => {
     const id = await stored()
-    expect(issues(pipeline({ dataId: id, idColumn: 'bodyId' })).join(' ')).toContain('bodyId')
+    expect(issues(pipeline({ dataId: id, idColumn: 'neuronId' })).join(' ')).toContain(
+      'neuronId',
+    )
   })
 })
 
@@ -178,7 +219,7 @@ describe('core.uploadTable — evaluate', () => {
     if (!isTableValue(out)) throw new Error('expected a table')
     expect(out.kind).toBe('neurons')
     expect(out.length).toBe(3)
-    expect(out.data['bodyId']).toEqual([101, 102, 103])
+    expect(out.data['neuronId']).toEqual([101, 102, 103])
     expect(out.data['cellType']).toEqual(['LC4', 'LC6', 'LC4'])
   })
 
@@ -222,9 +263,9 @@ describe('core.uploadTable — evaluate', () => {
   it('refuses an ID column the file does not have, listing what it does', async () => {
     const id = await stored()
     const scheduler = makeScheduler()
-    await scheduler.run(pipeline({ dataId: id, idColumn: 'bodyId' }), { mode: 'full' })
+    await scheduler.run(pipeline({ dataId: id, idColumn: 'neuronId' }), { mode: 'full' })
     const error = scheduler.info('up').error ?? ''
-    expect(error).toContain('bodyId')
+    expect(error).toContain('neuronId')
     expect(error).toContain('root_id')
   })
 })

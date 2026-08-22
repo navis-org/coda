@@ -27,12 +27,12 @@ beforeAll(() => {
   registerSource(source)
 })
 
-function someBodyIds(count: number): number[] {
+function someNeuronIds(count: number): string[] {
   const connectome = getConnectome('optic-lobe-mini')!
   return connectome.neurons
     .filter((n) => n.type === 'LC4')
     .slice(0, count)
-    .map((n) => n.bodyId)
+    .map((n) => String(n.neuronId))
 }
 
 describe('generateSkeleton', () => {
@@ -57,7 +57,7 @@ describe('generateSkeleton', () => {
     expect(roots).toBe(1)
   })
 
-  it('is deterministic for a body id, so cache keys stay valid', () => {
+  it('is deterministic for a neuron id, so cache keys stay valid', () => {
     const a = generateSkeleton(999, ['ME(R)'])
     const b = generateSkeleton(999, ['ME(R)'])
     expect([...a.positions]).toEqual([...b.positions])
@@ -133,14 +133,15 @@ describe('synapsePosition', () => {
 
 describe('MockSource morphology', () => {
   it('fetches skeletons with an attribute row per neuron', async () => {
-    const bodyIds = someBodyIds(3)
-    const skeletons = await source.fetchSkeletons({ datasetId: 'optic-lobe-mini', bodyIds })
+    const neuronIds = someNeuronIds(3)
+    const skeletons = await source.fetchSkeletons({ datasetId: 'optic-lobe-mini', neuronIds })
 
     expect(skeletons.kind).toBe('skeletons')
     expect(skeletons.items).toHaveLength(3)
     expect(skeletons.attributes.length).toBe(3)
     // Attribute rows are in item order — the encoding layer indexes by position.
-    expect(skeletons.attributes.data.bodyId).toEqual(skeletons.items.map((i) => i.bodyId))
+    const ids = skeletons.items.map((i) => i.id)
+    expect(skeletons.attributes.data.neuronId?.map(String)).toEqual(ids)
     expect(skeletons.attributes.schema.columns.map((c) => c.name)).toContain('cableLength')
     expect(skeletonPointCount(skeletons)).toBeGreaterThan(100)
     // Synthetic, but it still states its units rather than leaving a consumer to guess — the
@@ -151,7 +152,7 @@ describe('MockSource morphology', () => {
   it('reports bounds that enclose the geometry', async () => {
     const skeletons = await source.fetchSkeletons({
       datasetId: 'optic-lobe-mini',
-      bodyIds: someBodyIds(2),
+      neuronIds: someNeuronIds(2),
     })
     for (const item of skeletons.items) {
       for (let i = 0; i < item.positions.length; i += 3) {
@@ -164,19 +165,19 @@ describe('MockSource morphology', () => {
   })
 
   it('derives meshes from the same skeletons, so the two views agree', async () => {
-    const bodyIds = someBodyIds(2)
+    const neuronIds = someNeuronIds(2)
     const [skeletons, meshes] = await Promise.all([
-      source.fetchSkeletons({ datasetId: 'optic-lobe-mini', bodyIds }),
-      source.fetchMeshes({ datasetId: 'optic-lobe-mini', bodyIds }),
+      source.fetchSkeletons({ datasetId: 'optic-lobe-mini', neuronIds }),
+      source.fetchMeshes({ datasetId: 'optic-lobe-mini', neuronIds }),
     ])
-    expect(meshes.items.map((m) => m.bodyId)).toEqual(skeletons.items.map((s) => s.bodyId))
+    expect(meshes.items.map((m) => m.id)).toEqual(skeletons.items.map((s) => s.id))
     expect(meshes.items[0]!.indices.length).toBeGreaterThan(0)
   })
 
   it('places synapses with one attribute row per point', async () => {
     const points = await source.fetchSynapses({
       datasetId: 'optic-lobe-mini',
-      bodyIds: someBodyIds(2),
+      neuronIds: someNeuronIds(2),
     })
     expect(points.kind).toBe('points')
     expect(points.positions.length).toBe(points.attributes.length * 3)
@@ -187,17 +188,17 @@ describe('MockSource morphology', () => {
   })
 
   it('filters synapses by polarity and weight', async () => {
-    const bodyIds = someBodyIds(2)
+    const neuronIds = someNeuronIds(2)
     const pre = await source.fetchSynapses({
       datasetId: 'optic-lobe-mini',
-      bodyIds,
+      neuronIds,
       polarity: 'pre',
     })
     expect(new Set(pre.attributes.data.polarity as string[])).toEqual(new Set(['pre']))
 
     const heavy = await source.fetchSynapses({
       datasetId: 'optic-lobe-mini',
-      bodyIds,
+      neuronIds,
       minWeight: 20,
     })
     for (const weight of heavy.attributes.data.weight as number[]) {
@@ -231,7 +232,7 @@ describe('mock region meshes', () => {
     expect(meshes.items).toHaveLength(connectome.rois.length)
     expect(meshes.attributes.length).toBe(meshes.items.length)
     // Identity is the region's name, in the item and in the attribute row, in the same order.
-    expect(meshes.items.map((m) => m.label)).toEqual(connectome.rois)
+    expect(meshes.items.map((m) => m.id)).toEqual(connectome.rois)
     expect(meshes.attributes.data.roi).toEqual(connectome.rois)
   })
 
@@ -279,9 +280,9 @@ describe('mock region meshes', () => {
     const union = boundsOf(meshes.items.map((m) => m.positions))
 
     const connectome = getConnectome('hemibrain-mini')!
-    const bodyId = connectome.neurons[0]!.bodyId
-    const rois = connectome.roiCounts.filter((rc) => rc.bodyId === bodyId).map((rc) => rc.roi)
-    const skeleton = generateSkeleton(bodyId, rois)
+    const neuronId = connectome.neurons[0]!.neuronId
+    const rois = connectome.roiCounts.filter((rc) => rc.neuronId === neuronId).map((rc) => rc.roi)
+    const skeleton = generateSkeleton(neuronId, rois)
 
     let inside = 0
     const points = skeleton.positions.length / 3

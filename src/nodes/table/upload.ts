@@ -1,7 +1,7 @@
 import { registerNode } from '../../core/registry'
-import type { ColumnSchemaSource } from '../../core/node'
 import { T, columnNames, findColumn } from '../../core/types'
 import { getUpload, peekUploadSchema, uploadPeekSettled } from '../../data/uploads'
+import { importShapeIssues, importShapeParams, readImportShape } from '../lib/importParams'
 import { uploadIsNeurons, uploadShapeSchema, uploadShapeTable } from '../lib/tableOps'
 
 /**
@@ -33,16 +33,13 @@ import { uploadIsNeurons, uploadShapeSchema, uploadShapeTable } from '../lib/tab
  * would key the node one way before the peek landed and another way after, and mark a node
  * that had just run stale.
  */
-const uploadedSchema: ColumnSchemaSource = (_inputs, params) =>
-  peekUploadSchema(String(params.dataId ?? ''))
-
 export const uploadTableNode = registerNode({
   type: 'core.uploadTable',
   label: 'Upload Table',
   category: 'utility',
   description: 'Bring in a CSV of your own — annotations, cell types, an embedding.',
   guide:
-    'Your own CSV: annotations, custom cell types, an embedding. The only node here with no inputs and no data source behind it. Delimiter, header and each column’s type are worked out from the file rather than configured, and naming an ID column renames it to bodyId so the result meets the rest of the app as neurons. The rows live in this browser rather than in the graph, so a .coda.json sent to a colleague arrives without them — the card says which file is missing and offers to pick it again.',
+    'Your own CSV: annotations, custom cell types, an embedding. The only node here with no inputs and no data source behind it. Delimiter, header and each column’s type are worked out from the file rather than configured, and naming an ID column renames it to neuronId so the result meets the rest of the app as neurons. The rows live in this browser rather than in the graph, so a .coda.json sent to a colleague arrives without them — the card says which file is missing and offers to pick it again.',
   // No network and no parse: `evaluate` is one IndexedDB read of an already-parsed table.
   cost: 'cheap',
   inputs: [],
@@ -69,35 +66,7 @@ export const uploadTableNode = registerNode({
       advanced: true,
       presentational: true,
     },
-    {
-      id: 'idColumn',
-      kind: 'enum',
-      label: 'ID column',
-      help: 'Renamed to bodyId, which is the name every neuron node looks for.',
-      default: '',
-      options: (ctx) => {
-        const schema = peekUploadSchema(String(ctx.params.dataId ?? ''))
-        return [
-          { value: '', label: 'none (plain table)' },
-          // Identifiers only. A float is a measurement and a boolean is a flag; offering
-          // either would invite a Neurons table whose body ids are neither.
-          ...(schema?.columns ?? [])
-            .filter((c) => c.dtype === 'i64' || c.dtype === 'str')
-            .map((c) => ({ value: c.name, label: c.name })),
-        ]
-      },
-    },
-    {
-      id: 'textColumns',
-      kind: 'columns',
-      label: 'Text columns',
-      help: 'Read these as text rather than numbers — a cluster id is a label, not a quantity.',
-      // No port to read; the schema comes from the node's own upload. See `uploadedSchema`.
-      from: '',
-      schemaFrom: uploadedSchema,
-      default: [],
-      optional: true,
-    },
+    ...importShapeParams({ read: (params) => peekUploadSchema(String(params.dataId ?? '')) }),
   ],
 
   /**
@@ -108,10 +77,10 @@ export const uploadTableNode = registerNode({
    */
   inferOutputs: (ctx) => {
     const stored = peekUploadSchema(String(ctx.params.dataId ?? ''))
-    const idColumn = String(ctx.params.idColumn ?? '')
-    const shaped = uploadShapeSchema(stored, idColumn, ctx.columns('textColumns'))
+    const shape = readImportShape(ctx)
+    const shaped = uploadShapeSchema(stored, shape)
     return {
-      out: uploadIsNeurons(stored, idColumn) ? T.neurons(shaped) : T.table(shaped),
+      out: uploadIsNeurons(stored, shape.idColumn ?? '') ? T.neurons(shaped) : T.table(shaped),
     }
   },
 
@@ -131,11 +100,7 @@ export const uploadTableNode = registerNode({
       const name = String(ctx.params.fileName ?? '') || 'this file'
       return [`${name} is not stored in this browser — pick the file again`]
     }
-    const idColumn = String(ctx.params.idColumn ?? '')
-    if (idColumn && !findColumn(schema, idColumn)) {
-      return [`ID column "${idColumn}" is not in ${String(ctx.params.fileName ?? 'the file')}`]
-    }
-    return []
+    return importShapeIssues(ctx, schema, String(ctx.params.fileName ?? '') || 'the file')
   },
 
   evaluate: async (ctx) => {
@@ -162,6 +127,6 @@ export const uploadTableNode = registerNode({
         `ID column "${idColumn}" is not in "${name}". Available: ${columnNames(table.schema).join(', ')}`,
       )
     }
-    return { out: uploadShapeTable(table, idColumn, ctx.columns('textColumns')) }
+    return { out: uploadShapeTable(table, readImportShape(ctx)) }
   },
 })

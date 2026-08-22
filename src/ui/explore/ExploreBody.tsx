@@ -17,8 +17,10 @@
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 
+import { idText } from '../../core/ids'
 import { datasetRef } from '../../core/types'
-import { MAX_SELECT_ALL } from '../../nodes/query/explore'
+import { isDatasetValue } from '../../core/values'
+import { MAX_SELECT_ALL, excludedFromSearch } from '../../nodes/query/explore'
 import {
   completeSearch,
   parseSearch,
@@ -38,9 +40,54 @@ import { useNeuronIndex } from '../useNeuronIndex'
  */
 const DEBOUNCE_MS = 140
 
-export function ExploreBody({ node, ctx, compact, setParam }: NodeBodyProps) {
-  const ref = datasetRef(ctx.inputs.dataset)
-  const { state, reload } = useNeuronIndex(ref?.sourceId, ref?.datasetId)
+export function ExploreBody({ node, ctx, compact, inputValues, setParam }: NodeBodyProps) {
+  /*
+   * The value's dataset id when there is one, the type's otherwise — never one paired with the
+   * other's chain. A dataset node on "Latest" publishes no id until its listing lands, so the
+   * type's can be absent or older than the value's, and an index fetched for one while carrying
+   * the other's labels would be cached under a key claiming a pairing that never existed. Same
+   * reasoning as `datasetRequest`, which exists so a call site cannot supply one without the
+   * other.
+   */
+  const value = inputValues?.dataset
+  const ref = isDatasetValue(value) ? value : datasetRef(ctx.inputs.dataset)
+  /*
+   * The chain comes off the *value*, not the type.
+   *
+   * A dataset **type** carries the annotation chain's schema; only the `DatasetValue` carries its
+   * table, because that table is a fetch somebody's Run paid for. On a datastack that publishes a
+   * neuron table this is a labelling improvement — the list shows the chain's names instead of
+   * the backend's. On one that publishes none it is the difference between working and not, since
+   * there the chain *is* the neuron list.
+   *
+   * That is a real departure from "this widget loads independently of any run", and it is bounded
+   * to what cannot be had otherwise: with nothing wired, or before a run, it behaves exactly as
+   * it always did.
+   */
+  const annotations = isDatasetValue(value) ? value.annotations : undefined
+
+  /*
+   * **A chain wired but not yet run means wait, not load.**
+   *
+   * The *type* says a chain is there the moment the wire is drawn; only the value carries its
+   * table. Loading anyway downloads the whole index under the unannotated key and then a second
+   * time under the annotated one the instant a Run lands — on FlyWire that is 139,255 rows and
+   * about seven seconds thrown away, and both tables are then retained for the life of the tab,
+   * since the shared entry map is never evicted. It is also the *wrong* list to show: the labels
+   * are the backend's, which is the gap the chain was wired to close.
+   *
+   * Read off the type rather than off the source's refusal. It used to match the text of
+   * `CaveSource`'s "publishes no table listing its neurons", which coupled this empty state to
+   * the wording of a sentence in `src/data` and recognised only CAVE's phrasing.
+   */
+  const type = ctx.inputs.dataset
+  const chainWired = type?.kind === 'dataset' && type.annotations !== undefined
+  const awaitingRun = chainWired && !annotations
+  const { state, reload } = useNeuronIndex(
+    awaitingRun ? undefined : ref?.sourceId,
+    awaitingRun ? undefined : ref?.datasetId,
+    annotations,
+  )
 
   const committed = String(node.params.query ?? '')
   const [text, setText] = useState(committed)
@@ -84,21 +131,35 @@ export function ExploreBody({ node, ctx, compact, setParam }: NodeBodyProps) {
   }, [text, applied, committed, setParam])
 
   const table = state.status === 'ready' ? state.table : undefined
+
   // Through `ctx.columns`, never `ctx.params.chips`: that is what filters the stored list
   // against the schema actually arriving, so a graph repointed at another dataset drops the
   // fields it no longer has instead of showing a column of blanks.
   // Joined into a key rather than kept as an array: `ctx.columns` mints a fresh one on every
   // render, so an identity-keyed memo would rebuild the row spec on every keystroke.
   const chosenKey = ctx.columns('chips').join('\u0000')
+  // Resolved the same way, and for the same reason: a tag column the current dataset does not
+  // have must drop out rather than draw an empty row.
+  const tagColumn = ctx.column('tagColumn') ?? ''
   const fields = useMemo(
-    () => rowFields(table?.schema, chosenKey ? chosenKey.split('\u0000') : []),
-    [table, chosenKey],
+    () => rowFields(table?.schema, chosenKey ? chosenKey.split('\u0000') : [], tagColumn),
+    [table, chosenKey, tagColumn],
   )
 
+  /*
+   * The same exclusion `evaluate` applies, through the one function that states it — or the
+   * live list would show rows `Hits` does not carry, which is precisely the disagreement the
+   * live-widget / committed-param split exists to avoid rather than to create.
+   */
+  const excluded = excludedFromSearch(ctx.params, tagColumn)
   const result = useMemo(() => {
     if (!table) return { rows: [] as number[], fuzzy: false }
-    return runSearch(table, searchIndexFor(table), parseSearch(applied))
-  }, [table, applied])
+    return runSearch(
+      table,
+      searchIndexFor(table, excluded ? [excluded] : []),
+      parseSearch(applied),
+    )
+  }, [table, applied, excluded])
 
   const completions = useMemo(() => {
     if (!table || !completionOpen) return { from: 0, to: 0, items: [] }
@@ -131,28 +192,44 @@ export function ExploreBody({ node, ctx, compact, setParam }: NodeBodyProps) {
   const selectionRef = useRef(selection)
   selectionRef.current = selection
   const toggle = useCallback(
-    (bodyId: number) => {
+    (neuronId: string) => {
       const next = new Set(selectionRef.current)
-      const key = String(bodyId)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
+      if (next.has(neuronId)) next.delete(neuronId)
+      else next.add(neuronId)
       setParam('selection', [...next])
     },
     [setParam],
   )
 
-  const bodyIdAt = useCallback(
-    (row: number) => Number(table?.data['bodyId']?.[row] ?? 0),
+  /**
+   * A row's neuron id, as **text**.
+   *
+   * Invariant 8, and this widget broke it: it was `Number(cell)`, so an eighteen-digit CAVE root
+   * id was rounded on its way into the `selection` param — `720575940628857210` stored as
+   * `…200`, which `rowsWithIds` then matched against nothing. The symptom is precise and was
+   * reported as such: `Hits` works and `Selected` is empty, because `Hits` never goes through
+   * the selection. Worse, the *checkbox* looked right, since the widget compared its own rounded
+   * id against its own rounded id and only the value crossing to `evaluate` was wrong.
+   *
+   * neuPrint's nine-to-eleven-digit ids are exact as doubles, which is why it survived this long.
+   */
+  const neuronIdAt = useCallback(
+    (row: number) => idText(table?.data['neuronId']?.[row] ?? null),
     [table],
   )
 
   const selectRowsInto = useCallback(
     (rows: readonly number[]) => {
       const next = new Set(selection)
-      for (const row of rows) next.add(String(bodyIdAt(row)))
+      for (const row of rows) {
+        const id = neuronIdAt(row)
+        // A row whose id is null or unreadable is skipped rather than added as "null" — the
+        // grammar's job, and `idText` is the one place that decides it.
+        if (id) next.add(id)
+      }
       setParam('selection', [...next])
     },
-    [selection, bodyIdAt, setParam],
+    [selection, neuronIdAt, setParam],
   )
 
   const selectVisible = useCallback(() => selectRowsInto(visible), [selectRowsInto, visible])
@@ -299,6 +376,21 @@ export function ExploreBody({ node, ctx, compact, setParam }: NodeBodyProps) {
           </span>
         </div>
       )}
+      {awaitingRun && (
+        /*
+         * A state rather than a fault, so it reads as an instruction. The chain's table is a
+         * fetch a Run pays for; until then there is either nothing to list (a datastack with no
+         * neuron table of its own) or only the backend's labels, which is the list the chain was
+         * wired to replace.
+         */
+        <div className="explore__empty">
+          Press Run to load this dataset&rsquo;s neurons.
+          <span className="explore__hint">
+            An Annotations source is wired, and its labels are this list — they arrive with the
+            first Run.
+          </span>
+        </div>
+      )}
       {state.status === 'error' && <div className="explore__error">{state.message}</div>}
 
       {table && (
@@ -311,16 +403,16 @@ export function ExploreBody({ node, ctx, compact, setParam }: NodeBodyProps) {
               </div>
             ) : (
               visible.map((row) => {
-                const bodyId = bodyIdAt(row)
+                const neuronId = neuronIdAt(row) ?? ''
                 return (
                   <NeuronRow
-                    key={bodyId}
+                    key={neuronId || row}
                     table={table}
                     row={row}
                     fields={fields}
                     sourceId={ref?.sourceId}
                     datasetId={ref?.datasetId}
-                    selected={selection.has(String(bodyId))}
+                    selected={selection.has(neuronId)}
                     onToggle={toggle}
                     compact={compact}
                   />

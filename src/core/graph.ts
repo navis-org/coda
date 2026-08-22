@@ -7,7 +7,7 @@
  */
 
 import type { ParamValues } from './node'
-import { getNodeDef } from './registry'
+import { getNodeDef, typesWithReferenceInputs } from './registry'
 
 export const GRAPH_FORMAT_VERSION = 1
 
@@ -190,6 +190,73 @@ export function ancestors(graph: CodaGraph, nodeId: string): Set<string> {
   return closure(neighbourIndex(graph.edges, 'target'), nodeId)
 }
 
+/**
+ * Whether this graph could contain a reference edge at all.
+ *
+ * Asked before anything walks the edges, because exactly one node type in the registry declares a
+ * reference input — so on every graph without one the machinery below costs a `Set` lookup per
+ * node and allocates nothing. It is worth the guard: `topoSort` runs twice per keystroke and
+ * `wouldCreateCycle` once per pointer move of a link drag, and both used to build a node-type
+ * index and a filtered edge array whatever the graph held. Measured at 1.4 µs → 0.13 µs.
+ */
+function mayHaveReferences(nodes: readonly GraphNode[]): boolean {
+  const types = typesWithReferenceInputs()
+  return types.size > 0 && nodes.some((n) => types.has(n.type))
+}
+
+/**
+ * Whether a node type's port is declared a reference — see `PortDef.reference`.
+ *
+ * A question about a **port**, which is what the flag is on. It was phrased about an edge, which
+ * meant `wouldCreateCycle` had to fabricate one with three placeholder fields to ask about a wire
+ * that did not exist yet.
+ */
+function isReferencePort(nodeType: string | undefined, portId: string): boolean {
+  if (!nodeType) return false
+  return (getNodeDef(nodeType)?.inputs ?? []).some((p) => p.id === portId && p.reference === true)
+}
+
+/**
+ * The edges that create an ordering dependency — every edge except one landing on a `reference`
+ * port.
+ *
+ * **One filter, in the one place both the indegree count and its decrement derive from.** That is
+ * not a stylistic choice: `topoSort`'s own note records the bug where the count came from
+ * `graph.edges` and the decrement from `neighbourIndex`, so a target joined twice never reached
+ * zero and came out `cyclic`. Filtering anywhere but here would re-introduce exactly that shape,
+ * with a reference edge counted once and decremented never.
+ *
+ * A reference names a node rather than consuming its output — see `PortDef.reference`. It is
+ * excluded here and in `wouldCreateCycle`, and **nowhere else**: invalidation still follows it, so
+ * dropping a dataset's result still reaches the node that read its identity. That walk is
+ * `descendantsOf` in `scheduler.ts` — *not* the `descendants` exported here, which has no
+ * production caller. Whoever consolidates the two must keep it walking every edge.
+ *
+ * Returns `graph.edges` itself when nothing can be filtered, so the common graph allocates
+ * nothing at all.
+ */
+function dataflowEdges(graph: CodaGraph): readonly GraphEdge[] {
+  if (!mayHaveReferences(graph.nodes)) return graph.edges
+  const types = new Map(graph.nodes.map((n) => [n.id, n.type]))
+  return graph.edges.filter((edge) => !isReferencePort(types.get(edge.target), edge.targetHandle))
+}
+
+/**
+ * The ids of every edge that names a node rather than carrying its output.
+ *
+ * A set rather than a predicate the caller asks per edge, because the caller is the canvas and
+ * that would put a `getNodeDef` in the middle of the edge memo.
+ */
+export function referenceEdgeIds(graph: CodaGraph): Set<string> {
+  const out = new Set<string>()
+  if (!mayHaveReferences(graph.nodes)) return out
+  const types = new Map(graph.nodes.map((n) => [n.id, n.type]))
+  for (const edge of graph.edges) {
+    if (isReferencePort(types.get(edge.target), edge.targetHandle)) out.add(edge.id)
+  }
+  return out
+}
+
 // ---------------------------------------------------------------------------
 // Topological order
 // ---------------------------------------------------------------------------
@@ -222,7 +289,7 @@ export interface TopoResult {
  * disagree again.
  */
 export function topoSort(graph: CodaGraph): TopoResult {
-  const outgoing = neighbourIndex(graph.edges, 'source')
+  const outgoing = neighbourIndex(dataflowEdges(graph), 'source')
 
   const indegree = new Map<string, number>()
   for (const n of graph.nodes) indegree.set(n.id, 0)
@@ -253,11 +320,73 @@ export function topoSort(graph: CodaGraph): TopoResult {
   return { order, cyclic }
 }
 
-/** Would adding source -> target introduce a cycle? */
-export function wouldCreateCycle(graph: CodaGraph, source: string, target: string): boolean {
+/**
+ * A topological order with every reference's source moved ahead of its reader, where it can be.
+ *
+ * `topoSort` deliberately ignores reference edges — that is what lets a node take a dataset it
+ * also feeds, and it is the right order for *running*, where the reader waits on nothing.
+ * Anything that instead **writes the nodes out**, so that one node's text can name another, wants
+ * the opposite. `src/export/order.ts` is that caller and holds the reasoning; this is only the
+ * transformation.
+ *
+ * **Only a node with no dataflow inputs is lifted**, and that condition is not a precaution — it
+ * is the same one that makes a reference sound, made checkable. A reference is valid because the
+ * referenced node's identity comes from its params alone; a node that *consumes* something cannot
+ * be written above what it consumes, and the wiring references exist for is exactly that shape:
+ * `CAVE table → Update root IDs → Dataset` puts the dataset after both nodes referencing it, so
+ * hoisting it above them would classify it `blocked` by its own annotations and cascade a false
+ * TODO to everything downstream — the very failure the hoist was added to prevent, arrived at
+ * from the other side.
+ *
+ * A reader left ahead of its reference is not stranded: the walk does not treat an unbound
+ * reference port as blocking, and an emitter reading one falls back to the referenced node's
+ * *type*, which is all a reference ever promised.
+ *
+ * Relative order is preserved on both sides, so a graph with no references is untouched.
+ */
+export function referencesFirst(order: readonly string[], graph: CodaGraph): string[] {
+  if (!mayHaveReferences(graph.nodes)) return [...order]
+  const types = new Map(graph.nodes.map((n) => [n.id, n.type]))
+  const referenced = new Set<string>()
+  const consumes = new Set<string>()
+  for (const edge of graph.edges) {
+    if (isReferencePort(types.get(edge.target), edge.targetHandle)) referenced.add(edge.source)
+    else consumes.add(edge.target)
+  }
+  const lift = (id: string): boolean => referenced.has(id) && !consumes.has(id)
+  // No empty-set branch: with nothing lifted the two filters already produce an order-preserving
+  // copy, and a special case for it is one more thing to read.
+  return [...order.filter(lift), ...order.filter((id) => !lift(id))]
+}
+
+/**
+ * Would adding source -> target introduce a cycle?
+ *
+ * Walks the **dataflow** edges, not all of them: a reference names a node and imposes no order,
+ * so a wire that would only close a loop through one is not a loop. Without this the editor
+ * refuses precisely the wiring references exist to allow.
+ */
+export function wouldCreateCycle(
+  graph: CodaGraph,
+  source: string,
+  target: string,
+  targetHandle: string,
+): boolean {
   if (source === target) return true
-  // A cycle appears iff `source` is already reachable from `target`.
-  return descendants(graph, target).has(source) || target === source
+  /*
+   * The wire *being drawn* can itself be a reference, and then it can never close a loop — it
+   * imposes no order. Without this the check refuses precisely the wiring references exist to
+   * allow: `Dataset → CAVE table` is refused because `CAVE table → Dataset` already runs the
+   * other way, which is the whole arrangement.
+   *
+   * `targetHandle` is required rather than optional. It was optional to spare three test call
+   * sites, and the defaulted answer was the *wrong* one — the existing graph filtered but the new
+   * wire treated as dataflow — so a caller that forgot it got a refusal reading as a real cycle.
+   */
+  const targetType = graph.nodes.find((n) => n.id === target)?.type
+  if (isReferencePort(targetType, targetHandle)) return false
+  // A cycle appears iff `source` is already reachable from `target` along dataflow edges.
+  return closure(neighbourIndex(dataflowEdges(graph), 'source'), target).has(source)
 }
 
 // ---------------------------------------------------------------------------

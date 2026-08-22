@@ -64,7 +64,7 @@ async function rows(graph: CodaGraph, scheduler = makeScheduler()): Promise<numb
   await scheduler.run(graph, { mode: 'full' })
   const out = scheduler.output('smp', 'out')
   if (!isTableValue(out)) throw new Error('expected a table')
-  return (out.data['bodyId'] ?? []).map(Number)
+  return (out.data['neuronId'] ?? []).map(Number)
 }
 
 describe('core.sample — types', () => {
@@ -76,7 +76,7 @@ describe('core.sample — types', () => {
   it('advertises the incoming columns before anything has run', () => {
     const inference = inferGraph(pipeline())
     const names = schemaOf(inference.nodes['smp']?.outputs['out'])?.columns.map((c) => c.name)
-    expect(names).toContain('bodyId')
+    expect(names).toContain('neuronId')
     expect(names).toContain('type')
   })
 })
@@ -141,7 +141,7 @@ describe('core.sample — provenance', () => {
     expect(summary.executed).toContain('smp')
     const second = scheduler.output('smp', 'out')
     if (!isTableValue(second)) throw new Error('expected a table')
-    expect((second.data['bodyId'] ?? []).map(Number)).not.toEqual(first)
+    expect((second.data['neuronId'] ?? []).map(Number)).not.toEqual(first)
   })
 
   it('the seed costs nothing while the mode it belongs to is not chosen', async () => {

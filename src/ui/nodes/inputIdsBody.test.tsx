@@ -88,7 +88,7 @@ async function run() {
 /** Real ids from the mock connectome, so a lookup has something to find. */
 async function realIds(count: number): Promise<number[]> {
   const table = await new MockSource({ latencyMs: 0 }).findNeurons({ datasetId: DATASET })
-  return (table.data['bodyId'] ?? []).slice(0, count).map(Number)
+  return (table.data['neuronId'] ?? []).slice(0, count).map(Number)
 }
 
 describe('Input IDs card', () => {
@@ -144,9 +144,9 @@ describe('Input IDs card', () => {
   it('shows the refusal where the text that caused it is', async () => {
     // Also on the node's badge, but the field is two inches above this line, which is where
     // somebody who just pasted a spreadsheet column is actually looking.
-    const body = await open({ ids: 'bodyId\n1234' })
+    const body = await open({ ids: 'neuronId\n1234' })
     await waitFor(() => expect(body.querySelector('.list-body__missing')).toBeTruthy())
-    expect(body.textContent).toContain('"bodyId"')
+    expect(body.textContent).toContain('"neuronId"')
     expect(body.textContent).toContain('delete its header line')
   })
 })

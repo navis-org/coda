@@ -43,6 +43,35 @@ export interface PortDef {
   type: CodaType
   /** Inputs only. Unconnected required inputs block execution. Defaults to true. */
   required?: boolean
+  /**
+   * Inputs only. This port names a node rather than consuming its output.
+   *
+   * **It creates no ordering dependency**, so it is excluded from `topoSort` and from
+   * `wouldCreateCycle`, and the scheduler never waits on it. That is what lets a node sit
+   * *between* a dataset and itself — `CAVE table → Dataset` needs to know which datastack to
+   * read out of, and wiring the dataset in makes two edges between one pair in opposite
+   * directions, which is a cycle at node granularity even though nothing circular is being
+   * computed.
+   *
+   * **What makes it sound is a property of the upstream node, not a promise from this one**: a
+   * dataset node's *identity* is a function of its params alone — `T.dataset(family.sourceId,
+   * resolveDatasetId(family, params.version), …)` — and only the annotations *schema* comes from
+   * an input. So the thing a reference reads is knowable without running, or even inferring,
+   * anything downstream of it. Inference resolves the type by inferring the source node **with no
+   * inputs of its own**, which cannot recurse and yields exactly the identity, without the
+   * annotations schema. That is the honest answer as well as the terminating one: a node cannot
+   * read the annotations it is about to supply.
+   *
+   * So it is deliberately **narrow — a Dataset socket that takes the identity only**, not a
+   * general "information edge". Synthesising a value from a type is defensible only because we
+   * know what a dataset identity is; there is no second kind asking for it.
+   *
+   * `evaluate` receives a `DatasetValue` built from that type, carrying no annotations, and the
+   * provenance key takes the type's hash in place of the upstream node's key — so changing the
+   * dataset's version re-keys this node and changing its annotations does not, which is right
+   * because this node never reads them.
+   */
+  reference?: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -193,8 +222,16 @@ export interface ColumnParam extends ParamBase {
   from: string
   /** Which attribute table to read when the input carries more than one (Network). */
   part?: AttributePart
-  /** Restrict to these dtypes. Undefined = any dtype. */
-  dtypes?: DType[]
+  /**
+   * Restrict to these dtypes. Undefined = any dtype.
+   *
+   * A function where the restriction depends on the node's other params — Group By's value
+   * picker is numeric for every aggregation except `join`, which takes text. `schemaFrom` is
+   * already function-valued for the same reason; before this was, the only way to express it
+   * was two stored params made exclusive by `visibleIf`, which is a second param in the saved
+   * document and a branch at every reader.
+   */
+  dtypes?: DType[] | ((params: ParamValues) => DType[] | undefined)
   /** Overrides how the schema is found; `from` still says which port must be connected. */
   schemaFrom?: ColumnSchemaSource
   /** Empty string means "first compatible column", resolved consistently at both stages. */
@@ -208,7 +245,8 @@ export interface ColumnsParam extends ParamBase {
   kind: 'columns'
   from: string
   part?: AttributePart
-  dtypes?: DType[]
+  /** As `ColumnParam.dtypes`. */
+  dtypes?: DType[] | ((params: ParamValues) => DType[] | undefined)
   schemaFrom?: ColumnSchemaSource
   default: string[]
   /**
@@ -236,6 +274,30 @@ export interface IdsParam extends ParamBase {
 
 export type ParamDef =
   NumberParam | StringParam | BooleanParam | EnumParam | ColumnParam | ColumnsParam | IdsParam
+
+/**
+ * The `refresh` nonce a node carries when its data can change under fixed params.
+ *
+ * Cache keys are provenance, so nothing downstream can see that a server's rows changed. This is
+ * the sanctioned escape hatch, and it is `internal` because bumping it by hand is not the point —
+ * `hiddenParams.test.tsx` asserts every `refresh` in the registry carries that flag, so a copy
+ * that dropped it fails in a file about something else.
+ *
+ * `help` differs per node because what "changed" means differs — a dataset listing against an
+ * annotation base edited daily — so it is an argument rather than a fixed string.
+ */
+export function refreshParam(help: string) {
+  return {
+    id: 'refresh',
+    kind: 'int',
+    label: 'Refresh',
+    help,
+    default: 0,
+    min: 0,
+    advanced: true,
+    internal: true,
+  } as const
+}
 
 export type ParamValue = number | string | boolean | string[]
 export type ParamValues = Record<string, ParamValue>
@@ -272,15 +334,60 @@ export interface EvalContext<P extends ParamValues = ParamValues> {
   params: P
   /** Realised value on an input port, or undefined when unconnected. */
   input(portId: string): Value | undefined
+  /**
+   * The provenance key of what arrived on a port — undefined when nothing is wired.
+   *
+   * For a node that has to publish an *identity* for a value it passes on, so something further
+   * down can key a cache by it. The chain of annotation sources is the case: what identifies an
+   * annotation table is no longer the refs that fetched it, because a Filter may sit in between,
+   * and the honest answer is the same one the scheduler already computed to decide this node
+   * should run at all — `hash(type, params, upstream)`, which is provenance rather than content
+   * (invariant 4) and changes exactly when the table would.
+   *
+   * Not the node's *own* key, which would fold in params of this node that have nothing to do
+   * with the value on that port.
+   */
+  inputKey(portId: string): string | undefined
   /** Same resolution as `InferContext.column`, so infer and eval never disagree. */
   column(paramId: string): string | undefined
   columns(paramId: string): string[]
   /** Look up a registered data source by id (from a DatasetValue). */
   resolveSource(sourceId: string): DataSource
+  /**
+   * This run was asked to ignore any persistent data cache for this node.
+   *
+   * Set by **Clear Cache** on the node, and read by whatever `evaluate` does its fetching
+   * through — `loadCachedTable`'s `refresh`, in practice. It is a fact about *this run* rather
+   * than about the document, which is the whole difference from the `refresh` nonce it replaced:
+   * a nonce had to live in the saved graph and take part in the provenance key, so re-fetching
+   * was an edit, it travelled to whoever you sent the file to, and every node wanting the
+   * ability grew its own param.
+   *
+   * Only nodes declaring `dataCache` read it, and the flag is what makes the button appear —
+   * one statement, so a node cannot offer Clear Cache and quietly ignore it.
+   */
+  refresh: boolean
   /** Aborted when the run is superseded or cancelled. Long loops should check it. */
   signal: AbortSignal
   /** Report 0..1 progress for the node's status bar. */
   progress(fraction: number, note?: string): void
+  /**
+   * Say when the data behind this result was actually read from a server.
+   *
+   * For a node declaring `dataCache`: a run that answers from `loadCachedTable` is
+   * indistinguishable from one that reached the network, so the card cannot say "this is a
+   * month-old copy of a base somebody edits daily" unless it is told.
+   *
+   * Reported rather than inferred, and kept in the scheduler's **cache entry** rather than in
+   * `NodeRunInfo`, which is what makes it survive a result being restored instead of recomputed —
+   * the distinction `unmatchedLabels` and `PathsBody` both work around by deriving from the
+   * result. There is nothing to derive here: an age is not in the rows.
+   *
+   * The **oldest** report of a run wins, so a node making several fetches says how old the
+   * stalest thing behind its answer is. Ignore it and the card simply says nothing, which is the
+   * honest state for a node that did not fetch.
+   */
+  reportFetched(at: number): void
 }
 
 export interface NodeDefinition<P extends ParamValues = ParamValues> {
@@ -305,6 +412,21 @@ export interface NodeDefinition<P extends ParamValues = ParamValues> {
    */
   guide?: string
   cost: NodeCost
+  /**
+   * `evaluate` reads through a persistent data cache, so a run may answer from storage rather
+   * than from the server.
+   *
+   * Two things at once, deliberately paired. It puts **Clear Cache** on the node's menu and in
+   * the inspector, and it declares that `evaluate` honours `ctx.refresh` — a node offering the
+   * button and ignoring the flag is a control that does nothing, which is exactly what the
+   * `refresh` nonce's absence used to look like from the outside ("Invalidate" cleared the
+   * result and the re-run came back instantly from IndexedDB).
+   *
+   * Not the scheduler's own result cache, which every node has and `Invalidate Results` covers.
+   * This is the second layer: `loadCachedTable`'s IndexedDB store, kept for a month and keyed by
+   * what was fetched rather than by the graph.
+   */
+  dataCache?: boolean
   /**
    * Tabs for a grouped styling panel, in display order; a param's `group` names one.
    *
@@ -546,6 +668,31 @@ function differsFromDefault(value: ParamValue | undefined, fallback: ParamValue 
  *
  * `optional` still answers *off*, and before rule 2 — that is what optional means, and a
  * decoration pointed at a missing column has a sensible nothing to do.
+ *
+ * **Rule 3 is skipped entirely when the schema is unknown**, which is `resolveColumns`' guard in
+ * the form that fits the singular and was missing here. "The first compatible column" is an
+ * answer computed from a list, and a port carrying no schema at all has an *empty* list — so a
+ * picker still holding its declared default resolved to **nothing** until the schema landed, and
+ * to the right column afterwards. That is the runs-twice-answers-differently signature, in the
+ * provenance key.
+ *
+ * Reported on `Table from URL → Combine Columns → Update root IDs`: `Table from URL` remembers
+ * its schema per URL in a session-scoped map, so on a fresh session it publishes none, and
+ * `Update root IDs` — whose `ID column` sits on its declared default `neuronId` — failed with
+ * "Pick an ID column and a supervoxel ID column" over a picker the card was drawing as empty.
+ * Note the asymmetry that hides it: a value *differing* from the default survives by rule 2, so
+ * this only ever bites a picker nobody has touched.
+ *
+ * The guard can only ever *add* an answer, never change one: it fires exactly when `available`
+ * is empty, where `available[0]` was already `undefined`.
+ *
+ * **An unset required picker means the declared default**, which is the other half. A required
+ * picker has no "none", so an empty stored value is *unset* rather than a choice — and unset is
+ * what `defaultParams` fills with the default at creation. Reading it that way is what keeps the
+ * unknown-schema answer and the known-schema one the same: without it, a default naming a real
+ * column resolves to that column once the schema arrives and to nothing before, which is the very
+ * disagreement above. Inert wherever the default is `''`, which is most pickers — `out.barChart`'s
+ * `Category` still means "decide for me".
  */
 export function resolveColumn(
   param: ColumnParam,
@@ -554,10 +701,20 @@ export function resolveColumn(
 ): string | undefined {
   const available = availableColumns(param, inputs, params)
   const stored = params[param.id]
-  const chosen = typeof stored === 'string' ? stored : ''
+  const saved = typeof stored === 'string' ? stored : ''
+  /*
+   * Unset falls through to the declared default — but only for a *required* picker, which has
+   * no "none" to mean. On an optional one an empty value is a choice, and `out.scatter`'s
+   * `idColumn: ''` is exactly that: "identify points by row index, not by neuron id". Reading
+   * it as unset would hand back `neuronId` and quietly undo it.
+   */
+  const chosen = saved || (param.optional ? '' : (param.default ?? ''))
   if (chosen && available.includes(chosen)) return chosen
   if (param.optional) return undefined
   if (chosen && chosen !== param.default) return chosen
+  // A schema this picker cannot see is not a schema without this column in it, so there is
+  // nothing here to pick a first compatible column *from*.
+  if (!columnsKnown(param, inputs, params)) return chosen || undefined
   // Undefined when there is nothing to offer, which every caller already handles.
   return available[0]
 }
@@ -589,7 +746,7 @@ export function resolveColumns(
 ): string[] {
   const stored = params[param.id]
   if (!Array.isArray(stored)) return []
-  if (!columnSchemaFor(param, inputs, params)) return stored
+  if (!columnsKnown(param, inputs, params)) return stored
   const available = availableColumns(param, inputs, params)
   return stored.filter((name) => available.includes(name))
 }
@@ -615,6 +772,30 @@ export function columnSchemaFor(
     : attributeSchema(inputs[param.from], param.part ?? 'nodes')
 }
 
+/**
+ * Whether the port this picker reads carries a schema *at all*.
+ *
+ * The unknown-versus-empty question, which `resolveColumn`, `resolveColumns`,
+ * `validateColumnParams` and both column widgets all ask — and which is the distinction
+ * `columnSchemaFor` answers `undefined` separately from an empty schema for. Named because
+ * `!== undefined` at five sites is a rule nobody can grep for.
+ */
+export function columnsKnown(
+  param: ColumnParam | ColumnsParam,
+  inputs: Readonly<Record<string, CodaType | undefined>>,
+  params: ParamValues,
+): boolean {
+  return columnSchemaFor(param, inputs, params) !== undefined
+}
+
+/** The dtype restriction for these params, whether it was declared as a list or a rule. */
+export function dtypesOf(
+  param: ColumnParam | ColumnsParam,
+  params: ParamValues,
+): DType[] | undefined {
+  return typeof param.dtypes === 'function' ? param.dtypes(params) : param.dtypes
+}
+
 export function availableColumns(
   param: ColumnParam | ColumnsParam,
   inputs: Readonly<Record<string, CodaType | undefined>>,
@@ -622,7 +803,8 @@ export function availableColumns(
 ): string[] {
   const schema = columnSchemaFor(param, inputs, params)
   if (!schema) return []
-  const cols = param.dtypes ? columnsOfType(schema, param.dtypes) : schema.columns
+  const dtypes = dtypesOf(param, params)
+  const cols = dtypes ? columnsOfType(schema, dtypes) : schema.columns
   return cols.map((c) => c.name)
 }
 
@@ -650,14 +832,15 @@ export function validateColumnParams(def: NodeDefinition, ctx: InferContext): st
      * is most likely still correct, and inviting someone to re-pick from an empty list is
      * worse advice than silence.
      */
-    if (!columnSchemaFor(p, ctx.inputs, ctx.params)) continue
+    if (!columnsKnown(p, ctx.inputs, ctx.params)) continue
     const available = availableColumns(p, ctx.inputs, ctx.params)
     if (available.length === 0) {
       // An optional picker is allowed to have nothing to offer — that is what optional means.
       // Reporting it puts a warning badge on a node whose control nobody has touched, which
       // is how a genuine issue further down the list stops being read.
       if (p.optional) continue
-      const restriction = p.dtypes ? ` of type ${p.dtypes.join('/')}` : ''
+      const dtypes = dtypesOf(p, ctx.params)
+      const restriction = dtypes ? ` of type ${dtypes.join('/')}` : ''
       issues.push(`No columns${restriction} available for "${p.label}"`)
       continue
     }
@@ -671,7 +854,7 @@ export function validateColumnParams(def: NodeDefinition, ctx: InferContext): st
          * An optional picker answers *off*, so naming a fallback would be a false statement
          * rather than merely a loud one — and a stored value still equal to the definition's
          * own default was never a decision anybody made, so there is no drift to report.
-         * `out.scatter` declares `bodyId` so a neuron table needs no configuring; on a table
+         * `out.scatter` declares `neuronId` so a neuron table needs no configuring; on a table
          * without one it means row positions, which is the node working.
          *
          * A name somebody chose is now *kept* rather than substituted, so the singular says

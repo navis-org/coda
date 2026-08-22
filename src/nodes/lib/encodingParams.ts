@@ -51,7 +51,7 @@ export interface ColorParamOptions {
   defaultColor?: string
   /**
    * Column the picker starts on. Empty means "first compatible column", which on a neuron
-   * schema is `bodyId` — a categorical encoding over one-value-per-row, folded into eight
+   * schema is `neuronId` — a categorical encoding over one-value-per-row, folded into eight
    * slots plus grey. That reads as category structure where there is none, so a viewer whose
    * schema has a real label column should name it.
    */

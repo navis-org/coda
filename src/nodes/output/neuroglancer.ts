@@ -2,7 +2,7 @@
  * Neuroglancer viewer node.
  *
  * Takes a dataset and a neuron table and emits a **URL**: the dataset's own published
- * neuroglancer scene, pointed at those body ids and coloured by a column. The widget beside
+ * neuroglancer scene, pointed at those neuron ids and coloured by a column. The widget beside
  * it is an iframe on that URL, so the workhorse rendering — EM, segmentation, ROI meshes,
  * synapse layers, all at full resolution and lazily paged — is done by neuroglancer rather
  * than by us. The `3D View` node stays for scenes Coda builds itself.
@@ -27,11 +27,17 @@
  */
 
 import { registerNode } from '../../core/registry'
+import type { ParamValues } from '../../core/node'
 import { T } from '../../core/types'
 import type { TableValue } from '../../core/values'
 import { isTableValue, str } from '../../core/values'
-import type { NgLayerSet, NgLayout } from '../../data/neuroglancer/scene'
-import { DEFAULT_NEUROGLANCER_URL, buildScene, sceneUrl } from '../../data/neuroglancer/scene'
+import type { NgLayerSet, NgLayout, ViewerKind } from '../../data/neuroglancer/scene'
+import {
+  DEFAULT_NEUROGLANCER_URL,
+  buildScene,
+  sceneUrl,
+  viewerBaseFor,
+} from '../../data/neuroglancer/scene'
 /*
  * The one import from `src/ui` in the node pack, and it is the palette resolver on purpose:
  * "never re-implement colour mapping in a viewer" applies just as much to an external one.
@@ -49,12 +55,25 @@ import { colorParams, readColorSpec } from '../lib/encodingParams'
  * A different guard rail from the morphology nodes' `Max neurons`, which bounds what *Coda*
  * fetches. Nothing is fetched here — the cost is neuroglancer's own mesh loading plus URL
  * length, and the URL is the harder limit in practice: male-CNS publishes a 38 kB state
- * before a single body id is added, and each coloured segment costs ~40 bytes more.
+ * before a single neuron id is added, and each coloured segment costs ~40 bytes more.
  */
 const MAX_SEGMENTS = 1000
 
 /** Neuroglancer renders on black, so the dark palette is the right one whatever Coda's theme is. */
 const VIEWER_MODE = 'dark' as const
+
+/**
+ * The `Viewer type` param as a kind, or undefined for "work it out".
+ *
+ * One statement because two surfaces read it: this node, which bakes the answer into the URL,
+ * and `ValuePreview`, which hands it to the embedded frame. The frame cannot recover it from the
+ * URL — `sceneForViewer` *normalises*, so re-deriving from the host would strip an explicit
+ * override back out, which is the whole of what the escape hatch is for.
+ */
+export function chosenViewerKind(params: ParamValues): ViewerKind | undefined {
+  const chosen = String(params.viewerType ?? 'auto')
+  return chosen === 'auto' ? undefined : (chosen as ViewerKind)
+}
 
 export const neuroglancerNode = registerNode({
   type: 'out.neuroglancer',
@@ -92,9 +111,22 @@ export const neuroglancerNode = registerNode({
       allowLiteral: true,
       from: 'neurons',
       label: 'Colour',
-      defaultMode: 'categorical',
-      // Not the first compatible column, which is `bodyId`: colouring by it caps at eight
-      // slots plus grey, so two unrelated neurons share a hue and look like a group.
+      /*
+       * Neuroglancer's own hash colouring, not Coda's categorical palette.
+       *
+       * It is the mode that suits what this node emits. Coda's palette caps at eight slots and
+       * folds the rest into one achromatic bucket, which is right for a chart legend and wrong
+       * for a scene: past the eighth type every remaining neuron is the same grey, and colouring
+       * by `neuronId` would give two unrelated neurons one hue and make them look like a group.
+       * Neuroglancer gives every segment a distinct colour and needs no legend to do it.
+       *
+       * It is also the shortest link there is — no colour data travels at all, which matters on
+       * a node whose whole output is a URL people paste into mail.
+       */
+      defaultMode: 'default',
+      // Only reached once somebody picks a data-driven mode, and then this is the column worth
+      // starting on: `neuronId` is the first compatible one and is the wrong answer, for the
+      // eight-slot reason above.
       defaultColumn: 'type',
       // Baked into the URL — see the header.
       presentational: false,
@@ -172,10 +204,31 @@ export const neuroglancerNode = registerNode({
       id: 'viewer',
       kind: 'string',
       label: 'Viewer',
-      default: DEFAULT_NEUROGLANCER_URL,
+      // Empty rather than the constant, so the *dataset's* own deployment can win — see
+      // `evaluate`. A graph saved with the old explicit default keeps pointing where it did.
+      default: '',
       advanced: true,
       placeholder: DEFAULT_NEUROGLANCER_URL,
-      help: 'Which neuroglancer deployment to open. The whole scene travels in the URL fragment, so this instance never sees your data — but it must allow being embedded.',
+      help: 'Which neuroglancer deployment to open. Empty uses the one the dataset names, and otherwise the default above. The whole scene travels in the URL fragment, so the instance never sees your data, but it must allow being embedded.',
+    },
+    {
+      id: 'viewerType',
+      kind: 'enum',
+      label: 'Viewer type',
+      default: 'auto',
+      advanced: true,
+      options: [
+        { value: 'auto', label: 'Automatic' },
+        { value: 'spelunker', label: 'Spelunker / mainline' },
+        { value: 'seunglab', label: 'Seung-lab (FlyWire, NeuVue)' },
+      ],
+      /*
+       * The escape hatch for a deployment `viewerKind`'s table has not met. `Viewer` is free
+       * text, so the table can never be complete, and a wrong answer here is a scene that opens
+       * with no segmentation in it and nothing naming the cause — which has happened once
+       * already, in the other direction.
+       */
+      help: 'How a CAVE segmentation is authenticated. Spelunker builds need a middleauth+ prefix on the source; the Seung-lab fork runs its own login and refuses it. Automatic reads it off the deployment, and is right for every viewer this app knows about.',
     },
   ],
 
@@ -223,7 +276,11 @@ export const neuroglancerNode = registerNode({
       showSlices: ctx.params.showSlices === true,
     })
 
-    return { url: str(sceneUrl(String(ctx.params.viewer ?? ''), scene)) }
+    const viewer = viewerBaseFor(
+      String(ctx.params.viewer ?? ''),
+      source.peekDataset(dataset.datasetId)?.viewerSite,
+    )
+    return { url: str(sceneUrl(viewer, scene, chosenViewerKind(ctx.params))) }
   },
 })
 
@@ -248,7 +305,7 @@ function colorFields(
 }
 
 /**
- * Body ids and their colours, in table order.
+ * Neuron ids and their colours, in table order.
  *
  * Row order is preserved and duplicates keep their first colour, so the assignment matches
  * what the same encoding would draw in the 3D view — `resolveColor` ranks categories by
@@ -263,8 +320,8 @@ function segmentColors(
   if (!neurons) return { segments: [], colors: {} }
 
   const resolved = resolveColor(neurons, spec, VIEWER_MODE)
-  const ids = neurons.data['bodyId']
-  if (!ids) throw new Error('Neurons input has no bodyId column')
+  const ids = neurons.data['neuronId']
+  if (!ids) throw new Error('Neurons input has no neuronId column')
 
   const segments: string[] = []
   const colors: Record<string, string> = {}

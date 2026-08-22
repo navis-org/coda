@@ -14,6 +14,7 @@ import type { GraphState } from '../../store/graphStore'
 import { pickGraphFile } from '../../store/persistence'
 import { downloadGraph, downloadNotebook, downloadRmd } from '../export'
 import { canExportNotebook } from '../../export/canExport'
+import { peekExportWarnings } from '../exportWarnings'
 import { appElement, toggleFullscreen } from '../fullscreen'
 import { EXAMPLES } from '../../examples'
 import { plural } from '../format'
@@ -46,6 +47,14 @@ export interface PaletteItem {
   /** Rendered right-aligned, e.g. "⇧R". */
   shortcut?: string
   disabled?: boolean
+  /**
+   * Draws the hint as a caution rather than as description.
+   *
+   * Distinct from `disabled`, which means the row does nothing. This row works; what it is
+   * about is merely incomplete, and a reader deciding whether to press it wants to know that
+   * before rather than after.
+   */
+  warn?: boolean
   /** Node items only: the type to insert and the port to auto-connect. */
   nodeType?: string
   portId?: string
@@ -125,10 +134,24 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
    */
   const annotated = selectedNode !== undefined && isAnnotation(selectedNode.type)
   const computable = single !== undefined && !annotated
-  // Asked once, up front. `buildCommandItems` runs on every store change, so this deliberately
-  // comes from `canExport` rather than from the exporter — importing the latter to answer a
-  // question about a menu row would put every emitter in the main chunk.
-  const exportRefusal = canExportNotebook(store.graph)
+  /*
+   * Asked once per format, up front. `buildCommandItems` runs on every store change, so this
+   * deliberately comes from `canExport` rather than from the exporter — importing the latter to
+   * answer a question about a menu row would put every emitter in the main chunk.
+   *
+   * Two answers rather than one: the exporters no longer cover the same backends, so a FlyWire
+   * graph offers the notebook and refuses the R document.
+   */
+  const notebookRefusal = canExportNotebook(store.graph, 'python')
+  const rmdRefusal = canExportNotebook(store.graph, 'r')
+  /*
+   * The softer question beside the refusal: how much of the graph the walk cannot translate.
+   * Only the peek is called here — it is a cache read, where the *request* runs the real
+   * exporter and is made once, from the palette opening. This function runs on every store
+   * change while the palette is open.
+   */
+  const notebookWarning = peekExportWarnings(store.graph, 'python')
+  const rmdWarning = peekExportWarnings(store.graph, 'r')
 
   const items: PaletteItem[] = [
     {
@@ -284,20 +307,23 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
        * which is every synthetic graph anyone starts from, it is the *usual* state rather than
        * an edge case.
        */
-      hint: exportRefusal
-        ? `${exportRefusal.reason} — ${exportRefusal.fix}`
-        : 'Download this graph as a Jupyter notebook (neuprint-python, pandas, navis)',
-      disabled: exportRefusal !== undefined,
+      hint: notebookRefusal
+        ? `${notebookRefusal.reason} — ${notebookRefusal.fix}`
+        : (notebookWarning?.short ??
+          'Download this graph as a Jupyter notebook (neuprint-python, pandas, navis)'),
+      disabled: notebookRefusal !== undefined,
+      warn: notebookRefusal === undefined && notebookWarning !== undefined,
       perform: () => void downloadNotebook(store.graph, { appVersion: __APP_VERSION__ }),
     },
     {
       id: 'cmd:export-rmd',
       label: 'Export as R Markdown',
       action: 'Graph',
-      hint: exportRefusal
-        ? `${exportRefusal.reason} — ${exportRefusal.fix}`
-        : 'Download this graph as an .Rmd (neuprintr, dplyr, nat)',
-      disabled: exportRefusal !== undefined,
+      hint: rmdRefusal
+        ? `${rmdRefusal.reason} — ${rmdRefusal.fix}`
+        : (rmdWarning?.short ?? 'Download this graph as an .Rmd (neuprintr, dplyr, nat)'),
+      disabled: rmdRefusal !== undefined,
+      warn: rmdRefusal === undefined && rmdWarning !== undefined,
       perform: () => void downloadRmd(store.graph, { appVersion: __APP_VERSION__ }),
     },
 

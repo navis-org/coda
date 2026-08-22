@@ -28,6 +28,7 @@
  */
 
 import type { NgScene } from '../neuroglancer/scene'
+import { objectStoreUrl } from '../precomputed/transport'
 import type { RequestOptions } from './client'
 import { get } from './client'
 
@@ -93,14 +94,10 @@ function urls(layer: NgLayer): string[] {
  * mapping it to an HTTP URL would produce 404s that look like missing neurons.
  */
 export function precomputedToHttp(source: string): string | undefined {
-  const match = /^(?:precomputed|zarr|n5):\/\/(gs|s3):\/\/(.+)$/.exec(source.trim())
-  if (!match) return undefined
-  const [, scheme, path] = match
-  if (scheme === 'gs') return `https://storage.googleapis.com/${path!.replace(/\/+$/, '')}`
-  // Virtual-hosted style: the path-style endpoint 301-redirects, and fetch will not follow a
-  // redirect that drops CORS headers.
-  const [bucket, ...rest] = path!.replace(/\/+$/, '').split('/')
-  return `https://${bucket}.s3.amazonaws.com/${rest.join('/')}`
+  const match = /^(?:precomputed|zarr|n5):\/\/(.+)$/.exec(source.trim())
+  // The bucket mapping itself is `objectStoreUrl`, shared with the CAVE mesh reader, which
+  // meets the same `gs://` without a neuroglancer prefix in front of it.
+  return match ? objectStoreUrl(match[1]!) : undefined
 }
 
 export interface MeshSourceRef {

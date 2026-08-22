@@ -12,6 +12,12 @@
  *
  * It is deliberately not a workflow anybody would build. Coverage is the job; the branches
  * exist to reach node types, not to answer a question.
+ *
+ * **There are two graphs, and that is new.** The exporters no longer cover the same backends —
+ * FlyWire emits caveclient in Python and nothing in R — so a CAVE node in `everythingGraph`
+ * would make `canExportNotebook(graph, 'r')` refuse the whole thing and leave the R golden with
+ * nothing in it. `caveGraph` is the CAVE half, exported as its own notebook and asserted to be
+ * *refused* on the R side, which is the honest shape of a split neither language can hide.
  */
 
 import type { CodaGraph, GraphEdge, GraphNode } from '../core/graph'
@@ -202,16 +208,28 @@ export function everythingGraph(): CodaGraph {
      */
     { id: 'linkage', type: 'cluster.linkage', col: 4, row: 5, params: { method: 'average' } },
     { id: 'cut', type: 'cluster.cut', col: 5, row: 5, params: { mode: 'count', count: 4 } },
-    { id: 'cutH', type: 'cluster.cut', col: 5, row: 6, params: { mode: 'height', height: 0.6 } },
+    {
+      id: 'cutH',
+      type: 'cluster.cut',
+      col: 5,
+      row: 6,
+      params: { mode: 'height', height: 0.6 },
+    },
     // A selection set, since that is the branch whose emitted frame is not simply empty.
     /*
      * The two label-to-neuron nodes, one on each branch of their shared emitter: `sel` has no
-     * Neurons wired, so its labels are read as body ids, and `clu` has one, so it matches as
+     * Neurons wired, so its labels are read as neuron ids, and `clu` has one, so it matches as
      * text and carries the cluster number across. One node would record only whichever branch
      * happened to be wired — the same reason there are two NBLAST nodes and two Select Ones.
      */
     { id: 'sel', type: 'cluster.selectedToNeurons', col: 7, row: 5 },
-    { id: 'clu', type: 'cluster.clustersToNeurons', col: 6, row: 6, params: { matchColumn: 'type' } },
+    {
+      id: 'clu',
+      type: 'cluster.clustersToNeurons',
+      col: 6,
+      row: 6,
+      params: { matchColumn: 'type' },
+    },
 
     {
       id: 'dendro',
@@ -242,36 +260,69 @@ export function everythingGraph(): CodaGraph {
       params: { mode: 'random', count: 200, seed: 7 },
     },
     {
+      id: 'dedupe',
+      type: 'core.dedupe',
+      col: 6,
+      // `last` rather than the default, so the golden records the argument that differs from
+      // pandas' own default — a fixture on `first` would pass with the parameter omitted.
+      params: { columns: ['preType', 'postType'], keep: 'last' },
+    },
+    /*
+     * `type` then `instance`, which is the shape this node is for: one fact spread over several
+     * columns, the first filled-in one winning. A source column too, since that is a second
+     * emitted line and a second generated helper — the branch a fixture without one records as
+     * absent rather than as untested.
+     */
+    {
+      id: 'combine',
+      type: 'core.combineColumns',
+      col: 3,
+      row: 1,
+      params: { columns: ['type', 'instance'], into: 'label', sourceColumn: 'label_from' },
+    },
+    /*
+     * The `join` aggregation, which is the one that emits a generated helper rather than a
+     * pandas method name — and the only route by which `coda_join` reaches a golden, where
+     * `probe-py-helpers.py` can actually run it.
+     */
+    {
+      id: 'joined',
+      type: 'core.groupBy',
+      col: 4,
+      row: 1,
+      params: { by: ['type'], agg: 'join', value: 'instance' },
+    },
+    {
       id: 'group',
       type: 'core.groupBy',
-      col: 6,
+      col: 7,
       params: { by: ['preType', 'postType'], agg: 'sum', value: 'weight' },
     },
     {
       id: 'select',
       type: 'core.select',
-      col: 7,
+      col: 8,
       params: { columns: ['preType', 'postType', 'sum_weight'] },
     },
     {
       id: 'join',
       type: 'core.join',
-      col: 8,
+      col: 9,
       params: { leftKey: 'preType', rightKey: 'preType', how: 'left', suffix: '_r' },
     },
     {
       id: 'stack',
       type: 'core.stack',
-      col: 9,
+      col: 10,
       params: { sourceColumn: 'origin', topLabel: 'Direct', bottomLabel: 'Indirect' },
     },
     {
       id: 'pivot',
       type: 'core.pivot',
-      col: 10,
+      col: 11,
       params: { rows: 'preType', columns: 'postType', value: 'weight', agg: 'sum' },
     },
-    { id: 'norm', type: 'core.normalize', col: 11, params: { mode: 'row' } },
+    { id: 'norm', type: 'core.normalize', col: 12, params: { mode: 'row' } },
 
     /*
      * Twice, and that is not redundancy: the emitter branches on the input's *kind*, because a
@@ -365,7 +416,7 @@ export function everythingGraph(): CodaGraph {
         xLog: true,
         yLog: true,
         trend: 'linear',
-        idColumn: 'bodyId',
+        idColumn: 'neuronId',
         selection: ['1001'],
       },
     },
@@ -420,6 +471,8 @@ export function everythingGraph(): CodaGraph {
 
   const edges: Array<[string, string, string, string]> = [
     ['ds', 'dataset', 'find', 'dataset'],
+    ['ds', 'dataset', 'summary', 'dataset'],
+    ['ds', 'dataset', 'explore', 'dataset'],
     ['ds', 'dataset', 'ids', 'dataset'],
     ['ds', 'dataset', 'labels', 'dataset'],
     ['ds', 'dataset', 'explore', 'dataset'],
@@ -447,6 +500,8 @@ export function everythingGraph(): CodaGraph {
     ['find', 'neurons', 'mesh', 'neurons'],
     ['find', 'neurons', 'syn', 'neurons'],
     ['find', 'neurons', 'scatter', 'in'],
+    ['find', 'neurons', 'combine', 'in'],
+    ['find', 'neurons', 'joined', 'in'],
     ['find', 'neurons', 'profile', 'neurons'],
     ['ds', 'dataset', 'profile', 'dataset'],
     ['ds', 'dataset', 'summary', 'dataset'],
@@ -457,7 +512,8 @@ export function everythingGraph(): CodaGraph {
     ['conn', 'connections', 'filter', 'in'],
     ['filter', 'out', 'sort', 'in'],
     ['sort', 'out', 'sample', 'in'],
-    ['sample', 'out', 'group', 'in'],
+    ['sample', 'out', 'dedupe', 'in'],
+    ['dedupe', 'out', 'group', 'in'],
     ['sort', 'out', 'pick', 'in'],
     ['skel', 'skeletons', 'pickSkel', 'in'],
     ['group', 'out', 'select', 'in'],
@@ -500,5 +556,114 @@ export function everythingGraph(): CodaGraph {
       n.id === 'muted' ? { ...n, disabled: true, title: 'Muted step' } : n,
     ),
   }
+  return g
+}
+
+/**
+ * The CAVE half.
+ *
+ * Kept apart from `everythingGraph` because R refuses it outright — see the note above — and
+ * because it wants a shape the everything graph does not: the reference wiring that made
+ * reference edges necessary in the first place. `CAVE table → Update root IDs → Dataset`, with
+ * both nodes pointing their Dataset sockets *back* at the dataset they feed, which is two edges
+ * between one pair in opposite directions and a cycle at node granularity.
+ *
+ * The `Custom CAVE` node is here for the reason all six neuPrint families are in the other
+ * graph: it and `dataset.flywire` share an emitter but not the branch that resolves a
+ * materialization, so a fixture reaching only one of them records only half the code.
+ *
+ * The chain is three sources deep — FlyTable, then a wide CAVE table, then a long one — because
+ * what each adds is different: SeaTable is a whole other library, the wide and long CAVE forms
+ * are two branches of one emitter, and only a chain exercises the outer join between them.
+ */
+export function caveGraph(): CodaGraph {
+  let g = emptyGraph('CAVE')
+  g.meta = { ...g.meta, description: 'The CAVE nodes, wired the way references exist for.' }
+
+  const nodes: Spec[] = [
+    { id: 'ds', type: 'dataset.flywire', col: 4, params: { version: '783' } },
+    // Both SeaTable registrations, since they share an emitter and differ in the host it
+    // defaults to — a fixture reaching one records half the code.
+    {
+      id: 'sea',
+      type: 'annotation.seaTable',
+      col: -2,
+      params: { base: 'my base', table: 'types', idColumn: 'root_id' },
+    },
+    {
+      id: 'fly',
+      type: 'annotation.flyTable',
+      col: -1,
+      params: { base: 'main', table: 'info', columns: 'cell_type, side', idColumn: 'root_id' },
+    },
+    {
+      id: 'ann',
+      type: 'annotation.caveTable',
+      col: 0,
+      params: { datastack: 'flywire_fafb_public:783', table: 'nuclei_v1', columns: 'volume' },
+    },
+    {
+      id: 'annLong',
+      type: 'annotation.caveTable',
+      col: 1,
+      params: {
+        table: 'hierarchical_neuron_annotations',
+        idColumn: 'target_id',
+        pivotOn: 'classification_system',
+        valueColumn: 'cell_type',
+      },
+    },
+    { id: 'filter', type: 'core.filter', col: 2, params: { column: 'type', op: 'notEmpty' } },
+    {
+      id: 'repair',
+      type: 'cave.updateRootIds',
+      col: 3,
+      params: { idColumn: 'neuronId', supervoxelColumn: 'supervoxel_id' },
+    },
+    { id: 'table', type: 'out.table', col: 5, row: 1 },
+    { id: 'find', type: 'neuron.findNeurons', col: 5, params: { typePattern: 'LC.*' } },
+    // A neuPrint-only node on a CAVE dataset: the walk turns an undeclared backend into a TODO,
+    // and the golden is where that message is read. Find Neurons used to be this one, and is now
+    // written for both — which is the shape of the whole exercise, so the marker moved rather
+    // than the assertion being dropped.
+    { id: 'summary', type: 'out.datasetSummary', col: 6, params: {} },
+    /*
+     * And one that *is* written for both, since only its index fetch is backend-specific. The
+     * query and the selection are both set so the golden carries the search and the text-keyed
+     * `isin` — a CAVE id column is `str`, and comparing it against Python ints matches nothing.
+     */
+    {
+      id: 'explore',
+      type: 'neuron.explore',
+      col: 5,
+      row: 2,
+      params: { query: 'side=left', selection: ['720575940628857210'] },
+    },
+    {
+      id: 'custom',
+      type: 'dataset.cave',
+      col: 0,
+      row: 2,
+      params: { datastack: 'wclee_aedes_brain', version: '117', neuronTable: 'nuclei' },
+    },
+  ]
+  for (const spec of nodes) g = place(g, spec)
+
+  const edges: Array<[string, string, string, string]> = [
+    // The reference wiring: both of these name the dataset they feed.
+    ['ds', 'dataset', 'annLong', 'dataset'],
+    ['ds', 'dataset', 'repair', 'dataset'],
+    ['sea', 'annotations', 'fly', 'annotations'],
+    ['fly', 'annotations', 'ann', 'annotations'],
+    ['ann', 'annotations', 'annLong', 'annotations'],
+    ['annLong', 'annotations', 'filter', 'in'],
+    ['filter', 'out', 'repair', 'in'],
+    ['repair', 'out', 'ds', 'annotations'],
+    ['repair', 'out', 'table', 'in'],
+    ['ds', 'dataset', 'find', 'dataset'],
+    ['ds', 'dataset', 'summary', 'dataset'],
+    ['ds', 'dataset', 'explore', 'dataset'],
+  ]
+  for (const [from, out, to, into] of edges) g = wire(g, from, out, to, into)
   return g
 }

@@ -126,16 +126,29 @@ export function Viewer3D(props: Viewer3DProps) {
             : ''}
           {selection.length > 0 && ` · ${selection.length} selected`}
         </span>
+        {/*
+          * Two ways a mesh set can be coarser than what the source holds, and they need
+          * different words. A multi-resolution source *picked a level*, so the useful number is
+          * which of how many; a source with none *simplified what it fetched*, where naming a
+          * level would report "0 of 0" while most of the triangles have gone. Both admit the
+          * trade and both name the control that changes it.
+          */}
         {meshes?.detail && !compact && (
           <span
             className="viewer__note"
             title={
-              `Meshes drawn at level ${meshes.detail.lod} of ${meshes.detail.levels - 1} ` +
-              `(0 is finest), ${meshes.detail.triangles.toLocaleString()} triangles. Raise ` +
-              `Detail on the Meshes node, or fetch fewer neurons, for a finer surface.`
+              (meshes.detail.decimated
+                ? `This source publishes one level of detail, so meshes are simplified on ` +
+                  `arrival to fit the triangle budget — ` +
+                  `${meshes.detail.triangles.toLocaleString()} triangles here.`
+                : `Meshes drawn at level ${meshes.detail.lod} of ${meshes.detail.levels - 1} ` +
+                  `(0 is finest), ${meshes.detail.triangles.toLocaleString()} triangles.`) +
+              ` Raise Detail on the Meshes node, or fetch fewer neurons, for a finer surface.`
             }
           >
-            mesh LOD {meshes.detail.lod}/{meshes.detail.levels - 1}
+            {meshes.detail.decimated
+              ? 'meshes simplified'
+              : `mesh LOD ${meshes.detail.lod}/${meshes.detail.levels - 1}`}
           </span>
         )}
         {skeletonColors.legend && !compact && (
@@ -194,12 +207,12 @@ function SceneContents({
       )}
       {meshes?.items.map((item, index) => (
         <MeshItem
-          key={`${item.bodyId}-${index}`}
+          key={`${item.id}-${index}`}
           positions={item.positions}
           indices={item.indices}
           color={meshColors.at(index)}
           opacity={meshOpacity}
-          dimmed={selected.size > 0 && !selected.has(String(item.bodyId))}
+          dimmed={selected.size > 0 && !selected.has(item.id)}
         />
       ))}
       {points && <PointCloud points={points} colorAt={pointColors.at} size={pointSize} />}
@@ -266,8 +279,8 @@ function SkeletonLines({
     const dimming = selected.size > 0
     for (let s = 0; s < built.segments; s++) {
       const itemIndex = built.segmentItem[s]!
-      const bodyId = String(skeletons.items[itemIndex]?.bodyId ?? '')
-      const rgb = dimming && !selected.has(bodyId) ? DIMMED : hexToRgbFloat(colorAt(itemIndex))
+      const neuronId = skeletons.items[itemIndex]?.id ?? ''
+      const rgb = dimming && !selected.has(neuronId) ? DIMMED : hexToRgbFloat(colorAt(itemIndex))
       for (let v = 0; v < 2; v++) {
         buffer[s * 6 + v * 3] = rgb[0]
         buffer[s * 6 + v * 3 + 1] = rgb[1]
@@ -297,13 +310,13 @@ function SkeletonLines({
     const segment = Math.floor(vertexIndex / 2)
     const itemIndex = built.segmentItem[segment]
     if (itemIndex === undefined) return
-    const bodyId = String(skeletons.items[itemIndex]?.bodyId ?? '')
-    if (!bodyId) return
+    const neuronId = skeletons.items[itemIndex]?.id ?? ''
+    if (!neuronId) return
     event.stopPropagation()
     onSelectionChange(
-      selection.includes(bodyId)
-        ? selection.filter((id) => id !== bodyId)
-        : [...selection, bodyId],
+      selection.includes(neuronId)
+        ? selection.filter((id) => id !== neuronId)
+        : [...selection, neuronId],
     )
   }
 

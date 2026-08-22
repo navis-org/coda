@@ -18,7 +18,7 @@ import { stackColumns, stackSchema, stackTables } from '../lib/tableOps'
  * screen to say so. Same call `Join` makes when it suffixes a colliding name rather than
  * dropping it.
  *
- * **A dtype clash is refused, not reconciled.** `bodyId` as a number above and text below is two
+ * **A dtype clash is refused, not reconciled.** `neuronId` as a number above and text below is two
  * different columns wearing one name. Widening both to text would keep the values and remove the
  * column from every numeric picker downstream; coercing text to a number loses values outright.
  * Neither is a decision this node has the grounds to make, so it names the column and stops.
@@ -38,7 +38,7 @@ export const stackNode = registerNode({
   category: 'transform',
   description: 'Combine two tables vertically, keeping every column either of them has.',
   guide:
-    'The vertical Join: where that one widens a table with columns, this lengthens it with rows. Two connectivity results from different seeds, a curated list added to a query result, the same analysis run on two datasets. A column only one side has is filled with null for the other’s rows rather than being dropped — but a column the two sides genuinely disagree about, a bodyId that is a number above and text below, is refused by name rather than silently reconciled.',
+    'The vertical Join: where that one widens a table with columns, this lengthens it with rows. Two connectivity results from different seeds, a curated list added to a query result, the same analysis run on two datasets. A column only one side has is filled with null for the other’s rows rather than being dropped — but a column the two sides genuinely disagree about, a neuronId that is a number above and text below, is refused by name rather than silently reconciled.',
   cost: 'cheap',
   inputs: [
     { id: 'top', label: 'Top', type: T.table() },

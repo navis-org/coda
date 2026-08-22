@@ -27,11 +27,11 @@ afterEach(() => {
 })
 
 const NEURONS = tableFromRows(
-  tableSchema(column('bodyId', 'i64'), column('type', 'str')),
+  tableSchema(column('neuronId', 'i64'), column('type', 'str')),
   [
-    { bodyId: 1, type: 'DNa02' },
-    { bodyId: 2, type: 'DNa02' },
-    { bodyId: 3, type: 'DNp01' },
+    { neuronId: 1, type: 'DNa02' },
+    { neuronId: 2, type: 'DNa02' },
+    { neuronId: 3, type: 'DNp01' },
   ],
   'neurons',
 )
@@ -348,7 +348,7 @@ describe('the caption', () => {
     expect(screen.getByText(/no neurons connected/)).toBeTruthy()
 
     const empty = tableFromRows(
-      tableSchema(column('bodyId', 'i64'), column('type', 'str')),
+      tableSchema(column('neuronId', 'i64'), column('type', 'str')),
       [],
       'neurons',
     )
@@ -373,5 +373,140 @@ describe('the caption', () => {
   it('offers the link on its own, for a browser that will not frame it', () => {
     render(<NeuroglancerViewer url={URL_A} neurons={NEURONS} color={CATEGORICAL} />)
     expect(screen.getByLabelText('Open in a new tab').getAttribute('href')).toBe(URL_A)
+  })
+})
+
+/**
+ * Reloading, which is the only way to clear a warning the viewer has already put up.
+ *
+ * FlyWire's fork banners a deprecated layer spec along the bottom of the frame and clears it
+ * only on a document load — and a foreign-origin frame cannot be reloaded from outside:
+ * `contentWindow.location.reload()` is blocked, and re-assigning the same `src` is a
+ * *same-document* fragment navigation, which is the very property the merge depends on.
+ * Remounting the element is what is left.
+ */
+describe('reloading the frame', () => {
+  it('replaces the element and navigates it afresh', () => {
+    const { container } = render(<NeuroglancerViewer url={URL_A} color={CATEGORICAL} />)
+    const before = frame(container)
+    frameLoaded(container)
+    expect(before).not.toBeNull()
+
+    act(() => {
+      fireEvent.click(screen.getByLabelText('Reload the viewer'))
+    })
+
+    // A new element, or the browser has been asked to re-fetch nothing: assigning a src that
+    // has not changed does not reload a document.
+    expect(frame(container)).not.toBe(before)
+    expect(frameScene(container)).toEqual(parseSceneUrl(URL_A))
+  })
+
+  it('sends the whole scene rather than a merge, since there is nothing left to merge into', () => {
+    const { container } = render(<NeuroglancerViewer url={URL_A} color={CATEGORICAL} />)
+    frameLoaded(container)
+    frameShowing(container, sceneWith(['1']))
+
+    act(() => {
+      fireEvent.click(screen.getByLabelText('Reload the viewer'))
+    })
+
+    /*
+     * The `#!+` form merges onto whatever the document currently holds. After a remount that is
+     * neuroglancer's *defaults*, not the published scene — so a reload that patched would land
+     * the selection on an empty viewer and lose the camera it was meant to restore.
+     */
+    expect(frameSrc(container)).toContain('#!%7B')
+    expect(frameSrc(container)).not.toContain('#!+')
+  })
+
+  it('does not merge into the reloaded document before it has loaded', () => {
+    /*
+     * The guard `loadedRef` exists for, arrived at from the other side. After a remount the old
+     * document is gone and the new one has not booted, so an upstream edit landing in that
+     * window would send a patch as the frame's *opening* navigation — merging onto
+     * neuroglancer's defaults instead of the published scene.
+     *
+     * Clearing `appliedRef` alone does not cover this: it is cleared, then set again by the
+     * reload's own navigation, and the next edit is a merge from there.
+     */
+    const { container, rerender } = render(
+      <NeuroglancerViewer url={URL_A} color={CATEGORICAL} />,
+    )
+    frameLoaded(container)
+    act(() => {
+      fireEvent.click(screen.getByLabelText('Reload the viewer'))
+    })
+
+    // Deliberately no `frameLoaded` here: the new document is still on its way.
+    rerender(<NeuroglancerViewer url={URL_B} color={CATEGORICAL} />)
+    flushMerge()
+    expect(frameSrc(container)).not.toContain('#!+')
+    expect(frameScene(container)).toEqual(parseSceneUrl(URL_B))
+  })
+
+  it('merges again once the reloaded document has landed', () => {
+    // The reload must not leave the frame permanently in replace mode: the next upstream edit
+    // is an ordinary merge, which is what keeps the camera across a selection change.
+    const { container, rerender } = render(
+      <NeuroglancerViewer url={URL_A} color={CATEGORICAL} />,
+    )
+    frameLoaded(container)
+    act(() => {
+      fireEvent.click(screen.getByLabelText('Reload the viewer'))
+    })
+    frameLoaded(container)
+
+    rerender(<NeuroglancerViewer url={URL_B} color={CATEGORICAL} />)
+    flushMerge()
+    expect(frameSrc(container)).toContain('#!+')
+  })
+})
+
+/**
+ * An explicit `Viewer type` has to reach the *frame*, not only the copied link.
+ *
+ * It cannot travel in the URL: `sceneForViewer` normalises, so a viewer re-deriving the kind
+ * from the host would strip an override back out — on exactly the deployment `SEUNGLAB_HOSTS`
+ * gets wrong, which is the only reason the control exists. And this card is where the symptom
+ * is seen, since a segmentation layer that is present and empty looks like a broken viewer.
+ */
+describe('an explicit viewer type', () => {
+  const GRAPHENE = 'graphene://https://prodv1.flywire-daf.com/segmentation/table/fly_v31'
+  const CAVE_SCENE = {
+    layers: [
+      { type: 'segmentation', name: 'hemibrain:v1.2.1', source: GRAPHENE, segments: ['1'] },
+    ],
+  }
+  const sourceIn = (container: HTMLElement): string => {
+    const scene = frameScene(container) as { layers: Array<{ source?: string }> } | undefined
+    return String(scene?.layers[0]?.source)
+  }
+
+  it('is honoured rather than re-derived from the host', () => {
+    // `neuroglancer-demo.appspot.com` is spelunker in the table, so the default would prefix.
+    const url = sceneUrl(undefined, CAVE_SCENE, 'spelunker')
+    const { container } = render(
+      <NeuroglancerViewer url={url} color={CATEGORICAL} viewerType="seunglab" />,
+    )
+    expect(sourceIn(container)).toBe(GRAPHENE)
+  })
+
+  it('falls back to the deployment when nobody said', () => {
+    const url = sceneUrl(undefined, CAVE_SCENE)
+    const { container } = render(<NeuroglancerViewer url={url} color={CATEGORICAL} />)
+    expect(sourceIn(container)).toContain('middleauth+')
+  })
+
+  it('re-navigates when the choice changes', () => {
+    // It is in the effect's dependency list, or flipping the control leaves the frame showing
+    // the scene built for the other flavour until something else happens to change the URL.
+    const url = sceneUrl(undefined, CAVE_SCENE, 'spelunker')
+    const { container, rerender } = render(
+      <NeuroglancerViewer url={url} color={CATEGORICAL} viewerType="spelunker" />,
+    )
+    expect(sourceIn(container)).toContain('middleauth+')
+    rerender(<NeuroglancerViewer url={url} color={CATEGORICAL} viewerType="seunglab" />)
+    expect(sourceIn(container)).toBe(GRAPHENE)
   })
 })

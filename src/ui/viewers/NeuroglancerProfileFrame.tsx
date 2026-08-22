@@ -16,7 +16,7 @@
 import { useEffect, useState } from 'react'
 
 import type { NgScene } from '../../data/neuroglancer/scene'
-import { buildScene, sceneUrl } from '../../data/neuroglancer/scene'
+import { buildScene, sceneUrl, viewerBaseFor } from '../../data/neuroglancer/scene'
 import { getSource } from '../../data/source'
 import type { ColorSpec } from '../../nodes/lib/encodingParams'
 import { NeuroglancerViewer } from './NeuroglancerViewer'
@@ -25,7 +25,8 @@ import { errorMessage } from '../../core/errors'
 export interface NeuroglancerProfileFrameProps {
   sourceId: string | undefined
   datasetId: string | undefined
-  bodyId: number | undefined
+  /** Text, never a number: it becomes a neuroglancer segment. See invariant 8. */
+  neuronId: string | undefined
   onError?: (message: string) => void
 }
 
@@ -100,7 +101,7 @@ function usePublishedScene(
 export function NeuroglancerProfileFrame({
   sourceId,
   datasetId,
-  bodyId,
+  neuronId,
   onError,
 }: NeuroglancerProfileFrameProps) {
   const state = usePublishedScene(sourceId, datasetId)
@@ -124,7 +125,7 @@ export function NeuroglancerProfileFrame({
    */
   const scene = buildScene(state.scene, {
     datasetId: datasetId ?? '',
-    segments: bodyId === undefined ? [] : [bodyId],
+    segments: neuronId === undefined ? [] : [neuronId],
     segmentDefaultColor: '#3987e5',
     layout: '3d',
     layers: 'all',
@@ -132,7 +133,14 @@ export function NeuroglancerProfileFrame({
 
   return (
     <NeuroglancerViewer
-      url={sceneUrl('', scene)}
+      // The dataset's own deployment, through the same resolver `out.neuroglancer` uses. This
+      // was a bare `''`, so a CAVE dataset opened in the built-in default rather than the viewer
+      // its own datastack names — and a segmentation source is written for one flavour or the
+      // other, so it drew the EM volume with no neurons in it. See `viewerKind`.
+      url={sceneUrl(
+        viewerBaseFor('', getSource(sourceId ?? '')?.peekDataset(datasetId ?? '')?.viewerSite),
+        scene,
+      )}
       color={SEGMENT_COLOR}
       compact
       onError={onError}

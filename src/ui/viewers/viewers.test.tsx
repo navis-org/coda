@@ -318,15 +318,15 @@ describe('TableViewer', () => {
   })
 
   /**
-   * A body id is a name, so it is printed as it would be typed back — while the count in the
+   * A neuron id is a name, so it is printed as it would be typed back — while the count in the
    * column beside it keeps its separator. Asserted here rather than only in `format.test.ts`
    * because the rule is worth nothing until the column name reaches it, and a cell rendering
    * `formatCell(cell)` with the name dropped fails no type check.
    */
   it('prints ids verbatim and quantities grouped, in the same row', () => {
-    const schema = tableSchema(column('bodyId', 'i64'), column('post', 'i64', 'synapses'))
+    const schema = tableSchema(column('neuronId', 'i64'), column('post', 'i64', 'synapses'))
     const { container } = render(
-      <TableViewer table={tableFromRows(schema, [{ bodyId: 527536, post: 527536 }])} />,
+      <TableViewer table={tableFromRows(schema, [{ neuronId: 527536, post: 527536 }])} />,
     )
     const cells = [...container.querySelectorAll('tbody td')].map((td) => td.textContent)
     expect(cells).toEqual(['527536', '527,536'])
@@ -345,18 +345,18 @@ describe('TableViewer', () => {
  * subset. None of those fail a type check and all three look fine in a screenshot.
  */
 describe('TableViewer filtering', () => {
-  const NEURONS = tableSchema(column('bodyId', 'i64'), column('type', 'str'), column('pre', 'i64'))
+  const NEURONS = tableSchema(column('neuronId', 'i64'), column('type', 'str'), column('pre', 'i64'))
   const neurons = () =>
     tableFromRows(NEURONS, [
-      { bodyId: 1, type: 'LC4', pre: 40 },
-      { bodyId: 2, type: 'LC6', pre: 5 },
-      { bodyId: 3, type: 'DNp01', pre: 100 },
+      { neuronId: 1, type: 'LC4', pre: 40 },
+      { neuronId: 2, type: 'LC6', pre: 5 },
+      { neuronId: 3, type: 'DNp01', pre: 100 },
     ])
 
   const cell = (container: HTMLElement, name: string) =>
     container.querySelector<HTMLInputElement>(`input[aria-label="Filter ${name}"]`)
 
-  const bodyIds = (container: HTMLElement) =>
+  const neuronIds = (container: HTMLElement) =>
     [...container.querySelectorAll('tbody tr')].map(
       (row) => row.querySelector('td')?.textContent,
     )
@@ -380,7 +380,7 @@ describe('TableViewer filtering', () => {
       />,
     )
     fireEvent.change(cell(container, 'type')!, { target: { value: 'LC' } })
-    expect(bodyIds(container)).toEqual(['1', '2'])
+    expect(neuronIds(container)).toEqual(['1', '2'])
     // The param follows the pause, not the keystroke — see COMMIT_DELAY_MS.
     expect(onFiltersChange).not.toHaveBeenCalled()
   })
@@ -421,12 +421,12 @@ describe('TableViewer filtering', () => {
     // so in words. Two controls that look alike, told apart in the one place a reader looks.
     expect(screen.getByText('2 of 3 rows')).toBeTruthy()
     expect(screen.queryByText('sorted view only')).toBeNull()
-    fireEvent.click(screen.getByText('bodyId'))
+    fireEvent.click(screen.getByText('neuronId'))
     expect(screen.getByText('sorted view only')).toBeTruthy()
     expect(screen.getByText('2 of 3 rows')).toBeTruthy()
     // Paging counts what survived, not what arrived.
     expect(screen.getByText('1–2 of 2')).toBeTruthy()
-    expect(bodyIds(container)).toEqual(['1', '3'])
+    expect(neuronIds(container)).toEqual(['1', '3'])
   })
 
   it('opens the row for a filter that is already set, and refuses to hide it', () => {
@@ -453,7 +453,7 @@ describe('TableViewer filtering', () => {
     )
     expect(cell(container, 'type')?.getAttribute('data-invalid')).toBe('true')
     // Dropped, so every row survives — a broken clause shows more rows, never fewer.
-    expect(bodyIds(container)).toEqual(['1', '2', '3'])
+    expect(neuronIds(container)).toEqual(['1', '2', '3'])
   })
 
   it('distinguishes an empty result from an empty input', () => {

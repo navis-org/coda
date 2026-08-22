@@ -54,7 +54,7 @@ function pipeline(params: Record<string, unknown> = {}): CodaGraph {
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: DATASET }))
   g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC4', status: 'Traced' }))
   g = addNode(g, node('dl', 'out.download', params))
-  g = addNode(g, node('sort', 'core.sort', { column: 'bodyId' }))
+  g = addNode(g, node('sort', 'core.sort', { column: 'neuronId' }))
   g = addEdge(g, {
     source: 'ds',
     sourceHandle: 'dataset',
@@ -79,7 +79,7 @@ describe('out.download — the tap', () => {
     const inference = inferGraph(pipeline())
     const out = inference.nodes['dl']?.outputs['out']
     expect(out?.kind).toBe('neurons')
-    expect(columnNames(schemaOf(out))).toContain('bodyId')
+    expect(columnNames(schemaOf(out))).toContain('neuronId')
     // Which is the point: nothing after it can tell it is there.
     expect(columnNames(schemaOf(inference.nodes['sort']?.outputs['out']))).toContain('type')
   })

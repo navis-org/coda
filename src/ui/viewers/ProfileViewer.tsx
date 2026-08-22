@@ -7,7 +7,7 @@
  *
  *  - **A tile renders only when its data exists.** Datasets disagree about almost everything:
  *    hemibrain has no transmitter probabilities, MANC has no `superclass`, a table that has
- *    been through Select may have nothing but a bodyId. So a tile that cannot say anything is
+ *    been through Select may have nothing but a neuronId. So a tile that cannot say anything is
  *    absent rather than full of dashes, and nothing here names a column that must be present.
  *  - **Browsing is free.** The pager writes a presentational param and the fetches are the
  *    widget's own, so paging never marks the node stale. Pinning is the deliberate act, and
@@ -23,7 +23,8 @@
 
 import { useMemo } from 'react'
 
-import type { CellValue, TableValue } from '../../core/values'
+import type { DatasetAnnotations, CellValue, TableValue } from '../../core/values'
+import { idText } from '../../core/ids'
 import { getRow } from '../../core/values'
 import {
   connectivitySummary,
@@ -33,7 +34,7 @@ import {
   topPartners,
   transmitterReading,
 } from '../../nodes/lib/profileStats'
-import type { PartnerTypeRow, RegionRow } from '../../nodes/lib/profileStats'
+import type { PartnerRow, PartnerTypeRow, RegionRow } from '../../nodes/lib/profileStats'
 import { CHART_INK, currentMode, seriesColor } from '../colors'
 import { chipKey, chipSlots, rowFields } from '../explore/rowFields'
 import { NeuronThumbnail } from '../explore/NeuronThumbnail'
@@ -49,11 +50,13 @@ export interface ProfileViewerProps {
   /** The incoming neuron table. Paged through, one row at a time. */
   neurons: TableValue | undefined
   sourceId: string | undefined
+  /** The wired annotation chain, so a partner's type is the one the ports carry. */
+  annotations?: DatasetAnnotations
   datasetId: string | undefined
   /** Row index shown. Clamped here, never trusted. */
   page: number
   onPage: (page: number) => void
-  /** Body ids on the node's `selection` param — what the Current port emits. */
+  /** Neuron ids on the node's `selection` param — what the Current port emits. */
   pinned: readonly string[]
   onPin: (ids: string[]) => void
   minWeight: number
@@ -72,6 +75,7 @@ const SILHOUETTE_SIZE = 104
 export function ProfileViewer({
   neurons,
   sourceId,
+  annotations,
   datasetId,
   page,
   onPage,
@@ -96,10 +100,14 @@ export function ProfileViewer({
     () => (neurons && total > 0 ? getRow(neurons, index) : undefined),
     [neurons, index, total],
   )
-  const bodyId = row ? Number(row['bodyId']) : undefined
-  const hasBodyId = bodyId !== undefined && Number.isFinite(bodyId)
+  /*
+   * Read once through `idText`, which keeps a wide id exactly — `Number(cell)` then
+   * `String(...)` round-trips through a float, which is the loss `NeuronId` exists to avoid,
+   * and it would land on the profile fetch and the thumbnail cache key.
+   */
+  const neuronId = row ? idText(row['neuronId']) : null
 
-  const profile = useNeuronProfile(sourceId, datasetId, hasBodyId ? bodyId : undefined)
+  const profile = useNeuronProfile(sourceId, datasetId, neuronId ?? undefined, annotations)
   const data = profile.status === 'ready' ? profile.data : undefined
 
   /*
@@ -149,7 +157,7 @@ export function ProfileViewer({
 
   const transmitter = useMemo(() => (row ? transmitterReading(row) : undefined), [row])
 
-  const isPinned = hasBodyId && pinned.includes(String(bodyId))
+  const isPinned = neuronId !== null && pinned.includes(neuronId)
   const exportSource: ExportSource = {
     csv: () => (neurons ? tableToCsvParts(neurons) : []),
   }
@@ -201,9 +209,9 @@ export function ProfileViewer({
         <span className="profile__name" title={name}>
           {name}
         </span>
-        {hasBodyId && <span className="profile__id">{bodyId}</span>}
+        {neuronId !== null && <span className="profile__id">{neuronId}</span>}
         <span className="profile__spacer" />
-        {hasBodyId && (
+        {neuronId !== null && (
           <button
             type="button"
             className="profile__pin"
@@ -214,7 +222,7 @@ export function ProfileViewer({
                 ? 'Unpin. The Current port stops emitting this neuron, so downstream goes stale.'
                 : 'Pin this neuron to the Current port. Unlike paging, this marks the graph stale.'
             }
-            onClick={() => onPin(togglePin(pinned, String(bodyId)))}
+            onClick={() => onPin(togglePin(pinned, String(neuronId)))}
           >
             {isPinned ? 'Pinned' : 'Pin'}
           </button>
@@ -247,7 +255,7 @@ export function ProfileViewer({
               <NeuronThumbnail
                 sourceId={sourceId}
                 datasetId={datasetId}
-                bodyId={hasBodyId ? bodyId : 0}
+                neuronId={neuronId ?? ''}
                 size={SILHOUETTE_SIZE}
               />
               <div className="profile__shape-facts">
@@ -269,7 +277,9 @@ export function ProfileViewer({
             <NeuroglancerProfileFrame
               sourceId={sourceId}
               datasetId={datasetId}
-              bodyId={hasBodyId ? bodyId : undefined}
+              // Text: a wide root id does not survive a double, and this one becomes a
+              // neuroglancer segment. Invariant 8.
+              neuronId={idText(neuronId) ?? undefined}
               onError={onError}
             />
           )}
@@ -510,15 +520,15 @@ function PartnerList({
   rows,
   total,
 }: {
-  rows: Array<{ bodyId: number; type: string | null; weight: number; share: number }>
+  rows: readonly PartnerRow[]
   total: number
 }) {
   return (
     <div className="profile__partners">
       {rows.map((row) => (
-        <div key={row.bodyId} className="profile__partner">
-          <span className="profile__partner-name" title={String(row.bodyId)}>
-            {row.bodyId}
+        <div key={row.neuronId} className="profile__partner">
+          <span className="profile__partner-name" title={String(row.neuronId)}>
+            {row.neuronId}
             {row.type && <span className="profile__partner-type">{row.type}</span>}
           </span>
           <span className="profile__partner-weight">{formatNumber(row.weight)}</span>
@@ -590,7 +600,7 @@ function primaryName(
 ): string {
   const value = primary ? row?.[primary] : undefined
   if (value !== null && value !== undefined && value !== '') return String(value)
-  const id = row?.['bodyId']
+  const id = row?.['neuronId']
   return id === null || id === undefined ? 'Neuron' : String(id)
 }
 

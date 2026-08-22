@@ -30,6 +30,20 @@ library(igraph)
 # no equivalent in dplyr or neuprintr, written out here so the document
 # stands on its own.
 
+#' The first of `columns` holding a value per row, or which column that was.
+coda_combine <- function(df, columns, source = FALSE) {
+  out <- if (source) rep(NA_character_, nrow(df)) else rep(NA, nrow(df))
+  for (name in columns) {
+    if (!name %in% names(df)) next
+    col <- df[[name]]
+    # Null and the empty string are one absence: a blank must not stop the search.
+    fill <- is.na(out) & !is.na(col) & as.character(col) != ""
+    out[fill] <- if (source) name else col[fill]
+  }
+  out
+}
+
+
 coda_edge_list <- function(ids, prepost, min_weight, conn) {
   # Coda's Connectivity output: preId -> postId, always oriented the way the synapse
   # points, whichever way the traversal travelled.
@@ -70,12 +84,20 @@ coda_edge_list <- function(ids, prepost, min_weight, conn) {
 }
 
 
+#' Coda's `join` aggregation: distinct, first-appearance order, absences skipped.
+coda_join <- function(x) {
+  kept <- as.character(x[!is.na(x)])
+  kept <- unique(kept[kept != ""])
+  if (length(kept) == 0) NA_character_ else paste(kept, collapse = "; ")
+}
+
+
 coda_neurons <- function(df) {
-  # neuprintr publishes `bodyid`; Coda uses `bodyId` everywhere. `df$bodyId` on a tibble
-  # is NULL rather than an error, so an unrenamed frame reports zero neurons somewhere
-  # far from here.
-  if (!is.null(df) && "bodyid" %in% names(df) && !("bodyId" %in% names(df))) {
-    df <- dplyr::rename(df, bodyId = bodyid)
+  # neuprintr publishes `bodyid`; Coda calls the id column `neuronId` everywhere.
+  # `df$neuronId` on a tibble is NULL rather than an error, so an unrenamed frame
+  # reports zero neurons somewhere far from here.
+  if (!is.null(df) && "bodyid" %in% names(df) && !("neuronId" %in% names(df))) {
+    df <- dplyr::rename(df, neuronId = bodyid)
   }
   df
 }
@@ -244,7 +266,7 @@ coda_search <- function(df, query) {
     if (is.null(field)) {
       if (is.null(haystack)) {
         cols <- names(df)[vapply(df, function(x) is.character(x) || is.factor(x), TRUE)]
-        cols <- union(cols, intersect("bodyId", names(df)))
+        cols <- union(cols, intersect("neuronId", names(df)))
         haystack <- tolower(do.call(paste, c(lapply(df[cols], function(x)
           ifelse(is.na(x), "", as.character(x))), sep = " ")))
       }
@@ -327,9 +349,9 @@ coda_traverse_connectivity <- function(seed_ids, direction, hops, min_weight, co
 }
 ```
 
-```{r hemibrain}
-# ── Hemibrain ──
-hemibrain <- neuprint_connection(
+```{r hemibrain-neuprint}
+# ── Hemibrain (neuPrint) ──
+hemibrain_neuprint <- neuprint_connection(
   server = "https://neuprint.janelia.org",
   dataset = "hemibrain:v1.2.1",
   token = Sys.getenv("neuprint_token")
@@ -345,48 +367,48 @@ custom_neuprint <- neuprint_connection(
 )
 ```
 
-```{r malecns}
-# ── MaleCNS ──
-malecns <- neuprint_connection(
+```{r malecns-neuprint}
+# ── MaleCNS (neuPrint) ──
+malecns_neuprint <- neuprint_connection(
   server = "https://neuprint.janelia.org",
   dataset = "male-cns:v1.0",
   token = Sys.getenv("neuprint_token")
 )
 ```
 
-```{r manc}
-# ── MANC ──
-manc <- neuprint_connection(
+```{r manc-neuprint}
+# ── MANC (neuPrint) ──
+manc_neuprint <- neuprint_connection(
   server = "https://neuprint.janelia.org",
   dataset = "manc:v1.2.3",
   token = Sys.getenv("neuprint_token")
 )
 ```
 
-```{r optic-lobe}
-# ── Optic Lobe ──
-optic_lobe <- neuprint_connection(
+```{r optic-lobe-neuprint}
+# ── Optic Lobe (neuPrint) ──
+optic_lobe_neuprint <- neuprint_connection(
   server = "https://neuprint.janelia.org",
   dataset = "optic-lobe:v1.1",
   token = Sys.getenv("neuprint_token")
 )
 ```
 
-```{r fib-19}
-# ── FIB-19 ──
-fib_19 <- neuprint_connection(
+```{r fib-19-neuprint}
+# ── FIB-19 (neuPrint) ──
+fib_19_neuprint <- neuprint_connection(
   server = "https://neuprint.janelia.org",
   dataset = "fib19:v1.0",
   token = Sys.getenv("neuprint_token")
 )
 ```
 
-```{r mushroom-body}
-# ── Mushroom Body ──
+```{r mushroom-body-neuprint}
+# ── Mushroom Body (neuPrint) ──
 # NOTE: This node tracks the latest release and the exporter could not
 # resolve which that is, so only the family is named. Set `dataset` to the
 # exact release you mean before sharing the document.
-mushroom_body <- neuprint_connection(
+mushroom_body_neuprint <- neuprint_connection(
   server = "https://neuprint.janelia.org",
   dataset = "mushroombody",
   token = Sys.getenv("neuprint_token")
@@ -408,7 +430,7 @@ dataset_generic <- neuprint_connection(
 # the rows are not in this document. Point this at your copy of
 # "annotations.csv".
 upload_table <- read_csv("annotations.csv", show_col_types = FALSE)
-upload_table <- upload_table |> rename(bodyId = `root_id`)
+upload_table <- upload_table |> rename(neuronId = `root_id`)
 upload_table <- upload_table |> mutate(across(all_of(c("cluster")), as.character))
 ```
 
@@ -428,7 +450,7 @@ find_neurons <- neuprint_search(
   "LC.*",
   field = "type",
   meta = TRUE,
-  conn = hemibrain
+  conn = hemibrain_neuprint
 ) |> coda_neurons()
 # NOTE: neuprint_search narrows on one field, so Coda's other criteria are
 # applied to the result rather than in the query. Same rows, one larger
@@ -439,8 +461,8 @@ find_neurons <- find_neurons |> head(200)
 
 ```{r input-ids}
 # ── Input IDs ──
-ids <- c(1001, 1002, 1003)
-input_ids <- neuprint_get_meta(ids, conn = hemibrain) |> coda_neurons()
+ids <- c("1001", "1002", "1003")
+input_ids <- neuprint_get_meta(ids, conn = hemibrain_neuprint) |> coda_neurons()
 ```
 
 ```{r ids-from-label}
@@ -450,7 +472,7 @@ ids_from_label <- neuprint_search(
   paste0("^", paste(gsub("([.\\\\^$|()\\[\\]{}*+?])", "\\\\\\\\\\1", labels), collapse = "$|^"), "$"),
   field = "type",
   meta = TRUE,
-  conn = hemibrain
+  conn = hemibrain_neuprint
 ) |> coda_neurons()
 ids_from_label <- ids_from_label |> filter(status == "Traced")
 ```
@@ -461,9 +483,9 @@ ids_from_label <- ids_from_label |> filter(status == "Traced")
 # locally. On male-CNS that is around 165,000 rows; expect this chunk to
 # take a few seconds.
 explore_all <- neuprint_fetch_custom(
-  "MATCH (n:Neuron) RETURN n.bodyId AS bodyId, n.type AS type, n.instance AS instance,
+  "MATCH (n:Neuron) RETURN n.bodyId AS neuronId, n.type AS type, n.instance AS instance,
    n.status AS status, n.pre AS pre, n.post AS post",
-  conn = hemibrain
+  conn = hemibrain_neuprint
 )
 
 explore_hits <- coda_search(explore_all, "status!=Traced pre>100")
@@ -472,7 +494,7 @@ explore_hits <- coda_search(explore_all, "status!=Traced pre>100")
 # instead.
 explore_hits <- explore_hits |> head(500)
 
-explore_selected <- explore_all |> filter(bodyId %in% c(1001, 1005))
+explore_selected <- explore_all |> filter(neuronId %in% c(1001, 1005))
 ```
 
 ```{r cypher}
@@ -481,7 +503,7 @@ cypher <- neuprint_fetch_custom(
   "MATCH (n:Neuron)
   WHERE n.pre > 1000
   RETURN n.bodyId, n.type",
-  conn = hemibrain
+  conn = hemibrain_neuprint
 )
 ```
 
@@ -491,24 +513,24 @@ cypher <- neuprint_fetch_custom(
 # the node sends.
 roi_completeness <- neuprint_fetch_custom(
   "MATCH (n:Meta) RETURN n.roiInfo",
-  conn = hemibrain
+  conn = hemibrain_neuprint
 )
 ```
 
 ```{r roi-connectivity}
 # ── ROI Connectivity ──
 roi_connectivity_links <- neuprint_ROI_connectivity(
-  rois = neuprint_ROIs(conn = hemibrain),
-  conn = hemibrain
+  rois = neuprint_ROIs(conn = hemibrain_neuprint),
+  conn = hemibrain_neuprint
 )
 roi_connectivity_matrix_df <- roi_connectivity_links
 ```
 
 ```{r description}
 # ── Description ──
-# TODO: This card shows the dataset's published description and citation.
-# Read it with neuprint_get_meta() / neuprint_datasets() if you need it
-# here.
+# NOTE: This card shows the dataset's published description and citation,
+# which is prose rather than a step. Read it with neuprint_get_meta() /
+# neuprint_datasets() if you need it here.
 ```
 
 ```{r dataset-summary}
@@ -517,9 +539,9 @@ roi_connectivity_matrix_df <- roi_connectivity_links
 # every body is the equivalent and is a large download — expect this chunk
 # to take a while.
 dataset_summary_neurons <- neuprint_fetch_custom(
-  "MATCH (n:Neuron) RETURN n.bodyId AS bodyId, n.type AS type,
+  "MATCH (n:Neuron) RETURN n.bodyId AS neuronId, n.type AS type,
    n.status AS status, n.pre AS pre, n.post AS post",
-  conn = hemibrain
+  conn = hemibrain_neuprint
 )
 
 dataset_summary_neurons <- dataset_summary_neurons |> filter(status == "Traced")
@@ -534,31 +556,31 @@ dataset_summary_top_types
 # ── ROIs ──
 # NOTE: Region meshes are display surfaces published for visualization — a
 # volume measured off one is an approximation rather than a figure to quote.
-rois_rois <- neuprint_ROIs(superLevel = FALSE, conn = hemibrain)
+rois_rois <- neuprint_ROIs(superLevel = FALSE, conn = hemibrain_neuprint)
 
 # One request each. nat::plot3d() draws them once read.
-# rois_meshes <- lapply(rois_rois, neuprint_ROI_mesh, conn = hemibrain)
+# rois_meshes <- lapply(rois_rois, neuprint_ROI_mesh, conn = hemibrain_neuprint)
 rois_rois
 ```
 
 ```{r connectivity}
 # ── Connectivity ──
 connectivity <- coda_edge_list(
-  find_neurons$bodyId,
+  find_neurons$neuronId,
   prepost = "POST",
   min_weight = 5,
-  conn = hemibrain
+  conn = hemibrain_neuprint
 )
 ```
 
 ```{r connectivity-2}
 # ── Connectivity ──
 connectivity_2 <- coda_traverse_connectivity(
-  find_neurons$bodyId,
+  find_neurons$neuronId,
   direction = "both",
   hops = 3,
   min_weight = 10,
-  conn = hemibrain
+  conn = hemibrain_neuprint
 )
 ```
 
@@ -567,13 +589,13 @@ connectivity_2 <- coda_traverse_connectivity(
 # NOTE: These counts nest: a synapse in LO(R) is counted again in its parent
 # OL(R). Filter to neuprint_ROIs(superLevel = FALSE) before summing, or the
 # totals roughly double.
-roi_counts <- neuprint_get_roiInfo(find_neurons$bodyId, conn = hemibrain) |>
+roi_counts <- neuprint_get_roiInfo(find_neurons$neuronId, conn = hemibrain_neuprint) |>
   coda_neurons()
 ```
 
 ```{r skeletons}
 # ── Skeletons ──
-skeletons <- neuprint_read_neurons(head(find_neurons$bodyId, 20), conn = hemibrain)
+skeletons <- neuprint_read_neurons(head(find_neurons$neuronId, 20), conn = hemibrain_neuprint)
 ```
 
 ```{r meshes}
@@ -585,13 +607,13 @@ skeletons <- neuprint_read_neurons(head(find_neurons$bodyId, 20), conn = hemibra
 
 ```{r synapses}
 # ── Synapses ──
-synapses <- neuprint_get_synapses(find_neurons$bodyId, prepost = "PRE", conn = hemibrain)
+synapses <- neuprint_get_synapses(find_neurons$neuronId, prepost = "PRE", conn = hemibrain_neuprint)
 ```
 
 ```{r scatter-plot}
 # ── Scatter Plot ──
 scatter_plot_out <- find_neurons
-scatter_plot_selected <- scatter_plot_out |> filter(`bodyId` %in% c(1001))
+scatter_plot_selected <- scatter_plot_out |> filter(`neuronId` %in% c(1001))
 
 ggplot(scatter_plot_out, aes(x = `pre`, y = `post`)) +
   geom_point(alpha = 0.8) +
@@ -601,16 +623,30 @@ ggplot(scatter_plot_out, aes(x = `pre`, y = `post`)) +
   theme_minimal()
 ```
 
+```{r combine-columns}
+# ── Combine Columns ──
+combine_columns <- find_neurons
+combine_columns[["label"]] <- coda_combine(find_neurons, c("type", "instance"))
+combine_columns[["label_from"]] <- coda_combine(find_neurons, c("type", "instance"), source = TRUE)
+```
+
+```{r group-by-df}
+# ── Group By ──
+group_by_df <- find_neurons |>
+  group_by(`type`) |>
+  summarise(n = n(), `join_instance` = coda_join(`instance`), .groups = "drop")
+```
+
 ```{r profile}
 # ── Profile ──
 profile_out <- find_neurons
-profile_current <- profile_out |> filter(bodyId %in% c(1001))
+profile_current <- profile_out |> filter(neuronId %in% c(1001))
 
 profile <- coda_profile(
   c(1001),
   min_weight = 1,
   top_n = 10,
-  conn = hemibrain
+  conn = hemibrain_neuprint
 )
 
 profile_upstream_types <- profile$upstream_types
@@ -632,9 +668,9 @@ profile_upstream_types
 ```{r adjacency}
 # ── Adjacency ──
 adjacency <- neuprint_get_adjacency_matrix(
-  inputids = find_neurons$bodyId,
-  outputids = ids_from_label$bodyId,
-  conn = hemibrain
+  inputids = find_neurons$neuronId,
+  outputids = ids_from_label$neuronId,
+  conn = hemibrain_neuprint
 )
 # NOTE: Coda groups this matrix by cell type. neuprint_get_adjacency_matrix
 # is per body, so the roll-up is done here rather than in the query.
@@ -646,11 +682,11 @@ adjacency <- neuprint_get_adjacency_matrix(
 # additionally ranks them by their weakest link and keeps the strongest —
 # that ranking is not reproduced, so this is the unranked set.
 paths_paths <- neuprint_get_paths(
-  find_neurons$bodyId,
-  ids_from_label$bodyId,
+  find_neurons$neuronId,
+  ids_from_label$neuronId,
   n = 3,
   weightT = 10,
-  conn = hemibrain
+  conn = hemibrain_neuprint
 )
 ```
 
@@ -722,7 +758,7 @@ nblast_df_2 <- nblast(
 plot3d(skeletons)
 
 # NOTE: Nothing is picked in the viewer, so Selected is empty.
-n_3d_view <- tibble(bodyId = numeric(0))
+n_3d_view <- tibble(neuronId = numeric(0))
 ```
 
 ```{r sort-df}
@@ -801,11 +837,9 @@ cut_tree_2_tree <- linkage_tree
 cut_tree_2_tree_clusters <- cl_
 ```
 
-```{r group-by-df}
-# ── Group By ──
-group_by_df <- sample_df |>
-  group_by(`preType`, `postType`) |>
-  summarise(n = n(), `sum_weight` = sum(`weight`), .groups = "drop")
+```{r deduplicate}
+# ── Deduplicate ──
+deduplicate <- sample_df[!duplicated(sample_df[c("preType", "postType")], fromLast = TRUE), ]
 ```
 
 ```{r dendrogram}
@@ -833,7 +867,7 @@ dendrogram_selected <- tibble(
 ```{r clusters-to-neurons}
 # ── Clusters to Neurons ──
 # NOTE: Coda matches labels as text, so both sides go through a character
-# key — a tree labelled by body id carries "722817260" against a numeric
+# key — a tree labelled by neuron id carries "722817260" against a numeric
 # column, and joining those directly matches nothing.
 clusters_to_neurons <- find_neurons |>
   mutate(key_ = as.character(`type`)) |>
@@ -848,14 +882,33 @@ clusters_to_neurons <- find_neurons |>
   select(-key_)
 ```
 
+```{r group-by-df-2}
+# ── Group By ──
+group_by_df_2 <- deduplicate |>
+  group_by(`preType`, `postType`) |>
+  summarise(n = n(), `sum_weight` = sum(`weight`), .groups = "drop")
+```
+
+```{r selected-to-neurons}
+# ── Selected to Neurons ──
+# NOTE: No neuron table is wired on the canvas, so the labels are read as
+# neuron ids. They stay `numeric` rather than becoming `integer`: R integers
+# are 32-bit and a neuron id can exceed that, where a double is exact to
+# 2^53 — which is Coda's own representation.
+selected_to_neurons <- dendrogram_selected |>
+  mutate(neuronId = suppressWarnings(as.numeric(`label`))) |>
+  filter(!is.na(neuronId)) |>
+  select(neuronId, everything(), -`label`)
+```
+
 ```{r select-columns}
 # ── Select Columns ──
-select_columns <- group_by_df |> select(all_of(c("preType", "postType", "sum_weight")))
+select_columns <- group_by_df_2 |> select(all_of(c("preType", "postType", "sum_weight")))
 ```
 
 ```{r bar-chart}
 # ── Bar Chart ──
-bar_chart <- group_by_df
+bar_chart <- group_by_df_2
 
 ggplot(bar_chart, aes(x = `preType`, y = `sum_weight`)) +
   geom_col() +
@@ -866,7 +919,7 @@ ggplot(bar_chart, aes(x = `preType`, y = `sum_weight`)) +
 
 ```{r table-df}
 # ── Table ──
-table_df_out <- group_by_df
+table_df_out <- group_by_df_2
 table_df_filtered <- dplyr::filter(
   table_df_out,
   (!is.na(.data[["sum_weight"]]) & .data[["sum_weight"]] >= 10),
@@ -882,7 +935,7 @@ table_df_filtered
 
 ```{r build-network}
 # ── Build Network ──
-links <- group_by_df |>
+links <- group_by_df_2 |>
   group_by(`preType`, `postType`) |>
   summarise(weight = sum(`sum_weight`), edges = n(), .groups = "drop")
 links <- links |> filter(weight >= 5)
@@ -893,18 +946,6 @@ build_network <- graph_from_data_frame(
 )
 ```
 
-```{r selected-to-neurons}
-# ── Selected to Neurons ──
-# NOTE: No neuron table is wired on the canvas, so the labels are read as
-# body ids. They stay `numeric` rather than becoming `integer`: R integers
-# are 32-bit and a body id can exceed that, where a double is exact to 2^53
-# — which is Coda's own representation.
-selected_to_neurons <- dendrogram_selected |>
-  mutate(bodyId = suppressWarnings(as.numeric(`label`))) |>
-  filter(!is.na(bodyId)) |>
-  select(bodyId, everything(), -`label`)
-```
-
 ```{r join}
 # ── Join ──
 # NOTE: Coda keeps the first matching row from the right table, so a
@@ -912,7 +953,7 @@ selected_to_neurons <- dendrogram_selected |>
 # reproduces that — without it the join returns every matching pair.
 join <- select_columns |>
   left_join(
-    group_by_df |> distinct(`preType`, .keep_all = TRUE),
+    group_by_df_2 |> distinct(`preType`, .keep_all = TRUE),
     by = join_by(`preType` == `preType`),
     suffix = c("", "_r")
   )

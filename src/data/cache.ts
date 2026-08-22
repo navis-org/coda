@@ -100,8 +100,23 @@ export async function cacheGet<T>(
   key: string,
   options: CacheGetOptions = {},
 ): Promise<T | undefined> {
+  return (await cacheGetEntry<T>(key, options))?.value
+}
+
+/**
+ * The same read, with **when the value was stored**.
+ *
+ * The age is the half a caller cannot reconstruct: a hit and a fresh fetch are indistinguishable
+ * from the value alone, so anything wanting to say "this is a month-old copy of a base somebody
+ * edits daily" has to be told. It was recorded from the start (`Envelope.savedAt`) and reachable
+ * from nowhere.
+ */
+export async function cacheGetEntry<T>(
+  key: string,
+  options: CacheGetOptions = {},
+): Promise<{ value: T; savedAt: number } | undefined> {
   const held = memory.get(key)
-  if (fresh(held, options)) return held!.value as T
+  if (fresh(held, options)) return { value: held!.value as T, savedAt: held!.savedAt }
 
   const stored = await request<Envelope>(
     (store) => store.get(key) as IDBRequest<Envelope>,
@@ -110,7 +125,7 @@ export async function cacheGet<T>(
   if (!fresh(stored, options)) return undefined
   // Promote into memory so a second reader in the same session skips IndexedDB entirely.
   memory.set(key, stored!)
-  return stored!.value as T
+  return { value: stored!.value as T, savedAt: stored!.savedAt }
 }
 
 /**

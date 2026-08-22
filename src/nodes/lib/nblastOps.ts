@@ -7,10 +7,16 @@
  * side of the seam is one call.
  */
 
-import type { TableSchema } from '../../core/types'
-import { column, tableSchema } from '../../core/types'
+import type { DType, TableSchema } from '../../core/types'
+import { column, findColumn, tableSchema } from '../../core/types'
 import type { CellValue, MatrixValue, SkeletonsValue, TableValue } from '../../core/values'
-import { getColumn, isSkeletonsValue, makeMatrix, skeletonPointCount, tableFromRows } from '../../core/values'
+import {
+  getColumn,
+  isSkeletonsValue,
+  makeMatrix,
+  skeletonPointCount,
+  tableFromRows,
+} from '../../core/values'
 import type { Value } from '../../core/values'
 import type { NblastKnnResult, NblastResult, PointSet } from '../../pyodide/nblast'
 
@@ -88,7 +94,7 @@ export function dotpropSetFrom(skeletons: SkeletonsValue): PointSet {
 /**
  * What to call each row.
  *
- * Body ids unless a column was picked, and body ids again wherever that column is empty — a
+ * Neuron ids unless a column was picked, and neuron ids again wherever that column is empty — a
  * neuron with no type is still a neuron, and a blank row label in a heatmap is a row nobody
  * can identify rather than a row with nothing to say.
  */
@@ -96,7 +102,7 @@ export function nblastLabels(skeletons: SkeletonsValue, column: string | undefin
   const values = column ? getColumn(skeletons.attributes, column) : undefined
   return skeletons.items.map((item, i) => {
     const cell = values?.[i]
-    return cell === null || cell === undefined || cell === '' ? String(item.bodyId) : String(cell)
+    return cell === null || cell === undefined || cell === '' ? item.id : String(cell)
   })
 }
 
@@ -140,7 +146,7 @@ export function checkNblastSize(rows: number, cols: number): void {
  *
  * Both NBLAST nodes ask the same four questions of their inputs — is this a skeleton set, is
  * it empty, is it over the ceiling, is it in nanometres — and asked at each node they were the
- * same twenty lines twice, including the messages. The precedent is `bodyIdsFrom` in
+ * same twenty lines twice, including the messages. The precedent is `neuronIdsFrom` in
  * `query/morphology.ts`, which folds the identical three concerns for the three fetch nodes.
  *
  * The units check is the one that earns the sharing: it is the guard whose absence produces a
@@ -208,14 +214,29 @@ export function nblastMatrix(
  * The Python emitter renames navis's frame to these, or every downstream cell in the notebook
  * would be addressing columns that are not there.
  */
-export function knnSchema(withLabels: boolean): TableSchema {
+export function knnSchema(withLabels: boolean, idType: DType = 'i64'): TableSchema {
   return tableSchema(
-    column('queryId', 'i64'),
-    column('targetId', 'i64'),
+    column('queryId', idType),
+    column('targetId', idType),
     column('rank', 'i64'),
     column('score', 'f64'),
     ...(withLabels ? [column('queryLabel', 'str'), column('targetLabel', 'str')] : []),
   )
+}
+
+/**
+ * What dtype an id column built from this set should be: whatever its own `neuronId` already is.
+ *
+ * The ids are copied out of the attribute table rather than re-derived from the geometry, so
+ * mirroring the dtype is what keeps `queryId` joinable against the `neuronId` it came from and
+ * comparable the same way. Deciding here instead would mean choosing between rounding a wide id
+ * back into an `i64` and handing every neuPrint user a text column where a number was —
+ * which changes what a bare `527536` means in a Table filter, and how the column sorts.
+ *
+ * `i64` for a set carrying no `neuronId` at all, which is what the node advertises unwired.
+ */
+export function idTypeOf(schema: TableSchema | undefined): DType {
+  return findColumn(schema, 'neuronId')?.dtype ?? 'i64'
 }
 
 /**
@@ -231,10 +252,18 @@ export function knnSchema(withLabels: boolean): TableSchema {
  */
 export function knnTable(
   result: NblastKnnResult,
-  queryIds: number[],
-  targetIds: number[],
+  query: SkeletonsValue,
+  targets: SkeletonsValue,
   labels?: { query: string[]; target: string[] },
 ): TableValue {
+  /*
+   * The ids come out of each side's attribute table, index-aligned with its geometry, rather
+   * than off `SkeletonGeometry.id`. Both name the same neuron; the column is the one the source
+   * actually published, so a `queryId` lands in this table as the same *value and dtype* the
+   * `neuronId` upstream had — which is what a join, a filter and a sort downstream all rely on.
+   */
+  const queryIds = getColumn(query.attributes, 'neuronId')
+  const targetIds = getColumn(targets.attributes, 'neuronId')
   const rows: Record<string, CellValue>[] = []
 
   for (let r = 0; r < result.rows; r++) {
@@ -253,5 +282,5 @@ export function knnTable(
       })
     }
   }
-  return tableFromRows(knnSchema(labels !== undefined), rows)
+  return tableFromRows(knnSchema(labels !== undefined, idTypeOf(query.attributes.schema)), rows)
 }

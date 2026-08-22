@@ -83,7 +83,7 @@ describe('Paths output shape', () => {
       declared?.network?.kind === 'network'
         ? declared.network.edgeSchema?.columns.map((c) => c.name)
         : undefined
-    expect(nodeColumns).toEqual(['id', 'type', 'bodyId', 'role', 'hop', 'paths'])
+    expect(nodeColumns).toEqual(['id', 'type', 'neuronId', 'role', 'hop', 'paths'])
     expect(edgeColumns).toEqual(['source', 'target', 'weight', 'pairs', 'paths', 'hop'])
 
     const { network, table } = await run()
@@ -189,12 +189,12 @@ describe('Collapse types', () => {
     const { network } = await run({ maxHops: 3, minWeight: 1, topN: 5, collapseTypes: true })
     const ids = getColumn(network.nodes, 'id').map(String)
     expect(ids).toContain('LC4')
-    // A type-level id is a name, never a body id.
+    // A type-level id is a name, never a neuron id.
     expect(ids.every((id) => !/^\d+$/.test(id))).toBe(true)
     // `pairs` is how many neuron-to-neuron connections were merged; above one is the whole
     // point of collapsing, and would be flat 1 if the aggregation had not happened.
     expect(Math.max(...getColumn(network.edges, 'pairs').map(Number))).toBeGreaterThan(1)
-    expect(getColumn(network.nodes, 'bodyId').every((id) => id === null)).toBe(true)
+    expect(getColumn(network.nodes, 'neuronId').every((id) => id === null)).toBe(true)
   })
 
   it('switched off, traces individual neurons instead', async () => {

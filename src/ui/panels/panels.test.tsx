@@ -141,6 +141,51 @@ describe('the inspector', () => {
     fireEvent.keyDown(window, { key: 'I', shiftKey: true })
     expect(inspector()).toBeNull()
   })
+
+  it('summarises a table as text rather than drawing one', async () => {
+    /*
+     * This panel is 320 × 300, the smallest surface a viewer is drawn on. A 60-column annotation
+     * table there was a grid showing about three columns behind a sideways scrollbar — so it was
+     * both unreadable and the most expensive thing on screen, laid out again on every change of
+     * selection. Turned ninety degrees the whole schema fits.
+     *
+     * A generous page size is set deliberately: the node's own setting must not bring the grid
+     * back, which is the half a small one would not prove.
+     */
+    render(<App />)
+    fireEvent.click(inspectorToggle())
+
+    const store = useGraphStore.getState()
+    const ds = store.addNode('neuron.dataset', { x: 0, y: 0 })
+    const find = useGraphStore.getState().addNode('neuron.findNeurons', { x: 200, y: 0 })
+    const view = useGraphStore.getState().addNode('out.table', { x: 400, y: 0 })
+    act(() => {
+      const s = useGraphStore.getState()
+      s.setParam(ds, 'dataset', 'optic-lobe-mini')
+      s.connect({ source: ds, sourceHandle: 'dataset', target: find, targetHandle: 'dataset' })
+      s.connect({ source: find, sourceHandle: 'neurons', target: view, targetHandle: 'in' })
+      s.setParam(view, 'pageSize', 500)
+    })
+    await act(async () => {
+      await useGraphStore.getState().runAll()
+    })
+    act(() => {
+      useGraphStore.getState().setSelection([view])
+    })
+
+    const panel = inspector()!
+    // No grid at all — not a short one. `1–1 of 58,340` under a one-row table was the report
+    // that this replaced: a table shrunk is still a table.
+    expect(panel.querySelectorAll('.data-table').length).toBe(0)
+
+    // One line per column, each naming its type, and the first row's value beside it.
+    const rows = panel.querySelectorAll('.table-summary__row')
+    const table = useGraphStore.getState().nodeOutput(view, 'out')
+    const columns = table && 'schema' in table ? table.schema.columns.length : 0
+    expect(columns).toBeGreaterThan(3)
+    expect(rows.length).toBe(columns)
+    expect(panel.textContent).toContain('neuronId')
+  })
 })
 
 describe('the minimap', () => {

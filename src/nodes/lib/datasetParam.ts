@@ -9,7 +9,7 @@
 
 import type { CodaType } from '../../core/types'
 import { datasetRef } from '../../core/types'
-import type { DatasetValue, Value } from '../../core/values'
+import type { DatasetAnnotations, DatasetValue, Value } from '../../core/values'
 import { isDatasetValue } from '../../core/values'
 import type {
   DataSource,
@@ -17,7 +17,8 @@ import type {
   SourceCapabilities,
   SourceSchemas,
 } from '../../data/source'
-import { CANONICAL_SCHEMAS, allSources, getSource } from '../../data/source'
+import { withAnnotations } from '../../data/annotations/schema'
+import { CANONICAL_SCHEMAS, allSources, capabilityOf, getSource } from '../../data/source'
 
 /** Source referenced by a dataset-typed socket, if it is registered. */
 export function sourceFromType(type: CodaType | undefined): DataSource | undefined {
@@ -38,8 +39,8 @@ export function sourceSupports(
   ctx: { inputs: Record<string, CodaType | undefined> },
   capability: keyof SourceCapabilities,
 ): boolean {
-  const source = sourceFromType(ctx.inputs['dataset'])
-  return source ? source.capabilities[capability] : true
+  const type = ctx.inputs['dataset']
+  return capabilityOf(sourceFromType(type), datasetRef(type)?.datasetId, capability)
 }
 
 /** The source behind a Dataset socket, for a message that names it. */
@@ -61,8 +62,10 @@ export function schemasFromType(type: CodaType | undefined): SourceSchemas {
   const ref = datasetRef(type)
   const source = sourceFromType(type)
   if (!source) return CANONICAL_SCHEMAS
-  return ref?.datasetId ? schemasForDataset(source, ref.datasetId) : source.schemas
+  const schemas = ref?.datasetId ? schemasById(source, ref.datasetId) : source.schemas
+  return withAnnotations(schemas, type?.kind === 'dataset' ? type.annotations : undefined)
 }
+
 
 /**
  * The same narrowing, from a resolved source and dataset id rather than from a type.
@@ -71,7 +74,24 @@ export function schemasFromType(type: CodaType | undefined): SourceSchemas {
  * and a node that declares one schema at edit time and builds another at run time breaks
  * invariant 3 in the one direction no type check catches. Both halves go through here.
  */
-export function schemasForDataset(source: DataSource, datasetId: string): SourceSchemas {
+export function schemasForDataset(source: DataSource, dataset: DatasetValue): SourceSchemas {
+  /*
+   * Takes the whole handle, not an id, so the annotation substitution cannot be skipped. It took
+   * `DatasetValue | string` for a moment and one caller duly passed `dataset.datasetId` while
+   * holding `dataset` — which is the shape of the bug this function's own comment describes,
+   * reintroduced by the widening meant to fix it. A union here is an invitation.
+   */
+  return withAnnotations(schemasById(source, dataset.datasetId), dataset.annotations?.table.schema)
+}
+
+/**
+ * A source's schemas for a dataset id, before any annotation substitution.
+ *
+ * The type half's building block: `schemasFromType` reads the chain off the *type* (where it is
+ * a `TableSchema`) rather than off a value, so it substitutes itself. Nothing else should call
+ * this — a caller with a `DatasetValue` wants `schemasForDataset`.
+ */
+function schemasById(source: DataSource, datasetId: string): SourceSchemas {
   return source.schemasFor?.(datasetId) ?? source.schemas
 }
 
@@ -113,3 +133,26 @@ export function requireDataset(value: Value | undefined, portLabel = 'Dataset'):
 
 /** Enum option list for a "no filter" choice. */
 export const ANY_OPTION = { value: '', label: 'Any' }
+
+/**
+ * The dataset half of a source request: the id, and the labels that go with it.
+ *
+ * **Both together, deliberately.** Every request on the seam starts `datasetId: dataset.datasetId`
+ * and a wired chain has to ride alongside it — so a call site that spreads this cannot supply one
+ * without the other. Passing the annotations separately is how five call sites came to advertise
+ * the chain's columns at edit time and return the datastack's rows at run time: invariant 3
+ * across a seam, silent, and caught only by reading every caller.
+ *
+ * The deeper fix is for these methods to take the `DatasetValue` itself rather than an id plus
+ * fields peeled off it, which would make the omission unrepresentable. That is a change to every
+ * source and every query node; this is the shape that makes the pair hard to split meanwhile.
+ */
+export function datasetRequest(dataset: DatasetValue): {
+  datasetId: string
+  annotations?: DatasetAnnotations
+} {
+  return {
+    datasetId: dataset.datasetId,
+    ...(dataset.annotations ? { annotations: dataset.annotations } : {}),
+  }
+}

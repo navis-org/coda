@@ -18,6 +18,7 @@
 import type { ComponentType } from 'react'
 
 import type { GraphNode } from '../../core/graph'
+import type { Value } from '../../core/values'
 import type { InferContext, ParamValue } from '../../core/node'
 import { DATASET_FAMILIES } from '../../nodes/lib/datasetFamilies'
 import { ExploreBody } from '../explore/ExploreBody'
@@ -35,6 +36,16 @@ export interface NodeBodyProps {
   node: GraphNode
   /** Resolves the node's column params and carries its resolved input types. */
   ctx: InferContext
+  /**
+   * The values on this node's input ports, where a run has produced them.
+   *
+   * The same thing `ValuePreview` is handed, and for a related reason — a body that draws data
+   * rather than configuration needs what actually arrived, not only its type. Explore is the case
+   * that forced it: a `DatasetValue` carries the annotation chain's *table*, where the dataset
+   * *type* carries only its schema, and on a datastack that publishes no neuron table that table
+   * is the neuron list. Undefined per port until whatever feeds it has run.
+   */
+  inputValues?: Record<string, Value | undefined>
   /** True inside the node card, false in the full-size overlay. */
   compact: boolean
   setParam: (paramId: string, value: ParamValue) => void
@@ -77,7 +88,7 @@ export const NODE_BODIES: Record<string, NodeBodyEntry> = {
   'neuron.idsFromLabel': { Component: IdsFromLabelBody, width: 300 },
   /*
    * The same width as its sibling above, and for the same reason: the IDs field is a paste
-   * target, and a list of body ids wrapped into a 232px box is unreadable. Not `expandable` —
+   * target, and a list of neuron ids wrapped into a 232px box is unreadable. Not `expandable` —
    * the readout is one line and the fields are two.
    */
   'neuron.inputIds': { Component: InputIdsBody, width: 300 },

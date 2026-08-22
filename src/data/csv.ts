@@ -12,7 +12,7 @@
  */
 
 import type { ColumnSchema, DType } from '../core/types'
-import { column, tableSchema } from '../core/types'
+import { column, tableSchema, uniqueName } from '../core/types'
 import type { ColumnData, TableValue } from '../core/values'
 import { makeTable } from '../core/values'
 
@@ -167,7 +167,7 @@ function looksNumeric(text: string): boolean {
  * An integer only when the text survives a round trip.
  *
  * `007` and `0012` are how a zero-padded code is written, and reading them as 7 and 12 loses
- * the thing that made them identifiers; body ids past `Number.MAX_SAFE_INTEGER` come back as a
+ * the thing that made them identifiers; neuron ids past `Number.MAX_SAFE_INTEGER` come back as a
  * different number entirely. Both round-trip badly, so both stay text — which is lossless, and
  * is why the `Text columns` override never has to rescue a value, only a *reading* of one.
  */
@@ -242,15 +242,17 @@ function toCell(raw: string, dtype: DType): string | number | boolean | null {
   }
 }
 
-/** `type`, `type_2`, `type_3`… — the suffixing `joinedColumns` and the wide pivot both use. */
+/**
+ * `type`, `type_2`, `type_3`… — Coda's own suffixing, applied to somebody's header row.
+ *
+ * A blank cell becomes `col_n` first, because `to_csv()` with an index writes a leading empty
+ * name and every such export would otherwise collide on `''`. The deduplication itself is
+ * `uniqueName`, which this used to hand-roll by counting occurrences — and counting turns
+ * `a, a, a_2` into `a, a_2, a_2`, a collision made by the function that exists to prevent one.
+ */
 function uniqueNames(raw: string[]): string[] {
-  const seen = new Map<string, number>()
-  return raw.map((name, i) => {
-    const base = name.trim() || `col_${i + 1}`
-    const n = (seen.get(base) ?? 0) + 1
-    seen.set(base, n)
-    return n === 1 ? base : `${base}_${n}`
-  })
+  const taken = new Set<string>()
+  return raw.map((name, i) => uniqueName(taken, name.trim() || `col_${i + 1}`))
 }
 
 // ---------------------------------------------------------------------------
@@ -269,7 +271,7 @@ function uniqueNames(raw: string[]): string[] {
  */
 export function parseDelimited(text: string): ParsedTable {
   // A BOM survives every editor and would otherwise become part of the first column's name,
-  // so a file saved from Excel has a `bodyId` nothing matches.
+  // so a file saved from Excel has a first column no picker can find.
   const body = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text
 
   const delimiter = detectDelimiter(body)

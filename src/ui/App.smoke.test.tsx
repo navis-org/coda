@@ -84,7 +84,7 @@ describe('App', () => {
     // Sockets advertise their inferred type in the tooltip. Both ends of the
     // FindNeurons → Connectivity link report the same resolved schema, which is exactly
     // what edit-time propagation is supposed to achieve.
-    const sockets = screen.getAllByTitle(/Neurons: Neurons\{bodyId, type, instance/)
+    const sockets = screen.getAllByTitle(/Neurons: Neurons\{neuronId, type, instance/)
     expect(sockets.length).toBeGreaterThanOrEqual(2)
   })
 

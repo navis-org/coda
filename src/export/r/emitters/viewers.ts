@@ -218,11 +218,11 @@ registerEmitter('out.viewer3d', (ctx) => {
 
   const lines = [`plot3d(${wired.join(', ')})`, '']
   if (selection.length > 0) {
-    lines.push(`${selected} <- tibble(bodyId = ${rVector(selection)})`)
+    lines.push(`${selected} <- tibble(neuronId = ${rVector(selection)})`)
   } else {
     lines.push(
       ...ctx.note('Nothing is picked in the viewer, so Selected is empty.'),
-      `${selected} <- tibble(bodyId = numeric(0))`,
+      `${selected} <- tibble(neuronId = numeric(0))`,
     )
   }
   return lines
@@ -267,10 +267,12 @@ registerEmitter('out.neuroglancer', (ctx) => {
   )
 })
 
+// A note rather than a TODO — see the Python emitter, which records why at length: the card is
+// prose with no outputs, and it is on every published dataset node by default.
 registerEmitter('dataset.description', (ctx) => {
-  return ctx.todo(
-    "This card shows the dataset's published description and citation. Read it with " +
-      'neuprint_get_meta() / neuprint_datasets() if you need it here.',
+  return ctx.note(
+    "This card shows the dataset's published description and citation, which is prose rather " +
+      'than a step. Read it with neuprint_get_meta() / neuprint_datasets() if you need it here.',
   )
 })
 
@@ -293,7 +295,7 @@ registerEmitter('out.datasetSummary', (ctx) => {
     ),
     `${neurons} <- neuprint_fetch_custom(`,
     // Aliased: neuprint_fetch_custom names columns after the RETURN expressions.
-    `  "MATCH (n:Neuron) RETURN n.bodyId AS bodyId, n.type AS type,`,
+    `  "MATCH (n:Neuron) RETURN n.bodyId AS neuronId, n.type AS type,`,
     `   n.status AS status, n.pre AS pre, n.post AS post",`,
     `  conn = ${conn}`,
     `)`,

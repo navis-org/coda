@@ -81,7 +81,7 @@ bundled corepack, so pnpm was installed with `npm i -g pnpm`.
    vanished, so the ordinary `is gone — using "x"` names a fallback that will not be taken,
    which is a false statement rather than a loud one. **A default was never a decision:** an
    optional picker still holding the value the definition declared has no drift to report,
-   which is what lets `out.scatter` declare `idColumn: 'bodyId'` — configuring nothing on a
+   which is what lets `out.scatter` declare `idColumn: 'neuronId'` — configuring nothing on a
    neuron table, meaning row positions elsewhere — without a badge either way. A column
    somebody _chose_ is still reported, optional or not: `out.network`'s link label drawing
    nothing is exactly the silent failure the check exists for.
@@ -93,6 +93,160 @@ bundled corepack, so pnpm was installed with `npm i -g pnpm`.
    compares snapshots by identity. `Scheduler.info()` returns a shared frozen `IDLE` object
    for exactly this reason; returning `{ state: 'idle' }` per call caused an infinite-loop
    warning. Select primitives, or memoise.
+
+8. **A neuron id crosses the `DataSource` seam as text, never as a number.** `NeuronId` in
+   `data/source.ts` is a `string` of decimal digits, and every request field that names neurons
+   (`neuronIds`, `sourceIds`, `targetIds`, `neuronId`) is typed with it.
+
+   `CellValue` is a JS number, so an `i64` column is really a float64. neuPrint's ids are nine
+   to eleven digits and comfortably exact; a CAVE root id is eighteen and is not —
+   `648518347529750614` parses to `648518347529750700`, which is a **different neuron**, with
+   nothing anywhere to say so. Measured in R, the same id becomes `648518347529750528`: not
+   merely lossy but lossy differently per language, so no downstream comparison can be trusted
+   either.
+
+   **Each source converts at its own edge**, and every conversion is now the exact one:
+   `idList` in `neuprint/cypher.ts` splices the digits into Cypher as an integer literal so no
+   float is ever formed; `precomputed/index.ts` hands them to `BigInt`, which is exact from a
+   string and lossy from a number — so the shard hash it feeds was quietly wrong for a wide id
+   before this; `MockSource.numericIds` converts back to the small integers its generated
+   connectome is keyed by.
+
+   **The rule lives in `src/core/ids.ts`, and that placement is the point.** `NeuronId`,
+   `isNeuronId` (the grammar), `idText` (a cell → an id) and `compareIds` are one definition
+   each, plus `numericId` for the inverse direction. They sit in `src/core` because it is the
+   only layer every consumer reaches — the sources need the grammar, the nodes need the cell
+   rule, both exporters need both, and `src/data` may not import `src/nodes` (invariant 1), so
+   anywhere higher leaves somebody out. There is deliberately **no re-export**: a shim is how a
+   symbol acquires a second spelling and then a third.
+
+   That is worth saying because the rule was written four times before it was written once, and
+   the copies had already drifted: two accepted a leading `-` and two did not, while the type's
+   own documentation asserted a grammar no function enforced.
+
+   **And it kept being written a fifth time, in the UI, where nothing enforces it.** Three sites
+   converted an id to a `number` and were found together after one was reported: Explore's
+   `neuronIdAt` (`Number(cell)`, so an eighteen-digit root id went into the `selection` param as
+   `…857200`), `PartnerRow.neuronId` in `profileStats` (`toNumber`, and then
+   `a.neuronId - b.neuronId` as a tie-break, which reports two adjacent wide ids as *equal*), and
+   `NeuroglancerProfileFrame`'s `neuronId: number`, which becomes a neuroglancer segment.
+
+   The Explore one is the instructive symptom, because it is precise and points nowhere near the
+   cause: **`Hits` works and `Selected` is empty**. `Hits` is `selectRows(index, capped)` and never
+   goes through the selection; `Selected` is `rowsWithIds(index, selection)`, matching a rounded
+   string against exact ones. Worse, the *checkbox stayed ticked* — the widget compared its own
+   rounded id against its own rounded id, so only the value crossing to `evaluate` was wrong.
+   neuPrint's nine-to-eleven-digit ids are exact as doubles, which is why all three survived.
+
+   The one remaining `Number(...)` on an id is `inputIds`' unwired branch, which is deliberate and
+   documented there: `ID_ONLY_SCHEMA` declares `i64`, invariant 3 says the halves must agree, and
+   `validate` warns about the ids that cannot survive it.
+
+   **`idText` is the cell-level rule**, shared by `idColumn`, the connectivity traversal and the
+   path decoder, so the ids a query is _built from_ cannot disagree with the ids a result is
+   _keyed by_ — that disagreement shows up as edges silently missing from a hop rather than as
+   an error. Note it deliberately does **not** apply the grammar: a `str` column holding `LC4`
+   comes back as `'LC4'`, and callers differ in what they owe about it — `idsFromColumn` counts
+   what it drops, the query builders drop silently. Sorting goes through `compareIds`, which is
+   length-then-lexicographic: numeric order for non-negative integers of any width, where
+   `Number(a) - Number(b)` reports two adjacent wide ids as equal.
+
+   What this does **not** change is what a source _publishes_ as a **dtype**. neuPrint's ids are
+   exact as doubles, so its `neuronId` column is `i64` and holds numbers; a CAVE source will
+   declare `str`. `idColumn` reads either.
+
+   **The column is called `neuronId`, and that is Coda's word rather than any backend's.** It
+   used to be `bodyId`, which is neuPrint's property name, and it is the one column every node
+   addresses *by name* — `out.profile` validates on it, Connectivity, Skeletons, Meshes and
+   Synapses all reach their ids through `idColumn(table, 'neuronId')` — so it is the one that has
+   to be Coda's vocabulary. Everything else in a neuron table is a passthrough that only a column
+   picker ever names. The precedent is `preId`/`postId`, which Coda has always coined: neuPrint
+   answers `RETURN n.bodyId, n.type, p.bodyId, p.type, w.weight` and nobody reads those two as
+   neuPrint-flavoured.
+
+   The name itself is `ID_COLUMN_NAME` in `core/ids.ts`, beside the grammar and for the same
+   reason: the *name* is a cross-layer agreement exactly as the *format* is, and a disagreement is
+   silent. It links only the places where that silence bites — `idColumn` and `rowsWithIds`
+   default to it, `ID_ONLY_SCHEMA` is made of it, Upload Table renames onto it, and
+   `neuprint/schema.ts` keys its property table on it. It is deliberately **not** threaded through
+   every `'neuronId'` in the tree: a node's param default is a value somebody may change rather
+   than a definition, and a constant honoured at a fifth of its sites implies a discipline nobody
+   keeps. (It cannot live in `tableOps.ts`, where it started — `src/data` may not import
+   `src/nodes`, so it could not reach the neuPrint seam from there.)
+
+   **Each backend maps into it at its own edge**, which is invariant 8's shape again and the same
+   thing Upload Table's `ID column` has always done. For neuPrint that seam is one table,
+   `PROPERTY_NAMES` in `neuprint/schema.ts`, read in **both** directions because each fails
+   silently on its own: `neuprintProperty` builds the `RETURN` list — and `RETURN n.neuronId` is
+   valid Cypher against a property that does not exist, so every id comes back `null` — while
+   `CORE_NAMES` carries both spellings, which stops discovery offering `bodyId` as a *newly
+   found* property and putting the id in every neuron table twice under two names.
+   `NEURON_COLUMNS` derives that `RETURN` list from the canonical schema rather than restating
+   it, so it broke the instant the column was renamed; `neuprint.test.ts` asserts the query text,
+   which is what caught it.
+
+   **`neuprintProperty` has four call sites and two of them are in the exporters**, which is the
+   easy half to miss: `NEURON_COLUMNS` and `labelClause` in `cypher.ts`, plus the `idsFromLabel`
+   emitter in each language, because `neuprint_search(field = …)` and `NeuronCriteria(<field>=…)`
+   both take a *picked column name* straight to a neuPrint API. Unreachable on neuPrint today —
+   that picker offers `str` columns and the id is `i64` — and live the moment a CAVE source
+   publishes a `str` id, where R's version matches nothing at all with no error. Those two are
+   the first `src/export → src/data` imports in the tree; one table beats a third copy.
+
+   **Raw Cypher is deliberately exempt**: `inferTableFromCypher` names columns after the
+   expression the user typed, so `RETURN n.bodyId` really does yield a column called `bodyId`.
+   `RETURN n.bodyId AS neuronId` is what makes one meet a Neurons socket, and the node's own
+   example does exactly that.
+
+   The cost was taken knowingly: a saved graph loses any column param somebody had explicitly set
+   to `bodyId`. It fails loudly rather than silently — `resolveColumn`'s rule 2 keeps the stored
+   name and `validateColumnParams` reports `Missing column: bodyId` — and a value still equal to
+   a declared default falls back on its own, so `out.scatter`'s `idColumn` self-heals. There is
+   no migration shim, on the doctrine that a shim is how a symbol acquires a second spelling.
+
+   **Geometry carries the id too, as plain `id`, and the rename there is the interesting half.**
+   `SkeletonGeometry` and `MeshGeometry` held a `number`, which was the rounded copy of the
+   attribute table's exact id on any source whose ids do not fit in a double — benign on neuPrint
+   and the mock, and an empty selection on CAVE, because `Viewer3D` compares it by string against
+   `rowsWithIds` and both morphology exporters key filenames on it. It is still a **draw and
+   export key** and not the identity; that stays in the attribute row, which is the only place a
+   type, a status and a unit can ride along. It is `id` rather than `neuronId` because a region
+   mesh is not a neuron.
+
+   `MeshGeometry.label` is gone, absorbed into that field. A region mesh has no neuron id, so the
+   number was `0` for every one of them while `label` carried `ME(R)` — and every consumer
+   without exception wrote `label ?? String(bodyId)`. A distinction erased at every use site is
+   not one, and it only collapsed once the id had become text.
+
+   The one knock-on worth knowing is `knnTable`, which builds `queryId`/`targetId` from a
+   skeleton set. It reads them out of the **attribute table** rather than off the geometry, and
+   takes that column's dtype with them, so a `queryId` is the same value _and type_ as the
+   `neuronId` that fed it. Deciding a dtype here instead would mean choosing between rounding a
+   wide id back into an `i64` and handing every neuPrint user a text column where a number used
+   to be — which changes what a bare `527536` means in a Table filter and how the column sorts.
+   `inferOutputs` reads the same dtype off the input _type_, which is invariant 3 across a seam
+   the source rather than the node decides.
+
+   Both emitters had to learn it too, and each fails silently otherwise: `pyLongIntList` emits
+   unquoted Python integers because `NeuronCriteria(bodyId=['1001'])` matches nothing, and the R
+   emitter emits a **character** vector because R's default numeric is a double. The golden
+   files caught both.
+
+   Both also normalise the id column at their own seam, and `coda_neurons` is now a helper in
+   **each** language rather than only in R. On the Python side it goes through
+   `codaNeurons(ctx, frame)` in `emitters/common.ts`, which declares the helper *and* emits the
+   call, because those are two separate acts at a call site and `resolveHelpers` only writes out
+   what was asked for — so a site that emits the call and forgets `ctx.helper` produces a notebook
+   referring to a function nothing defines, invisible to the golden file because some other node
+   in the fixture happened to request it. `neuron.roiCounts` had already lost the pairing that
+   way. The rule: neuprint-python publishes `bodyId` and neuprintr
+   publishes `bodyid`, so an unrenamed frame meets the next generated cell — a Filter, a Group
+   By, anything carrying a column param — addressing a column it does not have. Note the
+   asymmetry that keeps the emitted code readable: the *argument* stays the library's, so a call
+   reads `NeuronCriteria(bodyId=df['neuronId'].tolist())`. Coda's column goes in, neuPrint's
+   parameter takes it. `bodyId_pre`/`bodyId_post` are untouched for the same reason — they are
+   pandas suffixes on `fetch_adjacencies`' own frame — and so is
+   `connection_table_to_matrix(conn, 'bodyId')`, which appends `_pre`/`_post` itself.
 
 ## Gotchas found the hard way
 
@@ -143,6 +297,71 @@ bundled corepack, so pnpm was installed with `npm i -g pnpm`.
   Note the knock-on in `validateColumnParams`: each branch now states what the resolver is
   actually about to do (`Missing column: x` when it is kept, `is gone — using "y"` only where a
   fallback is really taken), because that is the only thing that keeps the message true.
+
+- **A column picker on its own default resolved to nothing until the schema arrived**, so a
+  graph failed on its first Run of a session and worked on its second. `resolveColumns` had this
+  guard and `resolveColumn` did not.
+
+  Rule 3 is "the first compatible column" — an answer computed *from a list*. A port carrying no
+  schema has an empty list, so a picker still holding the value its definition declared resolved
+  to `undefined` before the schema landed and to the right column afterwards. That is the
+  runs-twice-answers-differently signature again, and it lands in the provenance key.
+
+  **The asymmetry is what hides it:** rule 2 already carries a value *differing* from the default
+  through untouched, so this only ever bites a picker nobody has touched — which is the common
+  case and the one nothing tests. Reported on `Table from URL → Combine Columns → Update root
+  IDs`, the chain that node's own guide describes: `Table from URL` keeps its schema per URL in a
+  session-scoped map, so a fresh session publishes none, and `Update root IDs` refused with "Pick
+  an ID column and a supervoxel ID column" over two pickers the card was drawing as empty.
+
+  The guard can only ever *add* an answer, never change one: it fires exactly when `available` is
+  empty, where `available[0]` was already `undefined`.
+
+  **An unset required picker now means its declared default**, which is the other half and is
+  what keeps the two answers the same. A required picker has no "none", so an empty value is
+  *unset* rather than a choice — and unset is what `defaultParams` fills with the default at
+  creation. Without it, a default naming a real column still resolves to that column once the
+  schema arrives and to nothing before, which is the same disagreement one paragraph up.
+
+  **Only for a required picker.** On an `optional` one, empty is a *decision*: `out.scatter`'s
+  `idColumn: ''` means "identify points by row index rather than by neuron id", against a
+  declared default of `neuronId`. Reading that as unset hands the column back and quietly undoes
+  it — a lasso that selects different rows. Its own test caught this within a minute of the
+  change, which is the argument for it existing.
+
+  Inert wherever the default is `''`, which is most pickers: `out.barChart`'s `Category` still
+  means "decide for me".
+
+  **And the widget said so out loud, which was the follow-up report.** With the resolver fixed
+  the node ran, and the card still drew `ID column: neuronId (missing)` above `Supervoxel ID
+  column: no column` — two false claims about a configuration that was correct, both pointing at
+  the user. `columnSchemaFor` exists to separate *unknown* from *empty*, and both widgets asked
+  only "is this name in the available list", which is `false` for a port carrying no list at all.
+
+  Three states now, matching the resolver's: **unknown** offers the resolved value plainly, with
+  the reason in a `title`; **known and lacking it** keeps `(missing)`, which is true there and is
+  the drift the label exists for; **known and empty** keeps `no columns`. The `(missing)` half was
+  the visible symptom, but the *disabled* half was worse — with nothing stored the option list
+  came out empty, `SelectField` took its no-options branch, and the select rendered disabled
+  behind a placeholder, so the one thing worth knowing was the one thing not shown.
+
+  The plural had it too: `resolveColumns` keeps a stored list untouched while the schema is
+  unknown, so labelling every chip `(missing)` contradicted the resolver an inch away. Its
+  placeholder chip also now stands down when anything *is* selected — `cell_type × hemibrain_type
+  × not run yet` reads as a warning about the two beside it.
+
+  **`columnsKnown` names the question**, which `resolveColumn`, `resolveColumns`,
+  `validateColumnParams` and both column widgets all ask. `columnSchemaFor(...) !== undefined`
+  written at five sites is a rule nobody can grep for.
+
+  **The widget is the reason nobody had stored a value.** A *required* picker renders
+  `ctx.column(id)` — the resolver's answer — so a fallback is drawn exactly as a choice is. The
+  reported graph carried `supervoxelColumn: ""` because the card had been showing `supervoxel_id`
+  the whole time; it was the table's first column and the fallback had found it. That is "a
+  default was never a decision" from the other side, and it is why `Update root IDs` now declares
+  `supervoxel_id` rather than `''`: an empty default there meant *the table's first column*,
+  which was right on FlyWire's published annotations by luck and is a guess with nothing behind
+  it anywhere else.
 
 - **Nothing was warming the schema, so the first Run behaved differently from the second.**
   The chain is: a dataset node on "Latest" reads its id from `peekDatasets()` → the id lets
@@ -238,8 +457,9 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | File                                     | Covers                                                                                                                           |
 | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | `core/graph.test.ts`                     | topo sort, cycles (incl. two wires between one pair), serialisation, lenient loading                                             |
+| `core/reference.test.ts`                 | reference edges: the round trip sorting, the identity without its own schema, evaluate not waiting, and that a real cycle and two wires between one pair are unchanged |
 | `core/scheduler.test.ts`                 | hybrid eval, caching, invalidation, errors, targeted runs                                                                        |
-| `nodes/lib/tableOps.test.ts`             | each op, plus schema/value agreement                                                                                             |
+| `nodes/lib/tableOps.test.ts`             | each op, plus schema/value agreement — including the coalesce's blank-is-absent rule, its widening, and backfill-in-place vs append — and the id bridge: a wide id kept exactly, a rounded one skipped, ids ordered by magnitude |
 | `data/mock/generate.test.ts`             | determinism, internal consistency, source semantics                                                                              |
 | `examples/examples.test.ts`              | all five examples end to end, inference-clean, non-empty, and their notes' markdown parsing                                      |
 | `ui/App.smoke.test.tsx`                  | real app mounted and driven: Run, live filtering, link rejection, undo, per-node run                                             |
@@ -248,8 +468,12 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `ui/panels/palette.test.tsx`             | command `disabled` flags vs live state, type-filtered node items, Space flow                                                     |
 | `ui/panels/overlay.test.tsx`             | expand/close paths, rail params, and that restyling does not stale a node                                                        |
 | `ui/params/paramGroups.test.ts`          | tabs/rows reshaping: that the panel shows every param the flat rail did, exactly once                                            |
+| `ui/params/columnField.test.tsx`         | what a column picker says about a port with no schema: the value it will use rather than "(missing)", never disabled, and both true claims kept |
 | `ui/export.test.ts`                      | CSV quoting/nulls/chunking, wide-matrix CSV, filenames, standalone SVG                                                           |
-| `ui/format.test.ts`                      | that an id column prints verbatim while the count beside it groups, and that an aggregate of one is a quantity again             |
+| `export/python/export.test.ts`           | both fixtures against their goldens, every wired port declared, every emitting type reached, and a neuPrint cell refusing on a CAVE dataset |
+| `ui/panels/notebookExport.test.tsx`      | (also) the warning on the Save item: one per format, naming the steps, and silence on a graph that exports whole |
+| `ui/panels/palette.test.tsx`             | (also) that the export rows' peek starts no walk, and light up once one has run |
+| `ui/format.test.ts`                      | that an id column prints verbatim while the count beside it groups, that an aggregate of one is a quantity again, and the length ladder: the rung asked of the rounded figure, any rung read as a source unit, and a sub-nanometre length not rounded away |
 | `ui/panels/nodeBrowser.test.tsx`         | rows/thumbnails/signatures, chip-search exclusivity, entry points                                                                |
 | `ui/encoding.test.ts`                    | palette rules: 8 slots, Other fold, area scaling, null handling                                                                  |
 | `ui/viewers/networkLayout.test.ts`       | topology reading, layering (incl. cycles), all four layouts                                                                      |
@@ -258,14 +482,24 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `ui/viewers/networkDraw.test.ts`         | reciprocal curvature, arrow geometry, the exported SVG                                                                           |
 | `ui/viewers/networkStyle.test.ts`        | focus/ego sets, dimming (hue kept, theme-flipped), and what a tooltip decides to say                                             |
 | `ui/viewers/networkViewer.test.tsx`      | the caption: counts, the label-thinning admission, size refusal                                                                  |
-| `data/neuprint/neuprint.test.ts`         | Cypher building/escaping, response decoding, schema discovery, mesh-source resolution, nm conversion                             |
+| `data/neuprint/neuprint.test.ts`         | Cypher building/escaping, response decoding, both halves of the `bodyId`→`neuronId` seam, schema discovery, mesh-source resolution, nm conversion |
 | `data/precomputed/precomputed.test.ts`   | shard lookup, multi-LOD manifest, Draco decode, legacy fragments, CORS fallback                                                  |
+| `nodes/transform/updateRootIds.test.ts`  | the repair: only stale rows looked up, supervoxels sent as raw uint64, a current row left alone even with a warm cache, a row with no supervoxel untouched, the id column's declared dtype kept rather than row zero's — and both pickers resolving before any schema has arrived |
+| `data/cave/rootIds.test.ts`              | the drift check: ids sent as unquoted integers, the frozen instant read as UTC rather than local, asked once per chain and re-asked when the wiring changes, a late lander not overwriting a newer answer, only the unseen ones asked, and nothing at all without a chunkedgraph |
+| `data/catmaid/catmaid.test.ts`           | CATMAID against recorded bodies: the confidence-bucket sum, parents rebuilt as indices, the indexed list encoding, an anonymous POST refused a direct route, a status filter ignored and a region filter refused |
+| `data/catmaid/live.test.ts`              | the same source against the real VFB FAFB instance, skipped without `CATMAID_LIVE` — a skeleton proved to be one tree in nanometres, its synapses inside its own bounds, and the neuropil volumes parsed |
+| `data/cave/cave.test.ts`                 | CAVE against recorded bodies: a wide root id kept exactly, the string-aware scan, the annotation pivot, an anchored pattern, a size filter refused rather than emptying the result, and every refusal |
+| `nodes/lib/datasetFamilies.test.ts`      | (also) that every CAVE family names a datastack spec and every spec a family — the join key nothing else checks |
+| `data/cave/live.test.ts`                 | the same source against the real services, skipped without `CAVE_TOKEN` — the only thing that notices an endpoint shape changing, the mesh and synapse clouds proved to share one nanometre frame, Aedes' edge list built by counting with nothing configured, and a loadable scene assembled for all three datastacks |
+| `data/annotations/annotations.test.ts`   | annotation sources: the `Token` scheme, the pseudo-workspaces dropped, a wide id kept as text, the outer join and the later source winning, a rename collision suffixed in all three shapers — plus the route fallback's three rules |
+| `data/annotations/live.test.ts`          | the same against real FlyTable, skipped without `SEATABLE_TOKEN` — including the ids proved to be beyond double precision |
+| `nodes/annotation/annotations.test.ts`   | the three source nodes: the two halves of one join asserted against each other, half a chain published as nothing, a Select in the chain (the case that decides the socket type), and a table with no `neuronId` refused twice |
 | `nodes/query/morphology.test.ts`         | the shared `Max neurons` ceiling and what its refusal message blames                                                             |
 | `ui/nodes/nodeRunRing.test.tsx`          | run-indicator arithmetic: dash fractions, the zero floor, indeterminate mode                                                     |
 | `ui/nodes/runRing.placement.test.tsx`    | that the outline renders outside the clipped card (slow mock, so 'running' is observable)                                        |
 | `nodes/analysis/network.test.ts`         | BuildNetwork semantics + the selection round-trip                                                                                |
 | `nodes/analysis/nblast.test.ts`          | the units conversion above all, plus the flattening, the labels, the ceiling, the voxel refusal, and every control reaching the request |
-| `nodes/analysis/nblastKnn.test.ts`       | the k-NN shape: the rectangle laid out long, the padding dropped and counted, and the id columns named so a body id is not a quantity |
+| `nodes/analysis/nblastKnn.test.ts`       | the k-NN shape: the rectangle laid out long, the padding dropped and counted, and the id columns named so a neuron id is not a quantity |
 | `core/values.test.ts`                    | what a node footer says about a geometry value: its units printed always, and voxels-vs-unknown told apart                        |
 | `nodes/lib/linkageOps.test.ts`           | the tree ops: the square-but-not-one-population refusal, exactly-k against a tie, clusters numbered in leaf order, the copied buffer |
 | `nodes/analysis/linkage.test.ts`         | the three nodes: every control reaching the request, the cut carried on the pass-through, and a restyle costing no run             |
@@ -275,9 +509,9 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `nodes/transform/labelsToNeurons.test.ts`| the two registrations: identical params, one warning that differs, and a neurons type published for a 3D socket                     |
 | `ui/nodes/labelsToNeuronsBody.test.tsx`  | the readout: what a wrong `Match on` says, not-wired against not-run, and every non-advanced param drawn                            |
 | `ui/viewers/dendrogram.test.tsx`         | the card through `ValuePreview`: a click handing back exactly the leaves under it, and every admission the caption makes           |
-| `data/neuroglancer/scene.test.ts`        | scene editing against the real published shapes, and the URL round-trip                                                          |
-| `nodes/output/neuroglancer.test.ts`      | what lands in the link: segments, colour agreement with the 3D view, the limit                                                   |
-| `ui/viewers/neuroglancerViewer.test.tsx` | that a restyle navigates the frame rather than remounting it                                                                     |
+| `data/neuroglancer/scene.test.ts`        | scene editing against the real published shapes, the URL round-trip, and `middleauth+` following the viewer rather than the backend |
+| `nodes/output/neuroglancer.test.ts`      | what lands in the link: segments, colour agreement with the 3D view, the limit, and which viewer the segmentation is authenticated for |
+| `ui/viewers/neuroglancerViewer.test.tsx` | that a restyle navigates the frame rather than remounting it, and that Reload does the opposite — a fresh document, and no merge into one still booting |
 | `ui/nodes/nodeResize.test.tsx`           | handles outside the clipping card, resize not invalidating a result, gesture undo                                                |
 | `ui/nodes/paramFold.test.tsx`            | folding a card's param rows: the header button surviving the band, notes excepted, one undo step, and that it costs no run       |
 | `ui/nodes/collapsedPorts.test.tsx`       | collapse to a header: handles moved not removed, each still addressable, and the wrapper's width kept but not its height         |
@@ -285,14 +519,15 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `nodes/lib/neuronSearch.test.ts`         | the Explore query language: parsing, matching, null rules, the fuzzy fallback, ranking, completion                               |
 | `data/cache.test.ts`                     | IndexedDB-less degradation, fingerprint/expiry invalidation, index dedupe                                                        |
 | `ui/explore/thumbnail.test.ts`           | silhouette projection/shading, and the data-driven row spec                                                                      |
-| `ui/explore/chips.test.ts`               | that the chip hues in `theme.css` still match `colors.ts`, and that a slot follows the field                                     |
+| `ui/explore/chips.test.ts`               | that the chip hues in `theme.css` still match `colors.ts`, that a slot follows the field, which chips each backend's vocabulary yields, and a tags column held out of all three lists |
+| `ui/explore/neuronRow.test.tsx`          | what a row draws: community tags apart from the chips and unlike them, capped with the rest in the counter's title, an absence drawing no row — and a stat scaled into its own unit with the stored figure kept verbatim on hover |
 | `ui/explore/explore.test.tsx`            | the widget: live filtering vs debounced commit, paging staleness, selection, completion, and it mounted in the real editor       |
 | `nodes/query/explore.test.ts`            | the node's ports: that `All` ignores both the search and `Max hits`, and infers what it evaluates                                |
 | `nodes/lib/labelLookup.test.ts`          | label parsing, the typed/wired union, and what the unmatched report refuses to claim                                             |
 | `nodes/query/idsFromLabel.test.ts`       | exact vs regex, the anchoring, the union reaching one query, and empty meaning empty                                             |
 | `ui/nodes/idsFromLabelBody.test.tsx`     | the card: every non-advanced param rendered, and the unmatched line naming the labels                                            |
 | `nodes/lib/datasetFamilies.test.ts`      | version ordering, latest-vs-pinned resolution, and the deployment/base-URL mapping                                               |
-| `nodes/dataset/dataset.test.ts`          | per-dataset nodes infer what they evaluate, the custom node's lazy source, and that the superseded node still runs               |
+| `nodes/dataset/dataset.test.ts`          | per-dataset nodes infer what they evaluate, the custom node's lazy source, that the superseded node still runs, and the drift advisory following the annotation chain in both directions |
 | `ui/nodes/datasetBody.test.tsx`          | preview above fields, the version dropdown, the resolved id, and no expand button                                                |
 | `data/mock/morphology.test.ts`           | tree validity, determinism, tube meshes, synapse placement                                                                       |
 | `store/inference.test.ts`                | inference against a source that has not learned its listing yet, and the re-infer signal                                         |
@@ -300,18 +535,24 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `nodes/lib/profileStats.test.ts`         | the profile roll-ups: distinct partners, nested-ROI filtering, the last-parenthesis side rule, NT column matching                |
 | `nodes/lib/networkOps.test.ts`           | filter order, ranking after the weight cut, and the recomputed degree roll-ups                                                   |
 | `nodes/output/profile.test.ts`           | that Profile is a tap, and that paging is free while pinning is not                                                              |
-| `ui/viewers/profileViewer.test.tsx`      | the widget: pager clamping, absent tiles vs dashes, the threshold reaching a heading, card-vs-overlay                            |
+| `ui/viewers/profileViewer.test.tsx`      | the widget: pager clamping, absent tiles vs dashes, the threshold reaching a heading, card-vs-overlay, and the annotation chain reaching both fetches and the cache key |
 | `ui/markdown.test.ts`                    | the markdown subset against the real published blurbs, plus what a hostile one cannot do                                         |
 | `store/companion.test.ts`                | that a dataset node brings its Description card, as one undo step, and which families opt out                                    |
 | `store/autowire.test.ts`                 | that a new node's Dataset socket arrives fed, and every case where it must not — ambiguity, load, an existing wire               |
 | `store/fitOnLoad.test.ts`                | that opening a graph asks for a fit, and that an empty one does not leave the request pending                                    |
+| `ui/fitOnLoad.test.tsx`                  | that the request is spent: `fitView` called on every open with `nodesInitialized` reading the `false` it really returns, and not called on an ordinary edit |
 | `ui/nodes/descriptionBody.test.tsx`      | the card in the real editor: links, nesting, the overlay, and that raw HTML never mounts                                         |
 | `store/library.test.ts`                  | the browser shelf against real IndexedDB: name-as-identity, and that a save with nowhere to go _rejects_                         |
 | `ui/panels/library.test.tsx`             | the menus and the start-page rail: the replace prompt, the delete prompt, an opened entry landing on the canvas                  |
 | `ui/panels/sources.test.tsx`             | the sources dialog: a tab per source, the tab an auth failure lands on, and where the credential promise sits                    |
 | `nodes/annotation/note.test.ts`          | that a text note is never executed, deferred, stalled or counted, and round-trips                                                |
 | `store/links.test.ts`                    | breaking and re-routing links: one undo step, the id kept, and what a refused rewire leaves                                      |
+| `core/splice.test.ts`                    | dropping a node on a wire: the downstream check needing the upstream link applied, isolation, and one link left on the port |
+| `store/splice.test.ts`                   | that the move and the rewire undo as one gesture, and that a node which does not fit is still moved                          |
 | `ui/panels/edgeMenu.test.tsx`            | the link menu: that its header names the wire it is about, and that deleting leaves the nodes                                    |
+| `ui/panels/nodeMenu.test.tsx`            | the node menu's two caches: Results rather than "cache", and Clear Cache gated on the node declaring one                        |
+| `ui/viewers/tableSummary.test.tsx`       | the inspector's text readout: every column listed, an id kept whole, a long value cut but recoverable, and no dash for no rows |
+| `ui/nodes/cacheAge.test.tsx`             | `cached 3d ago ⟳`: the age surviving a restored result, the click reaching both caches, and no threshold hiding a fresh one     |
 | `ui/nodes/noteCard.test.tsx`             | the note card: markdown as prose, no node chrome, Escape abandoning an edit, the frame toggle                                    |
 | `nodes/lib/connectivityOps.test.ts`      | the traversal: the pre→post swap, the both-ends dedupe, no re-expansion, minWeight pruning                                       |
 | `nodes/query/connectivity.test.ts`       | the node: that it advertises the columns it builds, and that Hops reaches the source                                             |
@@ -328,18 +569,20 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `ui/viewers/heatmapPlot.test.ts`         | the heatmap fold: a grid bounded by the plot, the strongest cell of a block surviving, the ramp table proved lossless, thinning |
 | `ui/viewers/svgBuilders.test.ts`         | every synthesised export through the real serializer: one namespace declaration, one font, and a document that actually parses |
 | `nodes/output/scatter.test.ts`           | the tap, id-vs-row-index selection, and that `Max points` stales nothing                                                         |
-| `core/columnParams.test.ts`              | what a column picker may complain about: unknown-vs-empty schema, what `optional` changes, and a plural keeping an unseen list   |
+| `core/columnParams.test.ts`              | what a column picker may complain about: unknown-vs-empty schema, what `optional` changes, a plural keeping an unseen list, and a singular on its default resolving the same either side of a schema |
 | `nodes/output/barChart.test.ts`          | the tap, that an unpicked column is a warning and not a refusal, and the stack-by-itself catch                                   |
 | `nodes/table/pivot.test.ts`              | the two outputs describing one pivot, and the wide schema arriving only by observation                                           |
 | `nodes/lib/tableFilter.test.ts`          | a header cell's grammar: a bare value following the column's dtype, the null rule, and every clause it drops rather than applies |
 | `nodes/output/table.test.ts`             | the two ports: the tap kept whole, filtering staling the node while paging does not, and a bad clause refusing nothing           |
 | `nodes/table/sample.test.ts`             | the four sampling modes, a draw reproduced from its seed, and the seed costing nothing in the other three                        |
-| `data/csv.test.ts`                       | reading somebody else's file: quoting, delimiter-by-consistency, header bias, and every value the parse refuses to widen         |
+| `nodes/table/combine.test.ts`            | the coalesce node: infer publishing what evaluate returns, an unset picker warning rather than refusing, and the chain into a Dataset |
+| `nodes/table/dedupe.test.ts`             | the three `keep` modes, an empty picker comparing whole rows, row order kept, and a null told apart from the text "null"       |
+| `data/csv.test.ts`                       | reading somebody else's file: quoting, delimiter-by-consistency, header bias, a suffix that cannot land on a name already taken, and every value the parse refuses to widen |
 | `data/uploads.test.ts`                   | the store against real IndexedDB: content addressing incl. a separator collision, a write that rejects, and the peek's one read  |
-| `nodes/table/upload.test.ts`             | the node: the schema arriving by peek, the bodyId rename, what a graph opened elsewhere says, and the filename costing nothing   |
+| `nodes/table/upload.test.ts`             | the node: the schema arriving by peek, the neuronId rename, what a graph opened elsewhere says, and the filename costing nothing   |
 | `ui/nodes/uploadBody.test.tsx`           | the card's four states — and that 'looking' is never printed as 'not here' — plus the size ceiling refusing before it reads      |
 | `nodes/table/fromUrl.test.ts`            | the fetch: deferred by the auto pass, Refresh as the only re-fetch, the schema keyed by URL, and what each refusal blames        |
-| `nodes/lib/idList.test.ts`               | reading pasted ids: every separator, and both refusals — a bad token and an id too big to be exact                               |
+| `nodes/lib/idList.test.ts`               | reading pasted ids: every separator, a bad token refusing the list, an eighteen-digit id kept exactly, and the 19-digit ceiling  |
 | `nodes/query/inputIds.test.ts`           | the node: no dataset means no query, the seam asked in numbers, no status filter, empty never all                                |
 | `ui/nodes/inputIdsBody.test.tsx`         | the card: the counts, the ids named as missing, and that it claims nothing with no Dataset wired                                 |
 | `nodes/table/stack.test.ts`              | the union schema needing both sides, a real dtype clash refused at run time, and the source column                               |
@@ -400,20 +643,131 @@ the thing to watch — an emitter can quietly stop agreeing with the `evaluate` 
 nothing type-checks the pair. `coverage.test.ts` is the tripwire: every registered type either
 has an emitter or is named in `NO_EMITTER` with a reason.
 
-**The two surfaces refuse differently, and that is not an inconsistency.** A menu has room to
-answer back, so the Save menu lets the click through and replaces the item with a sentence
-naming what to change. The palette closes on pick, so there is nowhere to put that sentence
-afterwards — the row is `disabled` and the _hint_ carries it, which is the idiom every other
-command there already follows. Getting this backwards would put a lit row in the palette that
-closes it and does nothing, and on a bundled example that is the usual state rather than an
-edge case.
+### The softer half: warning that an export will have gaps in it
 
-**A synthetic dataset is refused, and it is the only refusal.** Every other gap emits a TODO,
+A refusal says the export is not worth making. Beside it, both surfaces now say how much of a
+graph the walk **could not translate** — `⚠ 2 steps will be left as TODO` on a palette row, and
+a sentence naming them under the Save menu's item. The row still works: an export with gaps in it
+is worth having, which is why this sits *on* the item rather than replacing it the way a refusal
+does.
+
+**The only honest way to answer is to run the exporter**, and that is the decision the design
+turns on. The obvious alternative is a static table of which node types emit in which language:
+instant, main-chunk, and a mirror of two registries that nothing type-checks against them — the
+`NO_EMITTER` shape, which works only because `coverage.test.ts` pins it. Worse, it could not see
+most of what actually becomes a TODO. A cell comes out as one for five different reasons, and
+only the first is a fact about the *type*:
+
+1. no emitter for this language,
+2. a backend the emitter was not written against (`emitterBackends`),
+3. a required port nobody wired,
+4. an upstream that was itself a TODO,
+5. the emitter refusing on its own params — `Paths` with `Collapse types` on, a dataset that
+   could not be resolved, a column nobody picked.
+
+Running the real walk sees all five by construction and cannot drift. So both walks report
+`todos: TodoStep[]` — recorded where `emittedTodo` already is, plus the unknown-node-type branch,
+which `continue`s before that check and is the worst case there is, since it binds nothing and
+blocks everything downstream. Reported as `{nodeId, label}` rather than recovered from the
+finished document by scanning for `# TODO:`, which would be matching on prose.
+
+**A walk clears only the guard it was started under**, which is the one thing about the in-flight
+bookkeeping that is not obvious. `requestExportWarnings` replaces the `running` set *wholesale*
+when a newer graph arrives, so a walk that outlived its graph and deleted its language from the
+module binding cleared the **current** graph's guard — after which the next surface to ask saw no
+answer and nothing running, and started a second exporter walk over a graph already being walked.
+The set is passed in, so a walk can only ever clear its own. Not covered by a test, and that is
+recorded in the file: reaching the window needs a hook between two `compute` continuations, and
+vitest hands the *real* exporter to a second concurrent dynamic import of a mocked module, so the
+walks cannot be counted or told apart. Two tests were written for it and both were vacuous under
+mutation, which is worse than none.
+
+**`src/ui/exportWarnings.ts` is the `peek*` contract again**, with one deliberate split:
+
+- **`peekExportWarnings` starts nothing.** It is a cache read. `buildCommandItems` calls it on
+  every store change while the palette is open, and a peek that kicked off a walk there would run
+  one per change. Same rule, and the same reason, as `peekBases`.
+- **`requestExportWarnings` is the half that works**, called when a surface opens — the Save
+  menu's own mount, and an effect on the palette's `menu` state. It loads the exporters lazily,
+  so `canExport.ts` being separate is preserved exactly: nothing here is reachable until somebody
+  opens one of those two.
+
+The answer is keyed on the graph **object**, which the store mints afresh on every commit, so a
+stale answer is structurally impossible — a changed graph is a cache miss. A newer graph arriving
+while a walk is in flight owns the cache when it lands, which is the same ownership check the
+root-drift advisory needs and for the same reason.
+
+**It names the causes and counts the cascade.** A TODO binds nothing, so everything downstream
+of one is a TODO too — and telling somebody their Table node "has no notebook equivalent" when
+the Table is fine and the Explore in front of it is not sends them to the wrong card. That is the
+walk's own unwired-versus-blocked split carried out to the surface, through `TodoStep.blocked`.
+On the FlyWire starter the difference is the whole message: *"Explore" has no notebook
+equivalent, so it and 2 steps after it will be left as TODO comments* rather than a list of three
+nodes, two of which translate perfectly well. A muted node also binds nothing, so a graph can
+carry blocked steps with no untranslated root — then naming the blocked ones is the only true
+thing left to say.
+
+**It still does not say *why* each root is untranslated.** Those reasons are genuinely different
+and every one is already stated in the document itself, beside the step it is about.
+
+**The Description card emits a note rather than a TODO**, and that is what keeps the whole
+mechanism from crying wolf. `ctx.todo` means "no code came out of this", which is true of a
+credit card — and it also means "this step is missing from the translation", which is not. It has
+no outputs, so it blocks nothing, and `core/companion.ts` puts one on **every** published dataset
+node: counting it would have put a warning on essentially every graph anybody exports. Nothing is
+lost by the distinction, since `todo`'s only other effect is withholding output bindings and this
+node has none. It also declares `backends: ['neuprint', 'cave']` — not a claim that it emits
+caveclient code, since it emits none, but that the *card* is backend-independent, which is what
+stops the guard turning it into a TODO on every CAVE graph.
+
+**+1,890 bytes on the main chunk**, measured — the module, both surfaces and the CSS. `main` still
+matches neither exporter; both stay behind `await import`.
+
+**Verified in a real browser** over CDP, because this is colour and wrapping: both surfaces, both
+themes, no console errors. `--status-warn` resolves to `#fab219` on the dark panel (9.78:1) and
+`#8a5e00` on the light one (5.41:1) — the token's own measured values, and the reason it is
+per-mode at all, since the bright gold is 1.74:1 on light. The Save panel is **315px wide with no
+warning and 313px with one**: the sentence wraps inside the width the descriptions already set, so
+the menu does not jump between the two states. That was the thing worth pointing a browser at.
+
+**Both surfaces now refuse the same way, and the change is per-format coverage.** The palette
+closes on pick, so a refusal has always had to be `disabled` plus a hint — there is nowhere to
+put a sentence afterwards. The Save menu used to do the opposite: let the click through and
+replace the whole export block with a paragraph. That was right while one answer served both
+formats and became wrong the moment they could disagree, because replacing the block also took
+away the format that *would* have worked — a FlyWire graph builds a notebook and no R document.
+So the menu now disables the row it cannot honour and puts the reason under it, which is the same
+answer with more room. The reason renders at full strength while the row above it dims; taking a
+4.5:1 colour to half strength is how a message nobody can read ends up on screen.
+
+`--status-refused` exists for that sentence, and for `--status-warn`'s reason one colour over:
+`--status-error` is one value for both modes, which is fine for a badge dot and not for prose at
+10.5px — `#d03b3b` is 4.56:1 on the light panel and **3.73:1** on the dark one. No single red
+clears 4.5:1 on both, so it is per-mode: `#c22f2f` light, `#e05c5c` dark, both measured against
+the panel rather than the canvas.
+
+**Two things are refused; everything else is a TODO.** Every other gap emits a TODO,
 because the surrounding cells are still worth having. A `dataset.mock.*` connectome is generated
 in the browser: no server, no token, no id that means anything outside the tab — so the _first_
 cell is the one with nothing behind it, and what would come out is a notebook nobody can fix
 without knowing which real dataset was meant. Note the consequence: **all five bundled examples
 are refused**, which is why the golden files are built on `fixture.ts` rather than on them.
+
+**The second is a dataset from a backend *this format* has no emitter for**, which today means
+CAVE in R and nothing in Python. The same reasoning arriving from the other direction: the dataset
+cell is the one with nothing behind it, and the walk cascades a TODO to every node downstream, so
+what comes out is a document of nothing but TODOs. `DatasetFamily.notebook` is the single
+statement of which families each exporter can be built for, read by `canExportNotebook` and by
+both dataset emitter loops — it had to be, because those two used to disagree: the loops keyed on
+the *source id* while the refusal tested `synthetic` alone, so a FlyWire graph passed the check
+and produced exactly that document. It is deliberately not derived from `sourceId`, since what
+decides it is whether an emitter exists, not where the data comes from — and it is keyed **per
+language**, since the day that distinction stopped being academic has arrived.
+
+**A third kind of TODO came with it, and it is not a refusal.** A node whose *own* cell has only
+been written for neuPrint, on a graph whose dataset is CAVE, emits a TODO naming the backend —
+declared once per emitter through `registerEmitter`'s `backends` rather than guarded in each of
+the seventeen that take a Dataset. See *The CAVE half of the notebook exporter* below.
 
 **The walk decides whether an input arrived; emitters never ask.** `ctx.wired(port)` returns a
 plain `string` because the walk refuses to call an emitter whose _required_ ports are unwired or
@@ -449,7 +803,7 @@ Three findings, each of which was a wrong answer before it was checked:
   before being believed.
 - **`coda_search` was cross-checked against `runSearch`** over 23 queries covering the rules
   that are easy to lose: a missing value satisfying `!=` and nothing else, unanchored regex,
-  negation, `1200` matching a body id but not a synapse count. Zero divergence. It is
+  negation, `1200` matching a neuron id but not a synapse count. Zero divergence. It is
   deliberately **matching only** — no relevance ranking and no fuzzy fallback — and the
   docstring says so, because both change which rows come back where a result is capped.
 - **`import navis` does not expose `navis.interfaces.neuprint`.** The package root does not
@@ -501,6 +855,206 @@ It runs in its own workflow (`.github/workflows/export.yml`) rather than in `dep
 path-filtered to `src/export/**`: `pip install navis` is minutes against a deploy pipeline that
 is otherwise well under one, and it is only ever worth paying when the exporter changes.
 
+### The CAVE half of the notebook exporter
+
+`src/export/python/emitters/cave.ts` and `caveHelpers.ts`. A FlyWire graph now exports as a
+Jupyter notebook built on **caveclient, sea-serpent and pandas**, where before it was refused
+outright.
+
+**Every signature was read off caveclient 8.2.1 by introspection**, and three are not what an
+experienced user would guess:
+
+- **`CAVEclient(datastack, version=N)` pins the materialization for every later query** *and*
+  sets `client.timestamp` to that materialization's instant. That is what makes the dataset cell
+  the only place a version appears, and it is what `Update root IDs` asks its chunkedgraph
+  questions *at*.
+- **`client.materialize.version` reads back off the frameworkclient** rather than holding its own
+  (`if self.fc is not None and self.fc.version is not None: return self.fc.version`). Checked in
+  the source, because the alternative — a `materialization_version=` on every call — is a lot of
+  argument for something that would silently query "latest" if the inheritance did not hold.
+- **There is no token argument.** caveclient reads `~/.cloudvolume/secrets/cave-secret.json`,
+  written once by `client.auth.setup_token()`, where neuprint-python takes one per client.
+
+#### The refusal is per language now, and the policy is still one
+
+`DatasetFamily.notebook` was `'neuprint' | undefined` and is now
+`{ python?: …; r?: … }`; `canExportNotebook(graph, language)` takes which format is being asked
+about. Forced rather than chosen: R's route into FlyWire is `fafbseg`, which wraps FlyWire
+specifically rather than CAVE generally and has no emitter here — so one flag for both formats
+would either refuse an export Python can produce or offer an R document of nothing but TODOs. The
+palette asks twice and the two rows disagree, which is the honest state.
+
+`src/export/fixture.ts` gained a **second graph** for the same reason: a CAVE node in
+`everythingGraph` would make R refuse the whole thing and leave its golden with nothing in it.
+`caveGraph` is exported as its own notebook and asserted to be *refused* on the R side.
+
+#### A backend an emitter was not written against is a third kind of TODO
+
+Seventeen Python emitters take a Dataset, and all of them are neuprint-python. Left alone, a
+FlyWire graph would emit `fetch_neurons(..., client=<a CAVEclient>)` — valid Python, plausible
+reading, an `AttributeError` at best and a wrong answer at worst.
+
+So `registerEmitter` takes `{ backends }`, **defaulting to `['neuprint']`**, and the walk turns an
+undeclared backend into a TODO naming it. Declared at the registration rather than guarded inside
+each emitter, which is the call `emit.ts` already makes about unwired ports: seventeen
+hand-written guards is seventeen chances to forget one, with nothing failing when somebody does.
+The default is the narrow one deliberately — a new emitter that says nothing refuses a backend it
+was never tested against.
+
+The backend is read off `def.inputs` (any port whose declared type is `dataset`) rather than by
+asking for a port called `dataset`, which is the bug class `ports.test.ts` exists for. An
+*unresolved* dataset type refuses nothing: no `sourceId` is invariant 2's ordinary state on a cold
+session.
+
+#### A reference port yields no variable, and sometimes cannot
+
+`referencesFirst` hoisted every referenced node to the front so a cell naming one would find it
+bound. That is wrong for the wiring references exist for: in `CAVE table → Update root IDs →
+Dataset` the dataset **consumes** both nodes referencing it, so hoisting it above them classified
+it `blocked` by its own annotations and cascaded a false TODO to everything downstream — the very
+failure the hoist was added to prevent, arrived at from the other side.
+
+Two changes, and they are a pair:
+
+- **Only a node with no dataflow inputs is lifted.** That is not a precaution, it is the condition
+  that makes a reference sound in the first place — the referenced node's identity comes from its
+  params alone — made checkable.
+- **The walk does not treat an unbound reference port as blocking.** A reference is not a value
+  dependency, so an emitter reading one falls back to the referenced node's *type*, which is all a
+  reference ever promised.
+
+`clientFor` in `cave.ts` is that fallback, in one place so the two readers cannot drift: the
+bound variable's `.client` where the walk bound one, and a fresh `CAVEclient` built from the
+reference's type where it did not. The golden covers both branches.
+
+#### What a Coda Dataset is on CAVE, and why it is not a bare client
+
+The neuPrint dataset cell binds a `Client`. This one binds a generated `CodaCaveDataset`, because
+a CAVE dataset value is a client **and** a neuron table: the datastack's labels live in an
+annotation table, and anything wired to the Annotations socket *replaces* them. One Python name
+has to carry both.
+
+**`labels` is fetched on first use, not at construction**, which is the point of the class rather
+than a tuple. A graph that only cleans an annotation table never asks for the index, and on
+FlyWire that is 139,255 rows over six queries.
+
+#### The helpers, and the one that ran before it was believed
+
+`coda_cave_neurons`, `coda_cave_table`, `coda_seatable`, `coda_join_annotations`,
+`coda_update_root_ids`, `coda_int64` — each mirroring a specific piece of `src/data/cave` or
+`src/data/annotations`. Two
+rules came across that produce a plausible wrong table rather than an error, and both are
+transcribed rather than reinvented: the annotation table is read **one kind at a time** (the whole
+of `hierarchical_neuron_annotations` is over CAVE's 500,000-row cap, which the server applies by
+*truncating*), and a chained source **wins a collision falling back to the earlier one where it
+has no value** — a coalesce rather than a replace.
+
+**`merge_reference=False` is passed explicitly and the join is written out.** caveclient will
+merge a reference table with its target for you and that is very likely the tidier call; it was
+not verified against a live datastack, and a silently different frame is exactly what this
+exporter refuses to guess at.
+
+**`pd.to_numeric` is the wrong function for an id column, and it fails silently.** On a clean
+column of decimal strings it answers `int64` and is exact — and one null anywhere, which a
+supervoxel column has by design, forces `float64`: `720575940628857210` comes back as
+`720575940628857344`, a **different neuron**, with every later comparison wrong about a value
+nothing flagged. `coda_int64` parses per value with Python's `int`, exact at any width.
+
+That was found by **running** the helpers, on the first try, and it is why
+`scripts/probe-py-helpers.py` (`pnpm probe:helpers`) exists. It reads the generated helper cell out
+of the golden notebook and exercises it against a stub client — `probe-nblast.mjs`'s idiom one
+language over, and for its reason: the golden says the text is unchanged and `check-export.py`
+says it parses and its module attributes resolve, but **nothing else executes a line of it**, and
+every one of these helpers is pandas. It runs in `export.yml` and is the only step there that
+executes generated code. Reading the code did not catch the bug; running it did.
+
+#### What it costs, and what is not covered
+
+**+281 bytes on the main chunk**, measured against a build of the same tree with the feature
+stashed out — the family table's one field and the refusal's stack names. Everything else is in
+`exporter-*.js`, which stays lazily loaded; `CodaCaveDataset` appears nowhere in `main`.
+
+#### The query half, and why it was nearly free
+
+**Explore and Find Neurons emit for CAVE**, and the reason is that neither is really a query on
+this backend. A CAVE datastack has no server-side neuron search — its API has no regex worth
+using — so `CaveSource` downloads the index once and filters it locally, and the notebook does
+the same over the same frame. `coda_search` is already a port of Coda's matcher and does not care
+where the frame came from, so **Explore's CAVE branch is one line**: `dataset.labels` instead of
+`fetch_neurons(NeuronCriteria(...))`. That is why they were the first two written — on a FlyWire
+graph Explore is usually the only thing between the dataset and everything else, so a TODO there
+blocked the whole notebook.
+
+Find Neurons is the same frame with pandas filters on it, and the filters are **Coda's semantics
+rather than pandas' defaults**: `coda_match` uses `str.fullmatch` (anchored at both ends,
+case-sensitive — `compileRegex`'s `^(?:…)$`, which is Neo4j's `=~`), where `str.match` anchors
+only the start and would quietly widen every pattern. And a column the datastack does not publish
+**matches no row**, which is `CaveSource`'s own rule rather than an accident, and reachable here
+because a datastack's columns are whatever its annotations carry.
+
+That last rule surfaced a live bug in the app, not in the exporter: **Find Neurons' `status`
+defaults to `Traced` while its picker on a CAVE dataset offers only `Any`** (`statuses: []`), so
+the default survives into the request, `CaveSource` drops every row, and the node answers nothing
+without anybody having chosen a status. The emitted cell reproduces it — it has to agree with the
+canvas — and says so in a NOTE naming the fix, because a notebook that returned nothing silently
+would send the reader to look at their datastack.
+
+**`selectionIds` answered `number[]`, which is invariant 8 at a seam nobody had looked at.** A
+stored id is a string of digits and `Number('720575940628857210')` is `…216` — a different neuron,
+written into a notebook with nothing to say so. Harmless while every exportable dataset was
+neuPrint, and live the moment a CAVE selection could be exported. It answers exact text now, and
+`pySelection` pairs it with `pyLongIntList` in one place, because `pyValue` would *quote* a string
+and `isin(['1001'])` against an `i64` column matches nothing at all.
+
+Still not written, and each declines with a TODO naming the backend rather than emitting neuPrint
+code: **Connectivity, Adjacency, Skeletons, Meshes, Synapses, Profile, Dataset Summary, ROIs,
+Neuroglancer**. The table ops downstream are backend-agnostic and already work.
+
+#### SeaTable, through sea-serpent
+
+`annotation.flyTable` and `annotation.seaTable` emit too, on
+[`sea-serpent`](https://github.com/schlegelp/sea-serpent) — one registration each over one
+emitter, exactly as the nodes are two registrations over one implementation. Everything below was
+established **live against FlyTable**, not read off a README.
+
+- **`Table(name, base=…)` resolves the base itself** by enumerating the account's workspaces
+  (`find_base`), so Coda's `Workspace` param has no argument to map onto — it exists because the
+  REST API addresses a base by workspace *and* name, which is bookkeeping sea-serpent does for
+  you. Where one is set on the canvas the cell says so rather than dropping it silently.
+- **`to_frame()` rather than `query()`, and the reason is dtypes.** sea-serpent sanitises on the
+  way out: a text column stays text — so an eighteen-digit root id arrives exact under pandas'
+  `string` dtype, which is the whole of invariant 8 at this seam — a date column becomes
+  datetimes and a checkbox becomes booleans, which is `dtypeFor`'s mapping and better. `query()`
+  hands back raw records and loses all of it.
+- **The `query` narrowing is offered as a comment where `Columns` is set.** Measured live:
+  `to_frame()` is **3.3 s** for all 52 columns of `main.info` (58,340 rows, ~134 MB in memory)
+  against **0.8 s** for three through `query(..., no_limit=True)`. Worth having and not worth
+  defaulting to — and note this is the one place the notebook is simply *unblocked* where the
+  canvas is not, since `/dtable-db/api/v1/query/` sends no CORS headers at all.
+- **`query` auto-appends `FROM {TABLENAME}`**, so anything following the column list — a `LIMIT`,
+  a `WHERE` — needs the `FROM` written explicitly or the server answers `parse error: unexpected
+  LIMIT`. Backticked names are accepted, which is what makes a generated column list safe.
+- **sea-serpent names its columns with numpy `str_`.** They index fine and read oddly anywhere the
+  column list is printed, so `coda_seatable` normalises them.
+
+**The generated FlyTable cell was run verbatim against the real base**, helpers and all, and
+reproduces what the canvas reports: 58,340 rows, **56,309 distinct ids** — the same duplicate
+count recorded above — every id text, exact at eighteen digits, and all 58,340 beyond double
+precision.
+
+**The credential is `SEATABLE_TOKEN`**, which sea-serpent reads from the environment itself and
+the cell passes explicitly anyway, so what it needs is visible. Two deployments are two unrelated
+accounts, so a graph reading both wants two tokens and one env var cannot serve them; each cell
+names its `server=`.
+
+#### What has not been run
+
+**Nothing has been run against a live CAVE datastack.** `CAVE_TOKEN` is absent here, so for that
+half what is verified is the signatures (against the installed caveclient 8.2.1), the syntax and
+name resolution (`check-export.py`), and the pandas (`probe-py-helpers.py` against a stub). The
+wire format is `src/data/cave`'s business and is covered by `live.test.ts` there. The SeaTable
+half *has* been run live, as above.
+
 ### The R Markdown exporter
 
 `Save ▸ Export as R Markdown` writes the same graph as an `.Rmd` on **neuprintr, dplyr, nat,
@@ -511,9 +1065,16 @@ gets its own chunk (`exporter-*.js` × 2 — verify both stay out of `main` with
 is a **copy**, taken deliberately: a change to how R chunks are assembled cannot reach the
 notebook. The cost is real and is the thing to watch — topological order, variable naming,
 unwired-versus-blocked and where the notes land now exist twice, so **if you fix one, look at the
-other**. What stops them drifting on *coverage* is `src/export/fixture.ts`: one graph, two golden
-files, and a node that emits Python but nothing in R shows up as a TODO rather than as a document
-nobody noticed was shorter.
+other**. What stops them drifting on *coverage* is `src/export/fixture.ts`: `everythingGraph`,
+two golden files, and a node that emits Python but nothing in R shows up as a TODO rather than as
+a document nobody noticed was shorter.
+
+**The one place they have parted company is the backend.** `caveGraph` is the second fixture and
+R refuses it outright — `canExportNotebook` is asked per language now, and
+`DatasetFamily.notebook` names a client per language. That is a real coverage gap rather than a
+loophole, and R's `export.test.ts` asserts the refusal so it cannot become a silent one; see
+*The CAVE half of the notebook exporter* above. The refusal message points at the notebook, or
+"no document can be built" reads as "Coda cannot export this at all".
 
 **R's stack is the same lineage, which is why the mapping is clean** — navis is the Python port
 of `nat`, and neuprintr is the natverse's neuPrint client. Three things are genuinely *better*
@@ -527,7 +1088,7 @@ not neurons, so `neuron.meshes` emits a TODO pointing at the Skeletons node.
 
 Four R-specific traps, each of which produces a document that looks right:
 
-- **`neuprintr` publishes `bodyid`; every Coda table uses `bodyId`.** `df$bodyId` on a tibble is
+- **`neuprintr` publishes `bodyid`; every Coda table uses `neuronId`.** `df$neuronId` on a tibble is
   `NULL` rather than an error, so the mismatch travels silently until something reports zero
   neurons far from the cause. `coda_neurons()` normalises at every neuprintr seam; the helpers
   that read raw `neuprint_connection_table()` output keep its own names, which is the one place
@@ -985,7 +1546,7 @@ have — and the cost is paid once rather than as two implementations that drift
 **Matched locally, never queried.** The neurons come from a table already on the canvas, so a
 clade of three cell types resolves to the neurons that were *clustered* rather than to every
 neuron of those types in the connectome. That is a different question and `IDs from Label` is
-the node that asks it. With no Neurons wired the labels are read as body ids, which is what
+the node that asks it. With no Neurons wired the labels are read as neuron ids, which is what
 they are unless NBLAST was told to label by something else.
 
 Four things in it that each produce a plausible wrong table:
@@ -1081,6 +1642,636 @@ which is the only reason a viewer computing hex in JS survives a theme switch at
 What has **not** been looked at is a tree at the few-hundred-leaf end, where the label thinning
 actually bites, and the `Ordered` matrix beside a Heatmap at a size where the blocks matter.
 
+## Annotations, and telling backends apart
+
+Two things landed together because the second is what the first made necessary: neuron labels
+can now come from somewhere other than the connectome, and a dataset node now says which backend
+serves it.
+
+### Where a neuron's labels come from
+
+`src/data/annotations/`. A **CAVE dataset node has an Annotations socket**, and what is wired to
+it *replaces* the datastack's own labels. Sources **chain** — each has its own optional
+Annotations input — so `CAVEtable → FlyTable → Dataset` is one socket on the dataset and a
+visible sequence on the canvas, with a later source winning a name collision. What travels is an
+ordinary neuron table, so a Filter, a Sort or a Select can stand anywhere in that chain and a
+Table node beside it shows what actually arrived; see **the Annotations socket** below for why
+that is not a bespoke type.
+
+**neuPrint has no such socket**, and that is `DatasetBackend.acceptsAnnotations` rather than a
+type check: neuPrint carries its cell typing as properties on the neuron, so there is nothing for
+a source to replace and the control would change nothing. A CAVE datastack takes its labels from
+a table — which is exactly what an annotation source *is* — and for several datastacks there is
+no such table at all. Aedes publishes synapses and nuclei and no annotations whatsoever.
+
+**Three nodes over two providers**, which is `labelsToNeurons`' call again: `FlyTable` and
+`SeaTable` are the *same API at two hosts*, so they share a client and differ in the host they
+default to and the name somebody looks for.
+
+**Two column names are Coda's, and a chain has to land on both.** `neuronId` was obvious — an id
+column is whatever the base calls it and every provider renamed onto it from the start. `type` was
+not, and missing it is entirely silent: `typesOf` reads `index.data.type` by literal name, so a
+chain publishing `cell_type` leaves `neuronType`/`partnerType` null on **every** connectivity row
+while the schema still declares them, Explore's `PRIMARY = ['type', 'instance']` falls through to
+a guess, and Profile's type roll-ups empty. `annotationColumn` in `annotations/types.ts` is the
+rule, applied by both providers — the same statement `data/cave/schema.ts` makes for the
+datastack's own table (`{ pt_root_id: neuronId, cell_type: 'type' }`), since an annotation chain
+is just the other route to the same neuron table. Deliberately only those two: everything else is
+a passthrough only a column picker ever names, which is what neuPrint's `PROPERTY_NAMES` does for
+`cellBodyFiber` and `somaSide`.
+
+**What a chain does to a schema is one function, `withAnnotations`**, and it lives in `src/data`
+because both halves of the seam need it: the edit-time half runs in `src/nodes` (`schemasFromType`,
+so a picker knows what to offer) and the run-time half in `CaveSource` (so the table it builds
+matches), and `src/data` may not import `src/nodes`. Written twice they had already drifted — one
+took the id column off the source's own schema and the other hardcoded `str`, agreeing only
+because every CAVE schema happens to declare `str` today. Invariant 3 in the direction nothing
+type-checks. `chainSchema` and `joinAnnotations` are the same pairing one level up, and share
+`joinedSchema` for the same reason.
+
+**The chain reaches the source, not the graph.** Every request that names a dataset carries it —
+find, index, connectivity, adjacency, geometry — because a `DataSource` has no view of the graph
+and the chain is a fact about the wiring. `datasetRequest(dataset)` returns the **id and the
+annotations together**, so a call site cannot supply one without the other.
+
+That pairing is the fix for a real failure rather than a precaution. The first pass threaded the
+chain into the *type* and only partly into the values: `findNeurons` never forwarded it at all,
+`schemasForDataset` did not substitute where `schemasFromType` did, and the morphology attribute
+table was built from the datastack's schema. So three query nodes advertised the chain's columns
+and returned the backend's, both morphology nodes did the same, and a second complete 139,255-row
+index was built and cached under the unannotated key. Invariant 3 across a seam, silent, and only
+findable by reading every caller — which is why the id and the labels now travel as one thing.
+
+**A chain wired but not yet run means the widget waits, rather than loading.** The *type* says a
+chain is there the moment the wire is drawn; only the value carries its table. Loading anyway
+downloads the whole index under the unannotated key and again under the annotated one the instant
+a Run lands — on FlyWire, 139,255 rows and about seven seconds thrown away, both retained for the
+life of the tab since the shared entry map is never evicted — and the list it shows meanwhile
+carries the backend's labels, which is the gap the chain was wired to close. Read off the type,
+which also retired a match on the *text* of `CaveSource`'s refusal: that coupled the empty state
+to a sentence in `src/data` and recognised only CAVE's phrasing.
+
+**The Explore widget reads the chain off the _value_, one run later than the ports do.** A
+dataset *type* carries the chain's schema; only a `DatasetValue` carries its table, because that
+table is a fetch somebody's Run paid for. So `NodeBodyProps` gained `inputValues` — the same
+thing `ValuePreview` is handed, from the `nodeInputs(id)` the card already computed — and
+`useNeuronIndex` takes the chain and keys its shared entry on it, for `neuronIndexKey`'s reason.
+
+That is a real departure from "this widget loads independently of any run", and it was forced
+rather than chosen. It began as a labelling gap — an annotated CAVE dataset listed the backend's
+`type` while the wire carried the chain's columns — and became a **hard failure** the moment
+`DatastackSpec.neurons` was allowed to be absent: on a datastack that publishes no neuron table
+the chain *is* the list, so the widget had nothing to list and the source refused. Aedes is
+exactly that datastack, and it is the case the whole feature exists for.
+
+The departure is bounded to what cannot be had otherwise: with nothing wired, or before a run,
+the widget behaves exactly as it always did. And the pre-run state is drawn as an instruction —
+`Press Run to load this dataset's neurons` — rather than as the source's own sentence, which
+would send somebody to look at the dataset when the fix is a keypress. That recognition matches
+on the refusal's *text*, which is the thing `reportAuthFailure` exists to avoid; it is
+deliberately narrow (it only softens wording, and a real refusal still shows through) and the
+honest fix is the per-dataset capability that is still unwritten.
+
+**The Profile widget looked like the same gap and was not**, which is worth the sentence: it
+fetches per neuron rather than loading an index, and `ValuePreview` hands it a whole
+`DatasetValue` and then peeled two strings off it. So the chain now rides along, and the profile
+cache key carries it for `neuronIndexKey`'s reason — two graphs on one datastack with different
+annotations hold different answers, and without it the first one looked at is served to the other
+for the session. It matters on precisely this card because it is the one surface that prints a
+partner's *type* in words beside ports carrying the chain's.
+
+**A repeated root id is kept by the providers, and collapsed only where it has to be.** Both
+`shapeRows` and the CAVE table reader used to drop a repeat, on the stated grounds that it "would
+put that neuron in the index twice" — which was already answered downstream and always had been:
+`dedupedIds` fixes the row order and `annotationIndex` fixes the cells, both first-occurrence-wins,
+and `joinAnnotations` does the same per side. So collapsing it at the provider changed nothing a
+Dataset ever saw. What it did was hide, from the only person who could act on it, that their base
+disagrees with itself.
+
+Measured against FlyTable's `main.info`: **58,340 rows over 56,309 distinct ids, 1,089 neurons
+carrying more than one, and one segment appearing 104 times** with its `side` reading left, center
+and center among them — a proofreading merge pulling many old annotations onto one root id. "First
+wins" was picking one of those 104 by arrival order, silently. Now the repeats reach a Table node,
+and a Sort ahead of the Dataset decides which row wins instead of the order the API happened to
+return. `cave.test.ts` pins the downstream collapse, since that is what the providers now lean on.
+
+**And the change did not appear to ship, because the cached table outlived it.** An annotation
+table is kept for a month and the fingerprint was the ref key alone — which says what was *asked
+for* and nothing about how the answer was built, so no change to the shaping rules invalidated a
+single stored entry. A session that had read `main.info` before went on reporting 56,309 rows,
+with `Refresh` on the node the only way through. `SHAPE_FORMAT` in `annotations/registry.ts` is
+now part of the fingerprint. Same trap and same fix as `MASK_FORMAT` on the thumbnail cache — an
+entry that outlived the policy that produced it because nothing in it recorded which policy that
+was. In the fingerprint rather than the key, because a fingerprint mismatch is a miss that
+*overwrites*, and there is only ever one current shape.
+
+**"Shaping" is a precise thing, and the rule is: bump when the same reply would now produce a
+different table.** Which rows survive, what the columns are called, what dtype each gets, how a
+cell is narrowed, whether a long table is folded. *Not* how the fetch was made — paging, routes,
+retries and credentials all leave the same table behind, and none of them belong in the
+fingerprint.
+
+**And it is coupled rather than remembered.** `shapeRows`, `wideRows` and `pivotRows` each have
+their decisions asserted in `annotations.test.ts` — those blocks *are* the operative definition —
+and one test in the same file asserts `SHAPE_FORMAT` itself. So changing shaping fails a test,
+and bumping the constant alone fails a different one that points back at the blocks. Both
+directions were confirmed by mutation. Without that pairing the constant is a comment, and a
+version somebody has to remember to bump makes the cache look guarded when it is not. It is also
+what made `pivotRows` and `wideRows` worth exporting: `shapeRows` already was, and a shaping rule
+nobody can call is a shaping rule nobody can pin.
+
+Note the asymmetry those tests record. `wideRows` keeps a repeated root id; `pivotRows` cannot,
+because many rows per neuron is its *input* shape — one row per (neuron, kind, value) is what
+`pivotOn` exists to fold, so the Map keyed by id is the operation rather than a dedup on top of
+it.
+
+**`CaveSource` left-joins the chain onto its own neuron list**, and the direction matters: every
+neuron the segmentation knows about comes out, annotated or not. The other way round would let an
+annotation base decide which neurons *exist*, and those bases routinely carry rows for ids that
+have since been edited away — putting neurons in the index the connectome cannot answer a single
+query about. The index cache key carries the chain, or two datasets differing only in their
+annotations would share one cached table and the first one fetched would win for the session.
+
+**Where a datastack publishes no neuron table at all, the chain _is_ the list** — which is not
+that decision reversed but the case it does not cover. `DatastackSpec.neurons` is optional, and
+Aedes is the example: synapses and nuclei and nothing that enumerates neurons. With no
+segmentation list there is nothing to left-join onto, so `idsFromChain` takes the order from the
+chain's own `neuronId` column, deduplicated for `orderOf`'s reason — an annotation base is
+somebody's spreadsheet and can hold two rows for one neuron. Combining populations is then two
+annotation nodes chained rather than a setting, because `joinAnnotations` is a full outer join:
+`CAVE table (proofread_neurons) → FlyTable (info)` is the union of both id sets.
+
+**What that table is actually for is worth stating, because it is narrower than it looks.**
+Nothing queries *through* it. It is read for exactly two columns — the root id, which becomes the
+index, and the annotation table's own primary key, which is how `spec.annotations.refColumn`
+joins back — so `spec.annotations` depends on it and a datastack with neither is coherent.
+Connectivity reads the roll-up view by root id, and Skeletons, Meshes and Synapses take ids off a
+table, so `Input IDs → Connectivity` needs no neuron table whatsoever. What its absence costs is
+enumeration: Find Neurons, Explore, and the type names `typesOf` puts on every connectivity row.
+Hence the refusal names the wire to make rather than answering with an empty table, which would
+read as a datastack with no neurons in it.
+
+The node follows: `Neuron table` is no longer required, its help says any table with one row per
+neuron carrying a root id will do, and `validate` asks for **a table or a wire** rather than for
+the table. `registerCustomCaveSpec` registers the spec either way — withholding it for want of a
+neuron table would break the id-driven nodes, which never touch it.
+
+**The CAVE table node's Dataset input is optional, and that is not a convenience.** It was
+required, which made the wiring the node's own guide describes — a datastack's table handed back
+to that datastack as its labels — a **cycle**: `Dataset → CAVE table → Dataset` is two edges
+between one pair in opposite directions, so `topoSort` returns both nodes in `cyclic` and the pair
+goes dark with no result and nothing naming the cause. So the datastack is a param
+(`flywire_fafb_public:783`, the `datasetIdFor` grammar) and the socket is the *override*: wired, it
+names a different datastack to read the table out of, which is the cross-datastack case and the
+only one the wire was ever needed for. Found by writing the node's first test, which is exactly
+the gap invariant 5's corollary records about `out.barChart`.
+
+### SeaTable, verified rather than read
+
+Everything here was probed live against FlyTable. Four calls, and the auth scheme is **`Token`**,
+not `Bearer`, on every one — a Bearer JWT gets `403 invalid token`, which blames the credential
+rather than the scheme.
+
+```text
+GET  {host}/api/v2.1/workspaces/                                → bases, by workspace
+GET  {host}/api/v2.1/workspace/{ws}/dtable/{base}/access-token/ → JWT + uuid + dtable_server
+GET  {server}/api/v1/dtables/{uuid}/metadata/                   → tables and their columns
+GET  {server}/api/v1/dtables/{uuid}/rows/?table_name=…&limit=…  → the rows
+```
+
+- **An account token, not a base API token**, and the distinction cost four failed probes. The
+  documented "app access token" exchange takes a token minted *for one base*; an account token
+  answers `Permission denied` there and works everywhere else. It is also the better credential
+  to ask for: one reaches every base the account can see. The message says so, because the
+  server's does not.
+- **The rows endpoint has no column selection, and the one that does cannot be reached from a
+  browser.** `/dtable-db/api/v1/query/` takes SQL and answers 200 — with no ACAO header. So a
+  whole-table read is every column: FlyWire's `main.info` is 58,340 rows over 60 columns at
+  **~79 MB**, in six pages of 10,000, and **SeaTable does not gzip**. The node's `Columns` param
+  changes what is *kept*, not what is transferred. Cached in IndexedDB, so it is paid once per
+  base; measured end to end at **19.8 s**.
+- **Ids are already text.** `root_id` comes back as `"720575940621522189"`, so it round-trips
+  exactly and meets CAVE's string ids with no conversion. That is the half of invariant 8 that
+  was free, and it is why these two backends join at all — the live test asserts most of a
+  sample is genuinely beyond double precision, because an id merely *ending* in zeroes proves
+  nothing.
+- **Pages are sequential, not concurrent.** `start` is an offset into a base that is being edited
+  while you read it; firing six at once is how a page gets read twice and another missed.
+- **The workspace is worked out, not asked for.** A base is addressed by workspace *and* name,
+  which is the API's bookkeeping rather than anybody's question — measured on the real FlyTable
+  account, **46 bases across 13 workspaces and not one duplicated name**, so the field was never
+  once needed there. Empty now resolves from the listing and only genuine ambiguity is refused,
+  naming the workspaces rather than picking one. Exact match first, then case-insensitively,
+  because a base name is something people retype; the ambiguity rule guards both passes, so the
+  second cannot quietly choose between two bases.
+
+  `discovery` is keyed on `host|base` and deliberately **not** on the workspace as typed: the peek
+  runs on the typed config and the run on the *resolved* one, so with the workspace usually empty
+  the two never met and inference paid its own access-token-plus-metadata round trip per base for
+  an entry the run had already filled. A base name that is ambiguous is refused rather than
+  resolved, so the name alone identifies whatever was successfully opened.
+
+  Three things about it. The **resolution happens before the cache key is taken**, so `main` and
+  `5 / main` are one entry — `main.info` is ~79 MB, so keying on what somebody typed rather than
+  on what it means is a second twenty-second download and a second copy in IndexedDB. A ref that
+  *names* its workspace **never lists at all**, which is a round trip saved and an account whose
+  `/workspaces/` is slow or forbidden still able to open a base it has the id for. And
+  `peekBases` — which `validate` reads — is the one peek here that **starts no fetch**: it runs on
+  every graph mutation and would otherwise issue a listing, and with no token an auth-failure
+  popup, for a node somebody is still typing into. In practice it is loaded by the time it
+  matters, because `peekColumns` resolves the same base.
+
+  It also fixes a card refusing over something it does not draw: `workspace` is `advanced`, so
+  the old requirement was a badge pointing at an inspector-only field.
+
+**FlyTable cannot be read from a browser at all, and the live test could not see it.**
+`live.test.ts` runs in Node, where `fetch` does no CORS enforcement — so "probed live" covered
+every endpoint shape and none of the browser's actual constraint. Measured against the
+deployment: **zero `Access-Control-*` headers on any response**, and the `OPTIONS` preflight
+reaching Django and answering `403 Authentication credentials were not provided` before any CORS
+middleware could run. Not an allowlist — four different `Origin` values produce the same nothing.
+`cloud.seatable.io`, the same software hosted, answers the preflight 204 with
+`Access-Control-Allow-Origin: *`, so the two deployments differ entirely in this and the code
+cannot assume either.
+
+So `request` **tries and remembers**. That machinery is now **one module**, `data/routeMemory.ts`
+— it was written by hand three times (neuPrint's client, this one, and `transport.ts`'s in-memory
+variant), which is three statements of rules whose violation is invisible. What is shared is the
+memory and the preference ordering; the *loop* stays with each caller, because what a status
+means, which errors travel on the auth channel and what a failure should say are per-backend. The
+three rules: only a *thrown* fetch moves on (a
+response of any status means the request arrived), only a **2xx** is remembered (a 404 is what a
+static host answers for a relay path nobody serves, and pinning that would outlive the day the
+deployment gains CORS), and an `AbortError` is never answered by trying elsewhere. Direct is
+first, because the hosted service needs no relay and asking for one would fail on a static
+deploy. The relay is `/st/<encoded-origin>/<path>`, served by the **same** `vite.config.ts`
+plugin `/np/` uses — one handler, because the SSRF guard is the part that must not be copied.
+
+**The relay is a development answer, not a fix.** A static deploy serves nothing at that path,
+so the published build cannot reach FlyTable until the deployment sends the headers.
+`docs/flytable-cors.md` is the nginx config, and the four things in it each fail silently on
+their own — the preflight answered before authentication (a browser sends `OPTIONS` with no
+`Authorization`, which is why it reaches Django and 403s), `Authorization` in the allow list,
+`always` so the headers survive a 401 (without which `reportAuthFailure` cannot read the status
+and a rejected token reads as an unreachable host), and per-`location` repetition, since
+`add_header` does not inherit into a block that has one of its own.
+
+**Two things about that config were got wrong first, and both are worth knowing before touching
+another deployment.** `/dtable-server/` and `/dtable-db/` **already send their own CORS
+headers**, so adding a second is not belt-and-braces — two `Access-Control-Allow-Origin` headers
+on one response make a browser reject it, which would break the half that works. And the
+endpoint SeaTable's own documentation points a browser at, `/api/v2.1/dtable/app-access-token/`,
+is not the one Coda calls: it takes a token minted **for one base** and answers an account token
+`403 Permission denied`. So the two locations that need opening are `= /api/v2.1/workspaces/`
+and an anchored regex for `/api/v2.1/workspace/{ws}/dtable/{base}/access-token/` — pinned rather
+than a `/api/` prefix, which would expose the whole of seahub's v2.1 API.
+
+**The `*` is load-bearing and must not become an echoed origin.** These endpoints also accept a
+Django session cookie, and a literal `*` makes a browser refuse to attach cookies at all — so
+the cookie path is structurally unavailable rather than merely unused, and only the
+`Authorization: Token …` flow works. An echoed origin plus `Allow-Credentials` would let any
+permitted origin mint tokens for a logged-in user, and `SameSite=Lax` is no backstop on this
+host: `ac.uk` is a public suffix, so every `*.cam.ac.uk` server counts as same-site.
+
+Verified in a real browser over CDP against `pnpm dev`, which is the only thing that could:
+direct throws `TypeError: Failed to fetch`, the relay returns the data, `cloud.seatable.io`
+direct answers without one, and the full client path — `listBases` 46 bases and `readMetadata`
+through the `/dtable-server/` prefix — works with the route remembered as `proxy`.
+
+### The CAVE table provider, and where its line falls
+
+It reads a table carrying a root id **directly**, wide or long — `pivotOn` turns a
+one-row-per-(neuron, kind, value) table into columns, reusing the per-kind split `CaveSource`
+already needed for the 500,000-row cap. FlyWire's `hierarchical_neuron_annotations` is *not* such
+a table: it is keyed by `target_id` into `proofread_neurons`, so reading it needs a join only the
+datastack's own spec knows how to write. That stays in `CaveSource` as the built-in, which is
+what a dataset uses when nothing is wired — and keeping it there is what lets this provider be
+about *tables* rather than about FlyWire.
+
+**`peekColumns` is synchronous and answers `undefined` until it knows**, the same contract
+`schemasFor` has and for the same reason. A wide table answers immediately from the ref; a long
+one has to ask the server what its kinds are, and does it once per ref through the 52 kB
+`unique_string_values` call. `reportAnnotationsLearned` is the third thing wired to
+`afterSourceLearned` — dataset listings, upload schemas, and now these: three asynchronous facts
+that inference reads synchronously, one handler.
+
+### Backends, told apart
+
+`BACKENDS` in `datasetFamilies.ts` — a table, because "which backend" is now three things a
+reader needs and a fourth backend should be one entry rather than four edits.
+
+- **The backend is in the name**: `MaleCNS (neuPrint)`, `FlyWire FAFB (CAVE)`. Not decoration —
+  one dataset can be published on more than one backend, and without the suffix two nodes in the
+  Add menu would read identically and behave differently. A backend with an empty label adds
+  nothing, which is what keeps `Hemibrain (mini)` from becoming `Hemibrain (mini) (Mock)`. **The
+  node type ids are untouched**: that is what a saved graph carries.
+- **The card is tinted by backend**, through `--cat-dataset-<id>`. A *lightness* step within the
+  one green, not a second hue: deuteranopia and protanopia collapse red-green hue differences and
+  leave lightness intact, so two greens a stop apart separate for every reader while a green and
+  a teal separate for only some — and the category palette was validated as a set, so a genuinely
+  new hue would mean re-running the validator against the sockets too. The step is deliberately
+  large; a small one reads as a rendering artefact.
+- **The browser tile carries a pip**, which is the non-colour channel. A grid shows dozens of
+  tiles at once and two greens are a weaker signal at that size than on a card. One lit pip in a
+  fixed slot, so it is positional rather than a count to read.
+- **`Custom CAVE`** joins `Custom neuPrint`, and needs more than it: a datastack has no
+  privileged table, so the node names its neuron table and registers a spec through
+  `registerDatastackSpec` — synchronously and with no network, `neuPrintSourceFor`'s rule.
+
+  **Its Materialization is a dropdown fed by a per-datastack peek**, not by the listing. That is
+  forced rather than chosen: `listDatasets` lists only datastacks with a spec in the *static*
+  table, so a datastack somebody has just typed is not in it and never will be.
+  `peekMaterializations` is `schemasFor`'s contract again — synchronous, `undefined` until it
+  knows, starts the fetch once per datastack and re-infers through `reportSourceLearned` — with
+  `materializationsFor` as its awaited half, which `evaluate` uses. One memo behind both, so the
+  materialization the dropdown *shows* and the one a run *uses* cannot disagree.
+
+  Three things about it, each of which is a state somebody actually sees. **The empty select is
+  said in words**: `Name a datastack first` before one is typed, because a dropdown with nothing
+  in it reads as a broken control. **A pinned value is kept as an option while the list is
+  unknown** — the family nodes need no such thing, since their listing is one call every dataset
+  node shares, where this one is per-datastack and so absent on *every* reload; without it a
+  pinned materialization blanks for a second and reads as forgotten. And **`evaluate` resolves
+  "latest" by fetching rather than by peeking**, or an unpinned node fails on the first press and
+  works on the second — the runs-twice-answers-differently signature this codebase keeps being
+  caught by. `dataset.test.ts` pins all three, and the last two were confirmed by mutation.
+
+  The `validate` order matters too: the shipped-datastack collision is checked **first**, because
+  `specFor` prefers the static table, so every other setting on the card is inert for a datastack
+  that already has a node — and asking for a neuron table first answers a question that does not
+  matter.
+
+**The Annotations socket takes an ordinary table, and used to be its own type.** It had the
+dataset hue and the `diamond` shape and described the contract exactly — and that is what made it
+wrong. An annotation base is somebody's spreadsheet: it routinely wants a row dropped or sixty
+columns narrowed to four *before* a connectome is labelled by it, and a bespoke socket type meant
+no table op could touch one. `FlyTable → Filter → Sort → Dataset` is now an ordinary wire, and so
+is `Upload Table → Dataset` for a lab's own cell typing, which was impossible outright. The socket
+takes the table hue, which is honest.
+
+**`T.table()` and not `T.neurons()`, though every source does guarantee a `neuronId`.** Filter,
+Sort, Sample, Stack and `out.table` all *preserve* neurons-ness — checked, and each says so — so
+the stricter socket accepts every op somebody names first and then refuses `core.select`, which
+publishes a plain `table` because a selection *may* drop the id. Narrowing sixty columns to four
+is as ordinary a clean-up as dropping a row, so that is the case the type has to admit. "Has this
+column" is not a question assignability answers here; `types.ts` says so outright, and the
+requirement moved to `validate`, where it can name the column. `annotations.test.ts` pins the
+Select case specifically, because the Filter case passes under *either* socket type — a test
+built on it would have looked like it was defending the choice while defending nothing.
+
+**And `validate` only warns, so `annotationsFrom` refuses at run time as well.** The two things a
+run could do instead are both silent: ignoring the wire is the control that quietly does nothing,
+and carrying it on leaves `withAnnotations` merging a schema with no id column, so every neuron
+comes back unlabelled with the connectome to blame. One funnel, so the two dataset nodes cannot
+disagree about which.
+
+**What identifies an annotation table is now provenance, not the refs that fetched it.**
+`AnnotationsValue` was `{kind, sources, table}` and is now `DatasetAnnotations` — `{key, table}`,
+a field of `DatasetValue` rather than a member of the `Value` union. `sources` was the chain's
+`refKey`s, and the moment a Filter is allowed to stand in the chain those stop describing the
+table: two graphs filtering one base differently would share a cached neuron index, and the first
+one fetched would win for the session — precisely the failure the chain key was added to prevent.
+So the dataset node pairs the table with **`ctx.inputKey('annotations')`**, the scheduler's own
+`hash(type, params, upstream)` for whatever arrived on that port. It keys the CAVE neuron index,
+the Explore widget's shared entry and the profile cache, exactly as `chainKey` did.
+
+**`ctx.inputKey(portId)` is new on `EvalContext`**, and the scheduler was already computing it —
+`desiredKeys` builds `${key}:${handle}` per port to fold into the hash, and `upstreamKey` is now
+that one spelling shared by both. Deliberately *per port* rather than the node's own key, which
+would fold in params of this node that say nothing about the value on that port.
+
+It also closed a latent bug rather than only enabling the feature. `refKey` is `provider:config`
+and `refresh` is in neither `seaRef` nor `caveRef`, so bumping an annotation node's Refresh
+re-downloaded the base and re-ran the dataset — and then `neuronIndex` hit the same `chainKey`
+with the same column fingerprint and served the stale index. Traced rather than reproduced;
+provenance keying makes it structurally impossible.
+
+**Connections gained a fourth section rather than two more source tabs.** The top level there is
+*what kind of connection*, and an annotation base is somebody's spreadsheet of labels joined onto
+a connectome — filing FlyTable under Data sources would say it was a fourth backend you could
+query for neurons. Same split, same reasoning, as the AI key.
+
+### Root ids drift, and the dataset says so
+
+A CAVE root id is retired by any proofreading edit that touches its segment, so an annotation
+base — somebody's spreadsheet, edited on its own schedule — drifts out of step with a **pinned**
+materialization on its own. Nothing fails when it does: the labels stop matching, those rows join
+to nothing, and the dataset reads as under-annotated. `data/cave/rootIds.ts` is the heads-up.
+
+`caveclient.chunkedgraph.is_latest_roots`, read off caveclient 8.2.1 rather than recalled:
+`POST {cg}/segmentation/api/v1/table/{table}/is_latest_roots?timestamp=<epoch seconds>` with
+`{"node_ids": […]}` → `{"is_latest": […]}`. The timestamp is the materialization's own
+`time_stamp`, which `versionsMetadata` already returns and `datastack.ts` was throwing away — so
+it costs no extra round trip.
+
+**And CAVE writes that instant with no zone on it and means UTC, which `Date.parse` does not.**
+`"2023-08-29T00:00:00.000000"` is a date-*time* string with no offset, and ECMA-262 reads one of
+those as **local** time — so `Date.parse` turned the same reply into a different instant on every
+machine: an hour out in London for half the year, seven in `America/Los_Angeles`. That it is UTC
+is not a guess; caveclient parses the same field with
+`datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S.%f").replace(tzinfo=timezone.utc)`.
+
+The damage is silent and is not confined to a display. This instant is what `is_latest_roots` and
+`roots_binary` are asked *at*, **and** it is folded into the permanent cache key beside them — so a
+skewed one asks the chunkedgraph about a moment the materialization was never frozen at and then
+keeps the wrong answer forever. On a proofread datastack that makes `Update root IDs` write root
+ids that do not exist in the pinned materialization, which is the exact drift it exists to repair.
+
+`parseCaveTimestamp` is the rule and `versionFrozenAt` answers the **instant** rather than the
+string, which is what stops it being got wrong twice: nothing outside `datastack.ts` sees the raw
+field except `datasetInfoFor`, which only slices a date out of it for prose. An offset already on
+the string is honoured, so a deployment that starts sending one is not shifted twice.
+
+**The test could not have caught it, and that is the part worth carrying.** It asserted
+`timestamp=${Date.parse(STAMP) / 1000}` — the same expression the code used — so it agreed with
+whatever that expression produced. A value a test derives the way the code derives it is not an
+assertion. It is written out as a literal now, with the three spellings of one instant asserted
+to agree.
+
+**It is fired and forgotten.** `evaluate` starts it and returns; the answer lands on
+`subscribeRootCheck`, the **fourth** thing wired to `afterSourceLearned`, and `validate` reads it.
+So a run is never delayed by it and never fails because of it, which is right for an advisory
+about data the node did not fetch — and it is a *warning*, since an id that moved on is a fact
+about somebody's base rather than a mistake in this graph.
+
+**Four things keep it off the service**, which matters because this is a shared production
+chunkedgraph at roughly 50–100 µs a root:
+
+- **Once per (dataset, chain).** The ids arrive on every run, so re-asking per run is the
+  hammering to avoid — and never re-asking at all leaves the answer describing a wiring that is no
+  longer on the canvas, which is the bug below.
+- **Cached per (segmentation, frozen timestamp), permanently.** Whether a root was current at a
+  past instant *never changes*, so the answer is good forever — no expiry is passed to `cacheGet`
+  at all. Keyed on the segmentation and the instant rather than on the dataset or the id list, so
+  two datastack nodes share it and a base that gained rows costs only the rows it gained.
+- **Only ids nobody has asked about**, which is what that key buys.
+- **Deduplicated, and sequential in chunks of 10,000.** An annotation base repeats ids — 1,089 of
+  them on FlyTable's `main.info`, one 104 times — and firing every chunk at once is the same
+  hammering by another route.
+
+**The body is written as text**, because `node_ids` is a list of integers on the wire and an
+eighteen-digit root id through `JSON.stringify` of a `number` is a different neuron (invariant 8)
+— while *quoting* them is a type this endpoint was never promised to accept. `cavePostRaw` exists
+for that one case; every other CAVE POST goes through `cavePost`. The query endpoint's own
+tolerance of quoted ids was established live and does **not** transfer to this one.
+
+**And it answers to the wiring, which it did not at first.** The report was keyed on the dataset
+id alone and taken *once per session*, so the check was never re-asked: dropping an `Update root
+IDs` into the chain left the warning up, and pulling one back out never raised it. Both directions
+reported, and each reads as the opposite feature being broken — the repair not working, or the
+advisory not noticing.
+
+The fix is that a report records **which chain it is about**, and the chain's name is
+`ctx.inputKey('annotations')` — the same provenance key the dataset node already pairs with the
+table, which changes exactly when the table would (invariant 4). Four rules fall out, and each was
+mutation-checked because every one of them fails as a *plausible* warning rather than as an error:
+
+- **A new key drops the old answer immediately**, before the replacement lands. It was about a
+  chain that is no longer there, and a warning that outlives the repair it asked for is the
+  original bug wearing a shorter timeout.
+- **The drop is announced on `subscribeRootCheck`.** A run does not re-infer, so nothing else
+  would re-run `validate` — the warning would sit on the card until an unrelated edit, which is
+  precisely what "it didn't work" looked like.
+- **Nothing wired is a real key**, not a reason to keep the last one. Otherwise unplugging the
+  annotations leaves a warning naming ids the graph no longer holds.
+- **A late lander does not overwrite a newer chain.** The repaired ids are the ones the permanent
+  cache already knows, so the *replacement* check routinely finishes first and the superseded one
+  arrives after it — restoring the warning somebody just cleared, permanently.
+
+A failure releases the claim so the next run asks again, where a settled "nothing to say" — no
+chunkedgraph, no timestamp — keeps it: a dropped connection is not an answer, and a datastack with
+no chunkedgraph will never have one.
+
+The known limit, stated on `rootDriftIssues`: the report is keyed on the **dataset id**, which is
+all `validate` can see (an `InferContext` carries params, types and nothing else), so two dataset
+nodes on one datastack and materialization with different annotation chains share one entry and
+whichever ran last owns it. Uncommon, and the message says what was checked rather than whose it
+was.
+
+### Update root IDs: the repair
+
+`cave.updateRootIds`, `Add ▸ Transform ▸ Update root IDs`. The drift check above says an
+annotation base has fallen behind a materialization; this brings it forward, and the warning names
+it so somebody reading one arrives at the other.
+
+**A supervoxel is what makes a repair possible at all.** It is the atom of the segmentation —
+proofreading regroups supervoxels, it does not split them — so a supervoxel id is the stable
+handle a root id is not, and `get_roots(sv, timestamp)` answers which segment it belonged to at
+any past instant. A row without one is left alone: there is nothing to recover from, and a stale
+id is a better answer than a null or a dropped row.
+
+**The staleness check runs first, and that is the whole cost control.** Only rows whose root is
+*not* current are looked up, so an unedited base costs one `is_latest_roots` pass and **no**
+`get_roots` at all. Both answers are cached permanently and keyed on (segmentation, frozen
+timestamp), for the reason the advisory's are: what a root or a supervoxel was at a *past* instant
+never changes.
+
+**`roots_binary` is the one CAVE endpoint here that is not JSON**, and for once that makes
+invariant 8 easy: raw `uint64` in and out, so a `BigUint64Array` carries an eighteen-digit id
+exactly with nothing parsed, rounded or quoted. `cavePostBinary` exists for it — its own function
+rather than an option on `request`, which parses JSON unconditionally.
+
+**The id column keeps its storage, read off the schema rather than off row zero.** A CAVE id
+column is `str` and stays text; a table holding them as numbers keeps doing so rather than changing
+dtype under every picker downstream, and `idText` refuses a number too wide to be exact so nothing
+silently rounds. It asked `typeof ids[0] === 'number'`, which decides a whole column from one
+value — so a table whose first row has no id, which an annotation base routinely has, wrote strings
+into an `i64` column: invariant 3 broken by the node whose whole job is repair, and silent until
+something downstream sorted or compared them.
+
+The guard in the rewrite loop — only touch a row whose id was *stale* — reads as redundant, since
+only stale rows are ever asked about. It stops being redundant the moment the cache is warm: the
+supervoxel map is permanent and shared across runs and datasets, so a later run can hold a root
+for a row that did not move, and without the guard that row is silently rewritten. Pinned by a
+test that seeds the cache, after a mutation showed the obvious test could not see it.
+
+Its Dataset input is a **reference** — see the reference-edges section — which is what lets it sit
+between an annotation source and the dataset it feeds. That wiring was a cycle until references
+existed, and it is the placement the node is for.
+
+Not exported: named in both `NO_EMITTER`s, since it is caveclient's chunkedgraph and only ever
+sits on a CAVE dataset, whose own node is excused for the same reason.
+
+### What is not done
+
+The **R** exporter emits none of it — `dataset.flywire`, `dataset.cave` and the three annotation
+nodes are named in its `NO_EMITTER`, and a CAVE graph is refused outright there. Python emits all
+six; see *The CAVE half of the notebook exporter* below for what it does and does not reach.
+
+A node body for the annotation sources — a base and table picker fed by `listBases`/`readMetadata`
+rather than two text fields — is the obvious next thing; the client methods it needs already exist
+and are what the Connections tab's Test button uses.
+
+Not looked at in a browser: the tints, the tile pips and the chain on a real canvas. Same
+standing as the WebGL viewers.
+
+## Two caches, and the two controls that clear them
+
+`Invalidate Results` and `Clear Cache`, in the node's context menu and side by side in the
+inspector. They are different layers and the difference is not cosmetic:
+
+| | what it holds | keyed by | cleared by |
+| --- | --- | --- | --- |
+| the scheduler's result cache | what `evaluate` returned | provenance — `hash(type, params, upstream)` | Invalidate Results |
+| the data cache (`loadCachedTable` → IndexedDB) | what a *server* returned | what was fetched | Clear Cache |
+
+**Only the first was reachable, and the menu claimed otherwise.** The item read `Invalidate
+cache` with a tooltip saying "forcing a re-fetch" — and on a FlyTable node the card cleared, the
+node re-ran, and the answer came back in milliseconds with the same 79 MB of rows, because the
+second layer is keyed by the ref and kept for a month. A control that looks like it worked.
+
+**`ctx.refresh` is what crosses the gap.** `Scheduler.clearNodeCache` invalidates the result *and*
+arms a flag; `evaluate` reads it and passes it down to whatever fetches. Session state, never the
+document — it must not be saved, must not travel to whoever you send the file to, and must not
+take part in the provenance key.
+
+Two things about *when* it is spent. It goes at **execution**, not at the top of a run: an
+expensive node is deferred by the cheap pass, which fires on every keystroke, so a flag cleared
+there would be gone before the node ever had its chance — Clear Cache would work or not depending
+on whether anybody typed in between. And `pruneCache` drops it with its node, since ids are reused
+across loads and a stranded request would be spent by whatever took the id.
+
+**`NodeDefinition.dataCache` is one declaration meaning two things**: the button appears, and
+`evaluate` honours `ctx.refresh`. Paired deliberately — a node offering the button and ignoring
+the flag is exactly the control-that-does-nothing this replaced, and a button on a Filter would
+promise a re-fetch with no fetch behind it.
+
+**The card says how old the data is, and the label is the control.** `cached 3d ago ⟳` in the
+foot of any node that reported a fetch, clearing that node's data cache and running it. A passive
+badge would leave the obvious next act — a fresher copy — two gestures away in a menu, and what
+somebody wants on reading "3d" is not to be told again.
+
+**Shown whenever there is an age, not only when it is large.** `cached 0s ago` is exactly as
+informative as it sounds, and it is what makes the number believable the day it reads `28d` — the
+rule that keeps geometry units printed when they are the expected ones, and the matched half of
+`unmatchedLabels` on screen. There is no threshold and no confirm.
+
+**The age is reported, not derived, and that is forced.** A cache hit and a fresh read are
+indistinguishable from the rows, so `ctx.reportFetched(at)` carries it: `cacheGetEntry` hands
+`savedAt` to `loadCachedTable`, which calls `spec.onFetched` — the `onProgress` idiom, because
+every caller wants the table and only one wants the age, so widening the return type would edit
+six call sites to serve one. The oldest report of a run wins, so a node making several fetches
+says how stale its worst is.
+
+**It lives in the scheduler's `CacheEntry`, not in `NodeRunInfo`**, and that is the whole of why
+it works. A second Run over an unchanged graph re-executes nothing, so a run-time report would be
+gone while the stale table it described stayed on screen — the failure CLAUDE.md already records
+as "there is no channel from `evaluate` to a badge that survives a result being restored from
+cache". This is that channel, and it took a second consumer to justify it: an age is the one thing
+that genuinely cannot be derived from the result, since it is not in the rows.
+
+`formatAge` is deliberately **not** `formatDuration`. That one measures how long a run took and is
+written for the millisecond end (`<1ms`, `142ms`, `2.4s`); this answers a different question and
+rounds rather than refining — nobody deciding whether to re-read a base is served by `2.7d`. It
+**floors**, so nothing is ever reported as older than it is: `23h` stays `23h` until it really is
+a day.
+
+**It replaced the annotation nodes' `refresh` nonce.** A nonce works, and invariant 4 is why they
+exist at all; what it costs is that re-fetching becomes an **edit** — in the provenance key, in the
+saved file, and carried to whoever you send the graph to — and that every node wanting the ability
+grows its own param. `dataset.*` and `core.tableFromUrl` still carry theirs; they are the obvious
+next candidates, and `refreshParam` stays for them.
+
 ## Auto-run
 
 A checkbox beside Run. On, every change re-runs the **whole** graph, expensive nodes included;
@@ -1108,7 +2299,7 @@ stale until you touch something reads as the setting not working.
 
 Testing note: the Filter node is `cheap`, so editing it proves nothing about auto-run — the
 ordinary pass re-runs it either way. Only an expensive node's param distinguishes the modes.
-And a `typePattern` matching nothing makes Connectivity error ("No bodyIds…") and blocks
+And a `typePattern` matching nothing makes Connectivity error ("No neuronIds…") and blocks
 everything downstream, so a test that waits for zero stale nodes will hang on it.
 
 ## Framing a graph that was just opened
@@ -1119,18 +2310,37 @@ so one signal covers all of them. It crosses as a counter with a mount-seeded gu
 viewport belongs to React Flow and every trigger sits outside its provider, same idiom as
 `paletteRequest` and `browserRequest`.
 
-**The fit waits for `nodesInitialized`, and that is the load-bearing part.** `fitView` reads each
-node's _measured_ size, and a node committed in this render has none — fitting immediately frames
-a set of zero-sized boxes and lands at an arbitrary zoom. The hook goes false while the new cards
-are unmeasured and true once React Flow's ResizeObserver has them, so the effect leaves the
-request unhandled until then. Late and correct beats immediate and wrong.
+**The fit is asked for unconditionally, and waiting for the cards to be measured is React Flow's
+job rather than ours.** `fitView()` does not fit: it sets `fitViewQueued`, pushes a no-op onto the
+node queue, and returns a promise. The fit resolves either at the next `setNodes` where every node
+has a measurement or, failing that, inside `updateNodeInternals` when the ResizeObserver delivers
+one. So a graph committed this render — whose cards have no size yet — is framed a beat later
+against real measurements. That is worth knowing before writing a gate for it, because the
+obvious gate is what broke it.
+
+**It was gated on `useNodesInitialized`, and that flag is false here forever.** `adoptUserNodes`
+carries a measurement forward only while the **user** node object behind it is identity-equal and
+otherwise re-seeds `measured` from `userNode.measured`; `rfNodes` mints fresh objects on every
+store change and `onNodesChange` deliberately never writes a measured size back into the document,
+so that field is permanently undefined. `updateNodeInternals` never recomputes the flag, so
+nothing brings it back. See the auto-layout section, which met the same flag from the other side.
+
+**What that cost is the useful half, because it read as intermittent rather than broken.** The
+**first** open of a session framed correctly and every one after it did not — and that first fit is
+React Flow's own `fitView` prop, queued at mount and resolved once the opened graph's cards were
+measured, with nothing to do with this effect at all. Measured in a browser, opening a second graph
+left the viewport transform byte-identical and put the new graph's top row at y = −109 against a
+pane starting at y = 42. A control that works once per session is the hardest kind to report.
 
 **A graph with no nodes raises no request at all.** A request nothing can satisfy would sit
 pending and be spent on whatever the user added next — a viewport that lurches minutes later,
 nowhere near its cause. That is why `newGraph` does not ask and `loadGraph` checks first.
 
-jsdom does no layout, so the canvas half has no test; `store/fitOnLoad.test.ts` covers which
-loads ask and which do not.
+jsdom does no layout, so the framing itself is not asserted anywhere and was checked in a browser:
+five consecutive opens — a dataset starter, three examples and a re-open of the same graph — each
+landing wholly inside the pane at its own zoom, with no console errors. `store/fitOnLoad.test.ts`
+covers which loads ask; `ui/fitOnLoad.test.tsx` covers that the request is spent, by pinning
+`useNodesInitialized` to the `false` it really returns and asserting `fitView` is called anyway.
 
 ## Automatic layout
 
@@ -1171,12 +2381,14 @@ across, a dataset card 248, a Profile 560.
 Zoom-independence is not a nicety: these numbers go into `structureKey`, and a size that drifted
 with the viewport would have auto-layout re-arranging the graph every time somebody scrolled.
 
-**`useNodesInitialized` is unreliable in this app, for the same reason.** Its store flag is
-computed inside `adoptUserNodes` from the internal node's `measured`, which the paragraph above
-wipes on every edit — so it latches **false** once the first edit lands, and never recovers.
-Auto-layout was gated on it and consequently never ran at all. It now asks the readiness question
-of the sizes it is about to use instead. Worth knowing that the _fit-on-load_ path is gated on
-the same flag.
+**`useNodesInitialized` is unreliable in this app, for the same reason, and nothing reads it any
+more.** Its store flag is computed inside `adoptUserNodes` from the internal node's `measured`,
+which the paragraph above wipes on every edit — and `updateNodeInternals`, the path the
+ResizeObserver takes, never recomputes it. So it latches **false** once the first edit lands and
+never recovers. Auto-layout was gated on it and consequently never ran at all; it asks the
+readiness question of the sizes it is about to use instead. Fit-on-load was gated on it too and
+is written up under *Framing a graph that was just opened* — there the answer was different
+again, because React Flow's own `fitView()` already waits.
 
 **ELK numbers ports clockwise from the node's top-left.** With no north or south ports that walk
 is every east port top to bottom, then every west port **bottom to top** — so an output's index
@@ -1554,6 +2766,126 @@ by playwright against the dev server: both themes at 1440px and a 420px phone st
 errors, no sideways body scroll, the preview card correct for a 33-setting node and for a text
 note, the help disclosure opening, and a search dimming 44 of 49 tiles without moving one.
 
+### The inspector shows a table as text, not as a table
+
+`.inspector__viewer` is **320 × 300** — the smallest surface a viewer is drawn on, smaller than a
+card. It drew whatever the node's `pageSize` said, which on an annotation table is 100 rows across
+60 columns: six thousand cells laid out per change of selection, of which about forty are visible,
+behind a sideways scrollbar.
+
+`ValuePreview.summary` replaces that with `TableSummary` — **one line per column, carrying its
+name, its type and the first row's value**. The same information turned ninety degrees, and the
+whole schema fits where three columns did. It is a *schema readout with an example* rather than a
+sample of the data: what somebody selecting a node mid-pipeline wants to know is which columns
+arrived and what a value looks like, and reading the table itself is the Table node's job and the
+overlay's.
+
+Deliberately **no `<table>`**: no intrinsic-width pass over every cell, no sticky header per
+column, no horizontal scroll container — ordinary block layout in a narrow column, which is what a
+narrow column is for.
+
+Two intermediate versions are worth recording, because each was a smaller idea than the one that
+worked. First a **row cap sized to the box** (25 rows, from 300px at ~19px a row). Then **one
+row** — better, because the box was never the constraint, the panel's *job* was. Both were still a
+table: the one-row version was reported back as *"the table still reads 1–1 of 58,340"*, which is
+the point — a table shrunk is a table, and the panel was never the place for one.
+
+Only the fallback table branch honours `summary`. A node with a viewer of its own — a scatter, a
+heatmap, a profile — keeps it, since those already draw something sized to their box.
+
+### The freeze was React's dev instrumentation, not the table
+
+**React 19's dev build serialises changed props into Chrome's performance timeline, and does it
+with `JSON.stringify` on primitive arrays with no length cap.** `logComponentRender` fires on every
+render whose props differ from the previous one, deep-diffs old against new
+(`addObjectDiffToProperties`), and for each changed key calls `addValueToProperties` **twice** —
+once for the removed value and once for the added one. A Coda `TableValue` is an object of one
+array per column, so handing one to a component costs a full JSON serialisation of the whole
+table, twice, whenever its identity changes.
+
+Measured on a real annotation base — 58,340 rows over 60 columns — that is **five seconds of CPU
+and 1.5 GB of transient allocation** per selection, reclaimed over the following fifteen seconds.
+It reads as the tab freezing. `addValueToProperties` (72.5%) and `logComponentRender` (21.8%) were
+94% of a heap profile of it.
+
+Three things about it are worth keeping, because each one sent the search somewhere else first:
+
+- **It fires only where props *changed* on a component that stayed mounted.** Alternating between
+  two nodes holding big tables triggers it; alternating between a Text note and a table node does
+  not, because the result section unmounts and there is no previous props object to diff against.
+  That asymmetry looks like a fact about tables and is a fact about React's reconciler.
+- **Shrinking what was *drawn* could never have helped**, which is why capping the inspector to 25
+  rows, then to one row, then replacing the table with `TableSummary` all changed nothing: the
+  cost is in *passing* the table as a prop, and `<TableSummary table={table} />` passes exactly the
+  same object. Three fixes aimed at rendering, and rendering was never it.
+- **jsdom has no `console.timeStamp`**, so `supportsUserTiming` is false and none of this
+  machinery runs under vitest. Four rounds of harness — settled heap, peak heap, realistic
+  distinct strings, whole-app render — measured 4 ms and a flat heap while a browser was spending
+  five seconds and a gigabyte. A headless measurement that cannot reach the code path is not a
+  negative result.
+
+`reactTracksOff()` in `vite.config.ts` switches it off by making that gate false, injected
+`head-prepend` so it runs before `react-dom` initialises. **Dev server only** — the production
+build of `react-dom` contains none of this machinery, so the deployed app never had the problem.
+What it costs is React's own track in a performance recording; `localStorage['coda.reactTracks']
+= '1'` and a reload gets it back.
+
+The deeper reading is that **megabyte-scale values as React props are a hazard in this app**, not
+because React re-renders on them but because its dev tooling reads them. Nothing here does that
+today beyond the viewers, which need the data they draw; a component that wants only a *fact*
+about a table should take the fact.
+
+### What was measured, and what is still unexplained
+
+`.inspector__viewer` is **320 × 300** — smaller than a card, and the smallest surface a viewer is
+drawn on. It was passing neither `compact` nor any ceiling, so a node's own `pageSize` decided
+what it drew: on a real annotation table that is **100 rows × 60 columns, six thousand cells, of
+which about forty are visible**, laid out again on every change of selection. Reported as the app
+freezing while zoom and pan kept working, which is the signature of a long layout rather than a
+stuck script.
+
+Measured in jsdom, which performs no layout and so isolates the *JavaScript* half: a 58,340 × 60
+table renders in **113 ms** at 100 rows and **26 ms** at 25, and the cost is linear in
+`rows drawn × columns` — flat in table length, so the paging was working and the row count was
+never the problem. A selection switch went 101/48/73 ms to 47/24/36 ms. Twenty-four switches in a
+row settle at 15 ms with no growth.
+
+**The reported failure was memory, and none of the below explained it — see the section above for
+what did.** Kept because the eliminations are still true and still useful.
+
+ A real graph —
+FlyTable → Filter → Sort → Deduplicate, with a Table tapping the Sort — reaches about 0.5 GB after
+a run, which is four full copies and expected. With the inspector *closed*, switching selection
+costs nothing. With it *open*, each switch adds roughly **a gigabyte**, and the tab is unusable at
+5.4 GB.
+
+Ruled out, each by measurement rather than by reading: **JS-side retention** — the same chain over
+a 58,340 × 60 table, the real store and the real `Inspector`, ten switches with forced GC between,
+sits dead flat at 198 → 215 → 214 MB; **re-evaluation**, since `setSelection` is a bare `set` with
+no commit and no run; **eager export**, since the CSV builder is only ever referenced
+(`if (source.csv)`) and never called; and **drawn cells as the cause** — the strongest clue, since
+cutting them four-fold moved the memory not at all.
+
+So it is browser-side, proportional to something other than what is drawn, and invisible to Node.
+The remaining suspects are the 60 sticky `<th>` cells and `width: max-content` with
+`table-layout: auto`, which forces an intrinsic-width pass over every cell — but neither
+plausibly reaches a gigabyte, and `fixed` would change how every column in the app sizes. Left
+alone deliberately: it is a guess until somebody points a browser at it, and Chrome's own Task
+Manager splits it in one reading — if **JavaScript memory** tracks the footprint it is retention,
+and if it stays flat while the footprint climbs it is DOM, layout or compositing.
+
+`ValuePreview.maxRows` is a **cap** rather than a value, so a node whose page size is already
+small keeps it, and `compact` comes with it — which also withholds the rows-per-page selector,
+the one control that could put the cost straight back.
+
+**What is measured and what is not.** The four-fold cut in cells is measured; the *browser*
+half — `table-layout: auto` with `width: max-content`, which forces an intrinsic-width pass over
+every cell in every column — is the remaining suspect and could not be measured here, since jsdom
+lays nothing out. It is the classic pathological combination for a wide table, and `fixed` would
+remove it at the cost of columns no longer sizing to their content. Left alone deliberately: it
+is a guess until somebody points a browser at it, and this codebase's habit is to measure before
+changing something that decides how a thing looks.
+
 ## Collapsible panels
 
 The inspector and the minimap are both **closed by default** and remembered in `localStorage`
@@ -1867,7 +3199,7 @@ next dataset-shaped node will grow one and nothing else would catch it.
 
 `align-self: flex-end` puts it under the _fields_ rather than the labels, since it is about what
 is missing from the right-hand column, and the tooltip **names** the params — marking the changed
-ones — rather than printing their values, which an `ids` param holding four thousand body ids
+ones — rather than printing their values, which an `ids` param holding four thousand neuron ids
 would not survive. The click reads the store through `getState()` rather than subscribing, or
 every card re-renders whenever the inspector is toggled from anywhere; and it checks
 `panels.inspector` before flipping it, because `togglePanel` is the only setter there is and a
@@ -1911,6 +3243,140 @@ earlier request re-fires it and the widget pops open unprompted.
 Note `fuzzyMatch` tries every occurrence of the query's first character as an anchor rather
 than scanning greedily once — without that, "res" ranks "Clear Results" below an item whose
 _description_ starts with "Rescale", because greedy takes the `r` in "Clea**r**".
+
+## Dropping a node onto a wire
+
+Drag an **unconnected** node over an existing link and let go: `A → B` becomes `A → node → B`.
+The wire highlights while the card is over it, so the drop is never a surprise. `core/splice.ts`
+holds every decision, `ui/spliceHit.ts` the geometry, and the split is the usual one — jsdom
+performs no layout, so a path has no length and the geometry half cannot be tested at all.
+
+**Only an isolated node splices**, and that is not tidiness. A drag across a busy canvas passes
+over many wires, so a node already wired — one somebody is *rearranging* — would rewire the graph
+on any drop that happened to land on one. A node with no links has nothing to lose and is almost
+always one just added.
+
+**The downstream link is judged against a graph with the upstream one already applied**, which is
+the decision the whole thing turns on. A node's output type routinely depends on its input:
+`core.filter` isolated publishes `T.table()` and only becomes `neurons` once something
+neurons-shaped reaches it — so checking both links against the *current* inference refuses a
+Filter dropped on `Find Neurons → Skeletons`, which is the most obvious thing anybody would try.
+One re-inference, then the first compatible output; a node whose *second* input would have worked
+where its first did not is missed, which is the same "first compatible" simplification the
+palette's link-drag already makes.
+
+**The hit test walks the drawn path**, not a line between the sockets. `isPointInStroke` against
+the card's centre was the obvious route — React Flow already draws a fat `interactionWidth` copy
+of every edge — and it makes the target ±10 flow units around a hairline, which is a precise aim
+for a whole card thrown across a canvas. Sampling the path and asking whether it enters the card's
+rectangle is more forgiving and is what "drop it on the wire" means; walking the *rendered* path
+also means an orthogonal step and an ELK route are judged where they are drawn, with no geometry
+of our own. The card's size comes from `offsetWidth` for the reason `useArrange` records at
+length.
+
+**The move and the rewire are one `commit`, under the drag's own gesture tag**, so ⌘Z lands on the
+graph as it was before the drag began. Two commits would be two undo steps, the first of which
+leaves the graph rewired around a card in its new position — a state nobody was ever in. Unlike a
+plain move it *does* re-run, because the dataflow changed.
+
+**The ports are re-derived at the drop rather than carried from the drag.** The candidate was
+computed on a pointer move; positions do not reach inference, so the answer is the same one the
+highlight showed, and passing it would be a second copy of a decision that can only disagree.
+
+One note on `spliceGraph`, because the comment there was wrong first and mutation testing caught
+it: the original link is removed **explicitly**, but `addEdge` would evict it anyway — the
+downstream link targets the same `(node, port)`, which is exactly its eviction rule. So the order
+does not matter, and the removal stays because relying on that coincidence would hold only while
+both links land on one input.
+
+## Reference edges — a port that names a node
+
+`PortDef.reference` marks an **input that names a node rather than consuming its output**. It
+creates no ordering dependency: excluded from `topoSort` and from `wouldCreateCycle`, never waited
+on by the scheduler.
+
+It exists for one wiring, and that wiring is a node's own documented use: `Dataset → CAVE table →
+Dataset`, a datastack's annotation table handed back to that datastack as its labels. Two edges
+between one pair in opposite directions, which at *node* granularity `topoSort` reads as a cycle —
+both cards went dark with no result and nothing naming the cause. At *port* granularity there is
+no cycle at all, and that is the whole insight: `CAVE table`'s output needs the annotation table,
+not the dataset ref; the Dataset's output needs the annotations schema, not `CAVE table`'s ref. A
+node cannot half-run, so the sort cannot see it.
+
+**What makes it sound is a property of the upstream node, not a promise from the downstream one.**
+A dataset node's identity is a function of its params alone —
+`T.dataset(family.sourceId, resolveDatasetId(family, params.version), annotationSchemaFrom(…))`,
+where only the third argument comes from an input. So a reference reads something knowable without
+running, or even inferring, anything downstream. **Check that before marking a new port
+`reference`**; it is the condition the whole mechanism rests on.
+
+Five places implement it, and each was mutation-checked because every failure here is silent:
+
+- **A registry-level short-circuit first.** Exactly one node type declares a reference input, so
+  `typesWithReferenceInputs()` lets every walk ask "could this graph hold one at all?" without
+  touching an edge — and on every graph without one, `dataflowEdges` returns `graph.edges` itself
+  and allocates nothing. Measured 1.4 µs → 0.13 µs; `topoSort` runs twice per keystroke and
+  `wouldCreateCycle` once per pointer move of a link drag. The memo is **cleared by
+  `registerNode`** rather than assumed fixed, because a type registered afterwards would otherwise
+  be invisible and the round trip would read as a cycle again — pinned by a test that warms the
+  memo *before* registering.
+- **`dataflowEdges` in `graph.ts`, and nowhere else.** One filter, inside the one index from which
+  `topoSort` derives *both* the indegree count and its decrement — the arrangement that function's
+  own note demands, after the bug where the two came from different places and a target joined
+  twice never reached zero. Filtering anywhere else would bring that back wearing a reference's
+  clothes.
+- **`wouldCreateCycle` takes the target handle**, because the wire *being drawn* can itself be a
+  reference and then can never close a loop. Without it the editor refuses exactly the wiring this
+  exists to allow.
+- **`checkConnection` no longer walks its own edges.** It had a second reachability implementation
+  over `graph.edges` — one statement of a question `wouldCreateCycle` already answered — and the
+  two had to be found together: one knew about references and the other refused every wire.
+- **Inference resolves a reference type in isolation**: the source node's `inferOutputs` with *no
+  inputs at all*. It cannot recurse, so the walk terminates, and for a dataset it yields exactly
+  the identity without the annotations schema — the honest answer as well as the terminating one,
+  since a node cannot read the annotations it is itself about to supply. Through `outputTypesFor`,
+  which the main walk also uses, so "a reference is the same node inferred with no inputs" is
+  literally true rather than a second implementation that resembles it: the two had already parted
+  company on the merge rule (`if (type)` against `?? declared`) and on whether a throw becomes an
+  issue.
+- **The scheduler neither waits nor keys on the upstream.** `evaluate` is handed the value
+  `datasetIdentity(type)` builds, and the provenance takes `referenceKey(type)` in place of the
+  upstream node's key — which it *must*, since that node is outside the order and its key may not
+  exist yet. It is also the better key: changing the dataset's version re-keys the reader,
+  changing its annotations does not, and the reader never sees them. Both are single functions for
+  `upstreamKey`'s stated reason — the key is read by the two consumers that must not disagree, and
+  it was written out twice at first. `datasetIdentity` lives beside `DatasetValue` in `values.ts`
+  rather than in the scheduler, because it is the type→value projection and it is **partial**: no
+  annotations, and `label` is the dataset id rather than the human name an ordinary wire carries.
+
+**Deliberately narrow: a Dataset socket that takes the identity only, not a general information
+edge.** Synthesising a value from a type is defensible exactly because a dataset's identity *is*
+its type; there is no second kind asking, and a general mechanism would have to answer that
+question for every one of them.
+
+The canvas draws it **dotted** — a wire already wears the colour of the data flowing through it,
+so a hue would read as a type, where what this has to say is that nothing flows.
+
+**Writing the graph out wants the opposite order, and both exporters take it.** `topoSort` leaves
+references out because the reader waits on nothing; a *cell* that names the referenced node needs
+that node's own line to exist already. `exportOrder` in `src/export/order.ts` hoists them and both
+walks call it — one function rather than two lines copied into each, and in the layer whose
+vocabulary the rationale is written in. The copy doctrine protects the *assembly* walk (chunks,
+variable naming, unwired-versus-blocked); an ordering rule with no language in it is the same
+class as `canExport.ts`'s refusal policy, which both surfaces already share.
+Without it —
+without it the reader is classified `blocked by "Dataset"` and emits a TODO that is false and
+cascades to everything downstream. The condition that makes the hoist valid is the same one that
+makes references sound: **a referenced node's cell must be writable from its params alone**. A
+dataset's is — a `Client(…)` naming a datastack and a version — which is why it can be lifted
+above the annotations wired into it, and it is the thing to check when writing an emitter for a
+node anything references.
+
+Unreachable today, and deliberately built anyway: every CAVE node sits in `NO_EMITTER` and a CAVE
+dataset refuses export outright, so the only reference port in the tree is on a node with no
+emitter. The day a caveclient emitter is written it would fire, and it fires as a *plausible*
+TODO rather than as an error. `reference.test.ts` covers the ordering; the end-to-end case has
+nothing to exercise it with until that emitter exists.
 
 ## Breaking and re-routing links
 
@@ -2092,7 +3558,7 @@ only one that carries Coda's attribute tables *with their types*. A `<key>` decl
 up front, so `i64` arrives as a long and `f64` as a double rather than as whatever the reader
 infers from the first literal it meets, and an absent value is an omitted element rather than a
 zero somebody has to notice. GML implies types by literal syntax and restricts key names to
-something `sum_bodyId` survives and `pt root id` does not.
+something `sum_neuronId` survives and `pt root id` does not.
 
 **Attributes only — no positions, no colours.** So the Network viewer and Build Network write
 byte-identical files for the same network, and the document says what the data says rather than
@@ -2154,6 +3620,70 @@ for the same reason. It carries its own `.download-button` positioning context: 
 absolute against it and must not anchor to the surrounding row, which holds ⤢ in a caption bar and
 the summary in a foot.
 
+### A length is not a count either
+
+`formatCompact` is unit-blind — it reads magnitude and nothing else — so a cable length of
+2,980,158 nm rendered as **`3M`**: a magnitude carried entirely by a suffix meaning *million*,
+next to a stored unit meaning *nano*. About as misleading as a number can be, and it is the
+figure every paper about a fly neuron quotes in millimetres.
+
+`formatMeasure(value, unit)` in `ui/format.ts` walks the SI ladder — nm, µm, mm, m — picking the
+coarsest rung the value fills and **flooring at the finest**, so a sub-nanometre length stays a
+number instead of becoming `0 µm`. `2,980,158.182` reads `2.98 mm`; the giant fibre's
+22,484,326 reads `22.48 mm`.
+
+**The unit travels with the number here and does not for a count**, which is the asymmetry worth
+knowing before adding a fourth unit. Which unit a *length* wants depends on its magnitude, so
+`2.98` alone says nothing — where `12.9K` beside a `pre` label says everything. So `synapses` and
+`voxels` fall through to `formatCompact` unchanged: a count has no ladder, and a voxel is not a
+fraction of anything. Those three are the only units declared anywhere in the tree.
+
+**The rung is asked of the _rounded_ figure rather than the raw one**, which is not a refinement.
+999,999 nm fills only µm, and at two decimals prints there as `1,000 µm` — a thousands separator,
+which is the one thing the ladder exists to remove. Promoted only once the rounded figure has
+actually climbed, so 999,994 still reads `999.99 µm` and keeps its own precision.
+
+**The unit is looked up in the ladder, never tested against `'nm'`.** The table already names µm,
+mm and m, so gating on the storage unit would silently drop the unit and reinstate `3M` the moment
+a column declared one of the other three — an uploaded CSV of measurements, or a source publishing
+µm. It is also **sorted where it is declared** rather than by convention, because the rung search
+takes the last match: a `cm` added in reading order would otherwise become the answer for every
+length, with no type error and nothing failing for the cases already covered.
+
+**The schema half was already right, which is what made this a display bug rather than a data
+one.** Every `cableLength` column has carried `'nm'` since `CANONICAL_SCHEMAS`, and Explore's row
+*read* it — through `statUnit` — and then used it only in a `title`. The value beside it went
+through the unit-blind formatter. So the fix is where the two met, not in either half.
+
+**Glanceable on screen, exact on hover.** The row's title carries the stored figure **verbatim** —
+`cableLength (nm): 2980158.182` — rather than through `formatNumber`, which groups *and* rounds:
+that takes CATMAID's own 4003103.2328612693 down to `4,003,103.233`, which is neither exact nor
+pasteable and so answers the one question the hover exists for with a different number. It goes
+through `formatExact`, which is `formatCell`'s id branch renamed and exported: the reason is
+identical in both places — a grouped number is a string no query accepts, and under another locale
+not even the same string — and it had been written out privately for ids until a second caller
+wanted it. The unit sits on the **label** rather than after the value, so it survives an absent one;
+what a column is *in* is the one thing an empty cell can still say.
+
+The **Table** viewer is deliberately untouched: it prints the exact value with the unit in its
+header, and a table is where exact values are read — the compact forms are for the glanceable
+surfaces.
+
+Note what is *not* covered, and it is wider than one axis: **every chart that formats a magnitude
+without seeing the column's unit still reads `3M`** — the scatter's axis ticks (`scatterDraw`), the
+heatmap's colourbar and its printed cells, and both legend ramps (`LegendKeys`, `describeLegend`).
+The scatter and the legends need the unit threaded through the plot spec and the encoding
+resolution, which is a change to every viewer. The heatmap is nearer, and instructive about why it
+is still not a one-liner: `pivotMatrix` copies the value column's unit into `MatrixValue.valueLabel`,
+so `Pivot` on a `cableLength` draws `0 – 3M` beside a caption reading `· nm` today — but a chart
+states its unit **once**, in that caption, so scaling the bar means scaling the printed cell values
+with it and moving the caption to the *display* unit. Doing only the bar leaves the card
+disagreeing with itself, which is worse than the number it fixes.
+
+**`nodes` joined `STATS` with it.** It is CATMAID's `size` — a skeleton's node count is what says
+how much of a neuron was traced — and without it a CATMAID row had exactly one stat, since that
+backend publishes none of the other six.
+
 ### An identifier is not a quantity
 
 `formatCell` takes the **column name** as well as the value, and a column of identifiers is
@@ -2168,7 +3698,7 @@ so before this the hover and the cell under it disagreed on every id.
 `BuildNetwork`'s merge rule documents — "summing added `preId` up to 24093454514" — and the one
 the upload node's `Text columns` exists for; `isIdentifierColumn` in `ui/format.ts` is those
 two answers applied to the formatter. It reads the name's **last word**, split on separators
-and camelCase, which covers `bodyId`, `preId`/`postId`, `partnerId`, `sourceId`/`targetId` and
+and camelCase, which covers `neuronId`, `preId`/`postId`, `partnerId`, `sourceId`/`targetId` and
 the `root_id` / `pt_root_id` spellings an uploaded CSV arrives under with no list to keep in
 step. A plain `endsWith('id')` is not the same rule and is wrong: `centroid` and `valid` are
 words that happen to end that way.
@@ -2177,7 +3707,7 @@ words that happen to end that way.
 from `AGG_OPTIONS` rather than typed out. `groupBy` writes `<agg>_<column>`, so a count of
 distinct partners is literally called `countDistinct_partnerId` — five figures on male-CNS, and
 it does want its separator. What that costs is a column somebody else called `max_id`, which
-reads as an aggregate and keeps its grouping; taken deliberately, since `sum_bodyId` is a name
+reads as an aggregate and keeps its grouping; taken deliberately, since `sum_neuronId` is a name
 Coda generates and `max_id` can only arrive in a file.
 
 **The name is optional and absent means "a quantity"**, which is what every caller did before
@@ -2672,7 +4202,7 @@ same twice. The caption says `showing 50,000 of 165,122`, in the same idiom as
 **Selection is by id, with the row index as an admitted fallback.** `nodes/lib/rowIds.ts` owns
 it and _both_ the viewer and the node import it — what a selected point is called has to mean
 the same thing to the code writing the ids and the code resolving them, and two agreeing
-implementations drift the first time either is touched. `idColumn` defaults to `bodyId`
+implementations drift the first time either is touched. `idColumn` defaults to `neuronId`
 through `optional: true`, which is what makes the resolver answer "nothing" rather than
 reaching for the first column when the table has none. The fallback exists because the tables
 least likely to carry an id — an uploaded CSV of embeddings, a `groupBy` roll-up — are exactly
@@ -2964,7 +4494,7 @@ because they are not uniform and the differences are load-bearing:
 | `hemibrain:v1.2.1` | `{ layers }` and nothing else — no dimensions, position or layout              |
 | `hemibrain:v1.1`   | `{ layers, badlayers }`; `badlayers` is Explorer bookkeeping, not viewer state |
 | `manc:v1.2.3`      | full state, `layout: "3d"`, and a stray `segmentColors` for one body           |
-| `male-cns:v0.9`    | full state, 38 layers, 38 kB before a single body id is added                  |
+| `male-cns:v0.9`    | full state, 38 layers, 38 kB before a single neuron id is added                  |
 
 So the module supplies `layout` and `showSlices` when absent — neuroglancer's own defaults
 open hemibrain in 4-panel with EM planes cutting through the neurons — clears manc's stray
@@ -2980,7 +4510,7 @@ panel the user has since opened. Note that neuroglancer drops `visible` from its
 serialisation once it is false, since that is its default — so a round-trip will not show it.
 
 **Find the neuron layer by name, not by type.** male-CNS ships thirty segmentation layers:
-ROI shells, nuclei, cross-dataset mesh overlays. Writing body ids into `brain-shell` renders
+ROI shells, nuclei, cross-dataset mesh overlays. Writing neuron ids into `brain-shell` renders
 nothing with nothing to blame. Same family-name rule as `meshSourceFromState`.
 
 **This is the one node with no presentational params, and that is the invariant.** Its output
@@ -3020,10 +4550,22 @@ consequence: these params are _not_ presentational, so they never appear in the 
 rail either — the inspector is the only place they live.
 
 **Colour mode `default` sends nothing at all** and lets neuroglancer hash-colour each
-segment. Distinct from `constant`, which sends one `segmentDefaultColor`; the point is that
-no colour data travels, which is also the shortest link. `colorParams` only offers the mode
-when a caller opts in with `allowDefault`, because no in-app viewer can honour it —
-`resolveColor` degrades it to the flat colour so it is harmless if it ever leaks.
+segment, and it is **this node's default**. Distinct from `constant`, which sends one
+`segmentDefaultColor`; the point is that no colour data travels, which is also the shortest
+link — and this is the one node whose entire output is a URL somebody pastes into mail.
+
+It is the right default rather than merely the cheapest, and the reason is the palette's own
+rule: Coda caps a categorical encoding at eight slots and folds everything past them into one
+achromatic bucket, because in a legend a repeated hue claims two series are the same thing. A
+scene has no legend, and past the eighth cell type every remaining neuron would be the same
+grey. Neuroglancer gives every segment a distinct colour and needs no legend to do it.
+`defaultColumn: 'type'` is still there for the moment somebody picks a data-driven mode —
+`neuronId` is the first compatible column and is the wrong answer for the same eight-slot
+reason.
+
+`colorParams` only offers the mode when a caller opts in with `allowDefault`, because no in-app
+viewer can honour it — `resolveColor` degrades it to the flat colour so it is harmless if it
+ever leaks.
 
 **Updates go through neuroglancer's `#!+` merge form, and this is the load-bearing part.**
 The plain `#!` form makes neuroglancer `reset()` before restoring, so every upstream edit threw
@@ -3181,13 +4723,15 @@ hemibrain, and `IB`/`INP` look nothing like ROIs) and non-scalar properties (man
 five as `point{srid:9157}`).
 
 **Everything is inlined into the query string.** `/api/custom/custom` takes no parameter
-map, so values must go through `escapeString` / `numberList` / `escapeIdentifier` in
+map, so values must go through `escapeString` / `idList` / `escapeIdentifier` in
 `cypher.ts`. Nothing else may build a literal.
 
 **Column mapping is positional.** neuPrint names columns after the expression (`n.bodyId`),
 so the decoder matches `RETURN` order against schema order and throws on a count mismatch.
 If you add a column to one, add it to the other — the builder and its schema are written
-together for this reason.
+together for this reason. It is also what lets Coda's column name differ from neuPrint's
+property name without a lookup per row: `n.bodyId` lands in `neuronId` because it is first in
+both lists. See `PROPERTY_NAMES` in `schema.ts` for the one place that mapping is stated.
 
 **Don't percent-encode a dataset id in a path.** Every id contains a colon
 (`hemibrain:v1.2.1`) and neuPrint's router matches the raw segment; `%3A` gets a 400. Use
@@ -3206,6 +4750,862 @@ because errors cross the scheduler as strings and matching on message text rots 
 
 **Tests use recorded fixtures** in `__fixtures__/`, all real trimmed responses. The
 transport is not covered — it cannot be without a network — but it fails loudly.
+
+## CAVE
+
+`src/data/cave/`, and the second backend. FlyWire and everything else served by CAVE — the
+info service that lists datastacks, a materialization engine that answers queries against a
+frozen snapshot, and per-datastack annotation tables. Nothing above `src/data` knows it exists;
+a CAVE dataset node is `dataset.flywire`, built from `DATASET_FAMILIES` exactly as the neuPrint
+ones are.
+
+**Everything below was probed live against `global.daf-apis.com` and `prod.flywire-daf.com`
+rather than recalled**, and `live.test.ts` is that pass institutionalised — skipped without
+`CAVE_TOKEN`, the standing `scripts/check-export.py` has when navis is absent.
+
+### neuPrint is queried; CAVE is downloaded
+
+The single decision the whole module follows from. neuPrint runs Cypher against a shared
+production Neo4j, so `findNeurons` compiles a pattern into a query and every question is a round
+trip. CAVE's query API has **no regex worth using, no `GROUP BY`, and a 500,000-row cap** — but
+its annotations are a few tens of megabytes and are *already* what the Explore widget wants. So
+`CaveSource` fetches the neuron index once per dataset through the machinery Explore already
+has, pivots it, and answers `findNeurons` from memory: 139,255 neurons in **6.7 s**, then every
+query after that is local. The cost is that the first one waits.
+
+That is why `data/neuronFilter.ts` exists. Filtering locally means *Coda* decides what a pattern
+means, and it has to decide the same thing the mock does and the same thing Neo4j's `=~` does —
+`^(?:…)$`, so `LC.*` matches `LC4` and not `LPLC1` — or one graph pointed at two backends
+quietly returns two answers. `compileRegex` and `compileLabelMatch` moved out of `MockSource`
+when CAVE became their second consumer; a copy is how the two drift.
+
+**`refuseUnfilterable` is the third thing in it, and it is about a filter a backend cannot answer
+*at all*.** Both local sources met that and each got it wrong in a different direction, neither
+visible from the result. `CaveSource` read `index.data.size` — a column no CAVE index has —
+through `Number(undefined ?? 0)`, so any non-zero **Min size** compared 0 against the threshold and
+dropped every row: a node reporting "0 neurons" for a datastack full of them. `CatmaidSource` never
+read `req.roi` at all while publishing eighty regions to pick from, so the answer came back too
+*large*. An empty result and an unnarrowed one both look like answers, which is what makes a
+refusal the only one of the three that can be acted on; it names the control as the card labels it.
+
+Note which filters this covers and why. `Min size` and `In ROI` reach a source **only when
+somebody set them** — 0 and `Any` are dropped by the node — so a refusal fails a decision rather
+than a default. `status` is deliberately excluded: its default is `Traced`, so refusing there would
+fail a value nobody chose, and a source that cannot answer it ignores it instead. That is the split
+`CatmaidSource` already documents, made checkable.
+
+It is also deliberately **not** `compileLabelMatch`'s rule, whose absent value matches nothing on
+purpose: that is neuPrint's `WHERE` semantics for a *property* a dataset may legitimately lack per
+neuron, and every backend has to agree about it. These two are whole-query facts about the backend,
+known before a single row is read.
+
+### The 64-bit problem, at the other end of the seam
+
+Invariant 8 was written for this. A FlyWire root id is eighteen digits, and **`JSON.parse`
+rounds it**:
+
+```text
+raw text   "pt_root_id":720575940628857210
+JSON.parse  720575940628857200   ✗ a different neuron, silently
+json.ts    "720575940628857210"  ✓ matches the bytes on the wire
+```
+
+No reviver helps — a reviver is handed the value *after* parsing, so the digits are already
+gone. The exact value exists only in the response text, so `json.ts` quotes every integer
+literal too wide for a double before the parser sees it. Four things about it:
+
+- **The scan matches a complete string literal first**, so it never looks inside one. The
+  obvious `raw.replace(/:(\d{16,})/g, ':"$1"')` is wrong on real data: `neuron_information_v2`
+  is free-text user annotation, so a tag reading `root:720575940628857210` gets quotes spliced
+  into the middle of a string and the document stops parsing.
+- **The decision is per match, by `Number.isSafeInteger`.** A 16-digit value that is genuinely
+  exact stays a number; only what a double cannot hold becomes text.
+- **The delimiter is part of the match** rather than a lookbehind, which is also what stops the
+  fractional digits of `0.1234567890123456789` starting a match.
+- **721 ms on the real 64 MB index response**, against 108 ms for a naive parse. Paid once per
+  dataset behind the IndexedDB cache and against ~6 s of network — but worth knowing before
+  anyone puts it on a hot path.
+
+**The other leg is free, and that was checked rather than assumed: CAVE accepts a *quoted*
+eighteen-digit id in `filter_in_dict`** and answers identically to an unquoted one. So ids go
+out as text and come back as text, and no number is ever formed on either side. Had it not, the
+request body would have needed the mirror image of the same rewrite.
+
+### The 500,000-row cap, and why counting is the only tell
+
+The materialization engine truncates a result at 500,000 rows and says so in a `warning`
+header — which its `Access-Control-Expose-Headers` does **not** list, so a browser cannot read
+it. Truncation is therefore detected by counting, and refused rather than returned: a short
+index is not a visible failure, it is a dataset that silently lacks neurons.
+
+**`hierarchical_neuron_annotations` is over the cap**, which is why the index reads it **one
+`classification_system` at a time** — five queries of 17k to 139k rows instead of one that comes
+back quietly short. The kinds come from discovery, which has already run, so the split costs no
+extra round trip.
+
+That was found by `live.test.ts` on its first run, and it is exactly the class of bug the fixture
+suite cannot see. Note the tell that pointed the wrong way: the `table/{t}/count` endpoint reports
+**377,699** for that table and **127,978** for `proofread_neurons`, while the tables themselves
+yield over 500,000 rows and 139,255 distinct root ids. Whatever it counts, it is not the rows a
+query returns — which is also why `DatasetInfo.neuronCount` is filled in from the index after the
+fact rather than asked for at listing time.
+
+### A datastack does not describe itself
+
+neuPrint's graph has a `:Neuron` label with properties on it. A CAVE datastack is a bag of
+annotation tables with no privileged one — `flywire_fafb_public` publishes six, of which
+`proofread_neurons` is the neuron set, `hierarchical_neuron_annotations` is the cell typing, and
+`valid_connection_v2` is a **view** rather than a table. Nothing in the metadata says so; the
+schema types (`representative_point`, `cell_type_reference`) describe the shape of a row, not
+the role of the table.
+
+So `spec.ts` holds one entry per datastack, static for the reason `datasetFamilies.ts` is
+static, and it is a deliberately faithful port of the idea `connecto` arrived at in Python for
+the same problem. **A datastack with no entry is not offered** — the info service lists thirteen
+and most would fail on the first Run, and a dataset that appears in the picker and then fails is
+worse than one that is absent.
+
+**Connectivity prefers that view and falls back to counting synapses**, which is `connecto`'s
+shape and arrived at for its reason. `valid_connection_v2` is the server having done the
+aggregation once: one row per ordered (pre, post) pair with `n_syn`, filterable by root id *and*
+by `n_syn`, so a minimum weight is applied before anything is sent — on one neuron's outputs,
+4,818 rows / 410 kB unfiltered against 183 / 16 kB at `n_syn >= 5`.
+
+Where there is no such view — **which is most datastacks; FlyWire's is the exception** — the
+edge list is built by asking the synapse table for its two id columns and counting locally. The
+query API has no `GROUP BY`, so neither the grouping nor the weight cut can be pushed down: every
+synapse of every queried neuron is transferred, and `minWeight` is applied *after* counting.
+That is still worth having by a long way, because the alternative is not a cheaper query but no
+connectivity at all. Measured against Aedes, exactly that case: one neuron's 719 synapses arrive
+in 1.1 s and 111 kB and collapse to 508 partners.
+
+Two things about the synapse path were established live rather than assumed. **`select_columns`
+sends more than it is asked for** — naming a `*_pt_root_id` returns the whole bound point, so the
+supervoxel id rides along and the transfer is about twice what two columns suggest. And
+**`refuseIfCapped` is the real bound**: a hub neuron or a large seed set can reach the 500,000-row
+truncation, where the view path is one row per pair and cannot.
+
+**Which synapse table is three answers in order, and the order matters.** A configured
+`spec.synapses` wins, because it can name a curated table and the column that scores it —
+FlyWire's `synapses_nt_v1` with `cleft_score`, on a datastack that declares
+`synapse_table: null`. Otherwise the datastack's **own declaration**, which is what makes a
+hand-named datastack work with no configuration at all: 7 of the 13 the info service lists set
+it, `wclee_aedes_brain` among them. Its columns are `STANDARD_SYNAPSE_COLUMNS`, which is a
+definition rather than a guess — a table whose registered schema is `synapse` has
+`pre_pt_root_id`, `post_pt_root_id` and `ctr_pt_position` by `emannotationschemas`, checked
+against both a declared and a configured table. `fetchSynapses` resolves the same way, so a
+datastack that can answer connectivity by aggregation can also draw the synapses it aggregated;
+`positionColumn` is a *stem* the API splits into `_x`/`_y`/`_z`, verified to behave identically
+on both.
+
+### Endpoint shapes that are not what a reasonable person would guess
+
+Read off live responses and cross-checked against `caveclient` 8.0.1's own endpoint table:
+
+- **`arrow_format=false` returns `application/json`**, which is what keeps Arrow, a WASM decoder
+  and anything new in the main chunk out of this entirely. The cost is `json.ts`.
+- **`tables` sits on a v2 path inside the v3 API.** caveclient's v3 map points it at `mat_v2_api`
+  while everything around it moved; the v3 spelling 404s.
+- **`select_columns` and `select_column_map` are not interchangeable, and each endpoint takes
+  exactly one.** A single-table or view query rejects the map —
+  `{"schema_errors":{"select_columns":["Not a valid list."]}}` — and a *join* accepts the list
+  while warning that it "will attempt to select the first column it finds of this name in any
+  table, but if there are more than one such column it will not select both", which is a
+  silently wrong column rather than an error.
+- **One `/metadata` call lists every materialization with its timestamps**, where `versions`
+  returns bare integers and a per-version call turns a listing into a request per entry.
+- **`unique_string_values` is the cheap half of discovery**: 52 kB and about a second, against
+  tens of megabytes for the annotations. That is what lets discovery run from inference
+  (invariant 2) while the index waits until something actually asks for neurons.
+
+### What it costs, and what it declines
+
+**+16.4 kB raw / +5.2 kB gzipped on the main chunk** (1,010.02 → 1,026.39 kB), measured against
+a build of the same tree with the feature stashed out. Far under this codebase's bar for a lazy
+boundary.
+
+`SourceCapabilities` does the rest, and every `false` is a node that declines at edit time rather
+than failing at run time: no skeletons, meshes or synapses (the next phase — FlyWire publishes
+precomputed skeletons per materialization and Draco meshes in a CORS-open bucket, so this is
+"not wired up" rather than "not available"), no `paths` (it needs a hop aggregated server-side,
+which CAVE has no endpoint for), no `rawQuery`, no `viewerScene`, and none of the three ROI
+flags — FlyWire's neuropil assignments are a reference table on *synapses*, so there is no
+per-region completeness table to read, and a per-neuron breakdown would mean reading a neuron's
+synapses and grouping them, which is the work the connection roll-up exists to avoid.
+`neuronIndex`, `meshes`, `synapses` and `viewerScene` are true for the source; `skeletons` is
+answered **per dataset** through `capabilitiesFor` — see **Skeletons** below.
+
+**The scene is built rather than fetched, and that is the whole of `viewerScene` here.** neuPrint
+publishes a curated state per dataset — EM, ROI shells, synapse layers, a framing — which
+`buildScene` edits. CAVE publishes no such document, which is why this reported "publishes no
+neuroglancer scene"; but its info record names every *part* of one, so `cave/scene.ts` assembles
+two layers from it and stops. Anything beyond those two is curation, and inventing it would be
+claiming the datastack said something it did not. `layout` and `showSlices` are left off, because
+`buildScene` supplies them when absent and a second rule here is a second place for the two to
+disagree.
+
+Three things in it, and two of them disagree with `caveclient` on purpose:
+
+- **The segmentation source is published plain**, `caveclient`'s `format_graphene`. It used to
+  carry `graphene://middleauth+…` unconditionally, which is wrong and is written up under
+  *`middleauth+` is spelunker's, not neuroglancer's* below. Worth keeping from the first pass: an
+  *insertion* rather than the reparse the Python does, since `urlparse` reads
+  `graphene://https://host/p` as `netloc='https:'` and rebuilding from the parts only happens to
+  come out right.
+- **The image source is passed through, where `caveclient` answers `None`.**
+  `format_cave_explorer` routes a `precomputed://` scheme to `format_precomputed_neuroglancer`,
+  which handles `gs://`, `http://` and `https://` and falls through to `None` for a URL that
+  already carries its scheme — established by *running* it, not by reading it. Every datastack
+  probed publishes exactly that form, so porting the formatter faithfully would ship no image
+  layer at all.
+- **`viewer_resolution_*` is nanometres and neuroglancer's dimensions are metres, divided rather
+  than multiplied.** `45 * 1e-9` is `4.5000000000000006e-8` in float64 and that artefact would be
+  serialised into the URL verbatim; `45 / 1e9` is exact. 16, 4, 40 and 8 are unaffected either
+  way, which is why it survived the first reading — 45 and 50 are not.
+
+**The `#!+` merge works in spelunker too**, which was the open question the moment a CAVE dataset
+started opening there rather than in mainline neuroglancer — the merge form was established
+against the deployed Google viewer. Confirmed by reading spelunker's own bundle: its
+`updateFromUrlHash` branches on `#!+` *before* the `#!` case and calls `restoreState` with no
+`reset()`, which is exactly the semantic the camera-preserving update depends on.
+
+**`DatasetInfo.viewerSite` came with it**, and it is a fact about the dataset rather than a
+preference: `out.neuroglancer`'s `Viewer` param defaults to *empty*, meaning the dataset's own
+deployment and only then the built-in. A CAVE segmentation only loads in a viewer that
+authenticates the way its source is written for, and which way that is depends on the deployment —
+see below. Absent on every neuPrint dataset, whose states open anywhere.
+
+#### `middleauth+` is spelunker's, not neuroglancer's
+
+The prefix was applied to every CAVE segmentation source, on a note here claiming it "is what
+makes the segmentation load at all". That is true of one flavour of viewer and **breaks the
+other**, and the other is the one FlyWire publishes.
+
+`caveclient` says so in a fork the first transcription read straight past. `output_map` in
+`format_utils.py` routes `"neuroglancer"` to `format_graphene` — plain — and
+`"cave-explorer"`/`"spelunker"` to `format_verbose_graphene`, which adds the prefix; and
+`build_neuroglancer_url` sets `auth_text = ""` for `seunglab` against `"middleauth+"` for the
+rest. Transcribing `format_verbose_graphene` alone was transcribing one of two branches.
+
+**The failure is symmetric and neither half is loud.** A seunglab fork runs its own login and
+refuses the prefixed source; a spelunker build without it shows the segmentation layer present
+and empty. Both read as "the viewer is broken".
+
+**It is decided at `sceneUrl`/`scenePatchUrl`, which is the only place a scene meets a viewer.**
+`caveScene` runs inside `fetchViewerScene`, and a `DataSource` has no idea which deployment the
+node will open — so the prefix was being chosen a whole layer before the fact it depends on
+existed. Both URL builders funnel through one rewrite, which is what stops the navigation and the
+merge disagreeing; `SCENE_PATCH_KEYS` is `['layers']`, so a patch carries the sources too and
+would break the segmentation exactly as a navigation would. The rewrite **normalises** rather
+than only adding, so a hand-written state or a datastack that names its source with the prefix
+already on it comes out right either way.
+
+**caveclient's own test is unavailable to a browser**, which is why this is a table rather than a
+probe. It fetches `<viewer>/version.json` — 404 on a seunglab fork, 200 on the others — and
+measured against both deployments **that endpoint sends no `Access-Control-*` headers at all**.
+So `SEUNGLAB_HOSTS` in `neuroglancer/scene.ts` carries what was measured, and the measurement is
+in the comment beside it:
+
+```text
+ngl.flywire.ai                404  seunglab   ← flywire_fafb_public's own viewer_site
+neuroglancer.neuvue.io        404  seunglab   ← caveclient's own fallback_ngl_url
+neuroglancer.bossdb.io        404  seunglab
+spelunker.cave-explorer.org   200  spelunker
+ngl.cave-explorer.org         200  spelunker
+ngl.microns-explorer.org      200  spelunker
+neuroglancer-demo.appspot.com 200  spelunker  ← DEFAULT_NEUROGLANCER_URL
+```
+
+`ngl.cave-explorer.org` is in that list because it was **guessed** into the seunglab set on the
+strength of its name and is not one. The names do not tell you; probe before adding a row.
+
+**Unknown reads as spelunker**, and `out.neuroglancer` grew a `Viewer type` param
+(`auto`/`spelunker`/`seunglab`, advanced) as the escape hatch — because `Viewer` is free text, so
+the table can never be complete, and a wrong answer is a scene with no segmentation in it and
+nothing naming the cause.
+
+#### The layer type is the other thing the two flavours disagree about
+
+The Seung-lab fork has a layer type of its own for a chunked-graph source, and banners the
+plain name:
+
+```text
+The layer specification for graphene://… is deprecated.
+Key 'layerType' must be 'segmentation_with_graph'. Please reload this page.
+```
+
+That sits along the bottom of the frame and, as it says, **only a document reload clears it** —
+which on an unexpanded node card is a real share of the drawing, indefinitely.
+
+`nglui` is the reference and its rule is the **source scheme**, not the datastack:
+`_smart_add_segmentation_layer` builds a `ChunkedgraphSegmentationLayer` — which is
+`type="segmentation_with_graph"` — for a `graphene://` source and a plain `SegmentationLayer`
+for `precomputed://`. Mainline knows no such type, and nglui 4.x, which targets spelunker only,
+emits `segmentation` throughout. So it normalises **both** ways beside the prefix, in the same
+`sceneForViewer` pass: a scene read back out of a seunglab URL and re-sent to a spelunker viewer
+would otherwise carry a layer type that viewer cannot construct.
+
+**The ordering is what keeps it safe, and it is worth knowing before touching either end.**
+`segmentationLayerIndex` matches `type === 'segmentation'` exactly, and it runs inside
+`buildScene` — on the scene `fetchViewerScene` published, which is always the plain form. The
+rewrite happens later, at the URL. Do it earlier and the neuron layer stops being findable, so
+the scene comes out with no selection in it. `spliceSegments` is unaffected either way, since
+`ownedLayerName` finds the layer by its `segments` array rather than by its type. Both facts are
+pinned by tests, one of which asserts the segments survive the rename.
+
+**Not confirmed in a browser**, and that is a real gap rather than an oversight: `ngl.flywire.ai`
+refuses to boot without a FlyWire session — headless it answers *"Oops! There was an error and
+Neuroglancer…"* whichever type it is handed, so the warning cannot be observed appearing or
+disappearing here. What is established is the rule (nglui, both versions) and the required value
+(the warning names it outright).
+
+#### Reloading the frame
+
+There is no other way to clear a warning the viewer has already put up, and until now Coda had
+no way to ask. `contentWindow.location.reload()` is blocked on a foreign-origin frame, and
+re-assigning the same `src` is a **same-document fragment navigation** — the very property the
+`#!+` merge depends on, working against us here. What is left is remounting the element, which
+is a `key` on the `<iframe>` and a counter in the effect's dependency list.
+
+Two refs are cleared with it and both are load-bearing:
+
+- **`appliedRef`**, because the effect's first act is to return early for a URL already applied.
+  Leave it set and the remount produces a permanently blank frame.
+- **`loadedRef`**, because it decides merge-versus-replace. The reload's own navigation sets
+  `appliedRef` again, so the *next* upstream edit is an ordinary merge — and if the new document
+  has not booted yet, that patch lands on neuroglancer's defaults instead of the published
+  scene. This is the same window the flag was added for, reached from the other side.
+
+The second was **vacuously covered at first**: the obvious test clicks reload and asserts a full
+navigation, which passes on `appliedRef` alone. It only bites when the URL changes *between* the
+reload and the new document's `load`, which is what the test does now — confirmed by mutation,
+where the first version did not.
+
+The button is worth having beyond this warning: an embedded WebGL application can wedge for
+reasons nothing here can see, and every other route out of that was reloading the whole of Coda.
+
+**Ask `viewerKind` about a deployment, never about a proxy path.** `NeuroglancerViewer` rewrites
+its base to the same-origin `/ng` prefix so it can read the live state back, and `/ng` is a path
+on this origin that names no viewer at all — so that caller passes the kind of the base it
+started from. An inverse lookup inside `viewerKind` was written first and removed: it was correct
+and **unobservable**, since the only proxied deployment is the default and both it and the
+unknown fallback are spelunker, so a test on it passed under mutation while defending nothing.
+
+The existing test asserted the prefix unconditionally and passed, because the fixture's
+`viewer_site` happens to be `spelunker.cave-explorer.org`. Two more of the new tests were vacuous
+on the first pass for the same shape of reason — a plain source makes "no prefix" true whether or
+not anything ran — and both now assert **both directions**. Four mutations confirmed: always-
+spelunker, add-without-normalising, patch-not-rewritten, and the explicit kind ignored.
+
+**`roiCounts` is new, and `fetchRoiCounts` became optional to make room for it.** It was the one
+per-backend method on the seam that was required and ungated, and the cost of that showed up two
+levels away rather than at the node: `out.profile` fetches its regions in a `Promise.all` beside
+two connectivity queries, so a source that rejected there took all three down and **every tile on
+the card reported an error** — on a neuron whose partners had loaded perfectly well. The regions
+leg is now independently absent, which is the widget's own "a tile renders only when its data
+exists" rule, and `neuron.roiCounts` gained the `sourceSupports` gate its two ROI siblings
+already had.
+
+Two absences show up as data rather than as flags. A CAVE dataset reports **no ROIs and no
+statuses**, so Find Neurons' region and status pickers offer nothing to filter by — which is the
+honest state rather than a control that would match nothing.
+
+### Morphology: meshes and synapses, but not skeletons
+
+### Skeletons come from the level-2 cache, and the capability is per dataset
+
+**A CAVE datastack's skeletons depend on its chunkedgraph, not on the backend**, so
+`capabilities.skeletons` — which is per *source* — was telling every FlyWire-production user
+something false. `DataSource.capabilitiesFor(datasetId)` is the seam that fixes it: synchronous,
+`undefined` meaning "same as the source", read by `sourceSupports` ahead of the source's own
+answer. Only CAVE implements it, and only for `skeletons`; the Skeletons node's refusal now says
+"This **dataset** has no skeletons".
+
+**The route is the level-2 chunk graph, which is `fafbseg.flywire.get_l2_skeleton()`'s method.**
+Two requests per neuron: the graph of which level-2 chunks touch which, then the L2 cache's
+`rep_coord_nm` and `max_dt_nm` per chunk. Measured on BANC: five neurons concurrently in 3.2 s —
+which is one neuron's latency, since they overlap — and trees of 739, 69 and 2 nodes with radii.
+
+**The skeleton *service* several datastacks also publish is not used, and that is measured
+rather than assumed.** It generates from this same cache, so it covers no datastack the L2 route
+does not: `flywire_fafb_public` declares a service and has no cache, which is exactly why its
+skeleton cache was found empty in the phase before this. On one BANC neuron the service took
+10–45 s to generate against 1.6 s here, and returned 74 vertices against 146 chunks. It is also
+blind to `wclee_aedes_brain`, which has a populated cache and publishes no service at all.
+`caveclient.l2cache.has_cache()`'s rule is the gate — the table mapping lists the chunkedgraph
+tables the cache knows, and membership is the answer — verified against the live refusal
+("Dataset flywire_public does not have an L2 Cache") rather than trusted.
+
+Six of the thirteen datastacks have a cache: BANC, FANC production, FlyWire *production*,
+minnie65 public, Aedes and zheng_ca3. **`flywire_fafb_public` does not**, so the node Coda ships
+still declines — correctly, and now for the right reason.
+
+Four things in the tree building, each a wrong picture if lost. **Chunks with no cache entry are
+dropped, and dropped _before_ the walk** — after it they would orphan their children, where
+excluding them lets the walk route around through whatever else they touched (`navis.remove_nodes`
+reparents for the same reason; doing it up front needs no reparenting). **A breadth-first
+spanning forest**, because the L2 graph is undirected and can hold cycles while a skeleton is a
+tree — a cycle surviving into `parents` makes every consumer that walks to a root loop forever.
+**Each component gets its own root**, so a neuron split by an edit is two trees rather than one
+with a fabricated join. And **a single-chunk neuron answers `undefined` before the cache is
+asked**, which is `readGrapheneMesh`'s answer to the same shape of question and saves a round
+trip on a common case.
+
+**The attributes call is batched across the whole request, and that is the shape of the fetch.**
+It is keyed by *table*, not by root id, so the union of every neuron's chunks goes in a handful
+of requests however many neurons were asked for — a hundred neurons is a hundred chunk-graph
+reads plus about three attribute reads, rather than two hundred round trips. Measured: 1,177
+chunks (twelve neurons' worth) answered in **one 1.64 s request**, against roughly that for each
+of the twelve separately. The cost is that progress reports in two phases rather than per neuron.
+
+**`L2_CONCURRENCY` is 16, and it is set by correctness rather than by the curve.** Measured
+against BANC, 40 neurons: 14.5 s at 8, 4.6–6.0 s at 16, 3.9–4.9 s at 32, 5.2 s at 48 — three
+times faster at 16 and flat after. But **past 16 the server starts dropping requests silently**:
+two of three runs at 32 returned 38 and 39 skeletons of 40, and one at 48 returned 39, where
+every run at 8 and 16 returned all 40. `mapWithConcurrency` turns a failed neuron into an
+`undefined` indistinguishable from a neuron that genuinely has no skeleton, so the missing ones
+do not announce themselves.
+
+`MAX_L2_SKELETON_NEURONS` is 100 — far above `MAX_MESH_NEURONS`' 20, because a skeleton is one
+chunk-graph read where a graphene mesh is several hundred requests, and far below the 500 a
+source publishing ready-made skeletons allows.
+
+**Points come out in visit order, so a parent always precedes its child.** That is the contract
+`SkeletonGeometry.parents` states and that `neuprint/decode.ts` does real work to honour;
+emitting in chunk-id order would satisfy the type and break every consumer that walks the array
+once, the SWC writer included. The test for it uses edges whose *encounter* order differs from
+their *visit* order, because on a chain listed front to back the two coincide and a test built on
+one passes whichever the code emits.
+
+**`capabilityOf(source, datasetId, key)` is how a capability is read**, never
+`source.capabilities[key]` directly. The per-dataset override is useless to a reader that skips
+it, and the two halves of a gate usually sit in different layers — `validate` refuses at edit
+time and `evaluate` at run time — so a bypassing reader makes them disagree with nothing
+type-checking the pair. Six readers did exactly that when the override was introduced; they all
+go through the resolver now. `starters.ts` passes no dataset id and gets the source-level answer,
+which is honest there: a starter is a node type and some params, and which dataset it resolves to
+is not known until the node runs.
+
+**The skeleton is coarse and the docstring says so.** One node per level-2 chunk is tens to a few
+hundred for a whole neuron, where a traced skeleton is thousands. It is the right shape for
+NBLAST, a 3D overview and cable length; it is not a morphometric reconstruction.
+
+#### The earlier finding, kept because it explains the shape
+
+**The skeleton service is the one thing CAVE publishes that Coda still cannot use, and the
+blocker is the service rather than the format.** `skeleton_source` is a standard `neuroglancer_skeletons`
+precomputed endpoint — its `/info` declares `radius` and `compartment`, which is exactly what
+`SkeletonGeometry` wants, and it is CORS-open. But it is a **cache that generates on demand**,
+and for `flywire_fafb_public` it is empty: 100 proofread root ids sampled from two places in the
+table, across skeleton versions 0 through 4, came back `exists: false` for every one, and a
+queued bulk generation had not landed after five minutes. So a fetch blocks on generation, per
+neuron, against a node whose ceiling is 500. `capabilities.skeletons` is false and says so on
+the flag; claiming it would make every Skeletons run hang instead of decline.
+
+Two endpoint notes for whoever picks this up when the cache fills. `exists` answers as a **POST**
+(`{skeleton_version, root_ids}`) — the GET form 502s — and it is what makes the whole thing
+usable, because it turns "will this hang?" into a question you can ask first. And omitting the
+skeleton version from a fetch URL routes to a generate rather than 404ing, which is why the first
+probe here simply never returned.
+
+**Synapses are the cheapest capability on this source and needed no new transport.** It is
+`queryTable` with a root-id filter — the same call connectivity makes — over `synapses_nt_v1`.
+Measured: 14,986 synapses for one neuron in 1.8 s.
+
+- **`desired_resolution: [1, 1, 1]` is where the nanometres come from**, and it is passed
+  explicitly rather than inherited. The table stores **4x4x40 nm voxels**, established by asking
+  for both resolutions and watching the values divide by exactly 4, 4 and 40. The server's
+  current default for this table happens to *be* nanometres, so omitting it looks perfectly fine
+  and would put every synapse a factor out of the scene the day that default moved — with
+  nothing failing, because the cloud is internally consistent either way. This is the CAVE-native
+  answer to the rule `neuprint/units.ts` implements by scaling.
+- **No polarity means two queries, not one.** CAVE has no either-end filter, and an `IN` on both
+  columns of one query is an AND — which is the synapses a neuron makes onto *itself*.
+- **The cloud is query-relative**, like `fetchConnectivity`: `neuronId` is the end that matched
+  the filter and `partnerId` the other, so a Synapses node and a Connectivity node on one neuron
+  agree about which id is whose. `polarity` rides in the attribute table because a cloud fetched
+  for both ends is two populations in one buffer.
+
+**Meshes work, and cost requests rather than bytes.** A CAVE segmentation is `graphene://`, which
+is not a bucket you can read by id: a root id is a dynamic agglomeration, so the fragment list has
+to be asked for. `meshes.ts` asks the meshing API, then hands the fragments to
+`src/data/precomputed` unchanged — `decodeDracoFragment` and `concatMeshes` needed no edit at all.
+
+**A manifest failure is deliberately *not* swallowed**, which is the opposite of `readLegacyMesh`
+beside it. That one reads a static bucket where a 404 genuinely means "this body has no mesh";
+this calls an API whose 404 means the *table name* is wrong — the trap named just below. Letting
+it throw is what lets `mapWithConcurrency` do its job: one bad neuron still becomes `undefined`
+and costs the others nothing, but a systematically broken call fails every neuron and is
+rethrown, rather than handing back an empty scene under a green node.
+
+**The bucket mapping is `objectStoreUrl` in `precomputed/transport.ts`**, shared with
+`neuprint/nglayers.ts`, which is where the second consumer put it. The first copy here mapped an
+*unrecognised* scheme onto the GCS host — a confidently wrong URL rather than a refusal, and 404s
+per fragment that read as neurons with no mesh. Not every CAVE datastack is on GCS.
+
+Four things established live, each of which would otherwise be a plausible wrong picture:
+
+- **`verify=True` is not optional.** Without it the manifest answers a single fragment named
+  after the root id itself, which does not exist in the bucket — the unverified form is a promise
+  about what *would* be meshed rather than a list of files. With it, one FlyWire neuron is **492
+  fragments**.
+- **The meshing API is keyed by the graphene *table*, not by the datastack**, and on FlyWire
+  those are different strings: `flywire_public` against `flywire_fafb_public`. Taking the
+  datastack name 404s, so the table is parsed out of the `segmentation_source` URL that named it.
+- **Fragments decode straight to world nanometres.** Measured on a real one: x spans
+  474,201–474,810. So none of `multires.ts`'s `fragmentOffset`/`fragmentTransform` machinery
+  applies, and nothing scales anything — the decoder is called with an identity transform.
+- **The bucket is CORS-open** (`storage.googleapis.com`, `access-control-allow-origin: *`), so
+  this works from a static deploy with no proxy.
+
+**What it costs, all measured on one neuron:** 492 requests, ~1.2 MB, **13.3 s**, and 1,276,736
+triangles before decimation. There is no level of detail to trade against — a graphene manifest
+lists supervoxel fragments at full resolution, where neuPrint's multi-resolution meshes answer in
+a handful at a chosen LOD. Three constants follow from that, and each is a measurement rather
+than a guess:
+
+- **`MAX_MESH_NEURONS` is 20**, against the Skeletons node's shared 500. Enforced in the *source*
+  rather than on the node, because it is a fact about graphene: the same Meshes node against
+  neuPrint is fine at 500. (A per-source ceiling on the seam is the honest fix and is a later
+  phase; the refusal names the number and the reason meanwhile.)
+- **`FRAGMENT_CONCURRENCY` is 32.** The work is latency, not bytes — 492 fragments averaging
+  2.4 kB — so this is the number that decides the wait: 18.9 s at 12, 13.3 s at 32, 11.3 s at 64.
+  Past 32 the gain is small and it is a lot of parallel requests at one host. Measured from Node,
+  where nothing caps connections, so a browser will do no better.
+- **`MESH_DECIMATE_GRID` is 192**, through the same `decimateMesh` the ROI shells use. Much finer
+  than their 32, because a neuron is a thin arbor inside a box the size of the brain and that
+  grid would erase it: from 1,276,736 triangles, grid 96 gives 6,308, 192 gives 25,548, 256 gives
+  44,091. A full set of 20 is then about half a million triangles, inside the 1.5M budget the
+  Meshes node works to. It reduces memory and draw cost, not the wait — the requests are already
+  paid by then.
+
+**`fetchCoarseGeometry` stays unimplemented, and that is the right answer rather than a gap.**
+There is no cheap representation to draw a thumbnail from, and the interface's own docstring says
+an absent one beats quietly downloading full detail to fill a list. So Explore on a CAVE dataset
+draws placeholders.
+
+**The cross-check that ties it together** is in `live.test.ts`: a neuron's mesh has to enclose its
+own presynaptic cloud. Neither is scaled by anything here — the fragments arrive in world
+nanometres and the synapse query asks for them — so if either assumption were wrong the two boxes
+would be a whole factor apart, and nothing else would fail, because each is internally consistent.
+Measured: mesh 400,953–603,981 against synapses 402,596–602,328. Same shape as the neuPrint rule
+that a mesh bbox must enclose its skeleton's.
+
+**The morphology schema is narrowed rather than canonical.** `neuronId`, `type` and `points`, and
+no `instance`, `status`, `size` or `cableLength` — a graphene mesh carries none of them, and a
+column that arrives null on every row breaks every picker that believed it.
+
+### Smaller decisions
+
+- **`neuronId` is `str` on this source, and `type` is the only other renamed column.**
+  `pt_root_id` → `neuronId` and the `cell_type` annotation kind → `type`; everything else keeps
+  CAVE's own spelling (`super_class`, `cell_class`), the same call neuPrint's passthroughs make.
+  What `str` costs is numeric sorting of ids and their appearance in numeric pickers, neither of
+  which is a loss.
+- **A failed discovery is asked for once, not once per keystroke.** `schemasFor` runs from
+  edit-time inference and `runDiscovery` sets its schema only on success — so without a
+  `discoveryRequested` flag every failure was retried on every graph mutation: one 52 kB request
+  per keystroke, or one auth-failure popup per keystroke with no token. Exactly the rule
+  `peekDatasets` already states for the listing beside it, and the reason neither flag is cleared
+  on failure. Pressing Run still retries, because the index path calls `discover` regardless.
+- **The index's two legs run together.** The annotation queries depend on nothing from the neuron
+  table — only on the server and the discovered kinds — so awaiting it first cost a round trip
+  plus 139,255 rows of transfer. Measured against live CAVE: 5.76 s to 4.04 s.
+- **`typesOf` is memoised on the index's identity.** `fetchConnectivity` is called once per hop
+  per direction, so `Hops: 3, Direction: both` built the same ~108,000-entry map six times in one
+  Run, and Profile built two per page turn. A `WeakMap` on the `TableValue` is safe rather than
+  merely likely to hit: `cacheGet` promotes a hit into `cache.ts`'s module map and hands back the
+  same object. Same idiom as `searchIndexFor` and `statsFor`.
+- **A dataset id is `datastack:materialization`** — `flywire_fafb_public:783` — following
+  neuPrint's `family:version` convention exactly, which is what lets the existing version
+  dropdown carry a materialization with **no new control**: `compareVersions` orders bare
+  integers, so 783 sorts above 630 and a pinned 630 stays 630.
+- **The index is deduplicated on the root id.** A CAVE neuron table is keyed by a *point* — a
+  soma, a nucleus, a representative vertex — so one segment carrying two of them is two rows for
+  one neuron, and a repeated row is double-counted by everything downstream that sums a weight.
+- **Connectivity types come from the index**, not from a second query. A connectivity table
+  without them is readable by nothing, and by the time anyone runs Connectivity the index is
+  already in hand. A partner outside the annotated set has no type, which is honest rather than
+  a gap.
+- **There is no Base URL field**, unlike neuPrint's, and its absence is the finding: every CAVE
+  service Coda calls answers a browser directly, **including on its 401s**, which is the part
+  `reportAuthFailure` depends on. What the Connections tab does carry is a *global server*,
+  which is a different thing — CAVE splits into one service that knows which datastacks exist
+  and a per-datastack `local_server` that answers queries, and only the first is ever named.
+- **A CAVE 401 opens the CAVE tab.** `reportAuthFailure` carries no source id, so the Connections
+  panel used to declare one `authTab` per section, hardcoded to neuPrint. Harmless while neuPrint
+  was the only credentialed backend and wrong the moment CAVE arrived; the *tab* is now named by
+  whoever subscribes. The `section.authTab ? …` branch that chose whether to wrap a body was
+  reading an auth detail to answer a layout question and is now an explicit `tabbed` flag.
+- **Both exporters skip it, and the export is refused outright.** `dataset.flywire` is named in
+  each `NO_EMITTER` with its reason — the notebooks are built on neuprint-python and neuprintr,
+  and emitting neuPrint code against a dataset neuPrint has never heard of would produce a
+  document that runs and answers nothing. The loops and `canExportNotebook` both read
+  `DatasetFamily.notebook`; see the exporter section above for why that is one field rather than
+  a test repeated at each site.
+
+### What is not done
+
+Skeletons, until the skeleton cache has anything in it (above). The annotation-source
+abstraction that would let a FlyTable or a GitHub TSV join onto root ids, and the
+materialization/annotation dropdowns and per-source morphology ceilings. Aedes needs the
+annotation half before it is usable at all: its CAVE datastack publishes synapses and nuclei and
+*no* annotations, so type, class and side live in FlyTable.
+
+Not looked at in a browser yet — the module is headless and both suites are headless, so what has
+not been seen is a FlyWire dataset node on a real canvas: the Explore widget over 139,255 neurons,
+and twenty decimated meshes with their synapses in the 3D view. Same standing as the WebGL
+viewers, and the mesh path is the half most worth looking at, since a decimation grid is a
+judgement about a picture.
+
+## CATMAID
+
+`src/data/catmaid/`, and the third backend. The first target is Virtual Fly Brain's public FAFB
+instance, `catmaid-fafb.virtualflybrain.org`. Nothing above `src/data` knows it exists; a CATMAID
+dataset node is `dataset.fafb`, built from `DATASET_FAMILIES` exactly as the others are.
+
+Everything below was probed live rather than recalled, and `live.test.ts` is that pass
+institutionalised — skipped unless `CATMAID_LIVE=1`, because it is somebody's public server and
+the suite runs on every commit.
+
+### The access problem, which decides the module
+
+**CORS is perfect and it does not help.** `Access-Control-Allow-Origin: *`, `X-Authorization` in
+the allow-list, preflight 204 with a twenty-day max-age, and `can_browse: [1]` for the anonymous
+user. Every `GET` Coda makes is answered cross-origin with no credential at all.
+
+But **CATMAID's core query endpoints are POST-only** — checked against `/apis/`, not guessed:
+`skeletons/connectivity`, `annotations/query-targets`, `skeleton/annotationlist`,
+`skeleton/neuronnames`, `skeletons/review-status`. There is no GET alias for any of them. And an
+anonymous POST is refused by Django's CSRF, whose two gates a browser cannot pass: `Referer` is a
+[forbidden header name](https://developer.mozilla.org/en-US/docs/Glossary/Forbidden_header_name)
+so `fetch` sends our own origin and the trusted-origins check rejects it, and the `csrftoken`
+cookie is `SameSite=Lax` so it is never sent cross-site. Isolating them:
+
+```
+no Referer                     → CSRF Failed: Referer checking failed - no Referer
+Origin only, no Referer        → the same         (so Origin is ignored: Django ≤3.2)
+Origin + Referer, both foreign → does not match any trusted origins
+Origin foreign, Referer=server → CSRF Failed: CSRF cookie not set     (two gates, sequential)
+HTTP Basic, bogus              → still a CSRF error   (BasicAuthentication is not enabled)
+Authorization: Token <bogus>   → Invalid token        ← the way through
+```
+
+**A token bypasses CSRF entirely**, because DRF's token class runs before its session class and
+never reaches `enforce_csrf` — which is why a bogus token is answered `Invalid token` rather than
+`CSRF Failed`. That is the whole of why a token matters here, and it is *not* what a token means
+on the other two backends: it does not unlock private data, it is the only way a page can ask a
+question whose answer is already public.
+
+**And on this instance a token is not obtainable** — `/accounts/register` is 404. So the usual
+answer (require one, like neuPrint and CAVE) would make the named target unusable, and the module
+falls back to a same-origin `/cm/` relay that performs the handshake server-side. That works under
+`pnpm dev` and 404s on a static deploy, exactly as `/st/` does for FlyTable.
+`docs/catmaid_vfb.md` is the write-up and the upstream ask — which is **CATMAID's** rather than
+VFB's, since every instance with anonymous browse has the same wall for the same reason.
+
+**So the route is chosen rather than probed**, the deliberate departure from `neuprint/client.ts`
+and `seaTable.ts`. Those cannot tell a CORS refusal from a dead host, so they try and remember.
+Here the governing fact is known in advance: an anonymous POST *cannot* succeed direct, so
+issuing one to find out spends a request confirming what the protocol already says. `routeMemory`
+still earns its place for the case it was built for — a CATMAID sending no CORS headers at all,
+which VFB's does not but a lab instance well might — and that case is still a thrown fetch.
+
+**Verified from a real browser**, which is the only thing that could: direct `GET /projects/`
+answers 200, the same POST direct answers 403, and through the relay it answers 200 with a real
+neuron name. The browser produces a *third* CSRF variant — `Referer is insecure while host is
+secure`, because the dev origin is `http` — which becomes the trusted-origins form on a published
+`https` deploy. It does not change the outcome and it does change the message, which is worth
+knowing before debugging one against the other.
+
+### Credentials are a list, because CATMAID is software rather than a service
+
+`Connections ▸ Data sources ▸ CATMAID` holds **rows**, not a token. Every other tab there holds
+one, because neuPrint has a canonical deployment and CAVE has a global service that lists
+datastacks. CATMAID has neither: VFB, an LMB instance, a lab server are unrelated installations
+with unrelated accounts, and a token is per user **and** per instance. One field would not merely
+be awkward — it would send whichever was saved last to all of them.
+
+**`server` is a host pattern**, so one row covers a deployment answering on several hostnames:
+`*.virtualflybrain.org` rather than a row per subdomain. `hostPattern` normalises whatever was
+typed — a pasted address bar, a bare host, a port, a subpath — down to the host, because a
+credential is a property of a host and the rest cannot vary independently of it.
+
+Three rules in the matching, and the first is the one that would leak a token:
+
+- **`*` requires the literal dot.** `*.virtualflybrain.org` covers `a.b.virtualflybrain.org` and
+  does **not** cover `virtualflybrain.org`, `notvirtualflybrain.org`, or
+  `virtualflybrain.org.evil.com`.
+- **A pattern with no literal characters matches nothing.** `*` is an easy thing to type and would
+  otherwise send a token to whatever host a graph happened to name.
+- **Most specific wins**, exact over wildcard and longer wildcard over shorter — so a `*.lab.org`
+  row plus one exact row for the machine inside it that needs a different account behaves the way
+  it reads, rather than depending on list order.
+
+**Two credentials per row, and they are not alternatives.** `token` goes on `X-Authorization`,
+which is CATMAID's own header; `httpUser`/`httpPassword` go on `Authorization: Basic`, which is
+the *web server's*. They coexist on one request rather than competing, and CATMAID's middleware
+says why in as many words: it uses a non-standard header "to prevent conflicts with, e.g., HTTP
+server basic authentication". An instance behind nginx auth needs both.
+
+**Only the token bypasses CSRF.** Basic auth satisfies whatever sits in front and leaves Django
+exactly where it was, so `routesFor`'s `hasToken` is specifically the CATMAID token — conflating
+them would send an anonymous POST direct on any instance that happens to sit behind nginx auth,
+and it would be refused every time. A test pins it.
+
+The password is in `localStorage` in the clear, like every credential here, and the section's
+privacy note now says so — the note also stopped claiming that *every* data-source request travels
+through a same-origin relay, which stopped being true when CAVE arrived and is wronger with
+CATMAID beside it.
+
+**One pre-existing test was found by this and is worth knowing about**: `sources.test.tsx` asserted
+no AI tab appears among the data sources with `/AI|assistant|Anthropic/i`, and an unanchored `AI`
+matches "c**AT**M**AI**D". It had been passing for the right reason only by the accident that no
+tab name contained those two letters. It is `\bAI\b` now.
+
+### `type` is derived, because CATMAID has no such field
+
+neuPrint carries cell typing as properties on the neuron and CAVE reads it from an annotation
+table. CATMAID has neither: a neuron has a free-text **name** and a bag of **annotations**, with
+nothing saying which of them mean what.
+
+What makes it tractable is that **annotations can themselves be annotated**. Measured across all
+5,601 skeletons of public FAFB:
+
+```
+meta-annotation      annotations   neurons   max per neuron
+neuron name                 5601      5601                1
+Cell type                    329      4244                1
+Published                     26      5601                4
+export: tags                  27      5601                4
+publication_link: <doi>          1    1–1507              1     (×22, one per paper)
+```
+
+So the mechanism is **a meta-annotation names a field and the annotations carrying it are its
+values**, discovered by asking rather than hardcoded — the lesson CAVE taught. `neuron name`
+supplies `type` and `instance`, split at the `#`: `Uniglomerular mALT VA6 adPN#R1` yields both,
+and `DNp32_R` is its own type. 960 distinct types on FAFB.
+
+Three things about it are load-bearing:
+
+- **The default is a convention, not an assumption.** `neuron name` is how the labs that traced
+  FAFB annotate; CATMAID enforces nothing. So it is `DEFAULT_TYPE_META` and an instance without it
+  degrades to a neuron table with names and no types rather than failing.
+- **The instance keeps the whole label, so the `#` split is lossless.** That matters because the
+  convention puts real distinctions on the right of it: `KC#12-a'b'` gives type `KC`, and the a'b'
+  subtype survives only in `instance`. Coda is not the place to decide that `a'b'` is a type and
+  `12` is not.
+- **Everything below `Cell type` gets no column of its own.** `export: tags` and `Published` carry
+  the same information by different routes, and `publication_link: <doi>` is the `key: value`
+  annotation idiom — 22 of them, each naming one paper, none a field. A column per meta-annotation
+  would put forty-odd in every picker downstream, most describing a *paper* rather than a neuron.
+  They land in one `annotations` cell joined with `JOIN_SEPARATOR`, which is exactly the shape
+  Explore's `Additional tags` control already splits back into chips.
+
+**`JOIN_SEPARATOR` moved to `src/core/values.ts` for this**, from `tableOps.ts` where it began
+beside the Group By aggregation that writes it. That was right while a node was the only thing
+that could produce one; a *source* now does, and `src/data` may not import `src/nodes`
+(invariant 1). Same reasoning and same destination as `ID_COLUMN_NAME`, and deliberately no
+re-export from where it was.
+
+**`neuronId` is the skeleton id, never the neuron id**, and the two genuinely differ —
+`{'id': 27296, 'skeleton_ids': [27295]}`. Every endpoint takes the skeleton, so a table keyed on
+the neuron would join to nothing with each id off by a value or two, which is the kind of wrong
+that looks right.
+
+### The numbers, which cut both ways
+
+**The index is the cheapest here.** All 5,601 skeletons with names, annotations, node counts and
+cable lengths: **3.2 MB and about 1.4 s** — the id list, then the annotation graph's three chunks
+and the summary call all running together, which took it from 2.9 s, against neuPrint's 6.9 MB and CAVE's 139,255 rows. The
+public FAFB instance is a curated published subset rather than a whole-brain segmentation, which
+is what makes Explore over the whole of it immediate. And since `annotations/query-targets`
+matches names by **substring** rather than regex — `^LC[0-9]+` matches nothing, `LC` matches 129 —
+there is no server-side search worth pushing down, so filtering is local and `neuronFilter.ts`
+gets its third consumer.
+
+**Skeletons are the most expensive here.** 0.9–1.3 MB each, and **the server does not gzip** —
+verified, byte-identical with and without `Accept-Encoding`. One antennal-lobe PN is 16,840 nodes
+and a large descending neuron 64,385, where a CAVE L2 skeleton is ~150. `MAX_CATMAID_SKELETONS` is
+200 at `SKELETON_CONCURRENCY` 8, which is a *transfer* ceiling rather than a drawing one and the
+refusal says so. It moves the day the deployment turns on gzip.
+
+**Coordinates are already nanometres**, and volumes share the frame with skeletons — verified by
+bbox cross-check, and again in `live.test.ts` by the rule CAVE's mesh-encloses-synapses assertion
+follows: a synapse cloud must sit inside its own skeleton's box, because neither is scaled by
+anything here and a mistake in either would put the two a whole factor apart while each stayed
+internally consistent. So nothing does what `neuprint/units.ts` has to.
+
+**+16.25 kB raw / +5.03 kB gzipped on the main chunk**, measured against a build of the same tree
+with the feature absent — comparable to CAVE's +16.4 / +5.2.
+
+### Traps, each verified rather than assumed
+
+- **The connectivity weight is the sum of a five-element confidence array, not its last element.**
+  Almost everything sits in the last bucket, so taking that alone looks right and undercounts:
+  3,039 against a true 3,070 on skeleton 16's outgoing partners, cross-checked against 3,069
+  ground-truth links from the connector table. A one-percent error that no assertion on shape
+  would catch.
+- **`skeleton_ids[]` — the form `/apis/` documents — silently returns only the last id.** Not an
+  error, a short answer. Confirmed on `skeletons/summary` and `skeletons/cable-length` over both
+  verbs, so it is the view rather than the method. The indexed `skeleton_ids[0]=…&[1]=…` form works
+  everywhere and the plain repeated form 400s on `review-status`, so `encodeParams` emits indexed
+  and nothing may emit brackets.
+- **CATMAID names a parent by node id, and a skeleton's nodes arrive in no particular order.** The
+  tree is rebuilt through an id→index map; emitting ids would satisfy the type and break every
+  consumer that walks the array once, the SWC writer included.
+- **A radius of −1 means unset**, and a negative radius drawn as a tube is a spike.
+- **`/volumes/` answers `{columns, data}`**, a column table rather than records — the obvious
+  `VolumeRow[]` reading parses without error and yields `undefined` for every field.
+- **The volume mesh is X3D**, `<IndexedTriangleSet>`, parsed by hand rather than through
+  `DOMParser` so this layer stays usable without a DOM. An out-of-range index is refused rather
+  than passed on, because it draws as one enormous spike across the scene rather than as an error.
+- **A source that publishes no statuses must also *ignore* the parameter.** `DatasetInfo.statuses`
+  is empty because CATMAID has none — but a node's stored `Traced` default survives into the
+  request regardless, and filtering on it drops every row for a value nobody chose. That failure
+  is live on CAVE today; `findNeurons` here ignores `statuses` outright and a test pins it.
+- **A filter somebody *chose* is refused instead, and the difference is the default.** `In ROI` and
+  `Min size` reach a source only when they were set, so ignoring one answers a different question
+  than the card says — see `refuseUnfilterable` below. CATMAID is the case that makes it visible:
+  `volumeList` fills `DatasetInfo.rois` with eighty real neuropils so the ROIs viewer can draw
+  them, which also populates Find Neurons' region picker, and `findNeurons` never read `req.roi` at
+  all. A populated dropdown that narrows nothing, whose result is too *large* and looks correct.
+- **Cable length is measured, not fetched.** `core/values.ts`' `cableLength` is shared with the
+  neuPrint decoder and the mock so the three cannot disagree, and CATMAID's points are already
+  nanometres — so the Skeletons node computes it from the tree in hand rather than spending a
+  round trip on a shared community server. Checked against the server's own figure on skeleton
+  16: 4003103.2328612693 against 4003103.23286127. The *index* still fetches it, because there is
+  no geometry there to measure.
+- **`nodes` and `cableLength` are filled rather than declared-and-null.** One POST, 1.77 MB, 0.72 s
+  for all 5,601 — which roughly doubles a download cached for a month. The alternative was the
+  thing `CATMAID_NEURON_SCHEMA` refuses to do for `status`: an always-empty column is worse than an
+  absent one, because every picker downstream offers it.
+
+### What it cannot do, and what is not done
+
+`paths` (no aggregated-hop endpoint), `roiSummary` and `roiCounts` (no completeness or
+per-neuron-per-region table), `rawQuery`, `viewerScene`, and **`meshes`** — CATMAID stores
+skeletons rather than a segmentation, so its `volumes` are neuropil shells and are `roiMeshes`,
+which is a different question. Each declines at edit time rather than failing at run time.
+
+`fetchSynapses` carries `connectorId` but **no `partnerId`**: the partner on the far side of a
+connector belongs to a different skeleton, so naming it means a second POST per connector set, and
+a cloud drawn in 3D or counted by region needs none of it.
+
+Neither exporter emits it — both `NO_EMITTER` tables name `dataset.fafb`. pymaid is the obvious
+Python route and the natverse's `catmaid` the R one, and both map cleanly, but no emitter has been
+written so both languages refuse rather than producing a document of TODOs.
+
+**Labels are derived once, into a `Map` on `LabelIndex`, and the raw response dropped.** Four call
+sites wanted a neuron's type and one of them wanted it once per synapse *link* — tens of thousands
+of times for a densely traced neuron, each allocating a `Set` and joining a string to read one
+field. The same change lets the response be collected rather than held beside the neuron table
+built from it, and it is what makes `typeLookup`'s old "memoised per project" docstring true by
+deleting the function.
+
+**Not looked at on a real canvas**: the dataset node's tint and tile pip, Explore over 5,601
+neurons, and a hundred FAFB skeletons in the 3D view. The module and both suites are headless;
+what *was* driven in a browser is the relay and the CORS behaviour, above.
 
 ## Precomputed meshes
 
@@ -3573,10 +5973,55 @@ dragged off the node starts there, and the footer — which summarises the first
 says `N × M`.
 
 Two small things fall out of a matrix axis being labels rather than data. The label column is
-`str` even when pivoted from `bodyId`, which still joins back against the numeric column it
+`str` even when pivoted from `neuronId`, which still joins back against the numeric column it
 came from because `joinTables` keys on `String(cell)`. And a column label colliding with the
 row field's name is suffixed (`type`, `type_2`) rather than dropped, the same call
 `joinedColumns` makes.
+
+## Deduplicate
+
+`core.dedupe`, `Add ▸ Transform ▸ Deduplicate`. `pandas.drop_duplicates`: name the columns to
+compare on, and `Keep` decides which row of a repeated set survives — `first`, `last`, or `none`.
+
+**It exists because the providers stopped deciding.** Measured against FlyTable's `main.info`:
+58,340 rows, 56,309 distinct root ids, 1,089 neurons with more than one row, and one segment
+appearing 104 times with its `side` reading left, center and center among them. That used to be
+collapsed silently inside `shapeRows`; now it reaches the canvas, and this is the node that
+decides what to do about it in a place somebody can see.
+
+**`none` is a different question, not a third flavour.** `first`/`last` answer "one row per
+neuron" and differ only in which row a Sort upstream put where; `none` answers "only the rows
+nobody disagrees about", which is the conservative read when a repeat is a *conflict* rather than
+a copy. That is `keep=False`, and it is the mode worth knowing about.
+
+**Empty compares whole rows**, which is `drop_duplicates()`'s own default and `Select`'s reading
+of an empty picker — so an unconfigured node answers "this file has exact duplicates in it" with
+nothing set. A column that is *named* but absent is refused rather than dropped, `groupByTable`'s
+rule: comparing on fewer columns than were asked for silently keeps **more** rows, which on a
+table whose upstream schema moved reads as a dedupe that did not work.
+
+**Row order is the input's in all three modes.** A row kept because it was *last* stays where it
+was rather than moving to the end — pandas does the same, and a dedupe that also reordered would
+be two operations wearing one name. Note the trap in the implementation: `lastAt.values()` is in
+*first*-occurrence order, so the second pass walks the rows again rather than reading the Map.
+
+**`rowKey` is shared with `groupByTable`** rather than written twice — the second-consumer rule,
+and the two characters in it are the whole of its correctness. `\u0001` separates columns, so
+`["ab","c"]` and `["a","bc"]` are different rows (the collision `uploads.ts` records for its own
+content address); `\u0000` stands for a missing value, so a null is not the four-letter string
+`"null"`, which a `str` column of somebody's annotation base very plausibly contains. Both are
+mutation-checked, because both fail as a *plausible wrong table* rather than as an error.
+
+**Not Group By**, which is the neighbouring control and collapses rows into an aggregate. This
+keeps whole rows, so every column comes through with the value it had; that difference is what
+stops the two being one node with a mode.
+
+The R emitter is the one place in that file that leaves dplyr, and it says why: `distinct()` keeps
+the **first** row and has no argument for the other two, where `duplicated(..., fromLast = TRUE)`
+is exactly `last` and OR-ing both directions is exactly `none` — one idiom covering all three,
+preserving row order, and needing no library. Python is `drop_duplicates`, with `subset` **omitted**
+rather than passed empty: `subset=[]` compares on no columns, which makes every row a duplicate of
+the first.
 
 ## Upload Table and Table from URL: somebody else's data
 
@@ -3679,6 +6124,12 @@ undetectable has to be fixed rather than configured.
   demoting the row instead puts the word "type" into the first row of the column it was naming. The
   remaining ambiguity — an all-text file with no header — resolves _towards_ a header, the same bias
   `pandas.read_csv` takes.
+- **The suffixing is `uniqueName`, which now lives in `src/core/types.ts`.** It was hand-written
+  here and again in `tableOps.ts`, and `src/data` may not import `src/nodes` (invariant 1), so the
+  annotation providers were about to make it three — `ID_COLUMN_NAME`'s argument for `src/core`
+  exactly. The two copies had already parted company on the case that matters: this one *counted
+  occurrences*, which turns `a, a, a_2` into `a, a_2, a_2` — a collision produced by the very
+  function that exists to prevent one. Probing for the first **free** name cannot do that.
 - **A blank cell is null, never zero.** `Number('')` is 0, which draws a dense stripe of data
   nobody recorded along every axis downstream. Same trap `numeric()` in `encoding.ts` exists for.
 - **A value that would not survive a round trip stays text.** `007` and `0012` are how a
@@ -3708,12 +6159,12 @@ and never disagree with the rows already stored. The pair lives in `tableOps.ts`
 `uploadShapeSchema`/`uploadShapeTable`, with `uploadIsNeurons` shared between them so the schema
 half and the value half cannot disagree about the _kind_ either.
 
-- **`ID column` renames the chosen column to `bodyId`**, and the output becomes Neurons. Nodes
+- **`ID column` renames the chosen column to `neuronId`**, and the output becomes Neurons. Nodes
   address columns by name — `out.profile` validates on it, Connectivity and Skeletons read it — so
   a file whose author wrote `root_id` cannot meet neuron data until it is renamed. A column that
-  merely already held the name is suffixed (`bodyId_2`), the same call `joinedColumns` makes. Only
+  merely already held the name is suffixed (`neuronId_2`), the same call `joinedColumns` makes. Only
   `i64` and `str` columns are offered: a float is a measurement and a boolean is a flag, and
-  offering either invites a Neurons table whose body ids are neither.
+  offering either invites a Neurons table whose neuron ids are neither.
 - **`Text columns` widens a column to `str`**, and never the reverse. Reading text as a number is
   where data is lost, and the parser's round-trip rule has already kept anything ambiguous as
   text — so this is for a column that is genuinely numeric and genuinely not a _quantity_, like a
@@ -3781,6 +6232,147 @@ on how this app is served, which is not knowable at edit time — the same call 
 about `limit: 0`. A scheme that cannot be fetched at all (`file:`, `javascript:`) is refused by one
 rule rather than by a list of special cases.
 
+### A redirect is a CORS hop, and it is the one that fails
+
+The refusal names both a dead host and a cross-origin block because a browser reports them as one
+opaque `TypeError`. The commonest cause is neither: **a redirect whose *first* hop carries no
+usable CORS header**. `github.com/<org>/<repo>/raw/refs/heads/main/<path>` answers `302` with
+`access-control-allow-origin:` **present and empty**, which matches neither the origin nor `*`;
+a browser CORS-checks every hop of a chain, so it stops there and never reaches
+`raw.githubusercontent.com`, which answers `200` with `access-control-allow-origin: *` and gzips.
+Measured from a real page origin: the first throws `TypeError: Failed to fetch`, the second
+returns 31,718,491 characters. The fix is to paste the redirect *target*, and it is worth
+knowing because the URL that fails is the one GitHub's own UI hands you.
+
+Nothing in the code changed for this; it is recorded because "is it the format or is it CORS" is
+the first question anybody asks, and the header evidence answers it in one look.
+
+## Type column, and combining several into one
+
+Two names are Coda's rather than a backend's — `neuronId` and `type` (`annotationColumn` in
+`data/annotations/types.ts`, and `TYPE_COLUMN_NAME` beside it). Every provider renamed onto the
+first from the start; **the two import nodes now rename onto the second too**, which is the same
+rule stopping being half-applied.
+
+**They are a pair rather than a symmetry.** An id makes the table *Neurons* — the kind, the
+socket, `uploadIsNeurons`. A type makes it *legible*, and missing it is entirely silent:
+`typesOf` reads `type` by literal name, so a chain publishing `cell_type` leaves
+`neuronType`/`partnerType` null on every connectivity row **while the schema still declares
+them**, Explore's `PRIMARY = ['type', 'instance']` falls through to a guess, and Profile's type
+roll-ups empty. Reachable on the case the feature exists for: FlyWire's published annotation TSV
+names the column `cell_type`.
+
+`renamedColumns` takes `[from, to]` pairs now and applies both in one pass, so a column cannot be
+the source of one rename and the collision victim of the other. The first pair naming a source
+wins, so the same column picked twice is the id — and both nodes' pickers withhold the id from
+the type list, with `validate` catching the case a saved graph can still carry.
+
+**Every column is offered as the type, unlike the id.** A rename is lossless whatever the dtype
+and nothing downstream requires a type to be text, where offering a float as an *id* would invite
+a Neurons table whose neuron ids are neither.
+
+**The rename is not injective, and the annotation providers had to learn that.** `cell_type` and
+`celltype` both become `type`, so a base carrying two of those spellings — or one whose own column
+is literally called `neuronId` — maps two columns onto one name. Each shaper built its schema from
+`annotationColumn`, seeded `data` from `schema.columns` so the second entry overwrote the first,
+and pointed both targets at the surviving array: every row pushed into it twice and `makeTable`
+threw `ragged columns — "neuronId"`, naming the one column that was fine, on a fetch somebody had
+waited twenty seconds for.
+
+`annotationColumns` is the rule for all **five** sites — `shapeRows`, `wideRows`, `pivotRows` and
+both `peekColumns`, the last two because invariant 3 says the schema half and the value half must
+agree and a collision resolved in one and not the other leaves a picker offering a column no table
+has. It takes the id column's name first, then hands out the rest through `uniqueName`.
+
+Note it needs **no `SHAPE_FORMAT` bump**, against that constant's own instruction, and the reason
+is worth stating rather than assuming: the rule there is "the same reply would now produce a
+different table". Every input whose shape changed here previously *threw*, so it was never cached;
+every input that could be cached is byte-identical. Bumping would cost a 79 MB re-download to
+invalidate entries that are provably unchanged.
+
+### Combine Columns, and why it is a node
+
+`core.combineColumns`, `Add ▸ Transform ▸ Combine Columns`. `dplyr::coalesce`, SQL's `COALESCE`:
+the columns are tried in the order they were picked and the first holding a value wins. It exists
+because an annotation dump routinely spreads one fact over several columns — FlyWire's carries
+`cell_type`, `hemibrain_type`, `supertype` and `cell_class`, and a neuron missing the first very
+often has one of the others.
+
+**A multi-select on `Type column` was the alternative and is worse in three ways**, each of which
+is about reach rather than taste:
+
+- It would put the ability on **two** nodes, and want to exist on **four** — `annotation.caveTable`
+  and `annotation.flyTable`/`seaTable` have exactly the same problem, and a SeaTable base with its
+  type split across two columns would have no route to it at all.
+- Coalescing is not a fact about types. `soma_side`/`side`, two id columns, two name columns: the
+  same act, none of them reachable from a control called `Type column`.
+- It is a large semantic act with an invisible result. On the canvas a Table beside it shows what
+  came out; buried in an inspector multi-select, the precedence order is a thing you have to
+  believe rather than read.
+
+That is the annotation chain's own premise carried through — the socket takes an ordinary table
+*so ordinary table ops can stand in it* — so `Type column` stays singular, mirroring `ID column`
+exactly, and the general job is a general node.
+
+**The picker already expresses priority**: `ColumnsField` appends in pick order and renders the
+chips in that order, so the list reads left to right as "try this, then this" with no new UI.
+
+Five rules, each of which produces a plausible wrong table rather than an error:
+
+- **Null and blank are one absence.** `datasetStats.ts`' call, for its reason: a base publishes
+  both for one thing depending on how it was edited. This is also exactly where the obvious
+  spelling in each language goes wrong — `df[cols].bfill(axis=1)` and `dplyr::coalesce()` both
+  read `''` as a value and stop the search, and FlyWire's TSV writes an unset `cell_type` as a
+  blank field rather than as nothing. Whitespace is deliberately *not* trimmed: `" "` is odd data
+  rather than absent data.
+- **A result named after one of the picked columns replaces it in place**, which is the backfill
+  case and the common one — `[cell_type, hemibrain_type] → cell_type` leaves the table with the
+  columns it arrived with. Any other name appends, and a column merely already holding it is
+  suffixed rather than overwritten, which is `renamedColumns`' rule and `joinedColumns`' before it.
+- **Mixed dtypes widen to `str` rather than refusing**, which is the opposite of `stackColumns`
+  and the difference is real: a stack meeting two dtypes under one name has found two different
+  columns wearing it, where this picker *is* somebody saying these hold one fact. `i64` with `f64`
+  is the one pair that reconciles without leaving numbers. A number reaching a text column is
+  converted, or the dtype is a lie.
+- **A column the schema lacks is skipped, not refused.** `groupByTable` refuses the same case
+  because grouping on fewer columns silently keeps *more* rows; here it keeps fewer values, which
+  the result column shows.
+- **It warns and passes through when unconfigured**, never refuses — invariant 5's corollary, and
+  the gap that let `out.barChart` carry a wrong refusal unnoticed for months for want of a
+  node-level test.
+
+`Source column` is optional and off by default, naming which input each value came from —
+`core.stack`'s companion, and on a real chain it is how you find out that `hemibrain_type`
+contributed two rows out of 139,248.
+
+### Verified by running it, in both languages
+
+`scripts/probe-cave-helpers.py` became **`scripts/probe-py-helpers.py`** (`pnpm probe:helpers`),
+because a prefix naming one of two consumers is a claim that goes stale — the call
+`.profile__tile` → `.tile` and `.labels-body` → `.list-body` already record. It now reads two
+generated cells: the CAVE helpers out of `cave.ipynb`, and the general cell out of
+`everything.ipynb` for `coda_combine`. It does not claim to cover the rest of that cell, and says
+so.
+
+Both languages were **run against the golden text**, not read: ten checks each — priority order,
+blank-as-absent, null-as-absent, nothing-anywhere, a missing column, the source column, and the
+widening — agreeing on all ten, R included, where R's widening happens by coercion
+(`out[fill] <- col[fill]` on a logical `NA` vector) rather than by a rule anybody wrote. The
+blank-as-absent mutation was confirmed to fail the probe.
+
+And on the real file, through the real functions: the published FlyWire TSV parses as tab
+(31 columns, 139,248 rows), `root_id` survives as `str` — the round-trip rule vetoing a *numeric*
+reading of anything past `MAX_SAFE_INTEGER`, so an eighteen-digit id meets CAVE's string ids with
+no conversion anywhere — and `[cell_type, hemibrain_type, supertype, cell_class]` takes 137,720
+typed neurons to **139,166 of 139,248**, with 82 carrying nothing at all.
+
+**+5.12 kB raw / +1.25 kB gzipped on the main chunk** (1,088.17 → 1,093.29 kB), measured against
+a build of the same tree with the feature stashed out. Both emitters are in the lazily-loaded
+`exporter-*.js` pair as ever.
+
+**Not looked at in a browser**: the `Type column` dropdown and the chip order on a real card.
+Both are existing components, so the standing of the WebGL viewers applies.
+
 ## Select One: stepping through a collection
 
 `core.selectOne`, `Add ▸ Transform ▸ Select One`. Forward and back through a table's rows, a
@@ -3818,7 +6410,7 @@ so in words, naming the position and the length — "emitting nothing" alone rea
 
 **`any` in, `any` out.** The type system cannot say "a table, skeletons or meshes", so the port
 says `any` and the refusal is a validation question — the same call `out.profile` makes about
-needing a `bodyId`. The output type is the input type untouched, so one row of a Neurons table is
+needing a `neuronId`. The output type is the input type untouched, so one row of a Neurons table is
 still Neurons with the same columns and nothing downstream loses a column picker.
 
 ### What an iterable is
@@ -3895,7 +6487,7 @@ alternative, keeping only the columns both have, silently discards data that was
 two neuron tables from different datasets that can be most of the columns with nothing on screen
 saying so. Same call `Join` makes when it suffixes a colliding name rather than dropping it.
 
-**A dtype clash is refused, not reconciled.** `bodyId` as a number above and text below is two
+**A dtype clash is refused, not reconciled.** `neuronId` as a number above and text below is two
 different columns wearing one name. Widening both to text keeps every value and removes the column
 from every numeric picker downstream; coercing text to a number loses values outright
 (`Number('n/a')`). Neither is a decision this node has grounds to make, so it names the column,
@@ -3921,7 +6513,7 @@ on the same list, and it keeps the other columns pickable while somebody fixes t
 clashes.
 
 **Neurons only when both inputs are.** A `neurons` kind is a claim that the ids are neurons of a
-dataset; a plain table that happens to carry a `bodyId` never made it. The type half and the value
+dataset; a plain table that happens to carry a `neuronId` never made it. The type half and the value
 half decide it the same way.
 
 **Two inputs, chained for more**, exactly `Join`'s shape. Note the consequence for the source
@@ -4056,7 +6648,7 @@ node _emits_, which is the part to read before touching it.
 `postId`/`postType`, plus `hop` and `direction`. Every row is oriented the way the synapse
 points, always, so `Build Network` with source `preId` and target `postId` is correct for every
 combination of params with nothing to think about. The old query-relative shape
-(`bodyId` = the neuron you asked about, whichever way the arrow went) cannot survive either
+(`neuronId` = the neuron you asked about, whichever way the arrow went) cannot survive either
 addition: a `both` result mixes in-edges and out-edges, so half a network's arrows come out
 backwards, and past one hop "the neuron you asked about" is not a thing a row can name — it is
 whatever the previous hop reached.
@@ -4104,7 +6696,7 @@ no source should own, and `MockSource` would need its own BFS regardless. Loopin
 `fetchConnectivity` instead means no source changed at all, the mock works for free, the BFS is
 testable against a fake graph with no network, and progress can report per round.
 
-**Known limit: the frontier is inlined into the query.** `numberList` puts every id in an `IN`
+**Known limit: the frontier is inlined into the query.** `idList` puts every id in an `IN`
 list, so a hop-2 frontier of tens of thousands of neurons builds a very large Cypher string. Not
 chunked, because chunking is only worth writing once a real query has actually failed on it — but
 it is the first thing to suspect if a deep traversal errors at the transport rather than timing out.
@@ -4135,7 +6727,7 @@ frontier type and collapses to a few hundred rows; doing that client-side would 
 downloading the former to compute the latter, per hop. `pathStepCypher` does it in one `WITH`.
 
 **The frontier is two lists, not one.** A neuron with no type stands as its own node — there is
-nothing to collapse it into — so a frontier is a mix of type names and body ids, and
+nothing to collapse it into — so a frontier is a mix of type names and neuron ids, and
 `sourceId`/`targetId` are null exactly when the key names a type. Both halves of the `WHERE`
 are then index-backed, where a `coalesce(n.type, toString(n.bodyId)) IN [...]` would express the
 same set and force a label scan of every `:Neuron` in the dataset.
@@ -4356,13 +6948,13 @@ control that was never added. `idsFromLabelBody.test.tsx` asserts the list.
 
 ## Input IDs: the ids themselves
 
-`neuron.inputIds`, `Add ▸ Query ▸ Input IDs`. Somebody has body ids from a paper, a spreadsheet
+`neuron.inputIds`, `Add ▸ Query ▸ Input IDs`. Somebody has neuron ids from a paper, a spreadsheet
 or a colleague. `IDs from Label` resolves a _named_ set; this takes the ids.
 
 **The Dataset input is optional, and that is the whole design.** Unwired, the node emits the ids
 as a one-column `Neurons` table and touches no network — already enough for most of what a list
 of ids is _for_, since `Connectivity`, `Skeletons`, `Meshes`, `Synapses` and `ROI Counts` all
-reach their ids through `idColumn(table, 'bodyId')` and read nothing else off the row. Wired, it
+reach their ids through `idColumn(table, 'neuronId')` and read nothing else off the row. Wired, it
 fetches the full neuron rows, which buys the columns every downstream picker wants and — the part
 worth having — the ability to say **which ids the dataset has never heard of**, which is how a
 mistyped id is caught and is otherwise uncatchable.
@@ -4407,12 +6999,18 @@ The cost is real and accepted — pasting a spreadsheet column brings its header
 says _"If you pasted a column, delete its header line"_ when the first token is a word, and only
 then. A hint offered where it cannot be true is noise on top of an error.
 
-**An id past `Number.MAX_SAFE_INTEGER` is refused, naming it.** `CellValue` is a JS number, so an
-`i64` column is really a float64: `720575940379279312` is stored as a _different_ integer and
-would identify a different neuron, with nothing anywhere to say so. neuPrint's ids are nine to
-eleven digits and nowhere near it; FlyWire root ids are eighteen and well past. This costs nothing
-today and is the difference between a clear error and a wrong answer the day somebody pastes
-FlyWire ids into a Coda that has grown a FlyWire source.
+**A wide id is now kept exactly, and the ceiling describes the data rather than JavaScript.**
+This file used to refuse anything past `Number.MAX_SAFE_INTEGER`, on the grounds that `CellValue`
+is a JS number so an `i64` column is really a float64 — `720575940379279312` stored as a
+_different_ integer, identifying a different neuron with nothing anywhere to say so. That was
+right for exactly as long as an id had to become a number on its way to a query, and the day it
+predicted has arrived: see invariant 8 above. Ids are now carried as decimal digits,
+so there is nothing to lose, and the refusal is a nineteen-digit width — a signed 64-bit maximum,
+which is what both Neo4j and CAVE actually store.
+
+Note what did _not_ move. With **no Dataset wired** the ids are the node's own output, and that
+table's `neuronId` is an `i64` column, so the width still bites there — `validate` warns and names
+the id rather than rounding it, and says to wire the Dataset that was almost certainly meant.
 
 **The wired column drops what it cannot use instead of refusing**, and the asymmetry is
 deliberate. Typed text is _authored_ — a bad token is a mistake somebody just made and can fix, so
@@ -4429,12 +7027,12 @@ unmatched report prints in, so a report and the list that produced it read again
 `evaluate` raise the _same sentence_. A badge and an error describing one problem differently is
 how somebody concludes there are two.
 
-### `FindNeuronsRequest.bodyIds`
+### `FindNeuronsRequest.neuronIds`
 
-A new field at the source seam rather than a `LabelMatch` on `bodyId`, and the reason is not
+A new field at the source seam rather than a `LabelMatch` on `neuronId`, and the reason is not
 stylistic: `labelClause` compiles to a list of **string** literals, and `123 IN ['123']` is false
-in Cypher — an empty result, with no error anywhere to explain it. `bodyIds` goes through
-`numberList`.
+in Cypher — an empty result, with no error anywhere to explain it. `neuronIds` goes through
+`idList`, which emits the digits as an unquoted integer literal.
 
 **Present-and-empty means no neurons, never "no filter".** Deliberately unlike the label clause
 beside it, which drops itself when empty and so reads an empty set as no filter at all; that is
@@ -4508,14 +7106,14 @@ count off by three orders of magnitude is its own lie. As a fallback it still ca
 (`mechnosensory` → `mechanosensory`) without inflating every count.
 
 **Ranking is a bucket partition, not a sort.** Five tiers (exact / prefix / substring in
-`type`|`instance`|`bodyId` / substring anywhere / subsequence), so it is O(n) and can rank
+`type`|`instance`|`neuronId` / substring anywhere / subsequence), so it is O(n) and can rank
 _every_ hit. An earlier version gave up above a threshold, which left the real DNp01 neurons
 thousands of rows deep in a 21k-row fuzzy set — i.e. "fuzzy search does not work".
 
 Non-obvious rules pinned by tests: a missing value satisfies `!=` and nothing else (so
 `status!=Traced` finds the untraced _and_ the unlabelled, where SQL's three-valued logic drops
 both, silently); regexes are **unanchored**, deliberately unlike neuPrint's `=~`, because this
-search is local and has no server semantic to match; and only `bodyId` and string columns join
+search is local and has no server semantic to match; and only `neuronId` and string columns join
 the free-text haystack, so `1200` does not match a synapse count.
 
 **A thumbnail cache remembers masks and never refusals.** A mask is a fact about the geometry;
@@ -4551,7 +7149,7 @@ suite.
 
 **Select-all is capped at `MAX_SELECT_ALL` (10,000) and refuses rather than truncates.** A
 selection is provenance — it is in the saved file and in every downstream cache key — so
-`stableStringify` walks the whole array on every graph edit: 10k body ids is ~110 kB per key
+`stableStringify` walks the whole array on every graph edit: 10k neuron ids is ~110 kB per key
 computation, the whole of male-CNS is ~1.9 MB and would make typing in an unrelated node
 stutter. The button stays rendered while refused (a limit reads as a limit; a missing button
 reads as a missing feature) and its title says what to do. The ceiling is on the _click_, not
@@ -4594,6 +7192,147 @@ list takes the first member present. Without it a dataset that names one thing t
 field that says something new off the end of the cap, which is how `consensusNt` disappeared
 from male-CNS the moment `itoleeHl` joined `hemilineage` in the list. Only the automatic list
 dedupes; a list chosen in the inspector is taken literally, including asking for both.
+
+**The list carries both vocabularies, paired by family.** It was neuPrint's alone —
+`class`, `superclass`, `somaSide`, `itoleeHl`, `consensusNt` — and a CAVE row drew **no chips at
+all**, because a datastack publishes the same facts in snake_case out of an annotation table and
+not one name matched. That was not only the annotation-chain case: FlyWire's *built-in*
+annotations are exactly `cell_class`, `cell_sub_class`, `super_class`, `flow` and `cell_type`, so
+the shipped dataset had never had a chip either.
+
+Each pair shares a family **and a slot**, which is what makes `class` the same blue whichever
+backend the row came from — the stated point of keying the slot to the field. The two spellings
+sit adjacent, so `automaticChips` walking the list in order gives the same priority on either
+backend. What comes out:
+
+```text
+FlyWire + published annotations   cell_class  cell_sub_class  super_class  side  flow
+                                  ito_lee_hemilineage  top_nt  nerve
+FlyWire, nothing wired            cell_class  cell_sub_class  super_class  flow
+male-CNS                          unchanged
+```
+
+Two entries are deliberately *not* paired. **`somaSide` and `rootSide` are different facts** —
+where the soma sits against where the neurite enters — so they stay two chips; CAVE's `side` is
+the soma one and joins that family. And **`flow`** (intrinsic / afferent / efferent) is a fact
+neuPrint has no column for at all, so it has no partner and takes slot 4, free on every dataset
+that publishes it.
+
+The FlyWire chain fills all eight slots exactly, so `supertype`, `hartenstein_hemilineage`,
+`known_nt` and `dimorphism` are left out — `hartenstein_hemilineage` by the same rule that leaves
+`trumanHl` unlisted on male-CNS, one of each pair having to lead. The `chips` param is the way to
+ask for any of them.
+
+**What is *not* fixed is an annotation base nobody anticipated.** A lab's own SeaTable or an
+uploaded CSV has arbitrary column names, and no curated list can meet them; the param is the
+sanctioned answer, and its picker sees the chain's columns because `schemasFromType` merges them.
+Deriving the list from the schema instead was declined for now — an annotation base is somebody's
+spreadsheet with sixty columns, and deciding which of them deserve a chip automatically
+(cardinality? dtype? position?) is a judgement worth making deliberately rather than in passing.
+
+**Whether a neuPrint dataset could publish one of the CAVE spellings is not provable here** —
+neuPrint's properties are *discovered* per dataset and the custom-query endpoint needs a token. A
+family only fires where a dataset carries **both** names, and where it does, one chip instead of
+two saying the same thing is the intended behaviour. `chips.test.ts` pins the neuPrint answer as
+unchanged, which is the half that would actually regress.
+
+### Community tags: free-form text, drawn as its own thing
+
+Some CAVE datastacks let anyone attach free-form text to a neuron — FlyWire's
+`neuron_information_v2` is one row per (neuron, `tag`), with a `pt_supervoxel_id` beside it so a
+stale root id can be repaired. Explore's `Additional tags` param names a column holding those,
+and the row draws them **apart from the chips and deliberately unlike them**: their own line
+below, smaller type, no palette slot, a hairline border rather than a tint. A tinted chip would
+say they came from a known field, which is exactly what they did not — they are somebody's prose
+against a neuron, not a controlled vocabulary.
+
+**The shape does not fit the annotation chain, so something has to fold it.** A chain is one row
+per neuron — `annotationIndex` and `joinAnnotations` are first-occurrence-wins, deliberately —
+and `annotation.caveTable` reads wide (so the *first* tag silently wins) or long via `pivotOn`
+(so every distinct tag becomes a *column*, which for free text is thousands). Neither is usable.
+
+So the enabler is a **`join text` aggregation on Group By**, which is a general table op and was
+missing outright: there was no way to concatenate strings in a Group By at all. The chain is
+
+```text
+CAVE table (neuron_information_v2) → Update root IDs → Group By (by neuronId, join text of tag)
+    → Join ← the rest of the annotations → Dataset ▸ Annotations
+```
+
+A node rather than a provider mode, on the reasoning `combineColumns` records: gathering values
+is not a fact about CAVE tables, and the repair has to run on the *ungathered* rows, where each
+tag still has its own supervoxel.
+
+`join` is **distinct**, in first-appearance order, absences skipped. Null and the empty string
+are one absence, `coda_combine`'s rule; a group with nothing in it answers **null rather than
+`''`**, because an empty string reads as a value to every picker downstream. The unit does not
+ride along — nanometres joined with semicolons are not nanometres. `n` still counts **rows**, not
+values, so how much agreement is behind a label survives the fold.
+
+**Distinct is the departure from `string_agg` / `paste(collapse=)`, and it was got wrong first.**
+The first pass kept repeats on the reasoning that `join` should be what its name is elsewhere and
+a Deduplicate upstream is where that decision belongs. That is wrong about what the cell is *for*:
+it exists to be read, it is what a community-annotation table folds into, and two people adding
+the same tag is the ordinary case there — so a repeat is noise in every use this has, and putting
+a node on the main path to remove something nobody wanted is a bad trade. A `Set` in the bucket,
+which iterates in insertion order and is what keeps "first appearance" true.
+
+Folded on **exact text**, deliberately: `DA?` and `da?` are different text somebody typed, and
+folding them would be an editorial decision an aggregation cannot make. Both generated helpers
+match — `dict.fromkeys` in Python rather than a `set`, because it deduplicates *and* keeps order,
+and `unique` in R — and all three were run against each other rather than read.
+
+**`JOIN_SEPARATOR` is a contract, not a formatting choice.** `'; '` is written by the aggregation
+and split back by the widget, so one constant. Plain text rather than a control character because
+the cell is read by people too — it lands in a Table node, a CSV and a notebook — and the cost is
+stated rather than engineered away: a tag containing `'; '` comes apart into two chips. Cosmetic,
+and the whole cell is one hover away.
+
+**`core.pivot` does not offer it**, and that exclusion is derived rather than listed: a
+`MatrixValue` cell is a `Float64Array` slot, so `NUMERIC_AGG_OPTIONS` filters `AGG_OPTIONS`
+through `aggDType`. A future text aggregation is excluded by *arriving*; the failure otherwise is
+a dropdown entry that silently yields a matrix of zeroes.
+
+**`ColumnParam.dtypes` takes a rule, not only a list**, which is what keeps this one *stored*
+param. It was briefly two — `value` numeric and `textValue` not, made exclusive by `visibleIf`,
+with an `aggValueParam` indirection saying which was live — because `dtypes` was a fixed array
+where `schemaFrom` had been function-valued all along. The split leaked within the hour: both
+emitters were corrected to say "needs a value column" while the node's own `validate` still said
+"numeric". `dtypesOf` resolves it for the two readers that exist (`availableColumns` and
+`validateColumnParams`), both of which already had the params in hand.
+
+**Searching is on by default with an opt-out**, and both halves are `Explore`'s only params that
+are *not* presentational: together they decide which column is kept out of the haystack, and that
+changes which rows `Hits` returns. A picker quietly changing a port's contents while claiming to
+be a drawing knob is what `presentational` must never mean. `excludedFromSearch` is one function
+because two surfaces read it — `evaluate`, and the widget filtering live as you type — and two
+spellings would be a list showing rows the port does not carry.
+
+The exclusion reaches the **free-text half only**: a field term naming the column still matches,
+since `prepareFieldTerms` reads the table rather than the index, and asking for a column by name
+is an explicit act rather than a stray word in a search box. `searchIndexFor` is memoised per
+table **and per exclusion** — one entry per table would hand the widget the index a node built
+without excluding, which is the disagreement above by another route.
+
+**A row caps at four tags and counts the rest**, with all of them in the counter's `title`. Every
+row the same height is what makes a list scannable, and one neuron with forty tags would push
+several others off the page. Each tag ellipsises at its own `max-width` with the full text in
+`title`, which is CSS — jsdom performs none of it, so what the tests can pin is the half that
+makes it recoverable.
+
+**The import nodes' three shaping controls are one factory**, `importShapeParams` in
+`nodes/lib/`. `Upload Table` and `Table from URL` are the same node over two ways of getting
+bytes — they shared `uploadShapeSchema`/`uploadShapeTable` for the *values* from the start and
+hand-wrote the *declarations* twice, which is the asymmetry `colorParams`' own note predicts: the
+upload node reported a `Type column` naming a column its file does not carry, and the URL node,
+with the same three params written out a second time, did not. The one real difference is where
+the schema is found, so that is the argument.
+
+**`chips` is labelled `Fields` now, on Explore and on Profile.** The value is a list of *columns*
+where `Additional tags` names a column of *values*; two controls called Tags meaning opposite
+halves of one row is the confusion the rename avoids. The **id stays `chips`** — that is what a
+saved graph carries. Profile was renamed too though only Explore was reported: leaving one of the
+pair called Tags puts the same confusion one widget over.
 
 **A card shows the same tags as the overlay.** There was a cap on chips in `compact`, on the
 grounds that a card is a preview, and it was wrong twice: it hid the seventh chip in the one
@@ -4713,7 +7452,7 @@ from one out of a region that is 91%.
 It ships with two ordinary query nodes rather than swallowing their data privately:
 `neuron.roiCompleteness` → Table and `neuron.roiConnectivity` → Matrix + Table. Both take nothing
 but a Dataset — they are the only query nodes here that ask about the **volume** rather than
-about a body id list — and both flow into the Heatmap, the Bar Chart, Filter, Download and the
+about a neuron id list — and both flow into the Heatmap, the Bar Chart, Filter, Download and the
 notebook exporter for free. The Summary's own region tiles read the same source methods, so the
 card and the nodes cannot disagree.
 
@@ -5345,7 +8084,7 @@ of any of this.
 The numbers are what settle it. Measured across the five bundled examples, **deflate + base64url
 is 1,540–2,004 characters** against 4,282–4,786 for the same graph as literal JSON — 2.8×, and
 the difference between a workflow that pastes anywhere and one that does not. The case that
-genuinely needs the gist is an Explore select-all: 10,000 body ids pack to **~56,000**, which
+genuinely needs the gist is an Explore select-all: 10,000 neuron ids pack to **~56,000**, which
 mail and chat clients cut short.
 
 ### The grammar
@@ -5476,8 +8215,24 @@ of these cases.
 - **An upload names the _file_**, never the content hash, because the filename is the only part
   of this anybody can act on. The rows are in IndexedDB by content address, exactly as a
   `.coda.json` has always been.
-- **A real connectome names itself**, so the recipient is told they need their own token — and
-  told that only Run needs it. A synthetic dataset earns no advisory at all.
+- **A real connectome names itself and the backend names the credential**, so the recipient is
+  told they need their own *CAVE* or *neuPrint* token — and told that only Run needs it. It said
+  `neuPrint token` for every dataset, which was true for as long as neuPrint was the only
+  credentialled backend and became a **wrong instruction** the day a CAVE one shipped: it points
+  somebody at the wrong tab of the Connections dialog, which is worse than saying nothing, because
+  a sentence that specific reads as knowing what it is talking about. One sentence per backend
+  rather than one compound one, since a graph can hold both and the recipient then needs two
+  tokens from two places — hence the id is `token-<backend>`, which is what the dialog keys the
+  list on. The backend comes from `backendForNodeType`, not from the family table alone, so
+  **`Custom neuPrint` and `Custom CAVE` are counted too**: those name their server by hand and so
+  have no family entry, which meant a graph built on one got no token advisory *at all* — the same
+  failure with the sentence missing rather than wrong. A synthetic dataset earns no advisory,
+  which is also what keeps `BACKENDS.mock`'s deliberately empty label from putting `a  token` on
+  screen.
+
+  Still unsaid: an annotation source needs its own credential and nothing here mentions it. On a
+  CAVE graph `annotation.caveTable` is covered by the dataset's own sentence, but a FlyTable or
+  SeaTable node wants `SEATABLE_TOKEN` and would need a second table keyed by node type.
 - **A link over `LONG_LINK_CHARS` (8,000)** recommends the gist. Not a browser limit — Chrome
   carries about two megabytes and a fragment never reaches a server — but mail wraps, chat clients
   elide, and trackers linkify as far as they feel like.
@@ -5607,6 +8362,115 @@ a fresh `IDBFactory` _and_ calls `resetLibrary()`, or every case after the first
 dead database. And in `ui/panels/library.test.tsx`, never put a `fireEvent` inside a `waitFor` —
 the click mutates the DOM, the observer re-invokes the callback, and the two chase each other
 without ever yielding to the poll's own timeout. It hangs the run rather than failing it.
+
+## Starter graphs, and the one that is not the generic shape
+
+`examples/starters.ts` — what `New ▸ <dataset>` and the start page's dataset rail both build,
+through one `buildStarter(spec)`. The generic shape is four nodes: a Dataset, an Explore, and a
+Table and a Neuroglancer view off `Selected`, plus the Description companion. Built from each
+node's own defaults, exactly like the examples, so a starter cannot drift out of sync with a
+node's param set.
+
+**FlyWire FAFB opts out, and the reason is the backend rather than taste.** A neuPrint dataset
+carries its cell typing as properties on the neuron, so "a Dataset and a browser" is a complete
+first screen. A CAVE datastack does not — the labels live in a table — so the same four nodes
+open on a list of eighteen-digit root ids and nothing else. No arrangement of the generic shape
+fixes that, because what is missing is a *chain in front of the dataset*:
+
+```text
+Table from URL ▸ Combine Columns ▸ Update root IDs ──────────┐
+                                                              ├─▸ Join ─▸ Dataset
+CAVE table (neuron_information_v2) ▸ Group By (join text) ───┘        ▸ Annotations
+```
+
+Two sources answering two different questions about one neuron: structured fields along the top,
+free-form community text along the bottom.
+
+`BESPOKE` in that file is the dispatch — keyed by node type, since that is what a `StarterSpec`
+carries. One entry today, and it is a table rather than an `if` so the second cannot become one.
+
+Each step answers a question somebody would otherwise have to discover, and every one is pinned
+by `examples.test.ts`:
+
+- **`raw.githubusercontent.com`, not the `github.com/…/raw/…` address the repository's own UI
+  hands you.** That one answers `302` with `access-control-allow-origin:` **present and empty**,
+  and a browser CORS-checks every hop of a redirect chain — so it never reaches the host that
+  answers `200` with `*`. Measured from a real page origin: the first throws
+  `TypeError: Failed to fetch`, the second returns 31,718,491 characters.
+- **Combine Columns**, because the type has to arrive in a column *called* `type` before anything
+  reads it in words — the connectivity tables, Explore's chips, Profile's roll-ups all address it
+  by literal name (`annotationColumn`). The coalesce is about **precedence**, not coverage, and
+  the measurement is the reason to say so: on the published file `cell_type` covers 137,720 of
+  139,248 neurons and `hemibrain_type` 33,271, but only **2** neurons have the second and not the
+  first — so `[cell_type, hemibrain_type]` gains two rows and decides the nomenclature for the
+  rest. Reaching for coverage means naming more columns: adding `supertype` and `cell_class` takes
+  it to 139,166, with 82 carrying nothing at all.
+- **Update root IDs**, because the published file is a snapshot and a root id is retired by any
+  proofreading edit. Without it the rows whose ids have moved on join to nothing, and the dataset
+  merely reads as under-annotated — which is the failure `data/cave/rootIds.ts` exists to
+  announce.
+- **Group By, folding `tag` with `join text`**, because `neuron_information_v2` is one row per
+  (neuron, tag) and everything downstream wants one row per neuron. It is not a tidy-up:
+  `joinTables` takes the **first** matching row for a repeated key — deliberately, so a
+  many-to-many join cannot multiply the table being annotated — so without the fold a neuron
+  carrying eight community tags shows exactly one of them, with nothing saying so. The
+  aggregation is distinct and in first-appearance order, which is what a table two people have
+  annotated the same way needs.
+- **The Join rather than an annotation chain**, because a chain makes the later source **win** a
+  collision rather than sit beside it. `left`, so a neuron nobody has tagged still comes through.
+- **`Columns: pt_root_id, tag`** on the CAVE table. Everything else in `neuron_information_v2` is
+  bookkeeping — a point, a supervoxel, a user id, a timestamp — that would otherwise arrive in
+  every neuron table and in every column picker downstream. It has a second effect worth knowing:
+  `peekColumns` answers a **wide** table's columns from the ref alone, so naming them is what lets
+  `tag` be known at edit time with no fetch, where an empty `Columns` is `undefined` by design.
+- **The Dataset is wired *back* into Update root IDs and into the CAVE table, and both are
+  reference edges.** Two edges between one pair in opposite directions, twice; `topoSort` sees
+  only the dataflow half of each. It is the placement `cave.updateRootIds` was given a reference
+  port for, and the test asserts `cyclic` is empty so a regression there shows up as a starter
+  rather than as a unit test nobody connected.
+
+Two deliberate departures from the generic shape, both visible on the canvas. The **Table hangs
+off `All` rather than `Selected`** — every other starter avoids that, because `Hits`/`All` with
+an empty search is the whole dataset and teaches the wrong lesson about what to connect; here the
+annotated neuron table *is* the thing worth looking at, and a Table showing nothing until a row
+is ticked would hide it. Everything else **opens empty**: `selection` and `page` are both written
+by the Explore *widget*, so a starter carrying either would ship whoever exported the graph's
+browsing position, and the Neuroglancer panel would open on a neuron nobody chose.
+
+**`Additional tags` is pointed at `join_tag`, and the name is derived rather than typed.**
+`groupByTable` names an aggregate `<agg>_<column>`, so the starter reads it back through
+`aggColumnName` — a literal would be that rule stated in a second place, and getting it wrong is
+entirely silent, since a wrong `Additional tags` does not fail, it just draws no tag row. The
+other half of the pairing is `JOIN_SEPARATOR`: the aggregation joins with it and `splitTags`
+splits on it.
+
+**The starter carries one warning on a cold session: `Column "join_tag" is gone` on Explore.** It is
+the documented conflation in `annotationSchemaFrom`, which answers the same `undefined` for an
+unwired socket and for a chain whose columns are not known yet — so `withAnnotations` falls back
+to the *datastack's own* labels, and a chain replaces those, which makes the fallback a schema
+that is known and known to be wrong. `join_tag` is not in it, so `validateColumnParams` reports
+the drift it exists to report. The chain's schema arrives once `Table from URL` has run (its schema
+is session-scoped and keyed by URL), so the badge clears on the first Run and returns on reload.
+
+Worth stating why it has not been fixed here, because the obvious fix is not obviously an
+improvement: making the neuron schema *unknown* under an unresolved chain would empty every
+column picker on a CAVE dataset until the first Run, where today they offer the datastack's own
+columns — which on this graph largely **are** the right names, since the published TSV and the
+datastack agree on `cell_class`, `super_class` and the rest. Telling the two states apart needs
+the dataset type to say "a chain is wired" separately from carrying its schema, which is a change
+to a seam every CAVE graph reads. `examples.test.ts` pins the warning *exactly*, so a second
+issue fails the test rather than hiding behind this one.
+
+`examples/notes.ts` holds `dedent` and `noteNode`, shared with the bundled examples rather than
+copied — both write notes as indented template literals in TypeScript source, and two copies of
+`dedent` is two answers to what counts as a heading.
+
+**Checked in a real browser** over CDP against `pnpm dev`, which is the only thing that could:
+thirteen cards and thirteen wires in both themes, no overlaps at their measured sizes, the two
+notes right-aligned against the pipeline's left edge, no console errors, no sideways body scroll, every one of the note's four links resolving (the DOI to
+`doi.org` rather than to a university proxy), and neither note clipping its own text —
+`scrollHeight` equal to `clientHeight` on both, light and dark. What is *not* checked anywhere is
+a Run, which needs a CAVE token.
 
 ## Start page
 

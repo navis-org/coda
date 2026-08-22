@@ -16,10 +16,10 @@ describe('mock connectomes', () => {
     expect(a.connections.length).toBeGreaterThan(500)
   })
 
-  it('gives every neuron a unique body id', () => {
+  it('gives every neuron a unique neuron id', () => {
     for (const id of mockDatasetIds()) {
       const c = getConnectome(id)!
-      expect(new Set(c.neurons.map((n) => n.bodyId)).size).toBe(c.neurons.length)
+      expect(new Set(c.neurons.map((n) => n.neuronId)).size).toBe(c.neurons.length)
     }
   })
 
@@ -27,14 +27,14 @@ describe('mock connectomes', () => {
     const c = getConnectome('hemibrain-mini')!
     const perNeuron = new Map<number, { pre: number; post: number }>()
     for (const rc of c.roiCounts) {
-      const acc = perNeuron.get(rc.bodyId) ?? { pre: 0, post: 0 }
+      const acc = perNeuron.get(rc.neuronId) ?? { pre: 0, post: 0 }
       acc.pre += rc.pre
       acc.post += rc.post
-      perNeuron.set(rc.bodyId, acc)
+      perNeuron.set(rc.neuronId, acc)
     }
     // Every neuron with a ROI preference should have its synapses fully accounted for.
     for (const neuron of c.neurons) {
-      const sums = perNeuron.get(neuron.bodyId)
+      const sums = perNeuron.get(neuron.neuronId)
       if (!sums) continue
       expect(sums.pre).toBe(neuron.pre)
       expect(sums.post).toBe(neuron.post)
@@ -54,7 +54,7 @@ describe('mock connectomes', () => {
     expect(lc4.length).toBeGreaterThan(0)
     const partners = new Set<string>()
     for (const n of lc4) {
-      for (const e of c.out.get(n.bodyId) ?? []) {
+      for (const e of c.out.get(n.neuronId) ?? []) {
         partners.add(c.byId.get(e.post)?.type ?? '?')
       }
     }
@@ -88,7 +88,7 @@ describe('MockSource', () => {
     const table = await source.findNeurons({ datasetId: 'optic-lobe-mini', typePattern: 'LC4' })
     expect(table.kind).toBe('neurons')
     expect(table.schema.columns.map((c) => c.name)).toEqual([
-      'bodyId',
+      'neuronId',
       'type',
       'instance',
       'status',
@@ -117,7 +117,7 @@ describe('MockSource', () => {
     const lc4 = await source.findNeurons({ datasetId: 'optic-lobe-mini', typePattern: 'LC4' })
     const conn = await source.fetchConnectivity({
       datasetId: 'optic-lobe-mini',
-      bodyIds: lc4.data.bodyId as number[],
+      neuronIds: lc4.data.neuronId!.map(String),
       direction: 'outputs',
       minWeight: 1,
     })
@@ -133,7 +133,7 @@ describe('MockSource', () => {
     const lc4 = await source.findNeurons({ datasetId: 'optic-lobe-mini', typePattern: 'LC4' })
     const conn = await source.fetchConnectivity({
       datasetId: 'optic-lobe-mini',
-      bodyIds: lc4.data.bodyId as number[],
+      neuronIds: lc4.data.neuronId!.map(String),
       direction: 'outputs',
       minWeight: 20,
     })
@@ -145,8 +145,8 @@ describe('MockSource', () => {
     const dn = await source.findNeurons({ datasetId: 'optic-lobe-mini', typePattern: 'DNp.*' })
     const m = await source.fetchAdjacency({
       datasetId: 'optic-lobe-mini',
-      sourceIds: lc.data.bodyId as number[],
-      targetIds: dn.data.bodyId as number[],
+      sourceIds: lc.data.neuronId!.map(String),
+      targetIds: dn.data.neuronId!.map(String),
       groupByType: true,
     })
     expect(m.rowLabels).toEqual(

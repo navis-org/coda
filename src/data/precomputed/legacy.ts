@@ -61,12 +61,12 @@ export function parseLegacyFragment(buffer: ArrayBuffer): RawMesh {
 /** Read every fragment of a segment and concatenate them into one mesh. */
 export async function readLegacyMesh(
   base: string,
-  bodyId: bigint,
+  neuronId: bigint,
   options: FetchOptions = {},
 ): Promise<RawMesh | undefined> {
   let manifest: LegacyManifest
   try {
-    manifest = await fetchJson<LegacyManifest>(`${base}/${bodyId}:0`, options)
+    manifest = await fetchJson<LegacyManifest>(`${base}/${neuronId}:0`, options)
   } catch {
     // A missing manifest means no mesh for this body, which is normal for fragments and
     // unproofread segments — not an error worth failing the whole request over.

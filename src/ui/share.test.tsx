@@ -30,6 +30,7 @@ import { registerSource } from '../data/source'
 import { deserializeGraph, emptyGraph, newId } from '../core/graph'
 import { decodePacked, parseShareFragment } from '../data/share/fragment'
 import { resetGithubCredentials, setGithubToken } from '../data/share/credentials'
+import { shareAdvisories } from './shareAdvisories'
 import { useGraphStore } from '../store/graphStore'
 import { clearStorage, installJsdomStubs } from '../test/jsdomStubs'
 
@@ -209,6 +210,76 @@ describe('what the dialog admits', () => {
     const note = within(dialog).getByText(/stored in this browser, not in the workflow/)
     expect(note.textContent).toContain('annotations.csv')
     expect(note.textContent).not.toContain('abc123')
+  })
+
+  /**
+   * The credential is per **backend**, and the sentence names it.
+   *
+   * It said `neuPrint token` for every dataset, which was true for as long as neuPrint was the
+   * only credentialled backend. Left alone it points a FlyWire recipient at the wrong tab of the
+   * Connections dialog — worse than saying nothing, since a sentence this specific reads as
+   * knowing what it is talking about.
+   *
+   * Asked of `shareAdvisories` directly rather than through the dialog: it is pure, and the
+   * neuPrint case above already proves the wiring.
+   */
+  describe('the token advisory', () => {
+    const graphOf = (...types: string[]) => {
+      const graph = emptyGraph('shared')
+      for (const type of types) {
+        graph.nodes.push({ id: newId('n'), type, position: { x: 0, y: 0 }, params: {} })
+      }
+      return graph
+    }
+    const tokenAdvisories = (...types: string[]) =>
+      shareAdvisories(graphOf(...types), undefined).filter((a) => a.id.startsWith('token'))
+    const tokenNotes = (...types: string[]) => tokenAdvisories(...types).map((a) => a.text)
+
+    it('names CAVE for a CAVE dataset', () => {
+      expect(tokenNotes('dataset.flywire')).toEqual([
+        expect.stringContaining('a CAVE token of their own'),
+      ])
+      expect(tokenNotes('dataset.flywire')[0]).toContain('FlyWire FAFB')
+    })
+
+    it('names neuPrint for a neuPrint one', () => {
+      expect(tokenNotes('dataset.hemibrain')).toEqual([
+        expect.stringContaining('a neuPrint token of their own'),
+      ])
+    })
+
+    it('says both, once each, for a graph holding both', () => {
+      // One sentence per backend rather than one compound one: the recipient needs two tokens
+      // from two places, and a list that ran them together would name neither properly.
+      const notes = tokenNotes('dataset.hemibrain', 'dataset.malecns', 'dataset.flywire')
+      expect(notes).toHaveLength(2)
+      expect(notes.join(' | ')).toContain('a neuPrint token')
+      expect(notes.join(' | ')).toContain('a CAVE token')
+      // Two neuPrint datasets, one sentence, both named.
+      const neuprint = notes.find((t) => t.includes('neuPrint'))!
+      expect(neuprint).toContain('Hemibrain')
+      expect(neuprint).toContain('MaleCNS')
+      expect(neuprint).toContain('are real connectomes')
+
+      // The id is what the dialog keys the list on, so two sentences must not share one.
+      const ids = tokenAdvisories('dataset.hemibrain', 'dataset.flywire').map((a) => a.id)
+      expect(new Set(ids).size).toBe(ids.length)
+    })
+
+    it('counts the custom nodes, which have no family entry to read a label off', () => {
+      // These name their server by hand, so `familyForNodeType` answers nothing — which used to
+      // mean a graph built on one got no token advisory at all.
+      expect(tokenNotes('dataset.neuprint')).toEqual([
+        expect.stringContaining('a neuPrint token of their own'),
+      ])
+      expect(tokenNotes('dataset.cave')[0]).toContain('Custom CAVE')
+    })
+
+    it('says nothing for a connectome generated in the browser', () => {
+      // No server to authenticate against — and `BACKENDS.mock` carries an empty label, so a
+      // rule that fired here would put `a  token` on screen.
+      expect(tokenNotes('dataset.mock.hemibrain')).toEqual([])
+    })
   })
 
   it('warns that a link built on localhost opens nowhere else', async () => {

@@ -100,7 +100,7 @@ describe('the packed form', () => {
       id: 'n1',
       type: 'core.filter',
       position: { x: 0, y: 0 },
-      params: { column: 'bodyId', op: '>=', value: ids.join(',') },
+      params: { column: 'neuronId', op: '>=', value: ids.join(',') },
     })
     const fragment = await encodeShareFragment(graph)
     const ref = parseShareFragment(fragment)

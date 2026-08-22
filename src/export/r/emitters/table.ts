@@ -8,7 +8,7 @@
 
 import { isNumericDType } from '../../../core/types'
 import type { AggFn } from '../../../nodes/lib/tableOps'
-import { aggColumnName } from '../../../nodes/lib/tableOps'
+import { aggColumnName, combineLayout } from '../../../nodes/lib/tableOps'
 import { rCol, rStr, rValue, rVector } from '../r'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
@@ -169,9 +169,89 @@ registerEmitter('core.selectOne', (ctx) => {
 })
 
 // ---------------------------------------------------------------------------
+// Deduplicate
+// ---------------------------------------------------------------------------
+
+registerEmitter('core.dedupe', (ctx) => {
+  const src = ctx.wired('in')
+  const out = ctx.output('out')
+  const names = ctx.columns('columns')
+  const keep = String(ctx.params.keep ?? 'first')
+
+  /*
+   * Base R's `duplicated()` rather than `dplyr::distinct()`, which is the house verb everywhere
+   * else in this file. Three reasons, and they only apply to this node:
+   *
+   *  - `distinct()` keeps the **first** row of a set and has no argument for the other two.
+   *    `duplicated(..., fromLast = TRUE)` is exactly Coda's `last`, and OR-ing the two directions
+   *    is exactly `none` — one idiom covering all three, against a `group_by`/`slice`/`arrange`
+   *    contortion for the second.
+   *  - It **preserves row order**, where grouping reorders rows into group order. A dedupe that
+   *    also reordered would be two operations wearing one name, and the difference is invisible
+   *    until something downstream depends on the order.
+   *  - It needs no library at all, so this chunk is honest about depending on nothing.
+   */
+  const subject = names.length > 0 ? `${src}[${rVector(names)}]` : src
+  if (keep === 'none') {
+    // Both directions: a row is dropped when anything before *or* after it matches, which leaves
+    // only the rows that were already unique.
+    return [
+      `${out} <- ${src}[!(duplicated(${subject}) | duplicated(${subject}, fromLast = TRUE)), ]`,
+    ]
+  }
+  const fromLast = keep === 'last' ? ', fromLast = TRUE' : ''
+  return [`${out} <- ${src}[!duplicated(${subject}${fromLast}), ]`]
+})
+
+// ---------------------------------------------------------------------------
+// Combine Columns
+// ---------------------------------------------------------------------------
+
+registerEmitter('core.combineColumns', (ctx) => {
+  const src = ctx.wired('in')
+  const out = ctx.output('out')
+  const columns = ctx.columns('columns')
+  const into = String(ctx.params.into ?? '').trim()
+  const sourceColumn = String(ctx.params.sourceColumn ?? '').trim()
+  if (!into || columns.length === 0) {
+    // Not configured, and the node passes its input through in exactly that case.
+    return [`${out} <- ${src}`]
+  }
+
+  ctx.helper('coda_combine')
+
+  /*
+   * A column already holding the result's name is renamed rather than overwritten — the node's
+   * own rule, and the opposite of what `df[[name]] <- ...` does. Taken from `combineLayout`, the
+   * same function the node's own halves use, rather than reconstructed by diffing
+   * `combineSchema`'s output positionally; an unknown input schema predicts nothing and the
+   * assignment lands as base R would have it.
+   */
+  const inNames = ctx.schema('in')?.columns.map((c) => c.name) ?? []
+  const layout = combineLayout(inNames, { columns, into, sourceColumn })
+  const renamed = inNames.flatMap((name, i) =>
+    layout.renamed[i] === name ? [] : [[name, layout.renamed[i]!] as const],
+  )
+
+  const lines = [`${out} <- ${src}`]
+  for (const [from, to] of renamed) {
+    lines.push(`names(${out})[names(${out}) == ${rStr(from)}] <- ${rStr(to)}`)
+  }
+  lines.push(`${out}[[${rStr(into)}]] <- coda_combine(${src}, ${rVector(columns)})`)
+  if (sourceColumn) {
+    const name = layout.sourceName ?? sourceColumn
+    lines.push(
+      `${out}[[${rStr(name)}]] <- coda_combine(${src}, ${rVector(columns)}, source = TRUE)`,
+    )
+  }
+  return lines
+})
+
+// ---------------------------------------------------------------------------
 // Group By
 // ---------------------------------------------------------------------------
 
+/** `coda_join` is generated: `paste(collapse=)` alone keeps NAs and empty strings. */
 const AGG_FUNCS: Record<AggFn, string> = {
   sum: 'sum',
   mean: 'mean',
@@ -179,6 +259,7 @@ const AGG_FUNCS: Record<AggFn, string> = {
   max: 'max',
   count: 'n',
   countDistinct: 'n_distinct',
+  join: 'coda_join',
 }
 
 registerEmitter('core.groupBy', (ctx) => {
@@ -190,7 +271,8 @@ registerEmitter('core.groupBy', (ctx) => {
   const out = ctx.output('out')
   const agg = String(ctx.params.agg ?? 'sum') as AggFn
   const value = agg === 'count' ? undefined : ctx.column('value')
-  if (agg !== 'count' && !value) return ctx.todo(`"${agg}" needs a numeric value column.`)
+  if (agg !== 'count' && !value) return ctx.todo(`"${agg}" needs a value column.`)
+  if (agg === 'join') ctx.helper('coda_join')
 
   // `n` rides along with every aggregation, exactly as the node emits it.
   const aggs = ['n = n()']
@@ -360,7 +442,7 @@ function shapingLines(ctx: EmitContext, out: string): string[] {
 
   if (idColumn) {
     ctx.library('dplyr')
-    lines.push(`${out} <- ${out} |> rename(bodyId = ${col(idColumn)})`)
+    lines.push(`${out} <- ${out} |> rename(neuronId = ${col(idColumn)})`)
   }
   if (textColumns.length > 0) {
     ctx.library('dplyr')

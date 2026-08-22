@@ -277,12 +277,12 @@ describe('clusterColor', () => {
 
 describe('resolveColor — literal', () => {
   const table = tableFromRows(
-    tableSchema(column('bodyId', 'i64'), column('color', 'str')),
+    tableSchema(column('neuronId', 'i64'), column('color', 'str')),
     [
-      { bodyId: 1, color: '#3987e5' },
-      { bodyId: 2, color: '#d95926' },
-      { bodyId: 3, color: 'not a colour' },
-      { bodyId: 4, color: null },
+      { neuronId: 1, color: '#3987e5' },
+      { neuronId: 2, color: '#d95926' },
+      { neuronId: 3, color: 'not a colour' },
+      { neuronId: 4, color: null },
     ],
   )
 

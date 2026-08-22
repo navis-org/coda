@@ -207,7 +207,7 @@ export function chooseLod(
 /** Fetch a segment's manifest, or undefined when the store has no mesh for it. */
 export async function readManifest(
   base: string,
-  bodyId: bigint,
+  neuronId: bigint,
   info: MultiResInfo,
   options: FetchOptions = {},
 ): Promise<MultiResManifest | undefined> {
@@ -217,9 +217,9 @@ export async function readManifest(
     // untested path, say so.
     throw new Error('Unsharded multi-resolution meshes are not supported yet')
   }
-  const location = locate(base, bodyId, info.sharding)
+  const location = locate(base, neuronId, info.sharding)
   const entries = await readMinishard(location, info.sharding, options)
-  const entry = entries.find((e) => e.key === bodyId)
+  const entry = entries.find((e) => e.key === neuronId)
   if (!entry) return undefined
   const buffer = await readObject(location.url, entry, info.sharding, options)
   // The manifest's own offset is what locates the fragment data that precedes it.
@@ -227,6 +227,6 @@ export async function readManifest(
 }
 
 /** Shard file a segment's fragments live in — the same file as its manifest. */
-export function shardUrl(base: string, bodyId: bigint, spec: ShardingSpec): string {
-  return locate(base, bodyId, spec).url
+export function shardUrl(base: string, neuronId: bigint, spec: ShardingSpec): string {
+  return locate(base, neuronId, spec).url
 }

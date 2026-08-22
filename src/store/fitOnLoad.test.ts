@@ -8,9 +8,9 @@
  * pending and spend it on whatever node the user added next — a viewport that lurches for no
  * reason, minutes later and nowhere near the cause.
  *
- * The canvas half — waiting for `nodesInitialized` before fitting, because `fitView` reads
- * measured sizes and a node committed this render has none — is not covered here. jsdom does no
- * layout, so a fit cannot be observed; see `Editor.tsx`.
+ * The canvas half — that the request is actually spent — is `ui/fitOnLoad.test.tsx`. jsdom does
+ * no layout, so the framing itself cannot be observed anywhere; what that file pins is that
+ * `fitView` is called at all, which is what a gate on `useNodesInitialized` used to prevent.
  */
 
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'

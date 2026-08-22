@@ -13,7 +13,9 @@
  */
 
 import type { TableSchema } from '../../core/types'
+import type { CellValue } from '../../core/values'
 import { isNumericDType } from '../../core/types'
+import { JOIN_SEPARATOR } from '../../core/values'
 import { MAX_SERIES } from '../colors'
 
 /**
@@ -70,27 +72,74 @@ interface ChipSpec {
   key?: string
 }
 
+/*
+ * Both vocabularies, paired by family.
+ *
+ * neuPrint publishes these facts in camelCase as properties on the neuron; a CAVE datastack
+ * publishes them in snake_case out of an annotation table, and FlyWire's published annotations
+ * do the same. They are *the same facts*, so each pair shares a family and a slot — which is
+ * what makes `class` the same blue whichever backend a row came from, and what stops a dataset
+ * naming one thing twice spending two of eight slots on it.
+ *
+ * Until this, the list was neuPrint's alone and a FlyWire row drew **no chips at all** — not
+ * only through an annotation chain but on the shipped dataset, whose built-in annotations are
+ * exactly `cell_class`, `cell_sub_class`, `super_class`, `flow` and `cell_type`.
+ *
+ * The two spellings of a fact are adjacent so the priority order reads the same on either
+ * backend; `automaticChips` walks this list in order and takes the first member of each family
+ * the dataset actually has.
+ */
 const CHIPS: ChipSpec[] = [
-  { name: 'class', slot: 0 },
-  { name: 'subclass', slot: 1 },
-  { name: 'superclass', slot: 2 },
-  { name: 'somaSide', slot: 3, key: 'soma' },
+  { name: 'class', slot: 0, family: 'class' },
+  { name: 'cell_class', slot: 0, family: 'class' },
+  { name: 'subclass', slot: 1, family: 'subclass' },
+  { name: 'cell_sub_class', slot: 1, family: 'subclass' },
+  { name: 'superclass', slot: 2, family: 'superclass' },
+  { name: 'super_class', slot: 2, family: 'superclass' },
+  // `somaSide` and `rootSide` are *different* facts — where the soma sits against where the
+  // neurite enters — so they are deliberately not one family. CAVE's `side` is the soma one,
+  // and it needs no `key`: it spells the value out, where the neuPrint pair are both `L`/`R`.
+  { name: 'somaSide', slot: 3, family: 'side', key: 'soma' },
+  { name: 'side', slot: 3, family: 'side' },
   { name: 'rootSide', slot: 4, key: 'root' },
-  // Hemilineage under three names: MANC calls it `hemilineage`, male-CNS publishes both the
-  // Ito-Lee and the Truman nomenclature. `trumanHl` is not listed at all — one of the two
-  // male-CNS names has to lead, and the param is there for anyone who wants the other.
+  // Intrinsic / afferent / efferent: the coarsest division there is, and one neuPrint has no
+  // column for at all. Slot 4 is free on every dataset that publishes it, `rootSide` being the
+  // other occupant and male-CNS's alone.
+  { name: 'flow', slot: 4 },
+  // Hemilineage under four names now: MANC calls it `hemilineage`, male-CNS publishes both the
+  // Ito-Lee and the Truman nomenclature, and FlyWire's annotations spell the first
+  // `ito_lee_hemilineage`. `trumanHl` and `hartenstein_hemilineage` are not listed at all — one
+  // of each pair has to lead, and the param is there for anyone who wants the other.
   { name: 'itoleeHl', slot: 5, family: 'hemilineage' },
   { name: 'hemilineage', slot: 5, family: 'hemilineage' },
+  { name: 'ito_lee_hemilineage', slot: 5, family: 'hemilineage' },
   { name: 'consensusNt', slot: 6, family: 'neurotransmitter' },
   { name: 'predictedNt', slot: 6, family: 'neurotransmitter' },
+  { name: 'top_nt', slot: 6, family: 'neurotransmitter' },
+  // A cell-body fibre is not a nerve, so only the latter two are one family.
   { name: 'cellBodyFiber', slot: 7 },
-  { name: 'entryNerve', slot: 7 },
+  { name: 'entryNerve', slot: 7, family: 'nerve' },
+  { name: 'nerve', slot: 7, family: 'nerve' },
   { name: 'flywireType', slot: 2 },
 ]
 
 const CHIP_BY_NAME = new Map(CHIPS.map((chip) => [chip.name, chip]))
 
-const STATS = ['pre', 'post', 'synweight', 'upstream', 'downstream', 'size', 'cableLength']
+/*
+ * `nodes` sits beside `size` because it is the same question on a backend that has no voxel
+ * count: a CATMAID skeleton's node count is what says how much of a neuron was traced. Without
+ * it a CATMAID row had exactly one stat, since it publishes none of the other six.
+ */
+const STATS = [
+  'pre',
+  'post',
+  'synweight',
+  'upstream',
+  'downstream',
+  'size',
+  'nodes',
+  'cableLength',
+]
 
 /**
  * Eight, which is the size of the palette — so the automatic list can never want a colour that
@@ -109,6 +158,29 @@ export interface RowFields {
   chips: string[]
   /** Numeric columns, rendered as a right-aligned figure list. */
   stats: string[]
+  /**
+   * A column whose *values* are several free-form tags, joined with `JOIN_SEPARATOR`.
+   *
+   * Drawn apart from `chips` and deliberately unlike them: community annotations are somebody's
+   * prose rather than a controlled vocabulary, so they get no palette slot, no key and no claim
+   * to be one of a known set. Undefined unless somebody named a column.
+   */
+  tags: string | undefined
+}
+
+/**
+ * The tags in one cell, in order, with the absences dropped.
+ *
+ * Splits on the separator `join` wrote, which is the one contract between the two — and it is
+ * plain text rather than a control character, so a tag that itself contains `"; "` comes apart
+ * into two. Cosmetic, admitted, and the whole cell is one hover away.
+ */
+export function splitTags(cell: CellValue): string[] {
+  if (typeof cell !== 'string' || cell === '') return []
+  return cell
+    .split(JOIN_SEPARATOR)
+    .map((tag) => tag.trim())
+    .filter(Boolean)
 }
 
 /**
@@ -118,9 +190,13 @@ export interface RowFields {
 export function rowFields(
   schema: TableSchema | undefined,
   chosen: readonly string[] = [],
+  tagColumn = '',
 ): RowFields {
   const byName = new Map((schema?.columns ?? []).map((c) => [c.name, c]))
   const has = (name: string) => byName.has(name)
+  // Filtered against the schema like everything else here: the param outlives the dataset it
+  // was set on, and a graph repointed elsewhere should lose the row rather than draw blanks.
+  const tags = tagColumn && has(tagColumn) ? tagColumn : undefined
 
   const primary = PRIMARY.find(has) ?? firstString(schema)
   // A chosen field is still filtered against the schema: the param outlives the dataset it was
@@ -130,13 +206,18 @@ export function rowFields(
 
   return {
     primary,
-    // Never repeat the headline on the line beneath it.
-    secondary: SECONDARY.filter((name) => has(name) && name !== primary).slice(0, 2),
-    chips,
+    // Never repeat the headline on the line beneath it — nor the tags row, which draws the same
+    // cell in its own shape a line below.
+    secondary: SECONDARY.filter((name) => has(name) && name !== primary && name !== tags).slice(
+      0,
+      2,
+    ),
+    chips: chips.filter((name) => name !== tags),
     stats: STATS.filter((name) => {
       const column = byName.get(name)
       return column !== undefined && isNumericDType(column.dtype)
     }).slice(0, MAX_STATS),
+    tags,
   }
 }
 

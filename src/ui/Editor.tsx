@@ -23,7 +23,6 @@ import {
   MiniMap,
   ReactFlow,
   ReactFlowProvider,
-  useNodesInitialized,
   useReactFlow,
 } from '@xyflow/react'
 import type {
@@ -41,7 +40,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CodaGraph, GraphNode } from '../core/graph'
 import { getNodeDef, isAnnotation } from '../core/registry'
 import type { CodaType } from '../core/types'
+import { referenceEdgeIds } from '../core/graph'
+import { spliceCandidate } from '../core/splice'
 import { useGraphStore } from '../store/graphStore'
+import { edgeUnderRect } from './spliceHit'
 import type { CodaNodeData } from './nodes/CodaNodeView'
 import { CodaNodeView } from './nodes/CodaNodeView'
 import { NoteCard } from './nodes/NoteCard'
@@ -53,6 +55,7 @@ import { NodeBrowser } from './panels/NodeBrowser'
 import { NodeContextMenu } from './panels/NodeContextMenu'
 import type { PaletteItem } from './panels/paletteItems'
 import { buildCommandItems, buildNodeItems } from './panels/paletteItems'
+import { requestExportWarnings, useExportWarnings } from './exportWarnings'
 import { appElement, toggleFullscreen } from './fullscreen'
 import { typeColorVar } from './socketStyle'
 import { useArrange } from './useArrange'
@@ -80,6 +83,9 @@ const MINIMAP_SIZE = { width: 180, height: 120 }
  * that component's hooks all subscribe to run state, and a card with none would be paying for
  * every one of them on every scheduler tick.
  */
+/** Shared, so the hit test's `exclude` argument is not a fresh Set on every pointer move. */
+const EMPTY_IDS: ReadonlySet<string> = new Set()
+
 const NODE_TYPES = { coda: CodaNodeView, note: NoteCard }
 
 /**
@@ -139,6 +145,8 @@ function EditorCanvas() {
   const wrapperRef = useRef<HTMLDivElement>(null)
   const pointerRef = useRef({ x: 0, y: 0 })
   const draggingRef = useRef(false)
+  // The wire a drop would insert the dragged card into; drawn highlighted while it is set.
+  const [spliceEdgeId, setSpliceEdgeId] = useState<string | undefined>(undefined)
   const resizingRef = useRef(false)
   const menuSeq = useRef(0)
 
@@ -209,6 +217,17 @@ function EditorCanvas() {
     [graph.nodes],
   )
 
+  /*
+   * Which wires name a node rather than carrying its output, so the edge memo below can mark
+   * them without a registry lookup per edge.
+   *
+   * Keyed on `graph`, like `disabledIds` two lines up is on `graph.nodes` — and with the same
+   * honest caveat: `moveNodes` mints a fresh `nodes` array per drag frame, so both recompute on
+   * every frame of a drag. That costs nothing measurable, and it is already true of `rfEdges`
+   * either way; the earlier comment here claimed the opposite, which was simply wrong.
+   */
+  const referenceIds = useMemo(() => referenceEdgeIds(graph), [graph])
+
   const rfEdges = useMemo<Edge[]>(
     () =>
       graph.edges.map((edge) => {
@@ -230,6 +249,25 @@ function EditorCanvas() {
           target: edge.target,
           targetHandle: edge.targetHandle,
           data: { route, step: orthogonal },
+          /*
+           * Two independent marks, **joined** rather than spread as two `className` keys — the
+           * later spread silently won, so a reference wire that was also the splice candidate
+           * lost its splice highlight with nothing failing. The cost of the shape is not that
+           * one missing mark: it is that the third thing wanting a class would have clobbered
+           * the second the same way.
+           *
+           * `--splice`: the wire a dropped card would be inserted into, marked *during* the drag,
+           * because a drop that rewires the graph with no warning is a surprise whatever it does
+           * afterwards. `--reference`: a wire that names a node rather than carrying its output,
+           * drawn dotted because a wire carrying no data should not look like one that does.
+           */
+          className:
+            [
+              edge.id === spliceEdgeId && 'coda-edge--splice',
+              referenceIds.has(edge.id) && 'coda-edge--reference',
+            ]
+              .filter(Boolean)
+              .join(' ') || undefined,
           // Links wear the colour of the data flowing through them, as in Blender.
           style: {
             stroke: typeColorVar(sourceType),
@@ -238,10 +276,56 @@ function EditorCanvas() {
           },
         }
       }),
-    [graph.edges, disabledIds, inference, edgeRouting, arrangeRoutes],
+    [
+      graph.edges,
+      disabledIds,
+      inference,
+      edgeRouting,
+      arrangeRoutes,
+      spliceEdgeId,
+      referenceIds,
+    ],
   )
 
   // --- change handlers ----------------------------------------------------
+
+  /**
+   * The edge a card at this position would be inserted into, or undefined.
+   *
+   * Two halves, and both have to say yes: the wire has to run under the card (`edgeUnderRect`,
+   * which walks the *drawn* path so a route or an orthogonal step is judged where it is shown),
+   * and the node has to have a pair of ports that fit (`spliceCandidate`, which is where every
+   * decision lives).
+   *
+   * The card's size comes from `offsetWidth`, the rule `useArrange` records at length: React
+   * Flow's `measured` is wiped on every graph edit here, and a bounding rect is in screen pixels
+   * and would shrink with the camera — where a hit test against flow-space path coordinates needs
+   * flow units.
+   */
+  const spliceOn = useCallback((nodeId: string): string | undefined => {
+    const store = useGraphStore.getState()
+    const node = store.graph.nodes.find((n) => n.id === nodeId)
+    if (!node) return undefined
+    const el = document.querySelector<HTMLElement>(`.react-flow__node[data-id="${nodeId}"]`)
+    if (!el || el.offsetWidth === 0 || el.offsetHeight === 0) return undefined
+
+    const edgeId = edgeUnderRect(
+      {
+        x: node.position.x,
+        y: node.position.y,
+        width: el.offsetWidth,
+        height: el.offsetHeight,
+      },
+      // Nothing to exclude: an isolated node touches no wire, and `spliceCandidate` refuses a
+      // node that is not isolated — so a wire of the dragged node's own can never be a target.
+      EMPTY_IDS,
+    )
+    if (!edgeId) return undefined
+
+    const edge = store.graph.edges.find((e) => e.id === edgeId)
+    if (!edge) return undefined
+    return spliceCandidate(store.graph, store.inference, nodeId, edge) ? edgeId : undefined
+  }, [])
 
   const onNodesChange = useCallback(
     (changes: NodeChange<Node<CodaNodeData>>[]) => {
@@ -274,6 +358,21 @@ function EditorCanvas() {
       }
 
       if (moves.length > 0) {
+        /*
+         * Dropping an isolated card on a wire inserts it there. Only ever one card — splicing a
+         * whole selection into one link means nothing — and only where `spliceCandidate` found a
+         * pair of ports, so an incompatible node dropped on a wire is an ordinary move.
+         */
+        const candidate = moves.length === 1 ? spliceOn(moves[0]!.id) : undefined
+        if (!draggingRef.current) {
+          setSpliceEdgeId(undefined)
+          if (candidate && moves.length === 1) {
+            useGraphStore.getState().spliceNode(moves[0]!.id, candidate, moves)
+            return
+          }
+        } else {
+          setSpliceEdgeId(candidate)
+        }
         // History gets one entry per drag, recorded when the drag ends.
         useGraphStore.getState().moveNodes(moves, !draggingRef.current)
       }
@@ -286,7 +385,7 @@ function EditorCanvas() {
           .setSelection(graph.nodes.filter((n) => nextSelection.has(n.id)).map((n) => n.id))
       }
     },
-    [graph.nodes, selection],
+    [graph.nodes, selection, spliceOn],
   )
 
   const isValidConnection = useCallback<IsValidConnection>((candidate) => {
@@ -410,7 +509,22 @@ function EditorCanvas() {
    * drag-into-space is unambiguously "insert a node here", and mixing "Undo" into that
    * list would be noise.
    */
+  /*
+   * The palette's export rows can say how much of the graph will come out as a TODO, and the
+   * only honest way to know is to run the exporter — so it is started here, when the palette
+   * opens, rather than from `buildCommandItems`, which runs on every store change while it is
+   * open. `useExportWarnings` is the cursor that re-renders when an answer lands.
+   */
+  const exportWarningsRevision = useExportWarnings()
+  useEffect(() => {
+    if (menu) requestExportWarnings(useGraphStore.getState().graph)
+  }, [menu])
+
   const paletteItems = useMemo<PaletteItem[]>(() => {
+    // Read so the dependency is a real one: `buildCommandItems` calls `peekExportWarnings`,
+    // which answers differently once a walk has landed and is invisible to the lint rule.
+    // `Inspector`'s `void s.runVersion` is the same idiom in a selector.
+    void exportWarningsRevision
     if (!menu) return []
     if (menu.filter) return buildNodeItems(menu.filter)
     return [
@@ -421,8 +535,10 @@ function EditorCanvas() {
       ...buildNodeItems(),
     ]
     // `liveStore` is the whole state object while the palette is open, so this recomputes
-    // whenever anything changes — which is what keeps `disabled` flags honest.
-  }, [menu, liveStore, fitView])
+    // whenever anything changes — which is what keeps `disabled` flags honest. The revision is
+    // in the list for the same reason: an export warning that lands after the palette opened
+    // has to reach the row it is about.
+  }, [menu, liveStore, fitView, exportWarningsRevision])
 
   /** Run a command, or insert a node and wire it to the drag origin. */
   const handlePick = useCallback(
@@ -496,23 +612,42 @@ function EditorCanvas() {
   /*
    * Frame a graph that has just been opened.
    *
-   * Gated on `nodesInitialized`, and that is the whole difficulty: `fitView` reads each node's
-   * *measured* size, and a node committed this render has none yet — fitting straight away
-   * frames a set of zero-sized boxes and lands at some arbitrary zoom. The hook goes false while
-   * the new cards are unmeasured and true once React Flow's ResizeObserver has them, so leaving
-   * the request unhandled until then is what makes the fit correct rather than merely late.
+   * **Asked for unconditionally, and waiting for the cards to be measured is React Flow's job
+   * rather than ours.** `fitView()` does not fit: it sets `fitViewQueued` and pushes a no-op onto
+   * the node queue, and the fit resolves either at the next `setNodes` where every node has a
+   * measurement or, failing that, inside `updateNodeInternals` when the ResizeObserver delivers
+   * one. So a graph committed this render — whose cards have no size yet — is framed a beat later
+   * against real measurements, which is exactly what a gate here was trying to arrange.
+   *
+   * This *was* gated on `useNodesInitialized`, which made it the only surface in the app still
+   * reading that flag, and the flag is false here forever. `adoptUserNodes` carries a
+   * measurement forward only while the **user** node object behind it is identity-equal and
+   * otherwise re-seeds `measured` from `userNode.measured`; `rfNodes` mints fresh objects on
+   * every store change and `onNodesChange` deliberately never writes a measured size back into
+   * the document, so that field is permanently undefined. `updateNodeInternals` — the path the
+   * ResizeObserver takes — never recomputes the flag, so nothing brings it back.
+   *
+   * What that cost is worth recording, because it looked like an intermittent bug rather than a
+   * dead control: the **first** open of a session framed correctly and every one after it did
+   * not. That first fit is React Flow's own `fitView` prop, queued at mount and resolved when the
+   * opened graph's cards were measured — nothing to do with this effect. Measured in a browser:
+   * opening a second graph left the viewport transform byte-identical, with the new graph's top
+   * row at y = −109 against a pane starting at y = 42.
+   *
+   * `useArrange` reached the same conclusion about the same flag from the other side and asks its
+   * readiness question of the sizes it is about to use. Here there is no question to ask, because
+   * the consumer already waits.
    *
    * The request is only ever raised for a graph with nodes, so it cannot sit pending and then
    * fire on whatever the user adds next.
    */
   const fitRequest = useGraphStore((s) => s.fitRequest)
   const handledFit = useRef(fitRequest)
-  const nodesInitialized = useNodesInitialized()
   useEffect(() => {
-    if (fitRequest === handledFit.current || !nodesInitialized) return
+    if (fitRequest === handledFit.current) return
     handledFit.current = fitRequest
     void fitView({ ...FIT_VIEW_OPTIONS, duration: 240 })
-  }, [fitRequest, nodesInitialized, fitView])
+  }, [fitRequest, fitView])
 
   // --- keyboard -----------------------------------------------------------
 

@@ -1,0 +1,353 @@
+/**
+ * Whether an annotation's root ids were still current when a materialization was frozen.
+ *
+ * A CAVE root id is not stable: proofreading merges and splits retire an id and mint new ones.
+ * An annotation base is somebody's spreadsheet, edited on its own schedule, so its ids drift out
+ * of step with a *pinned* materialization — and nothing says so. The labels simply stop matching
+ * neurons, the joins come back empty for those rows, and the dataset looks under-annotated.
+ *
+ * **This is a heads-up, not a gate.** It runs after the value has been built, never blocks a
+ * run, and its absence is not an error — a check that has not come back yet, or a datastack with
+ * no chunkedgraph, both say nothing. What it produces is a count and a few examples for the
+ * dataset node's badge.
+ *
+ * The call is `caveclient.chunkedgraph.is_latest_roots`, read off caveclient 8.2.1 rather than
+ * recalled: `POST {cg}/segmentation/api/v1/table/{table}/is_latest_roots?timestamp=<epoch
+ * seconds>` with `{"node_ids": [...]}`, answering `{"is_latest": [bool, ...]}`. The timestamp is
+ * the materialization's own `time_stamp`, which `versionsMetadata` already returns.
+ */
+
+import { cacheGet, cacheSet } from '../cache'
+import type { CaveRequestOptions } from './client'
+import { cavePostBinary, cavePostRaw } from './client'
+import { datastackRecord, materializationsFor, versionFrozenAt } from './datastack'
+import type { GrapheneSource } from './graphene'
+import { parseGrapheneSource } from './graphene'
+import { channel } from '../channel'
+
+/**
+ * What a completed check found.
+ *
+ * `checked` rather than a bare fraction because the message has to be true about what was
+ * actually asked: a set larger than `MAX_ROOTS_CHECKED` is checked in part, and a claim about
+ * "your ids" would then be a claim about ids nobody looked at.
+ */
+export interface RootCheck {
+  /** How many distinct ids were judged. */
+  checked: number
+  /** How many of those were not current at the materialization. */
+  stale: number
+  /** A few of them, for a message that can be acted on. */
+  examples: readonly string[]
+  /** Distinct ids the chain carried, which `checked` may fall short of. */
+  total: number
+}
+
+/**
+ * A backstop rather than a budget. At roughly 50–100 µs a root server-side this is a few seconds
+ * of somebody else's service, paid once — see the cache below, which makes the second run free.
+ */
+const MAX_ROOTS_CHECKED = 250_000
+
+/** Ids per request. caveclient sends one call; this splits it so no single body is enormous. */
+const CHUNK = 10_000
+
+/** How many stale ids a message names. Enough to paste into a search, short enough to read. */
+const EXAMPLES = 3
+
+/**
+ * Bump when what is stored changes shape. The `SHAPE_FORMAT` lesson: an entry kept indefinitely
+ * outlives the code that wrote it unless something in the key says which code that was.
+ */
+const STORE_FORMAT = 1
+
+/**
+ * What is known about one dataset node's annotations, and which chain produced it.
+ *
+ * The `key` is the whole reason this is an entry rather than a bare result. A check is about a
+ * *particular* set of ids, and those ids change the moment somebody drops an `Update root IDs`
+ * between the base and the dataset — which is exactly the moment the answer matters most. Keyed
+ * on the dataset id, because that is all `validate` can see; carrying the chain's provenance key,
+ * so a changed chain replaces the answer instead of being served the previous one.
+ */
+interface Entry {
+  /** `ctx.inputKey('annotations')`, or `''` where nothing is wired. */
+  key: string
+  /** Absent while a check is in flight, and where there was nothing to check. */
+  check?: RootCheck
+}
+
+const entries = new Map<string, Entry>()
+
+const learned = channel()
+/**
+ * Fired when a check lands *or is dropped*, so `validate` is asked again. `reportSourceLearned`'s
+ * terms. The drop half matters: a run does not re-infer, so without it a warning about a chain
+ * somebody has just replaced stays on the card until the next unrelated edit.
+ */
+export const subscribeRootCheck = learned.subscribe
+
+/** What a finished check found for a dataset, or undefined while nothing is known. */
+export function peekRootCheck(datasetId: string): RootCheck | undefined {
+  return entries.get(datasetId)?.check
+}
+
+/** Test seam, and what a Clear Cache on the dataset would reach. */
+export function resetRootChecks(): void {
+  entries.clear()
+}
+
+/**
+ * Start a check, unless this dataset's answer is already about this very chain.
+ *
+ * Deliberately returns nothing and never rejects: a caller is `evaluate`, which must not wait for
+ * it and must not fail because of it. Asked **once per (dataset, chain)** — the ids arrive on
+ * every run, so re-asking per run is the hammering this exists to avoid, while never re-asking at
+ * all leaves the answer describing a chain that is no longer on the canvas.
+ *
+ * `chainKey` is the annotations port's provenance key, which changes exactly when the table would
+ * (invariant 4). Undefined — nothing wired — is a real key rather than a reason to keep the last
+ * one, or unplugging the annotations would leave a warning about ids the graph no longer holds.
+ */
+export function startRootCheck(
+  datasetId: string,
+  chainKey: string | undefined,
+  ids: readonly string[],
+  options: CaveRequestOptions = {},
+): void {
+  const key = chainKey ?? ''
+  if (entries.get(datasetId)?.key === key) return
+
+  /*
+   * The previous answer goes *now*, before the new one is known. It was about a chain that is no
+   * longer there, and leaving it up until the replacement lands is the bug this fixed: a warning
+   * that survived the repair it asked for reads as the repair not having worked.
+   */
+  const had = entries.get(datasetId)?.check !== undefined
+  entries.set(datasetId, { key })
+  // Deferred, because `notify` re-runs inference and the caller is inside a node's `evaluate`.
+  if (had) queueMicrotask(() => learned.notify())
+  if (ids.length === 0) return
+
+  void run(datasetId, ids, options)
+    .then((result) => {
+      // Undefined is a settled "nothing to say" — no chunkedgraph, or no timestamp — so the
+      // entry stays claimed and nothing asks again.
+      if (!result) return
+      // A newer chain may have arrived while this was in flight; it owns the entry now.
+      if (entries.get(datasetId)?.key !== key) return
+      entries.set(datasetId, { key, check: result })
+      learned.notify()
+    })
+    .catch(() => {
+      /*
+       * Swallowed — an advisory that could not be produced has nothing to say, and a 401 already
+       * travels to the Connections panel on its own channel. The claim is released, though: a
+       * dropped connection is not an answer, so the next run asks again rather than the session
+       * going quiet about a base that may well be drifting.
+       */
+      if (entries.get(datasetId)?.key === key) entries.delete(datasetId)
+    })
+}
+
+async function run(
+  datasetId: string,
+  ids: readonly string[],
+  options: CaveRequestOptions,
+): Promise<RootCheck | undefined> {
+  const [datastack, versionText] = datasetId.split(':')
+  const version = Number(versionText)
+  if (!datastack || !Number.isInteger(version)) return undefined
+
+  const graphene = await grapheneFor(datastack, options)
+  const at = await frozenAt(datastack, version, options)
+  if (!graphene || at === undefined) return undefined
+
+  // Distinct, in first-occurrence order. An annotation base carries repeats — measured at 1,089
+  // neurons on FlyTable's `main.info` — and checking one twice is a request nobody needed.
+  const distinct = [...new Set(ids)].filter((id) => id !== '')
+  const wanted = distinct.slice(0, MAX_ROOTS_CHECKED)
+  const { stale } = await judge(graphene, at, wanted, options)
+
+  const bad = wanted.filter((id) => stale.has(id))
+  return {
+    checked: wanted.length,
+    stale: bad.length,
+    examples: bad.slice(0, EXAMPLES),
+    total: distinct.length,
+  }
+}
+
+/** The chunkedgraph behind a datastack, or undefined where there is none. */
+async function grapheneFor(
+  datastack: string,
+  options: CaveRequestOptions,
+): Promise<GrapheneSource | undefined> {
+  const info = await datastackRecord(datastack, options)
+  // Not a chunkedgraph at all, so root ids do not move and none of this applies.
+  return parseGrapheneSource(info.segmentation_source)
+}
+
+/**
+ * When a materialization was frozen, in epoch ms.
+ *
+ * Awaits the listing rather than peeking, which fills `versionFrozenAt` as a side effect — the
+ * memo means this is free once any dataset node on the datastack has resolved.
+ */
+async function frozenAt(
+  datastack: string,
+  version: number,
+  options: CaveRequestOptions,
+): Promise<number | undefined> {
+  await materializationsFor(datastack, options)
+  return versionFrozenAt(datastack, version)
+}
+
+/**
+ * Which of these ids the chunkedgraph still called current at that instant, asking only about the
+ * ones nobody has asked about before.
+ *
+ * **The persistent half, and the reason this is cheap after the first time:** whether a root was
+ * current at a past instant never changes, so an answer is good forever. Keyed on the
+ * chunkedgraph table and the frozen timestamp, which together are what the answer is *about* —
+ * not on the dataset, so two datastack nodes on one segmentation share it, and not on the id
+ * list, so a base that gained rows only costs the rows it gained.
+ */
+async function judge(
+  graphene: GrapheneSource,
+  at: number,
+  wanted: readonly string[],
+  options: CaveRequestOptions,
+): Promise<{ latest: Set<string>; stale: Set<string> }> {
+  const key = `cave-roots:${graphene.server}|${graphene.table}|${at}`
+  const held = await cacheGet<{ latest: string[]; stale: string[] }>(key, {
+    fingerprint: `v${STORE_FORMAT}`,
+  })
+  const latest = new Set(held?.latest ?? [])
+  const stale = new Set(held?.stale ?? [])
+
+  const unknown = wanted.filter((id) => !latest.has(id) && !stale.has(id))
+  for (let i = 0; i < unknown.length; i += CHUNK) {
+    // Sequential on purpose. This is an advisory against a shared production service; firing
+    // every chunk at once would be the hammering it exists to avoid.
+    const batch = unknown.slice(i, i + CHUNK)
+    const answer = await isLatestRoots(graphene.server, graphene.table, batch, at, options)
+    for (let k = 0; k < batch.length; k++) {
+      ;(answer[k] === false ? stale : latest).add(batch[k]!)
+    }
+  }
+  if (unknown.length > 0) {
+    void cacheSet(key, { latest: [...latest], stale: [...stale] }, `v${STORE_FORMAT}`)
+  }
+  return { latest, stale }
+}
+
+/**
+ * Which of these root ids were **not** current when the materialization was frozen.
+ *
+ * The same call and the same permanent cache the advisory uses, answering per id rather than as a
+ * count — because the Update root IDs node needs to know *which* rows to repair, and asking twice
+ * would be two passes over somebody's chunkedgraph for one question.
+ */
+export async function staleRoots(
+  datastack: string,
+  version: number,
+  ids: readonly string[],
+  options: CaveRequestOptions = {},
+): Promise<Set<string>> {
+  const graphene = await grapheneFor(datastack, options)
+  const at = await frozenAt(datastack, version, options)
+  if (!graphene || at === undefined) return new Set()
+  const { stale } = await judge(graphene, at, [...new Set(ids)].filter(Boolean), options)
+  return stale
+}
+
+/**
+ * The root id each supervoxel belonged to at a materialization.
+ *
+ * `caveclient.chunkedgraph.get_roots`, which is `roots_binary` — raw `uint64` in and out, so a
+ * root id crosses exactly with nothing parsed or rounded (invariant 8, for once made easy).
+ *
+ * **Cached permanently, like the staleness check beside it and for the same reason**: which
+ * segment a supervoxel belonged to at a *past* instant never changes. A supervoxel is the atom of
+ * the segmentation — proofreading regroups them, it does not split them — so this is the stable
+ * handle a root id is not, which is the whole reason a repair is possible at all.
+ *
+ * Answers a map rather than an array, since callers ask about the rows that moved rather than
+ * about every row, and a `0` — a supervoxel the graph does not know — is left out rather than
+ * returned as a root nothing owns.
+ */
+export async function rootsForSupervoxels(
+  datastack: string,
+  version: number,
+  supervoxels: readonly string[],
+  options: CaveRequestOptions = {},
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>()
+  const graphene = await grapheneFor(datastack, options)
+  const at = await frozenAt(datastack, version, options)
+  if (!graphene || at === undefined) return out
+
+  const wanted = [...new Set(supervoxels)].filter(Boolean)
+  const key = `cave-sv-roots:${graphene.server}|${graphene.table}|${at}`
+  const held = await cacheGet<{ sv: string[]; root: string[] }>(key, {
+    fingerprint: `v${STORE_FORMAT}`,
+  })
+  for (let i = 0; i < (held?.sv.length ?? 0); i++) out.set(held!.sv[i]!, held!.root[i]!)
+
+  const unknown = wanted.filter((id) => !out.has(id))
+  for (let i = 0; i < unknown.length; i += CHUNK) {
+    // Sequential, like the staleness check: an advisory repair has no business firing every
+    // chunk at a shared production service at once.
+    const batch = unknown.slice(i, i + CHUNK)
+    const answer = await getRoots(graphene.server, graphene.table, batch, at, options)
+    for (let k = 0; k < batch.length; k++) {
+      const root = answer[k]
+      // `0` is "no such supervoxel here" — not a root, and not something to write into a table.
+      if (root !== undefined && root !== 0n) out.set(batch[k]!, String(root))
+    }
+  }
+  if (unknown.length > 0) {
+    void cacheSet(key, { sv: [...out.keys()], root: [...out.values()] }, `v${STORE_FORMAT}`)
+  }
+  return out
+}
+
+async function getRoots(
+  server: string,
+  table: string,
+  supervoxels: readonly string[],
+  at: number,
+  options: CaveRequestOptions,
+): Promise<BigUint64Array> {
+  const url =
+    `${server}/segmentation/api/v1/table/${encodeURIComponent(table)}` +
+    `/roots_binary?timestamp=${at / 1000}`
+  // `BigInt` from a decimal string is exact where `Number` is not — the conversion
+  // `precomputed/index.ts` already relies on for the same reason.
+  const body = BigUint64Array.from(supervoxels, (id) => BigInt(id))
+  return cavePostBinary(url, body, options)
+}
+
+/**
+ * One `is_latest_roots` call.
+ *
+ * The body is built as **text**, so no id is ever a JavaScript number: `node_ids` is a list of
+ * integers on the wire, and an eighteen-digit root id through `JSON.stringify` of a `number` is a
+ * different neuron (invariant 8). The same splice `idList` performs for Cypher and
+ * `pyLongIntList` for the notebook.
+ */
+async function isLatestRoots(
+  server: string,
+  table: string,
+  ids: readonly string[],
+  at: number,
+  options: CaveRequestOptions,
+): Promise<boolean[]> {
+  const url =
+    `${server}/segmentation/api/v1/table/${encodeURIComponent(table)}` +
+    `/is_latest_roots?timestamp=${at / 1000}`
+  const body = `{"node_ids":[${ids.join(',')}]}`
+  const answer = await cavePostRaw<{ is_latest: boolean[] }>(url, body, options)
+  return answer.is_latest ?? []
+}
