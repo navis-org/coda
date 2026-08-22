@@ -13,7 +13,14 @@
  */
 
 import type { ColumnSchema, DType, TableSchema } from '../../core/types'
-import { column, findColumn, isNumericDType, pickColumns, tableSchema } from '../../core/types'
+import {
+  column,
+  findColumn,
+  isNumericDType,
+  pickColumns,
+  tableSchema,
+  uniqueName,
+} from '../../core/types'
 import type { CellValue, ColumnData, MatrixValue, TableValue } from '../../core/values'
 import { JOIN_SEPARATOR, getColumn, makeMatrix, makeTable, selectRows } from '../../core/values'
 import { ID_COLUMN_NAME, idText } from '../../core/ids'
@@ -443,20 +450,6 @@ export function sampleTable(table: TableValue, spec: SampleSpec): TableValue {
   // Every index list here is strictly ascending, so a full-length one is the identity.
   if (indices.length === table.length) return table
   return selectRows(table, indices)
-}
-
-/**
- * `name`, or the first free `name_n`, marking it taken.
- *
- * The one statement of Coda's collision rule, which `joinedColumns`, the wide pivot,
- * `renamedColumns` and `combineLayout` all make: the newcomer wins the name and the incumbent is
- * suffixed rather than overwritten.
- */
-function uniqueName(taken: Set<string>, name: string): string {
-  let out = name
-  for (let n = 2; taken.has(out); n++) out = `${name}_${n}`
-  taken.add(out)
-  return out
 }
 
 // ---------------------------------------------------------------------------

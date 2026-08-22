@@ -82,3 +82,46 @@ export function compileLabelMatch(
     return value !== null && value !== undefined && test(String(value))
   }
 }
+
+/**
+ * Refuse a filter this backend cannot answer, rather than applying it to something that is not
+ * there.
+ *
+ * Both local sources met this and each got it wrong in a different direction, and neither
+ * failure is visible from the result. `CaveSource` read `index.data.size` — a column no CAVE
+ * index has — through `Number(undefined ?? 0)`, so any non-zero **Min size** compared 0 against
+ * it and dropped every row: a node reporting "0 neurons" for a datastack full of them.
+ * `CatmaidSource` never read `req.roi` at all, while its volume list fills `DatasetInfo.rois`
+ * with eighty real neuropils — so **In ROI** was a populated dropdown that narrowed nothing, and
+ * the answer came back too *large*.
+ *
+ * An empty result and an unnarrowed one both look like answers, which is what makes a refusal
+ * the only one of the three that can be acted on. It names the control as the card labels it,
+ * because that is what somebody has to go and clear.
+ *
+ * Deliberately not the same call as `compileLabelMatch`'s, whose absent value matches nothing on
+ * purpose: that is neuPrint's `WHERE` semantics for a *property* the dataset may legitimately
+ * lack per neuron, and every backend has to agree about it. These two are whole-query facts
+ * about the backend, known before a single row is read.
+ *
+ * `status` is deliberately absent from this: its default is `Traced`, so refusing would fail a
+ * value nobody chose. A source that cannot answer it ignores it instead — see `CatmaidSource`.
+ */
+export function refuseUnfilterable(
+  req: { minSize?: number | undefined; roi?: string | undefined },
+  can: { size: boolean; roi: boolean },
+  backend: string,
+): void {
+  if (req.minSize && !can.size) {
+    throw new Error(
+      `${backend} publishes no neuron size, so "Min size" cannot narrow this query. ` +
+        `Set it back to 0 to search this dataset.`,
+    )
+  }
+  if (req.roi && !can.roi) {
+    throw new Error(
+      `${backend} cannot filter neurons by region, so "In ROI" cannot narrow this query. ` +
+        `Set it back to Any to search this dataset.`,
+    )
+  }
+}

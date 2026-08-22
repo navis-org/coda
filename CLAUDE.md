@@ -484,14 +484,14 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `ui/viewers/networkViewer.test.tsx`      | the caption: counts, the label-thinning admission, size refusal                                                                  |
 | `data/neuprint/neuprint.test.ts`         | Cypher building/escaping, response decoding, both halves of the `bodyId`→`neuronId` seam, schema discovery, mesh-source resolution, nm conversion |
 | `data/precomputed/precomputed.test.ts`   | shard lookup, multi-LOD manifest, Draco decode, legacy fragments, CORS fallback                                                  |
-| `nodes/transform/updateRootIds.test.ts`  | the repair: only stale rows looked up, supervoxels sent as raw uint64, a current row left alone even with a warm cache, a row with no supervoxel untouched — and both pickers resolving before any schema has arrived |
-| `data/cave/rootIds.test.ts`              | the drift check: ids sent as unquoted integers, asked once per chain and re-asked when the wiring changes, a late lander not overwriting a newer answer, only the unseen ones asked, and nothing at all without a chunkedgraph |
-| `data/catmaid/catmaid.test.ts`           | CATMAID against recorded bodies: the confidence-bucket sum, parents rebuilt as indices, the indexed list encoding, an anonymous POST refused a direct route, and a status filter ignored |
+| `nodes/transform/updateRootIds.test.ts`  | the repair: only stale rows looked up, supervoxels sent as raw uint64, a current row left alone even with a warm cache, a row with no supervoxel untouched, the id column's declared dtype kept rather than row zero's — and both pickers resolving before any schema has arrived |
+| `data/cave/rootIds.test.ts`              | the drift check: ids sent as unquoted integers, the frozen instant read as UTC rather than local, asked once per chain and re-asked when the wiring changes, a late lander not overwriting a newer answer, only the unseen ones asked, and nothing at all without a chunkedgraph |
+| `data/catmaid/catmaid.test.ts`           | CATMAID against recorded bodies: the confidence-bucket sum, parents rebuilt as indices, the indexed list encoding, an anonymous POST refused a direct route, a status filter ignored and a region filter refused |
 | `data/catmaid/live.test.ts`              | the same source against the real VFB FAFB instance, skipped without `CATMAID_LIVE` — a skeleton proved to be one tree in nanometres, its synapses inside its own bounds, and the neuropil volumes parsed |
-| `data/cave/cave.test.ts`                 | CAVE against recorded bodies: a wide root id kept exactly, the string-aware scan, the annotation pivot, an anchored pattern, and every refusal |
+| `data/cave/cave.test.ts`                 | CAVE against recorded bodies: a wide root id kept exactly, the string-aware scan, the annotation pivot, an anchored pattern, a size filter refused rather than emptying the result, and every refusal |
 | `nodes/lib/datasetFamilies.test.ts`      | (also) that every CAVE family names a datastack spec and every spec a family — the join key nothing else checks |
 | `data/cave/live.test.ts`                 | the same source against the real services, skipped without `CAVE_TOKEN` — the only thing that notices an endpoint shape changing, the mesh and synapse clouds proved to share one nanometre frame, Aedes' edge list built by counting with nothing configured, and a loadable scene assembled for all three datastacks |
-| `data/annotations/annotations.test.ts`   | annotation sources: the `Token` scheme, the pseudo-workspaces dropped, a wide id kept as text, the outer join and the later source winning — plus the route fallback's three rules |
+| `data/annotations/annotations.test.ts`   | annotation sources: the `Token` scheme, the pseudo-workspaces dropped, a wide id kept as text, the outer join and the later source winning, a rename collision suffixed in all three shapers — plus the route fallback's three rules |
 | `data/annotations/live.test.ts`          | the same against real FlyTable, skipped without `SEATABLE_TOKEN` — including the ids proved to be beyond double precision |
 | `nodes/annotation/annotations.test.ts`   | the three source nodes: the two halves of one join asserted against each other, half a chain published as nothing, a Select in the chain (the case that decides the socket type), and a table with no `neuronId` refused twice |
 | `nodes/query/morphology.test.ts`         | the shared `Max neurons` ceiling and what its refusal message blames                                                             |
@@ -576,7 +576,7 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `nodes/table/sample.test.ts`             | the four sampling modes, a draw reproduced from its seed, and the seed costing nothing in the other three                        |
 | `nodes/table/combine.test.ts`            | the coalesce node: infer publishing what evaluate returns, an unset picker warning rather than refusing, and the chain into a Dataset |
 | `nodes/table/dedupe.test.ts`             | the three `keep` modes, an empty picker comparing whole rows, row order kept, and a null told apart from the text "null"       |
-| `data/csv.test.ts`                       | reading somebody else's file: quoting, delimiter-by-consistency, header bias, and every value the parse refuses to widen         |
+| `data/csv.test.ts`                       | reading somebody else's file: quoting, delimiter-by-consistency, header bias, a suffix that cannot land on a name already taken, and every value the parse refuses to widen |
 | `data/uploads.test.ts`                   | the store against real IndexedDB: content addressing incl. a separator collision, a write that rejects, and the peek's one read  |
 | `nodes/table/upload.test.ts`             | the node: the schema arriving by peek, the neuronId rename, what a graph opened elsewhere says, and the filename costing nothing   |
 | `ui/nodes/uploadBody.test.tsx`           | the card's four states — and that 'looking' is never printed as 'not here' — plus the size ceiling refusing before it reads      |
@@ -669,6 +669,17 @@ Running the real walk sees all five by construction and cannot drift. So both wa
 which `continue`s before that check and is the worst case there is, since it binds nothing and
 blocks everything downstream. Reported as `{nodeId, label}` rather than recovered from the
 finished document by scanning for `# TODO:`, which would be matching on prose.
+
+**A walk clears only the guard it was started under**, which is the one thing about the in-flight
+bookkeeping that is not obvious. `requestExportWarnings` replaces the `running` set *wholesale*
+when a newer graph arrives, so a walk that outlived its graph and deleted its language from the
+module binding cleared the **current** graph's guard — after which the next surface to ask saw no
+answer and nothing running, and started a second exporter walk over a graph already being walked.
+The set is passed in, so a walk can only ever clear its own. Not covered by a test, and that is
+recorded in the file: reaching the window needs a hook between two `compute` continuations, and
+vitest hands the *real* exporter to a second concurrent dynamic import of a mocked module, so the
+walks cannot be counted or told apart. Two tests were written for it and both were vacuous under
+mutation, which is worse than none.
 
 **`src/ui/exportWarnings.ts` is the `peek*` contract again**, with one deliberate split:
 
@@ -2052,6 +2063,30 @@ to nothing, and the dataset reads as under-annotated. `data/cave/rootIds.ts` is 
 `time_stamp`, which `versionsMetadata` already returns and `datastack.ts` was throwing away — so
 it costs no extra round trip.
 
+**And CAVE writes that instant with no zone on it and means UTC, which `Date.parse` does not.**
+`"2023-08-29T00:00:00.000000"` is a date-*time* string with no offset, and ECMA-262 reads one of
+those as **local** time — so `Date.parse` turned the same reply into a different instant on every
+machine: an hour out in London for half the year, seven in `America/Los_Angeles`. That it is UTC
+is not a guess; caveclient parses the same field with
+`datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S.%f").replace(tzinfo=timezone.utc)`.
+
+The damage is silent and is not confined to a display. This instant is what `is_latest_roots` and
+`roots_binary` are asked *at*, **and** it is folded into the permanent cache key beside them — so a
+skewed one asks the chunkedgraph about a moment the materialization was never frozen at and then
+keeps the wrong answer forever. On a proofread datastack that makes `Update root IDs` write root
+ids that do not exist in the pinned materialization, which is the exact drift it exists to repair.
+
+`parseCaveTimestamp` is the rule and `versionFrozenAt` answers the **instant** rather than the
+string, which is what stops it being got wrong twice: nothing outside `datastack.ts` sees the raw
+field except `datasetInfoFor`, which only slices a date out of it for prose. An offset already on
+the string is honoured, so a deployment that starts sending one is not shifted twice.
+
+**The test could not have caught it, and that is the part worth carrying.** It asserted
+`timestamp=${Date.parse(STAMP) / 1000}` — the same expression the code used — so it agreed with
+whatever that expression produced. A value a test derives the way the code derives it is not an
+assertion. It is written out as a literal now, with the three spellings of one instant asserted
+to agree.
+
 **It is fired and forgotten.** `evaluate` starts it and returns; the answer lands on
 `subscribeRootCheck`, the **fourth** thing wired to `afterSourceLearned`, and `validate` reads it.
 So a run is never delayed by it and never fails because of it, which is right for an advisory
@@ -2135,9 +2170,13 @@ invariant 8 easy: raw `uint64` in and out, so a `BigUint64Array` carries an eigh
 exactly with nothing parsed, rounded or quoted. `cavePostBinary` exists for it — its own function
 rather than an option on `request`, which parses JSON unconditionally.
 
-**The id column keeps its storage.** A CAVE id column is `str` and stays text; a table holding
-them as numbers keeps doing so rather than changing dtype under every picker downstream, and
-`idText` refuses a number too wide to be exact so nothing silently rounds.
+**The id column keeps its storage, read off the schema rather than off row zero.** A CAVE id
+column is `str` and stays text; a table holding them as numbers keeps doing so rather than changing
+dtype under every picker downstream, and `idText` refuses a number too wide to be exact so nothing
+silently rounds. It asked `typeof ids[0] === 'number'`, which decides a whole column from one
+value — so a table whose first row has no id, which an annotation base routinely has, wrote strings
+into an `i64` column: invariant 3 broken by the node whose whole job is repair, and silent until
+something downstream sorted or compared them.
 
 The guard in the rewrite loop — only touch a row whose id was *stale* — reads as redundant, since
 only stale rows are ever asked about. It stops being redundant the moment the cache is warm: the
@@ -4718,6 +4757,26 @@ means, and it has to decide the same thing the mock does and the same thing Neo4
 quietly returns two answers. `compileRegex` and `compileLabelMatch` moved out of `MockSource`
 when CAVE became their second consumer; a copy is how the two drift.
 
+**`refuseUnfilterable` is the third thing in it, and it is about a filter a backend cannot answer
+*at all*.** Both local sources met that and each got it wrong in a different direction, neither
+visible from the result. `CaveSource` read `index.data.size` — a column no CAVE index has —
+through `Number(undefined ?? 0)`, so any non-zero **Min size** compared 0 against the threshold and
+dropped every row: a node reporting "0 neurons" for a datastack full of them. `CatmaidSource` never
+read `req.roi` at all while publishing eighty regions to pick from, so the answer came back too
+*large*. An empty result and an unnarrowed one both look like answers, which is what makes a
+refusal the only one of the three that can be acted on; it names the control as the card labels it.
+
+Note which filters this covers and why. `Min size` and `In ROI` reach a source **only when
+somebody set them** — 0 and `Any` are dropped by the node — so a refusal fails a decision rather
+than a default. `status` is deliberately excluded: its default is `Traced`, so refusing there would
+fail a value nobody chose, and a source that cannot answer it ignores it instead. That is the split
+`CatmaidSource` already documents, made checkable.
+
+It is also deliberately **not** `compileLabelMatch`'s rule, whose absent value matches nothing on
+purpose: that is neuPrint's `WHERE` semantics for a *property* a dataset may legitimately lack per
+neuron, and every backend has to agree about it. These two are whole-query facts about the backend,
+known before a single row is read.
+
 ### The 64-bit problem, at the other end of the seam
 
 Invariant 8 was written for this. A FlyWire root id is eighteen digits, and **`JSON.parse`
@@ -5483,6 +5542,12 @@ with the feature absent — comparable to CAVE's +16.4 / +5.2.
   is empty because CATMAID has none — but a node's stored `Traced` default survives into the
   request regardless, and filtering on it drops every row for a value nobody chose. That failure
   is live on CAVE today; `findNeurons` here ignores `statuses` outright and a test pins it.
+- **A filter somebody *chose* is refused instead, and the difference is the default.** `In ROI` and
+  `Min size` reach a source only when they were set, so ignoring one answers a different question
+  than the card says — see `refuseUnfilterable` below. CATMAID is the case that makes it visible:
+  `volumeList` fills `DatasetInfo.rois` with eighty real neuropils so the ROIs viewer can draw
+  them, which also populates Find Neurons' region picker, and `findNeurons` never read `req.roi` at
+  all. A populated dropdown that narrows nothing, whose result is too *large* and looks correct.
 - **Cable length is measured, not fetched.** `core/values.ts`' `cableLength` is shared with the
   neuPrint decoder and the mock so the three cannot disagree, and CATMAID's points are already
   nanometres — so the Skeletons node computes it from the tree in hand rather than spending a
@@ -6037,6 +6102,12 @@ undetectable has to be fixed rather than configured.
   demoting the row instead puts the word "type" into the first row of the column it was naming. The
   remaining ambiguity — an all-text file with no header — resolves _towards_ a header, the same bias
   `pandas.read_csv` takes.
+- **The suffixing is `uniqueName`, which now lives in `src/core/types.ts`.** It was hand-written
+  here and again in `tableOps.ts`, and `src/data` may not import `src/nodes` (invariant 1), so the
+  annotation providers were about to make it three — `ID_COLUMN_NAME`'s argument for `src/core`
+  exactly. The two copies had already parted company on the case that matters: this one *counted
+  occurrences*, which turns `a, a, a_2` into `a, a_2, a_2` — a collision produced by the very
+  function that exists to prevent one. Probing for the first **free** name cannot do that.
 - **A blank cell is null, never zero.** `Number('')` is 0, which draws a dense stripe of data
   nobody recorded along every axis downstream. Same trap `numeric()` in `encoding.ts` exists for.
 - **A value that would not survive a round trip stays text.** `007` and `0012` are how a
@@ -6177,6 +6248,25 @@ the type list, with `validate` catching the case a saved graph can still carry.
 **Every column is offered as the type, unlike the id.** A rename is lossless whatever the dtype
 and nothing downstream requires a type to be text, where offering a float as an *id* would invite
 a Neurons table whose neuron ids are neither.
+
+**The rename is not injective, and the annotation providers had to learn that.** `cell_type` and
+`celltype` both become `type`, so a base carrying two of those spellings — or one whose own column
+is literally called `neuronId` — maps two columns onto one name. Each shaper built its schema from
+`annotationColumn`, seeded `data` from `schema.columns` so the second entry overwrote the first,
+and pointed both targets at the surviving array: every row pushed into it twice and `makeTable`
+threw `ragged columns — "neuronId"`, naming the one column that was fine, on a fetch somebody had
+waited twenty seconds for.
+
+`annotationColumns` is the rule for all **five** sites — `shapeRows`, `wideRows`, `pivotRows` and
+both `peekColumns`, the last two because invariant 3 says the schema half and the value half must
+agree and a collision resolved in one and not the other leaves a picker offering a column no table
+has. It takes the id column's name first, then hands out the rest through `uniqueName`.
+
+Note it needs **no `SHAPE_FORMAT` bump**, against that constant's own instruction, and the reason
+is worth stating rather than assuming: the rule there is "the same reply would now produce a
+different table". Every input whose shape changed here previously *threw*, so it was never cached;
+every input that could be cached is byte-identical. Bumping would cost a 79 MB re-download to
+invalidate entries that are provably unchanged.
 
 ### Combine Columns, and why it is a node
 

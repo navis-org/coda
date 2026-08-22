@@ -100,6 +100,19 @@ describe('header detection', () => {
     expect(table.schema.columns.map((c) => c.name)).toEqual(['type', 'type_2'])
     expect(table.length).toBe(1)
   })
+
+  it('does not suffix one column onto another that already carries the name', () => {
+    /*
+     * The case a *counting* deduplicator gets wrong, and it was writing one: numbering
+     * occurrences turns `a, a, a_2` into `a, a_2, a_2` — a collision produced by the very
+     * function that exists to prevent one, and then a ragged table or a silently dropped column
+     * downstream. `uniqueName` probes for the first *free* name, so it cannot.
+     */
+    const { table } = parseDelimited('a,a,a_2\n1,2,3\n')
+    expect(table.schema.columns.map((c) => c.name)).toEqual(['a', 'a_2', 'a_2_2'])
+    expect(table.data.a_2).toEqual([2])
+    expect(table.data.a_2_2).toEqual([3])
+  })
 })
 
 describe('dtype inference', () => {

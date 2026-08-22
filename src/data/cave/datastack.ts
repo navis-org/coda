@@ -148,15 +148,46 @@ async function load(datastack: string, options: CaveRequestOptions): Promise<num
 }
 
 /**
- * When a materialization was frozen, if it is known — the moment a root id has to have been
- * current at for the annotations keyed on it to mean anything.
+ * CAVE writes an instant with no zone on it and means **UTC**, which `Date.parse` does not.
+ *
+ * `"2023-08-29T00:00:00.000000"` is a date-*time* string with no offset, and ECMA-262 reads that
+ * as **local time** — so the same reply becomes a different instant on every machine, seven hours
+ * out in `America/Los_Angeles` and an hour out in London for half the year. That it is UTC is not
+ * a guess: caveclient parses the same field with
+ * `datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S.%f").replace(tzinfo=timezone.utc)`.
+ *
+ * The damage is silent and it is not confined to a display. This instant is what
+ * `is_latest_roots` and `roots_binary` are asked *at*, so a skewed one asks the chunkedgraph
+ * about a moment the materialization was never frozen at — and it is folded into the permanent
+ * cache key beside it, so the wrong answer is then kept forever. On a proofread datastack that
+ * makes `Update root IDs` write root ids that do not exist in the pinned materialization, which
+ * is the exact drift it exists to repair.
+ *
+ * An offset already on the string is honoured, so a deployment that starts sending one is not
+ * shifted twice; extra fractional digits are truncated by the parser, which is what CAVE's six
+ * of them need.
+ */
+export function parseCaveTimestamp(stamp: string): number | undefined {
+  const naive = !/(?:Z|[+-]\d{2}:?\d{2})$/.test(stamp)
+  const at = Date.parse(naive ? `${stamp}Z` : stamp)
+  return Number.isFinite(at) ? at : undefined
+}
+
+/**
+ * When a materialization was frozen, in epoch ms, if it is known — the moment a root id has to
+ * have been current at for the annotations keyed on it to mean anything.
+ *
+ * Answers the *instant* rather than the string it arrived as, which is the whole of why the
+ * parse above cannot be got wrong twice: nothing outside this file sees the raw field except
+ * `datasetInfoFor`, which only slices a date out of it for prose.
  *
  * `undefined` until the listing has landed, `peekMaterializations`' contract; the caller that
  * needs it can await `materializationsFor` first, which fills this as a side effect.
  */
-export function versionTimestamp(datastack: string, version: number): string | undefined {
+export function versionFrozenAt(datastack: string, version: number): number | undefined {
   currentServer()
-  return versionInfo.get(datastack)?.find((v) => v.version === version)?.time_stamp
+  const stamp = versionInfo.get(datastack)?.find((v) => v.version === version)?.time_stamp
+  return stamp ? parseCaveTimestamp(stamp) : undefined
 }
 
 /**
@@ -173,7 +204,6 @@ export function usableVersions(versions: readonly VersionInfo[]): VersionInfo[] 
     .filter((v) => v.valid !== false && (v.status ?? 'AVAILABLE') === 'AVAILABLE')
     .sort((a, b) => b.version - a.version)
 }
-
 
 const materializations = new Map<string, number[]>()
 const versionInfo = new Map<string, VersionInfo[]>()

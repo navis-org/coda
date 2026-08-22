@@ -49,7 +49,7 @@ import {
   reportAnnotationsLearned,
 } from './registry'
 import type { AnnotationFetchOptions, AnnotationProvider, AnnotationRef } from './types'
-import { annotationColumn, namedColumns } from './types'
+import { annotationColumns, namedColumns } from './types'
 
 export const SEATABLE_PROVIDER = 'seaTable'
 
@@ -170,7 +170,10 @@ async function request<T>(url: string, token: string, signal?: AbortSignal): Pro
   }
   const text = await response.text()
   if (!response.ok) {
-    throw new SeaTableError(`SeaTable returned ${response.status}: ${explain(text)}`, response.status)
+    throw new SeaTableError(
+      `SeaTable returned ${response.status}: ${explain(text)}`,
+      response.status,
+    )
   }
   return JSON.parse(text) as T
 }
@@ -522,9 +525,12 @@ class SeaTableProvider implements AnnotationProvider {
     if (!table) return tableSchema(column(ID_COLUMN_NAME, 'str'))
     const kept = keptColumns(config, table)
     const byName = new Map(table.columns.map((c) => [c.name, c.type]))
+    // Through the same `annotationColumns` `shapeRows` uses: invariant 3, and the collision it
+    // resolves is exactly the kind that would leave a picker offering a column no table has.
+    const codaNames = annotationColumns(kept)
     return tableSchema(
       column(ID_COLUMN_NAME, 'str'),
-      ...kept.map((name) => column(annotationColumn(name), dtypeFor(byName.get(name) ?? 'text'))),
+      ...kept.map((name, i) => column(codaNames[i]!, dtypeFor(byName.get(name) ?? 'text'))),
     )
   }
 
@@ -614,9 +620,12 @@ export function shapeRows(
 ): TableValue {
   const kept = keptColumns(config, meta)
   const types = new Map(meta.columns.map((c) => [c.name, c.type]))
+  // Coda's names, deduplicated: `cell_type` and `type` in one base map onto one name, and two
+  // columns sharing one array is a ragged table. See `annotationColumns`.
+  const codaNames = annotationColumns(kept)
   const schema = tableSchema(
     column(ID_COLUMN_NAME, 'str'),
-    ...kept.map((name) => column(annotationColumn(name), dtypeFor(types.get(name) ?? 'text'))),
+    ...kept.map((name, i) => column(codaNames[i]!, dtypeFor(types.get(name) ?? 'text'))),
   )
 
   const data: Record<string, ColumnData> = {}
@@ -626,9 +635,9 @@ export function shapeRows(
   // Column array and dtype resolved once. Per cell it was a Map lookup, a `dtypeFor` switch and a
   // string-keyed load — over 58,340 rows and 60 columns, to recompute what `schema.columns`
   // twelve lines above already decided.
-  const targets = kept.map((name) => ({
+  const targets = kept.map((name, i) => ({
     name,
-    into: data[annotationColumn(name)]!,
+    into: data[codaNames[i]!]!,
     dtype: dtypeFor(types.get(name) ?? 'text'),
   }))
   for (const row of rows) {

@@ -224,6 +224,61 @@ describe('shaping SeaTable rows', () => {
     expect(table.data.type).toEqual(['LC4'])
   })
 
+  /*
+   * The rename is not injective, and a base can carry both spellings. Every shaper built its
+   * schema from `annotationColumn` and then seeded `data` from `schema.columns` — so the second
+   * `type` overwrote the first, both targets pointed at the surviving array, every row pushed
+   * into it twice and `makeTable` threw `ragged columns — "neuronId"`: a refusal naming the one
+   * column that was fine, on a fetch somebody had waited twenty seconds for.
+   *
+   * `uniqueName`'s rule instead — the newcomer wins and the incumbent is suffixed — which is what
+   * `joinedColumns`, the wide pivot and `renamedColumns` all already do.
+   *
+   * Note this needs **no `SHAPE_FORMAT` bump**, against the instruction below, and the reason is
+   * that the rule there is "the same reply would now produce a different table". Every input
+   * whose shape changed here previously *threw*, so it was never cached; every input that could
+   * be cached is byte-identical. Bumping would cost a 79 MB re-download to invalidate entries
+   * that are provably unchanged.
+   */
+  it('suffixes a collision rather than throwing about a column that is fine', () => {
+    const both: SeaTableTable = {
+      name: 'info',
+      columns: [
+        { name: 'root_id', type: 'text' },
+        { name: 'cell_type', type: 'text' },
+        { name: 'type', type: 'text' },
+      ],
+    }
+    const table = shapeRows(
+      [{ root_id: '1', cell_type: 'LC4', type: 'interneuron' }],
+      config({ columns: 'cell_type,type' }),
+      both,
+    )
+    expect(table.schema.columns.map((c) => c.name)).toEqual(['neuronId', 'type', 'type_2'])
+    expect(table.data.type).toEqual(['LC4'])
+    expect(table.data.type_2).toEqual(['interneuron'])
+  })
+
+  it('takes the id column’s name before offering it to anything else', () => {
+    // A base whose own column is literally called `neuronId` collides with the one every
+    // provider adds — the same failure by another route, and the reason the id is taken first.
+    const clash: SeaTableTable = {
+      name: 'info',
+      columns: [
+        { name: 'root_id', type: 'text' },
+        { name: 'neuronId', type: 'text' },
+      ],
+    }
+    const table = shapeRows(
+      [{ root_id: '1', neuronId: 'legacy' }],
+      config({ columns: 'neuronId' }),
+      clash,
+    )
+    expect(table.schema.columns.map((c) => c.name)).toEqual(['neuronId', 'neuronId_2'])
+    expect(table.data.neuronId).toEqual(['1'])
+    expect(table.data.neuronId_2).toEqual(['legacy'])
+  })
+
   it('leaves every other column under the name the base gave it', () => {
     // A passthrough is only ever named by a column picker — neuPrint's `PROPERTY_NAMES` makes
     // the same call for `cellBodyFiber`.
@@ -303,6 +358,19 @@ describe('what the CAVE table provider shapes', () => {
     expect(table.data.volume).toEqual([41, 38])
   })
 
+  it('suffixes a collision here too, since one shaper differing is a schema nothing matches', () => {
+    // Both shapers rename through `annotationColumns`, so what `peekColumns` offers a picker and
+    // what a run produces cannot disagree — invariant 3 across the two halves of one provider.
+    const table = wideRows(
+      [{ pt_root_id: '1', cell_type: 'LC4', type: 'interneuron' }],
+      config(),
+      ['cell_type', 'type'],
+    )
+    expect(table.schema.columns.map((c) => c.name)).toEqual(['neuronId', 'type', 'type_2'])
+    expect(table.data.type).toEqual(['LC4'])
+    expect(table.data.type_2).toEqual(['interneuron'])
+  })
+
   it('pivots a long table to one row per neuron, which is not the same act', () => {
     /*
      * The asymmetry worth stating: `wideRows` keeps repeats and this cannot, because many rows
@@ -312,16 +380,38 @@ describe('what the CAVE table provider shapes', () => {
      */
     const table = pivotRows(
       [
-        ['cell_type', [{ pt_root_id: '1', label: 'LC4' }, { pt_root_id: '2', label: 'LC6' }]],
+        [
+          'cell_type',
+          [
+            { pt_root_id: '1', label: 'LC4' },
+            { pt_root_id: '2', label: 'LC6' },
+          ],
+        ],
         ['side', [{ pt_root_id: '1', label: 'left' }]],
       ],
       config({ pivotOn: 'classification_system', valueColumn: 'label' }),
     )
     expect(table.schema.columns.map((c) => c.name)).toEqual(['neuronId', 'type', 'side'])
     expect(table.data.neuronId).toEqual(['1', '2'])
+    expect(table.data.type).toEqual(['LC4', 'LC6'])
     // Neuron 2 has no `side` row: a null rather than a dropped neuron, since the other kind
     // said something about it.
     expect(table.data.side).toEqual(['left', null])
+  })
+
+  it('suffixes two kinds that map onto one name, as the other two shapers do', () => {
+    // Three shapers, one rule: a long table whose `classification_system` carries both spellings
+    // is the pivot's version of the same collision.
+    const table = pivotRows(
+      [
+        ['cell_type', [{ pt_root_id: '1', label: 'LC4' }]],
+        ['type', [{ pt_root_id: '1', label: 'interneuron' }]],
+      ],
+      config({ pivotOn: 'classification_system', valueColumn: 'label' }),
+    )
+    expect(table.schema.columns.map((c) => c.name)).toEqual(['neuronId', 'type', 'type_2'])
+    expect(table.data.type).toEqual(['LC4'])
+    expect(table.data.type_2).toEqual(['interneuron'])
   })
 })
 
@@ -346,10 +436,15 @@ describe('the annotation table cache', () => {
 
   const ref = {
     provider: 'seaTable',
-    config: { host: 'https://h', base: 'main', table: 'info', idColumn: 'root_id', columns: '' },
+    config: {
+      host: 'https://h',
+      base: 'main',
+      table: 'info',
+      idColumn: 'root_id',
+      columns: '',
+    },
   }
-  const built = () =>
-    makeTable(tableSchema(column('neuronId', 'str')), { neuronId: ['1'] })
+  const built = () => makeTable(tableSchema(column('neuronId', 'str')), { neuronId: ['1'] })
 
   it('serves a table it stored, so a base is downloaded once', async () => {
     let reads = 0
@@ -377,7 +472,11 @@ describe('the annotation table cache', () => {
      * sitting in real browsers, and being a *miss* is the whole claim.
      */
     const key = `annotations:${refKey(ref)}`
-    await cacheSet(key, makeTable(tableSchema(column('neuronId', 'str')), { neuronId: ['stale'] }), key)
+    await cacheSet(
+      key,
+      makeTable(tableSchema(column('neuronId', 'str')), { neuronId: ['stale'] }),
+      key,
+    )
 
     let reads = 0
     const table = await cachedAnnotationTable(ref, {}, () => {
@@ -397,7 +496,11 @@ describe('the provider seam', () => {
     const provider = annotationProvider('seaTable')!
     const ref = {
       provider: 'seaTable',
-      config: { ...{ host: HOST, workspace: '5', base: 'main', table: 'info' }, idColumn: 'root_id', columns: 'side' },
+      config: {
+        ...{ host: HOST, workspace: '5', base: 'main', table: 'info' },
+        idColumn: 'root_id',
+        columns: 'side',
+      },
     }
     // Unknown is not empty — the rule `columnSchemaFor` draws, and what stops every picker
     // downstream configuring itself against a schema that is about to change.
@@ -452,7 +555,10 @@ describe('joining a chain', () => {
     })
 
   it('is an outer join, so a neuron only one source knows about survives', () => {
-    const joined = joinAnnotations(t(['1', '2'], 'type', ['a', 'b']), t(['2', '3'], 'side', ['L', 'R']))
+    const joined = joinAnnotations(
+      t(['1', '2'], 'type', ['a', 'b']),
+      t(['2', '3'], 'side', ['L', 'R']),
+    )
     // Two bases routinely cover different populations; an inner join would silently return
     // their intersection, which on real data is a fraction of either.
     expect(joined.data.neuronId).toEqual(['1', '2', '3'])
@@ -515,9 +621,7 @@ describe('routes', () => {
     await listBases(HOST)
     // The origin is encoded whole, so the relay needs no per-deployment rule — and the path
     // survives, which is what lets `dtable-server` calls take the same route.
-    expect(tried[1]).toBe(
-      `/st/${encodeURIComponent(HOST)}/api/v2.1/workspaces/`,
-    )
+    expect(tried[1]).toBe(`/st/${encodeURIComponent(HOST)}/api/v2.1/workspaces/`)
   })
 
   it('remembers the relay, so a proxied session pays one failed preflight and not one per call', async () => {
@@ -535,7 +639,11 @@ describe('routes', () => {
     // route failure — and remembering it would outlive the day the deployment gains CORS.
     vi.stubGlobal('fetch', (url: string) =>
       String(url).startsWith('/st/')
-        ? Promise.resolve({ ok: false, status: 404, text: () => Promise.resolve('') } as Response)
+        ? Promise.resolve({
+            ok: false,
+            status: 404,
+            text: () => Promise.resolve(''),
+          } as Response)
         : Promise.reject(new TypeError('NetworkError')),
     )
     await expect(listBases(HOST)).rejects.toThrow(/404/)
@@ -655,17 +763,17 @@ describe('resolving a workspace', () => {
     })
     const provider = annotationProvider(SEATABLE_PROVIDER)
     await expect(
-      provider?.fetch(
-        { provider: SEATABLE_PROVIDER, config: config({ workspace: '' }) },
-        {},
-      ),
+      provider?.fetch({ provider: SEATABLE_PROVIDER, config: config({ workspace: '' }) }, {}),
     ).rejects.toThrow(/FlyWire \(5\).*Copy \(7\)|Set Workspace/s)
   })
 
   it('never lists at all when the ref names its workspace', async () => {
     const captured = installFetch()
     const provider = annotationProvider(SEATABLE_PROVIDER)
-    await provider?.fetch({ provider: SEATABLE_PROVIDER, config: config({ workspace: '5' }) }, {})
+    await provider?.fetch(
+      { provider: SEATABLE_PROVIDER, config: config({ workspace: '5' }) },
+      {},
+    )
     // A whole round trip, and an account whose `/workspaces/` is forbidden can still open a base
     // it has the id for.
     expect(captured.filter((c) => c.url.endsWith('/api/v2.1/workspaces/'))).toHaveLength(0)
@@ -680,20 +788,31 @@ describe('resolving a workspace', () => {
      */
     const captured = installFetch()
     const provider = annotationProvider(SEATABLE_PROVIDER)
-    await provider?.fetch({ provider: SEATABLE_PROVIDER, config: config({ workspace: '' }) }, {})
+    await provider?.fetch(
+      { provider: SEATABLE_PROVIDER, config: config({ workspace: '' }) },
+      {},
+    )
     const before = captured.filter((c) => c.url.includes('/metadata/')).length
 
     // The peek, on the typed config, now answers from what the run stored.
-    expect(peekRefColumns({ provider: SEATABLE_PROVIDER, config: config({ workspace: '' }) })).toBeTruthy()
+    expect(
+      peekRefColumns({ provider: SEATABLE_PROVIDER, config: config({ workspace: '' }) }),
+    ).toBeTruthy()
     expect(captured.filter((c) => c.url.includes('/metadata/')).length).toBe(before)
   })
 
   it('caches on the resolved base, so two spellings are one download', async () => {
     const captured = installFetch()
     const provider = annotationProvider(SEATABLE_PROVIDER)
-    await provider?.fetch({ provider: SEATABLE_PROVIDER, config: config({ workspace: '' }) }, {})
+    await provider?.fetch(
+      { provider: SEATABLE_PROVIDER, config: config({ workspace: '' }) },
+      {},
+    )
     const reads = captured.filter((c) => c.url.includes('/rows/')).length
-    await provider?.fetch({ provider: SEATABLE_PROVIDER, config: config({ workspace: '5' }) }, {})
+    await provider?.fetch(
+      { provider: SEATABLE_PROVIDER, config: config({ workspace: '5' }) },
+      {},
+    )
     /*
      * FlyWire's `main.info` is 58,340 rows over 60 columns at ~79 MB ungzipped, so keying on
      * what somebody typed rather than on what it means is a second twenty-second download and a

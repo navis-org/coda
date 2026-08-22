@@ -256,6 +256,28 @@ export function columnNames(schema: TableSchema | undefined): string[] {
   return schema?.columns.map((c) => c.name) ?? []
 }
 
+/**
+ * `name`, or the first free `name_n`, marking it taken.
+ *
+ * The one statement of Coda's collision rule — the newcomer wins the name and the incumbent is
+ * suffixed rather than overwritten — which `joinedColumns`, the wide pivot, `renamedColumns`,
+ * `combineLayout`, the CSV header and both annotation providers all make.
+ *
+ * It sits in `src/core` for `ID_COLUMN_NAME`'s reason: this is the only layer every consumer
+ * reaches. It had been written by hand in `nodes/lib/tableOps.ts` and again in `data/csv.ts`,
+ * and `src/data` may not import `src/nodes` (invariant 1), so the annotation providers were
+ * about to make it three. The two copies had already parted company on the case that matters:
+ * counting occurrences, as the CSV one did, turns `a, a, a_2` into `a, a_2, a_2` — a collision
+ * produced by the very function that exists to prevent one. Probing for the first *free* name
+ * cannot do that.
+ */
+export function uniqueName(taken: Set<string>, name: string): string {
+  let out = name
+  for (let n = 2; taken.has(out); n++) out = `${name}_${n}`
+  taken.add(out)
+  return out
+}
+
 /** Columns restricted to a set of dtypes — powers dtype-aware column pickers. */
 export function columnsOfType(
   schema: TableSchema | undefined,

@@ -348,6 +348,23 @@ describe('finding neurons', () => {
     expect((await source().findNeurons({ datasetId: DATASET, neuronIds: [] })).length).toBe(0)
   })
 
+  /*
+   * `Min size` is a plain number on the Find Neurons card whatever the dataset — unlike `Status`
+   * and `In ROI`, whose pickers are fed from what the dataset reports. So it reaches a CAVE
+   * source configured, and CAVE has no `size` column: the filter used to read `index.data.size`
+   * through `Number(undefined ?? 0)`, compare 0 against the threshold and drop **every** row.
+   * A node answering "0 neurons" for a datastack full of them, with nothing saying why.
+   */
+  it('refuses a size filter it has nothing to answer with, rather than emptying the result', async () => {
+    installFetch()
+    const cave = source()
+    await expect(cave.findNeurons({ datasetId: DATASET, minSize: 1000 })).rejects.toThrow(
+      /Min size/,
+    )
+    // And an unset one is not a filter at all — the node sends `undefined` for its default 0.
+    expect((await cave.findNeurons({ datasetId: DATASET })).length).toBe(4)
+  })
+
   it('applies the limit and downloads the index only once across queries', async () => {
     const captured = installFetch()
     const cave = source()

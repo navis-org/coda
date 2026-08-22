@@ -20,7 +20,7 @@
 import { cacheGet, cacheSet } from '../cache'
 import type { CaveRequestOptions } from './client'
 import { cavePostBinary, cavePostRaw } from './client'
-import { datastackRecord, materializationsFor, versionTimestamp } from './datastack'
+import { datastackRecord, materializationsFor, versionFrozenAt } from './datastack'
 import type { GrapheneSource } from './graphene'
 import { parseGrapheneSource } from './graphene'
 import { channel } from '../channel'
@@ -191,7 +191,7 @@ async function grapheneFor(
 /**
  * When a materialization was frozen, in epoch ms.
  *
- * Awaits the listing rather than peeking, which fills `versionTimestamp` as a side effect — the
+ * Awaits the listing rather than peeking, which fills `versionFrozenAt` as a side effect — the
  * memo means this is free once any dataset node on the datastack has resolved.
  */
 async function frozenAt(
@@ -200,10 +200,7 @@ async function frozenAt(
   options: CaveRequestOptions,
 ): Promise<number | undefined> {
   await materializationsFor(datastack, options)
-  const stamp = versionTimestamp(datastack, version)
-  if (!stamp) return undefined
-  const at = Date.parse(stamp)
-  return Number.isFinite(at) ? at : undefined
+  return versionFrozenAt(datastack, version)
 }
 
 /**

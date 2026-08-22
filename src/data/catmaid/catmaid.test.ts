@@ -467,6 +467,27 @@ describe('what a CATMAID dataset says about itself', () => {
     expect(filtered.length).toBe(all.length)
   })
 
+  /*
+   * The opposite call to `statuses`, and the difference is that somebody chose it. `volumeList`
+   * fills `DatasetInfo.rois` with eighty real neuropils so the ROIs viewer can draw them — which
+   * also populates Find Neurons' **In ROI** — and `findNeurons` had no way to honour it. Ignoring
+   * a region somebody picked returns a result that is too *large* and looks exactly like a
+   * correct one; `Min size` is the same, since CATMAID measures a neuron in nodes and cable
+   * rather than voxels.
+   */
+  it('refuses a region or size filter rather than quietly not applying it', async () => {
+    setInstances([{ server: 'catmaid.example.org', token: 't' }])
+    stubFetch(defaultRoutes)
+    await expect(source().findNeurons({ datasetId: '1', roi: 'AL_R' })).rejects.toThrow(
+      /In ROI/,
+    )
+    await expect(source().findNeurons({ datasetId: '1', minSize: 1000 })).rejects.toThrow(
+      /Min size/,
+    )
+    // Neither is sent unless it was set: both default to a value the node drops.
+    expect((await source().findNeurons({ datasetId: '1' })).length).toBeGreaterThan(0)
+  })
+
   it('refuses a dataset id that is not a project number', async () => {
     stubFetch(defaultRoutes)
     await expect(source().findNeurons({ datasetId: 'hemibrain' })).rejects.toThrow(/project/)

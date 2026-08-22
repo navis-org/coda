@@ -35,7 +35,7 @@ import {
   reportAnnotationsLearned,
 } from './registry'
 import type { AnnotationFetchOptions, AnnotationProvider, AnnotationRef } from './types'
-import { annotationColumn, namedColumns } from './types'
+import { annotationColumns, namedColumns } from './types'
 
 /** A short annotation set reads as neurons having no labels, rather than as a truncated read. */
 const INCOMPLETE = 'these annotations would be incomplete'
@@ -75,7 +75,6 @@ function kindKey(config: CaveTableConfig): string {
   return `${config.dataset}|${config.table}|${config.pivotOn}`
 }
 
-
 class CaveTableProvider implements AnnotationProvider {
   readonly id = CAVE_TABLE_PROVIDER
   readonly label = 'CAVE table'
@@ -99,9 +98,11 @@ class CaveTableProvider implements AnnotationProvider {
       // Unknown rather than a guess: a schema this picker cannot see is not a schema without
       // columns in it.
       if (named.length === 0) return undefined
+      // Through the same `annotationColumns` the shapers use — invariant 3, and here the
+      // collision it resolves would otherwise offer a picker a column no table has.
       return tableSchema(
         column(ID_COLUMN_NAME, 'str'),
-        ...named.map((n) => column(annotationColumn(n), 'str')),
+        ...annotationColumns(named).map((n) => column(n, 'str')),
       )
     }
 
@@ -109,7 +110,7 @@ class CaveTableProvider implements AnnotationProvider {
     if (!kinds) return undefined
     return tableSchema(
       column(ID_COLUMN_NAME, 'str'),
-      ...kinds.map((kind) => column(annotationColumn(kind), 'str')),
+      ...annotationColumns(kinds).map((n) => column(n, 'str')),
     )
   }
 
@@ -200,7 +201,6 @@ class CaveTableProvider implements AnnotationProvider {
   }
 }
 
-
 /** Long form to one row per neuron, a column per kind. */
 export function pivotRows(
   perKind: ReadonlyArray<readonly [string, CaveRow[]]>,
@@ -223,14 +223,17 @@ export function pivotRows(
   }
 
   const kinds = perKind.map(([kind]) => kind)
+  // Coda's names, deduplicated: a table carrying both a `cell_type` kind and a `type` one maps
+  // two of them onto a single column. See `annotationColumns`.
+  const codaNames = annotationColumns(kinds)
   const schema = tableSchema(
     column(ID_COLUMN_NAME, 'str'),
-    ...kinds.map((kind) => column(annotationColumn(kind), 'str')),
+    ...codaNames.map((name) => column(name, 'str')),
   )
   const data: Record<string, ColumnData> = {}
   for (const col of schema.columns) data[col.name] = []
   const ids = data[ID_COLUMN_NAME]!
-  const targets = kinds.map((kind) => ({ kind, into: data[annotationColumn(kind)]! }))
+  const targets = kinds.map((kind, i) => ({ kind, into: data[codaNames[i]!]! }))
   // The Map's own insertion order *is* the order — an `order` array beside it was a second copy
   // of it, and re-looking-up each record by id recovered something the iteration already yields.
   for (const [id, record] of byId) {
@@ -262,15 +265,18 @@ export function wideRows(
   }
 
   const dtypes = dtypesOf(rows, columns)
+  // Coda's names, deduplicated: a table carrying both `cell_type` and `type` maps two of its
+  // columns onto one. See `annotationColumns`.
+  const codaNames = annotationColumns(columns)
   const schema = tableSchema(
     column(ID_COLUMN_NAME, 'str'),
-    ...columns.map((name) => column(annotationColumn(name), dtypes.get(name) ?? 'str')),
+    ...columns.map((name, i) => column(codaNames[i]!, dtypes.get(name) ?? 'str')),
   )
   const data: Record<string, ColumnData> = {}
   for (const col of schema.columns) data[col.name] = []
 
   const ids = data[ID_COLUMN_NAME]!
-  const targets = columns.map((name) => ({ name, into: data[annotationColumn(name)]! }))
+  const targets = columns.map((name, i) => ({ name, into: data[codaNames[i]!]! }))
   for (const row of rows) {
     const raw = row[config.idColumn]
     if (raw === null || raw === undefined) continue

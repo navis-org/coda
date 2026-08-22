@@ -106,11 +106,18 @@ export function requestExportWarnings(graph: CodaGraph): void {
       continue
     }
     running.add(language)
-    void compute(graph, language)
+    // The set is passed in rather than read back from the module: `running` is replaced whole
+    // when a newer graph arrives, and a walk that outlived its graph must clear its own entry
+    // rather than the current graph's. See `compute`.
+    void compute(graph, language, running)
   }
 }
 
-async function compute(graph: CodaGraph, language: ExportLanguage): Promise<void> {
+async function compute(
+  graph: CodaGraph,
+  language: ExportLanguage,
+  owner: Set<ExportLanguage>,
+): Promise<void> {
   let todos: TodoStep[] = []
   try {
     todos = await runWalk(graph, language)
@@ -119,7 +126,14 @@ async function compute(graph: CodaGraph, language: ExportLanguage): Promise<void
     // produce it must not surface as an error, and pressing the export itself will report
     // whatever went wrong in the place somebody can act on it.
   }
-  running.delete(language)
+  /*
+   * Cleared from the set this walk was *started* under, never from whatever `running` now points
+   * at. A newer graph replaces the set wholesale, so deleting from the module binding here would
+   * clear the **current** graph's in-flight guard — after which the next `requestExportWarnings`
+   * sees no answer and nothing running, and starts a second exporter walk for a graph already
+   * being walked. Two lazily-imported exporters over the same graph, for one surface opening.
+   */
+  owner.delete(language)
   // A newer graph may have arrived while the exporter was loading; it owns the cache now.
   if (entry?.graph !== graph) return
   entry[language] = describe(todos, language)
@@ -171,8 +185,10 @@ function describe(todos: readonly TodoStep[], language: ExportLanguage): ExportW
 
   const blocked = roots.length > 0 ? todos.length - roots.length : 0
   const cascade =
-    blocked > 0 ? `, so ${named.length === 1 ? 'it' : 'they'} and ${steps(blocked)} after ` +
-      `${named.length === 1 ? 'it' : 'them'} will be left as TODO comments` : ''
+    blocked > 0
+      ? `, so ${named.length === 1 ? 'it' : 'they'} and ${steps(blocked)} after ` +
+        `${named.length === 1 ? 'it' : 'them'} will be left as TODO comments`
+      : ''
 
   return {
     count: todos.length,

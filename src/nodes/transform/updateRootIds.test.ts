@@ -37,7 +37,13 @@ interface Call {
 }
 
 /** `OLD` has moved on; `KEPT` has not. The supervoxel resolves to `NEW`. */
-function installFetch(): Call[] {
+/**
+ * `stale`/`fresh` are parameters because one case needs ids narrow enough to survive a double:
+ * `idText` refuses a number too wide to be exact, so an eighteen-digit id in a *numeric* column
+ * is correctly skipped — which is the right behaviour and the wrong fixture for a test about
+ * which dtype the replacement takes.
+ */
+function installFetch(stale: string = OLD, fresh: string = NEW): Call[] {
   const calls: Call[] = []
   vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
     const text = String(url)
@@ -61,12 +67,12 @@ function installFetch(): Call[] {
     if (text.includes('is_latest_roots')) {
       const ids = /\[(.*)\]/.exec(String(init?.body ?? ''))?.[1] ?? ''
       const list = ids ? ids.split(',') : []
-      return json({ is_latest: list.map((id) => id !== OLD) })
+      return json({ is_latest: list.map((id) => id !== stale) })
     }
     if (text.includes('roots_binary')) {
       // Raw uint64 out, as `roots_binary` answers — one root per supervoxel sent.
       const sent = new BigUint64Array(init?.body as ArrayBuffer)
-      const out = BigUint64Array.from(sent, () => BigInt(NEW))
+      const out = BigUint64Array.from(sent, () => BigInt(fresh))
       return Promise.resolve({
         ok: true,
         status: 200,
@@ -147,6 +153,38 @@ describe('the repair', () => {
     expect(out.data.type).toEqual(['LC4', 'LC6'])
     expect(out.kind).toBe('neurons')
     expect(out.schema.columns.map((c) => c.name)).toEqual(['neuronId', 'supervoxel_id', 'type'])
+  })
+
+  /*
+   * The replacement keeps the column's **declared** storage, read off the schema rather than off
+   * row zero. `typeof ids[0] === 'number'` decides the whole column from one value, so a table
+   * whose first row has no id — an annotation base with a blank leading row, which is ordinary —
+   * wrote strings into an `i64` column: schema and values disagreeing (invariant 3), left that
+   * way by the node whose whole job is repair, and silent until something downstream sorted or
+   * compared them.
+   */
+  it('keeps the id column’s declared storage, whatever the first row happens to hold', async () => {
+    // Narrow ids, so `idText` does not correctly refuse them for being inexact as doubles — this
+    // is about which dtype the replacement takes, not about invariant 8.
+    installFetch('527536', '527999')
+    const numeric = makeTable(
+      tableSchema(
+        column('neuronId', 'i64'),
+        column('supervoxel_id', 'str'),
+        column('type', 'str'),
+      ),
+      {
+        // A null first row is what made row zero the wrong place to ask.
+        neuronId: [null, 527536, 812345],
+        supervoxel_id: [null, SV, '80000000000000002'],
+        type: ['?', 'LC4', 'LC6'],
+      },
+      'neurons',
+    )
+    const out = (await run(numeric)).out as TableValue
+    expect(out.data.neuronId).toEqual([null, 527999, 812345])
+    // Numbers, not the strings `roots_binary` answers in — the schema still says `i64`.
+    expect(out.data.neuronId?.map((c) => typeof c)).toEqual(['object', 'number', 'number'])
   })
 
   it('sends the supervoxels as raw uint64, and only the ones that moved', async () => {

@@ -39,7 +39,7 @@ import {
   tableFromRows,
 } from '../../core/values'
 import { mapWithConcurrency } from '../concurrency'
-import { compileLabelMatch, compileRegex } from '../neuronFilter'
+import { compileLabelMatch, compileRegex, refuseUnfilterable } from '../neuronFilter'
 import { loadCachedTable, neuronIndexKey } from '../neuronIndex'
 import type { NeuronIndexRequest } from '../neuronIndex'
 import type {
@@ -457,12 +457,21 @@ export class CatmaidSource implements DataSource {
    * carries none and the picker offers only `Any` — but a node's stored default survives into the
    * request regardless, and a source that filtered on it would drop every row for a value nobody
    * chose. That failure is live on CAVE today; it is not repeated here.
+   *
+   * **`req.roi` is refused rather than ignored**, and the difference is that somebody chose it.
+   * `volumeList` fills `DatasetInfo.rois` with eighty real neuropils so the ROIs viewer can draw
+   * them, which also populates Find Neurons' **In ROI** — and answering "which skeletons are in
+   * this volume" needs a spatial query CATMAID has no bulk endpoint for. Silently ignoring it
+   * returns a result that is too *large* and looks exactly like a correct one. `minSize` goes the
+   * same way: it means a voxel count, and CATMAID measures a neuron in nodes and cable.
    */
   async findNeurons(req: FindNeuronsRequest): Promise<TableValue> {
     const index = await this.neuronIndex({
       datasetId: req.datasetId,
       ...(req.signal ? { signal: req.signal } : {}),
     })
+
+    refuseUnfilterable(req, { size: false, roi: false }, 'CATMAID')
 
     const typeRe = compileRegex(req.typePattern, 'type')
     const instanceRe = compileRegex(req.instancePattern, 'instance')

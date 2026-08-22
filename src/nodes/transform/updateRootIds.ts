@@ -23,7 +23,7 @@
  */
 
 import { registerNode } from '../../core/registry'
-import { T, isTabular, schemaOf } from '../../core/types'
+import { T, findColumn, isNumericDType, isTabular, schemaOf } from '../../core/types'
 import { idText } from '../../core/ids'
 import type { CellValue, ColumnData } from '../../core/values'
 import { isTableValue, makeTable } from '../../core/values'
@@ -164,7 +164,14 @@ export const updateRootIdsNode = registerNode({
     const roots = await rootsForSupervoxels(datastack, version, needed, options)
 
     const updated: ColumnData = new Array(table.length)
-    const numeric = typeof ids[0] === 'number'
+    /*
+     * The column's *declared* storage, not row zero's. Reading the first cell decides the whole
+     * column from one value, and a table whose first row has no id — an annotation base with a
+     * blank leading row, which is ordinary — writes strings into an `i64` column: schema and
+     * values disagreeing, which is invariant 3 broken silently by a repair node. The schema is
+     * right there and says it for every row at once.
+     */
+    const numeric = isNumericDType(findColumn(table.schema, idColumn)?.dtype ?? 'str')
     for (let i = 0; i < table.length; i++) {
       const original = ids[i] ?? null
       const id = idText(original)

@@ -59,7 +59,7 @@ import type {
 import { reportSourceLearned } from '../source'
 import type { NeuronIndexRequest } from '../neuronIndex'
 import { loadCachedTable, neuronIndexKey } from '../neuronIndex'
-import { compileLabelMatch, compileRegex } from '../neuronFilter'
+import { compileLabelMatch, compileRegex, refuseUnfilterable } from '../neuronFilter'
 import { mapWithConcurrency } from '../concurrency'
 import type { GrapheneMeshSource } from './meshes'
 import {
@@ -80,7 +80,13 @@ import {
   versionsMetadata,
 } from './api'
 import { getServer } from './credentials'
-import { caveServerFor, datastackRecord, l2SourceFor, peekL2Cache, usableVersions } from './datastack'
+import {
+  caveServerFor,
+  datastackRecord,
+  l2SourceFor,
+  peekL2Cache,
+  usableVersions,
+} from './datastack'
 import { codaColumn, defaultSchemas, neuronSchemaFor, schemasFor } from './schema'
 import { withAnnotations } from '../annotations/schema'
 import { MAX_L2_SKELETON_NEURONS, readL2Skeletons } from './l2'
@@ -479,7 +485,16 @@ export class CaveSource implements DataSource {
     }
 
     req.onProgress?.(0.9, 'building index')
-    return this.finish(spec, version, labelIndex(dedupedIds(neuronRows.map((row) => row[neurons.idColumn])), annotations, schema), req)
+    return this.finish(
+      spec,
+      version,
+      labelIndex(
+        dedupedIds(neuronRows.map((row) => row[neurons.idColumn])),
+        annotations,
+        schema,
+      ),
+      req,
+    )
   }
 
   /**
@@ -603,13 +618,15 @@ export class CaveSource implements DataSource {
     const statuses = req.statuses?.length ? new Set(req.statuses) : undefined
 
     /*
-     * A filter naming a column this dataset does not publish matches nothing, which is Cypher's
-     * null rule and `compileLabelMatch`'s. A region filter is the whole-query case of that — CAVE
-     * publishes no regions at all — so it is decided once rather than per row. Neither is
-     * reachable from the UI, since both pickers are populated from what the dataset reports; this
-     * is what a graph saved against another backend meets.
+     * Two filters a CAVE datastack has nothing to answer with, refused before a row is read.
+     *
+     * `roi` is unreachable from the UI here — the picker is fed from `DatasetInfo.rois`, which is
+     * empty — so this is what a graph saved against another backend meets. `minSize` is not:
+     * **Min size** is a plain number on the card whatever the dataset, and it used to be applied
+     * per row against `index.data.size`, a column no CAVE index has. `Number(undefined ?? 0)` is
+     * 0, so every neuron failed and the node answered nothing at all.
      */
-    if (req.roi) return selectRows(index, [])
+    refuseUnfilterable(req, { size: false, roi: false }, 'This CAVE datastack')
 
     /*
      * Columns hoisted, and a row record built only where one is genuinely needed. Every filter
@@ -620,7 +637,6 @@ export class CaveSource implements DataSource {
     const types = index.data.type
     const instances = index.data.instance
     const statusValues = index.data.status
-    const sizes = index.data.size
 
     const matched: number[] = []
     for (let i = 0; i < index.length; i++) {
@@ -628,7 +644,6 @@ export class CaveSource implements DataSource {
       if (typeRe && !typeRe.test(String(types?.[i] ?? ''))) continue
       if (instanceRe && !instanceRe.test(String(instances?.[i] ?? ''))) continue
       if (statuses && !statuses.has(String(statusValues?.[i] ?? ''))) continue
-      if (req.minSize && Number(sizes?.[i] ?? 0) < req.minSize) continue
       if (labelTest && !labelTest(getRow(index, i))) continue
       matched.push(i)
     }
@@ -883,14 +898,19 @@ export class CaveSource implements DataSource {
      * `decimateMesh` has a continuous knob.
      */
     const inFlight = Math.min(MESH_CONCURRENCY, req.neuronIds.length)
-    const grid = decimateGridFor(req.triangleBudget ?? DEFAULT_TRIANGLE_BUDGET, req.neuronIds.length)
+    const grid = decimateGridFor(
+      req.triangleBudget ?? DEFAULT_TRIANGLE_BUDGET,
+      req.neuronIds.length,
+    )
     const fragmentLimit = fragmentConcurrencyFor(inFlight)
 
     let done = 0
     const raw = await mapWithConcurrency(req.neuronIds, MESH_CONCURRENCY, async (neuronId) => {
       const mesh = await readGrapheneMesh(source, neuronId, grid, fragmentLimit, options)
       req.onProgress?.(++done / req.neuronIds.length, `${done}/${req.neuronIds.length} meshes`)
-      return mesh ? { id: neuronId, positions: mesh.positions, indices: mesh.indices } : undefined
+      return mesh
+        ? { id: neuronId, positions: mesh.positions, indices: mesh.indices }
+        : undefined
     })
 
     // One list carrying its own id, rather than a second list of ids zipped by index — the shape
@@ -969,7 +989,6 @@ export class CaveSource implements DataSource {
       // The cache publishes `rep_coord_nm`, so no conversion happens anywhere.
       units: 'nm',
     }
-
   }
 
   /**
@@ -1118,9 +1137,11 @@ export class CaveSource implements DataSource {
    * turn. Building a hundred thousand entries six times over to get the same answer is the
    * `searchIndexFor`/`statsFor` case exactly.
    */
-  private async typeLookup(
-    req: { datasetId: string; annotations?: DatasetAnnotations; signal?: AbortSignal },
-  ): Promise<Map<string, string>> {
+  private async typeLookup(req: {
+    datasetId: string
+    annotations?: DatasetAnnotations
+    signal?: AbortSignal
+  }): Promise<Map<string, string>> {
     const index = await this.neuronIndex({
       datasetId: req.datasetId,
       ...(req.annotations ? { annotations: req.annotations } : {}),
@@ -1200,8 +1221,6 @@ function dedupedIds(cells: Iterable<CellValue | undefined>): string[] {
   }
   return order
 }
-
-
 
 /**
  * The built-in path's table: the datastack's own labels, by root id.
@@ -1422,7 +1441,3 @@ function datasetInfoFor(
     ...(viewerSite ? { viewerSite } : {}),
   }
 }
-
-
-
-

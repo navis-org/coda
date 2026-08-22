@@ -20,7 +20,9 @@
  * which is what keeps `CaveSource` free of the word "SeaTable".
  */
 
+import { ID_COLUMN_NAME } from '../../core/ids'
 import type { TableSchema } from '../../core/types'
+import { uniqueName } from '../../core/types'
 import type { TableValue } from '../../core/values'
 
 /**
@@ -124,6 +126,29 @@ const CODA_NAMES: Record<string, string> = {
 /** What Coda calls an annotation column. Identity for everything but the cell type. */
 export function annotationColumn(name: string): string {
   return CODA_NAMES[name] ?? name
+}
+
+/**
+ * A base's column names as Coda's, in order, with a collision suffixed.
+ *
+ * The rename above is not injective, and that is not hypothetical: a base carrying **both**
+ * `cell_type` and `type` maps two of its columns onto one name. Each shaper then built a schema
+ * with the name twice, seeded `data` from `schema.columns` so the second entry overwrote the
+ * first, and pointed both targets at the surviving array — so every row pushed into it twice and
+ * `makeTable` threw `ragged columns`. A base with `celltype` beside `cell_type` does the same,
+ * and so does one whose own column is literally called `neuronId`, which is why the id is taken
+ * before anything else is offered a name.
+ *
+ * A throw is at least loud, but it names the *id* column — the one that is fine — and it lands
+ * on a fetch somebody has waited twenty seconds for. `uniqueName` is the rule the rest of the
+ * tree already applies to exactly this: the newcomer wins and the incumbent is suffixed.
+ *
+ * One function because three shapers need it — `shapeRows`, `wideRows` and `pivotRows` — and
+ * they must not disagree about what a base's columns are called.
+ */
+export function annotationColumns(names: readonly string[]): string[] {
+  const taken = new Set<string>([ID_COLUMN_NAME])
+  return names.map((name) => uniqueName(taken, annotationColumn(name)))
 }
 
 /**

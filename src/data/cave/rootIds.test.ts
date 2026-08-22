@@ -13,12 +13,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { resetCache } from '../cache'
 import { resetCredentials, setToken } from './credentials'
-import { resetDatastackRecords } from './datastack'
+import { parseCaveTimestamp, resetDatastackRecords } from './datastack'
 import { peekRootCheck, resetRootChecks, startRootCheck, subscribeRootCheck } from './rootIds'
 
 const DATASTACK = 'flywire_fafb_public'
 const DATASET = `${DATASTACK}:783`
+/** Zone-less, six fractional digits — the shape CAVE's `/metadata` actually returns. */
 const STAMP = '2023-08-29T00:00:00.000000'
+/** The same instant read as UTC, which is what CAVE means by it. Written out, not re-derived. */
+const STAMP_EPOCH_SECONDS = 1_693_267_200
 
 interface Call {
   url: string
@@ -56,7 +59,11 @@ function installFetch(stale: string[] = [], overrides: Record<string, unknown> =
       const list = ids ? ids.split(',') : []
       return answer({ is_latest: list.map((id) => !stale.includes(id)) })
     }
-    return Promise.resolve({ ok: false, status: 404, text: () => Promise.resolve('{}') } as Response)
+    return Promise.resolve({
+      ok: false,
+      status: 404,
+      text: () => Promise.resolve('{}'),
+    } as Response)
   })
   return calls
 }
@@ -99,7 +106,11 @@ describe('what it finds', () => {
   it('names the ids that were not current, and counts them', async () => {
     installFetch(['720575940628857211'])
     const wait = landed()
-    startRootCheck(DATASET, 'chain', ['720575940628857210', '720575940628857211', '720575940628857212'])
+    startRootCheck(DATASET, 'chain', [
+      '720575940628857210',
+      '720575940628857211',
+      '720575940628857212',
+    ])
     await wait
 
     const check = peekRootCheck(DATASET)
@@ -123,8 +134,46 @@ describe('what it finds', () => {
     const post = calls.find((c) => c.url.includes('is_latest_roots'))!
     expect(post.body).toBe('{"node_ids":[720575940628857210]}')
     expect(post.body).not.toContain('"720575940628857210"')
-    // The materialization's own instant, in epoch seconds, which is what the answer is about.
-    expect(post.url).toContain(`timestamp=${Date.parse(STAMP) / 1000}`)
+    /*
+     * The materialization's own instant, in epoch seconds, which is what the answer is about —
+     * and written out rather than re-derived. This assertion used to read
+     * `Date.parse(STAMP) / 1000`, i.e. the same expression the code used, so it agreed with any
+     * answer that expression gave: on a machine in `Europe/London` in August that is an hour
+     * early, and in `America/Los_Angeles` seven hours. See `parseCaveTimestamp`.
+     */
+    expect(post.url).toContain(`timestamp=${STAMP_EPOCH_SECONDS}`)
+  })
+})
+
+/**
+ * CAVE writes an instant with no zone on it and means UTC; `Date.parse` reads that as *local*.
+ *
+ * Worth its own case because the damage is invisible from either end: the instant goes into the
+ * chunkedgraph query **and** into the permanent cache key beside it, so a skewed one asks about a
+ * moment the materialization was never frozen at and then keeps the answer forever. That
+ * caveclient means UTC is not inferred — it parses the same field with
+ * `strptime(...).replace(tzinfo=timezone.utc)`.
+ */
+describe('the instant a materialization was frozen', () => {
+  it('reads a zone-less stamp as UTC, not as local time', () => {
+    expect(parseCaveTimestamp(STAMP)).toBe(STAMP_EPOCH_SECONDS * 1000)
+    // The three spellings of one instant must agree. A naive stamp read as local time agrees
+    // with the other two only on a machine that happens to be running in UTC.
+    expect(parseCaveTimestamp(`${STAMP}Z`)).toBe(STAMP_EPOCH_SECONDS * 1000)
+    expect(parseCaveTimestamp('2023-08-29T02:00:00.000000+02:00')).toBe(
+      STAMP_EPOCH_SECONDS * 1000,
+    )
+  })
+
+  it('keeps an offset the deployment does send, rather than shifting it twice', () => {
+    // Appending `Z` unconditionally would make `+02:00` parse as UTC and lose two hours.
+    expect(parseCaveTimestamp('2023-08-29T00:00:00+00:00')).toBe(STAMP_EPOCH_SECONDS * 1000)
+    expect(parseCaveTimestamp('2023-08-29T00:00:00+0000')).toBe(STAMP_EPOCH_SECONDS * 1000)
+  })
+
+  it('answers undefined for a stamp it cannot read, rather than NaN', () => {
+    // `NaN` would reach the query string as `timestamp=NaN` and the cache key as `|NaN`.
+    expect(parseCaveTimestamp('not a date')).toBeUndefined()
   })
 })
 
@@ -268,7 +317,11 @@ describe('what keeps it cheap', () => {
 
     resetRootChecks()
     wait = landed()
-    startRootCheck(DATASET, 'chain', ['720575940628857210', '720575940628857211', '720575940628857299'])
+    startRootCheck(DATASET, 'chain', [
+      '720575940628857210',
+      '720575940628857211',
+      '720575940628857299',
+    ])
     await wait
 
     const posts = calls.filter((c) => c.url.includes('is_latest_roots'))
@@ -282,7 +335,11 @@ describe('what keeps it cheap', () => {
     // Measured at 1,089 neurons on FlyTable's `main.info`, one of them 104 times over.
     const calls = installFetch()
     const wait = landed()
-    startRootCheck(DATASET, 'chain', ['720575940628857210', '720575940628857210', '720575940628857210'])
+    startRootCheck(DATASET, 'chain', [
+      '720575940628857210',
+      '720575940628857210',
+      '720575940628857210',
+    ])
     await wait
     expect(calls.find((c) => c.url.includes('is_latest_roots'))!.body).toBe(
       '{"node_ids":[720575940628857210]}',
