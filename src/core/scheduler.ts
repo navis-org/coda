@@ -23,8 +23,8 @@ import type { EvalContext, NodeDefinition, ParamValues } from './node'
 import { findParam, resolveColumn, resolveColumns } from './node'
 import { getNodeDef } from './registry'
 import type { CodaType } from './types'
-import { datasetRef } from './types'
 import type { Value } from './values'
+import { datasetIdentity } from './values'
 import type { DataSource } from '../data/source'
 import { errorMessage } from './errors'
 
@@ -363,9 +363,8 @@ export class Scheduler {
          */
         if (port.reference) {
           const type = inference.nodes[nodeId]?.inputs[port.id]
-          const value = referenceValue(type)
-          if (value) inputs[port.id] = value
-          inputKeys[port.id] = `ref:${hashValue(type ?? null)}`
+          inputs[port.id] = datasetIdentity(type)
+          inputKeys[port.id] = referenceKey(type)
           continue
         }
         if (!available.has(edge.source)) {
@@ -504,7 +503,7 @@ export class Scheduler {
          * is right, because this node never sees them.
          */
         if (edge && port.reference) {
-          upstream.push([port.id, `ref:${hashValue(inference.nodes[nodeId]?.inputs[port.id] ?? null)}`])
+          upstream.push([port.id, referenceKey(inputTypes[port.id])])
           continue
         }
         upstream.push([
@@ -594,28 +593,6 @@ export class Scheduler {
 }
 
 /**
- * The value a `reference` port hands to `evaluate`: an identity, with no data behind it.
- *
- * Built from the inferred type rather than read from a run, because the node being referenced may
- * be *downstream* and may never have run — which is the arrangement references exist to allow.
- * Only a dataset today, and deliberately so: synthesising a value from a type is defensible
- * exactly because a dataset's identity *is* its type, and there is no second kind asking.
- *
- * No `annotations`, and that absence is correct rather than a limitation — a node reading a
- * reference is usually the one about to supply them.
- */
-function referenceValue(type: CodaType | undefined): Value | undefined {
-  const ref = datasetRef(type)
-  if (!ref?.datasetId || !ref.sourceId) return undefined
-  return {
-    kind: 'dataset',
-    sourceId: ref.sourceId,
-    datasetId: ref.datasetId,
-    label: ref.datasetId,
-  }
-}
-
-/**
  * How one port's upstream is named in a provenance key.
  *
  * One spelling, because two consumers depend on it meaning the same thing: `desiredKeys` folds
@@ -625,6 +602,22 @@ function referenceValue(type: CodaType | undefined): Value | undefined {
  */
 function upstreamKey(keys: Map<string, string>, source: string, handle: string): string {
   return `${keys.get(source) ?? 'unresolved'}:${handle}`
+}
+
+/**
+ * How a `reference` port's upstream is named — the resolved *type*, not the source node's key.
+ *
+ * It has to be the type: the referenced node is excluded from the order, so its key may not be
+ * computed when this is read, and `keys.get` would answer `'unresolved'` forever. It is also the
+ * better key, since a dataset's identity is all a reference reads.
+ *
+ * One spelling, for `upstreamKey`'s reason and in the same two consumers — `desiredKeys` folds it
+ * into the hash that decides whether a node re-runs, and `ctx.inputKey` hands it to the node as
+ * the identity of what arrived. Written out twice, they drift into a node that either re-runs
+ * forever or never invalidates, with nothing type-checking the pair.
+ */
+function referenceKey(type: CodaType | undefined): string {
+  return `ref:${hashValue(type ?? null)}`
 }
 
 /**

@@ -181,6 +181,45 @@ describe('what a reference must not change', () => {
     expect(wouldCreateCycle(g, 'a', 'b', 'in')).toBe(true)
   })
 
+  it('notices a reference port registered after the type memo was built', () => {
+    /*
+     * `typesWithReferenceInputs` memoises, so the graph walks can ask "could this graph hold a
+     * reference at all?" without touching an edge. A memo that outlived a registration would
+     * answer about a registry that no longer exists — and the failure is the exact thing
+     * references were built to remove: the round trip reads as a cycle again, both cards go dark,
+     * and nothing names the cause.
+     *
+     * Warm it first, deliberately: registering before anything has asked proves nothing.
+     */
+    topoSort(emptyGraph('warm'))
+
+    registerNode({
+      type: 'test.ref.late',
+      label: 'late',
+      category: 'utility',
+      cost: 'cheap',
+      inputs: [
+        { id: 'dataset', label: 'Dataset', type: T.dataset(), required: false, reference: true },
+        { id: 'in', label: 'In', type: T.table(), required: false },
+      ],
+      outputs: [{ id: 'out', label: 'Out', type: T.table() }],
+      inferOutputs: () => ({ out: T.table() }),
+      evaluate: () => ({ out: { kind: 'table', schema: { columns: [] }, data: {}, length: 0 } }),
+    })
+
+    let g = emptyGraph('late')
+    g = addNode(g, node('ds', 'test.ref.dataset', { id: 'stack:1' }))
+    g = addNode(g, node('late', 'test.ref.late'))
+    g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'late', targetHandle: 'dataset' })
+    g = addEdge(g, {
+      source: 'late',
+      sourceHandle: 'out',
+      target: 'ds',
+      targetHandle: 'annotations',
+    })
+    expect(topoSort(g).cyclic).toEqual([])
+  })
+
   it('leaves two wires between one pair not a cycle', () => {
     /*
      * `topoSort`'s own recorded bug: the indegree was counted over `graph.edges` while the

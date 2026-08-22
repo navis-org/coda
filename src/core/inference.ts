@@ -9,6 +9,7 @@
 
 import type { CodaGraph, GraphNode } from './graph'
 import { inboundIndex, nodesById, portKey, topoSort, wouldCreateCycle } from './graph'
+import type { InferContext, NodeDefinition } from './node'
 import { makeInferContext, validateColumnParams } from './node'
 import { getNodeDef } from './registry'
 import type { CodaType, TableSchema } from './types'
@@ -51,6 +52,55 @@ export interface InferOptions {
    * results themselves.
    */
   observedSchemas?: Readonly<Record<string, TableSchema | undefined>>
+}
+
+/**
+ * A node's output types: the declared ones, overlaid with whatever `inferOutputs` says.
+ *
+ * One statement of the three rules — seed from `def.outputs`, let `inferOutputs` override, never
+ * throw — because there are two callers and they had already parted company. The walk merged with
+ * `if (type)` while `referenceType` used `?? declared`; identical for the object types in play
+ * today, different the moment one is falsy, and nothing type-checks the pair. The walk also
+ * passes `observedSchemas` where the reference path must not, which is a real difference and now
+ * a visible one: it rides on the context the caller builds.
+ *
+ * `error` rather than a thrown one, so the walk can turn it into an issue on the node and the
+ * reference path — which has no node to report against — can ignore it. `inferOutputs` must never
+ * throw (invariant 2), and this is what keeps a node that does from taking the pass down.
+ */
+function outputTypesFor(
+  def: NodeDefinition,
+  ctx: InferContext,
+): { outputs: Record<string, CodaType>; error?: string } {
+  const outputs: Record<string, CodaType> = {}
+  for (const port of def.outputs ?? []) outputs[port.id] = port.type
+  if (!def.inferOutputs) return { outputs }
+  try {
+    for (const [portId, type] of Object.entries(def.inferOutputs(ctx))) {
+      if (type) outputs[portId] = type
+    }
+    return { outputs }
+  } catch (err) {
+    return { outputs, error: (err as Error).message }
+  }
+}
+
+/**
+ * What a node publishes on a port when nothing is wired to it — the half of its output that is a
+ * function of its params alone.
+ *
+ * Only for `reference` inputs; see `PortDef.reference`. Isolated by construction, since it is
+ * handed no inputs, so it cannot reach back into the walk that called it — and no `observed`
+ * schema either, which would be a fact from a *run* rather than from the params.
+ *
+ * Through `outputTypesFor`, so "a reference is the same node inferred with no inputs" is literally
+ * true rather than a second implementation that resembles it.
+ */
+function referenceType(node: GraphNode | undefined, portId: string): CodaType | undefined {
+  if (!node) return undefined
+  const def = getNodeDef(node.type)
+  if (!def) return undefined
+  return outputTypesFor(def, makeInferContext(def, node.params, {})).outputs[portId]
 }
 
 export function inferGraph(graph: CodaGraph, options: InferOptions = {}): InferenceResult {
@@ -119,21 +169,9 @@ export function inferGraph(graph: CodaGraph, options: InferOptions = {}): Infere
       inputs,
       def.observesOutputSchema ? options.observedSchemas?.[nodeId] : undefined,
     )
-    const outputs: Record<string, CodaType> = {}
-    for (const port of def.outputs ?? []) outputs[port.id] = port.type
-
-    if (def.inferOutputs) {
-      try {
-        const inferred = def.inferOutputs(ctx)
-        for (const [portId, type] of Object.entries(inferred)) {
-          if (type) outputs[portId] = type
-        }
-      } catch (err) {
-        issues.push({
-          severity: 'warning',
-          message: `Type inference failed: ${(err as Error).message}`,
-        })
-      }
+    const { outputs, error } = outputTypesFor(def, ctx)
+    if (error) {
+      issues.push({ severity: 'warning', message: `Type inference failed: ${error}` })
     }
 
     // 3. Node-specific and generic param validation.
@@ -196,29 +234,6 @@ export interface ConnectionCheck {
  * Can this link be made? Called continuously while dragging an edge, so it leans on the
  * already-computed inference result rather than re-deriving types.
  */
-
-/**
- * What a node publishes on a port when nothing is wired to it — the half of its output that is a
- * function of its params alone.
- *
- * Only for `reference` inputs; see `PortDef.reference`. Isolated by construction, since it is
- * handed no inputs, so it cannot reach back into the walk that called it.
- */
-function referenceType(node: GraphNode | undefined, portId: string): CodaType | undefined {
-  if (!node) return undefined
-  const def = getNodeDef(node.type)
-  if (!def) return undefined
-  const declared = (def.outputs ?? []).find((p) => p.id === portId)?.type
-  if (!def.inferOutputs) return declared
-  try {
-    return def.inferOutputs(makeInferContext(def, node.params, {}))[portId] ?? declared
-  } catch {
-    // `inferOutputs` must never throw (invariant 2), but a reference must not be the thing that
-    // discovers it does — the declared type is a complete answer here.
-    return declared
-  }
-}
-
 export function checkConnection(
   graph: CodaGraph,
   inference: InferenceResult,

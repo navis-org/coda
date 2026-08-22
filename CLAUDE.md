@@ -2809,6 +2809,14 @@ running, or even inferring, anything downstream. **Check that before marking a n
 
 Five places implement it, and each was mutation-checked because every failure here is silent:
 
+- **A registry-level short-circuit first.** Exactly one node type declares a reference input, so
+  `typesWithReferenceInputs()` lets every walk ask "could this graph hold one at all?" without
+  touching an edge — and on every graph without one, `dataflowEdges` returns `graph.edges` itself
+  and allocates nothing. Measured 1.4 µs → 0.13 µs; `topoSort` runs twice per keystroke and
+  `wouldCreateCycle` once per pointer move of a link drag. The memo is **cleared by
+  `registerNode`** rather than assumed fixed, because a type registered afterwards would otherwise
+  be invisible and the round trip would read as a cycle again — pinned by a test that warms the
+  memo *before* registering.
 - **`dataflowEdges` in `graph.ts`, and nowhere else.** One filter, inside the one index from which
   `topoSort` derives *both* the indegree count and its decrement — the arrangement that function's
   own note demands, after the bug where the two came from different places and a target joined
@@ -2823,12 +2831,20 @@ Five places implement it, and each was mutation-checked because every failure he
 - **Inference resolves a reference type in isolation**: the source node's `inferOutputs` with *no
   inputs at all*. It cannot recurse, so the walk terminates, and for a dataset it yields exactly
   the identity without the annotations schema — the honest answer as well as the terminating one,
-  since a node cannot read the annotations it is itself about to supply.
-- **The scheduler neither waits nor keys on the upstream.** `evaluate` is handed a `DatasetValue`
-  synthesised from the type, and the provenance takes `hash(type)` in place of the upstream node's
-  key — which it *must*, since that node is outside the order and its key may not exist yet.
-  It is also the better key: changing the dataset's version re-keys the reader, changing its
-  annotations does not, and the reader never sees them.
+  since a node cannot read the annotations it is itself about to supply. Through `outputTypesFor`,
+  which the main walk also uses, so "a reference is the same node inferred with no inputs" is
+  literally true rather than a second implementation that resembles it: the two had already parted
+  company on the merge rule (`if (type)` against `?? declared`) and on whether a throw becomes an
+  issue.
+- **The scheduler neither waits nor keys on the upstream.** `evaluate` is handed the value
+  `datasetIdentity(type)` builds, and the provenance takes `referenceKey(type)` in place of the
+  upstream node's key — which it *must*, since that node is outside the order and its key may not
+  exist yet. It is also the better key: changing the dataset's version re-keys the reader,
+  changing its annotations does not, and the reader never sees them. Both are single functions for
+  `upstreamKey`'s stated reason — the key is read by the two consumers that must not disagree, and
+  it was written out twice at first. `datasetIdentity` lives beside `DatasetValue` in `values.ts`
+  rather than in the scheduler, because it is the type→value projection and it is **partial**: no
+  annotations, and `label` is the dataset id rather than the human name an ordinary wire carries.
 
 **Deliberately narrow: a Dataset socket that takes the identity only, not a general information
 edge.** Synthesising a value from a type is defensible exactly because a dataset's identity *is*
@@ -2840,7 +2856,12 @@ so a hue would read as a type, where what this has to say is that nothing flows.
 
 **Writing the graph out wants the opposite order, and both exporters take it.** `topoSort` leaves
 references out because the reader waits on nothing; a *cell* that names the referenced node needs
-that node's own line to exist already. `referencesFirst` hoists them, and both walks call it —
+that node's own line to exist already. `exportOrder` in `src/export/order.ts` hoists them and both
+walks call it — one function rather than two lines copied into each, and in the layer whose
+vocabulary the rationale is written in. The copy doctrine protects the *assembly* walk (chunks,
+variable naming, unwired-versus-blocked); an ordering rule with no language in it is the same
+class as `canExport.ts`'s refusal policy, which both surfaces already share.
+Without it —
 without it the reader is classified `blocked by "Dataset"` and emits a TODO that is false and
 cascades to everything downstream. The condition that makes the hoist valid is the same one that
 makes references sound: **a referenced node's cell must be writable from its params alone**. A

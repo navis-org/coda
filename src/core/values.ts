@@ -7,7 +7,8 @@
  * Nodes must treat columns as immutable — always build new arrays.
  */
 
-import type { TableSchema } from './types'
+import type { CodaType, TableSchema } from './types'
+import { datasetRef } from './types'
 
 export type CellValue = number | string | boolean | null
 export type ColumnData = CellValue[]
@@ -86,6 +87,28 @@ export interface DatasetAnnotations {
   readonly key: string
   /** `neuronId` plus the chain's columns, one row per neuron. */
   readonly table: TableValue
+}
+
+/**
+ * The identity half of a dataset, as a value — what a `reference` port is handed.
+ *
+ * Here rather than in the scheduler, which is where it started: this is the projection from a
+ * dataset *type* to a dataset *value*, and both halves of that pairing live in this file and
+ * `types.ts`. Two layers away it was a `DatasetValue` nobody reading `DatasetValue` would find,
+ * and the day this interface gains a field the person adding it looks here.
+ *
+ * **Deliberately partial, in two ways worth knowing.** There are no `annotations` — a reference
+ * reader is usually the node about to supply them. And `label` is the dataset id rather than the
+ * human name a run would carry (`"MaleCNS v0.9"`), because a type does not know it; a node fed by
+ * a reference therefore sees a plainer label than the same node fed by an ordinary wire.
+ *
+ * `undefined` when the type is not a dataset or has not resolved an id yet, which is the ordinary
+ * state on a fresh session and not an error.
+ */
+export function datasetIdentity(type: CodaType | undefined): DatasetValue | undefined {
+  const ref = datasetRef(type)
+  if (!ref?.sourceId || !ref.datasetId) return undefined
+  return { kind: 'dataset', sourceId: ref.sourceId, datasetId: ref.datasetId, label: ref.datasetId }
 }
 
 export interface ScalarValue {

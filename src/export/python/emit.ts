@@ -7,7 +7,8 @@
  */
 
 import type { CodaGraph, GraphNode } from '../../core/graph'
-import { inboundIndex, nodesById, portKey, referencesFirst, topoSort } from '../../core/graph'
+import { inboundIndex, nodesById, portKey } from '../../core/graph'
+import { exportOrder } from '../order'
 import { inferGraph } from '../../core/inference'
 import type { NodeDefinition, ParamValues } from '../../core/node'
 import { defaultParams, makeInferContext } from '../../core/node'
@@ -93,17 +94,9 @@ export function exportNotebook(graph: CodaGraph, options: ExportOptions = {}): E
   const refusal = canExportNotebook(graph)
   if (refusal) return { ok: false, ...refusal }
 
-  /*
-   * `referencesFirst`, because a cell that names a referenced node needs that node's own line to
-   * exist already — `topoSort` leaves references out of the order on purpose, which is right for
-   * *running* and backwards for *writing out*. Without it the reader is classified as blocked by
-   * a node that was translated perfectly well, and emits a false TODO that cascades.
-   *
-   * The other walk does this too. They are deliberate copies; if you change one, look at the
-   * other.
-   */
-  const { order: sorted, cyclic } = topoSort(graph)
-  const order = referencesFirst(sorted, graph)
+  // Referenced nodes first — see `exportOrder`; `topoSort` alone is the running order, which
+  // is the opposite of the writing order.
+  const { order, cyclic } = exportOrder(graph)
   const nodes = nodesById(graph)
   const inbound = inboundIndex(graph)
   const inference = inferGraph(graph)

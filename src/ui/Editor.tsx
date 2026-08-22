@@ -217,12 +217,16 @@ function EditorCanvas() {
     [graph.nodes],
   )
 
-  // Keyed on the node *types* and the edges, so a drag — which changes positions and nothing
-  // else — does not recompute it, and the edge memo below does not gain the whole graph.
-  const referenceIds = useMemo(
-    () => referenceEdgeIds(graph.nodes, graph.edges),
-    [graph.nodes, graph.edges],
-  )
+  /*
+   * Which wires name a node rather than carrying its output, so the edge memo below can mark
+   * them without a registry lookup per edge.
+   *
+   * Keyed on `graph`, like `disabledIds` two lines up is on `graph.nodes` — and with the same
+   * honest caveat: `moveNodes` mints a fresh `nodes` array per drag frame, so both recompute on
+   * every frame of a drag. That costs nothing measurable, and it is already true of `rfEdges`
+   * either way; the earlier comment here claimed the opposite, which was simply wrong.
+   */
+  const referenceIds = useMemo(() => referenceEdgeIds(graph), [graph])
 
   const rfEdges = useMemo<Edge[]>(
     () =>
@@ -246,19 +250,24 @@ function EditorCanvas() {
           targetHandle: edge.targetHandle,
           data: { route, step: orthogonal },
           /*
-           * The wire a dropped card would be inserted into. A class rather than a style, so the
-           * rule lives with the rest of the canvas — and marked during the drag rather than only
-           * on release, because a drop that rewires the graph with no warning is a surprise
-           * whatever it does afterwards.
+           * Two independent marks, **joined** rather than spread as two `className` keys — the
+           * later spread silently won, so a reference wire that was also the splice candidate
+           * lost its splice highlight with nothing failing. The cost of the shape is not that
+           * one missing mark: it is that the third thing wanting a class would have clobbered
+           * the second the same way.
+           *
+           * `--splice`: the wire a dropped card would be inserted into, marked *during* the drag,
+           * because a drop that rewires the graph with no warning is a surprise whatever it does
+           * afterwards. `--reference`: a wire that names a node rather than carrying its output,
+           * drawn dotted because a wire carrying no data should not look like one that does.
            */
-          ...(edge.id === spliceEdgeId ? { className: 'coda-edge--splice' } : {}),
-          /*
-           * A reference names a node rather than carrying its output, so it is drawn as a dotted
-           * line: it imposes no order, waits for nothing, and a wire that carries no data should
-           * not look like one that does. `Dataset → CAVE table` is the case — the datastack to
-           * read a table out of, on a node that feeds that same dataset its labels.
-           */
-          ...(referenceIds.has(edge.id) ? { className: 'coda-edge--reference' } : {}),
+          className:
+            [
+              edge.id === spliceEdgeId && 'coda-edge--splice',
+              referenceIds.has(edge.id) && 'coda-edge--reference',
+            ]
+              .filter(Boolean)
+              .join(' ') || undefined,
           // Links wear the colour of the data flowing through them, as in Blender.
           style: {
             stroke: typeColorVar(sourceType),

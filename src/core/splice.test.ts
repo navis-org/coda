@@ -16,10 +16,28 @@ import { describe, expect, it } from 'vitest'
 import { addEdge, addNode, emptyGraph } from './graph'
 import type { CodaGraph, GraphNode } from './graph'
 import { inferGraph } from './inference'
+import { T } from './types'
 import { defaultParams } from './node'
-import { requireNodeDef } from './registry'
+import { registerNode, requireNodeDef } from './registry'
 import { spliceCandidate, spliceGraph } from './splice'
 import '../nodes'
+
+/*
+ * A dataset in, a dataset out — what a "pin the materialization" node would be. Nothing in the
+ * registry has that shape today, which is exactly why the reference guard needs one built: with
+ * no such node the refusal it is asserting happens for an unrelated reason (a Dataset does not
+ * fit a table port) and the test passes whether or not the guard exists.
+ */
+registerNode({
+  type: 'test.splice.passthrough',
+  label: 'passthrough',
+  category: 'transform',
+  cost: 'cheap',
+  inputs: [{ id: 'in', label: 'In', type: T.dataset() }],
+  outputs: [{ id: 'out', label: 'Out', type: T.dataset() }],
+  inferOutputs: (ctx) => ({ out: ctx.inputs.in ?? T.dataset() }),
+  evaluate: (ctx) => ({ out: ctx.input('in')! }),
+})
 
 function node(id: string, type: string, params: Record<string, unknown> = {}): GraphNode {
   return {
@@ -90,6 +108,49 @@ describe('what can be spliced', () => {
     // by looking the edge up in a graph that never had it.)
     expect(candidate(graph, edgeId)).toBeTruthy()
     expect(candidate(wired, edgeId)).toBeUndefined()
+  })
+
+  it('refuses a reference wire, which carries nothing to pass through', () => {
+    /*
+     * A reference names a node rather than carrying its output, so there is nothing to insert
+     * into it — and `wouldCreateCycle` answers `false` for one by design, so the cycle half of
+     * the check waves it through. What is left standing between the gesture and a graph whose
+     * middle node is fed by a port delivering no value is only *type* compatibility, and that is
+     * an accident of the current registry rather than a rule: no node today both takes a Dataset
+     * and returns one.
+     *
+     * So the case is built rather than found. `test.splice.passthrough` is what a "pin the
+     * materialization" node would look like, and without the guard this splice is offered.
+     */
+    let g = emptyGraph('ref-splice')
+    g = addNode(g, node('ds', 'neuron.dataset', { dataset: 'optic-lobe-mini' }))
+    g = addNode(g, node('cave', 'annotation.caveTable', { datastack: 'x:1', table: 't' }))
+    g = addNode(g, node('loose', 'test.splice.passthrough'))
+    g = addEdge(g, {
+      source: 'ds',
+      sourceHandle: 'dataset',
+      target: 'cave',
+      targetHandle: 'dataset',
+    })
+    const refEdge = g.edges[g.edges.length - 1]!
+    expect(spliceCandidate(g, inferGraph(g), 'loose', refEdge)).toBeUndefined()
+
+    // And the same node on an ordinary Dataset wire still splices, so the refusal above is
+    // about the reference rather than about this node.
+    let ok = emptyGraph('ok-splice')
+    ok = addNode(ok, node('ds', 'neuron.dataset', { dataset: 'optic-lobe-mini' }))
+    ok = addNode(ok, node('find', 'neuron.findNeurons'))
+    ok = addNode(ok, node('loose', 'test.splice.passthrough'))
+    ok = addEdge(ok, {
+      source: 'ds',
+      sourceHandle: 'dataset',
+      target: 'find',
+      targetHandle: 'dataset',
+    })
+    expect(spliceCandidate(ok, inferGraph(ok), 'loose', ok.edges[0]!)).toEqual({
+      inPort: 'in',
+      outPort: 'out',
+    })
   })
 
   it('refuses a text note, which has no ports at all', () => {

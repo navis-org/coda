@@ -16,7 +16,7 @@
  */
 
 import type { CodaGraph, GraphEdge } from './graph'
-import { addEdge, removeEdges } from './graph'
+import { addEdge, referenceEdgeIds, removeEdges } from './graph'
 import type { InferenceResult } from './inference'
 import { checkConnection, inferGraph } from './inference'
 import { getNodeDef, isAnnotation } from './registry'
@@ -51,6 +51,13 @@ export function spliceCandidate(
 ): SplicePorts | undefined {
   const node = graph.nodes.find((n) => n.id === nodeId)
   if (!node || isAnnotation(node.type)) return undefined
+  /*
+   * Never onto a reference wire. That wire names a node rather than carrying its output, so there
+   * is no value to pass through and nothing to insert *into* — but `wouldCreateCycle` now answers
+   * `false` for it by design, so without this the gesture would happily offer the splice and
+   * produce a graph whose middle node is fed by a port that delivers nothing.
+   */
+  if (referenceEdgeIds(graph).has(edge.id)) return undefined
   // Isolated, per the note above. Also excludes the edge's own endpoints for free.
   if (graph.edges.some((e) => e.source === nodeId || e.target === nodeId)) return undefined
 

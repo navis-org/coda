@@ -147,10 +147,13 @@ describe('reachability', () => {
   })
 
   it('detects cycles before they are created', () => {
+    // The handle is required: which port a wire lands on decides whether it imposes an order at
+    // all, so a check that did not know would answer about a different wire. These are the real
+    // ports on those nodes.
     const g = chain()
-    expect(wouldCreateCycle(g, 'view', 'find')).toBe(true)
-    expect(wouldCreateCycle(g, 'ds', 'view')).toBe(false)
-    expect(wouldCreateCycle(g, 'ds', 'ds')).toBe(true)
+    expect(wouldCreateCycle(g, 'view', 'find', 'neurons')).toBe(true)
+    expect(wouldCreateCycle(g, 'ds', 'view', 'in')).toBe(false)
+    expect(wouldCreateCycle(g, 'ds', 'ds', 'dataset')).toBe(true)
   })
 })
 
