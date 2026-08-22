@@ -47,6 +47,7 @@ import { CaveSource } from '../data/cave/CaveSource'
 import { registerSource, requireSource, subscribeSourceLearned } from '../data/source'
 import { subscribeUploadLearned } from '../data/uploads'
 import { subscribeAnnotationsLearned } from '../data/annotations'
+import { subscribeRootCheck } from '../data/cave/rootIds'
 import { getExample } from '../examples'
 import type { StarterSpec } from '../examples/starters'
 import { buildStarter } from '../examples/starters'
@@ -641,6 +642,12 @@ export const useGraphStore = create<GraphState>((set, get) => {
    * Same handler again — three asynchronous facts that inference reads synchronously, one rule.
    */
   subscribeAnnotationsLearned(afterSourceLearned)
+  /*
+   * The fourth: whether a CAVE annotation's root ids were still current at the materialization.
+   * Same terms as the three above — it is not a data-changed event, invalidates nothing and
+   * schedules no run; it only tells `validate` that an answer it drew nothing from has arrived.
+   */
+  subscribeRootCheck(afterSourceLearned)
 
   return {
     graph: initialGraph,

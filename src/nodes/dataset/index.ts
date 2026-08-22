@@ -15,6 +15,8 @@ import type { CompanionSpec } from '../../core/companion'
 import { registerNode } from '../../core/registry'
 import { T } from '../../core/types'
 import type { DatasetValue } from '../../core/values'
+import { ID_COLUMN_NAME, idText } from '../../core/ids'
+import { peekRootCheck, startRootCheck } from '../../data/cave/rootIds'
 import { getSource } from '../../data/source'
 import { neuPrintSourceFor } from '../../data/neuprint/registry'
 import {
@@ -126,7 +128,10 @@ function buildDatasetNode(family: DatasetFamily) {
           `${familyLabel(family)} ${chosen} is not on this server — it offers ${versions.map((v) => v.version).join(', ')}`,
         ]
       }
-      return annotationIssues(ctx.inputs.annotations)
+      return [
+        ...annotationIssues(ctx.inputs.annotations),
+        ...rootDriftIssues(resolveDatasetId(family, ctx.params.version)),
+      ]
     },
 
     evaluate: async (ctx) => {
@@ -147,6 +152,7 @@ function buildDatasetNode(family: DatasetFamily) {
         label: info.label,
         ...annotationsFrom(ctx.input('annotations'), ctx.inputKey('annotations')),
       }
+      watchRootDrift(value)
       return { dataset: value }
     },
   })
@@ -323,7 +329,12 @@ export const customCaveNode = registerNode({
           : `${datastack} reports no usable materializations`,
       ]
     }
-    return annotationIssues(ctx.inputs.annotations)
+    return [
+      ...annotationIssues(ctx.inputs.annotations),
+      // Through the same resolver the node's own id goes through, unpinned case included — a
+      // second spelling of the `datastack:materialization` grammar is a second place to drift.
+      ...rootDriftIssues(customCaveDatasetId(ctx.params)),
+    ]
   },
 
   evaluate: async (ctx) => {
@@ -349,17 +360,65 @@ export const customCaveNode = registerNode({
     // Not checked against the listing, unlike the named families: a private datastack the
     // account can query need not appear in the public one, and refusing on that would make the
     // escape hatch useless for the case it exists for.
-    return {
-      dataset: {
-        kind: 'dataset',
-        sourceId: 'cave',
-        datasetId,
-        label: `${datastack} ${version}`,
-        ...annotationsFrom(ctx.input('annotations'), ctx.inputKey('annotations')),
-      } satisfies DatasetValue,
-    }
+    const value = {
+      kind: 'dataset',
+      sourceId: 'cave',
+      datasetId,
+      label: `${datastack} ${version}`,
+      ...annotationsFrom(ctx.input('annotations'), ctx.inputKey('annotations')),
+    } satisfies DatasetValue
+    watchRootDrift(value)
+    return { dataset: value }
   },
 })
+
+
+/**
+ * Ask, in the background, whether the wired annotations' root ids were still current when this
+ * materialization was frozen.
+ *
+ * A CAVE root id is retired by any proofreading edit that touches its segment, so an annotation
+ * base drifts out of step with a *pinned* materialization on its own. Nothing fails when it does:
+ * the labels stop matching, those rows join to nothing, and the dataset reads as under-annotated.
+ *
+ * **Fired and forgotten, deliberately.** It costs a few seconds against a shared service for a
+ * large base, and none of it is needed to build the value — so `evaluate` starts it and returns.
+ * The answer arrives on `subscribeRootCheck`, which re-runs inference, and `validate` reads it.
+ * Started once per dataset per session and cached per (segmentation, timestamp) beyond that; see
+ * `data/cave/rootIds.ts`, where the answer being permanently true is what makes it cheap.
+ *
+ * Only CAVE, and only with annotations wired: a neuPrint id is a property on a node and does not
+ * move, and a datastack's own table is materialised with the version by construction.
+ */
+function watchRootDrift(value: DatasetValue): void {
+  if (value.sourceId !== 'cave') return
+  const ids = value.annotations?.table.data[ID_COLUMN_NAME]
+  if (!ids) return
+  startRootCheck(value.datasetId, ids.map((cell) => idText(cell) ?? '').filter(Boolean))
+}
+
+/**
+ * What that check found, as an edit-time warning — or nothing, which is the ordinary state.
+ *
+ * A *warning*: an id that has moved on is a fact about somebody's base rather than a mistake in
+ * this graph, and the run it describes has already produced a perfectly good dataset. Refusing
+ * would be refusing over data the node did not fetch.
+ *
+ * Keyed on the dataset id, which is all `validate` can see — so two dataset nodes on one
+ * datastack and materialization with *different* annotation chains would show each other's
+ * count. Uncommon, and the message says what was checked rather than whose it was.
+ */
+function rootDriftIssues(datasetId: string | undefined): string[] {
+  const check = datasetId ? peekRootCheck(datasetId) : undefined
+  if (!check || check.stale === 0) return []
+  const some = check.examples.join(', ')
+  const part = check.checked < check.total ? ` of the first ${check.checked.toLocaleString()}` : ''
+  return [
+    `${check.stale.toLocaleString()}${part} annotation ids are not current at this ` +
+      `materialization (e.g. ${some}) — those rows will not match a neuron. Pin a materialization ` +
+      `from after the base was updated, or update the base.`,
+  ]
+}
 
 /**
  * The dataset id this node stands for, or undefined while it cannot say.

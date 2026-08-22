@@ -139,9 +139,24 @@ export function materializationsFor(
 
 async function load(datastack: string, options: CaveRequestOptions): Promise<number[]> {
   const info = await datastackRecord(datastack, options)
-  return usableVersions(await versionsMetadata(info.local_server, datastack, options)).map(
-    (v) => v.version,
-  )
+  const usable = usableVersions(await versionsMetadata(info.local_server, datastack, options))
+  // Kept whole rather than reduced to numbers: the same reply carries each version's
+  // `time_stamp`, which is what a root id is judged against, and asking for it separately would
+  // be a second round trip for something already in hand.
+  versionInfo.set(datastack, usable)
+  return usable.map((v) => v.version)
+}
+
+/**
+ * When a materialization was frozen, if it is known — the moment a root id has to have been
+ * current at for the annotations keyed on it to mean anything.
+ *
+ * `undefined` until the listing has landed, `peekMaterializations`' contract; the caller that
+ * needs it can await `materializationsFor` first, which fills this as a side effect.
+ */
+export function versionTimestamp(datastack: string, version: number): string | undefined {
+  currentServer()
+  return versionInfo.get(datastack)?.find((v) => v.version === version)?.time_stamp
 }
 
 /**
@@ -161,6 +176,7 @@ export function usableVersions(versions: readonly VersionInfo[]): VersionInfo[] 
 
 
 const materializations = new Map<string, number[]>()
+const versionInfo = new Map<string, VersionInfo[]>()
 const loading = new Map<string, Promise<number[]>>()
 const asked = new Set<string>()
 
@@ -175,6 +191,7 @@ const asked = new Set<string>()
 function clearLearned(): void {
   records.clear()
   materializations.clear()
+  versionInfo.clear()
   loading.clear()
   asked.clear()
   l2Sources.clear()

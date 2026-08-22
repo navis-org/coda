@@ -414,6 +414,7 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `ui/viewers/networkViewer.test.tsx`      | the caption: counts, the label-thinning admission, size refusal                                                                  |
 | `data/neuprint/neuprint.test.ts`         | Cypher building/escaping, response decoding, both halves of the `bodyId`→`neuronId` seam, schema discovery, mesh-source resolution, nm conversion |
 | `data/precomputed/precomputed.test.ts`   | shard lookup, multi-LOD manifest, Draco decode, legacy fragments, CORS fallback                                                  |
+| `data/cave/rootIds.test.ts`              | the drift check: ids sent as unquoted integers, asked once per dataset, only the unseen ones re-asked, and nothing at all without a chunkedgraph |
 | `data/cave/cave.test.ts`                 | CAVE against recorded bodies: a wide root id kept exactly, the string-aware scan, the annotation pivot, an anchored pattern, and every refusal |
 | `nodes/lib/datasetFamilies.test.ts`      | (also) that every CAVE family names a datastack spec and every spec a family — the join key nothing else checks |
 | `data/cave/live.test.ts`                 | the same source against the real services, skipped without `CAVE_TOKEN` — the only thing that notices an endpoint shape changing, the mesh and synapse clouds proved to share one nanometre frame, Aedes' edge list built by counting with nothing configured, and a loadable scene assembled for all three datastacks |
@@ -1665,6 +1666,50 @@ provenance keying makes it structurally impossible.
 *what kind of connection*, and an annotation base is somebody's spreadsheet of labels joined onto
 a connectome — filing FlyTable under Data sources would say it was a fourth backend you could
 query for neurons. Same split, same reasoning, as the AI key.
+
+### Root ids drift, and the dataset says so
+
+A CAVE root id is retired by any proofreading edit that touches its segment, so an annotation
+base — somebody's spreadsheet, edited on its own schedule — drifts out of step with a **pinned**
+materialization on its own. Nothing fails when it does: the labels stop matching, those rows join
+to nothing, and the dataset reads as under-annotated. `data/cave/rootIds.ts` is the heads-up.
+
+`caveclient.chunkedgraph.is_latest_roots`, read off caveclient 8.2.1 rather than recalled:
+`POST {cg}/segmentation/api/v1/table/{table}/is_latest_roots?timestamp=<epoch seconds>` with
+`{"node_ids": […]}` → `{"is_latest": […]}`. The timestamp is the materialization's own
+`time_stamp`, which `versionsMetadata` already returns and `datastack.ts` was throwing away — so
+it costs no extra round trip.
+
+**It is fired and forgotten.** `evaluate` starts it and returns; the answer lands on
+`subscribeRootCheck`, the **fourth** thing wired to `afterSourceLearned`, and `validate` reads it.
+So a run is never delayed by it and never fails because of it, which is right for an advisory
+about data the node did not fetch — and it is a *warning*, since an id that moved on is a fact
+about somebody's base rather than a mistake in this graph.
+
+**Four things keep it off the service**, which matters because this is a shared production
+chunkedgraph at roughly 50–100 µs a root:
+
+- **Once per dataset per session.** The ids arrive on every run; re-asking on each is precisely
+  the hammering to avoid.
+- **Cached per (segmentation, frozen timestamp), permanently.** Whether a root was current at a
+  past instant *never changes*, so the answer is good forever — no expiry is passed to `cacheGet`
+  at all. Keyed on the segmentation and the instant rather than on the dataset or the id list, so
+  two datastack nodes share it and a base that gained rows costs only the rows it gained.
+- **Only ids nobody has asked about**, which is what that key buys.
+- **Deduplicated, and sequential in chunks of 10,000.** An annotation base repeats ids — 1,089 of
+  them on FlyTable's `main.info`, one 104 times — and firing every chunk at once is the same
+  hammering by another route.
+
+**The body is written as text**, because `node_ids` is a list of integers on the wire and an
+eighteen-digit root id through `JSON.stringify` of a `number` is a different neuron (invariant 8)
+— while *quoting* them is a type this endpoint was never promised to accept. `cavePostRaw` exists
+for that one case; every other CAVE POST goes through `cavePost`. The query endpoint's own
+tolerance of quoted ids was established live and does **not** transfer to this one.
+
+The known limit, stated on `rootDriftIssues`: the report is keyed on the **dataset id**, which is
+all `validate` can see, so two dataset nodes on one datastack and materialization with different
+annotation chains would show each other's count. Uncommon, and the message says what was checked
+rather than whose it was.
 
 ### What is not done
 

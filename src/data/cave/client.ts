@@ -151,3 +151,20 @@ export function cavePost<T>(
 ): Promise<T> {
   return request<T>(url, { method: 'POST', body: JSON.stringify(body) }, options)
 }
+
+/**
+ * A POST whose body the caller has already written.
+ *
+ * For the one thing `JSON.stringify` cannot express: a list of **unquoted** integers too wide for
+ * a double. `is_latest_roots` takes `node_ids` as integers, and a root id through
+ * `JSON.stringify` of a `number` is a different neuron (invariant 8) — where quoting them is a
+ * type the endpoint was not promised to accept. So the digits are spliced in as text, the same
+ * answer `idList` gives for Cypher and `pyLongIntList` for the notebook.
+ */
+export function cavePostRaw<T>(
+  url: string,
+  body: string,
+  options: CaveRequestOptions = {},
+): Promise<T> {
+  return request<T>(url, { method: 'POST', body }, options)
+}
