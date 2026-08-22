@@ -1,0 +1,49 @@
+{
+  "columns": [
+    "id",
+    "name",
+    "comment",
+    "user_id",
+    "editor_id",
+    "project_id",
+    "creation_time",
+    "edition_time",
+    "annotations",
+    "area",
+    "volume",
+    "watertight",
+    "meta_computed"
+  ],
+  "data": [
+    [
+      485,
+      "LAL_L",
+      "Lateral accessory lobe left",
+      55,
+      55,
+      1,
+      "2017-10-08T13:54:13.728Z",
+      "2017-10-08T13:54:13.728Z",
+      null,
+      18957115000.0,
+      155862820000000.0,
+      true,
+      true
+    ],
+    [
+      455,
+      "MB_PED_R",
+      "Peduncle right",
+      55,
+      55,
+      1,
+      "2017-10-08T13:54:06.823Z",
+      "2017-10-08T13:54:06.823Z",
+      null,
+      8291675600.0,
+      39714980000000.0,
+      true,
+      true
+    ]
+  ]
+}

@@ -3,10 +3,9 @@ import { describe, expect, it } from 'vitest'
 import { compareIds, idText, isNeuronId } from '../../core/ids'
 import { column, columnNames, tableSchema } from '../../core/types'
 import type { TableValue } from '../../core/values'
-import { makeMatrix, tableFromRows } from '../../core/values'
+import { makeMatrix, tableFromRows, JOIN_SEPARATOR } from '../../core/values'
 import {
   AGG_OPTIONS,
-  JOIN_SEPARATOR,
   NUMERIC_AGG_OPTIONS,
   combineSchema,
   combineTable,

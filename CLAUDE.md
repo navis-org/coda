@@ -486,6 +486,8 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `data/precomputed/precomputed.test.ts`   | shard lookup, multi-LOD manifest, Draco decode, legacy fragments, CORS fallback                                                  |
 | `nodes/transform/updateRootIds.test.ts`  | the repair: only stale rows looked up, supervoxels sent as raw uint64, a current row left alone even with a warm cache, a row with no supervoxel untouched — and both pickers resolving before any schema has arrived |
 | `data/cave/rootIds.test.ts`              | the drift check: ids sent as unquoted integers, asked once per chain and re-asked when the wiring changes, a late lander not overwriting a newer answer, only the unseen ones asked, and nothing at all without a chunkedgraph |
+| `data/catmaid/catmaid.test.ts`           | CATMAID against recorded bodies: the confidence-bucket sum, parents rebuilt as indices, the indexed list encoding, an anonymous POST refused a direct route, and a status filter ignored |
+| `data/catmaid/live.test.ts`              | the same source against the real VFB FAFB instance, skipped without `CATMAID_LIVE` — a skeleton proved to be one tree in nanometres, its synapses inside its own bounds, and the neuropil volumes parsed |
 | `data/cave/cave.test.ts`                 | CAVE against recorded bodies: a wide root id kept exactly, the string-aware scan, the annotation pivot, an anchored pattern, and every refusal |
 | `nodes/lib/datasetFamilies.test.ts`      | (also) that every CAVE family names a datastack spec and every spec a family — the join key nothing else checks |
 | `data/cave/live.test.ts`                 | the same source against the real services, skipped without `CAVE_TOKEN` — the only thing that notices an endpoint shape changing, the mesh and synapse clouds proved to share one nanometre frame, Aedes' edge list built by counting with nothing configured, and a loadable scene assembled for all three datastacks |
@@ -5210,6 +5212,190 @@ not been seen is a FlyWire dataset node on a real canvas: the Explore widget ove
 and twenty decimated meshes with their synapses in the 3D view. Same standing as the WebGL
 viewers, and the mesh path is the half most worth looking at, since a decimation grid is a
 judgement about a picture.
+
+## CATMAID
+
+`src/data/catmaid/`, and the third backend. The first target is Virtual Fly Brain's public FAFB
+instance, `catmaid-fafb.virtualflybrain.org`. Nothing above `src/data` knows it exists; a CATMAID
+dataset node is `dataset.fafb`, built from `DATASET_FAMILIES` exactly as the others are.
+
+Everything below was probed live rather than recalled, and `live.test.ts` is that pass
+institutionalised — skipped unless `CATMAID_LIVE=1`, because it is somebody's public server and
+the suite runs on every commit.
+
+### The access problem, which decides the module
+
+**CORS is perfect and it does not help.** `Access-Control-Allow-Origin: *`, `X-Authorization` in
+the allow-list, preflight 204 with a twenty-day max-age, and `can_browse: [1]` for the anonymous
+user. Every `GET` Coda makes is answered cross-origin with no credential at all.
+
+But **CATMAID's core query endpoints are POST-only** — checked against `/apis/`, not guessed:
+`skeletons/connectivity`, `annotations/query-targets`, `skeleton/annotationlist`,
+`skeleton/neuronnames`, `skeletons/review-status`. There is no GET alias for any of them. And an
+anonymous POST is refused by Django's CSRF, whose two gates a browser cannot pass: `Referer` is a
+[forbidden header name](https://developer.mozilla.org/en-US/docs/Glossary/Forbidden_header_name)
+so `fetch` sends our own origin and the trusted-origins check rejects it, and the `csrftoken`
+cookie is `SameSite=Lax` so it is never sent cross-site. Isolating them:
+
+```
+no Referer                     → CSRF Failed: Referer checking failed - no Referer
+Origin only, no Referer        → the same         (so Origin is ignored: Django ≤3.2)
+Origin + Referer, both foreign → does not match any trusted origins
+Origin foreign, Referer=server → CSRF Failed: CSRF cookie not set     (two gates, sequential)
+HTTP Basic, bogus              → still a CSRF error   (BasicAuthentication is not enabled)
+Authorization: Token <bogus>   → Invalid token        ← the way through
+```
+
+**A token bypasses CSRF entirely**, because DRF's token class runs before its session class and
+never reaches `enforce_csrf` — which is why a bogus token is answered `Invalid token` rather than
+`CSRF Failed`. That is the whole of why a token matters here, and it is *not* what a token means
+on the other two backends: it does not unlock private data, it is the only way a page can ask a
+question whose answer is already public.
+
+**And on this instance a token is not obtainable** — `/accounts/register` is 404. So the usual
+answer (require one, like neuPrint and CAVE) would make the named target unusable, and the module
+falls back to a same-origin `/cm/` relay that performs the handshake server-side. That works under
+`pnpm dev` and 404s on a static deploy, exactly as `/st/` does for FlyTable.
+`docs/catmaid_vfb.md` is the write-up and the upstream ask — which is **CATMAID's** rather than
+VFB's, since every instance with anonymous browse has the same wall for the same reason.
+
+**So the route is chosen rather than probed**, the deliberate departure from `neuprint/client.ts`
+and `seaTable.ts`. Those cannot tell a CORS refusal from a dead host, so they try and remember.
+Here the governing fact is known in advance: an anonymous POST *cannot* succeed direct, so
+issuing one to find out spends a request confirming what the protocol already says. `routeMemory`
+still earns its place for the case it was built for — a CATMAID sending no CORS headers at all,
+which VFB's does not but a lab instance well might — and that case is still a thrown fetch.
+
+**Verified from a real browser**, which is the only thing that could: direct `GET /projects/`
+answers 200, the same POST direct answers 403, and through the relay it answers 200 with a real
+neuron name. The browser produces a *third* CSRF variant — `Referer is insecure while host is
+secure`, because the dev origin is `http` — which becomes the trusted-origins form on a published
+`https` deploy. It does not change the outcome and it does change the message, which is worth
+knowing before debugging one against the other.
+
+### `type` is derived, because CATMAID has no such field
+
+neuPrint carries cell typing as properties on the neuron and CAVE reads it from an annotation
+table. CATMAID has neither: a neuron has a free-text **name** and a bag of **annotations**, with
+nothing saying which of them mean what.
+
+What makes it tractable is that **annotations can themselves be annotated**. Measured across all
+5,601 skeletons of public FAFB:
+
+```
+meta-annotation      annotations   neurons   max per neuron
+neuron name                 5601      5601                1
+Cell type                    329      4244                1
+Published                     26      5601                4
+export: tags                  27      5601                4
+publication_link: <doi>          1    1–1507              1     (×22, one per paper)
+```
+
+So the mechanism is **a meta-annotation names a field and the annotations carrying it are its
+values**, discovered by asking rather than hardcoded — the lesson CAVE taught. `neuron name`
+supplies `type` and `instance`, split at the `#`: `Uniglomerular mALT VA6 adPN#R1` yields both,
+and `DNp32_R` is its own type. 960 distinct types on FAFB.
+
+Three things about it are load-bearing:
+
+- **The default is a convention, not an assumption.** `neuron name` is how the labs that traced
+  FAFB annotate; CATMAID enforces nothing. So it is `DEFAULT_TYPE_META` and an instance without it
+  degrades to a neuron table with names and no types rather than failing.
+- **The instance keeps the whole label, so the `#` split is lossless.** That matters because the
+  convention puts real distinctions on the right of it: `KC#12-a'b'` gives type `KC`, and the a'b'
+  subtype survives only in `instance`. Coda is not the place to decide that `a'b'` is a type and
+  `12` is not.
+- **Everything below `Cell type` gets no column of its own.** `export: tags` and `Published` carry
+  the same information by different routes, and `publication_link: <doi>` is the `key: value`
+  annotation idiom — 22 of them, each naming one paper, none a field. A column per meta-annotation
+  would put forty-odd in every picker downstream, most describing a *paper* rather than a neuron.
+  They land in one `annotations` cell joined with `JOIN_SEPARATOR`, which is exactly the shape
+  Explore's `Additional tags` control already splits back into chips.
+
+**`JOIN_SEPARATOR` moved to `src/core/values.ts` for this**, from `tableOps.ts` where it began
+beside the Group By aggregation that writes it. That was right while a node was the only thing
+that could produce one; a *source* now does, and `src/data` may not import `src/nodes`
+(invariant 1). Same reasoning and same destination as `ID_COLUMN_NAME`, and deliberately no
+re-export from where it was.
+
+**`neuronId` is the skeleton id, never the neuron id**, and the two genuinely differ —
+`{'id': 27296, 'skeleton_ids': [27295]}`. Every endpoint takes the skeleton, so a table keyed on
+the neuron would join to nothing with each id off by a value or two, which is the kind of wrong
+that looks right.
+
+### The numbers, which cut both ways
+
+**The index is the cheapest here.** All 5,601 skeletons with names, annotations, node counts and
+cable lengths: **3.2 MB and about 3 s**, against neuPrint's 6.9 MB and CAVE's 139,255 rows. The
+public FAFB instance is a curated published subset rather than a whole-brain segmentation, which
+is what makes Explore over the whole of it immediate. And since `annotations/query-targets`
+matches names by **substring** rather than regex — `^LC[0-9]+` matches nothing, `LC` matches 129 —
+there is no server-side search worth pushing down, so filtering is local and `neuronFilter.ts`
+gets its third consumer.
+
+**Skeletons are the most expensive here.** 0.9–1.3 MB each, and **the server does not gzip** —
+verified, byte-identical with and without `Accept-Encoding`. One antennal-lobe PN is 16,840 nodes
+and a large descending neuron 64,385, where a CAVE L2 skeleton is ~150. `MAX_CATMAID_SKELETONS` is
+200 at `SKELETON_CONCURRENCY` 8, which is a *transfer* ceiling rather than a drawing one and the
+refusal says so. It moves the day the deployment turns on gzip.
+
+**Coordinates are already nanometres**, and volumes share the frame with skeletons — verified by
+bbox cross-check, and again in `live.test.ts` by the rule CAVE's mesh-encloses-synapses assertion
+follows: a synapse cloud must sit inside its own skeleton's box, because neither is scaled by
+anything here and a mistake in either would put the two a whole factor apart while each stayed
+internally consistent. So nothing does what `neuprint/units.ts` has to.
+
+**+16.25 kB raw / +5.03 kB gzipped on the main chunk**, measured against a build of the same tree
+with the feature absent — comparable to CAVE's +16.4 / +5.2.
+
+### Traps, each verified rather than assumed
+
+- **The connectivity weight is the sum of a five-element confidence array, not its last element.**
+  Almost everything sits in the last bucket, so taking that alone looks right and undercounts:
+  3,039 against a true 3,070 on skeleton 16's outgoing partners, cross-checked against 3,069
+  ground-truth links from the connector table. A one-percent error that no assertion on shape
+  would catch.
+- **`skeleton_ids[]` — the form `/apis/` documents — silently returns only the last id.** Not an
+  error, a short answer. Confirmed on `skeletons/summary` and `skeletons/cable-length` over both
+  verbs, so it is the view rather than the method. The indexed `skeleton_ids[0]=…&[1]=…` form works
+  everywhere and the plain repeated form 400s on `review-status`, so `encodeParams` emits indexed
+  and nothing may emit brackets.
+- **CATMAID names a parent by node id, and a skeleton's nodes arrive in no particular order.** The
+  tree is rebuilt through an id→index map; emitting ids would satisfy the type and break every
+  consumer that walks the array once, the SWC writer included.
+- **A radius of −1 means unset**, and a negative radius drawn as a tube is a spike.
+- **`/volumes/` answers `{columns, data}`**, a column table rather than records — the obvious
+  `VolumeRow[]` reading parses without error and yields `undefined` for every field.
+- **The volume mesh is X3D**, `<IndexedTriangleSet>`, parsed by hand rather than through
+  `DOMParser` so this layer stays usable without a DOM. An out-of-range index is refused rather
+  than passed on, because it draws as one enormous spike across the scene rather than as an error.
+- **A source that publishes no statuses must also *ignore* the parameter.** `DatasetInfo.statuses`
+  is empty because CATMAID has none — but a node's stored `Traced` default survives into the
+  request regardless, and filtering on it drops every row for a value nobody chose. That failure
+  is live on CAVE today; `findNeurons` here ignores `statuses` outright and a test pins it.
+- **`nodes` and `cableLength` are filled rather than declared-and-null.** One POST, 1.77 MB, 0.72 s
+  for all 5,601 — which roughly doubles a download cached for a month. The alternative was the
+  thing `CATMAID_NEURON_SCHEMA` refuses to do for `status`: an always-empty column is worse than an
+  absent one, because every picker downstream offers it.
+
+### What it cannot do, and what is not done
+
+`paths` (no aggregated-hop endpoint), `roiSummary` and `roiCounts` (no completeness or
+per-neuron-per-region table), `rawQuery`, `viewerScene`, and **`meshes`** — CATMAID stores
+skeletons rather than a segmentation, so its `volumes` are neuropil shells and are `roiMeshes`,
+which is a different question. Each declines at edit time rather than failing at run time.
+
+`fetchSynapses` carries `connectorId` but **no `partnerId`**: the partner on the far side of a
+connector belongs to a different skeleton, so naming it means a second POST per connector set, and
+a cloud drawn in 3D or counted by region needs none of it.
+
+Neither exporter emits it — both `NO_EMITTER` tables name `dataset.fafb`. pymaid is the obvious
+Python route and the natverse's `catmaid` the R one, and both map cleanly, but no emitter has been
+written so both languages refuse rather than producing a document of TODOs.
+
+**Not looked at on a real canvas**: the dataset node's tint and tile pip, Explore over 5,601
+neurons, and a hundred FAFB skeletons in the 3D view. The module and both suites are headless;
+what *was* driven in a browser is the relay and the CORS behaviour, above.
 
 ## Precomputed meshes
 

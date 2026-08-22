@@ -15,7 +15,7 @@
 import type { ColumnSchema, DType, TableSchema } from '../../core/types'
 import { column, findColumn, isNumericDType, pickColumns, tableSchema } from '../../core/types'
 import type { CellValue, ColumnData, MatrixValue, TableValue } from '../../core/values'
-import { getColumn, makeMatrix, makeTable, selectRows } from '../../core/values'
+import { JOIN_SEPARATOR, getColumn, makeMatrix, makeTable, selectRows } from '../../core/values'
 import { ID_COLUMN_NAME, idText } from '../../core/ids'
 import { TYPE_COLUMN_NAME } from '../../data/annotations/types'
 
@@ -967,20 +967,6 @@ export const AGG_OPTIONS: Array<{ value: AggFn; label: string }> = [
 export const NUMERIC_AGG_OPTIONS: Array<{ value: AggFn; label: string }> = AGG_OPTIONS.filter(
   (option) => isNumericDType(aggDType(option.value, undefined)),
 )
-
-/**
- * What `join` puts between values, and what anything reading the result splits on.
- *
- * One constant because it is a *contract* rather than a formatting choice: a community-tag table
- * folded into one cell here is split back into chips by the Explore widget, and two spellings of
- * the separator would be a row of tags nobody could read.
- *
- * `'; '` rather than a control character, because the cell is read by people too — it lands in a
- * Table node, in a CSV and in a notebook. The cost is stated rather than engineered away: a value
- * that itself contains `'; '` splits into two on the way back out. That is cosmetic, the whole
- * cell is one hover away, and the alternative is a column of invisible bytes.
- */
-export const JOIN_SEPARATOR = '; '
 
 /** Name of the column an aggregation produces. Kept in one place so both halves agree. */
 export function aggColumnName(agg: AggFn, valueColumn: string | undefined): string {

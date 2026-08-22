@@ -15,7 +15,7 @@
 import type { TableSchema } from '../../core/types'
 import type { CellValue } from '../../core/values'
 import { isNumericDType } from '../../core/types'
-import { JOIN_SEPARATOR } from '../../nodes/lib/tableOps'
+import { JOIN_SEPARATOR } from '../../core/values'
 import { MAX_SERIES } from '../colors'
 
 /**

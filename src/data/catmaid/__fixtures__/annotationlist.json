@@ -1,0 +1,272 @@
+{
+  "skeletons": {
+    "16": {
+      "annotations": [
+        {
+          "uid": 94,
+          "id": 15895188
+        },
+        {
+          "uid": 116,
+          "id": 15980866
+        },
+        {
+          "uid": 94,
+          "id": 15754279
+        },
+        {
+          "uid": 116,
+          "id": 11490509
+        }
+      ]
+    },
+    "430": {
+      "annotations": [
+        {
+          "uid": 116,
+          "id": 17041728
+        },
+        {
+          "uid": 116,
+          "id": 17044027
+        },
+        {
+          "uid": 310,
+          "id": 15754388
+        }
+      ]
+    },
+    "6582": {
+      "annotations": [
+        {
+          "uid": 116,
+          "id": 15549507
+        },
+        {
+          "uid": 116,
+          "id": 15552805
+        },
+        {
+          "uid": 116,
+          "id": 15556619
+        },
+        {
+          "uid": 116,
+          "id": 17684440
+        }
+      ]
+    }
+  },
+  "annotations": {
+    "15895188": "Uniglomerular mALT VA6 adPN#R1",
+    "15980866": "FBbt:00007447",
+    "15754279": "Paper: Bates and Schlegel et al 2020",
+    "11490509": "Paper: Zheng et al 2018",
+    "17041728": "DNp32_R",
+    "17044027": "FBbt:00047665",
+    "15754388": "Paper: Otto et al 2020",
+    "15549507": "Paper: Zheng et al 2020",
+    "15552805": "KC#1-y",
+    "15556619": "FBbt:00100247",
+    "17684440": "Paper: Zheng et al 2022",
+    "11476309": "Published",
+    "16239030": "publication_timestamp: 2017-05-19",
+    "16239032": "publication_link: https://doi.org/10.1016/j.cell.2018.06.019",
+    "16036180": "export: tags",
+    "15983322": "export: annotations",
+    "16036182": "export: intra-connectors-and-placeholders",
+    "12870980": "neuron name",
+    "11078097": "Cell type",
+    "15983326": "export: intra-connectors-and-original-placeholders",
+    "15983328": "publication_timestamp: 2020-07-02",
+    "15983330": "publication_link: https://doi.org/10.1016/j.cub.2020.06.042",
+    "16239056": "export: intra-connectors-only",
+    "17041625": "publication_timestamp: 2020-08-17",
+    "17041627": "publication_link: https://doi.org/10.1016/j.cub.2020.05.077",
+    "17684430": "publication_timestamp: 2022-07-06",
+    "17685952": "publication_link: https://doi.org/10.1016/j.cub.2022.06.031"
+  },
+  "neuronnames": {
+    "16": "Uniglomerular mALT VA6 adPN 017 DB",
+    "430": "La Grosse Cellule LGC 431 JS",
+    "6582": "KCy 6583 SAC"
+  },
+  "metaannotations": {
+    "11490509": {
+      "annotations": [
+        {
+          "uid": 116,
+          "id": 11476309
+        },
+        {
+          "uid": 116,
+          "id": 16239030
+        },
+        {
+          "uid": 116,
+          "id": 16239032
+        },
+        {
+          "uid": 116,
+          "id": 16036180
+        },
+        {
+          "uid": 116,
+          "id": 15983322
+        },
+        {
+          "uid": 116,
+          "id": 16036182
+        }
+      ]
+    },
+    "15549507": {
+      "annotations": [
+        {
+          "uid": 116,
+          "id": 16036182
+        },
+        {
+          "uid": 116,
+          "id": 15983322
+        },
+        {
+          "uid": 116,
+          "id": 16036180
+        }
+      ]
+    },
+    "15552805": {
+      "annotations": [
+        {
+          "uid": 116,
+          "id": 12870980
+        }
+      ]
+    },
+    "15556619": {
+      "annotations": [
+        {
+          "uid": 116,
+          "id": 11078097
+        }
+      ]
+    },
+    "15754279": {
+      "annotations": [
+        {
+          "uid": 116,
+          "id": 16036180
+        },
+        {
+          "uid": 116,
+          "id": 15983326
+        },
+        {
+          "uid": 116,
+          "id": 15983322
+        },
+        {
+          "uid": 116,
+          "id": 15983328
+        },
+        {
+          "uid": 116,
+          "id": 15983330
+        },
+        {
+          "uid": 116,
+          "id": 11476309
+        }
+      ]
+    },
+    "15754388": {
+      "annotations": [
+        {
+          "uid": 116,
+          "id": 15983322
+        },
+        {
+          "uid": 116,
+          "id": 16036180
+        },
+        {
+          "uid": 116,
+          "id": 16239056
+        },
+        {
+          "uid": 116,
+          "id": 17041625
+        },
+        {
+          "uid": 116,
+          "id": 17041627
+        },
+        {
+          "uid": 116,
+          "id": 11476309
+        }
+      ]
+    },
+    "15895188": {
+      "annotations": [
+        {
+          "uid": 94,
+          "id": 12870980
+        }
+      ]
+    },
+    "15980866": {
+      "annotations": [
+        {
+          "uid": 116,
+          "id": 11078097
+        }
+      ]
+    },
+    "17041728": {
+      "annotations": [
+        {
+          "uid": 116,
+          "id": 12870980
+        }
+      ]
+    },
+    "17044027": {
+      "annotations": [
+        {
+          "uid": 116,
+          "id": 11078097
+        }
+      ]
+    },
+    "17684440": {
+      "annotations": [
+        {
+          "uid": 116,
+          "id": 15983322
+        },
+        {
+          "uid": 116,
+          "id": 16036180
+        },
+        {
+          "uid": 116,
+          "id": 16036182
+        },
+        {
+          "uid": 116,
+          "id": 17684430
+        },
+        {
+          "uid": 116,
+          "id": 17685952
+        },
+        {
+          "uid": 116,
+          "id": 11476309
+        }
+      ]
+    }
+  }
+}

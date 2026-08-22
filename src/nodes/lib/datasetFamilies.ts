@@ -61,6 +61,19 @@ export const BACKENDS: Record<string, DatasetBackend> = {
     acceptsAnnotations: true,
   },
   /*
+   * CATMAID takes no Annotations socket, which puts it with neuPrint rather than with CAVE.
+   * The distinction `acceptsAnnotations` draws is whether a dataset's labels come from a table
+   * something else could supply: CAVE reads them from an annotation table, so replacing it is
+   * meaningful, while neuPrint carries them as properties on the neuron. CATMAID carries them as
+   * annotations *on* the neuron — intrinsic in the same way, and derived through its own
+   * meta-annotation layer (see `data/catmaid/annotations.ts`), so there is nothing for an
+   * external table to replace.
+   */
+  catmaid: {
+    id: 'catmaid',
+    label: 'CATMAID',
+  },
+  /*
    * The synthetic families get a backend too, and its label is deliberately empty: `Hemibrain
    * (mini)` already says what it is, and `Hemibrain (mini) (Mock)` is the kind of name a rule
    * produces when nobody checked it against the values. The tint and the tile mark still apply.
@@ -288,9 +301,38 @@ const CAVE_FAMILIES: DatasetFamily[] = [
   },
 ]
 
+/**
+ * CATMAID's families.
+ *
+ * A CATMAID dataset is a **project**, and its id is the project's number as text — per-instance
+ * rather than portable, because CATMAID is software rather than a service and there is no
+ * cross-instance name to use. `1` is FAFB on Virtual Fly Brain's deployment and something else
+ * on anyone's lab server; the *source* id carries which server, which is what keeps the two
+ * apart. There is no version half, so `resolveDatasetId` takes the mock's branch.
+ *
+ * Neither exporter emits it. pymaid is the obvious Python route and `natverse`'s `catmaid` the R
+ * one, but no emitter has been written for either, so both languages refuse rather than
+ * producing a document of TODOs — `DatasetFamily.notebook` absent is what says so.
+ */
+const CATMAID_FAMILIES: DatasetFamily[] = [
+  {
+    key: 'fafb',
+    sourceId: 'catmaid',
+    backend: 'catmaid',
+    family: '1',
+    label: 'FAFB',
+    description:
+      'Whole adult female fly brain, manually traced. Public tracings published on Virtual Fly Brain.',
+    guide:
+      'The FAFB volume as traced in CATMAID and published by Virtual Fly Brain — a few thousand carefully reconstructed neurons rather than a whole-brain segmentation, which is the opposite trade from FlyWire on the same EM. CATMAID has no cell-type field, so Coda derives type and instance from the annotations a neuron carries, and everything else it carries lands in one searchable `annotations` column. The whole instance is indexed in about two seconds, so Explore is immediate; skeletons are densely traced and large, so the Skeletons node has a lower ceiling here than elsewhere. Reading needs no token, but CATMAID answers connectivity only over POST, which a browser cannot do anonymously — see docs/catmaid_vfb.md.',
+    glyph: 'brain',
+  },
+]
+
 export const DATASET_FAMILIES: DatasetFamily[] = [
   ...NEUPRINT_FAMILIES,
   ...CAVE_FAMILIES,
+  ...CATMAID_FAMILIES,
   ...MOCK_FAMILIES,
 ]
 

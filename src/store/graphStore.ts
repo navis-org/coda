@@ -43,6 +43,7 @@ import type { Value } from '../core/values'
 import { isTableValue } from '../core/values'
 import { MockSource } from '../data/mock/MockSource'
 import { NeuPrintSource } from '../data/neuprint/NeuPrintSource'
+import { catmaidSourceFor } from '../data/catmaid/registry'
 import { CaveSource } from '../data/cave/CaveSource'
 import { registerSource, requireSource, subscribeSourceLearned } from '../data/source'
 import { subscribeUploadLearned } from '../data/uploads'
@@ -88,6 +89,7 @@ import '../nodes'
 registerSource(new MockSource())
 registerSource(new NeuPrintSource())
 registerSource(new CaveSource())
+catmaidSourceFor(undefined)
 
 const AUTO_RUN_DELAY_MS = 180
 

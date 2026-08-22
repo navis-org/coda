@@ -25,6 +25,12 @@ import { getEmitter, registeredEmitterTypes } from './registry'
  * of a long list is that the exporter is unfinished.
  */
 const NO_EMITTER: Record<string, string> = {
+  'dataset.fafb':
+    'A CATMAID project rather than a neuPrint dataset. The route in is pymaid, which is a ' +
+    'faithful one \u2014 `pymaid.CatmaidInstance` plus `get_neuron`/`get_partners` maps cleanly ' +
+    'onto what this backend answers \u2014 but no emitter has been written for it, so it ' +
+    'degrades to a TODO rather than emitting neuprint-python against a server neuPrint has ' +
+    'never heard of.',
   'note.text': 'An annotation. It becomes a markdown cell, which the walk does directly.',
   'dataset.mock.hemibrain':
     'Synthetic, so a graph holding one is refused before the walk starts. An emitter here ' +

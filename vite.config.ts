@@ -106,7 +106,44 @@ const NEUPRINT_PROXY = {
 function deploymentProxy(): PluginOption {
   const BLOCKED =
     /^(localhost$|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|\[?::1\]?$)/i
-  const PREFIXES = ['/np/', '/st/']
+  const PREFIXES = ['/np/', '/st/', '/cm/']
+
+  /*
+   * CATMAID's CSRF pair, per origin, for the `/cm/` prefix.
+   *
+   * This is the one relay here that does more than forward, and the reason is that CATMAID's
+   * read endpoints are POST-only behind Django's CSRF: a browser cannot satisfy it, because
+   * `Referer` is a forbidden header name and the `csrftoken` cookie is SameSite=Lax. A server
+   * can. So one GET to the instance root yields the cookie and the token, and every POST after
+   * it carries both plus a same-origin Referer.
+   *
+   * **The cookie name is per-instance** — `csrftoken_6666cd76f96956469e7be39d750cc7d9`, not
+   * `csrftoken` — so it is matched by prefix rather than assumed. See `docs/catmaid_vfb.md`,
+   * which is also where the upstream fix that would make this whole block unnecessary is
+   * written down.
+   */
+  const csrf = new Map<string, { cookie: string; token: string }>()
+
+  const csrfFor = async (
+    origin: string,
+  ): Promise<{ cookie: string; token: string } | undefined> => {
+    const held = csrf.get(origin)
+    if (held) return held
+    try {
+      const response = await fetch(`${origin}/`, { headers: { accept: 'text/html' } })
+      const cookies = response.headers.getSetCookie?.() ?? []
+      const found = cookies
+        .map((line) => line.split(';')[0] ?? '')
+        .find((pair) => pair.startsWith('csrftoken'))
+      if (!found) return undefined
+      const token = found.slice(found.indexOf('=') + 1)
+      const pair = { cookie: found, token }
+      csrf.set(origin, pair)
+      return pair
+    } catch {
+      return undefined
+    }
+  }
 
   const handler = async (req: IncomingMessage, res: ServerResponse, next: () => void) => {
     const url = req.url ?? ''
@@ -135,21 +172,45 @@ function deploymentProxy(): PluginOption {
           })
 
     try {
-      const upstream = await fetch(`${target.origin}/${rest.join('/')}`, {
-        method: req.method ?? 'GET',
-        headers: {
-          // Only what these APIs need. Forwarding the browser's Host or Origin makes neuPrint
-          // answer 400, and SeaTable needs neither.
-          ...(req.headers.authorization
-            ? { authorization: String(req.headers.authorization) }
-            : {}),
-          ...(req.headers['content-type']
-            ? { 'content-type': String(req.headers['content-type']) }
-            : {}),
-          accept: 'application/json',
-        },
-        ...(body && body.length ? { body } : {}),
-      })
+      // CATMAID only, and only for the methods that need it: a GET is answered anonymously.
+      const needsCsrf = url.startsWith('/cm/') && req.method === 'POST'
+
+      const send = async (pair: { cookie: string; token: string } | undefined) =>
+        fetch(`${target.origin}/${rest.join('/')}`, {
+          method: req.method ?? 'GET',
+          headers: {
+            ...(pair
+              ? { cookie: pair.cookie, 'x-csrftoken': pair.token, referer: `${target.origin}/` }
+              : {}),
+            // CATMAID takes its token under this name, and a request carrying one skips CSRF
+            // entirely — so a user with a token is relayed unchanged and needs none of the above.
+            ...(req.headers['x-authorization']
+              ? { 'x-authorization': String(req.headers['x-authorization']) }
+              : {}),
+            // Only what these APIs need. Forwarding the browser's Host or Origin makes neuPrint
+            // answer 400, and SeaTable needs neither.
+            ...(req.headers.authorization
+              ? { authorization: String(req.headers.authorization) }
+              : {}),
+            ...(req.headers['content-type']
+              ? { 'content-type': String(req.headers['content-type']) }
+              : {}),
+            accept: 'application/json',
+          },
+          ...(body && body.length ? { body } : {}),
+        })
+
+      let upstream = await send(needsCsrf ? await csrfFor(target.origin) : undefined)
+      /*
+       * One retry with a fresh CSRF pair. Django's anonymous token is stable for a year, so this
+       * is not the common path — but a cached pair that has gone stale would otherwise wedge the
+       * relay for the life of the dev server, and the symptom (every POST 403s while GETs work)
+       * points nowhere near a cache.
+       */
+      if (needsCsrf && upstream.status === 403) {
+        csrf.delete(target.origin)
+        upstream = await send(await csrfFor(target.origin))
+      }
       res.statusCode = upstream.status
       res.setHeader('content-type', upstream.headers.get('content-type') ?? 'application/json')
       res.end(Buffer.from(await upstream.arrayBuffer()))

@@ -126,6 +126,7 @@
    * browser tile, which is the rule the socket palette follows for the same reason.
    */
   --cat-dataset-cave: #0b6b48;
+  --cat-dataset-catmaid: #12885d;
   --cat-dataset-mock: #7fb3a0;
   --cat-query: #2a78d6;
   --cat-transform: #898781;
@@ -216,6 +217,7 @@
     --chip-8: #e66767;
     --cat-dataset: #199e70;
     --cat-dataset-cave: #3fd6a0;
+    --cat-dataset-catmaid: #2ab98a;
     --cat-dataset-mock: #6f9686;
     --cat-query: #3987e5;
     --cat-transform: #898781;
@@ -277,6 +279,7 @@
   --chip-8: #e66767;
   --cat-dataset: #199e70;
   --cat-dataset-cave: #3fd6a0;
+  --cat-dataset-catmaid: #2ab98a;
   --cat-dataset-mock: #6f9686;
   --cat-query: #3987e5;
   --cat-transform: #898781;

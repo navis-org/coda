@@ -7,7 +7,7 @@
  * document still runs and still answers.
  */
 
-import { JOIN_SEPARATOR } from '../../nodes/lib/tableOps'
+import { JOIN_SEPARATOR } from '../../core/values'
 import { registerHelper } from './registry'
 
 /**

@@ -108,7 +108,12 @@ export interface DatasetAnnotations {
 export function datasetIdentity(type: CodaType | undefined): DatasetValue | undefined {
   const ref = datasetRef(type)
   if (!ref?.sourceId || !ref.datasetId) return undefined
-  return { kind: 'dataset', sourceId: ref.sourceId, datasetId: ref.datasetId, label: ref.datasetId }
+  return {
+    kind: 'dataset',
+    sourceId: ref.sourceId,
+    datasetId: ref.datasetId,
+    label: ref.datasetId,
+  }
 }
 
 export interface ScalarValue {
@@ -575,7 +580,9 @@ export function makeLinkage(
     )
   }
   if (order.length !== labels.length) {
-    throw new Error(`makeLinkage: ${labels.length} labels but ${order.length} in the leaf order`)
+    throw new Error(
+      `makeLinkage: ${labels.length} labels but ${order.length} in the leaf order`,
+    )
   }
   if (extra.clusters && extra.clusters.length !== labels.length) {
     throw new Error(
@@ -662,3 +669,26 @@ export function describeValue(v: Value | undefined): string {
       return String(v.value)
   }
 }
+
+/**
+ * What `join` puts between values, and what anything reading the result splits on.
+ *
+ * One constant because it is a *contract* rather than a formatting choice: a community-tag table
+ * folded into one cell here is split back into chips by the Explore widget, and two spellings of
+ * the separator would be a row of tags nobody could read.
+ *
+ * `'; '` rather than a control character, because the cell is read by people too — it lands in a
+ * Table node, in a CSV and in a notebook. The cost is stated rather than engineered away: a value
+ * that itself contains `'; '` splits into two on the way back out. That is cosmetic, the whole
+ * cell is one hover away, and the alternative is a column of invisible bytes.
+ *
+ * **It lives in `src/core` because a *source* now produces one.** It began in `tableOps.ts`
+ * beside the Group By aggregation that writes it, which was right while a node was the only
+ * thing that could — and `CatmaidSource` folds a neuron's remaining annotations into one cell
+ * exactly as that aggregation folds community tags, so it needs the separator the Explore widget
+ * will split on. `src/data` may not import `src/nodes` (invariant 1), so the agreement had to
+ * move to the layer every consumer reaches. Same reasoning and same destination as
+ * `ID_COLUMN_NAME`, and deliberately no re-export from where it was: a shim is how a symbol
+ * acquires a second spelling and then a third.
+ */
+export const JOIN_SEPARATOR = '; '

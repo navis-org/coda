@@ -14,6 +14,10 @@ import './exporter'
 import { getEmitter, registeredEmitterTypes } from './registry'
 
 const NO_EMITTER: Record<string, string> = {
+  'dataset.fafb':
+    'A CATMAID project rather than a neuPrint dataset. The natverse has `catmaid` (rcatmaid), ' +
+    'which is the R counterpart of pymaid and would map as cleanly, but no emitter has been ' +
+    'written for either language \u2014 see the Python note.',
   'dataset.cave':
     'A CAVE datastack named by hand, so it has the same reason as `dataset.flywire`: this ' +
     'document is built on neuprintr and there is no fafbseg/CAVE emitter yet.',

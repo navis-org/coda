@@ -12,7 +12,7 @@
  * neuPrint notebook should carry none of it.
  */
 
-import { JOIN_SEPARATOR } from '../../nodes/lib/tableOps'
+import { JOIN_SEPARATOR } from '../../core/values'
 import { registerHelper } from './registry'
 
 /**
