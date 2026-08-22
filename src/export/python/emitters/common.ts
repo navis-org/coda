@@ -6,6 +6,8 @@
  * about which column that is.
  */
 
+import { datasetRef } from '../../../core/types'
+import { pyLongIntList } from '../py'
 import type { EmitContext } from '../types'
 
 /**
@@ -20,15 +22,34 @@ export function neuronIds(frame: string): string {
 }
 
 /**
- * A viewer's `ids` selection param, as numbers.
+ * A viewer's `ids` selection param, as **exact decimal text**.
  *
  * `kind: 'ids'` params are written by widgets and live in the saved file, so the value is
  * whatever was last stored — an array normally, and absent on a graph saved before the param
  * existed.
+ *
+ * It used to answer `number[]`, which is invariant 8 at a seam nobody had looked at: a stored id
+ * is a string of digits, and `Number('720575940628857210')` is `720575940628857216` — a
+ * different neuron, written into a notebook with nothing to say so. Harmless while every
+ * exportable dataset was neuPrint, whose nine-to-eleven-digit ids are exact as doubles, and live
+ * the moment a CAVE selection can be exported at all. Emit with `pyLongIntList`, which splices
+ * the digits, or compare as text where the column is text.
  */
-export function selectionIds(ctx: EmitContext, paramId = 'selection'): number[] {
+export function selectionIds(ctx: EmitContext, paramId = 'selection'): string[] {
   const raw = ctx.params[paramId]
-  return Array.isArray(raw) ? raw.map(Number) : []
+  return Array.isArray(raw) ? raw.map((id) => String(id).trim()).filter(Boolean) : []
+}
+
+/**
+ * A selection as a Python list literal, wrapped if long.
+ *
+ * Paired with `selectionIds` deliberately, the way `codaNeurons` pairs a declaration with its
+ * call: the ids come back as **text** so no digit is lost, and `pyValue` would then *quote*
+ * them — `isin(['1001'])` against an `i64` column matches nothing at all, silently. Nothing
+ * type-checks that pairing, so it is one function rather than five call sites remembering.
+ */
+export function pySelection(ids: readonly string[]): string {
+  return pyLongIntList(ids).join('\n')
 }
 
 /**
@@ -49,4 +70,30 @@ export function selectionIds(ctx: EmitContext, paramId = 'selection'): number[] 
 export function codaNeurons(ctx: EmitContext, frame: string): string {
   ctx.helper('coda_neurons')
   return `${frame} = coda_neurons(${frame})`
+}
+
+/**
+ * Is the dataset on this port a CAVE datastack?
+ *
+ * Read off the resolved *type*, which carries the source id — the same thing the walk's backend
+ * guard reads, so an emitter branching on this and the guard letting it through cannot disagree
+ * about which backend a node is on.
+ *
+ * An emitter that asks this has to declare `backends: ['neuprint', 'cave']`, or the guard turns
+ * it into a TODO before the branch is ever reached.
+ */
+export function isCaveDataset(ctx: EmitContext, portId = 'dataset'): boolean {
+  return datasetRef(ctx.inputType(portId))?.sourceId === 'cave'
+}
+
+/**
+ * The neuron table a CAVE dataset labels its neurons with — Coda's index, one row per neuron.
+ *
+ * `CodaCaveDataset.labels`, which is fetched on first use and is exactly what `CaveSource`
+ * builds: the datastack's neuron table joined to its annotations, or whatever an Annotations
+ * source supplied instead. Every node that would otherwise download an index goes through this,
+ * so a graph with three of them pays for one.
+ */
+export function caveLabels(dataset: string): string {
+  return `${dataset}.labels`
 }

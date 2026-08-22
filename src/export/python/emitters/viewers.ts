@@ -15,7 +15,7 @@ import { datasetRef } from '../../../core/types'
 import { decodeClauses, resolveFilters, usesRegex } from '../../../nodes/lib/tableFilter'
 import { pyList, pyStr } from '../py'
 import { registerEmitter } from '../registry'
-import { codaNeurons, selectionIds } from './common'
+import { codaNeurons, pySelection, selectionIds } from './common'
 import { filterMasks } from './tableFilters'
 
 // ---------------------------------------------------------------------------
@@ -159,7 +159,7 @@ registerEmitter('out.scatter', (ctx) => {
   const selection = selectionIds(ctx)
   const idColumn = ctx.column('idColumn')
   if (selection.length > 0 && idColumn) {
-    lines.push(`${selected} = ${out}[${out}[${pyStr(idColumn)}].isin(${pyList(selection)})]`)
+    lines.push(`${selected} = ${out}[${out}[${pyStr(idColumn)}].isin(${pySelection(selection)})]`)
   } else {
     lines.push(
       ...ctx.note('Nothing is lassoed on the canvas, so Selected is empty.'),
@@ -274,7 +274,7 @@ registerEmitter('out.viewer3d', (ctx) => {
   ctx.require('pandas')
   const lines = [`navis.plot3d([${wired.join(', ')}])`, '']
   if (selection.length > 0) {
-    lines.push(`${selected} = pd.DataFrame({'neuronId': ${pyList(selection)}})`)
+    lines.push(`${selected} = pd.DataFrame({'neuronId': ${pySelection(selection)}})`)
   } else {
     lines.push(
       ...ctx.note('Nothing is picked in the viewer, so Selected is empty.'),

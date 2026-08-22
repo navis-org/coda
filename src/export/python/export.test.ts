@@ -102,7 +102,9 @@ describe('notebook export', () => {
   it('refuses a neuPrint cell on a CAVE dataset, naming the backend', () => {
     const source = exportFixture(caveGraph())
     expect(source).toContain('wired to a CAVE dataset')
+    // And nothing anywhere in the document reaches for neuprint-python.
     expect(source).not.toContain('NeuronCriteria')
+    expect(source).not.toContain('fetch_neurons')
   })
 
   it('refuses a graph holding a synthetic dataset', () => {

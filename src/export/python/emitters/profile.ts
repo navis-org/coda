@@ -12,9 +12,9 @@
  * a plausible wrong number rather than an error, so each is called out where it is applied.
  */
 
-import { pyList } from '../py'
+import {  } from '../py'
 import { registerEmitter, registerHelper } from '../registry'
-import { neuronIds, selectionIds } from './common'
+import { neuronIds, pySelection, selectionIds } from './common'
 
 registerEmitter('out.profile', (ctx) => {
   const src = ctx.wired('neurons')
@@ -31,7 +31,7 @@ registerEmitter('out.profile', (ctx) => {
 
   // The pinned row, which is the node's `Current` output whether or not the metrics run.
   if (selection.length > 0) {
-    lines.push(`${current} = ${out}[${out}['neuronId'].isin(${pyList(selection)})]`)
+    lines.push(`${current} = ${out}[${out}['neuronId'].isin(${pySelection(selection)})]`)
   } else {
     lines.push(
       ...ctx.note('No neuron is pinned on the canvas, so Current is empty.'),
@@ -50,7 +50,7 @@ registerEmitter('out.profile', (ctx) => {
   }
 
   ctx.helper('coda_profile')
-  const ids = selection.length > 0 ? pyList(selection) : neuronIds(out)
+  const ids = selection.length > 0 ? pySelection(selection) : neuronIds(out)
 
   lines.push(
     ``,

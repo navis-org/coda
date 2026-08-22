@@ -434,6 +434,8 @@ export function everythingGraph(): CodaGraph {
 
   const edges: Array<[string, string, string, string]> = [
     ['ds', 'dataset', 'find', 'dataset'],
+    ['ds', 'dataset', 'summary', 'dataset'],
+    ['ds', 'dataset', 'explore', 'dataset'],
     ['ds', 'dataset', 'ids', 'dataset'],
     ['ds', 'dataset', 'labels', 'dataset'],
     ['ds', 'dataset', 'explore', 'dataset'],
@@ -580,9 +582,24 @@ export function caveGraph(): CodaGraph {
       params: { idColumn: 'neuronId', supervoxelColumn: 'supervoxel_id' },
     },
     { id: 'table', type: 'out.table', col: 5, row: 1 },
-    // A neuPrint-only node on a CAVE dataset: the walk turns an undeclared backend into a TODO,
-    // and the golden is where that message is read.
     { id: 'find', type: 'neuron.findNeurons', col: 5, params: { typePattern: 'LC.*' } },
+    // A neuPrint-only node on a CAVE dataset: the walk turns an undeclared backend into a TODO,
+    // and the golden is where that message is read. Find Neurons used to be this one, and is now
+    // written for both — which is the shape of the whole exercise, so the marker moved rather
+    // than the assertion being dropped.
+    { id: 'summary', type: 'out.datasetSummary', col: 6, params: {} },
+    /*
+     * And one that *is* written for both, since only its index fetch is backend-specific. The
+     * query and the selection are both set so the golden carries the search and the text-keyed
+     * `isin` — a CAVE id column is `str`, and comparing it against Python ints matches nothing.
+     */
+    {
+      id: 'explore',
+      type: 'neuron.explore',
+      col: 5,
+      row: 2,
+      params: { query: 'side=left', selection: ['720575940628857210'] },
+    },
     {
       id: 'custom',
       type: 'dataset.cave',
@@ -605,6 +622,8 @@ export function caveGraph(): CodaGraph {
     ['repair', 'out', 'ds', 'annotations'],
     ['repair', 'out', 'table', 'in'],
     ['ds', 'dataset', 'find', 'dataset'],
+    ['ds', 'dataset', 'summary', 'dataset'],
+    ['ds', 'dataset', 'explore', 'dataset'],
   ]
   for (const [from, out, to, into] of edges) g = wire(g, from, out, to, into)
   return g

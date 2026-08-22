@@ -892,11 +892,41 @@ executes generated code. Reading the code did not catch the bug; running it did.
 stashed out — the family table's one field and the refusal's stack names. Everything else is in
 `exporter-*.js`, which stays lazily loaded; `CodaCaveDataset` appears nowhere in `main`.
 
-Not written yet, and each declines with a TODO naming the backend rather than emitting neuPrint
-code: **Find Neurons, Explore, Connectivity, Adjacency, Skeletons, Meshes, Synapses, Profile,
-Neuroglancer**. `CodaCaveDataset.labels` is what the first two would read, and it exists and is
-tested ahead of them for that reason. The table ops downstream are backend-agnostic and already
-work.
+#### The query half, and why it was nearly free
+
+**Explore and Find Neurons emit for CAVE**, and the reason is that neither is really a query on
+this backend. A CAVE datastack has no server-side neuron search — its API has no regex worth
+using — so `CaveSource` downloads the index once and filters it locally, and the notebook does
+the same over the same frame. `coda_search` is already a port of Coda's matcher and does not care
+where the frame came from, so **Explore's CAVE branch is one line**: `dataset.labels` instead of
+`fetch_neurons(NeuronCriteria(...))`. That is why they were the first two written — on a FlyWire
+graph Explore is usually the only thing between the dataset and everything else, so a TODO there
+blocked the whole notebook.
+
+Find Neurons is the same frame with pandas filters on it, and the filters are **Coda's semantics
+rather than pandas' defaults**: `coda_match` uses `str.fullmatch` (anchored at both ends,
+case-sensitive — `compileRegex`'s `^(?:…)$`, which is Neo4j's `=~`), where `str.match` anchors
+only the start and would quietly widen every pattern. And a column the datastack does not publish
+**matches no row**, which is `CaveSource`'s own rule rather than an accident, and reachable here
+because a datastack's columns are whatever its annotations carry.
+
+That last rule surfaced a live bug in the app, not in the exporter: **Find Neurons' `status`
+defaults to `Traced` while its picker on a CAVE dataset offers only `Any`** (`statuses: []`), so
+the default survives into the request, `CaveSource` drops every row, and the node answers nothing
+without anybody having chosen a status. The emitted cell reproduces it — it has to agree with the
+canvas — and says so in a NOTE naming the fix, because a notebook that returned nothing silently
+would send the reader to look at their datastack.
+
+**`selectionIds` answered `number[]`, which is invariant 8 at a seam nobody had looked at.** A
+stored id is a string of digits and `Number('720575940628857210')` is `…216` — a different neuron,
+written into a notebook with nothing to say so. Harmless while every exportable dataset was
+neuPrint, and live the moment a CAVE selection could be exported. It answers exact text now, and
+`pySelection` pairs it with `pyLongIntList` in one place, because `pyValue` would *quote* a string
+and `isin(['1001'])` against an `i64` column matches nothing at all.
+
+Still not written, and each declines with a TODO naming the backend rather than emitting neuPrint
+code: **Connectivity, Adjacency, Skeletons, Meshes, Synapses, Profile, Dataset Summary, ROIs,
+Neuroglancer**. The table ops downstream are backend-agnostic and already work.
 
 #### SeaTable, through sea-serpent
 

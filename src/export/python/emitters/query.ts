@@ -22,7 +22,7 @@ import type { EmitContext } from '../types'
 /** What "neuPrint" means unless a node says otherwise. */
 const DEFAULT_DEPLOYMENT = 'https://neuprint.janelia.org'
 import { neuprintProperty } from '../../../data/neuprint/schema'
-import { codaNeurons, neuronIds } from './common'
+import { caveLabels, codaNeurons, isCaveDataset, neuronIds } from './common'
 
 // ---------------------------------------------------------------------------
 // Dataset
@@ -139,13 +139,90 @@ registerEmitter('neuron.dataset', (ctx) => {
 // Find Neurons
 // ---------------------------------------------------------------------------
 
-registerEmitter('neuron.findNeurons', (ctx) => {
-  const c = ctx.wired('dataset')
-  if (!c) return ctx.todo('No Dataset is wired to this Find Neurons.')
+/**
+ * Find Neurons, on either backend, and the two are genuinely different operations.
+ *
+ * neuPrint compiles the fields into a `NeuronCriteria` and the server answers. A CAVE datastack
+ * has no such query — its API has no regex worth using — so `CaveSource` downloads the index once
+ * and filters it locally, and the notebook does the same thing over the same frame
+ * (`CodaCaveDataset.labels`, shared with Explore, so a graph with both pays for one fetch).
+ *
+ * The filters are Coda's own semantics rather than pandas' defaults: anchored and case-sensitive,
+ * which is what `compileRegex` does to match Neo4j's `=~`, and a column the datastack does not
+ * publish matches **no** row rather than every row. See `coda_match`.
+ */
+registerEmitter(
+  'neuron.findNeurons',
+  (ctx) => {
+    const c = ctx.wired('dataset')
+    if (!c) return ctx.todo('No Dataset is wired to this Find Neurons.')
+    if (isCaveDataset(ctx)) return caveFindNeurons(ctx, c)
 
-  ctx.require('neuprint', 'NeuronCriteria', 'fetch_neurons')
+    ctx.require('neuprint', 'NeuronCriteria', 'fetch_neurons')
+    const out = ctx.output('neurons')
+
+    const typePattern = String(ctx.params.typePattern ?? '')
+    const instancePattern = String(ctx.params.instancePattern ?? '')
+    const status = String(ctx.params.status ?? '')
+    const roi = String(ctx.params.roi ?? '')
+    const minSize = Number(ctx.params.minSize ?? 0)
+    const limit = Number(ctx.params.limit ?? 0)
+
+    const criteria: string[] = []
+    if (typePattern) criteria.push(`type=${pyStr(typePattern)}`)
+    if (instancePattern) criteria.push(`instance=${pyStr(instancePattern)}`)
+    if (status) criteria.push(`status=${pyStr(status)}`)
+    if (roi) criteria.push(`rois=${pyList([roi])}`)
+    // `regex='guess'` is NeuronCriteria's default and it guesses from the string's shape. Coda's
+    // fields are always regexes — anchored, since that is what Neo4j's `=~` does — so saying so
+    // is what stops `LC4` and `LC.*` being matched by two different rules.
+    if (typePattern || instancePattern) criteria.push('regex=True')
+    criteria.push(`client=${c}`)
+
+    const lines: string[] = []
+    // The ternary is only about line wrapping, so the normalisation sits outside it.
+    const call =
+      criteria.length <= 2
+        ? [`${out}, _ = fetch_neurons(NeuronCriteria(${criteria.join(', ')}), client=${c})`]
+        : [
+            `${out}, _ = fetch_neurons(`,
+            `    NeuronCriteria(`,
+            ...criteria.map((c_) => `        ${c_},`),
+            `    ),`,
+            `    client=${c},`,
+            `)`,
+          ]
+    lines.push(...call, codaNeurons(ctx, out))
+
+    if (minSize > 0) {
+      // NeuronCriteria has no size field, so Coda's server-side cut becomes a filter on the
+      // result. Same rows, one larger response.
+      lines.push(
+        ...ctx.note(
+          'Coda applies this size cut in the query; there is no NeuronCriteria field for it.',
+        ),
+        `${out} = ${out}[${out}['size'] >= ${minSize}]`,
+      )
+    }
+    if (limit > 0) lines.push(`${out} = ${out}.head(${limit})`)
+    return lines
+  },
+  { backends: ['neuprint', 'cave'] },
+)
+
+/**
+ * The same node against a CAVE datastack: the index, filtered locally.
+ *
+ * Every clause is applied the way `CaveSource.findNeurons` applies it, including the two that
+ * look like bugs and are not. **A region filter answers empty** — CAVE publishes no regions at
+ * all, so the clause can match nothing, and that is Coda's answer rather than an oversight.
+ * **Status and size go through `coda_match`/`coda_isin`'s missing-column rule** for the same
+ * reason, except where an annotation chain happens to supply such a column, in which case they
+ * work. Neither is reachable from the card — both pickers are filled from what the dataset
+ * reports — so this is what a graph saved against another backend meets.
+ */
+function caveFindNeurons(ctx: EmitContext, dataset: string): string[] {
   const out = ctx.output('neurons')
-
   const typePattern = String(ctx.params.typePattern ?? '')
   const instancePattern = String(ctx.params.instancePattern ?? '')
   const status = String(ctx.params.status ?? '')
@@ -153,45 +230,60 @@ registerEmitter('neuron.findNeurons', (ctx) => {
   const minSize = Number(ctx.params.minSize ?? 0)
   const limit = Number(ctx.params.limit ?? 0)
 
-  const criteria: string[] = []
-  if (typePattern) criteria.push(`type=${pyStr(typePattern)}`)
-  if (instancePattern) criteria.push(`instance=${pyStr(instancePattern)}`)
-  if (status) criteria.push(`status=${pyStr(status)}`)
-  if (roi) criteria.push(`rois=${pyList([roi])}`)
-  // `regex='guess'` is NeuronCriteria's default and it guesses from the string's shape. Coda's
-  // fields are always regexes — anchored, since that is what Neo4j's `=~` does — so saying so
-  // is what stops `LC4` and `LC.*` being matched by two different rules.
-  if (typePattern || instancePattern) criteria.push('regex=True')
-  criteria.push(`client=${c}`)
+  const lines: string[] = [
+    ...ctx.note(
+      'A CAVE datastack has no server-side neuron query, so Coda reads its whole index once ' +
+        'and filters it here — which is what this does. Explore shares the same frame.',
+    ),
+    `${out} = ${caveLabels(dataset)}`,
+  ]
 
-  const lines: string[] = []
-  // The ternary is only about line wrapping, so the normalisation sits outside it.
-  const call =
-    criteria.length <= 2
-      ? [`${out}, _ = fetch_neurons(NeuronCriteria(${criteria.join(', ')}), client=${c})`]
-      : [
-          `${out}, _ = fetch_neurons(`,
-          `    NeuronCriteria(`,
-          ...criteria.map((c_) => `        ${c_},`),
-          `    ),`,
-          `    client=${c},`,
-          `)`,
-        ]
-  lines.push(...call, codaNeurons(ctx, out))
+  if (roi) {
+    return [
+      ...lines,
+      ...ctx.note(
+        `This node filters on region "${roi}", and a CAVE datastack publishes no regions — so ` +
+          'Coda answers it empty rather than ignoring it. Drop the region to get neurons back.',
+      ),
+      `${out} = ${out}.iloc[0:0]`,
+    ]
+  }
 
-  if (minSize > 0) {
-    // NeuronCriteria has no size field, so Coda's server-side cut becomes a filter on the
-    // result. Same rows, one larger response.
+  for (const [column, pattern] of [
+    ['type', typePattern],
+    ['instance', instancePattern],
+  ] as const) {
+    if (!pattern) continue
+    ctx.helper('coda_match')
+    lines.push(`${out} = coda_match(${out}, ${pyStr(column)}, ${pyStr(pattern)})`)
+  }
+  if (status) {
+    /*
+     * Faithful, and worth explaining rather than only reproducing: a CAVE datastack publishes no
+     * status, so this clause matches nothing and the cell answers empty — which is exactly what
+     * the canvas answers. The node's status default is `Traced` and its picker on a CAVE dataset
+     * offers only `Any`, so this is reachable *without anybody choosing it*; a notebook that
+     * returned nothing without saying why would send the reader to look at their datastack.
+     */
+    ctx.helper('coda_isin')
     lines.push(
       ...ctx.note(
-        'Coda applies this size cut in the query; there is no NeuronCriteria field for it.',
+        `Status is set to "${status}" and a CAVE datastack publishes no status, so this ` +
+          'matches no neuron — as it does on the canvas. Set Status to "Any" on the node, or ' +
+          'delete this line.',
       ),
-      `${out} = ${out}[${out}['size'] >= ${minSize}]`,
+      `${out} = coda_isin(${out}, 'status', ${pyList([status])})`,
+    )
+  }
+  if (minSize > 0) {
+    lines.push(
+      `${out} = ${out}[${out}['size'] >= ${minSize}] if 'size' in ${out}.columns ` +
+        `else ${out}.iloc[0:0]`,
     )
   }
   if (limit > 0) lines.push(`${out} = ${out}.head(${limit})`)
   return lines
-})
+}
 
 // ---------------------------------------------------------------------------
 // Input IDs

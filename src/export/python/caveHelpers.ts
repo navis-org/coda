@@ -365,6 +365,50 @@ registerHelper({
 })
 
 /**
+ * An anchored, case-sensitive regex over one column — Coda's own filter, and Neo4j's `=~`.
+ *
+ * `str.fullmatch` is the exact pandas equivalent of `compileRegex`'s `^(?:…)$`: anchored at both
+ * ends, case-sensitive, and `na=False` so a missing value is not a match. `str.match` anchors
+ * only the start and would quietly widen every pattern.
+ *
+ * **A column the table does not have matches no row**, which is what Coda answers rather than an
+ * accident of it: a filter naming a column this dataset does not publish is Cypher's null rule,
+ * and it is reachable here because a CAVE datastack's columns are whatever its annotations
+ * happen to carry.
+ */
+registerHelper({
+  name: 'coda_match',
+  requires: [['pandas']],
+  source: [
+    'def coda_match(df, column, pattern):',
+    '    """Rows whose `column` matches `pattern` end to end, case-sensitively."""',
+    '    if column not in df.columns:',
+    '        return df.iloc[0:0]',
+    "    return df[df[column].astype('string').str.fullmatch(pattern, na=False)]",
+  ],
+})
+
+/**
+ * Rows whose `column` is one of `values`, with the same missing-column rule as `coda_match`.
+ *
+ * Compared as text throughout, which is invariant 8 at this seam: a CAVE id column is `str`
+ * because an eighteen-digit root id is not exact as a float, so `isin` against a list of Python
+ * ints matches nothing at all — silently, and on every row.
+ */
+registerHelper({
+  name: 'coda_isin',
+  requires: [['pandas']],
+  source: [
+    'def coda_isin(df, column, values):',
+    '    """Rows whose `column` is one of `values`, compared as text."""',
+    '    if column not in df.columns:',
+    '        return df.iloc[0:0]',
+    '    wanted = [str(v) for v in values]',
+    '    return df[df[column].astype(str).isin(wanted)]',
+  ],
+})
+
+/**
  * Bring stale root ids forward to a materialization.
  *
  * `cave.updateRootIds`, and the shape is the whole cost control: **the staleness check runs

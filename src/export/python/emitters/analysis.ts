@@ -9,7 +9,7 @@ import { clusterColor } from '../../../ui/encoding'
 import { pyList, pyStr } from '../py'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
-import { selectionIds } from './common'
+import { pySelection, selectionIds } from './common'
 
 // ---------------------------------------------------------------------------
 // Build Network
@@ -539,7 +539,7 @@ registerEmitter('out.dendrogram', (ctx) => {
 
   if (selection.length > 0) {
     lines.push(
-      `_picked = ${pyList(selection)}`,
+      `_picked = ${pySelection(selection)}`,
       `_position = {int(obs): i for i, obs in enumerate(${outNames.order})}`,
       `_palette = ${pyList(palette)}`,
       `_cluster_of = lambda i: 0 if ${outNames.clusters} is None else int(${outNames.clusters}[i])`,

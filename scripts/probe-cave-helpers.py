@@ -158,6 +158,30 @@ check(
     str(list(st_all.columns)),
 )
 
+# ---- coda_match / coda_isin -------------------------------------------------
+# Coda's own filter semantics rather than pandas' defaults: anchored at both ends,
+# case-sensitive, and a column the table does not have matching no row.
+idx = pd.DataFrame(
+    {
+        "neuronId": ["1", "2", "3", "4"],
+        "type": pd.array(["LC4", "LPLC1", "LC6", None], dtype="string"),
+    }
+)
+check(
+    "match: anchored at both ends",
+    list(ns["coda_match"](idx, "type", "LC.*")["neuronId"]) == ["1", "3"],
+    str(list(ns["coda_match"](idx, "type", "LC.*")["neuronId"])),
+)
+check("match: case-sensitive", len(ns["coda_match"](idx, "type", "lc4")) == 0)
+check("match: a null is not a match", len(ns["coda_match"](idx, "type", ".*")) == 3)
+check("match: a missing column matches nothing", len(ns["coda_match"](idx, "side", ".*")) == 0)
+check(
+    "isin: compares as text",
+    list(ns["coda_isin"](idx, "neuronId", [1, 3])["neuronId"]) == ["1", "3"],
+    str(list(ns["coda_isin"](idx, "neuronId", [1, 3])["neuronId"])),
+)
+check("isin: a missing column matches nothing", len(ns["coda_isin"](idx, "status", ["Traced"])) == 0)
+
 # ---- coda_join_annotations --------------------------------------------------
 left  = pd.DataFrame({'neuronId': ['1', '2'], 'type': ['A', 'B'], 'side': ['L', None]})
 right = pd.DataFrame({'neuronId': ['2', '3'], 'type': ['B2', None], 'nt': ['ACh', 'GABA']})
