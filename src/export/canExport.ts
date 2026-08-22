@@ -40,6 +40,17 @@ export interface TodoStep {
   nodeId: string
   /** What the node is called on the canvas. */
   label: string
+  /**
+   * Nothing upstream produced a value, so this step was never *reached* rather than never
+   * translated.
+   *
+   * The distinction the walk already draws for its own messages, carried out to whoever is
+   * counting: a blocked node is usually translatable and is a TODO only because something in
+   * front of it was not. Telling a reader that their Table node "has no notebook equivalent"
+   * when the Table is fine and the Explore before it is not sends them to look at the wrong
+   * card — the same failure the walk's own unwired-versus-blocked split exists to avoid.
+   */
+  blocked?: boolean
 }
 
 export interface ExportRefusal {

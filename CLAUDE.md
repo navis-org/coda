@@ -615,10 +615,28 @@ stale answer is structurally impossible — a changed graph is a cache miss. A n
 while a walk is in flight owns the cache when it lands, which is the same ownership check the
 root-drift advisory needs and for the same reason.
 
-**The message does not say *why* each step is a TODO.** The five reasons above are genuinely
-different and every one of them is already stated in the document itself, beside the step it is
-about. What a reader wants before clicking is how much of the graph will be missing, and which
-parts.
+**It names the causes and counts the cascade.** A TODO binds nothing, so everything downstream
+of one is a TODO too — and telling somebody their Table node "has no notebook equivalent" when
+the Table is fine and the Explore in front of it is not sends them to the wrong card. That is the
+walk's own unwired-versus-blocked split carried out to the surface, through `TodoStep.blocked`.
+On the FlyWire starter the difference is the whole message: *"Explore" has no notebook
+equivalent, so it and 2 steps after it will be left as TODO comments* rather than a list of three
+nodes, two of which translate perfectly well. A muted node also binds nothing, so a graph can
+carry blocked steps with no untranslated root — then naming the blocked ones is the only true
+thing left to say.
+
+**It still does not say *why* each root is untranslated.** Those reasons are genuinely different
+and every one is already stated in the document itself, beside the step it is about.
+
+**The Description card emits a note rather than a TODO**, and that is what keeps the whole
+mechanism from crying wolf. `ctx.todo` means "no code came out of this", which is true of a
+credit card — and it also means "this step is missing from the translation", which is not. It has
+no outputs, so it blocks nothing, and `core/companion.ts` puts one on **every** published dataset
+node: counting it would have put a warning on essentially every graph anybody exports. Nothing is
+lost by the distinction, since `todo`'s only other effect is withholding output bindings and this
+node has none. It also declares `backends: ['neuprint', 'cave']` — not a claim that it emits
+caveclient code, since it emits none, but that the *card* is backend-independent, which is what
+stops the guard turning it into a TODO on every CAVE graph.
 
 **+1,890 bytes on the main chunk**, measured — the module, both surfaces and the CSS. `main` still
 matches neither exporter; both stay behind `await import`.
@@ -630,13 +648,21 @@ per-mode at all, since the bright gold is 1.74:1 on light. The Save panel is **3
 warning and 313px with one**: the sentence wraps inside the width the descriptions already set, so
 the menu does not jump between the two states. That was the thing worth pointing a browser at.
 
-**The two surfaces refuse differently, and that is not an inconsistency.** A menu has room to
-answer back, so the Save menu lets the click through and replaces the item with a sentence
-naming what to change. The palette closes on pick, so there is nowhere to put that sentence
-afterwards — the row is `disabled` and the _hint_ carries it, which is the idiom every other
-command there already follows. Getting this backwards would put a lit row in the palette that
-closes it and does nothing, and on a bundled example that is the usual state rather than an
-edge case.
+**Both surfaces now refuse the same way, and the change is per-format coverage.** The palette
+closes on pick, so a refusal has always had to be `disabled` plus a hint — there is nowhere to
+put a sentence afterwards. The Save menu used to do the opposite: let the click through and
+replace the whole export block with a paragraph. That was right while one answer served both
+formats and became wrong the moment they could disagree, because replacing the block also took
+away the format that *would* have worked — a FlyWire graph builds a notebook and no R document.
+So the menu now disables the row it cannot honour and puts the reason under it, which is the same
+answer with more room. The reason renders at full strength while the row above it dims; taking a
+4.5:1 colour to half strength is how a message nobody can read ends up on screen.
+
+`--status-refused` exists for that sentence, and for `--status-warn`'s reason one colour over:
+`--status-error` is one value for both modes, which is fine for a badge dot and not for prose at
+10.5px — `#d03b3b` is 4.56:1 on the light panel and **3.73:1** on the dark one. No single red
+clears 4.5:1 on both, so it is per-mode: `#c22f2f` light, `#e05c5c` dark, both measured against
+the panel rather than the canvas.
 
 **Two things are refused; everything else is a TODO.** Every other gap emits a TODO,
 because the surrounding cells are still worth having. A `dataset.mock.*` connectome is generated

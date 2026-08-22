@@ -267,10 +267,12 @@ registerEmitter('out.neuroglancer', (ctx) => {
   )
 })
 
+// A note rather than a TODO — see the Python emitter, which records why at length: the card is
+// prose with no outputs, and it is on every published dataset node by default.
 registerEmitter('dataset.description', (ctx) => {
-  return ctx.todo(
-    "This card shows the dataset's published description and citation. Read it with " +
-      'neuprint_get_meta() / neuprint_datasets() if you need it here.',
+  return ctx.note(
+    "This card shows the dataset's published description and citation, which is prose rather " +
+      'than a step. Read it with neuprint_get_meta() / neuprint_datasets() if you need it here.',
   )
 })
 

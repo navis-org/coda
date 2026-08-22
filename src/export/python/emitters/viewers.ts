@@ -11,6 +11,7 @@
  * worse than a knob visibly not translated.
  */
 
+import { datasetRef } from '../../../core/types'
 import { decodeClauses, resolveFilters, usesRegex } from '../../../nodes/lib/tableFilter'
 import { pyList, pyStr } from '../py'
 import { registerEmitter } from '../registry'
@@ -337,14 +338,40 @@ registerEmitter('out.neuroglancer', (ctx) => {
 // Dataset description
 // ---------------------------------------------------------------------------
 
-registerEmitter('dataset.description', (ctx) => {
-  // No outputs, and the card's whole content is somebody else's prose. A cell that fetched
-  // and printed it would be a network call for a credit line.
-  return ctx.todo(
-    "This card shows the dataset's published description and citation. Read it with " +
-      '`fetch_meta(client=...)` if you need it here.',
-  )
-})
+/**
+ * The dataset's own credit card, which emits a **note** rather than a TODO.
+ *
+ * `ctx.todo` means "no code came out of this", which is true here — and it also means "this step
+ * is missing from the translation", which is not. The card is a credit line on the canvas: it has
+ * no outputs, so it blocks nothing, and nobody expects it in a notebook. It is also on *every*
+ * published dataset node by default (`core/companion.ts`), so counting it would put a warning on
+ * essentially every graph anyone exports, which is how a warning stops being read.
+ *
+ * Nothing is lost by the distinction: `todo` withholds a node's output bindings, and this node
+ * has none.
+ */
+registerEmitter(
+  'dataset.description',
+  (ctx) => {
+    const cave = datasetRef(ctx.inputType('dataset'))?.sourceId === 'cave'
+    return ctx.note(
+      "This card shows the dataset's published description and citation, which is prose " +
+        'rather than a step. Read it with ' +
+        (cave ? '`client.info.get_datastack_info()`' : '`fetch_meta(client=...)`') +
+        ' if you need it here.',
+    )
+  },
+  /*
+   * Both backends, which is not a claim that this emits caveclient code — it emits no code at
+   * all. It is a claim that the *card* is backend-independent, which it is: it is prose about a
+   * dataset, and the guard exists to stop neuprint-python calls reaching a `CAVEclient`.
+   *
+   * Without it the guard fires first and this becomes a TODO on every CAVE graph — and since
+   * the card is on every published dataset node by default, that is a warning on every CAVE
+   * graph anybody exports, about the one node nobody expected in a notebook.
+   */
+  { backends: ['neuprint', 'cave'] },
+)
 
 // ---------------------------------------------------------------------------
 // Dataset Summary

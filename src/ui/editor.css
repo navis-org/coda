@@ -3013,12 +3013,34 @@ a.dropdown__item {
 }
 /*
  * The item still works — this says what the export will be *missing*, which is why it sits under
- * the description rather than replacing the row the way a refusal does. Not `white-space: nowrap`:
- * it names nodes, so it has to be allowed to wrap inside the menu's width.
+ * the description rather than replacing the row. Not `white-space: nowrap`: it names nodes, so it
+ * has to be allowed to wrap inside the menu's width.
  */
 .dropdown__item .dropdown__warn {
   color: var(--status-warn);
   margin-top: 2px;
+}
+/*
+ * A format this graph cannot be exported as. The row is disabled, and only the row *above* the
+ * reason dims: taking a 4.5:1 colour to half strength is how a message nobody can read ends up
+ * on screen, and this one is the only thing on the row worth reading.
+ *
+ * `--status-refused` rather than `--status-error`, which is one value for both modes and drops
+ * to 3.73:1 on the dark panel — see the token, which records why prose needs its own.
+ */
+.dropdown__item .dropdown__refused {
+  color: var(--status-refused);
+  margin-top: 2px;
+}
+.dropdown__item:disabled {
+  cursor: default;
+}
+.dropdown__item:disabled:hover {
+  background: transparent;
+}
+.dropdown__item:disabled strong,
+.dropdown__item:disabled > span:not(.dropdown__refused) {
+  opacity: 0.45;
 }
 
 /*

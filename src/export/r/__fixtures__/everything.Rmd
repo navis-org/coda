@@ -506,9 +506,9 @@ roi_connectivity_matrix_df <- roi_connectivity_links
 
 ```{r description}
 # ── Description ──
-# TODO: This card shows the dataset's published description and citation.
-# Read it with neuprint_get_meta() / neuprint_datasets() if you need it
-# here.
+# NOTE: This card shows the dataset's published description and citation,
+# which is prose rather than a step. Read it with neuprint_get_meta() /
+# neuprint_datasets() if you need it here.
 ```
 
 ```{r dataset-summary}

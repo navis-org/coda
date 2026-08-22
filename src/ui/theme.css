@@ -98,6 +98,18 @@
    */
   --status-warn: #8a5e00;
 
+  /*
+   * A refusal beside it: this cannot be done at all, said in prose on a panel.
+   *
+   * `--status-error` is one value for both modes, which is fine for the badge dot and the short
+   * status line it was picked for and **not** for a sentence: #d03b3b is 4.56:1 on the light
+   * panel and 3.73:1 on the dark one, under the 4.5:1 floor for 10.5px text exactly where the
+   * dark-mode reader is. As with the gold above, no single red clears it on both — a red light
+   * enough for the dark panel is 3.4:1 on the light one — so it is per-mode. #c22f2f is 5.32:1
+   * light; #e05c5c is 5.00:1 dark, and both stay in --status-error's own hue.
+   */
+  --status-refused: #c22f2f;
+
   /* --- node category header tints (decorative, low chroma) --------------- */
   --cat-dataset: #1baf7a;
   /*
@@ -175,6 +187,7 @@
     /* Bright gold reads at 10.2:1 on this canvas; the light value would be 1.5:1. */
     --status-running-ring: #fab219;
     --status-warn: #fab219;
+    --status-refused: #e05c5c;
     --accent: #3987e5;
     --accent-soft: rgba(57, 135, 229, 0.2);
     --socket-table: #3987e5;
@@ -235,6 +248,7 @@
   --grid: #2c2c2a;
   --status-running-ring: #fab219;
   --status-warn: #fab219;
+  --status-refused: #e05c5c;
   --accent: #3987e5;
   --accent-soft: rgba(57, 135, 229, 0.2);
   --socket-table: #3987e5;

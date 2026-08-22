@@ -256,12 +256,14 @@ export function exportRmd(graph: CodaGraph, options: ExportOptions = {}): Export
     }
 
     let body: string[]
+    let blockedHere = false
     if (unwired.length > 0) {
       body = ctx.todo(
         `${quoted(unwired)} ${unwired.length === 1 ? 'is' : 'are'} not wired on this ` +
           `${def.label}, so there is nothing to translate.`,
       )
     } else if (blockedBy.length > 0) {
+      blockedHere = true
       body = ctx.todo(
         `nothing upstream produced a value — ${quoted([...new Set(blockedBy)])} ` +
           `${blockedBy.length === 1 ? 'was' : 'were'} not translated.`,
@@ -285,7 +287,9 @@ export function exportRmd(graph: CodaGraph, options: ExportOptions = {}): Export
     // Only bind the outputs if the emitter actually produced code. A TODO binds nothing, so
     // downstream sees an unconnected input and says so, rather than referring to a variable
     // that does not exist.
-    if (emittedTodo) todos.push({ nodeId, label: nodeLabel(node) })
+    if (emittedTodo) {
+      todos.push({ nodeId, label: nodeLabel(node), ...(blockedHere ? { blocked: true } : {}) })
+    }
 
     if (!emittedTodo && body.length > 0) {
       for (const port of def.outputs ?? []) {

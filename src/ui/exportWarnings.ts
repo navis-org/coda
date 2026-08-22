@@ -140,23 +140,47 @@ async function runWalk(graph: CodaGraph, language: ExportLanguage): Promise<Todo
 /**
  * The message, or null where there is nothing to say.
  *
- * Deliberately does not say *why* each step is a TODO. The reasons are genuinely different — no
- * emitter, a foreign backend, an unwired port — and every one of them is already stated in the
- * document itself, next to the step it is about. What a reader wants before clicking is how much
- * of the graph will be missing, and which parts.
+ * **It names the root causes and counts the cascade**, which is the one distinction worth
+ * drawing. A TODO binds nothing, so everything downstream of one is a TODO too — and telling
+ * somebody that their Table node "has no notebook equivalent" when the Table is perfectly
+ * translatable and the Explore in front of it is not sends them to look at the wrong card. That
+ * is the walk's own unwired-versus-blocked split, carried out to the surface.
+ *
+ * It deliberately does not say *why* each root is untranslated. Those reasons are genuinely
+ * different — no emitter, a foreign backend, an unwired port — and every one of them is already
+ * stated in the document itself, beside the step it is about.
  */
 function describe(todos: readonly TodoStep[], language: ExportLanguage): ExportWarning | null {
   if (todos.length === 0) return null
   const what = language === 'python' ? 'notebook' : 'document'
-  const names = todos.map((t) => `“${t.label}”`)
-  const listed = names.slice(0, NAMED).join(', ')
-  const rest = names.length > NAMED ? ` and ${names.length - NAMED} more` : ''
+  const steps = (n: number) => `${n} ${n === 1 ? 'step' : 'steps'}`
+
+  /*
+   * A muted node also binds nothing, so a graph can carry blocked steps with no untranslated
+   * root at all. Naming the blocked ones is then the only true thing left to say.
+   */
+  const roots = todos.filter((t) => !t.blocked)
+  const named = (roots.length > 0 ? roots : todos).map((t) => `“${t.label}”`)
+  const shown = named.slice(0, NAMED)
+  const over = named.length - shown.length
+  // `"a"`, `"a" and "b"`, `"a", "b" and 2 more` — the walk's own `quoted` shape, since this
+  // sentence is read beside the messages that walk produces.
+  const tail = over > 0 ? `${over} more` : shown.pop()
+  const listed = shown.length > 0 ? `${shown.join(', ')} and ${tail}` : String(tail)
+  const have = named.length === 1 ? 'has' : 'have'
+
+  const blocked = roots.length > 0 ? todos.length - roots.length : 0
+  const cascade =
+    blocked > 0 ? `, so ${named.length === 1 ? 'it' : 'they'} and ${steps(blocked)} after ` +
+      `${named.length === 1 ? 'it' : 'them'} will be left as TODO comments` : ''
+
   return {
     count: todos.length,
-    short: `${todos.length} ${todos.length === 1 ? 'step' : 'steps'} will be left as TODO`,
+    short: `${steps(todos.length)} will be left as TODO`,
     detail:
-      `${listed}${rest} ${names.length === 1 ? 'has' : 'have'} no ${what} equivalent and will ` +
-      `be left as TODO comments. The rest of the graph exports normally.`,
+      `${listed} ${have} no ${what} equivalent${cascade}` +
+      `${cascade ? '' : ` and will be left as ${todos.length === 1 ? 'a TODO comment' : 'TODO comments'}`}. ` +
+      `The rest of the graph exports normally.`,
   }
 }
 
