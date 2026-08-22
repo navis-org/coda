@@ -540,6 +540,7 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `store/companion.test.ts`                | that a dataset node brings its Description card, as one undo step, and which families opt out                                    |
 | `store/autowire.test.ts`                 | that a new node's Dataset socket arrives fed, and every case where it must not — ambiguity, load, an existing wire               |
 | `store/fitOnLoad.test.ts`                | that opening a graph asks for a fit, and that an empty one does not leave the request pending                                    |
+| `ui/fitOnLoad.test.tsx`                  | that the request is spent: `fitView` called on every open with `nodesInitialized` reading the `false` it really returns, and not called on an ordinary edit |
 | `ui/nodes/descriptionBody.test.tsx`      | the card in the real editor: links, nesting, the overlay, and that raw HTML never mounts                                         |
 | `store/library.test.ts`                  | the browser shelf against real IndexedDB: name-as-identity, and that a save with nowhere to go _rejects_                         |
 | `ui/panels/library.test.tsx`             | the menus and the start-page rail: the replace prompt, the delete prompt, an opened entry landing on the canvas                  |
@@ -2309,18 +2310,37 @@ so one signal covers all of them. It crosses as a counter with a mount-seeded gu
 viewport belongs to React Flow and every trigger sits outside its provider, same idiom as
 `paletteRequest` and `browserRequest`.
 
-**The fit waits for `nodesInitialized`, and that is the load-bearing part.** `fitView` reads each
-node's _measured_ size, and a node committed in this render has none — fitting immediately frames
-a set of zero-sized boxes and lands at an arbitrary zoom. The hook goes false while the new cards
-are unmeasured and true once React Flow's ResizeObserver has them, so the effect leaves the
-request unhandled until then. Late and correct beats immediate and wrong.
+**The fit is asked for unconditionally, and waiting for the cards to be measured is React Flow's
+job rather than ours.** `fitView()` does not fit: it sets `fitViewQueued`, pushes a no-op onto the
+node queue, and returns a promise. The fit resolves either at the next `setNodes` where every node
+has a measurement or, failing that, inside `updateNodeInternals` when the ResizeObserver delivers
+one. So a graph committed this render — whose cards have no size yet — is framed a beat later
+against real measurements. That is worth knowing before writing a gate for it, because the
+obvious gate is what broke it.
+
+**It was gated on `useNodesInitialized`, and that flag is false here forever.** `adoptUserNodes`
+carries a measurement forward only while the **user** node object behind it is identity-equal and
+otherwise re-seeds `measured` from `userNode.measured`; `rfNodes` mints fresh objects on every
+store change and `onNodesChange` deliberately never writes a measured size back into the document,
+so that field is permanently undefined. `updateNodeInternals` never recomputes the flag, so
+nothing brings it back. See the auto-layout section, which met the same flag from the other side.
+
+**What that cost is the useful half, because it read as intermittent rather than broken.** The
+**first** open of a session framed correctly and every one after it did not — and that first fit is
+React Flow's own `fitView` prop, queued at mount and resolved once the opened graph's cards were
+measured, with nothing to do with this effect at all. Measured in a browser, opening a second graph
+left the viewport transform byte-identical and put the new graph's top row at y = −109 against a
+pane starting at y = 42. A control that works once per session is the hardest kind to report.
 
 **A graph with no nodes raises no request at all.** A request nothing can satisfy would sit
 pending and be spent on whatever the user added next — a viewport that lurches minutes later,
 nowhere near its cause. That is why `newGraph` does not ask and `loadGraph` checks first.
 
-jsdom does no layout, so the canvas half has no test; `store/fitOnLoad.test.ts` covers which
-loads ask and which do not.
+jsdom does no layout, so the framing itself is not asserted anywhere and was checked in a browser:
+five consecutive opens — a dataset starter, three examples and a re-open of the same graph — each
+landing wholly inside the pane at its own zoom, with no console errors. `store/fitOnLoad.test.ts`
+covers which loads ask; `ui/fitOnLoad.test.tsx` covers that the request is spent, by pinning
+`useNodesInitialized` to the `false` it really returns and asserting `fitView` is called anyway.
 
 ## Automatic layout
 
@@ -2361,12 +2381,14 @@ across, a dataset card 248, a Profile 560.
 Zoom-independence is not a nicety: these numbers go into `structureKey`, and a size that drifted
 with the viewport would have auto-layout re-arranging the graph every time somebody scrolled.
 
-**`useNodesInitialized` is unreliable in this app, for the same reason.** Its store flag is
-computed inside `adoptUserNodes` from the internal node's `measured`, which the paragraph above
-wipes on every edit — so it latches **false** once the first edit lands, and never recovers.
-Auto-layout was gated on it and consequently never ran at all. It now asks the readiness question
-of the sizes it is about to use instead. Worth knowing that the _fit-on-load_ path is gated on
-the same flag.
+**`useNodesInitialized` is unreliable in this app, for the same reason, and nothing reads it any
+more.** Its store flag is computed inside `adoptUserNodes` from the internal node's `measured`,
+which the paragraph above wipes on every edit — and `updateNodeInternals`, the path the
+ResizeObserver takes, never recomputes it. So it latches **false** once the first edit lands and
+never recovers. Auto-layout was gated on it and consequently never ran at all; it asks the
+readiness question of the sizes it is about to use instead. Fit-on-load was gated on it too and
+is written up under *Framing a graph that was just opened* — there the answer was different
+again, because React Flow's own `fitView()` already waits.
 
 **ELK numbers ports clockwise from the node's top-left.** With no north or south ports that walk
 is every east port top to bottom, then every west port **bottom to top** — so an output's index

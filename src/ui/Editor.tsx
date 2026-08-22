@@ -23,7 +23,6 @@ import {
   MiniMap,
   ReactFlow,
   ReactFlowProvider,
-  useNodesInitialized,
   useReactFlow,
 } from '@xyflow/react'
 import type {
@@ -277,7 +276,15 @@ function EditorCanvas() {
           },
         }
       }),
-    [graph.edges, disabledIds, inference, edgeRouting, arrangeRoutes, spliceEdgeId, referenceIds],
+    [
+      graph.edges,
+      disabledIds,
+      inference,
+      edgeRouting,
+      arrangeRoutes,
+      spliceEdgeId,
+      referenceIds,
+    ],
   )
 
   // --- change handlers ----------------------------------------------------
@@ -295,33 +302,30 @@ function EditorCanvas() {
    * and would shrink with the camera — where a hit test against flow-space path coordinates needs
    * flow units.
    */
-  const spliceOn = useCallback(
-    (nodeId: string): string | undefined => {
-      const store = useGraphStore.getState()
-      const node = store.graph.nodes.find((n) => n.id === nodeId)
-      if (!node) return undefined
-      const el = document.querySelector<HTMLElement>(`.react-flow__node[data-id="${nodeId}"]`)
-      if (!el || el.offsetWidth === 0 || el.offsetHeight === 0) return undefined
+  const spliceOn = useCallback((nodeId: string): string | undefined => {
+    const store = useGraphStore.getState()
+    const node = store.graph.nodes.find((n) => n.id === nodeId)
+    if (!node) return undefined
+    const el = document.querySelector<HTMLElement>(`.react-flow__node[data-id="${nodeId}"]`)
+    if (!el || el.offsetWidth === 0 || el.offsetHeight === 0) return undefined
 
-      const edgeId = edgeUnderRect(
-        {
-          x: node.position.x,
-          y: node.position.y,
-          width: el.offsetWidth,
-          height: el.offsetHeight,
-        },
-        // Nothing to exclude: an isolated node touches no wire, and `spliceCandidate` refuses a
-        // node that is not isolated — so a wire of the dragged node's own can never be a target.
-        EMPTY_IDS,
-      )
-      if (!edgeId) return undefined
+    const edgeId = edgeUnderRect(
+      {
+        x: node.position.x,
+        y: node.position.y,
+        width: el.offsetWidth,
+        height: el.offsetHeight,
+      },
+      // Nothing to exclude: an isolated node touches no wire, and `spliceCandidate` refuses a
+      // node that is not isolated — so a wire of the dragged node's own can never be a target.
+      EMPTY_IDS,
+    )
+    if (!edgeId) return undefined
 
-      const edge = store.graph.edges.find((e) => e.id === edgeId)
-      if (!edge) return undefined
-      return spliceCandidate(store.graph, store.inference, nodeId, edge) ? edgeId : undefined
-    },
-    [],
-  )
+    const edge = store.graph.edges.find((e) => e.id === edgeId)
+    if (!edge) return undefined
+    return spliceCandidate(store.graph, store.inference, nodeId, edge) ? edgeId : undefined
+  }, [])
 
   const onNodesChange = useCallback(
     (changes: NodeChange<Node<CodaNodeData>>[]) => {
@@ -608,23 +612,42 @@ function EditorCanvas() {
   /*
    * Frame a graph that has just been opened.
    *
-   * Gated on `nodesInitialized`, and that is the whole difficulty: `fitView` reads each node's
-   * *measured* size, and a node committed this render has none yet — fitting straight away
-   * frames a set of zero-sized boxes and lands at some arbitrary zoom. The hook goes false while
-   * the new cards are unmeasured and true once React Flow's ResizeObserver has them, so leaving
-   * the request unhandled until then is what makes the fit correct rather than merely late.
+   * **Asked for unconditionally, and waiting for the cards to be measured is React Flow's job
+   * rather than ours.** `fitView()` does not fit: it sets `fitViewQueued` and pushes a no-op onto
+   * the node queue, and the fit resolves either at the next `setNodes` where every node has a
+   * measurement or, failing that, inside `updateNodeInternals` when the ResizeObserver delivers
+   * one. So a graph committed this render — whose cards have no size yet — is framed a beat later
+   * against real measurements, which is exactly what a gate here was trying to arrange.
+   *
+   * This *was* gated on `useNodesInitialized`, which made it the only surface in the app still
+   * reading that flag, and the flag is false here forever. `adoptUserNodes` carries a
+   * measurement forward only while the **user** node object behind it is identity-equal and
+   * otherwise re-seeds `measured` from `userNode.measured`; `rfNodes` mints fresh objects on
+   * every store change and `onNodesChange` deliberately never writes a measured size back into
+   * the document, so that field is permanently undefined. `updateNodeInternals` — the path the
+   * ResizeObserver takes — never recomputes the flag, so nothing brings it back.
+   *
+   * What that cost is worth recording, because it looked like an intermittent bug rather than a
+   * dead control: the **first** open of a session framed correctly and every one after it did
+   * not. That first fit is React Flow's own `fitView` prop, queued at mount and resolved when the
+   * opened graph's cards were measured — nothing to do with this effect. Measured in a browser:
+   * opening a second graph left the viewport transform byte-identical, with the new graph's top
+   * row at y = −109 against a pane starting at y = 42.
+   *
+   * `useArrange` reached the same conclusion about the same flag from the other side and asks its
+   * readiness question of the sizes it is about to use. Here there is no question to ask, because
+   * the consumer already waits.
    *
    * The request is only ever raised for a graph with nodes, so it cannot sit pending and then
    * fire on whatever the user adds next.
    */
   const fitRequest = useGraphStore((s) => s.fitRequest)
   const handledFit = useRef(fitRequest)
-  const nodesInitialized = useNodesInitialized()
   useEffect(() => {
-    if (fitRequest === handledFit.current || !nodesInitialized) return
+    if (fitRequest === handledFit.current) return
     handledFit.current = fitRequest
     void fitView({ ...FIT_VIEW_OPTIONS, duration: 240 })
-  }, [fitRequest, nodesInitialized, fitView])
+  }, [fitRequest, fitView])
 
   // --- keyboard -----------------------------------------------------------
 
