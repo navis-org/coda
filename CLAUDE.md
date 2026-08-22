@@ -2838,6 +2838,22 @@ question for every one of them.
 The canvas draws it **dotted** — a wire already wears the colour of the data flowing through it,
 so a hue would read as a type, where what this has to say is that nothing flows.
 
+**Writing the graph out wants the opposite order, and both exporters take it.** `topoSort` leaves
+references out because the reader waits on nothing; a *cell* that names the referenced node needs
+that node's own line to exist already. `referencesFirst` hoists them, and both walks call it —
+without it the reader is classified `blocked by "Dataset"` and emits a TODO that is false and
+cascades to everything downstream. The condition that makes the hoist valid is the same one that
+makes references sound: **a referenced node's cell must be writable from its params alone**. A
+dataset's is — a `Client(…)` naming a datastack and a version — which is why it can be lifted
+above the annotations wired into it, and it is the thing to check when writing an emitter for a
+node anything references.
+
+Unreachable today, and deliberately built anyway: every CAVE node sits in `NO_EMITTER` and a CAVE
+dataset refuses export outright, so the only reference port in the tree is on a node with no
+emitter. The day a caveclient emitter is written it would fire, and it fires as a *plausible*
+TODO rather than as an error. `reference.test.ts` covers the ordering; the end-to-end case has
+nothing to exercise it with until that emitter exists.
+
 ## Breaking and re-routing links
 
 Two gestures, and the pair is the design: **right-click a wire** for a menu, or **drag either

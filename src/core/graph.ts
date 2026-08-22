@@ -298,6 +298,31 @@ export function topoSort(graph: CodaGraph): TopoResult {
 }
 
 /**
+ * A topological order with every reference's source moved ahead of its reader.
+ *
+ * `topoSort` deliberately ignores reference edges — that is what lets a node take a dataset it
+ * also feeds. Anything that *writes the nodes out in order* needs the opposite: a reader emits
+ * code naming the referenced node, so that node's own line has to exist first. Both exporters
+ * walk in this order for exactly that reason; without it the reader is classified `blocked by
+ * "Dataset"` and emits a TODO that is false, cascading one to everything downstream.
+ *
+ * **The condition that makes the hoist valid is the same one that makes references sound**: the
+ * referenced node's cell must be writable from its params alone. A dataset's is — a `Client(…)`
+ * naming a datastack and a version — which is why it can be lifted above the annotations wired
+ * into it. A future emitter for a referenced node that reached for its own inputs would break
+ * that, and would be wrong for the same reason a reference reading its own annotations would be.
+ *
+ * Relative order is preserved on both sides, so a graph with no references is untouched.
+ */
+export function referencesFirst(order: readonly string[], graph: CodaGraph): string[] {
+  const types = new Map(graph.nodes.map((n) => [n.id, n.type]))
+  const referenced = new Set<string>()
+  for (const edge of graph.edges) if (isReferenceEdge(types, edge)) referenced.add(edge.source)
+  if (referenced.size === 0) return [...order]
+  return [...order.filter((id) => referenced.has(id)), ...order.filter((id) => !referenced.has(id))]
+}
+
+/**
  * Would adding source -> target introduce a cycle?
  *
  * Walks the **dataflow** edges, not all of them: a reference names a node and imposes no order,

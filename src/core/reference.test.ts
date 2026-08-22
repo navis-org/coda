@@ -16,7 +16,7 @@
 
 import { beforeAll, describe, expect, it } from 'vitest'
 
-import { addEdge, addNode, emptyGraph, topoSort, wouldCreateCycle } from './graph'
+import { addEdge, addNode, emptyGraph, referencesFirst, topoSort, wouldCreateCycle } from './graph'
 import type { CodaGraph, GraphNode } from './graph'
 import { checkConnection, inferGraph } from './inference'
 import { registerNode } from './registry'
@@ -203,5 +203,48 @@ describe('what a reference must not change', () => {
     // The reference is excluded; the ordinary wire beside it still orders the pair.
     const sorted = topoSort(roundTrip())
     expect(sorted.order.indexOf('rd')).toBeLessThan(sorted.order.indexOf('ds'))
+  })
+})
+
+describe('writing the nodes out, which wants the opposite order', () => {
+  it('puts a referenced node ahead of its reader', () => {
+    /*
+     * `topoSort` leaves references out of the order, which is right for *running* — the reader
+     * waits on nothing — and backwards for *writing out*, where the reader emits a line naming
+     * the referenced node and that node's own line has to exist first.
+     *
+     * Both exporters walk in this order. Without it the reader is classified as blocked by a node
+     * that was translated perfectly well, and emits a TODO that is false and cascades to
+     * everything downstream of it.
+     */
+    const g = roundTrip()
+    const order = referencesFirst(topoSort(g).order, g)
+    expect(order.indexOf('ds')).toBeLessThan(order.indexOf('rd'))
+    // The running order is the other way round, and stays that way.
+    expect(topoSort(g).order.indexOf('rd')).toBeLessThan(topoSort(g).order.indexOf('ds'))
+  })
+
+  it('leaves a graph with no references exactly as it was', () => {
+    let g = emptyGraph('plain')
+    g = addNode(g, node('a', 'test.ref.reader'))
+    g = addNode(g, node('b', 'test.ref.reader'))
+    g = addEdge(g, { source: 'a', sourceHandle: 'out', target: 'b', targetHandle: 'in' })
+    const sorted = topoSort(g).order
+    expect(referencesFirst(sorted, g)).toEqual(sorted)
+  })
+
+  it('keeps the relative order of the nodes it moves', () => {
+    // Two datasets referenced by one reader: hoisted together, in the order they were sorted in.
+    let g = emptyGraph('two')
+    g = addNode(g, node('d1', 'test.ref.dataset', { id: 'a' }))
+    g = addNode(g, node('mid', 'test.ref.reader'))
+    g = addNode(g, node('d2', 'test.ref.dataset', { id: 'b' }))
+    g = addNode(g, node('rd', 'test.ref.reader'))
+    g = addEdge(g, { source: 'd1', sourceHandle: 'dataset', target: 'rd', targetHandle: 'dataset' })
+    g = addEdge(g, { source: 'd2', sourceHandle: 'dataset', target: 'mid', targetHandle: 'dataset' })
+    const sorted = topoSort(g).order
+    const order = referencesFirst(sorted, g)
+    expect(order.slice(0, 2)).toEqual(sorted.filter((id) => id === 'd1' || id === 'd2'))
+    expect(order).toHaveLength(sorted.length)
   })
 })
