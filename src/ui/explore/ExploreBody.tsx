@@ -20,7 +20,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { idText } from '../../core/ids'
 import { datasetRef } from '../../core/types'
 import { isDatasetValue } from '../../core/values'
-import { MAX_SELECT_ALL } from '../../nodes/query/explore'
+import { MAX_SELECT_ALL, excludedFromSearch } from '../../nodes/query/explore'
 import {
   completeSearch,
   parseSearch,
@@ -132,22 +132,31 @@ export function ExploreBody({ node, ctx, compact, inputValues, setParam }: NodeB
 
   const table = state.status === 'ready' ? state.table : undefined
 
-
   // Through `ctx.columns`, never `ctx.params.chips`: that is what filters the stored list
   // against the schema actually arriving, so a graph repointed at another dataset drops the
   // fields it no longer has instead of showing a column of blanks.
   // Joined into a key rather than kept as an array: `ctx.columns` mints a fresh one on every
   // render, so an identity-keyed memo would rebuild the row spec on every keystroke.
   const chosenKey = ctx.columns('chips').join('\u0000')
+  // Resolved the same way, and for the same reason: a tag column the current dataset does not
+  // have must drop out rather than draw an empty row.
+  const tagColumn = ctx.column('tagColumn') ?? ''
   const fields = useMemo(
-    () => rowFields(table?.schema, chosenKey ? chosenKey.split('\u0000') : []),
-    [table, chosenKey],
+    () => rowFields(table?.schema, chosenKey ? chosenKey.split('\u0000') : [], tagColumn),
+    [table, chosenKey, tagColumn],
   )
 
+  /*
+   * The same exclusion `evaluate` applies, through the one function that states it — or the
+   * live list would show rows `Hits` does not carry, which is precisely the disagreement the
+   * live-widget / committed-param split exists to avoid rather than to create.
+   */
+  const excludedKey = excludedFromSearch(ctx).join('\u0000')
   const result = useMemo(() => {
     if (!table) return { rows: [] as number[], fuzzy: false }
-    return runSearch(table, searchIndexFor(table), parseSearch(applied))
-  }, [table, applied])
+    const excluded = excludedKey ? excludedKey.split('\u0000') : []
+    return runSearch(table, searchIndexFor(table, excluded), parseSearch(applied))
+  }, [table, applied, excludedKey])
 
   const completions = useMemo(() => {
     if (!table || !completionOpen) return { from: 0, to: 0, items: [] }

@@ -15,6 +15,7 @@ import type { CodaGraph, GraphNode } from '../../core/graph'
 import { inferGraph } from '../../core/inference'
 import { defaultParams } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
+import { excludedFromSearch } from './explore'
 import { Scheduler } from '../../core/scheduler'
 import { isTableValue } from '../../core/values'
 import type { TableValue } from '../../core/values'
@@ -100,5 +101,61 @@ describe('Explore: the All port', () => {
 
     const picked = await ports({ query: 'LC4', selection: ids(all) })
     expect(picked.selected.length).toBe(2)
+  })
+})
+
+/**
+ * `Search tags`, which is the one control here that changes what a *port* carries.
+ *
+ * Free-form community text is exactly what somebody might not want folded into a hit count they
+ * go on to quote — and exactly what somebody else wants to find neurons by, which is why it is a
+ * control and why it defaults to on.
+ */
+describe('the tag search opt-out', () => {
+  const ctx = (params: Record<string, unknown>) => ({
+    params: params as never,
+    column: (id: string) => (params[id] ? String(params[id]) : undefined),
+  })
+
+  it('excludes nothing while it is on, which is the default', () => {
+    expect(excludedFromSearch(ctx({ tagColumn: 'community' }))).toEqual([])
+    expect(excludedFromSearch(ctx({ tagColumn: 'community', searchTags: true }))).toEqual([])
+  })
+
+  it('excludes the tag column once it is off', () => {
+    expect(excludedFromSearch(ctx({ tagColumn: 'community', searchTags: false }))).toEqual([
+      'community',
+    ])
+  })
+
+  it('excludes nothing when no tag column is named', () => {
+    // Off with nothing to exclude must not silently mean "exclude something else".
+    expect(excludedFromSearch(ctx({ searchTags: false }))).toEqual([])
+  })
+
+  it('is declared so that it reaches the provenance key', () => {
+    /*
+     * Both params are *not* presentational, unlike `chips`, and that is the whole of why this
+     * pair is safe: together they decide which column is kept out of the haystack, which changes
+     * which rows `Hits` returns. A picker that quietly changed a port's contents while claiming
+     * to be a drawing knob is what `presentational` must never mean.
+     */
+    const def = requireNodeDef('neuron.explore')
+    for (const id of ['tagColumn', 'searchTags']) {
+      const param = def.params?.find((p) => p.id === id)
+      expect(param, id).toBeDefined()
+      expect(param?.presentational, id).toBeFalsy()
+    }
+    // And `chips` still is presentational: it only decides what is drawn.
+    expect(def.params?.find((p) => p.id === 'chips')?.presentational).toBe(true)
+  })
+
+  it('calls the field list "Fields", not "Tags"', () => {
+    // Two controls called Tags, meaning opposite halves of one row — a list of columns against a
+    // column of values — is the confusion this rename avoids. The id stays `chips`, which is
+    // what a saved graph carries.
+    const def = requireNodeDef('neuron.explore')
+    expect(def.params?.find((p) => p.id === 'chips')?.label).toBe('Fields')
+    expect(def.params?.find((p) => p.id === 'tagColumn')?.label).toBe('Additional tags')
   })
 })

@@ -274,6 +274,35 @@ check('combine: source names the winner', src.iloc[0] == 'cell_type', str(src.il
 check('combine: source follows the blank rule', src.iloc[1] == 'hemibrain_type', str(src.iloc[1]))
 check('combine: no source where nothing won', pd.isna(src.iloc[3]), str(src.iloc[3]))
 
+# ---- coda_join, the `join` aggregation --------------------------------------
+#
+# Read out of the same cell. `', '.join(...)` is the obvious spelling and is a different rule
+# three ways: it raises on a NaN, it keeps empty strings — which Coda reads as absences — and it
+# answers '' for a group with nothing in it where Coda answers None.
+join_src = next(
+    ("".join(c["source"]) for c in everything["cells"] if "def coda_join(" in "".join(c["source"])),
+    None,
+)
+if join_src is None:
+    sys.exit("no coda_join in everything.ipynb")
+exec(join_src, cns)  # noqa: S102
+
+jf = pd.DataFrame({
+    'type': ['LC4', 'LC4', 'LC4', 'LC6', 'DNp01'],
+    'tag':  ['left', '', 'left', None, 'putative giant fibre'],
+})
+g = jf.groupby('type', dropna=False).agg(n=('tag', 'size'), join_tag=('tag', cns['coda_join']))
+row = lambda t: g.loc[t, 'join_tag']
+check('join: row order kept, repeats kept', row('LC4') == 'left; left', str(row('LC4')))
+check('join: blank skipped', '; ; ' not in str(row('LC4')), str(row('LC4')))
+check('join: nothing at all is None, not empty string', row('LC6') is None, repr(row('LC6')))
+check('join: single value unwrapped', row('DNp01') == 'putative giant fibre', str(row('DNp01')))
+check('join: n still counts every row', int(g.loc['LC4', 'n']) == 3, str(g.loc['LC4', 'n']))
+# A numeric column joined: str() per value, so no float formatting surprises on integers.
+nf = pd.DataFrame({'k': ['a', 'a'], 'v': [1, 2]})
+gn = nf.groupby('k').agg(j=('v', cns['coda_join']))
+check('join: integers are not floated', gn.loc['a', 'j'] == '1; 2', str(gn.loc['a', 'j']))
+
 # The mixed-dtype case, where Coda widens to text rather than refusing.
 mixed = pd.DataFrame({'name': [None, 'LC4'], 'cluster': [12693, 7]})
 m = cns['coda_combine'](mixed, ['name', 'cluster']).astype('string')

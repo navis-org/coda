@@ -1459,6 +1459,48 @@ select.field {
   gap: 3px;
 }
 /*
+ * Community tags: free-form text somebody typed against a neuron, not a controlled vocabulary.
+ *
+ * Deliberately unlike `.explore-chip` in every channel that matters, because they are a
+ * different *kind* of claim and a reader has to be able to tell at a glance. Their own row below
+ * the chips, smaller type, no hue at all, and a hairline border rather than a fill — a tinted
+ * chip here would say these came from a known field, which is exactly what they did not.
+ *
+ * `nowrap` on the row, not `wrap`: the count is capped in `NeuronRow`, so what is left must fit
+ * on one line or the row stops being the same height as its neighbours, which is what makes a
+ * list scannable. Each tag ellipsises at `max-width`, with the whole of it in `title`.
+ */
+.explore-row__tags {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: baseline;
+  gap: 3px;
+  margin-top: 2px;
+  overflow: hidden;
+}
+.explore-tag {
+  font-size: 9px;
+  line-height: 1.5;
+  padding: 0 3px;
+  border-radius: 3px;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  background: none;
+  max-width: 14ch;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* The one thing that must not shrink away: a tag clipped to nothing is worse than absent. */
+  flex: 0 1 auto;
+}
+/* The counter is the one item that never ellipsises — it is the admission that there are more. */
+.explore-tag--more {
+  border-color: transparent;
+  flex: 0 0 auto;
+  max-width: none;
+}
+
+/*
  * One annotation chip, tinted by which *field* it came from — `class` is the same blue on
  * every dataset and every row, so a column of them can be scanned without reading each one.
  *

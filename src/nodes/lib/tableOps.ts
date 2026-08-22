@@ -922,7 +922,7 @@ export function stackTables(
 // Group by + aggregate
 // ---------------------------------------------------------------------------
 
-export type AggFn = 'sum' | 'mean' | 'min' | 'max' | 'count' | 'countDistinct'
+export type AggFn = 'sum' | 'mean' | 'min' | 'max' | 'count' | 'countDistinct' | 'join'
 
 export const AGG_OPTIONS: Array<{ value: AggFn; label: string }> = [
   { value: 'sum', label: 'sum' },
@@ -931,7 +931,46 @@ export const AGG_OPTIONS: Array<{ value: AggFn; label: string }> = [
   { value: 'max', label: 'max' },
   { value: 'count', label: 'count rows' },
   { value: 'countDistinct', label: 'count distinct' },
+  { value: 'join', label: 'join text' },
 ]
+
+/**
+ * The aggregations a **matrix** can hold, which is not all of them.
+ *
+ * A `MatrixValue` cell is a `Float64Array` slot, so `core.pivot` can only offer aggregations
+ * whose result is a number. Derived from `aggDType` rather than listed, so a future text
+ * aggregation is excluded by arriving rather than by somebody remembering this line — the
+ * failure otherwise is a dropdown entry that produces a matrix of zeroes.
+ */
+export const NUMERIC_AGG_OPTIONS: Array<{ value: AggFn; label: string }> = AGG_OPTIONS.filter(
+  (option) => isNumericDType(aggDType(option.value, undefined)),
+)
+
+/**
+ * What `join` puts between values, and what anything reading the result splits on.
+ *
+ * One constant because it is a *contract* rather than a formatting choice: a community-tag table
+ * folded into one cell here is split back into chips by the Explore widget, and two spellings of
+ * the separator would be a row of tags nobody could read.
+ *
+ * `'; '` rather than a control character, because the cell is read by people too — it lands in a
+ * Table node, in a CSV and in a notebook. The cost is stated rather than engineered away: a value
+ * that itself contains `'; '` splits into two on the way back out. That is cosmetic, the whole
+ * cell is one hover away, and the alternative is a column of invisible bytes.
+ */
+export const JOIN_SEPARATOR = '; '
+
+/**
+ * Which param holds the value column, which depends on the aggregation.
+ *
+ * `join` takes text where every other aggregation takes a number, and `ColumnParam.dtypes` is a
+ * fixed list rather than a function of the params — so the two are separate pickers, made
+ * exclusive by `visibleIf`, exactly as a colour's column picker and its swatch are. One statement
+ * of the pairing because three callers read it: the node, and both emitters.
+ */
+export function aggValueParam(agg: AggFn): 'value' | 'textValue' {
+  return agg === 'join' ? 'textValue' : 'value'
+}
 
 /** Name of the column an aggregation produces. Kept in one place so both halves agree. */
 export function aggColumnName(agg: AggFn, valueColumn: string | undefined): string {
@@ -943,6 +982,8 @@ export function aggColumnName(agg: AggFn, valueColumn: string | undefined): stri
 function aggDType(agg: AggFn, source: DType | undefined): DType {
   if (agg === 'count' || agg === 'countDistinct') return 'i64'
   if (agg === 'mean') return 'f64'
+  // `join` is the one aggregation whose result is not a number, whatever it was given.
+  if (agg === 'join') return 'str'
   return source && isNumericDType(source) ? source : 'f64'
 }
 
@@ -959,7 +1000,9 @@ export function groupBySchema(
   const out: ColumnSchema[] = [...keyColumns, column('n', 'i64')]
   if (agg !== 'count') {
     const src = valueColumn ? findColumn(schema, valueColumn) : undefined
-    const unit = src?.unit
+    // A unit belongs to a quantity: `join` produces text, so nanometres joined with semicolons
+    // are no longer nanometres — the call `textColumns` makes one op over.
+    const unit = agg === 'join' ? undefined : src?.unit
     out.push(
       unit
         ? column(aggColumnName(agg, valueColumn), aggDType(agg, src?.dtype), unit)
@@ -993,6 +1036,7 @@ export function groupByTable(
     min: number
     max: number
     distinct?: Set<string>
+    texts?: string[]
   }
   const buckets = new Map<string, Bucket>()
 
@@ -1009,6 +1053,7 @@ export function groupByTable(
         min: Number.POSITIVE_INFINITY,
         max: Number.NEGATIVE_INFINITY,
         ...(agg === 'countDistinct' ? { distinct: new Set<string>() } : {}),
+        ...(agg === 'join' ? { texts: [] as string[] } : {}),
       }
       buckets.set(hash, bucket)
     }
@@ -1017,6 +1062,14 @@ export function groupByTable(
       const raw = valueData[i]
       if (agg === 'countDistinct') {
         bucket.distinct!.add(raw === null || raw === undefined ? '\u0000' : String(raw))
+      } else if (agg === 'join') {
+        /*
+         * Row order, absences skipped, duplicates kept — `string_agg` and `paste(collapse=)`,
+         * which is what a reader expects of something called `join`. A base where two people
+         * added the same tag wants a Deduplicate upstream; that is a decision about the data
+         * and belongs where it can be seen.
+         */
+        if (raw !== null && raw !== undefined && raw !== '') bucket.texts!.push(String(raw))
       } else if (raw !== null && raw !== undefined) {
         const v = Number(raw)
         if (Number.isFinite(v)) {
@@ -1040,7 +1093,12 @@ export function groupByTable(
       data[name]!.push(bucket.keys[idx] ?? null)
     })
     data['n']!.push(bucket.n)
-    if (agg !== 'count') {
+    if (agg === 'join') {
+      // Empty rather than an empty string: a neuron nobody tagged has no tags, which is an
+      // absence, and `String(null)` is the four-letter word every picker downstream would read
+      // as a value.
+      data[outName]!.push(bucket.texts!.length ? bucket.texts!.join(JOIN_SEPARATOR) : null)
+    } else if (agg !== 'count') {
       let value: number
       switch (agg) {
         case 'sum':

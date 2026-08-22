@@ -8,7 +8,7 @@
 
 import { isNumericDType } from '../../../core/types'
 import type { AggFn } from '../../../nodes/lib/tableOps'
-import { aggColumnName, combineSchema } from '../../../nodes/lib/tableOps'
+import { aggColumnName, aggValueParam, combineSchema } from '../../../nodes/lib/tableOps'
 import { rCol, rStr, rValue, rVector } from '../r'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
@@ -251,6 +251,7 @@ registerEmitter('core.dedupe', (ctx) => {
 // Group By
 // ---------------------------------------------------------------------------
 
+/** `coda_join` is generated: `paste(collapse=)` alone keeps NAs and empty strings. */
 const AGG_FUNCS: Record<AggFn, string> = {
   sum: 'sum',
   mean: 'mean',
@@ -258,6 +259,7 @@ const AGG_FUNCS: Record<AggFn, string> = {
   max: 'max',
   count: 'n',
   countDistinct: 'n_distinct',
+  join: 'coda_join',
 }
 
 registerEmitter('core.groupBy', (ctx) => {
@@ -268,8 +270,9 @@ registerEmitter('core.groupBy', (ctx) => {
   ctx.library('dplyr')
   const out = ctx.output('out')
   const agg = String(ctx.params.agg ?? 'sum') as AggFn
-  const value = agg === 'count' ? undefined : ctx.column('value')
-  if (agg !== 'count' && !value) return ctx.todo(`"${agg}" needs a numeric value column.`)
+  const value = agg === 'count' ? undefined : ctx.column(aggValueParam(agg))
+  if (agg !== 'count' && !value) return ctx.todo(`"${agg}" needs a value column.`)
+  if (agg === 'join') ctx.helper('coda_join')
 
   // `n` rides along with every aggregation, exactly as the node emits it.
   const aggs = ['n = n()']

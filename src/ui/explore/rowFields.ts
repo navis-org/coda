@@ -13,7 +13,9 @@
  */
 
 import type { TableSchema } from '../../core/types'
+import type { CellValue } from '../../core/values'
 import { isNumericDType } from '../../core/types'
+import { JOIN_SEPARATOR } from '../../nodes/lib/tableOps'
 import { MAX_SERIES } from '../colors'
 
 /**
@@ -142,6 +144,29 @@ export interface RowFields {
   chips: string[]
   /** Numeric columns, rendered as a right-aligned figure list. */
   stats: string[]
+  /**
+   * A column whose *values* are several free-form tags, joined with `JOIN_SEPARATOR`.
+   *
+   * Drawn apart from `chips` and deliberately unlike them: community annotations are somebody's
+   * prose rather than a controlled vocabulary, so they get no palette slot, no key and no claim
+   * to be one of a known set. Undefined unless somebody named a column.
+   */
+  tags: string | undefined
+}
+
+/**
+ * The tags in one cell, in order, with the absences dropped.
+ *
+ * Splits on the separator `join` wrote, which is the one contract between the two — and it is
+ * plain text rather than a control character, so a tag that itself contains `"; "` comes apart
+ * into two. Cosmetic, admitted, and the whole cell is one hover away.
+ */
+export function splitTags(cell: CellValue): string[] {
+  if (typeof cell !== 'string' || cell === '') return []
+  return cell
+    .split(JOIN_SEPARATOR)
+    .map((tag) => tag.trim())
+    .filter(Boolean)
 }
 
 /**
@@ -151,9 +176,13 @@ export interface RowFields {
 export function rowFields(
   schema: TableSchema | undefined,
   chosen: readonly string[] = [],
+  tagColumn = '',
 ): RowFields {
   const byName = new Map((schema?.columns ?? []).map((c) => [c.name, c]))
   const has = (name: string) => byName.has(name)
+  // Filtered against the schema like everything else here: the param outlives the dataset it
+  // was set on, and a graph repointed elsewhere should lose the row rather than draw blanks.
+  const tags = tagColumn && has(tagColumn) ? tagColumn : undefined
 
   const primary = PRIMARY.find(has) ?? firstString(schema)
   // A chosen field is still filtered against the schema: the param outlives the dataset it was
@@ -163,13 +192,18 @@ export function rowFields(
 
   return {
     primary,
-    // Never repeat the headline on the line beneath it.
-    secondary: SECONDARY.filter((name) => has(name) && name !== primary).slice(0, 2),
-    chips,
+    // Never repeat the headline on the line beneath it — nor the tags row, which draws the same
+    // cell in its own shape a line below.
+    secondary: SECONDARY.filter((name) => has(name) && name !== primary && name !== tags).slice(
+      0,
+      2,
+    ),
+    chips: chips.filter((name) => name !== tags),
     stats: STATS.filter((name) => {
       const column = byName.get(name)
       return column !== undefined && isNumericDType(column.dtype)
     }).slice(0, MAX_STATS),
+    tags,
   }
 }
 

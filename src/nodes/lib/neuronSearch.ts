@@ -234,17 +234,29 @@ export interface SearchIndex {
  */
 const PRIMARY_CANDIDATES = ['type', 'instance', 'neuronId']
 
-/** Columns folded into the free-text haystack: identifiers and every string field. */
-function searchableColumns(schema: TableSchema): ColumnSchema[] {
-  return schema.columns.filter((c) => c.dtype === 'str' || c.name === 'neuronId')
+/**
+ * Columns folded into the free-text haystack: identifiers and every string field.
+ *
+ * `exclude` is how a column stays *shown* without being *searched*, which is what Explore's
+ * `Search tags` opt-out is. It only reaches the free-text half — a field term naming the column
+ * still matches it, because `prepareFieldTerms` reads the table rather than this index, and
+ * asking for a column by name is an explicit act rather than a stray word in a search box.
+ */
+function searchableColumns(schema: TableSchema, exclude: ReadonlySet<string>): ColumnSchema[] {
+  return schema.columns.filter(
+    (c) => (c.dtype === 'str' || c.name === 'neuronId') && !exclude.has(c.name),
+  )
 }
 
 /**
  * Build the concatenated lowercase haystacks. ~55 ms and ~24 MB for 165k neurons, so this is
  * memoised per table by `searchIndexFor` rather than rebuilt per query.
  */
-export function buildSearchIndex(table: TableValue): SearchIndex {
-  const columns = searchableColumns(table.schema)
+export function buildSearchIndex(
+  table: TableValue,
+  exclude: readonly string[] = [],
+): SearchIndex {
+  const columns = searchableColumns(table.schema, new Set(exclude))
   const arrays = columns.map((c) => table.data[c.name] ?? [])
   const haystacks = new Array<string>(table.length)
 
@@ -265,14 +277,27 @@ export function buildSearchIndex(table: TableValue): SearchIndex {
   }
 }
 
-const indexCache = new WeakMap<TableValue, SearchIndex>()
+const indexCache = new WeakMap<TableValue, Map<string, SearchIndex>>()
 
 /** Memoised `buildSearchIndex`. Keyed by table identity, which is how values flow anyway. */
-export function searchIndexFor(table: TableValue): SearchIndex {
-  let index = indexCache.get(table)
+export function searchIndexFor(
+  table: TableValue,
+  exclude: readonly string[] = [],
+): SearchIndex {
+  // Keyed on the exclusion as well as the table: the haystack *is* the exclusion, so one entry
+  // per table would hand a widget that excludes tags the index a node built without excluding
+  // them. Sorted, so two spellings of one exclusion share an entry rather than building the
+  // whole 24 MB haystack twice.
+  const key = [...exclude].sort().join('\u0001')
+  let byExclusion = indexCache.get(table)
+  if (!byExclusion) {
+    byExclusion = new Map<string, SearchIndex>()
+    indexCache.set(table, byExclusion)
+  }
+  let index = byExclusion.get(key)
   if (!index) {
-    index = buildSearchIndex(table)
-    indexCache.set(table, index)
+    index = buildSearchIndex(table, exclude)
+    byExclusion.set(key, index)
   }
   return index
 }

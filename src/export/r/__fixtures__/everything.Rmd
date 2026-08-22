@@ -97,6 +97,14 @@ coda_edge_list <- function(ids, prepost, min_weight, conn) {
 }
 
 
+#' Coda's `join` aggregation: row order, absences skipped, repeats kept.
+coda_join <- function(x) {
+  kept <- as.character(x[!is.na(x)])
+  kept <- kept[kept != ""]
+  if (length(kept) == 0) NA_character_ else paste(kept, collapse = "; ")
+}
+
+
 coda_neurons <- function(df) {
   # neuprintr publishes `bodyid`; Coda calls the id column `neuronId` everywhere.
   # `df$neuronId` on a tibble is NULL rather than an error, so an unrenamed frame
@@ -635,6 +643,13 @@ combine_columns[["label"]] <- coda_combine(find_neurons, c("type", "instance"))
 combine_columns[["label_from"]] <- coda_combine_source(find_neurons, c("type", "instance"))
 ```
 
+```{r group-by-df}
+# ── Group By ──
+group_by_df <- find_neurons |>
+  group_by(`type`) |>
+  summarise(n = n(), `join_instance` = coda_join(`instance`), .groups = "drop")
+```
+
 ```{r profile}
 # ── Profile ──
 profile_out <- find_neurons
@@ -880,9 +895,9 @@ clusters_to_neurons <- find_neurons |>
   select(-key_)
 ```
 
-```{r group-by-df}
+```{r group-by-df-2}
 # ── Group By ──
-group_by_df <- deduplicate |>
+group_by_df_2 <- deduplicate |>
   group_by(`preType`, `postType`) |>
   summarise(n = n(), `sum_weight` = sum(`weight`), .groups = "drop")
 ```
@@ -901,12 +916,12 @@ selected_to_neurons <- dendrogram_selected |>
 
 ```{r select-columns}
 # ── Select Columns ──
-select_columns <- group_by_df |> select(all_of(c("preType", "postType", "sum_weight")))
+select_columns <- group_by_df_2 |> select(all_of(c("preType", "postType", "sum_weight")))
 ```
 
 ```{r bar-chart}
 # ── Bar Chart ──
-bar_chart <- group_by_df
+bar_chart <- group_by_df_2
 
 ggplot(bar_chart, aes(x = `preType`, y = `sum_weight`)) +
   geom_col() +
@@ -917,7 +932,7 @@ ggplot(bar_chart, aes(x = `preType`, y = `sum_weight`)) +
 
 ```{r table-df}
 # ── Table ──
-table_df_out <- group_by_df
+table_df_out <- group_by_df_2
 table_df_filtered <- dplyr::filter(
   table_df_out,
   (!is.na(.data[["sum_weight"]]) & .data[["sum_weight"]] >= 10),
@@ -933,7 +948,7 @@ table_df_filtered
 
 ```{r build-network}
 # ── Build Network ──
-links <- group_by_df |>
+links <- group_by_df_2 |>
   group_by(`preType`, `postType`) |>
   summarise(weight = sum(`sum_weight`), edges = n(), .groups = "drop")
 links <- links |> filter(weight >= 5)
@@ -951,7 +966,7 @@ build_network <- graph_from_data_frame(
 # reproduces that — without it the join returns every matching pair.
 join <- select_columns |>
   left_join(
-    group_by_df |> distinct(`preType`, .keep_all = TRUE),
+    group_by_df_2 |> distinct(`preType`, .keep_all = TRUE),
     by = join_by(`preType` == `preType`),
     suffix = c("", "_r")
   )

@@ -112,9 +112,12 @@ export const profileNode = registerNode({
        */
       id: 'chips',
       kind: 'columns',
-      label: 'Tags',
+      // "Fields" here too, and for Explore's reason: the value is a list of *columns*, and
+      // Explore's neighbouring `Additional tags` names a column whose *values* are tags.
+      // Leaving one of the pair called Tags would put the confusion one widget over.
+      label: 'Fields',
       from: 'neurons',
-      help: 'Fields shown as tags beside the neuron’s name. Leave empty to choose automatically.',
+      help: 'Which columns are shown as chips beside the neuron’s name. Leave empty to choose automatically.',
       default: [],
       // Empty is the normal state, so a table whose schema is not yet known must not raise a
       // warning about a control nobody has touched.

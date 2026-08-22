@@ -2,6 +2,7 @@ import { registerNode } from '../../core/registry'
 import { NUMERIC_DTYPES, T } from '../../core/types'
 import { isTableValue } from '../../core/values'
 import type { AggFn } from '../lib/tableOps'
+import { aggValueParam } from '../lib/tableOps'
 import { AGG_OPTIONS, groupBySchema, groupByTable } from '../lib/tableOps'
 
 /**
@@ -42,14 +43,29 @@ export const groupByNode = registerNode({
       from: 'in',
       dtypes: NUMERIC_DTYPES,
       default: '',
-      visibleIf: (params) => params.agg !== 'count',
+      visibleIf: (params) => params.agg !== 'count' && params.agg !== 'join',
+    },
+    {
+      /*
+       * The same slot for `join`, which takes text where the others take a number. Two pickers
+       * made exclusive by `visibleIf` rather than one with a conditional dtype list, because
+       * `ColumnParam.dtypes` is a fixed list — the idiom `colorParams` already uses to put a
+       * column picker or a swatch in one row and never both. `aggValueParam` says which is live.
+       */
+      id: 'textValue',
+      kind: 'column',
+      label: 'Of column',
+      from: 'in',
+      help: 'Values are joined with "; " in row order. Absences are skipped and repeats are kept — put a Deduplicate upstream to drop those, where the decision is visible.',
+      default: '',
+      visibleIf: (params) => params.agg === 'join',
     },
   ],
 
   inferOutputs: (ctx) => {
     const agg = String(ctx.params.agg ?? 'sum') as AggFn
     const by = ctx.columns('by')
-    const value = agg === 'count' ? undefined : ctx.column('value')
+    const value = agg === 'count' ? undefined : ctx.column(aggValueParam(agg))
     const schema = groupBySchema(ctx.schema('in'), by, value, agg)
     return { out: schema ? T.table(schema) : T.table() }
   },
@@ -59,7 +75,7 @@ export const groupByNode = registerNode({
       return ['Pick at least one column to group by']
     }
     const agg = String(ctx.params.agg ?? 'sum') as AggFn
-    if (agg !== 'count' && !ctx.column('value')) {
+    if (agg !== 'count' && !ctx.column(aggValueParam(agg))) {
       return [`"${agg}" needs a numeric value column`]
     }
     return []
@@ -72,7 +88,12 @@ export const groupByNode = registerNode({
     const by = ctx.columns('by')
     if (by.length === 0) throw new Error('No group-by columns selected')
     return {
-      out: groupByTable(table, by, agg === 'count' ? undefined : ctx.column('value'), agg),
+      out: groupByTable(
+        table,
+        by,
+        agg === 'count' ? undefined : ctx.column(aggValueParam(agg)),
+        agg,
+      ),
     }
   },
 })

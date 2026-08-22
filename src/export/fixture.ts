@@ -280,6 +280,18 @@ export function everythingGraph(): CodaGraph {
       row: 1,
       params: { columns: ['type', 'instance'], into: 'label', sourceColumn: 'label_from' },
     },
+    /*
+     * The `join` aggregation, which is the one that emits a generated helper rather than a
+     * pandas method name — and the only route by which `coda_join` reaches a golden, where
+     * `probe-py-helpers.py` can actually run it.
+     */
+    {
+      id: 'joined',
+      type: 'core.groupBy',
+      col: 4,
+      row: 1,
+      params: { by: ['type'], agg: 'join', textValue: 'instance' },
+    },
     {
       id: 'group',
       type: 'core.groupBy',
@@ -489,6 +501,7 @@ export function everythingGraph(): CodaGraph {
     ['find', 'neurons', 'syn', 'neurons'],
     ['find', 'neurons', 'scatter', 'in'],
     ['find', 'neurons', 'combine', 'in'],
+    ['find', 'neurons', 'joined', 'in'],
     ['find', 'neurons', 'profile', 'neurons'],
     ['ds', 'dataset', 'profile', 'dataset'],
     ['ds', 'dataset', 'summary', 'dataset'],

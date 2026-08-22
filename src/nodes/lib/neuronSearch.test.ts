@@ -78,7 +78,14 @@ const NEURONS: TableValue = tableFromRows(
       post: 40,
     },
     { neuronId: 50, type: 'KCg', instance: 'KCg_x', status: 'Traced', class: null, post: 7 },
-    { neuronId: 60, type: null, instance: 'unnamed', status: null, class: 'descending', post: 0 },
+    {
+      neuronId: 60,
+      type: null,
+      instance: 'unnamed',
+      status: null,
+      class: 'descending',
+      post: 0,
+    },
     {
       neuronId: 70,
       type: 'aDNp01x',
@@ -422,5 +429,57 @@ describe('rankStrings', () => {
 
   it('honours the limit and returns the head of the list when the query is empty', () => {
     expect(rankStrings('', ['a', 'b', 'c'], 2)).toEqual(['a', 'b'])
+  })
+})
+
+/**
+ * Keeping a column *shown* without letting it be *searched*.
+ *
+ * Explore's `Search tags` opt-out. Free-form community text is exactly the thing somebody might
+ * not want folded into a hit count they then quote — and it is exactly the thing somebody else
+ * wants to find neurons by, which is why the default is on and this is a control rather than a
+ * rule.
+ */
+describe('excluding a column from the free-text haystack', () => {
+  const SCHEMA = tableSchema(
+    column('neuronId', 'str'),
+    column('type', 'str'),
+    column('community', 'str'),
+  )
+  const table = () =>
+    tableFromRows(SCHEMA, [
+      { neuronId: '1', type: 'DNp01', community: 'putative giant fibre' },
+      { neuronId: '2', type: 'LC4', community: 'checked' },
+    ])
+
+  const hits = (query: string, exclude: string[] = []) =>
+    runSearch(table(), searchIndexFor(table(), exclude), parseSearch(query)).rows
+
+  it('matches the column by default', () => {
+    expect(hits('giant')).toEqual([0])
+  })
+
+  it('stops matching it once excluded, and leaves every other column alone', () => {
+    expect(hits('giant', ['community'])).toEqual([])
+    expect(hits('DNp01', ['community'])).toEqual([0])
+  })
+
+  it('still answers a field term naming the column', () => {
+    /*
+     * The exclusion is the *free-text* half only. Asking for a column by name is an explicit
+     * act rather than a stray word in a search box, and `prepareFieldTerms` reads the table
+     * rather than this index — so the opt-out costs nothing anybody deliberately asked for.
+     */
+    expect(hits('community~giant', ['community'])).toEqual([0])
+  })
+
+  it('does not serve one exclusion’s index to another', () => {
+    // The memo is per table *and* per exclusion: one entry per table would hand the widget the
+    // index a node built without the exclusion, and the list would show rows Hits does not.
+    const t = table()
+    expect(searchIndexFor(t).searched).toContain('community')
+    expect(searchIndexFor(t, ['community']).searched).not.toContain('community')
+    // And back again, from the same cached table.
+    expect(searchIndexFor(t).searched).toContain('community')
   })
 })

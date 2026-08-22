@@ -17,7 +17,7 @@ import type { CellValue, TableValue } from '../../core/values'
 import { formatCompact, formatCell } from '../format'
 import { NeuronThumbnail } from './NeuronThumbnail'
 import type { RowFields } from './rowFields'
-import { chipKey, chipSlots, statUnit } from './rowFields'
+import { chipKey, chipSlots, splitTags, statUnit } from './rowFields'
 
 export interface NeuronRowProps {
   table: TableValue
@@ -37,6 +37,15 @@ export interface NeuronRowProps {
   /** Inside a node card rather than the full-size overlay: a smaller thumbnail. */
   compact: boolean
 }
+
+/**
+ * How many tags a row draws before it starts counting.
+ *
+ * Small on purpose. These are the least structured thing on the row and the least likely to be
+ * what somebody is scanning for, so they get the least width — four is about what fits beside a
+ * name without the row becoming a paragraph.
+ */
+const MAX_ROW_TAGS = 4
 
 function cellOf(table: TableValue, name: string, row: number): CellValue {
   const column = table.data[name]
@@ -84,6 +93,18 @@ function NeuronRowImpl({
     .map((name) => cellOf(table, name, row))
     .filter((value): value is string => typeof value === 'string' && value.length > 0)
 
+  /*
+   * Community tags: free-form text somebody typed, not a controlled vocabulary.
+   *
+   * Capped rather than wrapped, so every row in the list keeps the same height — which is the
+   * whole reason a list is scannable, and a neuron with forty tags would otherwise push several
+   * others off the page. The counter says how many were held back and carries all of them in
+   * its `title`, so nothing is hidden without saying so.
+   */
+  const tags = fields.tags ? splitTags(cellOf(table, fields.tags, row)) : []
+  const shownTags = tags.slice(0, MAX_ROW_TAGS)
+  const hiddenTags = tags.length - shownTags.length
+
   return (
     <div className="explore-row" data-selected={selected || undefined}>
       <label className="explore-row__pick" title={selected ? 'Deselect' : 'Select'}>
@@ -126,6 +147,22 @@ function NeuronRowImpl({
                 {formatCell(chip.value, chip.name)}
               </span>
             ))}
+          </div>
+        )}
+        {shownTags.length > 0 && (
+          <div className="explore-row__tags">
+            {shownTags.map((tag, at) => (
+              // Keyed by position as well as text: a base can hold the same tag twice, and two
+              // children with one key is a React warning and a dropped node.
+              <span key={`${at}:${tag}`} className="explore-tag" title={tag}>
+                {tag}
+              </span>
+            ))}
+            {hiddenTags > 0 && (
+              <span className="explore-tag explore-tag--more" title={tags.join('\n')}>
+                +{hiddenTags} more
+              </span>
+            )}
           </div>
         )}
       </div>

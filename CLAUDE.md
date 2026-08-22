@@ -513,7 +513,8 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `nodes/lib/neuronSearch.test.ts`         | the Explore query language: parsing, matching, null rules, the fuzzy fallback, ranking, completion                               |
 | `data/cache.test.ts`                     | IndexedDB-less degradation, fingerprint/expiry invalidation, index dedupe                                                        |
 | `ui/explore/thumbnail.test.ts`           | silhouette projection/shading, and the data-driven row spec                                                                      |
-| `ui/explore/chips.test.ts`               | that the chip hues in `theme.css` still match `colors.ts`, that a slot follows the field, and which chips each backend's vocabulary yields |
+| `ui/explore/chips.test.ts`               | that the chip hues in `theme.css` still match `colors.ts`, that a slot follows the field, which chips each backend's vocabulary yields, and a tags column held out of all three lists |
+| `ui/explore/neuronRow.test.tsx`          | community tags on a row: apart from the chips and unlike them, capped with the rest in the counter's title, and an absence drawing no row |
 | `ui/explore/explore.test.tsx`            | the widget: live filtering vs debounced commit, paging staleness, selection, completion, and it mounted in the real editor       |
 | `nodes/query/explore.test.ts`            | the node's ports: that `All` ignores both the search and `Max hits`, and infers what it evaluates                                |
 | `nodes/lib/labelLookup.test.ts`          | label parsing, the typed/wired union, and what the unmatched report refuses to claim                                             |
@@ -6809,6 +6810,80 @@ neuPrint's properties are *discovered* per dataset and the custom-query endpoint
 family only fires where a dataset carries **both** names, and where it does, one chip instead of
 two saying the same thing is the intended behaviour. `chips.test.ts` pins the neuPrint answer as
 unchanged, which is the half that would actually regress.
+
+### Community tags: free-form text, drawn as its own thing
+
+Some CAVE datastacks let anyone attach free-form text to a neuron — FlyWire's
+`neuron_information_v2` is one row per (neuron, `tag`), with a `pt_supervoxel_id` beside it so a
+stale root id can be repaired. Explore's `Additional tags` param names a column holding those,
+and the row draws them **apart from the chips and deliberately unlike them**: their own line
+below, smaller type, no palette slot, a hairline border rather than a tint. A tinted chip would
+say they came from a known field, which is exactly what they did not — they are somebody's prose
+against a neuron, not a controlled vocabulary.
+
+**The shape does not fit the annotation chain, so something has to fold it.** A chain is one row
+per neuron — `annotationIndex` and `joinAnnotations` are first-occurrence-wins, deliberately —
+and `annotation.caveTable` reads wide (so the *first* tag silently wins) or long via `pivotOn`
+(so every distinct tag becomes a *column*, which for free text is thousands). Neither is usable.
+
+So the enabler is a **`join text` aggregation on Group By**, which is a general table op and was
+missing outright: there was no way to concatenate strings in a Group By at all. The chain is
+
+```text
+CAVE table (neuron_information_v2) → Update root IDs → Group By (by neuronId, join text of tag)
+    → Join ← the rest of the annotations → Dataset ▸ Annotations
+```
+
+A node rather than a provider mode, on the reasoning `combineColumns` records: gathering values
+is not a fact about CAVE tables, and the repair has to run on the *ungathered* rows, where each
+tag still has its own supervoxel.
+
+`join` is `string_agg` / `paste(collapse=)`: **row order, absences skipped, repeats kept**. Null
+and the empty string are one absence, `coda_combine`'s rule; a group with nothing in it answers
+**null rather than `''`**, because an empty string reads as a value to every picker downstream. A
+base where two people added the same tag wants a Deduplicate upstream, where that decision is
+visible. The unit does not ride along — nanometres joined with semicolons are not nanometres.
+
+**`JOIN_SEPARATOR` is a contract, not a formatting choice.** `'; '` is written by the aggregation
+and split back by the widget, so one constant. Plain text rather than a control character because
+the cell is read by people too — it lands in a Table node, a CSV and a notebook — and the cost is
+stated rather than engineered away: a tag containing `'; '` comes apart into two chips. Cosmetic,
+and the whole cell is one hover away.
+
+**`core.pivot` does not offer it**, and that exclusion is derived rather than listed: a
+`MatrixValue` cell is a `Float64Array` slot, so `NUMERIC_AGG_OPTIONS` filters `AGG_OPTIONS`
+through `aggDType`. A future text aggregation is excluded by *arriving*; the failure otherwise is
+a dropdown entry that silently yields a matrix of zeroes.
+
+**Two pickers for one slot**, made exclusive by `visibleIf`: `value` is numeric-only and
+`textValue` is not, because `ColumnParam.dtypes` is a fixed list rather than a function of the
+params. `aggValueParam` says which is live — one statement, because three callers read it (the
+node and both emitters). Same idiom as a colour's column picker and its swatch.
+
+**Searching is on by default with an opt-out**, and both halves are `Explore`'s only params that
+are *not* presentational: together they decide which column is kept out of the haystack, and that
+changes which rows `Hits` returns. A picker quietly changing a port's contents while claiming to
+be a drawing knob is what `presentational` must never mean. `excludedFromSearch` is one function
+because two surfaces read it — `evaluate`, and the widget filtering live as you type — and two
+spellings would be a list showing rows the port does not carry.
+
+The exclusion reaches the **free-text half only**: a field term naming the column still matches,
+since `prepareFieldTerms` reads the table rather than the index, and asking for a column by name
+is an explicit act rather than a stray word in a search box. `searchIndexFor` is memoised per
+table **and per exclusion** — one entry per table would hand the widget the index a node built
+without excluding, which is the disagreement above by another route.
+
+**A row caps at four tags and counts the rest**, with all of them in the counter's `title`. Every
+row the same height is what makes a list scannable, and one neuron with forty tags would push
+several others off the page. Each tag ellipsises at its own `max-width` with the full text in
+`title`, which is CSS — jsdom performs none of it, so what the tests can pin is the half that
+makes it recoverable.
+
+**`chips` is labelled `Fields` now, on Explore and on Profile.** The value is a list of *columns*
+where `Additional tags` names a column of *values*; two controls called Tags meaning opposite
+halves of one row is the confusion the rename avoids. The **id stays `chips`** — that is what a
+saved graph carries. Profile was renamed too though only Explore was reported: leaving one of the
+pair called Tags puts the same confusion one widget over.
 
 **A card shows the same tags as the overlay.** There was a cap on chips in `compact`, on the
 grounds that a card is a preview, and it was wrong twice: it hid the seventh chip in the one

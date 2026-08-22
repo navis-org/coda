@@ -7,6 +7,7 @@
  * document still runs and still answers.
  */
 
+import { JOIN_SEPARATOR } from '../../nodes/lib/tableOps'
 import { registerHelper } from './registry'
 
 /**
@@ -152,6 +153,26 @@ registerHelper({
     '    out[fill] <- name',
     '  }',
     '  out',
+    '}',
+  ],
+})
+
+/**
+ * Coda's `join` aggregation, in R.
+ *
+ * `paste(x, collapse = "; ")` is the obvious spelling and keeps both an `NA` — as the literal
+ * two letters — and an empty string, where Coda reads either as an absence. A group with
+ * nothing in it answers `NA_character_` rather than `""`, so the column stays a real absence
+ * and `is.na` finds it. The separator is spliced from `JOIN_SEPARATOR`.
+ */
+registerHelper({
+  name: 'coda_join',
+  source: [
+    "#' Coda's `join` aggregation: row order, absences skipped, repeats kept.",
+    'coda_join <- function(x) {',
+    '  kept <- as.character(x[!is.na(x)])',
+    '  kept <- kept[kept != ""]',
+    `  if (length(kept) == 0) NA_character_ else paste(kept, collapse = ${JSON.stringify(JOIN_SEPARATOR)})`,
     '}',
   ],
 })

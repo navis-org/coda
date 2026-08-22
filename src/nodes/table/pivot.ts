@@ -2,7 +2,7 @@ import { registerNode } from '../../core/registry'
 import { NUMERIC_DTYPES, T } from '../../core/types'
 import { isTableValue } from '../../core/values'
 import type { AggFn } from '../lib/tableOps'
-import { AGG_OPTIONS, matrixToTable, pivotTable } from '../lib/tableOps'
+import { NUMERIC_AGG_OPTIONS, matrixToTable, pivotTable } from '../lib/tableOps'
 
 /**
  * Long table -> labelled matrix, and the same pivot as a wide table. The general route to a
@@ -43,7 +43,14 @@ export const pivotNode = registerNode({
   params: [
     { id: 'rows', kind: 'column', label: 'Rows', from: 'in', default: '' },
     { id: 'columns', kind: 'column', label: 'Columns', from: 'in', default: '' },
-    { id: 'agg', kind: 'enum', label: 'Aggregate', default: 'sum', options: AGG_OPTIONS },
+    // Numeric only: a matrix cell is a Float64Array slot, so `join` has nowhere to put text.
+    {
+      id: 'agg',
+      kind: 'enum',
+      label: 'Aggregate',
+      default: 'sum',
+      options: NUMERIC_AGG_OPTIONS,
+    },
     {
       id: 'value',
       kind: 'column',

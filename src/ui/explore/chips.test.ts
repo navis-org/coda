@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url'
 
 import { MAX_SERIES, seriesColor } from '../colors'
 import type { Mode } from '../colors'
-import { chipKey, chipSlots, rowFields } from './rowFields'
+import { chipKey, chipSlots, rowFields, splitTags } from './rowFields'
 import { column, tableSchema } from '../../core/types'
 
 const THEME = readFileSync(fileURLToPath(new URL('../theme.css', import.meta.url)), 'utf8')
@@ -249,5 +249,62 @@ describe('the automatic chip list', () => {
       'hartenstein_hemilineage',
     ])
     expect(chips).toEqual(['supertype', 'hartenstein_hemilineage'])
+  })
+})
+
+/**
+ * Community tags: a column whose *values* are several free-form strings, as a CAVE
+ * `neuron_information_v2` table folds into once Group By's `join` has gathered it.
+ *
+ * They are a different kind of claim from the chips above them — somebody's prose against a
+ * neuron, not a controlled vocabulary — so what has to hold is that they stay *apart*: their own
+ * field on the spec, and out of the three lists that would otherwise draw the same cell twice.
+ */
+describe('the additional tags column', () => {
+  const schema = (...names: string[]) =>
+    tableSchema(...names.map((n) => column(n, 'str')), column('pre', 'i64'))
+
+  it('is reported apart from the chips, and drawn by neither list', () => {
+    const f = rowFields(schema('neuronId', 'type', 'cell_class', 'community'), [], 'community')
+    expect(f.tags).toBe('community')
+    expect(f.chips).not.toContain('community')
+    expect(f.secondary).not.toContain('community')
+  })
+
+  it('does not claim a column the current dataset lacks', () => {
+    // The param outlives the dataset it was set on, exactly as `chips` does.
+    expect(rowFields(schema('neuronId', 'type'), [], 'community').tags).toBeUndefined()
+    expect(rowFields(schema('neuronId', 'type'), []).tags).toBeUndefined()
+  })
+
+  it('wins the cell when somebody named it in both controls', () => {
+    // Naming one column in both is a mistake rather than a request to draw it twice, and the
+    // tag row is the more specific statement.
+    const f = rowFields(schema('neuronId', 'type', 'community'), ['community'], 'community')
+    expect(f.chips).toEqual([])
+    expect(f.tags).toBe('community')
+  })
+
+  it('does not displace a status line that is a different column', () => {
+    const f = rowFields(schema('neuronId', 'type', 'status', 'community'), [], 'community')
+    expect(f.secondary).toContain('status')
+  })
+})
+
+describe('splitting a joined tag cell', () => {
+  it('splits on the separator the join wrote, trimming and dropping blanks', () => {
+    expect(splitTags('left; putative giant fibre; DA?')).toEqual([
+      'left',
+      'putative giant fibre',
+      'DA?',
+    ])
+    expect(splitTags('a;  ; b')).toEqual(['a', 'b'])
+  })
+
+  it('answers nothing for an absence rather than one empty tag', () => {
+    expect(splitTags(null)).toEqual([])
+    expect(splitTags('')).toEqual([])
+    // A number in the column is not text somebody typed; nothing to split.
+    expect(splitTags(42)).toEqual([])
   })
 })

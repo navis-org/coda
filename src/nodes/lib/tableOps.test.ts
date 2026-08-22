@@ -5,6 +5,9 @@ import { column, columnNames, tableSchema } from '../../core/types'
 import type { TableValue } from '../../core/values'
 import { makeMatrix, tableFromRows } from '../../core/values'
 import {
+  AGG_OPTIONS,
+  JOIN_SEPARATOR,
+  NUMERIC_AGG_OPTIONS,
   combineSchema,
   combineTable,
   aggColumnName,
@@ -819,5 +822,72 @@ describe('combine columns', () => {
   it('passes the table through when it is not configured', () => {
     expect(combineTable(ann(), { columns: [], into: 'type' }).schema).toEqual(ANN)
     expect(combineTable(ann(), { columns: ['cell_type'], into: '' }).schema).toEqual(ANN)
+  })
+})
+
+describe('the join aggregation', () => {
+  const TAGS = tableSchema(column('neuronId', 'str'), column('tag', 'str'))
+  const tags = () =>
+    tableFromRows(TAGS, [
+      { neuronId: '1', tag: 'left' },
+      { neuronId: '1', tag: '' },
+      { neuronId: '1', tag: 'left' },
+      { neuronId: '2', tag: null },
+      { neuronId: '3', tag: 'putative giant fibre' },
+    ])
+
+  const joined = (t = tags()) => groupByTable(t, ['neuronId'], 'tag', 'join')
+
+  it('keeps row order and repeats, and skips both kinds of absence', () => {
+    const out = joined()
+    // Row order and repeats, because this is `string_agg` — a base where two people added the
+    // same tag wants a Deduplicate upstream, where the decision is visible.
+    expect(out.data.join_tag?.[0]).toBe(`left${JOIN_SEPARATOR}left`)
+    // Null and blank are one absence, the rule `coda_combine` follows one op over.
+    expect(out.data.join_tag?.[0]).not.toContain(`${JOIN_SEPARATOR}${JOIN_SEPARATOR}`)
+  })
+
+  it('answers null for a group with nothing in it, never an empty string', () => {
+    // `String(null)` is the four-letter word, and `''` reads as a value to every picker
+    // downstream. A neuron nobody tagged has no tags.
+    expect(joined().data.join_tag?.[1]).toBeNull()
+  })
+
+  it('still counts every row in n, including the ones it skipped', () => {
+    expect(joined().data.n?.[0]).toBe(3)
+  })
+
+  it('agrees with its schema half, and produces text whatever it was given', () => {
+    const declared = groupBySchema(TAGS, ['neuronId'], 'tag', 'join')
+    expectSchemaAgreement(declared, joined())
+    expect(declared!.columns.at(-1)!.dtype).toBe('str')
+
+    // A number joined is text, and the *unit* does not ride along: nanometres joined with
+    // semicolons are no longer nanometres.
+    const nm = tableSchema(column('k', 'str'), column('len', 'i64', 'nm'))
+    const out = groupByTable(
+      tableFromRows(nm, [
+        { k: 'a', len: 1 },
+        { k: 'a', len: 2 },
+      ]),
+      ['k'],
+      'len',
+      'join',
+    )
+    expectSchemaAgreement(groupBySchema(nm, ['k'], 'len', 'join'), out)
+    expect(out.data.join_len?.[0]).toBe(`1${JOIN_SEPARATOR}2`)
+    expect(out.schema.columns.at(-1)!.unit).toBeUndefined()
+  })
+
+  it('is not offered where the result has to be a number', () => {
+    /*
+     * A `MatrixValue` cell is a `Float64Array` slot, so `core.pivot` can only take aggregations
+     * that produce one. Derived from `aggDType` rather than listed, so a future text aggregation
+     * is excluded by arriving — the failure otherwise is a dropdown entry that silently yields a
+     * matrix of zeroes.
+     */
+    expect(AGG_OPTIONS.map((o) => o.value)).toContain('join')
+    expect(NUMERIC_AGG_OPTIONS.map((o) => o.value)).not.toContain('join')
+    expect(NUMERIC_AGG_OPTIONS.length).toBe(AGG_OPTIONS.length - 1)
   })
 })

@@ -16,7 +16,7 @@
  *  - `Sort` puts nulls last in **both** directions, where `sort_values` follows the direction.
  */
 
-import { aggColumnName, combineSchema } from '../../../nodes/lib/tableOps'
+import { aggColumnName, aggValueParam, combineSchema } from '../../../nodes/lib/tableOps'
 import type { AggFn } from '../../../nodes/lib/tableOps'
 import { findColumn, isNumericDType } from '../../../core/types'
 import { pyList, pyStr, pyValue } from '../py'
@@ -252,7 +252,8 @@ registerEmitter('core.combineColumns', (ctx) => {
 // Group By
 // ---------------------------------------------------------------------------
 
-const AGG_FUNCS: Record<AggFn, string> = {
+/** `join` is absent on purpose: it is a callable rather than a pandas method name. */
+const AGG_FUNCS: Record<Exclude<AggFn, 'join'>, string> = {
   sum: 'sum',
   mean: 'mean',
   min: 'min',
@@ -269,13 +270,18 @@ registerEmitter('core.groupBy', (ctx) => {
   ctx.require('pandas')
   const out = ctx.output('out')
   const agg = String(ctx.params.agg ?? 'sum') as AggFn
-  const value = agg === 'count' ? undefined : ctx.column('value')
-  if (agg !== 'count' && !value) return ctx.todo(`"${agg}" needs a numeric value column.`)
+  const value = agg === 'count' ? undefined : ctx.column(aggValueParam(agg))
+  if (agg !== 'count' && !value) return ctx.todo(`"${agg}" needs a value column.`)
 
   // `n` rides along with every aggregation, exactly as the node emits it — you almost always
   // want to know whether a mean came from 2 rows or 200.
   const aggs = [`n=(${pyStr(value ?? by[0]!)}, 'size')`]
-  if (agg !== 'count') {
+  if (agg === 'join') {
+    // A callable, not a method name: pandas takes either in a named-aggregation tuple, and
+    // Coda's rule about absences and empties is not one `', '.join` expresses.
+    ctx.helper('coda_join')
+    aggs.push(`${aggColumnName(agg, value)}=(${pyStr(value!)}, coda_join)`)
+  } else if (agg !== 'count') {
     aggs.push(`${aggColumnName(agg, value)}=(${pyStr(value!)}, ${pyStr(AGG_FUNCS[agg])})`)
   }
 
@@ -401,6 +407,11 @@ registerEmitter('core.pivot', (ctx) => {
   const value = ctx.column('value')
   const matrix = ctx.output('matrix')
   const table = ctx.output('table')
+
+  // Unreachable through the picker, which offers `NUMERIC_AGG_OPTIONS`; a hand-edited file is
+  // the only way here, and `pivot_table` would answer a frame of zeroes rather than fail.
+  if (agg === 'join')
+    return ctx.todo('A pivot cannot aggregate text — a matrix cell is a number.')
 
   const args = [
     `index=${pyStr(rows)}`,
