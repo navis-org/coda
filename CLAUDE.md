@@ -473,7 +473,7 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `export/python/export.test.ts`           | both fixtures against their goldens, every wired port declared, every emitting type reached, and a neuPrint cell refusing on a CAVE dataset |
 | `ui/panels/notebookExport.test.tsx`      | (also) the warning on the Save item: one per format, naming the steps, and silence on a graph that exports whole |
 | `ui/panels/palette.test.tsx`             | (also) that the export rows' peek starts no walk, and light up once one has run |
-| `ui/format.test.ts`                      | that an id column prints verbatim while the count beside it groups, and that an aggregate of one is a quantity again             |
+| `ui/format.test.ts`                      | that an id column prints verbatim while the count beside it groups, that an aggregate of one is a quantity again, and the length ladder: the rung asked of the rounded figure, any rung read as a source unit, and a sub-nanometre length not rounded away |
 | `ui/panels/nodeBrowser.test.tsx`         | rows/thumbnails/signatures, chip-search exclusivity, entry points                                                                |
 | `ui/encoding.test.ts`                    | palette rules: 8 slots, Other fold, area scaling, null handling                                                                  |
 | `ui/viewers/networkLayout.test.ts`       | topology reading, layering (incl. cycles), all four layouts                                                                      |
@@ -520,7 +520,7 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `data/cache.test.ts`                     | IndexedDB-less degradation, fingerprint/expiry invalidation, index dedupe                                                        |
 | `ui/explore/thumbnail.test.ts`           | silhouette projection/shading, and the data-driven row spec                                                                      |
 | `ui/explore/chips.test.ts`               | that the chip hues in `theme.css` still match `colors.ts`, that a slot follows the field, which chips each backend's vocabulary yields, and a tags column held out of all three lists |
-| `ui/explore/neuronRow.test.tsx`          | community tags on a row: apart from the chips and unlike them, capped with the rest in the counter's title, and an absence drawing no row |
+| `ui/explore/neuronRow.test.tsx`          | what a row draws: community tags apart from the chips and unlike them, capped with the rest in the counter's title, an absence drawing no row — and a stat scaled into its own unit with the stored figure kept verbatim on hover |
 | `ui/explore/explore.test.tsx`            | the widget: live filtering vs debounced commit, paging staleness, selection, completion, and it mounted in the real editor       |
 | `nodes/query/explore.test.ts`            | the node's ports: that `All` ignores both the search and `Max hits`, and infers what it evaluates                                |
 | `nodes/lib/labelLookup.test.ts`          | label parsing, the typed/wired union, and what the unmatched report refuses to claim                                             |
@@ -3566,8 +3566,8 @@ the summary in a foot.
 next to a stored unit meaning *nano*. About as misleading as a number can be, and it is the
 figure every paper about a fly neuron quotes in millimetres.
 
-`formatMeasure(value, unit)` in `ui/format.ts` walks the SI ladder from `nm` — nm, µm, mm, m —
-picking the coarsest step the value fills and **flooring at nm**, so a sub-micron length stays a
+`formatMeasure(value, unit)` in `ui/format.ts` walks the SI ladder — nm, µm, mm, m — picking the
+coarsest rung the value fills and **flooring at the finest**, so a sub-nanometre length stays a
 number instead of becoming `0 µm`. `2,980,158.182` reads `2.98 mm`; the giant fibre's
 22,484,326 reads `22.48 mm`.
 
@@ -3577,20 +3577,47 @@ knowing before adding a fourth unit. Which unit a *length* wants depends on its 
 `voxels` fall through to `formatCompact` unchanged: a count has no ladder, and a voxel is not a
 fraction of anything. Those three are the only units declared anywhere in the tree.
 
+**The rung is asked of the _rounded_ figure rather than the raw one**, which is not a refinement.
+999,999 nm fills only µm, and at two decimals prints there as `1,000 µm` — a thousands separator,
+which is the one thing the ladder exists to remove. Promoted only once the rounded figure has
+actually climbed, so 999,994 still reads `999.99 µm` and keeps its own precision.
+
+**The unit is looked up in the ladder, never tested against `'nm'`.** The table already names µm,
+mm and m, so gating on the storage unit would silently drop the unit and reinstate `3M` the moment
+a column declared one of the other three — an uploaded CSV of measurements, or a source publishing
+µm. It is also **sorted where it is declared** rather than by convention, because the rung search
+takes the last match: a `cm` added in reading order would otherwise become the answer for every
+length, with no type error and nothing failing for the cases already covered.
+
 **The schema half was already right, which is what made this a display bug rather than a data
 one.** Every `cableLength` column has carried `'nm'` since `CANONICAL_SCHEMAS`, and Explore's row
 *read* it — through `statUnit` — and then used it only in a `title`. The value beside it went
 through the unit-blind formatter. So the fix is where the two met, not in either half.
 
-**Glanceable on screen, exact on hover.** The row's tooltip now carries the stored figure in the
-stored unit (`cableLength: 2,980,158.182 nm`), because the scaled form is for reading and the
-stored one is what somebody copies into anything else. The **Table** viewer is deliberately
-untouched: it prints the exact value with the unit in its header, and a table is where exact
-values are read — the compact forms are for the glanceable surfaces.
+**Glanceable on screen, exact on hover.** The row's title carries the stored figure **verbatim** —
+`cableLength (nm): 2980158.182` — rather than through `formatNumber`, which groups *and* rounds:
+that takes CATMAID's own 4003103.2328612693 down to `4,003,103.233`, which is neither exact nor
+pasteable and so answers the one question the hover exists for with a different number. It goes
+through `formatExact`, which is `formatCell`'s id branch renamed and exported: the reason is
+identical in both places — a grouped number is a string no query accepts, and under another locale
+not even the same string — and it had been written out privately for ids until a second caller
+wanted it. The unit sits on the **label** rather than after the value, so it survives an absent one;
+what a column is *in* is the one thing an empty cell can still say.
 
-Note what is *not* covered: a scatter axis over a `nm` column still reads `3M`, because
-`scatterDraw` formats ticks without ever seeing the column's unit. Threading it through the plot
-spec is the honest fix and has not been made.
+The **Table** viewer is deliberately untouched: it prints the exact value with the unit in its
+header, and a table is where exact values are read — the compact forms are for the glanceable
+surfaces.
+
+Note what is *not* covered, and it is wider than one axis: **every chart that formats a magnitude
+without seeing the column's unit still reads `3M`** — the scatter's axis ticks (`scatterDraw`), the
+heatmap's colourbar and its printed cells, and both legend ramps (`LegendKeys`, `describeLegend`).
+The scatter and the legends need the unit threaded through the plot spec and the encoding
+resolution, which is a change to every viewer. The heatmap is nearer, and instructive about why it
+is still not a one-liner: `pivotMatrix` copies the value column's unit into `MatrixValue.valueLabel`,
+so `Pivot` on a `cableLength` draws `0 – 3M` beside a caption reading `· nm` today — but a chart
+states its unit **once**, in that caption, so scaling the bar means scaling the printed cell values
+with it and moving the caption to the *display* unit. Doing only the bar leaves the card
+disagreeing with itself, which is worse than the number it fixes.
 
 **`nodes` joined `STATS` with it.** It is CATMAID's `size` — a skeleton's node count is what says
 how much of a neuron was traced — and without it a CATMAID row had exactly one stat, since that

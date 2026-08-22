@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 
 /**
- * How a row draws community tags, which are deliberately not chips.
+ * What a row draws for one neuron: its community tags, and its figures.
+ *
+ * Community tags are deliberately not chips.
  *
  * A CAVE datastack lets anyone attach free-form text to a neuron — FlyWire's
  * `neuron_information_v2` is one row per (neuron, tag) — so once Group By's `join` has gathered
@@ -13,10 +15,13 @@
 import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 
+import type { TableSchema } from '../../core/types'
 import { column, tableSchema } from '../../core/types'
+import type { CellValue, TableValue } from '../../core/values'
 import { tableFromRows } from '../../core/values'
 import { installJsdomStubs } from '../../test/jsdomStubs'
 import { NeuronRow } from './NeuronRow'
+import type { RowFields } from './rowFields'
 import { rowFields } from './rowFields'
 
 beforeAll(() => installJsdomStubs({ width: 800, height: 500 }))
@@ -29,13 +34,8 @@ const SCHEMA = tableSchema(
   column('community', 'str'),
 )
 
-function draw(community: string | null) {
-  const table = tableFromRows(
-    SCHEMA,
-    [{ neuronId: '720575940628857210', type: 'DNp01', cell_class: 'descending', community }],
-    'neurons',
-  )
-  const fields = rowFields(table.schema, [], 'community')
+/** Returns `render`'s own container, so a query is scoped to the row rather than to jsdom. */
+function drawRow(table: TableValue, fields: RowFields) {
   return render(
     <NeuronRow
       table={table}
@@ -48,6 +48,19 @@ function draw(community: string | null) {
       compact={false}
     />,
   )
+}
+
+function draw(community: string | null) {
+  const table = tableFromRows(
+    SCHEMA,
+    [{ neuronId: '720575940628857210', type: 'DNp01', cell_class: 'descending', community }],
+    'neurons',
+  )
+  return drawRow(table, rowFields(table.schema, [], 'community'))
+}
+
+function drawStats(schema: TableSchema, row: Record<string, CellValue>) {
+  return drawRow(tableFromRows(schema, [row], 'neurons'), rowFields(schema))
 }
 
 describe('community tags on a row', () => {
@@ -100,5 +113,64 @@ describe('community tags on a row', () => {
       'left',
       'left',
     ])
+  })
+})
+
+/**
+ * A stat that carries a unit.
+ *
+ * The schema half already declared `nm`; the row read it and used it only in a tooltip, so a
+ * CATMAID cable length went through the unit-blind compact formatter and rendered as "3M" — a
+ * magnitude carried by a suffix meaning *million* beside a unit meaning *nano*.
+ */
+describe('a stat that carries a unit', () => {
+  it('draws a cable length in millimetres, and keeps the exact value on hover', () => {
+    const { container } = drawStats(
+      tableSchema(column('neuronId', 'i64'), column('cableLength', 'f64', 'nm')),
+      { neuronId: 16, cableLength: 2_980_158.182 },
+    )
+    const stat = container.querySelector('.explore-stat')
+    expect(stat?.querySelector('.explore-stat__value')?.textContent).toBe('2.98 mm')
+    // The scaled figure is for reading; the title is the one to copy anywhere else, so it is
+    // verbatim — grouped and rounded it would answer that question with a different number.
+    expect(stat?.getAttribute('title')).toBe('cableLength (nm): 2980158.182')
+  })
+
+  it('says what an absent value would have been in', () => {
+    // The one thing an empty cell can still tell somebody, and what the title said before the
+    // value was added to it.
+    const { container } = drawStats(
+      tableSchema(column('neuronId', 'i64'), column('cableLength', 'f64', 'nm')),
+      { neuronId: 16, cableLength: null },
+    )
+    const stat = container.querySelector('.explore-stat')
+    expect(stat?.querySelector('.explore-stat__value')?.textContent).toBe('—')
+    expect(stat?.getAttribute('title')).toBe('cableLength (nm)')
+  })
+
+  it('leaves a count as a plain figure, since its label already says what it counts', () => {
+    const { container } = drawStats(
+      tableSchema(column('neuronId', 'i64'), column('nodes', 'i64')),
+      { neuronId: 16, nodes: 16_840 },
+    )
+    const stat = container.querySelector('.explore-stat')
+    expect(stat?.querySelector('.explore-stat__value')?.textContent).toBe('16.8K')
+    expect(stat?.querySelector('.explore-stat__label')?.textContent).toBe('nodes')
+  })
+
+  // `nodes` is CATMAID's `size`: without it a CATMAID row had exactly one stat, because it
+  // publishes none of the other six.
+  it('shows both of a CATMAID row’s figures', () => {
+    const { container } = drawStats(
+      tableSchema(
+        column('neuronId', 'i64'),
+        column('nodes', 'i64'),
+        column('cableLength', 'f64', 'nm'),
+      ),
+      { neuronId: 16, nodes: 16_840, cableLength: 2_980_158 },
+    )
+    expect(
+      [...container.querySelectorAll('.explore-stat__value')].map((el) => el.textContent),
+    ).toEqual(['16.8K', '2.98 mm'])
   })
 })

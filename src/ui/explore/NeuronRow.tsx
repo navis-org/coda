@@ -14,7 +14,7 @@ import { memo } from 'react'
 
 import { idText } from '../../core/ids'
 import type { CellValue, TableValue } from '../../core/values'
-import { formatCell, formatMeasure, formatNumber } from '../format'
+import { formatCell, formatExact, formatMeasure } from '../format'
 import { NeuronThumbnail } from './NeuronThumbnail'
 import type { RowFields } from './rowFields'
 import { chipKey, chipSlots, splitTags, statUnit } from './rowFields'
@@ -174,14 +174,18 @@ function NeuronRowImpl({
           /*
            * Glanceable on screen, exact on hover. The figure is scaled into the unit a reader
            * thinks in — a cable length is millimetres of arbor, not three million nanometres —
-           * and the tooltip keeps the stored value, which is the one to copy into anything else.
+           * and the title carries the stored number **verbatim**, which is the one to copy into
+           * anything else: `formatNumber` would group and round it, so the hover would answer
+           * the one question it exists for with a different number.
+           *
+           * The unit stays on the label rather than after the value, so it survives an absent
+           * one. What a column is *in* is the one thing an empty cell can still say, and it is
+           * what the title said before any of this.
            */
-          const exact =
-            typeof value === 'number'
-              ? `${name}: ${formatNumber(value)}${unit ? ` ${unit}` : ''}`
-              : name
+          const label = unit ? `${name} (${unit})` : name
+          const title = typeof value === 'number' ? `${label}: ${formatExact(value)}` : label
           return (
-            <span key={name} className="explore-stat" title={exact}>
+            <span key={name} className="explore-stat" title={title}>
               <span className="explore-stat__value">
                 {typeof value === 'number' ? formatMeasure(value, unit) : '—'}
               </span>

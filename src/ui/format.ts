@@ -19,18 +19,32 @@ function trim(value: number): string {
 }
 
 /**
- * The SI ladder a length is read on, coarsest last.
+ * The SI ladder a length is read on.
  *
- * Only lengths get one, and only from `nm`, because that is the one unit in the tree with a
- * scale problem: `synapses` and `voxels` are *counts*, and a count has no ladder — 12.9K
- * synapses is already the form somebody wants, and a voxel is not a fraction of anything.
+ * `per` is how many of the finest unit one of these is, so a value in any of them converts by
+ * multiplying. **Sorted here rather than by convention**, because the rung search below takes the
+ * last match: a `cm` added in reading order would otherwise silently become the answer for every
+ * length, with no type error and nothing failing for the cases already covered.
+ *
+ * Only lengths get a ladder, and that asymmetry is the point rather than an omission. Which unit
+ * a length wants depends on its magnitude, so "2.98" alone says nothing — where `synapses` and
+ * `voxels` are *counts*, and a count has no ladder: 12.9K synapses is already the form somebody
+ * wants, and a voxel is not a fraction of anything.
  */
-const LENGTH_STEPS: ReadonlyArray<{ unit: string; per: number }> = [
+interface LengthStep {
+  readonly unit: string
+  readonly per: number
+}
+
+const LENGTH_STEPS: readonly LengthStep[] = [
   { unit: 'nm', per: 1 },
   { unit: 'µm', per: 1e3 },
   { unit: 'mm', per: 1e6 },
   { unit: 'm', per: 1e9 },
-]
+].sort((a, b) => a.per - b.per)
+
+/** Decimals a scaled measurement keeps. Two is a hundredth of a rung, which is plenty to read. */
+const MEASURE_DIGITS = 2
 
 /**
  * A measurement in the unit a reader thinks in, rather than the one it is stored in.
@@ -41,20 +55,43 @@ const LENGTH_STEPS: ReadonlyArray<{ unit: string; per: number }> = [
  * one scene) and the wrong *display* one for anything the size of a neuron: a fly neuron's arbor
  * is millimetres of cable, and that is the figure in every paper about it.
  *
- * **The unit travels with the number here, and does not for a count.** That asymmetry is the
- * point rather than an inconsistency: which unit a length wants depends on its magnitude, so
- * "2.98" alone is meaningless where "12.9K" beside a `pre` label is not. A caller that shows the
- * unit separately should keep using `formatCompact`.
+ * **The unit travels with the number here, and does not for a count** — see `LENGTH_STEPS`. A
+ * caller that shows the unit separately should keep using `formatCompact`; a caller holding a
+ * unit this does not know gets `formatCompact` anyway, which is what it had before.
+ *
+ * The lookup is by *membership*, never `unit === 'nm'`: the ladder already names µm, mm and m, so
+ * gating on the storage unit would silently drop the unit and reinstate the "3M" failure the
+ * moment a column declared one of the others — an uploaded CSV of measurements, or a source
+ * publishing µm.
  */
 export function formatMeasure(value: number, unit: string | undefined): string {
-  if (unit !== 'nm' || !Number.isFinite(value)) return formatCompact(value)
-  const abs = Math.abs(value)
-  // The coarsest step the value fills, floored at nm so a sub-micron length stays readable
-  // rather than becoming "0 µm".
-  let step = LENGTH_STEPS[0]!
-  for (const candidate of LENGTH_STEPS) if (abs >= candidate.per) step = candidate
-  const scaled = value / step.per
-  return `${scaled.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${step.unit}`
+  const from = LENGTH_STEPS.find((step) => step.unit === unit)
+  if (!from || !Number.isFinite(value)) return formatCompact(value)
+
+  const base = value * from.per
+  const abs = Math.abs(base)
+  // The coarsest rung the value fills, floored at the finest so a sub-nanometre length stays a
+  // number rather than becoming "0 µm" one rung up.
+  let at = 0
+  for (let i = 0; i < LENGTH_STEPS.length; i++) if (abs >= LENGTH_STEPS[i]!.per) at = i
+  /*
+   * Then once more against the *rounded* figure, which is not redundant: the rung is chosen from
+   * the raw value and the number is rounded afterwards, so 999,999 nm fills only µm and prints
+   * there as "1,000 µm" — a thousands separator, which is the one thing the ladder exists to
+   * remove. Asked of the rounded figure it reads "1 mm", and 999,994 still reads "999.99 µm".
+   */
+  const next = LENGTH_STEPS[at + 1]
+  const rounded = Number((abs / LENGTH_STEPS[at]!.per).toFixed(MEASURE_DIGITS))
+  if (next && rounded * LENGTH_STEPS[at]!.per >= next.per) at += 1
+
+  const step = LENGTH_STEPS[at]!
+  const scaled = base / step.per
+  const scaledAbs = Math.abs(scaled)
+  // Below the finest rung there is nowhere left to go, so keep `formatCompact`'s own tail rather
+  // than rounding a real length away to "0 nm".
+  if (scaledAbs !== 0 && scaledAbs < 0.01) return `${scaled.toExponential(1)} ${step.unit}`
+  const digits = scaledAbs !== 0 && scaledAbs < 1 ? 3 : MEASURE_DIGITS
+  return `${scaled.toLocaleString(undefined, { maximumFractionDigits: digits })} ${step.unit}`
 }
 
 /** Full precision with thousands separators, for tables and tooltips. */
@@ -67,13 +104,21 @@ export function formatNumber(value: number): string {
 }
 
 /**
- * An identifier printed as it would be typed back in: no grouping, no rounding.
+ * A number printed as it would be typed back in: no grouping, no rounding.
  *
- * `String` rather than a `useGrouping: false` locale call because that is exactly what the
- * cell's own `title` already shows — a hover that disagrees with the cell under it is the
- * failure this is here to fix, not a second spelling of it.
+ * Two callers want exactly this, for one reason. An **identifier** has no magnitude, so a
+ * thousands separator is a reading aid for something that is not there: body 527536 is not five
+ * hundred thousand of anything, `527,536` is a string no query accepts, and under another locale
+ * it is not even the same string — which makes a column copied out of the table disagree with
+ * itself between two machines. And a **stat's tooltip** is the escape hatch from the compact
+ * figure beside it, so rounding there answers the one question the hover exists for with a
+ * different number: `formatNumber` takes a CATMAID cable length of 4003103.2328612693 nm down to
+ * "4,003,103.233", which is neither exact nor pasteable.
+ *
+ * `String` rather than a `useGrouping: false` locale call, because that is what "verbatim" means
+ * and a second spelling of it is a second thing to keep in step.
  */
-function formatId(value: number): string {
+export function formatExact(value: number): string {
   return Number.isFinite(value) ? String(value) : '—'
 }
 
@@ -83,14 +128,10 @@ const AGG_PREFIXES = AGG_OPTIONS.map((option) => `${option.value}_`)
 /**
  * Whether a column's numbers are *names* rather than quantities.
  *
- * A thousands separator is a reading aid for magnitude, and an identifier has no magnitude:
- * body 527536 is not five hundred thousand of anything, so `527,536` is a string nobody can
- * paste back into a query — and under another locale it is not even the same string, which
- * makes a copied column disagree with itself between two machines.
- *
- * Nothing in a `DType` says which of the two a column holds. That is the same gap
- * `BuildNetwork`'s merge rule documents ("summing added `preId` up to 24093454514") and the
- * one the upload node's `Text columns` exists for, so the answer here is theirs: the *name*.
+ * Why it matters is `formatExact`'s note; what it costs is that nothing in a `DType` says which
+ * of the two a column holds — the same gap `BuildNetwork`'s merge rule documents ("summing added
+ * `preId` up to 24093454514") and the one the upload node's `Text columns` exists for. So the
+ * answer here is theirs: the *name*.
  *
  * The rule is the name's **last word**, split on separators and camelCase boundaries. That
  * covers `neuronId`, `preId`/`postId`, `partnerId`, `sourceId`/`targetId` and the `root_id` /
@@ -140,7 +181,7 @@ export function isIdentifierColumn(name: string | undefined): boolean {
 export function formatCell(value: CellValue, columnName?: string): string {
   if (value === null || value === undefined) return '—'
   if (typeof value === 'number')
-    return isIdentifierColumn(columnName) ? formatId(value) : formatNumber(value)
+    return isIdentifierColumn(columnName) ? formatExact(value) : formatNumber(value)
   if (typeof value === 'boolean') return value ? 'true' : 'false'
   return value
 }

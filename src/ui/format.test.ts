@@ -140,10 +140,39 @@ describe('a measurement in the unit somebody reads it in', () => {
     expect(formatMeasure(12e9, 'nm')).toBe('12 m')
   })
 
-  // Floored at nm, so a sub-micron length stays a number rather than becoming "0 µm".
+  // Floored at nm, so a sub-micron length stays a number rather than becoming "0 µm" — and
+  // below the floor it keeps `formatCompact`'s own tail rather than rounding away to "0 nm".
   it('does not round a short length away', () => {
     expect(formatMeasure(0, 'nm')).toBe('0 nm')
     expect(formatMeasure(4, 'nm')).toBe('4 nm')
+    expect(formatMeasure(0.004, 'nm')).toBe('4.0e-3 nm')
+  })
+
+  /*
+   * The rung is chosen from the raw value and the number is rounded afterwards, so a value just
+   * under a rung would print `1,000 µm` — a thousands separator, which is the one thing the
+   * ladder exists to remove. Promoted only when the *rounded* figure has climbed, so a value
+   * that still fits keeps its own rung and its own precision.
+   */
+  it('promotes a value that rounds up into the next rung, and only then', () => {
+    expect(formatMeasure(999_999, 'nm')).toBe('1 mm')
+    expect(formatMeasure(999_999_999, 'nm')).toBe('1 m')
+    expect(formatMeasure(999_994, 'nm')).toBe('999.99 µm')
+  })
+
+  /*
+   * The unit is looked up in the ladder rather than tested against `'nm'`. Gating on the storage
+   * unit would silently drop the unit and reinstate "3M" the moment a column declared one of the
+   * other three — which the ladder already names.
+   */
+  it('reads a length stored in any rung, not only in nanometres', () => {
+    expect(formatMeasure(2980.158182, 'µm')).toBe('2.98 mm')
+    expect(formatMeasure(0.0025, 'mm')).toBe('2.5 µm')
+    expect(formatMeasure(2.98, 'mm')).toBe('2.98 mm')
+  })
+
+  it('keeps the sign, which is a rung question and not a magnitude one', () => {
+    expect(formatMeasure(-2_980_158.182, 'nm')).toBe('-2.98 mm')
   })
 
   /*
