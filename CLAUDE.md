@@ -513,7 +513,7 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `nodes/lib/neuronSearch.test.ts`         | the Explore query language: parsing, matching, null rules, the fuzzy fallback, ranking, completion                               |
 | `data/cache.test.ts`                     | IndexedDB-less degradation, fingerprint/expiry invalidation, index dedupe                                                        |
 | `ui/explore/thumbnail.test.ts`           | silhouette projection/shading, and the data-driven row spec                                                                      |
-| `ui/explore/chips.test.ts`               | that the chip hues in `theme.css` still match `colors.ts`, and that a slot follows the field                                     |
+| `ui/explore/chips.test.ts`               | that the chip hues in `theme.css` still match `colors.ts`, that a slot follows the field, and which chips each backend's vocabulary yields |
 | `ui/explore/explore.test.tsx`            | the widget: live filtering vs debounced commit, paging staleness, selection, completion, and it mounted in the real editor       |
 | `nodes/query/explore.test.ts`            | the node's ports: that `All` ignores both the search and `Max hits`, and infers what it evaluates                                |
 | `nodes/lib/labelLookup.test.ts`          | label parsing, the typed/wired union, and what the unmatched report refuses to claim                                             |
@@ -6766,6 +6766,49 @@ list takes the first member present. Without it a dataset that names one thing t
 field that says something new off the end of the cap, which is how `consensusNt` disappeared
 from male-CNS the moment `itoleeHl` joined `hemilineage` in the list. Only the automatic list
 dedupes; a list chosen in the inspector is taken literally, including asking for both.
+
+**The list carries both vocabularies, paired by family.** It was neuPrint's alone —
+`class`, `superclass`, `somaSide`, `itoleeHl`, `consensusNt` — and a CAVE row drew **no chips at
+all**, because a datastack publishes the same facts in snake_case out of an annotation table and
+not one name matched. That was not only the annotation-chain case: FlyWire's *built-in*
+annotations are exactly `cell_class`, `cell_sub_class`, `super_class`, `flow` and `cell_type`, so
+the shipped dataset had never had a chip either.
+
+Each pair shares a family **and a slot**, which is what makes `class` the same blue whichever
+backend the row came from — the stated point of keying the slot to the field. The two spellings
+sit adjacent, so `automaticChips` walking the list in order gives the same priority on either
+backend. What comes out:
+
+```text
+FlyWire + published annotations   cell_class  cell_sub_class  super_class  side  flow
+                                  ito_lee_hemilineage  top_nt  nerve
+FlyWire, nothing wired            cell_class  cell_sub_class  super_class  flow
+male-CNS                          unchanged
+```
+
+Two entries are deliberately *not* paired. **`somaSide` and `rootSide` are different facts** —
+where the soma sits against where the neurite enters — so they stay two chips; CAVE's `side` is
+the soma one and joins that family. And **`flow`** (intrinsic / afferent / efferent) is a fact
+neuPrint has no column for at all, so it has no partner and takes slot 4, free on every dataset
+that publishes it.
+
+The FlyWire chain fills all eight slots exactly, so `supertype`, `hartenstein_hemilineage`,
+`known_nt` and `dimorphism` are left out — `hartenstein_hemilineage` by the same rule that leaves
+`trumanHl` unlisted on male-CNS, one of each pair having to lead. The `chips` param is the way to
+ask for any of them.
+
+**What is *not* fixed is an annotation base nobody anticipated.** A lab's own SeaTable or an
+uploaded CSV has arbitrary column names, and no curated list can meet them; the param is the
+sanctioned answer, and its picker sees the chain's columns because `schemasFromType` merges them.
+Deriving the list from the schema instead was declined for now — an annotation base is somebody's
+spreadsheet with sixty columns, and deciding which of them deserve a chip automatically
+(cardinality? dtype? position?) is a judgement worth making deliberately rather than in passing.
+
+**Whether a neuPrint dataset could publish one of the CAVE spellings is not provable here** —
+neuPrint's properties are *discovered* per dataset and the custom-query endpoint needs a token. A
+family only fires where a dataset carries **both** names, and where it does, one chip instead of
+two saying the same thing is the intended behaviour. `chips.test.ts` pins the neuPrint answer as
+unchanged, which is the half that would actually regress.
 
 **A card shows the same tags as the overlay.** There was a cap on chips in `compact`, on the
 grounds that a card is a preview, and it was wrong twice: it hid the seventh chip in the one

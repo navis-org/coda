@@ -70,21 +70,54 @@ interface ChipSpec {
   key?: string
 }
 
+/*
+ * Both vocabularies, paired by family.
+ *
+ * neuPrint publishes these facts in camelCase as properties on the neuron; a CAVE datastack
+ * publishes them in snake_case out of an annotation table, and FlyWire's published annotations
+ * do the same. They are *the same facts*, so each pair shares a family and a slot — which is
+ * what makes `class` the same blue whichever backend a row came from, and what stops a dataset
+ * naming one thing twice spending two of eight slots on it.
+ *
+ * Until this, the list was neuPrint's alone and a FlyWire row drew **no chips at all** — not
+ * only through an annotation chain but on the shipped dataset, whose built-in annotations are
+ * exactly `cell_class`, `cell_sub_class`, `super_class`, `flow` and `cell_type`.
+ *
+ * The two spellings of a fact are adjacent so the priority order reads the same on either
+ * backend; `automaticChips` walks this list in order and takes the first member of each family
+ * the dataset actually has.
+ */
 const CHIPS: ChipSpec[] = [
-  { name: 'class', slot: 0 },
-  { name: 'subclass', slot: 1 },
-  { name: 'superclass', slot: 2 },
-  { name: 'somaSide', slot: 3, key: 'soma' },
+  { name: 'class', slot: 0, family: 'class' },
+  { name: 'cell_class', slot: 0, family: 'class' },
+  { name: 'subclass', slot: 1, family: 'subclass' },
+  { name: 'cell_sub_class', slot: 1, family: 'subclass' },
+  { name: 'superclass', slot: 2, family: 'superclass' },
+  { name: 'super_class', slot: 2, family: 'superclass' },
+  // `somaSide` and `rootSide` are *different* facts — where the soma sits against where the
+  // neurite enters — so they are deliberately not one family. CAVE's `side` is the soma one,
+  // and it needs no `key`: it spells the value out, where the neuPrint pair are both `L`/`R`.
+  { name: 'somaSide', slot: 3, family: 'side', key: 'soma' },
+  { name: 'side', slot: 3, family: 'side' },
   { name: 'rootSide', slot: 4, key: 'root' },
-  // Hemilineage under three names: MANC calls it `hemilineage`, male-CNS publishes both the
-  // Ito-Lee and the Truman nomenclature. `trumanHl` is not listed at all — one of the two
-  // male-CNS names has to lead, and the param is there for anyone who wants the other.
+  // Intrinsic / afferent / efferent: the coarsest division there is, and one neuPrint has no
+  // column for at all. Slot 4 is free on every dataset that publishes it, `rootSide` being the
+  // other occupant and male-CNS's alone.
+  { name: 'flow', slot: 4 },
+  // Hemilineage under four names now: MANC calls it `hemilineage`, male-CNS publishes both the
+  // Ito-Lee and the Truman nomenclature, and FlyWire's annotations spell the first
+  // `ito_lee_hemilineage`. `trumanHl` and `hartenstein_hemilineage` are not listed at all — one
+  // of each pair has to lead, and the param is there for anyone who wants the other.
   { name: 'itoleeHl', slot: 5, family: 'hemilineage' },
   { name: 'hemilineage', slot: 5, family: 'hemilineage' },
+  { name: 'ito_lee_hemilineage', slot: 5, family: 'hemilineage' },
   { name: 'consensusNt', slot: 6, family: 'neurotransmitter' },
   { name: 'predictedNt', slot: 6, family: 'neurotransmitter' },
+  { name: 'top_nt', slot: 6, family: 'neurotransmitter' },
+  // A cell-body fibre is not a nerve, so only the latter two are one family.
   { name: 'cellBodyFiber', slot: 7 },
-  { name: 'entryNerve', slot: 7 },
+  { name: 'entryNerve', slot: 7, family: 'nerve' },
+  { name: 'nerve', slot: 7, family: 'nerve' },
   { name: 'flywireType', slot: 2 },
 ]
 
