@@ -89,19 +89,21 @@ export const caveTableNode = registerNode({
   cost: 'expensive',
   dataCache: true,
   /*
-   * The Dataset input is **optional**, and that is what keeps the ordinary wiring possible at
-   * all. It was required, which made the wiring this node's own guide describes — a datastack's
-   * table handed back to that datastack as its labels — a *cycle*: `Dataset → CAVE table →
-   * Dataset` is two edges between one pair in opposite directions, so `topoSort` returns both
-   * nodes as `cyclic` and the pair goes dark with no result and no error naming the cause.
+   * The Dataset input is a **reference**: it names a datastack rather than consuming a dataset.
    *
-   * So the datastack is a param, and the socket is the override: wired, it names a *different*
-   * datastack to read the table from, which is the cross-datastack case and the only one the
-   * wire was ever needed for. Found by writing this node's first test, which is the gap
-   * invariant 5's corollary records about `out.barChart`.
+   * That is what makes this node's own guide's wiring possible — a datastack's table handed back
+   * to that datastack as its labels. `Dataset → CAVE table → Dataset` is two edges between one
+   * pair in opposite directions, and at node granularity that is a cycle: `topoSort` returned
+   * both nodes as `cyclic` and the pair went dark with no result and nothing naming the cause.
+   * Nothing circular is being *computed*, though — this node reads the datastack's **identity**,
+   * which is a function of the dataset node's params alone. See `PortDef.reference`.
+   *
+   * It stays optional, and the `datastack` param stays with it: a reference resolves to nothing
+   * until the dataset node can say which datastack it is, and typing the name is the answer that
+   * needs no wire at all.
    */
   inputs: [
-    { id: 'dataset', label: 'Dataset', type: T.dataset(), required: false },
+    { id: 'dataset', label: 'Dataset', type: T.dataset(), required: false, reference: true },
     ANNOTATIONS_INPUT,
   ],
   outputs: [{ id: 'annotations', label: 'Annotations', type: T.neurons() }],

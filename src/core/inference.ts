@@ -7,8 +7,8 @@
  * blanking the editor.
  */
 
-import type { CodaGraph } from './graph'
-import { inboundIndex, nodesById, portKey, topoSort } from './graph'
+import type { CodaGraph, GraphNode } from './graph'
+import { inboundIndex, nodesById, portKey, topoSort, wouldCreateCycle } from './graph'
 import { makeInferContext, validateColumnParams } from './node'
 import { getNodeDef } from './registry'
 import type { CodaType, TableSchema } from './types'
@@ -88,7 +88,20 @@ export function inferGraph(graph: CodaGraph, options: InferOptions = {}): Infere
         }
         continue
       }
-      const upstream = result[edge.source]?.outputs[edge.sourceHandle]
+      /*
+       * A reference names a node rather than consuming its output, so the source may not have
+       * been ordered yet — it is excluded from `topoSort`, which is the whole point. Its type is
+       * therefore computed *in isolation*: the source node's own `inferOutputs` with **no inputs
+       * at all**.
+       *
+       * That cannot recurse, so the walk still terminates, and for a dataset it yields exactly
+       * the identity — `sourceId` and `datasetId`, which come from that node's params — without
+       * the annotations schema, which comes from its input. Which is the honest answer as well as
+       * the terminating one: a node cannot read the annotations it is itself about to supply.
+       */
+      const upstream = port.reference
+        ? referenceType(nodes.get(edge.source), edge.sourceHandle)
+        : result[edge.source]?.outputs[edge.sourceHandle]
       inputs[port.id] = upstream
       if (upstream && !isAssignable(upstream, port.type)) {
         issues.push({
@@ -183,6 +196,29 @@ export interface ConnectionCheck {
  * Can this link be made? Called continuously while dragging an edge, so it leans on the
  * already-computed inference result rather than re-deriving types.
  */
+
+/**
+ * What a node publishes on a port when nothing is wired to it — the half of its output that is a
+ * function of its params alone.
+ *
+ * Only for `reference` inputs; see `PortDef.reference`. Isolated by construction, since it is
+ * handed no inputs, so it cannot reach back into the walk that called it.
+ */
+function referenceType(node: GraphNode | undefined, portId: string): CodaType | undefined {
+  if (!node) return undefined
+  const def = getNodeDef(node.type)
+  if (!def) return undefined
+  const declared = (def.outputs ?? []).find((p) => p.id === portId)?.type
+  if (!def.inferOutputs) return declared
+  try {
+    return def.inferOutputs(makeInferContext(def, node.params, {}))[portId] ?? declared
+  } catch {
+    // `inferOutputs` must never throw (invariant 2), but a reference must not be the thing that
+    // discovers it does — the declared type is a complete answer here.
+    return declared
+  }
+}
+
 export function checkConnection(
   graph: CodaGraph,
   inference: InferenceResult,
@@ -209,23 +245,16 @@ export function checkConnection(
     }
   }
 
-  // Reachability check: target must not already reach source.
-  if (createsCycle(graph, from.nodeId, to.nodeId)) {
+  /*
+   * Reachability: the target must not already reach the source. Through `wouldCreateCycle`
+   * rather than a walk of its own — this was a second implementation of one question, and they
+   * had to be found together the moment `reference` edges stopped counting as dependencies. One
+   * of them knew and the other refused every wire the change existed to allow.
+   */
+  if (wouldCreateCycle(graph, from.nodeId, to.nodeId, to.portId)) {
     return { ok: false, reason: 'Would create a cycle' }
   }
 
   return { ok: true }
 }
 
-function createsCycle(graph: CodaGraph, source: string, target: string): boolean {
-  const seen = new Set<string>()
-  const stack = [target]
-  while (stack.length) {
-    const id = stack.pop()!
-    if (id === source) return true
-    if (seen.has(id)) continue
-    seen.add(id)
-    for (const e of graph.edges) if (e.source === id) stack.push(e.target)
-  }
-  return false
-}

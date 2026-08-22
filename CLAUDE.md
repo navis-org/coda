@@ -392,6 +392,7 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | File                                     | Covers                                                                                                                           |
 | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | `core/graph.test.ts`                     | topo sort, cycles (incl. two wires between one pair), serialisation, lenient loading                                             |
+| `core/reference.test.ts`                 | reference edges: the round trip sorting, the identity without its own schema, evaluate not waiting, and that a real cycle and two wires between one pair are unchanged |
 | `core/scheduler.test.ts`                 | hybrid eval, caching, invalidation, errors, targeted runs                                                                        |
 | `nodes/lib/tableOps.test.ts`             | each op, plus schema/value agreement — and the id bridge: a wide id kept exactly, a rounded one skipped, ids ordered by magnitude |
 | `data/mock/generate.test.ts`             | determinism, internal consistency, source semantics                                                                              |
@@ -2784,6 +2785,58 @@ it: the original link is removed **explicitly**, but `addEdge` would evict it an
 downstream link targets the same `(node, port)`, which is exactly its eviction rule. So the order
 does not matter, and the removal stays because relying on that coincidence would hold only while
 both links land on one input.
+
+## Reference edges — a port that names a node
+
+`PortDef.reference` marks an **input that names a node rather than consuming its output**. It
+creates no ordering dependency: excluded from `topoSort` and from `wouldCreateCycle`, never waited
+on by the scheduler.
+
+It exists for one wiring, and that wiring is a node's own documented use: `Dataset → CAVE table →
+Dataset`, a datastack's annotation table handed back to that datastack as its labels. Two edges
+between one pair in opposite directions, which at *node* granularity `topoSort` reads as a cycle —
+both cards went dark with no result and nothing naming the cause. At *port* granularity there is
+no cycle at all, and that is the whole insight: `CAVE table`'s output needs the annotation table,
+not the dataset ref; the Dataset's output needs the annotations schema, not `CAVE table`'s ref. A
+node cannot half-run, so the sort cannot see it.
+
+**What makes it sound is a property of the upstream node, not a promise from the downstream one.**
+A dataset node's identity is a function of its params alone —
+`T.dataset(family.sourceId, resolveDatasetId(family, params.version), annotationSchemaFrom(…))`,
+where only the third argument comes from an input. So a reference reads something knowable without
+running, or even inferring, anything downstream. **Check that before marking a new port
+`reference`**; it is the condition the whole mechanism rests on.
+
+Five places implement it, and each was mutation-checked because every failure here is silent:
+
+- **`dataflowEdges` in `graph.ts`, and nowhere else.** One filter, inside the one index from which
+  `topoSort` derives *both* the indegree count and its decrement — the arrangement that function's
+  own note demands, after the bug where the two came from different places and a target joined
+  twice never reached zero. Filtering anywhere else would bring that back wearing a reference's
+  clothes.
+- **`wouldCreateCycle` takes the target handle**, because the wire *being drawn* can itself be a
+  reference and then can never close a loop. Without it the editor refuses exactly the wiring this
+  exists to allow.
+- **`checkConnection` no longer walks its own edges.** It had a second reachability implementation
+  over `graph.edges` — one statement of a question `wouldCreateCycle` already answered — and the
+  two had to be found together: one knew about references and the other refused every wire.
+- **Inference resolves a reference type in isolation**: the source node's `inferOutputs` with *no
+  inputs at all*. It cannot recurse, so the walk terminates, and for a dataset it yields exactly
+  the identity without the annotations schema — the honest answer as well as the terminating one,
+  since a node cannot read the annotations it is itself about to supply.
+- **The scheduler neither waits nor keys on the upstream.** `evaluate` is handed a `DatasetValue`
+  synthesised from the type, and the provenance takes `hash(type)` in place of the upstream node's
+  key — which it *must*, since that node is outside the order and its key may not exist yet.
+  It is also the better key: changing the dataset's version re-keys the reader, changing its
+  annotations does not, and the reader never sees them.
+
+**Deliberately narrow: a Dataset socket that takes the identity only, not a general information
+edge.** Synthesising a value from a type is defensible exactly because a dataset's identity *is*
+its type; there is no second kind asking, and a general mechanism would have to answer that
+question for every one of them.
+
+The canvas draws it **dotted** — a wire already wears the colour of the data flowing through it,
+so a hue would read as a type, where what this has to say is that nothing flows.
 
 ## Breaking and re-routing links
 

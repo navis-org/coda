@@ -213,26 +213,48 @@ describe('annotation nodes — what a chain publishes', () => {
     ])
   })
 
-  it('names its own datastack, so annotating one is not a cycle', () => {
-    // The whole reason the Dataset input is optional. Wired *and* feeding the dataset back, the
-    // pair is two edges between one pair in opposite directions: `topoSort` returns both as
-    // `cyclic`, so the cards go dark with no result and nothing naming the cause.
+  it('takes its datastack from a Dataset it also feeds, which is not a cycle', () => {
+    /*
+     * The wiring this node's guide describes: a datastack's own table handed back to that
+     * datastack as its labels. Two edges between one pair in opposite directions, which at node
+     * granularity `topoSort` reads as a cycle — both cards go dark with no result and nothing
+     * naming the cause, which is what this did before the Dataset input became a `reference`.
+     *
+     * Nothing circular is computed. The Dataset publishes its *identity* from its params alone,
+     * and that is all this node reads; the annotations it publishes back are the other half. So
+     * the reference is excluded from the order and the pair sorts.
+     */
     let g = chain()
-    g = addEdge(g, {
-      source: 'ds',
-      sourceHandle: 'dataset',
-      target: 'cave',
-      targetHandle: 'dataset',
-    })
+    g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'cave', targetHandle: 'dataset' })
     g = addEdge(g, {
       source: 'cave',
       sourceHandle: 'annotations',
       target: 'ds',
       targetHandle: 'annotations',
     })
-    expect(topoSort(g).cyclic).toEqual(['ds', 'cave'])
+    expect(topoSort(g).cyclic).toEqual([])
+    // And in an order that runs the annotation node first, since the dataset genuinely waits on
+    // its labels while the reference waits on nothing.
+    expect(topoSort(g).order.indexOf('cave')).toBeLessThan(topoSort(g).order.indexOf('ds'))
 
-    // Without the wire — the ordinary shape — the same graph sorts.
+    // The editor has to permit the wire as well as the sort, and it is a separate walk.
+    const inf = inferGraph(g)
+    expect(
+      checkConnection(g, inf, { nodeId: 'ds', portId: 'dataset' }, { nodeId: 'cave', portId: 'dataset' })
+        .ok,
+    ).toBe(true)
+
+    /*
+     * What the reference resolves to: the identity, and *not* the annotations schema — which is
+     * the honest answer as well as the terminating one, since those annotations are the ones this
+     * node is itself about to supply.
+     */
+    const seen = inf.nodes['cave']?.inputs['dataset']
+    expect(seen?.kind).toBe('dataset')
+    expect(seen && 'datasetId' in seen ? seen.datasetId : undefined).toBe('test_stack:1')
+    expect(seen && 'annotations' in seen ? seen.annotations : undefined).toBeUndefined()
+
+    // Without the wire — the ordinary shape — the same graph still sorts.
     let ok = chain()
     ok = addEdge(ok, {
       source: 'cave',

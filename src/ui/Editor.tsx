@@ -41,6 +41,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CodaGraph, GraphNode } from '../core/graph'
 import { getNodeDef, isAnnotation } from '../core/registry'
 import type { CodaType } from '../core/types'
+import { referenceEdgeIds } from '../core/graph'
 import { spliceCandidate } from '../core/splice'
 import { useGraphStore } from '../store/graphStore'
 import { edgeUnderRect } from './spliceHit'
@@ -216,6 +217,13 @@ function EditorCanvas() {
     [graph.nodes],
   )
 
+  // Keyed on the node *types* and the edges, so a drag — which changes positions and nothing
+  // else — does not recompute it, and the edge memo below does not gain the whole graph.
+  const referenceIds = useMemo(
+    () => referenceEdgeIds(graph.nodes, graph.edges),
+    [graph.nodes, graph.edges],
+  )
+
   const rfEdges = useMemo<Edge[]>(
     () =>
       graph.edges.map((edge) => {
@@ -244,6 +252,13 @@ function EditorCanvas() {
            * whatever it does afterwards.
            */
           ...(edge.id === spliceEdgeId ? { className: 'coda-edge--splice' } : {}),
+          /*
+           * A reference names a node rather than carrying its output, so it is drawn as a dotted
+           * line: it imposes no order, waits for nothing, and a wire that carries no data should
+           * not look like one that does. `Dataset → CAVE table` is the case — the datastack to
+           * read a table out of, on a node that feeds that same dataset its labels.
+           */
+          ...(referenceIds.has(edge.id) ? { className: 'coda-edge--reference' } : {}),
           // Links wear the colour of the data flowing through them, as in Blender.
           style: {
             stroke: typeColorVar(sourceType),
@@ -252,7 +267,7 @@ function EditorCanvas() {
           },
         }
       }),
-    [graph.edges, disabledIds, inference, edgeRouting, arrangeRoutes, spliceEdgeId],
+    [graph.edges, disabledIds, inference, edgeRouting, arrangeRoutes, spliceEdgeId, referenceIds],
   )
 
   // --- change handlers ----------------------------------------------------

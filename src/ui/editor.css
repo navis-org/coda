@@ -6139,3 +6139,15 @@ details[open] > summary.tile__label {
   white-space: nowrap;
   text-align: right;
 }
+
+/*
+ * A reference edge: a wire that names a node rather than carrying its output.
+ *
+ * Dotted rather than recoloured — a wire already wears the colour of the data flowing through it,
+ * and a hue here would read as a type. What it has to say is that *nothing* flows, which is what
+ * a broken line says without a legend.
+ */
+.react-flow__edge.coda-edge--reference .react-flow__edge-path {
+  stroke-dasharray: 2 4;
+  opacity: 0.75;
+}

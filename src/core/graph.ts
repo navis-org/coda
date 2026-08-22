@@ -190,6 +190,50 @@ export function ancestors(graph: CodaGraph, nodeId: string): Set<string> {
   return closure(neighbourIndex(graph.edges, 'target'), nodeId)
 }
 
+/**
+ * The edges that create an ordering dependency — every edge except one landing on a `reference`
+ * port.
+ *
+ * **One filter, in the one place both the indegree count and its decrement derive from.** That is
+ * not a stylistic choice: `topoSort`'s own note records the bug where the count came from
+ * `graph.edges` and the decrement from `neighbourIndex`, so a target joined twice never reached
+ * zero and came out `cyclic`. Filtering anywhere but here would re-introduce exactly that shape,
+ * with a reference edge counted once and decremented never.
+ *
+ * A reference names a node rather than consuming its output — see `PortDef.reference`. It is
+ * excluded here and in `wouldCreateCycle`, and **nowhere else**: `descendants` still follows it,
+ * because invalidating a dataset must still reach the node that read its identity.
+ */
+function dataflowEdges(graph: CodaGraph): GraphEdge[] {
+  const types = new Map(graph.nodes.map((n) => [n.id, n.type]))
+  return graph.edges.filter((edge) => !isReferenceEdge(types, edge))
+}
+
+/** Whether this edge lands on a port its target declares as a reference. */
+function isReferenceEdge(types: ReadonlyMap<string, string>, edge: GraphEdge): boolean {
+  const type = types.get(edge.target)
+  if (!type) return false
+  const port = getNodeDef(type)?.inputs?.find((p) => p.id === edge.targetHandle)
+  return port?.reference === true
+}
+
+/**
+ * The ids of every edge that names a node rather than carrying its output.
+ *
+ * A set rather than a predicate taking the graph, because the caller is the canvas: asking per
+ * edge would put the whole `graph` in the edge memo's dependency list, and that memo rebuilds
+ * every wire — so it would do so on every frame of a drag, positions being part of the graph.
+ */
+export function referenceEdgeIds(
+  nodes: readonly GraphNode[],
+  edges: readonly GraphEdge[],
+): Set<string> {
+  const types = new Map(nodes.map((n) => [n.id, n.type]))
+  const out = new Set<string>()
+  for (const edge of edges) if (isReferenceEdge(types, edge)) out.add(edge.id)
+  return out
+}
+
 // ---------------------------------------------------------------------------
 // Topological order
 // ---------------------------------------------------------------------------
@@ -222,7 +266,7 @@ export interface TopoResult {
  * disagree again.
  */
 export function topoSort(graph: CodaGraph): TopoResult {
-  const outgoing = neighbourIndex(graph.edges, 'source')
+  const outgoing = neighbourIndex(dataflowEdges(graph), 'source')
 
   const indegree = new Map<string, number>()
   for (const n of graph.nodes) indegree.set(n.id, 0)
@@ -253,11 +297,34 @@ export function topoSort(graph: CodaGraph): TopoResult {
   return { order, cyclic }
 }
 
-/** Would adding source -> target introduce a cycle? */
-export function wouldCreateCycle(graph: CodaGraph, source: string, target: string): boolean {
+/**
+ * Would adding source -> target introduce a cycle?
+ *
+ * Walks the **dataflow** edges, not all of them: a reference names a node and imposes no order,
+ * so a wire that would only close a loop through one is not a loop. Without this the editor
+ * refuses precisely the wiring references exist to allow.
+ */
+export function wouldCreateCycle(
+  graph: CodaGraph,
+  source: string,
+  target: string,
+  targetHandle?: string,
+): boolean {
   if (source === target) return true
-  // A cycle appears iff `source` is already reachable from `target`.
-  return descendants(graph, target).has(source) || target === source
+  /*
+   * The wire *being drawn* can itself be a reference, and then it can never close a loop — it
+   * imposes no order. Without this the check refuses precisely the wiring references exist to
+   * allow: `Dataset → CAVE table` is refused because `CAVE table → Dataset` already runs the
+   * other way, which is the whole arrangement.
+   */
+  if (targetHandle !== undefined) {
+    const types = new Map(graph.nodes.map((n) => [n.id, n.type]))
+    if (isReferenceEdge(types, { id: '', source, sourceHandle: '', target, targetHandle })) {
+      return false
+    }
+  }
+  // A cycle appears iff `source` is already reachable from `target` along dataflow edges.
+  return closure(neighbourIndex(dataflowEdges(graph), 'source'), target).has(source)
 }
 
 // ---------------------------------------------------------------------------

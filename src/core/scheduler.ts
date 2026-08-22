@@ -22,6 +22,8 @@ import { hasErrors, inferGraph } from './inference'
 import type { EvalContext, NodeDefinition, ParamValues } from './node'
 import { findParam, resolveColumn, resolveColumns } from './node'
 import { getNodeDef } from './registry'
+import type { CodaType } from './types'
+import { datasetRef } from './types'
 import type { Value } from './values'
 import type { DataSource } from '../data/source'
 import { errorMessage } from './errors'
@@ -353,6 +355,19 @@ export class Scheduler {
           if (port.required !== false) blocked = true
           continue
         }
+        /*
+         * A reference names a node; it does not consume its output. So it never blocks — the
+         * source may be *downstream* of this node and quite unable to run first, which is the
+         * arrangement references exist to allow — and the value handed over is built from the
+         * inferred type rather than read from a run that may never have happened.
+         */
+        if (port.reference) {
+          const type = inference.nodes[nodeId]?.inputs[port.id]
+          const value = referenceValue(type)
+          if (value) inputs[port.id] = value
+          inputKeys[port.id] = `ref:${hashValue(type ?? null)}`
+          continue
+        }
         if (!available.has(edge.source)) {
           blocked = true
           continue
@@ -479,6 +494,19 @@ export class Scheduler {
       const upstream: Array<[string, string | null]> = []
       for (const port of def?.inputs ?? []) {
         const edge = inbound.get(portKey(nodeId, port.id))
+        /*
+         * A reference contributes the *type* it resolved to rather than the upstream node's key,
+         * and it has to: that node is excluded from the order, so its key may not be computed
+         * yet — `keys.get` would answer `'unresolved'` and this node would re-run forever.
+         *
+         * It is also the more honest key. A dataset's identity is what a reference reads, so
+         * changing its version re-keys this node and changing its *annotations* does not — which
+         * is right, because this node never sees them.
+         */
+        if (edge && port.reference) {
+          upstream.push([port.id, `ref:${hashValue(inference.nodes[nodeId]?.inputs[port.id] ?? null)}`])
+          continue
+        }
         upstream.push([
           port.id,
           edge ? upstreamKey(keys, edge.source, edge.sourceHandle) : null,
@@ -562,6 +590,28 @@ export class Scheduler {
     for (const id of [...this.states.keys()]) if (!alive.has(id)) this.states.delete(id)
     // A deleted node's pending request would otherwise be spent by whatever reused its id.
     for (const id of [...this.forceRefresh]) if (!alive.has(id)) this.forceRefresh.delete(id)
+  }
+}
+
+/**
+ * The value a `reference` port hands to `evaluate`: an identity, with no data behind it.
+ *
+ * Built from the inferred type rather than read from a run, because the node being referenced may
+ * be *downstream* and may never have run — which is the arrangement references exist to allow.
+ * Only a dataset today, and deliberately so: synthesising a value from a type is defensible
+ * exactly because a dataset's identity *is* its type, and there is no second kind asking.
+ *
+ * No `annotations`, and that absence is correct rather than a limitation — a node reading a
+ * reference is usually the one about to supply them.
+ */
+function referenceValue(type: CodaType | undefined): Value | undefined {
+  const ref = datasetRef(type)
+  if (!ref?.datasetId || !ref.sourceId) return undefined
+  return {
+    kind: 'dataset',
+    sourceId: ref.sourceId,
+    datasetId: ref.datasetId,
+    label: ref.datasetId,
   }
 }
 

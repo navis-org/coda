@@ -43,6 +43,35 @@ export interface PortDef {
   type: CodaType
   /** Inputs only. Unconnected required inputs block execution. Defaults to true. */
   required?: boolean
+  /**
+   * Inputs only. This port names a node rather than consuming its output.
+   *
+   * **It creates no ordering dependency**, so it is excluded from `topoSort` and from
+   * `wouldCreateCycle`, and the scheduler never waits on it. That is what lets a node sit
+   * *between* a dataset and itself — `CAVE table → Dataset` needs to know which datastack to
+   * read out of, and wiring the dataset in makes two edges between one pair in opposite
+   * directions, which is a cycle at node granularity even though nothing circular is being
+   * computed.
+   *
+   * **What makes it sound is a property of the upstream node, not a promise from this one**: a
+   * dataset node's *identity* is a function of its params alone — `T.dataset(family.sourceId,
+   * resolveDatasetId(family, params.version), …)` — and only the annotations *schema* comes from
+   * an input. So the thing a reference reads is knowable without running, or even inferring,
+   * anything downstream of it. Inference resolves the type by inferring the source node **with no
+   * inputs of its own**, which cannot recurse and yields exactly the identity, without the
+   * annotations schema. That is the honest answer as well as the terminating one: a node cannot
+   * read the annotations it is about to supply.
+   *
+   * So it is deliberately **narrow — a Dataset socket that takes the identity only**, not a
+   * general "information edge". Synthesising a value from a type is defensible only because we
+   * know what a dataset identity is; there is no second kind asking for it.
+   *
+   * `evaluate` receives a `DatasetValue` built from that type, carrying no annotations, and the
+   * provenance key takes the type's hash in place of the upstream node's key — so changing the
+   * dataset's version re-keys this node and changing its annotations does not, which is right
+   * because this node never reads them.
+   */
+  reference?: boolean
 }
 
 // ---------------------------------------------------------------------------
