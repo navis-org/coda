@@ -144,6 +144,18 @@ distinction does not matter — a page cannot set `Referer` at all, so it is ref
 branch it lands in — but it is worth knowing that the message differs between a developer's
 machine and a deploy, because the two look like different problems.
 
+### Where the token goes in Coda
+
+`Connections ▸ Data sources ▸ CATMAID` is a list of instances rather than a single field, because
+a CATMAID token is per user *and* per instance. Each row is a host — or a host pattern, so
+`*.virtualflybrain.org` covers a whole deployment — plus a token, plus an optional HTTP basic user
+and password for an instance behind web-server auth. Those last two are sent on `Authorization`
+while the token is sent on `X-Authorization`, which is exactly the separation CATMAID's own
+middleware describes, so both fit on one request.
+
+So if a public token is minted for the anonymous user, a reader pastes it into one row and the
+published build reaches the instance directly, with the relay below demoted to a fallback.
+
 ### What Coda does meanwhile
 
 `routeMemory.ts`'s try-and-remember: a token where the user has one (direct, works in

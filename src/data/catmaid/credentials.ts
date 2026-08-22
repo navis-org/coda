@@ -1,91 +1,197 @@
 /**
- * The CATMAID token and server, and the signal that the token is missing or wrong.
+ * CATMAID credentials: a **list of instances**, not one token.
  *
- * A near-twin of `cave/credentials.ts` and `neuprint/credentials.ts` rather than a shared
- * module, for the reason recorded there: three backends hold three keys, read by three clients,
- * and the one part worth sharing — the `channel()` idiom — already is.
+ * The departure from `cave/credentials.ts` and `neuprint/credentials.ts` is deliberate and it is
+ * forced by what CATMAID *is*. neuPrint has a canonical deployment and CAVE has a global service;
+ * CATMAID is software, so every instance is somebody's server with its own accounts. A token is
+ * per user **and** per instance, and one field cannot hold "my VFB token" and "my lab's token" at
+ * once — which a single-token store does not merely make awkward, it makes wrong, because
+ * whichever was saved last would be sent to both.
  *
- * What differs here is **what a token is for**, and it is not what either neighbour would lead
- * you to expect. A public CATMAID serves every `GET` to any origin unauthenticated: the
- * project list, the annotation vocabulary, skeletons, neuropil volumes. What it refuses is
- * `POST`, and it refuses that to a *browser* specifically — CATMAID's core query endpoints are
- * POST-only, Django's CSRF wants a `Referer` matching a trusted origin and a `csrftoken` cookie,
- * and a browser can supply neither: `Referer` is a forbidden header name, and the cookie is
- * `SameSite=Lax`. A token bypasses CSRF entirely, because DRF's token class runs before its
- * session class and never reaches `enforce_csrf`.
+ * Three things a row can carry, and the first two are independent:
  *
- * So on this backend a token is not "credentials for private data" — it is the only way a page
- * can ask a question whose answer is already public. `docs/catmaid_vfb.md` is the write-up and
- * the upstream ask. Until that lands, `client.ts` falls back to a same-origin dev proxy, which
- * is why a missing token is **not** an error here the way it is for CAVE.
+ *  - **`token`** goes in `X-Authorization: Token …`, which is CATMAID's own header.
+ *  - **`httpUser`/`httpPassword`** go in `Authorization: Basic …`, which is the *web server's*.
+ *    Those coexist on one request rather than competing, and that is exactly why CATMAID uses a
+ *    non-standard header at all — its own middleware says so: "CATMAID uses the `X-Authorization`
+ *    HTTP header rather than `Authorization` to prevent conflicts with, e.g., HTTP server basic
+ *    authentication." An instance behind nginx basic auth needs both.
+ *  - **`server`** is a host pattern, so one row can cover a deployment that serves several
+ *    hostnames — `*.virtualflybrain.org` rather than a row per subdomain.
+ *
+ * **Stored in `localStorage` in the clear**, including the basic-auth password. That is the same
+ * standing every other credential here has and the panel says so, but it is worth stating twice
+ * for this one: a password is reused across services in a way a scoped API token is not.
  */
 
 import { channel } from '../channel'
 import { readStorage, writeStorage } from '../localStore'
 
-const TOKEN_KEY = 'coda.catmaid.token'
-const SERVER_KEY = 'coda.catmaid.server'
+const INSTANCES_KEY = 'coda.catmaid.instances.v1'
 
 /**
  * Virtual Fly Brain's public FAFB instance, which is the one Coda ships a dataset node for.
  *
- * Named rather than assumed: CATMAID is *software*, not a service, so unlike neuPrint there is
- * no canonical deployment and unlike CAVE there is no global service that lists them. Every
- * instance is somebody's server, which is also why the Custom node exists.
+ * Named rather than assumed: CATMAID has no canonical deployment the way neuPrint does, and no
+ * service that lists them the way CAVE does. This is a *default server*, not a credential — the
+ * instance list below is only about credentials, and a row is needed for this host only if the
+ * deployment asks for one.
  */
 export const DEFAULT_CATMAID_SERVER = 'https://catmaid-fafb.virtualflybrain.org'
 
-let token: string | undefined
-let server: string | undefined
-let loaded = false
+/** One configured instance: which hosts it covers, and what to send them. */
+export interface CatmaidInstance {
+  /**
+   * A host pattern — `catmaid.example.org`, or `*.example.org` for a whole deployment.
+   *
+   * Matched against the request's **host**, because a credential is a property of a host: a
+   * scheme, a port, a path and a trailing slash are all accepted when typing and none of them
+   * take part in the match. A CATMAID served from a subpath is therefore covered by its host's
+   * row, which is right — the same nginx and the same accounts are in front of both.
+   */
+  server: string
+  /** CATMAID's own API token, sent as `X-Authorization: Token …`. */
+  token?: string
+  /** HTTP Basic user, for an instance behind web-server auth. Sent as `Authorization: Basic …`. */
+  httpUser?: string
+  httpPassword?: string
+}
 
+let instances: CatmaidInstance[] | undefined
 const authFailure = channel<string>()
 
-function load(): void {
-  if (loaded) return
-  loaded = true
-  token = readStorage(TOKEN_KEY)
-  server = readStorage(SERVER_KEY) || undefined
-}
-
-export function getToken(): string | undefined {
-  load()
-  return token
-}
-
-/**
- * Store a token, tolerating what people actually paste.
- *
- * CATMAID's own UI presents the token bare, but its documentation and every client show it
- * inside `Authorization: Token <value>` — so both spellings arrive on the clipboard, and
- * storing the prefix would send `Token Token abc…`.
- */
-export function setToken(raw: string | undefined): void {
-  load()
-  const cleaned = raw?.trim().replace(/^Token\s+/i, '')
-  token = cleaned || undefined
-  writeStorage(TOKEN_KEY, token)
-}
-
-/** The configured server, or the default. Trailing slashes are already stripped. */
-export function getServer(): string {
-  load()
-  return server ?? DEFAULT_CATMAID_SERVER
+function load(): CatmaidInstance[] {
+  if (instances) return instances
+  instances = []
+  try {
+    const raw = readStorage(INSTANCES_KEY)
+    if (raw) {
+      const parsed: unknown = JSON.parse(raw)
+      if (Array.isArray(parsed)) {
+        instances = parsed
+          .filter((entry): entry is CatmaidInstance => {
+            return Boolean(entry) && typeof (entry as CatmaidInstance).server === 'string'
+          })
+          .map(cleanInstance)
+          .filter((entry) => entry.server !== '')
+      }
+    }
+  } catch {
+    // Corrupt: start from an empty list rather than failing every request. Losing a stored
+    // credential is recoverable by retyping it; refusing to load is not.
+    instances = []
+  }
+  return instances
 }
 
 /**
- * Name a server, or clear it back to the default with an empty value.
+ * Normalise what somebody typed into a host pattern.
  *
- * A value equal to the default is stored as *unset*, the call `setServer` makes for CAVE and for
- * its reason: the panel shows the resolved server rather than an empty box, so saving an
- * untouched form would otherwise pin today's default into storage and keep it there after the
- * default moved.
+ * Accepts `https://host/`, `host/`, `host:8080/catmaid` and `*.example.org` alike, because all
+ * four are things people paste — the first is what a browser's address bar gives you and the
+ * last is what this feature is for. Everything but the host is discarded; see `server` above.
  */
-export function setServer(raw: string | undefined): void {
-  load()
-  const cleaned = raw?.trim().replace(/\/+$/, '') || undefined
-  server = cleaned === DEFAULT_CATMAID_SERVER ? undefined : cleaned
-  writeStorage(SERVER_KEY, server)
+export function hostPattern(raw: string): string {
+  let text = raw.trim().toLowerCase()
+  if (!text) return ''
+  text = text.replace(/^[a-z][a-z0-9+.-]*:\/\//, '')
+  // Strip any path, query or fragment, then any port and any credentials-in-URL.
+  text = text.split(/[/?#]/, 1)[0] ?? ''
+  text = text.split('@').pop() ?? ''
+  text = text.replace(/:\d+$/, '')
+  return text
+}
+
+/** A row with its fields normalised and its empty optionals dropped. */
+function cleanInstance(entry: CatmaidInstance): CatmaidInstance {
+  const token = entry.token?.trim().replace(/^Token\s+/i, '')
+  const httpUser = entry.httpUser?.trim()
+  const httpPassword = entry.httpPassword
+  return {
+    server: hostPattern(entry.server),
+    ...(token ? { token } : {}),
+    ...(httpUser ? { httpUser } : {}),
+    ...(httpUser && httpPassword ? { httpPassword } : {}),
+  }
+}
+
+/**
+ * Whether a host pattern covers a host.
+ *
+ * `*` stands for one or more characters, so `*.example.org` covers `a.example.org` and
+ * `a.b.example.org` but **not** `example.org` itself or `notexample.org` — the literal dot is
+ * required, which is what stops a pattern reaching a host somebody else registered. A pattern
+ * with no literal characters at all is refused outright rather than matching everything: `*` is
+ * an easy thing to type and would send a token to whatever host a graph happened to name.
+ */
+export function matchesHost(pattern: string, host: string): boolean {
+  const cleanedPattern = hostPattern(pattern)
+  const cleanedHost = hostPattern(host)
+  if (!cleanedPattern || !cleanedHost) return false
+  if (!cleanedPattern.includes('*')) return cleanedPattern === cleanedHost
+  if (!/[a-z0-9]/.test(cleanedPattern.replace(/\*/g, ''))) return false
+  const source = cleanedPattern
+    .split('*')
+    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('.+')
+  return new RegExp(`^${source}$`).test(cleanedHost)
+}
+
+/** How specific a pattern is, for ranking two that both match. Exact beats wildcard. */
+function specificity(pattern: string): number {
+  const literal = pattern.replace(/\*/g, '').length
+  return pattern.includes('*') ? literal : literal + 1000
+}
+
+/**
+ * The credentials for a server URL, or undefined where none are configured.
+ *
+ * **Most specific wins**, so an exact host beats a wildcard and a longer wildcard beats a
+ * shorter one. That ordering is what lets somebody hold `*.example.org` for a lab and one exact
+ * row for the machine inside it that needs a different account, which is the ordinary shape of
+ * this problem and would otherwise depend on list order.
+ */
+export function credentialsFor(server: string): CatmaidInstance | undefined {
+  const host = hostPattern(server)
+  if (!host) return undefined
+  let best: CatmaidInstance | undefined
+  let bestScore = -1
+  for (const entry of load()) {
+    if (!matchesHost(entry.server, host)) continue
+    const score = specificity(entry.server)
+    if (score > bestScore) {
+      best = entry
+      bestScore = score
+    }
+  }
+  return best
+}
+
+/** The configured instances, in the order they were saved. */
+export function listInstances(): CatmaidInstance[] {
+  return load().map((entry) => ({ ...entry }))
+}
+
+/**
+ * Replace the list.
+ *
+ * Rows with no host are dropped, and so are rows carrying no credential at all — an instance
+ * with neither a token nor a user is the same as not having configured it, and keeping it would
+ * put an empty row in front of somebody on every visit.
+ */
+export function setInstances(next: readonly CatmaidInstance[]): void {
+  instances = next
+    .map(cleanInstance)
+    .filter((entry) => entry.server !== '' && (entry.token || entry.httpUser))
+  writeStorage(INSTANCES_KEY, instances.length ? JSON.stringify(instances) : undefined)
+}
+
+/** The `Authorization` header value for an instance behind web-server basic auth. */
+export function basicAuthHeader(entry: CatmaidInstance | undefined): string | undefined {
+  if (!entry?.httpUser) return undefined
+  const raw = `${entry.httpUser}:${entry.httpPassword ?? ''}`
+  // `btoa` is DOM-ish but present in Node ≥16 too, so this stays usable outside a browser.
+  return `Basic ${btoa(unescape(encodeURIComponent(raw)))}`
 }
 
 /** Raised by the client on 401/403 so the UI can offer the fix instead of a bare error. */
@@ -94,9 +200,6 @@ export const subscribeAuthFailure = authFailure.subscribe
 
 /** Test seam: drop everything held in memory and in storage. */
 export function resetCredentials(): void {
-  loaded = false
-  token = undefined
-  server = undefined
-  writeStorage(TOKEN_KEY, undefined)
-  writeStorage(SERVER_KEY, undefined)
+  instances = undefined
+  writeStorage(INSTANCES_KEY, undefined)
 }

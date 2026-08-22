@@ -43,6 +43,15 @@ import {
   setToken as setSeaTableToken,
   subscribeAuthFailure as subscribeSeaTableAuthFailure,
 } from '../../data/annotations/credentials'
+import { listProjects } from '../../data/catmaid/api'
+import type { CatmaidInstance } from '../../data/catmaid/credentials'
+import {
+  DEFAULT_CATMAID_SERVER,
+  hostPattern,
+  listInstances,
+  setInstances,
+  subscribeAuthFailure as subscribeCatmaidAuthFailure,
+} from '../../data/catmaid/credentials'
 import { listDatastacks } from '../../data/cave/api'
 import {
   DEFAULT_CAVE_SERVER,
@@ -133,6 +142,11 @@ interface SourceTab {
 const SOURCE_TABS: readonly [SourceTab, ...SourceTab[]] = [
   { id: 'neuprint', label: 'neuPrint', render: (props) => <NeuPrintTab {...props} /> },
   { id: 'cave', label: 'CAVE', render: ({ onClose }) => <CaveTab onSaved={onClose} /> },
+  {
+    id: 'catmaid',
+    label: 'CATMAID',
+    render: ({ onClose }) => <CatmaidTab onSaved={onClose} />,
+  },
   { id: 'mock', label: 'Mock connectome', render: () => <MockTab /> },
 ]
 
@@ -235,17 +249,20 @@ const SECTIONS: readonly [Section, ...Section[]] = [
       const stops = [
         subscribeAuthFailure((message) => onFailure(message, 'neuprint')),
         subscribeCaveAuthFailure((message) => onFailure(message, 'cave')),
+        subscribeCatmaidAuthFailure((message) => onFailure(message, 'catmaid')),
       ]
       return () => stops.forEach((stop) => stop())
     },
     tabs: SOURCE_TABS,
     privacy: (
       <>
-        <strong>Credentials stay in this browser.</strong> Tokens are held in this
-        browser&rsquo;s local storage on this machine only. They are never written into a saved
-        graph or an export, never sent to us, and never shared with any third party — they go
-        only to the service they authenticate, through the same-origin proxy that request has to
-        travel through.
+        <strong>Credentials stay in this browser.</strong> Tokens — and a CATMAID
+        instance&rsquo;s HTTP basic password, if you set one — are held in this browser&rsquo;s
+        local storage on this machine only, in the clear. They are never written into a saved
+        graph or an export, never sent to us, and never shared with any third party: each goes
+        only to the deployment it belongs to, directly where that deployment allows a browser to
+        reach it and otherwise through a same-origin relay. A password is worth more care than a
+        scoped API token, so prefer a token where the instance offers one.
       </>
     ),
   },
@@ -280,8 +297,8 @@ const SECTIONS: readonly [Section, ...Section[]] = [
         <strong>One token per deployment, kept in this browser.</strong> FlyTable and
         cloud.seatable.io run the same software with unrelated accounts, so each needs its own.
         Tokens are held in this browser&rsquo;s local storage on this machine only, are never
-        written into a saved graph or an export, and are never sent to us — each goes only to the
-        deployment it belongs to. Coda reads bases; it never writes to one.
+        written into a saved graph or an export, and are never sent to us — each goes only to
+        the deployment it belongs to. Coda reads bases; it never writes to one.
       </>
     ),
   },
@@ -310,9 +327,7 @@ export function SourcesPanel() {
   const [probe, setProbe] = useState<Probe>({ state: 'idle' })
   const [reason, setReason] = useState<
     { section: SectionId; message: string; tab?: string } | undefined
-  >(
-    undefined,
-  )
+  >(undefined)
   const notify = useGraphStore((s) => s.setNotice)
 
   // The store outlives this component, but no failure channel replays — a subscription started
@@ -763,6 +778,234 @@ function SharingTab({ onSaved }: { onSaved: () => void }) {
  * which datastacks exist and a per-datastack server that answers queries, and only the first is
  * ever named. The second is discovered.
  */
+/**
+ * CATMAID: a list of instances rather than one credential, which is the shape the backend forces.
+ *
+ * Every other tab here holds one token, because neuPrint has a canonical deployment and CAVE has
+ * a global service. CATMAID is *software* — VFB, the LMB's instances, a lab server — and a token
+ * is per user **and** per instance, so a single field would send whichever was saved last to all
+ * of them. Hence a list, and hence `server` being a *pattern*: one deployment often answers on
+ * several hostnames, and `*.virtualflybrain.org` is one row rather than five.
+ *
+ * Two credentials per row, and they are not alternatives. `Token` is CATMAID's own, on
+ * `X-Authorization`; the HTTP-basic pair is the *web server's*, on `Authorization`. CATMAID
+ * picked a non-standard header precisely so both fit on one request — its middleware says so —
+ * and an instance behind nginx auth needs both.
+ */
+interface InstanceRow extends CatmaidInstance {
+  /** Local only. Rows are added and removed, so an index is not a stable React key. */
+  key: string
+}
+
+let nextRowKey = 0
+const withKey = (entry: CatmaidInstance): InstanceRow => ({
+  ...entry,
+  key: `row-${nextRowKey++}`,
+})
+
+function CatmaidTab({ onSaved }: { onSaved: () => void }) {
+  const [rows, setRows] = useState<InstanceRow[]>(() => listInstances().map(withKey))
+  const [probes, setProbes] = useState<Record<string, Probe>>({})
+  const notify = useGraphStore((s) => s.setNotice)
+
+  const patch = useCallback((key: string, change: Partial<CatmaidInstance>) => {
+    setRows((current) => current.map((row) => (row.key === key ? { ...row, ...change } : row)))
+    // A row that has been edited has not been tested, and a stale green tick beside a changed
+    // token is the one thing a Test button must never show.
+    setProbes((current) => {
+      if (!current[key]) return current
+      const next = { ...current }
+      delete next[key]
+      return next
+    })
+  }, [])
+
+  const test = useCallback(async (row: InstanceRow) => {
+    setProbes((current) => ({ ...current, [row.key]: { state: 'testing' } }))
+    const host = hostPattern(row.server)
+    if (!host || host.includes('*')) {
+      setProbes((current) => ({
+        ...current,
+        [row.key]: {
+          state: 'failed',
+          // A pattern names no single host, so there is nothing to call. Said rather than
+          // disabled, or the button reads as broken on exactly the rows this feature is for.
+          message: host
+            ? 'A wildcard covers several hosts, so there is nothing to test. Type one host to check it, then widen it again.'
+            : 'Name a server first.',
+        },
+      }))
+      return
+    }
+    try {
+      const projects = await listProjects(`https://${host}`, {
+        credentials: { ...row, server: host },
+      })
+      setProbes((current) => ({
+        ...current,
+        [row.key]: {
+          state: 'ok',
+          datasets: projects.length,
+          names: projects.map((project) => project.title).slice(0, 6),
+        },
+      }))
+    } catch (error) {
+      setProbes((current) => ({
+        ...current,
+        [row.key]: { state: 'failed', message: errorMessage(error) },
+      }))
+    }
+  }, [])
+
+  return (
+    <section className="sources__source">
+      <p className="sources__note">
+        CATMAID instances. Reading a public one needs no credentials at all — every{' '}
+        <code>GET</code> is answered anonymously — but connectivity and neuron names go over{' '}
+        <code>POST</code>, which a browser cannot send anonymously, so those need a token. Get
+        one from your instance: hover your name, then <em>Get API token</em>.
+      </p>
+
+      {rows.length === 0 ? (
+        <p className="sources__hint">
+          No instances configured. Coda still reads{' '}
+          <code>{hostPattern(DEFAULT_CATMAID_SERVER)}</code> without one; add a row when an
+          instance asks for a credential.
+        </p>
+      ) : null}
+
+      <ul className="sources__list">
+        {rows.map((row) => {
+          const probe = probes[row.key] ?? { state: 'idle' as const }
+          return (
+            <li key={row.key} className="sources__row">
+              <label className="sources__field">
+                <span>Server</span>
+                <input
+                  className="field field--mono"
+                  value={row.server}
+                  spellCheck={false}
+                  placeholder="catmaid.example.org  or  *.example.org"
+                  onChange={(e) => patch(row.key, { server: e.target.value })}
+                />
+              </label>
+
+              <label className="sources__field">
+                <span>API token</span>
+                <input
+                  className="field field--mono"
+                  type="password"
+                  value={row.token ?? ''}
+                  spellCheck={false}
+                  placeholder="9944b09199c62bcf9418ad846dd0e4bbdfc6ee4b"
+                  onChange={(e) => patch(row.key, { token: e.target.value })}
+                />
+              </label>
+
+              <details className="sources__more">
+                <summary>HTTP basic auth (only if the server asks for it)</summary>
+                <p className="sources__hint">
+                  The <em>web server&rsquo;s</em> login, not CATMAID&rsquo;s — the browser
+                  dialog some instances show before CATMAID loads. It is sent alongside the
+                  token rather than instead of it.
+                </p>
+                <label className="sources__field">
+                  <span>User</span>
+                  <input
+                    className="field field--mono"
+                    value={row.httpUser ?? ''}
+                    spellCheck={false}
+                    autoComplete="off"
+                    onChange={(e) => patch(row.key, { httpUser: e.target.value })}
+                  />
+                </label>
+                <label className="sources__field">
+                  <span>Password</span>
+                  <input
+                    className="field field--mono"
+                    type="password"
+                    value={row.httpPassword ?? ''}
+                    autoComplete="off"
+                    onChange={(e) => patch(row.key, { httpPassword: e.target.value })}
+                  />
+                </label>
+              </details>
+
+              <div className="sources__actions">
+                <button
+                  type="button"
+                  className="btn btn--ghost"
+                  onClick={() => void test(row)}
+                  disabled={probe.state === 'testing'}
+                >
+                  {probe.state === 'testing' ? 'Testing…' : 'Test'}
+                </button>
+                <div className="toolbar__spacer" />
+                <button
+                  type="button"
+                  className="btn btn--ghost"
+                  onClick={() => setRows((current) => current.filter((r) => r.key !== row.key))}
+                >
+                  Remove
+                </button>
+              </div>
+
+              {probe.state === 'ok' ? (
+                <p className="sources__result" data-tone="ok">
+                  Reached it — {probe.datasets} project{probe.datasets === 1 ? '' : 's'}
+                  {probe.names.length ? `: ${probe.names.join(', ')}` : ''}
+                </p>
+              ) : null}
+              {probe.state === 'failed' ? (
+                <p className="sources__result" data-tone="error">
+                  {probe.message}
+                </p>
+              ) : null}
+            </li>
+          )
+        })}
+      </ul>
+
+      <div className="sources__actions">
+        <button
+          type="button"
+          className="btn btn--ghost"
+          onClick={() =>
+            setRows((current) => [
+              ...current,
+              // Prefilled with VFB's host on the first row only: it is the instance Coda ships a
+              // dataset node for, and typing a hostname from memory is the step people get wrong.
+              withKey({ server: current.length ? '' : hostPattern(DEFAULT_CATMAID_SERVER) }),
+            ])
+          }
+        >
+          + Add instance
+        </button>
+        <div className="toolbar__spacer" />
+        <button
+          type="button"
+          className="btn btn--primary"
+          onClick={() => {
+            setInstances(rows)
+            // Re-read, because `setInstances` drops rows with no host or no credential — showing
+            // the stored list is what makes that visible rather than silent.
+            const stored = listInstances()
+            const dropped = rows.length - stored.length
+            notify(
+              dropped > 0
+                ? `Saved ${stored.length} CATMAID instance${stored.length === 1 ? '' : 's'} — ${dropped} incomplete row${dropped === 1 ? '' : 's'} dropped.`
+                : `Saved ${stored.length} CATMAID instance${stored.length === 1 ? '' : 's'}.`,
+            )
+            onSaved()
+          }}
+        >
+          Save
+        </button>
+      </div>
+    </section>
+  )
+}
+
 function CaveTab({ onSaved }: { onSaved: () => void }) {
   const [token, setTokenField] = useState(() => getCaveToken() ?? '')
   const [server, setServerField] = useState(() => getCaveServer())
@@ -797,8 +1040,8 @@ function CaveTab({ onSaved }: { onSaved: () => void }) {
         >
           global.daf-apis.com
         </a>{' '}
-        — the same token <code>caveclient</code> stores in{' '}
-        <code>~/.cloudvolume/secrets</code>, so if you already use CAVE from Python you have one.
+        — the same token <code>caveclient</code> stores in <code>~/.cloudvolume/secrets</code>,
+        so if you already use CAVE from Python you have one.
       </p>
 
       <label className="sources__field">
@@ -887,7 +1130,6 @@ function CaveTab({ onSaved }: { onSaved: () => void }) {
   )
 }
 
-
 /**
  * One SeaTable deployment's token.
  *
@@ -906,7 +1148,9 @@ function SeaTableTab({
   onSaved: () => void
 }) {
   const [token, setTokenField] = useState(() => getSeaTableToken(host) ?? '')
-  const [probe, setProbe] = useState<Probe<{ bases: number; names: string[] }>>({ state: 'idle' })
+  const [probe, setProbe] = useState<Probe<{ bases: number; names: string[] }>>({
+    state: 'idle',
+  })
   const fieldRef = useRef<HTMLInputElement>(null)
   useEffect(() => fieldRef.current?.focus(), [])
 
@@ -955,9 +1199,9 @@ function SeaTableTab({
       </label>
       <p className="sources__note sources__note--tight">
         <strong>An account token, not a base API token.</strong> The two look alike and only one
-        works: a base token is minted for a single base and is refused by the listing this needs,
-        with a message that blames the token rather than its kind. An account token reaches every
-        base the account can see.
+        works: a base token is minted for a single base and is refused by the listing this
+        needs, with a message that blames the token rather than its kind. An account token
+        reaches every base the account can see.
       </p>
 
       <div className="sources__actions">

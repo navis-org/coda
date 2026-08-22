@@ -20,7 +20,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { CatmaidSource } from './CatmaidSource'
-import { DEFAULT_CATMAID_SERVER, setToken } from './credentials'
+import { DEFAULT_CATMAID_SERVER, setInstances } from './credentials'
 
 const LIVE = process.env.CATMAID_LIVE === '1'
 const TOKEN = process.env.CATMAID_TOKEN
@@ -30,7 +30,7 @@ const live = LIVE ? describe : describe.skip
 const withToken = LIVE && TOKEN ? it : it.skip
 
 function source(): CatmaidSource {
-  if (TOKEN) setToken(TOKEN)
+  if (TOKEN) setInstances([{ server: DEFAULT_CATMAID_SERVER, token: TOKEN }])
   return new CatmaidSource(DEFAULT_CATMAID_SERVER, 'catmaid-live', 'CATMAID (live)')
 }
 

@@ -5273,6 +5273,51 @@ secure`, because the dev origin is `http` — which becomes the trusted-origins 
 `https` deploy. It does not change the outcome and it does change the message, which is worth
 knowing before debugging one against the other.
 
+### Credentials are a list, because CATMAID is software rather than a service
+
+`Connections ▸ Data sources ▸ CATMAID` holds **rows**, not a token. Every other tab there holds
+one, because neuPrint has a canonical deployment and CAVE has a global service that lists
+datastacks. CATMAID has neither: VFB, an LMB instance, a lab server are unrelated installations
+with unrelated accounts, and a token is per user **and** per instance. One field would not merely
+be awkward — it would send whichever was saved last to all of them.
+
+**`server` is a host pattern**, so one row covers a deployment answering on several hostnames:
+`*.virtualflybrain.org` rather than a row per subdomain. `hostPattern` normalises whatever was
+typed — a pasted address bar, a bare host, a port, a subpath — down to the host, because a
+credential is a property of a host and the rest cannot vary independently of it.
+
+Three rules in the matching, and the first is the one that would leak a token:
+
+- **`*` requires the literal dot.** `*.virtualflybrain.org` covers `a.b.virtualflybrain.org` and
+  does **not** cover `virtualflybrain.org`, `notvirtualflybrain.org`, or
+  `virtualflybrain.org.evil.com`.
+- **A pattern with no literal characters matches nothing.** `*` is an easy thing to type and would
+  otherwise send a token to whatever host a graph happened to name.
+- **Most specific wins**, exact over wildcard and longer wildcard over shorter — so a `*.lab.org`
+  row plus one exact row for the machine inside it that needs a different account behaves the way
+  it reads, rather than depending on list order.
+
+**Two credentials per row, and they are not alternatives.** `token` goes on `X-Authorization`,
+which is CATMAID's own header; `httpUser`/`httpPassword` go on `Authorization: Basic`, which is
+the *web server's*. They coexist on one request rather than competing, and CATMAID's middleware
+says why in as many words: it uses a non-standard header "to prevent conflicts with, e.g., HTTP
+server basic authentication". An instance behind nginx auth needs both.
+
+**Only the token bypasses CSRF.** Basic auth satisfies whatever sits in front and leaves Django
+exactly where it was, so `routesFor`'s `hasToken` is specifically the CATMAID token — conflating
+them would send an anonymous POST direct on any instance that happens to sit behind nginx auth,
+and it would be refused every time. A test pins it.
+
+The password is in `localStorage` in the clear, like every credential here, and the section's
+privacy note now says so — the note also stopped claiming that *every* data-source request travels
+through a same-origin relay, which stopped being true when CAVE arrived and is wronger with
+CATMAID beside it.
+
+**One pre-existing test was found by this and is worth knowing about**: `sources.test.tsx` asserted
+no AI tab appears among the data sources with `/AI|assistant|Anthropic/i`, and an unanchored `AI`
+matches "c**AT**M**AI**D". It had been passing for the right reason only by the accident that no
+tab name contained those two letters. It is `\bAI\b` now.
+
 ### `type` is derived, because CATMAID has no such field
 
 neuPrint carries cell typing as properties on the neuron and CAVE reads it from an annotation

@@ -27,6 +27,12 @@ import {
   reportAuthFailure as reportCaveAuthFailure,
   resetCredentials as resetCaveCredentials,
 } from '../../data/cave/credentials'
+import {
+  listInstances as listCatmaidInstances,
+  reportAuthFailure as reportCatmaidAuthFailure,
+  resetCredentials as resetCatmaidCredentials,
+  setInstances as setCatmaidInstances,
+} from '../../data/catmaid/credentials'
 import { reportAuthFailure, resetCredentials } from '../../data/neuprint/credentials'
 import { registerSource } from '../../data/source'
 import { installJsdomStubs } from '../../test/jsdomStubs'
@@ -41,6 +47,7 @@ afterEach(() => {
   cleanup()
   resetCredentials()
   resetCaveCredentials()
+  resetCatmaidCredentials()
   resetAiCredentials()
   vi.unstubAllGlobals()
 })
@@ -64,7 +71,7 @@ describe('source tabs', () => {
       sourceTabs()
         .getAllByRole('tab')
         .map((el) => el.textContent),
-    ).toEqual(['neuPrint', 'CAVE', 'Mock connectome'])
+    ).toEqual(['neuPrint', 'CAVE', 'CATMAID', 'Mock connectome'])
     expect(tab('neuPrint').getAttribute('aria-selected')).toBe('true')
     expect(tokenField()).not.toBeNull()
   })
@@ -198,7 +205,10 @@ describe('the sections', () => {
     render(<SourcesPanel />)
     open()
 
-    expect(sourceTabs().queryByRole('tab', { name: /AI|assistant|Anthropic/i })).toBeNull()
+    // `\bAI\b` rather than `AI`: an unanchored one matches "cATMAId", so this passed for the
+    // wrong reason the moment a CATMAID tab existed — it would have gone on "finding" an AI tab
+    // in the source list forever.
+    expect(sourceTabs().queryByRole('tab', { name: /\bAI\b|assistant|Anthropic/i })).toBeNull()
     expect(keyField()).toBeNull()
   })
 
@@ -285,14 +295,18 @@ describe('routing a failure to the half it is about', () => {
 describe('what each half promises about a credential', () => {
   it('does not claim a proxy relays the Anthropic request, because none does', () => {
     /*
-     * The data-source note ends "through the same-origin proxy that request has to travel
-     * through", which is true of neuPrint and false here — this one goes straight from the
-     * page. Reusing that sentence would make the panel's one security claim wrong.
+     * The data-source note says a credential may travel through a same-origin relay, which is
+     * true of neuPrint and of an anonymous CATMAID POST, and false here — this one goes straight
+     * from the page. Reusing that sentence would make the panel's one security claim wrong.
+     *
+     * Matched on "relay|proxy" rather than on the exact phrase: the note had to stop saying
+     * *every* data-source request is relayed once CAVE and CATMAID arrived, both of which reach
+     * their servers directly, and a test pinned to the old wording fails on a correction.
      */
     render(<SourcesPanel />)
     open()
     const forData = privacy()?.textContent ?? ''
-    expect(forData).toMatch(/same-origin proxy/i)
+    expect(forData).toMatch(/same-origin (relay|proxy)/i)
 
     fireEvent.click(section('AI assistant'))
     const forAi = privacy()?.textContent ?? ''
@@ -561,5 +575,96 @@ describe('the models a local server actually has', () => {
 
     expect(screen.queryByRole('button', { name: 'Refresh model list' })).toBeNull()
     expect(modelPicker().querySelector('optgroup')).toBeNull()
+  })
+})
+
+/**
+ * The CATMAID tab, which is the only one holding *several* credentials.
+ *
+ * A token there is per user **and** per instance, so the thing worth pinning is that the list is
+ * a list — that a second instance can be added without displacing the first, and that a row with
+ * nothing in it does not survive a save as an empty entry somebody has to clear later.
+ */
+describe('the CATMAID tab', () => {
+  const openCatmaid = () => {
+    render(<SourcesPanel />)
+    open()
+    fireEvent.click(tab('CATMAID'))
+  }
+  const serverFields = () => screen.getAllByLabelText('Server')
+  const tokenFields = () => screen.getAllByLabelText('API token')
+
+  it('starts empty and says reading still works without a credential', () => {
+    openCatmaid()
+    expect(screen.queryAllByLabelText('Server')).toHaveLength(0)
+    expect(screen.getByText(/No instances configured/)).toBeTruthy()
+  })
+
+  it('adds a row prefilled with the instance Coda ships a node for', () => {
+    openCatmaid()
+    fireEvent.click(screen.getByRole('button', { name: '+ Add instance' }))
+    expect((serverFields()[0] as HTMLInputElement).value).toBe(
+      'catmaid-fafb.virtualflybrain.org',
+    )
+    // Only the first: a second row is for somewhere else by definition.
+    fireEvent.click(screen.getByRole('button', { name: '+ Add instance' }))
+    expect((serverFields()[1] as HTMLInputElement).value).toBe('')
+  })
+
+  it('keeps several instances rather than replacing one with the next', () => {
+    openCatmaid()
+    fireEvent.click(screen.getByRole('button', { name: '+ Add instance' }))
+    fireEvent.click(screen.getByRole('button', { name: '+ Add instance' }))
+    fireEvent.change(tokenFields()[0]!, { target: { value: 'vfb-token' } })
+    fireEvent.change(serverFields()[1]!, { target: { value: 'https://catmaid.lab.example/' } })
+    fireEvent.change(tokenFields()[1]!, { target: { value: 'lab-token' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    expect(listCatmaidInstances()).toEqual([
+      { server: 'catmaid-fafb.virtualflybrain.org', token: 'vfb-token' },
+      // Normalised on the way in, so a pasted address bar and a bare host are one instance.
+      { server: 'catmaid.lab.example', token: 'lab-token' },
+    ])
+  })
+
+  it('carries HTTP basic auth beside the token rather than instead of it', () => {
+    openCatmaid()
+    fireEvent.click(screen.getByRole('button', { name: '+ Add instance' }))
+    fireEvent.change(tokenFields()[0]!, { target: { value: 'tok' } })
+    fireEvent.change(screen.getByLabelText('User'), { target: { value: 'alice' } })
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'secret' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    expect(listCatmaidInstances()[0]).toEqual({
+      server: 'catmaid-fafb.virtualflybrain.org',
+      token: 'tok',
+      httpUser: 'alice',
+      httpPassword: 'secret',
+    })
+  })
+
+  it('drops a row with no credential rather than storing an empty one', () => {
+    openCatmaid()
+    fireEvent.click(screen.getByRole('button', { name: '+ Add instance' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(listCatmaidInstances()).toEqual([])
+  })
+
+  it('removes the row it was asked to, not the last one', () => {
+    setCatmaidInstances([
+      { server: 'a.example.org', token: 'a' },
+      { server: 'b.example.org', token: 'b' },
+    ])
+    openCatmaid()
+    fireEvent.click(screen.getAllByRole('button', { name: 'Remove' })[0]!)
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(listCatmaidInstances().map((entry) => entry.server)).toEqual(['b.example.org'])
+  })
+
+  it('opens on this tab when CATMAID reports an auth failure', () => {
+    render(<SourcesPanel />)
+    act(() => reportCatmaidAuthFailure('CATMAID rejected the token.'))
+    expect(tab('CATMAID').getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByText('CATMAID rejected the token.')).toBeTruthy()
   })
 })

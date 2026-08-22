@@ -25,7 +25,8 @@
 import { errorMessage } from '../../core/errors'
 import type { RouteKind } from '../routeMemory'
 import { makeRouteMemory } from '../routeMemory'
-import { getToken, reportAuthFailure } from './credentials'
+import type { CatmaidInstance } from './credentials'
+import { basicAuthHeader, credentialsFor, reportAuthFailure } from './credentials'
 
 /** Served by `vite.config.ts` under `pnpm dev`/`pnpm preview`, and by nothing in a static build. */
 const PROXY_PREFIX = '/cm'
@@ -81,6 +82,12 @@ export function encodeParams(params: CatmaidParams): string {
  * **A POST with no token goes straight to the relay**, because direct cannot work: see the
  * module note. Everything else prefers direct, since the relay is slower and is served by
  * nothing in a published build.
+ *
+ * `hasToken` is specifically the **CATMAID token**, never basic auth. Only the token reaches
+ * `CsrfBypassTokenAuthenticationMiddleware`, which is what sets Django's
+ * `_dont_enforce_csrf_checks`; HTTP Basic satisfies the web server in front and leaves CSRF
+ * exactly where it was. Conflating the two would send an anonymous POST direct on any instance
+ * that happens to sit behind nginx auth, and it would be refused every time.
  */
 function routesFor(
   server: string,
@@ -101,7 +108,8 @@ function routesFor(
 
 export interface CatmaidRequestOptions {
   signal?: AbortSignal | undefined
-  token?: string | undefined
+  /** Override the configured credentials for this server. For tests and the panel's Test button. */
+  credentials?: CatmaidInstance | undefined
   /** Force a POST. Otherwise a request with params is a GET and one with none is a GET too. */
   post?: boolean
 }
@@ -119,17 +127,22 @@ export async function catmaidRequest<T>(
   params: CatmaidParams = {},
   options: CatmaidRequestOptions = {},
 ): Promise<T> {
-  const token = options.token ?? getToken()
+  const credentials = options.credentials ?? credentialsFor(server)
+  const token = credentials?.token
   const post = options.post ?? false
   const encoded = encodeParams(params)
   const origin = new URL(server).origin
 
   const headers: Record<string, string> = { Accept: 'application/json' }
-  // `X-Authorization`, which is what CATMAID's own clients send and what its CORS policy names
-  // in `Access-Control-Allow-Headers`. Plain `Authorization` also works — verified — but naming
-  // the one the deployment explicitly allows is what keeps this working on an instance whose
-  // allow-list is narrower than VFB's.
+  /*
+   * Two independent credentials, and they are carried on two different headers **on purpose**.
+   * CATMAID's own middleware explains why it does not use `Authorization` for its token: "to
+   * prevent conflicts with, e.g., HTTP server basic authentication". So an instance behind nginx
+   * basic auth sends both, and neither displaces the other.
+   */
   if (token) headers['X-Authorization'] = `Token ${token}`
+  const basic = basicAuthHeader(credentials)
+  if (basic) headers.Authorization = basic
   if (post) headers['Content-Type'] = 'application/x-www-form-urlencoded'
 
   const init: RequestInit = post

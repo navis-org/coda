@@ -3771,6 +3771,48 @@ a.viewer-actions__btn {
   color: var(--status-warn);
 }
 
+/*
+ * The CATMAID instance list.
+ *
+ * The only tab holding *several* credentials, so its rows need a visible boundary — every other
+ * one is a single form and the panel's own padding is enough. A card rather than a rule between
+ * rows, because each row carries a nested disclosure and an actions bar of its own, and a hairline
+ * leaves those reading as though they belong to the row below.
+ */
+.sources__list {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.sources__row {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 10px 8px;
+  background: var(--surface-2);
+}
+/* The last field in a row sits against the actions bar, which has its own spacing. */
+.sources__row .sources__field:last-of-type {
+  margin-bottom: 6px;
+}
+.sources__more {
+  margin: 0 0 8px;
+}
+.sources__more > summary {
+  font-size: 10px;
+  color: var(--text-muted);
+  cursor: pointer;
+  /* A dotted underline is this app's mark for "there is more behind this" — see the node guide. */
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  margin-bottom: 6px;
+}
+.sources__more > summary:hover {
+  color: var(--text-primary);
+}
+
 /* --------------------------------------------------------------------------
  * Share workflow
  *

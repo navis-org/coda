@@ -26,7 +26,14 @@ import type { AnnotationListResponse } from './api'
 import { synapseWeight } from './api'
 import { labelsForSkeleton, readVocabulary, typeFromLabel } from './annotations'
 import { encodeParams, forgetCatmaidRoutes } from './client'
-import { resetCredentials, setToken } from './credentials'
+import {
+  credentialsFor,
+  hostPattern,
+  listInstances,
+  matchesHost,
+  resetCredentials,
+  setInstances,
+} from './credentials'
 import { parseX3dMesh } from './x3d'
 
 const SERVER = 'https://catmaid.example.org'
@@ -108,6 +115,82 @@ afterEach(() => {
   forgetCatmaidRoutes()
 })
 
+describe('which instance a request uses', () => {
+  it('accepts every spelling of a host somebody might paste', () => {
+    for (const typed of [
+      'https://catmaid.example.org',
+      'catmaid.example.org/',
+      'http://catmaid.example.org:8080/catmaid/',
+      'CATMAID.example.org',
+    ]) {
+      expect(hostPattern(typed)).toBe('catmaid.example.org')
+    }
+  })
+
+  it('matches a wildcard at any depth, but never across a label boundary', () => {
+    expect(matchesHost('*.virtualflybrain.org', 'catmaid-fafb.virtualflybrain.org')).toBe(true)
+    expect(matchesHost('*.virtualflybrain.org', 'a.b.virtualflybrain.org')).toBe(true)
+    // The literal dot is required, which is what stops a pattern reaching a host somebody else
+    // registered — this is the case that would leak a token.
+    expect(matchesHost('*.virtualflybrain.org', 'notvirtualflybrain.org')).toBe(false)
+    expect(matchesHost('*.virtualflybrain.org', 'virtualflybrain.org')).toBe(false)
+    expect(matchesHost('*.virtualflybrain.org', 'virtualflybrain.org.evil.com')).toBe(false)
+  })
+
+  it('refuses a pattern with no literal characters rather than matching everything', () => {
+    expect(matchesHost('*', 'anything.example.org')).toBe(false)
+    expect(matchesHost('*.*', 'anything.example.org')).toBe(false)
+  })
+
+  it('prefers the most specific row, not the first', () => {
+    setInstances([
+      { server: '*.example.org', token: 'wide' },
+      { server: 'special.example.org', token: 'exact' },
+      { server: '*.sub.example.org', token: 'narrower' },
+    ])
+    expect(credentialsFor('https://special.example.org')?.token).toBe('exact')
+    expect(credentialsFor('https://other.example.org')?.token).toBe('wide')
+    expect(credentialsFor('https://a.sub.example.org')?.token).toBe('narrower')
+    expect(credentialsFor('https://elsewhere.com')).toBeUndefined()
+  })
+
+  it('drops a row carrying no credential at all', () => {
+    setInstances([
+      { server: 'a.example.org' },
+      { server: 'b.example.org', token: 't' },
+      { server: '', token: 'nowhere' },
+    ])
+    expect(listInstances().map((entry) => entry.server)).toEqual(['b.example.org'])
+  })
+
+  it('sends the token and basic auth on different headers, since both may be needed', async () => {
+    setInstances([
+      { server: 'catmaid.example.org', token: 'tok', httpUser: 'alice', httpPassword: 'p@ss' },
+    ])
+    stubFetch(defaultRoutes)
+    await source().listDatasets()
+    const call = calls[0]!
+    // CATMAID's own middleware says why these are two headers: `X-Authorization` exists "to
+    // prevent conflicts with, e.g., HTTP server basic authentication".
+    expect(call.headers['x-authorization']).toBe('Token tok')
+    expect(call.headers.authorization).toBe(`Basic ${btoa('alice:p@ss')}`)
+  })
+
+  /*
+   * Only the CATMAID token bypasses CSRF — it is what reaches
+   * `CsrfBypassTokenAuthenticationMiddleware`. Basic auth satisfies the web server in front and
+   * leaves CSRF where it was, so a POST with basic auth alone still has to take the relay.
+   */
+  it('does not let basic auth alone send a POST direct', async () => {
+    setInstances([{ server: 'catmaid.example.org', httpUser: 'alice', httpPassword: 'p' }])
+    stubFetch(defaultRoutes)
+    await source().neuronIndex({ datasetId: '1' })
+    for (const post of calls.filter((call) => call.method === 'POST')) {
+      expect(post.url.startsWith('/cm/')).toBe(true)
+    }
+  })
+})
+
 describe('encoding a request', () => {
   /*
    * The documented `skeleton_ids[]` form returns only the *last* id — a short answer rather than
@@ -149,7 +232,7 @@ describe('which route a request may take', () => {
   })
 
   it('sends a POST direct once a token is set, and names the header CATMAID allows', async () => {
-    setToken('abc123')
+    setInstances([{ server: 'catmaid.example.org', token: 'abc123' }])
     stubFetch(defaultRoutes)
     await source().neuronIndex({ datasetId: '1' })
     const post = calls.find((call) => call.method === 'POST')
@@ -158,7 +241,7 @@ describe('which route a request may take', () => {
   })
 
   it('strips a pasted "Token " prefix rather than sending it twice', () => {
-    setToken('Token abc123')
+    setInstances([{ server: 'catmaid.example.org', token: 'Token abc123' }])
     stubFetch(defaultRoutes)
     return source()
       .neuronIndex({ datasetId: '1' })
@@ -238,7 +321,7 @@ describe('connectivity', () => {
   })
 
   it('answers query-relative rows, with the queried neuron always in neuronId', async () => {
-    setToken('t')
+    setInstances([{ server: 'catmaid.example.org', token: 't' }])
     stubFetch(defaultRoutes)
     const table = await source().fetchConnectivity({
       datasetId: '1',
@@ -253,7 +336,7 @@ describe('connectivity', () => {
   })
 
   it('applies minWeight to the summed weight', async () => {
-    setToken('t')
+    setInstances([{ server: 'catmaid.example.org', token: 't' }])
     stubFetch(defaultRoutes)
     const table = await source().fetchConnectivity({
       datasetId: '1',
@@ -376,7 +459,7 @@ describe('what a CATMAID dataset says about itself', () => {
    * CAVE today, and is not repeated here.
    */
   it('ignores a status filter rather than dropping every row', async () => {
-    setToken('t')
+    setInstances([{ server: 'catmaid.example.org', token: 't' }])
     stubFetch(defaultRoutes)
     const all = await source().findNeurons({ datasetId: '1' })
     const filtered = await source().findNeurons({ datasetId: '1', statuses: ['Traced'] })
