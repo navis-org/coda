@@ -61,48 +61,93 @@ const EXAMPLES = 3
  */
 const STORE_FORMAT = 1
 
-const results = new Map<string, RootCheck>()
-const running = new Set<string>()
+/**
+ * What is known about one dataset node's annotations, and which chain produced it.
+ *
+ * The `key` is the whole reason this is an entry rather than a bare result. A check is about a
+ * *particular* set of ids, and those ids change the moment somebody drops an `Update root IDs`
+ * between the base and the dataset — which is exactly the moment the answer matters most. Keyed
+ * on the dataset id, because that is all `validate` can see; carrying the chain's provenance key,
+ * so a changed chain replaces the answer instead of being served the previous one.
+ */
+interface Entry {
+  /** `ctx.inputKey('annotations')`, or `''` where nothing is wired. */
+  key: string
+  /** Absent while a check is in flight, and where there was nothing to check. */
+  check?: RootCheck
+}
+
+const entries = new Map<string, Entry>()
 
 const learned = channel()
-/** Fired when a check lands, so `validate` is asked again. `reportSourceLearned`'s terms. */
+/**
+ * Fired when a check lands *or is dropped*, so `validate` is asked again. `reportSourceLearned`'s
+ * terms. The drop half matters: a run does not re-infer, so without it a warning about a chain
+ * somebody has just replaced stays on the card until the next unrelated edit.
+ */
 export const subscribeRootCheck = learned.subscribe
 
 /** What a finished check found for a dataset, or undefined while nothing is known. */
 export function peekRootCheck(datasetId: string): RootCheck | undefined {
-  return results.get(datasetId)
+  return entries.get(datasetId)?.check
 }
 
 /** Test seam, and what a Clear Cache on the dataset would reach. */
 export function resetRootChecks(): void {
-  results.clear()
-  running.clear()
+  entries.clear()
 }
 
 /**
- * Start a check, if one is not already running or done for this dataset.
+ * Start a check, unless this dataset's answer is already about this very chain.
  *
  * Deliberately returns nothing and never rejects: a caller is `evaluate`, which must not wait for
- * it and must not fail because of it. Started **once per dataset per session** — the ids arrive
- * on every run, and re-asking on each would be exactly the hammering this is meant to avoid.
+ * it and must not fail because of it. Asked **once per (dataset, chain)** — the ids arrive on
+ * every run, so re-asking per run is the hammering this exists to avoid, while never re-asking at
+ * all leaves the answer describing a chain that is no longer on the canvas.
+ *
+ * `chainKey` is the annotations port's provenance key, which changes exactly when the table would
+ * (invariant 4). Undefined — nothing wired — is a real key rather than a reason to keep the last
+ * one, or unplugging the annotations would leave a warning about ids the graph no longer holds.
  */
 export function startRootCheck(
   datasetId: string,
+  chainKey: string | undefined,
   ids: readonly string[],
   options: CaveRequestOptions = {},
 ): void {
-  if (results.has(datasetId) || running.has(datasetId) || ids.length === 0) return
-  running.add(datasetId)
+  const key = chainKey ?? ''
+  if (entries.get(datasetId)?.key === key) return
+
+  /*
+   * The previous answer goes *now*, before the new one is known. It was about a chain that is no
+   * longer there, and leaving it up until the replacement lands is the bug this fixed: a warning
+   * that survived the repair it asked for reads as the repair not having worked.
+   */
+  const had = entries.get(datasetId)?.check !== undefined
+  entries.set(datasetId, { key })
+  // Deferred, because `notify` re-runs inference and the caller is inside a node's `evaluate`.
+  if (had) queueMicrotask(() => learned.notify())
+  if (ids.length === 0) return
+
   void run(datasetId, ids, options)
     .then((result) => {
+      // Undefined is a settled "nothing to say" — no chunkedgraph, or no timestamp — so the
+      // entry stays claimed and nothing asks again.
       if (!result) return
-      results.set(datasetId, result)
+      // A newer chain may have arrived while this was in flight; it owns the entry now.
+      if (entries.get(datasetId)?.key !== key) return
+      entries.set(datasetId, { key, check: result })
       learned.notify()
     })
-    // Swallowed: an advisory that cannot be produced has nothing to say, and a 401 already
-    // travels to the Connections panel on its own channel.
-    .catch(() => undefined)
-    .finally(() => running.delete(datasetId))
+    .catch(() => {
+      /*
+       * Swallowed — an advisory that could not be produced has nothing to say, and a 401 already
+       * travels to the Connections panel on its own channel. The claim is released, though: a
+       * dropped connection is not an answer, so the next run asks again rather than the session
+       * going quiet about a base that may well be drifting.
+       */
+      if (entries.get(datasetId)?.key === key) entries.delete(datasetId)
+    })
 }
 
 async function run(

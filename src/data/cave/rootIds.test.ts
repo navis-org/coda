@@ -71,6 +71,17 @@ function landed(): Promise<void> {
   })
 }
 
+/**
+ * Polls until a condition holds.
+ *
+ * Not `landed()` where a chain changes: that fires on the *clear* as well as on the answer, so
+ * one notification is not the same as one result.
+ */
+async function until(ok: () => boolean): Promise<void> {
+  for (let i = 0; i < 200 && !ok(); i++) await new Promise((r) => setTimeout(r, 1))
+  if (!ok()) throw new Error('timed out waiting for a check')
+}
+
 beforeEach(() => {
   resetCache()
   resetRootChecks()
@@ -88,7 +99,7 @@ describe('what it finds', () => {
   it('names the ids that were not current, and counts them', async () => {
     installFetch(['720575940628857211'])
     const wait = landed()
-    startRootCheck(DATASET, ['720575940628857210', '720575940628857211', '720575940628857212'])
+    startRootCheck(DATASET, 'chain', ['720575940628857210', '720575940628857211', '720575940628857212'])
     await wait
 
     const check = peekRootCheck(DATASET)
@@ -106,7 +117,7 @@ describe('what it finds', () => {
      */
     const calls = installFetch()
     const wait = landed()
-    startRootCheck(DATASET, ['720575940628857210'])
+    startRootCheck(DATASET, 'chain', ['720575940628857210'])
     await wait
 
     const post = calls.find((c) => c.url.includes('is_latest_roots'))!
@@ -117,14 +128,127 @@ describe('what it finds', () => {
   })
 })
 
+describe('which chain it is about', () => {
+  /*
+   * The report used to be keyed on the dataset alone and taken once per session, which made it
+   * answer to whatever was wired first rather than to what is on the canvas. Both directions were
+   * reported: dropping an `Update root IDs` in left the warning up, and pulling one out never
+   * raised it. The chain's provenance key is what distinguishes the two wirings.
+   */
+  const STALE = '720575940628857211'
+  const REPAIRED = '720575940628857299'
+
+  it('drops the warning when a repair changes the ids', async () => {
+    installFetch([STALE])
+    startRootCheck(DATASET, 'raw', [STALE])
+    await until(() => peekRootCheck(DATASET)?.stale === 1)
+
+    // `Update root IDs` between the base and the dataset: one dataset, a different chain.
+    startRootCheck(DATASET, 'repaired', [REPAIRED])
+    await until(() => peekRootCheck(DATASET)?.checked === 1)
+    expect(peekRootCheck(DATASET)?.stale).toBe(0)
+  })
+
+  it('raises it when the repair is taken back out', async () => {
+    installFetch([STALE])
+    startRootCheck(DATASET, 'repaired', [REPAIRED])
+    await until(() => peekRootCheck(DATASET)?.checked === 1)
+    expect(peekRootCheck(DATASET)?.stale).toBe(0)
+
+    startRootCheck(DATASET, 'raw', [STALE])
+    await until(() => peekRootCheck(DATASET)?.stale === 1)
+  })
+
+  it('forgets it when the annotations are unplugged', async () => {
+    // Nothing wired is a real answer, not a reason to keep the last one: the warning would
+    // otherwise name ids the graph no longer holds.
+    installFetch([STALE])
+    startRootCheck(DATASET, 'raw', [STALE])
+    await until(() => peekRootCheck(DATASET)?.stale === 1)
+
+    startRootCheck(DATASET, undefined, [])
+    expect(peekRootCheck(DATASET)).toBeUndefined()
+  })
+
+  it('asks again after a failure, rather than going quiet for the session', async () => {
+    // A dropped connection is not an answer. The claim on the entry is released so the next run
+    // asks — unlike a settled "nothing to say", where no chunkedgraph means never.
+    installFetch([STALE])
+    const inner = globalThis.fetch as typeof fetch
+    let firstAsk = true
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
+      if (String(url).includes('is_latest_roots') && firstAsk) {
+        firstAsk = false
+        return Promise.resolve({
+          ok: false,
+          status: 500,
+          text: () => Promise.resolve('{}'),
+        } as Response)
+      }
+      return inner(url as never, init)
+    })
+
+    startRootCheck(DATASET, 'raw', [STALE])
+    await until(() => firstAsk === false)
+    await new Promise((r) => setTimeout(r, 20))
+    expect(peekRootCheck(DATASET)).toBeUndefined()
+
+    startRootCheck(DATASET, 'raw', [STALE])
+    await until(() => peekRootCheck(DATASET)?.stale === 1)
+  })
+
+  it('lets the newest chain own the answer, whichever lands first', async () => {
+    /*
+     * The same warning-that-will-not-go-away, arrived at by a race. A check for the chain
+     * somebody has already replaced must not overwrite the one that replaced it — and it can
+     * easily land second, since the repaired ids are the ones the permanent cache already knows.
+     */
+    const calls = installFetch([STALE])
+    const inner = globalThis.fetch as typeof fetch
+    const held: Array<() => void> = []
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
+      const answer = inner(url as never, init)
+      if (!String(url).includes('is_latest_roots')) return answer
+      return new Promise((resolve) => held.push(() => resolve(answer)))
+    })
+
+    startRootCheck(DATASET, 'raw', [STALE])
+    await until(() => held.length === 1)
+    startRootCheck(DATASET, 'repaired', [REPAIRED])
+    await until(() => held.length === 2)
+
+    held[1]!()
+    await until(() => peekRootCheck(DATASET)?.checked === 1)
+    expect(peekRootCheck(DATASET)?.stale).toBe(0)
+
+    // The chain nobody is on any more, arriving late.
+    held[0]!()
+    await new Promise((r) => setTimeout(r, 20))
+    expect(peekRootCheck(DATASET)?.stale).toBe(0)
+    expect(calls.filter((c) => c.url.includes('is_latest_roots'))).toHaveLength(2)
+  })
+
+  it('announces a drop, since nothing else re-runs validate', async () => {
+    // A run does not re-infer, so a warning nobody announces the removal of stays on the card
+    // until the next unrelated edit — which is what made this look like it had not worked.
+    installFetch([STALE])
+    startRootCheck(DATASET, 'raw', [STALE])
+    await until(() => peekRootCheck(DATASET)?.stale === 1)
+
+    const wait = landed()
+    startRootCheck(DATASET, undefined, [])
+    await wait
+  })
+})
+
 describe('what keeps it cheap', () => {
-  it('asks once per dataset, however many times a run reports the same ids', async () => {
+  it('asks once per chain, however many times a run reports the same ids', async () => {
     const calls = installFetch()
     const wait = landed()
-    startRootCheck(DATASET, ['720575940628857210'])
+    startRootCheck(DATASET, 'chain', ['720575940628857210'])
     await wait
-    startRootCheck(DATASET, ['720575940628857210'])
-    startRootCheck(DATASET, ['720575940628857210'])
+    startRootCheck(DATASET, 'chain', ['720575940628857210'])
+    startRootCheck(DATASET, 'chain', ['720575940628857210'])
 
     // The ids arrive on every run of a graph; re-asking on each is the hammering this avoids.
     expect(calls.filter((c) => c.url.includes('is_latest_roots'))).toHaveLength(1)
@@ -139,12 +263,12 @@ describe('what keeps it cheap', () => {
      */
     const calls = installFetch()
     let wait = landed()
-    startRootCheck(DATASET, ['720575940628857210', '720575940628857211'])
+    startRootCheck(DATASET, 'chain', ['720575940628857210', '720575940628857211'])
     await wait
 
     resetRootChecks()
     wait = landed()
-    startRootCheck(DATASET, ['720575940628857210', '720575940628857211', '720575940628857299'])
+    startRootCheck(DATASET, 'chain', ['720575940628857210', '720575940628857211', '720575940628857299'])
     await wait
 
     const posts = calls.filter((c) => c.url.includes('is_latest_roots'))
@@ -158,7 +282,7 @@ describe('what keeps it cheap', () => {
     // Measured at 1,089 neurons on FlyTable's `main.info`, one of them 104 times over.
     const calls = installFetch()
     const wait = landed()
-    startRootCheck(DATASET, ['720575940628857210', '720575940628857210', '720575940628857210'])
+    startRootCheck(DATASET, 'chain', ['720575940628857210', '720575940628857210', '720575940628857210'])
     await wait
     expect(calls.find((c) => c.url.includes('is_latest_roots'))!.body).toBe(
       '{"node_ids":[720575940628857210]}',
@@ -173,7 +297,7 @@ describe('what keeps it cheap', () => {
         segmentation_source: 'precomputed://gs://somewhere/seg',
       },
     })
-    startRootCheck(DATASET, ['720575940628857210'])
+    startRootCheck(DATASET, 'chain', ['720575940628857210'])
     await new Promise((r) => setTimeout(r, 50))
     expect(calls.filter((c) => c.url.includes('is_latest_roots'))).toHaveLength(0)
     expect(peekRootCheck(DATASET)).toBeUndefined()

@@ -384,17 +384,27 @@ export const customCaveNode = registerNode({
  * **Fired and forgotten, deliberately.** It costs a few seconds against a shared service for a
  * large base, and none of it is needed to build the value — so `evaluate` starts it and returns.
  * The answer arrives on `subscribeRootCheck`, which re-runs inference, and `validate` reads it.
- * Started once per dataset per session and cached per (segmentation, timestamp) beyond that; see
+ * Asked once per (dataset, chain) and cached per (segmentation, timestamp) beyond that; see
  * `data/cave/rootIds.ts`, where the answer being permanently true is what makes it cheap.
  *
- * Only CAVE, and only with annotations wired: a neuPrint id is a property on a node and does not
- * move, and a datastack's own table is materialised with the version by construction.
+ * **The chain's key travels with the ids**, and it is what makes the warning answer to the canvas
+ * rather than to whatever was wired first. Without it the report was keyed on the dataset alone
+ * and taken once per session, so inserting an `Update root IDs` left the warning up and removing
+ * one left it down — the check never being re-asked in either direction.
+ *
+ * Called for a CAVE dataset **whether or not annotations are wired**, since unplugging them has to
+ * clear the answer too. neuPrint is excluded outright: an id there is a property on a node and
+ * does not move, and a datastack's own table is materialised with the version by construction.
  */
 function watchRootDrift(value: DatasetValue): void {
   if (value.sourceId !== 'cave') return
-  const ids = value.annotations?.table.data[ID_COLUMN_NAME]
-  if (!ids) return
-  startRootCheck(value.datasetId, ids.map((cell) => idText(cell) ?? '').filter(Boolean))
+  const chain = value.annotations
+  const ids = chain?.table.data[ID_COLUMN_NAME] ?? []
+  startRootCheck(
+    value.datasetId,
+    chain?.key,
+    ids.map((cell) => idText(cell) ?? '').filter(Boolean),
+  )
 }
 
 /**
@@ -405,8 +415,8 @@ function watchRootDrift(value: DatasetValue): void {
  * would be refusing over data the node did not fetch.
  *
  * Keyed on the dataset id, which is all `validate` can see — so two dataset nodes on one
- * datastack and materialization with *different* annotation chains would show each other's
- * count. Uncommon, and the message says what was checked rather than whose it was.
+ * datastack and materialization with *different* annotation chains share one entry, and whichever
+ * ran last owns it. Uncommon, and the message says what was checked rather than whose it was.
  */
 function rootDriftIssues(datasetId: string | undefined): string[] {
   const check = datasetId ? peekRootCheck(datasetId) : undefined

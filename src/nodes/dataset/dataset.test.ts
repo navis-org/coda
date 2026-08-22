@@ -6,7 +6,7 @@
  * pinned version survives, and that the legacy generic node still loads.
  */
 
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { inferGraph } from '../../core/inference'
 import { addEdge, addNode, emptyGraph } from '../../core/graph'
@@ -24,6 +24,8 @@ import { resetDatastackRecords } from '../../data/cave/datastack'
 import { DATASTACK_SPECS, specFor } from '../../data/cave/spec'
 import { CaveSource } from '../../data/cave/CaveSource'
 import { resetCredentials as resetCaveCredentials, setToken } from '../../data/cave/credentials'
+import { peekRootCheck, resetRootChecks } from '../../data/cave/rootIds'
+import { resetCache } from '../../data/cache'
 import '../index'
 
 beforeAll(async () => {
@@ -322,5 +324,102 @@ describe('Custom CAVE', () => {
         ctxFor('dataset.cave', { datastack: DATASTACK_SPECS[0]?.datastack ?? '' }),
       ) ?? []
     expect(issues.join(' ')).toContain('ships a node')
+  })
+})
+
+describe('the root-drift advisory follows the wiring', () => {
+  /*
+   * The advisory is about *these* annotations, and the node is what says which those are. It used
+   * to hand over the dataset id alone, so the answer was taken once per session and then stuck:
+   * dropping an `Update root IDs` into the chain left the warning up, and pulling one out never
+   * raised it. `rootIds.test.ts` pins the mechanism; this pins that the chain's key reaches it.
+   */
+  const CURRENT = '100000001'
+  const RETIRED = '100000002'
+  const STAMP = '2023-08-29T00:00:00.000000'
+
+  /** Short ids on purpose: `inputIds` with no Dataset publishes an `i64`, which rounds a wide one. */
+  function graphWith(ids: string) {
+    let g = emptyGraph('drift')
+    g = addNode(g, {
+      id: 'ann',
+      type: 'neuron.inputIds',
+      position: { x: 0, y: 0 },
+      params: { ...defaultParams(requireNodeDef('neuron.inputIds')), ids },
+    })
+    g = addNode(g, node('dataset.cave', { datastack: 'somewhere', neuronTable: 'n' }))
+    return addEdge(g, {
+      source: 'ann',
+      sourceHandle: 'neurons',
+      target: 'ds',
+      targetHandle: 'annotations',
+    })
+  }
+
+  async function until(ok: () => boolean): Promise<void> {
+    for (let i = 0; i < 200 && !ok(); i++) await new Promise((r) => setTimeout(r, 1))
+    if (!ok()) throw new Error('timed out waiting for the drift check')
+  }
+
+  beforeEach(() => {
+    resetCache()
+    resetRootChecks()
+    resetDatastackRecords()
+    setToken('test-token')
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
+      const text = String(url)
+      const body = text.includes('/datastack/full/')
+        ? {
+            local_server: 'https://local.example',
+            segmentation_source: 'graphene://https://cg.example/segmentation/table/some_table',
+          }
+        : text.includes('is_latest_roots')
+          ? {
+              is_latest: (/\[(.*)\]/.exec(String(init?.body ?? ''))?.[1] ?? '')
+                .split(',')
+                .filter(Boolean)
+                .map((id) => id !== RETIRED),
+            }
+          : [{ version: 783, valid: true, status: 'AVAILABLE', time_stamp: STAMP }]
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        text: () => Promise.resolve(JSON.stringify(body)),
+      } as Response)
+    })
+    registerSource(new CaveSource())
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    resetCaveCredentials()
+    resetRootChecks()
+  })
+
+  it('re-asks when the chain changes, in both directions', async () => {
+    const scheduler = new Scheduler({ resolveSource: (id) => requireSource(id) })
+
+    await scheduler.run(graphWith(RETIRED), { mode: 'full' })
+    await until(() => peekRootCheck('somewhere:783')?.stale === 1)
+
+    // The gesture: a repair upstream, so the dataset is handed different ids under a new key.
+    await scheduler.run(graphWith(CURRENT), { mode: 'full' })
+    await until(() => peekRootCheck('somewhere:783')?.checked === 1)
+    expect(peekRootCheck('somewhere:783')?.stale).toBe(0)
+
+    // And back, which is the half that never fired at all.
+    await scheduler.run(graphWith(RETIRED), { mode: 'full' })
+    await until(() => peekRootCheck('somewhere:783')?.stale === 1)
+  })
+
+  it('forgets the answer when the annotations come off', async () => {
+    const scheduler = new Scheduler({ resolveSource: (id) => requireSource(id) })
+    await scheduler.run(graphWith(RETIRED), { mode: 'full' })
+    await until(() => peekRootCheck('somewhere:783')?.stale === 1)
+
+    let bare = emptyGraph('drift')
+    bare = addNode(bare, node('dataset.cave', { datastack: 'somewhere', neuronTable: 'n' }))
+    await scheduler.run(bare, { mode: 'full' })
+    expect(peekRootCheck('somewhere:783')).toBeUndefined()
   })
 })

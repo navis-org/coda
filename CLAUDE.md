@@ -416,7 +416,7 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `data/neuprint/neuprint.test.ts`         | Cypher building/escaping, response decoding, both halves of the `bodyId`→`neuronId` seam, schema discovery, mesh-source resolution, nm conversion |
 | `data/precomputed/precomputed.test.ts`   | shard lookup, multi-LOD manifest, Draco decode, legacy fragments, CORS fallback                                                  |
 | `nodes/transform/updateRootIds.test.ts`  | the repair: only stale rows looked up, supervoxels sent as raw uint64, a current row left alone even with a warm cache, and a row with no supervoxel untouched |
-| `data/cave/rootIds.test.ts`              | the drift check: ids sent as unquoted integers, asked once per dataset, only the unseen ones re-asked, and nothing at all without a chunkedgraph |
+| `data/cave/rootIds.test.ts`              | the drift check: ids sent as unquoted integers, asked once per chain and re-asked when the wiring changes, a late lander not overwriting a newer answer, only the unseen ones asked, and nothing at all without a chunkedgraph |
 | `data/cave/cave.test.ts`                 | CAVE against recorded bodies: a wide root id kept exactly, the string-aware scan, the annotation pivot, an anchored pattern, and every refusal |
 | `nodes/lib/datasetFamilies.test.ts`      | (also) that every CAVE family names a datastack spec and every spec a family — the join key nothing else checks |
 | `data/cave/live.test.ts`                 | the same source against the real services, skipped without `CAVE_TOKEN` — the only thing that notices an endpoint shape changing, the mesh and synapse clouds proved to share one nanometre frame, Aedes' edge list built by counting with nothing configured, and a loadable scene assembled for all three datastacks |
@@ -455,7 +455,7 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `nodes/query/idsFromLabel.test.ts`       | exact vs regex, the anchoring, the union reaching one query, and empty meaning empty                                             |
 | `ui/nodes/idsFromLabelBody.test.tsx`     | the card: every non-advanced param rendered, and the unmatched line naming the labels                                            |
 | `nodes/lib/datasetFamilies.test.ts`      | version ordering, latest-vs-pinned resolution, and the deployment/base-URL mapping                                               |
-| `nodes/dataset/dataset.test.ts`          | per-dataset nodes infer what they evaluate, the custom node's lazy source, and that the superseded node still runs               |
+| `nodes/dataset/dataset.test.ts`          | per-dataset nodes infer what they evaluate, the custom node's lazy source, that the superseded node still runs, and the drift advisory following the annotation chain in both directions |
 | `ui/nodes/datasetBody.test.tsx`          | preview above fields, the version dropdown, the resolved id, and no expand button                                                |
 | `data/mock/morphology.test.ts`           | tree validity, determinism, tube meshes, synapse placement                                                                       |
 | `store/inference.test.ts`                | inference against a source that has not learned its listing yet, and the re-infer signal                                         |
@@ -1691,8 +1691,9 @@ about somebody's base rather than a mistake in this graph.
 **Four things keep it off the service**, which matters because this is a shared production
 chunkedgraph at roughly 50–100 µs a root:
 
-- **Once per dataset per session.** The ids arrive on every run; re-asking on each is precisely
-  the hammering to avoid.
+- **Once per (dataset, chain).** The ids arrive on every run, so re-asking per run is the
+  hammering to avoid — and never re-asking at all leaves the answer describing a wiring that is no
+  longer on the canvas, which is the bug below.
 - **Cached per (segmentation, frozen timestamp), permanently.** Whether a root was current at a
   past instant *never changes*, so the answer is good forever — no expiry is passed to `cacheGet`
   at all. Keyed on the segmentation and the instant rather than on the dataset or the id list, so
@@ -1708,10 +1709,38 @@ eighteen-digit root id through `JSON.stringify` of a `number` is a different neu
 for that one case; every other CAVE POST goes through `cavePost`. The query endpoint's own
 tolerance of quoted ids was established live and does **not** transfer to this one.
 
+**And it answers to the wiring, which it did not at first.** The report was keyed on the dataset
+id alone and taken *once per session*, so the check was never re-asked: dropping an `Update root
+IDs` into the chain left the warning up, and pulling one back out never raised it. Both directions
+reported, and each reads as the opposite feature being broken — the repair not working, or the
+advisory not noticing.
+
+The fix is that a report records **which chain it is about**, and the chain's name is
+`ctx.inputKey('annotations')` — the same provenance key the dataset node already pairs with the
+table, which changes exactly when the table would (invariant 4). Four rules fall out, and each was
+mutation-checked because every one of them fails as a *plausible* warning rather than as an error:
+
+- **A new key drops the old answer immediately**, before the replacement lands. It was about a
+  chain that is no longer there, and a warning that outlives the repair it asked for is the
+  original bug wearing a shorter timeout.
+- **The drop is announced on `subscribeRootCheck`.** A run does not re-infer, so nothing else
+  would re-run `validate` — the warning would sit on the card until an unrelated edit, which is
+  precisely what "it didn't work" looked like.
+- **Nothing wired is a real key**, not a reason to keep the last one. Otherwise unplugging the
+  annotations leaves a warning naming ids the graph no longer holds.
+- **A late lander does not overwrite a newer chain.** The repaired ids are the ones the permanent
+  cache already knows, so the *replacement* check routinely finishes first and the superseded one
+  arrives after it — restoring the warning somebody just cleared, permanently.
+
+A failure releases the claim so the next run asks again, where a settled "nothing to say" — no
+chunkedgraph, no timestamp — keeps it: a dropped connection is not an answer, and a datastack with
+no chunkedgraph will never have one.
+
 The known limit, stated on `rootDriftIssues`: the report is keyed on the **dataset id**, which is
-all `validate` can see, so two dataset nodes on one datastack and materialization with different
-annotation chains would show each other's count. Uncommon, and the message says what was checked
-rather than whose it was.
+all `validate` can see (an `InferContext` carries params, types and nothing else), so two dataset
+nodes on one datastack and materialization with different annotation chains share one entry and
+whichever ran last owns it. Uncommon, and the message says what was checked rather than whose it
+was.
 
 ### Update root IDs: the repair
 
