@@ -308,29 +308,67 @@ describe('starters', () => {
 describe('the FlyWire starter', () => {
   const spec = { nodeType: 'dataset.flywire', label: 'FlyWire FAFB', sourceId: 'cave' }
 
-  it('builds with no type errors or warnings', () => {
-    const inference = inferGraph(buildStarter(spec))
-    const issues = Object.entries(inference.nodes).flatMap(([nodeId, node]) =>
+  const issuesIn = (graph: ReturnType<typeof buildStarter>) => {
+    const inference = inferGraph(graph)
+    return Object.entries(inference.nodes).flatMap(([nodeId, node]) =>
       node.issues.map((i) => `${nodeId}: ${i.severity}: ${i.message}`),
     )
-    expect(issues).toEqual([])
-    expect(inference.ok).toBe(true)
+  }
+
+  it('builds with no type errors, and one known warning', () => {
+    /*
+     * `Column "tag" is gone` is the cold-start state rather than a mistake in the graph, and it
+     * is here as a tripwire rather than as an endorsement. `annotationSchemaFrom` deliberately
+     * answers the same `undefined` for an unwired socket and for a chain whose columns are not
+     * known yet, so `withAnnotations` falls back to the datastack's *own* labels — a schema that
+     * is known and, since a chain replaces those labels, known to be wrong. The chain's schema
+     * only lands once `Table from URL` has run, so the badge clears on the first Run.
+     *
+     * Pinned exactly, so a second issue fails this rather than hiding behind the first.
+     */
+    expect(issuesIn(buildStarter(spec))).toEqual(['explore: warning: Column "tag" is gone'])
+    expect(inferGraph(buildStarter(spec)).ok).toBe(true)
   })
 
-  it('feeds the dataset its annotations, through the repair', () => {
+  it('feeds the dataset both label sources, joined', () => {
     const graph = buildStarter(spec)
     const into = (target: string, handle: string) =>
       graph.edges.find((e) => e.target === target && e.targetHandle === handle)
 
-    expect(into('dataset', 'annotations')?.source).toBe('repair')
+    // Structured fields down the left, community tags down the right, joined rather than
+    // chained — a chain would let the later source *win* a collision rather than sit beside it.
+    expect(into('dataset', 'annotations')?.source).toBe('join')
+    expect(into('join', 'left')?.source).toBe('repair')
+    expect(into('join', 'right')?.source).toBe('tags')
     expect(into('repair', 'in')?.source).toBe('combine')
     expect(into('combine', 'in')?.source).toBe('annotations')
+
+    // `left`, so a neuron nobody has tagged still comes through.
+    expect(graph.nodes.find((n) => n.id === 'join')!.params.how).toBe('left')
 
     // The published file spreads a neuron's type over two columns; coalescing them into `type`
     // is what makes the connectivity tables and Explore's chips read in words.
     const combine = graph.nodes.find((n) => n.id === 'combine')!
     expect(combine.params.columns).toEqual(['cell_type', 'hemibrain_type'])
     expect(combine.params.into).toBe('type')
+  })
+
+  it('narrows the tag table, and points Explore at the column it produces', () => {
+    const graph = buildStarter(spec)
+    // Everything else in `neuron_information_v2` is bookkeeping that would land in every neuron
+    // table downstream — and naming the columns is also what lets `peekColumns` answer for a wide
+    // table with no fetch at all.
+    expect(graph.nodes.find((n) => n.id === 'tags')!.params.columns).toBe('pt_root_id, tag')
+    expect(graph.nodes.find((n) => n.id === 'explore')!.params.tagColumn).toBe('tag')
+  })
+
+  it('opens with nothing browsed to and nothing ticked', () => {
+    // `page` and `selection` are both written by the Explore *widget*, so a starter carrying
+    // either is shipping whoever exported the graph's browsing position — and a Neuroglancer
+    // panel opening on a neuron nobody chose reads as the app having decided something.
+    const explore = buildStarter(spec).nodes.find((n) => n.id === 'explore')!
+    expect(explore.params.page).toBe(0)
+    expect(explore.params.selection).toEqual([])
   })
 
   it('reads the annotations through a host that answers a browser', () => {
@@ -341,11 +379,14 @@ describe('the FlyWire starter', () => {
     expect(url.startsWith('https://raw.githubusercontent.com/')).toBe(true)
   })
 
-  it('names the datastack through a reference, so the round trip is not a cycle', () => {
+  it('names the datastack through references, so neither round trip is a cycle', () => {
     const graph = buildStarter(spec)
-    const back = graph.edges.find((e) => e.target === 'repair' && e.targetHandle === 'dataset')
-    expect(back?.source).toBe('dataset')
-    // Both directions between one pair. `topoSort` only sees the dataflow half of it.
+    for (const target of ['repair', 'tags']) {
+      expect(
+        graph.edges.find((e) => e.target === target && e.targetHandle === 'dataset')?.source,
+      ).toBe('dataset')
+    }
+    // Both directions between two pairs. `topoSort` only sees the dataflow half of each.
     expect(topoSort(graph).cyclic).toEqual([])
   })
 

@@ -7941,14 +7941,16 @@ open on a list of eighteen-digit root ids and nothing else. No arrangement of th
 fixes that, because what is missing is a *chain in front of the dataset*:
 
 ```text
-Table from URL ▸ Combine Columns ▸ Update root IDs ─▸ Dataset ▸ Annotations
+Table from URL ▸ Combine Columns ▸ Update root IDs ─┐
+                                                     ├─▸ Join ─▸ Dataset ▸ Annotations
+CAVE table (neuron_information_v2) ─────────────────┘
 ```
 
 `BESPOKE` in that file is the dispatch — keyed by node type, since that is what a `StarterSpec`
 carries. One entry today, and it is a table rather than an `if` so the second cannot become one.
 
-Four things in the FlyWire graph each answer a question somebody would otherwise have to
-discover, and all four are pinned by `examples.test.ts`:
+Each step answers a question somebody would otherwise have to discover, and every one is pinned
+by `examples.test.ts`:
 
 - **`raw.githubusercontent.com`, not the `github.com/…/raw/…` address the repository's own UI
   hands you.** That one answers `302` with `access-control-allow-origin:` **present and empty**,
@@ -7967,34 +7969,64 @@ discover, and all four are pinned by `examples.test.ts`:
   proofreading edit. Without it the rows whose ids have moved on join to nothing, and the dataset
   merely reads as under-annotated — which is the failure `data/cave/rootIds.ts` exists to
   announce.
-- **The Dataset is wired *back* into Update root IDs, and that is a reference edge.** Two edges
-  between one pair in opposite directions; `topoSort` sees only the dataflow half. It is the
-  placement `cave.updateRootIds` was given a reference port for, and the test asserts `cyclic` is
-  empty so a regression there shows up as a starter rather than as a unit test nobody connected.
+- **The Join rather than a chain**, because the two sources answer different questions about one
+  neuron — structured fields on the left, free-form community text on the right — and an
+  annotation *chain* makes the later source **win** a collision rather than sit beside it. `left`,
+  so a neuron nobody has tagged still comes through.
+- **`Columns: pt_root_id, tag`** on the CAVE table. Everything else in `neuron_information_v2` is
+  bookkeeping — a point, a supervoxel, a user id, a timestamp — that would otherwise arrive in
+  every neuron table and in every column picker downstream. It has a second effect worth knowing:
+  `peekColumns` answers a **wide** table's columns from the ref alone, so naming them is what lets
+  `tag` be known at edit time with no fetch, where an empty `Columns` is `undefined` by design.
+- **The Dataset is wired *back* into Update root IDs and into the CAVE table, and both are
+  reference edges.** Two edges between one pair in opposite directions, twice; `topoSort` sees
+  only the dataflow half of each. It is the placement `cave.updateRootIds` was given a reference
+  port for, and the test asserts `cyclic` is empty so a regression there shows up as a starter
+  rather than as a unit test nobody connected.
 
 Two deliberate departures from the generic shape, both visible on the canvas. The **Table hangs
 off `All` rather than `Selected`** — every other starter avoids that, because `Hits`/`All` with
 an empty search is the whole dataset and teaches the wrong lesson about what to connect; here the
 annotated neuron table *is* the thing worth looking at, and a Table showing nothing until a row
-is ticked would hide it. And **Explore opens with one neuron already picked**, so the
-Neuroglancer panel draws something on the first Run.
+is ticked would hide it. Everything else **opens empty**: `selection` and `page` are both written
+by the Explore *widget*, so a starter carrying either would ship whoever exported the graph's
+browsing position, and the Neuroglancer panel would open on a neuron nobody chose.
 
-**The CAVE table node is configured and left unwired**, beside a note saying what it is for. It
-names `neuron_information_v2`, which is FlyWire's community annotations — one row per (neuron,
-tag) — and folding that into one cell per neuron is `Group By ▸ join text`, then a Join, then
-Explore's `Additional tags`. Four more nodes on a first screen, against a source already pointed
-at the right table for whoever wants them. Note what it costs, since it is not free: a node with
-no consumer still runs, so a full Run fetches that table for nothing.
+**One neuron gets one community tag, and the starter does not say so.** `neuron_information_v2`
+is one row per (neuron, tag), and `joinTables` takes the **first** matching row for a repeated
+key — deliberately, since a many-to-many join would multiply the rows of the table being
+annotated. So a neuron carrying eight tags shows one of them, and `Additional tags` draws a row
+of exactly one chip. `Group By ▸ join text` between the CAVE table and the Join is what folds all
+of them into one `; `-joined cell, which is the shape `splitTags` was written for; it is a sixth
+node on a first screen and was left out for that reason alone.
+
+**The starter carries one warning on a cold session: `Column "tag" is gone` on Explore.** It is
+the documented conflation in `annotationSchemaFrom`, which answers the same `undefined` for an
+unwired socket and for a chain whose columns are not known yet — so `withAnnotations` falls back
+to the *datastack's own* labels, and a chain replaces those, which makes the fallback a schema
+that is known and known to be wrong. `tag` is not in it, so `validateColumnParams` reports the
+drift it exists to report. The chain's schema arrives once `Table from URL` has run (its schema
+is session-scoped and keyed by URL), so the badge clears on the first Run and returns on reload.
+
+Worth stating why it has not been fixed here, because the obvious fix is not obviously an
+improvement: making the neuron schema *unknown* under an unresolved chain would empty every
+column picker on a CAVE dataset until the first Run, where today they offer the datastack's own
+columns — which on this graph largely **are** the right names, since the published TSV and the
+datastack agree on `cell_class`, `super_class` and the rest. Telling the two states apart needs
+the dataset type to say "a chain is wired" separately from carrying its schema, which is a change
+to a seam every CAVE graph reads. `examples.test.ts` pins the warning *exactly*, so a second
+issue fails the test rather than hiding behind this one.
 
 `examples/notes.ts` holds `dedent` and `noteNode`, shared with the bundled examples rather than
 copied — both write notes as indented template literals in TypeScript source, and two copies of
 `dedent` is two answers to what counts as a heading.
 
 **Checked in a real browser** over CDP against `pnpm dev`, which is the only thing that could:
-eleven cards and ten wires, no overlaps at their measured sizes, no console errors, no sideways
-body scroll, every one of the note's four links resolving (the DOI to `doi.org` rather than to a
-university proxy), and neither note clipping its own text — `scrollHeight` equal to
-`clientHeight` on both. What is *not* checked anywhere is a Run, which needs a CAVE token.
+twelve cards and twelve wires in both themes, no overlaps at their measured sizes, no console
+errors, no sideways body scroll, every one of the note's four links resolving (the DOI to
+`doi.org` rather than to a university proxy), and neither note clipping its own text —
+`scrollHeight` equal to `clientHeight` on both, light and dark. What is *not* checked anywhere is
+a Run, which needs a CAVE token.
 
 ## Start page
 

@@ -158,8 +158,14 @@ function genericStarter(spec: StarterSpec): CodaGraph {
 const FLYWIRE_ANNOTATIONS =
   'https://raw.githubusercontent.com/flyconnectome/flywire_annotations/main/supplemental_files/Supplemental_file1_neuron_annotations.tsv'
 
-/** One row of the pipeline; the notes and the annotation source sit above and below it. */
-const FLYWIRE_ROW = 340
+/**
+ * Two rows: the labels the dataset is browsed *by* on top, the community tags underneath.
+ *
+ * The tag chain is second because it is the optional half — pull the Join and the top row is a
+ * complete FlyWire workspace on its own.
+ */
+const MAIN_ROW = 0
+const TAG_ROW = 200
 
 /**
  * FlyWire FAFB, opening with its cell typing already wired in.
@@ -167,10 +173,12 @@ const FLYWIRE_ROW = 340
  * The generic starter is a dataset and a browser, which works because a neuPrint dataset carries
  * its cell typing as properties on the neuron. A CAVE datastack does not: the labels live in a
  * table, so "browse FlyWire" without an annotation chain is browsing a list of root ids. Hence
- * four extra nodes before the dataset, which is the whole reason this family cannot be built from
- * `genericStarter` with different arguments.
+ * the five nodes in front of the dataset, which is the whole reason this family cannot be built
+ * from `genericStarter` with different arguments.
  *
- *   Table from URL ▸ Combine Columns ▸ Update root IDs ─▸ Dataset ▸ Annotations
+ *   Table from URL ▸ Combine Columns ▸ Update root IDs ─┐
+ *                                                        ├─▸ Join ─▸ Dataset ▸ Annotations
+ *   CAVE table (neuron_information_v2) ─────────────────┘
  *
  * Each step is there for a reason somebody would otherwise have to discover:
  *
@@ -183,32 +191,38 @@ const FLYWIRE_ROW = 340
  *  - **Update root IDs** because the published file is a snapshot and a root id is retired by any
  *    proofreading edit; without it the rows whose ids have moved on join to nothing, and the
  *    dataset merely reads as under-annotated.
+ *  - **The Join** because the two sources answer different questions about one neuron —
+ *    structured fields on the left, free-form community text on the right — and a chain would
+ *    make the later one *win* a collision rather than sit beside it. `left`, so a neuron nobody
+ *    has tagged still comes through.
+ *  - **`Columns: pt_root_id, tag`** on the CAVE table, because everything else in
+ *    `neuron_information_v2` is bookkeeping — a point, a supervoxel, a user id, a timestamp —
+ *    that would arrive in every neuron table and in every column picker downstream.
+ *
+ * Explore reads those tags through `Additional tags: tag`, which draws them as a muted row of
+ * their own, apart from the fields above. Note what the wiring buys and what it does not: a
+ * `Join` takes the **first** matching row, so a neuron carrying several community tags shows one
+ * of them. A `Group By ▸ join text` between the CAVE table and the Join is what folds all of them
+ * into one cell, at the cost of a sixth node on a first screen.
  *
  * The Table hangs off `All` rather than `Selected`, unlike every other starter: what this graph
  * is *about* is the annotated neuron table, and a Table showing nothing until something is ticked
- * would hide the one thing worth looking at. Explore opens with a neuron already picked so the
- * Neuroglancer panel draws something on the first Run.
+ * would hide the one thing worth looking at.
+ *
+ * Everything else opens empty. `selection` and `page` are both written by the Explore *widget*,
+ * so a starter carrying either would be shipping whoever exported the graph's browsing position —
+ * and a Neuroglancer panel opening on a neuron nobody chose reads as the app having decided
+ * something. `defaultParams` supplies both, so this is a matter of not overriding them.
  */
 function flywireStarter(spec: StarterSpec): CodaGraph {
   return assemble(
     spec.label,
-    `${spec.label} with the published cell annotations wired in as its labels. Search in the Explore node, tick neurons, then Run.`,
+    `${spec.label} with the published cell annotations and the community tags wired in as its labels. Search in the Explore node, tick neurons, then Run.`,
     [
-      noteNode({
-        id: 'sourceNote',
-        x: 0,
-        y: FLYWIRE_ROW,
-        width: 282,
-        height: 190,
-        text: `
-        Hierarchical annotations loaded from [github.com/flyconnectome/flywire_annotations](https://github.com/flyconnectome/flywire_annotations).
-
-        Initial set of annotations reported in [Schlegel _et al._, Nature (2024)](https://doi.org/10.1038/s41586-024-07686-5). Now incorporates optic lobe annotations from [Matsliah _et al._, Nature (2024)](https://www.nature.com/articles/s41586-024-07981-1), and general updates from [Berg _et al._, Cell (2026)](https://www.biorxiv.org/content/10.1101/2025.10.09.680999v1).`,
-      }),
       node(
         'annotations',
         'core.tableFromUrl',
-        { x: 320, y: FLYWIRE_ROW },
+        { x: 0, y: MAIN_ROW },
         {
           url: FLYWIRE_ANNOTATIONS,
           idColumn: 'root_id',
@@ -217,54 +231,67 @@ function flywireStarter(spec: StarterSpec): CodaGraph {
       node(
         'combine',
         'core.combineColumns',
-        { x: 585, y: FLYWIRE_ROW },
+        { x: 262, y: MAIN_ROW },
         {
           columns: ['cell_type', 'hemibrain_type'],
         },
       ),
-      node('repair', 'cave.updateRootIds', { x: 850, y: FLYWIRE_ROW }),
-      node('dataset', spec.nodeType, { x: 1115, y: FLYWIRE_ROW }, spec.params),
+      node('repair', 'cave.updateRootIds', { x: 530, y: MAIN_ROW }),
+      node('dataset', spec.nodeType, { x: 790, y: MAIN_ROW }, spec.params),
+      node('explore', 'neuron.explore', { x: 1070, y: MAIN_ROW }, { tagColumn: 'tag' }),
+      node('ngl', 'out.neuroglancer', { x: 1610, y: MAIN_ROW }, undefined, {
+        width: 633,
+        height: 839,
+      }),
+
       noteNode({
-        id: 'tagsNote',
-        x: 1115,
-        y: 0,
-        width: 225,
-        height: 84,
-        text: `Community annotations are added as separate "tags" (as opposed to the more structured "fields").`,
+        id: 'sourceNote',
+        x: 0,
+        y: TAG_ROW,
+        width: 227,
+        height: 219,
+        text: `
+        Hierarchical annotations loaded from [github.com/flyconnectome/flywire_annotations](https://github.com/flyconnectome/flywire_annotations).
+
+        Initial set of annotations reported in [Schlegel _et al._, Nature (2024)](https://doi.org/10.1038/s41586-024-07686-5). Now incorporates optic lobe annotations from [Matsliah _et al._, Nature (2024)](https://www.nature.com/articles/s41586-024-07981-1), and general updates from [Berg _et al._, Cell (2026)](https://www.biorxiv.org/content/10.1101/2025.10.09.680999v1).`,
       }),
       node(
         'tags',
         'annotation.caveTable',
-        { x: 1115, y: 100 },
+        { x: 262, y: TAG_ROW },
         {
           table: 'neuron_information_v2',
+          columns: 'pt_root_id, tag',
         },
       ),
-      node(
-        'explore',
-        'neuron.explore',
-        { x: 1390, y: FLYWIRE_ROW },
-        {
-          selection: ['720575940620919646'],
-        },
-      ),
+      node('join', 'core.join', { x: 530, y: TAG_ROW }, { leftKey: 'neuronId' }),
+      noteNode({
+        id: 'tagsNote',
+        x: 262,
+        y: 420,
+        width: 230,
+        height: 86,
+        text: `Community annotations are added as separate "tags" (as opposed to the more structured "fields").`,
+      }),
       node(
         'picked',
         'out.table',
-        { x: 1935, y: FLYWIRE_ROW },
+        { x: 1070, y: 505 },
         { showFilters: true },
-        { width: 458, height: 330 },
+        { width: 522, height: 341 },
       ),
-      node('ngl', 'out.neuroglancer', { x: 1935, y: FLYWIRE_ROW + 351 }),
     ],
     [
       ['annotations', 'out', 'combine', 'in'],
       ['combine', 'out', 'repair', 'in'],
-      // A *reference*, so the pair below is not a cycle: `Update root IDs` reads the datastack's
-      // identity out of the dataset it is about to feed. See `PortDef.reference`.
+      // A *reference*, so neither pair below is a cycle: `Update root IDs` and the CAVE table both
+      // read the datastack's identity out of the dataset they are about to feed. See
+      // `PortDef.reference`.
       ['dataset', 'dataset', 'repair', 'dataset'],
-      ['repair', 'out', 'dataset', 'annotations'],
       ['dataset', 'dataset', 'tags', 'dataset'],
+      ['repair', 'out', 'join', 'left'],
+      ['tags', 'annotations', 'join', 'right'],
+      ['join', 'out', 'dataset', 'annotations'],
       ['dataset', 'dataset', 'explore', 'dataset'],
       ['dataset', 'dataset', 'ngl', 'dataset'],
       ['explore', 'all', 'picked', 'in'],
