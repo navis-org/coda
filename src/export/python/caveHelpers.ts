@@ -155,11 +155,17 @@ registerHelper({
     '    out = df.rename(columns=renames)',
     "    if 'neuronId' not in out.columns:",
     '        return out',
-    '    # A row with no id is dropped, as Coda\'s shaping does: it names no neuron.',
-    "    out = out[out['neuronId'].notna()].copy()",
-    '    # Text, always, and through `int` rather than a float: an eighteen-digit root id is a',
-    '    # *different neuron* once it has been a float64.',
-    "    out['neuronId'] = coda_int64(out['neuronId']).astype(str)",
+    '    # A row with no id names no neuron, which is what Coda\'s shaping drops. An empty',
+    '    # string counts: SeaTable spells a blank cell that way.',
+    "    ids = out['neuronId']",
+    "    out = out[ids.notna() & (ids.astype(str) != '')].copy()",
+    "    ids = out['neuronId']",
+    '    if pd.api.types.is_float_dtype(ids):',
+    '        # Already lossy — a float64 cannot hold an eighteen-digit root id — but `str()` of',
+    '        # one is `7.2e+17`, which matches nothing at all. Integer text at least keeps the',
+    '        # shape of an id. Text and int columns go straight through, exact at any width.',
+    '        ids = coda_int64(ids)',
+    "    out['neuronId'] = ids.astype(str)",
     '    return out',
   ],
 })
@@ -276,6 +282,45 @@ registerHelper({
     '        if columns:',
     '            out = out[[id_column] + [c for c in columns if c in out.columns]]',
     '    return coda_annotation_columns(out, id_column)',
+  ],
+})
+
+/**
+ * A SeaTable base's table as a Coda neuron table.
+ *
+ * `shapeRows` in `data/annotations/seaTable.ts`: the id column renamed, the named columns kept,
+ * a row with no id dropped, and a repeated id **kept** — a base carrying two rows for one neuron
+ * is a fact about somebody's spreadsheet, and collapsing it here would hide it from the only
+ * person who can act on it. Measured on FlyTable's `main.info`: 58,340 rows over 56,309 distinct
+ * ids, one segment appearing 104 times with its `side` disagreeing between them.
+ *
+ * **`to_frame()` rather than a SQL query**, and the reason is dtypes rather than convenience.
+ * sea-serpent sanitises on the way out — a date column becomes datetimes, a checkbox becomes
+ * booleans, and a text column stays text, so an eighteen-digit root id arrives exact under
+ * pandas' `string` dtype. `Table.query()` hands back raw records and loses all of that. Measured
+ * live against FlyTable: `to_frame()` is 3.3 s for 58,340 × 52 and about 134 MB in memory,
+ * against 0.8 s for three columns through `query(..., no_limit=True)` — so the narrowing is a
+ * real win where it is wanted, and the emitter offers it as a comment beside the call rather
+ * than as the default.
+ */
+registerHelper({
+  name: 'coda_seatable',
+  needs: ['coda_annotation_columns'],
+  requires: [['pandas']],
+  source: [
+    "def coda_seatable(table, id_column='root_id', columns=None):",
+    '    """A SeaTable table as a Coda neuron table."""',
+    '    df = table.to_frame(row_id_index=False)',
+    '    # sea-serpent names its columns with numpy `str_`, which indexes fine and reads oddly',
+    '    # in anything that prints the column list.',
+    '    df.columns = [str(c) for c in df.columns]',
+    '    if columns:',
+    '        keep = [c for c in columns if c in df.columns and c != id_column]',
+    '    else:',
+    '        # Empty means every column but the id, which is what a base says without being',
+    '        # asked what "every" is.',
+    '        keep = [c for c in df.columns if c != id_column]',
+    '    return coda_annotation_columns(df[[id_column] + keep], id_column)',
   ],
 })
 

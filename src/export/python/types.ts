@@ -50,6 +50,7 @@ export type PyModule =
   | 'numpy'
   | 'neuprint'
   | 'caveclient'
+  | 'seaserpent'
   | 'navis'
   | 'navisNeuprint'
   | 'networkx'
@@ -98,6 +99,14 @@ export const MODULES: Record<PyModule, ModuleSpec> = {
    * is why no dataset cell here has a `token=` argument, unlike the neuPrint one.
    */
   caveclient: { from: 'caveclient', pip: 'caveclient' },
+  /*
+   * SeaTable, through `sea-serpent` — which is the distribution name and `seaserpent` the module,
+   * exactly the mismatch `neuprint-python`/`neuprint` has and the reason `MODULES` names both.
+   *
+   * Imported whole rather than `from seaserpent import Table`, because `Table` on its own is a
+   * generic enough name in a notebook full of tables to be worth the three characters.
+   */
+  seaserpent: { statement: 'import seaserpent as ss', pip: 'sea-serpent' },
   /*
    * Two keys for one distribution, because a `from` import can only name one module and the
    * clustering needs `scipy.cluster.hierarchy` and `scipy.spatial.distance` both. The pip

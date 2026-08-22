@@ -690,7 +690,8 @@ is otherwise well under one, and it is only ever worth paying when the exporter 
 ### The CAVE half of the notebook exporter
 
 `src/export/python/emitters/cave.ts` and `caveHelpers.ts`. A FlyWire graph now exports as a
-Jupyter notebook built on **caveclient and pandas**, where before it was refused outright.
+Jupyter notebook built on **caveclient, sea-serpent and pandas**, where before it was refused
+outright.
 
 **Every signature was read off caveclient 8.2.1 by introspection**, and three are not what an
 experienced user would guess:
@@ -771,8 +772,9 @@ FlyWire that is 139,255 rows over six queries.
 
 #### The helpers, and the one that ran before it was believed
 
-`coda_cave_neurons`, `coda_cave_table`, `coda_join_annotations`, `coda_update_root_ids`,
-`coda_int64` — each mirroring a specific piece of `src/data/cave` or `src/data/annotations`. Two
+`coda_cave_neurons`, `coda_cave_table`, `coda_seatable`, `coda_join_annotations`,
+`coda_update_root_ids`, `coda_int64` — each mirroring a specific piece of `src/data/cave` or
+`src/data/annotations`. Two
 rules came across that produce a plausible wrong table rather than an error, and both are
 transcribed rather than reinvented: the annotation table is read **one kind at a time** (the whole
 of `hierarchical_neuron_annotations` is over CAVE's 500,000-row cap, which the server applies by
@@ -810,15 +812,50 @@ Neuroglancer**. `CodaCaveDataset.labels` is what the first two would read, and i
 tested ahead of them for that reason. The table ops downstream are backend-agnostic and already
 work.
 
-**SeaTable is a separate gap and a harder one.** `annotation.flyTable`/`seaTable` stay in
-`NO_EMITTER`: no client library in this notebook's stack speaks it, and the four REST calls need a
-base access token this exporter has no way to obtain. Its sibling `annotation.caveTable` emits
-because CAVE has a client.
+#### SeaTable, through sea-serpent
 
-**Nothing has been run against a live datastack.** `CAVE_TOKEN` is absent here, so what is
-verified is the signatures (against the installed caveclient), the syntax and name resolution
-(`check-export.py`), and the pandas (`probe-cave-helpers.py` against a stub). The wire format is
-`src/data/cave`'s business and is covered by `live.test.ts` there.
+`annotation.flyTable` and `annotation.seaTable` emit too, on
+[`sea-serpent`](https://github.com/schlegelp/sea-serpent) — one registration each over one
+emitter, exactly as the nodes are two registrations over one implementation. Everything below was
+established **live against FlyTable**, not read off a README.
+
+- **`Table(name, base=…)` resolves the base itself** by enumerating the account's workspaces
+  (`find_base`), so Coda's `Workspace` param has no argument to map onto — it exists because the
+  REST API addresses a base by workspace *and* name, which is bookkeeping sea-serpent does for
+  you. Where one is set on the canvas the cell says so rather than dropping it silently.
+- **`to_frame()` rather than `query()`, and the reason is dtypes.** sea-serpent sanitises on the
+  way out: a text column stays text — so an eighteen-digit root id arrives exact under pandas'
+  `string` dtype, which is the whole of invariant 8 at this seam — a date column becomes
+  datetimes and a checkbox becomes booleans, which is `dtypeFor`'s mapping and better. `query()`
+  hands back raw records and loses all of it.
+- **The `query` narrowing is offered as a comment where `Columns` is set.** Measured live:
+  `to_frame()` is **3.3 s** for all 52 columns of `main.info` (58,340 rows, ~134 MB in memory)
+  against **0.8 s** for three through `query(..., no_limit=True)`. Worth having and not worth
+  defaulting to — and note this is the one place the notebook is simply *unblocked* where the
+  canvas is not, since `/dtable-db/api/v1/query/` sends no CORS headers at all.
+- **`query` auto-appends `FROM {TABLENAME}`**, so anything following the column list — a `LIMIT`,
+  a `WHERE` — needs the `FROM` written explicitly or the server answers `parse error: unexpected
+  LIMIT`. Backticked names are accepted, which is what makes a generated column list safe.
+- **sea-serpent names its columns with numpy `str_`.** They index fine and read oddly anywhere the
+  column list is printed, so `coda_seatable` normalises them.
+
+**The generated FlyTable cell was run verbatim against the real base**, helpers and all, and
+reproduces what the canvas reports: 58,340 rows, **56,309 distinct ids** — the same duplicate
+count recorded above — every id text, exact at eighteen digits, and all 58,340 beyond double
+precision.
+
+**The credential is `SEATABLE_TOKEN`**, which sea-serpent reads from the environment itself and
+the cell passes explicitly anyway, so what it needs is visible. Two deployments are two unrelated
+accounts, so a graph reading both wants two tokens and one env var cannot serve them; each cell
+names its `server=`.
+
+#### What has not been run
+
+**Nothing has been run against a live CAVE datastack.** `CAVE_TOKEN` is absent here, so for that
+half what is verified is the signatures (against the installed caveclient 8.2.1), the syntax and
+name resolution (`check-export.py`), and the pandas (`probe-cave-helpers.py` against a stub). The
+wire format is `src/data/cave`'s business and is covered by `live.test.ts` there. The SeaTable
+half *has* been run live, as above.
 
 ### The R Markdown exporter
 
@@ -1932,8 +1969,8 @@ sits on a CAVE dataset, whose own node is excused for the same reason.
 ### What is not done
 
 The **R** exporter emits none of it — `dataset.flywire`, `dataset.cave` and the three annotation
-nodes are named in its `NO_EMITTER`, and a CAVE graph is refused outright there. Python covers the
-spine; see *The CAVE half of the notebook exporter* below for what it does and does not reach.
+nodes are named in its `NO_EMITTER`, and a CAVE graph is refused outright there. Python emits all
+six; see *The CAVE half of the notebook exporter* below for what it does and does not reach.
 
 A node body for the annotation sources — a base and table picker fed by `listBases`/`readMetadata`
 rather than two text fields — is the obvious next thing; the client methods it needs already exist

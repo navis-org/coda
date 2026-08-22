@@ -16,3 +16,6 @@ navis
 # resolving their names — the one check here that executes anything.
 caveclient
 pandas
+# SeaTable, for the annotation sources. The distribution is `sea-serpent` and the module
+# `seaserpent`, which is the mismatch `MODULES` exists to record.
+sea-serpent

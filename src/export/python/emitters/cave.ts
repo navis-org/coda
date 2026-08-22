@@ -30,6 +30,7 @@ import { splitDatasetId, specFor } from '../../../data/cave/spec'
 import { datasetRef } from '../../../core/types'
 import { DATASET_FAMILIES, resolveDatasetId } from '../../../nodes/lib/datasetFamilies'
 import { namedColumns } from '../../../data/annotations/types'
+import { SEATABLE_HOSTS } from '../../../data/annotations/credentials'
 import { pyList, pyStr } from '../py'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
@@ -350,3 +351,98 @@ registerEmitter(
   },
   { backends: [...CAVE_ONLY] },
 )
+
+// ---------------------------------------------------------------------------
+// SeaTable — the other annotation source
+// ---------------------------------------------------------------------------
+
+/**
+ * `FlyTable` and `SeaTable`, through **sea-serpent**.
+ *
+ * Two registrations over one emitter, exactly as the nodes are two registrations over one
+ * implementation: the same API at two hosts, differing in the host and the name somebody looks
+ * for. Everything below was verified live against FlyTable rather than read off a README.
+ *
+ * - **`Table(name, base=…)` resolves the base itself**, by enumerating the account's workspaces
+ *   (`find_base`). So Coda's `Workspace` param has no argument to map onto — it exists because
+ *   the REST API addresses a base by workspace *and* name, which is bookkeeping sea-serpent does
+ *   for you. Where one is set on the canvas the cell says so rather than dropping it silently.
+ * - **The credential is `SEATABLE_TOKEN`**, which sea-serpent reads from the environment itself;
+ *   it is passed explicitly anyway, so the cell says out loud what it needs. Two deployments are
+ *   two unrelated accounts, so a graph reading both wants two tokens and one env var cannot
+ *   serve them — the note says which server each cell is pointed at.
+ */
+function seaTableCell(ctx: EmitContext, defaultHost: string): string[] {
+  const base = String(ctx.params.base ?? '').trim()
+  const table = String(ctx.params.table ?? '').trim()
+  if (!base || !table) return ctx.todo('This node names no base and table.')
+
+  ctx.require('os')
+  ctx.require('seaserpent')
+  ctx.helper('coda_seatable')
+
+  const host = String(ctx.params.host ?? '').trim() || defaultHost
+  const idColumn = String(ctx.params.idColumn ?? 'root_id').trim() || 'root_id'
+  const columns = namedColumns(String(ctx.params.columns ?? ''), idColumn)
+  const out = ctx.output('annotations')
+  const lines: string[] = []
+
+  const workspace = String(ctx.params.workspace ?? '').trim()
+  if (workspace) {
+    lines.push(
+      ...ctx.note(
+        `The node names workspace "${workspace}"; sea-serpent finds the base by enumerating the ` +
+          'account\u2019s workspaces, so there is nothing to pass it. If two workspaces hold a ' +
+          `base called "${base}" it will say so.`,
+      ),
+    )
+  }
+
+  lines.push(
+    `_sea = ss.Table(`,
+    `    ${pyStr(table)},`,
+    `    base=${pyStr(base)},`,
+    `    server=${pyStr(host)},`,
+    `    auth_token=os.environ['SEATABLE_TOKEN'],`,
+    `)`,
+  )
+
+  if (columns.length > 0) {
+    /*
+     * Offered as a comment rather than emitted, which is the Network viewer's layout idiom. The
+     * whole-table read is what the canvas does and what `coda_seatable` mirrors, and it keeps
+     * sea-serpent's sanitised dtypes — a `query` hands back raw records. Measured live: 3.3 s
+     * for all 52 columns of FlyTable's `main.info`, 0.8 s for three.
+     */
+    const sql = [idColumn, ...columns].map((c) => `\`${c}\``).join(', ')
+    lines.push(
+      `# Every column is downloaded and then narrowed, as it is on the canvas. To narrow it`,
+      `# server-side instead \u2014 measured at about 4x faster, at the cost of sea-serpent's`,
+      `# dtype conversion \u2014 replace the call below with:`,
+      `#     _rows = _sea.query('SELECT ${sql} FROM \`${table}\`', no_limit=True)`,
+      `#     ${out} = coda_annotation_columns(pd.DataFrame(_rows), ${pyStr(idColumn)})`,
+    )
+  }
+
+  lines.push(
+    `${out} = coda_seatable(`,
+    `    _sea,`,
+    `    id_column=${pyStr(idColumn)},`,
+    ...(columns.length > 0 ? [`    columns=${pyList(columns)},`] : []),
+    `)`,
+  )
+
+  const upstream = ctx.input('annotations')
+  if (upstream) {
+    ctx.helper('coda_join_annotations')
+    lines.push(`${out} = coda_join_annotations(${upstream}, ${out})`)
+  }
+  return lines
+}
+
+for (const [type, host] of [
+  ['annotation.flyTable', SEATABLE_HOSTS.flytable],
+  ['annotation.seaTable', SEATABLE_HOSTS.seatable],
+] as const) {
+  registerEmitter(type, (ctx) => seaTableCell(ctx, host))
+}

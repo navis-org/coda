@@ -530,6 +530,10 @@ export function everythingGraph(): CodaGraph {
  * The `Custom CAVE` node is here for the reason all six neuPrint families are in the other
  * graph: it and `dataset.flywire` share an emitter but not the branch that resolves a
  * materialization, so a fixture reaching only one of them records only half the code.
+ *
+ * The chain is three sources deep — FlyTable, then a wide CAVE table, then a long one — because
+ * what each adds is different: SeaTable is a whole other library, the wide and long CAVE forms
+ * are two branches of one emitter, and only a chain exercises the outer join between them.
  */
 export function caveGraph(): CodaGraph {
   let g = emptyGraph('CAVE')
@@ -537,6 +541,20 @@ export function caveGraph(): CodaGraph {
 
   const nodes: Spec[] = [
     { id: 'ds', type: 'dataset.flywire', col: 4, params: { version: '783' } },
+    // Both SeaTable registrations, since they share an emitter and differ in the host it
+    // defaults to — a fixture reaching one records half the code.
+    {
+      id: 'sea',
+      type: 'annotation.seaTable',
+      col: -2,
+      params: { base: 'my base', table: 'types', idColumn: 'root_id' },
+    },
+    {
+      id: 'fly',
+      type: 'annotation.flyTable',
+      col: -1,
+      params: { base: 'main', table: 'info', columns: 'cell_type, side', idColumn: 'root_id' },
+    },
     {
       id: 'ann',
       type: 'annotation.caveTable',
@@ -579,6 +597,8 @@ export function caveGraph(): CodaGraph {
     // The reference wiring: both of these name the dataset they feed.
     ['ds', 'dataset', 'annLong', 'dataset'],
     ['ds', 'dataset', 'repair', 'dataset'],
+    ['sea', 'annotations', 'fly', 'annotations'],
+    ['fly', 'annotations', 'ann', 'annotations'],
     ['ann', 'annotations', 'annLong', 'annotations'],
     ['annLong', 'annotations', 'filter', 'in'],
     ['filter', 'out', 'repair', 'in'],

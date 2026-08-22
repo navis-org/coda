@@ -117,6 +117,47 @@ p = ns['coda_cave_table'](c2, 'hier', id_column='target_id',
 check('table: pivot folds to one row per neuron', len(p) == 2, str(len(p)))
 check('table: pivot names the kind', 'cell_type' in p.columns or 'type' in p.columns, str(list(p.columns)))
 
+# ---- coda_seatable ----------------------------------------------------------
+class SeaStub:
+    """Enough of `seaserpent.Table` for the helper: one method, returning a frame.
+
+    The dtypes are the ones sea-serpent really hands back, checked live against FlyTable:
+    `string` for a text column — which is why an eighteen-digit root id survives here at all —
+    and `category` for a single-select.
+    """
+
+    def __init__(self, frame):
+        self._frame = frame
+
+    def to_frame(self, row_id_index=True, workers=None):
+        return self._frame.copy()
+
+
+sea = pd.DataFrame(
+    {
+        "root_id": pd.array(
+            ["720575940621522189", "720575940628857210", "720575940628857210", "", None],
+            dtype="string",
+        ),
+        "cell_type": pd.array(["LC4", "DNp01", "DNp01", "x", "y"], dtype="string"),
+        "side": pd.Categorical(["left", "right", "right", "left", "left"]),
+        "notes": pd.array(["a", "b", "c", "d", "e"], dtype="string"),
+    }
+)
+st = ns["coda_seatable"](SeaStub(sea), id_column="root_id", columns=["cell_type", "side"])
+check("seatable: named columns kept, in order", list(st.columns) == ["neuronId", "type", "side"], str(list(st.columns)))
+check("seatable: 18-digit id exact", st["neuronId"].iloc[0] == "720575940621522189", st["neuronId"].iloc[0])
+check("seatable: blank and null ids dropped", len(st) == 3, str(len(st)))
+check("seatable: a repeated id is kept", (st["neuronId"] == "720575940628857210").sum() == 2)
+check("seatable: cell_type renamed to type", "type" in st.columns and "cell_type" not in st.columns)
+
+st_all = ns["coda_seatable"](SeaStub(sea), id_column="root_id")
+check(
+    "seatable: empty columns keeps everything but the id",
+    list(st_all.columns) == ["neuronId", "type", "side", "notes"],
+    str(list(st_all.columns)),
+)
+
 # ---- coda_join_annotations --------------------------------------------------
 left  = pd.DataFrame({'neuronId': ['1', '2'], 'type': ['A', 'B'], 'side': ['L', None]})
 right = pd.DataFrame({'neuronId': ['2', '3'], 'type': ['B2', None], 'nt': ['ACh', 'GABA']})

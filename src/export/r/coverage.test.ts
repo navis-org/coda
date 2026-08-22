@@ -23,8 +23,10 @@ const NO_EMITTER: Record<string, string> = {
     'typing as properties on the neuron, so there is nothing for a generated chunk to fetch ' +
     'separately. It reaches a document when the CAVE emitters do.',
   'annotation.flyTable':
-    'An annotation source — see annotation.caveTable. Its API is SeaTable\u2019s, which no ' +
-    'package in this document\u2019s stack speaks.',
+    'An annotation source — see annotation.caveTable. The notebook exporter emits this one ' +
+    'through `sea-serpent`; the natverse\u2019s `fafbseg::flytable_*` is the R equivalent and ' +
+    'no emitter has been written for it. Moot until a CAVE dataset can be emitted here at all, ' +
+    'since a graph holding one is refused before the walk starts.',
   'annotation.seaTable': 'An annotation source \u2014 see annotation.flyTable.',
   'dataset.flywire':
     'A CAVE datastack rather than a neuPrint one. This document is built on neuprintr, and a ' +

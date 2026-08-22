@@ -25,11 +25,6 @@ import { getEmitter, registeredEmitterTypes } from './registry'
  * of a long list is that the exporter is unfinished.
  */
 const NO_EMITTER: Record<string, string> = {
-  'annotation.flyTable':
-    'An annotation source whose API is SeaTable\u2019s, which nothing in this notebook\u2019s ' +
-    'stack speaks — no client library, and the REST call needs a base token this exporter has ' +
-    'no way to obtain. Its sibling `annotation.caveTable` does emit, because CAVE has one.',
-  'annotation.seaTable': 'An annotation source \u2014 see annotation.flyTable.',
   'note.text': 'An annotation. It becomes a markdown cell, which the walk does directly.',
   'dataset.mock.hemibrain':
     'Synthetic, so a graph holding one is refused before the walk starts. An emitter here ' +
