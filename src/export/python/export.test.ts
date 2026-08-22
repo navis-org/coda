@@ -147,6 +147,45 @@ describe('notebook export', () => {
     expect(text).toContain('"Dataset" and "Neurons" are not wired')
   })
 
+  /*
+   * Every reason a cell comes out as a TODO is reported the same way, because a surface warning
+   * about them wants the count and the names rather than the taxonomy. The unknown-type branch
+   * is the one that had to be added by hand: it `continue`s before the ordinary TODO channel,
+   * and it is the worst case there is — nothing is bound, so everything downstream is blocked.
+   */
+  it('reports every step that came out as a TODO, unknown types included', () => {
+    let g = emptyGraph('mixed')
+    g = addNode(g, {
+      id: 'ds',
+      type: 'dataset.hemibrain',
+      position: { x: 0, y: 0 },
+      params: { version: 'v1.2.1' },
+    })
+    g = addNode(g, {
+      id: 'alien',
+      type: 'from.the.future',
+      position: { x: 260, y: 0 },
+      params: {},
+    })
+    const result = exportNotebook(g, OPTIONS)
+    if (!result.ok) throw new Error(result.reason)
+    expect(result.todos.map((t) => t.nodeId)).toEqual(['alien'])
+
+    // And on the fixture, where the gaps are registered nodes refusing on their own terms: every
+    // report names a node that is really in the graph, and names it as the canvas does — a
+    // warning listing a label nobody can find on screen is worse than no warning.
+    const graph = everythingGraph()
+    const fixture = exportNotebook(graph, OPTIONS)
+    if (!fixture.ok) throw new Error(fixture.reason)
+    expect(fixture.todos.length).toBeGreaterThan(0)
+    const byId = new Map(graph.nodes.map((n) => [n.id, n]))
+    for (const todo of fixture.todos) {
+      const node = byId.get(todo.nodeId)
+      expect(node).toBeTruthy()
+      expect(todo.label).toBe(node?.title || requireNodeDef(node!.type).label)
+    }
+  })
+
   it('refuses an empty graph rather than writing an empty notebook', () => {
     const result = exportNotebook(emptyGraph('nothing'))
     expect(result.ok).toBe(false)

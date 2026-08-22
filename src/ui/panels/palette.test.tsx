@@ -12,7 +12,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { addNode, emptyGraph } from '../../core/graph'
+import { addEdge, addNode, emptyGraph } from '../../core/graph'
 import { getNodeDef } from '../../core/registry'
 import { T } from '../../core/types'
 import { MockSource } from '../../data/mock/MockSource'
@@ -20,6 +20,11 @@ import { registerSource } from '../../data/source'
 import '../../nodes'
 import { useGraphStore } from '../../store/graphStore'
 import { clearStorage, installJsdomStubs } from '../../test/jsdomStubs'
+import {
+  peekExportWarnings,
+  requestExportWarnings,
+  resetExportWarnings,
+} from '../exportWarnings'
 import { CommandPalette, parsePaletteQuery } from './CommandPalette'
 import type { PaletteItem } from './paletteItems'
 import { buildCommandItems, buildNodeItems } from './paletteItems'
@@ -31,6 +36,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   clearStorage()
+  resetExportWarnings()
   act(() => {
     useGraphStore.getState().loadExample('partners')
   })
@@ -118,6 +124,70 @@ describe('buildCommandItems', () => {
     const rmd = byId(commands(), 'cmd:export-rmd')
     expect(rmd.disabled).toBe(true)
     expect(rmd.hint).toContain('no document can be built for this backend yet')
+  })
+
+  /*
+   * The softer half of the refusal. A graph that exports *with gaps* is still worth exporting,
+   * so the row stays live and the hint says how much is missing — and it is asynchronous by
+   * construction, since the only honest way to know is to run the walk.
+   */
+  it('marks the export rows when part of the graph will be left as TODO', async () => {
+    act(() => {
+      let g = emptyGraph('half-translatable')
+      g = addNode(g, {
+        id: 'ds',
+        type: 'dataset.hemibrain',
+        position: { x: 0, y: 0 },
+        params: { version: 'v1.2.1' },
+      })
+      g = addNode(g, {
+        id: 'find',
+        type: 'neuron.findNeurons',
+        position: { x: 1, y: 0 },
+        params: { typePattern: 'LC4' },
+      })
+      // `Paths` with `Collapse types` on has no equivalent in either language.
+      g = addNode(g, {
+        id: 'paths',
+        type: 'neuron.paths',
+        position: { x: 2, y: 0 },
+        params: { collapseTypes: true },
+      })
+      g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'find', targetHandle: 'dataset' })
+      g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'paths', targetHandle: 'dataset' })
+      g = addEdge(g, { source: 'find', sourceHandle: 'neurons', target: 'paths', targetHandle: 'sources' })
+      g = addEdge(g, { source: 'find', sourceHandle: 'neurons', target: 'paths', targetHandle: 'targets' })
+      useGraphStore.getState().loadGraph(g)
+    })
+
+    const graph = useGraphStore.getState().graph
+
+    /*
+     * Warmed first, then forgotten, so what follows is a check on the *peek* rather than on how
+     * long a dynamic import takes. Without this the assertion below passes whether or not the
+     * peek starts work, because the exporter has not been loaded yet either way.
+     */
+    requestExportWarnings(graph)
+    await waitFor(() => expect(peekExportWarnings(graph, 'python')).toBeTruthy())
+    resetExportWarnings()
+
+    /*
+     * Nothing is known before the exporter has been *asked*, and the row says nothing rather
+     * than guessing. The second half is the load-bearing one: `buildCommandItems` runs on every
+     * store change while the palette is open, so its peek must start no work — asking it and
+     * then waiting has to leave the cache exactly as empty as it found it.
+     */
+    expect(byId(commands(), 'cmd:export-notebook').warn).toBeFalsy()
+    await new Promise((r) => setTimeout(r, 20))
+    expect(peekExportWarnings(graph, 'python')).toBeUndefined()
+
+    requestExportWarnings(graph)
+    await waitFor(() => expect(peekExportWarnings(graph, 'python')).toBeTruthy())
+
+    const item = byId(commands(), 'cmd:export-notebook')
+    expect(item.disabled).toBeFalsy()
+    expect(item.warn).toBe(true)
+    expect(item.hint).toBe('1 step will be left as TODO')
   })
 
   it('disables Export as Jupyter Notebook on an empty canvas', () => {

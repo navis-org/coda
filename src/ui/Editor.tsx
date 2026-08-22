@@ -56,6 +56,7 @@ import { NodeBrowser } from './panels/NodeBrowser'
 import { NodeContextMenu } from './panels/NodeContextMenu'
 import type { PaletteItem } from './panels/paletteItems'
 import { buildCommandItems, buildNodeItems } from './panels/paletteItems'
+import { requestExportWarnings, useExportWarnings } from './exportWarnings'
 import { appElement, toggleFullscreen } from './fullscreen'
 import { typeColorVar } from './socketStyle'
 import { useArrange } from './useArrange'
@@ -504,7 +505,22 @@ function EditorCanvas() {
    * drag-into-space is unambiguously "insert a node here", and mixing "Undo" into that
    * list would be noise.
    */
+  /*
+   * The palette's export rows can say how much of the graph will come out as a TODO, and the
+   * only honest way to know is to run the exporter — so it is started here, when the palette
+   * opens, rather than from `buildCommandItems`, which runs on every store change while it is
+   * open. `useExportWarnings` is the cursor that re-renders when an answer lands.
+   */
+  const exportWarningsRevision = useExportWarnings()
+  useEffect(() => {
+    if (menu) requestExportWarnings(useGraphStore.getState().graph)
+  }, [menu])
+
   const paletteItems = useMemo<PaletteItem[]>(() => {
+    // Read so the dependency is a real one: `buildCommandItems` calls `peekExportWarnings`,
+    // which answers differently once a walk has landed and is invisible to the lint rule.
+    // `Inspector`'s `void s.runVersion` is the same idiom in a selector.
+    void exportWarningsRevision
     if (!menu) return []
     if (menu.filter) return buildNodeItems(menu.filter)
     return [
@@ -515,8 +531,10 @@ function EditorCanvas() {
       ...buildNodeItems(),
     ]
     // `liveStore` is the whole state object while the palette is open, so this recomputes
-    // whenever anything changes — which is what keeps `disabled` flags honest.
-  }, [menu, liveStore, fitView])
+    // whenever anything changes — which is what keeps `disabled` flags honest. The revision is
+    // in the list for the same reason: an export warning that lands after the palette opened
+    // has to reach the row it is about.
+  }, [menu, liveStore, fitView, exportWarningsRevision])
 
   /** Run a command, or insert a node and wire it to the drag origin. */
   const handlePick = useCallback(

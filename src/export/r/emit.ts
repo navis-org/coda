@@ -21,7 +21,7 @@ import type { NodeDefinition, ParamValues } from '../../core/node'
 import { defaultParams, makeInferContext } from '../../core/node'
 import { getNodeDef, isAnnotation } from '../../core/registry'
 import type { CodaType } from '../../core/types'
-import type { ExportRefusal } from '../canExport'
+import type { ExportRefusal, TodoStep } from '../canExport'
 import { canExportNotebook, nodeLabel } from '../canExport'
 import { renderRmd } from './rmarkdown'
 import { chunkLabel, rComment, rIdent } from './r'
@@ -41,7 +41,8 @@ export interface ExportOptions {
 }
 
 export type ExportResult =
-  { ok: true; source: string; warnings: string[] } | ({ ok: false } & ExportRefusal)
+  | { ok: true; source: string; warnings: string[]; todos: TodoStep[] }
+  | ({ ok: false } & ExportRefusal)
 
 /** `"a"`, `"a" and "b"`, `"a", "b" and "c"` — for a message listing ports or nodes. */
 function quoted(names: readonly string[]): string {
@@ -109,6 +110,8 @@ export function exportRmd(graph: CodaGraph, options: ExportOptions = {}): Export
   const names = assignNames(order, nodes)
 
   const warnings: string[] = []
+  /** Nodes whose cell came out as a TODO, in walk order. See `TodoStep`. */
+  const todos: TodoStep[] = []
   const packages = new Set<RPackage>()
   const helpers = new Set<string>()
   /** Output port → variable, for ports that actually produced one. */
@@ -134,6 +137,9 @@ export function exportRmd(graph: CodaGraph, options: ExportOptions = {}): Export
 
     if (!def) {
       warnings.push(`Unknown node type "${node.type}" — emitted as a comment.`)
+      // It binds nothing, so everything downstream is blocked — which is exactly what a TODO
+      // step is, and a surface warning about them would otherwise miss the worst case there is.
+      todos.push({ nodeId, label: node.title || node.type })
       bodyCells.push({
         kind: 'code',
         label: `unknown-${bodyCells.length}`,
@@ -279,6 +285,8 @@ export function exportRmd(graph: CodaGraph, options: ExportOptions = {}): Export
     // Only bind the outputs if the emitter actually produced code. A TODO binds nothing, so
     // downstream sees an unconnected input and says so, rather than referring to a variable
     // that does not exist.
+    if (emittedTodo) todos.push({ nodeId, label: nodeLabel(node) })
+
     if (!emittedTodo && body.length > 0) {
       for (const port of def.outputs ?? []) {
         bound.set(portKey(nodeId, port.id), outputName(varName, def, port.id))
@@ -308,7 +316,7 @@ export function exportRmd(graph: CodaGraph, options: ExportOptions = {}): Export
     title: graph.meta?.name?.trim() || 'Untitled workflow',
     ...(options.now ? { date: options.now } : {}),
   })
-  return { ok: true, source, warnings }
+  return { ok: true, source, warnings, todos }
 }
 
 // ---------------------------------------------------------------------------

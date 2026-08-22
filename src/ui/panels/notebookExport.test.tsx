@@ -20,6 +20,7 @@ import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import { useGraphStore } from '../../store/graphStore'
 import { clearStorage, installDownloadCapture, installJsdomStubs } from '../../test/jsdomStubs'
+import { resetExportWarnings } from '../exportWarnings'
 
 beforeAll(() => {
   installJsdomStubs({ width: 900, height: 600 })
@@ -28,6 +29,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   clearStorage()
+  resetExportWarnings()
   act(() => useGraphStore.getState().closeStartPage())
 })
 
@@ -110,5 +112,64 @@ describe('Export as Jupyter Notebook', () => {
     } finally {
       capture.restore()
     }
+  })
+
+  /*
+   * The warning, which is the softer half of the refusal beside it. A graph that exports with
+   * gaps in it is still worth exporting — so this says so *on* the item, before the click,
+   * rather than replacing the row the way a refusal does.
+   *
+   * It is asynchronous by construction: the only honest way to know how much of a graph the
+   * walk cannot translate is to run the exporter, and the exporter is lazily loaded. So the
+   * menu opens without it and the sentence arrives.
+   */
+  it('warns on the item when part of the graph will be left as TODO', async () => {
+    render(<App />)
+    // `Paths` with `Collapse types` on has no notebook equivalent — Cypher cannot walk a
+    // derived graph — so its cell is a TODO on a graph that otherwise exports perfectly well.
+    let g = realGraph()
+    g = addNode(g, {
+      id: 'paths',
+      type: 'neuron.paths',
+      position: { x: 520, y: 0 },
+      params: { collapseTypes: true },
+    })
+    for (const [handle, port] of [
+      ['dataset', 'dataset'],
+      ['neurons', 'sources'],
+      ['neurons', 'targets'],
+    ] as const) {
+      g = addEdge(g, {
+        source: handle === 'dataset' ? 'ds' : 'find',
+        sourceHandle: handle,
+        target: 'paths',
+        targetHandle: port,
+      })
+    }
+    act(() => useGraphStore.getState().loadGraph(g))
+
+    openSaveMenu()
+    // One per format, because the two exporters answer separately — `Paths` with collapse on
+    // has no equivalent in either, so here they agree.
+    const warnings = await screen.findAllByText(/will be left as TODO comments/)
+    expect(warnings).toHaveLength(2)
+    for (const warning of warnings) {
+      // Named, and honest about what is left: the export is still worth making.
+      expect(warning.textContent).toContain('Paths')
+      expect(warning.textContent).toContain('The rest of the graph exports normally')
+    }
+    // On the item rather than in place of it — the row still works.
+    expect(screen.queryByText('Export as Jupyter Notebook')).toBeTruthy()
+  })
+
+  it('says nothing about a graph that exports whole', async () => {
+    render(<App />)
+    act(() => useGraphStore.getState().loadGraph(realGraph()))
+    openSaveMenu()
+    await screen.findByText('Export as Jupyter Notebook')
+    // The answer lands a tick later, so waiting on the item alone would pass either way.
+    await waitFor(() => expect(screen.queryByText(/left as TODO/)).toBeNull())
+    await new Promise((r) => setTimeout(r, 30))
+    expect(screen.queryByText(/left as TODO/)).toBeNull()
   })
 })

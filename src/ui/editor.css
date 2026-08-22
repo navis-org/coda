@@ -1741,6 +1741,14 @@ select.field {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/*
+ * A row that works but whose subject is incomplete — an export that will come out with TODOs in
+ * it. Distinct from `:disabled`, which dims the whole row because pressing it does nothing.
+ * `--status-warn` is per-mode and was measured for prose on a panel: 5.41:1 light, 9.78:1 dark.
+ */
+.add-menu__desc--warn {
+  color: var(--status-warn);
+}
 .add-menu__empty {
   padding: 14px 10px;
   font-size: 11px;
@@ -3002,6 +3010,15 @@ a.dropdown__item {
   font-size: 10.5px;
   color: var(--text-muted);
   line-height: 1.4;
+}
+/*
+ * The item still works — this says what the export will be *missing*, which is why it sits under
+ * the description rather than replacing the row the way a refusal does. Not `white-space: nowrap`:
+ * it names nodes, so it has to be allowed to wrap inside the menu's width.
+ */
+.dropdown__item .dropdown__warn {
+  color: var(--status-warn);
+  margin-top: 2px;
 }
 
 /*

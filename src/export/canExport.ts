@@ -24,6 +24,24 @@ import { getNodeDef } from '../core/registry'
 import type { ExportLanguage } from '../nodes/lib/datasetFamilies'
 import { familyForNodeType } from '../nodes/lib/datasetFamilies'
 
+/**
+ * A node the walk could not translate, so its cell is a TODO.
+ *
+ * Reported by both walks rather than derived from the finished document, because a TODO is a
+ * fact about a *node* and a cell is text — recovering the pairing by scanning for `# TODO:`
+ * would be matching on prose, which is the coupling `reportAuthFailure` exists to avoid.
+ *
+ * Every reason lands here: no emitter for this language, a backend the emitter was not written
+ * against, an unwired required port, an upstream that was itself a TODO, and whatever an
+ * emitter refuses on its own. A surface warning about them does not need to tell them apart —
+ * what the reader wants to know before clicking is *how much of my graph will be missing*.
+ */
+export interface TodoStep {
+  nodeId: string
+  /** What the node is called on the canvas. */
+  label: string
+}
+
 export interface ExportRefusal {
   /** Short phrase naming the problem. */
   reason: string

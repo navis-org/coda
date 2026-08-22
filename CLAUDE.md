@@ -405,6 +405,8 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `ui/params/paramGroups.test.ts`          | tabs/rows reshaping: that the panel shows every param the flat rail did, exactly once                                            |
 | `ui/export.test.ts`                      | CSV quoting/nulls/chunking, wide-matrix CSV, filenames, standalone SVG                                                           |
 | `export/python/export.test.ts`           | both fixtures against their goldens, every wired port declared, every emitting type reached, and a neuPrint cell refusing on a CAVE dataset |
+| `ui/panels/notebookExport.test.tsx`      | (also) the warning on the Save item: one per format, naming the steps, and silence on a graph that exports whole |
+| `ui/panels/palette.test.tsx`             | (also) that the export rows' peek starts no walk, and light up once one has run |
 | `ui/format.test.ts`                      | that an id column prints verbatim while the count beside it groups, and that an aggregate of one is a quantity again             |
 | `ui/panels/nodeBrowser.test.tsx`         | rows/thumbnails/signatures, chip-search exclusivity, entry points                                                                |
 | `ui/encoding.test.ts`                    | palette rules: 8 slots, Other fold, area scaling, null handling                                                                  |
@@ -569,6 +571,64 @@ with no emitter degrades to a TODO cell rather than failing to compile. The cost
 the thing to watch — an emitter can quietly stop agreeing with the `evaluate` it mirrors, and
 nothing type-checks the pair. `coverage.test.ts` is the tripwire: every registered type either
 has an emitter or is named in `NO_EMITTER` with a reason.
+
+### The softer half: warning that an export will have gaps in it
+
+A refusal says the export is not worth making. Beside it, both surfaces now say how much of a
+graph the walk **could not translate** — `⚠ 2 steps will be left as TODO` on a palette row, and
+a sentence naming them under the Save menu's item. The row still works: an export with gaps in it
+is worth having, which is why this sits *on* the item rather than replacing it the way a refusal
+does.
+
+**The only honest way to answer is to run the exporter**, and that is the decision the design
+turns on. The obvious alternative is a static table of which node types emit in which language:
+instant, main-chunk, and a mirror of two registries that nothing type-checks against them — the
+`NO_EMITTER` shape, which works only because `coverage.test.ts` pins it. Worse, it could not see
+most of what actually becomes a TODO. A cell comes out as one for five different reasons, and
+only the first is a fact about the *type*:
+
+1. no emitter for this language,
+2. a backend the emitter was not written against (`emitterBackends`),
+3. a required port nobody wired,
+4. an upstream that was itself a TODO,
+5. the emitter refusing on its own params — `Paths` with `Collapse types` on, a dataset that
+   could not be resolved, a column nobody picked.
+
+Running the real walk sees all five by construction and cannot drift. So both walks report
+`todos: TodoStep[]` — recorded where `emittedTodo` already is, plus the unknown-node-type branch,
+which `continue`s before that check and is the worst case there is, since it binds nothing and
+blocks everything downstream. Reported as `{nodeId, label}` rather than recovered from the
+finished document by scanning for `# TODO:`, which would be matching on prose.
+
+**`src/ui/exportWarnings.ts` is the `peek*` contract again**, with one deliberate split:
+
+- **`peekExportWarnings` starts nothing.** It is a cache read. `buildCommandItems` calls it on
+  every store change while the palette is open, and a peek that kicked off a walk there would run
+  one per change. Same rule, and the same reason, as `peekBases`.
+- **`requestExportWarnings` is the half that works**, called when a surface opens — the Save
+  menu's own mount, and an effect on the palette's `menu` state. It loads the exporters lazily,
+  so `canExport.ts` being separate is preserved exactly: nothing here is reachable until somebody
+  opens one of those two.
+
+The answer is keyed on the graph **object**, which the store mints afresh on every commit, so a
+stale answer is structurally impossible — a changed graph is a cache miss. A newer graph arriving
+while a walk is in flight owns the cache when it lands, which is the same ownership check the
+root-drift advisory needs and for the same reason.
+
+**The message does not say *why* each step is a TODO.** The five reasons above are genuinely
+different and every one of them is already stated in the document itself, beside the step it is
+about. What a reader wants before clicking is how much of the graph will be missing, and which
+parts.
+
+**+1,890 bytes on the main chunk**, measured — the module, both surfaces and the CSS. `main` still
+matches neither exporter; both stay behind `await import`.
+
+**Verified in a real browser** over CDP, because this is colour and wrapping: both surfaces, both
+themes, no console errors. `--status-warn` resolves to `#fab219` on the dark panel (9.78:1) and
+`#8a5e00` on the light one (5.41:1) — the token's own measured values, and the reason it is
+per-mode at all, since the bright gold is 1.74:1 on light. The Save panel is **315px wide with no
+warning and 313px with one**: the sentence wraps inside the width the descriptions already set, so
+the menu does not jump between the two states. That was the thing worth pointing a browser at.
 
 **The two surfaces refuse differently, and that is not an inconsistency.** A menu has room to
 answer back, so the Save menu lets the click through and replaces the item with a sentence

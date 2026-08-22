@@ -1,6 +1,11 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { CodaMark } from '../CodaMark'
+import {
+  peekExportWarnings,
+  requestExportWarnings,
+  useExportWarnings,
+} from '../exportWarnings'
 import { AssistantIcon, InspectorIcon, ShareIcon } from '../Icons'
 import { getSource } from '../../data/source'
 import { EXAMPLES } from '../../examples'
@@ -636,6 +641,17 @@ function SaveMenu({ close }: { close: () => void }) {
   const [confirming, setConfirming] = useState(false)
   const [refusal, setRefusal] = useState<{ reason: string; detail: string } | undefined>()
 
+  /*
+   * How much of the graph the exporters cannot translate, worked out by running them. Started
+   * here because this component is mounted only while the menu is open — the `Dropdown` renders
+   * its children behind `open` — and the answer arrives on a channel, so `useExportWarnings` is
+   * what brings it to the rows below rather than to the next unrelated re-render.
+   */
+  useExportWarnings()
+  useEffect(() => requestExportWarnings(graph), [graph])
+  const notebookWarning = peekExportWarnings(graph, 'python')
+  const rmdWarning = peekExportWarnings(graph, 'r')
+
   const name = (graph.meta?.name ?? '').trim() || 'Untitled'
   const conflict = findByName(library, name)
 
@@ -739,6 +755,9 @@ function SaveMenu({ close }: { close: () => void }) {
           >
             <strong>Export as Jupyter Notebook</strong>
             <span>A Jupyter notebook using neuprint-python, pandas and navis</span>
+            {notebookWarning && (
+              <span className="dropdown__warn">⚠ {notebookWarning.detail}</span>
+            )}
           </button>
         )}
 
@@ -755,6 +774,7 @@ function SaveMenu({ close }: { close: () => void }) {
           >
             <strong>Export as R Markdown</strong>
             <span>An .Rmd using neuprintr, dplyr and nat</span>
+            {rmdWarning && <span className="dropdown__warn">⚠ {rmdWarning.detail}</span>}
           </button>
         )}
       </div>
