@@ -2244,6 +2244,48 @@ the point — a table shrunk is a table, and the panel was never the place for o
 Only the fallback table branch honours `summary`. A node with a viewer of its own — a scatter, a
 heatmap, a profile — keeps it, since those already draw something sized to their box.
 
+### The freeze was React's dev instrumentation, not the table
+
+**React 19's dev build serialises changed props into Chrome's performance timeline, and does it
+with `JSON.stringify` on primitive arrays with no length cap.** `logComponentRender` fires on every
+render whose props differ from the previous one, deep-diffs old against new
+(`addObjectDiffToProperties`), and for each changed key calls `addValueToProperties` **twice** —
+once for the removed value and once for the added one. A Coda `TableValue` is an object of one
+array per column, so handing one to a component costs a full JSON serialisation of the whole
+table, twice, whenever its identity changes.
+
+Measured on a real annotation base — 58,340 rows over 60 columns — that is **five seconds of CPU
+and 1.5 GB of transient allocation** per selection, reclaimed over the following fifteen seconds.
+It reads as the tab freezing. `addValueToProperties` (72.5%) and `logComponentRender` (21.8%) were
+94% of a heap profile of it.
+
+Three things about it are worth keeping, because each one sent the search somewhere else first:
+
+- **It fires only where props *changed* on a component that stayed mounted.** Alternating between
+  two nodes holding big tables triggers it; alternating between a Text note and a table node does
+  not, because the result section unmounts and there is no previous props object to diff against.
+  That asymmetry looks like a fact about tables and is a fact about React's reconciler.
+- **Shrinking what was *drawn* could never have helped**, which is why capping the inspector to 25
+  rows, then to one row, then replacing the table with `TableSummary` all changed nothing: the
+  cost is in *passing* the table as a prop, and `<TableSummary table={table} />` passes exactly the
+  same object. Three fixes aimed at rendering, and rendering was never it.
+- **jsdom has no `console.timeStamp`**, so `supportsUserTiming` is false and none of this
+  machinery runs under vitest. Four rounds of harness — settled heap, peak heap, realistic
+  distinct strings, whole-app render — measured 4 ms and a flat heap while a browser was spending
+  five seconds and a gigabyte. A headless measurement that cannot reach the code path is not a
+  negative result.
+
+`reactTracksOff()` in `vite.config.ts` switches it off by making that gate false, injected
+`head-prepend` so it runs before `react-dom` initialises. **Dev server only** — the production
+build of `react-dom` contains none of this machinery, so the deployed app never had the problem.
+What it costs is React's own track in a performance recording; `localStorage['coda.reactTracks']
+= '1'` and a reload gets it back.
+
+The deeper reading is that **megabyte-scale values as React props are a hazard in this app**, not
+because React re-renders on them but because its dev tooling reads them. Nothing here does that
+today beyond the viewers, which need the data they draw; a component that wants only a *fact*
+about a table should take the fact.
+
 ### What was measured, and what is still unexplained
 
 `.inspector__viewer` is **320 × 300** — smaller than a card, and the smallest surface a viewer is
@@ -2259,7 +2301,10 @@ table renders in **113 ms** at 100 rows and **26 ms** at 25, and the cost is lin
 never the problem. A selection switch went 101/48/73 ms to 47/24/36 ms. Twenty-four switches in a
 row settle at 15 ms with no growth.
 
-**The reported failure is memory, and it is not explained by any of that.** A real graph —
+**The reported failure was memory, and none of the below explained it — see the section above for
+what did.** Kept because the eliminations are still true and still useful.
+
+ A real graph —
 FlyTable → Filter → Sort → Deduplicate, with a Table tapping the Sort — reaches about 0.5 GB after
 a run, which is four full copies and expected. With the inspector *closed*, switching selection
 costs nothing. With it *open*, each switch adds roughly **a gigabyte**, and the tab is unusable at

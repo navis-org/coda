@@ -170,8 +170,50 @@ function deploymentProxy(): PluginOption {
   }
 }
 
+/**
+ * Switch off React's development Performance Tracks, in the dev server only.
+ *
+ * React 19's dev build logs a "Components ⚛" track to Chrome's performance timeline. To label
+ * each entry it **deep-diffs the component's old and new props** and serialises them — and for an
+ * array of primitives that is `JSON.stringify(value)` with **no length cap**
+ * (`addValueToProperties`, `react-dom-client.development.js`). A Coda `TableValue` is an object of
+ * one array per column, so handing one to a component costs a full JSON serialisation of the
+ * table, twice, on every render where its identity changes.
+ *
+ * Measured against a real annotation base — 58,340 rows over 60 columns — selecting between two
+ * nodes holding one spent **five seconds of CPU and 1.5 GB**, which reads as the tab freezing.
+ * `addValueToProperties` and `logComponentRender` were 94% of a heap profile of it.
+ *
+ * The gate is `console.timeStamp && performance.measure`, evaluated when `react-dom` initialises,
+ * so this has to run before any module script — hence `head-prepend` rather than anything in
+ * `src/`. **jsdom has no `console.timeStamp`**, which is why none of this is reachable from the
+ * test suite and why the whole thing was invisible for four rounds of measurement.
+ *
+ * `apply: 'serve'`: the production build of `react-dom` contains none of this machinery, so the
+ * deployed app never had the problem and nothing needs disabling there.
+ *
+ * What it costs is React's own track in a performance recording. Set
+ * `localStorage['coda.reactTracks'] = '1'` and reload to get it back — worth doing when profiling
+ * React itself, and worth undoing before opening a large table again.
+ */
+function reactTracksOff(): PluginOption {
+  return {
+    name: 'coda-react-tracks-off',
+    apply: 'serve',
+    transformIndexHtml() {
+      return [
+        {
+          tag: 'script',
+          injectTo: 'head-prepend',
+          children: `try{if(!localStorage.getItem('coda.reactTracks'))console.timeStamp=undefined}catch(e){console.timeStamp=undefined}`,
+        },
+      ]
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [react(), deploymentProxy(), nodeGuideData()],
+  plugins: [react(), reactTracksOff(), deploymentProxy(), nodeGuideData()],
   define: { __APP_VERSION__: JSON.stringify(version) },
   // Relative base so the built bundle works from a subpath (GitHub Pages) as well as root.
   base: './',
