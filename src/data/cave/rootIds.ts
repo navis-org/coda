@@ -19,8 +19,9 @@
 
 import { cacheGet, cacheSet } from '../cache'
 import type { CaveRequestOptions } from './client'
-import { cavePostRaw } from './client'
+import { cavePostBinary, cavePostRaw } from './client'
 import { datastackRecord, materializationsFor, versionTimestamp } from './datastack'
+import type { GrapheneSource } from './graphene'
 import { parseGrapheneSource } from './graphene'
 import { channel } from '../channel'
 
@@ -113,31 +114,69 @@ async function run(
   const version = Number(versionText)
   if (!datastack || !Number.isInteger(version)) return undefined
 
-  const info = await datastackRecord(datastack, options)
-  const graphene = parseGrapheneSource(info.segmentation_source)
-  // Not a chunkedgraph, so root ids do not change and there is nothing to warn about.
-  if (!graphene) return undefined
-
-  // Fills `versionTimestamp` as a side effect; the listing is memoised, so this is free after
-  // the first dataset node has run.
-  await materializationsFor(datastack, options)
-  const stamp = versionTimestamp(datastack, version)
-  if (!stamp) return undefined
-  const at = Date.parse(stamp)
-  if (!Number.isFinite(at)) return undefined
+  const graphene = await grapheneFor(datastack, options)
+  const at = await frozenAt(datastack, version, options)
+  if (!graphene || at === undefined) return undefined
 
   // Distinct, in first-occurrence order. An annotation base carries repeats — measured at 1,089
   // neurons on FlyTable's `main.info` — and checking one twice is a request nobody needed.
   const distinct = [...new Set(ids)].filter((id) => id !== '')
   const wanted = distinct.slice(0, MAX_ROOTS_CHECKED)
+  const { stale } = await judge(graphene, at, wanted, options)
 
-  /*
-   * The persistent half, and the reason this is cheap after the first time: **whether a root was
-   * current at a past instant never changes**, so an answer is good forever. Keyed on the
-   * chunkedgraph table and the frozen timestamp, which together are what the answer is about —
-   * not on the dataset, so two datastack nodes on one segmentation share it, and not on the id
-   * list, so a base that gained rows only costs the rows it gained.
-   */
+  const bad = wanted.filter((id) => stale.has(id))
+  return {
+    checked: wanted.length,
+    stale: bad.length,
+    examples: bad.slice(0, EXAMPLES),
+    total: distinct.length,
+  }
+}
+
+/** The chunkedgraph behind a datastack, or undefined where there is none. */
+async function grapheneFor(
+  datastack: string,
+  options: CaveRequestOptions,
+): Promise<GrapheneSource | undefined> {
+  const info = await datastackRecord(datastack, options)
+  // Not a chunkedgraph at all, so root ids do not move and none of this applies.
+  return parseGrapheneSource(info.segmentation_source)
+}
+
+/**
+ * When a materialization was frozen, in epoch ms.
+ *
+ * Awaits the listing rather than peeking, which fills `versionTimestamp` as a side effect — the
+ * memo means this is free once any dataset node on the datastack has resolved.
+ */
+async function frozenAt(
+  datastack: string,
+  version: number,
+  options: CaveRequestOptions,
+): Promise<number | undefined> {
+  await materializationsFor(datastack, options)
+  const stamp = versionTimestamp(datastack, version)
+  if (!stamp) return undefined
+  const at = Date.parse(stamp)
+  return Number.isFinite(at) ? at : undefined
+}
+
+/**
+ * Which of these ids the chunkedgraph still called current at that instant, asking only about the
+ * ones nobody has asked about before.
+ *
+ * **The persistent half, and the reason this is cheap after the first time:** whether a root was
+ * current at a past instant never changes, so an answer is good forever. Keyed on the
+ * chunkedgraph table and the frozen timestamp, which together are what the answer is *about* —
+ * not on the dataset, so two datastack nodes on one segmentation share it, and not on the id
+ * list, so a base that gained rows only costs the rows it gained.
+ */
+async function judge(
+  graphene: GrapheneSource,
+  at: number,
+  wanted: readonly string[],
+  options: CaveRequestOptions,
+): Promise<{ latest: Set<string>; stale: Set<string> }> {
   const key = `cave-roots:${graphene.server}|${graphene.table}|${at}`
   const held = await cacheGet<{ latest: string[]; stale: string[] }>(key, {
     fingerprint: `v${STORE_FORMAT}`,
@@ -158,14 +197,94 @@ async function run(
   if (unknown.length > 0) {
     void cacheSet(key, { latest: [...latest], stale: [...stale] }, `v${STORE_FORMAT}`)
   }
+  return { latest, stale }
+}
 
-  const bad = wanted.filter((id) => stale.has(id))
-  return {
-    checked: wanted.length,
-    stale: bad.length,
-    examples: bad.slice(0, EXAMPLES),
-    total: distinct.length,
+/**
+ * Which of these root ids were **not** current when the materialization was frozen.
+ *
+ * The same call and the same permanent cache the advisory uses, answering per id rather than as a
+ * count — because the Update root IDs node needs to know *which* rows to repair, and asking twice
+ * would be two passes over somebody's chunkedgraph for one question.
+ */
+export async function staleRoots(
+  datastack: string,
+  version: number,
+  ids: readonly string[],
+  options: CaveRequestOptions = {},
+): Promise<Set<string>> {
+  const graphene = await grapheneFor(datastack, options)
+  const at = await frozenAt(datastack, version, options)
+  if (!graphene || at === undefined) return new Set()
+  const { stale } = await judge(graphene, at, [...new Set(ids)].filter(Boolean), options)
+  return stale
+}
+
+/**
+ * The root id each supervoxel belonged to at a materialization.
+ *
+ * `caveclient.chunkedgraph.get_roots`, which is `roots_binary` — raw `uint64` in and out, so a
+ * root id crosses exactly with nothing parsed or rounded (invariant 8, for once made easy).
+ *
+ * **Cached permanently, like the staleness check beside it and for the same reason**: which
+ * segment a supervoxel belonged to at a *past* instant never changes. A supervoxel is the atom of
+ * the segmentation — proofreading regroups them, it does not split them — so this is the stable
+ * handle a root id is not, which is the whole reason a repair is possible at all.
+ *
+ * Answers a map rather than an array, since callers ask about the rows that moved rather than
+ * about every row, and a `0` — a supervoxel the graph does not know — is left out rather than
+ * returned as a root nothing owns.
+ */
+export async function rootsForSupervoxels(
+  datastack: string,
+  version: number,
+  supervoxels: readonly string[],
+  options: CaveRequestOptions = {},
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>()
+  const graphene = await grapheneFor(datastack, options)
+  const at = await frozenAt(datastack, version, options)
+  if (!graphene || at === undefined) return out
+
+  const wanted = [...new Set(supervoxels)].filter(Boolean)
+  const key = `cave-sv-roots:${graphene.server}|${graphene.table}|${at}`
+  const held = await cacheGet<{ sv: string[]; root: string[] }>(key, {
+    fingerprint: `v${STORE_FORMAT}`,
+  })
+  for (let i = 0; i < (held?.sv.length ?? 0); i++) out.set(held!.sv[i]!, held!.root[i]!)
+
+  const unknown = wanted.filter((id) => !out.has(id))
+  for (let i = 0; i < unknown.length; i += CHUNK) {
+    // Sequential, like the staleness check: an advisory repair has no business firing every
+    // chunk at a shared production service at once.
+    const batch = unknown.slice(i, i + CHUNK)
+    const answer = await getRoots(graphene.server, graphene.table, batch, at, options)
+    for (let k = 0; k < batch.length; k++) {
+      const root = answer[k]
+      // `0` is "no such supervoxel here" — not a root, and not something to write into a table.
+      if (root !== undefined && root !== 0n) out.set(batch[k]!, String(root))
+    }
   }
+  if (unknown.length > 0) {
+    void cacheSet(key, { sv: [...out.keys()], root: [...out.values()] }, `v${STORE_FORMAT}`)
+  }
+  return out
+}
+
+async function getRoots(
+  server: string,
+  table: string,
+  supervoxels: readonly string[],
+  at: number,
+  options: CaveRequestOptions,
+): Promise<BigUint64Array> {
+  const url =
+    `${server}/segmentation/api/v1/table/${encodeURIComponent(table)}` +
+    `/roots_binary?timestamp=${at / 1000}`
+  // `BigInt` from a decimal string is exact where `Number` is not — the conversion
+  // `precomputed/index.ts` already relies on for the same reason.
+  const body = BigUint64Array.from(supervoxels, (id) => BigInt(id))
+  return cavePostBinary(url, body, options)
 }
 
 /**

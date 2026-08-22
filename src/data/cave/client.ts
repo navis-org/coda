@@ -161,6 +161,64 @@ export function cavePost<T>(
  * type the endpoint was not promised to accept. So the digits are spliced in as text, the same
  * answer `idList` gives for Cypher and `pyLongIntList` for the notebook.
  */
+/**
+ * A POST whose body and reply are both raw `uint64` arrays.
+ *
+ * `roots_binary` — what `caveclient.chunkedgraph.get_roots` calls — takes
+ * `np.array(ids, dtype=np.uint64).tobytes()` and answers the same. It is the one CAVE endpoint
+ * here that is not JSON, and for once that is the *easier* half of invariant 8: a
+ * `BigUint64Array` holds a root id exactly, so nothing is parsed, rounded or quoted in either
+ * direction. Little-endian on both sides, which is what numpy's native order and every platform
+ * JavaScript runs on both are.
+ *
+ * Its own function rather than an option on `request`, which parses JSON unconditionally and
+ * would have to grow a branch through every error path to do otherwise.
+ */
+export async function cavePostBinary(
+  url: string,
+  body: BigUint64Array,
+  options: CaveRequestOptions = {},
+): Promise<BigUint64Array> {
+  const token = options.token ?? getToken()
+  if (!token) {
+    const message = 'No CAVE token. Add one in Connections — the branch icon in the toolbar.'
+    reportAuthFailure(message)
+    throw new CaveError(message, 401)
+  }
+  let response: Response
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/octet-stream',
+      },
+      body: body.buffer as ArrayBuffer,
+      ...(options.signal ? { signal: options.signal } : {}),
+    })
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw error
+    throw new CaveError(
+      `Could not reach CAVE at ${new URL(url).origin}. It could not be read cross-origin, or ` +
+        `the host is down — a browser reports both the same way. (${errorMessage(error)})`,
+    )
+  }
+  if (response.status === 401 || response.status === 403) {
+    const message = `CAVE rejected the token (${response.status}).`
+    reportAuthFailure(message)
+    throw new CaveError(message, response.status)
+  }
+  if (!response.ok) {
+    throw new CaveError(`CAVE returned ${response.status}`, response.status)
+  }
+  const buffer = await response.arrayBuffer()
+  // A partial word would silently truncate the last id rather than failing.
+  if (buffer.byteLength % 8 !== 0) {
+    throw new CaveError(`CAVE returned ${buffer.byteLength} bytes, which is not whole uint64s`)
+  }
+  return new BigUint64Array(buffer)
+}
+
 export function cavePostRaw<T>(
   url: string,
   body: string,

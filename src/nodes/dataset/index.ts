@@ -413,10 +413,16 @@ function rootDriftIssues(datasetId: string | undefined): string[] {
   if (!check || check.stale === 0) return []
   const some = check.examples.join(', ')
   const part = check.checked < check.total ? ` of the first ${check.checked.toLocaleString()}` : ''
+  /*
+   * Names the node that repairs it. A warning that states a problem and leaves somebody to work
+   * out the remedy is half a warning — and the remedy here is not obvious, since it turns on a
+   * supervoxel column most people have never had a reason to look at.
+   */
   return [
     `${check.stale.toLocaleString()}${part} annotation ids are not current at this ` +
-      `materialization (e.g. ${some}) — those rows will not match a neuron. Pin a materialization ` +
-      `from after the base was updated, or update the base.`,
+      `materialization (e.g. ${some}) — those rows will not match a neuron. Use "Update root ` +
+      `IDs" to bring them forward from their supervoxel ids, or pin a materialization from ` +
+      `after the base was updated.`,
   ]
 }
 

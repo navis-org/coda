@@ -28,6 +28,9 @@ const NO_EMITTER: Record<string, string> = {
   'dataset.cave':
     'A CAVE datastack named by hand, so it has the same reason as `dataset.flywire`: this ' +
     'notebook is built on neuprint-python and there is no caveclient emitter yet.',
+  'cave.updateRootIds':
+    'Repairs CAVE root ids against a materialization — caveclient’s chunkedgraph, which no ' +
+    'emitter here speaks. It only ever sits on a CAVE dataset, whose own node is excused above.',
   'annotation.caveTable':
     'An annotation source. It has no neuPrint counterpart at all — neuPrint carries its cell ' +
     'typing as properties on the neuron, so there is nothing for a generated cell to fetch ' +

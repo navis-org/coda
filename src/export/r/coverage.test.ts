@@ -17,6 +17,7 @@ const NO_EMITTER: Record<string, string> = {
   'dataset.cave':
     'A CAVE datastack named by hand, so it has the same reason as `dataset.flywire`: this ' +
     'document is built on neuprintr and there is no fafbseg/CAVE emitter yet.',
+  'cave.updateRootIds': 'A CAVE chunkedgraph repair — see the Python note.',
   'annotation.caveTable':
     'An annotation source. It has no neuPrint counterpart at all — neuPrint carries its cell ' +
     'typing as properties on the neuron, so there is nothing for a generated chunk to fetch ' +

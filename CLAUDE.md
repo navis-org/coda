@@ -415,6 +415,7 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `ui/viewers/networkViewer.test.tsx`      | the caption: counts, the label-thinning admission, size refusal                                                                  |
 | `data/neuprint/neuprint.test.ts`         | Cypher building/escaping, response decoding, both halves of the `bodyId`→`neuronId` seam, schema discovery, mesh-source resolution, nm conversion |
 | `data/precomputed/precomputed.test.ts`   | shard lookup, multi-LOD manifest, Draco decode, legacy fragments, CORS fallback                                                  |
+| `nodes/transform/updateRootIds.test.ts`  | the repair: only stale rows looked up, supervoxels sent as raw uint64, a current row left alone even with a warm cache, and a row with no supervoxel untouched |
 | `data/cave/rootIds.test.ts`              | the drift check: ids sent as unquoted integers, asked once per dataset, only the unseen ones re-asked, and nothing at all without a chunkedgraph |
 | `data/cave/cave.test.ts`                 | CAVE against recorded bodies: a wide root id kept exactly, the string-aware scan, the annotation pivot, an anchored pattern, and every refusal |
 | `nodes/lib/datasetFamilies.test.ts`      | (also) that every CAVE family names a datastack spec and every spec a family — the join key nothing else checks |
@@ -1711,6 +1712,46 @@ The known limit, stated on `rootDriftIssues`: the report is keyed on the **datas
 all `validate` can see, so two dataset nodes on one datastack and materialization with different
 annotation chains would show each other's count. Uncommon, and the message says what was checked
 rather than whose it was.
+
+### Update root IDs: the repair
+
+`cave.updateRootIds`, `Add ▸ Transform ▸ Update root IDs`. The drift check above says an
+annotation base has fallen behind a materialization; this brings it forward, and the warning names
+it so somebody reading one arrives at the other.
+
+**A supervoxel is what makes a repair possible at all.** It is the atom of the segmentation —
+proofreading regroups supervoxels, it does not split them — so a supervoxel id is the stable
+handle a root id is not, and `get_roots(sv, timestamp)` answers which segment it belonged to at
+any past instant. A row without one is left alone: there is nothing to recover from, and a stale
+id is a better answer than a null or a dropped row.
+
+**The staleness check runs first, and that is the whole cost control.** Only rows whose root is
+*not* current are looked up, so an unedited base costs one `is_latest_roots` pass and **no**
+`get_roots` at all. Both answers are cached permanently and keyed on (segmentation, frozen
+timestamp), for the reason the advisory's are: what a root or a supervoxel was at a *past* instant
+never changes.
+
+**`roots_binary` is the one CAVE endpoint here that is not JSON**, and for once that makes
+invariant 8 easy: raw `uint64` in and out, so a `BigUint64Array` carries an eighteen-digit id
+exactly with nothing parsed, rounded or quoted. `cavePostBinary` exists for it — its own function
+rather than an option on `request`, which parses JSON unconditionally.
+
+**The id column keeps its storage.** A CAVE id column is `str` and stays text; a table holding
+them as numbers keeps doing so rather than changing dtype under every picker downstream, and
+`idText` refuses a number too wide to be exact so nothing silently rounds.
+
+The guard in the rewrite loop — only touch a row whose id was *stale* — reads as redundant, since
+only stale rows are ever asked about. It stops being redundant the moment the cache is warm: the
+supervoxel map is permanent and shared across runs and datasets, so a later run can hold a root
+for a row that did not move, and without the guard that row is silently rewritten. Pinned by a
+test that seeds the cache, after a mutation showed the obvious test could not see it.
+
+Its Dataset input is a **reference** — see the reference-edges section — which is what lets it sit
+between an annotation source and the dataset it feeds. That wiring was a cycle until references
+existed, and it is the placement the node is for.
+
+Not exported: named in both `NO_EMITTER`s, since it is caveclient's chunkedgraph and only ever
+sits on a CAVE dataset, whose own node is excused for the same reason.
 
 ### What is not done
 
