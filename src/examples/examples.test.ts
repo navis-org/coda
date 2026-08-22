@@ -2,7 +2,10 @@ import { beforeAll, describe, expect, it } from 'vitest'
 
 import { deserializeGraph, serializeGraph, topoSort } from '../core/graph'
 import { inferGraph } from '../core/inference'
+import { ID_COLUMN_NAME } from '../core/ids'
 import { isAnnotation } from '../core/registry'
+import type { AggFn } from '../nodes/lib/tableOps'
+import { aggColumnName } from '../nodes/lib/tableOps'
 import { parseMarkdown } from '../ui/markdown'
 import { Scheduler } from '../core/scheduler'
 import { isMatrixValue, isTableValue } from '../core/values'
@@ -326,7 +329,9 @@ describe('the FlyWire starter', () => {
      *
      * Pinned exactly, so a second issue fails this rather than hiding behind the first.
      */
-    expect(issuesIn(buildStarter(spec))).toEqual(['explore: warning: Column "tag" is gone'])
+    expect(issuesIn(buildStarter(spec))).toEqual([
+      'explore: warning: Column "join_tag" is gone',
+    ])
     expect(inferGraph(buildStarter(spec)).ok).toBe(true)
   })
 
@@ -335,11 +340,12 @@ describe('the FlyWire starter', () => {
     const into = (target: string, handle: string) =>
       graph.edges.find((e) => e.target === target && e.targetHandle === handle)
 
-    // Structured fields down the left, community tags down the right, joined rather than
+    // Structured fields along the top, community tags along the bottom, joined rather than
     // chained — a chain would let the later source *win* a collision rather than sit beside it.
     expect(into('dataset', 'annotations')?.source).toBe('join')
     expect(into('join', 'left')?.source).toBe('repair')
-    expect(into('join', 'right')?.source).toBe('tags')
+    expect(into('join', 'right')?.source).toBe('foldTags')
+    expect(into('foldTags', 'in')?.source).toBe('tags')
     expect(into('repair', 'in')?.source).toBe('combine')
     expect(into('combine', 'in')?.source).toBe('annotations')
 
@@ -353,13 +359,32 @@ describe('the FlyWire starter', () => {
     expect(combine.params.into).toBe('type')
   })
 
-  it('narrows the tag table, and points Explore at the column it produces', () => {
+  it('folds the tags to one row per neuron before the Join sees them', () => {
+    /*
+     * Not a tidy-up. `neuron_information_v2` is one row per (neuron, tag) and `joinTables` takes
+     * the *first* matching row for a repeated key — deliberately, so a many-to-many join cannot
+     * multiply the table being annotated. Without this fold a neuron carrying eight community
+     * tags shows exactly one of them, with nothing anywhere saying so.
+     */
+    const fold = buildStarter(spec).nodes.find((n) => n.id === 'foldTags')!
+    expect(fold.params.by).toEqual([ID_COLUMN_NAME])
+    expect(fold.params.agg).toBe('join')
+    expect(fold.params.value).toBe('tag')
+  })
+
+  it('narrows the tag table, and points Explore at the column the fold produces', () => {
     const graph = buildStarter(spec)
     // Everything else in `neuron_information_v2` is bookkeeping that would land in every neuron
     // table downstream — and naming the columns is also what lets `peekColumns` answer for a wide
     // table with no fetch at all.
     expect(graph.nodes.find((n) => n.id === 'tags')!.params.columns).toBe('pt_root_id, tag')
-    expect(graph.nodes.find((n) => n.id === 'explore')!.params.tagColumn).toBe('tag')
+
+    // Through `aggColumnName`, because a literal here is the naming rule stated in a second
+    // place — and a wrong `Additional tags` does not fail, it just draws no tag row.
+    const fold = graph.nodes.find((n) => n.id === 'foldTags')!
+    expect(graph.nodes.find((n) => n.id === 'explore')!.params.tagColumn).toBe(
+      aggColumnName(fold.params.agg as AggFn, String(fold.params.value)),
+    )
   })
 
   it('opens with nothing browsed to and nothing ticked', () => {

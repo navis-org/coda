@@ -7941,10 +7941,13 @@ open on a list of eighteen-digit root ids and nothing else. No arrangement of th
 fixes that, because what is missing is a *chain in front of the dataset*:
 
 ```text
-Table from URL ▸ Combine Columns ▸ Update root IDs ─┐
-                                                     ├─▸ Join ─▸ Dataset ▸ Annotations
-CAVE table (neuron_information_v2) ─────────────────┘
+Table from URL ▸ Combine Columns ▸ Update root IDs ──────────┐
+                                                              ├─▸ Join ─▸ Dataset
+CAVE table (neuron_information_v2) ▸ Group By (join text) ───┘        ▸ Annotations
 ```
+
+Two sources answering two different questions about one neuron: structured fields along the top,
+free-form community text along the bottom.
 
 `BESPOKE` in that file is the dispatch — keyed by node type, since that is what a `StarterSpec`
 carries. One entry today, and it is a table rather than an `if` so the second cannot become one.
@@ -7969,10 +7972,15 @@ by `examples.test.ts`:
   proofreading edit. Without it the rows whose ids have moved on join to nothing, and the dataset
   merely reads as under-annotated — which is the failure `data/cave/rootIds.ts` exists to
   announce.
-- **The Join rather than a chain**, because the two sources answer different questions about one
-  neuron — structured fields on the left, free-form community text on the right — and an
-  annotation *chain* makes the later source **win** a collision rather than sit beside it. `left`,
-  so a neuron nobody has tagged still comes through.
+- **Group By, folding `tag` with `join text`**, because `neuron_information_v2` is one row per
+  (neuron, tag) and everything downstream wants one row per neuron. It is not a tidy-up:
+  `joinTables` takes the **first** matching row for a repeated key — deliberately, so a
+  many-to-many join cannot multiply the table being annotated — so without the fold a neuron
+  carrying eight community tags shows exactly one of them, with nothing saying so. The
+  aggregation is distinct and in first-appearance order, which is what a table two people have
+  annotated the same way needs.
+- **The Join rather than an annotation chain**, because a chain makes the later source **win** a
+  collision rather than sit beside it. `left`, so a neuron nobody has tagged still comes through.
 - **`Columns: pt_root_id, tag`** on the CAVE table. Everything else in `neuron_information_v2` is
   bookkeeping — a point, a supervoxel, a user id, a timestamp — that would otherwise arrive in
   every neuron table and in every column picker downstream. It has a second effect worth knowing:
@@ -7992,20 +8000,19 @@ is ticked would hide it. Everything else **opens empty**: `selection` and `page`
 by the Explore *widget*, so a starter carrying either would ship whoever exported the graph's
 browsing position, and the Neuroglancer panel would open on a neuron nobody chose.
 
-**One neuron gets one community tag, and the starter does not say so.** `neuron_information_v2`
-is one row per (neuron, tag), and `joinTables` takes the **first** matching row for a repeated
-key — deliberately, since a many-to-many join would multiply the rows of the table being
-annotated. So a neuron carrying eight tags shows one of them, and `Additional tags` draws a row
-of exactly one chip. `Group By ▸ join text` between the CAVE table and the Join is what folds all
-of them into one `; `-joined cell, which is the shape `splitTags` was written for; it is a sixth
-node on a first screen and was left out for that reason alone.
+**`Additional tags` is pointed at `join_tag`, and the name is derived rather than typed.**
+`groupByTable` names an aggregate `<agg>_<column>`, so the starter reads it back through
+`aggColumnName` — a literal would be that rule stated in a second place, and getting it wrong is
+entirely silent, since a wrong `Additional tags` does not fail, it just draws no tag row. The
+other half of the pairing is `JOIN_SEPARATOR`: the aggregation joins with it and `splitTags`
+splits on it.
 
-**The starter carries one warning on a cold session: `Column "tag" is gone` on Explore.** It is
+**The starter carries one warning on a cold session: `Column "join_tag" is gone` on Explore.** It is
 the documented conflation in `annotationSchemaFrom`, which answers the same `undefined` for an
 unwired socket and for a chain whose columns are not known yet — so `withAnnotations` falls back
 to the *datastack's own* labels, and a chain replaces those, which makes the fallback a schema
-that is known and known to be wrong. `tag` is not in it, so `validateColumnParams` reports the
-drift it exists to report. The chain's schema arrives once `Table from URL` has run (its schema
+that is known and known to be wrong. `join_tag` is not in it, so `validateColumnParams` reports
+the drift it exists to report. The chain's schema arrives once `Table from URL` has run (its schema
 is session-scoped and keyed by URL), so the badge clears on the first Run and returns on reload.
 
 Worth stating why it has not been fixed here, because the obvious fix is not obviously an
@@ -8022,8 +8029,8 @@ copied — both write notes as indented template literals in TypeScript source, 
 `dedent` is two answers to what counts as a heading.
 
 **Checked in a real browser** over CDP against `pnpm dev`, which is the only thing that could:
-twelve cards and twelve wires in both themes, no overlaps at their measured sizes, no console
-errors, no sideways body scroll, every one of the note's four links resolving (the DOI to
+thirteen cards and thirteen wires in both themes, no overlaps at their measured sizes, the two
+notes right-aligned against the pipeline's left edge, no console errors, no sideways body scroll, every one of the note's four links resolving (the DOI to
 `doi.org` rather than to a university proxy), and neither note clipping its own text —
 `scrollHeight` equal to `clientHeight` on both, light and dark. What is *not* checked anywhere is
 a Run, which needs a CAVE token.
