@@ -6838,11 +6838,24 @@ A node rather than a provider mode, on the reasoning `combineColumns` records: g
 is not a fact about CAVE tables, and the repair has to run on the *ungathered* rows, where each
 tag still has its own supervoxel.
 
-`join` is `string_agg` / `paste(collapse=)`: **row order, absences skipped, repeats kept**. Null
-and the empty string are one absence, `coda_combine`'s rule; a group with nothing in it answers
-**null rather than `''`**, because an empty string reads as a value to every picker downstream. A
-base where two people added the same tag wants a Deduplicate upstream, where that decision is
-visible. The unit does not ride along — nanometres joined with semicolons are not nanometres.
+`join` is **distinct**, in first-appearance order, absences skipped. Null and the empty string
+are one absence, `coda_combine`'s rule; a group with nothing in it answers **null rather than
+`''`**, because an empty string reads as a value to every picker downstream. The unit does not
+ride along — nanometres joined with semicolons are not nanometres. `n` still counts **rows**, not
+values, so how much agreement is behind a label survives the fold.
+
+**Distinct is the departure from `string_agg` / `paste(collapse=)`, and it was got wrong first.**
+The first pass kept repeats on the reasoning that `join` should be what its name is elsewhere and
+a Deduplicate upstream is where that decision belongs. That is wrong about what the cell is *for*:
+it exists to be read, it is what a community-annotation table folds into, and two people adding
+the same tag is the ordinary case there — so a repeat is noise in every use this has, and putting
+a node on the main path to remove something nobody wanted is a bad trade. A `Set` in the bucket,
+which iterates in insertion order and is what keeps "first appearance" true.
+
+Folded on **exact text**, deliberately: `DA?` and `da?` are different text somebody typed, and
+folding them would be an editorial decision an aggregation cannot make. Both generated helpers
+match — `dict.fromkeys` in Python rather than a `set`, because it deduplicates *and* keeps order,
+and `unique` in R — and all three were run against each other rather than read.
 
 **`JOIN_SEPARATOR` is a contract, not a formatting choice.** `'; '` is written by the aggregation
 and split back by the widget, so one constant. Plain text rather than a control character because

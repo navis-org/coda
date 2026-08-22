@@ -56,7 +56,7 @@ export const groupByNode = registerNode({
       kind: 'column',
       label: 'Of column',
       from: 'in',
-      help: 'Values are joined with "; " in row order. Absences are skipped and repeats are kept — put a Deduplicate upstream to drop those, where the decision is visible.',
+      help: 'Distinct values, joined with "; " in the order they first appear. Absences are skipped, and a repeat is folded away — this cell is meant to be read.',
       default: '',
       visibleIf: (params) => params.agg === 'join',
     },

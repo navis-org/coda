@@ -152,19 +152,23 @@ registerHelper({
 /**
  * Coda's `join` aggregation.
  *
- * `', '.join(...)` is the obvious spelling and is a different rule three ways: it raises on a
+ * `', '.join(...)` is the obvious spelling and is a different rule four ways: it raises on a
  * NaN, it keeps empty strings — which Coda reads as absences, the same call `coda_combine`
- * makes — and it answers `''` for a group with nothing in it where Coda answers null. The
+ * makes — it keeps repeats, and it answers `''` for a group with nothing in it where Coda
+ * answers null. The
  * separator is spliced from `JOIN_SEPARATOR`, so the notebook and the canvas cannot disagree
  * about where one value ends and the next begins.
+ *
+ * `dict.fromkeys` rather than a `set`: it deduplicates *and* keeps first-appearance order,
+ * which a set does not promise in Python.
  */
 registerHelper({
   name: 'coda_join',
   requires: [['pandas']],
   source: [
     'def coda_join(values):',
-    '    """Coda\'s `join` aggregation: row order, absences skipped, repeats kept."""',
-    "    kept = [str(v) for v in values.dropna() if str(v) != '']",
+    '    """Coda\'s `join` aggregation: distinct, first-appearance order, absences skipped."""',
+    "    kept = dict.fromkeys(str(v) for v in values.dropna() if str(v) != '')",
     `    return ${JSON.stringify(JOIN_SEPARATOR)}.join(kept) if kept else None`,
   ],
 })

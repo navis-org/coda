@@ -838,13 +838,37 @@ describe('the join aggregation', () => {
 
   const joined = (t = tags()) => groupByTable(t, ['neuronId'], 'tag', 'join')
 
-  it('keeps row order and repeats, and skips both kinds of absence', () => {
+  it('folds a repeat away, and skips both kinds of absence', () => {
     const out = joined()
-    // Row order and repeats, because this is `string_agg` — a base where two people added the
-    // same tag wants a Deduplicate upstream, where the decision is visible.
-    expect(out.data.join_tag?.[0]).toBe(`left${JOIN_SEPARATOR}left`)
+    /*
+     * Distinct, which is the departure from `string_agg`. This cell exists to be read — it is
+     * what a community-annotation table folds into, and two people adding the same tag is the
+     * ordinary case there — so a repeat is noise in every use this has.
+     */
+    expect(out.data.join_tag?.[0]).toBe('left')
     // Null and blank are one absence, the rule `coda_combine` follows one op over.
     expect(out.data.join_tag?.[0]).not.toContain(`${JOIN_SEPARATOR}${JOIN_SEPARATOR}`)
+  })
+
+  it('keeps the order values first appeared in', () => {
+    const t = tableFromRows(TAGS, [
+      { neuronId: '1', tag: 'b' },
+      { neuronId: '1', tag: 'a' },
+      { neuronId: '1', tag: 'b' },
+    ])
+    // First appearance, not sorted and not last-wins: the order somebody's rows were in is the
+    // only order this has any claim to.
+    expect(joined(t).data.join_tag?.[0]).toBe(`b${JOIN_SEPARATOR}a`)
+  })
+
+  it('folds on exact text, so two spellings stay two values', () => {
+    // `DA?` and `da?` are different text somebody typed; folding them would be an editorial
+    // decision an aggregation cannot make.
+    const t = tableFromRows(TAGS, [
+      { neuronId: '1', tag: 'DA?' },
+      { neuronId: '1', tag: 'da?' },
+    ])
+    expect(joined(t).data.join_tag?.[0]).toBe(`DA?${JOIN_SEPARATOR}da?`)
   })
 
   it('answers null for a group with nothing in it, never an empty string', () => {
@@ -853,7 +877,9 @@ describe('the join aggregation', () => {
     expect(joined().data.join_tag?.[1]).toBeNull()
   })
 
-  it('still counts every row in n, including the ones it skipped', () => {
+  it('still counts every row in n, including the ones it skipped and folded', () => {
+    // `n` is rows, not values: three rows went into one tag, and losing that would hide how
+    // much agreement is behind a label.
     expect(joined().data.n?.[0]).toBe(3)
   })
 

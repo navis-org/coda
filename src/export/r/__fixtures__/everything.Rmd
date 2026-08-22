@@ -97,10 +97,10 @@ coda_edge_list <- function(ids, prepost, min_weight, conn) {
 }
 
 
-#' Coda's `join` aggregation: row order, absences skipped, repeats kept.
+#' Coda's `join` aggregation: distinct, first-appearance order, absences skipped.
 coda_join <- function(x) {
   kept <- as.character(x[!is.na(x)])
-  kept <- kept[kept != ""]
+  kept <- unique(kept[kept != ""])
   if (length(kept) == 0) NA_character_ else paste(kept, collapse = "; ")
 }
 

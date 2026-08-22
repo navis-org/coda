@@ -1036,7 +1036,7 @@ export function groupByTable(
     min: number
     max: number
     distinct?: Set<string>
-    texts?: string[]
+    texts?: Set<string>
   }
   const buckets = new Map<string, Bucket>()
 
@@ -1053,7 +1053,7 @@ export function groupByTable(
         min: Number.POSITIVE_INFINITY,
         max: Number.NEGATIVE_INFINITY,
         ...(agg === 'countDistinct' ? { distinct: new Set<string>() } : {}),
-        ...(agg === 'join' ? { texts: [] as string[] } : {}),
+        ...(agg === 'join' ? { texts: new Set<string>() } : {}),
       }
       buckets.set(hash, bucket)
     }
@@ -1064,12 +1064,19 @@ export function groupByTable(
         bucket.distinct!.add(raw === null || raw === undefined ? '\u0000' : String(raw))
       } else if (agg === 'join') {
         /*
-         * Row order, absences skipped, duplicates kept — `string_agg` and `paste(collapse=)`,
-         * which is what a reader expects of something called `join`. A base where two people
-         * added the same tag wants a Deduplicate upstream; that is a decision about the data
-         * and belongs where it can be seen.
+         * **Distinct**, in first-appearance order, absences skipped.
+         *
+         * A `Set` rather than an array, and that is the departure from `string_agg` /
+         * `paste(collapse=)`. This cell exists to be *read* — it is what a community-annotation
+         * table folds into, and two people adding the same tag is the ordinary case there — so a
+         * repeat is noise in every use this has. Leaving it to a Deduplicate upstream was the
+         * first call and the wrong one: it puts a node on the main path to remove something
+         * nobody wanted. Exact string match, deliberately: `DA?` and `da?` are different text
+         * somebody typed, and folding them would be an editorial decision this cannot make.
+         *
+         * JS `Set` iterates in insertion order, which is what keeps "first appearance" true.
          */
-        if (raw !== null && raw !== undefined && raw !== '') bucket.texts!.push(String(raw))
+        if (raw !== null && raw !== undefined && raw !== '') bucket.texts!.add(String(raw))
       } else if (raw !== null && raw !== undefined) {
         const v = Number(raw)
         if (Number.isFinite(v)) {
@@ -1097,7 +1104,7 @@ export function groupByTable(
       // Empty rather than an empty string: a neuron nobody tagged has no tags, which is an
       // absence, and `String(null)` is the four-letter word every picker downstream would read
       // as a value.
-      data[outName]!.push(bucket.texts!.length ? bucket.texts!.join(JOIN_SEPARATOR) : null)
+      data[outName]!.push(bucket.texts!.size ? [...bucket.texts!].join(JOIN_SEPARATOR) : null)
     } else if (agg !== 'count') {
       let value: number
       switch (agg) {

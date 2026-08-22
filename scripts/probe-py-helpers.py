@@ -293,11 +293,18 @@ jf = pd.DataFrame({
 })
 g = jf.groupby('type', dropna=False).agg(n=('tag', 'size'), join_tag=('tag', cns['coda_join']))
 row = lambda t: g.loc[t, 'join_tag']
-check('join: row order kept, repeats kept', row('LC4') == 'left; left', str(row('LC4')))
+check('join: repeat folded away', row('LC4') == 'left', str(row('LC4')))
 check('join: blank skipped', '; ; ' not in str(row('LC4')), str(row('LC4')))
 check('join: nothing at all is None, not empty string', row('LC6') is None, repr(row('LC6')))
 check('join: single value unwrapped', row('DNp01') == 'putative giant fibre', str(row('DNp01')))
 check('join: n still counts every row', int(g.loc['LC4', 'n']) == 3, str(g.loc['LC4', 'n']))
+of = pd.DataFrame({'k': ['a', 'a', 'a'], 'v': ['b', 'a', 'b']})
+go = of.groupby('k').agg(j=('v', cns['coda_join']))
+check('join: first-appearance order, not sorted', go.loc['a', 'j'] == 'b; a', str(go.loc['a', 'j']))
+cf = pd.DataFrame({'k': ['a', 'a'], 'v': ['DA?', 'da?']})
+gc = cf.groupby('k').agg(j=('v', cns['coda_join']))
+check('join: folds on exact text only', gc.loc['a', 'j'] == 'DA?; da?', str(gc.loc['a', 'j']))
+
 # A numeric column joined: str() per value, so no float formatting surprises on integers.
 nf = pd.DataFrame({'k': ['a', 'a'], 'v': [1, 2]})
 gn = nf.groupby('k').agg(j=('v', cns['coda_join']))

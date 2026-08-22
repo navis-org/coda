@@ -88,9 +88,13 @@ describe('community tags on a row', () => {
     expect(draw('').container.querySelector('.explore-row__tags')).toBeNull()
   })
 
-  it('keeps two identical tags rather than collapsing them', () => {
-    // `join` is `string_agg` and keeps repeats; a Deduplicate upstream is where that decision
-    // belongs. Two children with one React key would drop one silently.
+  it('draws what the cell says, even where that repeats', () => {
+    /*
+     * `join` folds a repeat away, so this cell cannot come from one — but an uploaded CSV or a
+     * hand-built column can, and the row's job is to show what it was given rather than to
+     * second-guess it. What is really pinned here is the React key: two children sharing one
+     * would drop the second silently.
+     */
     const { container } = draw('left; left')
     expect([...container.querySelectorAll('.explore-tag')].map((t) => t.textContent)).toEqual([
       'left',

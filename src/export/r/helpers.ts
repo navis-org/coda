@@ -160,18 +160,19 @@ registerHelper({
 /**
  * Coda's `join` aggregation, in R.
  *
- * `paste(x, collapse = "; ")` is the obvious spelling and keeps both an `NA` — as the literal
- * two letters — and an empty string, where Coda reads either as an absence. A group with
- * nothing in it answers `NA_character_` rather than `""`, so the column stays a real absence
- * and `is.na` finds it. The separator is spliced from `JOIN_SEPARATOR`.
+ * `paste(x, collapse = "; ")` is the obvious spelling and keeps an `NA` — as the literal two
+ * letters — an empty string, and every repeat, where Coda reads the first two as absences and
+ * folds the third away. A group with nothing in it answers `NA_character_` rather than `""`, so
+ * the column stays a real absence and `is.na` finds it. The separator is spliced from
+ * `JOIN_SEPARATOR`, and `unique` keeps first-appearance order.
  */
 registerHelper({
   name: 'coda_join',
   source: [
-    "#' Coda's `join` aggregation: row order, absences skipped, repeats kept.",
+    "#' Coda's `join` aggregation: distinct, first-appearance order, absences skipped.",
     'coda_join <- function(x) {',
     '  kept <- as.character(x[!is.na(x)])',
-    '  kept <- kept[kept != ""]',
+    '  kept <- unique(kept[kept != ""])',
     `  if (length(kept) == 0) NA_character_ else paste(kept, collapse = ${JSON.stringify(JOIN_SEPARATOR)})`,
     '}',
   ],
