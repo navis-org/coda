@@ -14,6 +14,7 @@ import type { ParamValues } from '../core/node'
 import { defaultParams } from '../core/node'
 import { requireNodeDef } from '../core/registry'
 import { COL_WIDTH, GRID_ORIGIN, ROW_HEIGHT } from '../layout/place'
+import { noteNode } from './notes'
 
 export interface ExampleGraph {
   id: string
@@ -72,34 +73,8 @@ interface NoteSpec {
   text: string
 }
 
-const NOTE_TYPE = 'note.text'
-
-/**
- * Strip the source indentation off a note written as an indented template literal.
- *
- * Not cosmetic: the markdown parser recognises a heading only at the start of a line, so a `###`
- * indented to match the surrounding code is not a heading at all — it is a paragraph that begins
- * with three hashes. The common indent is measured and removed rather than every leading space,
- * so a nested list in a future note still nests.
- */
-function dedent(text: string): string {
-  const lines = text.replace(/\r\n?/g, '\n').split('\n')
-  const indents = lines.filter((l) => l.trim()).map((l) => l.length - l.trimStart().length)
-  const common = indents.length ? Math.min(...indents) : 0
-  return lines
-    .map((l) => l.slice(common))
-    .join('\n')
-    .trim()
-}
-
 function placeNote({ id, col, y, width, height, text }: NoteSpec): GraphNode {
-  return {
-    id,
-    type: NOTE_TYPE,
-    position: { x: GRID_ORIGIN.x + col * COL_WIDTH, y },
-    params: { ...defaultParams(requireNodeDef(NOTE_TYPE)), text: dedent(text) } as ParamValues,
-    size: { width, height },
-  }
+  return noteNode({ id, x: GRID_ORIGIN.x + col * COL_WIDTH, y, width, height, text })
 }
 
 function assemble(

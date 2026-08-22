@@ -7926,6 +7926,76 @@ dead database. And in `ui/panels/library.test.tsx`, never put a `fireEvent` insi
 the click mutates the DOM, the observer re-invokes the callback, and the two chase each other
 without ever yielding to the poll's own timeout. It hangs the run rather than failing it.
 
+## Starter graphs, and the one that is not the generic shape
+
+`examples/starters.ts` — what `New ▸ <dataset>` and the start page's dataset rail both build,
+through one `buildStarter(spec)`. The generic shape is four nodes: a Dataset, an Explore, and a
+Table and a Neuroglancer view off `Selected`, plus the Description companion. Built from each
+node's own defaults, exactly like the examples, so a starter cannot drift out of sync with a
+node's param set.
+
+**FlyWire FAFB opts out, and the reason is the backend rather than taste.** A neuPrint dataset
+carries its cell typing as properties on the neuron, so "a Dataset and a browser" is a complete
+first screen. A CAVE datastack does not — the labels live in a table — so the same four nodes
+open on a list of eighteen-digit root ids and nothing else. No arrangement of the generic shape
+fixes that, because what is missing is a *chain in front of the dataset*:
+
+```text
+Table from URL ▸ Combine Columns ▸ Update root IDs ─▸ Dataset ▸ Annotations
+```
+
+`BESPOKE` in that file is the dispatch — keyed by node type, since that is what a `StarterSpec`
+carries. One entry today, and it is a table rather than an `if` so the second cannot become one.
+
+Four things in the FlyWire graph each answer a question somebody would otherwise have to
+discover, and all four are pinned by `examples.test.ts`:
+
+- **`raw.githubusercontent.com`, not the `github.com/…/raw/…` address the repository's own UI
+  hands you.** That one answers `302` with `access-control-allow-origin:` **present and empty**,
+  and a browser CORS-checks every hop of a redirect chain — so it never reaches the host that
+  answers `200` with `*`. Measured from a real page origin: the first throws
+  `TypeError: Failed to fetch`, the second returns 31,718,491 characters.
+- **Combine Columns**, because the type has to arrive in a column *called* `type` before anything
+  reads it in words — the connectivity tables, Explore's chips, Profile's roll-ups all address it
+  by literal name (`annotationColumn`). The coalesce is about **precedence**, not coverage, and
+  the measurement is the reason to say so: on the published file `cell_type` covers 137,720 of
+  139,248 neurons and `hemibrain_type` 33,271, but only **2** neurons have the second and not the
+  first — so `[cell_type, hemibrain_type]` gains two rows and decides the nomenclature for the
+  rest. Reaching for coverage means naming more columns: adding `supertype` and `cell_class` takes
+  it to 139,166, with 82 carrying nothing at all.
+- **Update root IDs**, because the published file is a snapshot and a root id is retired by any
+  proofreading edit. Without it the rows whose ids have moved on join to nothing, and the dataset
+  merely reads as under-annotated — which is the failure `data/cave/rootIds.ts` exists to
+  announce.
+- **The Dataset is wired *back* into Update root IDs, and that is a reference edge.** Two edges
+  between one pair in opposite directions; `topoSort` sees only the dataflow half. It is the
+  placement `cave.updateRootIds` was given a reference port for, and the test asserts `cyclic` is
+  empty so a regression there shows up as a starter rather than as a unit test nobody connected.
+
+Two deliberate departures from the generic shape, both visible on the canvas. The **Table hangs
+off `All` rather than `Selected`** — every other starter avoids that, because `Hits`/`All` with
+an empty search is the whole dataset and teaches the wrong lesson about what to connect; here the
+annotated neuron table *is* the thing worth looking at, and a Table showing nothing until a row
+is ticked would hide it. And **Explore opens with one neuron already picked**, so the
+Neuroglancer panel draws something on the first Run.
+
+**The CAVE table node is configured and left unwired**, beside a note saying what it is for. It
+names `neuron_information_v2`, which is FlyWire's community annotations — one row per (neuron,
+tag) — and folding that into one cell per neuron is `Group By ▸ join text`, then a Join, then
+Explore's `Additional tags`. Four more nodes on a first screen, against a source already pointed
+at the right table for whoever wants them. Note what it costs, since it is not free: a node with
+no consumer still runs, so a full Run fetches that table for nothing.
+
+`examples/notes.ts` holds `dedent` and `noteNode`, shared with the bundled examples rather than
+copied — both write notes as indented template literals in TypeScript source, and two copies of
+`dedent` is two answers to what counts as a heading.
+
+**Checked in a real browser** over CDP against `pnpm dev`, which is the only thing that could:
+eleven cards and ten wires, no overlaps at their measured sizes, no console errors, no sideways
+body scroll, every one of the note's four links resolving (the DOI to `doi.org` rather than to a
+university proxy), and neither note clipping its own text — `scrollHeight` equal to
+`clientHeight` on both. What is *not* checked anywhere is a Run, which needs a CAVE token.
+
 ## Start page
 
 The first thing anyone sees: a modal over the canvas with the alpha blurb, two rails of

@@ -1,12 +1,13 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 
-import { deserializeGraph, serializeGraph } from '../core/graph'
+import { deserializeGraph, serializeGraph, topoSort } from '../core/graph'
 import { inferGraph } from '../core/inference'
 import { isAnnotation } from '../core/registry'
 import { parseMarkdown } from '../ui/markdown'
 import { Scheduler } from '../core/scheduler'
 import { isMatrixValue, isTableValue } from '../core/values'
 import { MockSource } from '../data/mock/MockSource'
+import { CaveSource } from '../data/cave/CaveSource'
 import { NeuPrintSource } from '../data/neuprint/NeuPrintSource'
 import { registerSource, requireSource } from '../data/source'
 import '../nodes'
@@ -22,6 +23,7 @@ beforeAll(() => {
   // Registered but never called: the starter only asks what this source *can* do, which is
   // a synchronous capability read.
   registerSource(new NeuPrintSource())
+  registerSource(new CaveSource())
 })
 
 function scheduler(): Scheduler {
@@ -284,6 +286,67 @@ describe('starters', () => {
     // Nothing ticked yet, but the whole dataset matches an empty query.
     expect(isTableValue(hits) && hits.length).toBeGreaterThan(0)
     expect(isTableValue(selected) && selected.length).toBe(0)
+  })
+
+  it('survives a save and reload', () => {
+    const graph = buildStarter(spec)
+    const { graph: restored, warnings } = deserializeGraph(
+      JSON.parse(JSON.stringify(serializeGraph(graph))),
+    )
+    expect(warnings).toEqual([])
+    expect(restored.nodes).toHaveLength(graph.nodes.length)
+  })
+})
+
+/**
+ * FlyWire FAFB opts out of the generic shape — see `BESPOKE` in `starters.ts`.
+ *
+ * Held to the same bar as the rest, and to one more: a CAVE datastack takes its cell typing from
+ * a table rather than from properties on the neuron, so the point of this starter is the chain
+ * that fetches it. A wire missing there is a starter that opens on a list of root ids.
+ */
+describe('the FlyWire starter', () => {
+  const spec = { nodeType: 'dataset.flywire', label: 'FlyWire FAFB', sourceId: 'cave' }
+
+  it('builds with no type errors or warnings', () => {
+    const inference = inferGraph(buildStarter(spec))
+    const issues = Object.entries(inference.nodes).flatMap(([nodeId, node]) =>
+      node.issues.map((i) => `${nodeId}: ${i.severity}: ${i.message}`),
+    )
+    expect(issues).toEqual([])
+    expect(inference.ok).toBe(true)
+  })
+
+  it('feeds the dataset its annotations, through the repair', () => {
+    const graph = buildStarter(spec)
+    const into = (target: string, handle: string) =>
+      graph.edges.find((e) => e.target === target && e.targetHandle === handle)
+
+    expect(into('dataset', 'annotations')?.source).toBe('repair')
+    expect(into('repair', 'in')?.source).toBe('combine')
+    expect(into('combine', 'in')?.source).toBe('annotations')
+
+    // The published file spreads a neuron's type over two columns; coalescing them into `type`
+    // is what makes the connectivity tables and Explore's chips read in words.
+    const combine = graph.nodes.find((n) => n.id === 'combine')!
+    expect(combine.params.columns).toEqual(['cell_type', 'hemibrain_type'])
+    expect(combine.params.into).toBe('type')
+  })
+
+  it('reads the annotations through a host that answers a browser', () => {
+    // `github.com/.../raw/...` answers 302 with an empty `access-control-allow-origin`, and a
+    // browser CORS-checks every hop — so the address the repository's own UI hands you is the
+    // one address this cannot use.
+    const url = String(buildStarter(spec).nodes.find((n) => n.id === 'annotations')!.params.url)
+    expect(url.startsWith('https://raw.githubusercontent.com/')).toBe(true)
+  })
+
+  it('names the datastack through a reference, so the round trip is not a cycle', () => {
+    const graph = buildStarter(spec)
+    const back = graph.edges.find((e) => e.target === 'repair' && e.targetHandle === 'dataset')
+    expect(back?.source).toBe('dataset')
+    // Both directions between one pair. `topoSort` only sees the dataflow half of it.
+    expect(topoSort(graph).cyclic).toEqual([])
   })
 
   it('survives a save and reload', () => {
