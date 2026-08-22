@@ -537,7 +537,13 @@ describe('an annotated dataset', () => {
   it('lists the chain’s neurons on a datastack that has none of its own', async () => {
     registerSource(annotatedSource('mock-bare'))
     setup({}, 'mock-bare', {
-      dataset: { kind: 'dataset', sourceId: 'mock-bare', datasetId: DATASET, label: 'bare', annotations: CHAIN },
+      dataset: {
+        kind: 'dataset',
+        sourceId: 'mock-bare',
+        datasetId: DATASET,
+        label: 'bare',
+        annotations: CHAIN,
+      },
     })
     await waitFor(() => expect(screen.getByText(/2 neurons/)).toBeTruthy())
   })
@@ -555,12 +561,21 @@ describe('an annotated dataset', () => {
         id: 'mock-waits',
         neuronIndex: async () => {
           asked += 1
-          return makeTable(tableSchema(column('neuronId', 'str')), { neuronId: ['1'] }, 'neurons')
+          return makeTable(
+            tableSchema(column('neuronId', 'str')),
+            { neuronId: ['1'] },
+            'neurons',
+          )
         },
       }),
     )
 
-    setup({}, 'mock-waits', undefined, tableSchema(column('neuronId', 'str'), column('lab', 'str')))
+    setup(
+      {},
+      'mock-waits',
+      undefined,
+      tableSchema(column('neuronId', 'str'), column('lab', 'str')),
+    )
     await waitFor(() => expect(screen.getByText(/Press Run/)).toBeTruthy())
     // Nothing fetched, and no refusal shown — this is a state, not a fault.
     expect(asked).toBe(0)
@@ -574,7 +589,14 @@ describe('thumbnail caching', () => {
   const KEY = `thumb:mock:${DATASET}:${BODY}:152`
 
   function renderThumb(sourceId = 'mock') {
-    render(<NeuronThumbnail sourceId={sourceId} datasetId={DATASET} neuronId={String(BODY)} size={76} />)
+    render(
+      <NeuronThumbnail
+        sourceId={sourceId}
+        datasetId={DATASET}
+        neuronId={String(BODY)}
+        size={76}
+      />,
+    )
   }
 
   it('ignores an entry written by an older encoder, refusals included', async () => {
@@ -824,5 +846,78 @@ describe('Explore in the editor', () => {
     await waitFor(() =>
       expect(dialog.querySelectorAll('.explore-row').length).toBeGreaterThan(0),
     )
+  })
+})
+
+/**
+ * A stat that carries a unit.
+ *
+ * The schema half already declared `nm`; the row read it and used it only in a tooltip, so a
+ * CATMAID cable length went through the unit-blind compact formatter and rendered as "3M" — a
+ * magnitude carried by a suffix meaning *million* beside a unit meaning *nano*.
+ */
+describe('a stat that carries a unit', () => {
+  function statRow(schema: TableSchema, data: Record<string, (number | string)[]>) {
+    render(
+      <NeuronRow
+        table={makeTable(schema, data, 'neurons')}
+        row={0}
+        fields={rowFields(schema)}
+        sourceId={undefined}
+        datasetId={undefined}
+        selected={false}
+        onToggle={() => {}}
+        compact={false}
+      />,
+    )
+    return document.querySelector('.explore-stat')
+  }
+
+  it('draws a cable length in millimetres, and keeps the exact value on hover', () => {
+    const stat = statRow(
+      tableSchema(column('neuronId', 'i64'), column('cableLength', 'f64', 'nm')),
+      { neuronId: [16], cableLength: [2_980_158.182] },
+    )
+    expect(stat?.querySelector('.explore-stat__value')?.textContent).toBe('2.98 mm')
+    // The scaled figure is for reading; the stored one is the one to copy anywhere else.
+    expect(stat?.getAttribute('title')).toBe('cableLength: 2,980,158.182 nm')
+  })
+
+  it('leaves a count as a plain figure, since its label already says what it counts', () => {
+    const stat = statRow(tableSchema(column('neuronId', 'i64'), column('nodes', 'i64')), {
+      neuronId: [16],
+      nodes: [16_840],
+    })
+    expect(stat?.querySelector('.explore-stat__value')?.textContent).toBe('16.8K')
+    expect(stat?.querySelector('.explore-stat__label')?.textContent).toBe('nodes')
+  })
+
+  // `nodes` is CATMAID's `size`: without it a CATMAID row had exactly one stat, because it
+  // publishes none of the other six.
+  it('shows both of a CATMAID row’s figures', () => {
+    const schema = tableSchema(
+      column('neuronId', 'i64'),
+      column('nodes', 'i64'),
+      column('cableLength', 'f64', 'nm'),
+    )
+    render(
+      <NeuronRow
+        table={makeTable(
+          schema,
+          { neuronId: [16], nodes: [16_840], cableLength: [2_980_158] },
+          'neurons',
+        )}
+        row={0}
+        fields={rowFields(schema)}
+        sourceId={undefined}
+        datasetId={undefined}
+        selected={false}
+        onToggle={() => {}}
+        compact={false}
+      />,
+    )
+    expect(
+      Array.from(document.querySelectorAll('.explore-stat__value')).map((el) => el.textContent),
+    ).toEqual(['16.8K', '2.98 mm'])
   })
 })

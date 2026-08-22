@@ -3559,6 +3559,43 @@ for the same reason. It carries its own `.download-button` positioning context: 
 absolute against it and must not anchor to the surrounding row, which holds ⤢ in a caption bar and
 the summary in a foot.
 
+### A length is not a count either
+
+`formatCompact` is unit-blind — it reads magnitude and nothing else — so a cable length of
+2,980,158 nm rendered as **`3M`**: a magnitude carried entirely by a suffix meaning *million*,
+next to a stored unit meaning *nano*. About as misleading as a number can be, and it is the
+figure every paper about a fly neuron quotes in millimetres.
+
+`formatMeasure(value, unit)` in `ui/format.ts` walks the SI ladder from `nm` — nm, µm, mm, m —
+picking the coarsest step the value fills and **flooring at nm**, so a sub-micron length stays a
+number instead of becoming `0 µm`. `2,980,158.182` reads `2.98 mm`; the giant fibre's
+22,484,326 reads `22.48 mm`.
+
+**The unit travels with the number here and does not for a count**, which is the asymmetry worth
+knowing before adding a fourth unit. Which unit a *length* wants depends on its magnitude, so
+`2.98` alone says nothing — where `12.9K` beside a `pre` label says everything. So `synapses` and
+`voxels` fall through to `formatCompact` unchanged: a count has no ladder, and a voxel is not a
+fraction of anything. Those three are the only units declared anywhere in the tree.
+
+**The schema half was already right, which is what made this a display bug rather than a data
+one.** Every `cableLength` column has carried `'nm'` since `CANONICAL_SCHEMAS`, and Explore's row
+*read* it — through `statUnit` — and then used it only in a `title`. The value beside it went
+through the unit-blind formatter. So the fix is where the two met, not in either half.
+
+**Glanceable on screen, exact on hover.** The row's tooltip now carries the stored figure in the
+stored unit (`cableLength: 2,980,158.182 nm`), because the scaled form is for reading and the
+stored one is what somebody copies into anything else. The **Table** viewer is deliberately
+untouched: it prints the exact value with the unit in its header, and a table is where exact
+values are read — the compact forms are for the glanceable surfaces.
+
+Note what is *not* covered: a scatter axis over a `nm` column still reads `3M`, because
+`scatterDraw` formats ticks without ever seeing the column's unit. Threading it through the plot
+spec is the honest fix and has not been made.
+
+**`nodes` joined `STATS` with it.** It is CATMAID's `size` — a skeleton's node count is what says
+how much of a neuron was traced — and without it a CATMAID row had exactly one stat, since that
+backend publishes none of the other six.
+
 ### An identifier is not a quantity
 
 `formatCell` takes the **column name** as well as the value, and a column of identifiers is

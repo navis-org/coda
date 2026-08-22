@@ -125,7 +125,21 @@ const CHIPS: ChipSpec[] = [
 
 const CHIP_BY_NAME = new Map(CHIPS.map((chip) => [chip.name, chip]))
 
-const STATS = ['pre', 'post', 'synweight', 'upstream', 'downstream', 'size', 'cableLength']
+/*
+ * `nodes` sits beside `size` because it is the same question on a backend that has no voxel
+ * count: a CATMAID skeleton's node count is what says how much of a neuron was traced. Without
+ * it a CATMAID row had exactly one stat, since it publishes none of the other six.
+ */
+const STATS = [
+  'pre',
+  'post',
+  'synweight',
+  'upstream',
+  'downstream',
+  'size',
+  'nodes',
+  'cableLength',
+]
 
 /**
  * Eight, which is the size of the palette — so the automatic list can never want a colour that

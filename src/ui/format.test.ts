@@ -10,7 +10,14 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { formatAge, formatCell, formatNumber, isIdentifierColumn } from './format'
+import {
+  formatAge,
+  formatCell,
+  formatCompact,
+  formatMeasure,
+  formatNumber,
+  isIdentifierColumn,
+} from './format'
 
 describe('isIdentifierColumn', () => {
   it('takes the names every query node publishes', () => {
@@ -112,5 +119,45 @@ describe('formatAge', () => {
 
   it('does not go negative on a clock that moved', () => {
     expect(formatAge(-5000)).toBe('0s')
+  })
+})
+
+describe('a measurement in the unit somebody reads it in', () => {
+  /*
+   * The reported case. Nanometres are the right storage unit and the wrong display one for
+   * anything the size of a neuron: `formatCompact` is unit-blind, so 2,980,158 nm read as "3M" —
+   * a magnitude carried entirely by a suffix that means *million* next to a unit that means
+   * *nano*, which is about as misleading as a number can be.
+   */
+  it('reads a fly neuron’s cable length in millimetres', () => {
+    expect(formatMeasure(2_980_158.182, 'nm')).toBe('2.98 mm')
+    expect(formatMeasure(22_484_326.7, 'nm')).toBe('22.48 mm')
+  })
+
+  it('climbs the ladder with the magnitude', () => {
+    expect(formatMeasure(999, 'nm')).toBe('999 nm')
+    expect(formatMeasure(12_500, 'nm')).toBe('12.5 µm')
+    expect(formatMeasure(12e9, 'nm')).toBe('12 m')
+  })
+
+  // Floored at nm, so a sub-micron length stays a number rather than becoming "0 µm".
+  it('does not round a short length away', () => {
+    expect(formatMeasure(0, 'nm')).toBe('0 nm')
+    expect(formatMeasure(4, 'nm')).toBe('4 nm')
+  })
+
+  /*
+   * A count has no ladder — 12.9K synapses is already what somebody wants, and a voxel is not a
+   * fraction of anything. So those keep `formatCompact`'s bare number, and the unit stays where
+   * the caller was already putting it.
+   */
+  it('leaves a count alone, unit and all', () => {
+    expect(formatMeasure(12_900, 'synapses')).toBe(formatCompact(12_900))
+    expect(formatMeasure(2_980_158, 'voxels')).toBe('3M')
+    expect(formatMeasure(2_980_158, undefined)).toBe('3M')
+  })
+
+  it('degrades rather than printing a scaled NaN', () => {
+    expect(formatMeasure(Number.NaN, 'nm')).toBe('—')
   })
 })

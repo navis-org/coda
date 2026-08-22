@@ -18,6 +18,45 @@ function trim(value: number): string {
   return value.toLocaleString(undefined, { maximumFractionDigits: 1 })
 }
 
+/**
+ * The SI ladder a length is read on, coarsest last.
+ *
+ * Only lengths get one, and only from `nm`, because that is the one unit in the tree with a
+ * scale problem: `synapses` and `voxels` are *counts*, and a count has no ladder — 12.9K
+ * synapses is already the form somebody wants, and a voxel is not a fraction of anything.
+ */
+const LENGTH_STEPS: ReadonlyArray<{ unit: string; per: number }> = [
+  { unit: 'nm', per: 1 },
+  { unit: 'µm', per: 1e3 },
+  { unit: 'mm', per: 1e6 },
+  { unit: 'm', per: 1e9 },
+]
+
+/**
+ * A measurement in the unit a reader thinks in, rather than the one it is stored in.
+ *
+ * `formatCompact` is unit-blind, so a cable length of 2,980,158 nm read as "3M" — a number whose
+ * magnitude is carried entirely by a suffix that means "million" rather than "milli". Nanometres
+ * are the right *storage* unit (invariant: geometry is normalised so meshes and skeletons share
+ * one scene) and the wrong *display* one for anything the size of a neuron: a fly neuron's arbor
+ * is millimetres of cable, and that is the figure in every paper about it.
+ *
+ * **The unit travels with the number here, and does not for a count.** That asymmetry is the
+ * point rather than an inconsistency: which unit a length wants depends on its magnitude, so
+ * "2.98" alone is meaningless where "12.9K" beside a `pre` label is not. A caller that shows the
+ * unit separately should keep using `formatCompact`.
+ */
+export function formatMeasure(value: number, unit: string | undefined): string {
+  if (unit !== 'nm' || !Number.isFinite(value)) return formatCompact(value)
+  const abs = Math.abs(value)
+  // The coarsest step the value fills, floored at nm so a sub-micron length stays readable
+  // rather than becoming "0 µm".
+  let step = LENGTH_STEPS[0]!
+  for (const candidate of LENGTH_STEPS) if (abs >= candidate.per) step = candidate
+  const scaled = value / step.per
+  return `${scaled.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${step.unit}`
+}
+
 /** Full precision with thousands separators, for tables and tooltips. */
 export function formatNumber(value: number): string {
   if (!Number.isFinite(value)) return '—'

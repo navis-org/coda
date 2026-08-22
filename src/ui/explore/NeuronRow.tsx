@@ -14,7 +14,7 @@ import { memo } from 'react'
 
 import { idText } from '../../core/ids'
 import type { CellValue, TableValue } from '../../core/values'
-import { formatCompact, formatCell } from '../format'
+import { formatCell, formatMeasure, formatNumber } from '../format'
 import { NeuronThumbnail } from './NeuronThumbnail'
 import type { RowFields } from './rowFields'
 import { chipKey, chipSlots, splitTags, statUnit } from './rowFields'
@@ -171,10 +171,19 @@ function NeuronRowImpl({
         {fields.stats.map((name) => {
           const value = cellOf(table, name, row)
           const unit = statUnit(table.schema, name)
+          /*
+           * Glanceable on screen, exact on hover. The figure is scaled into the unit a reader
+           * thinks in — a cable length is millimetres of arbor, not three million nanometres —
+           * and the tooltip keeps the stored value, which is the one to copy into anything else.
+           */
+          const exact =
+            typeof value === 'number'
+              ? `${name}: ${formatNumber(value)}${unit ? ` ${unit}` : ''}`
+              : name
           return (
-            <span key={name} className="explore-stat" title={unit ? `${name} (${unit})` : name}>
+            <span key={name} className="explore-stat" title={exact}>
               <span className="explore-stat__value">
-                {typeof value === 'number' ? formatCompact(value) : '—'}
+                {typeof value === 'number' ? formatMeasure(value, unit) : '—'}
               </span>
               <span className="explore-stat__label">{name}</span>
             </span>
