@@ -97,7 +97,7 @@ function outputName(base: string, def: NodeDefinition, portId: string): string {
 // ---------------------------------------------------------------------------
 
 export function exportRmd(graph: CodaGraph, options: ExportOptions = {}): ExportResult {
-  const refusal = canExportNotebook(graph)
+  const refusal = canExportNotebook(graph, 'r')
   if (refusal) return { ok: false, ...refusal }
 
   // Referenced nodes first — see `exportOrder`; `topoSort` alone is the running order, which
@@ -238,6 +238,14 @@ export function exportRmd(graph: CodaGraph, options: ExportOptions = {}): Export
         continue
       }
       if (bound.has(portKey(edge.source, edge.sourceHandle))) continue
+      /*
+       * A reference is not a value dependency, so an unbound one is not a blockage. It can only
+       * be unbound when the referenced node comes *later* — which `referencesFirst` avoids where
+       * it can and cannot avoid at all for the wiring references exist for, since there the
+       * dataset consumes the very node referencing it. An emitter reading a reference falls back
+       * to the referenced node's type, which is all a reference ever promised.
+       */
+      if (port.reference === true) continue
       blockedBy.push(nodeLabel(nodes.get(edge.source)))
     }
 

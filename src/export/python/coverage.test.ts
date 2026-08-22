@@ -25,26 +25,11 @@ import { getEmitter, registeredEmitterTypes } from './registry'
  * of a long list is that the exporter is unfinished.
  */
 const NO_EMITTER: Record<string, string> = {
-  'dataset.cave':
-    'A CAVE datastack named by hand, so it has the same reason as `dataset.flywire`: this ' +
-    'notebook is built on neuprint-python and there is no caveclient emitter yet.',
-  'cave.updateRootIds':
-    'Repairs CAVE root ids against a materialization — caveclient’s chunkedgraph, which no ' +
-    'emitter here speaks. It only ever sits on a CAVE dataset, whose own node is excused above.',
-  'annotation.caveTable':
-    'An annotation source. It has no neuPrint counterpart at all — neuPrint carries its cell ' +
-    'typing as properties on the neuron, so there is nothing for a generated cell to fetch ' +
-    'separately. It reaches a notebook when the CAVE emitters do.',
   'annotation.flyTable':
-    'An annotation source — see annotation.caveTable. Its API is SeaTable\u2019s, which no ' +
-    'library in this notebook\u2019s stack speaks.',
+    'An annotation source whose API is SeaTable\u2019s, which nothing in this notebook\u2019s ' +
+    'stack speaks — no client library, and the REST call needs a base token this exporter has ' +
+    'no way to obtain. Its sibling `annotation.caveTable` does emit, because CAVE has one.',
   'annotation.seaTable': 'An annotation source \u2014 see annotation.flyTable.',
-  'dataset.flywire':
-    'A CAVE datastack rather than a neuPrint one. This notebook is built on neuprint-python, ' +
-    'and a faithful translation needs caveclient plus a materialization version — see ' +
-    'src/data/cave. Until that is written it degrades to a TODO, which is the honest outcome: ' +
-    'emitting neuPrint code against a dataset neuPrint has never heard of would produce a ' +
-    'document that runs and answers nothing.',
   'note.text': 'An annotation. It becomes a markdown cell, which the walk does directly.',
   'dataset.mock.hemibrain':
     'Synthetic, so a graph holding one is refused before the walk starts. An emitter here ' +

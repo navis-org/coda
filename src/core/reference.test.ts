@@ -256,10 +256,36 @@ describe('writing the nodes out, which wants the opposite order', () => {
      * that was translated perfectly well, and emits a TODO that is false and cascades to
      * everything downstream of it.
      */
-    const g = roundTrip()
+    let g = emptyGraph('one-way')
+    g = addNode(g, node('rd', 'test.ref.reader'))
+    g = addNode(g, node('ds', 'test.ref.dataset', { id: 'stack:7' }))
+    g = addEdge(g, {
+      source: 'ds',
+      sourceHandle: 'dataset',
+      target: 'rd',
+      targetHandle: 'dataset',
+    })
+    // Nothing orders these two, so the sort is free to put the reader first; the hoist is what
+    // makes the dataset's line exist by the time the reader names it.
     const order = referencesFirst(topoSort(g).order, g)
     expect(order.indexOf('ds')).toBeLessThan(order.indexOf('rd'))
-    // The running order is the other way round, and stays that way.
+  })
+
+  it('leaves a referenced node that consumes its reader where it is', () => {
+    /*
+     * The wiring references exist for, and the one case the hoist must decline: the dataset takes
+     * the reader's output as its annotations, so writing it first would classify it `blocked` by
+     * its own labels and cascade a false TODO to everything downstream — the very failure the
+     * hoist was added to prevent, arrived at from the other side.
+     *
+     * A reader left ahead of its reference is not stranded: the walk does not treat an unbound
+     * reference port as blocking, and an emitter falls back to the referenced node's *type*,
+     * which is all a reference ever promised.
+     */
+    const g = roundTrip()
+    const order = referencesFirst(topoSort(g).order, g)
+    expect(order.indexOf('rd')).toBeLessThan(order.indexOf('ds'))
+    // The running order is the same, and stays that way.
     expect(topoSort(g).order.indexOf('rd')).toBeLessThan(topoSort(g).order.indexOf('ds'))
   })
 

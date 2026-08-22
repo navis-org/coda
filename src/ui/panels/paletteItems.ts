@@ -125,10 +125,16 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
    */
   const annotated = selectedNode !== undefined && isAnnotation(selectedNode.type)
   const computable = single !== undefined && !annotated
-  // Asked once, up front. `buildCommandItems` runs on every store change, so this deliberately
-  // comes from `canExport` rather than from the exporter — importing the latter to answer a
-  // question about a menu row would put every emitter in the main chunk.
-  const exportRefusal = canExportNotebook(store.graph)
+  /*
+   * Asked once per format, up front. `buildCommandItems` runs on every store change, so this
+   * deliberately comes from `canExport` rather than from the exporter — importing the latter to
+   * answer a question about a menu row would put every emitter in the main chunk.
+   *
+   * Two answers rather than one: the exporters no longer cover the same backends, so a FlyWire
+   * graph offers the notebook and refuses the R document.
+   */
+  const notebookRefusal = canExportNotebook(store.graph, 'python')
+  const rmdRefusal = canExportNotebook(store.graph, 'r')
 
   const items: PaletteItem[] = [
     {
@@ -284,20 +290,20 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
        * which is every synthetic graph anyone starts from, it is the *usual* state rather than
        * an edge case.
        */
-      hint: exportRefusal
-        ? `${exportRefusal.reason} — ${exportRefusal.fix}`
+      hint: notebookRefusal
+        ? `${notebookRefusal.reason} — ${notebookRefusal.fix}`
         : 'Download this graph as a Jupyter notebook (neuprint-python, pandas, navis)',
-      disabled: exportRefusal !== undefined,
+      disabled: notebookRefusal !== undefined,
       perform: () => void downloadNotebook(store.graph, { appVersion: __APP_VERSION__ }),
     },
     {
       id: 'cmd:export-rmd',
       label: 'Export as R Markdown',
       action: 'Graph',
-      hint: exportRefusal
-        ? `${exportRefusal.reason} — ${exportRefusal.fix}`
+      hint: rmdRefusal
+        ? `${rmdRefusal.reason} — ${rmdRefusal.fix}`
         : 'Download this graph as an .Rmd (neuprintr, dplyr, nat)',
-      disabled: exportRefusal !== undefined,
+      disabled: rmdRefusal !== undefined,
       perform: () => void downloadRmd(store.graph, { appVersion: __APP_VERSION__ }),
     },
 

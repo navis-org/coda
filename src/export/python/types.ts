@@ -49,6 +49,7 @@ export type PyModule =
   | 'pandas'
   | 'numpy'
   | 'neuprint'
+  | 'caveclient'
   | 'navis'
   | 'navisNeuprint'
   | 'networkx'
@@ -87,6 +88,16 @@ export const MODULES: Record<PyModule, ModuleSpec> = {
     pip: 'navis',
   },
   neuprint: { from: 'neuprint', pip: 'neuprint-python' },
+  /*
+   * The CAVE client, for a datastack rather than a connectome server. `CAVEclient` is the only
+   * name a generated cell ever needs — everything else hangs off it (`client.materialize`,
+   * `client.chunkedgraph`), which is caveclient's own idiom and keeps the import line short.
+   *
+   * Its credential is a file rather than an environment variable: caveclient reads
+   * `~/.cloudvolume/secrets/cave-secret.json`, written once by `client.auth.setup_token()`. That
+   * is why no dataset cell here has a `token=` argument, unlike the neuPrint one.
+   */
+  caveclient: { from: 'caveclient', pip: 'caveclient' },
   /*
    * Two keys for one distribution, because a `from` import can only name one module and the
    * clustering needs `scipy.cluster.hierarchy` and `scipy.spatial.distance` both. The pip

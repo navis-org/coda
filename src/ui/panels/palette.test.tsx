@@ -98,8 +98,11 @@ describe('buildCommandItems', () => {
    * The second refusal, and it is the one that was missing: the emitters skipped a CAVE family
    * while `canExportNotebook` refused on `synthetic` alone, so the row lit, the dataset cell
    * emitted a TODO and every node after it cascaded to "nothing upstream produced a value".
+   *
+   * It is now asked **per format**, because the two exporters cover different backends: FlyWire
+   * emits caveclient in Python and nothing in R. The two rows disagreeing is the point.
    */
-  it('disables Export as Jupyter Notebook on a dataset no emitter is written for', () => {
+  it('offers the notebook and refuses the R document on a CAVE dataset', () => {
     act(() => {
       let graph = emptyGraph('FlyWire')
       graph = addNode(graph, {
@@ -110,9 +113,11 @@ describe('buildCommandItems', () => {
       })
       useGraphStore.getState().loadGraph(graph)
     })
-    const item = byId(commands(), 'cmd:export-notebook')
-    expect(item.disabled).toBe(true)
-    expect(item.hint).toContain('no notebook can be built for it yet')
+    expect(byId(commands(), 'cmd:export-notebook').disabled).toBe(false)
+
+    const rmd = byId(commands(), 'cmd:export-rmd')
+    expect(rmd.disabled).toBe(true)
+    expect(rmd.hint).toContain('no document can be built for this backend yet')
   })
 
   it('disables Export as Jupyter Notebook on an empty canvas', () => {

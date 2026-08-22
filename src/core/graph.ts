@@ -321,7 +321,7 @@ export function topoSort(graph: CodaGraph): TopoResult {
 }
 
 /**
- * A topological order with every reference's source moved ahead of its reader.
+ * A topological order with every reference's source moved ahead of its reader, where it can be.
  *
  * `topoSort` deliberately ignores reference edges — that is what lets a node take a dataset it
  * also feeds, and it is the right order for *running*, where the reader waits on nothing.
@@ -329,18 +329,34 @@ export function topoSort(graph: CodaGraph): TopoResult {
  * the opposite. `src/export/order.ts` is that caller and holds the reasoning; this is only the
  * transformation.
  *
+ * **Only a node with no dataflow inputs is lifted**, and that condition is not a precaution — it
+ * is the same one that makes a reference sound, made checkable. A reference is valid because the
+ * referenced node's identity comes from its params alone; a node that *consumes* something cannot
+ * be written above what it consumes, and the wiring references exist for is exactly that shape:
+ * `CAVE table → Update root IDs → Dataset` puts the dataset after both nodes referencing it, so
+ * hoisting it above them would classify it `blocked` by its own annotations and cascade a false
+ * TODO to everything downstream — the very failure the hoist was added to prevent, arrived at
+ * from the other side.
+ *
+ * A reader left ahead of its reference is not stranded: the walk does not treat an unbound
+ * reference port as blocking, and an emitter reading one falls back to the referenced node's
+ * *type*, which is all a reference ever promised.
+ *
  * Relative order is preserved on both sides, so a graph with no references is untouched.
  */
 export function referencesFirst(order: readonly string[], graph: CodaGraph): string[] {
   if (!mayHaveReferences(graph.nodes)) return [...order]
   const types = new Map(graph.nodes.map((n) => [n.id, n.type]))
   const referenced = new Set<string>()
+  const consumes = new Set<string>()
   for (const edge of graph.edges) {
     if (isReferencePort(types.get(edge.target), edge.targetHandle)) referenced.add(edge.source)
+    else consumes.add(edge.target)
   }
-  // No empty-set branch: with nothing referenced the two filters already produce an
-  // order-preserving copy, and a special case for it is one more thing to read.
-  return [...order.filter((id) => referenced.has(id)), ...order.filter((id) => !referenced.has(id))]
+  const lift = (id: string): boolean => referenced.has(id) && !consumes.has(id)
+  // No empty-set branch: with nothing lifted the two filters already produce an order-preserving
+  // copy, and a special case for it is one more thing to read.
+  return [...order.filter(lift), ...order.filter((id) => !lift(id))]
 }
 
 /**

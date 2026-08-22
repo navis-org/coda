@@ -105,7 +105,8 @@ export interface DatasetFamily {
    */
   synthetic?: boolean
   /**
-   * Which client library a generated notebook would be built on. Absent means none can be.
+   * Which client library each exporter builds on. A language absent means it cannot emit this
+   * family at all, and `canExportNotebook` refuses that format.
    *
    * Stated once here rather than tested at each site that cares, because there are three and
    * they used to disagree: both dataset emitters keyed on the *source id* while
@@ -114,12 +115,31 @@ export interface DatasetFamily {
    * a value". The Save menu offered an export that produces a document of nothing but TODOs,
    * which is exactly the outcome `canExport.ts` exists to prevent.
    *
+   * **Per language, which it was not at first**, and the day the comment here predicted has
+   * arrived: FlyWire emits caveclient in Python and nothing in R, because R's route in is
+   * `fafbseg` rather than the natverse's neuPrint client and no emitter has been written for it.
+   * One flag for both formats would either refuse an export Python can produce or offer an R
+   * document of nothing but TODOs.
+   *
    * Deliberately not derived from `sourceId`: what decides this is whether an emitter has been
-   * written, not which backend the data comes from, and those part company the day a caveclient
-   * emitter lands.
+   * written, not which backend the data comes from.
    */
-  notebook?: 'neuprint'
+  notebook?: ExportClients
 }
+
+/** The two things a graph can be exported as. */
+export type ExportLanguage = 'python' | 'r'
+
+/**
+ * The client library each exporter builds on, keyed by language.
+ *
+ * The *value* is what a refusal message names, so it is a closed set rather than a free string:
+ * a family exported through a library nobody has named here is a library nobody installed.
+ */
+export type ExportClients = Partial<Record<ExportLanguage, 'neuprint' | 'caveclient'>>
+
+/** Both exporters are built on the neuPrint clients, which is every family but FlyWire. */
+const NEUPRINT_NOTEBOOK: ExportClients = { python: 'neuprint', r: 'neuprint' }
 
 /**
  * neuPrint's families, as published at `/api/dbmeta/datasets`. Verified against the live
@@ -131,7 +151,7 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     key: 'malecns',
     sourceId: 'neuprint',
     backend: 'neuprint',
-    notebook: 'neuprint',
+    notebook: NEUPRINT_NOTEBOOK,
     family: 'male-cns',
     label: 'MaleCNS',
     description:
@@ -144,7 +164,7 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     key: 'hemibrain',
     sourceId: 'neuprint',
     backend: 'neuprint',
-    notebook: 'neuprint',
+    notebook: NEUPRINT_NOTEBOOK,
     family: 'hemibrain',
     label: 'Hemibrain',
     description:
@@ -157,7 +177,7 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     key: 'manc',
     sourceId: 'neuprint',
     backend: 'neuprint',
-    notebook: 'neuprint',
+    notebook: NEUPRINT_NOTEBOOK,
     family: 'manc',
     label: 'MANC',
     description: 'Male adult nerve cord — the ventral nerve cord, motor and premotor circuits.',
@@ -169,7 +189,7 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     key: 'opticlobe',
     sourceId: 'neuprint',
     backend: 'neuprint',
-    notebook: 'neuprint',
+    notebook: NEUPRINT_NOTEBOOK,
     family: 'optic-lobe',
     label: 'Optic Lobe',
     description:
@@ -182,7 +202,7 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     key: 'fib19',
     sourceId: 'neuprint',
     backend: 'neuprint',
-    notebook: 'neuprint',
+    notebook: NEUPRINT_NOTEBOOK,
     family: 'fib19',
     label: 'FIB-19',
     description:
@@ -195,7 +215,7 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     key: 'mushroombody',
     sourceId: 'neuprint',
     backend: 'neuprint',
-    notebook: 'neuprint',
+    notebook: NEUPRINT_NOTEBOOK,
     family: 'mushroombody',
     label: 'Mushroom Body',
     description: 'Mushroom body reconstruction. Carries no version in its dataset id.',
@@ -259,6 +279,12 @@ const CAVE_FAMILIES: DatasetFamily[] = [
     guide:
       'The public FlyWire segmentation of a whole female brain, read through CAVE rather than neuPrint — so it needs a CAVE token rather than a neuPrint one, and its version dropdown names a materialization rather than a release. Coda downloads its cell annotations once per dataset and searches them locally, so the first query waits and every one after it is immediate. Connectivity comes from a server-side roll-up of the synapse table; skeletons, meshes, synapses, paths and per-region counts are not wired up yet and the nodes that need them decline rather than failing.',
     glyph: 'brain',
+    /*
+     * Python only. `caveclient` is a faithful route in — the dataset cell is a real `CAVEclient`
+     * pinned to the materialization the node resolved — where R's would be `fafbseg`, which wraps
+     * FlyWire specifically rather than CAVE generally and has no emitter here yet.
+     */
+    notebook: { python: 'caveclient' },
   },
 ]
 

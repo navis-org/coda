@@ -11,10 +11,17 @@
  * It is also the one place the refusal policy is stated. The two surfaces *present* it
  * differently — a menu can answer back, a palette row cannot — but what counts as
  * unexportable is one rule in one place.
+ *
+ * **The rule is per language, though the policy is not.** The two exporters no longer cover the
+ * same backends — FlyWire emits caveclient in Python and nothing in R — so the question is
+ * "can this graph be exported *as this*", and every caller says which. Sharing the policy while
+ * splitting the answer is what stops the Save menu offering an R document of nothing but TODOs
+ * while correctly offering the notebook beside it.
  */
 
 import type { CodaGraph, GraphNode } from '../core/graph'
 import { getNodeDef } from '../core/registry'
+import type { ExportLanguage } from '../nodes/lib/datasetFamilies'
 import { familyForNodeType } from '../nodes/lib/datasetFamilies'
 
 export interface ExportRefusal {
@@ -60,25 +67,38 @@ export function syntheticDatasetNodes(graph: CodaGraph): GraphNode[] {
 }
 
 /**
- * Dataset nodes from a backend no emitter has been written for.
+ * Dataset nodes from a backend this language has no emitter for.
  *
  * The second refusal, and it exists for the same reason as the first rather than as an
  * exception to it: the dataset cell is the one with nothing behind it, and `emit.ts` cascades a
  * TODO to every node downstream — so what comes out is a document of nothing but TODOs. Both
- * exporters already skip these families; this is the half that stops the menu offering it.
+ * exporters already skip the families they cannot emit; this is the half that stops the menu
+ * offering it.
  *
  * `synthetic` is excluded so the two refusals cannot both fire on one node: a mock family has no
  * `notebook` either, and its own message is the more useful one.
  */
-export function untranslatableDatasetNodes(graph: CodaGraph): GraphNode[] {
+export function untranslatableDatasetNodes(
+  graph: CodaGraph,
+  language: ExportLanguage,
+): GraphNode[] {
   return graph.nodes.filter((node) => {
     const family = familyForNodeType(node.type)
-    return family !== undefined && !family.synthetic && family.notebook === undefined
+    return family !== undefined && !family.synthetic && family.notebook?.[language] === undefined
   })
 }
 
-/** The refusal, or undefined when the graph can be exported. */
-export function canExportNotebook(graph: CodaGraph): ExportRefusal | undefined {
+/** What the generated document would be built on, for a message naming what is missing. */
+const STACK: Record<ExportLanguage, string> = {
+  python: 'neuprint-python and caveclient',
+  r: 'neuprintr',
+}
+
+/** The refusal, or undefined when the graph can be exported as this. */
+export function canExportNotebook(
+  graph: CodaGraph,
+  language: ExportLanguage,
+): ExportRefusal | undefined {
   if (graph.nodes.length === 0) {
     return {
       reason: 'this graph is empty',
@@ -101,18 +121,20 @@ export function canExportNotebook(graph: CodaGraph): ExportRefusal | undefined {
       fix: 'generated in the browser — swap in a real dataset first',
     }
   }
-  const untranslatable = untranslatableDatasetNodes(graph)
+  const untranslatable = untranslatableDatasetNodes(graph, language)
   if (untranslatable.length > 0) {
     const names = untranslatable.map((n) => `“${nodeLabel(n)}”`)
+    const what = language === 'python' ? 'notebook' : 'document'
     return {
       reason:
         names.length === 1
-          ? `${names[0]} is not a neuPrint dataset`
-          : `${names.join(', ')} are not neuPrint datasets`,
+          ? `${names[0]} has no ${what} equivalent`
+          : `${names.join(', ')} have no ${what} equivalent`,
       detail:
-        'The generated notebook is built on neuprint-python and neuprintr, and there is no ' +
-        'emitter for this backend yet — so every cell after the dataset would be a TODO.',
-      fix: 'not a neuPrint dataset — no notebook can be built for it yet',
+        `The generated ${what} is built on ${STACK[language]}, and there is no emitter for ` +
+        `this backend yet — so every cell after the dataset would be a TODO.` +
+        (language === 'r' ? ' The Jupyter notebook may still cover it.' : ''),
+      fix: `no ${what} can be built for this backend yet`,
     }
   }
   return undefined

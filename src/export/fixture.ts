@@ -12,6 +12,12 @@
  *
  * It is deliberately not a workflow anybody would build. Coverage is the job; the branches
  * exist to reach node types, not to answer a question.
+ *
+ * **There are two graphs, and that is new.** The exporters no longer cover the same backends —
+ * FlyWire emits caveclient in Python and nothing in R — so a CAVE node in `everythingGraph`
+ * would make `canExportNotebook(graph, 'r')` refuse the whole thing and leave the R golden with
+ * nothing in it. `caveGraph` is the CAVE half, exported as its own notebook and asserted to be
+ * *refused* on the R side, which is the honest shape of a split neither language can hide.
  */
 
 import type { CodaGraph, GraphEdge, GraphNode } from '../core/graph'
@@ -509,5 +515,77 @@ export function everythingGraph(): CodaGraph {
       n.id === 'muted' ? { ...n, disabled: true, title: 'Muted step' } : n,
     ),
   }
+  return g
+}
+
+/**
+ * The CAVE half.
+ *
+ * Kept apart from `everythingGraph` because R refuses it outright — see the note above — and
+ * because it wants a shape the everything graph does not: the reference wiring that made
+ * reference edges necessary in the first place. `CAVE table → Update root IDs → Dataset`, with
+ * both nodes pointing their Dataset sockets *back* at the dataset they feed, which is two edges
+ * between one pair in opposite directions and a cycle at node granularity.
+ *
+ * The `Custom CAVE` node is here for the reason all six neuPrint families are in the other
+ * graph: it and `dataset.flywire` share an emitter but not the branch that resolves a
+ * materialization, so a fixture reaching only one of them records only half the code.
+ */
+export function caveGraph(): CodaGraph {
+  let g = emptyGraph('CAVE')
+  g.meta = { ...g.meta, description: 'The CAVE nodes, wired the way references exist for.' }
+
+  const nodes: Spec[] = [
+    { id: 'ds', type: 'dataset.flywire', col: 4, params: { version: '783' } },
+    {
+      id: 'ann',
+      type: 'annotation.caveTable',
+      col: 0,
+      params: { datastack: 'flywire_fafb_public:783', table: 'nuclei_v1', columns: 'volume' },
+    },
+    {
+      id: 'annLong',
+      type: 'annotation.caveTable',
+      col: 1,
+      params: {
+        table: 'hierarchical_neuron_annotations',
+        idColumn: 'target_id',
+        pivotOn: 'classification_system',
+        valueColumn: 'cell_type',
+      },
+    },
+    { id: 'filter', type: 'core.filter', col: 2, params: { column: 'type', op: 'notEmpty' } },
+    {
+      id: 'repair',
+      type: 'cave.updateRootIds',
+      col: 3,
+      params: { idColumn: 'neuronId', supervoxelColumn: 'supervoxel_id' },
+    },
+    { id: 'table', type: 'out.table', col: 5, row: 1 },
+    // A neuPrint-only node on a CAVE dataset: the walk turns an undeclared backend into a TODO,
+    // and the golden is where that message is read.
+    { id: 'find', type: 'neuron.findNeurons', col: 5, params: { typePattern: 'LC.*' } },
+    {
+      id: 'custom',
+      type: 'dataset.cave',
+      col: 0,
+      row: 2,
+      params: { datastack: 'wclee_aedes_brain', version: '117', neuronTable: 'nuclei' },
+    },
+  ]
+  for (const spec of nodes) g = place(g, spec)
+
+  const edges: Array<[string, string, string, string]> = [
+    // The reference wiring: both of these name the dataset they feed.
+    ['ds', 'dataset', 'annLong', 'dataset'],
+    ['ds', 'dataset', 'repair', 'dataset'],
+    ['ann', 'annotations', 'annLong', 'annotations'],
+    ['annLong', 'annotations', 'filter', 'in'],
+    ['filter', 'out', 'repair', 'in'],
+    ['repair', 'out', 'ds', 'annotations'],
+    ['repair', 'out', 'table', 'in'],
+    ['ds', 'dataset', 'find', 'dataset'],
+  ]
+  for (const [from, out, to, into] of edges) g = wire(g, from, out, to, into)
   return g
 }

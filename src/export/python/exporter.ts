@@ -8,7 +8,9 @@
  */
 
 import './helpers'
+import './caveHelpers'
 import './emitters/analysis'
+import './emitters/cave'
 import './emitters/connectivity'
 import './emitters/explore'
 import './emitters/profile'

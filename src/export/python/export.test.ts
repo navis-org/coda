@@ -17,20 +17,24 @@ import { addNode, emptyGraph } from '../../core/graph'
 import { allNodeDefs, requireNodeDef } from '../../core/registry'
 import '../../nodes'
 import { exportNotebook } from './exporter'
-import { everythingGraph } from '../fixture'
+import { caveGraph, everythingGraph } from '../fixture'
 import { getEmitter } from './registry'
 import { serializeNotebook } from './notebook'
 
 const GOLDEN = new URL('./__fixtures__/everything.ipynb', import.meta.url).pathname
+const CAVE_GOLDEN = new URL('./__fixtures__/cave.ipynb', import.meta.url).pathname
 
 /** Fixed, so the golden file does not change every time it is written. */
 const OPTIONS = { now: '2026-01-01', appVersion: '0.0.0-test' }
 
-function exportFixture(): string {
-  const result = exportNotebook(everythingGraph(), OPTIONS)
+function exportFixture(graph = everythingGraph()): string {
+  const result = exportNotebook(graph, OPTIONS)
   if (!result.ok) throw new Error(`refused: ${result.reason}`)
   return serializeNotebook(result.notebook)
 }
+
+/** Both fixture graphs, since the CAVE half is its own for the reason `fixture.ts` records. */
+const FIXTURES = [everythingGraph, caveGraph]
 
 describe('the fixture itself', () => {
   /*
@@ -41,27 +45,28 @@ describe('the fixture itself', () => {
    * fixture, because it is the thing everything else is checked against.
    */
   it('wires only ports the definitions declare', () => {
-    const graph = everythingGraph()
-    const byId = new Map(graph.nodes.map((n) => [n.id, n]))
     const bad: string[] = []
-
-    for (const edge of graph.edges) {
-      const source = byId.get(edge.source)
-      const target = byId.get(edge.target)
-      const outputs = (source ? requireNodeDef(source.type).outputs : []) ?? []
-      const inputs = (target ? requireNodeDef(target.type).inputs : []) ?? []
-      if (!outputs.some((p) => p.id === edge.sourceHandle)) {
-        bad.push(`${edge.source} has no output "${edge.sourceHandle}"`)
-      }
-      if (!inputs.some((p) => p.id === edge.targetHandle)) {
-        bad.push(`${edge.target} has no input "${edge.targetHandle}"`)
+    for (const build of FIXTURES) {
+      const graph = build()
+      const byId = new Map(graph.nodes.map((n) => [n.id, n]))
+      for (const edge of graph.edges) {
+        const source = byId.get(edge.source)
+        const target = byId.get(edge.target)
+        const outputs = (source ? requireNodeDef(source.type).outputs : []) ?? []
+        const inputs = (target ? requireNodeDef(target.type).inputs : []) ?? []
+        if (!outputs.some((p) => p.id === edge.sourceHandle)) {
+          bad.push(`${edge.source} has no output "${edge.sourceHandle}"`)
+        }
+        if (!inputs.some((p) => p.id === edge.targetHandle)) {
+          bad.push(`${edge.target} has no input "${edge.targetHandle}"`)
+        }
       }
     }
     expect(bad).toEqual([])
   })
 
   it('reaches every emitting node type', () => {
-    const covered = new Set(everythingGraph().nodes.map((n) => n.type))
+    const covered = new Set(FIXTURES.flatMap((build) => build().nodes.map((n) => n.type)))
     const missed = allNodeDefs()
       .map((d) => d.type)
       .filter((t) => getEmitter(t) && !covered.has(t))
@@ -77,6 +82,27 @@ describe('notebook export', () => {
       return
     }
     expect(actual).toEqual(readFileSync(GOLDEN, 'utf-8'))
+  })
+
+  it('matches the golden CAVE notebook', () => {
+    const actual = exportFixture(caveGraph())
+    if (process.env.UPDATE_GOLDEN) {
+      writeFileSync(CAVE_GOLDEN, actual)
+      return
+    }
+    expect(actual).toEqual(readFileSync(CAVE_GOLDEN, 'utf-8'))
+  })
+
+  /*
+   * The third way a node fails to translate, and the one the backend declaration exists for: a
+   * graph that is perfectly well wired, on a backend nobody has written *that node's* cell for.
+   * Without it Find Neurons would emit `fetch_neurons(..., client=<a CAVEclient>)`, which is
+   * valid Python, plausible reading, and an AttributeError at best.
+   */
+  it('refuses a neuPrint cell on a CAVE dataset, naming the backend', () => {
+    const source = exportFixture(caveGraph())
+    expect(source).toContain('wired to a CAVE dataset')
+    expect(source).not.toContain('NeuronCriteria')
   })
 
   it('refuses a graph holding a synthetic dataset', () => {

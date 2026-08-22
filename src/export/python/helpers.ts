@@ -6,6 +6,10 @@
  * specific piece of `src/nodes/lib`, and the pairing is the thing to keep true — a helper
  * that has quietly stopped agreeing with the TypeScript it was ported from is worse than no
  * helper at all, because the notebook still runs and still answers.
+ *
+ * `caveHelpers.ts` is the same thing for the other backend, kept apart because it mirrors
+ * `src/data/cave` and `src/data/annotations` rather than `src/nodes/lib` — and because a
+ * neuPrint notebook should carry none of it.
  */
 
 import { registerHelper } from './registry'

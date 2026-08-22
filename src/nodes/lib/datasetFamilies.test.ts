@@ -214,9 +214,16 @@ describe('CAVE families and datastack specs', () => {
     expect(families).toEqual(specs)
   })
 
-  it('carries no notebook emitter, so the export refuses rather than emitting TODOs', () => {
+  it('names a notebook client per language, since the two exporters differ here', () => {
+    /*
+     * The field is what both dataset emitter loops and `canExportNotebook` read, and it is per
+     * language because the exporters no longer cover the same backends: caveclient in Python,
+     * nothing in R. One flag for both would either refuse an export Python can produce or offer
+     * an R document of nothing but TODOs.
+     */
     for (const family of DATASET_FAMILIES.filter((f) => f.sourceId === 'cave')) {
-      expect(family.notebook).toBeUndefined()
+      expect(family.notebook?.python).toBe('caveclient')
+      expect(family.notebook?.r).toBeUndefined()
     }
   })
 })

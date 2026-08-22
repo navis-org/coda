@@ -404,6 +404,7 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `ui/panels/overlay.test.tsx`             | expand/close paths, rail params, and that restyling does not stale a node                                                        |
 | `ui/params/paramGroups.test.ts`          | tabs/rows reshaping: that the panel shows every param the flat rail did, exactly once                                            |
 | `ui/export.test.ts`                      | CSV quoting/nulls/chunking, wide-matrix CSV, filenames, standalone SVG                                                           |
+| `export/python/export.test.ts`           | both fixtures against their goldens, every wired port declared, every emitting type reached, and a neuPrint cell refusing on a CAVE dataset |
 | `ui/format.test.ts`                      | that an id column prints verbatim while the count beside it groups, and that an aggregate of one is a quantity again             |
 | `ui/panels/nodeBrowser.test.tsx`         | rows/thumbnails/signatures, chip-search exclusivity, entry points                                                                |
 | `ui/encoding.test.ts`                    | palette rules: 8 slots, Other fold, area scaling, null handling                                                                  |
@@ -584,15 +585,21 @@ cell is the one with nothing behind it, and what would come out is a notebook no
 without knowing which real dataset was meant. Note the consequence: **all five bundled examples
 are refused**, which is why the golden files are built on `fixture.ts` rather than on them.
 
-**The second is a dataset from a backend no emitter has been written for**, which today means
-CAVE. The same reasoning arriving from the other direction: the dataset cell is the one with
-nothing behind it, and the walk cascades a TODO to every node downstream, so what comes out is a
-document of nothing but TODOs. `DatasetFamily.notebook` is the single statement of which families
-a notebook can be built for, read by `canExportNotebook` and by both dataset emitter loops — it
-had to be, because those two used to disagree: the loops keyed on the *source id* while the
-refusal tested `synthetic` alone, so a FlyWire graph passed the check and produced exactly that
-document. It is deliberately not derived from `sourceId`, since what decides it is whether an
-emitter exists, not where the data comes from.
+**The second is a dataset from a backend *this format* has no emitter for**, which today means
+CAVE in R and nothing in Python. The same reasoning arriving from the other direction: the dataset
+cell is the one with nothing behind it, and the walk cascades a TODO to every node downstream, so
+what comes out is a document of nothing but TODOs. `DatasetFamily.notebook` is the single
+statement of which families each exporter can be built for, read by `canExportNotebook` and by
+both dataset emitter loops — it had to be, because those two used to disagree: the loops keyed on
+the *source id* while the refusal tested `synthetic` alone, so a FlyWire graph passed the check
+and produced exactly that document. It is deliberately not derived from `sourceId`, since what
+decides it is whether an emitter exists, not where the data comes from — and it is keyed **per
+language**, since the day that distinction stopped being academic has arrived.
+
+**A third kind of TODO came with it, and it is not a refusal.** A node whose *own* cell has only
+been written for neuPrint, on a graph whose dataset is CAVE, emits a TODO naming the backend —
+declared once per emitter through `registerEmitter`'s `backends` rather than guarded in each of
+the seventeen that take a Dataset. See *The CAVE half of the notebook exporter* below.
 
 **The walk decides whether an input arrived; emitters never ask.** `ctx.wired(port)` returns a
 plain `string` because the walk refuses to call an emitter whose _required_ ports are unwired or
@@ -680,6 +687,139 @@ It runs in its own workflow (`.github/workflows/export.yml`) rather than in `dep
 path-filtered to `src/export/**`: `pip install navis` is minutes against a deploy pipeline that
 is otherwise well under one, and it is only ever worth paying when the exporter changes.
 
+### The CAVE half of the notebook exporter
+
+`src/export/python/emitters/cave.ts` and `caveHelpers.ts`. A FlyWire graph now exports as a
+Jupyter notebook built on **caveclient and pandas**, where before it was refused outright.
+
+**Every signature was read off caveclient 8.2.1 by introspection**, and three are not what an
+experienced user would guess:
+
+- **`CAVEclient(datastack, version=N)` pins the materialization for every later query** *and*
+  sets `client.timestamp` to that materialization's instant. That is what makes the dataset cell
+  the only place a version appears, and it is what `Update root IDs` asks its chunkedgraph
+  questions *at*.
+- **`client.materialize.version` reads back off the frameworkclient** rather than holding its own
+  (`if self.fc is not None and self.fc.version is not None: return self.fc.version`). Checked in
+  the source, because the alternative — a `materialization_version=` on every call — is a lot of
+  argument for something that would silently query "latest" if the inheritance did not hold.
+- **There is no token argument.** caveclient reads `~/.cloudvolume/secrets/cave-secret.json`,
+  written once by `client.auth.setup_token()`, where neuprint-python takes one per client.
+
+#### The refusal is per language now, and the policy is still one
+
+`DatasetFamily.notebook` was `'neuprint' | undefined` and is now
+`{ python?: …; r?: … }`; `canExportNotebook(graph, language)` takes which format is being asked
+about. Forced rather than chosen: R's route into FlyWire is `fafbseg`, which wraps FlyWire
+specifically rather than CAVE generally and has no emitter here — so one flag for both formats
+would either refuse an export Python can produce or offer an R document of nothing but TODOs. The
+palette asks twice and the two rows disagree, which is the honest state.
+
+`src/export/fixture.ts` gained a **second graph** for the same reason: a CAVE node in
+`everythingGraph` would make R refuse the whole thing and leave its golden with nothing in it.
+`caveGraph` is exported as its own notebook and asserted to be *refused* on the R side.
+
+#### A backend an emitter was not written against is a third kind of TODO
+
+Seventeen Python emitters take a Dataset, and all of them are neuprint-python. Left alone, a
+FlyWire graph would emit `fetch_neurons(..., client=<a CAVEclient>)` — valid Python, plausible
+reading, an `AttributeError` at best and a wrong answer at worst.
+
+So `registerEmitter` takes `{ backends }`, **defaulting to `['neuprint']`**, and the walk turns an
+undeclared backend into a TODO naming it. Declared at the registration rather than guarded inside
+each emitter, which is the call `emit.ts` already makes about unwired ports: seventeen
+hand-written guards is seventeen chances to forget one, with nothing failing when somebody does.
+The default is the narrow one deliberately — a new emitter that says nothing refuses a backend it
+was never tested against.
+
+The backend is read off `def.inputs` (any port whose declared type is `dataset`) rather than by
+asking for a port called `dataset`, which is the bug class `ports.test.ts` exists for. An
+*unresolved* dataset type refuses nothing: no `sourceId` is invariant 2's ordinary state on a cold
+session.
+
+#### A reference port yields no variable, and sometimes cannot
+
+`referencesFirst` hoisted every referenced node to the front so a cell naming one would find it
+bound. That is wrong for the wiring references exist for: in `CAVE table → Update root IDs →
+Dataset` the dataset **consumes** both nodes referencing it, so hoisting it above them classified
+it `blocked` by its own annotations and cascaded a false TODO to everything downstream — the very
+failure the hoist was added to prevent, arrived at from the other side.
+
+Two changes, and they are a pair:
+
+- **Only a node with no dataflow inputs is lifted.** That is not a precaution, it is the condition
+  that makes a reference sound in the first place — the referenced node's identity comes from its
+  params alone — made checkable.
+- **The walk does not treat an unbound reference port as blocking.** A reference is not a value
+  dependency, so an emitter reading one falls back to the referenced node's *type*, which is all a
+  reference ever promised.
+
+`clientFor` in `cave.ts` is that fallback, in one place so the two readers cannot drift: the
+bound variable's `.client` where the walk bound one, and a fresh `CAVEclient` built from the
+reference's type where it did not. The golden covers both branches.
+
+#### What a Coda Dataset is on CAVE, and why it is not a bare client
+
+The neuPrint dataset cell binds a `Client`. This one binds a generated `CodaCaveDataset`, because
+a CAVE dataset value is a client **and** a neuron table: the datastack's labels live in an
+annotation table, and anything wired to the Annotations socket *replaces* them. One Python name
+has to carry both.
+
+**`labels` is fetched on first use, not at construction**, which is the point of the class rather
+than a tuple. A graph that only cleans an annotation table never asks for the index, and on
+FlyWire that is 139,255 rows over six queries.
+
+#### The helpers, and the one that ran before it was believed
+
+`coda_cave_neurons`, `coda_cave_table`, `coda_join_annotations`, `coda_update_root_ids`,
+`coda_int64` — each mirroring a specific piece of `src/data/cave` or `src/data/annotations`. Two
+rules came across that produce a plausible wrong table rather than an error, and both are
+transcribed rather than reinvented: the annotation table is read **one kind at a time** (the whole
+of `hierarchical_neuron_annotations` is over CAVE's 500,000-row cap, which the server applies by
+*truncating*), and a chained source **wins a collision falling back to the earlier one where it
+has no value** — a coalesce rather than a replace.
+
+**`merge_reference=False` is passed explicitly and the join is written out.** caveclient will
+merge a reference table with its target for you and that is very likely the tidier call; it was
+not verified against a live datastack, and a silently different frame is exactly what this
+exporter refuses to guess at.
+
+**`pd.to_numeric` is the wrong function for an id column, and it fails silently.** On a clean
+column of decimal strings it answers `int64` and is exact — and one null anywhere, which a
+supervoxel column has by design, forces `float64`: `720575940628857210` comes back as
+`720575940628857344`, a **different neuron**, with every later comparison wrong about a value
+nothing flagged. `coda_int64` parses per value with Python's `int`, exact at any width.
+
+That was found by **running** the helpers, on the first try, and it is why
+`scripts/probe-cave-helpers.py` (`pnpm probe:cave`) exists. It reads the generated helper cell out
+of the golden notebook and exercises it against a stub client — `probe-nblast.mjs`'s idiom one
+language over, and for its reason: the golden says the text is unchanged and `check-export.py`
+says it parses and its module attributes resolve, but **nothing else executes a line of it**, and
+every one of these helpers is pandas. It runs in `export.yml` and is the only step there that
+executes generated code. Reading the code did not catch the bug; running it did.
+
+#### What it costs, and what is not covered
+
+**+281 bytes on the main chunk**, measured against a build of the same tree with the feature
+stashed out — the family table's one field and the refusal's stack names. Everything else is in
+`exporter-*.js`, which stays lazily loaded; `CodaCaveDataset` appears nowhere in `main`.
+
+Not written yet, and each declines with a TODO naming the backend rather than emitting neuPrint
+code: **Find Neurons, Explore, Connectivity, Adjacency, Skeletons, Meshes, Synapses, Profile,
+Neuroglancer**. `CodaCaveDataset.labels` is what the first two would read, and it exists and is
+tested ahead of them for that reason. The table ops downstream are backend-agnostic and already
+work.
+
+**SeaTable is a separate gap and a harder one.** `annotation.flyTable`/`seaTable` stay in
+`NO_EMITTER`: no client library in this notebook's stack speaks it, and the four REST calls need a
+base access token this exporter has no way to obtain. Its sibling `annotation.caveTable` emits
+because CAVE has a client.
+
+**Nothing has been run against a live datastack.** `CAVE_TOKEN` is absent here, so what is
+verified is the signatures (against the installed caveclient), the syntax and name resolution
+(`check-export.py`), and the pandas (`probe-cave-helpers.py` against a stub). The wire format is
+`src/data/cave`'s business and is covered by `live.test.ts` there.
+
 ### The R Markdown exporter
 
 `Save ▸ Export as R Markdown` writes the same graph as an `.Rmd` on **neuprintr, dplyr, nat,
@@ -690,9 +830,16 @@ gets its own chunk (`exporter-*.js` × 2 — verify both stay out of `main` with
 is a **copy**, taken deliberately: a change to how R chunks are assembled cannot reach the
 notebook. The cost is real and is the thing to watch — topological order, variable naming,
 unwired-versus-blocked and where the notes land now exist twice, so **if you fix one, look at the
-other**. What stops them drifting on *coverage* is `src/export/fixture.ts`: one graph, two golden
-files, and a node that emits Python but nothing in R shows up as a TODO rather than as a document
-nobody noticed was shorter.
+other**. What stops them drifting on *coverage* is `src/export/fixture.ts`: `everythingGraph`,
+two golden files, and a node that emits Python but nothing in R shows up as a TODO rather than as
+a document nobody noticed was shorter.
+
+**The one place they have parted company is the backend.** `caveGraph` is the second fixture and
+R refuses it outright — `canExportNotebook` is asked per language now, and
+`DatasetFamily.notebook` names a client per language. That is a real coverage gap rather than a
+loophole, and R's `export.test.ts` asserts the refusal so it cannot become a silent one; see
+*The CAVE half of the notebook exporter* above. The refusal message points at the notebook, or
+"no document can be built" reads as "Coda cannot export this at all".
 
 **R's stack is the same lineage, which is why the mapping is clean** — navis is the Python port
 of `nat`, and neuprintr is the natverse's neuPrint client. Three things are genuinely *better*
@@ -1784,11 +1931,13 @@ sits on a CAVE dataset, whose own node is excused for the same reason.
 
 ### What is not done
 
-Neither exporter emits any of it: `dataset.cave` and the three annotation nodes are named in each
-`NO_EMITTER`, because the notebooks are built on neuprint-python and neuprintr and there is no
-caveclient emitter yet. A node body for the annotation sources — a base and table picker fed by
-`listBases`/`readMetadata` rather than two text fields — is the obvious next thing; the client
-methods it needs already exist and are what the Connections tab's Test button uses.
+The **R** exporter emits none of it — `dataset.flywire`, `dataset.cave` and the three annotation
+nodes are named in its `NO_EMITTER`, and a CAVE graph is refused outright there. Python covers the
+spine; see *The CAVE half of the notebook exporter* below for what it does and does not reach.
+
+A node body for the annotation sources — a base and table picker fed by `listBases`/`readMetadata`
+rather than two text fields — is the obvious next thing; the client methods it needs already exist
+and are what the Connections tab's Test button uses.
 
 Not looked at in a browser: the tints, the tile pips and the chain on a real canvas. Same
 standing as the WebGL viewers.

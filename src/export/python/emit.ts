@@ -19,7 +19,7 @@ import { canExportNotebook, nodeLabel } from '../canExport'
 import type { Notebook } from './notebook'
 import { buildNotebook } from './notebook'
 import { pyComment, pyIdent } from './py'
-import { getEmitter, resolveHelpers } from './registry'
+import { emitterBackends, getEmitter, resolveHelpers } from './registry'
 import type { Cell, EmitContext, PyModule } from './types'
 import { MODULES } from './types'
 
@@ -86,12 +86,53 @@ function outputName(base: string, def: NodeDefinition, portId: string): string {
   return `${base}_${pyIdent(portId, 'out')}`
 }
 
+/**
+ * The backend behind a source id.
+ *
+ * `neuprint`, `cave`, `mock` — the part before the colon, since a non-default neuPrint
+ * deployment registers as `neuprint:https://…` (see `sourceIdForServer`) and is still neuPrint
+ * as far as which library can query it.
+ */
+function backendOf(sourceId: string): string {
+  const at = sourceId.indexOf(':')
+  return at === -1 ? sourceId : sourceId.slice(0, at)
+}
+
+/** How a backend is spelled in prose, since a source id is lower case and a name is not. */
+const BACKEND_NAMES: Record<string, string> = { cave: 'CAVE', neuprint: 'neuPrint' }
+
+/**
+ * A dataset backend this node's emitter was not written against, or undefined.
+ *
+ * Read off `def.inputs` rather than by asking for a port called `dataset`, which is the bug
+ * class `ports.test.ts` exists for — a hardcoded port id that is wrong for one node and fails
+ * silently on it. Every dataset-shaped port is checked, reference ports included, since a
+ * reference names a datastack and naming a CAVE one is exactly the case at issue.
+ *
+ * An *unresolved* dataset type says nothing and refuses nothing: no `sourceId` is the ordinary
+ * state before a listing lands (invariant 2), and refusing there would turn a cold session into
+ * a notebook of TODOs.
+ */
+function unsupportedBackend(
+  def: NodeDefinition,
+  inputTypes: Readonly<Record<string, CodaType | undefined>>,
+): string | undefined {
+  const supported = emitterBackends(def.type)
+  for (const port of def.inputs ?? []) {
+    if (port.type.kind !== 'dataset') continue
+    const resolved = inputTypes[port.id]
+    const sourceId = resolved?.kind === 'dataset' ? resolved.sourceId : undefined
+    if (sourceId && !supported.includes(backendOf(sourceId))) return backendOf(sourceId)
+  }
+  return undefined
+}
+
 // ---------------------------------------------------------------------------
 // The walk
 // ---------------------------------------------------------------------------
 
 export function exportNotebook(graph: CodaGraph, options: ExportOptions = {}): ExportResult {
-  const refusal = canExportNotebook(graph)
+  const refusal = canExportNotebook(graph, 'python')
   if (refusal) return { ok: false, ...refusal }
 
   // Referenced nodes first — see `exportOrder`; `topoSort` alone is the running order, which
@@ -230,8 +271,18 @@ export function exportNotebook(graph: CodaGraph, options: ExportOptions = {}): E
         continue
       }
       if (bound.has(portKey(edge.source, edge.sourceHandle))) continue
+      /*
+       * A reference is not a value dependency, so an unbound one is not a blockage. It can only
+       * be unbound when the referenced node comes *later* — which `referencesFirst` avoids where
+       * it can and cannot avoid at all for the wiring references exist for, since there the
+       * dataset consumes the very node referencing it. An emitter reading a reference falls back
+       * to the referenced node's type, which is all a reference ever promised.
+       */
+      if (port.reference === true) continue
       blockedBy.push(nodeLabel(nodes.get(edge.source)))
     }
+
+    const foreign = unsupportedBackend(def, inputTypes)
 
     let body: string[]
     if (unwired.length > 0) {
@@ -250,6 +301,20 @@ export function exportNotebook(graph: CodaGraph, options: ExportOptions = {}): E
         `"${def.label}" has no notebook equivalent yet, so this step is missing from ` +
           'the translation. Everything downstream of it refers to variables that were ' +
           'never bound.',
+      )
+    } else if (foreign !== undefined) {
+      /*
+       * A third way a node fails to translate, and worth saying apart from the other two for the
+       * same reason those are said apart: this is a graph that is perfectly well wired, on a
+       * backend nobody has written *this node's* cell for. Sending the reader to the canvas to
+       * check a wire would be sending them nowhere.
+       */
+      const named = BACKEND_NAMES[foreign] ?? foreign
+      warnings.push(`${def.label} has no ${named} equivalent yet.`)
+      body = ctx.todo(
+        `"${def.label}" is wired to a ${named} dataset, and its notebook cell has only been ` +
+          `written for neuPrint. The dataset itself is a real client, so this is the step to ` +
+          `fill in by hand.`,
       )
     } else {
       try {
@@ -354,7 +419,7 @@ function helperCells(
   const lines: string[] = [
     ...pyComment(
       'Helpers, generated by Coda. These are the parts of the workflow that have no ' +
-        'equivalent in pandas or neuprint-python, written out here so the notebook stands ' +
+        'equivalent in the libraries this notebook imports, written out here so it stands ' +
         'on its own.',
     ),
     '',

@@ -116,7 +116,7 @@ for (const family of DATASET_FAMILIES) {
    * export whose every cell after the first is a TODO; both families are named in
    * coverage.test.ts's NO_EMITTER as well.
    */
-  if (family.notebook !== 'neuprint') continue
+  if (family.notebook?.python !== 'neuprint') continue
   registerEmitter(`dataset.${family.key}`, (ctx) => emitDataset(ctx, family.key))
 }
 
