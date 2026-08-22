@@ -151,12 +151,15 @@ export function ExploreBody({ node, ctx, compact, inputValues, setParam }: NodeB
    * live list would show rows `Hits` does not carry, which is precisely the disagreement the
    * live-widget / committed-param split exists to avoid rather than to create.
    */
-  const excludedKey = excludedFromSearch(ctx).join('\u0000')
+  const excluded = excludedFromSearch(ctx.params, tagColumn)
   const result = useMemo(() => {
     if (!table) return { rows: [] as number[], fuzzy: false }
-    const excluded = excludedKey ? excludedKey.split('\u0000') : []
-    return runSearch(table, searchIndexFor(table, excluded), parseSearch(applied))
-  }, [table, applied, excludedKey])
+    return runSearch(
+      table,
+      searchIndexFor(table, excluded ? [excluded] : []),
+      parseSearch(applied),
+    )
+  }, [table, applied, excluded])
 
   const completions = useMemo(() => {
     if (!table || !completionOpen) return { from: 0, to: 0, items: [] }

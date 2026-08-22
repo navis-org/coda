@@ -49,7 +49,7 @@
 import { useEffect, useRef, useState } from 'react'
 
 import type { TableValue } from '../../core/values'
-import type { NgScene } from '../../data/neuroglancer/scene'
+import type { NgScene, ViewerKind } from '../../data/neuroglancer/scene'
 import {
   parseSceneUrl,
   proxiedViewer,
@@ -78,6 +78,14 @@ export interface NeuroglancerViewerProps {
    * neuroglancer's own toolbar and panels relative to the card. Nothing to do with its camera.
    */
   scale?: number
+  /**
+   * Which neuroglancer flavour the scene was built for, when somebody said so explicitly.
+   *
+   * Undefined means read it off the deployment. It has to arrive as a prop because the URL
+   * cannot carry it: `sceneForViewer` normalises, so re-deriving here would undo an override on
+   * exactly the host the table gets wrong — and this card is where that is seen.
+   */
+  viewerType?: ViewerKind | undefined
   compact?: boolean
   baseName?: string
   onExpand?: () => void
@@ -126,6 +134,7 @@ export function NeuroglancerViewer({
   neurons,
   color,
   scale = 1,
+  viewerType,
   compact = false,
   baseName,
   onExpand,
@@ -133,9 +142,10 @@ export function NeuroglancerViewer({
 }: NeuroglancerViewerProps) {
   const frameRef = useRef<HTMLIFrameElement>(null)
   /** What the live frame was last pointed at, so the next change knows how to apply itself. */
-  const appliedRef = useRef<{ url: string; base: string; identity: string } | undefined>(
-    undefined,
-  )
+  const appliedRef = useRef<
+    | { url: string; base: string; identity: string; viewerType?: ViewerKind | undefined }
+    | undefined
+  >(undefined)
   /** Whether a document has finished loading in the frame, i.e. whether there is state to merge into. */
   const loadedRef = useRef(false)
   /**
@@ -154,7 +164,11 @@ export function NeuroglancerViewer({
     // Re-running for a URL already applied would renavigate for nothing — and under
     // StrictMode's double-invoked effects it would send a patch as the frame's *first*
     // navigation, merging onto neuroglancer's defaults instead of the published scene.
-    if (appliedRef.current?.url === url) return
+    // The chosen flavour as well as the URL: it is not *in* the URL — `sceneForViewer`
+    // normalises — so flipping the control alone leaves this guard true and the frame showing
+    // the scene built for the other one. The prop rather than the resolved kind, since
+    // `viewerKind` is a pure function of the URL that is already being compared.
+    if (appliedRef.current?.url === url && appliedRef.current.viewerType === viewerType) return
 
     const split = splitSceneUrl(url)
     if (!split) {
@@ -174,7 +188,7 @@ export function NeuroglancerViewer({
      * decides whether a CAVE segmentation carries `middleauth+`, and both are wrong the other
      * way round — see `viewerKind`.
      */
-    const kind = viewerKind(split.base)
+    const kind = viewerType ?? viewerKind(split.base)
     const applied = appliedRef.current
     const canMerge =
       // Nothing to merge *into* until the first document has loaded. Without this, changing a
@@ -204,7 +218,7 @@ export function NeuroglancerViewer({
         : canMerge
           ? scenePatchUrl(frameBase, split.scene, kind)
           : sceneUrl(frameBase, split.scene, kind)
-      appliedRef.current = { url, base: split.base, identity }
+      appliedRef.current = { url, base: split.base, identity, viewerType }
     }
 
     if (!canMerge) {
@@ -216,7 +230,7 @@ export function NeuroglancerViewer({
     // `reloadCount` belongs here rather than only on the element: the effect's own guard
     // returns early for a URL already applied, so a remount with no reason to renavigate would
     // leave a blank frame.
-  }, [url, reloadCount])
+  }, [url, reloadCount, viewerType])
 
   if (!url) {
     return (

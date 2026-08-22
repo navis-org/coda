@@ -27,6 +27,7 @@
  */
 
 import { registerNode } from '../../core/registry'
+import type { ParamValues } from '../../core/node'
 import { T } from '../../core/types'
 import type { TableValue } from '../../core/values'
 import { isTableValue, str } from '../../core/values'
@@ -60,6 +61,19 @@ const MAX_SEGMENTS = 1000
 
 /** Neuroglancer renders on black, so the dark palette is the right one whatever Coda's theme is. */
 const VIEWER_MODE = 'dark' as const
+
+/**
+ * The `Viewer type` param as a kind, or undefined for "work it out".
+ *
+ * One statement because two surfaces read it: this node, which bakes the answer into the URL,
+ * and `ValuePreview`, which hands it to the embedded frame. The frame cannot recover it from the
+ * URL — `sceneForViewer` *normalises*, so re-deriving from the host would strip an explicit
+ * override back out, which is the whole of what the escape hatch is for.
+ */
+export function chosenViewerKind(params: ParamValues): ViewerKind | undefined {
+  const chosen = String(params.viewerType ?? 'auto')
+  return chosen === 'auto' ? undefined : (chosen as ViewerKind)
+}
 
 export const neuroglancerNode = registerNode({
   type: 'out.neuroglancer',
@@ -266,10 +280,7 @@ export const neuroglancerNode = registerNode({
       String(ctx.params.viewer ?? ''),
       source.peekDataset(dataset.datasetId)?.viewerSite,
     )
-    const chosen = String(ctx.params.viewerType ?? 'auto')
-    return {
-      url: str(sceneUrl(viewer, scene, chosen === 'auto' ? undefined : (chosen as ViewerKind))),
-    }
+    return { url: str(sceneUrl(viewer, scene, chosenViewerKind(ctx.params))) }
   },
 })
 

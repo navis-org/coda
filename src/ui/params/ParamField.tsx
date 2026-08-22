@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { InferContext, ParamDef, ParamValue } from '../../core/node'
-import { availableColumns, columnSchemaFor } from '../../core/node'
+import { availableColumns, columnsKnown } from '../../core/node'
 
 /**
  * What a column picker says when the port carries no schema at all.
@@ -96,7 +96,7 @@ export function ParamField({ param, value, ctx, onChange, variant = 'node' }: Pa
 
     case 'column': {
       const columns = availableColumns(param, ctx.inputs, ctx.params)
-      const known = columnSchemaFor(param, ctx.inputs, ctx.params) !== undefined
+      const known = columnsKnown(param, ctx.inputs, ctx.params)
       const stored = typeof value === 'string' ? value : ''
       // An optional param shows exactly what is stored, including "none"; a required one
       // shows the resolver's fallback so the widget never displays an empty selection.
@@ -144,7 +144,7 @@ export function ParamField({ param, value, ctx, onChange, variant = 'node' }: Pa
           available={columns}
           // `resolveColumns` keeps a stored list untouched while the schema is unknown, so the
           // chips have to read as kept rather than as lost.
-          known={columnSchemaFor(param, ctx.inputs, ctx.params) !== undefined}
+          known={columnsKnown(param, ctx.inputs, ctx.params)}
           selected={selected}
           onChange={onChange}
         />

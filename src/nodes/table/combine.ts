@@ -1,7 +1,9 @@
 import { registerNode } from '../../core/registry'
+import type { ParamValues } from '../../core/node'
 import { T, isTabular, schemaOf } from '../../core/types'
 import { isTableValue } from '../../core/values'
 import { TYPE_COLUMN_NAME } from '../../data/annotations/types'
+import type { CombineSpec } from '../lib/tableOps'
 import { combineSchema, combineTable } from '../lib/tableOps'
 
 /**
@@ -25,6 +27,27 @@ import { combineSchema, combineTable } from '../lib/tableOps'
  * Distinct from `Join`, which brings columns from *another* table, and from `Group By`, which
  * collapses rows. This reads across one row and writes one cell.
  */
+/**
+ * The node's params as a spec, read once.
+ *
+ * `stack.ts`'s `readOptions` idiom, and for its reason: `inferOutputs`, `validate` and
+ * `evaluate` all need the same answer, and the trimming in particular decides whether a source
+ * column was asked for at all. Three transcriptions is three chances for invariant 3's two
+ * halves to disagree about it.
+ */
+function readSpec(ctx: {
+  params: ParamValues
+  columns: (id: string) => string[]
+}): CombineSpec {
+  return {
+    // Through `ctx.columns`, never `ctx.params` — invariant 5, so the provenance key and the
+    // columns actually read agree about which names resolved.
+    columns: ctx.columns('columns'),
+    into: String(ctx.params.into ?? '').trim(),
+    sourceColumn: String(ctx.params.sourceColumn ?? '').trim(),
+  }
+}
+
 export const combineColumnsNode = registerNode({
   type: 'core.combineColumns',
   label: 'Combine Columns',
@@ -74,11 +97,7 @@ export const combineColumnsNode = registerNode({
   inferOutputs: (ctx) => {
     const input = ctx.inputs.in
     if (!isTabular(input)) return { out: T.table() }
-    const shaped = combineSchema(schemaOf(input), {
-      columns: ctx.columns('columns'),
-      into: String(ctx.params.into ?? '').trim(),
-      sourceColumn: String(ctx.params.sourceColumn ?? '').trim(),
-    })
+    const shaped = combineSchema(schemaOf(input), readSpec(ctx))
     return { out: input.kind === 'neurons' ? T.neurons(shaped) : T.table(shaped) }
   },
 
@@ -88,8 +107,7 @@ export const combineColumnsNode = registerNode({
    * call invariant 5's corollary records about the `out.*` viewers.
    */
   validate: (ctx) => {
-    const columns = ctx.columns('columns')
-    const into = String(ctx.params.into ?? '').trim()
+    const { columns, into } = readSpec(ctx)
     const issues: string[] = []
     if (!into) issues.push('No result name — nothing will be added')
     if (columns.length === 0)
@@ -103,14 +121,6 @@ export const combineColumnsNode = registerNode({
   evaluate: (ctx) => {
     const table = ctx.input('in')
     if (!isTableValue(table)) throw new Error('Input is not a table')
-    // Through `ctx.columns`, never `ctx.params` — invariant 5, so the provenance key and the
-    // columns actually read agree about which names resolved.
-    return {
-      out: combineTable(table, {
-        columns: ctx.columns('columns'),
-        into: String(ctx.params.into ?? '').trim(),
-        sourceColumn: String(ctx.params.sourceColumn ?? '').trim(),
-      }),
-    }
+    return { out: combineTable(table, readSpec(ctx)) }
   },
 })

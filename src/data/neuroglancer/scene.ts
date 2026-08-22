@@ -317,22 +317,23 @@ const SEGMENTATION_TYPES: ReadonlySet<string> = new Set(Object.values(GRAPHENE_L
 function sceneForViewer(scene: NgScene, kind: ViewerKind): NgScene {
   const layers = scene.layers
   if (!Array.isArray(layers)) return scene
-  let changed = false
-  const next = layers.map((layer) => {
-    const l = layer as NgLayer
-    // Only a graphene layer: `precomputed://` is prefixed by caveclient for the annotation and
-    // segment-property URLs CAVE serves itself, neither of which a scene built here carries,
-    // and the layer *type* is a fact about a chunked-graph source specifically.
-    if (typeof l.source !== 'string' || !l.source.startsWith(GRAPHENE)) return layer
-    const source = grapheneFor(l.source, kind)
-    // Left alone unless it is already a segmentation under one of its two names — an image
-    // layer is not turned into one by having a source this recognises.
-    const type = SEGMENTATION_TYPES.has(String(l.type)) ? GRAPHENE_LAYER_TYPE[kind] : l.type
-    if (source === l.source && type === l.type) return layer
-    changed = true
-    return { ...l, source, type }
-  })
-  return changed ? { ...scene, layers: next } : scene
+  return {
+    ...scene,
+    layers: layers.map((layer) => {
+      const l = layer as NgLayer
+      // Only a graphene layer: `precomputed://` is prefixed by caveclient for the annotation and
+      // segment-property URLs CAVE serves itself, neither of which a scene built here carries,
+      // and the layer *type* is a fact about a chunked-graph source specifically.
+      if (typeof l.source !== 'string' || !l.source.startsWith(GRAPHENE)) return layer
+      return {
+        ...l,
+        source: grapheneFor(l.source, kind),
+        // Left alone unless it is already a segmentation under one of its two names — an image
+        // layer is not turned into one by having a source this recognises.
+        type: SEGMENTATION_TYPES.has(String(l.type)) ? GRAPHENE_LAYER_TYPE[kind] : l.type,
+      }
+    }),
+  }
 }
 
 export function sceneUrl(

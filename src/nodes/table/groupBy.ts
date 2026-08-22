@@ -2,7 +2,6 @@ import { registerNode } from '../../core/registry'
 import { NUMERIC_DTYPES, T } from '../../core/types'
 import { isTableValue } from '../../core/values'
 import type { AggFn } from '../lib/tableOps'
-import { aggValueParam } from '../lib/tableOps'
 import { AGG_OPTIONS, groupBySchema, groupByTable } from '../lib/tableOps'
 
 /**
@@ -41,31 +40,23 @@ export const groupByNode = registerNode({
       kind: 'column',
       label: 'Of column',
       from: 'in',
-      dtypes: NUMERIC_DTYPES,
-      default: '',
-      visibleIf: (params) => params.agg !== 'count' && params.agg !== 'join',
-    },
-    {
       /*
-       * The same slot for `join`, which takes text where the others take a number. Two pickers
-       * made exclusive by `visibleIf` rather than one with a conditional dtype list, because
-       * `ColumnParam.dtypes` is a fixed list — the idiom `colorParams` already uses to put a
-       * column picker or a swatch in one row and never both. `aggValueParam` says which is live.
+       * Numeric for every aggregation but `join`, which takes text — a rule rather than a list,
+       * which is what keeps this one *stored* param. It was briefly two, made exclusive by
+       * `visibleIf`, and the split leaked immediately: the emitters were corrected to say "needs
+       * a value column" while `validate` here still said "numeric".
        */
-      id: 'textValue',
-      kind: 'column',
-      label: 'Of column',
-      from: 'in',
-      help: 'Distinct values, joined with "; " in the order they first appear. Absences are skipped, and a repeat is folded away — this cell is meant to be read.',
+      dtypes: (params) => (params.agg === 'join' ? undefined : NUMERIC_DTYPES),
+      help: 'For "join text": distinct values, joined with "; " in the order they first appear. Absences are skipped and a repeat is folded away — this cell is meant to be read.',
       default: '',
-      visibleIf: (params) => params.agg === 'join',
+      visibleIf: (params) => params.agg !== 'count',
     },
   ],
 
   inferOutputs: (ctx) => {
     const agg = String(ctx.params.agg ?? 'sum') as AggFn
     const by = ctx.columns('by')
-    const value = agg === 'count' ? undefined : ctx.column(aggValueParam(agg))
+    const value = agg === 'count' ? undefined : ctx.column('value')
     const schema = groupBySchema(ctx.schema('in'), by, value, agg)
     return { out: schema ? T.table(schema) : T.table() }
   },
@@ -75,8 +66,8 @@ export const groupByNode = registerNode({
       return ['Pick at least one column to group by']
     }
     const agg = String(ctx.params.agg ?? 'sum') as AggFn
-    if (agg !== 'count' && !ctx.column(aggValueParam(agg))) {
-      return [`"${agg}" needs a numeric value column`]
+    if (agg !== 'count' && !ctx.column('value')) {
+      return [`"${agg}" needs a value column`]
     }
     return []
   },
@@ -88,12 +79,7 @@ export const groupByNode = registerNode({
     const by = ctx.columns('by')
     if (by.length === 0) throw new Error('No group-by columns selected')
     return {
-      out: groupByTable(
-        table,
-        by,
-        agg === 'count' ? undefined : ctx.column(aggValueParam(agg)),
-        agg,
-      ),
+      out: groupByTable(table, by, agg === 'count' ? undefined : ctx.column('value'), agg),
     }
   },
 })

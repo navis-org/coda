@@ -290,7 +290,7 @@ export function everythingGraph(): CodaGraph {
       type: 'core.groupBy',
       col: 4,
       row: 1,
-      params: { by: ['type'], agg: 'join', textValue: 'instance' },
+      params: { by: ['type'], agg: 'join', value: 'instance' },
     },
     {
       id: 'group',

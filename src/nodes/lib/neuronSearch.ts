@@ -296,11 +296,24 @@ export function searchIndexFor(
   }
   let index = byExclusion.get(key)
   if (!index) {
+    /*
+     * Bounded, because the `WeakMap` protects nothing here: `cacheGet` promotes a hit into
+     * `cache.ts`'s module map, so the neuron index is held for the life of the tab and every
+     * distinct exclusion would accumulate a haystack that is never collected — 24 MB apiece at
+     * 165k neurons. Two is what the honest case needs (two Explore nodes on one dataset,
+     * configured differently); a single slot would thrash between them at 55 ms a swap.
+     */
+    if (byExclusion.size >= MAX_CACHED_INDEXES) {
+      byExclusion.delete(byExclusion.keys().next().value!)
+    }
     index = buildSearchIndex(table, exclude)
     byExclusion.set(key, index)
   }
   return index
 }
+
+/** Haystacks kept per table. See the note in `searchIndexFor`. */
+const MAX_CACHED_INDEXES = 3
 
 // ---------------------------------------------------------------------------
 // Matching

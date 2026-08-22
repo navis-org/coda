@@ -16,7 +16,7 @@
  *  - `Sort` puts nulls last in **both** directions, where `sort_values` follows the direction.
  */
 
-import { aggColumnName, aggValueParam, combineSchema } from '../../../nodes/lib/tableOps'
+import { aggColumnName, combineLayout } from '../../../nodes/lib/tableOps'
 import type { AggFn } from '../../../nodes/lib/tableOps'
 import { findColumn, isNumericDType } from '../../../core/types'
 import { pyList, pyStr, pyValue } from '../py'
@@ -221,18 +221,18 @@ registerEmitter('core.combineColumns', (ctx) => {
 
   /*
    * A column already holding the result's name is renamed rather than overwritten, which is the
-   * node's own rule and pandas' opposite — `df['type'] = ...` replaces silently. The rename is
-   * read back off `combineSchema` rather than re-derived, so the two cannot disagree about the
-   * suffix; where the input schema is unknown (downstream of a Pivot, say) there is nothing to
-   * predict and the assignment simply lands as pandas would have it.
+   * node's own rule and pandas' opposite — `df['type'] = ...` replaces silently. Taken from
+   * `combineLayout`, the same function the node's own halves use, rather than reconstructed by
+   * diffing `combineSchema`'s output positionally — which bound this to two array-order facts
+   * ("the result is appended last", "the source column is last") that nothing stated. Where the
+   * input schema is unknown (downstream of a Pivot, say) there is nothing to predict and the
+   * assignment simply lands as pandas would have it.
    */
-  const schema = ctx.schema('in')
-  const inNames = schema?.columns.map((c) => c.name) ?? []
-  const shaped = combineSchema(schema, { columns, into, sourceColumn })
-  const renames: string[] = []
-  shaped?.columns.slice(0, inNames.length).forEach((c, i) => {
-    if (c.name !== inNames[i]) renames.push(`${pyStr(inNames[i]!)}: ${pyStr(c.name)}`)
-  })
+  const inNames = ctx.schema('in')?.columns.map((c) => c.name) ?? []
+  const layout = combineLayout(inNames, { columns, into, sourceColumn })
+  const renames = inNames.flatMap((name, i) =>
+    layout.renamed[i] === name ? [] : [`${pyStr(name)}: ${pyStr(layout.renamed[i]!)}`],
+  )
 
   const lines = [
     renames.length > 0
@@ -241,9 +241,8 @@ registerEmitter('core.combineColumns', (ctx) => {
     `${out}[${pyStr(into)}] = coda_combine(${src}, ${pyList(columns)})`,
   ]
   if (sourceColumn) {
-    ctx.helper('coda_combine_source')
-    const name = shaped?.columns[shaped.columns.length - 1]?.name ?? sourceColumn
-    lines.push(`${out}[${pyStr(name)}] = coda_combine_source(${src}, ${pyList(columns)})`)
+    const name = layout.sourceName ?? sourceColumn
+    lines.push(`${out}[${pyStr(name)}] = coda_combine(${src}, ${pyList(columns)}, source=True)`)
   }
   return lines
 })
@@ -270,7 +269,7 @@ registerEmitter('core.groupBy', (ctx) => {
   ctx.require('pandas')
   const out = ctx.output('out')
   const agg = String(ctx.params.agg ?? 'sum') as AggFn
-  const value = agg === 'count' ? undefined : ctx.column(aggValueParam(agg))
+  const value = agg === 'count' ? undefined : ctx.column('value')
   if (agg !== 'count' && !value) return ctx.todo(`"${agg}" needs a value column.`)
 
   // `n` rides along with every aggregation, exactly as the node emits it — you almost always

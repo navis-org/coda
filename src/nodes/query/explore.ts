@@ -76,20 +76,22 @@ const lastRefresh = new Map<string, number>()
 export const MAX_SELECT_ALL = 10_000
 
 /**
- * The columns kept out of the free-text haystack, which is at most the tags column.
+ * The column kept out of the free-text haystack, if any.
  *
  * One function because two surfaces read it — `evaluate`, whose answer reaches `Hits`, and the
  * widget, which filters live as you type. Two spellings would be a list showing rows the port
  * does not carry, which is the disagreement the live-widget/committed-param split exists to
  * avoid rather than to create.
+ *
+ * Takes the *resolved* column rather than resolving it: both callers already have it in hand,
+ * and both need it for the row spec anyway. Answers one name rather than a list, so a memo can
+ * key on it directly instead of encoding an array that can never hold two.
  */
-export function excludedFromSearch(ctx: {
-  params: ParamValues
-  column: (id: string) => string | undefined
-}): string[] {
-  if (ctx.params.searchTags !== false) return []
-  const column = ctx.column('tagColumn')
-  return column ? [column] : []
+export function excludedFromSearch(
+  params: ParamValues,
+  tagColumn: string | undefined,
+): string | undefined {
+  return params.searchTags === false ? tagColumn || undefined : undefined
 }
 
 export const exploreNode = registerNode({
@@ -284,7 +286,8 @@ export const exploreNode = registerNode({
     const parsed = parseSearch(String(ctx.params.query ?? ''))
     // Through `ctx.column`, never `ctx.params` — invariant 5, and it is what keeps the column
     // excluded here the same one the provenance key was taken over.
-    const { rows } = runSearch(index, searchIndexFor(index, excludedFromSearch(ctx)), parsed)
+    const excluded = excludedFromSearch(ctx.params, ctx.column('tagColumn'))
+    const { rows } = runSearch(index, searchIndexFor(index, excluded ? [excluded] : []), parsed)
     const limit = Number(ctx.params.limit ?? 0)
     const capped = limit > 0 ? rows.slice(0, limit) : rows
 

@@ -91,60 +91,32 @@ registerHelper({
 })
 
 /**
- * The rule behind Combine Columns: null and blank are one absence.
- *
- * Its own function because two helpers apply it and they must not part company — a value half
- * and a provenance half disagreeing about which cells count would put a source name beside a
- * blank, or a value beside no source.
- */
-registerHelper({
-  name: '_coda_present',
-  requires: [['pandas']],
-  source: [
-    'def _coda_present(col):',
-    '    """Cells that count as a value: not null, and not the empty string."""',
-    "    return col.notna() & (col.astype(str) != '')",
-  ],
-})
-
-/**
- * Coda's Combine Columns node.
+ * Coda's Combine Columns node, both halves.
  *
  * `df[columns].bfill(axis=1).iloc[:, 0]` is the obvious pandas spelling and is a *different
  * rule*: it reads an empty string as a value, so a blank cell stops the search where Coda reads
  * null and blank as one absence. On a real annotation dump that is most of the difference —
  * FlyWire's published TSV writes an unset `cell_type` as a blank field rather than as nothing.
+ *
+ * `source=True` answers which column each value came from. One function rather than two,
+ * because the loop and — the part that matters — the *absence rule* are identical; two copies is
+ * two places for "what counts as a value" to drift, and a drifted pair puts a source name beside
+ * a blank or a value beside no source.
  */
 registerHelper({
   name: 'coda_combine',
-  needs: ['_coda_present'],
   requires: [['pandas']],
   source: [
-    'def coda_combine(df, columns):',
-    '    """The first of `columns` holding a value, per row."""',
+    'def coda_combine(df, columns, source=False):',
+    '    """The first of `columns` holding a value per row, or which column that was."""',
     '    out = pd.Series([None] * len(df), index=df.index, dtype=object)',
     '    for name in columns:',
     '        if name not in df.columns:',
     '            continue',
     '        col = df[name]',
-    '        out = out.mask(out.isna() & _coda_present(col), col)',
-    '    return out',
-  ],
-})
-
-/** Which column each value in `coda_combine` came from. */
-registerHelper({
-  name: 'coda_combine_source',
-  needs: ['_coda_present'],
-  requires: [['pandas']],
-  source: [
-    'def coda_combine_source(df, columns):',
-    '    """The name of the column `coda_combine` took each value from."""',
-    '    out = pd.Series([None] * len(df), index=df.index, dtype=object)',
-    '    for name in columns:',
-    '        if name not in df.columns:',
-    '            continue',
-    '        out = out.mask(out.isna() & _coda_present(df[name]), name)',
+    '        # Null and the empty string are one absence: a blank must not stop the search.',
+    "        have = col.notna() & (col.astype(str) != '')",
+    '        out = out.mask(out.isna() & have, name if source else col)',
     '    return out',
   ],
 })

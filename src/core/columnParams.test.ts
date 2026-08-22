@@ -14,7 +14,13 @@
 import { describe, expect, it } from 'vitest'
 
 import type { NodeDefinition, ParamDef } from './node'
-import { makeInferContext, resolveColumn, resolveColumns, validateColumnParams } from './node'
+import {
+  availableColumns,
+  makeInferContext,
+  resolveColumn,
+  resolveColumns,
+  validateColumnParams,
+} from './node'
 import type { CodaType, TableSchema } from './types'
 import { T, column, tableSchema } from './types'
 
@@ -324,5 +330,41 @@ describe('resolveColumn against a schema that has not arrived', () => {
         },
       ),
     ).toBe(undefined)
+  })
+})
+
+/**
+ * `dtypes` as a rule rather than a list.
+ *
+ * Group By's value picker is numeric for every aggregation but `join`, which takes text.
+ * Expressing that with a static list needed *two stored params* made exclusive by `visibleIf`,
+ * plus an indirection saying which was live — and the split leaked immediately, leaving one of
+ * three sites saying "needs a numeric value column" about a text one. `schemaFrom` was already
+ * function-valued for the same reason.
+ */
+describe('a dtype restriction that depends on the other params', () => {
+  const MIXED = tableSchema(column('n', 'i64'), column('label', 'str'))
+  const dynamic = picker({
+    dtypes: (params: Record<string, unknown>) => (params.agg === 'join' ? undefined : ['i64']),
+  }) as Parameters<typeof resolveColumn>[0]
+
+  it('narrows or opens the picker with the value it depends on', () => {
+    const inputs = { in: T.table(MIXED) }
+    expect(availableColumns(dynamic, inputs, { agg: 'sum' } as never)).toEqual(['n'])
+    expect(availableColumns(dynamic, inputs, { agg: 'join' } as never)).toEqual(['n', 'label'])
+  })
+
+  it('resolves through the same rule, so the key and the picker agree', () => {
+    const inputs = { in: T.table(MIXED) }
+    expect(resolveColumn(dynamic, { col: 'label', agg: 'sum' }, inputs)).not.toBe(undefined)
+    expect(resolveColumn(dynamic, { col: 'label', agg: 'join' }, inputs)).toBe('label')
+  })
+
+  it('is honoured by the message that names the restriction', () => {
+    // `No columns of type i64 available for "Column"` must not be reported for an aggregation
+    // that does not restrict — the second reader of `dtypes`, which had to learn it too.
+    const onlyText = T.table(tableSchema(column('label', 'str')))
+    expect(issues(def(dynamic as never), { agg: 'sum' }, onlyText).join(' ')).toContain('i64')
+    expect(issues(def(dynamic as never), { agg: 'join' }, onlyText)).toEqual([])
   })
 })

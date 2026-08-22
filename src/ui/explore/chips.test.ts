@@ -22,6 +22,10 @@ import type { Mode } from '../colors'
 import { chipKey, chipSlots, rowFields, splitTags } from './rowFields'
 import { column, tableSchema } from '../../core/types'
 
+/** Columns as `str`, plus one numeric so `stats` has something to find. */
+const schema = (...names: string[]) =>
+  tableSchema(...names.map((n) => column(n, 'str')), column('pre', 'i64'))
+
 const THEME = readFileSync(fileURLToPath(new URL('../theme.css', import.meta.url)), 'utf8')
 
 /**
@@ -154,9 +158,6 @@ describe('chipKey', () => {
  * untouched by having gained a family.
  */
 describe('the automatic chip list', () => {
-  const schema = (...names: string[]) =>
-    tableSchema(...names.map((n) => column(n, 'str')), column('pre', 'i64'))
-
   it('gives a FlyWire dataset its built-in annotations', () => {
     // `type` is the headline, so it is never also a chip.
     const { chips, primary } = rowFields(
@@ -261,9 +262,6 @@ describe('the automatic chip list', () => {
  * field on the spec, and out of the three lists that would otherwise draw the same cell twice.
  */
 describe('the additional tags column', () => {
-  const schema = (...names: string[]) =>
-    tableSchema(...names.map((n) => column(n, 'str')), column('pre', 'i64'))
-
   it('is reported apart from the chips, and drawn by neither list', () => {
     const f = rowFields(schema('neuronId', 'type', 'cell_class', 'community'), [], 'community')
     expect(f.tags).toBe('community')

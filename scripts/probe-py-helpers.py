@@ -39,20 +39,21 @@ NOTEBOOK = FIXTURES / "cave.ipynb"
 # The *generated* helper cell, read out of the golden notebook rather than transcribed here —
 # so this probes what the exporter actually writes, exactly as `probe-nblast.mjs` runs the real
 # `nblast.py` through the real entry point rather than a copy of it.
-notebook = json.loads(NOTEBOOK.read_text())
-helper_src = next(
-    (
-        "".join(cell["source"])
-        for cell in notebook["cells"]
-        if "def coda_annotation_columns" in "".join(cell["source"])
-    ),
-    None,
-)
-if helper_src is None:
-    sys.exit(f"no helper cell in {NOTEBOOK}")
+def load_cell(notebook: Path, marker: str, ns: dict) -> dict:
+    """Exec the generated cell containing `marker` into `ns`, and hand `ns` back.
 
-ns: dict = {"pd": pd, "np": np}
-exec(helper_src, ns)  # noqa: S102 — the point is to run what was generated
+    Reads the *golden* rather than a transcription, so this probes what the exporter actually
+    writes — `probe-nblast.mjs`'s rule, one language over.
+    """
+    cells = json.loads(notebook.read_text())["cells"]
+    src = next(("".join(c["source"]) for c in cells if marker in "".join(c["source"])), None)
+    if src is None:
+        sys.exit(f"no cell containing {marker!r} in {notebook}")
+    exec(src, ns)  # noqa: S102 - the point is to run what was generated
+    return ns
+
+
+ns = load_cell(NOTEBOOK, "def coda_annotation_columns", {"pd": pd, "np": np})
 
 # ---- stub CAVE client -------------------------------------------------------
 class Mat:
@@ -237,20 +238,8 @@ check('repair: int rewrite exact', r3['neuronId'].iloc[1] == 720575940628857299,
 # helper cell rather than in the CAVE one. They are pandas either way, and the rule they carry —
 # null and blank are one absence — is precisely the sort that reads as correct and answers wrong:
 # `df[cols].bfill(axis=1)` is the obvious spelling and stops at the first empty string.
-everything = json.loads((FIXTURES / "everything.ipynb").read_text())
-combine_src = next(
-    (
-        "".join(cell["source"])
-        for cell in everything["cells"]
-        if "def coda_combine(" in "".join(cell["source"])
-    ),
-    None,
-)
-if combine_src is None:
-    sys.exit("no coda_combine in everything.ipynb")
-
-cns: dict = {"pd": pd, "np": np}
-exec(combine_src, cns)  # noqa: S102 - the point is to run what was generated
+# One cell carries both `coda_combine` and `coda_join`, so it is loaded once.
+cns = load_cell(FIXTURES / "everything.ipynb", "def coda_combine(", {"pd": pd, "np": np})
 
 ann = pd.DataFrame({
     'cell_type':      ['LC4', '', None, None],
@@ -269,7 +258,7 @@ check('combine: picked order is priority', reversed_.iloc[0] == 'LC4b', str(reve
 missing = cns['coda_combine'](ann, ['gone', 'hemibrain_type'])
 check('combine: a column the frame lacks is skipped', missing.iloc[1] == 'PS180', str(missing.iloc[1]))
 
-src = cns['coda_combine_source'](ann, ['cell_type', 'hemibrain_type'])
+src = cns['coda_combine'](ann, ['cell_type', 'hemibrain_type'], source=True)
 check('combine: source names the winner', src.iloc[0] == 'cell_type', str(src.iloc[0]))
 check('combine: source follows the blank rule', src.iloc[1] == 'hemibrain_type', str(src.iloc[1]))
 check('combine: no source where nothing won', pd.isna(src.iloc[3]), str(src.iloc[3]))
@@ -279,14 +268,6 @@ check('combine: no source where nothing won', pd.isna(src.iloc[3]), str(src.iloc
 # Read out of the same cell. `', '.join(...)` is the obvious spelling and is a different rule
 # three ways: it raises on a NaN, it keeps empty strings — which Coda reads as absences — and it
 # answers '' for a group with nothing in it where Coda answers None.
-join_src = next(
-    ("".join(c["source"]) for c in everything["cells"] if "def coda_join(" in "".join(c["source"])),
-    None,
-)
-if join_src is None:
-    sys.exit("no coda_join in everything.ipynb")
-exec(join_src, cns)  # noqa: S102
-
 jf = pd.DataFrame({
     'type': ['LC4', 'LC4', 'LC4', 'LC6', 'DNp01'],
     'tag':  ['left', '', 'left', None, 'putative giant fibre'],

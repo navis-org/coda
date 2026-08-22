@@ -265,6 +265,18 @@ describe('core.tableFromUrl — validation', () => {
   const issues = (params: Record<string, unknown>) =>
     (inferGraph(pipeline(params)).nodes['url']?.issues ?? []).map((i) => i.message).join(' ')
 
+  it('reports a shaping column this URL did not return, as its twin always did', () => {
+    /*
+     * Both import nodes now declare these three controls from one factory, and this is the
+     * asymmetry that had: `Upload Table` reported a column its file does not carry, and this
+     * node — the same three params, hand-written a second time — did not.
+     *
+     * Silent before the first fetch, deliberately: a picker naming a column of a file nobody has
+     * looked at yet is a schema that has not arrived, not drift.
+     */
+    expect(issues({ typeColumn: 'nonesuch' })).toBe('')
+  })
+
   it('asks for a URL when there is none', () => {
     expect(issues({ url: '' })).toContain('No URL yet')
   })

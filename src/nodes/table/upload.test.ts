@@ -170,6 +170,18 @@ describe('core.uploadTable — validation', () => {
     expect(issues(pipeline()).join(' ')).toContain('No file chosen')
   })
 
+  it('reports either shaping column when the file does not have it', async () => {
+    // Both nodes declare these from one factory now, and this is what that is for: the same
+    // three controls used to be hand-written twice, and only one of the two reported this.
+    const id = await stored()
+    expect(issues(pipeline({ dataId: id, typeColumn: 'nonesuch' })).join(' ')).toContain(
+      'Type column "nonesuch"',
+    )
+    expect(issues(pipeline({ dataId: id, idColumn: 'nonesuch' })).join(' ')).toContain(
+      'ID column "nonesuch"',
+    )
+  })
+
   it('says nothing at all while the peek has not settled', async () => {
     // Otherwise "not stored in this browser" lands on every card for the first frames of
     // every single load, which is how a real message stops being read.

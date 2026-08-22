@@ -350,6 +350,10 @@ bundled corepack, so pnpm was installed with `npm i -g pnpm`.
   placeholder chip also now stands down when anything *is* selected — `cell_type × hemibrain_type
   × not run yet` reads as a warning about the two beside it.
 
+  **`columnsKnown` names the question**, which `resolveColumn`, `resolveColumns`,
+  `validateColumnParams` and both column widgets all ask. `columnSchemaFor(...) !== undefined`
+  written at five sites is a rule nobody can grep for.
+
   **The widget is the reason nobody had stored a value.** A *required* picker renders
   `ctx.column(id)` — the resolver's answer — so a fallback is drawn exactly as a choice is. The
   reported graph carried `supervoxelColumn: ""` because the card had been showing `supervoxel_id`
@@ -6868,10 +6872,13 @@ and the whole cell is one hover away.
 through `aggDType`. A future text aggregation is excluded by *arriving*; the failure otherwise is
 a dropdown entry that silently yields a matrix of zeroes.
 
-**Two pickers for one slot**, made exclusive by `visibleIf`: `value` is numeric-only and
-`textValue` is not, because `ColumnParam.dtypes` is a fixed list rather than a function of the
-params. `aggValueParam` says which is live — one statement, because three callers read it (the
-node and both emitters). Same idiom as a colour's column picker and its swatch.
+**`ColumnParam.dtypes` takes a rule, not only a list**, which is what keeps this one *stored*
+param. It was briefly two — `value` numeric and `textValue` not, made exclusive by `visibleIf`,
+with an `aggValueParam` indirection saying which was live — because `dtypes` was a fixed array
+where `schemaFrom` had been function-valued all along. The split leaked within the hour: both
+emitters were corrected to say "needs a value column" while the node's own `validate` still said
+"numeric". `dtypesOf` resolves it for the two readers that exist (`availableColumns` and
+`validateColumnParams`), both of which already had the params in hand.
 
 **Searching is on by default with an opt-out**, and both halves are `Explore`'s only params that
 are *not* presentational: together they decide which column is kept out of the haystack, and that
@@ -6891,6 +6898,14 @@ row the same height is what makes a list scannable, and one neuron with forty ta
 several others off the page. Each tag ellipsises at its own `max-width` with the full text in
 `title`, which is CSS — jsdom performs none of it, so what the tests can pin is the half that
 makes it recoverable.
+
+**The import nodes' three shaping controls are one factory**, `importShapeParams` in
+`nodes/lib/`. `Upload Table` and `Table from URL` are the same node over two ways of getting
+bytes — they shared `uploadShapeSchema`/`uploadShapeTable` for the *values* from the start and
+hand-wrote the *declarations* twice, which is the asymmetry `colorParams`' own note predicts: the
+upload node reported a `Type column` naming a column its file does not carry, and the URL node,
+with the same three params written out a second time, did not. The one real difference is where
+the schema is found, so that is the argument.
 
 **`chips` is labelled `Fields` now, on Explore and on Profile.** The value is a list of *columns*
 where `Additional tags` names a column of *values*; two controls called Tags meaning opposite

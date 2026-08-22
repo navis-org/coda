@@ -462,3 +462,51 @@ describe('reloading the frame', () => {
     expect(frameSrc(container)).toContain('#!+')
   })
 })
+
+/**
+ * An explicit `Viewer type` has to reach the *frame*, not only the copied link.
+ *
+ * It cannot travel in the URL: `sceneForViewer` normalises, so a viewer re-deriving the kind
+ * from the host would strip an override back out — on exactly the deployment `SEUNGLAB_HOSTS`
+ * gets wrong, which is the only reason the control exists. And this card is where the symptom
+ * is seen, since a segmentation layer that is present and empty looks like a broken viewer.
+ */
+describe('an explicit viewer type', () => {
+  const GRAPHENE = 'graphene://https://prodv1.flywire-daf.com/segmentation/table/fly_v31'
+  const CAVE_SCENE = {
+    layers: [
+      { type: 'segmentation', name: 'hemibrain:v1.2.1', source: GRAPHENE, segments: ['1'] },
+    ],
+  }
+  const sourceIn = (container: HTMLElement): string => {
+    const scene = frameScene(container) as { layers: Array<{ source?: string }> } | undefined
+    return String(scene?.layers[0]?.source)
+  }
+
+  it('is honoured rather than re-derived from the host', () => {
+    // `neuroglancer-demo.appspot.com` is spelunker in the table, so the default would prefix.
+    const url = sceneUrl(undefined, CAVE_SCENE, 'spelunker')
+    const { container } = render(
+      <NeuroglancerViewer url={url} color={CATEGORICAL} viewerType="seunglab" />,
+    )
+    expect(sourceIn(container)).toBe(GRAPHENE)
+  })
+
+  it('falls back to the deployment when nobody said', () => {
+    const url = sceneUrl(undefined, CAVE_SCENE)
+    const { container } = render(<NeuroglancerViewer url={url} color={CATEGORICAL} />)
+    expect(sourceIn(container)).toContain('middleauth+')
+  })
+
+  it('re-navigates when the choice changes', () => {
+    // It is in the effect's dependency list, or flipping the control leaves the frame showing
+    // the scene built for the other flavour until something else happens to change the URL.
+    const url = sceneUrl(undefined, CAVE_SCENE, 'spelunker')
+    const { container, rerender } = render(
+      <NeuroglancerViewer url={url} color={CATEGORICAL} viewerType="spelunker" />,
+    )
+    expect(sourceIn(container)).toContain('middleauth+')
+    rerender(<NeuroglancerViewer url={url} color={CATEGORICAL} viewerType="seunglab" />)
+    expect(sourceIn(container)).toBe(GRAPHENE)
+  })
+})

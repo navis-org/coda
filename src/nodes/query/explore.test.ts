@@ -112,25 +112,22 @@ describe('Explore: the All port', () => {
  * control and why it defaults to on.
  */
 describe('the tag search opt-out', () => {
-  const ctx = (params: Record<string, unknown>) => ({
-    params: params as never,
-    column: (id: string) => (params[id] ? String(params[id]) : undefined),
-  })
+  const excluded = (params: Record<string, unknown>, tagColumn?: string) =>
+    excludedFromSearch(params as never, tagColumn)
 
   it('excludes nothing while it is on, which is the default', () => {
-    expect(excludedFromSearch(ctx({ tagColumn: 'community' }))).toEqual([])
-    expect(excludedFromSearch(ctx({ tagColumn: 'community', searchTags: true }))).toEqual([])
+    expect(excluded({}, 'community')).toBeUndefined()
+    expect(excluded({ searchTags: true }, 'community')).toBeUndefined()
   })
 
   it('excludes the tag column once it is off', () => {
-    expect(excludedFromSearch(ctx({ tagColumn: 'community', searchTags: false }))).toEqual([
-      'community',
-    ])
+    expect(excluded({ searchTags: false }, 'community')).toBe('community')
   })
 
   it('excludes nothing when no tag column is named', () => {
     // Off with nothing to exclude must not silently mean "exclude something else".
-    expect(excludedFromSearch(ctx({ searchTags: false }))).toEqual([])
+    expect(excluded({ searchTags: false })).toBeUndefined()
+    expect(excluded({ searchTags: false }, '')).toBeUndefined()
   })
 
   it('is declared so that it reaches the provenance key', () => {

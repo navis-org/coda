@@ -445,6 +445,20 @@ export function sampleTable(table: TableValue, spec: SampleSpec): TableValue {
   return selectRows(table, indices)
 }
 
+/**
+ * `name`, or the first free `name_n`, marking it taken.
+ *
+ * The one statement of Coda's collision rule, which `joinedColumns`, the wide pivot,
+ * `renamedColumns` and `combineLayout` all make: the newcomer wins the name and the incumbent is
+ * suffixed rather than overwritten.
+ */
+function uniqueName(taken: Set<string>, name: string): string {
+  let out = name
+  for (let n = 2; taken.has(out); n++) out = `${name}_${n}`
+  taken.add(out)
+  return out
+}
+
 // ---------------------------------------------------------------------------
 // Uploaded table shaping
 // ---------------------------------------------------------------------------
@@ -487,11 +501,7 @@ function renamedColumns(
     if (target !== undefined) return target
     // The chosen column wins the name; a column that merely already had it is suffixed, the
     // same call `joinedColumns` and the wide pivot make about a collision.
-    if (!targets.has(name)) return name
-    let n = 2
-    while (taken.has(`${name}_${n}`) || targets.has(`${name}_${n}`)) n++
-    taken.add(`${name}_${n}`)
-    return `${name}_${n}`
+    return targets.has(name) ? uniqueName(taken, name) : name
   })
 }
 
@@ -614,11 +624,14 @@ function combinedDType(schema: TableSchema | undefined, columns: readonly string
     .map((n) => findColumn(schema, n)?.dtype)
     .filter((d): d is DType => d !== undefined)
   if (found.length === 0) return 'str'
-  if (found.every((d) => d === found[0])) return found[0]!
-  return found.every(isNumericDType) ? 'f64' : 'str'
+  // `mergedDType` is the one statement of "can these two reconcile" — the same question
+  // `stackColumns` asks. What differs is only what each caller does with a *no*: a stack has
+  // found two different columns wearing one name and refuses, where this picker is somebody
+  // saying these hold one fact, so it widens to the type that keeps every value.
+  return found.reduce((a, b) => mergedDType(a, b) ?? 'str')
 }
 
-interface CombineLayout {
+export interface CombineLayout {
   /** One output name per input column, in order. */
   renamed: string[]
   /** Whether the result takes an existing column's place rather than being appended. */
@@ -636,56 +649,66 @@ interface CombineLayout {
  * last, and any *other* column already holding the name is suffixed rather than overwritten —
  * `renamedColumns`' rule, and `joinedColumns`' before it.
  */
-function combineLayout(names: readonly string[], spec: CombineSpec): CombineLayout {
+export function combineLayout(names: readonly string[], spec: CombineSpec): CombineLayout {
   const replaced = spec.columns.includes(spec.into)
   const taken = new Set(names)
   const renamed = replaced
     ? [...names]
-    : names.map((name) => {
-        if (name !== spec.into) return name
-        let n = 2
-        while (taken.has(`${name}_${n}`)) n++
-        taken.add(`${name}_${n}`)
-        return `${name}_${n}`
-      })
+    : names.map((name) => (name === spec.into ? uniqueName(taken, name) : name))
   taken.add(spec.into)
 
-  let sourceName: string | undefined
-  if (spec.sourceColumn) {
-    // Appended last, and a collision suffixed, on `stackColumns`' reasoning: it is this node's
-    // annotation about the table rather than part of it.
-    sourceName = spec.sourceColumn
-    let n = 2
-    while (taken.has(sourceName)) sourceName = `${spec.sourceColumn}_${n++}`
-  }
+  // Appended last, and a collision suffixed, on `stackColumns`' reasoning: it is this node's
+  // annotation about the table rather than part of it.
+  const sourceName = spec.sourceColumn ? uniqueName(taken, spec.sourceColumn) : undefined
   return { renamed, replaced, sourceName }
 }
 
-export function combineSchema(
+/**
+ * Everything both halves need, derived once.
+ *
+ * The schema half and the value half were each computing `combinedDType` and `combineLayout`
+ * from the same inputs — two derivations of one answer that nothing checked against each other,
+ * which is the drift invariant 3 exists to prevent, inside a single op. Undefined where there is
+ * nothing to do, which is what makes both entry points a one-line guard.
+ */
+export interface CombinePlan extends CombineLayout {
+  schema: TableSchema
+  dtype: DType
+}
+
+export function combinePlan(
   schema: TableSchema | undefined,
   spec: CombineSpec,
-): TableSchema | undefined {
-  if (!schema) return undefined
-  if (!spec.into || spec.columns.length === 0) return schema
+): CombinePlan | undefined {
+  if (!schema || !spec.into || spec.columns.length === 0) return undefined
 
   const dtype = combinedDType(schema, spec.columns)
-  const { renamed, replaced, sourceName } = combineLayout(
+  const layout = combineLayout(
     schema.columns.map((c) => c.name),
     spec,
   )
   const columns: ColumnSchema[] = schema.columns.map((c, i) =>
     // The unit does not survive: the values now come from several columns, and one of them
     // carrying nanometres says nothing about the result.
-    replaced && c.name === spec.into ? column(spec.into, dtype) : { ...c, name: renamed[i]! },
+    layout.replaced && c.name === spec.into
+      ? column(spec.into, dtype)
+      : { ...c, name: layout.renamed[i]! },
   )
-  if (!replaced) columns.push(column(spec.into, dtype))
-  if (sourceName) columns.push(column(sourceName, 'str'))
-  return { columns }
+  if (!layout.replaced) columns.push(column(spec.into, dtype))
+  if (layout.sourceName) columns.push(column(layout.sourceName, 'str'))
+  return { ...layout, schema: { columns }, dtype }
+}
+
+export function combineSchema(
+  schema: TableSchema | undefined,
+  spec: CombineSpec,
+): TableSchema | undefined {
+  return combinePlan(schema, spec)?.schema ?? schema
 }
 
 export function combineTable(table: TableValue, spec: CombineSpec): TableValue {
-  const schema = combineSchema(table.schema, spec)
-  if (!schema || !spec.into || spec.columns.length === 0) return table
+  const plan = combinePlan(table.schema, spec)
+  if (!plan) return table
 
   /*
    * Only the columns the table actually has, and a missing one is skipped rather than refused:
@@ -697,33 +720,32 @@ export function combineTable(table: TableValue, spec: CombineSpec): TableValue {
   const sources = spec.columns
     .filter((n) => findColumn(table.schema, n))
     .map((n) => ({ name: n, data: getColumn(table, n) }))
-  const dtype = combinedDType(table.schema, spec.columns)
 
   const values: CellValue[] = new Array(table.length).fill(null)
-  const from: CellValue[] = new Array(table.length).fill(null)
+  // Only where one was asked for. Unset is the default, and this is a whole extra column's
+  // worth of allocation and one store per row on tables that run to six figures.
+  const from: CellValue[] | undefined = plan.sourceName
+    ? new Array<CellValue>(table.length).fill(null)
+    : undefined
   for (let row = 0; row < table.length; row++) {
     for (const source of sources) {
       const cell = source.data[row] ?? null
       if (absent(cell)) continue
-      values[row] = dtype === 'str' && typeof cell !== 'string' ? String(cell) : cell
-      from[row] = source.name
+      values[row] = plan.dtype === 'str' && typeof cell !== 'string' ? String(cell) : cell
+      if (from) from[row] = source.name
       break
     }
   }
 
-  const { renamed, sourceName } = combineLayout(
-    table.schema.columns.map((c) => c.name),
-    spec,
-  )
   const data: Record<string, ColumnData> = {}
   table.schema.columns.forEach((c, i) => {
-    data[renamed[i]!] = getColumn(table, c.name)
+    data[plan.renamed[i]!] = getColumn(table, c.name)
   })
   // After the pass above, so a replaced column takes the result rather than keeping its own.
   data[spec.into] = values
-  if (sourceName) data[sourceName] = from
+  if (plan.sourceName && from) data[plan.sourceName] = from
 
-  return makeTable(schema, data, table.kind)
+  return makeTable(plan.schema, data, table.kind)
 }
 
 // ---------------------------------------------------------------------------
@@ -959,18 +981,6 @@ export const NUMERIC_AGG_OPTIONS: Array<{ value: AggFn; label: string }> = AGG_O
  * cell is one hover away, and the alternative is a column of invisible bytes.
  */
 export const JOIN_SEPARATOR = '; '
-
-/**
- * Which param holds the value column, which depends on the aggregation.
- *
- * `join` takes text where every other aggregation takes a number, and `ColumnParam.dtypes` is a
- * fixed list rather than a function of the params — so the two are separate pickers, made
- * exclusive by `visibleIf`, exactly as a colour's column picker and its swatch are. One statement
- * of the pairing because three callers read it: the node, and both emitters.
- */
-export function aggValueParam(agg: AggFn): 'value' | 'textValue' {
-  return agg === 'join' ? 'textValue' : 'value'
-}
 
 /** Name of the column an aggregation produces. Kept in one place so both halves agree. */
 export function aggColumnName(agg: AggFn, valueColumn: string | undefined): string {
@@ -1402,13 +1412,6 @@ export function matrixToTable(matrix: MatrixValue, labelColumn: string): TableVa
 }
 
 /** First free name, so a column label colliding with the row field keeps both columns. */
-function uniqueName(taken: Set<string>, name: string): string {
-  let out = name
-  for (let n = 2; taken.has(out); n++) out = `${name}_${n}`
-  taken.add(out)
-  return out
-}
-
 function labelOf(cell: CellValue | undefined): string {
   return cell === null || cell === undefined ? '—' : String(cell)
 }

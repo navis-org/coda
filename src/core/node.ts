@@ -222,8 +222,16 @@ export interface ColumnParam extends ParamBase {
   from: string
   /** Which attribute table to read when the input carries more than one (Network). */
   part?: AttributePart
-  /** Restrict to these dtypes. Undefined = any dtype. */
-  dtypes?: DType[]
+  /**
+   * Restrict to these dtypes. Undefined = any dtype.
+   *
+   * A function where the restriction depends on the node's other params — Group By's value
+   * picker is numeric for every aggregation except `join`, which takes text. `schemaFrom` is
+   * already function-valued for the same reason; before this was, the only way to express it
+   * was two stored params made exclusive by `visibleIf`, which is a second param in the saved
+   * document and a branch at every reader.
+   */
+  dtypes?: DType[] | ((params: ParamValues) => DType[] | undefined)
   /** Overrides how the schema is found; `from` still says which port must be connected. */
   schemaFrom?: ColumnSchemaSource
   /** Empty string means "first compatible column", resolved consistently at both stages. */
@@ -237,7 +245,8 @@ export interface ColumnsParam extends ParamBase {
   kind: 'columns'
   from: string
   part?: AttributePart
-  dtypes?: DType[]
+  /** As `ColumnParam.dtypes`. */
+  dtypes?: DType[] | ((params: ParamValues) => DType[] | undefined)
   schemaFrom?: ColumnSchemaSource
   default: string[]
   /**
@@ -705,7 +714,7 @@ export function resolveColumn(
   if (chosen && chosen !== param.default) return chosen
   // A schema this picker cannot see is not a schema without this column in it, so there is
   // nothing here to pick a first compatible column *from*.
-  if (!columnSchemaFor(param, inputs, params)) return chosen || undefined
+  if (!columnsKnown(param, inputs, params)) return chosen || undefined
   // Undefined when there is nothing to offer, which every caller already handles.
   return available[0]
 }
@@ -737,7 +746,7 @@ export function resolveColumns(
 ): string[] {
   const stored = params[param.id]
   if (!Array.isArray(stored)) return []
-  if (!columnSchemaFor(param, inputs, params)) return stored
+  if (!columnsKnown(param, inputs, params)) return stored
   const available = availableColumns(param, inputs, params)
   return stored.filter((name) => available.includes(name))
 }
@@ -763,6 +772,30 @@ export function columnSchemaFor(
     : attributeSchema(inputs[param.from], param.part ?? 'nodes')
 }
 
+/**
+ * Whether the port this picker reads carries a schema *at all*.
+ *
+ * The unknown-versus-empty question, which `resolveColumn`, `resolveColumns`,
+ * `validateColumnParams` and both column widgets all ask — and which is the distinction
+ * `columnSchemaFor` answers `undefined` separately from an empty schema for. Named because
+ * `!== undefined` at five sites is a rule nobody can grep for.
+ */
+export function columnsKnown(
+  param: ColumnParam | ColumnsParam,
+  inputs: Readonly<Record<string, CodaType | undefined>>,
+  params: ParamValues,
+): boolean {
+  return columnSchemaFor(param, inputs, params) !== undefined
+}
+
+/** The dtype restriction for these params, whether it was declared as a list or a rule. */
+export function dtypesOf(
+  param: ColumnParam | ColumnsParam,
+  params: ParamValues,
+): DType[] | undefined {
+  return typeof param.dtypes === 'function' ? param.dtypes(params) : param.dtypes
+}
+
 export function availableColumns(
   param: ColumnParam | ColumnsParam,
   inputs: Readonly<Record<string, CodaType | undefined>>,
@@ -770,7 +803,8 @@ export function availableColumns(
 ): string[] {
   const schema = columnSchemaFor(param, inputs, params)
   if (!schema) return []
-  const cols = param.dtypes ? columnsOfType(schema, param.dtypes) : schema.columns
+  const dtypes = dtypesOf(param, params)
+  const cols = dtypes ? columnsOfType(schema, dtypes) : schema.columns
   return cols.map((c) => c.name)
 }
 
@@ -798,14 +832,15 @@ export function validateColumnParams(def: NodeDefinition, ctx: InferContext): st
      * is most likely still correct, and inviting someone to re-pick from an empty list is
      * worse advice than silence.
      */
-    if (!columnSchemaFor(p, ctx.inputs, ctx.params)) continue
+    if (!columnsKnown(p, ctx.inputs, ctx.params)) continue
     const available = availableColumns(p, ctx.inputs, ctx.params)
     if (available.length === 0) {
       // An optional picker is allowed to have nothing to offer — that is what optional means.
       // Reporting it puts a warning badge on a node whose control nobody has touched, which
       // is how a genuine issue further down the list stops being read.
       if (p.optional) continue
-      const restriction = p.dtypes ? ` of type ${p.dtypes.join('/')}` : ''
+      const dtypes = dtypesOf(p, ctx.params)
+      const restriction = dtypes ? ` of type ${dtypes.join('/')}` : ''
       issues.push(`No columns${restriction} available for "${p.label}"`)
       continue
     }

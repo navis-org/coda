@@ -22,6 +22,7 @@ import { BarChartViewer } from './BarChartViewer'
 import { HeatmapViewer } from './HeatmapViewer'
 import { LazyNetworkViewer, LazyViewer3D } from './LazyViewers'
 import { NeuroglancerViewer } from './NeuroglancerViewer'
+import { chosenViewerKind } from '../../nodes/output/neuroglancer'
 import { DatasetSummaryViewer } from './DatasetSummaryViewer'
 import { RoisViewer } from './RoisViewer'
 import type { RoiColorMode, RoiLabelMode } from './RoisViewer'
@@ -305,6 +306,7 @@ function ValuePreviewInner({
         neurons={isTableValue(neurons) ? neurons : undefined}
         color={readColorSpec('segment', node.params, ctx.column)}
         scale={Number(node.params.uiScale ?? 0.75)}
+        viewerType={chosenViewerKind(node.params)}
         {...shared}
       />
     )

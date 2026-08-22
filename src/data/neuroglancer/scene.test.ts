@@ -547,14 +547,9 @@ describe('which flavour of neuroglancer a deployment is', () => {
 
   it('leaves a non-graphene source alone whichever viewer is asked for', () => {
     for (const viewer of ['https://ngl.flywire.ai/', 'https://spelunker.cave-explorer.org/']) {
-      const scene = JSON.parse(
-        decodeURIComponent(sceneUrl(viewer, CAVE).split('#!').pop()!),
-      ) as {
-        layers: Array<{ type?: string; source?: string }>
-      }
       // caveclient prefixes `precomputed://` only for the annotation and segment-property URLs
       // CAVE serves itself, neither of which appears in a scene built here.
-      expect(scene.layers.find((l) => l.type === 'image')!.source).toBe(
+      expect(stateIn(sceneUrl(viewer, CAVE)).find((l) => l.type === 'image')!.source).toBe(
         'precomputed://gs://flywire_em/aligned/v1',
       )
     }
@@ -569,8 +564,7 @@ describe('which flavour of neuroglancer a deployment is', () => {
      * Both directions, because either alone is vacuous: `CAVE`'s source is plain, so asserting
      * only that a seunglab patch lacks the prefix passes just as well when nothing was rewritten.
      */
-    const patchLayer = (viewer: string): Layer =>
-      stateIn(scenePatchUrl(viewer, CAVE)).find((l) => l.source?.startsWith('graphene://'))!
+    const patchLayer = (viewer: string): Layer => grapheneLayer(scenePatchUrl(viewer, CAVE))
     expect(patchLayer('https://spelunker.cave-explorer.org/').source).toContain('middleauth+')
     expect(patchLayer('https://ngl.flywire.ai/').source).not.toContain('middleauth')
     expect(patchLayer('https://ngl.flywire.ai/').type).toBe('segmentation_with_graph')

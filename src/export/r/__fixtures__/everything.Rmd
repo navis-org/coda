@@ -30,28 +30,15 @@ library(igraph)
 # no equivalent in dplyr or neuprintr, written out here so the document
 # stands on its own.
 
-.coda_present <- function(x) !is.na(x) & as.character(x) != ""
-
-#' The first of `columns` holding a value, per row.
-coda_combine <- function(df, columns) {
-  out <- rep(NA, nrow(df))
+#' The first of `columns` holding a value per row, or which column that was.
+coda_combine <- function(df, columns, source = FALSE) {
+  out <- if (source) rep(NA_character_, nrow(df)) else rep(NA, nrow(df))
   for (name in columns) {
     if (!name %in% names(df)) next
     col <- df[[name]]
-    fill <- is.na(out) & .coda_present(col)
-    out[fill] <- col[fill]
-  }
-  out
-}
-
-
-#' The name of the column `coda_combine` took each value from.
-coda_combine_source <- function(df, columns) {
-  out <- rep(NA_character_, nrow(df))
-  for (name in columns) {
-    if (!name %in% names(df)) next
-    fill <- is.na(out) & .coda_present(df[[name]])
-    out[fill] <- name
+    # Null and the empty string are one absence: a blank must not stop the search.
+    fill <- is.na(out) & !is.na(col) & as.character(col) != ""
+    out[fill] <- if (source) name else col[fill]
   }
   out
 }
@@ -640,7 +627,7 @@ ggplot(scatter_plot_out, aes(x = `pre`, y = `post`)) +
 # ── Combine Columns ──
 combine_columns <- find_neurons
 combine_columns[["label"]] <- coda_combine(find_neurons, c("type", "instance"))
-combine_columns[["label_from"]] <- coda_combine_source(find_neurons, c("type", "instance"))
+combine_columns[["label_from"]] <- coda_combine(find_neurons, c("type", "instance"), source = TRUE)
 ```
 
 ```{r group-by-df}
