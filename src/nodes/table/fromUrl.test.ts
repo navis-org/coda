@@ -112,6 +112,22 @@ describe('core.tableFromUrl — fetching', () => {
     expect(out.data['cluster']).toEqual(['3', '1'])
   })
 
+  it('renames the type column, and the values land under it', async () => {
+    const scheduler = makeScheduler()
+    await scheduler.run(pipeline({ idColumn: 'root_id', typeColumn: 'cellType' }), {
+      mode: 'full',
+    })
+    const out = scheduler.output('url', 'out')
+    if (!isTableValue(out)) throw new Error('expected a table')
+    /*
+     * The value half, because the schema half is asserted in `tableOps.test.ts` and the two
+     * disagreeing is invariant 3's whole failure mode — a picker downstream offering `type` over
+     * a table whose values never moved.
+     */
+    expect(columnNames(out.schema)).toEqual(['neuronId', 'type', 'cluster'])
+    expect(out.data['type']).toEqual(['LC4', 'LC6'])
+  })
+
   it('is expensive, so typing a URL cannot fire a request', async () => {
     // Invariant 6, in its plainest form: this param is a text field aimed at an arbitrary host.
     expect(requireNodeDef('core.tableFromUrl').cost).toBe('expensive')

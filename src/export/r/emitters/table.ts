@@ -8,7 +8,7 @@
 
 import { isNumericDType } from '../../../core/types'
 import type { AggFn } from '../../../nodes/lib/tableOps'
-import { aggColumnName } from '../../../nodes/lib/tableOps'
+import { aggColumnName, combineSchema } from '../../../nodes/lib/tableOps'
 import { rCol, rStr, rValue, rVector } from '../r'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
@@ -171,6 +171,50 @@ registerEmitter('core.selectOne', (ctx) => {
 // ---------------------------------------------------------------------------
 // Deduplicate
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Combine Columns
+// ---------------------------------------------------------------------------
+
+registerEmitter('core.combineColumns', (ctx) => {
+  const src = ctx.wired('in')
+  const out = ctx.output('out')
+  const columns = ctx.columns('columns')
+  const into = String(ctx.params.into ?? '').trim()
+  const sourceColumn = String(ctx.params.sourceColumn ?? '').trim()
+  if (!into || columns.length === 0) {
+    // Not configured, and the node passes its input through in exactly that case.
+    return [`${out} <- ${src}`]
+  }
+
+  ctx.helper('coda_combine')
+
+  /*
+   * A column already holding the result's name is renamed rather than overwritten — the node's
+   * own rule, and the opposite of what `df[[name]] <- ...` does. Read back off `combineSchema`
+   * so the suffix cannot disagree with the canvas; an unknown input schema predicts nothing and
+   * the assignment lands as base R would have it.
+   */
+  const schema = ctx.schema('in')
+  const inNames = schema?.columns.map((c) => c.name) ?? []
+  const shaped = combineSchema(schema, { columns, into, sourceColumn })
+  const renamed: Array<[string, string]> = []
+  shaped?.columns.slice(0, inNames.length).forEach((c, i) => {
+    if (c.name !== inNames[i]) renamed.push([inNames[i]!, c.name])
+  })
+
+  const lines = [`${out} <- ${src}`]
+  for (const [from, to] of renamed) {
+    lines.push(`names(${out})[names(${out}) == ${rStr(from)}] <- ${rStr(to)}`)
+  }
+  lines.push(`${out}[[${rStr(into)}]] <- coda_combine(${src}, ${rVector(columns)})`)
+  if (sourceColumn) {
+    ctx.helper('coda_combine_source')
+    const name = shaped?.columns[shaped.columns.length - 1]?.name ?? sourceColumn
+    lines.push(`${out}[[${rStr(name)}]] <- coda_combine_source(${src}, ${rVector(columns)})`)
+  }
+  return lines
+})
 
 registerEmitter('core.dedupe', (ctx) => {
   const src = ctx.wired('in')

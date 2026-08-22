@@ -16,7 +16,7 @@
  *  - `Sort` puts nulls last in **both** directions, where `sort_values` follows the direction.
  */
 
-import { aggColumnName } from '../../../nodes/lib/tableOps'
+import { aggColumnName, combineSchema } from '../../../nodes/lib/tableOps'
 import type { AggFn } from '../../../nodes/lib/tableOps'
 import { findColumn, isNumericDType } from '../../../core/types'
 import { pyList, pyStr, pyValue } from '../py'
@@ -199,6 +199,53 @@ registerEmitter('core.dedupe', (ctx) => {
   // is what an empty picker means here.
   const subset = names.length > 0 ? `subset=${pyList(names)}, ` : ''
   return [`${out} = ${src}.drop_duplicates(${subset}keep=${keep})`]
+})
+
+// ---------------------------------------------------------------------------
+// Combine Columns
+// ---------------------------------------------------------------------------
+
+registerEmitter('core.combineColumns', (ctx) => {
+  const src = ctx.wired('in')
+  const out = ctx.output('out')
+  const columns = ctx.columns('columns')
+  const into = String(ctx.params.into ?? '').trim()
+  const sourceColumn = String(ctx.params.sourceColumn ?? '').trim()
+  if (!into || columns.length === 0) {
+    // Not configured, and the node passes its input through in exactly that case.
+    return [`${out} = ${src}`]
+  }
+
+  ctx.require('pandas')
+  ctx.helper('coda_combine')
+
+  /*
+   * A column already holding the result's name is renamed rather than overwritten, which is the
+   * node's own rule and pandas' opposite — `df['type'] = ...` replaces silently. The rename is
+   * read back off `combineSchema` rather than re-derived, so the two cannot disagree about the
+   * suffix; where the input schema is unknown (downstream of a Pivot, say) there is nothing to
+   * predict and the assignment simply lands as pandas would have it.
+   */
+  const schema = ctx.schema('in')
+  const inNames = schema?.columns.map((c) => c.name) ?? []
+  const shaped = combineSchema(schema, { columns, into, sourceColumn })
+  const renames: string[] = []
+  shaped?.columns.slice(0, inNames.length).forEach((c, i) => {
+    if (c.name !== inNames[i]) renames.push(`${pyStr(inNames[i]!)}: ${pyStr(c.name)}`)
+  })
+
+  const lines = [
+    renames.length > 0
+      ? `${out} = ${src}.rename(columns={${renames.join(', ')}})`
+      : `${out} = ${src}.copy()`,
+    `${out}[${pyStr(into)}] = coda_combine(${src}, ${pyList(columns)})`,
+  ]
+  if (sourceColumn) {
+    ctx.helper('coda_combine_source')
+    const name = shaped?.columns[shaped.columns.length - 1]?.name ?? sourceColumn
+    lines.push(`${out}[${pyStr(name)}] = coda_combine_source(${src}, ${pyList(columns)})`)
+  }
+  return lines
 })
 
 // ---------------------------------------------------------------------------

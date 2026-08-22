@@ -30,6 +30,33 @@ library(igraph)
 # no equivalent in dplyr or neuprintr, written out here so the document
 # stands on its own.
 
+.coda_present <- function(x) !is.na(x) & as.character(x) != ""
+
+#' The first of `columns` holding a value, per row.
+coda_combine <- function(df, columns) {
+  out <- rep(NA, nrow(df))
+  for (name in columns) {
+    if (!name %in% names(df)) next
+    col <- df[[name]]
+    fill <- is.na(out) & .coda_present(col)
+    out[fill] <- col[fill]
+  }
+  out
+}
+
+
+#' The name of the column `coda_combine` took each value from.
+coda_combine_source <- function(df, columns) {
+  out <- rep(NA_character_, nrow(df))
+  for (name in columns) {
+    if (!name %in% names(df)) next
+    fill <- is.na(out) & .coda_present(df[[name]])
+    out[fill] <- name
+  }
+  out
+}
+
+
 coda_edge_list <- function(ids, prepost, min_weight, conn) {
   # Coda's Connectivity output: preId -> postId, always oriented the way the synapse
   # points, whichever way the traversal travelled.
@@ -599,6 +626,13 @@ ggplot(scatter_plot_out, aes(x = `pre`, y = `post`)) +
   scale_y_log10() +
   geom_smooth(method = "lm", se = FALSE) +
   theme_minimal()
+```
+
+```{r combine-columns}
+# ── Combine Columns ──
+combine_columns <- find_neurons
+combine_columns[["label"]] <- coda_combine(find_neurons, c("type", "instance"))
+combine_columns[["label_from"]] <- coda_combine_source(find_neurons, c("type", "instance"))
 ```
 
 ```{r profile}

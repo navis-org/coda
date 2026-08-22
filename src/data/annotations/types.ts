@@ -114,9 +114,11 @@ export interface AnnotationFetchOptions {
  * Deliberately just these two. Everything else is a passthrough only a column picker ever names,
  * which is the rule neuPrint's `PROPERTY_NAMES` follows for `cellBodyFiber` and `somaSide`.
  */
+export const TYPE_COLUMN_NAME = 'type'
+
 const CODA_NAMES: Record<string, string> = {
-  cell_type: 'type',
-  celltype: 'type',
+  cell_type: TYPE_COLUMN_NAME,
+  celltype: TYPE_COLUMN_NAME,
 }
 
 /** What Coda calls an annotation column. Identity for everything but the cell type. */

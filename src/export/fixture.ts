@@ -208,7 +208,13 @@ export function everythingGraph(): CodaGraph {
      */
     { id: 'linkage', type: 'cluster.linkage', col: 4, row: 5, params: { method: 'average' } },
     { id: 'cut', type: 'cluster.cut', col: 5, row: 5, params: { mode: 'count', count: 4 } },
-    { id: 'cutH', type: 'cluster.cut', col: 5, row: 6, params: { mode: 'height', height: 0.6 } },
+    {
+      id: 'cutH',
+      type: 'cluster.cut',
+      col: 5,
+      row: 6,
+      params: { mode: 'height', height: 0.6 },
+    },
     // A selection set, since that is the branch whose emitted frame is not simply empty.
     /*
      * The two label-to-neuron nodes, one on each branch of their shared emitter: `sel` has no
@@ -217,7 +223,13 @@ export function everythingGraph(): CodaGraph {
      * happened to be wired — the same reason there are two NBLAST nodes and two Select Ones.
      */
     { id: 'sel', type: 'cluster.selectedToNeurons', col: 7, row: 5 },
-    { id: 'clu', type: 'cluster.clustersToNeurons', col: 6, row: 6, params: { matchColumn: 'type' } },
+    {
+      id: 'clu',
+      type: 'cluster.clustersToNeurons',
+      col: 6,
+      row: 6,
+      params: { matchColumn: 'type' },
+    },
 
     {
       id: 'dendro',
@@ -254,6 +266,19 @@ export function everythingGraph(): CodaGraph {
       // `last` rather than the default, so the golden records the argument that differs from
       // pandas' own default — a fixture on `first` would pass with the parameter omitted.
       params: { columns: ['preType', 'postType'], keep: 'last' },
+    },
+    /*
+     * `type` then `instance`, which is the shape this node is for: one fact spread over several
+     * columns, the first filled-in one winning. A source column too, since that is a second
+     * emitted line and a second generated helper — the branch a fixture without one records as
+     * absent rather than as untested.
+     */
+    {
+      id: 'combine',
+      type: 'core.combineColumns',
+      col: 3,
+      row: 1,
+      params: { columns: ['type', 'instance'], into: 'label', sourceColumn: 'label_from' },
     },
     {
       id: 'group',
@@ -463,6 +488,7 @@ export function everythingGraph(): CodaGraph {
     ['find', 'neurons', 'mesh', 'neurons'],
     ['find', 'neurons', 'syn', 'neurons'],
     ['find', 'neurons', 'scatter', 'in'],
+    ['find', 'neurons', 'combine', 'in'],
     ['find', 'neurons', 'profile', 'neurons'],
     ['ds', 'dataset', 'profile', 'dataset'],
     ['ds', 'dataset', 'summary', 'dataset'],

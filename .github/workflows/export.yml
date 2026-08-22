@@ -16,14 +16,14 @@ on:
     paths:
       - 'src/export/**'
       - 'scripts/check-export.py'
-      - 'scripts/probe-cave-helpers.py'
+      - 'scripts/probe-py-helpers.py'
       - 'scripts/export-requirements.txt'
       - '.github/workflows/export.yml'
   pull_request:
     paths:
       - 'src/export/**'
       - 'scripts/check-export.py'
-      - 'scripts/probe-cave-helpers.py'
+      - 'scripts/probe-py-helpers.py'
       - 'scripts/export-requirements.txt'
   workflow_dispatch:
 
@@ -63,7 +63,7 @@ jobs:
       # real libraries and stops there; the CAVE helpers are pandas, and a pandas mistake is
       # invisible to every other pass here — the first run of this found `pd.to_numeric`
       # silently turning an eighteen-digit root id into a different neuron.
-      - run: python3 scripts/probe-cave-helpers.py
+      - run: python3 scripts/probe-py-helpers.py
 
       # The R half. `nat` pulls a large dependency tree, so this is the other reason the
       # workflow is path-filtered rather than living in `deploy.yml`.

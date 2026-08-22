@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""Run the generated CAVE helpers, against a stub client, and check what they answer.
+"""Run generated Python helpers and check what they answer.
 
-`pnpm probe:cave`. The counterpart of `probe-nblast.mjs` one language over, and it exists for the
-same reason: the golden file says the emitted text is unchanged and `check-export.py` says it
-parses and its module attributes resolve, but **nothing executes a line of it**. Every helper in
-`caveHelpers.ts` is pandas, which is exactly where the mistakes are.
+`pnpm probe:helpers`. The counterpart of `probe-nblast.mjs` one language over, and it exists for
+the same reason: the golden file says the emitted text is unchanged and `check-export.py` says it
+parses and its module attributes resolve, but **nothing executes a line of it**. These helpers are
+pandas, which is exactly where the mistakes are.
+
+It reads two generated cells: `caveHelpers.ts`' out of the CAVE golden, and the general helper
+cell out of `everything.ipynb`. It does *not* claim to cover every helper in the latter — what is
+exercised is listed below, and a helper nobody probes is still a helper nobody has run.
 
 It earned its place immediately. `coda_update_root_ids` read its id columns with
 `pd.to_numeric(..., errors='coerce')` — exact on a clean column, and **float64** the moment the
@@ -19,7 +23,7 @@ caveclient's wire format. `check-export.py` covers the signatures against the re
 
 Nothing here needs a token or a network.
 
-    python3 scripts/probe-cave-helpers.py
+    python3 scripts/probe-py-helpers.py
 """
 import json
 import sys
@@ -29,7 +33,8 @@ import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parent.parent
-NOTEBOOK = ROOT / "src" / "export" / "python" / "__fixtures__" / "cave.ipynb"
+FIXTURES = ROOT / "src" / "export" / "python" / "__fixtures__"
+NOTEBOOK = FIXTURES / "cave.ipynb"
 
 # The *generated* helper cell, read out of the golden notebook rather than transcribed here —
 # so this probes what the exporter actually writes, exactly as `probe-nblast.mjs` runs the real
@@ -225,6 +230,55 @@ idf = df.copy(); idf['neuronId'] = idf['neuronId'].astype('int64')
 r3 = ns['coda_update_root_ids'](Client(None, CG(current={720575940628857210}, roots={81000000000000002: 720575940628857299})), idf)
 check('repair: int column stays int', str(r3['neuronId'].dtype).startswith('int'), str(r3['neuronId'].dtype))
 check('repair: int rewrite exact', r3['neuronId'].iloc[1] == 720575940628857299, str(r3['neuronId'].iloc[1]))
+
+# ---- coda_combine, out of the *other* golden ---------------------------------
+#
+# Combine Columns is an ordinary table op, so its helpers live in `everything.ipynb`'s general
+# helper cell rather than in the CAVE one. They are pandas either way, and the rule they carry —
+# null and blank are one absence — is precisely the sort that reads as correct and answers wrong:
+# `df[cols].bfill(axis=1)` is the obvious spelling and stops at the first empty string.
+everything = json.loads((FIXTURES / "everything.ipynb").read_text())
+combine_src = next(
+    (
+        "".join(cell["source"])
+        for cell in everything["cells"]
+        if "def coda_combine(" in "".join(cell["source"])
+    ),
+    None,
+)
+if combine_src is None:
+    sys.exit("no coda_combine in everything.ipynb")
+
+cns: dict = {"pd": pd, "np": np}
+exec(combine_src, cns)  # noqa: S102 - the point is to run what was generated
+
+ann = pd.DataFrame({
+    'cell_type':      ['LC4', '', None, None],
+    'hemibrain_type': ['LC4b', 'PS180', 'DNp01', None],
+})
+combined = cns['coda_combine'](ann, ['cell_type', 'hemibrain_type'])
+check('combine: first with a value wins', combined.iloc[0] == 'LC4', str(combined.iloc[0]))
+# Row 1 is the whole point: a blank must not stop the search.
+check('combine: blank is absent', combined.iloc[1] == 'PS180', str(combined.iloc[1]))
+check('combine: null is absent', combined.iloc[2] == 'DNp01', str(combined.iloc[2]))
+check('combine: nothing anywhere stays absent', pd.isna(combined.iloc[3]), str(combined.iloc[3]))
+
+reversed_ = cns['coda_combine'](ann, ['hemibrain_type', 'cell_type'])
+check('combine: picked order is priority', reversed_.iloc[0] == 'LC4b', str(reversed_.iloc[0]))
+
+missing = cns['coda_combine'](ann, ['gone', 'hemibrain_type'])
+check('combine: a column the frame lacks is skipped', missing.iloc[1] == 'PS180', str(missing.iloc[1]))
+
+src = cns['coda_combine_source'](ann, ['cell_type', 'hemibrain_type'])
+check('combine: source names the winner', src.iloc[0] == 'cell_type', str(src.iloc[0]))
+check('combine: source follows the blank rule', src.iloc[1] == 'hemibrain_type', str(src.iloc[1]))
+check('combine: no source where nothing won', pd.isna(src.iloc[3]), str(src.iloc[3]))
+
+# The mixed-dtype case, where Coda widens to text rather than refusing.
+mixed = pd.DataFrame({'name': [None, 'LC4'], 'cluster': [12693, 7]})
+m = cns['coda_combine'](mixed, ['name', 'cluster']).astype('string')
+check('combine: a number widened to text', m.iloc[0] == '12693', str(m.iloc[0]))
+check('combine: text kept', m.iloc[1] == 'LC4', str(m.iloc[1]))
 
 print()
 print(f'{len(fails)} failed' if fails else 'all passed')

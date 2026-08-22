@@ -17,6 +17,7 @@ import { column, findColumn, isNumericDType, pickColumns, tableSchema } from '..
 import type { CellValue, ColumnData, MatrixValue, TableValue } from '../../core/values'
 import { getColumn, makeMatrix, makeTable, selectRows } from '../../core/values'
 import { ID_COLUMN_NAME, idText } from '../../core/ids'
+import { TYPE_COLUMN_NAME } from '../../data/annotations/types'
 
 // ---------------------------------------------------------------------------
 // Filter
@@ -460,27 +461,68 @@ export function uploadIsNeurons(schema: TableSchema | undefined, idColumn: strin
   return Boolean(idColumn) && Boolean(findColumn(schema, idColumn))
 }
 
-/** Rename the chosen id column, evicting a different column already holding the name. */
-function renamedColumns(names: readonly string[], idColumn: string): string[] {
-  if (!idColumn || !names.includes(idColumn)) return [...names]
-  const taken = new Set(names.filter((n) => n !== idColumn))
+/**
+ * Apply a set of renames, suffixing any column that merely already held a target name.
+ *
+ * `[from, to]` pairs rather than one id column, because there are two names Coda addresses a
+ * table by — `neuronId` and `type` — and they are applied in one pass so a column cannot be
+ * both the source of one rename and the collision victim of the other. The first pair naming
+ * a source wins, so the same column picked twice is the id rather than half of each.
+ */
+function renamedColumns(
+  names: readonly string[],
+  renames: ReadonlyArray<readonly [string, string]>,
+): string[] {
+  const from = new Map<string, string>()
+  for (const [source, target] of renames) {
+    if (source && names.includes(source) && !from.has(source)) from.set(source, target)
+  }
+  if (from.size === 0) return [...names]
+
+  const targets = new Set(from.values())
+  // Everything that survives untouched, so a suffix search never lands on one of them.
+  const taken = new Set(names.filter((n) => !from.has(n)))
   return names.map((name) => {
-    if (name === idColumn) return ID_COLUMN_NAME
+    const target = from.get(name)
+    if (target !== undefined) return target
     // The chosen column wins the name; a column that merely already had it is suffixed, the
     // same call `joinedColumns` and the wide pivot make about a collision.
-    if (name !== ID_COLUMN_NAME) return name
+    if (!targets.has(name)) return name
     let n = 2
-    while (taken.has(`${ID_COLUMN_NAME}_${n}`)) n++
-    return `${ID_COLUMN_NAME}_${n}`
+    while (taken.has(`${name}_${n}`) || targets.has(`${name}_${n}`)) n++
+    taken.add(`${name}_${n}`)
+    return `${name}_${n}`
   })
 }
 
 /**
- * What an upload's stored table looks like once the node's two controls are applied.
+ * The two import nodes' controls, as one argument.
  *
- * Both are lossless by construction, which is what lets them be applied *after* parsing rather
- * than during it — so changing either costs no re-parse and cannot disagree with the rows the
- * uploads store already holds.
+ * An object rather than three positional arguments, because two of them are column names and
+ * a caller that swapped them would type-check, run, and rename the wrong column.
+ */
+export interface UploadShape {
+  /** Renamed to `neuronId`. Empty renames nothing. */
+  idColumn?: string
+  /** Renamed to `type`. Empty renames nothing. */
+  typeColumn?: string
+  /** Widened to `str`. */
+  textColumns?: readonly string[]
+}
+
+function renamesOf(shape: UploadShape): Array<readonly [string, string]> {
+  return [
+    [shape.idColumn ?? '', ID_COLUMN_NAME] as const,
+    [shape.typeColumn ?? '', TYPE_COLUMN_NAME] as const,
+  ]
+}
+
+/**
+ * What an import's table looks like once the node's controls are applied.
+ *
+ * All three are lossless by construction, which is what lets them be applied *after* parsing
+ * rather than during it — so changing any of them costs no re-parse and cannot disagree with
+ * the rows the uploads store already holds.
  *
  *  - `textColumns` widens a column to `str`. Widening only, and never the reverse: reading
  *    text as a number is where data is lost, and the parser's round-trip rule has already kept
@@ -488,17 +530,20 @@ function renamedColumns(names: readonly string[], idColumn: string): string[] {
  *    not a *quantity* — a cluster label, a layer index — which has no business offering itself
  *    to a size encoding or being averaged.
  *  - `idColumn` renames one column to `neuronId`. See `ID_COLUMN_NAME`.
+ *  - `typeColumn` renames one column to `type`. See `TYPE_COLUMN_NAME`, and note that the two
+ *    are a pair rather than a symmetry: an id makes the table *Neurons*, where a type makes it
+ *    legible — `typesOf` reads `type` by literal name, so a chain publishing `cell_type` leaves
+ *    every connectivity row's type null with the schema still declaring it.
  */
 export function uploadShapeSchema(
   schema: TableSchema | undefined,
-  idColumn: string,
-  textColumns: readonly string[],
+  shape: UploadShape,
 ): TableSchema | undefined {
   if (!schema) return undefined
-  const text = new Set(textColumns)
+  const text = new Set(shape.textColumns ?? [])
   const names = renamedColumns(
     schema.columns.map((c) => c.name),
-    idColumn,
+    renamesOf(shape),
   )
   return {
     columns: schema.columns.map((c, i) =>
@@ -508,13 +553,9 @@ export function uploadShapeSchema(
   }
 }
 
-export function uploadShapeTable(
-  table: TableValue,
-  idColumn: string,
-  textColumns: readonly string[],
-): TableValue {
-  const schema = uploadShapeSchema(table.schema, idColumn, textColumns)!
-  const text = new Set(textColumns)
+export function uploadShapeTable(table: TableValue, shape: UploadShape): TableValue {
+  const schema = uploadShapeSchema(table.schema, shape)!
+  const text = new Set(shape.textColumns ?? [])
   const data: Record<string, ColumnData> = {}
   for (let i = 0; i < table.schema.columns.length; i++) {
     const from = table.schema.columns[i]!.name
@@ -526,7 +567,163 @@ export function uploadShapeTable(
       ? source.map((cell) => (cell === null ? null : String(cell)))
       : source
   }
-  return makeTable(schema, data, uploadIsNeurons(table.schema, idColumn) ? 'neurons' : 'table')
+  return makeTable(
+    schema,
+    data,
+    uploadIsNeurons(table.schema, shape.idColumn ?? '') ? 'neurons' : 'table',
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Combine columns
+// ---------------------------------------------------------------------------
+
+export interface CombineSpec {
+  /** The columns to draw from, in priority order. The first with a value wins. */
+  columns: readonly string[]
+  /** Name for the result. */
+  into: string
+  /** Column naming which input each value came from. Empty adds none. */
+  sourceColumn?: string
+}
+
+/**
+ * A cell that counts as absent.
+ *
+ * Null and the empty string are one absence, which is the call `datasetStats.ts` already makes
+ * and for the same reason: a base publishes both for one thing depending on how it was edited,
+ * so a coalesce stopping at the first `''` would answer "no type" for a neuron that has one two
+ * columns over. Whitespace is deliberately *not* trimmed — `" "` is odd data rather than absent
+ * data, and a trim rule invented here would drop it with nothing saying so.
+ */
+function absent(cell: CellValue): boolean {
+  return cell === null || cell === ''
+}
+
+/**
+ * The dtype a combined column takes: the shared one, or `str`.
+ *
+ * Widening rather than refusing, which is the opposite of `stackColumns` and the difference is
+ * real. A stack meeting two dtypes under one name has found two different columns wearing it;
+ * here the picker *is* somebody saying these columns hold one fact, so the honest merge keeps
+ * every value — and `str` keeps all of them, the same trade `textColumns` makes. `i64` with
+ * `f64` is the one pair that reconciles without leaving numbers behind.
+ */
+function combinedDType(schema: TableSchema | undefined, columns: readonly string[]): DType {
+  const found = columns
+    .map((n) => findColumn(schema, n)?.dtype)
+    .filter((d): d is DType => d !== undefined)
+  if (found.length === 0) return 'str'
+  if (found.every((d) => d === found[0])) return found[0]!
+  return found.every(isNumericDType) ? 'f64' : 'str'
+}
+
+interface CombineLayout {
+  /** One output name per input column, in order. */
+  renamed: string[]
+  /** Whether the result takes an existing column's place rather than being appended. */
+  replaced: boolean
+  /** The source column's final name, once a collision has been settled. */
+  sourceName?: string
+}
+
+/**
+ * Where the result sits, and what happens to a column already holding its name.
+ *
+ * Two clauses. **A result named after one of the picked columns replaces it in place**, which
+ * is the backfill case and the common one: `[cell_type, hemibrain_type] → cell_type` should
+ * leave a table with exactly the columns it arrived with. Otherwise the result is appended
+ * last, and any *other* column already holding the name is suffixed rather than overwritten —
+ * `renamedColumns`' rule, and `joinedColumns`' before it.
+ */
+function combineLayout(names: readonly string[], spec: CombineSpec): CombineLayout {
+  const replaced = spec.columns.includes(spec.into)
+  const taken = new Set(names)
+  const renamed = replaced
+    ? [...names]
+    : names.map((name) => {
+        if (name !== spec.into) return name
+        let n = 2
+        while (taken.has(`${name}_${n}`)) n++
+        taken.add(`${name}_${n}`)
+        return `${name}_${n}`
+      })
+  taken.add(spec.into)
+
+  let sourceName: string | undefined
+  if (spec.sourceColumn) {
+    // Appended last, and a collision suffixed, on `stackColumns`' reasoning: it is this node's
+    // annotation about the table rather than part of it.
+    sourceName = spec.sourceColumn
+    let n = 2
+    while (taken.has(sourceName)) sourceName = `${spec.sourceColumn}_${n++}`
+  }
+  return { renamed, replaced, sourceName }
+}
+
+export function combineSchema(
+  schema: TableSchema | undefined,
+  spec: CombineSpec,
+): TableSchema | undefined {
+  if (!schema) return undefined
+  if (!spec.into || spec.columns.length === 0) return schema
+
+  const dtype = combinedDType(schema, spec.columns)
+  const { renamed, replaced, sourceName } = combineLayout(
+    schema.columns.map((c) => c.name),
+    spec,
+  )
+  const columns: ColumnSchema[] = schema.columns.map((c, i) =>
+    // The unit does not survive: the values now come from several columns, and one of them
+    // carrying nanometres says nothing about the result.
+    replaced && c.name === spec.into ? column(spec.into, dtype) : { ...c, name: renamed[i]! },
+  )
+  if (!replaced) columns.push(column(spec.into, dtype))
+  if (sourceName) columns.push(column(sourceName, 'str'))
+  return { columns }
+}
+
+export function combineTable(table: TableValue, spec: CombineSpec): TableValue {
+  const schema = combineSchema(table.schema, spec)
+  if (!schema || !spec.into || spec.columns.length === 0) return table
+
+  /*
+   * Only the columns the table actually has, and a missing one is skipped rather than refused:
+   * this is a coalesce, so a name the schema lost is one fewer place to look rather than a
+   * question that can no longer be answered. `groupByTable` refuses the same case because
+   * grouping on fewer columns silently keeps *more* rows; here it keeps fewer values, which
+   * the result column shows.
+   */
+  const sources = spec.columns
+    .filter((n) => findColumn(table.schema, n))
+    .map((n) => ({ name: n, data: getColumn(table, n) }))
+  const dtype = combinedDType(table.schema, spec.columns)
+
+  const values: CellValue[] = new Array(table.length).fill(null)
+  const from: CellValue[] = new Array(table.length).fill(null)
+  for (let row = 0; row < table.length; row++) {
+    for (const source of sources) {
+      const cell = source.data[row] ?? null
+      if (absent(cell)) continue
+      values[row] = dtype === 'str' && typeof cell !== 'string' ? String(cell) : cell
+      from[row] = source.name
+      break
+    }
+  }
+
+  const { renamed, sourceName } = combineLayout(
+    table.schema.columns.map((c) => c.name),
+    spec,
+  )
+  const data: Record<string, ColumnData> = {}
+  table.schema.columns.forEach((c, i) => {
+    data[renamed[i]!] = getColumn(table, c.name)
+  })
+  // After the pass above, so a replaced column takes the result rather than keeping its own.
+  data[spec.into] = values
+  if (sourceName) data[sourceName] = from
+
+  return makeTable(schema, data, table.kind)
 }
 
 // ---------------------------------------------------------------------------

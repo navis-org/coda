@@ -108,6 +108,33 @@ describe('core.uploadTable — inference', () => {
     expect(columnNames(schemaOf(out))).toEqual(['neuronId', 'cellType', 'cluster'])
   })
 
+  it('renames the type column too, and both renames land in one pass', async () => {
+    const id = await stored()
+    const out = inferGraph(
+      pipeline({ dataId: id, idColumn: 'root_id', typeColumn: 'cellType' }),
+    ).nodes['up']?.outputs['out']
+    /*
+     * `type` is the second name Coda addresses a table by, and missing it is entirely silent:
+     * `typesOf` reads `type` by literal name, so a chain publishing `cellType` leaves every
+     * connectivity row's type null with the schema still declaring one.
+     */
+    expect(columnNames(schemaOf(out))).toEqual(['neuronId', 'type', 'cluster'])
+    expect(out?.kind).toBe('neurons')
+  })
+
+  it('does not offer the ID column as the type column', async () => {
+    const id = await stored()
+    const def = requireNodeDef('core.uploadTable')
+    const param = def.params?.find((p) => p.id === 'typeColumn')
+    if (param?.kind !== 'enum' || typeof param.options !== 'function') {
+      throw new Error('typeColumn is not a dynamic enum')
+    }
+    const ctx = { params: { dataId: id, idColumn: 'root_id' } } as never
+    // One column cannot be renamed to two names, and the id claims it first — so offering it
+    // here would be a control that silently does nothing.
+    expect(param.options(ctx).map((o) => o.value)).toEqual(['', 'cellType', 'cluster'])
+  })
+
   it('stays a plain table with no ID column chosen', async () => {
     const id = await stored()
     const out = inferGraph(pipeline({ dataId: id })).nodes['up']?.outputs['out']
@@ -164,7 +191,9 @@ describe('core.uploadTable — validation', () => {
 
   it('reports an ID column the file does not have', async () => {
     const id = await stored()
-    expect(issues(pipeline({ dataId: id, idColumn: 'neuronId' })).join(' ')).toContain('neuronId')
+    expect(issues(pipeline({ dataId: id, idColumn: 'neuronId' })).join(' ')).toContain(
+      'neuronId',
+    )
   })
 })
 

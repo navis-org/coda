@@ -88,6 +88,29 @@ export const uploadTableNode = registerNode({
       },
     },
     {
+      id: 'typeColumn',
+      kind: 'enum',
+      label: 'Type column',
+      help: 'Renamed to type, which is the name Coda reads a cell type from.',
+      default: '',
+      /*
+       * Every column is offered, unlike `ID column`. A rename is lossless whatever the dtype,
+       * and there is no downstream contract that a type be text — where offering a float as an
+       * *id* would invite a Neurons table whose neuron ids are neither.
+       */
+      options: (ctx) => {
+        const schema = peekUploadSchema(String(ctx.params.dataId ?? ''))
+        const id = String(ctx.params.idColumn ?? '')
+        return [
+          { value: '', label: 'none' },
+          ...(schema?.columns ?? [])
+            // One column cannot be renamed to two names, so the id is not on offer here.
+            .filter((c) => c.name !== id)
+            .map((c) => ({ value: c.name, label: c.name })),
+        ]
+      },
+    },
+    {
       id: 'textColumns',
       kind: 'columns',
       label: 'Text columns',
@@ -109,7 +132,11 @@ export const uploadTableNode = registerNode({
   inferOutputs: (ctx) => {
     const stored = peekUploadSchema(String(ctx.params.dataId ?? ''))
     const idColumn = String(ctx.params.idColumn ?? '')
-    const shaped = uploadShapeSchema(stored, idColumn, ctx.columns('textColumns'))
+    const shaped = uploadShapeSchema(stored, {
+      idColumn,
+      typeColumn: String(ctx.params.typeColumn ?? ''),
+      textColumns: ctx.columns('textColumns'),
+    })
     return {
       out: uploadIsNeurons(stored, idColumn) ? T.neurons(shaped) : T.table(shaped),
     }
@@ -131,9 +158,19 @@ export const uploadTableNode = registerNode({
       const name = String(ctx.params.fileName ?? '') || 'this file'
       return [`${name} is not stored in this browser — pick the file again`]
     }
+    const file = String(ctx.params.fileName ?? '') || 'the file'
     const idColumn = String(ctx.params.idColumn ?? '')
     if (idColumn && !findColumn(schema, idColumn)) {
-      return [`ID column "${idColumn}" is not in ${String(ctx.params.fileName ?? 'the file')}`]
+      return [`ID column "${idColumn}" is not in ${file}`]
+    }
+    const typeColumn = String(ctx.params.typeColumn ?? '')
+    if (typeColumn && !findColumn(schema, typeColumn)) {
+      return [`Type column "${typeColumn}" is not in ${file}`]
+    }
+    // Reachable from a saved graph rather than from the picker, which never offers the id. The
+    // rename would silently do nothing, since the id claims the column first.
+    if (typeColumn && typeColumn === idColumn) {
+      return [`"${idColumn}" cannot be both the ID column and the Type column`]
     }
     return []
   },
@@ -162,6 +199,12 @@ export const uploadTableNode = registerNode({
         `ID column "${idColumn}" is not in "${name}". Available: ${columnNames(table.schema).join(', ')}`,
       )
     }
-    return { out: uploadShapeTable(table, idColumn, ctx.columns('textColumns')) }
+    return {
+      out: uploadShapeTable(table, {
+        idColumn,
+        typeColumn: String(ctx.params.typeColumn ?? ''),
+        textColumns: ctx.columns('textColumns'),
+      }),
+    }
   },
 })

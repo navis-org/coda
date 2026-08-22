@@ -394,7 +394,7 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `core/graph.test.ts`                     | topo sort, cycles (incl. two wires between one pair), serialisation, lenient loading                                             |
 | `core/reference.test.ts`                 | reference edges: the round trip sorting, the identity without its own schema, evaluate not waiting, and that a real cycle and two wires between one pair are unchanged |
 | `core/scheduler.test.ts`                 | hybrid eval, caching, invalidation, errors, targeted runs                                                                        |
-| `nodes/lib/tableOps.test.ts`             | each op, plus schema/value agreement — and the id bridge: a wide id kept exactly, a rounded one skipped, ids ordered by magnitude |
+| `nodes/lib/tableOps.test.ts`             | each op, plus schema/value agreement — including the coalesce's blank-is-absent rule, its widening, and backfill-in-place vs append — and the id bridge: a wide id kept exactly, a rounded one skipped, ids ordered by magnitude |
 | `data/mock/generate.test.ts`             | determinism, internal consistency, source semantics                                                                              |
 | `examples/examples.test.ts`              | all five examples end to end, inference-clean, non-empty, and their notes' markdown parsing                                      |
 | `ui/App.smoke.test.tsx`                  | real app mounted and driven: Run, live filtering, link rejection, undo, per-node run                                             |
@@ -499,12 +499,13 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `ui/viewers/heatmapPlot.test.ts`         | the heatmap fold: a grid bounded by the plot, the strongest cell of a block surviving, the ramp table proved lossless, thinning |
 | `ui/viewers/svgBuilders.test.ts`         | every synthesised export through the real serializer: one namespace declaration, one font, and a document that actually parses |
 | `nodes/output/scatter.test.ts`           | the tap, id-vs-row-index selection, and that `Max points` stales nothing                                                         |
-| `core/columnParams.test.ts`              | what a column picker may complain about: unknown-vs-empty schema, what `optional` changes, and a plural keeping an unseen list   |
+| `core/columnParams.test.ts`              | what a column picker may complain about: unknown-vs-empty schema, what `optional` changes, a plural keeping an unseen list, and a singular on its default resolving the same either side of a schema |
 | `nodes/output/barChart.test.ts`          | the tap, that an unpicked column is a warning and not a refusal, and the stack-by-itself catch                                   |
 | `nodes/table/pivot.test.ts`              | the two outputs describing one pivot, and the wide schema arriving only by observation                                           |
 | `nodes/lib/tableFilter.test.ts`          | a header cell's grammar: a bare value following the column's dtype, the null rule, and every clause it drops rather than applies |
 | `nodes/output/table.test.ts`             | the two ports: the tap kept whole, filtering staling the node while paging does not, and a bad clause refusing nothing           |
 | `nodes/table/sample.test.ts`             | the four sampling modes, a draw reproduced from its seed, and the seed costing nothing in the other three                        |
+| `nodes/table/combine.test.ts`            | the coalesce node: infer publishing what evaluate returns, an unset picker warning rather than refusing, and the chain into a Dataset |
 | `nodes/table/dedupe.test.ts`             | the three `keep` modes, an empty picker comparing whole rows, row order kept, and a null told apart from the text "null"       |
 | `data/csv.test.ts`                       | reading somebody else's file: quoting, delimiter-by-consistency, header bias, and every value the parse refuses to widen         |
 | `data/uploads.test.ts`                   | the store against real IndexedDB: content addressing incl. a separator collision, a write that rejects, and the peek's one read  |
@@ -879,7 +880,7 @@ supervoxel column has by design, forces `float64`: `720575940628857210` comes ba
 nothing flagged. `coda_int64` parses per value with Python's `int`, exact at any width.
 
 That was found by **running** the helpers, on the first try, and it is why
-`scripts/probe-cave-helpers.py` (`pnpm probe:cave`) exists. It reads the generated helper cell out
+`scripts/probe-py-helpers.py` (`pnpm probe:helpers`) exists. It reads the generated helper cell out
 of the golden notebook and exercises it against a stub client — `probe-nblast.mjs`'s idiom one
 language over, and for its reason: the golden says the text is unchanged and `check-export.py`
 says it parses and its module attributes resolve, but **nothing else executes a line of it**, and
@@ -969,7 +970,7 @@ names its `server=`.
 
 **Nothing has been run against a live CAVE datastack.** `CAVE_TOKEN` is absent here, so for that
 half what is verified is the signatures (against the installed caveclient 8.2.1), the syntax and
-name resolution (`check-export.py`), and the pandas (`probe-cave-helpers.py` against a stub). The
+name resolution (`check-export.py`), and the pandas (`probe-py-helpers.py` against a stub). The
 wire format is `src/data/cave`'s business and is covered by `live.test.ts` there. The SeaTable
 half *has* been run live, as above.
 
@@ -5638,6 +5639,128 @@ somebody to inspect a file that is perfectly fine.
 on how this app is served, which is not knowable at edit time — the same call `Find Neurons` makes
 about `limit: 0`. A scheme that cannot be fetched at all (`file:`, `javascript:`) is refused by one
 rule rather than by a list of special cases.
+
+### A redirect is a CORS hop, and it is the one that fails
+
+The refusal names both a dead host and a cross-origin block because a browser reports them as one
+opaque `TypeError`. The commonest cause is neither: **a redirect whose *first* hop carries no
+usable CORS header**. `github.com/<org>/<repo>/raw/refs/heads/main/<path>` answers `302` with
+`access-control-allow-origin:` **present and empty**, which matches neither the origin nor `*`;
+a browser CORS-checks every hop of a chain, so it stops there and never reaches
+`raw.githubusercontent.com`, which answers `200` with `access-control-allow-origin: *` and gzips.
+Measured from a real page origin: the first throws `TypeError: Failed to fetch`, the second
+returns 31,718,491 characters. The fix is to paste the redirect *target*, and it is worth
+knowing because the URL that fails is the one GitHub's own UI hands you.
+
+Nothing in the code changed for this; it is recorded because "is it the format or is it CORS" is
+the first question anybody asks, and the header evidence answers it in one look.
+
+## Type column, and combining several into one
+
+Two names are Coda's rather than a backend's — `neuronId` and `type` (`annotationColumn` in
+`data/annotations/types.ts`, and `TYPE_COLUMN_NAME` beside it). Every provider renamed onto the
+first from the start; **the two import nodes now rename onto the second too**, which is the same
+rule stopping being half-applied.
+
+**They are a pair rather than a symmetry.** An id makes the table *Neurons* — the kind, the
+socket, `uploadIsNeurons`. A type makes it *legible*, and missing it is entirely silent:
+`typesOf` reads `type` by literal name, so a chain publishing `cell_type` leaves
+`neuronType`/`partnerType` null on every connectivity row **while the schema still declares
+them**, Explore's `PRIMARY = ['type', 'instance']` falls through to a guess, and Profile's type
+roll-ups empty. Reachable on the case the feature exists for: FlyWire's published annotation TSV
+names the column `cell_type`.
+
+`renamedColumns` takes `[from, to]` pairs now and applies both in one pass, so a column cannot be
+the source of one rename and the collision victim of the other. The first pair naming a source
+wins, so the same column picked twice is the id — and both nodes' pickers withhold the id from
+the type list, with `validate` catching the case a saved graph can still carry.
+
+**Every column is offered as the type, unlike the id.** A rename is lossless whatever the dtype
+and nothing downstream requires a type to be text, where offering a float as an *id* would invite
+a Neurons table whose neuron ids are neither.
+
+### Combine Columns, and why it is a node
+
+`core.combineColumns`, `Add ▸ Transform ▸ Combine Columns`. `dplyr::coalesce`, SQL's `COALESCE`:
+the columns are tried in the order they were picked and the first holding a value wins. It exists
+because an annotation dump routinely spreads one fact over several columns — FlyWire's carries
+`cell_type`, `hemibrain_type`, `supertype` and `cell_class`, and a neuron missing the first very
+often has one of the others.
+
+**A multi-select on `Type column` was the alternative and is worse in three ways**, each of which
+is about reach rather than taste:
+
+- It would put the ability on **two** nodes, and want to exist on **four** — `annotation.caveTable`
+  and `annotation.flyTable`/`seaTable` have exactly the same problem, and a SeaTable base with its
+  type split across two columns would have no route to it at all.
+- Coalescing is not a fact about types. `soma_side`/`side`, two id columns, two name columns: the
+  same act, none of them reachable from a control called `Type column`.
+- It is a large semantic act with an invisible result. On the canvas a Table beside it shows what
+  came out; buried in an inspector multi-select, the precedence order is a thing you have to
+  believe rather than read.
+
+That is the annotation chain's own premise carried through — the socket takes an ordinary table
+*so ordinary table ops can stand in it* — so `Type column` stays singular, mirroring `ID column`
+exactly, and the general job is a general node.
+
+**The picker already expresses priority**: `ColumnsField` appends in pick order and renders the
+chips in that order, so the list reads left to right as "try this, then this" with no new UI.
+
+Five rules, each of which produces a plausible wrong table rather than an error:
+
+- **Null and blank are one absence.** `datasetStats.ts`' call, for its reason: a base publishes
+  both for one thing depending on how it was edited. This is also exactly where the obvious
+  spelling in each language goes wrong — `df[cols].bfill(axis=1)` and `dplyr::coalesce()` both
+  read `''` as a value and stop the search, and FlyWire's TSV writes an unset `cell_type` as a
+  blank field rather than as nothing. Whitespace is deliberately *not* trimmed: `" "` is odd data
+  rather than absent data.
+- **A result named after one of the picked columns replaces it in place**, which is the backfill
+  case and the common one — `[cell_type, hemibrain_type] → cell_type` leaves the table with the
+  columns it arrived with. Any other name appends, and a column merely already holding it is
+  suffixed rather than overwritten, which is `renamedColumns`' rule and `joinedColumns`' before it.
+- **Mixed dtypes widen to `str` rather than refusing**, which is the opposite of `stackColumns`
+  and the difference is real: a stack meeting two dtypes under one name has found two different
+  columns wearing it, where this picker *is* somebody saying these hold one fact. `i64` with `f64`
+  is the one pair that reconciles without leaving numbers. A number reaching a text column is
+  converted, or the dtype is a lie.
+- **A column the schema lacks is skipped, not refused.** `groupByTable` refuses the same case
+  because grouping on fewer columns silently keeps *more* rows; here it keeps fewer values, which
+  the result column shows.
+- **It warns and passes through when unconfigured**, never refuses — invariant 5's corollary, and
+  the gap that let `out.barChart` carry a wrong refusal unnoticed for months for want of a
+  node-level test.
+
+`Source column` is optional and off by default, naming which input each value came from —
+`core.stack`'s companion, and on a real chain it is how you find out that `hemibrain_type`
+contributed two rows out of 139,248.
+
+### Verified by running it, in both languages
+
+`scripts/probe-cave-helpers.py` became **`scripts/probe-py-helpers.py`** (`pnpm probe:helpers`),
+because a prefix naming one of two consumers is a claim that goes stale — the call
+`.profile__tile` → `.tile` and `.labels-body` → `.list-body` already record. It now reads two
+generated cells: the CAVE helpers out of `cave.ipynb`, and the general cell out of
+`everything.ipynb` for `coda_combine`. It does not claim to cover the rest of that cell, and says
+so.
+
+Both languages were **run against the golden text**, not read: ten checks each — priority order,
+blank-as-absent, null-as-absent, nothing-anywhere, a missing column, the source column, and the
+widening — agreeing on all ten, R included, where R's widening happens by coercion
+(`out[fill] <- col[fill]` on a logical `NA` vector) rather than by a rule anybody wrote. The
+blank-as-absent mutation was confirmed to fail the probe.
+
+And on the real file, through the real functions: the published FlyWire TSV parses as tab
+(31 columns, 139,248 rows), `root_id` survives as `str` — the round-trip rule vetoing a *numeric*
+reading of anything past `MAX_SAFE_INTEGER`, so an eighteen-digit id meets CAVE's string ids with
+no conversion anywhere — and `[cell_type, hemibrain_type, supertype, cell_class]` takes 137,720
+typed neurons to **139,166 of 139,248**, with 82 carrying nothing at all.
+
+**+5.12 kB raw / +1.25 kB gzipped on the main chunk** (1,088.17 → 1,093.29 kB), measured against
+a build of the same tree with the feature stashed out. Both emitters are in the lazily-loaded
+`exporter-*.js` pair as ever.
+
+**Not looked at in a browser**: the `Type column` dropdown and the chip order on a real card.
+Both are existing components, so the standing of the WebGL viewers applies.
 
 ## Select One: stepping through a collection
 

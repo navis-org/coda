@@ -101,6 +101,28 @@ export const tableFromUrlNode = registerNode({
       ],
     },
     {
+      id: 'typeColumn',
+      kind: 'enum',
+      label: 'Type column',
+      help: 'Renamed to type, which is the name Coda reads a cell type from.',
+      default: '',
+      /*
+       * Every column is offered, unlike `ID column`. A rename is lossless whatever the dtype,
+       * and there is no downstream contract that a type be text — where offering a float as an
+       * *id* would invite a Neurons table whose neuron ids are neither.
+       */
+      options: (ctx) => {
+        const id = String(ctx.params.idColumn ?? '')
+        return [
+          { value: '', label: 'none' },
+          ...(schemaByUrl.get(String(ctx.params.url ?? '').trim())?.columns ?? [])
+            // One column cannot be renamed to two names, so the id is not on offer here.
+            .filter((c) => c.name !== id)
+            .map((c) => ({ value: c.name, label: c.name })),
+        ]
+      },
+    },
+    {
       id: 'textColumns',
       kind: 'columns',
       label: 'Text columns',
@@ -133,7 +155,11 @@ export const tableFromUrlNode = registerNode({
   inferOutputs: (ctx) => {
     const known = schemaByUrl.get(String(ctx.params.url ?? '').trim())
     const idColumn = String(ctx.params.idColumn ?? '')
-    const shaped = uploadShapeSchema(known, idColumn, ctx.columns('textColumns'))
+    const shaped = uploadShapeSchema(known, {
+      idColumn,
+      typeColumn: String(ctx.params.typeColumn ?? ''),
+      textColumns: ctx.columns('textColumns'),
+    })
     return {
       out: uploadIsNeurons(known, idColumn) ? T.neurons(shaped) : T.table(shaped),
     }
@@ -163,6 +189,12 @@ export const tableFromUrlNode = registerNode({
     // browser's job at the moment it happens, not a reason to refuse the address now.
     if (parsed.protocol === 'http:') {
       return ['An http URL will be blocked by the browser when this app is served over https']
+    }
+    // Reachable from a saved graph rather than from the picker, which never offers the id. The
+    // rename would silently do nothing, since the id claims the column first.
+    const idColumn = String(ctx.params.idColumn ?? '')
+    if (idColumn && idColumn === String(ctx.params.typeColumn ?? '')) {
+      return [`"${idColumn}" cannot be both the ID column and the Type column`]
     }
     return []
   },
@@ -247,6 +279,12 @@ export const tableFromUrlNode = registerNode({
     }
 
     ctx.progress(1)
-    return { out: uploadShapeTable(parsed.table, idColumn, ctx.columns('textColumns')) }
+    return {
+      out: uploadShapeTable(parsed.table, {
+        idColumn,
+        typeColumn: String(ctx.params.typeColumn ?? ''),
+        textColumns: ctx.columns('textColumns'),
+      }),
+    }
   },
 })

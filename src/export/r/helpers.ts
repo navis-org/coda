@@ -109,3 +109,49 @@ registerHelper({
     '}',
   ],
 })
+
+/**
+ * Coda's Combine Columns node, in R.
+ *
+ * `dplyr::coalesce()` is the obvious spelling and is a *different rule* twice over: it treats an
+ * empty string as a value, where Coda reads null and blank as one absence, and it requires every
+ * argument to share a type, where an annotation dump routinely mixes a text column with a
+ * numeric one. The loop widens as R does — assigning a character into a numeric vector coerces
+ * the whole vector — which is the same widening `combinedDType` performs.
+ */
+registerHelper({
+  name: 'coda_combine',
+  source: [
+    '.coda_present <- function(x) !is.na(x) & as.character(x) != ""',
+    '',
+    "#' The first of `columns` holding a value, per row.",
+    'coda_combine <- function(df, columns) {',
+    '  out <- rep(NA, nrow(df))',
+    '  for (name in columns) {',
+    '    if (!name %in% names(df)) next',
+    '    col <- df[[name]]',
+    '    fill <- is.na(out) & .coda_present(col)',
+    '    out[fill] <- col[fill]',
+    '  }',
+    '  out',
+    '}',
+  ],
+})
+
+/** Which column each value in `coda_combine` came from. */
+registerHelper({
+  name: 'coda_combine_source',
+  needs: ['coda_combine'],
+  source: [
+    "#' The name of the column `coda_combine` took each value from.",
+    'coda_combine_source <- function(df, columns) {',
+    '  out <- rep(NA_character_, nrow(df))',
+    '  for (name in columns) {',
+    '    if (!name %in% names(df)) next',
+    '    fill <- is.na(out) & .coda_present(df[[name]])',
+    '    out[fill] <- name',
+    '  }',
+    '  out',
+    '}',
+  ],
+})

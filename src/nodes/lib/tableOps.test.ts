@@ -5,6 +5,8 @@ import { column, columnNames, tableSchema } from '../../core/types'
 import type { TableValue } from '../../core/values'
 import { makeMatrix, tableFromRows } from '../../core/values'
 import {
+  combineSchema,
+  combineTable,
   aggColumnName,
   filterTable,
   idColumn,
@@ -189,16 +191,16 @@ describe('upload shaping', () => {
     ])
 
   it('renames the id column and agrees with its schema half', () => {
-    const declared = uploadShapeSchema(UPLOAD, 'root_id', [])
-    const out = uploadShapeTable(upload(), 'root_id', [])
+    const declared = uploadShapeSchema(UPLOAD, { idColumn: 'root_id' })
+    const out = uploadShapeTable(upload(), { idColumn: 'root_id' })
     expectSchemaAgreement(declared, out)
     expect(out.data.neuronId).toEqual([101, 102])
     expect(out.kind).toBe('neurons')
   })
 
   it('widens a chosen column to text, and agrees there too', () => {
-    const declared = uploadShapeSchema(UPLOAD, '', ['cluster'])
-    const out = uploadShapeTable(upload(), '', ['cluster'])
+    const declared = uploadShapeSchema(UPLOAD, { textColumns: ['cluster'] })
+    const out = uploadShapeTable(upload(), { textColumns: ['cluster'] })
     expectSchemaAgreement(declared, out)
     // Null is absence and stays absence: `String(null)` is the four-letter word "null", which
     // would read as a value in every picker and chart downstream.
@@ -208,12 +210,10 @@ describe('upload shaping', () => {
 
   it('gives the chosen column the name, and suffixes the one that had it', () => {
     const clash = tableSchema(column('root_id', 'i64'), column('neuronId', 'str'))
-    const declared = uploadShapeSchema(clash, 'root_id', [])
-    const out = uploadShapeTable(
-      tableFromRows(clash, [{ root_id: 1, neuronId: 'x' }]),
-      'root_id',
-      [],
-    )
+    const declared = uploadShapeSchema(clash, { idColumn: 'root_id' })
+    const out = uploadShapeTable(tableFromRows(clash, [{ root_id: 1, neuronId: 'x' }]), {
+      idColumn: 'root_id',
+    })
     expectSchemaAgreement(declared, out)
     expect(columnNames(out.schema)).toEqual(['neuronId', 'neuronId_2'])
     expect(out.data.neuronId).toEqual([1])
@@ -221,7 +221,7 @@ describe('upload shaping', () => {
   })
 
   it('leaves the table alone when nothing is configured', () => {
-    const out = uploadShapeTable(upload(), '', [])
+    const out = uploadShapeTable(upload(), {})
     expect(out.schema).toEqual(UPLOAD)
     expect(out.kind).toBe('table')
   })
@@ -233,7 +233,7 @@ describe('upload shaping', () => {
     expect(uploadIsNeurons(UPLOAD, 'missing')).toBe(false)
     expect(uploadIsNeurons(UPLOAD, '')).toBe(false)
     expect(uploadIsNeurons(undefined, 'root_id')).toBe(false)
-    expect(uploadShapeTable(upload(), 'missing', []).kind).toBe('table')
+    expect(uploadShapeTable(upload(), { idColumn: 'missing' }).kind).toBe('table')
   })
 })
 
@@ -445,9 +445,10 @@ describe('join', () => {
   })
 
   it('suffixes colliding column names rather than dropping them', () => {
-    const right = tableFromRows(tableSchema(column('neuronId', 'i64'), column('weight', 'i64')), [
-      { neuronId: 1, weight: 999 },
-    ])
+    const right = tableFromRows(
+      tableSchema(column('neuronId', 'i64'), column('weight', 'i64')),
+      [{ neuronId: 1, weight: 999 }],
+    )
     const out = joinTables(conn(), right, 'neuronId', 'neuronId', 'left')
     expect(out.schema.columns.map((c) => c.name)).toContain('weight_r')
     expect(out.schema.columns.map((c) => c.name)).toContain('weight')
@@ -608,7 +609,6 @@ describe('normalizeMatrix', () => {
   })
 })
 
-
 /*
  * The bridge into every DataSource call, and the one place a table cell becomes an id.
  *
@@ -720,5 +720,104 @@ describe('compareIds', () => {
     expect(compareIds(a, b)).toBeLessThan(0)
     expect(compareIds(b, a)).toBeGreaterThan(0)
     expect(compareIds(a, a)).toBe(0)
+  })
+})
+
+describe('combine columns', () => {
+  const ANN = tableSchema(
+    column('neuronId', 'i64'),
+    column('cell_type', 'str'),
+    column('hemibrain_type', 'str'),
+  )
+  const ann = () =>
+    tableFromRows(ANN, [
+      { neuronId: 1, cell_type: 'LC4', hemibrain_type: 'LC4b' },
+      // The two absences a real annotation dump mixes: a blank field and a missing one.
+      { neuronId: 2, cell_type: '', hemibrain_type: 'PS180' },
+      { neuronId: 3, cell_type: null, hemibrain_type: 'DNp01' },
+      { neuronId: 4, cell_type: null, hemibrain_type: null },
+    ])
+
+  const spec = (over: Partial<Parameters<typeof combineTable>[1]> = {}) => ({
+    columns: ['cell_type', 'hemibrain_type'],
+    into: 'type',
+    ...over,
+  })
+
+  it('takes the first column with a value, and reads blank as absent', () => {
+    const declared = combineSchema(ANN, spec())
+    const out = combineTable(ann(), spec())
+    expectSchemaAgreement(declared, out)
+    // Row 2 is the one that matters: `''` must not stop the search, or a neuron with a blank
+    // cell_type is reported as having no type at all while the next column holds one.
+    expect(out.data.type).toEqual(['LC4', 'PS180', 'DNp01', null])
+  })
+
+  it('honours the picked order rather than the schema order', () => {
+    const out = combineTable(ann(), spec({ columns: ['hemibrain_type', 'cell_type'] }))
+    expect(out.data.type).toEqual(['LC4b', 'PS180', 'DNp01', null])
+  })
+
+  it('backfills in place when the result names one of the picked columns', () => {
+    const out = combineTable(ann(), spec({ into: 'cell_type' }))
+    expect(columnNames(out.schema)).toEqual(columnNames(ANN))
+    expect(out.data.cell_type).toEqual(['LC4', 'PS180', 'DNp01', null])
+  })
+
+  it('suffixes a column that merely already held the name', () => {
+    const clash = tableSchema(column('a', 'str'), column('type', 'str'))
+    const table = tableFromRows(clash, [{ a: 'x', type: 'old' }])
+    const at = { columns: ['a'], into: 'type' }
+    const declared = combineSchema(clash, at)
+    const out = combineTable(table, at)
+    expectSchemaAgreement(declared, out)
+    // Lossless: the result wins the name and the incumbent is kept beside it, which is the
+    // call `renamedColumns` and `joinedColumns` both make.
+    expect(columnNames(out.schema)).toEqual(['a', 'type_2', 'type'])
+    expect(out.data.type_2).toEqual(['old'])
+    expect(out.data.type).toEqual(['x'])
+  })
+
+  it('names which column each value came from, and nothing where none did', () => {
+    const at = spec({ sourceColumn: 'from' })
+    const declared = combineSchema(ANN, at)
+    const out = combineTable(ann(), at)
+    expectSchemaAgreement(declared, out)
+    expect(out.data.from).toEqual(['cell_type', 'hemibrain_type', 'hemibrain_type', null])
+  })
+
+  it('widens to text where the picked columns disagree, and keeps a shared dtype', () => {
+    const mixed = tableSchema(column('name', 'str'), column('cluster', 'i64'))
+    const table = tableFromRows(mixed, [
+      { name: null, cluster: 12693 },
+      { name: 'LC4', cluster: 7 },
+    ])
+    const at = { columns: ['name', 'cluster'], into: 'label' }
+    const declared = combineSchema(mixed, at)
+    const out = combineTable(table, at)
+    expectSchemaAgreement(declared, out)
+    // A number reaching a text column is converted rather than left as a number, or the dtype
+    // is a lie and every consumer reading the column by dtype disagrees with what is in it.
+    expect(declared!.columns.at(-1)!.dtype).toBe('str')
+    expect(out.data.label).toEqual(['12693', 'LC4'])
+
+    const nums = tableSchema(column('a', 'i64'), column('b', 'i64'))
+    expect(combineSchema(nums, { columns: ['a', 'b'], into: 'c' })!.columns.at(-1)!.dtype).toBe(
+      'i64',
+    )
+    const wide = tableSchema(column('a', 'i64'), column('b', 'f64'))
+    expect(combineSchema(wide, { columns: ['a', 'b'], into: 'c' })!.columns.at(-1)!.dtype).toBe(
+      'f64',
+    )
+  })
+
+  it('skips a column the table does not have rather than refusing', () => {
+    const out = combineTable(ann(), spec({ columns: ['gone', 'hemibrain_type'] }))
+    expect(out.data.type).toEqual(['LC4b', 'PS180', 'DNp01', null])
+  })
+
+  it('passes the table through when it is not configured', () => {
+    expect(combineTable(ann(), { columns: [], into: 'type' }).schema).toEqual(ANN)
+    expect(combineTable(ann(), { columns: ['cell_type'], into: '' }).schema).toEqual(ANN)
   })
 })

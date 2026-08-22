@@ -12,11 +12,11 @@
   "scripts": {
     "build": "tsc -b && vite build",
     "dev": "vite",
-    "export:check": "vitest run src/export && python3 scripts/check-export.py && python3 scripts/probe-cave-helpers.py && Rscript scripts/check-export.R",
+    "export:check": "vitest run src/export && python3 scripts/check-export.py && python3 scripts/probe-py-helpers.py && Rscript scripts/check-export.R",
     "export:golden": "UPDATE_GOLDEN=1 vitest run src/export",
     "probe:nblast": "node scripts/probe-nblast.mjs",
     "probe:linkage": "node scripts/probe-linkage.mjs",
-    "probe:cave": "python3 scripts/probe-cave-helpers.py",
+    "probe:helpers": "python3 scripts/probe-py-helpers.py",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
     "lint": "eslint .",
     "preview": "vite preview",
