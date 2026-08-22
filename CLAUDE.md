@@ -298,6 +298,67 @@ bundled corepack, so pnpm was installed with `npm i -g pnpm`.
   actually about to do (`Missing column: x` when it is kept, `is gone — using "y"` only where a
   fallback is really taken), because that is the only thing that keeps the message true.
 
+- **A column picker on its own default resolved to nothing until the schema arrived**, so a
+  graph failed on its first Run of a session and worked on its second. `resolveColumns` had this
+  guard and `resolveColumn` did not.
+
+  Rule 3 is "the first compatible column" — an answer computed *from a list*. A port carrying no
+  schema has an empty list, so a picker still holding the value its definition declared resolved
+  to `undefined` before the schema landed and to the right column afterwards. That is the
+  runs-twice-answers-differently signature again, and it lands in the provenance key.
+
+  **The asymmetry is what hides it:** rule 2 already carries a value *differing* from the default
+  through untouched, so this only ever bites a picker nobody has touched — which is the common
+  case and the one nothing tests. Reported on `Table from URL → Combine Columns → Update root
+  IDs`, the chain that node's own guide describes: `Table from URL` keeps its schema per URL in a
+  session-scoped map, so a fresh session publishes none, and `Update root IDs` refused with "Pick
+  an ID column and a supervoxel ID column" over two pickers the card was drawing as empty.
+
+  The guard can only ever *add* an answer, never change one: it fires exactly when `available` is
+  empty, where `available[0]` was already `undefined`.
+
+  **An unset required picker now means its declared default**, which is the other half and is
+  what keeps the two answers the same. A required picker has no "none", so an empty value is
+  *unset* rather than a choice — and unset is what `defaultParams` fills with the default at
+  creation. Without it, a default naming a real column still resolves to that column once the
+  schema arrives and to nothing before, which is the same disagreement one paragraph up.
+
+  **Only for a required picker.** On an `optional` one, empty is a *decision*: `out.scatter`'s
+  `idColumn: ''` means "identify points by row index rather than by neuron id", against a
+  declared default of `neuronId`. Reading that as unset hands the column back and quietly undoes
+  it — a lasso that selects different rows. Its own test caught this within a minute of the
+  change, which is the argument for it existing.
+
+  Inert wherever the default is `''`, which is most pickers: `out.barChart`'s `Category` still
+  means "decide for me".
+
+  **And the widget said so out loud, which was the follow-up report.** With the resolver fixed
+  the node ran, and the card still drew `ID column: neuronId (missing)` above `Supervoxel ID
+  column: no column` — two false claims about a configuration that was correct, both pointing at
+  the user. `columnSchemaFor` exists to separate *unknown* from *empty*, and both widgets asked
+  only "is this name in the available list", which is `false` for a port carrying no list at all.
+
+  Three states now, matching the resolver's: **unknown** offers the resolved value plainly, with
+  the reason in a `title`; **known and lacking it** keeps `(missing)`, which is true there and is
+  the drift the label exists for; **known and empty** keeps `no columns`. The `(missing)` half was
+  the visible symptom, but the *disabled* half was worse — with nothing stored the option list
+  came out empty, `SelectField` took its no-options branch, and the select rendered disabled
+  behind a placeholder, so the one thing worth knowing was the one thing not shown.
+
+  The plural had it too: `resolveColumns` keeps a stored list untouched while the schema is
+  unknown, so labelling every chip `(missing)` contradicted the resolver an inch away. Its
+  placeholder chip also now stands down when anything *is* selected — `cell_type × hemibrain_type
+  × not run yet` reads as a warning about the two beside it.
+
+  **The widget is the reason nobody had stored a value.** A *required* picker renders
+  `ctx.column(id)` — the resolver's answer — so a fallback is drawn exactly as a choice is. The
+  reported graph carried `supervoxelColumn: ""` because the card had been showing `supervoxel_id`
+  the whole time; it was the table's first column and the fallback had found it. That is "a
+  default was never a decision" from the other side, and it is why `Update root IDs` now declares
+  `supervoxel_id` rather than `''`: an empty default there meant *the table's first column*,
+  which was right on FlyWire's published annotations by luck and is a guess with nothing behind
+  it anywhere else.
+
 - **Nothing was warming the schema, so the first Run behaved differently from the second.**
   The chain is: a dataset node on "Latest" reads its id from `peekDatasets()` → the id lets
   `schemasFromType` call `schemasFor(datasetId)` → that kicks off discovery →
@@ -403,6 +464,7 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `ui/panels/palette.test.tsx`             | command `disabled` flags vs live state, type-filtered node items, Space flow                                                     |
 | `ui/panels/overlay.test.tsx`             | expand/close paths, rail params, and that restyling does not stale a node                                                        |
 | `ui/params/paramGroups.test.ts`          | tabs/rows reshaping: that the panel shows every param the flat rail did, exactly once                                            |
+| `ui/params/columnField.test.tsx`         | what a column picker says about a port with no schema: the value it will use rather than "(missing)", never disabled, and both true claims kept |
 | `ui/export.test.ts`                      | CSV quoting/nulls/chunking, wide-matrix CSV, filenames, standalone SVG                                                           |
 | `export/python/export.test.ts`           | both fixtures against their goldens, every wired port declared, every emitting type reached, and a neuPrint cell refusing on a CAVE dataset |
 | `ui/panels/notebookExport.test.tsx`      | (also) the warning on the Save item: one per format, naming the steps, and silence on a graph that exports whole |
@@ -418,7 +480,7 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `ui/viewers/networkViewer.test.tsx`      | the caption: counts, the label-thinning admission, size refusal                                                                  |
 | `data/neuprint/neuprint.test.ts`         | Cypher building/escaping, response decoding, both halves of the `bodyId`→`neuronId` seam, schema discovery, mesh-source resolution, nm conversion |
 | `data/precomputed/precomputed.test.ts`   | shard lookup, multi-LOD manifest, Draco decode, legacy fragments, CORS fallback                                                  |
-| `nodes/transform/updateRootIds.test.ts`  | the repair: only stale rows looked up, supervoxels sent as raw uint64, a current row left alone even with a warm cache, and a row with no supervoxel untouched |
+| `nodes/transform/updateRootIds.test.ts`  | the repair: only stale rows looked up, supervoxels sent as raw uint64, a current row left alone even with a warm cache, a row with no supervoxel untouched — and both pickers resolving before any schema has arrived |
 | `data/cave/rootIds.test.ts`              | the drift check: ids sent as unquoted integers, asked once per chain and re-asked when the wiring changes, a late lander not overwriting a newer answer, only the unseen ones asked, and nothing at all without a chunkedgraph |
 | `data/cave/cave.test.ts`                 | CAVE against recorded bodies: a wide root id kept exactly, the string-aware scan, the annotation pivot, an anchored pattern, and every refusal |
 | `nodes/lib/datasetFamilies.test.ts`      | (also) that every CAVE family names a datastack spec and every spec a family — the join key nothing else checks |

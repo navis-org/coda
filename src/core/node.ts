@@ -659,6 +659,31 @@ function differsFromDefault(value: ParamValue | undefined, fallback: ParamValue 
  *
  * `optional` still answers *off*, and before rule 2 — that is what optional means, and a
  * decoration pointed at a missing column has a sensible nothing to do.
+ *
+ * **Rule 3 is skipped entirely when the schema is unknown**, which is `resolveColumns`' guard in
+ * the form that fits the singular and was missing here. "The first compatible column" is an
+ * answer computed from a list, and a port carrying no schema at all has an *empty* list — so a
+ * picker still holding its declared default resolved to **nothing** until the schema landed, and
+ * to the right column afterwards. That is the runs-twice-answers-differently signature, in the
+ * provenance key.
+ *
+ * Reported on `Table from URL → Combine Columns → Update root IDs`: `Table from URL` remembers
+ * its schema per URL in a session-scoped map, so on a fresh session it publishes none, and
+ * `Update root IDs` — whose `ID column` sits on its declared default `neuronId` — failed with
+ * "Pick an ID column and a supervoxel ID column" over a picker the card was drawing as empty.
+ * Note the asymmetry that hides it: a value *differing* from the default survives by rule 2, so
+ * this only ever bites a picker nobody has touched.
+ *
+ * The guard can only ever *add* an answer, never change one: it fires exactly when `available`
+ * is empty, where `available[0]` was already `undefined`.
+ *
+ * **An unset required picker means the declared default**, which is the other half. A required
+ * picker has no "none", so an empty stored value is *unset* rather than a choice — and unset is
+ * what `defaultParams` fills with the default at creation. Reading it that way is what keeps the
+ * unknown-schema answer and the known-schema one the same: without it, a default naming a real
+ * column resolves to that column once the schema arrives and to nothing before, which is the very
+ * disagreement above. Inert wherever the default is `''`, which is most pickers — `out.barChart`'s
+ * `Category` still means "decide for me".
  */
 export function resolveColumn(
   param: ColumnParam,
@@ -667,10 +692,20 @@ export function resolveColumn(
 ): string | undefined {
   const available = availableColumns(param, inputs, params)
   const stored = params[param.id]
-  const chosen = typeof stored === 'string' ? stored : ''
+  const saved = typeof stored === 'string' ? stored : ''
+  /*
+   * Unset falls through to the declared default — but only for a *required* picker, which has
+   * no "none" to mean. On an optional one an empty value is a choice, and `out.scatter`'s
+   * `idColumn: ''` is exactly that: "identify points by row index, not by neuron id". Reading
+   * it as unset would hand back `neuronId` and quietly undo it.
+   */
+  const chosen = saved || (param.optional ? '' : (param.default ?? ''))
   if (chosen && available.includes(chosen)) return chosen
   if (param.optional) return undefined
   if (chosen && chosen !== param.default) return chosen
+  // A schema this picker cannot see is not a schema without this column in it, so there is
+  // nothing here to pick a first compatible column *from*.
+  if (!columnSchemaFor(param, inputs, params)) return chosen || undefined
   // Undefined when there is nothing to offer, which every caller already handles.
   return available[0]
 }

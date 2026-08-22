@@ -19,6 +19,9 @@ import { cacheSet, resetCache } from '../../data/cache'
 import { resetCredentials, setToken } from '../../data/cave/credentials'
 import { resetDatastackRecords } from '../../data/cave/datastack'
 import { resetRootChecks } from '../../data/cave/rootIds'
+import { defaultParams, findParam, resolveColumn } from '../../core/node'
+import type { ColumnParam } from '../../core/node'
+import { T } from '../../core/types'
 import { requireNodeDef } from '../../core/registry'
 import '../index'
 
@@ -70,14 +73,22 @@ function installFetch(): Call[] {
         arrayBuffer: () => Promise.resolve(out.buffer),
       } as unknown as Response)
     }
-    return Promise.resolve({ ok: false, status: 404, text: () => Promise.resolve('{}') } as Response)
+    return Promise.resolve({
+      ok: false,
+      status: 404,
+      text: () => Promise.resolve('{}'),
+    } as Response)
   })
   return calls
 }
 
 function annotations(): TableValue {
   return makeTable(
-    tableSchema(column('neuronId', 'str'), column('supervoxel_id', 'str'), column('type', 'str')),
+    tableSchema(
+      column('neuronId', 'str'),
+      column('supervoxel_id', 'str'),
+      column('type', 'str'),
+    ),
     { neuronId: [OLD, KEPT], supervoxel_id: [SV, '80000000000000002'], type: ['LC4', 'LC6'] },
     'neurons',
   )
@@ -98,7 +109,12 @@ function run(table: TableValue, params: Record<string, unknown> = {}) {
         ? table
         : { kind: 'dataset', sourceId: 'cave', datasetId: DATASET, label: DATASET },
     inputKey: () => undefined,
-    column: (id) => String((params[id] ?? { idColumn: 'neuronId', supervoxelColumn: 'supervoxel_id' }[id as 'idColumn']) ?? ''),
+    column: (id) =>
+      String(
+        params[id] ??
+          { idColumn: 'neuronId', supervoxelColumn: 'supervoxel_id' }[id as 'idColumn'] ??
+          '',
+      ),
     columns: () => [],
     resolveSource: () => {
       throw new Error('no source')
@@ -197,5 +213,61 @@ describe('the repair', () => {
     )
     const out = (await run(partial)).out as TableValue
     expect(out.data.neuronId).toEqual([OLD])
+  })
+})
+
+/**
+ * Both pickers, on a fresh session — the state this node is *usually* first met in.
+ *
+ * Reported on `Table from URL → Combine Columns → Update root IDs`, which is the chain its own
+ * guide describes: the first Run of a session failed with "Pick an ID column and a supervoxel ID
+ * column" over two pickers the card was drawing as empty, and a second Run worked. `Table from
+ * URL` remembers its schema per URL in a session-scoped map, so before its first fetch it
+ * publishes none — and neither picker had been *touched*, which is precisely the case the
+ * resolver got wrong.
+ */
+describe('the pickers before any schema has arrived', () => {
+  const def = requireNodeDef('cave.updateRootIds')
+  const resolve = (id: string, params: Record<string, unknown>, input = T.table()) =>
+    resolveColumn(
+      findParam(def, id) as ColumnParam,
+      { ...defaultParams(def), ...params } as never,
+      {
+        in: input,
+      },
+    )
+
+  it('resolves both on a node nobody has configured', () => {
+    expect(resolve('idColumn', {})).toBe('neuronId')
+    expect(resolve('supervoxelColumn', {})).toBe('supervoxel_id')
+  })
+
+  it('resolves both from a saved graph carrying the old empty supervoxel value', () => {
+    // Exactly what the reported `.coda.json` holds: `idColumn` on its declared default, and
+    // `supervoxelColumn` empty because the widget had been *showing* the resolver's fallback,
+    // so there was never anything to change.
+    expect(resolve('idColumn', { idColumn: 'neuronId', supervoxelColumn: '' })).toBe('neuronId')
+    expect(resolve('supervoxelColumn', { idColumn: 'neuronId', supervoxelColumn: '' })).toBe(
+      'supervoxel_id',
+    )
+  })
+
+  it('answers the same once the schema lands, or the key moves under a finished run', () => {
+    const landed = T.table(
+      tableSchema(
+        column('supervoxel_id', 'str'),
+        column('neuronId', 'str'),
+        column('cell_type', 'str'),
+      ),
+    )
+    for (const id of ['idColumn', 'supervoxelColumn']) {
+      expect(resolve(id, {}, landed)).toBe(resolve(id, {}))
+    }
+  })
+
+  it('still lets a chosen column win, whichever way the schema is known', () => {
+    const landed = T.table(tableSchema(column('sv', 'str'), column('root', 'str')))
+    expect(resolve('supervoxelColumn', { supervoxelColumn: 'sv' }, landed)).toBe('sv')
+    expect(resolve('supervoxelColumn', { supervoxelColumn: 'sv' })).toBe('sv')
   })
 })

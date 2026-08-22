@@ -10,7 +10,21 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { InferContext, ParamDef, ParamValue } from '../../core/node'
-import { availableColumns } from '../../core/node'
+import { availableColumns, columnSchemaFor } from '../../core/node'
+
+/**
+ * What a column picker says when the port carries no schema at all.
+ *
+ * **Unknown is not missing**, which is the distinction `columnSchemaFor` exists to draw and the
+ * one both of these widgets used to flatten. A port publishes no schema before its first run —
+ * a Pivot, Raw Cypher, `Table from URL` on a fresh session — and marking a perfectly good column
+ * "(missing)" there says it was deleted, which sends somebody to fix a picker that is already
+ * right. Reported on exactly that chain: `ID column: neuronId (missing)` above
+ * `Supervoxel ID column: no column`, on a node that then ran correctly.
+ */
+const UNKNOWN_COLUMNS = 'not run yet'
+const UNKNOWN_HINT =
+  'The upstream columns are not known until this has run. This is what will be used.'
 
 export interface ParamFieldProps {
   param: ParamDef
@@ -82,6 +96,7 @@ export function ParamField({ param, value, ctx, onChange, variant = 'node' }: Pa
 
     case 'column': {
       const columns = availableColumns(param, ctx.inputs, ctx.params)
+      const known = columnSchemaFor(param, ctx.inputs, ctx.params) !== undefined
       const stored = typeof value === 'string' ? value : ''
       // An optional param shows exactly what is stored, including "none"; a required one
       // shows the resolver's fallback so the widget never displays an empty selection.
@@ -90,17 +105,24 @@ export function ParamField({ param, value, ctx, onChange, variant = 'node' }: Pa
         <SelectField
           label={label}
           value={resolved}
-          // Show the drifted name so the user sees what went missing, rather than
-          // silently pretending they picked the fallback.
+          title={known ? undefined : UNKNOWN_HINT}
           options={[
             // An optional encoding needs a way back to "off"; a required one does not.
             ...(param.optional ? [{ value: '', label: 'none' }] : []),
-            ...(stored && !columns.includes(stored)
+            /*
+             * No schema yet: offer what the resolver actually answered, plainly. Without this
+             * the select falls to its no-options branch and renders *disabled*, so the one
+             * thing worth knowing — which column this will use — is the one thing not shown.
+             */
+            ...(!known && resolved ? [{ value: resolved, label: resolved }] : []),
+            // Drift, and only where the schema is known enough to say so: show the name that
+            // went missing rather than silently pretending they picked the fallback.
+            ...(known && stored && !columns.includes(stored)
               ? [{ value: stored, label: `${stored} (missing)` }]
               : []),
             ...columns.map((c) => ({ value: c, label: c })),
           ]}
-          empty={columns.length === 0 ? 'no columns' : undefined}
+          empty={columns.length === 0 ? (known ? 'no columns' : UNKNOWN_COLUMNS) : undefined}
           onChange={onChange}
         />
       )
@@ -120,6 +142,9 @@ export function ParamField({ param, value, ctx, onChange, variant = 'node' }: Pa
         <ColumnsField
           label={label}
           available={columns}
+          // `resolveColumns` keeps a stored list untouched while the schema is unknown, so the
+          // chips have to read as kept rather than as lost.
+          known={columnSchemaFor(param, ctx.inputs, ctx.params) !== undefined}
           selected={selected}
           onChange={onChange}
         />
@@ -337,13 +362,14 @@ interface SelectFieldProps {
   value: string
   options: Array<{ value: string; label: string }>
   empty?: string
+  title?: string | undefined
   onChange: (value: string) => void
 }
 
-function SelectField({ label, value, options, empty, onChange }: SelectFieldProps) {
+function SelectField({ label, value, options, empty, title, onChange }: SelectFieldProps) {
   if (options.length === 0) {
     return (
-      <select className="field nodrag" aria-label={label} disabled>
+      <select className="field nodrag" aria-label={label} title={title} disabled>
         <option>{empty ?? '—'}</option>
       </select>
     )
@@ -352,6 +378,7 @@ function SelectField({ label, value, options, empty, onChange }: SelectFieldProp
     <select
       className="field nodrag"
       aria-label={label}
+      title={title}
       value={value}
       onChange={(e) => onChange(e.target.value)}
       onPointerDown={(e) => e.stopPropagation()}
@@ -429,12 +456,14 @@ function IdsField({ label, noun, ids, onChange }: IdsFieldProps) {
 interface ColumnsFieldProps {
   label: string
   available: string[]
+  /** Whether the port publishes a schema at all. Unknown is not empty — see `UNKNOWN_COLUMNS`. */
+  known: boolean
   selected: string[]
   onChange: (value: string[]) => void
 }
 
 /** Ordered multi-select shown as removable chips plus an add dropdown. */
-function ColumnsField({ label, available, selected, onChange }: ColumnsFieldProps) {
+function ColumnsField({ label, available, known, selected, onChange }: ColumnsFieldProps) {
   const remaining = available.filter((c) => !selected.includes(c))
   return (
     <div className="columns-field nodrag">
@@ -442,8 +471,8 @@ function ColumnsField({ label, available, selected, onChange }: ColumnsFieldProp
         <span className="chip chip--empty">none</span>
       )}
       {selected.map((name) => (
-        <span key={name} className="chip">
-          {available.includes(name) ? name : `${name} (missing)`}
+        <span key={name} className="chip" title={known ? undefined : UNKNOWN_HINT}>
+          {known && !available.includes(name) ? `${name} (missing)` : name}
           <button
             type="button"
             title={`Remove ${name}`}
@@ -472,7 +501,17 @@ function ColumnsField({ label, available, selected, onChange }: ColumnsFieldProp
           ))}
         </select>
       )}
-      {available.length === 0 && <span className="chip chip--empty">no columns</span>}
+      {/*
+        Only where there is nothing to show instead. Beside a set of chips this is noise at best
+        — the selections are visible, each already marked "(missing)" if a *known* schema has
+        lost it, and the absent `+` says the rest — and at worst it reads as a warning about the
+        chips next to it.
+      */}
+      {available.length === 0 && selected.length === 0 && (
+        <span className="chip chip--empty" title={known ? undefined : UNKNOWN_HINT}>
+          {known ? 'no columns' : UNKNOWN_COLUMNS}
+        </span>
+      )}
     </div>
   )
 }

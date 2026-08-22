@@ -69,7 +69,22 @@ export const updateRootIdsNode = registerNode({
       label: 'Supervoxel ID column',
       from: 'in',
       help: 'The supervoxel each row was annotated at. This is what a stale root id is recovered from, so a row without one is left alone.',
-      default: '',
+      /*
+       * A named default rather than `''`, and the difference is whether this node can run on the
+       * first press of a fresh session.
+       *
+       * An empty default means "the first compatible column", which is an answer computed from
+       * the schema — so before one has arrived there is none, and `evaluate` refused over a
+       * picker the card was drawing as filled in. It also means the fallback is *literally the
+       * table's first column*, which happened to be right on FlyWire's published annotations and
+       * is a guess with nothing behind it anywhere else.
+       *
+       * `supervoxel_id` is what that file and CAVE's own annotation tables call it (CAVE spells
+       * a bound point's as `pt_supervoxel_id`, which the fallback still reaches). Being a
+       * declared default it stays a suggestion: a table without the column falls back exactly as
+       * before, and `validateColumnParams` reports no drift for it.
+       */
+      default: 'supervoxel_id',
     },
     {
       id: 'version',
@@ -93,7 +108,9 @@ export const updateRootIdsNode = registerNode({
 
   validate: (ctx) => {
     if (!ctx.column('supervoxelColumn')) {
-      return ['Pick the column holding each row’s supervoxel id — the ids cannot be updated without it']
+      return [
+        'Pick the column holding each row’s supervoxel id — the ids cannot be updated without it',
+      ]
     }
     const version = String(ctx.params.version ?? '').trim()
     if (version && !Number.isInteger(Number(version))) {
@@ -159,7 +176,7 @@ export const updateRootIdsNode = registerNode({
        * them as numbers keeps doing so rather than changing dtype under everything downstream —
        * and `idText` refuses a number too wide to be exact, so nothing silently rounds.
        */
-      updated[i] = root === undefined ? original : (numeric ? (Number(root) as CellValue) : root)
+      updated[i] = root === undefined ? original : numeric ? (Number(root) as CellValue) : root
     }
     return { out: makeTable(table.schema, { ...table.data, [idColumn]: updated }, table.kind) }
   },
