@@ -134,8 +134,9 @@ export function NeuroglancerProfileFrame({
   return (
     <NeuroglancerViewer
       // The dataset's own deployment, through the same resolver `out.neuroglancer` uses. This
-      // was a bare `''`, so a CAVE dataset opened in mainline neuroglancer — which does not
-      // speak `middleauth+`, and drew the EM volume with no segmentation.
+      // was a bare `''`, so a CAVE dataset opened in the built-in default rather than the viewer
+      // its own datastack names — and a segmentation source is written for one flavour or the
+      // other, so it drew the EM volume with no neurons in it. See `viewerKind`.
       url={sceneUrl(
         viewerBaseFor('', getSource(sourceId ?? '')?.peekDataset(datasetId ?? '')?.viewerSite),
         scene,

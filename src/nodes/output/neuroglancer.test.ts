@@ -418,3 +418,116 @@ describe('provenance', () => {
     expect(only.url.length).toBeLessThan(all.url.length)
   })
 })
+
+/**
+ * The prefix a CAVE segmentation needs depends on which neuroglancer opens it, and getting it
+ * wrong breaks the layer in both directions: a seunglab fork refuses the source outright, a
+ * spelunker build shows the layer empty.
+ *
+ * Worth having at the *node* level as well as in `scene.test.ts`, because what decides it here
+ * is a chain of three — the `Viewer` param, then the dataset's own `viewer_site`, then the
+ * built-in default — and only this surface puts all three together. The FlyWire case is the
+ * middle link, which is exactly the one with no explicit control behind it.
+ */
+describe('which viewer the segmentation is authenticated for', () => {
+  const GRAPHENE = 'graphene://https://prodv1.flywire-daf.com/segmentation/table/fly_v31'
+  const CAVE_SCENE: NgScene = {
+    layers: [
+      { type: 'image', name: 'EM', source: 'precomputed://gs://flywire_em/v1' },
+      { type: 'segmentation', name: 'manc:v1.2.3', source: GRAPHENE },
+    ],
+  }
+
+  /** A source whose dataset names a particular deployment, as a CAVE datastack's info does. */
+  function sourceWithViewer(viewerSite: string): DataSource {
+    const info = { ...DATASET_INFO, viewerSite }
+    return {
+      ...stubSource(CAVE_SCENE),
+      listDatasets: () => Promise.resolve([info]),
+      peekDatasets: () => [info],
+      peekDataset: () => info,
+    } as unknown as DataSource
+  }
+
+  // By source rather than by type: the layer's *type* is one of the things this rewrites, so a
+  // helper keyed on it would report "no segmentation layer" for the case that changed it.
+  const grapheneLayer = (scene: NgScene): Record<string, unknown> =>
+    layersOf(scene).find((l) => String(l['source']).startsWith('graphene://'))!
+  const segmentationSource = (scene: NgScene): string => String(grapheneLayer(scene)['source'])
+
+  it('sends no middleauth+ to the deployment FlyWire itself names', async () => {
+    /*
+     * `flywire_fafb_public` publishes `https://ngl.flywire.ai/` as its `viewer_site`, so this
+     * is the path taken with *nothing* configured — the default, not an exotic setting. It
+     * used to send the prefix, which that viewer refuses.
+     */
+    const { scene } = await sceneFrom(
+      {},
+      undefined,
+      sourceWithViewer('https://ngl.flywire.ai/'),
+    )
+    expect(segmentationSource(scene)).toBe(GRAPHENE)
+  })
+
+  it('sends it to a spelunker deployment, where the layer is otherwise empty', async () => {
+    const { scene } = await sceneFrom(
+      {},
+      undefined,
+      sourceWithViewer('https://spelunker.cave-explorer.org/'),
+    )
+    expect(segmentationSource(scene)).toBe(
+      'graphene://middleauth+https://prodv1.flywire-daf.com/segmentation/table/fly_v31',
+    )
+  })
+
+  it('follows the Viewer param when one is set, not the dataset’s own', async () => {
+    // Somebody who has pointed the node elsewhere has changed which viewer opens it, so the
+    // prefix has to follow the choice rather than the dataset.
+    const { scene } = await sceneFrom(
+      { viewer: 'https://ngl.flywire.ai/' },
+      undefined,
+      sourceWithViewer('https://spelunker.cave-explorer.org/'),
+    )
+    expect(segmentationSource(scene)).toBe(GRAPHENE)
+  })
+
+  it('names the graphene layer the way the chosen viewer expects', async () => {
+    /*
+     * The Seung-lab fork warns when a graphene source arrives under the plain `segmentation`
+     * name, and only a document reload clears the banner — which on a card is a real share of
+     * the drawing. `nglui` keys the rule on the source scheme, not on the datastack.
+     */
+    const fly = await sceneFrom({}, undefined, sourceWithViewer('https://ngl.flywire.ai/'))
+    expect(grapheneLayer(fly.scene)['type']).toBe('segmentation_with_graph')
+
+    const spel = await sceneFrom(
+      {},
+      undefined,
+      sourceWithViewer('https://spelunker.cave-explorer.org/'),
+    )
+    expect(grapheneLayer(spel.scene)['type']).toBe('segmentation')
+  })
+
+  it('still puts the segments on that layer, whatever it is called', async () => {
+    // `segmentationLayerIndex` matches `type === 'segmentation'` and runs inside `buildScene`,
+    // before the rewrite. Getting that order wrong would leave a scene with no selection in it.
+    const fly = await sceneFrom({}, undefined, sourceWithViewer('https://ngl.flywire.ai/'))
+    expect(grapheneLayer(fly.scene)['segments']).toEqual(['10001', '10002', '10003'])
+  })
+
+  it('lets Viewer type override the guess, which is what an unknown host needs', async () => {
+    const { scene } = await sceneFrom(
+      { viewerType: 'spelunker' },
+      undefined,
+      sourceWithViewer('https://ngl.flywire.ai/'),
+    )
+    expect(segmentationSource(scene)).toContain('middleauth+')
+
+    const back = await sceneFrom(
+      { viewerType: 'seunglab' },
+      undefined,
+      sourceWithViewer('https://spelunker.cave-explorer.org/'),
+    )
+    expect(segmentationSource(back.scene)).toBe(GRAPHENE)
+  })
+})

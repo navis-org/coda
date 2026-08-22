@@ -30,7 +30,12 @@ import { readL2Skeletons } from './l2'
 import { segmentationLayerIndex } from '../neuroglancer/scene'
 import { MAX_MESH_NEURONS, decimateGridFor, fragmentConcurrencyFor } from './meshes'
 import { quoteWideIntegers, parseCaveJson } from './json'
-import { reportAuthFailure, resetCredentials, setToken, subscribeAuthFailure } from './credentials'
+import {
+  reportAuthFailure,
+  resetCredentials,
+  setToken,
+  subscribeAuthFailure,
+} from './credentials'
 
 const fixture = (name: string) => readFileSync(join(__dirname, '__fixtures__', name), 'utf8')
 
@@ -62,7 +67,8 @@ function installFetch(overrides: Record<string, string> = {}): Captured[] {
       if (url.includes(fragment)) return answer(text)
     }
     if (url.includes('/info/api/v2/datastacks')) return answer(fixture('datastacks.json'))
-    if (url.includes('/info/api/v2/datastack/full/')) return answer(fixture('datastack-flywire.json'))
+    if (url.includes('/info/api/v2/datastack/full/'))
+      return answer(fixture('datastack-flywire.json'))
     if (url.includes('/materialize/api/v3/datastack/flywire_fafb_public/metadata'))
       return answer(fixture('versions.json'))
     if (url.includes('/unique_string_values')) return answer(fixture('unique-strings.json'))
@@ -77,7 +83,8 @@ function installFetch(overrides: Record<string, string> = {}): Captured[] {
         JSON.stringify(rows.filter((r) => !system || r.classification_system === system)),
       )
     }
-    if (url.includes('/views/valid_connection_v2/query')) return answer(fixture('connections.txt'))
+    if (url.includes('/views/valid_connection_v2/query'))
+      return answer(fixture('connections.txt'))
     if (url.includes('/table/synapses_nt_v1/query')) return answer(fixture('synapses.txt'))
     if (url.includes('/segmentation/1.0/flywire_public/info'))
       return answer(fixture('segmentation.json'))
@@ -276,7 +283,9 @@ describe('the neuron index', () => {
     )
     expect(annotations).toHaveLength(5)
     expect(annotations[0]!.body).toEqual({
-      filter_equal_dict: { hierarchical_neuron_annotations: { classification_system: 'cell_class' } },
+      filter_equal_dict: {
+        hierarchical_neuron_annotations: { classification_system: 'cell_class' },
+      },
       select_columns: ['target_id', 'cell_type'],
     })
   })
@@ -443,7 +452,9 @@ describe('synapses', () => {
      * be nanometres, so omitting this looks fine and would put every synapse a factor out of the
      * scene the day that moved, with nothing failing.
      */
-    expect((query.body as { desired_resolution?: number[] }).desired_resolution).toEqual([1, 1, 1])
+    expect((query.body as { desired_resolution?: number[] }).desired_resolution).toEqual([
+      1, 1, 1,
+    ])
   })
 
   it('reads positions as a point cloud in nanometres, one attribute row apiece', async () => {
@@ -483,7 +494,7 @@ describe('synapses', () => {
     expect(post.attributes.data.partnerId?.[0]).toBe('720575940628857210')
   })
 
-it('applies the weight cut on the server, where it saves the download', async () => {
+  it('applies the weight cut on the server, where it saves the download', async () => {
     const captured = installFetch()
     await new CaveSource().fetchSynapses({
       datasetId: DATASET,
@@ -588,7 +599,7 @@ describe('meshes', () => {
     )
   })
 
-it('turns the triangle budget into a decimation grid, since graphene has no levels', async () => {
+  it('turns the triangle budget into a decimation grid, since graphene has no levels', async () => {
     // The seam says a source with one level ignores `triangleBudget`; that is written for a
     // publisher whose levels are fixed. Graphene has one level and a continuous knob, so it is
     // the only source that can hit an arbitrary budget exactly — and the Meshes node's `Detail`
@@ -630,13 +641,10 @@ it('turns the triangle budget into a decimation grid, since graphene has no leve
 describe('a wired annotation chain', () => {
   const chain = {
     key: 'seaTable:base=main&table=info',
-    table: makeTable(
-      tableSchema(column('neuronId', 'str'), column('side', 'str')),
-      {
-        neuronId: ['720575940628857210', '720575940626838909', '999'],
-        side: ['left', 'right', 'nobody'],
-      },
-    ),
+    table: makeTable(tableSchema(column('neuronId', 'str'), column('side', 'str')), {
+      neuronId: ['720575940628857210', '720575940626838909', '999'],
+      side: ['left', 'right', 'nobody'],
+    }),
   }
 
   it('replaces the datastack’s labels in the rows, not just in the type', async () => {
@@ -767,7 +775,10 @@ describe('connectivity with no connection view', () => {
   })
 
   it('asks for only the two id columns, which is what makes it affordable', async () => {
-    const captured = installFetch({ '/table/synapses/query': SYNAPSE_ROWS, '/table/nuclei/query': NUCLEI })
+    const captured = installFetch({
+      '/table/synapses/query': SYNAPSE_ROWS,
+      '/table/nuclei/query': NUCLEI,
+    })
     await new CaveSource().fetchConnectivity({
       datasetId: DATASET_SYN,
       neuronIds: ['111'],
@@ -793,7 +804,10 @@ describe('connectivity with no connection view', () => {
   })
 
   it('filters on the queried end, so direction still means what it says', async () => {
-    const captured = installFetch({ '/table/synapses/query': SYNAPSE_ROWS, '/table/nuclei/query': NUCLEI })
+    const captured = installFetch({
+      '/table/synapses/query': SYNAPSE_ROWS,
+      '/table/nuclei/query': NUCLEI,
+    })
     await new CaveSource().fetchConnectivity({
       datasetId: DATASET_SYN,
       neuronIds: ['222'],
@@ -881,15 +895,12 @@ describe('a datastack with no neuron table', () => {
 
   const chain = {
     key: 'seaTable:base=main&table=info',
-    table: makeTable(
-      tableSchema(column('neuronId', 'str'), column('side', 'str')),
-      {
-        // A repeat, because an annotation base is somebody's spreadsheet and can hold two rows
-        // for one neuron — and a repeated id is double-counted by anything summing a weight.
-        neuronId: ['720575940628857210', '999', '720575940628857210'],
-        side: ['left', 'right', 'left'],
-      },
-    ),
+    table: makeTable(tableSchema(column('neuronId', 'str'), column('side', 'str')), {
+      // A repeat, because an annotation base is somebody's spreadsheet and can hold two rows
+      // for one neuron — and a repeated id is double-counted by anything summing a weight.
+      neuronId: ['720575940628857210', '999', '720575940628857210'],
+      side: ['left', 'right', 'left'],
+    }),
   }
 
   beforeEach(() => {
@@ -1048,23 +1059,17 @@ describe('building a neuroglancer scene', () => {
   const layers = (scene: Record<string, unknown> | undefined) =>
     (scene?.layers ?? []) as Array<Record<string, unknown>>
 
-  it('prefixes the segmentation with middleauth+, which is what makes it load', () => {
+  it('publishes the segmentation plain, leaving middleauth+ to whoever opens it', () => {
     const scene = caveScene('aedes', INFO)
     const segmentation = layers(scene).find((l) => l.type === 'segmentation')
-    // Matches `caveclient`'s `format_cave_explorer` on this exact value. Without it the layer is
-    // there and empty, because CAVE's segmentation is behind its auth.
+    /*
+     * `caveclient`'s `format_graphene`, not `format_verbose_graphene`. The prefix is
+     * spelunker's — `output_map` picks between the two by target site — and a scene is built
+     * here with no idea which deployment will open it, so `sceneUrl` decides. This asserted the
+     * opposite and passed, because its `viewer_site` above happens to be a spelunker one.
+     */
     expect(segmentation?.source).toBe(
-      'graphene://middleauth+https://cave.fanc-fly.com/segmentation/table/aedes',
-    )
-  })
-
-  it('does not double the prefix on a source that already carries it', () => {
-    const scene = caveScene('aedes', {
-      ...INFO,
-      segmentation_source: 'graphene://middleauth+https://cave.fanc-fly.com/segmentation/table/aedes',
-    })
-    expect(String(layers(scene).find((l) => l.type === 'segmentation')?.source)).not.toContain(
-      'middleauth+middleauth+',
+      'graphene://https://cave.fanc-fly.com/segmentation/table/aedes',
     )
   })
 
@@ -1145,7 +1150,13 @@ describe('building a skeleton from the L2 graph', () => {
   }
 
   /** `a—b—c—d`, a straight chain. */
-  const CHAIN = JSON.stringify({ edge_graph: [['1', '2'], ['2', '3'], ['3', '4']] })
+  const CHAIN = JSON.stringify({
+    edge_graph: [
+      ['1', '2'],
+      ['2', '3'],
+      ['3', '4'],
+    ],
+  })
   const at = (n: number) => ({ rep_coord_nm: [n * 10, 0, 0], max_dt_nm: n })
   const COORDS = JSON.stringify({ '1': at(1), '2': at(2), '3': at(3), '4': at(4) })
 
@@ -1170,7 +1181,13 @@ describe('building a skeleton from the L2 graph', () => {
      * built on one passes whichever the code emits.
      */
     installFetch({
-      '/lvl2_graph': JSON.stringify({ edge_graph: [['3', '4'], ['1', '2'], ['2', '3']] }),
+      '/lvl2_graph': JSON.stringify({
+        edge_graph: [
+          ['3', '4'],
+          ['1', '2'],
+          ['2', '3'],
+        ],
+      }),
       '/attributes': COORDS,
     })
     const sk = await one()
@@ -1188,7 +1205,13 @@ describe('building a skeleton from the L2 graph', () => {
 
   it('breaks a cycle rather than emitting one', async () => {
     installFetch({
-      '/lvl2_graph': JSON.stringify({ edge_graph: [['1', '2'], ['2', '3'], ['3', '1']] }),
+      '/lvl2_graph': JSON.stringify({
+        edge_graph: [
+          ['1', '2'],
+          ['2', '3'],
+          ['3', '1'],
+        ],
+      }),
       '/attributes': COORDS,
     })
     const sk = await one()
@@ -1203,7 +1226,12 @@ describe('building a skeleton from the L2 graph', () => {
 
   it('gives each disconnected component its own root', async () => {
     installFetch({
-      '/lvl2_graph': JSON.stringify({ edge_graph: [['1', '2'], ['3', '4']] }),
+      '/lvl2_graph': JSON.stringify({
+        edge_graph: [
+          ['1', '2'],
+          ['3', '4'],
+        ],
+      }),
       '/attributes': COORDS,
     })
     expect([...(await one())!.parents].filter((p) => p === -1)).toHaveLength(2)

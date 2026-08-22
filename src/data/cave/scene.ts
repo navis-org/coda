@@ -21,23 +21,6 @@ import type { NgScene } from '../neuroglancer/scene'
 import type { DatastackInfo } from './api'
 
 /**
- * `middleauth+` on a graphene source, which is what makes the segmentation load at all.
- *
- * CAVE's segmentation is behind its auth, and a spelunker-flavoured neuroglancer authenticates
- * through the `middleauth+` prefix. Transcribed from `caveclient`'s `format_verbose_graphene`
- * and checked against it on both FlyWire's and Aedes' real sources: `graphene://https://host/p`
- * becomes `graphene://middleauth+https://host/p`, which is an insertion rather than the
- * reparse the Python does — `urlparse` reads that URL as `netloc='https:'`, and rebuilding it
- * from the parts only happens to work.
- */
-function grapheneSource(raw: string): string {
-  const prefix = 'graphene://'
-  if (!raw.startsWith(prefix)) return raw
-  const rest = raw.slice(prefix.length)
-  return rest.startsWith('middleauth+') ? raw : `${prefix}middleauth+${rest}`
-}
-
-/**
  * The image source, used as published.
  *
  * Deliberately **not** `caveclient`'s formatter, which answers `None` for exactly the value
@@ -93,7 +76,20 @@ export function caveScene(datastack: string, info: DatastackInfo): NgScene | und
         // called anything else would be found only by the "first segmentation layer" fallback,
         // which is luck rather than a rule.
         name: datastack,
-        source: grapheneSource(info.segmentation_source),
+        /*
+         * Published as-is, which is `caveclient`'s `format_graphene` — **no `middleauth+`**.
+         *
+         * That prefix is added, or not, by `sceneUrl`/`scenePatchUrl`, the only places a scene
+         * meets the viewer it is about to open in. It is spelunker's: a seunglab-flavoured
+         * deployment runs its own login and refuses it, and `flywire_fafb_public` publishes
+         * exactly such a deployment as its own `viewer_site`. See `viewerKind`.
+         *
+         * It used to be inserted here, which read as harmless because `format_verbose_graphene`
+         * really does produce it — that is just one of two formatters `output_map` picks
+         * between by target site. A `DataSource` answers `fetchViewerScene` with no view of the
+         * node that will open it, so this was never a decision this layer could make.
+         */
+        source: info.segmentation_source,
         segments: [] as string[],
       },
     ],

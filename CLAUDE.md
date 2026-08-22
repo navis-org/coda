@@ -441,9 +441,9 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `nodes/transform/labelsToNeurons.test.ts`| the two registrations: identical params, one warning that differs, and a neurons type published for a 3D socket                     |
 | `ui/nodes/labelsToNeuronsBody.test.tsx`  | the readout: what a wrong `Match on` says, not-wired against not-run, and every non-advanced param drawn                            |
 | `ui/viewers/dendrogram.test.tsx`         | the card through `ValuePreview`: a click handing back exactly the leaves under it, and every admission the caption makes           |
-| `data/neuroglancer/scene.test.ts`        | scene editing against the real published shapes, and the URL round-trip                                                          |
-| `nodes/output/neuroglancer.test.ts`      | what lands in the link: segments, colour agreement with the 3D view, the limit                                                   |
-| `ui/viewers/neuroglancerViewer.test.tsx` | that a restyle navigates the frame rather than remounting it                                                                     |
+| `data/neuroglancer/scene.test.ts`        | scene editing against the real published shapes, the URL round-trip, and `middleauth+` following the viewer rather than the backend |
+| `nodes/output/neuroglancer.test.ts`      | what lands in the link: segments, colour agreement with the 3D view, the limit, and which viewer the segmentation is authenticated for |
+| `ui/viewers/neuroglancerViewer.test.tsx` | that a restyle navigates the frame rather than remounting it, and that Reload does the opposite — a fresh document, and no merge into one still booting |
 | `ui/nodes/nodeResize.test.tsx`           | handles outside the clipping card, resize not invalidating a result, gesture undo                                                |
 | `ui/nodes/paramFold.test.tsx`            | folding a card's param rows: the header button surviving the band, notes excepted, one undo step, and that it costs no run       |
 | `ui/nodes/collapsedPorts.test.tsx`       | collapse to a header: handles moved not removed, each still addressable, and the wrapper's width kept but not its height         |
@@ -4732,11 +4732,12 @@ disagree.
 
 Three things in it, and two of them disagree with `caveclient` on purpose:
 
-- **`graphene://middleauth+…` is what makes the segmentation load at all.** CAVE's segmentation
-  is behind its auth and only a spelunker-flavoured viewer authenticates through that prefix.
-  Transcribed from `format_verbose_graphene` and checked against it, but as an *insertion* rather
-  than the reparse the Python does: `urlparse` reads `graphene://https://host/p` as
-  `netloc='https:'`, and rebuilding from the parts only happens to come out right.
+- **The segmentation source is published plain**, `caveclient`'s `format_graphene`. It used to
+  carry `graphene://middleauth+…` unconditionally, which is wrong and is written up under
+  *`middleauth+` is spelunker's, not neuroglancer's* below. Worth keeping from the first pass: an
+  *insertion* rather than the reparse the Python does, since `urlparse` reads
+  `graphene://https://host/p` as `netloc='https:'` and rebuilding from the parts only happens to
+  come out right.
 - **The image source is passed through, where `caveclient` answers `None`.**
   `format_cave_explorer` routes a `precomputed://` scheme to `format_precomputed_neuroglancer`,
   which handles `gs://`, `http://` and `https://` and falls through to `None` for a URL that
@@ -4755,10 +4756,132 @@ against the deployed Google viewer. Confirmed by reading spelunker's own bundle:
 `reset()`, which is exactly the semantic the camera-preserving update depends on.
 
 **`DatasetInfo.viewerSite` came with it**, and it is a fact about the dataset rather than a
-preference: `out.neuroglancer`'s `Viewer` param now defaults to *empty*, meaning the dataset's own
-deployment and only then the built-in. A CAVE scene opened in mainline neuroglancer draws the EM
-volume with no neurons in it and nothing saying why, because mainline does not speak
-`middleauth+`. Absent on every neuPrint dataset, whose states open anywhere.
+preference: `out.neuroglancer`'s `Viewer` param defaults to *empty*, meaning the dataset's own
+deployment and only then the built-in. A CAVE segmentation only loads in a viewer that
+authenticates the way its source is written for, and which way that is depends on the deployment —
+see below. Absent on every neuPrint dataset, whose states open anywhere.
+
+#### `middleauth+` is spelunker's, not neuroglancer's
+
+The prefix was applied to every CAVE segmentation source, on a note here claiming it "is what
+makes the segmentation load at all". That is true of one flavour of viewer and **breaks the
+other**, and the other is the one FlyWire publishes.
+
+`caveclient` says so in a fork the first transcription read straight past. `output_map` in
+`format_utils.py` routes `"neuroglancer"` to `format_graphene` — plain — and
+`"cave-explorer"`/`"spelunker"` to `format_verbose_graphene`, which adds the prefix; and
+`build_neuroglancer_url` sets `auth_text = ""` for `seunglab` against `"middleauth+"` for the
+rest. Transcribing `format_verbose_graphene` alone was transcribing one of two branches.
+
+**The failure is symmetric and neither half is loud.** A seunglab fork runs its own login and
+refuses the prefixed source; a spelunker build without it shows the segmentation layer present
+and empty. Both read as "the viewer is broken".
+
+**It is decided at `sceneUrl`/`scenePatchUrl`, which is the only place a scene meets a viewer.**
+`caveScene` runs inside `fetchViewerScene`, and a `DataSource` has no idea which deployment the
+node will open — so the prefix was being chosen a whole layer before the fact it depends on
+existed. Both URL builders funnel through one rewrite, which is what stops the navigation and the
+merge disagreeing; `SCENE_PATCH_KEYS` is `['layers']`, so a patch carries the sources too and
+would break the segmentation exactly as a navigation would. The rewrite **normalises** rather
+than only adding, so a hand-written state or a datastack that names its source with the prefix
+already on it comes out right either way.
+
+**caveclient's own test is unavailable to a browser**, which is why this is a table rather than a
+probe. It fetches `<viewer>/version.json` — 404 on a seunglab fork, 200 on the others — and
+measured against both deployments **that endpoint sends no `Access-Control-*` headers at all**.
+So `SEUNGLAB_HOSTS` in `neuroglancer/scene.ts` carries what was measured, and the measurement is
+in the comment beside it:
+
+```text
+ngl.flywire.ai                404  seunglab   ← flywire_fafb_public's own viewer_site
+neuroglancer.neuvue.io        404  seunglab   ← caveclient's own fallback_ngl_url
+neuroglancer.bossdb.io        404  seunglab
+spelunker.cave-explorer.org   200  spelunker
+ngl.cave-explorer.org         200  spelunker
+ngl.microns-explorer.org      200  spelunker
+neuroglancer-demo.appspot.com 200  spelunker  ← DEFAULT_NEUROGLANCER_URL
+```
+
+`ngl.cave-explorer.org` is in that list because it was **guessed** into the seunglab set on the
+strength of its name and is not one. The names do not tell you; probe before adding a row.
+
+**Unknown reads as spelunker**, and `out.neuroglancer` grew a `Viewer type` param
+(`auto`/`spelunker`/`seunglab`, advanced) as the escape hatch — because `Viewer` is free text, so
+the table can never be complete, and a wrong answer is a scene with no segmentation in it and
+nothing naming the cause.
+
+#### The layer type is the other thing the two flavours disagree about
+
+The Seung-lab fork has a layer type of its own for a chunked-graph source, and banners the
+plain name:
+
+```text
+The layer specification for graphene://… is deprecated.
+Key 'layerType' must be 'segmentation_with_graph'. Please reload this page.
+```
+
+That sits along the bottom of the frame and, as it says, **only a document reload clears it** —
+which on an unexpanded node card is a real share of the drawing, indefinitely.
+
+`nglui` is the reference and its rule is the **source scheme**, not the datastack:
+`_smart_add_segmentation_layer` builds a `ChunkedgraphSegmentationLayer` — which is
+`type="segmentation_with_graph"` — for a `graphene://` source and a plain `SegmentationLayer`
+for `precomputed://`. Mainline knows no such type, and nglui 4.x, which targets spelunker only,
+emits `segmentation` throughout. So it normalises **both** ways beside the prefix, in the same
+`sceneForViewer` pass: a scene read back out of a seunglab URL and re-sent to a spelunker viewer
+would otherwise carry a layer type that viewer cannot construct.
+
+**The ordering is what keeps it safe, and it is worth knowing before touching either end.**
+`segmentationLayerIndex` matches `type === 'segmentation'` exactly, and it runs inside
+`buildScene` — on the scene `fetchViewerScene` published, which is always the plain form. The
+rewrite happens later, at the URL. Do it earlier and the neuron layer stops being findable, so
+the scene comes out with no selection in it. `spliceSegments` is unaffected either way, since
+`ownedLayerName` finds the layer by its `segments` array rather than by its type. Both facts are
+pinned by tests, one of which asserts the segments survive the rename.
+
+**Not confirmed in a browser**, and that is a real gap rather than an oversight: `ngl.flywire.ai`
+refuses to boot without a FlyWire session — headless it answers *"Oops! There was an error and
+Neuroglancer…"* whichever type it is handed, so the warning cannot be observed appearing or
+disappearing here. What is established is the rule (nglui, both versions) and the required value
+(the warning names it outright).
+
+#### Reloading the frame
+
+There is no other way to clear a warning the viewer has already put up, and until now Coda had
+no way to ask. `contentWindow.location.reload()` is blocked on a foreign-origin frame, and
+re-assigning the same `src` is a **same-document fragment navigation** — the very property the
+`#!+` merge depends on, working against us here. What is left is remounting the element, which
+is a `key` on the `<iframe>` and a counter in the effect's dependency list.
+
+Two refs are cleared with it and both are load-bearing:
+
+- **`appliedRef`**, because the effect's first act is to return early for a URL already applied.
+  Leave it set and the remount produces a permanently blank frame.
+- **`loadedRef`**, because it decides merge-versus-replace. The reload's own navigation sets
+  `appliedRef` again, so the *next* upstream edit is an ordinary merge — and if the new document
+  has not booted yet, that patch lands on neuroglancer's defaults instead of the published
+  scene. This is the same window the flag was added for, reached from the other side.
+
+The second was **vacuously covered at first**: the obvious test clicks reload and asserts a full
+navigation, which passes on `appliedRef` alone. It only bites when the URL changes *between* the
+reload and the new document's `load`, which is what the test does now — confirmed by mutation,
+where the first version did not.
+
+The button is worth having beyond this warning: an embedded WebGL application can wedge for
+reasons nothing here can see, and every other route out of that was reloading the whole of Coda.
+
+**Ask `viewerKind` about a deployment, never about a proxy path.** `NeuroglancerViewer` rewrites
+its base to the same-origin `/ng` prefix so it can read the live state back, and `/ng` is a path
+on this origin that names no viewer at all — so that caller passes the kind of the base it
+started from. An inverse lookup inside `viewerKind` was written first and removed: it was correct
+and **unobservable**, since the only proxied deployment is the default and both it and the
+unknown fallback are spelunker, so a test on it passed under mutation while defending nothing.
+
+The existing test asserted the prefix unconditionally and passed, because the fixture's
+`viewer_site` happens to be `spelunker.cave-explorer.org`. Two more of the new tests were vacuous
+on the first pass for the same shape of reason — a plain source makes "no prefix" true whether or
+not anything ran — and both now assert **both directions**. Four mutations confirmed: always-
+spelunker, add-without-normalising, patch-not-rewritten, and the explicit kind ignored.
 
 **`roiCounts` is new, and `fetchRoiCounts` became optional to make room for it.** It was the one
 per-backend method on the seam that was required and ungated, and the cost of that showed up two

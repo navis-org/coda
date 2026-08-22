@@ -30,7 +30,7 @@ import { registerNode } from '../../core/registry'
 import { T } from '../../core/types'
 import type { TableValue } from '../../core/values'
 import { isTableValue, str } from '../../core/values'
-import type { NgLayerSet, NgLayout } from '../../data/neuroglancer/scene'
+import type { NgLayerSet, NgLayout, ViewerKind } from '../../data/neuroglancer/scene'
 import {
   DEFAULT_NEUROGLANCER_URL,
   buildScene,
@@ -195,7 +195,26 @@ export const neuroglancerNode = registerNode({
       default: '',
       advanced: true,
       placeholder: DEFAULT_NEUROGLANCER_URL,
-      help: 'Which neuroglancer deployment to open. Empty uses the one the dataset names, and otherwise the default above — a CAVE segmentation only authenticates in its own viewer. The whole scene travels in the URL fragment, so the instance never sees your data, but it must allow being embedded.',
+      help: 'Which neuroglancer deployment to open. Empty uses the one the dataset names, and otherwise the default above. The whole scene travels in the URL fragment, so the instance never sees your data, but it must allow being embedded.',
+    },
+    {
+      id: 'viewerType',
+      kind: 'enum',
+      label: 'Viewer type',
+      default: 'auto',
+      advanced: true,
+      options: [
+        { value: 'auto', label: 'Automatic' },
+        { value: 'spelunker', label: 'Spelunker / mainline' },
+        { value: 'seunglab', label: 'Seung-lab (FlyWire, NeuVue)' },
+      ],
+      /*
+       * The escape hatch for a deployment `viewerKind`'s table has not met. `Viewer` is free
+       * text, so the table can never be complete, and a wrong answer here is a scene that opens
+       * with no segmentation in it and nothing naming the cause — which has happened once
+       * already, in the other direction.
+       */
+      help: 'How a CAVE segmentation is authenticated. Spelunker builds need a middleauth+ prefix on the source; the Seung-lab fork runs its own login and refuses it. Automatic reads it off the deployment, and is right for every viewer this app knows about.',
     },
   ],
 
@@ -247,7 +266,10 @@ export const neuroglancerNode = registerNode({
       String(ctx.params.viewer ?? ''),
       source.peekDataset(dataset.datasetId)?.viewerSite,
     )
-    return { url: str(sceneUrl(viewer, scene)) }
+    const chosen = String(ctx.params.viewerType ?? 'auto')
+    return {
+      url: str(sceneUrl(viewer, scene, chosen === 'auto' ? undefined : (chosen as ViewerKind))),
+    }
   },
 })
 

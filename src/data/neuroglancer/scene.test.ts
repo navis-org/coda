@@ -20,6 +20,7 @@ import {
   scenePatchUrl,
   sceneUrl,
   segmentationLayerIndex,
+  viewerKind,
   splitSceneUrl,
 } from './scene'
 
@@ -463,5 +464,173 @@ describe('the URL', () => {
   it('returns nothing for a URL that carries no scene', () => {
     expect(parseSceneUrl('https://ng.example.org/')).toBeUndefined()
     expect(parseSceneUrl('https://ng.example.org/#!not-json')).toBeUndefined()
+  })
+})
+
+/**
+ * `middleauth+` is spelunker's, not neuroglancer's, and getting it backwards breaks a real
+ * dataset either way round: on a seunglab fork the viewer refuses the source outright, and on a
+ * spelunker one the segmentation layer is present and empty.
+ *
+ * The reference is `caveclient`'s `output_map`, which routes `"neuroglancer"` to
+ * `format_graphene` and `"cave-explorer"`/`"spelunker"` to `format_verbose_graphene`. Its own
+ * way of telling them apart — fetching `<viewer>/version.json` — is unavailable here: measured
+ * against both deployments, that endpoint sends no `Access-Control-*` headers at all.
+ */
+describe('which flavour of neuroglancer a deployment is', () => {
+  const CAVE: NgScene = {
+    layers: [
+      { type: 'image', name: 'EM', source: 'precomputed://gs://flywire_em/aligned/v1' },
+      {
+        type: 'segmentation',
+        name: 'flywire_fafb_public',
+        source: 'graphene://https://prodv1.flywire-daf.com/segmentation/table/fly_v31',
+        segments: ['720575940628857210'],
+      },
+    ],
+  }
+
+  type Layer = { type?: string; source?: string }
+  const stateIn = (url: string): Layer[] =>
+    (JSON.parse(decodeURIComponent(url.split(/#!\+?/).pop()!)) as { layers: Layer[] }).layers
+
+  // Found by its *source*, not its type — the type is one of the things under test, and a
+  // helper keyed on it reports "no segmentation layer" for the very case that changed it.
+  const grapheneLayer = (url: string): Layer =>
+    stateIn(url).find((l) => l.source?.startsWith('graphene://'))!
+  const sourceIn = (url: string): string => grapheneLayer(url).source!
+
+  it('reads flywire’s own deployment as seunglab, which is the case that was wrong', () => {
+    // `flywire_fafb_public` publishes this as its `viewer_site`, so it is what a FlyWire
+    // Neuroglancer node opens with nothing configured — the default path, not an exotic one.
+    expect(viewerKind('https://ngl.flywire.ai/')).toBe('seunglab')
+    expect(sourceIn(sceneUrl('https://ngl.flywire.ai/', CAVE))).toBe(
+      'graphene://https://prodv1.flywire-daf.com/segmentation/table/fly_v31',
+    )
+  })
+
+  it('prefixes for a spelunker deployment, where the layer is otherwise empty', () => {
+    expect(viewerKind('https://spelunker.cave-explorer.org/')).toBe('spelunker')
+    expect(sourceIn(sceneUrl('https://spelunker.cave-explorer.org/', CAVE))).toBe(
+      'graphene://middleauth+https://prodv1.flywire-daf.com/segmentation/table/fly_v31',
+    )
+  })
+
+  it('takes the kind it is given even when the base is a proxy path', () => {
+    /*
+     * A proxy prefix is a path on this origin and names no deployment, so `viewerKind` must not
+     * be asked about one — `NeuroglancerViewer` passes the kind of the base it started from.
+     * What is pinned here is that the third argument is honoured for such a base, which is the
+     * whole of what that caller relies on.
+     */
+    const proxied = proxiedViewer(undefined)!
+    expect(sourceIn(sceneUrl(proxied, CAVE, 'seunglab'))).not.toContain('middleauth')
+    expect(sourceIn(sceneUrl(proxied, CAVE, 'spelunker'))).toContain('middleauth+')
+  })
+
+  it('normalises rather than only adding, so a prefixed source is not doubled', () => {
+    const already: NgScene = {
+      layers: [
+        {
+          type: 'segmentation',
+          source: 'graphene://middleauth+https://prodv1.flywire-daf.com/segmentation/table/x',
+        },
+      ],
+    }
+    expect(sourceIn(sceneUrl('https://ngl.flywire.ai/', already))).toBe(
+      'graphene://https://prodv1.flywire-daf.com/segmentation/table/x',
+    )
+    expect(sourceIn(sceneUrl('https://spelunker.cave-explorer.org/', already))).not.toContain(
+      'middleauth+middleauth+',
+    )
+  })
+
+  it('leaves a non-graphene source alone whichever viewer is asked for', () => {
+    for (const viewer of ['https://ngl.flywire.ai/', 'https://spelunker.cave-explorer.org/']) {
+      const scene = JSON.parse(
+        decodeURIComponent(sceneUrl(viewer, CAVE).split('#!').pop()!),
+      ) as {
+        layers: Array<{ type?: string; source?: string }>
+      }
+      // caveclient prefixes `precomputed://` only for the annotation and segment-property URLs
+      // CAVE serves itself, neither of which appears in a scene built here.
+      expect(scene.layers.find((l) => l.type === 'image')!.source).toBe(
+        'precomputed://gs://flywire_em/aligned/v1',
+      )
+    }
+  })
+
+  it('rewrites a patch too, since layers is the one key it carries', () => {
+    /*
+     * A merge sends the whole layer list, sources included, so it breaks the segmentation
+     * exactly as a navigation would — and a merge is what every upstream edit lands as, so this
+     * is the *common* path rather than the first-load one.
+     *
+     * Both directions, because either alone is vacuous: `CAVE`'s source is plain, so asserting
+     * only that a seunglab patch lacks the prefix passes just as well when nothing was rewritten.
+     */
+    const patchLayer = (viewer: string): Layer =>
+      stateIn(scenePatchUrl(viewer, CAVE)).find((l) => l.source?.startsWith('graphene://'))!
+    expect(patchLayer('https://spelunker.cave-explorer.org/').source).toContain('middleauth+')
+    expect(patchLayer('https://ngl.flywire.ai/').source).not.toContain('middleauth')
+    expect(patchLayer('https://ngl.flywire.ai/').type).toBe('segmentation_with_graph')
+  })
+
+  /**
+   * The Seung-lab fork has a layer type of its own for a chunked-graph source and *warns* when
+   * it is handed one under the plain name — a banner across the bottom of the viewer that only
+   * a document reload clears, which on a node card is a real share of the drawing.
+   *
+   * `nglui`'s rule is the source scheme rather than the datastack:
+   * `_smart_add_segmentation_layer` builds a `ChunkedgraphSegmentationLayer` for `graphene://`
+   * and a plain `SegmentationLayer` for `precomputed://`.
+   */
+  it('names a graphene layer the way each viewer expects', () => {
+    expect(grapheneLayer(sceneUrl('https://ngl.flywire.ai/', CAVE)).type).toBe(
+      'segmentation_with_graph',
+    )
+    // Mainline knows no such type, and nglui 4.x — spelunker-only — emits `segmentation`.
+    expect(grapheneLayer(sceneUrl('https://spelunker.cave-explorer.org/', CAVE)).type).toBe(
+      'segmentation',
+    )
+  })
+
+  it('normalises the type back, so a scene does not carry the other viewer’s name', () => {
+    // The case that makes this a normalisation rather than a rename: a scene read back out of a
+    // seunglab URL and re-sent to a spelunker viewer would otherwise carry a type it cannot
+    // construct at all.
+    const seunglab: NgScene = {
+      layers: [
+        {
+          type: 'segmentation_with_graph',
+          source: 'graphene://https://prodv1.flywire-daf.com/segmentation/table/fly_v31',
+        },
+      ],
+    }
+    expect(grapheneLayer(sceneUrl('https://spelunker.cave-explorer.org/', seunglab)).type).toBe(
+      'segmentation',
+    )
+  })
+
+  it('does not rename a layer that is not a segmentation', () => {
+    // An image layer is not turned into one by having a source this recognises.
+    const odd: NgScene = { layers: [{ type: 'image', source: 'graphene://https://h/p' }] }
+    expect(grapheneLayer(sceneUrl('https://ngl.flywire.ai/', odd)).type).toBe('image')
+  })
+
+  it('takes an explicit kind over the deployment, which is the escape hatch', () => {
+    expect(sourceIn(sceneUrl('https://ngl.flywire.ai/', CAVE, 'spelunker'))).toContain(
+      'middleauth+',
+    )
+    expect(
+      sourceIn(sceneUrl('https://spelunker.cave-explorer.org/', CAVE, 'seunglab')),
+    ).not.toContain('middleauth')
+  })
+
+  it('reads an unknown deployment as spelunker', () => {
+    // The seunglab fork is a small enumerable set of lab deployments; anything built on
+    // google's neuroglancer since is the other one.
+    expect(viewerKind('https://ng.example.org/')).toBe('spelunker')
+    expect(viewerKind(undefined)).toBe('spelunker')
   })
 })

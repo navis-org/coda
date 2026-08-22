@@ -46,7 +46,7 @@
  * the user is doing with the mouse.
  */
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import type { TableValue } from '../../core/values'
 import type { NgScene } from '../../data/neuroglancer/scene'
@@ -55,6 +55,7 @@ import {
   proxiedViewer,
   sceneIdentity,
   scenePatchUrl,
+  viewerKind,
   sceneUrl,
   spliceSegments,
   splitSceneUrl,
@@ -137,6 +138,15 @@ export function NeuroglancerViewer({
   )
   /** Whether a document has finished loading in the frame, i.e. whether there is state to merge into. */
   const loadedRef = useRef(false)
+  /**
+   * Bumped to throw the current document away and fetch a fresh one.
+   *
+   * There is no other way to reload a foreign-origin frame: `contentWindow.location.reload()`
+   * is blocked, and re-assigning `src` with the same URL is a same-document fragment
+   * navigation — the very property the merge depends on, working against us here. Remounting
+   * the element is what forces a real load.
+   */
+  const [reloadCount, setReloadCount] = useState(0)
 
   useEffect(() => {
     const frame = frameRef.current
@@ -158,6 +168,13 @@ export function NeuroglancerViewer({
     // The frame goes to the proxied path where one exists; the *link* stays the absolute
     // public URL, so copying it still gives something that opens anywhere.
     const frameBase = proxiedViewer(split.base) ?? split.base
+    /*
+     * Read off the *deployment*, not off `frameBase`: a proxy prefix is a path on this origin
+     * and names no viewer, so asking about it would answer for the wrong one. Which flavour
+     * decides whether a CAVE segmentation carries `middleauth+`, and both are wrong the other
+     * way round — see `viewerKind`.
+     */
+    const kind = viewerKind(split.base)
     const applied = appliedRef.current
     const canMerge =
       // Nothing to merge *into* until the first document has loaded. Without this, changing a
@@ -183,10 +200,10 @@ export function NeuroglancerViewer({
       const live = canMerge ? readLiveScene(frame) : undefined
       const spliced = live ? spliceSegments(live, split.scene) : undefined
       frame.src = spliced
-        ? scenePatchUrl(frameBase, spliced)
+        ? scenePatchUrl(frameBase, spliced, kind)
         : canMerge
-          ? scenePatchUrl(frameBase, split.scene)
-          : sceneUrl(frameBase, split.scene)
+          ? scenePatchUrl(frameBase, split.scene, kind)
+          : sceneUrl(frameBase, split.scene, kind)
       appliedRef.current = { url, base: split.base, identity }
     }
 
@@ -196,7 +213,10 @@ export function NeuroglancerViewer({
     }
     const timer = setTimeout(navigate, MERGE_DEBOUNCE_MS)
     return () => clearTimeout(timer)
-  }, [url])
+    // `reloadCount` belongs here rather than only on the element: the effect's own guard
+    // returns early for a URL already applied, so a remount with no reason to renavigate would
+    // leave a blank frame.
+  }, [url, reloadCount])
 
   if (!url) {
     return (
@@ -222,6 +242,18 @@ export function NeuroglancerViewer({
     void copyText(url).catch((err: unknown) => onError?.(errorMessage(err)))
   }
 
+  /*
+   * Both refs are cleared first, and both matter. `appliedRef` is what the effect checks before
+   * doing anything, so leaving it set means the remount produces an empty frame; `loadedRef`
+   * decides merge-versus-replace, and merging into a document that no longer exists lands the
+   * patch on neuroglancer's defaults rather than on the published scene.
+   */
+  const reload = () => {
+    appliedRef.current = undefined
+    loadedRef.current = false
+    setReloadCount((n) => n + 1)
+  }
+
   return (
     <div className="viewer">
       <div
@@ -231,6 +263,8 @@ export function NeuroglancerViewer({
         style={{ '--ng-scale': safeScale(scale) } as React.CSSProperties}
       >
         <iframe
+          // Remounting is the reload: see `reloadCount`.
+          key={reloadCount}
           ref={frameRef}
           className="ng-frame__doc nodrag nowheel"
           title="Neuroglancer"
@@ -269,6 +303,15 @@ export function NeuroglancerViewer({
             onClick={copyLink}
           >
             ⧉{!compact && <span>Copy link</span>}
+          </button>
+          <button
+            type="button"
+            className="viewer-actions__btn nodrag"
+            title="Reload the viewer"
+            aria-label="Reload the viewer"
+            onClick={reload}
+          >
+            ↻{!compact && <span>Reload</span>}
           </button>
           <a
             className="viewer-actions__btn nodrag"

@@ -191,12 +191,157 @@ export function buildScene(published: NgScene | undefined, options: SceneOptions
  * segmentation is `graphene://middleauth+…`, which only a spelunker-flavoured viewer
  * authenticates.
  */
-export function viewerBaseFor(chosen: string | undefined, viewerSite: string | undefined): string {
+export function viewerBaseFor(
+  chosen: string | undefined,
+  viewerSite: string | undefined,
+): string {
   return chosen?.trim() || viewerSite || ''
 }
 
-export function sceneUrl(viewerBase: string | undefined, scene: NgScene): string {
-  return `${viewerRoot(viewerBase)}/#!${encodeURIComponent(JSON.stringify(scene))}`
+/**
+ * Which flavour of neuroglancer a deployment is, because they disagree about one prefix.
+ *
+ * `middleauth+` on a graphene source is **not** universal, which is what this used to assume.
+ * It is spelunker's, and caveclient says so in a fork nothing in the transcription noticed:
+ * `output_map` routes `"neuroglancer"` to `format_graphene` (plain) and
+ * `"cave-explorer"`/`"spelunker"` to `format_verbose_graphene` (prefixed), and
+ * `build_neuroglancer_url` sets `auth_text = ""` for `seunglab` against `"middleauth+"` for the
+ * rest. A seunglab-flavoured viewer runs its own login and **refuses** the prefix; a spelunker
+ * one needs it or the segmentation layer is present and empty.
+ *
+ * caveclient decides by fetching `<viewer>/version.json` — 404 on a seunglab fork, 200 on the
+ * others. Coda cannot: measured against both deployments, **that endpoint sends no
+ * `Access-Control-*` headers at all**, so a browser can never read it. Hence a table, which is
+ * also what makes the answer synchronous everywhere it is needed.
+ *
+ * Unknown is read as spelunker, deliberately: the seunglab fork is a small enumerable set of
+ * lab deployments, where anything built on google's neuroglancer since is the other one — and
+ * `out.neuroglancer`'s `Viewer type` is the escape hatch for a host this table has not met.
+ */
+export type ViewerKind = 'spelunker' | 'seunglab'
+
+/**
+ * Deployments running the Seung-lab fork, **measured rather than assumed** — each 404s on
+ * `version.json`, which is caveclient's own test:
+ *
+ *   ngl.flywire.ai             404  seunglab
+ *   neuroglancer.neuvue.io     404  seunglab   (caveclient's own `fallback_ngl_url`)
+ *   neuroglancer.bossdb.io     404  seunglab
+ *   spelunker.cave-explorer.org 200 spelunker
+ *   ngl.cave-explorer.org      200  spelunker
+ *   ngl.microns-explorer.org   200  spelunker
+ *   neuroglancer-demo.appspot.com 200 spelunker  (`DEFAULT_NEUROGLANCER_URL`)
+ *
+ * `ngl.cave-explorer.org` is on that list for a reason: it was guessed into the seunglab set on
+ * the strength of its name and is not one. The names do not tell you.
+ *
+ * `ngl.flywire.ai` is the entry that matters — it is `flywire_fafb_public`'s published
+ * `viewer_site`, so it is what a FlyWire Neuroglancer node opens with nothing configured.
+ */
+const SEUNGLAB_HOSTS: ReadonlySet<string> = new Set([
+  'ngl.flywire.ai',
+  'neuroglancer.neuvue.io',
+  'neuroglancer.bossdb.io',
+])
+
+/**
+ * Ask this about the deployment somebody chose, never about a same-origin proxy path — `/ng` is
+ * a path on *this* origin and names no deployment at all. `NeuroglancerViewer` is the one caller
+ * that rewrites a base for proxying, and it passes the kind of the base it started from rather
+ * than of the path it produced.
+ */
+export function viewerKind(viewerBase: string | undefined): ViewerKind {
+  let host: string
+  try {
+    host = new URL(viewerRoot(viewerBase)).hostname
+  } catch {
+    return 'spelunker'
+  }
+  return SEUNGLAB_HOSTS.has(host) ? 'seunglab' : 'spelunker'
+}
+
+/**
+ * A graphene source carrying the prefix this viewer wants, and not the one it does not.
+ *
+ * Normalising rather than only adding, so the answer does not depend on what the source
+ * happened to arrive as: a published state somebody hand-wrote, or a datastack that names its
+ * segmentation with the prefix already on it, both come out right. Only `graphene://` is
+ * touched — caveclient prefixes `precomputed://` sources only for the annotation and
+ * segment-property URLs CAVE serves itself, and neither appears in a scene built here.
+ */
+function grapheneFor(source: string, kind: ViewerKind): string {
+  const rest = source.slice(GRAPHENE.length).replace(/^middleauth\+/, '')
+  return kind === 'seunglab' ? `${GRAPHENE}${rest}` : `${GRAPHENE}middleauth+${rest}`
+}
+
+const GRAPHENE = 'graphene://'
+
+/**
+ * What a segmentation layer is *called*, which the two flavours also disagree about.
+ *
+ * The Seung-lab fork has a layer type of its own for a chunked-graph source —
+ * `segmentation_with_graph`, carrying the proofreading tools a plain segmentation has no use
+ * for — and it warns when it is handed a graphene source under the plain name:
+ *
+ *     The layer specification for graphene://… is deprecated.
+ *     Key 'layerType' must be 'segmentation_with_graph'. Please reload this page.
+ *
+ * That banner sits along the bottom of the viewer and only a **document reload** clears it, so
+ * on a node card it costs a real share of the drawing until somebody reloads the whole app.
+ *
+ * `nglui` is the reference and its rule is the source scheme rather than the datastack:
+ * `_smart_add_segmentation_layer` builds a `ChunkedgraphSegmentationLayer` (which is
+ * `type="segmentation_with_graph"`) for a `graphene://` source and a plain `SegmentationLayer`
+ * for `precomputed://`. Mainline knows no such type, and nglui 4.x — which targets spelunker
+ * only — emits `segmentation` throughout, so this normalises **both** ways for the reason the
+ * prefix does: a scene parsed back out of a seunglab URL and re-sent to a spelunker viewer
+ * would otherwise carry a layer type that viewer cannot construct.
+ */
+const GRAPHENE_LAYER_TYPE: Readonly<Record<ViewerKind, string>> = {
+  seunglab: 'segmentation_with_graph',
+  spelunker: 'segmentation',
+}
+
+/** `nglui`'s own `SEGMENTATION_LAYER_TYPES`: the two names one layer can be going under. */
+const SEGMENTATION_TYPES: ReadonlySet<string> = new Set(Object.values(GRAPHENE_LAYER_TYPE))
+
+/**
+ * The scene as this particular viewer needs it.
+ *
+ * Applied here rather than where the scene is built, because the prefix is a fact about the
+ * **viewer** and the scene is assembled before anybody has chosen one — `caveScene` runs inside
+ * `fetchViewerScene`, which a `DataSource` answers with no idea which deployment the node will
+ * open. Both URL builders funnel through it so the two cannot drift, which is the reason
+ * `viewerBaseFor` exists one function up.
+ */
+function sceneForViewer(scene: NgScene, kind: ViewerKind): NgScene {
+  const layers = scene.layers
+  if (!Array.isArray(layers)) return scene
+  let changed = false
+  const next = layers.map((layer) => {
+    const l = layer as NgLayer
+    // Only a graphene layer: `precomputed://` is prefixed by caveclient for the annotation and
+    // segment-property URLs CAVE serves itself, neither of which a scene built here carries,
+    // and the layer *type* is a fact about a chunked-graph source specifically.
+    if (typeof l.source !== 'string' || !l.source.startsWith(GRAPHENE)) return layer
+    const source = grapheneFor(l.source, kind)
+    // Left alone unless it is already a segmentation under one of its two names — an image
+    // layer is not turned into one by having a source this recognises.
+    const type = SEGMENTATION_TYPES.has(String(l.type)) ? GRAPHENE_LAYER_TYPE[kind] : l.type
+    if (source === l.source && type === l.type) return layer
+    changed = true
+    return { ...l, source, type }
+  })
+  return changed ? { ...scene, layers: next } : scene
+}
+
+export function sceneUrl(
+  viewerBase: string | undefined,
+  scene: NgScene,
+  kind: ViewerKind = viewerKind(viewerBase),
+): string {
+  const state = sceneForViewer(scene, kind)
+  return `${viewerRoot(viewerBase)}/#!${encodeURIComponent(JSON.stringify(state))}`
 }
 
 /** Viewer instance a URL is built against, normalised: no trailing slash, no fragment. */
@@ -242,10 +387,18 @@ export const SCENE_PATCH_KEYS = ['layers'] as const
  * The corollary is what a patch *cannot* preserve: per-layer state the viewer owns, like a
  * visibility toggle or a randomised colour seed, is rebuilt from what is sent here.
  */
-export function scenePatchUrl(viewerBase: string | undefined, scene: NgScene): string {
+export function scenePatchUrl(
+  viewerBase: string | undefined,
+  scene: NgScene,
+  kind: ViewerKind = viewerKind(viewerBase),
+): string {
+  // Through the same rewrite as a full navigation: `layers` is the one key a patch carries, so
+  // it carries the sources, and a merge sending the wrong prefix breaks the segmentation exactly
+  // as a navigation would.
+  const state = sceneForViewer(scene, kind)
   const patch: Record<string, unknown> = {}
   for (const key of SCENE_PATCH_KEYS) {
-    if (scene[key] !== undefined) patch[key] = scene[key]
+    if (state[key] !== undefined) patch[key] = state[key]
   }
   return `${viewerRoot(viewerBase)}/#!+${encodeURIComponent(JSON.stringify(patch))}`
 }
