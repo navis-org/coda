@@ -12,7 +12,9 @@
  */
 
 import type { CodaGraph } from '../core/graph'
-import { familyForNodeType } from '../nodes/lib/datasetFamilies'
+import { getNodeDef } from '../core/registry'
+import type { DatasetBackend } from '../nodes/lib/datasetFamilies'
+import { backendForNodeType, familyForNodeType } from '../nodes/lib/datasetFamilies'
 
 export interface ShareAdvisory {
   /** Stable id, so the dialog can key a list and a test can name one. */
@@ -50,15 +52,39 @@ function uploadFiles(graph: CodaGraph): string[] {
   return names
 }
 
-/** Dataset nodes on a real connectome, i.e. the ones the recipient needs a token to query. */
-function credentialledDatasets(graph: CodaGraph): string[] {
-  const labels = new Set<string>()
+/**
+ * Dataset nodes on a real connectome, grouped by the backend whose token they need.
+ *
+ * **Grouped, because the credential is per backend and the message names it.** It said `neuPrint
+ * token` for every dataset, which was true for as long as neuPrint was the only credentialled
+ * backend and became a wrong instruction the day a CAVE one shipped — pointing the recipient at
+ * the wrong tab of the Connections dialog, which is worse than saying nothing, since the sentence
+ * reads as knowing what it is talking about.
+ *
+ * `backendForNodeType` rather than the family table alone, so **`Custom neuPrint` and
+ * `Custom CAVE` are counted too**. Those name their server by hand and so have no family entry —
+ * which meant a graph built on one got no token advisory at all, which is the same failure with
+ * the sentence missing rather than wrong. Their *name* comes off the node definition, since there
+ * is no dataset label to give: what they point at is in their params.
+ *
+ * A synthetic family is skipped before either lookup. It is generated in the browser, so there is
+ * no server to authenticate against — and `BACKENDS.mock` deliberately carries an empty label,
+ * which would put `a  token` on screen.
+ */
+function credentialledDatasets(graph: CodaGraph): Map<DatasetBackend, string[]> {
+  const byBackend = new Map<DatasetBackend, Set<string>>()
   for (const node of graph.nodes) {
     const family = familyForNodeType(node.type)
-    if (!family || family.synthetic) continue
-    labels.add(family.label)
+    if (family?.synthetic) continue
+    const backend = backendForNodeType(node.type)
+    if (!backend) continue
+    const label = family?.label ?? getNodeDef(node.type)?.label
+    if (!label) continue
+    const held = byBackend.get(backend)
+    if (held) held.add(label)
+    else byBackend.set(backend, new Set([label]))
   }
-  return [...labels]
+  return new Map([...byBackend].map(([backend, labels]) => [backend, [...labels]]))
 }
 
 /**
@@ -85,11 +111,13 @@ export function shareAdvisories(
     })
   }
 
-  const datasets = credentialledDatasets(graph)
-  if (datasets.length > 0) {
+  // One sentence per backend rather than one compound one: a graph can hold a neuPrint dataset
+  // and a CAVE dataset, and the recipient then needs two tokens from two places.
+  for (const [backend, labels] of credentialledDatasets(graph)) {
+    const credential = backend.label ? `a ${backend.label} token` : 'a token'
     out.push({
-      id: 'token',
-      text: `Running this needs a neuPrint token of their own — ${datasets.join(', ')} ${datasets.length === 1 ? 'is a real connectome' : 'are real connectomes'}. The workflow opens without one; only Run needs it.`,
+      id: `token-${backend.id}`,
+      text: `Running this needs ${credential} of their own — ${labels.join(', ')} ${labels.length === 1 ? 'is a real connectome' : 'are real connectomes'}. The workflow opens without one; only Run needs it.`,
     })
   }
 

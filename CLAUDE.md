@@ -7794,8 +7794,24 @@ of these cases.
 - **An upload names the _file_**, never the content hash, because the filename is the only part
   of this anybody can act on. The rows are in IndexedDB by content address, exactly as a
   `.coda.json` has always been.
-- **A real connectome names itself**, so the recipient is told they need their own token — and
-  told that only Run needs it. A synthetic dataset earns no advisory at all.
+- **A real connectome names itself and the backend names the credential**, so the recipient is
+  told they need their own *CAVE* or *neuPrint* token — and told that only Run needs it. It said
+  `neuPrint token` for every dataset, which was true for as long as neuPrint was the only
+  credentialled backend and became a **wrong instruction** the day a CAVE one shipped: it points
+  somebody at the wrong tab of the Connections dialog, which is worse than saying nothing, because
+  a sentence that specific reads as knowing what it is talking about. One sentence per backend
+  rather than one compound one, since a graph can hold both and the recipient then needs two
+  tokens from two places — hence the id is `token-<backend>`, which is what the dialog keys the
+  list on. The backend comes from `backendForNodeType`, not from the family table alone, so
+  **`Custom neuPrint` and `Custom CAVE` are counted too**: those name their server by hand and so
+  have no family entry, which meant a graph built on one got no token advisory *at all* — the same
+  failure with the sentence missing rather than wrong. A synthetic dataset earns no advisory,
+  which is also what keeps `BACKENDS.mock`'s deliberately empty label from putting `a  token` on
+  screen.
+
+  Still unsaid: an annotation source needs its own credential and nothing here mentions it. On a
+  CAVE graph `annotation.caveTable` is covered by the dataset's own sentence, but a FlyTable or
+  SeaTable node wants `SEATABLE_TOKEN` and would need a second table keyed by node type.
 - **A link over `LONG_LINK_CHARS` (8,000)** recommends the gist. Not a browser limit — Chrome
   carries about two megabytes and a fragment never reaches a server — but mail wraps, chat clients
   elide, and trackers linkify as far as they feel like.
