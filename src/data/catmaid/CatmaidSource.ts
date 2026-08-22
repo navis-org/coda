@@ -19,9 +19,7 @@
  *     the one place this backend needs a ceiling the others do not.
  */
 
-import { ID_COLUMN_NAME } from '../../core/ids'
-import type { NeuronId } from '../../core/ids'
-import type { TableSchema } from '../../core/types'
+import { ID_COLUMN_NAME, numericIds } from '../../core/ids'
 import type {
   CellValue,
   MatrixValue,
@@ -32,7 +30,14 @@ import type {
   SkeletonsValue,
   TableValue,
 } from '../../core/values'
-import { boundsOf, makeMatrix, tableFromRows } from '../../core/values'
+import {
+  boundsOf,
+  cableLength,
+  getRow,
+  makeMatrix,
+  selectRows,
+  tableFromRows,
+} from '../../core/values'
 import { mapWithConcurrency } from '../concurrency'
 import { compileLabelMatch, compileRegex } from '../neuronFilter'
 import { loadCachedTable, neuronIndexKey } from '../neuronIndex'
@@ -51,9 +56,9 @@ import type {
 } from '../source'
 import { ROI_MESH_SCHEMA, reportSourceLearned, throwIfAborted } from '../source'
 import type { AnnotationListResponse, CatmaidProject } from './api'
+import type { SkeletonSummary } from './api'
 import {
   annotationList,
-  cableLengths,
   compactSkeleton,
   connectivityMatrix,
   connectorLinks,
@@ -61,12 +66,11 @@ import {
   listSkeletons,
   listVolumes,
   skeletonConnectivity,
-  skeletonNumber,
   skeletonSummaries,
   synapseWeight,
   volumeDetail,
 } from './api'
-import type { CatmaidVocabulary } from './annotations'
+import type { CatmaidLabels } from './annotations'
 import { labelsForSkeleton, readVocabulary } from './annotations'
 import { CATMAID_SCHEMAS } from './schema'
 import { parseX3dMesh } from './x3d'
@@ -119,16 +123,41 @@ const CATMAID_CAPABILITIES: SourceCapabilities = {
 }
 
 interface ProjectState {
+  /** Every skeleton id in the project — needed before the labels, and by itself. */
+  skeletonIds?: Promise<number[]>
   /** The whole-instance annotation index, once built. */
   labels?: Promise<LabelIndex>
-  volumes?: Promise<{ id: number; name: string; comment: string | null }[]>
+  volumes?: Promise<VolumeEntry[]>
 }
 
-/** Everything the neuron table needs about labels, keyed by skeleton id. */
+interface VolumeEntry {
+  id: number
+  name: string
+  comment: string | null
+}
+
+/**
+ * Everything the neuron table needs about labels, **already derived**.
+ *
+ * The raw `AnnotationListResponse` is deliberately *not* kept. `labelsForSkeleton` allocates a
+ * `Set` and joins a string per call, and four call sites wanted labels — one of them once per
+ * synapse *link*, which is tens of thousands of times for a densely traced FAFB neuron. Deriving
+ * once here makes every one of them a map lookup, and it lets the response — 5,601 skeleton
+ * entries, ~6,000 annotation names and the metaannotation graph — be collected rather than held
+ * for the life of the tab beside the neuron table built from it.
+ */
 interface LabelIndex {
-  vocabulary: CatmaidVocabulary
-  response: AnnotationListResponse
   skeletonIds: number[]
+  labels: Map<number, CatmaidLabels>
+}
+
+/** What a skeleton the annotation graph has never heard of gets. Shared, so it is one object. */
+const EMPTY_LABELS: CatmaidLabels = {
+  name: null,
+  type: null,
+  instance: null,
+  ontology: null,
+  annotations: null,
 }
 
 export class CatmaidSource implements DataSource {
@@ -151,13 +180,42 @@ export class CatmaidSource implements DataSource {
     this.label = label
   }
 
+  /**
+   * Memoise a promise on a slot, **dropping it if it rejects**.
+   *
+   * One helper rather than three spellings of `slot ??= run()`, because the three had already
+   * diverged on the half that matters: a plain `??=` caches a *rejection* and replays it for the
+   * life of the tab, so one failed listing on a flaky connection means the dataset picker stays
+   * empty until a reload. Keeping the resolved value is the whole point; keeping the failure is
+   * never what anybody wanted.
+   */
+  private once<T>(
+    read: () => Promise<T> | undefined,
+    write: (value: Promise<T> | undefined) => void,
+    run: () => Promise<T>,
+  ): Promise<T> {
+    const held = read()
+    if (held) return held
+    const started = run().catch((error: unknown) => {
+      write(undefined)
+      throw error
+    })
+    write(started)
+    return started
+  }
+
   // -------------------------------------------------------------------------
   // Datasets — a CATMAID *project*
   // -------------------------------------------------------------------------
 
   async listDatasets(signal?: AbortSignal): Promise<DatasetInfo[]> {
-    this.listing ??= this.runListing(signal)
-    return this.listing
+    return this.once(
+      () => this.listing,
+      (value) => {
+        this.listing = value
+      },
+      () => this.runListing(signal),
+    )
   }
 
   /**
@@ -260,23 +318,29 @@ export class CatmaidSource implements DataSource {
     const projectId = this.projectId(req.datasetId)
     const options = req.signal ? { signal: req.signal } : {}
     req.onProgress?.(0.05, 'skeletons')
-    const index = await this.labelIndex(req.datasetId, options, req.onProgress)
-    throwIfAborted(req.signal)
 
-    req.onProgress?.(0.9, 'sizes')
-    // A missing roll-up is a null column, not a failed index: the names and types are the
-    // answer somebody asked for, and refusing the lot because a secondary call was unavailable
-    // is the `out.profile` failure this codebase already records.
-    const summaries = await skeletonSummaries(
-      this.server,
-      projectId,
-      index.skeletonIds,
-      options,
-    ).catch(() => ({}) as Record<string, { num_nodes: number; cable_length: number }>)
+    /*
+     * The id list first, then the two legs that need it **together**. The annotation graph is
+     * ~1.4 MB over three POSTs and the summaries a single 1.8 MB POST, and neither reads the
+     * other — awaiting them in turn parked 0.7 s behind 2.0 s for nothing. `CaveSource` makes the
+     * same call about its own two legs ("5.76 s to 4.04 s").
+     */
+    const skeletonIds = await this.skeletonIds(req.datasetId, options)
+    throwIfAborted(req.signal)
+    const [index, summaries] = await Promise.all([
+      this.labelIndex(req.datasetId, options, req.onProgress),
+      // A missing roll-up is a null column, not a failed index: the names and types are the
+      // answer somebody asked for, and refusing the lot because a secondary call was unavailable
+      // is the `out.profile` failure this codebase already records.
+      skeletonSummaries(this.server, projectId, skeletonIds, options).catch(
+        () => ({}) as Record<string, SkeletonSummary>,
+      ),
+    ])
+    throwIfAborted(req.signal)
 
     const rows: Array<Record<string, CellValue>> = []
     for (const skeletonId of index.skeletonIds) {
-      const labels = labelsForSkeleton(index.response, index.vocabulary, skeletonId)
+      const labels = index.labels.get(skeletonId) ?? EMPTY_LABELS
       const summary = summaries[String(skeletonId)]
       rows.push({
         [ID_COLUMN_NAME]: skeletonId,
@@ -293,22 +357,32 @@ export class CatmaidSource implements DataSource {
     return tableFromRows(this.schemas.neurons, rows, 'neurons')
   }
 
-  /** The annotation graph for the whole project, fetched once and held. */
+  /** Every skeleton id in the project, fetched once. Both index legs start from it. */
+  private skeletonIds(datasetId: string, options: { signal?: AbortSignal }): Promise<number[]> {
+    const state = this.state(datasetId)
+    return this.once(
+      () => state.skeletonIds,
+      (value) => {
+        state.skeletonIds = value
+      },
+      () => listSkeletons(this.server, this.projectId(datasetId), undefined, options),
+    )
+  }
+
+  /** The annotation graph for the whole project, fetched once and derived once. */
   private labelIndex(
     datasetId: string,
     options: { signal?: AbortSignal },
     onProgress?: (fraction: number, note?: string) => void,
   ): Promise<LabelIndex> {
     const state = this.state(datasetId)
-    state.labels ??= this.runLabelIndex(datasetId, options, onProgress).catch(
-      (error: unknown) => {
-        // A failed index must not be cached as a rejected promise, or every later call replays the
-        // same failure without ever retrying. Same rule the discovery flags follow.
-        state.labels = undefined
-        throw error
+    return this.once(
+      () => state.labels,
+      (value) => {
+        state.labels = value
       },
+      () => this.runLabelIndex(datasetId, options, onProgress),
     )
-    return state.labels
   }
 
   private async runLabelIndex(
@@ -317,7 +391,32 @@ export class CatmaidSource implements DataSource {
     onProgress?: (fraction: number, note?: string) => void,
   ): Promise<LabelIndex> {
     const projectId = this.projectId(datasetId)
-    const skeletonIds = await listSkeletons(this.server, projectId, undefined, options)
+    const skeletonIds = await this.skeletonIds(datasetId, options)
+
+    const chunks: number[][] = []
+    for (let offset = 0; offset < skeletonIds.length; offset += ANNOTATION_CHUNK) {
+      chunks.push(skeletonIds.slice(offset, offset + ANNOTATION_CHUNK))
+    }
+
+    /*
+     * Concurrently, because the chunks ask about disjoint id sets and are merged by assignment —
+     * three sequential 0.7 s calls for what one round trip's worth of wall clock buys.
+     *
+     * `Promise.all` rather than `mapWithConcurrency`, deliberately: that one turns a per-item
+     * failure into `undefined`, which for a chunk means two thousand neurons silently arriving
+     * with no labels at all. A whole index is the wrong granularity to degrade at. What is given
+     * up is a monotonic progress bar — it now reports chunks as they land.
+     */
+    let landed = 0
+    const parts = await Promise.all(
+      chunks.map(async (chunk) => {
+        const part = await annotationList(this.server, projectId, chunk, options)
+        landed += chunk.length
+        // The id list was the first tenth; leave the last for deriving and building the table.
+        onProgress?.(0.1 + (0.8 * landed) / skeletonIds.length, 'annotations')
+        return part
+      }),
+    )
 
     const merged: AnnotationListResponse = {
       skeletons: {},
@@ -325,19 +424,24 @@ export class CatmaidSource implements DataSource {
       neuronnames: {},
       metaannotations: {},
     }
-    for (let offset = 0; offset < skeletonIds.length; offset += ANNOTATION_CHUNK) {
-      throwIfAborted(options.signal)
-      const chunk = skeletonIds.slice(offset, offset + ANNOTATION_CHUNK)
-      const part = await annotationList(this.server, projectId, chunk, options)
+    for (const part of parts) {
       Object.assign(merged.skeletons, part.skeletons)
       Object.assign(merged.annotations, part.annotations)
       Object.assign(merged.neuronnames, part.neuronnames)
       Object.assign(merged.metaannotations, part.metaannotations)
-      // The first phase was the id list; leave the last tenth for building the table.
-      onProgress?.(0.1 + (0.8 * (offset + chunk.length)) / skeletonIds.length, 'annotations')
     }
 
-    return { vocabulary: readVocabulary(merged), response: merged, skeletonIds }
+    /*
+     * Derived here, once, and the raw response dropped — see `LabelIndex`. Every consumer wants
+     * a lookup rather than a walk, and the one that wanted `.type` per synapse link was paying
+     * a `Set` allocation and a string join for it.
+     */
+    const vocabulary = readVocabulary(merged)
+    const labels = new Map<number, CatmaidLabels>()
+    for (const skeletonId of skeletonIds) {
+      labels.set(skeletonId, labelsForSkeleton(merged, vocabulary, skeletonId))
+    }
+    return { skeletonIds, labels }
   }
 
   // -------------------------------------------------------------------------
@@ -363,24 +467,38 @@ export class CatmaidSource implements DataSource {
     const typeRe = compileRegex(req.typePattern, 'type')
     const instanceRe = compileRegex(req.instancePattern, 'instance')
     const labelMatch = compileLabelMatch(req.labels)
-    const wanted = req.neuronIds ? new Set(req.neuronIds.map(String)) : undefined
+    const wanted = req.neuronIds ? new Set(numericIds(req.neuronIds)) : undefined
 
-    const rows: Array<Record<string, CellValue>> = []
-    const columns = index.schema.columns.map((column) => column.name)
+    /*
+     * Columns hoisted and the row built **only** for `labelMatch`, which is the one filter that
+     * needs a whole row. `CaveSource` documents the same fix: materialising every row first cost
+     * it 139,255 objects per query, "discarded, overwhelmingly, by the very next line".
+     *
+     * And the result is `selectRows` rather than a rebuilt table, which matters beyond the
+     * allocation: `tableFromRows` mints a fresh `TableValue`, throwing away the object identity
+     * that `searchIndexFor` and `statsFor` key their `WeakMap`s on.
+     */
+    const ids = index.data[ID_COLUMN_NAME] ?? []
+    const types = index.data.type ?? []
+    const instances = index.data.instance ?? []
+
+    const matched: number[] = []
     for (let i = 0; i < index.length; i += 1) {
-      const row: Record<string, CellValue> = {}
-      for (const name of columns) row[name] = index.data[name]?.[i] ?? null
-
-      if (wanted && !wanted.has(String(row[ID_COLUMN_NAME]))) continue
-      if (typeRe && !(typeof row.type === 'string' && typeRe.test(row.type))) continue
-      if (instanceRe && !(typeof row.instance === 'string' && instanceRe.test(row.instance)))
-        continue
-      if (labelMatch && !labelMatch(row)) continue
-      rows.push(row)
-      if (req.limit && rows.length >= req.limit) break
+      if (wanted && !wanted.has(Number(ids[i]))) continue
+      if (typeRe) {
+        const value = types[i]
+        if (typeof value !== 'string' || !typeRe.test(value)) continue
+      }
+      if (instanceRe) {
+        const value = instances[i]
+        if (typeof value !== 'string' || !instanceRe.test(value)) continue
+      }
+      if (labelMatch && !labelMatch(getRow(index, i))) continue
+      matched.push(i)
+      if (req.limit && matched.length >= req.limit) break
     }
 
-    return tableFromRows(this.schemas.neurons, rows, 'neurons')
+    return selectRows(index, matched)
   }
 
   /**
@@ -393,12 +511,12 @@ export class CatmaidSource implements DataSource {
   async fetchConnectivity(req: ConnectivityRequest): Promise<TableValue> {
     const projectId = this.projectId(req.datasetId)
     const options = req.signal ? { signal: req.signal } : {}
-    const queried = req.neuronIds.map(Number).filter(Number.isSafeInteger)
+    const queried = numericIds(req.neuronIds)
     if (queried.length === 0) return tableFromRows(this.schemas.connectivity, [])
 
     const response = await skeletonConnectivity(this.server, projectId, queried, options)
     const side = req.direction === 'outputs' ? response.outgoing : response.incoming
-    const types = await this.typeLookup(req.datasetId, options)
+    const labels = await this.labelIndex(req.datasetId, options)
 
     const rows: Array<Record<string, CellValue>> = []
     for (const [partnerId, entry] of Object.entries(side ?? {})) {
@@ -407,9 +525,9 @@ export class CatmaidSource implements DataSource {
         if (req.minWeight && weight < req.minWeight) continue
         rows.push({
           [ID_COLUMN_NAME]: Number(queryId),
-          neuronType: types.get(Number(queryId)) ?? null,
+          neuronType: labels.labels.get(Number(queryId))?.type ?? null,
           partnerId: Number(partnerId),
-          partnerType: types.get(Number(partnerId)) ?? null,
+          partnerType: labels.labels.get(Number(partnerId))?.type ?? null,
           weight,
         })
       }
@@ -420,13 +538,13 @@ export class CatmaidSource implements DataSource {
   async fetchAdjacency(req: AdjacencyRequest): Promise<MatrixValue> {
     const projectId = this.projectId(req.datasetId)
     const options = req.signal ? { signal: req.signal } : {}
-    const rows = req.sourceIds.map(Number).filter(Number.isSafeInteger)
-    const columns = req.targetIds.map(Number).filter(Number.isSafeInteger)
+    const rows = numericIds(req.sourceIds)
+    const columns = numericIds(req.targetIds)
     const matrix = await connectivityMatrix(this.server, projectId, rows, columns, options)
-    const types = await this.typeLookup(req.datasetId, options)
+    const labels = await this.labelIndex(req.datasetId, options)
 
     const label = (id: number): string =>
-      req.groupByType ? (types.get(id) ?? String(id)) : String(id)
+      req.groupByType ? (labels.labels.get(id)?.type ?? String(id)) : String(id)
 
     const values = new Float64Array(rows.length * columns.length)
     rows.forEach((source, r) => {
@@ -438,20 +556,6 @@ export class CatmaidSource implements DataSource {
     return makeMatrix(rows.map(label), columns.map(label), values, 'synapses', 'count')
   }
 
-  /** Skeleton id → derived type, for labelling connectivity rows. Memoised per project. */
-  private async typeLookup(
-    datasetId: string,
-    options: { signal?: AbortSignal },
-  ): Promise<Map<number, string>> {
-    const index = await this.labelIndex(datasetId, options)
-    const types = new Map<number, string>()
-    for (const skeletonId of index.skeletonIds) {
-      const labels = labelsForSkeleton(index.response, index.vocabulary, skeletonId)
-      if (labels.type) types.set(skeletonId, labels.type)
-    }
-    return types
-  }
-
   // -------------------------------------------------------------------------
   // Morphology
   // -------------------------------------------------------------------------
@@ -459,7 +563,7 @@ export class CatmaidSource implements DataSource {
   async fetchSkeletons(req: GeometryRequest): Promise<SkeletonsValue> {
     const projectId = this.projectId(req.datasetId)
     const options = req.signal ? { signal: req.signal } : {}
-    const ids = req.neuronIds.map(Number).filter(Number.isSafeInteger)
+    const ids = numericIds(req.neuronIds)
     if (ids.length > MAX_CATMAID_SKELETONS) {
       throw new Error(
         `${ids.length} skeletons is above this backend's ceiling of ${MAX_CATMAID_SKELETONS}. ` +
@@ -502,21 +606,25 @@ export class CatmaidSource implements DataSource {
         parents[i] = parent === null ? -1 : (position.get(parent) ?? -1)
       })
 
-      items.push({ id: String(entry.id), positions, radii, parents })
-      const labels = index
-        ? labelsForSkeleton(index.response, index.vocabulary, entry.id)
-        : { name: null, type: null, instance: null }
+      const item: SkeletonGeometry = { id: String(entry.id), positions, radii, parents }
+      items.push(item)
+      const labels = index?.labels.get(entry.id) ?? EMPTY_LABELS
       rows.push({
         [ID_COLUMN_NAME]: entry.id,
         name: labels.name,
         type: labels.type,
         instance: labels.instance,
         points: nodes.length,
-        cableLength: null,
+        /*
+         * Measured from the geometry rather than fetched. `cableLength` is shared with the
+         * neuPrint decoder and the mock so the three cannot disagree, the points are already
+         * nanometres, and the tree is in hand — so the alternative was an extra round trip
+         * against a shared community server for a number already sitting in memory.
+         */
+        cableLength: cableLength(item),
       })
     }
 
-    await this.fillCable(req.datasetId, rows, req.signal)
     return {
       kind: 'skeletons',
       items,
@@ -525,28 +633,6 @@ export class CatmaidSource implements DataSource {
       // Project coordinates are nanometres — see `POINTS_ARE_NM`. Declared rather than left
       // absent, because NBLAST refuses anything that is not `nm` and absent means unknown.
       units: 'nm',
-    }
-  }
-
-  private async fillCable(
-    datasetId: string,
-    rows: Array<Record<string, CellValue>>,
-    signal?: AbortSignal,
-  ): Promise<void> {
-    if (rows.length === 0) return
-    try {
-      const lengths = await cableLengths(
-        this.server,
-        this.projectId(datasetId),
-        rows.map((row) => Number(row[ID_COLUMN_NAME])),
-        signal ? { signal } : {},
-      )
-      for (const row of rows) {
-        const value = lengths[String(row[ID_COLUMN_NAME])]
-        if (value !== undefined) row.cableLength = value
-      }
-    } catch {
-      // As `fillSizes`: a missing roll-up is a null column, not a failed fetch.
     }
   }
 
@@ -561,7 +647,7 @@ export class CatmaidSource implements DataSource {
   async fetchSynapses(req: SynapseRequest): Promise<PointsValue> {
     const projectId = this.projectId(req.datasetId)
     const options = req.signal ? { signal: req.signal } : {}
-    const ids = req.neuronIds.map(Number).filter(Number.isSafeInteger)
+    const ids = numericIds(req.neuronIds)
     const relations: Array<'presynaptic_to' | 'postsynaptic_to'> =
       req.polarity === 'pre'
         ? ['presynaptic_to']
@@ -570,27 +656,40 @@ export class CatmaidSource implements DataSource {
           : ['presynaptic_to', 'postsynaptic_to']
 
     const index = await this.labelIndex(req.datasetId, options).catch(() => undefined)
+
+    /*
+     * Both relations at once. They are independent GETs over the same id set — CATMAID has no
+     * either-end filter, which is why there are two at all — so awaiting them in turn doubled
+     * the wait on the default path for nothing. Flattened in relation order afterwards, so the
+     * `polarity` grouping stays stable rather than following whichever landed first.
+     */
+    const responses =
+      ids.length === 0
+        ? []
+        : await Promise.all(
+            relations.map((relation) =>
+              connectorLinks(this.server, projectId, ids, relation, options),
+            ),
+          )
+
     const points: number[] = []
     const rows: Array<Record<string, CellValue>> = []
-
-    for (const relation of relations) {
-      if (ids.length === 0) break
-      const { links } = await connectorLinks(this.server, projectId, ids, relation, options)
+    responses.forEach(({ links }, at) => {
+      const polarity = relations[at] === 'presynaptic_to' ? 'pre' : 'post'
       for (const link of links) {
         const [skeletonId, connectorId, x, y, z, confidence] = link
         points.push(x, y, z)
-        const labels = index
-          ? labelsForSkeleton(index.response, index.vocabulary, skeletonId)
-          : { type: null }
         rows.push({
           [ID_COLUMN_NAME]: skeletonId,
-          type: labels.type,
+          // A map lookup rather than a derivation: this runs once per *link*, which for a
+          // densely traced FAFB neuron is tens of thousands of times.
+          type: index?.labels.get(skeletonId)?.type ?? null,
           connectorId,
-          polarity: relation === 'presynaptic_to' ? 'pre' : 'post',
+          polarity,
           confidence,
         })
       }
-    }
+    })
 
     const positions = Float32Array.from(points)
     return {
@@ -696,14 +795,4 @@ export class CatmaidSource implements DataSource {
     })
     return state.volumes
   }
-}
-
-/** Unused today, kept honest: the schema a table built from `findNeurons` carries. */
-export function catmaidNeuronSchema(): TableSchema {
-  return CATMAID_SCHEMAS.neurons
-}
-
-/** Skeleton ids are small integers, but the seam carries text (invariant 8). */
-export function catmaidNeuronId(id: NeuronId): number | undefined {
-  return skeletonNumber(id)
 }

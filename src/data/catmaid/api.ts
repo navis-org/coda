@@ -12,7 +12,6 @@
  * a convenience. See `client.ts`.
  */
 
-import type { NeuronId } from '../../core/ids'
 import { catmaidGet, catmaidPost } from './client'
 import type { CatmaidRequestOptions } from './client'
 
@@ -42,57 +41,19 @@ export function listProjects(
   return catmaidGet<CatmaidProject[]>(server, '/projects/', {}, options)
 }
 
-export interface StackInfo {
-  sid: number
-  stitle: string
-  /** Nanometres per voxel. Coordinates elsewhere are already nm — see `POINTS_ARE_NM`. */
-  resolution: { x: number; y: number; z: number }
-  dimension: { x: number; y: number; z: number }
-  translation: { x: number; y: number; z: number }
-}
-
-export function stackInfo(
-  server: string,
-  projectId: number,
-  stackId: number,
-  options?: CatmaidRequestOptions,
-): Promise<StackInfo> {
-  return catmaidGet<StackInfo>(server, `/${projectId}/stack/${stackId}/info`, {}, options)
-}
-
-/**
+/*
  * Treenode, connector and volume coordinates are **project space, which is nanometres**.
  *
  * Not derived from the stack resolution, which is nm-per-*voxel* and describes the image stack
  * rather than the annotations on it. Verified by cross-check: skeleton 16 spans x[326111,495041]
- * and the `LAL_L` volume x[538898,626985], both inside the FAFB extent of 253952 × 4 nm — one
- * frame, no scaling. This is why nothing here does what `neuprint/units.ts` has to.
+ * and the `LAL_L` volume x[538898,626985], both inside the FAFB extent of 253952 x 4 nm — one
+ * frame, no scaling. This is why nothing here does what `neuprint/units.ts` has to, and why
+ * every geometry this source builds declares `units: 'nm'`.
  */
-export const POINTS_ARE_NM = true
 
 // ---------------------------------------------------------------------------
 // The annotation graph, which is where a CATMAID neuron's labels live
 // ---------------------------------------------------------------------------
-
-export interface AnnotationEntry {
-  id: number
-  name: string
-}
-
-/** The whole vocabulary. 6,013 entries / 505 kB on FAFB, and anonymous. */
-export async function listAnnotations(
-  server: string,
-  projectId: number,
-  options?: CatmaidRequestOptions,
-): Promise<AnnotationEntry[]> {
-  const body = await catmaidGet<{ annotations: AnnotationEntry[] }>(
-    server,
-    `/${projectId}/annotations/`,
-    {},
-    options,
-  )
-  return body.annotations
-}
 
 /**
  * Every skeleton id in a project, optionally only the substantial ones.
@@ -147,39 +108,6 @@ export function annotationList(
     { skeleton_ids: skeletonIds, metaannotations: 1, neuronnames: 1 },
     options,
   )
-}
-
-export interface QueryEntity {
-  id: number
-  name: string
-  type: string
-  skeleton_ids?: number[]
-}
-
-/**
- * Entities matching an annotation or a name.
- *
- * `name` is a **case-insensitive substring**, not a regex — `^LC[0-9]+` matches nothing while
- * `LC` matches 129. That is why `CatmaidSource` filters locally instead of pushing patterns
- * down; see the note on `neuronIndex` there.
- */
-export async function queryTargets(
-  server: string,
-  projectId: number,
-  query: { annotatedWith?: number; name?: string; types?: readonly string[] },
-  options?: CatmaidRequestOptions,
-): Promise<QueryEntity[]> {
-  const body = await catmaidPost<{ entities: QueryEntity[] }>(
-    server,
-    `/${projectId}/annotations/query-targets`,
-    {
-      ...(query.annotatedWith !== undefined ? { annotated_with: [query.annotatedWith] } : {}),
-      ...(query.name !== undefined ? { name: query.name } : {}),
-      types: query.types ?? ['neuron'],
-    },
-    options,
-  )
-  return body.entities
 }
 
 // ---------------------------------------------------------------------------
@@ -393,7 +321,3 @@ export function volumeDetail(
 }
 
 /** Skeleton ids are small integers here, but the seam carries text (invariant 8). */
-export function skeletonNumber(id: NeuronId): number | undefined {
-  const n = Number(id)
-  return Number.isSafeInteger(n) && n > 0 ? n : undefined
-}

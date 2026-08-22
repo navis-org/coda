@@ -147,3 +147,26 @@ export function numericId(id: NeuronId): number | undefined {
   const n = Number(id)
   return Number.isSafeInteger(n) ? n : undefined
 }
+
+/**
+ * The list form, dropping what cannot survive the conversion.
+ *
+ * Beside `numericId` rather than in either caller, because it is the same decision applied to a
+ * list and both callers are *source edges* — `MockSource` converting to the small integers its
+ * generated connectome is keyed by, and `CatmaidSource` to the skeleton ids CATMAID numbers its
+ * neurons with. Written inline it was `ids.map(Number).filter(Number.isSafeInteger)`, which
+ * differs in the one way that matters: `Number('')` is 0 and `Number.isSafeInteger(0)` is true,
+ * so a blank id became neuron zero rather than being dropped.
+ *
+ * Dropping is the right default *here* because both callers are converting a list they were
+ * handed rather than one somebody typed — `nodes/lib/idList.ts` is the place that refuses, and
+ * it refuses before a request is ever built.
+ */
+export function numericIds(ids: readonly NeuronId[]): number[] {
+  const out: number[] = []
+  for (const id of ids) {
+    const n = numericId(id)
+    if (n !== undefined) out.push(n)
+  }
+  return out
+}

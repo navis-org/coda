@@ -16,7 +16,7 @@ import type {
   SkeletonsValue,
   TableValue,
 } from '../../core/values'
-import { numericId } from '../../core/ids'
+import { numericIds } from '../../core/ids'
 import type { CellValue } from '../../core/values'
 import { boundsOf, cableLength, makeMatrix, tableFromRows } from '../../core/values'
 import type {
@@ -60,22 +60,6 @@ import {
 export interface MockSourceOptions {
   /** Simulated round-trip latency in ms. Set to 0 in tests. */
   latencyMs?: number
-}
-
-/**
- * Request ids as the numbers the generated connectome is keyed by.
- *
- * A `NeuronId` crosses the DataSource seam as text, and each source converts at its own edge;
- * this is the mock's edge. The conversion is exact here by construction — `generate.ts` mints
- * small sequential ids, nowhere near `Number.MAX_SAFE_INTEGER`.
- */
-function numericIds(ids: readonly string[]): number[] {
-  const out: number[] = []
-  for (const id of ids) {
-    const n = numericId(id)
-    if (n !== undefined) out.push(n)
-  }
-  return out
 }
 
 export class MockSource implements DataSource {
@@ -303,7 +287,9 @@ export class MockSource implements DataSource {
     const ids = new Set(numericIds(req.neuronIds ?? []))
 
     // Group key of a neuron: its type when collapsing and it has one, else its own neuron id.
-    const keyOf = (neuronId: number): { key: string; type: string | null; id: number | null } => {
+    const keyOf = (
+      neuronId: number,
+    ): { key: string; type: string | null; id: number | null } => {
       const neuron = connectome.byId.get(neuronId)
       const type = neuron?.type ?? null
       if (req.collapseTypes && type) return { key: type, type, id: null }
@@ -618,7 +604,9 @@ export class MockSource implements DataSource {
       if (!neuron) continue
       // The skeleton is regenerated here rather than cached, because it is seeded and
       // therefore identical — synapses land on the same arbor the 3D viewer draws.
-      const rois = connectome.roiCounts.filter((rc) => rc.neuronId === neuronId).map((rc) => rc.roi)
+      const rois = connectome.roiCounts
+        .filter((rc) => rc.neuronId === neuronId)
+        .map((rc) => rc.roi)
       const skeleton = generateSkeleton(neuronId, rois)
 
       let index = 0

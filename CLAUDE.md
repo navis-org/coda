@@ -5371,7 +5371,8 @@ that looks right.
 ### The numbers, which cut both ways
 
 **The index is the cheapest here.** All 5,601 skeletons with names, annotations, node counts and
-cable lengths: **3.2 MB and about 3 s**, against neuPrint's 6.9 MB and CAVE's 139,255 rows. The
+cable lengths: **3.2 MB and about 1.4 s** — the id list, then the annotation graph's three chunks
+and the summary call all running together, which took it from 2.9 s, against neuPrint's 6.9 MB and CAVE's 139,255 rows. The
 public FAFB instance is a curated published subset rather than a whole-brain segmentation, which
 is what makes Explore over the whole of it immediate. And since `annotations/query-targets`
 matches names by **substring** rather than regex — `^LC[0-9]+` matches nothing, `LC` matches 129 —
@@ -5418,6 +5419,12 @@ with the feature absent — comparable to CAVE's +16.4 / +5.2.
   is empty because CATMAID has none — but a node's stored `Traced` default survives into the
   request regardless, and filtering on it drops every row for a value nobody chose. That failure
   is live on CAVE today; `findNeurons` here ignores `statuses` outright and a test pins it.
+- **Cable length is measured, not fetched.** `core/values.ts`' `cableLength` is shared with the
+  neuPrint decoder and the mock so the three cannot disagree, and CATMAID's points are already
+  nanometres — so the Skeletons node computes it from the tree in hand rather than spending a
+  round trip on a shared community server. Checked against the server's own figure on skeleton
+  16: 4003103.2328612693 against 4003103.23286127. The *index* still fetches it, because there is
+  no geometry there to measure.
 - **`nodes` and `cableLength` are filled rather than declared-and-null.** One POST, 1.77 MB, 0.72 s
   for all 5,601 — which roughly doubles a download cached for a month. The alternative was the
   thing `CATMAID_NEURON_SCHEMA` refuses to do for `status`: an always-empty column is worse than an
@@ -5437,6 +5444,13 @@ a cloud drawn in 3D or counted by region needs none of it.
 Neither exporter emits it — both `NO_EMITTER` tables name `dataset.fafb`. pymaid is the obvious
 Python route and the natverse's `catmaid` the R one, and both map cleanly, but no emitter has been
 written so both languages refuse rather than producing a document of TODOs.
+
+**Labels are derived once, into a `Map` on `LabelIndex`, and the raw response dropped.** Four call
+sites wanted a neuron's type and one of them wanted it once per synapse *link* — tens of thousands
+of times for a densely traced neuron, each allocating a `Set` and joining a string to read one
+field. The same change lets the response be collected rather than held beside the neuron table
+built from it, and it is what makes `typeLookup`'s old "memoised per project" docstring true by
+deleting the function.
 
 **Not looked at on a real canvas**: the dataset node's tint and tile pip, Explore over 5,601
 neurons, and a hundred FAFB skeletons in the 3D view. The module and both suites are headless;

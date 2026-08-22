@@ -316,7 +316,13 @@ const CAVE_FAMILIES: DatasetFamily[] = [
  */
 const CATMAID_FAMILIES: DatasetFamily[] = [
   {
-    key: 'fafb',
+    /*
+     * Backend-scoped, like `mock.hemibrain`. Family keys are a permanent flat namespace — the
+     * node type is `dataset.<key>` and it is in every saved file — and FAFB is the *volume*
+     * rather than this reconstruction of it: `dataset.flywire` is already "FlyWire FAFB" on the
+     * same EM. A bare `fafb` would claim the volume's name for one of its two backends.
+     */
+    key: 'catmaid.fafb',
     sourceId: 'catmaid',
     backend: 'catmaid',
     family: '1',

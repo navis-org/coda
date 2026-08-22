@@ -333,6 +333,9 @@
 .coda-node__header[data-backend='cave'] {
   --cat: var(--cat-dataset-cave);
 }
+.coda-node__header[data-backend='catmaid'] {
+  --cat: var(--cat-dataset-catmaid);
+}
 .coda-node__header[data-backend='mock'] {
   --cat: var(--cat-dataset-mock);
 }

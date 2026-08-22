@@ -13,6 +13,7 @@ import { inferGraph } from '../../core/inference'
 import type { NodeDefinition, ParamValues } from '../../core/node'
 import { defaultParams, makeInferContext } from '../../core/node'
 import { getNodeDef, isAnnotation } from '../../core/registry'
+import { BACKENDS } from '../../nodes/lib/datasetFamilies'
 import type { CodaType } from '../../core/types'
 import type { ExportRefusal, TodoStep } from '../canExport'
 import { canExportNotebook, nodeLabel } from '../canExport'
@@ -99,8 +100,17 @@ function backendOf(sourceId: string): string {
   return at === -1 ? sourceId : sourceId.slice(0, at)
 }
 
-/** How a backend is spelled in prose, since a source id is lower case and a name is not. */
-const BACKEND_NAMES: Record<string, string> = { cave: 'CAVE', neuprint: 'neuPrint' }
+/**
+ * How a backend is spelled in prose, since a source id is lower case and a name is not.
+ *
+ * Read off `BACKENDS` rather than restated: this was a second table of the same fact and it had
+ * already fallen behind — a third backend arrived and its TODOs would have read "has no catmaid
+ * equivalent yet". The `?? foreign` keeps a source id nobody has registered a backend for
+ * readable rather than blank.
+ */
+function backendName(id: string): string {
+  return BACKENDS[id]?.label || id
+}
 
 /**
  * A dataset backend this node's emitter was not written against, or undefined.
@@ -317,7 +327,7 @@ export function exportNotebook(graph: CodaGraph, options: ExportOptions = {}): E
        * backend nobody has written *this node's* cell for. Sending the reader to the canvas to
        * check a wire would be sending them nowhere.
        */
-      const named = BACKEND_NAMES[foreign] ?? foreign
+      const named = backendName(foreign)
       warnings.push(`${def.label} has no ${named} equivalent yet.`)
       body = ctx.todo(
         `"${def.label}" is wired to a ${named} dataset, and its notebook cell has only been ` +

@@ -28,9 +28,11 @@ export interface X3dMesh {
  * hand-written or re-serialised volume still parses. The attribute is found by name rather than
  * by position, since `index` and `point` sit on different elements.
  */
-function attribute(source: string, name: string): string | undefined {
-  const match = new RegExp(`${name}\\s*=\\s*(['"])([\\s\\S]*?)\\1`).exec(source)
-  return match?.[2]
+const INDEX_RE = /index\s*=\s*(['"])([\s\S]*?)\1/
+const POINT_RE = /point\s*=\s*(['"])([\s\S]*?)\1/
+
+function attribute(source: string, pattern: RegExp): string | undefined {
+  return pattern.exec(source)?.[2]
 }
 
 /**
@@ -60,8 +62,8 @@ function numbers(text: string): number[] {
 }
 
 export function parseX3dMesh(source: string): X3dMesh {
-  const indexText = attribute(source, 'index')
-  const pointText = attribute(source, 'point')
+  const indexText = attribute(source, INDEX_RE)
+  const pointText = attribute(source, POINT_RE)
   if (indexText === undefined || pointText === undefined) {
     throw new Error(
       'CATMAID volume is not an IndexedTriangleSet — no index or point attribute found',

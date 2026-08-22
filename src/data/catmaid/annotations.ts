@@ -64,11 +64,7 @@ export interface CatmaidVocabulary {
  * Both lookups are by *name* rather than by id because an annotation id is per-instance, and the
  * whole point is that a second CATMAID with the same conventions works with no configuration.
  */
-export function readVocabulary(
-  response: AnnotationListResponse,
-  typeMeta: string = DEFAULT_TYPE_META,
-  ontologyMeta: string = DEFAULT_ONTOLOGY_META,
-): CatmaidVocabulary {
+export function readVocabulary(response: AnnotationListResponse): CatmaidVocabulary {
   const nameOf = (id: number): string | undefined => response.annotations[String(id)]
   const typeAnnotations = new Map<number, string>()
   const ontologyAnnotations = new Map<number, string>()
@@ -82,8 +78,8 @@ export function readVocabulary(
       const metaName = nameOf(meta.id)
       if (metaName === undefined) continue
       metaAnnotations.add(metaName)
-      if (metaName === typeMeta) typeAnnotations.set(id, label)
-      else if (metaName === ontologyMeta) ontologyAnnotations.set(id, label)
+      if (metaName === DEFAULT_TYPE_META) typeAnnotations.set(id, label)
+      else if (metaName === DEFAULT_ONTOLOGY_META) ontologyAnnotations.set(id, label)
     }
   }
 

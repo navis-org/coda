@@ -136,16 +136,38 @@ interface SourceTab {
    * which are the bar's own state and belong to the thing drawing it.
    */
   render: (props: SourceTabProps & { onClose: () => void }) => ReactNode
+  /**
+   * The auth-failure channel for *this* tab's credential store.
+   *
+   * On the tab rather than fanned in by the section, because the section's version repeated
+   * every tab's id as a bare string literal (`onFailure(message, 'catmaid')`) in a second array
+   * — two edits per backend joined by a string nothing checks. A typo or an omission is silent,
+   * and what it produces is the 401 opening whichever tab was last selected rather than the one
+   * holding the credential: exactly the CAVE-opens-neuPrint bug this pairing was introduced to
+   * fix. Optional, since `MockTab` has no credential and so no channel.
+   */
+  subscribe?: (onFailure: (message: string) => void) => () => void
 }
 
 // A non-empty tuple, so the fallback below is a `SourceTab` rather than possibly undefined.
 const SOURCE_TABS: readonly [SourceTab, ...SourceTab[]] = [
-  { id: 'neuprint', label: 'neuPrint', render: (props) => <NeuPrintTab {...props} /> },
-  { id: 'cave', label: 'CAVE', render: ({ onClose }) => <CaveTab onSaved={onClose} /> },
+  {
+    id: 'neuprint',
+    label: 'neuPrint',
+    render: (props) => <NeuPrintTab {...props} />,
+    subscribe: subscribeAuthFailure,
+  },
+  {
+    id: 'cave',
+    label: 'CAVE',
+    render: ({ onClose }) => <CaveTab onSaved={onClose} />,
+    subscribe: subscribeCaveAuthFailure,
+  },
   {
     id: 'catmaid',
     label: 'CATMAID',
     render: ({ onClose }) => <CatmaidTab onSaved={onClose} />,
+    subscribe: subscribeCatmaidAuthFailure,
   },
   { id: 'mock', label: 'Mock connectome', render: () => <MockTab /> },
 ]
@@ -184,6 +206,20 @@ const ANNOTATION_TABS: readonly [SourceTab, ...SourceTab[]] = [
     ),
   },
 ]
+
+/**
+ * Fan a tab bar's own channels in, each naming the tab it belongs to.
+ *
+ * Derived from the table rather than written beside it, so a tab that declares a channel is
+ * routed to itself by construction and one that does not is skipped.
+ */
+function subscribeTabs(
+  tabs: readonly SourceTab[],
+  onFailure: (message: string, tab?: string) => void,
+): () => void {
+  const stops = tabs.map((tab) => tab.subscribe?.((message) => onFailure(message, tab.id)))
+  return () => stops.forEach((stop) => stop?.())
+}
 
 type SectionId = 'data' | 'ai' | 'annotations' | 'sharing'
 
@@ -245,14 +281,7 @@ const SECTIONS: readonly [Section, ...Section[]] = [
   {
     id: 'data',
     label: 'Data sources',
-    subscribe: (onFailure) => {
-      const stops = [
-        subscribeAuthFailure((message) => onFailure(message, 'neuprint')),
-        subscribeCaveAuthFailure((message) => onFailure(message, 'cave')),
-        subscribeCatmaidAuthFailure((message) => onFailure(message, 'catmaid')),
-      ]
-      return () => stops.forEach((stop) => stop())
-    },
+    subscribe: (onFailure) => subscribeTabs(SOURCE_TABS, onFailure),
     tabs: SOURCE_TABS,
     privacy: (
       <>
@@ -808,54 +837,61 @@ function CatmaidTab({ onSaved }: { onSaved: () => void }) {
   const [probes, setProbes] = useState<Record<string, Probe>>({})
   const notify = useGraphStore((s) => s.setNotice)
 
-  const patch = useCallback((key: string, change: Partial<CatmaidInstance>) => {
-    setRows((current) => current.map((row) => (row.key === key ? { ...row, ...change } : row)))
-    // A row that has been edited has not been tested, and a stale green tick beside a changed
-    // token is the one thing a Test button must never show.
+  /** One setter for every probe transition; `undefined` clears, which absorbs the edit case. */
+  const setProbe = useCallback((key: string, probe: Probe | undefined) => {
     setProbes((current) => {
-      if (!current[key]) return current
-      const next = { ...current }
-      delete next[key]
-      return next
+      if (!probe) {
+        if (!current[key]) return current
+        const next = { ...current }
+        delete next[key]
+        return next
+      }
+      return { ...current, [key]: probe }
     })
   }, [])
 
-  const test = useCallback(async (row: InstanceRow) => {
-    setProbes((current) => ({ ...current, [row.key]: { state: 'testing' } }))
-    const host = hostPattern(row.server)
-    if (!host || host.includes('*')) {
-      setProbes((current) => ({
-        ...current,
-        [row.key]: {
+  const patch = useCallback(
+    (key: string, change: Partial<CatmaidInstance>) => {
+      setRows((current) =>
+        current.map((row) => (row.key === key ? { ...row, ...change } : row)),
+      )
+      // A row that has been edited has not been tested, and a stale green tick beside a changed
+      // token is the one thing a Test button must never show.
+      setProbe(key, undefined)
+    },
+    [setProbe],
+  )
+
+  const test = useCallback(
+    async (row: InstanceRow) => {
+      setProbe(row.key, { state: 'testing' })
+      const host = hostPattern(row.server)
+      if (!host || host.includes('*')) {
+        // A pattern names no single host, so there is nothing to call. Said rather than
+        // disabled, or the button reads as broken on exactly the rows this feature is for.
+        setProbe(row.key, {
           state: 'failed',
-          // A pattern names no single host, so there is nothing to call. Said rather than
-          // disabled, or the button reads as broken on exactly the rows this feature is for.
           message: host
             ? 'A wildcard covers several hosts, so there is nothing to test. Type one host to check it, then widen it again.'
             : 'Name a server first.',
-        },
-      }))
-      return
-    }
-    try {
-      const projects = await listProjects(`https://${host}`, {
-        credentials: { ...row, server: host },
-      })
-      setProbes((current) => ({
-        ...current,
-        [row.key]: {
+        })
+        return
+      }
+      try {
+        const projects = await listProjects(`https://${host}`, {
+          credentials: { ...row, server: host },
+        })
+        setProbe(row.key, {
           state: 'ok',
           datasets: projects.length,
           names: projects.map((project) => project.title).slice(0, 6),
-        },
-      }))
-    } catch (error) {
-      setProbes((current) => ({
-        ...current,
-        [row.key]: { state: 'failed', message: errorMessage(error) },
-      }))
-    }
-  }, [])
+        })
+      } catch (error) {
+        setProbe(row.key, { state: 'failed', message: errorMessage(error) })
+      }
+    },
+    [setProbe],
+  )
 
   return (
     <section className="sources__source">
@@ -991,10 +1027,11 @@ function CatmaidTab({ onSaved }: { onSaved: () => void }) {
             // the stored list is what makes that visible rather than silent.
             const stored = listInstances()
             const dropped = rows.length - stored.length
+            const saved = `Saved ${stored.length} CATMAID instance${stored.length === 1 ? '' : 's'}`
             notify(
               dropped > 0
-                ? `Saved ${stored.length} CATMAID instance${stored.length === 1 ? '' : 's'} — ${dropped} incomplete row${dropped === 1 ? '' : 's'} dropped.`
-                : `Saved ${stored.length} CATMAID instance${stored.length === 1 ? '' : 's'}.`,
+                ? `${saved} — ${dropped} incomplete row${dropped === 1 ? '' : 's'} dropped.`
+                : `${saved}.`,
             )
             onSaved()
           }}

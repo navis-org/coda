@@ -110,8 +110,6 @@ export interface CatmaidRequestOptions {
   signal?: AbortSignal | undefined
   /** Override the configured credentials for this server. For tests and the panel's Test button. */
   credentials?: CatmaidInstance | undefined
-  /** Force a POST. Otherwise a request with params is a GET and one with none is a GET too. */
-  post?: boolean
 }
 
 /**
@@ -121,15 +119,15 @@ export interface CatmaidRequestOptions {
  * CATMAID's views read either way — they take `request.GET` or `request.POST` by method, so the
  * same names work for both and the *only* thing the verb decides is which endpoints will answer.
  */
-export async function catmaidRequest<T>(
+async function catmaidRequest<T>(
   server: string,
   path: string,
-  params: CatmaidParams = {},
-  options: CatmaidRequestOptions = {},
+  params: CatmaidParams,
+  post: boolean,
+  options: CatmaidRequestOptions,
 ): Promise<T> {
   const credentials = options.credentials ?? credentialsFor(server)
   const token = credentials?.token
-  const post = options.post ?? false
   const encoded = encodeParams(params)
   const origin = new URL(server).origin
 
@@ -150,6 +148,7 @@ export async function catmaidRequest<T>(
     : { method: 'GET', headers }
 
   let response: Response | undefined
+  let answered: RouteKind | undefined
   let lastError: unknown
   for (const route of routesFor(server, path, post ? '' : encoded, post, Boolean(token))) {
     try {
@@ -165,6 +164,7 @@ export async function catmaidRequest<T>(
       response = undefined
       continue
     }
+    answered = route.kind
     // Only a 2xx is remembered: a 404 is what a static host answers for a relay path nobody
     // serves, and pinning that would outlive the day this deployment gains what it needs.
     if (response.ok) memory.remember(origin, route.kind)
@@ -186,6 +186,23 @@ export async function catmaidRequest<T>(
     throw new CatmaidError(message, response.status)
   }
   if (!response.ok) {
+    /*
+     * A 404 from the *relay* means nothing is serving that path, not that CATMAID said 404 — and
+     * this backend meets it far more often than its neighbours, because an anonymous POST has no
+     * route but the relay, which a published build serves with its own HTML 404 page. Left alone
+     * it reads `CATMAID returned 404: <!DOCTYPE html>…`, blaming a server that never saw the
+     * request. `neuprint/client.ts` diagnoses the same thing with its own copy of this; the
+     * honest fix is one helper beside `routeMemory`, which is a change to three clients.
+     */
+    if (answered === 'proxy' && response.status === 404) {
+      throw new CatmaidError(
+        `Nothing is serving Coda's relay at ${PROXY_PREFIX}/, so an anonymous request to ` +
+          `${origin} could not be sent. The relay comes from vite.config.ts, so \`pnpm dev\` ` +
+          `and \`pnpm preview\` serve it and a published build does not. Adding a CATMAID ` +
+          `token in Connections sends the request directly instead.`,
+        response.status,
+      )
+    }
     throw new CatmaidError(
       `CATMAID returned ${response.status}: ${explain(text)}`,
       response.status,
@@ -201,7 +218,7 @@ export function catmaidGet<T>(
   params: CatmaidParams = {},
   options: CatmaidRequestOptions = {},
 ): Promise<T> {
-  return catmaidRequest<T>(server, path, params, { ...options, post: false })
+  return catmaidRequest<T>(server, path, params, false, options)
 }
 
 /** A POST, which needs a token or the dev relay. */
@@ -211,7 +228,7 @@ export function catmaidPost<T>(
   params: CatmaidParams = {},
   options: CatmaidRequestOptions = {},
 ): Promise<T> {
-  return catmaidRequest<T>(server, path, params, { ...options, post: true })
+  return catmaidRequest<T>(server, path, params, true, options)
 }
 
 /**

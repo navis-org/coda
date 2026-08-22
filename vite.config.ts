@@ -106,7 +106,23 @@ const NEUPRINT_PROXY = {
 function deploymentProxy(): PluginOption {
   const BLOCKED =
     /^(localhost$|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|\[?::1\]?$)/i
-  const PREFIXES = ['/np/', '/st/', '/cm/']
+  /**
+   * What each relay prefix forwards, and whether it needs a handshake first.
+   *
+   * A table rather than a membership list plus `startsWith` branches inside the handler: the
+   * header allowlist was a *union* applied to every prefix, so CATMAID's `x-authorization` was
+   * being forwarded on neuPrint's and SeaTable's relays too. Each backend's need widening what
+   * every other backend forwards is the wrong direction for a thing whose whole job is to be a
+   * narrow hole in the dev server.
+   */
+  const PREFIXES: Record<string, { forward: readonly string[]; csrf?: boolean }> = {
+    // neuPrint and SeaTable both authenticate with a plain `Authorization` header.
+    '/np/': { forward: ['authorization'] },
+    '/st/': { forward: ['authorization'] },
+    // CATMAID's token rides on its own header, and an *anonymous* POST needs the CSRF
+    // handshake below — which is the only thing here that is more than a forward.
+    '/cm/': { forward: ['x-authorization'], csrf: true },
+  }
 
   /*
    * CATMAID's CSRF pair, per origin, for the `/cm/` prefix.
@@ -147,7 +163,9 @@ function deploymentProxy(): PluginOption {
 
   const handler = async (req: IncomingMessage, res: ServerResponse, next: () => void) => {
     const url = req.url ?? ''
-    if (!PREFIXES.some((prefix) => url.startsWith(prefix))) return next()
+    const prefix = Object.keys(PREFIXES).find((candidate) => url.startsWith(candidate))
+    const rules = prefix ? PREFIXES[prefix] : undefined
+    if (!rules) return next()
 
     const [, , encoded = '', ...rest] = url.split('/')
     let target: URL
@@ -172,8 +190,8 @@ function deploymentProxy(): PluginOption {
           })
 
     try {
-      // CATMAID only, and only for the methods that need it: a GET is answered anonymously.
-      const needsCsrf = url.startsWith('/cm/') && req.method === 'POST'
+      // Only for the methods that need it: a GET is answered anonymously.
+      const needsCsrf = Boolean(rules.csrf) && req.method === 'POST'
 
       const send = async (pair: { cookie: string; token: string } | undefined) =>
         fetch(`${target.origin}/${rest.join('/')}`, {
