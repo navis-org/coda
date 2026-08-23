@@ -17,7 +17,13 @@ import { defaultParams } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
 import { Scheduler } from '../../core/scheduler'
 import type { LinkageValue, MatrixValue, TableValue } from '../../core/values'
-import { getColumn, isLinkageValue, isMatrixValue, isTableValue, makeMatrix } from '../../core/values'
+import {
+  getColumn,
+  isLinkageValue,
+  isMatrixValue,
+  isTableValue,
+  makeMatrix,
+} from '../../core/values'
 import { MockSource } from '../../data/mock/MockSource'
 import { clusterColor } from '../../ui/encoding'
 import type { DataSource } from '../../data/source'
@@ -179,11 +185,7 @@ describe('the Linkage node', () => {
     const def = requireNodeDef('cluster.linkage')
     // An Adjacency matrix: raw synapse counts, no `measure`. `1 - 77` is a negative distance,
     // which fastcore clusters happily and the viewer then draws off the card entirely.
-    const counts = makeMatrix(
-      ['a', 'b'],
-      ['a', 'b'],
-      Float64Array.from([0, 77, 12, 0]),
-    )
+    const counts = makeMatrix(['a', 'b'], ['a', 'b'], Float64Array.from([0, 77, 12, 0]))
     await expect(
       def.evaluate!({
         params: {},
@@ -308,7 +310,10 @@ describe('the Dendrogram node', () => {
     } as never) as Record<string, unknown>
     const table = selected.selected as TableValue
     expect(getColumn(table, 'cluster')).toEqual([2, 1])
-    expect(getColumn(table, 'color')).toEqual([clusterColor(2, 'dark'), clusterColor(1, 'dark')])
+    expect(getColumn(table, 'color')).toEqual([
+      clusterColor(2, 'dark'),
+      clusterColor(1, 'dark'),
+    ])
   })
 
   it('keeps both columns with nothing cut, rather than dropping them from the schema', () => {

@@ -17,7 +17,6 @@ import type { MarkerShape, ScatterSpec } from './scatterPlot'
 import { inverse } from './scatterPlot'
 import { formatCompact } from '../format'
 
-
 /** Height of the legend strip appended below an exported plot. */
 const LEGEND_HEIGHT = 26
 
@@ -105,7 +104,6 @@ function plusVertices(rotation: number): number[][] {
   const sin = Math.sin(rotation)
   return base.map(([x, y]) => [x! * cos - y! * sin, x! * sin + y! * cos])
 }
-
 
 /** SVG path data for one mark. */
 export function markPath(shape: MarkerShape, x: number, y: number, r: number): string {

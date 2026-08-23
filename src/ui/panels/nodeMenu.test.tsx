@@ -37,7 +37,9 @@ afterEach(cleanup)
 
 function menuOn(type: string): void {
   const id = useGraphStore.getState().addNode(type, { x: 0, y: 0 })
-  render(<NodeContextMenu nodeId={id} screenPosition={{ x: 0, y: 0 }} onClose={() => undefined} />)
+  render(
+    <NodeContextMenu nodeId={id} screenPosition={{ x: 0, y: 0 }} onClose={() => undefined} />,
+  )
 }
 
 describe('the node menu’s two caches', () => {
@@ -62,5 +64,4 @@ describe('the node menu’s two caches', () => {
     menuOn('core.filter')
     expect(screen.queryByText('Clear Cache')).toBeNull()
   })
-
 })

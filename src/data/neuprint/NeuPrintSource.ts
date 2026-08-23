@@ -98,7 +98,13 @@ import { fetchNgState, meshSourceFromState } from './nglayers'
 import type { DiscoveredSchema } from './schema'
 import { discoverNeuronSchema, schemasFor } from './schema'
 import type { VoxelScale } from './units'
-import { IDENTITY_SCALE, geometryUnitsFor, scalePositions, scaleRadii, voxelScale } from './units'
+import {
+  IDENTITY_SCALE,
+  geometryUnitsFor,
+  scalePositions,
+  scaleRadii,
+  voxelScale,
+} from './units'
 import { mapWithConcurrency } from '../concurrency'
 
 /**

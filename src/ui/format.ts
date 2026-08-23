@@ -287,3 +287,22 @@ export function formatAgo(epochMs: number, now = Date.now()): string {
 export function plural(n: number, noun: string, suffix = 's'): string {
   return `${formatNumber(n)} ${noun}${n === 1 ? '' : suffix}`
 }
+
+/**
+ * A size in bytes, in the units storage is quoted in.
+ *
+ * Binary rungs (1024) rather than decimal, because what these numbers describe is browser
+ * storage and a quota — where 1 MB means 1,048,576 and a decimal reading is quietly 5% out by
+ * the gigabyte. A `GB` rung because an edge set reaches it where an upload never did.
+ *
+ * Moved here from `UploadBody`, which held it privately until an edge set became the second
+ * thing in the app with a size worth stating. Note there is a *third* spelling in `RoisViewer`,
+ * which quotes decimal MB for a download — left alone deliberately rather than folded in, since
+ * changing it would move a number on an unrelated card.
+ */
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} kB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
+}

@@ -19,8 +19,9 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { addEdge, addNode, emptyGraph } from '../../core/graph'
 import type { CodaGraph, GraphNode } from '../../core/graph'
 import { inferGraph } from '../../core/inference'
-import { availableColumns, defaultParams } from '../../core/node'
+import { availableColumns, defaultParams, makeInferContext } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
+import { T } from '../../core/types'
 import { Scheduler } from '../../core/scheduler'
 import { getColumn, isLayoutValue, isNetworkValue, isTableValue } from '../../core/values'
 import { MockSource } from '../../data/mock/MockSource'
@@ -71,6 +72,20 @@ async function run(params: Record<string, unknown> = {}, from = 'L1', to = 'DNp0
   if (!isTableValue(table)) throw new Error(`expected a table, got ${String(table)}`)
   return { network, layout, table, info: sched.info('paths') }
 }
+
+describe('the capability gate', () => {
+  it('says nothing about a Dataset socket that has not resolved a source', () => {
+    /*
+     * `T.dataset()` with no source id is invariant 2's ordinary cold-session state — a listing
+     * that has not landed. `capabilityOf` answers *true* for an unknown source precisely so a
+     * warning nobody can substantiate is never raised, and a gate that short-circuits on the
+     * method before reaching it reported "cannot trace paths" on a node that is perfectly fine.
+     */
+    const def = requireNodeDef('neuron.paths')
+    const ctx = makeInferContext(def, defaultParams(def), { dataset: T.dataset() })
+    expect(def.validate!(ctx).filter((i) => /trace paths/.test(i))).toEqual([])
+  })
+})
 
 describe('Paths output shape', () => {
   it('advertises the columns it actually builds', async () => {

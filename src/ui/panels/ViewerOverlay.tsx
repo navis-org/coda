@@ -178,14 +178,14 @@ export function ViewerOverlay() {
                   {param.label}
                 </span>
                 {/*
-                  * `inspector`, because the rail draws the label itself in the span above.
-                  * Under the default `node` variant a checkbox draws its own as well, so a
-                  * boolean rail param renders "Show filter row ☑ Show filter row" — the same
-                  * double label `SelectOneBody` documents, in the other surface that pairs a
-                  * label of its own with a `ParamField`. `out.table`'s filter-row toggle is
-                  * the first presentational boolean to reach this rail, which is why it went
-                  * unnoticed: every other kind ignores `showLabel`.
-                  */}
+                 * `inspector`, because the rail draws the label itself in the span above.
+                 * Under the default `node` variant a checkbox draws its own as well, so a
+                 * boolean rail param renders "Show filter row ☑ Show filter row" — the same
+                 * double label `SelectOneBody` documents, in the other surface that pairs a
+                 * label of its own with a `ParamField`. `out.table`'s filter-row toggle is
+                 * the first presentational boolean to reach this rail, which is why it went
+                 * unnoticed: every other kind ignores `showLabel`.
+                 */}
                 <ParamField
                   param={param}
                   value={node.params[param.id]}

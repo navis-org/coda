@@ -128,9 +128,15 @@ function datasetNode(): GraphNode {
 function chain(second?: Record<string, unknown>): CodaGraph {
   let g = emptyGraph('annotations-test')
   g = addNode(g, datasetNode())
-  g = addNode(g, node('cave', 'annotation.caveTable', { datastack: 'test_stack:1', table: 'nuclei' }))
+  g = addNode(
+    g,
+    node('cave', 'annotation.caveTable', { datastack: 'test_stack:1', table: 'nuclei' }),
+  )
   if (second) {
-    g = addNode(g, node('fly', 'annotation.flyTable', { base: 'main', workspace: '5', ...second }))
+    g = addNode(
+      g,
+      node('fly', 'annotation.flyTable', { base: 'main', workspace: '5', ...second }),
+    )
     g = addEdge(g, {
       source: 'cave',
       sourceHandle: 'annotations',
@@ -225,7 +231,12 @@ describe('annotation nodes — what a chain publishes', () => {
      * the reference is excluded from the order and the pair sorts.
      */
     let g = chain()
-    g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'cave', targetHandle: 'dataset' })
+    g = addEdge(g, {
+      source: 'ds',
+      sourceHandle: 'dataset',
+      target: 'cave',
+      targetHandle: 'dataset',
+    })
     g = addEdge(g, {
       source: 'cave',
       sourceHandle: 'annotations',
@@ -240,8 +251,12 @@ describe('annotation nodes — what a chain publishes', () => {
     // The editor has to permit the wire as well as the sort, and it is a separate walk.
     const inf = inferGraph(g)
     expect(
-      checkConnection(g, inf, { nodeId: 'ds', portId: 'dataset' }, { nodeId: 'cave', portId: 'dataset' })
-        .ok,
+      checkConnection(
+        g,
+        inf,
+        { nodeId: 'ds', portId: 'dataset' },
+        { nodeId: 'cave', portId: 'dataset' },
+      ).ok,
     ).toBe(true)
 
     /*
@@ -322,8 +337,18 @@ describe('annotation nodes — what a chain returns', () => {
     )
     g = addNode(g, node('keep', 'core.filter', { column: 'type', op: 'eq', value: 'LC6' }))
     g = addNode(g, node('fly', 'annotation.flyTable', { base: 'main', table: 'info' }))
-    g = addEdge(g, { source: 'cave', sourceHandle: 'annotations', target: 'keep', targetHandle: 'in' })
-    g = addEdge(g, { source: 'keep', sourceHandle: 'out', target: 'fly', targetHandle: 'annotations' })
+    g = addEdge(g, {
+      source: 'cave',
+      sourceHandle: 'annotations',
+      target: 'keep',
+      targetHandle: 'in',
+    })
+    g = addEdge(g, {
+      source: 'keep',
+      sourceHandle: 'out',
+      target: 'fly',
+      targetHandle: 'annotations',
+    })
     g = addEdge(g, {
       source: 'fly',
       sourceHandle: 'annotations',
@@ -338,8 +363,14 @@ describe('annotation nodes — what a chain returns', () => {
      */
     const inf = inferGraph(g)
     for (const [from, to] of [
-      [{ nodeId: 'cave', portId: 'annotations' }, { nodeId: 'keep', portId: 'in' }],
-      [{ nodeId: 'keep', portId: 'out' }, { nodeId: 'fly', portId: 'annotations' }],
+      [
+        { nodeId: 'cave', portId: 'annotations' },
+        { nodeId: 'keep', portId: 'in' },
+      ],
+      [
+        { nodeId: 'keep', portId: 'out' },
+        { nodeId: 'fly', portId: 'annotations' },
+      ],
     ] as const) {
       expect(checkConnection(g, inf, from, to).ok).toBe(true)
     }
@@ -375,14 +406,29 @@ describe('annotation nodes — what a chain returns', () => {
       node('cave', 'annotation.caveTable', { datastack: 'test_stack:1', table: 'nuclei' }),
     )
     g = addNode(g, node('cols', 'core.select', { columns: ['neuronId', 'type'] }))
-    g = addEdge(g, { source: 'cave', sourceHandle: 'annotations', target: 'cols', targetHandle: 'in' })
-    g = addEdge(g, { source: 'cols', sourceHandle: 'out', target: 'ds', targetHandle: 'annotations' })
+    g = addEdge(g, {
+      source: 'cave',
+      sourceHandle: 'annotations',
+      target: 'cols',
+      targetHandle: 'in',
+    })
+    g = addEdge(g, {
+      source: 'cols',
+      sourceHandle: 'out',
+      target: 'ds',
+      targetHandle: 'annotations',
+    })
 
     const inf = inferGraph(g)
     // A plain `table`, which is what makes this the deciding case rather than a second Filter.
     expect(inf.nodes['cols']?.outputs['out']?.kind).toBe('table')
     expect(
-      checkConnection(g, inf, { nodeId: 'cols', portId: 'out' }, { nodeId: 'ds', portId: 'annotations' }).ok,
+      checkConnection(
+        g,
+        inf,
+        { nodeId: 'cols', portId: 'out' },
+        { nodeId: 'ds', portId: 'annotations' },
+      ).ok,
     ).toBe(true)
     expect(issuesOf(inf, 'ds')).toBe('')
 
@@ -464,8 +510,18 @@ describe('annotation nodes — what a chain returns', () => {
       node('cave', 'annotation.caveTable', { datastack: 'test_stack:1', table: 'nuclei' }),
     )
     g = addNode(g, node('cols', 'core.select', { columns: ['type'] }))
-    g = addEdge(g, { source: 'cave', sourceHandle: 'annotations', target: 'cols', targetHandle: 'in' })
-    g = addEdge(g, { source: 'cols', sourceHandle: 'out', target: 'ds', targetHandle: 'annotations' })
+    g = addEdge(g, {
+      source: 'cave',
+      sourceHandle: 'annotations',
+      target: 'cols',
+      targetHandle: 'in',
+    })
+    g = addEdge(g, {
+      source: 'cols',
+      sourceHandle: 'out',
+      target: 'ds',
+      targetHandle: 'annotations',
+    })
 
     const sched = scheduler()
     await sched.run(g, { mode: 'full' })
@@ -576,6 +632,11 @@ describe('annotation nodes — refusals', () => {
     // configuration published no schema at all and every picker downstream sat empty.
     let g = emptyGraph('x')
     g = addNode(g, node('fly', 'annotation.flyTable', { base: 'main', table: 'info' }))
-    expect(columnNames(published(g, 'fly'))).toEqual(['neuronId', 'type', 'side', 'hemilineage'])
+    expect(columnNames(published(g, 'fly'))).toEqual([
+      'neuronId',
+      'type',
+      'side',
+      'hemilineage',
+    ])
   })
 })

@@ -22,7 +22,8 @@
  * picture is what the Network node's presentational params are for.
  */
 
-import { capabilityOf } from '../../data/source'
+import { canTracePaths } from '../../data/source'
+import { pathStepFor } from '../../data/queries'
 import { registerNode } from '../../core/registry'
 import { T } from '../../core/types'
 import type { TableValue } from '../../core/values'
@@ -40,7 +41,12 @@ import {
   rankPaths,
   traversePaths,
 } from '../lib/pathOps'
-import { requireDataset } from '../lib/datasetParam'
+import {
+  connectivityRequest,
+  requireDataset,
+  sourceLabel,
+  sourceSupports,
+} from '../lib/datasetParam'
 import { idText } from '../../core/ids'
 
 /** Above this the fan-out is worth saying out loud. A warning, never a refusal. */
@@ -146,6 +152,16 @@ export const pathsNode = registerNode({
 
   validate: (ctx) => {
     const issues: string[] = []
+    /*
+     * Said before a run rather than only during one, which is what every other capability-gated
+     * node here does. It is also the reader the dataset *type*'s `edges` flag exists for: an
+     * attached edge set answers a hop locally, so a backend declaring `paths: false` — CAVE,
+     * whose API has no server-side aggregation — goes from refusing outright to traceable, and a
+     * refusal has to be right before anything runs.
+     */
+    if (ctx.inputs.dataset && !sourceSupports(ctx, 'paths')) {
+      return [`${sourceLabel(ctx.inputs.dataset) ?? 'This data source'} cannot trace paths`]
+    }
     const hops = Number(ctx.params.maxHops ?? 3)
     const minWeight = Number(ctx.params.minWeight ?? 10)
     /*
@@ -168,8 +184,8 @@ export const pathsNode = registerNode({
   evaluate: async (ctx) => {
     const dataset = requireDataset(ctx.input('dataset'))
     const source = ctx.resolveSource(dataset.sourceId)
-    const fetchStep = source.fetchPathStep?.bind(source)
-    if (!fetchStep || !capabilityOf(source, dataset.datasetId, 'paths')) {
+    // One predicate, shared with `validate` above and with the funnel — see `canTracePaths`.
+    if (!canTracePaths(source, dataset.datasetId, dataset.edges !== undefined)) {
       throw new Error(`${source.label} cannot trace paths`)
     }
 
@@ -202,8 +218,8 @@ export const pathsNode = registerNode({
           `${direction === 'outputs' ? 'downstream' : 'upstream'} hop ${round}/${rounds} · ${frontier} nodes`,
         ),
       fetch: (frontier, direction) =>
-        fetchStep({
-          datasetId: dataset.datasetId,
+        pathStepFor(source, {
+          ...connectivityRequest(dataset),
           types: frontier.types,
           neuronIds: frontier.neuronIds,
           direction,

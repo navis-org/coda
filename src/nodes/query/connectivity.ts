@@ -1,5 +1,6 @@
 import { registerNode } from '../../core/registry'
-import { datasetRequest } from '../lib/datasetParam'
+import { connectivityRequest } from '../lib/datasetParam'
+import { connectivityFor } from '../../data/queries'
 import { T } from '../../core/types'
 import { isTableValue } from '../../core/values'
 import { idColumn } from '../lib/tableOps'
@@ -117,9 +118,7 @@ export const connectivityNode = registerNode({
       seeds: neuronIds,
       direction,
       hops,
-      schema: connectivityOutputSchema(
-        schemasForDataset(source, dataset).connectivity,
-      ),
+      schema: connectivityOutputSchema(schemasForDataset(source, dataset).connectivity),
       signal: ctx.signal,
       // A hop's cost is unknown until its frontier is known, so progress is per round rather
       // than per row: the fraction paces the hops and the note carries the frontier size.
@@ -129,8 +128,8 @@ export const connectivityNode = registerNode({
           total > 1 ? `hop ${hop}/${total} · ${frontier} neurons` : `${frontier} neurons`,
         ),
       fetch: (frontier, hopDirection) =>
-        source.fetchConnectivity({
-          ...datasetRequest(dataset),
+        connectivityFor(source, {
+          ...connectivityRequest(dataset),
           neuronIds: frontier,
           direction: hopDirection,
           minWeight,

@@ -215,7 +215,9 @@ describe('Custom CAVE', () => {
 
   it('says to name a datastack rather than offering an empty list', () => {
     // An empty select reads as a control that does not work; a sentence reads as an instruction.
-    expect(versionOptions('dataset.cave').map((o) => o.label)).toEqual(['Name a datastack first'])
+    expect(versionOptions('dataset.cave').map((o) => o.label)).toEqual([
+      'Name a datastack first',
+    ])
   })
 
   it('offers Latest and keeps a pinned value while the metadata is in flight', () => {
@@ -241,10 +243,15 @@ describe('Custom CAVE', () => {
 
   it('refuses a materialization that is not a number, and accepts an empty one', () => {
     const def = requireNodeDef('dataset.cave')
-    const bad = def.validate?.(ctxFor('dataset.cave', { datastack: 'x', neuronTable: 'n', version: 'latest' })) ?? []
+    const bad =
+      def.validate?.(
+        ctxFor('dataset.cave', { datastack: 'x', neuronTable: 'n', version: 'latest' }),
+      ) ?? []
     expect(bad.join(' ')).toContain('not a materialization number')
     // Empty is "latest", as it is on every family dataset node — not a missing value.
-    expect(def.validate?.(ctxFor('dataset.cave', { datastack: 'x', neuronTable: 'n', version: '' }))).toEqual([])
+    expect(
+      def.validate?.(ctxFor('dataset.cave', { datastack: 'x', neuronTable: 'n', version: '' })),
+    ).toEqual([])
   })
 
   it('resolves an unpinned materialization by fetching, so the first Run works', async () => {

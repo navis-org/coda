@@ -593,12 +593,16 @@ export function ScatterViewer({
           {stableColor.column && (
             <div className="chart-tooltip__row">
               {stableColor.column}:{' '}
-              {formatCell(table.data[stableColor.column]?.[hoveredRow] ?? null, stableColor.column)}
+              {formatCell(
+                table.data[stableColor.column]?.[hoveredRow] ?? null,
+                stableColor.column,
+              )}
             </div>
           )}
           {shapeColumn && shapeColumn !== stableColor.column && (
             <div className="chart-tooltip__row">
-              {shapeColumn}: {formatCell(table.data[shapeColumn]?.[hoveredRow] ?? null, shapeColumn)}
+              {shapeColumn}:{' '}
+              {formatCell(table.data[shapeColumn]?.[hoveredRow] ?? null, shapeColumn)}
             </div>
           )}
         </div>

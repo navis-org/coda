@@ -138,9 +138,10 @@ describe('matching against a neuron table', () => {
   })
 
   it('suffixes a carried column the neuron table already has', () => {
-    const collides = tableFromRows(tableSchema(column('label', 'str'), column('status', 'str')), [
-      { label: 'LC4', status: 'from the cut' },
-    ])
+    const collides = tableFromRows(
+      tableSchema(column('label', 'str'), column('status', 'str')),
+      [{ label: 'LC4', status: 'from the cut' }],
+    )
     const out = labelsToNeurons({
       labels: collides,
       labelColumn: 'label',
@@ -154,10 +155,13 @@ describe('matching against a neuron table', () => {
   })
 
   it('ignores a null or empty label, which names nothing', () => {
-    const blanks = tableFromRows(tableSchema(column('label', 'str'), column('cluster', 'i64')), [
-      { label: null, cluster: 1 },
-      { label: '', cluster: 2 },
-    ])
+    const blanks = tableFromRows(
+      tableSchema(column('label', 'str'), column('cluster', 'i64')),
+      [
+        { label: null, cluster: 1 },
+        { label: '', cluster: 2 },
+      ],
+    )
     expect(
       labelsToNeurons({
         labels: blanks,
@@ -184,9 +188,9 @@ describe('with no neuron table, the labels are ids', () => {
   })
 
   it('puts neuronId first, since that is the column it exists to produce', () => {
-    expect(labelsToNeurons({ labels: byId(), labelColumn: 'label' }).neurons.schema.columns[0]!.name).toBe(
-      'neuronId',
-    )
+    expect(
+      labelsToNeurons({ labels: byId(), labelColumn: 'label' }).neurons.schema.columns[0]!.name,
+    ).toBe('neuronId')
   })
 
   it('drops a label that is not a usable id, and counts it', () => {

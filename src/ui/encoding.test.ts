@@ -12,7 +12,13 @@ import { describe, expect, it } from 'vitest'
 import { column, tableSchema } from '../core/types'
 import { tableFromRows } from '../core/values'
 import { MAX_SERIES, OTHER_LABEL, seriesColor } from './colors'
-import { clusterColor, hexToRgbFloat, literalColor, resolveColor, resolveSize } from './encoding'
+import {
+  clusterColor,
+  hexToRgbFloat,
+  literalColor,
+  resolveColor,
+  resolveSize,
+} from './encoding'
 
 const SCHEMA = tableSchema(column('id', 'str'), column('type', 'str'), column('weight', 'f64'))
 
@@ -276,18 +282,19 @@ describe('clusterColor', () => {
 })
 
 describe('resolveColor — literal', () => {
-  const table = tableFromRows(
-    tableSchema(column('neuronId', 'i64'), column('color', 'str')),
-    [
-      { neuronId: 1, color: '#3987e5' },
-      { neuronId: 2, color: '#d95926' },
-      { neuronId: 3, color: 'not a colour' },
-      { neuronId: 4, color: null },
-    ],
-  )
+  const table = tableFromRows(tableSchema(column('neuronId', 'i64'), column('color', 'str')), [
+    { neuronId: 1, color: '#3987e5' },
+    { neuronId: 2, color: '#d95926' },
+    { neuronId: 3, color: 'not a colour' },
+    { neuronId: 4, color: null },
+  ])
 
   it('uses the cells as they stand', () => {
-    const resolved = resolveColor(table, { mode: 'literal', column: 'color', constant: '0' }, 'dark')
+    const resolved = resolveColor(
+      table,
+      { mode: 'literal', column: 'color', constant: '0' },
+      'dark',
+    )
     expect(resolved.at(0)).toBe('#3987e5')
     expect(resolved.at(1)).toBe('#d95926')
   })
@@ -303,7 +310,11 @@ describe('resolveColor — literal', () => {
       { color: '#d95926' },
       { color: '#3987e5' },
     ])
-    const literal = resolveColor(many, { mode: 'literal', column: 'color', constant: '0' }, 'dark')
+    const literal = resolveColor(
+      many,
+      { mode: 'literal', column: 'color', constant: '0' },
+      'dark',
+    )
     expect(literal.at(2)).toBe('#3987e5')
 
     const categorical = resolveColor(
@@ -316,7 +327,11 @@ describe('resolveColor — literal', () => {
   })
 
   it('greys a cell that is not a colour, and a null', () => {
-    const resolved = resolveColor(table, { mode: 'literal', column: 'color', constant: '0' }, 'dark')
+    const resolved = resolveColor(
+      table,
+      { mode: 'literal', column: 'color', constant: '0' },
+      'dark',
+    )
     expect(resolved.at(2)).toBe(resolved.at(3))
     expect(resolved.at(2)).not.toBe('#3987e5')
   })
@@ -329,7 +344,11 @@ describe('resolveColor — literal', () => {
   })
 
   it('falls back to the flat colour with no column picked', () => {
-    const resolved = resolveColor(table, { mode: 'literal', column: undefined, constant: '0' }, 'dark')
+    const resolved = resolveColor(
+      table,
+      { mode: 'literal', column: undefined, constant: '0' },
+      'dark',
+    )
     expect(resolved.at(0)).toBe(resolved.at(2))
   })
 })

@@ -127,12 +127,12 @@ export function Viewer3D(props: Viewer3DProps) {
           {selection.length > 0 && ` · ${selection.length} selected`}
         </span>
         {/*
-          * Two ways a mesh set can be coarser than what the source holds, and they need
-          * different words. A multi-resolution source *picked a level*, so the useful number is
-          * which of how many; a source with none *simplified what it fetched*, where naming a
-          * level would report "0 of 0" while most of the triangles have gone. Both admit the
-          * trade and both name the control that changes it.
-          */}
+         * Two ways a mesh set can be coarser than what the source holds, and they need
+         * different words. A multi-resolution source *picked a level*, so the useful number is
+         * which of how many; a source with none *simplified what it fetched*, where naming a
+         * level would report "0 of 0" while most of the triangles have gone. Both admit the
+         * trade and both name the control that changes it.
+         */}
         {meshes?.detail && !compact && (
           <span
             className="viewer__note"
@@ -280,7 +280,8 @@ function SkeletonLines({
     for (let s = 0; s < built.segments; s++) {
       const itemIndex = built.segmentItem[s]!
       const neuronId = skeletons.items[itemIndex]?.id ?? ''
-      const rgb = dimming && !selected.has(neuronId) ? DIMMED : hexToRgbFloat(colorAt(itemIndex))
+      const rgb =
+        dimming && !selected.has(neuronId) ? DIMMED : hexToRgbFloat(colorAt(itemIndex))
       for (let v = 0; v < 2; v++) {
         buffer[s * 6 + v * 3] = rgb[0]
         buffer[s * 6 + v * 3 + 1] = rgb[1]

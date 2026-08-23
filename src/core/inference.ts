@@ -272,4 +272,3 @@ export function checkConnection(
 
   return { ok: true }
 }
-

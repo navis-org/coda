@@ -104,6 +104,50 @@ describe('dataset node body', () => {
     expect(inputs.length).toBeGreaterThanOrEqual(2)
   })
 
+  describe('the edge-data button', () => {
+    it('is the indicator, because an attached edge set has no wire', async () => {
+      openStarter()
+      await waitFor(() => expect(datasetCard()).toBeTruthy())
+      const button = within(datasetCard()).getByRole('button', { name: /Edge data/ })
+      expect(button.getAttribute('aria-pressed')).toBe('false')
+
+      const id = useGraphStore
+        .getState()
+        .graph.nodes.find((n) => n.type.startsWith('dataset.'))!.id
+      act(() => {
+        useGraphStore.getState().attachEdgeSet(id, { id: 'abc123', name: 'FlyWire 783' })
+      })
+
+      /*
+       * Pressed, and carrying the set's own name. A card that looked the same either way would be
+       * a dataset silently answering connectivity from a file — which is the whole reason this
+       * control is an indicator rather than only a way in.
+       */
+      await waitFor(() => {
+        const pressed = within(datasetCard()).getByRole('button', { name: /FlyWire 783/ })
+        expect(pressed.getAttribute('aria-pressed')).toBe('true')
+      })
+    })
+
+    it('opens the panel on the node it belongs to', async () => {
+      openStarter()
+      await waitFor(() => expect(datasetCard()).toBeTruthy())
+      const id = useGraphStore
+        .getState()
+        .graph.nodes.find((n) => n.type.startsWith('dataset.'))!.id
+      fireEvent.click(within(datasetCard()).getByRole('button', { name: /Edge data/ }))
+      expect(useGraphStore.getState().edgePanelNode).toBe(id)
+    })
+
+    it('is absent on a backend that does not offer one', async () => {
+      // CATMAID, by `DatasetBackend.edgeSets` — not a capability gap, a control nobody there is
+      // expected to reach for. The button follows the param rather than a second list.
+      openStarter('dataset.catmaid.fafb')
+      await waitFor(() => expect(datasetCard()).toBeTruthy())
+      expect(within(datasetCard()).queryByRole('button', { name: /Edge data/ })).toBeNull()
+    })
+  })
+
   it('does not draw a body for a node that has none', async () => {
     openStarter()
     await waitFor(datasetCard)

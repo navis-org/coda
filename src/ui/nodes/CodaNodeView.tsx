@@ -665,11 +665,11 @@ function CodaNodeViewImpl({
               <span className="coda-node__timing">{formatDuration(info.durationMs)}</span>
             )}
             {/*
-              * How old the data behind this result is, and the control that replaces it. Absent
-              * unless the node reported a fetch, so it never appears on a node with nothing to
-              * re-read — and it says so even when the answer is `0s`, because a line that shows
-              * up only when something is wrong is one nobody learns to look at.
-              */}
+             * How old the data behind this result is, and the control that replaces it. Absent
+             * unless the node reported a fetch, so it never appears on a node with nothing to
+             * re-read — and it says so even when the answer is `0s`, because a line that shows
+             * up only when something is wrong is one nobody learns to look at.
+             */}
             <CacheAge
               fetchedAt={fetchedAt}
               onRefresh={() => {
@@ -678,13 +678,13 @@ function CodaNodeViewImpl({
               }}
             />
             {/*
-              * Write this node's result to a file, for the cards that have no viewer to ask.
-              *
-              * Withheld where the card is drawing one, because that card already carries a ⤓ an
-              * inch above this — and it is the better of the two there, since a viewer can offer
-              * its picture as SVG and PNG where a value cannot. Saying the same thing twice on
-              * one card is the rule the `… N more` hint follows when it stands down on a fold.
-              */}
+             * Write this node's result to a file, for the cards that have no viewer to ask.
+             *
+             * Withheld where the card is drawing one, because that card already carries a ⤓ an
+             * inch above this — and it is the better of the two there, since a viewer can offer
+             * its picture as SVG and PNG where a value cannot. Saying the same thing twice on
+             * one card is the rule the `… N more` hint follows when it stands down on a fold.
+             */}
             {!showPreview && (
               <ResultDownload
                 value={outputValue}

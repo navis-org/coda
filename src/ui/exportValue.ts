@@ -37,15 +37,7 @@ export interface ExportFile {
 }
 
 export type ExportFormat =
-  | 'auto'
-  | 'csv'
-  | 'graphml'
-  | 'json'
-  | 'svg'
-  | 'png'
-  | 'swc'
-  | 'obj'
-  | 'newick'
+  'auto' | 'csv' | 'graphml' | 'json' | 'svg' | 'png' | 'swc' | 'obj' | 'newick'
 
 const TEXT = 'text/plain;charset=utf-8'
 const CSV = 'text/csv;charset=utf-8'
@@ -416,7 +408,9 @@ export function networkToGraphml(network: NetworkValue): string[] {
   for (let row = 0; row < network.nodes.length; row++) {
     const id = xmlText(String(ids[row] ?? ''))
     const data = graphmlData(network.nodes, nodeKeys, row)
-    chunk.push(data ? `    <node id="${id}">\n${data}    </node>\n` : `    <node id="${id}"/>\n`)
+    chunk.push(
+      data ? `    <node id="${id}">\n${data}    </node>\n` : `    <node id="${id}"/>\n`,
+    )
     if (chunk.length >= GRAPHML_CHUNK_ROWS) flush()
   }
   flush()
@@ -505,9 +499,7 @@ function networkFiles(network: NetworkValue, base: string): ExportFile[] {
 
 /** The same network as one file, with both halves and their types intact. */
 function graphmlFiles(network: NetworkValue, base: string): ExportFile[] {
-  return [
-    { name: `${base}.graphml`, parts: networkToGraphml(network), mime: GRAPHML_MIME },
-  ]
+  return [{ name: `${base}.graphml`, parts: networkToGraphml(network), mime: GRAPHML_MIME }]
 }
 
 /**

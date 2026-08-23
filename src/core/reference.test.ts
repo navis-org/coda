@@ -16,7 +16,14 @@
 
 import { beforeAll, describe, expect, it } from 'vitest'
 
-import { addEdge, addNode, emptyGraph, referencesFirst, topoSort, wouldCreateCycle } from './graph'
+import {
+  addEdge,
+  addNode,
+  emptyGraph,
+  referencesFirst,
+  topoSort,
+  wouldCreateCycle,
+} from './graph'
 import type { CodaGraph, GraphNode } from './graph'
 import { checkConnection, inferGraph } from './inference'
 import { registerNode } from './registry'
@@ -82,7 +89,12 @@ function roundTrip(): CodaGraph {
   let g = emptyGraph('ref')
   g = addNode(g, node('ds', 'test.ref.dataset', { id: 'stack:7' }))
   g = addNode(g, node('rd', 'test.ref.reader'))
-  g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'rd', targetHandle: 'dataset' })
+  g = addEdge(g, {
+    source: 'ds',
+    sourceHandle: 'dataset',
+    target: 'rd',
+    targetHandle: 'dataset',
+  })
   return addEdge(g, {
     source: 'rd',
     sourceHandle: 'out',
@@ -108,8 +120,12 @@ describe('what a reference changes', () => {
     const g = roundTrip()
     const inf = inferGraph(g)
     expect(
-      checkConnection(g, inf, { nodeId: 'ds', portId: 'dataset' }, { nodeId: 'rd', portId: 'dataset' })
-        .ok,
+      checkConnection(
+        g,
+        inf,
+        { nodeId: 'ds', portId: 'dataset' },
+        { nodeId: 'rd', portId: 'dataset' },
+      ).ok,
     ).toBe(true)
     // And the wire being *drawn* is what matters, not only the ones already there.
     expect(wouldCreateCycle(g, 'ds', 'rd', 'dataset')).toBe(false)
@@ -199,18 +215,31 @@ describe('what a reference must not change', () => {
       category: 'utility',
       cost: 'cheap',
       inputs: [
-        { id: 'dataset', label: 'Dataset', type: T.dataset(), required: false, reference: true },
+        {
+          id: 'dataset',
+          label: 'Dataset',
+          type: T.dataset(),
+          required: false,
+          reference: true,
+        },
         { id: 'in', label: 'In', type: T.table(), required: false },
       ],
       outputs: [{ id: 'out', label: 'Out', type: T.table() }],
       inferOutputs: () => ({ out: T.table() }),
-      evaluate: () => ({ out: { kind: 'table', schema: { columns: [] }, data: {}, length: 0 } }),
+      evaluate: () => ({
+        out: { kind: 'table', schema: { columns: [] }, data: {}, length: 0 },
+      }),
     })
 
     let g = emptyGraph('late')
     g = addNode(g, node('ds', 'test.ref.dataset', { id: 'stack:1' }))
     g = addNode(g, node('late', 'test.ref.late'))
-    g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'late', targetHandle: 'dataset' })
+    g = addEdge(g, {
+      source: 'ds',
+      sourceHandle: 'dataset',
+      target: 'late',
+      targetHandle: 'dataset',
+    })
     g = addEdge(g, {
       source: 'late',
       sourceHandle: 'out',
@@ -232,7 +261,12 @@ describe('what a reference must not change', () => {
     g = addNode(g, node('a', 'test.ref.reader'))
     g = addNode(g, node('b', 'test.ref.reader'))
     g = addEdge(g, { source: 'a', sourceHandle: 'out', target: 'b', targetHandle: 'in' })
-    g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'b', targetHandle: 'dataset' })
+    g = addEdge(g, {
+      source: 'ds',
+      sourceHandle: 'dataset',
+      target: 'b',
+      targetHandle: 'dataset',
+    })
     g = addEdge(g, { source: 'a', sourceHandle: 'out', target: 'b', targetHandle: 'in' })
     expect(topoSort(g).cyclic).toEqual([])
     expect(topoSort(g).order).toHaveLength(3)
@@ -305,8 +339,18 @@ describe('writing the nodes out, which wants the opposite order', () => {
     g = addNode(g, node('mid', 'test.ref.reader'))
     g = addNode(g, node('d2', 'test.ref.dataset', { id: 'b' }))
     g = addNode(g, node('rd', 'test.ref.reader'))
-    g = addEdge(g, { source: 'd1', sourceHandle: 'dataset', target: 'rd', targetHandle: 'dataset' })
-    g = addEdge(g, { source: 'd2', sourceHandle: 'dataset', target: 'mid', targetHandle: 'dataset' })
+    g = addEdge(g, {
+      source: 'd1',
+      sourceHandle: 'dataset',
+      target: 'rd',
+      targetHandle: 'dataset',
+    })
+    g = addEdge(g, {
+      source: 'd2',
+      sourceHandle: 'dataset',
+      target: 'mid',
+      targetHandle: 'dataset',
+    })
     const sorted = topoSort(g).order
     const order = referencesFirst(sorted, g)
     expect(order.slice(0, 2)).toEqual(sorted.filter((id) => id === 'd1' || id === 'd2'))

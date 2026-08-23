@@ -136,7 +136,7 @@ live('CAVE, live', () => {
     expect(new Set(strong.data.neuronId)).toEqual(new Set([SEED]))
   }, 300_000)
 
-/*
+  /*
    * The two halves of morphology that work, and the check that ties them together.
    *
    * A mesh and a synapse cloud for one neuron have to sit in the same space, and neither is
@@ -329,7 +329,9 @@ describe.skipIf(!TOKEN)('CAVE, live — L2 skeletons', () => {
     const version = (await materializationsFor('brain_and_nerve_cord_public'))[0]
     const dataset = `brain_and_nerve_cord_public:${version}`
     const ids = (
-      (await cave.findNeurons({ datasetId: dataset, limit: 6 })).data[ID_COLUMN_NAME] as string[]
+      (await cave.findNeurons({ datasetId: dataset, limit: 6 })).data[
+        ID_COLUMN_NAME
+      ] as string[]
     ).slice(0, 5)
 
     const skeletons = await cave.fetchSkeletons!({ datasetId: dataset, neuronIds: ids })

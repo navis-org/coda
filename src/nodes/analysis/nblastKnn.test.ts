@@ -56,15 +56,39 @@ function pipeline(params: Record<string, unknown> = {}): CodaGraph {
   g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC4', status: 'Traced' }))
   g = addNode(g, node('skel', 'neuron.skeletons', { limit: 20 }))
   g = addNode(g, node('knn', 'neuron.nblastKnn', params))
-  g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'find', targetHandle: 'dataset' })
-  g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'skel', targetHandle: 'dataset' })
-  g = addEdge(g, { source: 'find', sourceHandle: 'neurons', target: 'skel', targetHandle: 'neurons' })
-  g = addEdge(g, { source: 'skel', sourceHandle: 'skeletons', target: 'knn', targetHandle: 'query' })
+  g = addEdge(g, {
+    source: 'ds',
+    sourceHandle: 'dataset',
+    target: 'find',
+    targetHandle: 'dataset',
+  })
+  g = addEdge(g, {
+    source: 'ds',
+    sourceHandle: 'dataset',
+    target: 'skel',
+    targetHandle: 'dataset',
+  })
+  g = addEdge(g, {
+    source: 'find',
+    sourceHandle: 'neurons',
+    target: 'skel',
+    targetHandle: 'neurons',
+  })
+  g = addEdge(g, {
+    source: 'skel',
+    sourceHandle: 'skeletons',
+    target: 'knn',
+    targetHandle: 'query',
+  })
   return g
 }
 
 /** Descending scores, and `-1`/`-Infinity` wherever a row ran out of candidates. */
-function knnResult(rows: number, k: number, padFrom = k): {
+function knnResult(
+  rows: number,
+  k: number,
+  padFrom = k,
+): {
   idx: Int32Array
   scores: Float64Array
   rows: number
@@ -231,7 +255,9 @@ describe('neuron.nblastKnn — running', () => {
   it('refuses above Max neurons, naming the side that is too big', async () => {
     const scheduler = new Scheduler({ resolveSource: () => source })
     await scheduler.run(pipeline({ limit: 2 }), { mode: 'full' })
-    expect(scheduler.info('knn').error).toMatch(/on Query exceeds this node's Max neurons \(2\)/)
+    expect(scheduler.info('knn').error).toMatch(
+      /on Query exceeds this node's Max neurons \(2\)/,
+    )
     expect(mockedKnn).not.toHaveBeenCalled()
   })
 })

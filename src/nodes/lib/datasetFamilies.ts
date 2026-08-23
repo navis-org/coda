@@ -48,6 +48,17 @@ export interface DatasetBackend {
    * for several datastacks there is no such table at all.
    */
   acceptsAnnotations?: boolean
+  /**
+   * Whether its dataset nodes offer an attached edge set. Absent means yes.
+   *
+   * Weaker than `acceptsAnnotations`, and the difference is worth keeping straight. That flag is
+   * structural — neuPrint has nothing for an annotation source to *replace*, so the control
+   * would do nothing. This one is a product judgement: `data/queries.ts` is backend-agnostic, so
+   * a user edge list would answer perfectly well on any of them, and CATMAID is off because
+   * nobody is expected to want one there rather than because it could not work. One character
+   * to reverse.
+   */
+  edgeSets?: boolean
 }
 
 export const BACKENDS: Record<string, DatasetBackend> = {
@@ -71,6 +82,10 @@ export const BACKENDS: Record<string, DatasetBackend> = {
    */
   catmaid: {
     id: 'catmaid',
+    // Not a capability gap: an edge list would answer here as it does anywhere. CATMAID gives
+    // you the connectors directly and its public instances are curated subsets, so a supplied
+    // edge list has nothing to add. See `DatasetBackend.edgeSets`.
+    edgeSets: false,
     label: 'CATMAID',
   },
   /*

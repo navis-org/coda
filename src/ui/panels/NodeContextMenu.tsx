@@ -64,10 +64,10 @@ export function NodeContextMenu({ screenPosition, nodeId, onClose }: NodeContext
             Invalidate Results
           </button>
           {/*
-            * The second layer, and only on a node that has one. The title above used to say
-            * "forcing a re-fetch", which was the false half: a node fetching through
-            * `loadCachedTable` re-ran from IndexedDB in milliseconds with the same bytes.
-            */}
+           * The second layer, and only on a node that has one. The title above used to say
+           * "forcing a re-fetch", which was the false half: a node fetching through
+           * `loadCachedTable` re-ran from IndexedDB in milliseconds with the same bytes.
+           */}
           {def?.dataCache && (
             <button
               type="button"

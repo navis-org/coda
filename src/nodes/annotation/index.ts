@@ -172,7 +172,9 @@ export const caveTableNode = registerNode({
 
   validate: (ctx) => {
     if (!ctx.inputs.dataset && !String(ctx.params.datastack ?? '').trim()) {
-      return ['Name a datastack, e.g. flywire_fafb_public:783 — or wire one to the Dataset input']
+      return [
+        'Name a datastack, e.g. flywire_fafb_public:783 — or wire one to the Dataset input',
+      ]
     }
     if (!String(ctx.params.table ?? '').trim()) return ['Name an annotation table']
     if (String(ctx.params.pivotOn ?? '') && !String(ctx.params.valueColumn ?? '')) {
@@ -183,10 +185,7 @@ export const caveTableNode = registerNode({
 
   evaluate: async (ctx) => {
     const dataset = ctx.input('dataset')
-    const ref = caveRef(
-      dataset?.kind === 'dataset' ? dataset.datasetId : undefined,
-      ctx.params,
-    )
+    const ref = caveRef(dataset?.kind === 'dataset' ? dataset.datasetId : undefined, ctx.params)
     if (!ref) throw new Error('Name a datastack and a table, or wire a Dataset')
     return { annotations: await resolve(ctx, ref) }
   },
@@ -287,10 +286,12 @@ function buildSeaTableNode(spec: { key: string; label: string; host: string; gui
         help: 'SeaTable deployment. FlyTable and cloud.seatable.io are the same software with unrelated accounts, so each needs its own token.',
         advanced: true,
       },
-      ],
+    ],
 
     inferOutputs: (ctx) => ({
-      annotations: T.neurons(chainSchema(ctx.inputs.annotations, seaRef(ctx.params, spec.host))),
+      annotations: T.neurons(
+        chainSchema(ctx.inputs.annotations, seaRef(ctx.params, spec.host)),
+      ),
     }),
 
     validate: (ctx) => {

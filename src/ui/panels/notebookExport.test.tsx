@@ -139,8 +139,18 @@ describe('Export as Jupyter Notebook', () => {
     let g = realGraph()
     // The card every published dataset node arrives with (`core/companion.ts`), so the exclusion
     // below is about a graph that really has one.
-    g = addNode(g, { id: 'desc', type: 'dataset.description', position: { x: 0, y: 180 }, params: {} })
-    g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'desc', targetHandle: 'dataset' })
+    g = addNode(g, {
+      id: 'desc',
+      type: 'dataset.description',
+      position: { x: 0, y: 180 },
+      params: {},
+    })
+    g = addEdge(g, {
+      source: 'ds',
+      sourceHandle: 'dataset',
+      target: 'desc',
+      targetHandle: 'dataset',
+    })
     g = addNode(g, {
       id: 'paths',
       type: 'neuron.paths',
@@ -207,12 +217,37 @@ describe('Export as Jupyter Notebook', () => {
     g = addNode(g, { id: 'ex', type: 'neuron.explore', position: { x: 260, y: 0 }, params: {} })
     // Connectivity is the untranslated root — Explore beside it now emits — and the Table after
     // it is the cascade.
-    g = addNode(g, { id: 'conn', type: 'neuron.connectivity', position: { x: 520, y: 0 }, params: {} })
+    g = addNode(g, {
+      id: 'conn',
+      type: 'neuron.connectivity',
+      position: { x: 520, y: 0 },
+      params: {},
+    })
     g = addNode(g, { id: 'tbl', type: 'out.table', position: { x: 780, y: 0 }, params: {} })
-    g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'ex', targetHandle: 'dataset' })
-    g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'conn', targetHandle: 'dataset' })
-    g = addEdge(g, { source: 'ex', sourceHandle: 'selected', target: 'conn', targetHandle: 'neurons' })
-    g = addEdge(g, { source: 'conn', sourceHandle: 'connections', target: 'tbl', targetHandle: 'in' })
+    g = addEdge(g, {
+      source: 'ds',
+      sourceHandle: 'dataset',
+      target: 'ex',
+      targetHandle: 'dataset',
+    })
+    g = addEdge(g, {
+      source: 'ds',
+      sourceHandle: 'dataset',
+      target: 'conn',
+      targetHandle: 'dataset',
+    })
+    g = addEdge(g, {
+      source: 'ex',
+      sourceHandle: 'selected',
+      target: 'conn',
+      targetHandle: 'neurons',
+    })
+    g = addEdge(g, {
+      source: 'conn',
+      sourceHandle: 'connections',
+      target: 'tbl',
+      targetHandle: 'in',
+    })
     act(() => useGraphStore.getState().loadGraph(g))
 
     openSaveMenu()

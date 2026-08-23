@@ -422,7 +422,8 @@ function foldCells(
   // Row and column mappings are hoisted: `Math.floor(c * gridCols / cols)` inside the inner
   // loop is one multiply and one floor per cell, which at four million cells is the pass.
   const colOf = new Int32Array(cols)
-  for (let c = 0; c < cols; c++) colOf[c] = Math.min(gridCols - 1, Math.floor((c * gridCols) / cols))
+  for (let c = 0; c < cols; c++)
+    colOf[c] = Math.min(gridCols - 1, Math.floor((c * gridCols) / cols))
 
   for (let r = 0; r < rows; r++) {
     const gr = Math.min(gridRows - 1, Math.floor((r * gridRows) / rows))
@@ -494,7 +495,11 @@ export function drawnCellSize(spec: HeatmapSpec): { width: number; height: numbe
 export function cellRect(spec: HeatmapSpec, row: number, col: number): Rect {
   const gx = Math.min(spec.gridCols - 1, Math.floor((col * spec.gridCols) / spec.cols))
   const gy = Math.min(spec.gridRows - 1, Math.floor((row * spec.gridRows) / spec.rows))
-  return { x: spec.plot.x + gx * spec.cellWidth, y: spec.plot.y + gy * spec.cellHeight, ...drawnCellSize(spec) }
+  return {
+    x: spec.plot.x + gx * spec.cellWidth,
+    y: spec.plot.y + gy * spec.cellHeight,
+    ...drawnCellSize(spec),
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -572,7 +577,11 @@ export function axisMarks(spec: HeatmapSpec, ink: string): TextMark[] {
  * already implies an unfolded grid — it caps at 400 cells on cells of at least 26x14 px — so
  * the matrix's own stride indexes the buckets.
  */
-export function valueMarks(spec: HeatmapSpec, values: Float64Array, ramp: string[]): TextMark[] {
+export function valueMarks(
+  spec: HeatmapSpec,
+  values: Float64Array,
+  ramp: string[],
+): TextMark[] {
   if (!spec.labelsFit) return []
   const marks: TextMark[] = []
   for (let r = 0; r < spec.rows; r++) {

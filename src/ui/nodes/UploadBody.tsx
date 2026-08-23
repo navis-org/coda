@@ -35,18 +35,12 @@ import {
   uploadPeekSettled,
   uploadRevision,
 } from '../../data/uploads'
-import { formatNumber } from '../format'
+import { formatBytes, formatNumber } from '../format'
 import { ParamField } from '../params/ParamField'
 import type { NodeBodyProps } from './nodeBodies'
 
 /** Big enough that a header and a few rows are legible; small enough not to own the card. */
 const PASTE_ROWS = 4
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} kB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
 
 export function UploadBody({ node, ctx, compact, setParam, onError }: NodeBodyProps) {
   const def = getNodeDef(node.type)

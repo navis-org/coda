@@ -136,9 +136,7 @@ export const dendrogramNode = registerNode({
      */
     // Numbers once, so the loop below neither stringifies an index per leaf nor builds a row
     // and a colour for every observation to keep the handful that were clicked.
-    const wanted = new Set(
-      ((ctx.params.selection as string[] | undefined) ?? []).map(Number),
-    )
+    const wanted = new Set(((ctx.params.selection as string[] | undefined) ?? []).map(Number))
     const position = leafPositions(tree)
 
     const rows = []

@@ -4,11 +4,7 @@ import type { CodaGraph } from '../../core/graph'
 import { canExportNotebook } from '../../export/canExport'
 import type { ExportLanguage } from '../../nodes/lib/datasetFamilies'
 import { CodaMark } from '../CodaMark'
-import {
-  peekExportWarnings,
-  requestExportWarnings,
-  useExportWarnings,
-} from '../exportWarnings'
+import { peekExportWarnings, requestExportWarnings, useExportWarnings } from '../exportWarnings'
 import { AssistantIcon, InspectorIcon, ShareIcon } from '../Icons'
 import { getSource } from '../../data/source'
 import { EXAMPLES } from '../../examples'
@@ -22,6 +18,7 @@ import { pickGraphFile } from '../../store/persistence'
 import { downloadGraph, downloadNotebook, downloadRmd } from '../export'
 import { formatAgo, plural } from '../format'
 import { appElement, toggleFullscreen, useIsFullscreen } from '../fullscreen'
+import { EdgeSetPanel } from './EdgeSetPanel'
 import { SourcesPanel } from './SourcesPanel'
 import { useDismissOnOutside } from '../useDismiss'
 
@@ -239,6 +236,9 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
       </button>
 
       <SourcesPanel />
+      {/* Opened from a dataset card, mounted here: a modal inside React Flow's transformed
+          pane takes the transform as its containing block. */}
+      <EdgeSetPanel />
 
       <button
         type="button"

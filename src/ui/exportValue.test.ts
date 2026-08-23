@@ -482,7 +482,7 @@ describe('linkageToNewick', () => {
     // `SMP001(a)` would otherwise close a clade in the middle of a name.
     const named = makeLinkage(
       Float64Array.from([0, 1, 0.5, 2]),
-      ["SMP001(a)", "o'brien"],
+      ['SMP001(a)', "o'brien"],
       Int32Array.from([0, 1]),
     )
     expect(linkageToNewick(named)).toBe("('SMP001(a)':0.5,'o''brien':0.5);")
@@ -507,9 +507,9 @@ describe('linkageToNewick', () => {
   })
 
   it('writes a single leaf and an empty tree without inventing a clade', () => {
-    expect(linkageToNewick(makeLinkage(new Float64Array(0), ['only'], Int32Array.from([0])))).toBe(
-      'only;',
-    )
+    expect(
+      linkageToNewick(makeLinkage(new Float64Array(0), ['only'], Int32Array.from([0]))),
+    ).toBe('only;')
     expect(linkageToNewick(makeLinkage(new Float64Array(0), [], new Int32Array(0)))).toBe(';')
   })
 })

@@ -68,15 +68,38 @@ function pipeline(params: Record<string, unknown> = {}, limit = 20): CodaGraph {
   g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC4', status: 'Traced' }))
   g = addNode(g, node('skel', 'neuron.skeletons', { limit }))
   g = addNode(g, node('nb', 'neuron.nblast', params))
-  g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'find', targetHandle: 'dataset' })
-  g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'skel', targetHandle: 'dataset' })
-  g = addEdge(g, { source: 'find', sourceHandle: 'neurons', target: 'skel', targetHandle: 'neurons' })
-  g = addEdge(g, { source: 'skel', sourceHandle: 'skeletons', target: 'nb', targetHandle: 'query' })
+  g = addEdge(g, {
+    source: 'ds',
+    sourceHandle: 'dataset',
+    target: 'find',
+    targetHandle: 'dataset',
+  })
+  g = addEdge(g, {
+    source: 'ds',
+    sourceHandle: 'dataset',
+    target: 'skel',
+    targetHandle: 'dataset',
+  })
+  g = addEdge(g, {
+    source: 'find',
+    sourceHandle: 'neurons',
+    target: 'skel',
+    targetHandle: 'neurons',
+  })
+  g = addEdge(g, {
+    source: 'skel',
+    sourceHandle: 'skeletons',
+    target: 'nb',
+    targetHandle: 'query',
+  })
   return g
 }
 
 /** A square identity-ish result, the shape the engine promises. */
-function scores(rows: number, cols: number): { scores: Float64Array; rows: number; cols: number } {
+function scores(
+  rows: number,
+  cols: number,
+): { scores: Float64Array; rows: number; cols: number } {
   const values = new Float64Array(rows * cols)
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) values[r * cols + c] = r === c ? 1 : 0.25
@@ -155,7 +178,9 @@ describe('nblastOps — the flattening', () => {
   it('lets nanometres and unknown through, which are not the same thing', () => {
     // Unknown is what a value built before units existed says, and no source produces it
     // today. Refusing on it would refuse on a fact nobody stated.
-    expect(() => checkNblastUnits('Query', { ...skeletonsFixture(), units: 'nm' })).not.toThrow()
+    expect(() =>
+      checkNblastUnits('Query', { ...skeletonsFixture(), units: 'nm' }),
+    ).not.toThrow()
     expect(() => checkNblastUnits('Query', skeletonsFixture())).not.toThrow()
   })
 
@@ -201,7 +226,9 @@ describe('neuron.nblast — types and params', () => {
 describe('neuron.nblast — running', () => {
   it('sends micrometres, forwards every control, and asks for an all-by-all', async () => {
     mockedRun.mockImplementation((request: NblastRequest) =>
-      Promise.resolve(scores(request.query.offsets.length - 1, request.query.offsets.length - 1)),
+      Promise.resolve(
+        scores(request.query.offsets.length - 1, request.query.offsets.length - 1),
+      ),
     )
     const scheduler = makeScheduler()
     await scheduler.run(pipeline({ k: 7, resample: 2, symmetry: 'min', useAlpha: true }), {
@@ -215,14 +242,18 @@ describe('neuron.nblast — running', () => {
 
     const skeletons = scheduler.output('skel', 'skeletons')
     if (!isSkeletonsValue(skeletons)) throw new Error('expected skeletons')
-    const nm = Math.max(...skeletons.items.flatMap((i) => Array.from(i.positions).map(Math.abs)))
+    const nm = Math.max(
+      ...skeletons.items.flatMap((i) => Array.from(i.positions).map(Math.abs)),
+    )
     const um = Math.max(...Array.from(request.query.points).map(Math.abs))
     expect(um).toBeCloseTo(nm / NM_PER_UM, 3)
   })
 
   it('labels both axes of an all-by-all from the picked column', async () => {
     mockedRun.mockImplementation((request: NblastRequest) =>
-      Promise.resolve(scores(request.query.offsets.length - 1, request.query.offsets.length - 1)),
+      Promise.resolve(
+        scores(request.query.offsets.length - 1, request.query.offsets.length - 1),
+      ),
     )
     const scheduler = makeScheduler()
     await scheduler.run(pipeline({ labelColumn: 'type' }), { mode: 'full' })
@@ -246,7 +277,9 @@ describe('neuron.nblast — running', () => {
     const fetched = scheduler.output('skel', 'skeletons')
     if (!isSkeletonsValue(fetched)) throw new Error('expected skeletons')
     expect(fetched.units).toBe('nm')
-    expect(() => checkNblastUnits('Query', { ...fetched, units: 'voxels' })).toThrow(/wrong scale/)
+    expect(() => checkNblastUnits('Query', { ...fetched, units: 'voxels' })).toThrow(
+      /wrong scale/,
+    )
   })
 
   it('refuses above Max neurons, naming the side that is too big', async () => {

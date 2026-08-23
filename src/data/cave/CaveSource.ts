@@ -36,14 +36,7 @@ import type {
   SkeletonsValue,
   TableValue,
 } from '../../core/values'
-import {
-  boundsOf,
-  getRow,
-  makeMatrix,
-  makeTable,
-  selectRows,
-  tableFromRows,
-} from '../../core/values'
+import { boundsOf, getRow, makeTable, selectRows, tableFromRows } from '../../core/values'
 import type {
   AdjacencyRequest,
   ConnectivityRequest,
@@ -58,6 +51,8 @@ import type {
 } from '../source'
 import { reportSourceLearned } from '../source'
 import type { NeuronIndexRequest } from '../neuronIndex'
+import type { Edge } from '../connectivity'
+import { matrixFromEdges, typesOf } from '../connectivity'
 import { loadCachedTable, neuronIndexKey } from '../neuronIndex'
 import { compileLabelMatch, compileRegex, refuseUnfilterable } from '../neuronFilter'
 import { mapWithConcurrency } from '../concurrency'
@@ -178,13 +173,6 @@ interface DatastackState {
    * failed listing.
    */
   discoveryRequested?: boolean
-}
-
-/** One connection, normalised out of whichever source answered. */
-interface Edge {
-  pre: string
-  post: string
-  weight: number
 }
 
 /**
@@ -705,24 +693,7 @@ export class CaveSource implements DataSource {
       ),
       req.groupByType ? this.typeLookup(req) : undefined,
     ])
-    // An untyped neuron keeps its own id as its key rather than joining a bucket called "null" —
-    // the rule `profileStats` follows, and for its reason: merging them puts a fictitious type
-    // at the top of the list.
-    const key = (id: string) => types?.get(id) ?? id
-    const rowKeys = [...new Set(req.sourceIds.map(key))]
-    const colKeys = [...new Set(req.targetIds.map(key))]
-    const rowAtKey = new Map(rowKeys.map((k, i) => [k, i]))
-    const colAtKey = new Map(colKeys.map((k, i) => [k, i]))
-
-    const values = new Float64Array(rowKeys.length * colKeys.length)
-    for (const edge of edges) {
-      const r = rowAtKey.get(key(edge.pre))
-      const c = colAtKey.get(key(edge.post))
-      if (r === undefined || c === undefined) continue
-      const at = r * colKeys.length + c
-      values[at] = (values[at] ?? 0) + edge.weight
-    }
-    return makeMatrix(rowKeys, colKeys, values, 'synapses', 'count')
+    return matrixFromEdges(edges, req.sourceIds, req.targetIds, types)
   }
 
   /**
@@ -1386,32 +1357,6 @@ function synapsePoints(
     bounds: boundsOf([positions]),
     units: 'nm',
   }
-}
-
-/**
- * Neuron id → cell type for one index, built once per table.
- *
- * A `WeakMap` on the table itself, which is safe rather than merely likely to hit: `cacheGet`
- * promotes a cached table into `cache.ts`'s module-level map and hands back **the same object**,
- * so repeat `neuronIndex` calls for one dataset return an identical `TableValue`. Same idiom as
- * `searchIndexFor`, `statsFor` and `cornersByBucket`.
- */
-const typeCache = new WeakMap<TableValue, Map<string, string>>()
-
-function typesOf(index: TableValue): Map<string, string> {
-  const cached = typeCache.get(index)
-  if (cached) return cached
-  const lookup = new Map<string, string>()
-  const ids = index.data[ID_COLUMN_NAME]
-  const types = index.data.type
-  if (ids && types) {
-    for (let i = 0; i < index.length; i++) {
-      const type = types[i]
-      if (typeof type === 'string' && type) lookup.set(String(ids[i]), type)
-    }
-  }
-  typeCache.set(index, lookup)
-  return lookup
 }
 
 function datasetInfoFor(

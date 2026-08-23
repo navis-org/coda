@@ -52,10 +52,13 @@ const VALUE_SCAN = /"(?:[^"\\]|\\.)*"|([:,[]\s*)(-?\d{16,})(?![\d.eE])/g
  * handful of ways to be subtly wrong, and each of them is a wrong neuron rather than an error.
  */
 export function quoteWideIntegers(text: string): string {
-  return text.replace(VALUE_SCAN, (match, prefix: string | undefined, digits: string | undefined) => {
-    if (prefix === undefined || digits === undefined) return match
-    return Number.isSafeInteger(Number(digits)) ? match : `${prefix}"${digits}"`
-  })
+  return text.replace(
+    VALUE_SCAN,
+    (match, prefix: string | undefined, digits: string | undefined) => {
+      if (prefix === undefined || digits === undefined) return match
+      return Number.isSafeInteger(Number(digits)) ? match : `${prefix}"${digits}"`
+    },
+  )
 }
 
 /**

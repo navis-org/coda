@@ -204,9 +204,7 @@ export function registerDatastackSpec(spec: DatastackSpec): DatastackSpec {
 }
 
 export function specFor(datastack: string): DatastackSpec | undefined {
-  return (
-    DATASTACK_SPECS.find((s) => s.datastack === datastack) ?? runtimeSpecs.get(datastack)
-  )
+  return DATASTACK_SPECS.find((s) => s.datastack === datastack) ?? runtimeSpecs.get(datastack)
 }
 
 /** Test seam: drop hand-named datastacks between suites. */

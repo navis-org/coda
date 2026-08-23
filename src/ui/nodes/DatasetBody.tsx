@@ -17,12 +17,15 @@ import { serverLabel } from '../../data/neuprint/servers'
 import { findParam } from '../../core/node'
 import { getNodeDef } from '../../core/registry'
 import { formatNumber } from '../format'
+import { useGraphStore } from '../../store/graphStore'
+import { edgeSetLabel, hasEdgeSet } from '../../nodes/lib/edgeParams'
 import { ParamField } from '../params/ParamField'
 import type { NodeBodyProps } from './nodeBodies'
 import { DatasetPreview } from './DatasetPreview'
 
 export function DatasetBody({ node, ctx, compact, setParam }: NodeBodyProps) {
   const def = getNodeDef(node.type)
+  const openEdgePanel = useGraphStore((s) => s.openEdgePanel)
   const family = datasetFamily(node.type.replace(/^dataset\./, ''))
   // The node's own output type carries the resolved dataset id — the same value `evaluate` will
   // use — so reading it back is how the caption stays in step with the provenance key.
@@ -43,6 +46,22 @@ export function DatasetBody({ node, ctx, compact, setParam }: NodeBodyProps) {
     : known.length === 0
       ? 'no versions listed yet'
       : undefined
+
+  /*
+   * The button is the indicator, and that is not a convenience.
+   *
+   * An attached edge set replaces every connectivity answer for this dataset and arrives through
+   * a panel rather than a wire — so there is nothing on the canvas saying the numbers came from a
+   * file. A card that looked identical either way would be exactly the silent result-change this
+   * codebase keeps writing post-mortems about, which is why the label carries the set's name and
+   * the button is pressed rather than merely present.
+   *
+   * Absent where the node has no such param at all — CATMAID's, by `DatasetBackend.edgeSets`.
+   */
+  const edgesParam = def ? findParam(def, 'edgeSetId') : undefined
+  const attached = hasEdgeSet(node.params)
+  // Through the same resolver the refusal uses, or the card names one set and the error another.
+  const edgeSetName = attached ? edgeSetLabel(node.params) : ''
 
   const rois = info?.rois.length ?? 0
   const facts = [
@@ -85,6 +104,21 @@ export function DatasetBody({ node, ctx, compact, setParam }: NodeBodyProps) {
           </span>
         )}
         {facts.length > 0 && <span className="dataset-body__facts">{facts.join(' · ')}</span>}
+        {edgesParam && (
+          <button
+            type="button"
+            className="dataset-body__edges"
+            aria-pressed={attached}
+            title={
+              attached
+                ? `Connectivity comes from the edge set "${edgeSetName}"`
+                : 'Attach a user-supplied edge list'
+            }
+            onClick={() => openEdgePanel(node.id)}
+          >
+            {attached ? `⇄ ${edgeSetName}` : '⇄ Edge data'}
+          </button>
+        )}
         <button
           type="button"
           className="dataset-body__refresh"

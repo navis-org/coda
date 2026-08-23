@@ -47,6 +47,16 @@ export type CodaType =
       datasetId?: string
       /** Columns a wired annotation chain publishes, replacing the dataset's own labels. */
       annotations?: TableSchema
+      /**
+       * Whether a user-supplied edge set answers this dataset's connectivity.
+       *
+       * On the *type* and not only on the value because it is an edit-time fact: it decides
+       * whether the Paths node is offered at all. CAVE has no server-side hop aggregation and
+       * declares `paths: false`, but a local edge set can answer one — so an attached set
+       * unlocks a node that otherwise refuses outright, and a refusal has to be right before
+       * anything runs.
+       */
+      edges?: true
     }
   /** Columnar table. */
   | { kind: 'table'; schema?: TableSchema }
@@ -103,11 +113,17 @@ export const T = {
    * rather than only on the value because it decides what every column picker downstream
    * offers — which is an edit-time question. Absent means the dataset's own labels.
    */
-  dataset: (sourceId?: string, datasetId?: string, annotations?: TableSchema): CodaType => ({
+  dataset: (
+    sourceId?: string,
+    datasetId?: string,
+    annotations?: TableSchema,
+    edges?: boolean,
+  ): CodaType => ({
     kind: 'dataset',
     ...(sourceId ? { sourceId } : {}),
     ...(datasetId ? { datasetId } : {}),
     ...(annotations ? { annotations } : {}),
+    ...(edges ? { edges: true as const } : {}),
   }),
   table: (schema?: TableSchema): CodaType =>
     schema ? { kind: 'table', schema } : { kind: 'table' },

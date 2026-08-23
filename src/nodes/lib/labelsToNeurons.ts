@@ -198,7 +198,8 @@ function matchAgainst(
     // `joinTables` carries the left's kind through, and the left is the neuron table — but the
     // port declares `T.neurons()`, and a value whose kind disagrees with its port is a
     // disagreement nothing type-checks. Stated rather than inherited.
-    neurons: joined.kind === 'neurons' ? joined : makeTable(joined.schema, joined.data, 'neurons'),
+    neurons:
+      joined.kind === 'neurons' ? joined : makeTable(joined.schema, joined.data, 'neurons'),
     asked: rowForLabel.size,
     matched: hit.size,
     dropped: 0,

@@ -21,6 +21,7 @@ import type { TableSchema } from '../core/types'
 import { column, tableSchema } from '../core/types'
 import type {
   DatasetAnnotations,
+  DatasetEdges,
   MatrixValue,
   MeshesValue,
   PointsValue,
@@ -149,10 +150,38 @@ export interface FindNeuronsRequest {
   signal?: AbortSignal
 }
 
-export interface ConnectivityRequest {
+/**
+ * What every request naming a dataset carries.
+ *
+ * `datasetRequest` in `nodes/lib/datasetParam.ts` is the one projection of a `DatasetValue` onto
+ * this, so a call site cannot supply the id and forget the labels that go with it.
+ */
+export interface DatasetRequest {
   datasetId: string
-  /** Labels replacing the dataset's own — see `FindNeuronsRequest.annotations`. */
+  /**
+   * Labels replacing the dataset's own.
+   *
+   * Absent means the dataset uses whatever its backend publishes. A source is expected to honour
+   * this: `CaveSource` reads it at every query that names a neuron.
+   */
   annotations?: DatasetAnnotations
+}
+
+/**
+ * A dataset request a user-supplied edge set can answer instead of the backend.
+ *
+ * `edges` is read by the funnel in `data/queries.ts` and by **no source**, which is the whole
+ * difference from `annotations`: a chain changes what a backend's own query *returns*, where
+ * this replaces the query. So it sits on its own interface rather than on `DatasetRequest` — a
+ * backend implementing `findNeurons` or `fetchSkeletons` has no business being handed a field
+ * nothing in it can honour, and `connectivityRequest` is correspondingly the only projection
+ * that supplies one.
+ */
+export interface EdgeAnswerableRequest extends DatasetRequest {
+  edges?: DatasetEdges
+}
+
+export interface ConnectivityRequest extends EdgeAnswerableRequest {
   neuronIds: NeuronId[]
   direction: ConnectionDirection
   minWeight?: number
@@ -177,8 +206,7 @@ export interface ConnectivityRequest {
  * separately keeps both halves of the `WHERE` index-backed, where a
  * `coalesce(n.type, toString(n.bodyId)) IN [...]` would force a label scan.
  */
-export interface PathStepRequest {
-  datasetId: string
+export interface PathStepRequest extends EdgeAnswerableRequest {
   /** Frontier cell types. Empty (or absent) when the traversal is at neuron level. */
   types?: string[]
   /** Frontier neuron ids — every neuron when not collapsing, the untyped ones when collapsing. */
@@ -197,10 +225,7 @@ export interface PathStepRequest {
   signal?: AbortSignal
 }
 
-export interface AdjacencyRequest {
-  datasetId: string
-  /** Labels replacing the dataset's own — see `FindNeuronsRequest.annotations`. */
-  annotations?: DatasetAnnotations
+export interface AdjacencyRequest extends EdgeAnswerableRequest {
   sourceIds: NeuronId[]
   targetIds: NeuronId[]
   /** Aggregate per-neuron weights up to type level before building the matrix. */
@@ -496,16 +521,30 @@ export interface DataSource {
  * neuron→neuron connections were merged into the row — the honest denominator for a
  * type-level weight, and 1 at neuron level.
  */
-export const PATH_STEP_SCHEMA: TableSchema = tableSchema(
-  column('source', 'str'),
-  column('sourceType', 'str'),
-  column('sourceId', 'i64'),
-  column('target', 'str'),
-  column('targetType', 'str'),
-  column('targetId', 'i64'),
-  column('weight', 'f64', 'synapses'),
-  column('pairs', 'i64'),
-)
+export function pathStepSchema(idDType: 'i64' | 'str'): TableSchema {
+  return tableSchema(
+    column('source', 'str'),
+    column('sourceType', 'str'),
+    column('sourceId', idDType),
+    column('target', 'str'),
+    column('targetType', 'str'),
+    column('targetId', idDType),
+    column('weight', 'f64', 'synapses'),
+    column('pairs', 'i64'),
+  )
+}
+
+/**
+ * The neuPrint shape, whose ids are exact as doubles.
+ *
+ * A *builder* rather than one constant, because the id dtype is the one thing here that is a
+ * fact about the source rather than about the traversal -- invariant 8's "what a source
+ * publishes as a dtype" -- and a source keyed by eighteen-digit text cannot put its ids in an
+ * `i64` column without rounding them into different neurons. Safe to vary because this table
+ * never reaches a column picker: it is the transport between a source and `pathOps`, which
+ * reads both ends through `idText` and so takes either.
+ */
+export const PATH_STEP_SCHEMA: TableSchema = pathStepSchema('i64')
 
 /**
  * What either ROI summary needs: a dataset, and nothing else.
@@ -706,6 +745,37 @@ export function capabilityOf(
   if (!source) return true
   const forDataset = datasetId ? source.capabilitiesFor?.(datasetId) : undefined
   return forDataset?.[capability] ?? source.capabilities[capability]
+}
+
+/**
+ * Whether a dataset can answer one hop of a path traversal.
+ *
+ * One predicate because the question has **three** readers in three layers — the Paths node's
+ * `validate` (before a run), its `evaluate` (at the start of one) and `queries.ts` (at the hop
+ * itself) — and they had already parted company: two required `paths` and the third only checked
+ * that a method existed, so a source with `fetchPathStep` and `paths: false` was refused by the
+ * node and accepted by the funnel. Inert only because the node happened to run first.
+ *
+ * It sits here rather than in `src/nodes` for `capabilityOf`'s own stated reason: a per-dataset
+ * fact is useless to a reader that skips the resolver, and the readers are in different layers.
+ * An attached edge set is a third input to the same gate — it *adds* the capability, because a
+ * local edge list answers a hop that CAVE's API cannot.
+ */
+export function canTracePaths(
+  source: DataSource | undefined,
+  datasetId: string | undefined,
+  hasEdgeSet: boolean,
+): boolean {
+  if (hasEdgeSet) return true
+  /*
+   * An unresolved source refuses nothing — `capabilityOf`'s own rule, and it has to be applied
+   * *before* the method check rather than delegated to it. A Paths node whose Dataset socket
+   * carries the declared `T.dataset()` fallback has no source to ask, which is invariant 2's
+   * ordinary cold-session state; short-circuiting on `fetchPathStep` there reported "cannot
+   * trace paths" on a node that is perfectly fine.
+   */
+  if (!source) return true
+  return Boolean(source.fetchPathStep) && capabilityOf(source, datasetId, 'paths')
 }
 
 export function reportSourceLearned(sourceId: string): void {

@@ -167,7 +167,7 @@ describe('escaping', () => {
     expect(escapeIdentifier("a'L(R)")).toBe("`a'L(R)`")
   })
 
-  it('emits ids as unquoted integers, because `1 IN [\'1\']` is false in Cypher', () => {
+  it("emits ids as unquoted integers, because `1 IN ['1']` is false in Cypher", () => {
     // The failure this prevents is silent: a quoted list is valid Cypher, matches nothing, and
     // comes back as an empty result with no error anywhere to explain it.
     expect(idList(['1', '2'])).toBe('[1,2]')
@@ -327,7 +327,11 @@ describe('query building', () => {
     })
 
     it('composes with the other filters', () => {
-      const query = findNeuronsCypher({ datasetId: 'x', neuronIds: ['7'], statuses: ['Traced'] })
+      const query = findNeuronsCypher({
+        datasetId: 'x',
+        neuronIds: ['7'],
+        statuses: ['Traced'],
+      })
       expect(query).toContain("n.bodyId IN [7] AND n.status IN ['Traced']")
     })
   })
@@ -745,7 +749,7 @@ describe('per-dataset schema discovery', () => {
     ])
   })
 
-  it('maps Coda\'s id column onto neuPrint\'s property, and nothing else', () => {
+  it("maps Coda's id column onto neuPrint's property, and nothing else", () => {
     /*
      * The forward half of the seam, asserted directly because its three call sites are each a
      * one-liner: `NEURON_COLUMNS` (checked through the query text above), `labelClause`, and one
@@ -760,7 +764,7 @@ describe('per-dataset schema discovery', () => {
     }
   })
 
-  it('does not offer neuPrint\'s bodyId beside Coda\'s neuronId', () => {
+  it("does not offer neuPrint's bodyId beside Coda's neuronId", () => {
     /*
      * The backward half of the property-name seam. `bodyId` is a real neuPrint property and
      * shows up in both a `Meta.neuronProperties` declaration and a sampled neuron — but it

@@ -12,12 +12,7 @@ import { labelStep } from '../format'
 
 import type { LinkageValue } from '../../core/values'
 import { makeLinkage } from '../../core/values'
-import {
-  dendrogramShape,
-  linkPath,
-  observationsUnder,
-  projectPoint,
-} from './dendrogramLayout'
+import { dendrogramShape, linkPath, observationsUnder, projectPoint } from './dendrogramLayout'
 
 /**
  * Two pairs joined at the top, with the leaf order as drawn.
@@ -109,7 +104,11 @@ describe('dendrogramShape', () => {
   })
 
   it('handles a two-leaf tree, which is the smallest thing fastcore will cluster', () => {
-    const pair = makeLinkage(Float64Array.from([0, 1, 0.5, 2]), ['a', 'b'], Int32Array.from([0, 1]))
+    const pair = makeLinkage(
+      Float64Array.from([0, 1, 0.5, 2]),
+      ['a', 'b'],
+      Int32Array.from([0, 1]),
+    )
     const shape = dendrogramShape(pair)
     expect(shape.links).toHaveLength(1)
     expect(shape.leaves.map((l) => l.at)).toEqual([0.25, 0.75])

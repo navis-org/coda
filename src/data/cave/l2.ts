@@ -135,7 +135,9 @@ export async function readL2Skeletons(
 
   onProgress?.(1)
   return graphs
-    .map((g) => (g && g.edges.length > 0 ? skeletonFrom(g.neuronId, g.edges, attributes) : undefined))
+    .map((g) =>
+      g && g.edges.length > 0 ? skeletonFrom(g.neuronId, g.edges, attributes) : undefined,
+    )
     .filter((s): s is SkeletonGeometry => s !== undefined)
 }
 
@@ -150,8 +152,12 @@ async function readChunkGraph(
     options,
   )
   return (graph.edge_graph ?? [])
-    .map((edge) => (Array.isArray(edge) ? ([String(edge[0]), String(edge[1])] as const) : undefined))
-    .filter((edge): edge is readonly [string, string] => edge !== undefined && edge[0] !== edge[1])
+    .map((edge) =>
+      Array.isArray(edge) ? ([String(edge[0]), String(edge[1])] as const) : undefined,
+    )
+    .filter(
+      (edge): edge is readonly [string, string] => edge !== undefined && edge[0] !== edge[1],
+    )
     .map((edge) => [edge[0], edge[1]])
 }
 

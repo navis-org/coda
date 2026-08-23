@@ -61,7 +61,10 @@ export function makeRouteMemory(storageKey: string): RouteMemory {
   }
 
   function persist(): void {
-    writeStorage(storageKey, routes.size ? JSON.stringify(Object.fromEntries(routes)) : undefined)
+    writeStorage(
+      storageKey,
+      routes.size ? JSON.stringify(Object.fromEntries(routes)) : undefined,
+    )
   }
 
   return {

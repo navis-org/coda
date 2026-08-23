@@ -345,7 +345,11 @@ describe('TableViewer', () => {
  * subset. None of those fail a type check and all three look fine in a screenshot.
  */
 describe('TableViewer filtering', () => {
-  const NEURONS = tableSchema(column('neuronId', 'i64'), column('type', 'str'), column('pre', 'i64'))
+  const NEURONS = tableSchema(
+    column('neuronId', 'i64'),
+    column('type', 'str'),
+    column('pre', 'i64'),
+  )
   const neurons = () =>
     tableFromRows(NEURONS, [
       { neuronId: 1, type: 'LC4', pre: 40 },
@@ -466,7 +470,11 @@ describe('TableViewer filtering', () => {
     )
     expect(screen.getByText('no rows match the filters')).toBeTruthy()
     rerender(
-      <TableViewer table={tableFromRows(NEURONS, [])} filters={[]} onFiltersChange={() => {}} />,
+      <TableViewer
+        table={tableFromRows(NEURONS, [])}
+        filters={[]}
+        onFiltersChange={() => {}}
+      />,
     )
     expect(screen.getByText('no rows')).toBeTruthy()
   })

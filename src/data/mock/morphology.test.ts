@@ -281,7 +281,9 @@ describe('mock region meshes', () => {
 
     const connectome = getConnectome('hemibrain-mini')!
     const neuronId = connectome.neurons[0]!.neuronId
-    const rois = connectome.roiCounts.filter((rc) => rc.neuronId === neuronId).map((rc) => rc.roi)
+    const rois = connectome.roiCounts
+      .filter((rc) => rc.neuronId === neuronId)
+      .map((rc) => rc.roi)
     const skeleton = generateSkeleton(neuronId, rois)
 
     let inside = 0

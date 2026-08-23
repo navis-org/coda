@@ -65,6 +65,33 @@ export interface DatasetValue {
    * node threading an extra argument through the seam.
    */
   readonly annotations?: DatasetAnnotations
+  /**
+   * A user-supplied edge set answering every connectivity question for this dataset.
+   *
+   * Present, it is **authoritative**: `fetchConnectivity`, `fetchAdjacency` and `fetchPathStep`
+   * are all answered from it, so Connectivity, Adjacency, Paths and Profile change together.
+   * That is deliberate rather than a simplification — connectivity answered from two places at
+   * once, with nothing on the card saying which node used which, is a graph nobody can read.
+   *
+   * Only the identity travels: the edges themselves are in `data/edges/store.ts` and never in
+   * the `.coda.json`, the same trade `core.uploadTable` makes. What differs is what a missing
+   * one means. An upload that is not here blocks the node that names it; this one is a claim
+   * about the *whole dataset*, so a run refuses rather than quietly asking the backend — which
+   * would answer a different question under a green node.
+   */
+  readonly edges?: DatasetEdges
+}
+
+/**
+ * An attached edge set, by identity.
+ *
+ * `id` is a hash of the encoded content, so a colleague who imports the same file gets the same
+ * id and a shared graph resolves. `name` rides along only so a refusal can name the thing the
+ * reader is looking for rather than a hash.
+ */
+export interface DatasetEdges {
+  readonly id: string
+  readonly name: string
 }
 
 /**

@@ -213,7 +213,9 @@ function mayHaveReferences(nodes: readonly GraphNode[]): boolean {
  */
 function isReferencePort(nodeType: string | undefined, portId: string): boolean {
   if (!nodeType) return false
-  return (getNodeDef(nodeType)?.inputs ?? []).some((p) => p.id === portId && p.reference === true)
+  return (getNodeDef(nodeType)?.inputs ?? []).some(
+    (p) => p.id === portId && p.reference === true,
+  )
 }
 
 /**
@@ -238,7 +240,9 @@ function isReferencePort(nodeType: string | undefined, portId: string): boolean 
 function dataflowEdges(graph: CodaGraph): readonly GraphEdge[] {
   if (!mayHaveReferences(graph.nodes)) return graph.edges
   const types = new Map(graph.nodes.map((n) => [n.id, n.type]))
-  return graph.edges.filter((edge) => !isReferencePort(types.get(edge.target), edge.targetHandle))
+  return graph.edges.filter(
+    (edge) => !isReferencePort(types.get(edge.target), edge.targetHandle),
+  )
 }
 
 /**

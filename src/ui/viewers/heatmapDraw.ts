@@ -166,7 +166,9 @@ export function heatmapToSvg(options: HeatmapSvgOptions): SVGSVGElement {
   for (const [bucket, corners] of cornersByBucket(spec)) {
     const parts: string[] = []
     for (let i = 0; i < corners.length; i += 2) {
-      parts.push(`M${round(corners[i]!)},${round(corners[i + 1]!)}h${cellW}v${cellH}h-${cellW}Z`)
+      parts.push(
+        `M${round(corners[i]!)},${round(corners[i + 1]!)}h${cellW}v${cellH}h-${cellW}Z`,
+      )
     }
     svg.append(element('path', { d: parts.join(''), fill: ramp[bucket] ?? '#000000' }))
   }

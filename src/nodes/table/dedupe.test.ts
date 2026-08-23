@@ -141,9 +141,7 @@ describe('the node', () => {
     // is unchanged — and neurons-ness comes through, which is what lets this stand between an
     // annotation source and a Dataset.
     const neurons = T.neurons(tableSchema(column('neuronId', 'str'), column('side', 'str')))
-    const out = def.inferOutputs?.(
-      makeInferContext(def, defaultParams(def), { in: neurons }),
-    )
+    const out = def.inferOutputs?.(makeInferContext(def, defaultParams(def), { in: neurons }))
     expect(out?.out).toEqual(neurons)
   })
 
@@ -162,18 +160,37 @@ describe('the node', () => {
     let g = emptyGraph('dedupe-chain')
     g = addNode(g, graphNode('fly', 'annotation.flyTable', { base: 'main', table: 'info' }))
     g = addNode(g, graphNode('dd', 'core.dedupe', { columns: ['neuronId'], keep: 'first' }))
-    g = addNode(g, graphNode('ds', 'dataset.cave', {
-      datastack: 'test_stack',
-      version: '1',
-      neuronTable: 'neurons',
-    }))
-    g = addEdge(g, { source: 'fly', sourceHandle: 'annotations', target: 'dd', targetHandle: 'in' })
-    g = addEdge(g, { source: 'dd', sourceHandle: 'out', target: 'ds', targetHandle: 'annotations' })
+    g = addNode(
+      g,
+      graphNode('ds', 'dataset.cave', {
+        datastack: 'test_stack',
+        version: '1',
+        neuronTable: 'neurons',
+      }),
+    )
+    g = addEdge(g, {
+      source: 'fly',
+      sourceHandle: 'annotations',
+      target: 'dd',
+      targetHandle: 'in',
+    })
+    g = addEdge(g, {
+      source: 'dd',
+      sourceHandle: 'out',
+      target: 'ds',
+      targetHandle: 'annotations',
+    })
 
     const inf = inferGraph(g)
     for (const [from, to] of [
-      [{ nodeId: 'fly', portId: 'annotations' }, { nodeId: 'dd', portId: 'in' }],
-      [{ nodeId: 'dd', portId: 'out' }, { nodeId: 'ds', portId: 'annotations' }],
+      [
+        { nodeId: 'fly', portId: 'annotations' },
+        { nodeId: 'dd', portId: 'in' },
+      ],
+      [
+        { nodeId: 'dd', portId: 'out' },
+        { nodeId: 'ds', portId: 'annotations' },
+      ],
     ] as const) {
       expect(checkConnection(g, inf, from, to).ok).toBe(true)
     }

@@ -42,14 +42,11 @@ function neurons(): TableValue {
 }
 
 function clusters(): TableValue {
-  return tableFromRows(
-    tableSchema(column('label', 'str'), column('cluster', 'i64')),
-    [
-      { label: 'LC4', cluster: 1 },
-      { label: 'LC6', cluster: 1 },
-      { label: 'GONE', cluster: 2 },
-    ],
-  )
+  return tableFromRows(tableSchema(column('label', 'str'), column('cluster', 'i64')), [
+    { label: 'LC4', cluster: 1 },
+    { label: 'LC6', cluster: 1 },
+    { label: 'GONE', cluster: 2 },
+  ])
 }
 
 /**

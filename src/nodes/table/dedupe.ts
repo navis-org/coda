@@ -75,7 +75,11 @@ export const dedupeNode = registerNode({
     // Through `ctx.columns`, never `ctx.params` — invariant 5, and it is what makes the
     // provenance key and the comparison agree about which columns were actually resolved.
     return {
-      out: dedupeTable(table, ctx.columns('columns'), String(ctx.params.keep ?? 'first') as KeepMode),
+      out: dedupeTable(
+        table,
+        ctx.columns('columns'),
+        String(ctx.params.keep ?? 'first') as KeepMode,
+      ),
     }
   },
 })

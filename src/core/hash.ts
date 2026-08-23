@@ -72,3 +72,33 @@ export function hashString(input: string): string {
 export function hashValue(value: unknown): string {
   return hashString(stableStringify(value))
 }
+
+/**
+ * The same FNV-1a over raw bytes, for content-addressing a binary artefact.
+ *
+ * Here rather than beside its caller because it is the *same* hash family: a second
+ * implementation a layer away is how two ids for one artefact come about, and this codebase has
+ * the scar — `uniqueName` was written twice and the copies disagreed on the case that matters.
+ *
+ * Takes a list of views so a caller can hash several arrays as one stream without concatenating
+ * them, which for an encoded edge set would mean allocating a second hundred megabytes to hash
+ * the first. Each view is read as bytes, so the element width is part of what is hashed — two
+ * arrays holding the same numbers at different widths are different content, which is correct:
+ * they are not interchangeable on the way back out.
+ */
+export function hashBytes(views: readonly ArrayBufferView[]): string {
+  let h1 = 0x811c9dc5
+  let h2 = 0x01000193
+  let n = 0
+  for (const view of views) {
+    const bytes = new Uint8Array(view.buffer, view.byteOffset, view.byteLength)
+    for (let i = 0; i < bytes.length; i++, n++) {
+      const c = bytes[i]!
+      h1 ^= c
+      h1 = Math.imul(h1, 0x01000193) >>> 0
+      h2 ^= (c << 3) ^ n
+      h2 = Math.imul(h2, 0x85ebca6b) >>> 0
+    }
+  }
+  return h1.toString(36) + h2.toString(36)
+}

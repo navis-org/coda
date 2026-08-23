@@ -212,7 +212,8 @@ export function TableViewer({
    */
   const problems = useMemo(() => {
     const byColumn = new Map<string, string>()
-    for (const problem of filtered?.problems ?? []) byColumn.set(problem.column, problem.message)
+    for (const problem of filtered?.problems ?? [])
+      byColumn.set(problem.column, problem.message)
     return byColumn
   }, [filtered])
 

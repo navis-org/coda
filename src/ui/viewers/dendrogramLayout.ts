@@ -172,5 +172,3 @@ export function linkPath(
 export function observationsUnder(shape: DendrogramShape, link: DendrogramLink): number[] {
   return shape.leaves.slice(link.first, link.last + 1).map((leaf) => leaf.observation)
 }
-
-

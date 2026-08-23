@@ -55,10 +55,20 @@ function chain(loose: string): { graph: CodaGraph; edgeId: string } {
   g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC.*' }))
   g = addNode(g, node('skel', 'neuron.skeletons'))
   g = addNode(g, node('loose', loose))
-  g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'find', targetHandle: 'dataset' })
+  g = addEdge(g, {
+    source: 'ds',
+    sourceHandle: 'dataset',
+    target: 'find',
+    targetHandle: 'dataset',
+  })
   // Skeletons needs the dataset too, or the graph carries an unrelated error and the
   // inference-clean assertion below would be about the fixture rather than about the splice.
-  g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'skel', targetHandle: 'dataset' })
+  g = addEdge(g, {
+    source: 'ds',
+    sourceHandle: 'dataset',
+    target: 'skel',
+    targetHandle: 'dataset',
+  })
   g = addEdge(g, {
     source: 'find',
     sourceHandle: 'neurons',
@@ -69,7 +79,12 @@ function chain(loose: string): { graph: CodaGraph; edgeId: string } {
 }
 
 const candidate = (g: CodaGraph, edgeId: string, nodeId = 'loose') =>
-  spliceCandidate(g, inferGraph(g), nodeId, g.edges.find((e) => e.id === edgeId)!)
+  spliceCandidate(
+    g,
+    inferGraph(g),
+    nodeId,
+    g.edges.find((e) => e.id === edgeId)!,
+  )
 
 describe('what can be spliced', () => {
   it('takes a node whose output only becomes compatible once its input is wired', () => {
@@ -163,10 +178,17 @@ describe('the rewire', () => {
   it('replaces one link with two through the node', () => {
     const { graph, edgeId } = chain('core.filter')
     const ports = candidate(graph, edgeId)!
-    const after = spliceGraph(graph, 'loose', graph.edges.find((e) => e.id === edgeId)!, ports)
+    const after = spliceGraph(
+      graph,
+      'loose',
+      graph.edges.find((e) => e.id === edgeId)!,
+      ports,
+    )
 
     expect(after.edges.some((e) => e.id === edgeId)).toBe(false)
-    const links = after.edges.map((e) => `${e.source}:${e.sourceHandle}→${e.target}:${e.targetHandle}`)
+    const links = after.edges.map(
+      (e) => `${e.source}:${e.sourceHandle}→${e.target}:${e.targetHandle}`,
+    )
     expect(links).toContain('find:neurons→loose:in')
     expect(links).toContain('loose:out→skel:neurons')
     // The two dataset links are untouched, and nothing else was added.
@@ -188,7 +210,9 @@ describe('the rewire', () => {
     const { graph, edgeId } = chain('core.filter')
     const edge = graph.edges.find((e) => e.id === edgeId)!
     const after = spliceGraph(graph, 'loose', edge, { inPort: 'in', outPort: 'out' })
-    const inbound = after.edges.filter((e) => e.target === 'skel' && e.targetHandle === 'neurons')
+    const inbound = after.edges.filter(
+      (e) => e.target === 'skel' && e.targetHandle === 'neurons',
+    )
     expect(inbound).toHaveLength(1)
     expect(inbound[0]?.source).toBe('loose')
   })
@@ -200,7 +224,9 @@ describe('the rewire', () => {
     const inferred = inferGraph(after)
     expect(inferred.nodes['loose']?.outputs['out']?.kind).toBe('neurons')
     expect(
-      Object.values(inferred.nodes).flatMap((n) => n.issues.filter((i) => i.severity === 'error')),
+      Object.values(inferred.nodes).flatMap((n) =>
+        n.issues.filter((i) => i.severity === 'error'),
+      ),
     ).toEqual([])
   })
 })

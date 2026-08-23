@@ -171,7 +171,8 @@ export function nblastSidesFrom(
     )
   }
   if (queryValue.items.length > limit) refuse('Query', queryValue.items.length)
-  if (targetValue && targetValue.items.length > limit) refuse('Target', targetValue.items.length)
+  if (targetValue && targetValue.items.length > limit)
+    refuse('Target', targetValue.items.length)
 
   checkNblastUnits('Query', queryValue)
   if (targetValue) checkNblastUnits('Target', targetValue)

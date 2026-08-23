@@ -23,11 +23,7 @@ import { App } from '../../App'
 import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import { useGraphStore } from '../../store/graphStore'
-import {
-  clearStorage,
-  installDownloadCapture,
-  installJsdomStubs,
-} from '../../test/jsdomStubs'
+import { clearStorage, installDownloadCapture, installJsdomStubs } from '../../test/jsdomStubs'
 
 beforeAll(() => {
   installJsdomStubs({ width: 420, height: 300 })

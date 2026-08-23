@@ -23,7 +23,7 @@
 
 import { useMemo } from 'react'
 
-import type { DatasetAnnotations, CellValue, TableValue } from '../../core/values'
+import type { DatasetAnnotations, DatasetEdges, CellValue, TableValue } from '../../core/values'
 import { idText } from '../../core/ids'
 import { getRow } from '../../core/values'
 import {
@@ -52,6 +52,8 @@ export interface ProfileViewerProps {
   sourceId: string | undefined
   /** The wired annotation chain, so a partner's type is the one the ports carry. */
   annotations?: DatasetAnnotations
+  /** A user-supplied edge set, when one answers this dataset's connectivity. */
+  edges?: DatasetEdges
   datasetId: string | undefined
   /** Row index shown. Clamped here, never trusted. */
   page: number
@@ -76,6 +78,7 @@ export function ProfileViewer({
   neurons,
   sourceId,
   annotations,
+  edges,
   datasetId,
   page,
   onPage,
@@ -107,7 +110,13 @@ export function ProfileViewer({
    */
   const neuronId = row ? idText(row['neuronId']) : null
 
-  const profile = useNeuronProfile(sourceId, datasetId, neuronId ?? undefined, annotations)
+  const profile = useNeuronProfile(
+    sourceId,
+    datasetId,
+    neuronId ?? undefined,
+    annotations,
+    edges,
+  )
   const data = profile.status === 'ready' ? profile.data : undefined
 
   /*
@@ -516,13 +525,7 @@ function RegionBars({ rows }: { rows: RegionRow[] }) {
   )
 }
 
-function PartnerList({
-  rows,
-  total,
-}: {
-  rows: readonly PartnerRow[]
-  total: number
-}) {
+function PartnerList({ rows, total }: { rows: readonly PartnerRow[]; total: number }) {
   return (
     <div className="profile__partners">
       {rows.map((row) => (

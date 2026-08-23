@@ -1,5 +1,6 @@
 import { registerNode } from '../../core/registry'
-import { datasetRequest } from '../lib/datasetParam'
+import { connectivityRequest } from '../lib/datasetParam'
+import { adjacencyFor } from '../../data/queries'
 import { T } from '../../core/types'
 import { isTableValue } from '../../core/values'
 import { requireDataset } from '../lib/datasetParam'
@@ -49,8 +50,8 @@ export const adjacencyNode = registerNode({
     if (targetIds.length === 0) throw new Error('Targets table has no neuronIds')
 
     ctx.progress(0.2, `${sourceIds.length} × ${targetIds.length}`)
-    const matrix = await source.fetchAdjacency({
-      ...datasetRequest(dataset),
+    const matrix = await adjacencyFor(source, {
+      ...connectivityRequest(dataset),
       sourceIds,
       targetIds,
       groupByType: ctx.params.groupByType !== false,

@@ -54,7 +54,12 @@ function draw(
 ) {
   const def = requireNodeDef('out.dendrogram')
   const merged = { ...defaultParams(def), ...params }
-  const node = { id: 'dendro', type: 'out.dendrogram', position: { x: 0, y: 0 }, params: merged }
+  const node = {
+    id: 'dendro',
+    type: 'out.dendrogram',
+    position: { x: 0, y: 0 },
+    params: merged,
+  }
   const ctx = makeInferContext(def, merged, { in: T.linkage() })
   return render(
     <ValuePreview
@@ -105,7 +110,9 @@ describe('the dendrogram card', () => {
   it('adds to the selection under a modifier rather than replacing it', () => {
     const onSelectionChange = vi.fn()
     const { container } = draw(tree(), { selection: ['0'] }, onSelectionChange)
-    fireEvent.click(container.querySelectorAll('path[stroke="transparent"]')[1]!, { metaKey: true })
+    fireEvent.click(container.querySelectorAll('path[stroke="transparent"]')[1]!, {
+      metaKey: true,
+    })
     expect(onSelectionChange).toHaveBeenCalledWith(['0', '2', '3'])
   })
 

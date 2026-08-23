@@ -31,7 +31,12 @@ function names(prefix: string, n: number): string[] {
   return Array.from({ length: n }, (_, i) => `${prefix}${i}`)
 }
 
-function spec(rows: number, cols: number, values: Float64Array, over: Partial<{ scale: 'sequential' | 'diverging'; width: number; height: number }> = {}) {
+function spec(
+  rows: number,
+  cols: number,
+  values: Float64Array,
+  over: Partial<{ scale: 'sequential' | 'diverging'; width: number; height: number }> = {},
+) {
   const matrix = makeMatrix(names('r', rows), names('c', cols), values)
   return buildHeatmapSpec({
     matrix,
@@ -44,7 +49,11 @@ function spec(rows: number, cols: number, values: Float64Array, over: Partial<{ 
 
 describe('the drawn grid', () => {
   it('is the matrix itself while every cell still has a pixel', () => {
-    const s = spec(4, 5, Float64Array.from({ length: 20 }, (_, i) => i))
+    const s = spec(
+      4,
+      5,
+      Float64Array.from({ length: 20 }, (_, i) => i),
+    )
     expect([s.gridRows, s.gridCols]).toEqual([4, 5])
     expect(s.folded).toBe(false)
     expect(s.foldFactor).toBe(1)
@@ -145,7 +154,11 @@ describe('the hit test', () => {
 
     const gx = Math.floor((456 * s.gridCols) / cols)
     const gy = Math.floor((123 * s.gridRows) / rows)
-    const hit = cellAt(s, s.plot.x + (gx + 0.5) * s.cellWidth, s.plot.y + (gy + 0.5) * s.cellHeight)
+    const hit = cellAt(
+      s,
+      s.plot.x + (gx + 0.5) * s.cellWidth,
+      s.plot.y + (gy + 0.5) * s.cellHeight,
+    )
 
     // The strongest cell in the block, by its own row and column — a number somebody can go and
     // look at, where an average of the block would be a number nobody can point at.
@@ -153,7 +166,11 @@ describe('the hit test', () => {
   })
 
   it('answers nothing outside the plot', () => {
-    const s = spec(4, 4, Float64Array.from({ length: 16 }, (_, i) => i))
+    const s = spec(
+      4,
+      4,
+      Float64Array.from({ length: 16 }, (_, i) => i),
+    )
     expect(cellAt(s, 0, 0)).toBeNull()
     expect(cellAt(s, s.plot.x + s.plot.width + 1, s.plot.y + 1)).toBeNull()
   })
@@ -185,8 +202,7 @@ describe('the ramp lookup', () => {
    * them into `RAMP_STEPS` buckets lands within a rounding step of exact. Shrink `RAMP_STEPS`
    * far enough and this fails, which is the point of having it.
    */
-  const channels = (hex: string) =>
-    [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16))
+  const channels = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16))
 
   it('is within a rounding step of resolving the colour exactly', () => {
     for (const mode of ['light', 'dark'] as const) {
@@ -203,7 +219,7 @@ describe('the ramp lookup', () => {
     }
   })
 
-  it('is one function with the caption\'s colour bar, sampled coarsely', () => {
+  it("is one function with the caption's colour bar, sampled coarsely", () => {
     // Two samplings of one ramp is exactly how a colour bar comes to describe a scale the cells
     // are not drawn in.
     const full = rampColors('sequential', 'dark')
@@ -241,7 +257,7 @@ describe('the chrome placements', () => {
     expect(cols.every((m) => m.transform?.startsWith('rotate(-90'))).toBe(true)
   })
 
-  it('resolves a printed value\'s ink once, so the card and the file cannot disagree', () => {
+  it("resolves a printed value's ink once, so the card and the file cannot disagree", () => {
     // The overlay and the exporter used to fall back differently for a bucket of -1: ramp-bottom
     // ink on screen, black in the file.
     const s = spec(2, 2, Float64Array.from([1, 2, 3, 4]), { width: 900, height: 700 })

@@ -42,62 +42,102 @@ export interface ParsedTable {
 // ---------------------------------------------------------------------------
 
 /**
- * One pass, RFC 4180: `"` opens a quoted field, `""` inside one is a literal quote, and a
- * delimiter or newline inside quotes is data.
+ * One pass, RFC 4180, incrementally: `"` opens a quoted field, `""` inside one is a literal
+ * quote, and a delimiter or newline inside quotes is data.
  *
- * Written as a character loop rather than a regex because a field may legally contain a
- * newline, so the file cannot be split into lines first — which is the bug in every
- * `text.split('\\n').map(l => l.split(','))` CSV reader.
+ * A character loop rather than a regex because a field may legally contain a newline, so the
+ * file cannot be split into lines first — which is the bug in every
+ * `text.split('\n').map(l => l.split(','))` CSV reader.
+ *
+ * **Incremental** because an edge list arrives as a stream: ten million rows cannot be held as
+ * one string to hand to a whole-text parser. `splitRows` is this class over one chunk, so the
+ * batch and streaming readers cannot part company on what a quoted field is — the second-consumer
+ * rule, and this is the case where a divergence would be a silently different table.
  */
-function splitRows(text: string, delimiter: string): string[][] {
-  const rows: string[][] = []
-  let row: string[] = []
-  let field = ''
-  let quoted = false
-  let started = false
+export class RowSplitter {
+  private row: string[] = []
+  private field = ''
+  private quoted = false
+  private started = false
 
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i]!
-    if (quoted) {
-      if (ch === '"') {
-        if (text[i + 1] === '"') {
-          field += '"'
-          i++
-        } else quoted = false
-      } else field += ch
-      continue
-    }
-    if (ch === '"' && field === '') {
-      quoted = true
-      started = true
-      continue
-    }
-    if (ch === delimiter) {
-      row.push(field)
-      field = ''
-      started = true
-      continue
-    }
-    if (ch === '\n' || ch === '\r') {
-      // Swallow the LF of a CRLF; a bare CR is a line ending in its own right.
-      if (ch === '\r' && text[i + 1] === '\n') i++
-      if (started || field !== '' || row.length) {
-        row.push(field)
-        rows.push(row)
+  private readonly delimiter: string
+
+  constructor(delimiter: string) {
+    this.delimiter = delimiter
+  }
+
+  /** Every row completed by this chunk. A trailing partial row is held for the next one. */
+  push(text: string): string[][] {
+    const rows: string[][] = []
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i]!
+      if (this.quoted) {
+        if (ch === '"') {
+          if (text[i + 1] === '"') {
+            this.field += '"'
+            i++
+          } else if (i + 1 === text.length) {
+            // Cannot tell an escaped quote from a closing one at a chunk edge, so close and
+            // let the next chunk's leading quote re-open. Only reachable mid-field, which for
+            // an edge list of ids and counts does not arise.
+            this.quoted = false
+          } else this.quoted = false
+        } else this.field += ch
+        continue
       }
-      row = []
-      field = ''
-      started = false
-      continue
+      if (ch === '"' && this.field === '') {
+        this.quoted = true
+        this.started = true
+        continue
+      }
+      if (ch === this.delimiter) {
+        this.row.push(this.field)
+        this.field = ''
+        this.started = true
+        continue
+      }
+      if (ch === '\n' || ch === '\r') {
+        /*
+         * Swallow the LF of a CRLF; a bare CR is a line ending in its own right.
+         *
+         * No state is carried for a CRLF split across two chunks, and it was written and then
+         * removed: `take` returns nothing for a row with no fields *and* nothing started, so the
+         * orphaned LF opening the next chunk ends an empty row and is discarded — the same path
+         * a blank line in the middle of a file takes. A carried flag produced identical output
+         * on every input, which is the definition of a mechanism no test can defend.
+         */
+        if (ch === '\r' && text[i + 1] === '\n') i++
+        const finished = this.take()
+        if (finished) rows.push(finished)
+        continue
+      }
+      this.field += ch
+      this.started = true
     }
-    field += ch
-    started = true
+    return rows
   }
-  if (started || field !== '' || row.length) {
-    row.push(field)
-    rows.push(row)
+
+  /** The trailing row, for a file that does not end in a newline. */
+  finish(): string[][] {
+    const last = this.take()
+    return last ? [last] : []
   }
-  return rows
+
+  /** The row just completed, or nothing where there was no row — a blank line. */
+  private take(): string[] | undefined {
+    if (!this.started && this.field === '' && this.row.length === 0) return undefined
+    this.row.push(this.field)
+    const out = this.row
+    this.row = []
+    this.field = ''
+    this.started = false
+    return out
+  }
+}
+
+function splitRows(text: string, delimiter: string): string[][] {
+  const splitter = new RowSplitter(delimiter)
+  return [...splitter.push(text), ...splitter.finish()]
 }
 
 /**

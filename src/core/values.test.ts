@@ -78,8 +78,8 @@ describe('describeValue — geometry', () => {
   })
 
   it('still summarises an empty geometry set', () => {
-    expect(describeValue({ ...skeletons('nm'), items: [], attributes: emptyTable(SCHEMA) })).toBe(
-      '0 skeletons · 0 pts · nm',
-    )
+    expect(
+      describeValue({ ...skeletons('nm'), items: [], attributes: emptyTable(SCHEMA) }),
+    ).toBe('0 skeletons · 0 pts · nm')
   })
 })

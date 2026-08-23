@@ -72,6 +72,38 @@ export function installJsdomStubs(options: JsdomStubOptions = {}): void {
     })
   }
 
+  /*
+   * jsdom's `Blob` implements neither `arrayBuffer()` nor `stream()` — both of which every
+   * browser has had since 2020, and both of which node's own `Blob` has, so the gap shows up
+   * only in a `@vitest-environment jsdom` suite. Anything that reads a picked file hits it: the
+   * edge-list preview slices the first 64 kB, the reader streams the rest, and the Feather
+   * decoder takes the whole buffer.
+   *
+   * Built on `FileReader`, which jsdom *does* implement, and `stream()` is then built on
+   * `arrayBuffer()` — one real source of bytes rather than two that could disagree.
+   */
+  if (typeof Blob !== 'undefined' && !Blob.prototype.arrayBuffer) {
+    Blob.prototype.arrayBuffer = function arrayBuffer(this: Blob): Promise<ArrayBuffer> {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result as ArrayBuffer)
+        reader.onerror = () => reject(reader.error ?? new Error('Could not read blob'))
+        reader.readAsArrayBuffer(this)
+      })
+    }
+  }
+  if (typeof Blob !== 'undefined' && !Blob.prototype.stream) {
+    Blob.prototype.stream = function stream(this: Blob): ReadableStream<Uint8Array> {
+      const bytes = this.arrayBuffer()
+      return new ReadableStream<Uint8Array>({
+        async start(controller) {
+          controller.enqueue(new Uint8Array(await bytes))
+          controller.close()
+        },
+      })
+    } as Blob['stream']
+  }
+
   // jsdom implements no scrolling, so this is missing entirely rather than a no-op.
   // Stubbed here rather than guarded in components — every real browser has it.
   if (!Element.prototype.scrollIntoView) {

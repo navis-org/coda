@@ -18,7 +18,16 @@ function container(left: number, top: number, width: number, scale: number): HTM
   const element = document.createElement('div')
   Object.defineProperty(element, 'offsetWidth', { value: width, configurable: true })
   element.getBoundingClientRect = () =>
-    ({ left, top, width: width * scale, height: 100 * scale, right: 0, bottom: 0, x: left, y: top }) as DOMRect
+    ({
+      left,
+      top,
+      width: width * scale,
+      height: 100 * scale,
+      right: 0,
+      bottom: 0,
+      x: left,
+      y: top,
+    }) as DOMRect
   return element
 }
 
@@ -49,7 +58,10 @@ describe('tooltipPoint', () => {
      * tooltip at (1787, 498) under `position: fixed`, i.e. 533 px to the right. The card's
      * container sat at (1000, 330) drawn at 0.627.
      */
-    const point = tooltipPoint({ clientX: 1254, clientY: 417 }, container(1000, 330, 550, 0.627))
+    const point = tooltipPoint(
+      { clientX: 1254, clientY: 417 },
+      container(1000, 330, 550, 0.627),
+    )
     expect(point.x).toBeCloseTo(405.1, 1)
     expect(point.y).toBeCloseTo(138.8, 1)
     // Which is inside the card rather than half a screen away from it.

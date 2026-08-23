@@ -1,7 +1,12 @@
 import { registerNode } from '../../core/registry'
 import { T } from '../../core/types'
 import { isTableValue } from '../../core/values'
-import { requireDataset, schemasFromType, sourceLabel, sourceSupports } from '../lib/datasetParam'
+import {
+  requireDataset,
+  schemasFromType,
+  sourceLabel,
+  sourceSupports,
+} from '../lib/datasetParam'
 import { idColumn } from '../lib/tableOps'
 
 /**

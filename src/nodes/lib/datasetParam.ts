@@ -9,16 +9,24 @@
 
 import type { CodaType } from '../../core/types'
 import { datasetRef } from '../../core/types'
-import type { DatasetAnnotations, DatasetValue, Value } from '../../core/values'
+import type { DatasetValue, Value } from '../../core/values'
 import { isDatasetValue } from '../../core/values'
 import type {
   DataSource,
   DatasetInfo,
+  DatasetRequest,
+  EdgeAnswerableRequest,
   SourceCapabilities,
   SourceSchemas,
 } from '../../data/source'
 import { withAnnotations } from '../../data/annotations/schema'
-import { CANONICAL_SCHEMAS, allSources, capabilityOf, getSource } from '../../data/source'
+import {
+  CANONICAL_SCHEMAS,
+  allSources,
+  canTracePaths,
+  capabilityOf,
+  getSource,
+} from '../../data/source'
 
 /** Source referenced by a dataset-typed socket, if it is registered. */
 export function sourceFromType(type: CodaType | undefined): DataSource | undefined {
@@ -40,7 +48,14 @@ export function sourceSupports(
   capability: keyof SourceCapabilities,
 ): boolean {
   const type = ctx.inputs['dataset']
-  return capabilityOf(sourceFromType(type), datasetRef(type)?.datasetId, capability)
+  const source = sourceFromType(type)
+  const datasetId = datasetRef(type)?.datasetId
+  // `paths` is the one capability an attached edge set can *add*, so it has its own resolver —
+  // shared with the two run-time readers, which had drifted apart. Connectivity and adjacency
+  // are required methods rather than capabilities, so there is nothing there to unlock.
+  const edges = type?.kind === 'dataset' && type.edges === true
+  if (capability === 'paths') return canTracePaths(source, datasetId, edges)
+  return capabilityOf(source, datasetId, capability)
 }
 
 /** The source behind a Dataset socket, for a message that names it. */
@@ -66,7 +81,6 @@ export function schemasFromType(type: CodaType | undefined): SourceSchemas {
   return withAnnotations(schemas, type?.kind === 'dataset' ? type.annotations : undefined)
 }
 
-
 /**
  * The same narrowing, from a resolved source and dataset id rather than from a type.
  *
@@ -81,7 +95,10 @@ export function schemasForDataset(source: DataSource, dataset: DatasetValue): So
    * holding `dataset` — which is the shape of the bug this function's own comment describes,
    * reintroduced by the widening meant to fix it. A union here is an invitation.
    */
-  return withAnnotations(schemasById(source, dataset.datasetId), dataset.annotations?.table.schema)
+  return withAnnotations(
+    schemasById(source, dataset.datasetId),
+    dataset.annotations?.table.schema,
+  )
 }
 
 /**
@@ -147,12 +164,24 @@ export const ANY_OPTION = { value: '', label: 'Any' }
  * fields peeled off it, which would make the omission unrepresentable. That is a change to every
  * source and every query node; this is the shape that makes the pair hard to split meanwhile.
  */
-export function datasetRequest(dataset: DatasetValue): {
-  datasetId: string
-  annotations?: DatasetAnnotations
-} {
+export function datasetRequest(dataset: DatasetValue): DatasetRequest {
   return {
     datasetId: dataset.datasetId,
     ...(dataset.annotations ? { annotations: dataset.annotations } : {}),
+  }
+}
+
+/**
+ * The same, for the three questions a user-supplied edge set can answer.
+ *
+ * Separate from `datasetRequest` because `edges` is honoured by no source at all — only by the
+ * funnel in `data/queries.ts`. Folded into the general projection it was spread into seven
+ * requests that do not declare it (find, explore, all three morphology fetches, input ids,
+ * labels), and object spread does no excess-property checking, so nothing caught it.
+ */
+export function connectivityRequest(dataset: DatasetValue): EdgeAnswerableRequest {
+  return {
+    ...datasetRequest(dataset),
+    ...(dataset.edges ? { edges: dataset.edges } : {}),
   }
 }

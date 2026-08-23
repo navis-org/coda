@@ -284,6 +284,7 @@ function ValuePreviewInner({
         // The chain, not just the id: this card names a partner's *type* in words, so without
         // it the tiles would disagree with the ports an inch away.
         annotations={isDatasetValue(dataset) ? dataset.annotations : undefined}
+        edges={isDatasetValue(dataset) ? dataset.edges : undefined}
         page={Number(node.params.page ?? 0)}
         onPage={(next) => onParamChange?.('page', next)}
         pinned={selection}

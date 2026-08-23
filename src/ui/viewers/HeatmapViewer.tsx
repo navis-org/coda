@@ -265,7 +265,6 @@ export function HeatmapViewer({
                 strokeWidth={1.5}
               />
             )}
-
           </svg>
         )}
 

@@ -153,10 +153,30 @@ describe('buildCommandItems', () => {
         position: { x: 2, y: 0 },
         params: { collapseTypes: true },
       })
-      g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'find', targetHandle: 'dataset' })
-      g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'paths', targetHandle: 'dataset' })
-      g = addEdge(g, { source: 'find', sourceHandle: 'neurons', target: 'paths', targetHandle: 'sources' })
-      g = addEdge(g, { source: 'find', sourceHandle: 'neurons', target: 'paths', targetHandle: 'targets' })
+      g = addEdge(g, {
+        source: 'ds',
+        sourceHandle: 'dataset',
+        target: 'find',
+        targetHandle: 'dataset',
+      })
+      g = addEdge(g, {
+        source: 'ds',
+        sourceHandle: 'dataset',
+        target: 'paths',
+        targetHandle: 'dataset',
+      })
+      g = addEdge(g, {
+        source: 'find',
+        sourceHandle: 'neurons',
+        target: 'paths',
+        targetHandle: 'sources',
+      })
+      g = addEdge(g, {
+        source: 'find',
+        sourceHandle: 'neurons',
+        target: 'paths',
+        targetHandle: 'targets',
+      })
       useGraphStore.getState().loadGraph(g)
     })
 

@@ -4134,6 +4134,137 @@ a.viewer-actions__btn {
   color: var(--text-primary);
 }
 
+/*
+ * The edge-data button, which is also the indicator.
+ *
+ * An attached edge set has no wire on the canvas, so the card is the only thing that can say the
+ * connectivity came from a file — hence a pressed state carrying the set's own name rather than a
+ * neutral control that looks the same either way. `max-width` with an ellipsis because a name is
+ * whatever somebody typed and a card is 248px.
+ */
+.dataset-body__edges {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 4px;
+  font-size: 9.5px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.dataset-body__edges:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+.dataset-body__edges[aria-pressed='true'] {
+  color: var(--accent);
+  border-color: var(--border);
+}
+
+/* --------------------------------------------------------------------------
+   Edge data panel
+   -------------------------------------------------------------------------- */
+
+.edges__heading {
+  margin: 10px 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.edges__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.edges__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 11px;
+}
+
+.edges__pick {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 auto;
+  cursor: pointer;
+}
+
+.edges__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.edges__rename {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 11px;
+}
+
+.edges__facts {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.edges__actions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 4px;
+}
+
+/* The real input is the label's; a bare file input cannot be styled and reads as unrelated. */
+.edges__file {
+  display: none;
+}
+
+.edges__progress {
+  width: 100%;
+  height: 6px;
+}
+
+/*
+ * The sample rows. `table-layout: fixed` deliberately, which is the opposite of the data table's
+ * call: there the column widths are the point, and here the only question is which column is
+ * which — so an eighteen-digit id must not be allowed to push the others out of the dialog.
+ */
+.edges__sample {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  margin: 6px 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.edges__sample td {
+  padding: 1px 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border);
+}
+/* The two columns the mapping is about, so a wrong pick is visible in the data rather than only
+   in the dropdown above it. */
+.edges__sample td[data-role] {
+  color: var(--text-primary);
+  background: var(--surface-2);
+}
+
 /* --------------------------------------------------------------------------
  * Description node — the dataset's own blurb, rendered as prose
  * -------------------------------------------------------------------------- */

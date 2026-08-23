@@ -297,6 +297,18 @@ export default defineConfig({
   // Relative base so the built bundle works from a subpath (GitHub Pages) as well as root.
   base: './',
   /*
+   * Workers are ES modules, which they have to be: `data/edges/worker.ts` loads its Parquet and
+   * Feather decoders through `await import`, and vite's default `iife` format cannot code-split
+   * — the build fails outright rather than inlining them. Every `new Worker` in the tree already
+   * passes `{ type: 'module' }` (pyodide's engine, the edge importer), so this aligns the build
+   * with what the code was already asking for.
+   *
+   * The alternative was importing the decoders statically in the worker, which builds fine and
+   * makes every *CSV* import fetch 70 kB gzipped of Parquet and Arrow it will never call.
+   */
+  worker: { format: 'es' },
+
+  /*
    * Three entries. `tutorial.html` is the scroll-through introduction and
    * `nodes.html` the node guide — both plain TypeScript and CSS, importing
    * nothing from `src/ui` but `theme.css`, so they share the editor's palette

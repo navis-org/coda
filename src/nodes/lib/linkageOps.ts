@@ -11,7 +11,12 @@ import type { TableSchema } from '../../core/types'
 import { column, tableSchema } from '../../core/types'
 import type { CellValue, LinkageValue, MatrixValue, TableValue } from '../../core/values'
 import { linkageMergeCount, makeLinkage, makeMatrix, tableFromRows } from '../../core/values'
-import type { LinkageRequest, LinkageResult, LinkageSymmetry, LinkageTransform } from '../../pyodide/linkage'
+import type {
+  LinkageRequest,
+  LinkageResult,
+  LinkageSymmetry,
+  LinkageTransform,
+} from '../../pyodide/linkage'
 import { SYMMETRY_OPTIONS } from './nblastOps'
 
 /**
@@ -32,7 +37,7 @@ import { SYMMETRY_OPTIONS } from './nblastOps'
  * this data anyway.
  */
 export const LINKAGE_METHODS = [
-  { value: 'ward', label: "ward (minimum variance)" },
+  { value: 'ward', label: 'ward (minimum variance)' },
   { value: 'average', label: 'average (UPGMA)' },
   { value: 'complete', label: 'complete (furthest neighbour)' },
   { value: 'single', label: 'single (nearest neighbour)' },
@@ -120,10 +125,7 @@ export function checkLinkageInput(matrix: MatrixValue): void {
  * `checkLinkageDistances`, which exists because this was got wrong first and the symptom was
  * not what the comment here used to predict.
  */
-export function transformFor(
-  measure: MatrixValue['measure'],
-  param: string,
-): LinkageTransform {
+export function transformFor(measure: MatrixValue['measure'], param: string): LinkageTransform {
   if (param === 'one_minus' || param === 'none') return param
   return measure === 'distance' ? 'none' : 'one_minus'
 }
@@ -161,12 +163,12 @@ export function checkLinkageDistances(matrix: MatrixValue, transform: LinkageTra
   throw new Error(
     transform === 'one_minus'
       ? `These cells run ${range}, so treating them as similarities gives distances as low as ` +
-        `${formatCell(lowest)} — and a distance cannot be negative. A matrix of synapse counts ` +
-        `needs a Normalize in front of it to bring the cells into 0–1; un-normalised NBLAST ` +
-        `scores need Normalise turned back on at the NBLAST node. If the cells already are ` +
-        `distances, say so with the Distance setting.`
+          `${formatCell(lowest)} — and a distance cannot be negative. A matrix of synapse counts ` +
+          `needs a Normalize in front of it to bring the cells into 0–1; un-normalised NBLAST ` +
+          `scores need Normalise turned back on at the NBLAST node. If the cells already are ` +
+          `distances, say so with the Distance setting.`
       : `These cells run ${range}, and a distance cannot be negative. Set Distance back to ` +
-        `auto if they are similarities rather than distances.`,
+          `auto if they are similarities rather than distances.`,
   )
 }
 

@@ -118,7 +118,11 @@ function define(flavour: Flavour): NodeDefinition {
        * is somebody who has wired the Dendrogram's Selected in by mistake. A warning rather
        * than a refusal — the match itself is perfectly valid without it.
        */
-      if (flavour.expects && labels && !labels.columns.some((c) => c.name === flavour.expects)) {
+      if (
+        flavour.expects &&
+        labels &&
+        !labels.columns.some((c) => c.name === flavour.expects)
+      ) {
         issues.push(
           `No "${flavour.expects}" column on the input, so nothing downstream can colour by ` +
             `it. Wire the Clusters output of a Cut Tree.`,

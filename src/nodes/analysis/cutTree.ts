@@ -110,7 +110,10 @@ export const cutTreeNode = registerNode({
       // Not an error: one cluster is the true answer to "what groups at this distance" when
       // the distance is above the top of the tree. But it is worth reporting, because a table
       // of every neuron in cluster 1 otherwise reads as the node having failed.
-      ctx.progress(1, `above the top of the tree (${linkageMaxHeight(tree).toFixed(2)}) — 1 cluster`)
+      ctx.progress(
+        1,
+        `above the top of the tree (${linkageMaxHeight(tree).toFixed(2)}) — 1 cluster`,
+      )
     }
 
     return { clusters: clusterTable(tree, clusters), tree: withClusters(tree, clusters) }

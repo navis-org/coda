@@ -41,6 +41,7 @@ import {
   annotationSchemaFrom,
   annotationsFrom,
 } from '../lib/annotationParams'
+import { EDGE_SET_PARAMS, edgeSetIssues, edgesFrom, hasEdgeSet } from '../lib/edgeParams'
 import { refreshParam } from '../../core/node'
 
 /** The `refresh` nonce every dataset node carries. See `refreshParam`. */
@@ -105,6 +106,8 @@ function buildDatasetNode(family: DatasetFamily) {
         },
       },
       REFRESH_PARAM,
+      // Only the backends expected to want one — see `DatasetBackend.edgeSets`.
+      ...(BACKENDS[family.backend]?.edgeSets === false ? [] : EDGE_SET_PARAMS),
     ],
 
     inferOutputs: (ctx) => ({
@@ -112,6 +115,9 @@ function buildDatasetNode(family: DatasetFamily) {
         family.sourceId,
         resolveDatasetId(family, ctx.params.version),
         annotationSchemaFrom(ctx.inputs.annotations),
+        // On the type as well as the value: it is what makes `sourceSupports('paths')` true on a
+        // backend with no server-side aggregation, and a refusal has to be right before Run.
+        hasEdgeSet(ctx.params),
       ),
     }),
 
@@ -130,6 +136,7 @@ function buildDatasetNode(family: DatasetFamily) {
       }
       return [
         ...annotationIssues(ctx.inputs.annotations),
+        ...edgeSetIssues(ctx.params),
         ...rootDriftIssues(resolveDatasetId(family, ctx.params.version)),
       ]
     },
@@ -151,6 +158,7 @@ function buildDatasetNode(family: DatasetFamily) {
         datasetId: info.id,
         label: info.label,
         ...annotationsFrom(ctx.input('annotations'), ctx.inputKey('annotations')),
+        ...edgesFrom(ctx.params),
       }
       watchRootDrift(value)
       return { dataset: value }
@@ -268,6 +276,7 @@ export const customCaveNode = registerNode({
       advanced: true,
     },
     REFRESH_PARAM,
+    ...EDGE_SET_PARAMS,
   ],
 
   inferOutputs: (ctx) => {
@@ -280,6 +289,7 @@ export const customCaveNode = registerNode({
         'cave',
         datasetId,
         annotationSchemaFrom(ctx.inputs.annotations),
+        hasEdgeSet(ctx.params),
       ),
     }
   },
@@ -331,6 +341,7 @@ export const customCaveNode = registerNode({
     }
     return [
       ...annotationIssues(ctx.inputs.annotations),
+      ...edgeSetIssues(ctx.params),
       // Through the same resolver the node's own id goes through, unpinned case included — a
       // second spelling of the `datastack:materialization` grammar is a second place to drift.
       ...rootDriftIssues(customCaveDatasetId(ctx.params)),
@@ -366,12 +377,12 @@ export const customCaveNode = registerNode({
       datasetId,
       label: `${datastack} ${version}`,
       ...annotationsFrom(ctx.input('annotations'), ctx.inputKey('annotations')),
+      ...edgesFrom(ctx.params),
     } satisfies DatasetValue
     watchRootDrift(value)
     return { dataset: value }
   },
 })
-
 
 /**
  * Ask, in the background, whether the wired annotations' root ids were still current when this
@@ -422,7 +433,8 @@ function rootDriftIssues(datasetId: string | undefined): string[] {
   const check = datasetId ? peekRootCheck(datasetId) : undefined
   if (!check || check.stale === 0) return []
   const some = check.examples.join(', ')
-  const part = check.checked < check.total ? ` of the first ${check.checked.toLocaleString()}` : ''
+  const part =
+    check.checked < check.total ? ` of the first ${check.checked.toLocaleString()}` : ''
   /*
    * Names the node that repairs it. A warning that states a problem and leaves somebody to work
    * out the remedy is half a warning — and the remedy here is not obvious, since it turns on a
@@ -531,6 +543,7 @@ export const customNeuPrintNode = registerNode({
       default: '',
     },
     REFRESH_PARAM,
+    ...EDGE_SET_PARAMS,
   ],
 
   inferOutputs: (ctx) => {
@@ -540,7 +553,12 @@ export const customNeuPrintNode = registerNode({
     neuPrintSourceFor(server)
     const datasetId = String(ctx.params.dataset ?? '').trim()
     return {
-      dataset: T.dataset(sourceIdForServer(server), datasetId || undefined),
+      dataset: T.dataset(
+        sourceIdForServer(server),
+        datasetId || undefined,
+        undefined,
+        hasEdgeSet(ctx.params),
+      ),
     }
   },
 
@@ -553,7 +571,7 @@ export const customNeuPrintNode = registerNode({
     if (available && !available.some((d) => d.id === datasetId)) {
       return [`No dataset "${datasetId}" on ${serverLabel(source.server)}`]
     }
-    return []
+    return edgeSetIssues(ctx.params)
   },
 
   evaluate: async (ctx) => {
@@ -575,6 +593,7 @@ export const customNeuPrintNode = registerNode({
       sourceId: registered.id,
       datasetId: info.id,
       label: info.label,
+      ...edgesFrom(ctx.params),
     }
     return { dataset: value }
   },

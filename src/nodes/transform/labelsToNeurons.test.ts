@@ -39,12 +39,15 @@ function labels(): TableValue {
   )
 }
 
-function run(type: string, params: Record<string, unknown>, wired = true): Record<string, unknown> {
+function run(
+  type: string,
+  params: Record<string, unknown>,
+  wired = true,
+): Record<string, unknown> {
   const def = requireNodeDef(type)
   return def.evaluate!({
     params: { ...defaultParams(def), ...params },
-    input: (port: string) =>
-      port === 'labels' ? labels() : wired ? neurons() : undefined,
+    input: (port: string) => (port === 'labels' ? labels() : wired ? neurons() : undefined),
     column: (id: string) =>
       id === 'labelColumn' ? 'label' : ((params.matchColumn as string) ?? 'neuronId'),
     columns: () => [],
@@ -114,14 +117,12 @@ describe('what the two differ about', () => {
      */
     const bare = tableSchema(column('label', 'str'))
     const ask = (type: string) =>
-      requireNodeDef(type)
-        .validate!({
-          params: defaultParams(requireNodeDef(type)),
-          inputs: { labels: { kind: 'table', schema: bare }, neurons: { kind: 'neurons' } },
-          column: () => 'label',
-          columns: () => [],
-        } as never)
-        .join(' ')
+      requireNodeDef(type).validate!({
+        params: defaultParams(requireNodeDef(type)),
+        inputs: { labels: { kind: 'table', schema: bare }, neurons: { kind: 'neurons' } },
+        column: () => 'label',
+        columns: () => [],
+      } as never).join(' ')
     expect(ask('cluster.clustersToNeurons')).toMatch(/No "cluster" column/)
     expect(ask('cluster.selectedToNeurons')).not.toMatch(/No "cluster" column/)
   })
@@ -130,7 +131,11 @@ describe('what the two differ about', () => {
 describe('inference', () => {
   function graphWith(matchColumn: string) {
     let g = emptyGraph('l2n')
-    const node = (id: string, type: string, params: Record<string, unknown> = {}): GraphNode => ({
+    const node = (
+      id: string,
+      type: string,
+      params: Record<string, unknown> = {},
+    ): GraphNode => ({
       id,
       type,
       position: { x: 0, y: 0 },
@@ -139,8 +144,18 @@ describe('inference', () => {
     g = addNode(g, node('ds', 'dataset.mock.hemibrain'))
     g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC.*' }))
     g = addNode(g, node('l2n', 'cluster.clustersToNeurons', { matchColumn }))
-    g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'find', targetHandle: 'dataset' })
-    g = addEdge(g, { source: 'find', sourceHandle: 'neurons', target: 'l2n', targetHandle: 'neurons' })
+    g = addEdge(g, {
+      source: 'ds',
+      sourceHandle: 'dataset',
+      target: 'find',
+      targetHandle: 'dataset',
+    })
+    g = addEdge(g, {
+      source: 'find',
+      sourceHandle: 'neurons',
+      target: 'l2n',
+      targetHandle: 'neurons',
+    })
     return g
   }
 
@@ -157,7 +172,10 @@ describe('inference', () => {
      */
     const def = requireNodeDef('cluster.clustersToNeurons')
     const inferred = def.inferOutputs!({
-      inputs: { labels: { kind: 'table', schema: tableSchema(column('label', 'str')) }, neurons: { kind: 'neurons' } },
+      inputs: {
+        labels: { kind: 'table', schema: tableSchema(column('label', 'str')) },
+        neurons: { kind: 'neurons' },
+      },
       params: defaultParams(def),
       column: () => 'label',
       columns: () => [],

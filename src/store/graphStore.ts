@@ -47,6 +47,7 @@ import { catmaidSourceFor } from '../data/catmaid/registry'
 import { CaveSource } from '../data/cave/CaveSource'
 import { registerSource, requireSource, subscribeSourceLearned } from '../data/source'
 import { subscribeUploadLearned } from '../data/uploads'
+import { subscribeEdgeSetsLearned } from '../data/edges/store'
 import { subscribeAnnotationsLearned } from '../data/annotations'
 import { subscribeRootCheck } from '../data/cave/rootIds'
 import { getExample } from '../examples'
@@ -230,6 +231,25 @@ export interface GraphState {
    * simply reads it.
    */
   startPageOpen: boolean
+  /**
+   * Which dataset node's Edge data panel is open, if any.
+   *
+   * In the store rather than in the card, because the panel is a modal and a card lives inside
+   * React Flow's transformed pane — where a `position: fixed` descendant is captured by the
+   * transform and lands nowhere near the viewport. The same containing-block trap the chart
+   * tooltips document. So the button is on the card and the dialog is mounted at the top level.
+   */
+  edgePanelNode: string | undefined
+  openEdgePanel(nodeId: string): void
+  closeEdgePanel(): void
+  /**
+   * Attach an edge set to a dataset node, or detach it with `undefined`.
+   *
+   * One commit for both params, so attaching is **one undo step**. Two `setParam` calls would
+   * leave a state where the id is set and the name is not — which is what a refusal message
+   * reads to name the set somebody is looking for.
+   */
+  attachEdgeSet(nodeId: string, set: { id: string; name: string } | undefined): void
   /**
    * Whether the user ticked "Don't show again". Distinct from `startPageOpen` because closing
    * the start page is not dismissing it — only the checkbox writes to storage.
@@ -645,6 +665,14 @@ export const useGraphStore = create<GraphState>((set, get) => {
    */
   subscribeAnnotationsLearned(afterSourceLearned)
   /*
+   * And the edge-set catalogue, for the fourth time. `peekEdgeSet` is synchronous and the
+   * catalogue is an IndexedDB read, so a graph naming a set is validated against "I have not
+   * looked yet" — which `edgeSetIssues` deliberately answers with silence rather than with a
+   * warning it cannot substantiate. Without this the warning would then sit unshown until some
+   * unrelated edit, which is the shape of the root-drift bug written up in CLAUDE.md.
+   */
+  subscribeEdgeSetsLearned(afterSourceLearned)
+  /*
    * The fourth: whether a CAVE annotation's root ids were still current at the materialization.
    * Same terms as the three above — it is not a data-changed event, invalidates nothing and
    * schedules no run; it only tells `validate` that an answer it drew nothing from has arrived.
@@ -748,6 +776,23 @@ export const useGraphStore = create<GraphState>((set, get) => {
      */
     startPageOpen: !startDismissed && !sharedLinkPresent,
     startPageDismissed: startDismissed,
+    edgePanelNode: undefined,
+    openEdgePanel: (nodeId) => set({ edgePanelNode: nodeId }),
+    closeEdgePanel: () => set({ edgePanelNode: undefined }),
+
+    attachEdgeSet: (nodeId, edgeSet) => {
+      commit(
+        (g) =>
+          setNodeParam(
+            setNodeParam(g, nodeId, 'edgeSetId', edgeSet?.id ?? ''),
+            nodeId,
+            'edgeSetName',
+            edgeSet?.name ?? '',
+          ),
+        { tag: `edges:${nodeId}` },
+      )
+    },
+
     openStartPage: () => set({ startPageOpen: true }),
     closeStartPage: () => set({ startPageOpen: false }),
     setStartPageDismissed: (dismissed) => {

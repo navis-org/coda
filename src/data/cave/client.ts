@@ -115,7 +115,8 @@ async function request<T>(
   }
 
   const text = await response.text()
-  if (!response.ok) throw new CaveError(`CAVE returned ${response.status}: ${explain(text)}`, response.status)
+  if (!response.ok)
+    throw new CaveError(`CAVE returned ${response.status}: ${explain(text)}`, response.status)
   return parseCaveJson<T>(text)
 }
 

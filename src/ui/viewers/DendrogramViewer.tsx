@@ -6,12 +6,7 @@ import { clusterColor } from '../encoding'
 import { exportBaseName as makeBaseName } from '../export'
 import { formatNumber, truncateLabel, labelStep } from '../format'
 import type { DendrogramLink, DendrogramOrientation } from './dendrogramLayout'
-import {
-  dendrogramShape,
-  linkPath,
-  observationsUnder,
-  projectPoint,
-} from './dendrogramLayout'
+import { dendrogramShape, linkPath, observationsUnder, projectPoint } from './dendrogramLayout'
 import { tooltipPoint } from './tooltipPoint'
 import type { ExportSource } from './ViewerActions'
 import { ViewerActions } from './ViewerActions'
@@ -64,7 +59,9 @@ export function DendrogramViewer({
   onError,
 }: DendrogramViewerProps) {
   const [ref, size] = useElementSize<HTMLDivElement>()
-  const [hover, setHover] = useState<{ link: DendrogramLink; x: number; y: number } | null>(null)
+  const [hover, setHover] = useState<{ link: DendrogramLink; x: number; y: number } | null>(
+    null,
+  )
   const svgRef = useRef<SVGSVGElement>(null)
   const mode = currentMode()
   const ink = CHART_INK[mode]
@@ -92,7 +89,8 @@ export function DendrogramViewer({
     const whole = new Uint8Array(n + merges)
     // Nothing selected means nothing emphasised, rather than every branch qualifying vacuously.
     if (selected.size === 0) return whole
-    for (const leaf of shape.leaves) whole[leaf.observation] = selected.has(leaf.observation) ? 1 : 0
+    for (const leaf of shape.leaves)
+      whole[leaf.observation] = selected.has(leaf.observation) ? 1 : 0
     for (let i = 0; i < merges; i++) {
       const a = linkage.merges[i * 4]!
       const b = linkage.merges[i * 4 + 1]!
@@ -108,10 +106,7 @@ export function DendrogramViewer({
     [linkage.clusters],
   )
 
-  const exportSource: ExportSource = useMemo(
-    () => ({ svg: () => svgRef.current }),
-    [],
-  )
+  const exportSource: ExportSource = useMemo(() => ({ svg: () => svgRef.current }), [])
 
   const leafCount = shape.leaves.length
   if (leafCount === 0) {
@@ -181,7 +176,11 @@ export function DendrogramViewer({
 
   return (
     <div className="viewer">
-      <div ref={ref} className="viewer__scroll" style={{ overflow: 'hidden', position: 'relative' }}>
+      <div
+        ref={ref}
+        className="viewer__scroll"
+        style={{ overflow: 'hidden', position: 'relative' }}
+      >
         {size.width > 40 && size.height > 40 && (
           <svg
             ref={svgRef}
@@ -239,10 +238,10 @@ export function DendrogramViewer({
               })}
 
               {/*
-                * The hover emphasis as one extra path rather than a `strokeWidth` inside the
-                * map above: hovering writes to state, so a stroke that read `hover` would put
-                * every bracket's props back through reconciliation on each pointer move.
-                */}
+               * The hover emphasis as one extra path rather than a `strokeWidth` inside the
+               * map above: hovering writes to state, so a stroke that read `hover` would put
+               * every bracket's props back through reconciliation on each pointer move.
+               */}
               {hover && (
                 <path
                   d={linkPath(hover.link, orientation, box)}
@@ -294,12 +293,14 @@ export function DendrogramViewer({
           >
             <strong>{hover.link.last - hover.link.first + 1} leaves</strong>
             {/*
-              * Two rows rather than one. The label is an *expression* — "1 − NBLAST score" —
-              * where every other tooltip here appends a unit, so the heatmap's `{value}
-              * {label}` shape reads as "0.239 1 − NBLAST score" and the two numbers run
-              * together.
-              */}
-            <div className="chart-tooltip__row">joined at {formatNumber(hover.link.distance)}</div>
+             * Two rows rather than one. The label is an *expression* — "1 − NBLAST score" —
+             * where every other tooltip here appends a unit, so the heatmap's `{value}
+             * {label}` shape reads as "0.239 1 − NBLAST score" and the two numbers run
+             * together.
+             */}
+            <div className="chart-tooltip__row">
+              joined at {formatNumber(hover.link.distance)}
+            </div>
             {linkage.distanceLabel && (
               <div className="chart-tooltip__row">{linkage.distanceLabel}</div>
             )}

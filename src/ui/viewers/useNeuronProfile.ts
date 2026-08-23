@@ -14,7 +14,8 @@
 
 import { useEffect, useRef, useState } from 'react'
 
-import type { DatasetAnnotations, TableValue } from '../../core/values'
+import type { DatasetAnnotations, DatasetEdges, TableValue } from '../../core/values'
+import { connectivityFor } from '../../data/queries'
 import { getSource } from '../../data/source'
 import { errorMessage } from '../../core/errors'
 
@@ -99,6 +100,7 @@ async function load(
   datasetId: string,
   neuronId: string,
   annotations: DatasetAnnotations | undefined,
+  edges: DatasetEdges | undefined,
 ): Promise<NeuronProfileData> {
   const source = getSource(sourceId)
   if (!source) throw new Error(`Data source "${sourceId}" is not registered`)
@@ -116,10 +118,14 @@ async function load(
    * datastack's own labels while the ports an inch away carry the chain's — the disagreement
    * phase 4 exists to avoid, on the one surface that shows a type in words.
    */
-  const dataset = { datasetId, ...(annotations ? { annotations } : {}) }
+  const dataset = {
+    datasetId,
+    ...(annotations ? { annotations } : {}),
+    ...(edges ? { edges } : {}),
+  }
   const [inputs, outputs, regions] = await Promise.all([
-    source.fetchConnectivity({ ...dataset, neuronIds: [neuronId], direction: 'inputs' }),
-    source.fetchConnectivity({ ...dataset, neuronIds: [neuronId], direction: 'outputs' }),
+    connectivityFor(source, { ...dataset, neuronIds: [neuronId], direction: 'inputs' }),
+    connectivityFor(source, { ...dataset, neuronIds: [neuronId], direction: 'outputs' }),
     source.fetchRoiCounts?.({ ...dataset, neuronIds: [neuronId] }),
   ])
 
@@ -141,9 +147,13 @@ function profileKey(
   datasetId: string | undefined,
   neuronId: string | undefined,
   annotations: DatasetAnnotations | undefined,
+  edges: DatasetEdges | undefined,
 ): string | undefined {
   if (!sourceId || !datasetId || neuronId === undefined || neuronId === '') return undefined
-  return `${sourceId}|${datasetId}|${annotations?.key ?? ''}|${neuronId}`
+  // The edge set is in the key for the annotation chain's reason: one dataset with a file behind
+  // its connectivity and one without hold genuinely different answers, and without it whichever
+  // was looked at first is served to the other for the session.
+  return `${sourceId}|${datasetId}|${annotations?.key ?? ''}|${edges?.id ?? ''}|${neuronId}`
 }
 
 export function useNeuronProfile(
@@ -151,8 +161,9 @@ export function useNeuronProfile(
   datasetId: string | undefined,
   neuronId: string | undefined,
   annotations?: DatasetAnnotations,
+  edges?: DatasetEdges,
 ): NeuronProfileState {
-  const key = profileKey(sourceId, datasetId, neuronId, annotations)
+  const key = profileKey(sourceId, datasetId, neuronId, annotations, edges)
 
   /*
    * Held in a ref rather than a dependency: `ValuePreview` peels it off a fresh `DatasetValue`
@@ -162,6 +173,8 @@ export function useNeuronProfile(
    */
   const chain = useRef(annotations)
   chain.current = annotations
+  const attached = useRef(edges)
+  attached.current = edges
 
   // Seeded from the cache so paging back to a neuron already seen paints on the first render
   // rather than flashing a spinner for a frame.
@@ -183,7 +196,8 @@ export function useNeuronProfile(
     setState({ status: 'loading' })
 
     const timer = setTimeout(() => {
-      const shared = pending.get(key) ?? load(sourceId, datasetId, neuronId, chain.current)
+      const shared =
+        pending.get(key) ?? load(sourceId, datasetId, neuronId, chain.current, attached.current)
       pending.set(key, shared)
 
       shared

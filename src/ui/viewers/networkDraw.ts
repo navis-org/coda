@@ -20,7 +20,6 @@ import { getColumn } from '../../core/values'
 import type { Legend } from '../encoding'
 import { formatNumber } from '../format'
 
-
 /**
  * How far a reciprocal pair bows apart, as a fraction of the distance between its two
  * nodes. Same number, same meaning as `@sigma/edge-curve`'s `curvature` attribute, so the
@@ -97,7 +96,6 @@ export function curvePoint(source: Point, target: Point, curvature: number, t: n
     y: inverse * inverse * source.y + 2 * inverse * t * control.y + t * t * target.y,
   }
 }
-
 
 /** `d` attribute for an edge: a straight line, or a quadratic when it has to bow aside. */
 export function edgePath(source: Point, target: Point, curvature: number): string {

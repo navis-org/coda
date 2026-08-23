@@ -200,7 +200,11 @@ export function CommandPalette({
               {item.hint && (
                 <>
                   <Separator />
-                  <span className={item.warn ? 'add-menu__desc add-menu__desc--warn' : 'add-menu__desc'}>
+                  <span
+                    className={
+                      item.warn ? 'add-menu__desc add-menu__desc--warn' : 'add-menu__desc'
+                    }
+                  >
                     {item.warn ? '⚠ ' : ''}
                     {item.hint}
                   </span>

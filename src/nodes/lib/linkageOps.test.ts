@@ -39,9 +39,18 @@ import {
 function tree(clusters?: Int32Array): LinkageValue {
   return makeLinkage(
     Float64Array.from([
-      0, 1, 0.1, 2, //
-      2, 3, 0.2, 2,
-      4, 5, 0.8, 4,
+      0,
+      1,
+      0.1,
+      2, //
+      2,
+      3,
+      0.2,
+      2,
+      4,
+      5,
+      0.8,
+      4,
     ]),
     ['a', 'b', 'c', 'd'],
     Int32Array.from([0, 1, 2, 3]),
@@ -107,7 +116,13 @@ describe('the distance transform', () => {
   })
 
   it('says what a height means, so the axis is not a bare number', () => {
-    const scores = makeMatrix(['a'], ['a'], Float64Array.from([1]), 'NBLAST score', 'similarity')
+    const scores = makeMatrix(
+      ['a'],
+      ['a'],
+      Float64Array.from([1]),
+      'NBLAST score',
+      'similarity',
+    )
     expect(distanceLabelFor(scores, 'one_minus')).toBe('1 − NBLAST score')
     expect(distanceLabelFor(scores, 'none')).toBe('NBLAST score')
   })
@@ -146,7 +161,13 @@ describe('the ordered matrix', () => {
   })
 
   it('keeps what the cells mean, so the Heatmap still labels its colour bar', () => {
-    const matrix = makeMatrix(['a', 'b'], ['a', 'b'], new Float64Array(4), 'NBLAST score', 'similarity')
+    const matrix = makeMatrix(
+      ['a', 'b'],
+      ['a', 'b'],
+      new Float64Array(4),
+      'NBLAST score',
+      'similarity',
+    )
     const out = orderedMatrix(matrix, Int32Array.from([1, 0]))
     expect(out.valueLabel).toBe('NBLAST score')
     expect(out.measure).toBe('similarity')
@@ -210,8 +231,14 @@ describe('the cluster table', () => {
   })
 
   it('reports the position in the drawing, not the row number', () => {
-    const shuffled = makeLinkage(tree().merges, ['a', 'b', 'c', 'd'], Int32Array.from([3, 2, 1, 0]))
-    expect(getColumn(clusterTable(shuffled, cutByCount(shuffled, 4)), 'order')).toEqual([3, 2, 1, 0])
+    const shuffled = makeLinkage(
+      tree().merges,
+      ['a', 'b', 'c', 'd'],
+      Int32Array.from([3, 2, 1, 0]),
+    )
+    expect(getColumn(clusterTable(shuffled, cutByCount(shuffled, 4)), 'order')).toEqual([
+      3, 2, 1, 0,
+    ])
   })
 
   it('agrees with the schema it declares', () => {
@@ -286,7 +313,9 @@ describe('checkLinkageDistances', () => {
   })
 
   it('accepts a distance matrix that is already one', () => {
-    expect(() => checkLinkageDistances(cells([0, 0.4, 0.4, 0], 'distance'), 'none')).not.toThrow()
+    expect(() =>
+      checkLinkageDistances(cells([0, 0.4, 0.4, 0], 'distance'), 'none'),
+    ).not.toThrow()
   })
 
   it('ignores non-finite cells rather than reading them as the extreme', () => {
@@ -295,8 +324,11 @@ describe('checkLinkageDistances', () => {
   })
 
   it('refuses a matrix with nothing usable in it at all', () => {
-    expect(() => checkLinkageDistances(cells([Number.NaN, Number.NaN, Number.NaN, Number.NaN]), 'one_minus')).toThrow(
-      /no usable values/,
-    )
+    expect(() =>
+      checkLinkageDistances(
+        cells([Number.NaN, Number.NaN, Number.NaN, Number.NaN]),
+        'one_minus',
+      ),
+    ).toThrow(/no usable values/)
   })
 })
