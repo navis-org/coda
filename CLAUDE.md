@@ -609,6 +609,7 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `nodes/transform/selectOne.test.ts`      | stepping free vs committing stale, an index past the end emitting nothing, and one skeleton re-measuring its bounds                |
 | `ui/nodes/selectOneBody.test.tsx`        | the pager card: not-run vs not-wired, the Live label counted once, and the gap between what is shown and what is emitted           |
 | `nodeguide/nodeGuide.test.ts`            | the node guide's data: a paragraph per node, socket styles, internal-vs-advanced params, an enum's label, and the examples cross-reference |
+| `overview/overview.test.ts`              | the overview page against the registry: the node count it advertises as a floor, and every backend and real dataset family named on it |
 
 ## Exporting a notebook
 
@@ -2604,6 +2605,82 @@ found — jsdom happily confirmed `routed` "worked", because every one of its te
 What has **not** been looked at is a route under a non-default algorithm: `mrtree` bends every
 edge, `force`/`stress` bend none and `radial` returns no `sections` at all, all of which read as
 "no route" and are covered headlessly.
+
+## The overview page
+
+A **fourth** vite entry — `overview.html` at the root, `src/overview/{main.ts,overview.css}` —
+and the front door of the three documents that ship beside the app. The pair it completes reads
+in one order: this one is what Coda *is*, the field guide is how it works, the node guide is what
+each node does. Somebody deciding whether to open the editor at all reads this and nothing else.
+
+Same construction as the other two: plain TypeScript, no React and no store import, importing
+nothing from `src/ui` but `theme.css`. Verify with `pnpm build` — `overview-*.js` is **0.8 kB
+raw / 0.46 kB gzipped**, its CSS is 25 kB (nearly all of it `theme.css`), and
+`dist/overview.html` must reference no `main-*` chunk. If it ever does, something reached into
+`src/ui` past the stylesheet.
+
+**Its script is a scroll reveal and a theme read, and that is the whole of it.** The page has no
+camera and no pinned canvas — the field guide already owns that idiom, and repeating it here
+would make the front door the longest of the three to get through. Every figure is static markup
+in the app's own vocabulary: node cards with typed sockets, the Connections panel, a scatter
+feeding a neuroglancer frame, two exported code cells, the assistant's plan, a share link.
+
+**The sections are peers, so they are not numbered.** The field guide numbers its chapters
+because it is a sequence read front to back; an overview's highlights are a set, and `01 / 02 /
+03` down the side of one would be a structural device encoding something untrue. What they carry
+instead is an **icon**, and three of the seven are `<use>`d straight out of the shapes in
+`src/ui/Icons.tsx` — Connections' branch, the assistant's robot head, Share's box-with-an-arrow
+— so the page and the toolbar draw the same glyph. They are **achromatic** on the same rule
+`CodaMark` follows: every hue on this page already means a socket type, and a coloured section
+icon would read as a typed port rather than as chrome.
+
+The icon sits *before* the heading with `align-items: flex-start`, not `center`. Two of the
+titles wrap to three lines at the default width, and a centred icon on one of those floats
+halfway down the block beside nothing in particular.
+
+### What the page claims, and what checks it
+
+`overview.test.ts` exists because a static document is not a route: nothing in the app fails when
+it goes stale, and this one had **already drifted before it shipped** — the mock-up it was built
+from listed CAVE as "in progress" and CATMAID as "planned", months after both had landed. So two
+claims are asserted against the registry rather than against a snapshot:
+
+- **Every backend with a name, and every non-synthetic dataset family, must appear in the text.**
+  A fourth backend or a seventh neuPrint dataset is then a failing test rather than a page that
+  quietly under-reports what Coda reads. Both were confirmed by mutation.
+- **The node count is a floor** (`60+ nodes`), compared against `listableNodeDefs().length`.
+  A floor rather than an exact count, so adding a node does not fail a test that is about the
+  page being *wrong*.
+
+The test flattens the markup before matching, because the typography and the prose disagree about
+how to spell a hyphen — `FIB-19` in the dataset card and `FIB&#8209;19` in the sentence beside it
+are the same dataset to a reader and two strings to `toContain`.
+
+**What is deliberately not asserted is the layout.** jsdom performs no layout, so the geometry,
+the reveal and the mock widgets have the standing the tutorial's do: driven by hand.
+
+### Two things the theme forced
+
+**The wires in the canvas figure take their colour from CSS, never a `stroke` attribute.** A
+presentation attribute does not resolve `var()`, so `stroke="var(--socket-dataset)"` comes out
+black with nothing failing — the trap `tutorial/main.ts` records hitting from the other
+direction. The paths carry `data-fam` and the stylesheet colours them.
+
+**The syntax palette in the two code figures is per-mode, and it had to be.** Those are 11.5px
+glyphs, so the floor is 4.5:1 rather than the 3:1 a mark gets, and the socket hues fail exactly
+where a light-theme reader reads them: `--socket-dataset` is **2.67:1** on the light panel.
+Measured against `--surface-1` in each mode — light `#0a7a52` 5.08, `#1f63b4` 5.69, `#4a3aa7`
+8.12, `#6d6b66` 5.05; dark `#199e70` 5.27, `#3987e5` 4.93, `#9085e9` 5.74, `#898781` 4.99. Same
+reasoning and the same three-block shape as theme.css's own `--status-warn`.
+
+The neuroglancer figure's blacks and EM greys are the one place a literal is right: neuroglancer
+renders on black whatever theme Coda is in, which is also why `out.neuroglancer` resolves its
+segment colours in dark mode regardless. The orange in it is that dark-mode Matrix hue, so the
+lassoed points and the segments they became are the same colour on screen.
+
+Three entry points, all through `import.meta.env.BASE_URL`: the toolbar's `? ▾` (first of the
+three, ahead of both guides), the start page's credits row, and the README.
+`startPage.test.tsx` covers the two in-app ones.
 
 ## The tutorial page
 

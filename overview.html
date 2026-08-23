@@ -1,0 +1,808 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Coda Overview</title>
+    <meta
+      name="description"
+      content="What Coda is, in one scroll: a node-based editor for connectome data analysis, the backends it reads, and what comes out the other end."
+    />
+    <link rel="icon" href="./logo.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f9f9f7" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#171716" />
+  </head>
+  <body>
+<!-- ==========================================================================
+     Section icons.
+     Three are lifted from src/ui/Icons.tsx, so the page and the toolbar draw the
+     same glyph; the rest follow the same 24-unit grid and 2-unit stroke.
+     ========================================================================== -->
+<svg width="0" height="0" style="position: absolute" aria-hidden="true">
+  <defs>
+    <g id="i-nodes" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="2" y="9" width="6.5" height="6" rx="1.5"/>
+      <rect x="15.5" y="2.5" width="6.5" height="6" rx="1.5"/>
+      <rect x="15.5" y="15.5" width="6.5" height="6" rx="1.5"/>
+      <path d="M8.5 11.4h3.5v-5.9h3.5M8.5 12.6h3.5v5.9h3.5"/>
+    </g>
+    <!-- Connections, from Icons.tsx: a branch, which is the shape everybody
+         already reads as one thing splitting into another. -->
+    <g id="i-connections" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M6 4.5v11"/>
+      <circle cx="6" cy="18" r="2.5"/>
+      <circle cx="18" cy="6" r="2.5"/>
+      <path d="M18 8.5a9.5 9.5 0 0 1-9.5 9.5"/>
+    </g>
+    <g id="i-pointer" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M5.5 3.5 19 11l-6 1.9L11 19z"/>
+      <path d="M13.6 13.6 20 20"/>
+    </g>
+    <g id="i-download" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 3v11"/>
+      <path d="m7.5 10 4.5 4.5 4.5-4.5"/>
+      <path d="M4 20h16"/>
+    </g>
+    <g id="i-code" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="m8.5 6-5 6 5 6"/>
+      <path d="m15.5 6 5 6-5 6"/>
+    </g>
+    <!-- Assistant, from Icons.tsx. The eyes are filled dots rather than circles:
+         at this size a stroked one closes up into a smudge. -->
+    <g id="i-assistant" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="4" y="8.5" width="16" height="11.5" rx="3"/>
+      <path d="M12 5.5v3"/>
+      <path d="M2 13v3M22 13v3"/>
+      <circle cx="12" cy="4" r="1.4" fill="currentColor" stroke="none"/>
+      <circle cx="9.25" cy="14" r="1.3" fill="currentColor" stroke="none"/>
+      <circle cx="14.75" cy="14" r="1.3" fill="currentColor" stroke="none"/>
+    </g>
+    <!-- Share, from Icons.tsx: a box with an arrow leaving it. -->
+    <g id="i-share" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M18 12.5V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6.5"/>
+      <path d="M14 3h7v7"/>
+      <path d="M11.5 12.5 21 3"/>
+    </g>
+  </defs>
+</svg>
+
+<header class="hero">
+  <div class="hero__dots" aria-hidden="true"></div>
+  <div class="shell hero__inner">
+    <div class="hero__brand">
+      <svg width="22" height="22" viewBox="0 0 64 64" fill="currentColor" aria-hidden="true">
+        <path fill-rule="evenodd" d="M32 12a18 20 0 1 0 0 40 18 20 0 1 0 0-40Zm0 3.6a12.24 16.4 0 1 1 0 32.8 12.24 16.4 0 1 1 0-32.8Z"/>
+        <rect x="30" y="5" width="4" height="54" rx="2"/>
+        <rect x="7" y="30" width="50" height="4" rx="2"/>
+      </svg>
+      <span>Coda</span>
+      <span class="hero__tag">Alpha</span>
+    </div>
+
+    <h1>Coda &mdash; <em>Feature Overview</em></h1>
+
+    <div class="hero__meta">
+      <span>neuPrint &middot; CAVE &middot; CATMAID</span>
+      <span>60+ nodes</span>
+      <span>runs in the browser</span>
+    </div>
+  </div>
+</header>
+
+<!-- ==========================================================================
+     Node-based editor
+     ========================================================================== -->
+<section class="thesis">
+  <div class="shell">
+    <div class="chapter__head rise" style="max-width: 42rem">
+      <h2>
+        <span class="h2icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-nodes"/></svg></span>
+        Node-Based Editor
+      </h2>
+      <p class="lede">
+        Coda is a node-based editor for connectome data analysis. Each node does one thing
+        &mdash; fetching, analysis or visualisation &mdash; and can be freely combined to enable
+        complex analysis pipelines: search <em>Neurons</em>, run <em>NBLASTs</em>,
+        visualise data <em>Neuroglancer</em>, explore <em>Networks</em> and more.
+      </p>
+    </div>
+
+    <div class="stagewrap rise" data-delay="1">
+      <div class="stage">
+        <div class="stage__bar">
+          <strong>LC outputs</strong>
+          <span>&middot; hemibrain</span>
+          <span class="stage__spacer"></span>
+          <span class="stage__run">&#9654; Run</span>
+        </div>
+
+        <div class="world">
+          <svg class="wires" viewBox="0 0 1010 348" aria-hidden="true">
+            <path data-fam="dataset" d="M152 161 C181 161, 171 143, 200 143"/>
+            <path data-fam="dataset" d="M152 161 C288 161, 264 139, 400 139"/>
+            <path data-fam="table" d="M352 143 C381 143, 371 159, 400 159"/>
+            <path data-fam="table" d="M576 139 C596 139, 590 69, 608 69"/>
+            <path data-fam="table" d="M576 139 C596 139, 590 225, 608 225"/>
+            <path data-fam="table" d="M784 69 C798 69, 798 53, 812 53"/>
+            <path data-fam="matrix" d="M776 225 C794 225, 796 211, 812 211"/>
+          </svg>
+
+          <div class="node" data-cat="dataset" style="left: 14px; top: 122px; width: 138px">
+            <div class="node__head"><span class="node__title">Hemibrain</span><span class="node__play">&#9654;</span></div>
+            <div class="node__ports">
+              <div class="port">
+                <span class="port__in"></span>
+                <span class="port__out">Dataset<i class="sock sock--out" data-fam="dataset" data-shape="square"></i></span>
+              </div>
+            </div>
+            <div class="node__params">
+              <div class="prow"><span>Version</span><b class="is-picker">Latest</b></div>
+            </div>
+            <div class="node__foot"><span>hemibrain:v1.2.1</span></div>
+          </div>
+
+          <div class="node" data-cat="query" style="left: 200px; top: 104px; width: 152px">
+            <div class="node__head"><span class="node__title">Find Neurons</span><span class="node__play">&#9654;</span></div>
+            <div class="node__ports">
+              <div class="port">
+                <span class="port__in">Dataset<i class="sock sock--in" data-fam="dataset" data-shape="square"></i></span>
+                <span class="port__out">Neurons<i class="sock sock--out" data-fam="table" data-shape="circle"></i></span>
+              </div>
+            </div>
+            <div class="node__params">
+              <div class="prow"><span>Type</span><b>^LC\d+$</b></div>
+              <div class="prow"><span>Status</span><b class="is-picker">Traced</b></div>
+            </div>
+            <div class="node__foot"><span>1,704 neurons</span></div>
+          </div>
+
+          <div class="node" data-cat="query" style="left: 400px; top: 100px; width: 176px">
+            <div class="node__head"><span class="node__title">Connectivity</span><span class="node__play">&#9654;</span></div>
+            <div class="node__ports">
+              <div class="port">
+                <span class="port__in">Dataset<i class="sock sock--in" data-fam="dataset" data-shape="square"></i></span>
+                <span class="port__out">Table<i class="sock sock--out" data-fam="table" data-shape="ring"></i></span>
+              </div>
+              <div class="port">
+                <span class="port__in">Neurons<i class="sock sock--in" data-fam="table" data-shape="circle"></i></span>
+                <span class="port__out"></span>
+              </div>
+            </div>
+            <div class="node__params">
+              <div class="prow"><span>Direction</span><b class="is-picker">downstream</b></div>
+              <div class="prow"><span>Hops</span><b>1</b></div>
+            </div>
+            <div class="node__foot"><span>18,206 rows</span></div>
+          </div>
+
+          <div class="node" data-cat="transform" style="left: 608px; top: 30px; width: 176px">
+            <div class="node__head"><span class="node__title">Group By</span><span class="node__play">&#9654;</span></div>
+            <div class="node__ports">
+              <div class="port">
+                <span class="port__in">Table<i class="sock sock--in" data-fam="table" data-shape="ring"></i></span>
+                <span class="port__out">Table<i class="sock sock--out" data-fam="table" data-shape="ring"></i></span>
+              </div>
+            </div>
+            <div class="node__params">
+              <div class="prow"><span>Group by</span><b class="is-picker">postType</b></div>
+              <div class="prow"><span>Aggregate</span><b class="is-picker">sum(weight)</b></div>
+            </div>
+            <div class="node__foot"><span>214 rows</span></div>
+          </div>
+
+          <div class="node" data-cat="analysis" style="left: 608px; top: 186px; width: 168px">
+            <div class="node__head"><span class="node__title">Build Network</span><span class="node__play">&#9654;</span></div>
+            <div class="node__ports">
+              <div class="port">
+                <span class="port__in">Table<i class="sock sock--in" data-fam="table" data-shape="ring"></i></span>
+                <span class="port__out">Network<i class="sock sock--out" data-fam="matrix" data-shape="diamond"></i></span>
+              </div>
+            </div>
+            <div class="node__params">
+              <div class="prow"><span>Source</span><b class="is-picker">preType</b></div>
+              <div class="prow"><span>Target</span><b class="is-picker">postType</b></div>
+            </div>
+            <div class="node__foot"><span>214 nodes &middot; 1,088 links</span></div>
+          </div>
+
+          <div class="node" data-cat="visualisation" style="left: 812px; top: 14px; width: 176px">
+            <div class="node__head"><span class="node__title">Bar Chart</span><span class="node__play">&#9654;</span></div>
+            <div class="node__ports">
+              <div class="port">
+                <span class="port__in">Table<i class="sock sock--in" data-fam="table" data-shape="ring"></i></span>
+                <span class="port__out">Table<i class="sock sock--out" data-fam="table" data-shape="ring"></i></span>
+              </div>
+            </div>
+            <div class="mini">
+              <i style="--h: 88%; --i: 0"></i><i style="--h: 61%; --i: 1"></i><i style="--h: 50%; --i: 2"></i><i style="--h: 37%; --i: 3"></i><i style="--h: 26%; --i: 4"></i><i style="--h: 18%; --i: 5"></i>
+            </div>
+            <div class="node__foot"><span>214 bars &middot; sum(weight)</span></div>
+          </div>
+
+          <div class="node" data-cat="visualisation" style="left: 812px; top: 172px; width: 178px">
+            <div class="node__head"><span class="node__title">Network</span><span class="node__play">&#9654;</span></div>
+            <div class="node__ports">
+              <div class="port">
+                <span class="port__in">Network<i class="sock sock--in" data-fam="matrix" data-shape="diamond"></i></span>
+                <span class="port__out">Selected<i class="sock sock--out" data-fam="table" data-shape="circle"></i></span>
+              </div>
+            </div>
+            <div class="netmini">
+              <svg viewBox="0 0 160 62" width="100%" height="62" aria-hidden="true">
+                <path class="link" d="M28 20 78 12M28 20 70 38M78 12 122 24M70 38 122 24M70 38 104 50M122 24 104 50M28 20 44 46M44 46 70 38"/>
+                <g class="dot">
+                  <circle cx="28" cy="20" r="6"/><circle cx="78" cy="12" r="4.5"/>
+                  <circle cx="70" cy="38" r="7"/><circle cx="122" cy="24" r="5"/>
+                  <circle cx="104" cy="50" r="3.5"/><circle cx="44" cy="46" r="3.5"/>
+                </g>
+              </svg>
+            </div>
+            <div class="node__foot"><span>214 nodes &middot; click to select</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==========================================================================
+     Backends
+     ========================================================================== -->
+<section class="chapter">
+  <div class="shell">
+    <div class="chapter__head rise" style="max-width: 31rem">
+      <h2>
+        <span class="h2icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-connections"/></svg></span>
+        Support for (almost) every major connectome today
+      </h2>
+    </div>
+
+    <div class="split split--narrow">
+      <div class="stack rise">
+        <div>
+          <div class="backend" data-backend="neuprint">
+            <div class="backend__head"><b>neuPrint</b></div>
+            <p>
+              For example, MaleCNS, MANC, Hemibrain plus any other deployment by URL.
+            </p>
+          </div>
+          <div class="backend" data-backend="cave">
+            <div class="backend__head"><b>CAVE</b></div>
+            <p>
+              For example, FlyWire FAFB (public or production), BANC, MICrONS and any other datastack by name.
+            </p>
+          </div>
+          <div class="backend" data-backend="catmaid">
+            <div class="backend__head"><b>CATMAID</b></div>
+            <p>
+              For example, the manually traced FAFB, FANC and larval L1 datasets hosted by Virtual Fly Brain.
+              Or connect to your own CATMAID instance!
+            </p>
+          </div>
+          <div class="backend" data-backend="mock">
+            <div class="backend__head"><b>Your own data</b></div>
+            <p>
+              Bring in your own data, e.g. annotations from <code>SeaTable</code>, <code>Google Sheets</code>,
+              or CSV files (<code>Upload&nbsp;Table</code> + <code>Table&nbsp;from&nbsp;URL</code>).
+            </p>
+          </div>
+        </div>
+        <p class="fig__cap" style="max-width: 30rem">
+          One node per dataset. It arrives pointed somewhere and asks only for a version &mdash;
+          and its name says which backend serves it, because <b>one volume can be published on
+          two</b>.
+        </p>
+      </div>
+
+      <div class="surface rise" data-delay="1">
+        <div class="surface__bar">
+          <strong>Connections</strong>
+          <span class="spacer"></span><span>tokens stay in this browser</span>
+        </div>
+        <div class="tabs">
+          <span class="tab" data-on="true">neuPrint</span>
+          <span class="tab">CAVE</span>
+          <span class="tab">CATMAID</span>
+          <span class="tab">Annotations</span>
+        </div>
+        <div class="ok-line"><span class="dot-ok"></span>connected &middot; 6 datasets listed</div>
+        <div class="dsgrid">
+          <div class="dscard"><b>Hemibrain</b><span>v1.2.1</span></div>
+          <div class="dscard"><b>MaleCNS</b><span>v1.0</span></div>
+          <div class="dscard"><b>MANC</b><span>v1.2.3</span></div>
+          <div class="dscard"><b>Optic Lobe</b><span>v1.1</span></div>
+          <div class="dscard"><b>FIB-19</b><span>v1.0</span></div>
+          <div class="dscard"><b>Mushroom Body</b><span>no version</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==========================================================================
+     Interactive exploration
+     ========================================================================== -->
+<section class="chapter">
+  <div class="shell">
+    <div class="chapter__head rise">
+      <h2>
+        <span class="h2icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-pointer"/></svg></span>
+        Interactive Exploration
+      </h2>
+      <p class="lede">
+        Data viewers allow manually selecting neurons, enabling highly interactive pipelines.
+      </p>
+      <p>
+        Lasso points in a scatter, click nodes in a network, select a clade in a dendrogram. The
+        picked rows leave by a <span class="ty ty--table">Selected</span> output. Pass the
+        selection to other widgets &mdash; a 3D view, a fetch, another chart, or an embedded
+        neuroglancer scene.
+      </p>
+    </div>
+
+    <div class="pipe rise" data-delay="1">
+      <div class="surface">
+        <div class="surface__bar">
+          <strong>Scatter Plot</strong><span>&middot; pre &times; post</span>
+          <span class="spacer"></span><span>&#8679;drag to lasso</span>
+        </div>
+        <div class="plot">
+          <svg viewBox="0 0 320 176" role="img" aria-label="Scatter plot with a lassoed group of points highlighted">
+            <g class="plot__grid"><path d="M40 8V152M40 152H312M40 116H312M40 80H312M40 44H312"/></g>
+            <g class="plot__axis"><path d="M40 152H312M40 8V152"/></g>
+            <path class="plot__lasso" d="M204 40 218 23 253 17 275 44 262 71 227 75Z"/>
+            <g class="plot__pt">
+              <circle cx="58" cy="140" r="3"/><circle cx="70" cy="132" r="3"/><circle cx="66" cy="146" r="3"/>
+              <circle cx="84" cy="126" r="3"/><circle cx="92" cy="138" r="3"/><circle cx="102" cy="118" r="3"/>
+              <circle cx="112" cy="130" r="3"/><circle cx="120" cy="110" r="3"/><circle cx="128" cy="124" r="3"/>
+              <circle cx="138" cy="104" r="3"/><circle cx="146" cy="118" r="3"/><circle cx="154" cy="96" r="3"/>
+              <circle cx="162" cy="112" r="3"/><circle cx="170" cy="88" r="3"/><circle cx="178" cy="102" r="3"/>
+              <circle cx="186" cy="120" r="3"/><circle cx="196" cy="94" r="3"/><circle cx="206" cy="110" r="3"/>
+              <circle cx="216" cy="128" r="3"/><circle cx="228" cy="116" r="3"/><circle cx="240" cy="132" r="3"/>
+              <circle cx="252" cy="120" r="3"/><circle cx="266" cy="138" r="3"/><circle cx="284" cy="126" r="3"/>
+              <circle cx="296" cy="144" r="3"/><circle cx="88" cy="150" r="3"/><circle cx="132" cy="142" r="3"/>
+              <circle cx="176" cy="136" r="3"/><circle cx="286" cy="92" r="3"/><circle cx="292" cy="66" r="3"/>
+            </g>
+            <g class="plot__pt" data-picked="true">
+              <circle cx="212" cy="42" r="3.4"/><circle cx="224" cy="34" r="3.4"/><circle cx="238" cy="46" r="3.4"/>
+              <circle cx="250" cy="30" r="3.4"/><circle cx="246" cy="62" r="3.4"/><circle cx="262" cy="52" r="3.4"/>
+            </g>
+            <text class="plot__lab" x="40" y="166">0</text>
+            <text class="plot__lab" x="266" y="166">4,000 pre</text>
+            <text class="plot__lab" x="6" y="16">post</text>
+          </svg>
+        </div>
+        <div class="ports">
+          <div class="ports__cell"><b><i class="sock" data-fam="table" data-shape="ring"></i>Table</b><span>1,704 rows, unchanged</span></div>
+          <div class="ports__cell" data-wired="true"><b><i class="sock" data-fam="table" data-shape="circle"></i>Selected</b><span>6 rows</span></div>
+        </div>
+      </div>
+
+      <div class="pipe__link" aria-hidden="true">
+        <em>Selected</em>
+        <svg class="h" viewBox="0 0 78 44" width="78" height="44">
+          <path d="M0 22h60"/>
+          <polygon points="59,16 76,22 59,28"/>
+        </svg>
+        <svg class="v" viewBox="0 0 24 44" width="24" height="44">
+          <path d="M12 0v30"/>
+          <polygon points="6.5,29 12,43 17.5,29"/>
+        </svg>
+      </div>
+
+      <div class="surface">
+        <div class="surface__bar">
+          <i class="sock" data-fam="table" data-shape="circle" style="position: static; transform: none"></i>
+          <strong>Neuroglancer</strong><span>&middot; hemibrain:v1.2.1</span>
+          <span class="spacer"></span><span>6 segments</span>
+        </div>
+        <!--
+          Literal colours here, and deliberately: neuroglancer renders on black
+          whatever theme Coda is in, which is also why `out.neuroglancer`
+          resolves its segment colours in dark mode regardless. The orange is
+          that dark-mode Matrix hue, so the picked points and the segments they
+          became are the same colour on screen.
+        -->
+        <svg class="ngl" viewBox="0 0 320 180" role="img" aria-label="Embedded neuroglancer scene: three EM panels and a 3D view of the selected neurons">
+          <defs>
+            <pattern id="em" width="34" height="26" patternUnits="userSpaceOnUse" patternTransform="rotate(9)">
+              <rect width="34" height="26" fill="#232320"/>
+              <path d="M2 3 14 1 20 8 16 17 5 16Z" fill="none" stroke="#3d3d37" stroke-width="1.1"/>
+              <path d="M20 8 32 5 34 15 24 20 16 17Z" fill="none" stroke="#37372f" stroke-width="1.1"/>
+              <path d="M5 16 16 17 14 26 3 25Z" fill="none" stroke="#3a3a34" stroke-width="1"/>
+              <circle cx="9" cy="9" r="1.6" fill="#4b4b44"/>
+              <circle cx="27" cy="12" r="1.3" fill="#45453f"/>
+            </pattern>
+            <clipPath id="pTL"><rect x="0" y="0" width="159" height="89"/></clipPath>
+            <clipPath id="pTR"><rect x="161" y="0" width="159" height="89"/></clipPath>
+            <clipPath id="pBL"><rect x="0" y="91" width="159" height="89"/></clipPath>
+          </defs>
+
+          <rect width="320" height="180" fill="#0d0d0c"/>
+
+          <g clip-path="url(#pTL)">
+            <rect x="0" y="0" width="159" height="89" fill="url(#em)"/>
+            <g fill="#d95926" fill-opacity="0.72" stroke="#f0834a" stroke-width="0.8">
+              <ellipse cx="66" cy="33" rx="20" ry="13" transform="rotate(-17 66 33)"/>
+              <ellipse cx="110" cy="59" rx="17" ry="11" transform="rotate(26 110 59)"/>
+              <ellipse cx="40" cy="66" rx="13" ry="9" transform="rotate(-7 40 66)"/>
+            </g>
+            <path d="M0 44.5h159M79.5 0v89" stroke="#e8d44a" stroke-opacity="0.4" stroke-width="0.9"/>
+          </g>
+
+          <g clip-path="url(#pTR)">
+            <rect x="161" y="0" width="159" height="89" fill="url(#em)"/>
+            <g fill="#d95926" fill-opacity="0.72" stroke="#f0834a" stroke-width="0.8">
+              <ellipse cx="218" cy="27" rx="18" ry="12" transform="rotate(-22 218 27)"/>
+              <ellipse cx="266" cy="55" rx="19" ry="12" transform="rotate(14 266 55)"/>
+            </g>
+            <path d="M161 44.5h159M240.5 0v89" stroke="#e8d44a" stroke-opacity="0.4" stroke-width="0.9"/>
+          </g>
+
+          <g clip-path="url(#pBL)">
+            <rect x="0" y="91" width="159" height="89" fill="url(#em)"/>
+            <g fill="#d95926" fill-opacity="0.72" stroke="#f0834a" stroke-width="0.8">
+              <ellipse cx="60" cy="119" rx="20" ry="13" transform="rotate(-13 60 119)"/>
+              <ellipse cx="110" cy="148" rx="18" ry="12" transform="rotate(19 110 148)"/>
+            </g>
+            <path d="M0 135.5h159M79.5 91v89" stroke="#e8d44a" stroke-opacity="0.4" stroke-width="0.9"/>
+          </g>
+
+          <!-- The 3D view: one skeleton per selected row, so the count in the bar
+               and the neurons drawn are the same six. -->
+          <rect x="161" y="91" width="159" height="89" fill="#000000"/>
+          <g fill="none" stroke="#d95926" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5">
+            <g stroke-opacity="1">
+              <path d="M180 172 194 156 206 142 222 130 244 122"/>
+              <path d="M194 156 186 146"/>
+              <path d="M244 122 260 114 274 116"/>
+            </g>
+            <g stroke-opacity="0.88">
+              <path d="M188 176 204 164 220 154 238 150 260 144"/>
+              <path d="M220 154 216 164"/>
+            </g>
+            <g stroke-opacity="0.78">
+              <path d="M174 164 190 152 208 132 226 120 248 108"/>
+              <path d="M208 132 202 122"/>
+            </g>
+            <g stroke-opacity="0.68">
+              <path d="M184 178 200 168 216 160 236 156 258 154"/>
+            </g>
+            <g stroke-opacity="0.6">
+              <path d="M170 158 184 144 200 128 218 114 240 102"/>
+              <path d="M200 128 206 136"/>
+            </g>
+            <g stroke-opacity="0.52">
+              <path d="M192 174 206 160 222 148 242 140 266 132"/>
+            </g>
+          </g>
+          <g fill="#d95926">
+            <circle cx="180" cy="172" r="2.6"/><circle cx="188" cy="176" r="2.4" fill-opacity="0.88"/>
+            <circle cx="174" cy="164" r="2.3" fill-opacity="0.78"/><circle cx="184" cy="178" r="2.2" fill-opacity="0.68"/>
+            <circle cx="170" cy="158" r="2.2" fill-opacity="0.6"/><circle cx="192" cy="174" r="2.1" fill-opacity="0.52"/>
+          </g>
+        </svg>
+        <div class="node__foot" style="border-top: 1px solid var(--border)">
+          <span>the dataset&rsquo;s published scene, with the selection written into it</span>
+          <span>copy link</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==========================================================================
+     Export
+     ========================================================================== -->
+<section class="chapter">
+  <div class="shell">
+    <div class="chapter__head rise">
+      <h2>
+        <span class="h2icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-download"/></svg></span>
+        Exporting Data &amp; Results is Easy
+      </h2>
+      <p class="lede">Any node&rsquo;s result can be downloaded.</p>
+    </div>
+
+    <div class="split split--wide">
+      <div class="stack">
+        <div class="point rise">
+          <h3>From the card</h3>
+          <p>
+            The <strong>&#10515;</strong> in a card&rsquo;s footer writes what that node is holding.
+            A viewer also exports its picture &mdash; re-drawn as vector, so an SVG opens in
+            Illustrator or Inkscape.
+          </p>
+        </div>
+        <div class="point rise" data-delay="1">
+          <h3>Or as a step</h3>
+          <p>
+            A <code>Download</code> node at the end of a chain writes its file on every run. It
+            passes its input through, so it drops in anywhere.
+          </p>
+        </div>
+        <div class="point rise" data-delay="2">
+          <h3>Formats the next tool reads</h3>
+          <p>
+            Tables as CSV, morphology as SWC and OBJ, networks as GraphML, trees as Newick, charts
+            as SVG or PNG.
+          </p>
+        </div>
+      </div>
+
+      <div class="surface rise" data-delay="1">
+        <div class="surface__bar"><strong>Download</strong><span class="spacer"></span><span>&#10515;</span></div>
+        <div style="padding: 14px; display: grid; gap: 12px">
+          <div class="fmtgroup">
+            <em>Tables and matrices</em>
+            <div class="fmts">
+              <span class="fmt" style="--c: var(--t-table)">CSV</span>
+              <span class="fmt" style="--c: var(--t-table)">JSON</span>
+              <span class="fmt" style="--c: var(--t-matrix)">wide CSV</span>
+            </div>
+          </div>
+          <div class="fmtgroup">
+            <em>Morphology</em>
+            <div class="fmts">
+              <span class="fmt" style="--c: var(--t-dataset)">SWC</span>
+              <span class="fmt" style="--c: var(--t-dataset)">OBJ</span>
+            </div>
+          </div>
+          <div class="fmtgroup">
+            <em>Graphs and trees</em>
+            <div class="fmts">
+              <span class="fmt" style="--c: var(--t-matrix)">GraphML</span>
+              <span class="fmt" style="--c: var(--t-matrix)">nodes + links CSV</span>
+              <span class="fmt" style="--c: var(--t-analysis)">Newick</span>
+            </div>
+          </div>
+          <div class="fmtgroup">
+            <em>Figures</em>
+            <div class="fmts">
+              <span class="fmt">SVG</span>
+              <span class="fmt">PNG</span>
+            </div>
+          </div>
+        </div>
+        <div class="node__foot" style="border-top: 1px solid var(--border)">
+          <span>one file per neuron for a skeleton set</span>
+          <span>capped at 50</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==========================================================================
+     Python / R
+     ========================================================================== -->
+<section class="chapter">
+  <div class="shell">
+    <div class="chapter__head rise" style="max-width: 40rem">
+      <h2>
+        <span class="h2icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-code"/></svg></span>
+        Convert Pipelines to Python/R
+      </h2>
+      <p class="lede">
+        <strong>Save &#9656; Export as Jupyter Notebook</strong>, or as R Markdown. The graph is
+        walked in dependency order and written out as code on the libraries the field already
+        uses &mdash; neuprint-python, pandas and navis, or neuprintr, dplyr, nat and ggplot2.
+      </p>
+    </div>
+
+    <div class="split">
+      <div class="surface rise">
+        <div class="surface__bar">
+          <strong>LC-outputs.ipynb</strong><span class="spacer"></span>
+          <span>neuprint-python &middot; pandas &middot; navis</span>
+        </div>
+        <div class="code"><span class="c"># Connectivity — downstream partners, one hop</span>
+<span class="k">from</span> neuprint <span class="k">import</span> (
+    Client, NeuronCriteria, fetch_neurons, fetch_adjacencies,
+    merge_neuron_properties,
+)
+
+hemibrain = <span class="f">Client</span>(
+    <span class="s">"neuprint.janelia.org"</span>, dataset=<span class="s">"hemibrain:v1.2.1"</span>
+)
+
+find_neurons, _ = <span class="f">fetch_neurons</span>(
+    <span class="f">NeuronCriteria</span>(type=<span class="s">r"^LC\d+$"</span>, regex=<span class="k">True</span>, status=<span class="s">"Traced"</span>),
+    client=hemibrain,
+)
+neurons, conns = <span class="f">fetch_adjacencies</span>(
+    find_neurons[<span class="s">"bodyId"</span>].<span class="f">tolist</span>(), <span class="k">None</span>, client=hemibrain
+)
+connectivity = <span class="f">merge_neuron_properties</span>(neurons, conns, [<span class="s">"type"</span>])
+
+group_by = (
+    connectivity.<span class="f">groupby</span>(<span class="s">"postType"</span>, dropna=<span class="k">False</span>)[<span class="s">"weight"</span>]
+    .<span class="f">sum</span>()
+    .<span class="f">reset_index</span>(name=<span class="s">"sum_weight"</span>)
+)</div>
+        <div class="cellbar"><span>&#9654;</span><em>cell 4 of 9</em><span>&middot; one Client per dataset node</span></div>
+      </div>
+
+      <div class="surface rise" data-delay="1">
+        <div class="surface__bar">
+          <strong>LC-outputs.Rmd</strong><span class="spacer"></span>
+          <span>neuprintr &middot; dplyr &middot; nat &middot; ggplot2</span>
+        </div>
+        <div class="code"><span class="c">```{r connectivity}</span>
+<span class="f">library</span>(neuprintr); <span class="f">library</span>(dplyr)
+
+hemibrain &lt;- <span class="f">neuprint_login</span>(dataset = <span class="s">"hemibrain:v1.2.1"</span>)
+
+find_neurons &lt;- <span class="f">coda_neurons</span>(<span class="f">neuprint_search</span>(
+  <span class="s">"^LC\\d+$"</span>, field = <span class="s">"type"</span>, conn = hemibrain
+))
+connectivity &lt;- <span class="f">neuprint_connection_table</span>(
+  find_neurons<span class="k">$</span>bodyId, prepost = <span class="s">"POST"</span>, conn = hemibrain
+)
+group_by_df &lt;- connectivity <span class="k">|&gt;</span>
+  <span class="f">group_by</span>(postType) <span class="k">|&gt;</span>
+  <span class="f">summarise</span>(sum_weight = <span class="f">sum</span>(weight), .groups = <span class="s">"drop"</span>)
+<span class="c">```</span></div>
+        <div class="cellbar"><span>&#9654;</span><em>chunk 4 of 9</em><span>&middot; never a variable named <code style="font-size: 10px">filter</code></span></div>
+      </div>
+    </div>
+
+    <p class="fig__cap rise" data-delay="2" style="margin-top: 1.1rem; max-width: 52rem">
+      Runnable, and meant to be edited. Where Coda and the target library genuinely differ the
+      cell says so in a note, and the generated code is checked in CI against the real installed
+      libraries: syntax, undefined names, and whether an attribute actually resolves. A neuPrint
+      graph exports to both languages; a CAVE graph exports to Python, on <b>caveclient</b>.
+    </p>
+  </div>
+</section>
+
+<!-- ==========================================================================
+     AI
+     ========================================================================== -->
+<section class="chapter">
+  <div class="shell">
+    <div class="chapter__head rise">
+      <h2>
+        <span class="h2icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-assistant"/></svg></span>
+        AI-enabled
+      </h2>
+    </div>
+
+    <div class="split split--wide">
+      <div class="stack">
+        <div class="point rise">
+          <h3>Built-in assistant</h3>
+          <p>
+            Ask for a workflow in plain language and the assistant builds it: the nodes, the wires
+            between them and the parameters, applied to the canvas as one step.
+          </p>
+        </div>
+        <div class="point rise" data-delay="1">
+          <h3>Four providers</h3>
+          <p>
+            Anthropic, OpenAI, Gemini, or Ollama against a model running on your own machine.
+            Keys are pasted once and stay in this browser.
+          </p>
+        </div>
+      </div>
+
+      <div class="surface rise" data-delay="1">
+        <div class="surface__bar">
+          <strong>Assistant</strong><span class="spacer"></span><span>claude-sonnet-5</span>
+        </div>
+        <div class="chat">
+          <div class="bubble" data-me="true">
+            What do LC4 neurons talk to? Group it by cell type and chart it.
+          </div>
+          <div class="bubble">
+            Four nodes onto the Hemibrain dataset already on your canvas.
+            <div style="margin-top: 8px">
+              <div class="planrow"><em>add</em><span>Find Neurons &middot; <i>type</i> ^LC4$ &middot; <i>status</i> Traced</span></div>
+              <div class="planrow"><em>add</em><span>Connectivity &middot; <i>direction</i> downstream &middot; <i>hops</i> 1</span></div>
+              <div class="planrow"><em>add</em><span>Group By &middot; <i>by</i> postType &middot; <i>agg</i> sum(weight)</span></div>
+              <div class="planrow"><em>add</em><span>Bar Chart</span></div>
+              <div class="planrow" data-op="connect"><em>wire</em><span>Hemibrain &#9656; Dataset &rarr; Find Neurons &#9656; Dataset</span></div>
+              <div class="planrow" data-op="connect"><em>wire</em><span>Find Neurons &#9656; Neurons &rarr; Connectivity &#9656; Neurons</span></div>
+              <div class="planrow" data-op="connect"><em>wire</em><span>Connectivity &#9656; Table &rarr; Group By &#9656; Table</span></div>
+              <div class="planrow" data-op="connect"><em>wire</em><span>Group By &#9656; Table &rarr; Bar Chart &#9656; Table</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="btnrow">
+          <span class="btn-m" data-primary="true">Apply 8 changes</span>
+          <span class="btn-m">Discard</span>
+        </div>
+        <div class="provrow">
+          <span class="prov">Anthropic</span>
+          <span class="prov">OpenAI</span>
+          <span class="prov">Gemini</span>
+          <span class="prov" data-local="true">Ollama &middot; local</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==========================================================================
+     Sharing
+     ========================================================================== -->
+<section class="chapter">
+  <div class="shell">
+    <div class="chapter__head rise">
+      <h2>
+        <span class="h2icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-share"/></svg></span>
+        Shareable workflows
+      </h2>
+    </div>
+
+    <div class="split split--wide">
+      <div class="stack">
+        <div class="point rise">
+          <h3>As a file</h3>
+          <p>
+            Download the workflow as a <code>.coda.json</code> &mdash; plain JSON for a repository,
+            a supplement or an email. It stores the pipeline, not the results.
+          </p>
+        </div>
+        <div class="point rise" data-delay="1">
+          <h3>As a link</h3>
+          <p>
+            Or share a URL with the whole graph packed into its fragment, neuroglancer-style. No
+            server, no account, nothing to expire. Large workflows go to a GitHub Gist instead.
+          </p>
+        </div>
+      </div>
+
+      <div class="surface rise" data-delay="1">
+        <div class="surface__bar"><strong>Share workflow</strong><span class="spacer"></span><span>1,743 characters</span></div>
+        <div class="linkbar">
+          <span class="url"><b>navis-org.github.io/coda/</b><u>#!c1.</u>eNqNVFtv2jAU_itHedqkQAmXQnmr1E6bt&hellip;</span>
+          <span class="btn-m copy" data-primary="true">Copy</span>
+        </div>
+        <div class="filerow">
+          <span class="fmt" style="--c: var(--t-dataset)">.coda.json</span>
+          <span class="name">LC-outputs.coda.json</span>
+          <span class="size">14 kB</span>
+        </div>
+        <div class="node__foot" style="border-top: 1px solid var(--border)">
+          <span>the pipeline, not the results &middot; no token, no uploaded rows or edge sets</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==========================================================================
+     Outro
+     ========================================================================== -->
+<section class="outro">
+  <div class="shell">
+    <h2 class="rise">Try it</h2>
+    <p class="rise" data-delay="1">
+      Nothing to install. The bundled examples run on a synthetic connectome with no account.
+    </p>
+    <div class="outro__actions rise" data-delay="2">
+      <a class="cta" data-primary="true" href="./index.html">Open Coda</a>
+      <!-- The other two documents. Relative, so they work from a subpath deploy. -->
+      <a class="cta" href="./tutorial.html">Field guide</a>
+      <a class="cta" href="./nodes.html">Node guide</a>
+      <a class="cta" href="https://github.com/navis-org/coda" target="_blank" rel="noreferrer noopener">Source</a>
+    </div>
+    <p class="rise" data-delay="3" style="margin-top: 2rem; font-size: 0.9rem">
+      Coda is in alpha. Node parameters are still moving, and a workflow saved today may not open
+      in a later build.
+    </p>
+  </div>
+</section>
+
+<footer class="colophon">
+  <div class="shell">
+    Coda &mdash; connectome data analysis &middot; Fly Connectomics Group, Cambridge<br>
+    Connectome data published by the FlyEM project at Janelia Research Campus, by the FlyWire
+    consortium, and by Virtual Fly Brain.
+  </div>
+</footer>
+    <script type="module" src="/src/overview/main.ts"></script>
+  </body>
+</html>

@@ -155,7 +155,20 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
              * ordinary way — leaving the graph on the canvas untouched. Through
              * `BASE_URL`, since `base` is './' and an absolute path would resolve
              * to the domain root under a subpath deploy.
+             *
+             * Three documents, in the order somebody meets them: what Coda is,
+             * how it works, then what each node does.
              */}
+            <a
+              className="dropdown__item"
+              href={`${import.meta.env.BASE_URL}overview.html`}
+              target="_blank"
+              rel="noreferrer noopener"
+              onClick={close}
+            >
+              <strong>Overview</strong>
+              <span>What Coda is, in one scroll</span>
+            </a>
             <a
               className="dropdown__item"
               href={`${import.meta.env.BASE_URL}tutorial.html`}

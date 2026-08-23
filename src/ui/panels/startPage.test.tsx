@@ -144,6 +144,14 @@ describe('Start page', () => {
       expect(guide.getAttribute('href')).toBe(`${import.meta.env.BASE_URL}nodes.html`)
       expect(guide.getAttribute('rel')).toContain('noopener')
     })
+
+    /* The fourth entry, and the one somebody reaches for before either of the others. */
+    it('offers the overview, composed the same way', () => {
+      render(<StartPage />)
+      const overview = screen.getByRole('link', { name: 'Overview' })
+      expect(overview.getAttribute('href')).toBe(`${import.meta.env.BASE_URL}overview.html`)
+      expect(overview.getAttribute('rel')).toContain('noopener')
+    })
   })
 
   describe('picking something', () => {
@@ -282,6 +290,16 @@ describe('Start page', () => {
       const guide = await screen.findByRole('link', { name: /Node Guide/ })
       expect(guide.getAttribute('href')).toBe(`${import.meta.env.BASE_URL}nodes.html`)
       expect(guide.tagName).toBe('A')
+    })
+
+    it('offers the overview in the same menu, ahead of both guides', async () => {
+      act(() => useGraphStore.getState().closeStartPage())
+      render(<App />)
+
+      fireEvent.click(screen.getByRole('button', { name: 'Help' }))
+      const overview = await screen.findByRole('link', { name: /Overview/ })
+      expect(overview.getAttribute('href')).toBe(`${import.meta.env.BASE_URL}overview.html`)
+      expect(overview.tagName).toBe('A')
     })
 
     it('reopens from the palette, and that command is disabled while it is open', () => {

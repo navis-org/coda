@@ -33,6 +33,11 @@ Requires Node ≥ 20 and pnpm. On a fresh machine: `brew install node && npm i -
 
 ### Start by looking around
 
+Not sure what this is yet? The **[overview](https://navis-org.github.io/coda/overview.html)** is
+the short answer — one scroll through what Coda does, the connectomes it reads, and what comes
+out the other end. It is built with the app (`overview.html`), so it also opens from
+**?&nbsp;▾ ▸ Overview** in the toolbar and from the welcome screen.
+
 New to node graphs? The **[field guide](https://navis-org.github.io/coda/tutorial.html)** is a
 single scrolling page that builds a real pipeline as you read — nodes, wires, fetching data,
 Explore, the viewers, and saving your work. It is built with the app (`tutorial.html`), so it

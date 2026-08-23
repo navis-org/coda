@@ -39,6 +39,12 @@ const ISSUES_URL = `${REPO_URL}/issues`
 const TUTORIAL_URL = `${import.meta.env.BASE_URL}tutorial.html`
 /** The node reference, built as a third entry. Same `BASE_URL` reasoning as above. */
 const NODE_GUIDE_URL = `${import.meta.env.BASE_URL}nodes.html`
+/**
+ * The feature overview, built as a fourth entry — the front door for somebody
+ * who has not decided whether to open the editor at all. Same `BASE_URL`
+ * reasoning as above.
+ */
+const OVERVIEW_URL = `${import.meta.env.BASE_URL}overview.html`
 
 export function StartPage() {
   const open = useGraphStore((s) => s.startPageOpen)
@@ -246,6 +252,10 @@ export function StartPage() {
                 issue
               </a>{' '}
               for bugs and feature requests ·{' '}
+              <a href={OVERVIEW_URL} target="_blank" rel="noreferrer noopener">
+                Overview
+              </a>{' '}
+              ·{' '}
               <a href={TUTORIAL_URL} target="_blank" rel="noreferrer noopener">
                 Docs
               </a>{' '}

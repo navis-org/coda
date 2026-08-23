@@ -1,0 +1,1253 @@
+/*
+ * The overview page.
+ *
+ * The third document beside the app: the field guide teaches the model, the node
+ * guide answers "what does this node do", and this one is the front door — what
+ * Coda is, in one scroll, for somebody who has not opened it yet.
+ *
+ * Tokens come from the app's own `theme.css` rather than a second copy of the
+ * palette, exactly as `tutorial.css` does: a page whose node cards drifted from
+ * the editor's would be advertising the wrong thing. Everything below is page
+ * layout only.
+ *
+ * The palette is used *semantically*, never decoratively — green means Dataset,
+ * blue means Table/Neurons, orange means Matrix/Network, and a dataset card
+ * takes its backend's tint. Section icons are achromatic for the same reason: a
+ * coloured one would read as a typed port rather than as chrome.
+ */
+
+@import '../ui/theme.css';
+
+:root {
+  --measure: 34rem;
+  --gutter: clamp(1.25rem, 5vw, 4rem);
+  /* Aliases, so the markup can name a socket family without knowing the app's
+     variable names. */
+  --t-table: var(--socket-table);
+  --t-matrix: var(--socket-matrix);
+  --t-dataset: var(--socket-dataset);
+  --t-scalar: var(--socket-scalar);
+  --t-analysis: var(--cat-analysis);
+
+  /*
+   * The syntax palette for the two exported-code figures.
+   *
+   * Per-mode, and it has to be: these are 11.5px glyphs, so the floor is 4.5:1
+   * rather than the 3:1 a mark gets, and no single value clears it on both
+   * surfaces. The socket hues are the obvious choice and fail exactly where a
+   * light-theme reader reads them — `--socket-dataset` is 2.67:1 on the light
+   * panel. Measured against `--surface-1` in each mode:
+   *   light  #0a7a52 5.08 · #1f63b4 5.69 · #4a3aa7 8.12 · #6d6b66 5.05
+   *   dark   #199e70 5.27 · #3987e5 4.93 · #9085e9 5.74 · #898781 4.99
+   * Same reasoning, and the same three-block shape, as theme.css's own
+   * `--status-warn`.
+   */
+  --code-comment: #6d6b66;
+  --code-string: #0a7a52;
+  --code-call: #1f63b4;
+  --code-keyword: #4a3aa7;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --code-comment: #898781;
+    --code-string: #199e70;
+    --code-call: #3987e5;
+    --code-keyword: #9085e9;
+  }
+}
+:root[data-theme='dark'] {
+  --code-comment: #898781;
+  --code-string: #199e70;
+  --code-call: #3987e5;
+  --code-keyword: #9085e9;
+}
+
+/* --------------------------------------------------------------------------
+   Base
+   -------------------------------------------------------------------------- */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--canvas);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: 17px;
+  line-height: 1.62;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+  /* theme.css pins this off for the editor canvas; a document wants it back. */
+  overscroll-behavior: auto;
+}
+
+a {
+  color: inherit;
+  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+  text-underline-offset: 3px;
+}
+a:hover {
+  text-decoration-color: currentColor;
+}
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+h1,
+h2,
+h3 {
+  text-wrap: balance;
+  margin: 0;
+  letter-spacing: -0.028em;
+  font-weight: 800;
+  line-height: 1.06;
+}
+p {
+  margin: 0;
+}
+strong {
+  font-weight: 650;
+}
+
+code,
+.mono {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+}
+code {
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.1em 0.36em;
+  white-space: nowrap;
+}
+
+/* Type words carry their socket colour wherever they appear, prose included. */
+.ty {
+  font-weight: 650;
+  white-space: nowrap;
+}
+.ty--table {
+  color: var(--t-table);
+}
+.ty--matrix {
+  color: var(--t-matrix);
+}
+.ty--dataset {
+  color: var(--t-dataset);
+}
+
+.shell {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding-inline: var(--gutter);
+}
+.lede {
+  font-size: 1.1rem;
+  color: var(--text-secondary);
+}
+
+/* Scroll reveal. Gated on `.js`, which `main.ts` claims and gives back if it
+   throws, so a page whose script dies is static rather than blank. */
+.js .rise {
+  opacity: 0;
+  transform: translateY(18px);
+  transition:
+    opacity 0.7s ease,
+    transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.js .rise.is-in {
+  opacity: 1;
+  transform: none;
+}
+.js .rise[data-delay='1'] {
+  transition-delay: 0.08s;
+}
+.js .rise[data-delay='2'] {
+  transition-delay: 0.16s;
+}
+.js .rise[data-delay='3'] {
+  transition-delay: 0.24s;
+}
+
+/* --------------------------------------------------------------------------
+   Hero
+   -------------------------------------------------------------------------- */
+
+.hero {
+  position: relative;
+  display: grid;
+  align-content: center;
+  padding-block: clamp(3.5rem, 11vh, 6.5rem) clamp(2.5rem, 7vh, 4rem);
+  background:
+    radial-gradient(
+      1100px 620px at 74% 30%,
+      color-mix(in srgb, var(--accent) 10%, transparent),
+      transparent 66%
+    ),
+    var(--canvas);
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+}
+.hero__dots {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(var(--canvas-dot) 1px, transparent 1px);
+  background-size: 22px 22px;
+  opacity: 0.85;
+  pointer-events: none;
+}
+/*
+ * `width: 100%` is load-bearing. `.shell` centres with `margin: 0 auto`, and
+ * auto margins on a *grid item* disable the stretch that would otherwise size
+ * it — so without this the hero shrinks to the headline's own width and sits
+ * indented from every section below it.
+ */
+.hero__inner {
+  position: relative;
+  width: 100%;
+  display: grid;
+  gap: 1.7rem;
+}
+.hero__brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.hero__brand svg {
+  color: var(--text-primary);
+}
+.hero__tag {
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  padding: 0.15em 0.7em;
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 0.1em;
+}
+.hero h1 {
+  font-size: clamp(2.2rem, 6vw, 4.2rem);
+  max-width: 18ch;
+  letter-spacing: -0.035em;
+}
+.hero h1 em {
+  font-style: normal;
+  color: var(--text-muted);
+}
+.hero__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.hero__meta span {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+.hero__meta span + span::before {
+  content: '';
+  width: 1px;
+  height: 11px;
+  background: var(--border-strong);
+}
+
+.cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.68rem 1.35rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text-primary);
+  text-decoration: none;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+.cta[data-primary='true'] {
+  background: var(--text-primary);
+  color: var(--canvas);
+  border-color: var(--text-primary);
+}
+.cta:hover {
+  border-color: var(--accent);
+}
+
+/* --------------------------------------------------------------------------
+   The canvas
+   -------------------------------------------------------------------------- */
+
+.thesis {
+  padding-block: clamp(2.5rem, 7vh, 4.5rem) 0;
+}
+
+/* Fixed-width world; the frame scrolls sideways inside itself rather than
+   letting the page do it. */
+.stagewrap {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 6px;
+}
+.stage {
+  position: relative;
+  width: 1010px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background:
+    radial-gradient(var(--canvas-dot) 1px, transparent 1px) 0 0 / 22px 22px,
+    var(--canvas);
+  box-shadow: var(--shadow-panel);
+  overflow: hidden;
+}
+.stage__bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 10px;
+  height: 34px;
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.stage__bar strong {
+  color: var(--text-primary);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.stage__spacer {
+  flex: 1;
+}
+.stage__run {
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+}
+.world {
+  position: relative;
+  width: 1010px;
+  height: 348px;
+  margin: 0 auto;
+}
+.wires {
+  position: absolute;
+  inset: 0;
+  width: 1010px;
+  height: 348px;
+  overflow: visible;
+}
+.wires path {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+/* In CSS rather than a `stroke` attribute: a presentation attribute does not
+   resolve `var()`, so the wires would come out black with nothing failing. */
+.wires path[data-fam='dataset'] {
+  stroke: var(--t-dataset);
+}
+.wires path[data-fam='table'] {
+  stroke: var(--t-table);
+}
+.wires path[data-fam='matrix'] {
+  stroke: var(--t-matrix);
+}
+
+/* --- a node card, matching the editor's construction --- */
+
+.node {
+  position: absolute;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-node);
+  font-size: 12px;
+  overflow: hidden;
+  --state-bar: 3px;
+}
+.node::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--state-bar);
+  background: var(--status-ok);
+  z-index: 1;
+}
+.node__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px 5px calc(8px + var(--state-bar));
+  background: color-mix(in srgb, var(--cat) 16%, var(--surface-2));
+  border-bottom: 1px solid var(--border);
+  line-height: 1.5;
+}
+.node[data-cat='dataset'] {
+  --cat: var(--cat-dataset);
+}
+.node[data-cat='query'] {
+  --cat: var(--cat-query);
+}
+.node[data-cat='transform'] {
+  --cat: var(--cat-transform);
+}
+.node[data-cat='analysis'] {
+  --cat: var(--cat-analysis);
+}
+.node[data-cat='visualisation'] {
+  --cat: var(--cat-visualisation);
+}
+.node__title {
+  flex: 1;
+  font-weight: 650;
+  font-size: 12px;
+  letter-spacing: -0.01em;
+}
+.node__play {
+  font-size: 10px;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0 4px;
+  line-height: 1.5;
+}
+.node__ports {
+  padding: 4px 0;
+}
+/* Inputs left, outputs right, paired by row — the editor's own arrangement. */
+.port {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  align-items: center;
+  min-height: 20px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.port__in,
+.port__out {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.port__in {
+  padding-left: calc(11px + var(--state-bar));
+}
+.port__out {
+  text-align: right;
+  padding-right: 11px;
+}
+.port__in:empty,
+.port__out:empty {
+  visibility: hidden;
+}
+
+/* Sockets: colour AND shape AND a visible label — three channels, because
+   colour alone cannot carry type identity for colourblind readers. */
+.sock {
+  position: absolute;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 1.5px solid var(--surface-2);
+  background: var(--t-scalar);
+  top: 50%;
+  transform: translateY(-50%);
+}
+.sock--in {
+  left: calc(-6px + var(--state-bar));
+}
+.sock--out {
+  right: -6px;
+}
+.sock[data-fam='table'] {
+  background: var(--t-table);
+}
+.sock[data-fam='matrix'] {
+  background: var(--t-matrix);
+}
+.sock[data-fam='dataset'] {
+  background: var(--t-dataset);
+}
+.sock[data-shape='ring'] {
+  background: var(--surface-2);
+  border-width: 2.5px;
+  border-color: var(--t-table);
+}
+.sock[data-shape='ring'][data-fam='matrix'] {
+  border-color: var(--t-matrix);
+}
+.sock[data-shape='square'] {
+  border-radius: 2px;
+}
+.sock[data-shape='diamond'] {
+  border-radius: 2px;
+  width: 10px;
+  height: 10px;
+  transform: translateY(-50%) rotate(45deg);
+}
+
+.node__params {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 5px 8px 6px calc(8px + var(--state-bar));
+  border-top: 1px solid var(--border);
+}
+.prow {
+  display: grid;
+  grid-template-columns: 1fr 1.25fr;
+  gap: 6px;
+  align-items: center;
+}
+.prow span {
+  font-size: 10.5px;
+  color: var(--text-secondary);
+}
+.prow b {
+  position: relative;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 400;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 5px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Positioned, never floated: a floated caret wraps to a second line the moment
+   the value ellipsises, which doubles the row's height. */
+.prow b.is-picker {
+  padding-right: 15px;
+}
+.prow b.is-picker::after {
+  content: '▾';
+  position: absolute;
+  right: 4px;
+  top: 0;
+  color: var(--text-muted);
+}
+.node__foot {
+  display: flex;
+  gap: 6px;
+  padding: 3px 8px 4px calc(8px + var(--state-bar));
+  border-top: 1px solid var(--border);
+  background: var(--surface-3);
+  font-size: 10px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.node__foot span:first-child {
+  flex: 1;
+}
+
+/* A tiny bar chart and a tiny network, drawn inside the two viewer cards. */
+.mini {
+  padding: 8px 8px 8px calc(8px + var(--state-bar));
+  display: flex;
+  align-items: flex-end;
+  gap: 5px;
+  height: 74px;
+}
+.mini i {
+  flex: 1;
+  height: var(--h);
+  background: var(--t-matrix);
+  opacity: calc(1 - var(--i) * 0.13);
+  border-radius: 1px 1px 0 0;
+}
+.netmini {
+  padding: 6px 8px 6px calc(8px + var(--state-bar));
+  height: 74px;
+}
+.netmini .link {
+  stroke: var(--border-strong);
+  stroke-width: 1;
+  fill: none;
+}
+.netmini .dot {
+  fill: var(--t-matrix);
+}
+
+/* --------------------------------------------------------------------------
+   Sections
+   -------------------------------------------------------------------------- */
+
+.chapter {
+  padding-block: clamp(3.5rem, 10vh, 6.5rem);
+  border-top: 1px solid var(--border);
+}
+.chapter__head {
+  display: grid;
+  gap: 0.85rem;
+  max-width: var(--measure);
+  margin-bottom: clamp(1.75rem, 4.5vh, 2.75rem);
+}
+/*
+ * `flex-start`, not `center`: a title that wraps to three lines would otherwise
+ * float its icon halfway down the block, beside nothing in particular.
+ */
+.chapter__head h2 {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5em;
+  font-size: clamp(1.6rem, 3.2vw, 2.3rem);
+}
+.chapter__head p {
+  color: var(--text-secondary);
+}
+
+/* Section icons: the app's own toolbar glyphs where one exists, on the same
+   24-unit grid with a 2-unit stroke, painting in `currentColor`. */
+.h2icon {
+  flex: none;
+  display: inline-flex;
+  margin-top: 0.09em;
+  color: var(--text-secondary);
+}
+.h2icon svg {
+  width: 0.86em;
+  height: 0.86em;
+}
+
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: clamp(1.75rem, 4vw, 3.5rem);
+  align-items: start;
+}
+.split--wide {
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+}
+.split--narrow {
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+}
+.stack {
+  display: grid;
+  gap: 1.4rem;
+  align-content: start;
+}
+.point {
+  display: grid;
+  gap: 0.3rem;
+}
+.point h3 {
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+.point p {
+  font-size: 0.95rem;
+  color: var(--text-secondary);
+}
+
+/* A generic app-surface frame for the mock widgets. */
+.surface {
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface-1);
+  box-shadow: var(--shadow-panel);
+  overflow: hidden;
+}
+.surface__bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 7px 10px;
+  background: var(--surface-3);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.surface__bar strong {
+  color: var(--text-primary);
+  font-weight: 650;
+}
+.surface__bar .spacer {
+  flex: 1;
+}
+
+.fig__cap {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.fig__cap b {
+  color: var(--text-primary);
+  font-weight: 650;
+}
+
+/* --------------------------------------------------------------------------
+   Backends
+   -------------------------------------------------------------------------- */
+
+.backend {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.85rem 0;
+  border-top: 1px solid var(--border);
+}
+.backend:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+.backend__head {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+/* The same lightness step within one hue the canvas tints a dataset card by, so
+   a backend reads the same here as it does on a node. */
+.backend__head::before {
+  content: '';
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--tint, var(--cat-dataset));
+  flex: none;
+}
+.backend b {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+.backend p {
+  font-size: 0.93rem;
+  color: var(--text-secondary);
+}
+.backend[data-backend='cave'] {
+  --tint: var(--cat-dataset-cave);
+}
+.backend[data-backend='catmaid'] {
+  --tint: var(--cat-dataset-catmaid);
+}
+.backend[data-backend='mock'] {
+  --tint: var(--cat-dataset-mock);
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  padding: 10px 10px 0;
+}
+.tab {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  color: var(--text-muted);
+  background: var(--surface-3);
+}
+.tab[data-on='true'] {
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.dsgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+  padding: 12px;
+}
+.dscard {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  padding: 8px 10px;
+  display: grid;
+  gap: 3px;
+}
+.dscard b {
+  font-size: 12px;
+  font-weight: 650;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.dscard b::before {
+  content: '';
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  background: var(--tint, var(--cat-dataset));
+  flex: none;
+}
+.dscard span {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.ok-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 12px 0;
+  font-size: 11.5px;
+  color: var(--status-ok);
+  font-family: var(--font-mono);
+}
+.dot-ok {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--status-ok);
+  flex: none;
+}
+
+/* --------------------------------------------------------------------------
+   Viewers
+   -------------------------------------------------------------------------- */
+
+.plot {
+  padding: 10px;
+}
+.plot svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.plot__grid path {
+  stroke: var(--grid);
+  stroke-width: 1;
+  fill: none;
+}
+.plot__axis path {
+  stroke: var(--border-strong);
+  stroke-width: 1;
+  fill: none;
+}
+.plot__pt circle {
+  fill: var(--t-table);
+  opacity: 0.55;
+}
+.plot__pt[data-picked='true'] circle {
+  fill: var(--t-matrix);
+  opacity: 1;
+}
+.plot__lasso {
+  fill: color-mix(in srgb, var(--t-matrix) 12%, transparent);
+  stroke: var(--t-matrix);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+}
+.plot__lab {
+  fill: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+
+.ports {
+  display: flex;
+  border-top: 1px solid var(--border);
+  background: var(--surface-3);
+}
+.ports__cell {
+  flex: 1;
+  padding: 8px 12px;
+  display: grid;
+  gap: 2px;
+  border-left: 1px solid var(--border);
+}
+.ports__cell:first-child {
+  border-left: 0;
+}
+.ports__cell b {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+}
+.ports__cell span {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+.ports__cell .sock {
+  position: static;
+  transform: none;
+}
+.ports__cell .sock[data-shape='diamond'] {
+  transform: rotate(45deg);
+}
+.ports__cell[data-wired='true'] {
+  background: color-mix(in srgb, var(--t-table) 12%, var(--surface-3));
+}
+
+/* The wire between the two cards: across at full width, down when they stack. */
+.pipe {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 96px minmax(0, 1fr);
+  align-items: start;
+}
+.pipe__link {
+  position: relative;
+  align-self: center;
+  display: grid;
+  place-items: center;
+}
+.pipe__link em {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translate(-50%, 0.2rem);
+  font-family: var(--font-mono);
+  font-style: normal;
+  font-size: 10.5px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.pipe__link svg {
+  display: block;
+  overflow: visible;
+}
+.pipe__link path {
+  fill: none;
+  stroke: var(--t-table);
+  stroke-width: 2;
+}
+.pipe__link polygon {
+  fill: var(--t-table);
+}
+.pipe__link .v {
+  display: none;
+}
+
+.ngl {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* --------------------------------------------------------------------------
+   Export, code, assistant, sharing
+   -------------------------------------------------------------------------- */
+
+.fmts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.fmt {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 4px 10px;
+  color: var(--text-secondary);
+  background: var(--surface-2);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.fmt::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  background: var(--c, var(--t-scalar));
+}
+.fmtgroup {
+  display: grid;
+  gap: 7px;
+}
+.fmtgroup em {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-style: normal;
+}
+
+.code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.75;
+  padding: 12px 14px;
+  overflow-x: auto;
+  white-space: pre;
+  color: var(--text-secondary);
+  tab-size: 2;
+}
+.code .c {
+  color: var(--code-comment);
+}
+.code .k {
+  color: var(--code-keyword);
+}
+.code .s {
+  color: var(--code-string);
+}
+.code .f {
+  color: var(--code-call);
+}
+.cellbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-top: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.cellbar em {
+  font-style: normal;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.chat {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+.bubble {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  padding: 9px 11px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.bubble[data-me='true'] {
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface-2));
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  color: var(--text-primary);
+  justify-self: end;
+  max-width: 88%;
+}
+.planrow {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  padding: 3px 0;
+  border-top: 1px solid var(--border);
+}
+.planrow em {
+  font-style: normal;
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--t-dataset);
+}
+.planrow[data-op='connect'] em {
+  color: var(--t-table);
+}
+.planrow i {
+  font-style: normal;
+  color: var(--text-muted);
+}
+.btnrow {
+  display: flex;
+  gap: 8px;
+  padding: 0 12px 12px;
+}
+.btn-m {
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text-secondary);
+}
+.btn-m[data-primary='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.provrow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 12px 12px;
+}
+.prov {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  padding: 3px 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text-secondary);
+}
+.prov[data-local='true'] {
+  border-color: color-mix(in srgb, var(--t-dataset) 55%, var(--border));
+  color: var(--t-dataset);
+}
+
+.linkbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px;
+  padding: 8px 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+.linkbar .url {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+.linkbar .url b {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.linkbar .url u {
+  text-decoration: none;
+  color: var(--t-matrix);
+}
+.linkbar .copy {
+  margin-left: auto;
+  flex: none;
+}
+.filerow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border-top: 1px solid var(--border);
+}
+.filerow .name {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-primary);
+}
+.filerow .size {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+/* --------------------------------------------------------------------------
+   Closing
+   -------------------------------------------------------------------------- */
+
+.outro {
+  padding-block: clamp(3.5rem, 11vh, 6.5rem) clamp(2.5rem, 7vh, 4rem);
+  border-top: 1px solid var(--border);
+  text-align: center;
+}
+.outro h2 {
+  font-size: clamp(1.8rem, 4.2vw, 2.8rem);
+}
+.outro p {
+  color: var(--text-secondary);
+  max-width: 44ch;
+  margin: 1rem auto 0;
+}
+.outro__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: center;
+  margin-top: 2rem;
+}
+.colophon {
+  padding-block: 1.5rem 3rem;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-muted);
+  text-align: center;
+  line-height: 1.8;
+}
+
+/* --------------------------------------------------------------------------
+   Responsive
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 900px) {
+  .split,
+  .split--wide,
+  .split--narrow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .pipe {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .pipe__link {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.75rem 0;
+  }
+  .pipe__link em {
+    position: static;
+    transform: none;
+    margin-right: 0.6rem;
+  }
+  .pipe__link .h {
+    display: none;
+  }
+  .pipe__link .v {
+    display: block;
+  }
+}
+
+@media (max-width: 620px) {
+  body {
+    font-size: 16px;
+  }
+  .ports {
+    flex-direction: column;
+  }
+  .ports__cell {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
+  .ports__cell:first-child {
+    border-top: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  .js .rise {
+    opacity: 1;
+    transform: none;
+  }
+}

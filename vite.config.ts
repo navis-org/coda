@@ -309,18 +309,19 @@ export default defineConfig({
   worker: { format: 'es' },
 
   /*
-   * Three entries. `tutorial.html` is the scroll-through introduction and
-   * `nodes.html` the node guide — both plain TypeScript and CSS, importing
-   * nothing from `src/ui` but `theme.css`, so they share the editor's palette
-   * without pulling React, sigma or three into documents that draw none of
-   * them. Naming all three here is what stops vite treating `index.html` as the
-   * only root and silently dropping the others: they build green and 404 in
-   * production.
+   * Four entries. `overview.html` is the front door, `tutorial.html` the
+   * scroll-through introduction and `nodes.html` the node guide — all three
+   * plain TypeScript and CSS, importing nothing from `src/ui` but `theme.css`,
+   * so they share the editor's palette without pulling React, sigma or three
+   * into documents that draw none of them. Naming all four here is what stops
+   * vite treating `index.html` as the only root and silently dropping the
+   * others: they build green and 404 in production.
    */
   build: {
     rollupOptions: {
       input: {
         main: fileURLToPath(new URL('./index.html', import.meta.url)),
+        overview: fileURLToPath(new URL('./overview.html', import.meta.url)),
         tutorial: fileURLToPath(new URL('./tutorial.html', import.meta.url)),
         nodes: fileURLToPath(new URL('./nodes.html', import.meta.url)),
       },
