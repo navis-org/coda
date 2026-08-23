@@ -79,6 +79,7 @@ import {
   savePanels,
   saveAutosave,
   saveStartPageDismissed,
+  watchTabIdentity,
 } from './persistence'
 // Side-effect import: the store resolves node types the moment it loads the autosaved
 // graph, so the node pack must be registered first. Declaring the dependency here rather
@@ -649,6 +650,12 @@ export const useGraphStore = create<GraphState>((set, get) => {
    * Never unsubscribed: the store is a module singleton that outlives every component, and a
    * teardown hook here would be a hook that only ever runs when the page is going away anyway.
    */
+  /*
+   * A tab created from another one — Duplicate Tab, `window.open` — starts with a copy of its
+   * `sessionStorage`, so the two share an autosave slot and clobber each other. Same terms as
+   * the subscriptions below: registered once, never unsubscribed. See `watchTabIdentity`.
+   */
+  watchTabIdentity(() => saveAutosave(get().graph))
   subscribeSourceLearned(afterSourceLearned)
   /*
    * An upload's schema arrives the same way a dataset listing does — asynchronously, into

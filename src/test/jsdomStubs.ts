@@ -292,17 +292,27 @@ async function blobToText(blob: Blob): Promise<string> {
 }
 
 /**
- * Give this environment a working `localStorage`.
+ * Give this environment a working `localStorage` **and `sessionStorage`**.
  *
  * Node 26 shadows jsdom's, so `window.localStorage` throws on access and every persistence path
  * silently degrades — which is correct behaviour for the app and means the persistence layer has
  * no coverage at all by default. Opt in per suite rather than globally: with storage present,
  * autosaves and preferences start leaking between test files.
+ *
+ * Both, because the autosave needs both to mean anything: the graph goes in `localStorage` and
+ * the tab identity that decides *which* graph is in `sessionStorage`. Stubbing only the first
+ * exercises the degraded path — the one where every tab shares a slot — while looking like it
+ * covers the feature.
  */
 export function installStorageStub(): void {
+  installOneStorage('localStorage')
+  installOneStorage('sessionStorage')
+}
+
+function installOneStorage(name: 'localStorage' | 'sessionStorage'): void {
   let held: Storage | undefined
   try {
-    held = window.localStorage
+    held = window[name]
   } catch {
     held = undefined
   }
@@ -315,6 +325,7 @@ export function installStorageStub(): void {
     },
     clear: () => entries.clear(),
     getItem: (key) => entries.get(key) ?? null,
+    // Insertion order, which is what a browser answers too. `storedSlotIds` walks this.
     key: (index) => [...entries.keys()][index] ?? null,
     removeItem: (key) => {
       entries.delete(key)
@@ -323,8 +334,8 @@ export function installStorageStub(): void {
       entries.set(key, String(value))
     },
   }
-  Object.defineProperty(window, 'localStorage', { value: storage, configurable: true })
-  Object.defineProperty(globalThis, 'localStorage', { value: storage, configurable: true })
+  Object.defineProperty(window, name, { value: storage, configurable: true })
+  Object.defineProperty(globalThis, name, { value: storage, configurable: true })
 }
 
 /**
@@ -384,5 +395,12 @@ export function clearStorage(): void {
     window.localStorage?.clear()
   } catch {
     /* Node 26 shadows jsdom's localStorage unless --localstorage-file is passed. */
+  }
+  try {
+    // The tab identity lives here, so a suite that cleared only `localStorage` would carry one
+    // tab's id into the next test and read the slot it had just wiped.
+    window.sessionStorage?.clear()
+  } catch {
+    /* ignore */
   }
 }
