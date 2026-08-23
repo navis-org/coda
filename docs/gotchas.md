@@ -1,0 +1,192 @@
+# Gotchas found the hard way — the reasoning behind each
+
+The rule sentences live in `CLAUDE.md`. This is the incident behind each, moved
+verbatim.
+
+## Gotchas found the hard way
+
+- **`defaultSize` sizes React Flow's _wrapper_, and only a viewer's card fills one.** The card
+  stretches to the wrapper solely under `data-sized`, which `CodaNodeView` sets for resizable
+  nodes — i.e. `category: 'visualisation'`. Declare `defaultSize` anywhere else and the wrapper
+  is taller than the card. That slack would be invisible except for the state bar:
+  `.coda-node::before` is inset against the _wrapper_, because `.coda-node` is deliberately
+  unpositioned so the handles and the run ring can escape its `overflow: hidden`. So the bar
+  takes the wrapper's height and hangs below the card as a coloured line with nothing beside
+  it. A node that only wants to be wider sets `NODE_BODIES[type].width`, which goes through
+  `--node-width`. `nodeResize.test.tsx` asserts it across the whole registry, since nothing
+  else catches it.
+
+- **Two wires between the same pair of nodes are not a cycle**, and `topoSort` used to say they
+  were. It counted indegree over `graph.edges` while decrementing through `neighbourIndex`,
+  which _deduplicates_ node pairs — so a target joined twice was incremented by two and
+  decremented by one, never reached zero, and came out in `cyclic`. The count is now derived
+  from the same index that decrements it, which is what makes them unable to disagree again.
+
+  Recognising it matters more than the arithmetic, because the symptom points nowhere near the
+  sort. `wouldCreateCycle` is a separate and correct walk, so the link connects normally; then
+  inference drops the target's input types and **every column picker on it empties out**, while
+  a result cached from before the second wire stays on screen. It reads as a node that has lost
+  its schema. `Paths → Network` (network _and_ layout) is the first wiring that hits it by
+  design; Explore's `Hits` and `Selected` arriving at one Join is the other way in.
+
+- **A column picker used to substitute a different column, and it cost 9 GB.** `resolveColumn`
+  answered "the first compatible column" whenever the stored one was not in the current schema.
+  That reads as helpful and is not: a schema without a column is very often a schema that has
+  not _arrived_. neuPrint publishes only the canonical seven neuron properties until
+  per-dataset discovery lands, so on a fresh session every discovered property looks deleted.
+
+  Reported live as Firefox holding 6-10 GB on one tab. A Pivot whose `Columns` named `somaSide`
+  had it replaced by the first column — which `Rows` had already taken — so it pivoted `type`
+  against itself: 15,000² = 225 million cells across five accumulator arrays, inside one
+  `evaluate`, then cached. The run stalled ten seconds and the editor never recovered;
+  unplugging the Pivot avoided it and Clear Results freed it, which is the signature.
+
+  **A chosen column is now kept.** Rule 2 of `resolveColumn`: the stored name survives a schema
+  that does not list it, and reaches `evaluate` to fail there naming the column. A loud failure
+  about the column you picked beats a quiet success on one you did not — and it makes the
+  singular resolver agree with `resolveColumns`, which has always merely dropped what it could
+  not find. A value still equal to the definition's _declared_ default is a suggestion rather
+  than a decision and does still fall back, which is what lets `out.scatter` open on `pre`/`post`
+  without failing on a table that has neither. `optional` answers _off_ ahead of all of it.
+
+  Note the knock-on in `validateColumnParams`: each branch now states what the resolver is
+  actually about to do (`Missing column: x` when it is kept, `is gone — using "y"` only where a
+  fallback is really taken), because that is the only thing that keeps the message true.
+
+- **A column picker on its own default resolved to nothing until the schema arrived**, so a
+  graph failed on its first Run of a session and worked on its second. `resolveColumns` had this
+  guard and `resolveColumn` did not.
+
+  Rule 3 is "the first compatible column" — an answer computed *from a list*. A port carrying no
+  schema has an empty list, so a picker still holding the value its definition declared resolved
+  to `undefined` before the schema landed and to the right column afterwards. That is the
+  runs-twice-answers-differently signature again, and it lands in the provenance key.
+
+  **The asymmetry is what hides it:** rule 2 already carries a value *differing* from the default
+  through untouched, so this only ever bites a picker nobody has touched — which is the common
+  case and the one nothing tests. Reported on `Table from URL → Combine Columns → Update root
+  IDs`, the chain that node's own guide describes: `Table from URL` keeps its schema per URL in a
+  session-scoped map, so a fresh session publishes none, and `Update root IDs` refused with "Pick
+  an ID column and a supervoxel ID column" over two pickers the card was drawing as empty.
+
+  The guard can only ever *add* an answer, never change one: it fires exactly when `available` is
+  empty, where `available[0]` was already `undefined`.
+
+  **An unset required picker now means its declared default**, which is the other half and is
+  what keeps the two answers the same. A required picker has no "none", so an empty value is
+  *unset* rather than a choice — and unset is what `defaultParams` fills with the default at
+  creation. Without it, a default naming a real column still resolves to that column once the
+  schema arrives and to nothing before, which is the same disagreement one paragraph up.
+
+  **Only for a required picker.** On an `optional` one, empty is a *decision*: `out.scatter`'s
+  `idColumn: ''` means "identify points by row index rather than by neuron id", against a
+  declared default of `neuronId`. Reading that as unset hands the column back and quietly undoes
+  it — a lasso that selects different rows. Its own test caught this within a minute of the
+  change, which is the argument for it existing.
+
+  Inert wherever the default is `''`, which is most pickers: `out.barChart`'s `Category` still
+  means "decide for me".
+
+  **And the widget said so out loud, which was the follow-up report.** With the resolver fixed
+  the node ran, and the card still drew `ID column: neuronId (missing)` above `Supervoxel ID
+  column: no column` — two false claims about a configuration that was correct, both pointing at
+  the user. `columnSchemaFor` exists to separate *unknown* from *empty*, and both widgets asked
+  only "is this name in the available list", which is `false` for a port carrying no list at all.
+
+  Three states now, matching the resolver's: **unknown** offers the resolved value plainly, with
+  the reason in a `title`; **known and lacking it** keeps `(missing)`, which is true there and is
+  the drift the label exists for; **known and empty** keeps `no columns`. The `(missing)` half was
+  the visible symptom, but the *disabled* half was worse — with nothing stored the option list
+  came out empty, `SelectField` took its no-options branch, and the select rendered disabled
+  behind a placeholder, so the one thing worth knowing was the one thing not shown.
+
+  The plural had it too: `resolveColumns` keeps a stored list untouched while the schema is
+  unknown, so labelling every chip `(missing)` contradicted the resolver an inch away. Its
+  placeholder chip also now stands down when anything *is* selected — `cell_type × hemibrain_type
+  × not run yet` reads as a warning about the two beside it.
+
+  **`columnsKnown` names the question**, which `resolveColumn`, `resolveColumns`,
+  `validateColumnParams` and both column widgets all ask. `columnSchemaFor(...) !== undefined`
+  written at five sites is a rule nobody can grep for.
+
+  **The widget is the reason nobody had stored a value.** A *required* picker renders
+  `ctx.column(id)` — the resolver's answer — so a fallback is drawn exactly as a choice is. The
+  reported graph carried `supervoxelColumn: ""` because the card had been showing `supervoxel_id`
+  the whole time; it was the table's first column and the fallback had found it. That is "a
+  default was never a decision" from the other side, and it is why `Update root IDs` now declares
+  `supervoxel_id` rather than `''`: an empty default there meant *the table's first column*,
+  which was right on FlyWire's published annotations by luck and is a guess with nothing behind
+  it anywhere else.
+
+- **Nothing was warming the schema, so the first Run behaved differently from the second.**
+  The chain is: a dataset node on "Latest" reads its id from `peekDatasets()` → the id lets
+  `schemasFromType` call `schemasFor(datasetId)` → that kicks off discovery →
+  `reportSourceLearned` re-infers. Both peeks answered "I don't know" _without finding out_, so
+  the chain never started: no listing meant no dataset id, which meant discovery never ran, and
+  every column picker downstream sat on the canonical seven until the first Run fetched a
+  listing as a side effect. That is why running twice fixed it and reloading brought it back.
+
+  `peekDatasets()` now starts the listing the first time it cannot answer, and `schemasFor`
+  starts discovery for a dataset it has no state for instead of bailing — which is also the
+  only thing that ever asked on behalf of a **pinned** version, whose concrete id needs no
+  listing at all. Once per instance, not once per peek: inference runs on every graph mutation
+  and a failed listing retried from there would be a request per keystroke. Nothing is asked for
+  without a token; recovery is the Sources panel's explicit `listDatasets()`.
+
+  This is `schemasFor`'s existing trade — a peek that quietly starts a fetch — applied to the
+  link above it. `inferOutputs` may not await (invariant 2), so a synchronous peek is the only
+  place a fetch can start on a graph's behalf, and being re-run when it lands is exactly what
+  `reportSourceLearned` is for.
+
+- **`pivotTable` refuses on shape before it allocates**, and that is the backstop rather than
+  the fix — the two entries above are the fix. `MAX_PIVOT_COLUMNS` / `MAX_PIVOT_CELLS` are
+  checked against the label cardinalities, because by the time an array exists the damage is
+  done. It also allocates one accumulator per aggregation rather than all five, so `sum` costs
+  8 bytes a cell instead of 40. The general form is worth carrying: **a node whose output size
+  is the product of two independently-resolved columns needs a ceiling checked before
+  allocation**, because neither picker knows what the other did.
+
+- **A multi-column picker used to drop what it could not yet see, and the first Run differed from
+  the second.** `resolveColumns` filtered the stored names against the available ones, and an
+  input carrying _no schema at all_ produced an empty list — which then went into the provenance
+  key and into `ctx.columns`.
+
+  `Pivot → Select` with two of eight wide columns picked emitted **all eight** on the first run
+  after a reload, because empty means "everything" to the Select node. The store then re-inferred
+  against the schema the pivot had just published, the key changed, the node went stale, and a
+  second Run gave the right answer. Same "runs twice, answers differently" signature as the
+  dataset-listing bug in invariant 2, and the same root cause: a degraded answer that nothing
+  distinguished from a real one.
+
+  The fix is the singular's rule 2 in the form that fits the plural: **a schema this picker cannot
+  see is not a schema without these columns in it.** `resolveColumns` now returns the stored list
+  untouched when `columnSchemaFor` answers `undefined`, and still drops a column a _known_ schema
+  lacks — which is what keeps `validateColumnParams`' "Missing column(s)" true and stops a name
+  the table cannot honour reaching `evaluate`. That distinction is the entire reason
+  `columnSchemaFor` answers `undefined` separately from an empty schema.
+
+  It is also what makes `Text columns` safe on both import nodes, whose schema is empty before the
+  first run by construction.
+
+- **Module init order.** `graphStore.ts` imports `../nodes` for its side effect, because it
+  resolves node types the moment it loads the autosaved graph. Without that import,
+  ordering in `main.tsx` becomes load-bearing and a bad order silently drops every node.
+- **Type regexes are anchored.** `MockSource` wraps user patterns in `^(?:…)$` to match
+  Neo4j's `=~` semantics. So `LC.*` matches `LC4` but **not** `LPLC1`. Don't "fix" this —
+  the real neuPrint source behaves the same way because Neo4j does.
+- **`localStorage` is undefined** under Node 26 + jsdom unless `--localstorage-file` is
+  passed. `persistence.ts` try/catches every access, so the app degrades; tests use
+  `clearStorage()` from `src/test/jsdomStubs.ts`.
+- **React Flow needs measurements.** In jsdom it marks unmeasured nodes
+  `visibility: hidden`, so `getByRole` can't see them — component tests pass
+  `{ hidden: true }`. `installJsdomStubs()` supplies ResizeObserver (which must actually
+  fire, or charts stay 0×0 and silently render nothing), `getBoundingClientRect`,
+  `matchMedia`, and a **2D canvas context** — accept-everything, remember-nothing. The last
+  is not for assertions: it is what makes `drawScatter` and `NeuronThumbnail`'s raster pass
+  actually _run_, so a crash in either fails a test rather than waiting for a browser. WebGL
+  stays absent on purpose, since sigma and three both check for it and degrade, and a fake
+  that answered would send them down a render path with no GPU behind it. Note the coupling
+  it created: stubbing `getContext` turned `NeuronThumbnail`'s previously-skipped effect live,
+  which needs `ImageData` — a global jsdom only defines when the optional `canvas` package is
+  installed.
+- **`erasableSyntaxOnly` is on**, so no TS parameter properties (`constructor(private x)`).

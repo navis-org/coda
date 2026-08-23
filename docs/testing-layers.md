@@ -1,0 +1,167 @@
+# Testing layers
+
+Which test file covers what — the index to consult before writing a new test.
+
+Moved verbatim out of `CLAUDE.md`.
+
+
+## Testing layers
+
+| File                                     | Covers                                                                                                                           |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `core/graph.test.ts`                     | topo sort, cycles (incl. two wires between one pair), serialisation, lenient loading                                             |
+| `core/reference.test.ts`                 | reference edges: the round trip sorting, the identity without its own schema, evaluate not waiting, and that a real cycle and two wires between one pair are unchanged |
+| `core/scheduler.test.ts`                 | hybrid eval, caching, invalidation, errors, targeted runs                                                                        |
+| `nodes/lib/tableOps.test.ts`             | each op, plus schema/value agreement — including the coalesce's blank-is-absent rule, its widening, and backfill-in-place vs append — and the id bridge: a wide id kept exactly, a rounded one skipped, ids ordered by magnitude |
+| `data/mock/generate.test.ts`             | determinism, internal consistency, source semantics                                                                              |
+| `examples/examples.test.ts`              | all five examples end to end, inference-clean, non-empty, and their notes' markdown parsing                                      |
+| `ui/App.smoke.test.tsx`                  | real app mounted and driven: Run, live filtering, link rejection, undo, per-node run                                             |
+| `ui/viewers/viewers.test.tsx`            | chart geometry: bar cap, rounded end, 2px gaps, legend rules                                                                     |
+| `ui/panels/fuzzy.test.ts`                | match/ranking behaviour, including boundary alignment                                                                            |
+| `ui/panels/palette.test.tsx`             | command `disabled` flags vs live state, type-filtered node items, Space flow                                                     |
+| `ui/panels/overlay.test.tsx`             | expand/close paths, rail params, and that restyling does not stale a node                                                        |
+| `ui/params/paramGroups.test.ts`          | tabs/rows reshaping: that the panel shows every param the flat rail did, exactly once                                            |
+| `ui/params/columnField.test.tsx`         | what a column picker says about a port with no schema: the value it will use rather than "(missing)", never disabled, and both true claims kept |
+| `ui/export.test.ts`                      | CSV quoting/nulls/chunking, wide-matrix CSV, filenames, standalone SVG                                                           |
+| `export/python/export.test.ts`           | both fixtures against their goldens, every wired port declared, every emitting type reached, and a neuPrint cell refusing on a CAVE dataset |
+| `ui/panels/notebookExport.test.tsx`      | (also) the warning on the Save item: one per format, naming the steps, and silence on a graph that exports whole |
+| `ui/panels/palette.test.tsx`             | (also) that the export rows' peek starts no walk, and light up once one has run |
+| `ui/format.test.ts`                      | that an id column prints verbatim while the count beside it groups, that an aggregate of one is a quantity again, and the length ladder: the rung asked of the rounded figure, any rung read as a source unit, and a sub-nanometre length not rounded away |
+| `ui/panels/nodeBrowser.test.tsx`         | rows/thumbnails/signatures, chip-search exclusivity, entry points                                                                |
+| `ui/encoding.test.ts`                    | palette rules: 8 slots, Other fold, area scaling, null handling                                                                  |
+| `ui/viewers/networkLayout.test.ts`       | topology reading, layering (incl. cycles), all four layouts                                                                      |
+| `ui/viewers/networkRebuild.test.tsx`     | that restyling never re-runs the layout — the camera-reset regression, counted                                                   |
+| `ui/viewers/layoutMemo.test.ts`          | that a settled layout returns only while it still describes the graph                                                            |
+| `ui/viewers/networkDraw.test.ts`         | reciprocal curvature, arrow geometry, the exported SVG                                                                           |
+| `ui/viewers/networkStyle.test.ts`        | focus/ego sets, dimming (hue kept, theme-flipped), and what a tooltip decides to say                                             |
+| `ui/viewers/networkViewer.test.tsx`      | the caption: counts, the label-thinning admission, size refusal                                                                  |
+| `data/neuprint/neuprint.test.ts`         | Cypher building/escaping, response decoding, both halves of the `bodyId`→`neuronId` seam, schema discovery, mesh-source resolution, nm conversion |
+| `data/precomputed/precomputed.test.ts`   | shard lookup, multi-LOD manifest, Draco decode, legacy fragments, CORS fallback                                                  |
+| `nodes/transform/updateRootIds.test.ts`  | the repair: only stale rows looked up, supervoxels sent as raw uint64, a current row left alone even with a warm cache, a row with no supervoxel untouched, the id column's declared dtype kept rather than row zero's — and both pickers resolving before any schema has arrived |
+| `data/cave/rootIds.test.ts`              | the drift check: ids sent as unquoted integers, the frozen instant read as UTC rather than local, asked once per chain and re-asked when the wiring changes, a late lander not overwriting a newer answer, only the unseen ones asked, and nothing at all without a chunkedgraph |
+| `data/catmaid/catmaid.test.ts`           | CATMAID against recorded bodies: the confidence-bucket sum, parents rebuilt as indices, the indexed list encoding, an anonymous POST refused a direct route, a status filter ignored and a region filter refused |
+| `data/catmaid/live.test.ts`              | the same source against the real VFB FAFB instance, skipped without `CATMAID_LIVE` — a skeleton proved to be one tree in nanometres, its synapses inside its own bounds, and the neuropil volumes parsed |
+| `data/cave/cave.test.ts`                 | CAVE against recorded bodies: a wide root id kept exactly, the string-aware scan, the annotation pivot, an anchored pattern, a size filter refused rather than emptying the result, and every refusal |
+| `nodes/lib/datasetFamilies.test.ts`      | (also) that every CAVE family names a datastack spec and every spec a family — the join key nothing else checks |
+| `data/cave/live.test.ts`                 | the same source against the real services, skipped without `CAVE_TOKEN` — the only thing that notices an endpoint shape changing, the mesh and synapse clouds proved to share one nanometre frame, Aedes' edge list built by counting with nothing configured, and a loadable scene assembled for all three datastacks |
+| `data/annotations/annotations.test.ts`   | annotation sources: the `Token` scheme, the pseudo-workspaces dropped, a wide id kept as text, the outer join and the later source winning, a rename collision suffixed in all three shapers, the route fallback's three rules — and the Sheet link grammar, its cache keyed on the tab rather than the ref, and which status blames what |
+| `data/annotations/live.test.ts`          | the same against real FlyTable, skipped without `SEATABLE_TOKEN` — including the ids proved to be beyond double precision — and Google Sheets behind `GOOGLE_SHEET_LIVE`, where what is asserted is the CORS header nothing else can see |
+| `nodes/annotation/annotations.test.ts`   | the four source nodes: the two halves of one join asserted against each other, half a chain published as nothing, a Select in the chain (the case that decides the socket type), a table with no `neuronId` refused twice — and the Sheet link's tab reaching the ref, a refusal worded once for the badge and the run, and a column named before the tab has been read |
+| `nodes/query/morphology.test.ts`         | the shared `Max neurons` ceiling and what its refusal message blames                                                             |
+| `ui/nodes/nodeRunRing.test.tsx`          | run-indicator arithmetic: dash fractions, the zero floor, indeterminate mode                                                     |
+| `ui/nodes/runRing.placement.test.tsx`    | that the outline renders outside the clipped card (slow mock, so 'running' is observable)                                        |
+| `nodes/analysis/network.test.ts`         | BuildNetwork semantics + the selection round-trip                                                                                |
+| `nodes/analysis/nblast.test.ts`          | the units conversion above all, plus the flattening, the labels, the ceiling, the voxel refusal, and every control reaching the request |
+| `nodes/analysis/nblastKnn.test.ts`       | the k-NN shape: the rectangle laid out long, the padding dropped and counted, and the id columns named so a neuron id is not a quantity |
+| `core/values.test.ts`                    | what a node footer says about a geometry value: its units printed always, and voxels-vs-unknown told apart                        |
+| `nodes/lib/linkageOps.test.ts`           | the tree ops: the square-but-not-one-population refusal, exactly-k against a tie, clusters numbered in leaf order, the copied buffer |
+| `nodes/analysis/linkage.test.ts`         | the three nodes: every control reaching the request, the cut carried on the pass-through, and a restyle costing no run             |
+| `ui/viewers/dendrogramLayout.test.ts`    | the brackets: slot centres, a subtree as a contiguous run, a branch coloured only where its leaves agree, and both orientations     |
+| `ui/viewers/tooltipPoint.test.ts`        | a tooltip's coordinates: relative to its containing block and divided by the zoom, plus that the stylesheet still says `absolute`   |
+| `nodes/lib/labelsToNeurons.test.ts`      | labels to neurons: a type expanding to every neuron carrying it, matched as text, the first row for a repeat, and a collision suffixed |
+| `nodes/transform/labelsToNeurons.test.ts`| the two registrations: identical params, one warning that differs, and a neurons type published for a 3D socket                     |
+| `ui/nodes/labelsToNeuronsBody.test.tsx`  | the readout: what a wrong `Match on` says, not-wired against not-run, and every non-advanced param drawn                            |
+| `ui/viewers/dendrogram.test.tsx`         | the card through `ValuePreview`: a click handing back exactly the leaves under it, and every admission the caption makes           |
+| `data/neuroglancer/scene.test.ts`        | scene editing against the real published shapes, the URL round-trip, and `middleauth+` following the viewer rather than the backend |
+| `nodes/output/neuroglancer.test.ts`      | what lands in the link: segments, colour agreement with the 3D view, the limit, and which viewer the segmentation is authenticated for |
+| `ui/viewers/neuroglancerViewer.test.tsx` | that a restyle navigates the frame rather than remounting it, and that Reload does the opposite — a fresh document, and no merge into one still booting |
+| `ui/nodes/nodeResize.test.tsx`           | handles outside the clipping card, resize not invalidating a result, gesture undo                                                |
+| `ui/nodes/paramFold.test.tsx`            | folding a card's param rows: the header button surviving the band, notes excepted, one undo step, and that it costs no run       |
+| `ui/nodes/collapsedPorts.test.tsx`       | collapse to a header: handles moved not removed, each still addressable, and the wrapper's width kept but not its height         |
+| `ui/nodes/hiddenParams.test.tsx`         | the `… N more` hint: both counts, the card with no band at all, what is not a change, and that it never closes an open inspector |
+| `nodes/lib/neuronSearch.test.ts`         | the Explore query language: parsing, matching, null rules, the fuzzy fallback, ranking, completion                               |
+| `data/cache.test.ts`                     | IndexedDB-less degradation, fingerprint/expiry invalidation, index dedupe                                                        |
+| `ui/explore/thumbnail.test.ts`           | silhouette projection/shading, and the data-driven row spec                                                                      |
+| `ui/explore/chips.test.ts`               | that the chip hues in `theme.css` still match `colors.ts`, that a slot follows the field, which chips each backend's vocabulary yields, and a tags column held out of all three lists |
+| `ui/explore/neuronRow.test.tsx`          | what a row draws: community tags apart from the chips and unlike them, capped with the rest in the counter's title, an absence drawing no row — and a stat scaled into its own unit with the stored figure kept verbatim on hover |
+| `ui/explore/explore.test.tsx`            | the widget: live filtering vs debounced commit, paging staleness, selection, completion, and it mounted in the real editor       |
+| `nodes/query/explore.test.ts`            | the node's ports: that `All` ignores both the search and `Max hits`, and infers what it evaluates                                |
+| `nodes/lib/labelLookup.test.ts`          | label parsing, the typed/wired union, and what the unmatched report refuses to claim                                             |
+| `nodes/query/idsFromLabel.test.ts`       | exact vs regex, the anchoring, the union reaching one query, and empty meaning empty                                             |
+| `ui/nodes/idsFromLabelBody.test.tsx`     | the card: every non-advanced param rendered, and the unmatched line naming the labels                                            |
+| `nodes/lib/datasetFamilies.test.ts`      | version ordering, latest-vs-pinned resolution, and the deployment/base-URL mapping                                               |
+| `nodes/dataset/dataset.test.ts`          | per-dataset nodes infer what they evaluate, the custom node's lazy source, that the superseded node still runs, the drift advisory following the annotation chain in both directions, and CATMAID's project dropdown: not-listed-yet apart from lists-none, a stored value kept, and a source per instance |
+| `ui/nodes/datasetBody.test.tsx`          | preview above fields, the version dropdown, the resolved id, and no expand button                                                |
+| `data/mock/morphology.test.ts`           | tree validity, determinism, tube meshes, synapse placement                                                                       |
+| `store/inference.test.ts`                | inference against a source that has not learned its listing yet, and the re-infer signal                                         |
+| `ui/panels/startPage.test.tsx`           | start page: both rails, a tile per card, the replace-confirm, close-vs-dismiss, and both ways back                               |
+| `ui/panels/panels.test.tsx`              | (also) the New menu: an escape hatch under every backend's heading, and the three volumes held back without being unregistered   |
+| `nodes/lib/profileStats.test.ts`         | the profile roll-ups: distinct partners, nested-ROI filtering, the last-parenthesis side rule, NT column matching                |
+| `nodes/lib/networkOps.test.ts`           | filter order, ranking after the weight cut, and the recomputed degree roll-ups                                                   |
+| `nodes/output/profile.test.ts`           | that Profile is a tap, and that paging is free while pinning is not                                                              |
+| `ui/viewers/profileViewer.test.tsx`      | the widget: pager clamping, absent tiles vs dashes, the threshold reaching a heading, card-vs-overlay, and the annotation chain reaching both fetches and the cache key |
+| `ui/markdown.test.ts`                    | the markdown subset against the real published blurbs, plus what a hostile one cannot do                                         |
+| `store/companion.test.ts`                | that a dataset node brings its Description card, as one undo step, and which families opt out                                    |
+| `store/autowire.test.ts`                 | that a new node's Dataset socket arrives fed, and every case where it must not — ambiguity, load, an existing wire               |
+| `store/fitOnLoad.test.ts`                | that opening a graph asks for a fit, and that an empty one does not leave the request pending                                    |
+| `ui/fitOnLoad.test.tsx`                  | that the request is spent: `fitView` called on every open with `nodesInitialized` reading the `false` it really returns, and not called on an ordinary edit |
+| `ui/nodes/descriptionBody.test.tsx`      | the card in the real editor: links, nesting, the overlay, and that raw HTML never mounts                                         |
+| `store/library.test.ts`                  | the browser shelf against real IndexedDB: name-as-identity, and that a save with nowhere to go _rejects_                         |
+| `store/autosave.test.ts`                 | the crash net across tabs: a reload landing on its own graph rather than the last written, a fresh tab adopting the most recent, what bounds the slots, and a duplicated tab taking a new identity |
+| `ui/panels/library.test.tsx`             | the menus and the start-page rail: the replace prompt, the delete prompt, an opened entry landing on the canvas                  |
+| `ui/panels/sources.test.tsx`             | the sources dialog: a tab per source, the tab an auth failure lands on, and where the credential promise sits                    |
+| `nodes/annotation/note.test.ts`          | that a text note is never executed, deferred, stalled or counted, and round-trips                                                |
+| `store/links.test.ts`                    | breaking and re-routing links: one undo step, the id kept, and what a refused rewire leaves                                      |
+| `core/splice.test.ts`                    | dropping a node on a wire: the downstream check needing the upstream link applied, isolation, and one link left on the port |
+| `store/splice.test.ts`                   | that the move and the rewire undo as one gesture, and that a node which does not fit is still moved                          |
+| `ui/panels/edgeMenu.test.tsx`            | the link menu: that its header names the wire it is about, and that deleting leaves the nodes                                    |
+| `ui/panels/nodeMenu.test.tsx`            | the node menu's two caches: Results rather than "cache", and Clear Cache gated on the node declaring one                        |
+| `ui/viewers/tableSummary.test.tsx`       | the inspector's text readout: every column listed, an id kept whole, a long value cut but recoverable, and no dash for no rows |
+| `ui/nodes/cacheAge.test.tsx`             | `cached 3d ago ⟳`: the age surviving a restored result, the click reaching both caches, and no threshold hiding a fresh one     |
+| `ui/nodes/noteCard.test.tsx`             | the note card: markdown as prose, no node chrome, Escape abandoning an edit, the frame toggle                                    |
+| `nodes/lib/connectivityOps.test.ts`      | the traversal: the pre→post swap, the both-ends dedupe, no re-expansion, minWeight pruning                                       |
+| `nodes/query/connectivity.test.ts`       | the node: that it advertises the columns it builds, and that Hops reaches the source                                             |
+| `layout/layout.test.ts`                  | the ELK mapping and placement, the port convention and option keys against real ELK, and a network laid out by it                |
+| `layout/routing.test.ts`                 | edge routes: a wire bent past a card, pinned sockets honoured, a partial measurement declined, and what stales a route           |
+| `ui/edgeRoute.test.ts`                   | the wire's geometry: the fillet clamped to its own segment, and the ends staying on the sockets rather than on ELK's guess       |
+| `ui/edgeRouting.test.tsx`                | both routings drawn, the hit path following the detour, and which wires are marked as having followed a route                    |
+| `nodes/lib/pathOps.test.ts`              | the bidirectional search, the feed-forward prune, bottleneck ranking, and what truncation admits                                 |
+| `nodes/query/paths.test.ts`              | the node end to end, and that the collapse reaches the _source_ rather than relabelling after                                    |
+| `ui/panels/layoutControls.test.tsx`      | the four rail buttons, the bubble, what clears the auto-layout toggle, and routes dropping on a drag but not a param edit        |
+| `ui/viewers/scatterPlot.test.ts`         | the scales and the log drop, the point budget's stride, the trend in transformed space, and a lasso catching rows nothing drew   |
+| `ui/viewers/scatterDraw.test.ts`         | marker geometry, the colour+shape batching, and the exported SVG                                                                 |
+| `ui/viewers/scatterViewer.test.tsx`      | the scatter caption: every admission it makes, and which legend keys stand down in a card                                        |
+| `ui/viewers/heatmapPlot.test.ts`         | the heatmap fold: a grid bounded by the plot, the strongest cell of a block surviving, the ramp table proved lossless, thinning |
+| `ui/viewers/svgBuilders.test.ts`         | every synthesised export through the real serializer: one namespace declaration, one font, and a document that actually parses |
+| `nodes/output/scatter.test.ts`           | the tap, id-vs-row-index selection, and that `Max points` stales nothing                                                         |
+| `core/columnParams.test.ts`              | what a column picker may complain about: unknown-vs-empty schema, what `optional` changes, a plural keeping an unseen list, and a singular on its default resolving the same either side of a schema |
+| `nodes/output/barChart.test.ts`          | the tap, that an unpicked column is a warning and not a refusal, and the stack-by-itself catch                                   |
+| `nodes/table/pivot.test.ts`              | the two outputs describing one pivot, and the wide schema arriving only by observation                                           |
+| `nodes/lib/tableFilter.test.ts`          | a header cell's grammar: a bare value following the column's dtype, the null rule, and every clause it drops rather than applies |
+| `nodes/output/table.test.ts`             | the two ports: the tap kept whole, filtering staling the node while paging does not, and a bad clause refusing nothing           |
+| `nodes/table/sample.test.ts`             | the four sampling modes, a draw reproduced from its seed, and the seed costing nothing in the other three                        |
+| `nodes/table/combine.test.ts`            | the coalesce node: infer publishing what evaluate returns, an unset picker warning rather than refusing, and the chain into a Dataset |
+| `nodes/table/dedupe.test.ts`             | the three `keep` modes, an empty picker comparing whole rows, row order kept, and a null told apart from the text "null"       |
+| `data/csv.test.ts`                       | reading somebody else's file: quoting, delimiter-by-consistency, header bias, a suffix that cannot land on a name already taken, and every value the parse refuses to widen |
+| `data/uploads.test.ts`                   | the store against real IndexedDB: content addressing incl. a separator collision, a write that rejects, and the peek's one read  |
+| `nodes/table/upload.test.ts`             | the node: the schema arriving by peek, the neuronId rename, what a graph opened elsewhere says, and the filename costing nothing   |
+| `ui/nodes/uploadBody.test.tsx`           | the card's four states — and that 'looking' is never printed as 'not here' — plus the size ceiling refusing before it reads      |
+| `nodes/table/fromUrl.test.ts`            | the fetch: deferred by the auto pass, Refresh as the only re-fetch, the schema keyed by URL, and what each refusal blames        |
+| `nodes/lib/idList.test.ts`               | reading pasted ids: every separator, a bad token refusing the list, an eighteen-digit id kept exactly, and the 19-digit ceiling  |
+| `nodes/query/inputIds.test.ts`           | the node: no dataset means no query, the seam asked in numbers, no status filter, empty never all                                |
+| `ui/nodes/inputIdsBody.test.tsx`         | the card: the counts, the ids named as missing, and that it claims nothing with no Dataset wired                                 |
+| `nodes/table/stack.test.ts`              | the union schema needing both sides, a real dtype clash refused at run time, and the source column                               |
+| `ui/fullscreen.test.tsx`                 | the ⛶ and `F`: what element is handed over, that a refusal leaves the button unpressed, and the manifest's relative scope        |
+| `ui/exportValue.test.ts`                 | SWC's 1-based ids and -1 roots, OBJ's 1-based faces, the JSON typed-array unpack, the file cap, and GraphML parsed as real XML   |
+| `ui/nodes/resultDownload.test.tsx`       | the card foot's ⤓: absent before a run, withheld on a viewer card, the formats offered, and the dataset card the one rule reaches |
+| `nodes/output/download.test.ts`          | the tap: identity pass-through, deferred by the auto pass, and settings re-running nothing                                       |
+| `ui/useDownloads.test.tsx`               | the side effect: written on an executing run, not on an unchanged one, and the auto-run warning                                  |
+| `ui/panels/startPage.test.tsx`           | (also) the field-guide links, in the welcome bar and the Help menu, composed against `BASE_URL`                                  |
+| `nodes/lib/datasetStats.test.ts`         | the dataset roll-ups: null-vs-empty as one absence, absence counted apart, the residual fold, and one walk serving every cap        |
+| `nodes/query/roiSummary.test.ts`         | the two ROI nodes: answering from a Dataset alone, a region kept when its summability is unknown, and the asymmetry between them   |
+| `nodes/output/datasetSummary.test.ts`    | that a chart setting stales nothing while `Status` does, and that it emits no ports at all                                        |
+| `ui/viewers/datasetSummary.test.tsx`     | the card: absent tiles vs dashed ones, why an empty one is empty, the caption naming its population, ring-vs-bars, and paging |
+| `ui/useNeuronIndex.test.tsx`             | one load across two widgets, a late mount with no spinner flash, and a reload reaching every subscriber                            |
+| `ui/raster.test.ts`                      | triangles to masks and masks to outlines: clipping, brightest-wins, a concavity kept, split blobs, and the closed-ring simplify |
+| `ui/viewers/roiProjection.test.ts`       | the three anatomical planes, an outline that keeps its notch, the explode proved non-uniform, the frame held at full, and mesh volume |
+| `data/obj.test.ts`                       | reading somebody else's OBJ: every face-index form agreeing, polygons fanned, CRLF, and what a 200 that is not a mesh says |
+| `nodes/output/rois.test.ts`              | the ROIs node: no ports at all, every control costing no run, and what it says with a source publishing no region meshes |
+| `data/meshDecimate.test.ts`              | vertex clustering: the silhouette surviving, no degenerate faces, determinism, and welding a seam counted apart from decimating |
+| `ui/viewers/roiOutlines.test.ts`         | what survives when the meshes are released: three planes per region, the size claim, and a fingerprint that re-fetches on a changed region list |
+| `ui/viewers/rois.test.tsx`               | the card through `ValuePreview`: that it asks before spending 60 MB, stops asking once cached, drops the rail when compact, and marks the volume an estimate |
+| `ui/viewers/roiStyle.test.ts`            | the region hue: a left/right pair sharing one, sub-regions distinct, literal hex, and a published ratio clamped |
+| `data/neuprint/roiHierarchy.test.ts`     | the level above primary: groups from the real hemibrain tree, the root excluded, sub-primary not descended into, and a malformed tree losing the grouping not the map |
+| `nodes/transform/selectOne.test.ts`      | stepping free vs committing stale, an index past the end emitting nothing, and one skeleton re-measuring its bounds                |
+| `ui/nodes/selectOneBody.test.tsx`        | the pager card: not-run vs not-wired, the Live label counted once, and the gap between what is shown and what is emitted           |
+| `nodeguide/nodeGuide.test.ts`            | the node guide's data: a paragraph per node, socket styles, internal-vs-advanced params, an enum's label, and the examples cross-reference |
+| `overview/overview.test.ts`              | the overview page against the registry: the node count it advertises as a floor, and every backend and real dataset family named on it |
