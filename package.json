@@ -17,6 +17,7 @@
     "probe:nblast": "node scripts/probe-nblast.mjs",
     "probe:linkage": "node scripts/probe-linkage.mjs",
     "probe:helpers": "python3 scripts/probe-py-helpers.py",
+    "probe:r-helpers": "Rscript scripts/probe-r-helpers.R",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
     "lint": "eslint .",
     "preview": "vite preview",

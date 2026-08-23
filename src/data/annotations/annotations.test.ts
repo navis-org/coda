@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cacheSet, resetCache } from '../cache'
 import { joinAnnotations } from '../../nodes/lib/annotationOps'
 import { makeTable } from '../../core/values'
-import { column, tableSchema } from '../../core/types'
+import { column, columnNames, tableSchema } from '../../core/types'
 import {
   SEATABLE_HOSTS,
   resetSeaTableCredentials,
@@ -33,6 +33,13 @@ import {
 import type { SeaTableConfig, SeaTableTable } from './seaTable'
 import type { CaveTableConfig } from './caveTable'
 import { pivotRows, resetCaveTableState, wideRows } from './caveTable'
+import type { GoogleSheetConfig } from './googleSheet'
+import {
+  GOOGLE_SHEET_PROVIDER,
+  parseSheetLocation,
+  resetGoogleSheetState,
+  sheetExportUrl,
+} from './googleSheet'
 import {
   SHAPE_FORMAT,
   annotationProvider,
@@ -78,6 +85,7 @@ beforeEach(() => {
   // and a peek that has already resolved cannot demonstrate what an unresolved one answers.
   resetSeaTableState()
   resetCaveTableState()
+  resetGoogleSheetState()
   // Which route reached a host is module state too, and it is deliberately sticky in production.
   forgetSeaTableRoutes()
   setToken(HOST, 'account-token')
@@ -426,10 +434,16 @@ describe('the annotation table cache', () => {
      * hypothetical: dropping the duplicate-id collapse took `main.info` from 56,309 rows to
      * 58,340 and every session that had read it kept reporting 56,309.
      *
-     * So: **if you changed any expectation in `what a SeaTable base becomes` or `what the CAVE
-     * table provider shapes`, bump `SHAPE_FORMAT` and this number with it.** Those blocks are the
-     * operative definition of "shaping"; this line is what stops them drifting from the version
-     * that describes them. A constant nothing checks is a comment.
+     * So: **if you changed any expectation in `what a SeaTable base becomes`, `what the CAVE
+     * table provider shapes` or `reading a Google Sheet`, bump `SHAPE_FORMAT` and this number
+     * with it.** Those blocks are the operative definition of "shaping"; this line is what stops
+     * them drifting from the version that describes them. A constant nothing checks is a comment.
+     *
+     * **And `src/data/csv.ts` counts, which is the one that is easy to miss.** The Google Sheet
+     * provider caches the *parsed tab* rather than the finished annotation table, so what is
+     * stored is `parseDelimited`'s output — the delimiter detection, the header bias and
+     * `inferDType`'s round-trip rule. A change to any of those produces a different table from
+     * the same reply, which is exactly the condition, even though nothing in this file moved.
      */
     expect(SHAPE_FORMAT).toBe(2)
   })
@@ -819,5 +833,281 @@ describe('resolving a workspace', () => {
      * second copy in IndexedDB.
      */
     expect(captured.filter((c) => c.url.includes('/rows/')).length).toBe(reads)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Google Sheets
+// ---------------------------------------------------------------------------
+
+/**
+ * The sheet the stub serves, carrying one row for each rule.
+ *
+ * An eighteen-digit id, a blank cell, a row with no id at all, and a repeat — every one of which
+ * produces a plausible wrong table rather than an error if its rule is dropped.
+ */
+const SHEET_CSV =
+  'root_id,cell_type,side,synapses\n' +
+  '720575940628857210,LC4,left,120\n' +
+  '720575940628857211,,right,4\n' +
+  ',orphan,left,1\n' +
+  '720575940628857210,LC4,left,7\n'
+
+/** Every URL the provider asked for, so a second read can be shown not to have happened. */
+function installSheetFetch(body: string | { status: number } = SHEET_CSV): string[] {
+  const seen: string[] = []
+  vi.stubGlobal('fetch', (url: string) => {
+    seen.push(String(url))
+    if (typeof body !== 'string') {
+      return Promise.resolve({
+        ok: false,
+        status: body.status,
+        headers: new Headers(),
+        text: () => Promise.resolve('<!DOCTYPE html><html>…'),
+      } as Response)
+    }
+    return Promise.resolve({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-length': String(body.length) }),
+      text: () => Promise.resolve(body),
+    } as Response)
+  })
+  return seen
+}
+
+function sheetConfig(over: Partial<GoogleSheetConfig> = {}): GoogleSheetConfig {
+  return {
+    documentId: 'a'.repeat(44),
+    gid: '1874360847',
+    idColumn: 'root_id',
+    columns: '',
+    ...over,
+  }
+}
+
+const sheetRef = (over: Partial<GoogleSheetConfig> = {}) => ({
+  provider: GOOGLE_SHEET_PROVIDER,
+  config: sheetConfig(over),
+})
+
+describe('the Google Sheet link grammar', () => {
+  const ID = '1s0Pl9uTJ7Rl0Q1cQeXsp3s5kCsPRk9dU8jZ6yQnB4Vw'
+
+  it('takes the document and the tab out of a pasted address bar', () => {
+    // The whole point of parsing rather than asking for two fields: this is the string somebody
+    // already has, and it names both.
+    expect(parseSheetLocation(`https://docs.google.com/spreadsheets/d/${ID}/edit#gid=1874360847`))
+      .toEqual({ documentId: ID, gid: '1874360847' })
+  })
+
+  it('reads the tab out of the query too, which is where the current UI puts it', () => {
+    expect(
+      parseSheetLocation(`https://docs.google.com/spreadsheets/d/${ID}/edit?gid=42#gid=42`).gid,
+    ).toBe('42')
+  })
+
+  it('takes a bare id, and a ready-made export URL', () => {
+    expect(parseSheetLocation(ID)).toEqual({ documentId: ID })
+    expect(
+      parseSheetLocation(
+        `https://docs.google.com/spreadsheets/d/${ID}/export?format=csv&gid=7`,
+      ),
+    ).toEqual({ documentId: ID, gid: '7' })
+  })
+
+  it('refuses a publish-to-web link by name rather than reading its id as "e"', () => {
+    /*
+     * `/spreadsheets/d/e/2PACX-…/pub` is a different id space that `/export` cannot open at all,
+     * and the `/d/` in it means a naive match takes the id to be the literal `e` — a 404 blaming
+     * the sheet. The message has to name the link to use instead, which is one somebody has.
+     */
+    const { documentId, error } = parseSheetLocation(
+      'https://docs.google.com/spreadsheets/d/e/2PACX-1vQx9/pub?output=csv',
+    )
+    expect(documentId).toBeUndefined()
+    expect(error).toMatch(/publish to web/i)
+    expect(error).toMatch(/Share link/i)
+  })
+
+  it('refuses another host, and a string that is neither a link nor an id', () => {
+    expect(parseSheetLocation('https://example.org/sheet.csv').error).toMatch(/example\.org/)
+    expect(parseSheetLocation('my sheet').error).toMatch(/not a Google Sheet link or id/)
+  })
+
+  it('refuses an id too short to be one, which is what stops a peek fetching per keystroke', () => {
+    // `peekColumns` starts a read for any ref it can build, so every prefix of an id being typed
+    // would otherwise be a ref and a request that 404s.
+    expect(parseSheetLocation('1s0Pl9uTJ7').documentId).toBeUndefined()
+    expect(parseSheetLocation('')).toEqual({})
+  })
+
+  it('builds the export URL, and leaves the gid off for the first tab', () => {
+    expect(sheetExportUrl(ID, '99')).toBe(
+      `https://docs.google.com/spreadsheets/d/${ID}/export?format=csv&gid=99`,
+    )
+    expect(sheetExportUrl(ID, '')).toBe(
+      `https://docs.google.com/spreadsheets/d/${ID}/export?format=csv`,
+    )
+  })
+})
+
+describe('reading a Google Sheet', () => {
+  const provider = () => annotationProvider(GOOGLE_SHEET_PROVIDER)!
+
+  it('reads the export URL and keys the id column as text, exactly', async () => {
+    const seen = installSheetFetch()
+    const table = await provider().fetch(sheetRef(), {})
+
+    expect(seen[0]).toContain('/export?format=csv&gid=1874360847')
+    // The whole of invariant 8 at this seam: `inferDType` refuses a numeric reading of a value
+    // that would not survive a round trip, and the column is declared `str` besides.
+    expect(table.schema.columns[0]).toEqual({ name: 'neuronId', dtype: 'str' })
+    expect(table.data['neuronId']?.[0]).toBe('720575940628857210')
+  })
+
+  it('renames cell_type to type, which nothing else would notice', async () => {
+    installSheetFetch()
+    const table = await provider().fetch(sheetRef(), {})
+    // `typesOf` reads `type` by literal name, so a chain publishing `cell_type` leaves every
+    // connectivity row's type null while the schema still declares the column.
+    expect(columnNames(table.schema)).toEqual(['neuronId', 'type', 'side', 'synapses'])
+  })
+
+  it('drops a row with no id and keeps a repeated one', async () => {
+    installSheetFetch()
+    const table = await provider().fetch(sheetRef(), {})
+    // An annotation with no neuron attached has nothing to join to. A repeat is a fact about
+    // somebody's spreadsheet, collapsed downstream where a Sort can decide which row wins.
+    expect(table.data['neuronId']).toEqual([
+      '720575940628857210',
+      '720575940628857211',
+      '720575940628857210',
+    ])
+  })
+
+  it('drops a named column the tab does not have, rather than emitting nulls', async () => {
+    installSheetFetch()
+    const table = await provider().fetch(sheetRef({ columns: 'side, nope' }), {})
+    // The two other providers cannot see the server's column list without a round trip and so
+    // fill an absent one with nulls; this one has already parsed it, and a column of nulls is
+    // the quiet wrong answer. The node's `validate` names it instead.
+    expect(columnNames(table.schema)).toEqual(['neuronId', 'side'])
+  })
+
+  it('caches on the tab rather than on the ref, so renaming a column re-reads nothing', async () => {
+    const seen = installSheetFetch()
+    await provider().fetch(sheetRef({ columns: 'side' }), {})
+    expect(seen.length).toBe(1)
+    /*
+     * The one place this departs from the other two providers, and the reason is that the two
+     * halves have completely different costs here: the download is the whole expense and the
+     * shaping is a projection over a table already in hand. Nothing about `columns` changes what
+     * the *server* sends.
+     */
+    const table = await provider().fetch(sheetRef({ columns: 'cell_type' }), {})
+    expect(seen.length).toBe(1)
+    expect(columnNames(table.schema)).toEqual(['neuronId', 'type'])
+  })
+
+  it('refuses a missing id column by naming what the tab does have', async () => {
+    installSheetFetch()
+    await expect(provider().fetch(sheetRef({ idColumn: 'neuronId' }), {})).rejects.toThrow(
+      /root_id, cell_type, side, synapses/,
+    )
+  })
+
+  it('blames the gid on a 400 and the id on a 404', async () => {
+    // Measured against the live endpoint: a bad gid is a loud 400, where a bad *tab name* is a
+    // 200 carrying the first tab — which is why the tab is chosen by gid at all.
+    installSheetFetch({ status: 400 })
+    await expect(provider().fetch(sheetRef(), {})).rejects.toThrow(/no tab with gid 1874360847/)
+
+    resetCache()
+    installSheetFetch({ status: 404 })
+    // A document that does not exist. A *Restricted* one never reaches here — it is a blocked
+    // redirect, which is the case below — so this message names the id rather than offering both.
+    await expect(provider().fetch(sheetRef(), {})).rejects.toThrow(/No sheet with that id/)
+  })
+
+  it('reads a thrown fetch as a sheet nobody shared, not as a dead network', async () => {
+    /*
+     * The failure people actually hit, and the one the first version of this got backwards.
+     * A Restricted sheet answers a 302 to `accounts.google.com`, which sends no CORS headers at
+     * all, so a browser blocks the *redirect* and `fetch` throws an opaque TypeError. The old
+     * message read "the export URL is readable cross-origin, so this is a network failure",
+     * which is confidently wrong and sends somebody to check their wifi.
+     */
+    const calls: Array<RequestInit | undefined> = []
+    vi.stubGlobal('fetch', (_url: string, init?: RequestInit) => {
+      calls.push(init)
+      // The ordinary follow-the-redirect read is what a browser refuses.
+      if (init?.redirect !== 'manual') return Promise.reject(new TypeError('Failed to fetch'))
+      // `redirect: 'manual'` does not follow the second hop, so it does not CORS-check it.
+      return Promise.resolve({ type: 'opaqueredirect', status: 0 } as Response)
+    })
+
+    await expect(provider().fetch(sheetRef(), {})).rejects.toThrow(/not readable without signing in/)
+    // One extra request, and only on the failure path.
+    expect(calls.map((c) => c?.redirect)).toEqual(['follow', 'manual'])
+  })
+
+  it('still says the host is unreachable when the probe cannot reach it either', async () => {
+    // The other half of the classification. `docs.google.com` is the only host this provider
+    // talks to and it demonstrably sends CORS headers, so there is no third case to confuse.
+    vi.stubGlobal('fetch', () => Promise.reject(new TypeError('Failed to fetch')))
+    await expect(provider().fetch(sheetRef(), {})).rejects.toThrow(/Could not reach docs.google.com/)
+  })
+
+  it('keeps a cancelled run cancelled rather than reporting an unreachable host', async () => {
+    /*
+     * The abort has to land *inside the probe* to test anything: an abort on the ordinary read
+     * is already rethrown before the classification runs, so a stub that rejects both calls the
+     * same way passes whatever this guard does. Confirmed by mutation — the first version of
+     * this test did exactly that.
+     */
+    vi.stubGlobal('fetch', (_url: string, init?: RequestInit) =>
+      init?.redirect === 'manual'
+        ? Promise.reject(new DOMException('aborted', 'AbortError'))
+        : Promise.reject(new TypeError('Failed to fetch')),
+    )
+    await expect(provider().fetch(sheetRef(), {})).rejects.toThrow(/aborted/)
+  })
+
+  it('peeks undefined, then answers once the read it started has landed', async () => {
+    installSheetFetch()
+    const ref = sheetRef()
+    // Synchronous by contract — inference may not await (invariant 2) — so the first answer is
+    // "not yet" rather than a wait.
+    expect(peekRefColumns(ref)).toBeUndefined()
+    await vi.waitFor(() => expect(peekRefColumns(ref)).toBeTruthy())
+    expect(columnNames(peekRefColumns(ref))).toEqual(['neuronId', 'type', 'side', 'synapses'])
+  })
+
+  it('re-derives the schema when a column param changes, and fetches nothing', async () => {
+    const seen = installSheetFetch()
+    const ref = sheetRef()
+    peekRefColumns(ref)
+    await vi.waitFor(() => expect(peekRefColumns(ref)).toBeTruthy())
+    expect(seen.length).toBe(1)
+
+    /*
+     * `ID column` and `Columns` are free text, so every keystroke is a distinct config — and
+     * neither changes what the server sends. Keyed on them, the peek re-ran the whole shaping
+     * pipeline per keystroke and threw the table away; worse, a sheet that could not be read was
+     * re-fetched per keystroke, because `loadCachedTable` does not retain failures.
+     */
+    const narrowed = peekRefColumns(sheetRef({ columns: 'side' }))
+    expect(columnNames(narrowed)).toEqual(['neuronId', 'side'])
+    expect(seen.length).toBe(1)
+  })
+
+  it('asks once per ref however often inference runs', async () => {
+    const seen = installSheetFetch()
+    const ref = sheetRef()
+    for (let i = 0; i < 5; i++) peekRefColumns(ref)
+    await vi.waitFor(() => expect(peekRefColumns(ref)).toBeTruthy())
+    // A peek runs on every graph mutation, so a retry from here is a request per keystroke.
+    expect(seen.length).toBe(1)
   })
 })

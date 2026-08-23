@@ -491,9 +491,9 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `data/cave/cave.test.ts`                 | CAVE against recorded bodies: a wide root id kept exactly, the string-aware scan, the annotation pivot, an anchored pattern, a size filter refused rather than emptying the result, and every refusal |
 | `nodes/lib/datasetFamilies.test.ts`      | (also) that every CAVE family names a datastack spec and every spec a family — the join key nothing else checks |
 | `data/cave/live.test.ts`                 | the same source against the real services, skipped without `CAVE_TOKEN` — the only thing that notices an endpoint shape changing, the mesh and synapse clouds proved to share one nanometre frame, Aedes' edge list built by counting with nothing configured, and a loadable scene assembled for all three datastacks |
-| `data/annotations/annotations.test.ts`   | annotation sources: the `Token` scheme, the pseudo-workspaces dropped, a wide id kept as text, the outer join and the later source winning, a rename collision suffixed in all three shapers — plus the route fallback's three rules |
-| `data/annotations/live.test.ts`          | the same against real FlyTable, skipped without `SEATABLE_TOKEN` — including the ids proved to be beyond double precision |
-| `nodes/annotation/annotations.test.ts`   | the three source nodes: the two halves of one join asserted against each other, half a chain published as nothing, a Select in the chain (the case that decides the socket type), and a table with no `neuronId` refused twice |
+| `data/annotations/annotations.test.ts`   | annotation sources: the `Token` scheme, the pseudo-workspaces dropped, a wide id kept as text, the outer join and the later source winning, a rename collision suffixed in all three shapers, the route fallback's three rules — and the Sheet link grammar, its cache keyed on the tab rather than the ref, and which status blames what |
+| `data/annotations/live.test.ts`          | the same against real FlyTable, skipped without `SEATABLE_TOKEN` — including the ids proved to be beyond double precision — and Google Sheets behind `GOOGLE_SHEET_LIVE`, where what is asserted is the CORS header nothing else can see |
+| `nodes/annotation/annotations.test.ts`   | the four source nodes: the two halves of one join asserted against each other, half a chain published as nothing, a Select in the chain (the case that decides the socket type), a table with no `neuronId` refused twice — and the Sheet link's tab reaching the ref, a refusal worded once for the badge and the run, and a column named before the tab has been read |
 | `nodes/query/morphology.test.ts`         | the shared `Max neurons` ceiling and what its refusal message blames                                                             |
 | `ui/nodes/nodeRunRing.test.tsx`          | run-indicator arithmetic: dash fractions, the zero floor, indeterminate mode                                                     |
 | `ui/nodes/runRing.placement.test.tsx`    | that the outline renders outside the clipped card (slow mock, so 'running' is observable)                                        |
@@ -1666,9 +1666,10 @@ a source to replace and the control would change nothing. A CAVE datastack takes
 a table — which is exactly what an annotation source *is* — and for several datastacks there is
 no such table at all. Aedes publishes synapses and nuclei and no annotations whatsoever.
 
-**Three nodes over two providers**, which is `labelsToNeurons`' call again: `FlyTable` and
+**Four nodes over three providers**, which is `labelsToNeurons`' call again: `FlyTable` and
 `SeaTable` are the *same API at two hosts*, so they share a client and differ in the host they
-default to and the name somebody looks for.
+default to and the name somebody looks for. `Google Sheet` is the third provider and the one that
+needs no credential at all — see *Google Sheets, and the provider with no credential* below.
 
 **Two column names are Coda's, and a chain has to land on both.** `neuronId` was obvious — an id
 column is whatever the base calls it and every provider renamed onto it from the start. `type` was
@@ -1957,6 +1958,168 @@ one has to ask the server what its kinds are, and does it once per ref through t
 `afterSourceLearned` — dataset listings, upload schemas, and now these: three asynchronous facts
 that inference reads synchronously, one handler.
 
+### Google Sheets, and the provider with no credential
+
+`annotation.googleSheet`, `Add ▸ Dataset ▸ Google Sheet`. A sheet shared as **"anyone with the
+link can view"** read through its plain CSV export URL — `src/data/annotations/googleSheet.ts`.
+The third provider and the first that authenticates nothing: there is no token to store, no
+auth-failure channel and nothing for the Connections panel to offer, which is most of why it
+earns a node rather than being left to `Table from URL` pointed at a hand-built address. A lab's
+cell typing lives in a Google Sheet at least as often as it lives in a SeaTable base.
+
+Everything below was probed live rather than read off documentation.
+
+**Both hops of the redirect carry CORS, which is the finding the whole thing rests on.**
+`docs.google.com/…/export` answers `307` with `access-control-allow-origin` echoing the
+requesting origin, and the `doc-XX-XX-sheets.googleusercontent.com` target it names answers `200`
+with `*`. A browser CORS-checks *every* hop, so one link missing a usable header would block the
+fetch before it reached the data — which is exactly the trap `core.tableFromUrl`'s guide records
+about GitHub's `/raw/refs/heads/` redirect, whose first hop sends an **empty** ACAO. Here both are
+open, so there is no relay, no `/gs` proxy prefix and no `routeMemory`: the one route that exists
+is known to work. **Confirmed from a real page origin over CDP**, which is the only thing that
+could — Node's `fetch` does no CORS enforcement, which is precisely the gap `docs/flytable-cors.md`
+records having been caught by.
+
+**The tab is chosen by `gid`, and that is not a preference.** Measured on one sheet:
+
+```text
+export?format=csv&gid=999999    → 400        loud
+export?format=csv&sheet=Nope    → 200 …      the FIRST tab, silently
+gviz/tq?tqx=out:json&sheet=Nope → status ok  the FIRST tab, silently
+```
+
+A tab name typed wrong does not fail, it hands back different data under a green node. A `gid`
+typed wrong is a 400. Nobody has to type one either: it is in the URL people copy out of the
+address bar, so `parseSheetLocation` lifts it from the fragment or the query and the Tab field is
+only ever an override.
+
+**`gviz/tq?tqx=out:csv` is not used, for a second reason:** it pads every row out to the sheet's
+full column range — a six-column table came back as twenty-two, sixteen of them `""` — so a table
+read from it carries sixteen blank columns in every picker downstream. `export?format=csv` returns
+the used range and nothing else.
+
+**A publish-to-web link is refused by name rather than mangled.** `/spreadsheets/d/e/2PACX-…/pub`
+is a *different* id space that only `…/pub?output=csv` serves; `/export` does not know those ids
+at all, and the `/d/` in it means a naive match reads the id as the literal `e` — a 404 blaming
+the sheet. The message names the link to use instead, which is one somebody already has.
+
+**A missing document and a Restricted one are two different failures, and telling them apart
+cost the message being wrong first.** A **Restricted** sheet — the sharing default, and the thing
+people hit before anything else — does not answer a status a page can read: `docs.google.com`
+`302`s to `accounts.google.com/ServiceLogin`, which sends **no `Access-Control-*` at all**, and a
+browser CORS-checks every hop. So the fetch dies as an opaque `TypeError` with
+`corsError: MissingAllowOriginHeader`, and the first version of this node reported *"the export
+URL is readable cross-origin, so this is a network failure"* — confidently wrong, and it sends
+somebody to check their wifi over a share setting.
+
+**`curl` answers this endpoint differently from a browser, which is what produced that bug.** The
+same request from curl comes back a bare `401` **with** CORS headers and no redirect, so the code
+was written against a response no browser ever sees. Probing with curl alone was not enough here;
+what settled it was Chrome's own `Network.loadingFailed`. Treat that as the standing lesson —
+this is the second time a Google/CORS fact has only been visible from inside a browser.
+
+**So the two causes are told apart with one extra request, on the failure path only.**
+`explainFailure` re-issues the read with **`redirect: 'manual'`**, which does not follow — and
+therefore does not CORS-check — the second hop, so a sheet Google wants a login for comes back as
+an **opaque redirect** rather than throwing. That is decisive precisely *because* the ordinary
+path already threw: a public sheet also redirects, but it redirects somewhere readable and never
+reaches this function. A probe that throws too means the host is genuinely unreachable, and there
+is no third possibility, since this provider talks to one host and that host demonstrably sends
+CORS headers. Verified in a browser against a real Restricted sheet.
+
+A document that does not exist still answers a readable **`404`**, so that message names the
+**id** rather than offering both causes. There is deliberately **no `reportAuthFailure`** on any
+of it: that channel opens the Connections panel so somebody can fix a credential, and this
+provider has none. The fix is in Google's own share dialog, so the message names the setting.
+
+**The cache is keyed on the *tab*, and the shaping happens after it** — the one place this
+departs from its two siblings, which cache the finished annotation table. The two halves have
+completely different costs here: the download is the whole expense and the shaping is a
+projection, and unlike a SeaTable or CAVE ref there is nothing about `columns`/`idColumn` that
+changes what the *server* sends. Keyed per ref, editing the ID column would re-download a
+spreadsheet to rename a column already in hand. `SHAPE_FORMAT` still guards what is stored and
+still means what it says, because the parse *is* the shaping at that layer.
+
+**`peekColumns` starts the read, and the read is the download.** There is no metadata endpoint —
+a sheet publishes its shape only by handing over its contents — which would make this expensive
+if it were paid twice. It is not: the peek goes through `cachedAnnotationTable`, so it fills
+IndexedDB and the first Run finds it there.
+
+**What is cached and what is guarded are both the *tab*, and getting the second wrong cost a full
+re-shape per keystroke.** `discovery` was keyed on the whole config, so every distinct value of
+the free-text `ID column` and `Columns` fields ran the entire pipeline and read `.schema` off the
+result — an O(rows × columns) walk allocating a second copy of the table, discarded, twice per
+graph mutation. Worse, `loadCachedTable` does not retain failures, so an unshared sheet was
+*re-fetched* per keystroke, which is the opposite of the once-per-ref guard the method exists to
+be. `sheetSchema` is now the schema half split out of `shapeSheet` — the peek derives it
+synchronously from the parsed tab's schema and touches no row, and `shapeSheet` calls it rather
+than restating it, so invariant 3 holds by construction. `seaTable.ts`'s `baseKey` records the
+same class of mistake from the other side. Measured in a browser on a real sheet: the card read
+`8ms · cached 25s ago ⟳` after Run, and the output socket already said
+`Annotations: Neurons{neuronId, Gender, Major}` *before* anything had been run. The bytes move
+earlier rather than being spent again. Once per ref and never retried, invariant 2's corollary —
+which is also why `ID_PATTERN` has a 20-character floor: without one, every prefix of an id
+somebody is typing would be a ref and a request that 404s.
+
+**A named column the tab does not have is dropped rather than emitted as nulls**, which is where
+this parts company with `wideRows` and `shapeRows` — those cannot see the server's column list
+without a round trip and this one has already parsed it. A column of nulls is the quiet wrong
+answer; `validate` names the missing one out loud instead, as a *warning*, because the other
+columns are still worth having. The **id** column is the one that refuses, naming what the tab
+does have, since without it there is nothing to join.
+
+**Dtypes come from `parseDelimited`**, so invariant 8 is free here: `inferDType` refuses a numeric
+reading of any value that would not survive a round trip through a double, which keeps an
+eighteen-digit root id as text. The id is `String`-ed and declared `str` on top of that, because a
+sheet of nine-digit neuPrint ids parses as `i64` and every consumer keys on `neuronId` as a string.
+
+**One resolution, three consumers.** `sheetConfigFrom` in `googleSheet.ts` turns a node's params
+into a `GoogleSheetConfig`, and the node and both emitters call it. Sharing `parseSheetLocation`
+and `sheetExportUrl` and then re-deriving their *arguments* per consumer leaves the failure the
+sharing was for still reachable — the Tab field overrides the pasted link, and that precedence is
+precisely what decides which tab a generated notebook reads. It also collapses the double parse
+`validate` and `evaluate` were each doing on every keystroke.
+
+**The fetch-read-parse-refuse body is `readDelimitedResponse` in `data/csv.ts`,** shared with
+`core.tableFromUrl`, which this was written as a copy of — comments included. What was duplicated
+is not boilerplate: it is the `MAX_UPLOAD_BYTES` ceiling stated twice and the rule that a 200
+parsing to nothing must quote what arrived. The *fetch* is deliberately not shared, because what
+a thrown fetch means differs completely between the two — see below.
+
+**Both exporters emit it, and it is the only annotation source that does.** That is not a gap in
+the other two: FlyTable is `sea-serpent`, which has no natverse counterpart, and a CAVE table is
+caveclient, which R refuses the whole graph over. This one needs no client, so `pd.read_csv` and
+`readr::read_csv` reach it directly — which is also why it sits in `everythingGraph` rather than
+in `caveGraph`, chained onto the Upload node so the join branch is recorded rather than only the
+bare cell.
+
+Each language has one trap and it is the same trap from opposite directions, and **each was caught
+by running the generated helper rather than by reading it**. pandas types a column of
+eighteen-digit ids as `int64` — exact — and as `float64` the moment one row is blank, at which
+point `720575940628857210` comes back as `720575940628857216`: a different neuron, and two
+adjacent ids collapsing onto one. R has no 64-bit integer at all, so readr guessing gives a double
+and the same value. Both force the id column to text at the read — `dtype={id_column: 'string'}`
+and a `readr::cols` spec — and dropping either fails two checks in the probes and nothing else in
+the tree.
+
+**`scripts/probe-r-helpers.R` (`pnpm probe:r-helpers`) is new**, and it is `probe-py-helpers.py`
+one language over for that reason: `check-export.R` parses the chunks and resolves function names
+and stops there, so before this **nothing executed a line of generated R**. It reads the helper
+chunk out of the golden `.Rmd` rather than a transcription, needs no token and no network, and
+runs in `export.yml` beside its Python twin, where readr and dplyr are already installed. Coming
+with it are R's first `coda_annotation_columns` and `coda_join_annotations`, ported from
+`annotationColumn` and `joinAnnotations` — the second because a chain that silently ignored its
+upstream would be the control that quietly does nothing.
+
+**+7.82 kB raw / +1.95 kB gzipped on the main chunk** (1,154,422 → 1,162,245), measured against a
+build of `HEAD` in a clean worktree. Both exporter chunks carry `coda_google_sheet` and `main`
+carries none of it.
+
+**A live test, gated on `GOOGLE_SHEET_LIVE=1`** rather than on a credential, since there is none
+to withhold — `catmaid/live.test.ts`' idiom. It reads Google's own published `Class Data` sample
+and asserts the CORS header on the final hop, which is the thing that would notice the export
+endpoint changing and which every recorded-reply test in the tree would sail past.
+
 ### Backends, told apart
 
 `BACKENDS` in `datasetFamilies.ts` — a table, because "which backend" is now three things a
@@ -2198,9 +2361,11 @@ sits on a CAVE dataset, whose own node is excused for the same reason.
 
 ### What is not done
 
-The **R** exporter emits none of it — `dataset.flywire`, `dataset.cave` and the three annotation
-nodes are named in its `NO_EMITTER`, and a CAVE graph is refused outright there. Python emits all
-six; see *The CAVE half of the notebook exporter* below for what it does and does not reach.
+The **R** exporter emits almost none of it — `dataset.flywire`, `dataset.cave` and the CAVE and
+SeaTable annotation nodes are named in its `NO_EMITTER`, and a CAVE graph is refused outright
+there. `Google Sheet` is the exception and emits in both languages, because it needs no client:
+see its own section. Python emits all six; see *The CAVE half of the notebook exporter* below for
+what it does and does not reach.
 
 A node body for the annotation sources — a base and table picker fed by `listBases`/`readMetadata`
 rather than two text fields — is the obvious next thing; the client methods it needs already exist

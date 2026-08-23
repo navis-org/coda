@@ -84,11 +84,67 @@ coda_edge_list <- function(ids, prepost, min_weight, conn) {
 }
 
 
+#' Rename an annotation table's columns to the two names Coda addresses by name.
+coda_annotation_columns <- function(df, id_column) {
+  if (id_column %in% names(df)) names(df)[names(df) == id_column] <- "neuronId"
+  if (!("type" %in% names(df))) {
+    for (name in c("cell_type", "celltype")) {
+      if (name %in% names(df)) {
+        names(df)[names(df) == name] <- "type"
+        break
+      }
+    }
+  }
+  if (!("neuronId" %in% names(df))) return(df)
+  ids <- as.character(df$neuronId)
+  df$neuronId <- ids
+  df[!is.na(ids) & ids != "", , drop = FALSE]
+}
+
+
+#' A shared Google Sheet, read through its CSV export URL.
+coda_google_sheet <- function(url, id_column = "root_id", columns = NULL) {
+  spec <- stats::setNames(list(readr::col_character()), id_column)
+  df <- readr::read_csv(url, col_types = do.call(readr::cols, spec),
+                        show_col_types = FALSE, progress = FALSE)
+  if (!(id_column %in% names(df))) {
+    stop(sprintf("'%s' is not a column of that tab. It has: %s",
+                 id_column, paste(names(df), collapse = ", ")))
+  }
+  keep <- if (length(columns)) {
+    columns[columns %in% names(df) & columns != id_column]
+  } else {
+    # Empty means every column but the id, which is how a sheet says "all of it".
+    setdiff(names(df), id_column)
+  }
+  coda_annotation_columns(df[, c(id_column, keep), drop = FALSE], id_column)
+}
+
+
 #' Coda's `join` aggregation: distinct, first-appearance order, absences skipped.
 coda_join <- function(x) {
   kept <- as.character(x[!is.na(x)])
   kept <- unique(kept[kept != ""])
   if (length(kept) == 0) NA_character_ else paste(kept, collapse = "; ")
+}
+
+
+#' Chain two annotation sources: outer join on `neuronId`, the later one winning.
+coda_join_annotations <- function(left, right) {
+  if (is.null(left)) return(right)
+  if (is.null(right)) return(left)
+  left <- left[!duplicated(left$neuronId), , drop = FALSE]
+  right <- right[!duplicated(right$neuronId), , drop = FALSE]
+  shared <- setdiff(intersect(names(right), names(left)), "neuronId")
+  merged <- dplyr::full_join(left, right, by = "neuronId",
+                             suffix = c("", ".coda_later"))
+  for (name in shared) {
+    later <- merged[[paste0(name, ".coda_later")]]
+    take <- !is.na(later)
+    merged[[name]][take] <- later[take]
+    merged[[paste0(name, ".coda_later")]] <- NULL
+  }
+  merged
 }
 
 
@@ -561,6 +617,16 @@ rois_rois <- neuprint_ROIs(superLevel = FALSE, conn = hemibrain_neuprint)
 # One request each. nat::plot3d() draws them once read.
 # rois_meshes <- lapply(rois_rois, neuprint_ROI_mesh, conn = hemibrain_neuprint)
 rois_rois
+```
+
+```{r google-sheet}
+# ── Google Sheet ──
+google_sheet <- coda_google_sheet(
+  "https://docs.google.com/spreadsheets/d/1s0Pl9uTJ7Rl0Q1cQeXsp3s5kCsPRk9dU8jZ6yQnB4Vw/export?format=csv&gid=1874360847",
+  id_column = "root_id",
+  columns = c("cell_type", "side")
+)
+google_sheet <- coda_join_annotations(upload_table, google_sheet)
 ```
 
 ```{r connectivity}

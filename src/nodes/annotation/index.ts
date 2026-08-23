@@ -1,10 +1,17 @@
 /**
  * Annotation source nodes — where a CAVE dataset's labels come from.
  *
- * Three registrations over two providers, which is the `labelsToNeurons` call made again: `SeaTable`
- * and `FlyTable` are the *same* API at two hosts, so they share an implementation and differ in
- * the host they default to and the name somebody looks for. Discoverability is the case for two;
- * the cost is paid once rather than as two clients that drift.
+ * Four registrations over three providers, which is the `labelsToNeurons` call made again:
+ * `SeaTable` and `FlyTable` are the *same* API at two hosts, so they share an implementation and
+ * differ in the host they default to and the name somebody looks for. Discoverability is the case
+ * for two; the cost is paid once rather than as two clients that drift.
+ *
+ * **`Google Sheet` is the one that needs no credential**, which is why it is worth having beside
+ * the other two rather than being left to `Table from URL`: a sheet shared as "anyone with the
+ * link" answers an ordinary cross-origin GET, so the node is a link, a tab and two column
+ * fields. `data/annotations/googleSheet.ts` records what was measured about the export URL — in
+ * particular that the tab is chosen by `gid` because a tab *name* typed wrong is answered `200`
+ * with the first tab rather than refused.
  *
  * **They chain.** Each has its own optional Annotations input, so `CAVEtable → FlyTable →
  * Dataset` is one socket on the dataset and a visible sequence on the canvas. Each link adds its
@@ -25,16 +32,19 @@
 import type { EvalContext } from '../../core/node'
 import { registerNode } from '../../core/registry'
 import type { CodaType, TableSchema } from '../../core/types'
-import { T } from '../../core/types'
+import { T, columnNames } from '../../core/types'
 import type { TableValue } from '../../core/values'
 import { isTableValue } from '../../core/values'
 import type { AnnotationRef } from '../../data/annotations'
 import {
   CAVE_TABLE_PROVIDER,
+  GOOGLE_SHEET_PROVIDER,
   SEATABLE_PROVIDER,
   annotationProvider,
   peekRefColumns,
+  sheetConfigFrom,
 } from '../../data/annotations'
+import { annotationColumn, namedColumns } from '../../data/annotations/types'
 import { SEATABLE_HOSTS } from '../../data/annotations/credentials'
 import { peekBases, resolveWorkspace } from '../../data/annotations/seaTable'
 import { joinAnnotations, joinedSchema } from '../lib/annotationOps'
@@ -375,6 +385,130 @@ export const seaTableNode = buildSeaTableNode({
     'The same node as FlyTable pointed at cloud.seatable.io, which is the hosted service rather ' +
     'than the LMB’s deployment — two unrelated accounts, so each needs its own token. Use this ' +
     'for a base of your own; use FlyTable for the community annotations.',
+})
+
+
+// ---------------------------------------------------------------------------
+// Google Sheet
+// ---------------------------------------------------------------------------
+
+/**
+ * The ref this node stands for, from what somebody pasted.
+ *
+ * The resolution itself is `sheetConfigFrom` in `data/annotations/googleSheet.ts`, beside the
+ * link grammar it depends on, because both notebook emitters need the same answer — a copy here
+ * is how a generated cell comes to read a different tab from the card it was exported from.
+ *
+ * **Resolved before the ref is built**, which is `seaTable.ts`'s rule about resolving before the
+ * cache key is taken: a bare id, an edit URL and a ready-made export URL all name one tab, and a
+ * ref keyed on the spelling would download that tab once per spelling.
+ */
+function sheetRef(params: Record<string, unknown>): AnnotationRef | undefined {
+  const { config } = sheetConfigFrom(params)
+  return config ? { provider: GOOGLE_SHEET_PROVIDER, config } : undefined
+}
+
+export const googleSheetNode = registerNode({
+  type: 'annotation.googleSheet',
+  label: 'Google Sheet',
+  category: 'dataset',
+  description: 'Neuron labels from a shared Google Sheet, read through its CSV export URL.',
+  guide:
+    'Reads a Google Sheet nobody has to log in to see — Share ▸ Anyone with the link ▸ Viewer — ' +
+    'and hands it to a Dataset as its labels. Paste the address bar of the sheet: the document ' +
+    'and the tab both come out of it, so the Tab field is only needed to read a different tab ' +
+    'from the one that was open. Coda sends no credentials, so a sheet restricted to named ' +
+    'people cannot be read at all. What comes out is an ordinary neuron table, so a Filter or a ' +
+    'Sort can sit between here and the Dataset, and a Table node beside it shows what you ' +
+    'actually got.',
+  cost: 'expensive',
+  dataCache: true,
+  inputs: [ANNOTATIONS_INPUT],
+  outputs: [{ id: 'annotations', label: 'Annotations', type: T.neurons() }],
+  params: [
+    {
+      id: 'sheet',
+      kind: 'string',
+      label: 'Sheet',
+      placeholder: 'https://docs.google.com/spreadsheets/d/…/edit',
+      help: 'The sheet’s link, straight out of the address bar — or just the id from inside it. A “publish to web” link uses a different id and is not read here; the ordinary Share link is.',
+      default: '',
+    },
+    {
+      id: 'idColumn',
+      kind: 'string',
+      label: 'ID column',
+      default: 'root_id',
+      help: 'Column holding the neuron id. Renamed to neuronId, and kept as text so a wide root id survives exactly.',
+    },
+    {
+      id: 'columns',
+      kind: 'string',
+      label: 'Columns',
+      placeholder: 'cell_type, side',
+      help: 'Comma-separated columns to keep. Empty keeps everything but the id — the whole tab is downloaded either way, since a sheet has no way to serve part of one.',
+      default: '',
+    },
+    {
+      id: 'gid',
+      kind: 'string',
+      label: 'Tab',
+      placeholder: 'from the link',
+      help: 'The gid of the tab to read — the number after “#gid=” in the address bar. Empty uses whichever tab the pasted link named, or the first one.',
+      default: '',
+      advanced: true,
+    },
+  ],
+
+  inferOutputs: (ctx) => ({
+    annotations: T.neurons(chainSchema(ctx.inputs.annotations, sheetRef(ctx.params))),
+  }),
+
+  /**
+   * Checked at edit time, so this is about the *address* — plus whatever a landed peek can say.
+   *
+   * The column checks read `peekRefColumns`, which is `undefined` until the tab has been read
+   * once, and unknown is not empty: a name that cannot be checked yet is not a name that is
+   * wrong. Same rule `columnSchemaFor` states and `importShapeIssues` follows one node over.
+   */
+  validate: (ctx) => {
+    if (!String(ctx.params.sheet ?? '').trim()) return ['No sheet yet — paste its link']
+    const { config, error } = sheetConfigFrom(ctx.params)
+    if (error) return [error]
+    if (!config) return []
+    const gid = String(ctx.params.gid ?? '').trim()
+    if (gid && !/^\d+$/.test(gid)) {
+      return [`Tab "${gid}" is not a gid — it is the number after “#gid=” in the sheet’s URL`]
+    }
+
+    const known = peekRefColumns({ provider: GOOGLE_SHEET_PROVIDER, config })
+    // Unknown is not empty: a name that cannot be checked yet is not a name that is wrong. The
+    // id column is checked by the run rather than here, since a tab that does not carry it does
+    // not publish a schema at all.
+    if (!known) return []
+    const available = columnNames(known)
+    /*
+     * A named column the tab does not have is **dropped** rather than emitted as nulls, so this
+     * is the only thing that says so. A warning rather than a refusal: the other columns are
+     * still worth having, and an annotation source that refused would take the whole dataset
+     * down with it.
+     */
+    const missing = namedColumns(config.columns, config.idColumn).filter(
+      (name) => !available.includes(annotationColumn(name)),
+    )
+    return missing.length > 0 ? [`Not in that tab: ${missing.join(', ')}`] : []
+  },
+
+  evaluate: async (ctx) => {
+    const { config, error } = sheetConfigFrom(ctx.params)
+    // The same sentence `validate` puts on the card, so a badge and an error do not read as two
+    // different problems.
+    if (error) throw new Error(error)
+    if (!config) throw new Error('Paste the link of a Google Sheet.')
+    return {
+      annotations: await resolve(ctx, { provider: GOOGLE_SHEET_PROVIDER, config }),
+    }
+  },
 })
 
 // ---------------------------------------------------------------------------

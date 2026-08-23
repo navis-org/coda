@@ -100,9 +100,17 @@ export const SHAPE_FORMAT = 2
  * policy — the key prefix, the fingerprint, the expiry, the in-flight sharing — once rather than
  * twice. They had copied it line for line, including the `void cacheSet` and its reasoning.
  *
- * The key is the ref, which is right: a ref names its columns, so a differently-configured ref is
- * a different entry rather than the same entry with a different shape. The fingerprint is that
- * plus `SHAPE_FORMAT`, which is the half the key cannot carry.
+ * The key is the ref, and the fingerprint is that plus `SHAPE_FORMAT`, which is the half the key
+ * cannot carry.
+ *
+ * **A provider may narrow the ref it caches on, and one does.** For SeaTable and CAVE the whole
+ * ref is right, because `columns` changes what is *kept* out of a table large enough that a
+ * second copy matters. A Google Sheet is the other case: the export URL returns the whole tab
+ * whatever the ref asks for, so `googleSheet.ts` caches on `documentId|gid` and shapes
+ * afterwards — otherwise editing the ID column would re-download a spreadsheet to rename a
+ * column already in hand. What is passed here is then a **cache identity** rather than the
+ * source's full identity, and the provider is the only thing that can know which of its config
+ * fields are transport and which are shaping.
  */
 export function cachedAnnotationTable(
   ref: AnnotationRef,

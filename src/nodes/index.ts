@@ -8,7 +8,7 @@
 
 export { textNoteNode } from './annotation/note'
 export { datasetNodes, customNeuPrintNode, customCaveNode, customCatmaidNode } from './dataset'
-export { caveTableNode, flyTableNode, seaTableNode } from './annotation'
+export { caveTableNode, flyTableNode, googleSheetNode, seaTableNode } from './annotation'
 export { datasetDescriptionNode } from './dataset/description'
 export { datasetNode } from './query/dataset'
 export { exploreNode } from './query/explore'

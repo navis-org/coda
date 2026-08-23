@@ -9,6 +9,7 @@
 import './helpers'
 import './emitters/analysis'
 import './emitters/connectivity'
+import './emitters/googleSheet'
 import './emitters/query'
 import './emitters/table'
 import './emitters/viewers'

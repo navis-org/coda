@@ -15,6 +15,7 @@ import type { ColumnSchema, DType } from '../core/types'
 import { column, tableSchema, uniqueName } from '../core/types'
 import type { ColumnData, TableValue } from '../core/values'
 import { makeTable } from '../core/values'
+import { MAX_UPLOAD_BYTES } from './uploads'
 
 /**
  * Delimiters tried, in preference order.
@@ -357,4 +358,61 @@ export function parseDelimited(text: string): ParsedTable {
     hasHeader,
     raggedRows,
   }
+}
+
+// ---------------------------------------------------------------------------
+// Reading one over the wire
+// ---------------------------------------------------------------------------
+
+/**
+ * A fetched response as a table: the size ceiling, the read, the parse, and the refusal.
+ *
+ * One function because two nodes fetch delimited text — `core.tableFromUrl` and the Google
+ * Sheet annotation source — and the second was written as a copy of the first, comments
+ * included. What was duplicated is not boilerplate: it is the `MAX_UPLOAD_BYTES` ceiling stated
+ * twice, and the rule that a 200 parsing to nothing must *quote what arrived*. Two copies of a
+ * limit is how one comes to say 50 MB and the other 100.
+ *
+ * `subject` names the thing in each message — a URL for one caller, "that tab" for the other —
+ * because the address is the actionable part for one and meaningless for the other. `fail`
+ * builds the error, so each caller keeps its own error class.
+ *
+ * Deliberately **not** the fetch itself. What a thrown fetch means differs completely between
+ * the two: one has to name a cross-origin refusal as an equal possibility, and the other can
+ * tell a sign-in redirect from an unreachable host and says which. That is the interesting half
+ * and it is per-caller.
+ */
+export async function readDelimitedResponse(
+  response: Response,
+  subject: string,
+  fail: (message: string) => Error,
+  onProgress?: (fraction: number, note: string) => void,
+): Promise<ParsedTable> {
+  const megabytes = (bytes: number) => Math.round(bytes / (1024 * 1024))
+  const tooBig = (bytes: number) =>
+    fail(
+      `${subject} is ${megabytes(bytes)} MB, over the ${megabytes(MAX_UPLOAD_BYTES)} MB limit.`,
+    )
+
+  // Before the body is read, while it is still free — the call `pivotTable` makes on shape
+  // rather than on the array it is about to allocate. Absent on a chunked reply, which is why
+  // the parsed length is checked again below.
+  const declared = Number(response.headers.get('content-length') ?? '')
+  if (Number.isFinite(declared) && declared > MAX_UPLOAD_BYTES) throw tooBig(declared)
+
+  onProgress?.(0.5, 'reading')
+  const text = await response.text()
+  if (text.length > MAX_UPLOAD_BYTES) throw tooBig(text.length)
+
+  onProgress?.(0.8, 'parsing')
+  const parsed = parseDelimited(text)
+  if (parsed.table.schema.columns.length === 0 || parsed.table.length === 0) {
+    /*
+     * Very often a sign-in or error page served with a 200, which parses into one useless
+     * column. Saying what arrived is what turns "no rows" into something actionable.
+     */
+    const head = text.trim().slice(0, 60)
+    throw fail(`${subject} had no rows to read.${head ? ` It starts: ${JSON.stringify(head)}` : ''}`)
+  }
+  return parsed
 }

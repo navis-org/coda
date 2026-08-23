@@ -297,6 +297,56 @@ m = cns['coda_combine'](mixed, ['name', 'cluster']).astype('string')
 check('combine: a number widened to text', m.iloc[0] == '12693', str(m.iloc[0]))
 check('combine: text kept', m.iloc[1] == 'LC4', str(m.iloc[1]))
 
+# ---- coda_google_sheet, out of the same general cell -------------------------
+#
+# Read from a file rather than a URL: `pd.read_csv` takes either, and what is being checked is
+# the dtype and the shaping rather than Google's transport, which `data/annotations/googleSheet.ts`
+# records having probed live. The trap is the id column — pandas types eighteen-digit root ids as
+# int64 and then as float64 the moment one row is blank, at which point the value is a different
+# neuron with nothing to say so.
+import tempfile
+
+gns = load_cell(FIXTURES / "everything.ipynb", "def coda_google_sheet(", {"pd": pd, "np": np})
+SHEET = (
+    "root_id,cell_type,side,synapses\n"
+    "720575940628857210,LC4,left,120\n"
+    "720575940628857211,,right,4\n"
+    ",orphan,left,1\n"
+    "720575940628857210,LC4,left,7\n"
+)
+with tempfile.TemporaryDirectory() as tmp:
+    path = Path(tmp) / "sheet.csv"
+    path.write_text(SHEET)
+
+    out = gns['coda_google_sheet'](str(path), id_column='root_id', columns=['cell_type', 'side'])
+    ids = list(out['neuronId'])
+    check('sheet: a wide id survives exactly',
+          ids[0] == '720575940628857210', ids[0])
+    check('sheet: and is text, not a rounded float',
+          out['neuronId'].dtype == object or str(out['neuronId'].dtype) == 'string',
+          str(out['neuronId'].dtype))
+    check('sheet: a blank-id row is dropped', len(out) == 3, str(len(out)))
+    check('sheet: a repeated id is kept', ids.count('720575940628857210') == 2, str(ids))
+    check('sheet: cell_type becomes type', 'type' in out.columns, str(list(out.columns)))
+    check('sheet: an unnamed column is left out',
+          'synapses' not in out.columns, str(list(out.columns)))
+
+    every = gns['coda_google_sheet'](str(path), id_column='root_id')
+    check('sheet: empty columns keeps all but the id',
+          list(every.columns) == ['neuronId', 'type', 'side', 'synapses'],
+          str(list(every.columns)))
+
+    absent = gns['coda_google_sheet'](str(path), id_column='root_id', columns=['side', 'nope'])
+    check('sheet: a named column the tab lacks is dropped, not filled with NaN',
+          list(absent.columns) == ['neuronId', 'side'], str(list(absent.columns)))
+
+    try:
+        gns['coda_google_sheet'](str(path), id_column='neuronId')
+        check('sheet: a missing id column raises', False, 'no error')
+    except KeyError as err:
+        check('sheet: a missing id column raises, naming the columns',
+              'root_id' in str(err), str(err))
+
 print()
 print(f'{len(fails)} failed' if fails else 'all passed')
 sys.exit(1 if fails else 0)

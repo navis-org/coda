@@ -358,6 +358,24 @@ export function everythingGraph(): CodaGraph {
       row: 4,
       params: { url: 'https://example.org/embedding.csv', textColumns: ['layer'] },
     },
+    /*
+     * The one annotation source that is not backend-specific, which is why it is here rather
+     * than in `caveGraph`: it needs no client and no credential, so it emits in **both**
+     * languages and a fixture that only reached it through the CAVE graph would leave R's
+     * golden with nothing in it. Chained onto the upload, since the join is a separate branch
+     * of the emitter and an unwired one records only half the cell.
+     */
+    {
+      id: 'gsheet',
+      type: 'annotation.googleSheet',
+      col: 4,
+      row: 4,
+      params: {
+        sheet: 'https://docs.google.com/spreadsheets/d/1s0Pl9uTJ7Rl0Q1cQeXsp3s5kCsPRk9dU8jZ6yQnB4Vw/edit#gid=1874360847',
+        idColumn: 'root_id',
+        columns: 'cell_type, side',
+      },
+    },
 
     {
       id: 'net',
@@ -546,6 +564,7 @@ export function everythingGraph(): CodaGraph {
     ['find', 'neurons', 'clu', 'neurons'],
     ['skel', 'skeletons', 'v3d', 'skeletons'],
     ['stack', 'out', 'muted', 'in'],
+    ['upload', 'out', 'gsheet', 'annotations'],
   ]
   for (const [from, out, to, into] of edges) g = wire(g, from, out, to, into)
 

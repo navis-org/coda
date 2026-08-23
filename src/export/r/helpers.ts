@@ -161,3 +161,116 @@ registerHelper({
     '}',
   ],
 })
+
+/**
+ * Coda's names for an annotation table's columns.
+ *
+ * `annotationColumn` in `data/annotations/types.ts`: two renames and no more. The id column
+ * becomes `neuronId`, and a `cell_type`/`celltype` column becomes `type`. Those are the two
+ * columns nodes address **by name**, and missing the second is entirely silent — `df$type` on a
+ * tibble is `NULL` rather than an error, which is the same trap `coda_neurons` exists for one
+ * seam over.
+ *
+ * The id is kept as **character**, which is invariant 8 in R: there is no 64-bit integer here,
+ * so an eighteen-digit root id read as a numeric is a double and a *different* neuron. A row
+ * with no id names no neuron and is dropped, matching what every provider does on the canvas.
+ */
+registerHelper({
+  name: 'coda_annotation_columns',
+  source: [
+    "#' Rename an annotation table's columns to the two names Coda addresses by name.",
+    'coda_annotation_columns <- function(df, id_column) {',
+    '  if (id_column %in% names(df)) names(df)[names(df) == id_column] <- "neuronId"',
+    '  if (!("type" %in% names(df))) {',
+    '    for (name in c("cell_type", "celltype")) {',
+    '      if (name %in% names(df)) {',
+    '        names(df)[names(df) == name] <- "type"',
+    '        break',
+    '      }',
+    '    }',
+    '  }',
+    '  if (!("neuronId" %in% names(df))) return(df)',
+    '  ids <- as.character(df$neuronId)',
+    '  df$neuronId <- ids',
+    '  df[!is.na(ids) & ids != "", , drop = FALSE]',
+    '}',
+  ],
+})
+
+/**
+ * Two annotation sources chained.
+ *
+ * `joinAnnotations` in `nodes/lib/annotationOps.ts`, and the two rules that matter both produce
+ * a plausible wrong table rather than an error. It is a **full outer** join, because two sources
+ * routinely cover different populations and an inner one would silently return their
+ * intersection. And the later source **wins, falling back to the earlier one where it has no
+ * value** — a coalesce rather than a replace, which getting backwards produces a table that is
+ * right except in the cells one source left blank.
+ *
+ * Each side is deduplicated on the id first, or `full_join` cross-products a repeated one — an
+ * annotation base is somebody's spreadsheet and routinely holds two rows for one neuron.
+ *
+ * The fill is done by index rather than with `ifelse`, which drops a column's attributes and
+ * evaluates both branches. Assigning a character into a numeric column widens the whole vector,
+ * which is R doing what `combinedDType` does.
+ */
+registerHelper({
+  name: 'coda_join_annotations',
+  requires: ['dplyr'],
+  source: [
+    "#' Chain two annotation sources: outer join on `neuronId`, the later one winning.",
+    'coda_join_annotations <- function(left, right) {',
+    '  if (is.null(left)) return(right)',
+    '  if (is.null(right)) return(left)',
+    '  left <- left[!duplicated(left$neuronId), , drop = FALSE]',
+    '  right <- right[!duplicated(right$neuronId), , drop = FALSE]',
+    '  shared <- setdiff(intersect(names(right), names(left)), "neuronId")',
+    '  merged <- dplyr::full_join(left, right, by = "neuronId",',
+    '                             suffix = c("", ".coda_later"))',
+    '  for (name in shared) {',
+    '    later <- merged[[paste0(name, ".coda_later")]]',
+    '    take <- !is.na(later)',
+    '    merged[[name]][take] <- later[take]',
+    '    merged[[paste0(name, ".coda_later")]] <- NULL',
+    '  }',
+    '  merged',
+    '}',
+  ],
+})
+
+/**
+ * A shared Google Sheet as a Coda neuron table.
+ *
+ * **The id column is forced to character and everything else is guessed**, which is the whole
+ * of what makes this faithful. `readr` guesses well, and R's numeric is a double: a column of
+ * eighteen-digit root ids guessed as numeric is `7.205759e+17`, which matches nothing and is a
+ * different neuron besides. Coda's own reader reaches the same column by a different route —
+ * `inferDType` refuses a numeric reading of any value that would not survive a round trip.
+ *
+ * **A column named but not present is dropped rather than becoming a column of `NA`**, which is
+ * what the node does; the card carries the warning, and here the frame simply lacks it.
+ */
+registerHelper({
+  name: 'coda_google_sheet',
+  needs: ['coda_annotation_columns'],
+  requires: ['readr'],
+  source: [
+    "#' A shared Google Sheet, read through its CSV export URL.",
+    'coda_google_sheet <- function(url, id_column = "root_id", columns = NULL) {',
+    '  spec <- stats::setNames(list(readr::col_character()), id_column)',
+    '  df <- readr::read_csv(url, col_types = do.call(readr::cols, spec),',
+    '                        show_col_types = FALSE, progress = FALSE)',
+    '  if (!(id_column %in% names(df))) {',
+    '    stop(sprintf("\'%s\' is not a column of that tab. It has: %s",',
+    '                 id_column, paste(names(df), collapse = ", ")))',
+    '  }',
+    '  keep <- if (length(columns)) {',
+    '    columns[columns %in% names(df) & columns != id_column]',
+    '  } else {',
+    '    # Empty means every column but the id, which is how a sheet says "all of it".',
+    '    setdiff(names(df), id_column)',
+    '  }',
+    '  coda_annotation_columns(df[, c(id_column, keep), drop = FALSE], id_column)',
+    '}',
+  ],
+})

@@ -17,6 +17,7 @@ on:
       - 'src/export/**'
       - 'scripts/check-export.py'
       - 'scripts/probe-py-helpers.py'
+      - 'scripts/probe-r-helpers.R'
       - 'scripts/export-requirements.txt'
       - '.github/workflows/export.yml'
   pull_request:
@@ -24,6 +25,7 @@ on:
       - 'src/export/**'
       - 'scripts/check-export.py'
       - 'scripts/probe-py-helpers.py'
+      - 'scripts/probe-r-helpers.R'
       - 'scripts/export-requirements.txt'
   workflow_dispatch:
 
@@ -81,3 +83,9 @@ jobs:
             any::nat
             github::natverse/neuprintr
       - run: Rscript scripts/check-export.R --strict
+
+      # The R half of the run-what-was-generated pass. `check-export.R` resolves function names
+      # and stops there; these helpers are dplyr and readr, and the id column being forced to
+      # character is invisible to every other check — R has no 64-bit integer, so a guessed
+      # column of root ids is doubles and a different neuron.
+      - run: Rscript scripts/probe-r-helpers.R

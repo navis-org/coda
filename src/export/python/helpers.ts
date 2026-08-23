@@ -144,3 +144,49 @@ registerHelper({
     `    return ${JSON.stringify(JOIN_SEPARATOR)}.join(kept) if kept else None`,
   ],
 })
+
+/**
+ * A shared Google Sheet as a Coda neuron table.
+ *
+ * `data/annotations/googleSheet.ts` is what this mirrors, and the two rules worth transcribing
+ * exactly are the ones that produce a plausible wrong table rather than an error.
+ *
+ * **The id column is read as text rather than guessed.** pandas types a column of
+ * eighteen-digit root ids as `int64` — exact — and then as `float64` the moment one row is
+ * blank, at which point `720575940628857210` comes back as `720575940628857216` — a *different*
+ * neuron, with every later comparison wrong about a value nothing flagged. Measured rather than
+ * reasoned: removing the `dtype=` below and re-running `pnpm probe:helpers` collapses two
+ * adjacent ids in the probe's fixture onto one value. That is `coda_int64`'s finding at a
+ * different seam, and `dtype=` is the cheap way to never form the float at all.
+ * Coda's own reader arrives at the same column by a different route — `inferDType` refuses a
+ * numeric reading of any value that would not survive a round trip through a double.
+ *
+ * **A column named but not present is dropped rather than filled with NaN**, which is what the
+ * node does; the canvas says so in a warning on the card, and here the frame simply lacks it.
+ *
+ * `coda_annotation_columns` does the rest — see `caveHelpers.ts`, where it lives because
+ * `coda_seatable` wanted it first. It is not a CAVE helper: it is `annotationColumn`, which
+ * every annotation source in the tree renames through.
+ */
+registerHelper({
+  name: 'coda_google_sheet',
+  needs: ['coda_annotation_columns'],
+  requires: [['pandas']],
+  source: [
+    "def coda_google_sheet(url, id_column='root_id', columns=None):",
+    '    """A shared Google Sheet, read through its CSV export URL."""',
+    '    # `dtype=` rather than a cast afterwards: a float64 id is already the wrong neuron by',
+    '    # the time you could cast it back.',
+    "    df = pd.read_csv(url, dtype={id_column: 'string'})",
+    '    if id_column not in df.columns:',
+    '        raise KeyError(',
+    '            f"{id_column!r} is not a column of that tab. It has: {list(df.columns)}"',
+    '        )',
+    '    if columns:',
+    '        keep = [c for c in columns if c in df.columns and c != id_column]',
+    '    else:',
+    '        # Empty means every column but the id, which is how a sheet says "all of it".',
+    '        keep = [c for c in df.columns if c != id_column]',
+    '    return coda_annotation_columns(df[[id_column] + keep], id_column)',
+  ],
+})

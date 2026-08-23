@@ -31,6 +31,7 @@ import type { TableValue } from '../../core/values'
 import { isTableValue, tableFromRows } from '../../core/values'
 import type { AnnotationProvider } from '../../data/annotations/types'
 import { CAVE_TABLE_PROVIDER } from '../../data/annotations/caveTable'
+import { GOOGLE_SHEET_PROVIDER } from '../../data/annotations/googleSheet'
 import { SEATABLE_PROVIDER } from '../../data/annotations/seaTable'
 // Reached directly rather than through the barrel, which re-exports only what production code
 // outside this directory consumes — a registration seam is for a test and for `index.ts` itself.
@@ -638,5 +639,151 @@ describe('annotation nodes — refusals', () => {
       'side',
       'hemilineage',
     ])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Google Sheet
+// ---------------------------------------------------------------------------
+
+/**
+ * The refs the Google Sheet node built, so what a pasted link *became* can be asserted.
+ *
+ * The node is the only place the link grammar meets the params, and what it produces is a ref
+ * nothing else on the canvas shows — so the alternative is asserting on a fetch URL two layers
+ * down, which would pass just as happily with the tab dropped.
+ */
+let sheetRefs: Array<Record<string, string>> = []
+
+const SHEET_TABLE = tableFromRows(
+  tableSchema(column('neuronId', 'str'), column('type', 'str'), column('side', 'str')),
+  [{ neuronId: '720575940628857210', type: 'LC4', side: 'left' }],
+)
+
+/** Whether the sheet's columns have landed yet — the cold-session case, per ref. */
+let sheetKnown = true
+
+function sheetStub(): AnnotationProvider {
+  return {
+    id: GOOGLE_SHEET_PROVIDER,
+    label: 'Google Sheet',
+    peekColumns: (ref) => {
+      sheetRefs.push(ref.config as Record<string, string>)
+      return sheetKnown ? SHEET_TABLE.schema : undefined
+    },
+    fetch: (ref) => {
+      sheetRefs.push(ref.config as Record<string, string>)
+      return Promise.resolve(SHEET_TABLE)
+    },
+  }
+}
+
+const SHEET_ID = '1s0Pl9uTJ7Rl0Q1cQeXsp3s5kCsPRk9dU8jZ6yQnB4Vw'
+const SHEET_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/edit#gid=1874360847`
+
+/** One Google Sheet node, alone. */
+function sheetGraph(params: Record<string, unknown> = {}): CodaGraph {
+  return addNode(
+    emptyGraph('sheet-test'),
+    node('sheet', 'annotation.googleSheet', { sheet: SHEET_URL, ...params }),
+  )
+}
+
+describe('the Google Sheet node', () => {
+  const issues = (g: CodaGraph, id: string) => issuesOf(inferGraph(g), id)
+  const scheduler = () =>
+    new Scheduler({
+      resolveSource: (id) => {
+        throw new Error(`an annotation node must not reach a data source (asked for ${id})`)
+      },
+    })
+
+  beforeEach(() => {
+    sheetRefs = []
+    sheetKnown = true
+    registerAnnotationProvider(sheetStub())
+  })
+
+  it('takes the document and the tab out of the pasted link', () => {
+    published(sheetGraph(), 'sheet')
+    // The Tab field is an override, not the only way to name one: a link copied out of the
+    // address bar already says which tab was open, and asking for the number again is asking
+    // somebody to read it back out of the string they just pasted.
+    expect(sheetRefs[0]).toMatchObject({ documentId: SHEET_ID, gid: '1874360847' })
+  })
+
+  it('lets the Tab field override the link, and an empty one mean the first tab', () => {
+    published(sheetGraph({ gid: '42' }), 'sheet')
+    expect(sheetRefs[0]?.gid).toBe('42')
+
+    sheetRefs = []
+    published(sheetGraph({ sheet: SHEET_ID }), 'sheet')
+    expect(sheetRefs[0]?.gid).toBe('')
+  })
+
+  it('publishes what the provider answers, and nothing before it has answered', () => {
+    expect(columnNames(published(sheetGraph(), 'sheet'))).toEqual([
+      'neuronId',
+      'type',
+      'side',
+    ])
+    sheetKnown = false
+    expect(published(sheetGraph(), 'sheet')).toBeUndefined()
+  })
+
+  it('refuses a publish-to-web link in the same words the run would', async () => {
+    const g = sheetGraph({
+      sheet: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQx9/pub?output=csv',
+    })
+    const badge = issues(g, 'sheet')
+    expect(badge).toMatch(/publish to web/i)
+
+    // The same sentence, so a badge and an error do not read as two different problems. It is a
+    // *refusal* rather than a warning because there is nothing to fall back to — see
+    // `parseSheetLocation`, where the id would otherwise be read as the literal "e".
+    const sched = scheduler()
+    await sched.run(g, { mode: 'full' })
+    expect(sched.info('sheet').state).toBe('error')
+    expect(sched.info('sheet').error).toBe(badge)
+  })
+
+  it('says nothing about a column while the tab is still unread', () => {
+    sheetKnown = false
+    // Unknown is not empty. A name that cannot be checked yet is not a name that is wrong, and a
+    // check that cries wolf is how a real issue further down the list stops being read.
+    expect(issues(sheetGraph({ columns: 'nope' }), 'sheet')).toBe('')
+  })
+
+  it('names a column the tab does not have, without refusing over it', async () => {
+    const g = sheetGraph({ columns: 'side, nope' })
+    expect(issues(g, 'sheet')).toContain('nope')
+    // A warning: the other columns are still worth having, and an annotation source that refused
+    // would take the whole dataset down with it.
+    const sched = scheduler()
+    await sched.run(g, { mode: 'full' })
+    expect(sched.info('sheet').state).not.toBe('error')
+  })
+
+  it('chains, joining onto whatever arrived on its Annotations socket', async () => {
+    let g = emptyGraph('sheet-chain')
+    g = addNode(
+      g,
+      node('cave', 'annotation.caveTable', { datastack: 'test_stack:1', table: 'nuclei' }),
+    )
+    g = addNode(g, node('sheet', 'annotation.googleSheet', { sheet: SHEET_URL }))
+    g = addEdge(g, {
+      source: 'cave',
+      sourceHandle: 'annotations',
+      target: 'sheet',
+      targetHandle: 'annotations',
+    })
+    const sched = scheduler()
+    await sched.run(g, { mode: 'full' })
+    // The later source wins `type` and `side` and the earlier one's neurons still come through,
+    // which is `joinAnnotations`' outer join — the sheet is the same node in a chain as any
+    // other source, which is the point of it taking an ordinary table.
+    const table = produced(sched, 'sheet')
+    expect(columnNames(table.schema)).toEqual(['neuronId', 'type', 'side'])
+    expect(table.length).toBe(3)
   })
 })

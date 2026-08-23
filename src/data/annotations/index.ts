@@ -11,9 +11,16 @@
  */
 
 import './caveTable'
+import './googleSheet'
 import './seaTable'
 
 export { CAVE_TABLE_PROVIDER } from './caveTable'
+export {
+  GOOGLE_SHEET_PROVIDER,
+  parseSheetLocation,
+  sheetConfigFrom,
+  sheetExportUrl,
+} from './googleSheet'
 export { SEATABLE_PROVIDER, listBases } from './seaTable'
 export { annotationProvider, peekRefColumns, subscribeAnnotationsLearned } from './registry'
 export type { AnnotationRef } from './types'
