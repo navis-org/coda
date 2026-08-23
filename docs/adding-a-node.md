@@ -134,6 +134,7 @@ anything derivable must be derived instead.
 | `enum` | `options` is a static array **or** `(ctx) => EnumOption[]`, so it can read the upstream schema or dataset metadata (ROI lists, statuses). |
 | `column` | Single column from input `from`, optionally restricted by `dtypes`. |
 | `columns` | Ordered multi-select, rendered as chips. |
+| `ids` | Opaque `string[]` a widget writes rather than a hand-typed field. Two shapes use it: a viewer's selection, and a **list somebody grows** — `out.table`'s filter clauses and `core.rename`'s remappings are JSON pairs stored this way, because the number of them is not known when the definition is written. A node doing that needs a custom body (`ui/nodes/nodeBodies.ts`) and a codec beside the op; see `nodes/lib/renames.ts`. |
 
 Two flags worth knowing:
 

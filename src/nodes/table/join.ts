@@ -1,13 +1,38 @@
 import { registerNode } from '../../core/registry'
 import { T } from '../../core/types'
 import { isTableValue } from '../../core/values'
-import type { JoinHow } from '../lib/tableOps'
-import { joinSchema, joinTables } from '../lib/tableOps'
+import type { JoinHow, JoinSpec } from '../lib/tableOps'
+import { JOIN_OPTIONS, joinKeyDType, joinSchema, joinTables } from '../lib/tableOps'
+
+/**
+ * The node's params as the op's argument, in one place.
+ *
+ * `inferOutputs`, `validate` and `evaluate` all need the same four, and the schema half and
+ * the value half have to be handed *identical* ones — `how` decides whether the key column
+ * widens (invariant 3), so a default written out twice and typed differently in one of them
+ * would publish a schema the run does not produce.
+ */
+function specOf(ctx: {
+  column: (id: string) => string | undefined
+  params: Readonly<Record<string, unknown>>
+}): JoinSpec {
+  return {
+    leftKey: ctx.column('leftKey') ?? '',
+    rightKey: ctx.column('rightKey') ?? '',
+    how: String(ctx.params.how ?? 'left') as JoinHow,
+    suffix: String(ctx.params.suffix ?? '_r'),
+  }
+}
 
 /**
  * Key join of two tables. Colliding right-hand column names get a suffix rather than
  * being silently dropped — in a scientific pipeline, quietly losing a column is worse
  * than an ugly name.
+ *
+ * The four directions are the complete set, and `right` is not redundant with swapping the
+ * wires: the output's columns stay in left-then-right order either way, so nothing downstream
+ * has to be repointed to try the other one. See `joinTables` for what each direction does
+ * about a duplicated key, and for the one key column a row from the right alone arrives with.
  */
 export const joinNode = registerNode({
   type: 'core.join',
@@ -15,7 +40,7 @@ export const joinNode = registerNode({
   category: 'transform',
   description: 'Annotate the left table with matching rows from the right table.',
   guide:
-    'Annotate the left table with matching rows from the right — cell types onto an edge list, your own annotations onto a query result. A right-hand column whose name collides with one on the left gets a suffix rather than being dropped: in a scientific pipeline an ugly name beats a column that quietly disappeared. Two inputs, chained for more.',
+    'Annotate the left table with matching rows from the right — cell types onto an edge list, your own annotations onto a query result. Type decides which rows survive: left keeps every left row, inner only the matched ones, outer every row of both sides, right every right row. A right-hand column whose name collides with one on the left gets a suffix rather than being dropped, because in a scientific pipeline an ugly name beats a column that quietly disappeared; a duplicated key annotates rather than multiplying, so only the first matching row is taken. Two inputs, chained for more.',
   cost: 'cheap',
   inputs: [
     { id: 'left', label: 'Left', type: T.table() },
@@ -30,10 +55,8 @@ export const joinNode = registerNode({
       kind: 'enum',
       label: 'Type',
       default: 'left',
-      options: [
-        { value: 'left', label: 'left (keep unmatched)' },
-        { value: 'inner', label: 'inner (matched only)' },
-      ],
+      help: 'Which rows survive: every left row, only matched rows, every row of both sides, or every right row.',
+      options: JOIN_OPTIONS,
     },
     {
       id: 'suffix',
@@ -46,25 +69,27 @@ export const joinNode = registerNode({
   ],
 
   inferOutputs: (ctx) => {
-    const schema = joinSchema(
-      ctx.schema('left'),
-      ctx.schema('right'),
-      ctx.column('rightKey'),
-      String(ctx.params.suffix ?? '_r'),
-    )
+    const schema = joinSchema(ctx.schema('left'), ctx.schema('right'), specOf(ctx))
     return { out: schema ? T.table(schema) : T.table() }
   },
 
   validate: (ctx) => {
     const issues: string[] = []
-    const leftCol = ctx.column('leftKey')
-    const rightCol = ctx.column('rightKey')
-    if (ctx.inputs.left && ctx.inputs.right && leftCol && rightCol) {
-      const left = ctx.schema('left')?.columns.find((c) => c.name === leftCol)
-      const right = ctx.schema('right')?.columns.find((c) => c.name === rightCol)
-      if (left && right && left.dtype !== right.dtype) {
+    const spec = specOf(ctx)
+    if (ctx.inputs.left && ctx.inputs.right && spec.leftKey && spec.rightKey) {
+      const left = ctx.schema('left')
+      const right = ctx.schema('right')
+      const l = left?.columns.find((c) => c.name === spec.leftKey)
+      const r = right?.columns.find((c) => c.name === spec.rightKey)
+      if (l && r && l.dtype !== r.dtype) {
+        // The reconciliation is `joinKeyDType`, asked rather than restated — it only bites
+        // where a right-only row can put a right key value into the left key column, and it
+        // reconciles i64 with f64 rather than sending that pair to text. A column changing
+        // dtype under every picker downstream is not something to discover after a run.
+        const key = joinKeyDType(left, right, spec)
         issues.push(
-          `Key dtypes differ (${leftCol}: ${left.dtype} vs ${rightCol}: ${right.dtype}) — matches are compared as text`,
+          `Key dtypes differ (${spec.leftKey}: ${l.dtype} vs ${spec.rightKey}: ${r.dtype}) — matches are compared as text` +
+            (key ? `, and "${spec.leftKey}" comes out as ${key}` : ''),
         )
       }
     }
@@ -76,18 +101,8 @@ export const joinNode = registerNode({
     const right = ctx.input('right')
     if (!isTableValue(left)) throw new Error('Left input is not a table')
     if (!isTableValue(right)) throw new Error('Right input is not a table')
-    const leftKey = ctx.column('leftKey')
-    const rightKey = ctx.column('rightKey')
-    if (!leftKey || !rightKey) throw new Error('Both join keys must be selected')
-    return {
-      out: joinTables(
-        left,
-        right,
-        leftKey,
-        rightKey,
-        String(ctx.params.how ?? 'left') as JoinHow,
-        String(ctx.params.suffix ?? '_r'),
-      ),
-    }
+    const spec = specOf(ctx)
+    if (!spec.leftKey || !spec.rightKey) throw new Error('Both join keys must be selected')
+    return { out: joinTables(left, right, spec) }
   },
 })

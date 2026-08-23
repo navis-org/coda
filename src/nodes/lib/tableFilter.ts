@@ -64,6 +64,7 @@ import type { DType, TableSchema } from '../../core/types'
 import { findColumn, isNumericDType } from '../../core/types'
 import type { TableValue } from '../../core/values'
 import { selectRows } from '../../core/values'
+import { decodePairs, encodePair } from './paramPairs'
 import type { CompareOp, FieldTerm } from './neuronSearch'
 import { fieldTermsMatch, leadingOperator, prepareFieldTerms, unquote } from './neuronSearch'
 
@@ -81,51 +82,27 @@ export interface FilterClause {
 /**
  * A clause as one param entry, JSON rather than a delimited pair.
  *
- * A column name is not a safe left-hand side here. `parseSearch` reads a field name only where
- * it matches `FIELD_NAME`, and the columns this viewer draws routinely do not: a wide pivot
- * names its columns after label values (`LC11_02(R)`), and an uploaded CSV's header can hold
- * anything at all, spaces included. So the whole filter cannot be stored as one query string
- * and re-parsed — that would lose exactly the columns somebody is most likely to be filtering.
- *
- * A `\u001f` separator would work, and is the idiom `uploads.ts` uses for its content hash,
- * where the joined string is never read by a person. This one is: it sits in a `.coda.json`
- * people mail each other, and in the inspector's tooltip. `["Cell Type","~^LC"]` says what it
- * is where an invisible control character says nothing.
+ * The encoding is `paramPairs.ts`, shared with `core.rename`'s remappings — the reasoning for
+ * JSON over a separator is recorded there, and it is about column names that can hold anything
+ * at all. What stays here is the named struct and the keep-rule below, which is the one thing
+ * that genuinely differs between the two lists.
  */
-function encodeClause(clause: FilterClause): string {
-  return JSON.stringify([clause.column, clause.expression])
-}
-
-function decodeClause(raw: unknown): FilterClause | undefined {
-  if (typeof raw !== 'string') return undefined
-  try {
-    const parsed: unknown = JSON.parse(raw)
-    if (!Array.isArray(parsed) || parsed.length !== 2) return undefined
-    const [column, expression] = parsed as unknown[]
-    if (typeof column !== 'string' || typeof expression !== 'string') return undefined
-    if (!column) return undefined
-    return { column, expression }
-  } catch {
-    // A hand-edited file, or a format that predates this one. Dropped rather than thrown —
-    // the same lenient pass `deserializeGraph` gives everything else it cannot read.
-    return undefined
-  }
-}
 
 /** Read a stored `filters` param. Anything unreadable is dropped rather than throwing. */
 export function decodeClauses(raw: unknown): FilterClause[] {
-  if (!Array.isArray(raw)) return []
-  const out: FilterClause[] = []
-  for (const entry of raw) {
-    const clause = decodeClause(entry)
-    // A cleared cell stores no clause at all, but a file can still carry an empty one.
-    if (clause && clause.expression.trim()) out.push(clause)
-  }
-  return out
+  return (
+    decodePairs(raw)
+      .map(([column, expression]) => ({ column, expression }))
+      // A cleared cell stores no clause at all, but a file can still carry an empty one — and
+      // a clause with no column is not addressable by any header.
+      .filter((c) => c.column && c.expression.trim())
+  )
 }
 
 export function encodeClauses(clauses: readonly FilterClause[]): string[] {
-  return clauses.filter((c) => c.expression.trim()).map(encodeClause)
+  return clauses
+    .filter((c) => c.expression.trim())
+    .map((c) => encodePair(c.column, c.expression))
 }
 
 /** Set or clear one column's clause, keeping every other one in the order it was in. */

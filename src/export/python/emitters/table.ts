@@ -16,7 +16,14 @@
  *  - `Sort` puts nulls last in **both** directions, where `sort_values` follows the direction.
  */
 
-import { aggColumnName, combineLayout } from '../../../nodes/lib/tableOps'
+import type { JoinHow } from '../../../nodes/lib/tableOps'
+import {
+  aggColumnName,
+  combineLayout,
+  keepsUnmatchedRight,
+  renameMapping,
+} from '../../../nodes/lib/tableOps'
+import { decodeRenames } from '../../../nodes/lib/renames'
 import type { AggFn } from '../../../nodes/lib/tableOps'
 import { findColumn, isNumericDType } from '../../../core/types'
 import { pyList, pyStr, pyValue } from '../py'
@@ -296,8 +303,46 @@ registerEmitter('core.groupBy', (ctx) => {
 })
 
 // ---------------------------------------------------------------------------
+// Rename
+// ---------------------------------------------------------------------------
+
+/**
+ * `rename(columns=...)` tolerates a name the frame does not carry, which is Coda's rule too —
+ * a row naming a column an upstream edit removed renames nothing rather than failing. What it
+ * does *not* reproduce is the collision suffix, so the mapping is resolved against the incoming
+ * schema first; see `renameMapping`.
+ */
+registerEmitter('core.rename', (ctx) => {
+  const src = ctx.wired('in')
+  const pairs = renameMapping(ctx.schema('in'), decodeRenames(ctx.params.renames))
+  ctx.require('pandas')
+  const out = ctx.output('out')
+
+  // An unconfigured Rename is a pass-through on the canvas, so it is one here — `rename` with
+  // an empty dict would work and would read as a step that was meant to do something.
+  if (pairs.length === 0) return [`${out} = ${src}`]
+
+  return [
+    `${out} = ${src}.rename(`,
+    `    columns={`,
+    ...pairs.map(([from, to]) => `        ${pyStr(from)}: ${pyStr(to)},`),
+    `    },`,
+    `)`,
+  ]
+})
+
+// ---------------------------------------------------------------------------
 // Join
 // ---------------------------------------------------------------------------
+
+/**
+ * The name a Join's right key is moved to before the merge, where the two keys differ.
+ *
+ * Deliberately unlikely to be a real column: it exists for one line and is dropped on the next,
+ * and a collision with something already in the table would be a wrong answer rather than an
+ * error. pandas-only — R's `join_by(a == b)` coalesces the keys natively.
+ */
+const SCRATCH_KEY = '_coda_join_key'
 
 registerEmitter('core.join', (ctx) => {
   const left = ctx.wired('left')
@@ -306,25 +351,70 @@ registerEmitter('core.join', (ctx) => {
   const leftKey = ctx.column('leftKey')
   const rightKey = ctx.column('rightKey')
   if (!leftKey || !rightKey) return ctx.todo('This Join has no key column on one side.')
+  /*
+   * Verified against pandas 2.3 rather than assumed, because it decides whether the two lines
+   * below are needed at all: with `left_on` and `right_on` naming the *same* column, `merge`
+   * publishes a single key column — already coalesced under `how='outer'`/`'right'` — which is
+   * exactly what Coda publishes. Naming them differently is what makes pandas keep both.
+   */
+  const sameKey = leftKey === rightKey
 
   ctx.require('pandas')
   const out = ctx.output('out')
-  const how = String(ctx.params.how ?? 'left')
+  const how = String(ctx.params.how ?? 'left') as JoinHow
   const suffix = String(ctx.params.suffix ?? '_r')
+  // The op's own predicate, not a second copy of it — see `keepsUnmatchedRight`.
+  const fillsKey = keepsUnmatchedRight(how)
+
+  /*
+   * Which side is deduplicated flips with the direction, and getting it wrong costs a row
+   * count rather than an error. `left`/`inner`/`outer` match *into* the right, so the right is
+   * the side a duplicated key would multiply; `right` is the mirror, and dropping duplicates
+   * from the right there would delete rows a right join is defined to keep.
+   *
+   * Where the two keys are named differently the right one is renamed to a scratch name before
+   * the merge, and that is not decoration — it is what makes the drop below *knowable*.
+   * Measured against pandas 2.3: a right key whose name collides with a left column comes out
+   * suffixed (`postType_r`) while one that does not keeps its own name, so
+   * `drop(columns=[rightKey])` would delete the **left** table's own column in the first case.
+   * The scratch name cannot collide with anything, so one line is right either way and no
+   * schema has to be known at export time to write it — the same scratch-key idiom the label
+   * joins already use.
+   */
+  const moveKey = sameKey ? '' : `.rename(columns={${pyStr(rightKey)}: ${pyStr(SCRATCH_KEY)}})`
+  // Deduplicated before the rename, on the column as it is actually called, so the two reads
+  // in one line stay in the order somebody would do them by hand.
+  const frames =
+    how === 'right'
+      ? [`${left}.drop_duplicates(subset=[${pyStr(leftKey)}])`, `${right}${moveKey}`]
+      : [left, `${right}.drop_duplicates(subset=[${pyStr(rightKey)}])${moveKey}`]
 
   return [
     ...ctx.note(
-      'Coda keeps the first matching row from the right table, so a duplicated key ' +
+      'Coda keeps the first matching row from the other table, so a duplicated key ' +
         'annotates rather than multiplies. `drop_duplicates` is what reproduces that — ' +
         'without it `merge` returns the cross product of every matching pair.',
     ),
-    `${out} = ${left}.merge(`,
-    `    ${right}.drop_duplicates(subset=[${pyStr(rightKey)}]),`,
+    ...(sameKey
+      ? []
+      : ctx.note(
+          `Coda publishes **one** key column, filled from whichever side the row came from — ` +
+            `\`dplyr::full_join\`'s shape rather than pandas'. Where the two keys are named ` +
+            `differently pandas keeps both, so the right one is renamed out of the way and ` +
+            `dropped` +
+            (fillsKey ? `, after filling ${pyStr(leftKey)} from it.` : `.`),
+        )),
+    `${out} = pd.merge(`,
+    ...frames.map((frame) => `    ${frame},`),
     `    how=${pyStr(how)},`,
     `    left_on=${pyStr(leftKey)},`,
-    `    right_on=${pyStr(rightKey)},`,
+    `    right_on=${pyStr(sameKey ? rightKey : SCRATCH_KEY)},`,
     `    suffixes=('', ${pyStr(suffix)}),`,
     `)`,
+    ...(!sameKey && fillsKey
+      ? [`${out}[${pyStr(leftKey)}] = ${out}[${pyStr(leftKey)}].fillna(${out}[${pyStr(SCRATCH_KEY)}])`]
+      : []),
+    ...(sameKey ? [] : [`${out} = ${out}.drop(columns=[${pyStr(SCRATCH_KEY)}])`]),
   ]
 })
 

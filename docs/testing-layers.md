@@ -13,6 +13,8 @@ Moved verbatim out of `CLAUDE.md`.
 | `core/reference.test.ts`                 | reference edges: the round trip sorting, the identity without its own schema, evaluate not waiting, and that a real cycle and two wires between one pair are unchanged |
 | `core/scheduler.test.ts`                 | hybrid eval, caching, invalidation, errors, targeted runs                                                                        |
 | `nodes/lib/tableOps.test.ts`             | each op, plus schema/value agreement — including the coalesce's blank-is-absent rule, its widening, and backfill-in-place vs append — and the id bridge: a wide id kept exactly, a rounded one skipped, ids ordered by magnitude |
+| `nodes/lib/tableOps.test.ts`             | (also) the join's four directions: which right rows count as unmatched, the key column filled from the side the row came from, the widening only where it can bite, and the columns in one order whichever way it runs |
+| `nodes/lib/tableOps.test.ts`             | (also) the rename: dtype and unit riding along, a swap, both collisions suffixed, the kind promoted only on an applied rename, and `renameMapping`'s resolved-vs-typed branches |
 | `data/mock/generate.test.ts`             | determinism, internal consistency, source semantics                                                                              |
 | `examples/examples.test.ts`              | all five examples end to end, inference-clean, non-empty, and their notes' markdown parsing                                      |
 | `ui/App.smoke.test.tsx`                  | real app mounted and driven: Run, live filtering, link rejection, undo, per-node run                                             |
@@ -132,6 +134,7 @@ Moved verbatim out of `CLAUDE.md`.
 | `nodes/table/sample.test.ts`             | the four sampling modes, a draw reproduced from its seed, and the seed costing nothing in the other three                        |
 | `nodes/table/combine.test.ts`            | the coalesce node: infer publishing what evaluate returns, an unset picker warning rather than refusing, and the chain into a Dataset |
 | `nodes/table/dedupe.test.ts`             | the three `keep` modes, an empty picker comparing whole rows, row order kept, and a null told apart from the text "null"       |
+| `nodes/table/rename.test.ts`             | the node: infer publishing the kind evaluate returns, promotion needing an applied rename, demotion said out loud, and four warnings that refuse nothing |
 | `data/csv.test.ts`                       | reading somebody else's file: quoting, delimiter-by-consistency, header bias, a suffix that cannot land on a name already taken, and every value the parse refuses to widen |
 | `data/uploads.test.ts`                   | the store against real IndexedDB: content addressing incl. a separator collision, a write that rejects, and the peek's one read  |
 | `nodes/table/upload.test.ts`             | the node: the schema arriving by peek, the neuronId rename, what a graph opened elsewhere says, and the filename costing nothing   |
@@ -163,5 +166,6 @@ Moved verbatim out of `CLAUDE.md`.
 | `data/neuprint/roiHierarchy.test.ts`     | the level above primary: groups from the real hemibrain tree, the root excluded, sub-primary not descended into, and a malformed tree losing the grouping not the map |
 | `nodes/transform/selectOne.test.ts`      | stepping free vs committing stale, an index past the end emitting nothing, and one skeleton re-measuring its bounds                |
 | `ui/nodes/selectOneBody.test.tsx`        | the pager card: not-run vs not-wired, the Live label counted once, and the gap between what is shown and what is emitted           |
+| `ui/nodes/renameBody.test.tsx`           | the rename card: Add drawing a row without writing one, a filled row stored as a JSON pair, and the picker never disabled where the schema has not arrived |
 | `nodeguide/nodeGuide.test.ts`            | the node guide's data: a paragraph per node, socket styles, internal-vs-advanced params, an enum's label, and the examples cross-reference |
 | `overview/overview.test.ts`              | the overview page against the registry: the node count it advertises as a floor, and every backend and real dataset family named on it |

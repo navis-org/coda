@@ -29,6 +29,7 @@ import { IdsFromLabelBody } from './IdsFromLabelBody'
 import { InputIdsBody } from './InputIdsBody'
 import { LabelsToNeuronsBody } from './LabelsToNeuronsBody'
 import { PathsBody } from './PathsBody'
+import { RenameBody } from './RenameBody'
 import { SelectOneBody } from './SelectOneBody'
 import { UploadBody } from './UploadBody'
 
@@ -146,6 +147,13 @@ export const NODE_BODIES: Record<string, NodeBodyEntry> = {
    * what is worth looking at full size is whatever the Item port is wired to.
    */
   'core.selectOne': { Component: SelectOneBody, width: 300 },
+  /*
+   * The only card here whose configuration is a list somebody grows, so it is the only one that
+   * could not have been a param band. Wide enough for a column picker, an arrow and a name
+   * field to share one line — stacked, a rename stops reading as one act. Not `expandable`: the
+   * rows are the whole widget and a fullscreen panel of four of them is whitespace.
+   */
+  'core.rename': { Component: RenameBody, width: 320 },
 }
 
 export function nodeBody(type: string): NodeBodyEntry | undefined {

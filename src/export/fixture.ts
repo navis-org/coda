@@ -310,6 +310,26 @@ export function everythingGraph(): CodaGraph {
       col: 9,
       params: { leftKey: 'preType', rightKey: 'preType', how: 'left', suffix: '_r' },
     },
+    /*
+     * Two more directions, because they are three branches the `left` node above cannot reach:
+     * `outer` and `right` deduplicate *opposite* sides, and both keys are named differently
+     * here, which is what makes pandas keep a second key column Coda does not publish — so the
+     * fillna-and-drop only a golden would show ever gets written down.
+     */
+    {
+      id: 'joinOuter',
+      type: 'core.join',
+      col: 9,
+      row: 1,
+      params: { leftKey: 'preType', rightKey: 'postType', how: 'outer', suffix: '_r' },
+    },
+    {
+      id: 'joinRight',
+      type: 'core.join',
+      col: 9,
+      row: 2,
+      params: { leftKey: 'preType', rightKey: 'postType', how: 'right', suffix: '_r' },
+    },
     {
       id: 'stack',
       type: 'core.stack',
@@ -357,6 +377,21 @@ export function everythingGraph(): CodaGraph {
       col: 3,
       row: 4,
       params: { url: 'https://example.org/embedding.csv', textColumns: ['layer'] },
+    },
+    /*
+     * On the URL branch because that is the chain this node exists for: somebody else's table,
+     * whose id column is called `root_id` and whose cell typing is called `cell_type`, made to
+     * speak Coda's two vocabulary words before anything downstream reads either by name. Its
+     * schema is genuinely unknown at export time — `Table from URL` keeps one per URL in a
+     * session-scoped map — so this also records the branch where `renameMapping` has nothing to
+     * resolve against and emits the pairs as typed.
+     */
+    {
+      id: 'rename',
+      type: 'core.rename',
+      col: 4,
+      row: 5,
+      params: { renames: ['["root_id","neuronId"]', '["cell_type","type"]'] },
     },
     /*
      * The one annotation source that is not backend-specific, which is why it is here rather
@@ -538,6 +573,10 @@ export function everythingGraph(): CodaGraph {
     ['select', 'out', 'join', 'left'],
     ['group', 'out', 'join', 'right'],
     ['join', 'out', 'stack', 'top'],
+    ['select', 'out', 'joinOuter', 'left'],
+    ['group', 'out', 'joinOuter', 'right'],
+    ['select', 'out', 'joinRight', 'left'],
+    ['group', 'out', 'joinRight', 'right'],
     ['conn2', 'connections', 'stack', 'bottom'],
     ['stack', 'out', 'pivot', 'in'],
     ['pivot', 'matrix', 'norm', 'in'],
@@ -564,6 +603,7 @@ export function everythingGraph(): CodaGraph {
     ['find', 'neurons', 'clu', 'neurons'],
     ['skel', 'skeletons', 'v3d', 'skeletons'],
     ['stack', 'out', 'muted', 'in'],
+    ['url', 'out', 'rename', 'in'],
     ['upload', 'out', 'gsheet', 'annotations'],
   ]
   for (const [from, out, to, into] of edges) g = wire(g, from, out, to, into)

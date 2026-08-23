@@ -8,7 +8,8 @@
 
 import { isNumericDType } from '../../../core/types'
 import type { AggFn } from '../../../nodes/lib/tableOps'
-import { aggColumnName, combineLayout } from '../../../nodes/lib/tableOps'
+import { aggColumnName, combineLayout, renameMapping } from '../../../nodes/lib/tableOps'
+import { decodeRenames } from '../../../nodes/lib/renames'
 import { rCol, rStr, rValue, rVector } from '../r'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
@@ -289,6 +290,43 @@ registerEmitter('core.groupBy', (ctx) => {
 })
 
 // ---------------------------------------------------------------------------
+// Rename
+// ---------------------------------------------------------------------------
+
+/**
+ * `rename(any_of(...))` rather than `rename(new = old)`, and that is not a style choice: bare
+ * `rename` **errors** on a column the frame does not carry, where Coda's rule is that such a
+ * row renames nothing. `any_of` is the tidyselect form that renames what is there and passes
+ * over what is not, which is the same tolerance `df.rename(columns=...)` has in pandas.
+ *
+ * The named vector reads backwards from Coda's rows on purpose — tidyselect spells it
+ * `new = "old"`, where `renameMapping` answers `[from, to]`. Note also that the mapping is
+ * resolved against the incoming schema first, so a collision comes out as the suffix Coda
+ * applies rather than as `rename`'s "Names must be unique" error.
+ */
+registerEmitter('core.rename', (ctx) => {
+  const src = ctx.wired('in')
+  const pairs = renameMapping(ctx.schema('in'), decodeRenames(ctx.params.renames))
+  ctx.library('dplyr')
+  const out = ctx.output('out')
+
+  // An unconfigured Rename is a pass-through on the canvas, so it is one here.
+  if (pairs.length === 0) return [`${out} <- ${src}`]
+
+  /*
+   * Joined rather than one entry per line, which is what `select(all_of(...))` above already
+   * does — and here it is load-bearing as well as consistent. Python takes a trailing comma in
+   * a dict and R does **not** take one in `c()`: `c(a = 1,)` is `argument 2 is empty`, a parse
+   * error in a document knitr aborts on rather than a stylistic wart. Verified against R 4.4,
+   * since the same shape one file over is perfectly legal. `join` cannot produce one at all,
+   * where a per-line index test is a hand-rolled separator somebody has to check is not off by
+   * one.
+   */
+  const entries = pairs.map(([from, to]) => `${col(to)} = ${rStr(from)}`)
+  return [`${out} <- ${src} |>`, `  rename(any_of(c(${entries.join(', ')})))`]
+})
+
+// ---------------------------------------------------------------------------
 // Join / Stack
 // ---------------------------------------------------------------------------
 
@@ -304,18 +342,42 @@ registerEmitter('core.join', (ctx) => {
   const how = String(ctx.params.how ?? 'left')
   const suffix = String(ctx.params.suffix ?? '_r')
   const verb =
-    { left: 'left_join', inner: 'inner_join', full: 'full_join', right: 'right_join' }[how] ??
+    { left: 'left_join', inner: 'inner_join', outer: 'full_join', right: 'right_join' }[how] ??
     'left_join'
+
+  /*
+   * Which side is deduplicated flips with the direction, and getting it wrong costs a row count
+   * rather than an error. `left`/`inner`/`outer` match *into* the right, so the right is the
+   * side a duplicated key would multiply; `right` is the mirror, and thinning the right there
+   * would drop rows a right join is defined to keep.
+   */
+  const distinct = (frame: string, key: string) =>
+    `${frame} |> distinct(${col(key)}, .keep_all = TRUE)`
 
   return [
     ...ctx.note(
-      'Coda keeps the first matching row from the right table, so a duplicated key annotates ' +
+      'Coda keeps the first matching row from the other table, so a duplicated key annotates ' +
         'rather than multiplies. `distinct` is what reproduces that — without it the join ' +
         'returns every matching pair.',
     ),
-    `${out} <- ${left} |>`,
+    /*
+     * The one place R is the closer of the two languages, so it is worth saying which way
+     * round that is: `join_by(a == b)` publishes a *single* key column, coalesced from both
+     * sides, which is exactly what `joinTables` does and what the pandas cell has to rebuild
+     * by hand.
+     */
+    ...(how === 'right'
+      ? ctx.note(
+          'Row **order** differs here, and only here. Coda emits one row per right-table row ' +
+            "in the right table's order; dplyr 1.2 puts the matched rows in the left table's " +
+            'order and the unmatched right rows after them. Measured against both rather than ' +
+            'surmised — the rows themselves are identical — so add an `arrange()` only if ' +
+            'something downstream depends on the order.',
+        )
+      : []),
+    `${out} <- ${how === 'right' ? distinct(left, leftKey) : left} |>`,
     `  ${verb}(`,
-    `    ${right} |> distinct(${col(rightKey)}, .keep_all = TRUE),`,
+    `    ${how === 'right' ? right : distinct(right, rightKey)},`,
     `    by = join_by(${col(leftKey)} == ${col(rightKey)}),`,
     `    suffix = c("", ${rStr(suffix)})`,
     `  )`,

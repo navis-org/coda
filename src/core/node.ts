@@ -261,9 +261,17 @@ export interface ColumnsParam extends ParamBase {
 }
 
 /**
- * Opaque list of selected ids, written by a viewer rather than typed by hand. Not
- * presentational: a viewer's selection feeds a downstream output, so it belongs in the
- * provenance key and in the saved file.
+ * An opaque `string[]` that a bespoke surface owns, rather than a value a generic widget edits.
+ *
+ * Two shapes use it, and the second is why this says "opaque" rather than "ids": a **viewer's
+ * selection** (`out.scatter`, `out.network`, Explore), and a **list somebody grows** whose
+ * length is not known when the definition is written — `out.table`'s per-column filter clauses
+ * and `core.rename`'s remappings, both `[a, b]` entries encoded by `paramPairs.ts`. What makes
+ * something eligible is that no generic widget could meaningfully edit it, so the node brings
+ * its own card or viewer; `IdsField` is the read-and-clear fallback the inspector shows.
+ *
+ * Never presentational in either shape: what a viewer selected and what a card configured both
+ * feed a downstream output, so they belong in the provenance key and in the saved file.
  */
 export interface IdsParam extends ParamBase {
   kind: 'ids'

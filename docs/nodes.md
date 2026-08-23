@@ -509,6 +509,106 @@ a build of the same tree with the feature stashed out. Both emitters are in the 
 **Not looked at in a browser**: the `Type column` dropdown and the chip order on a real card.
 Both are existing components, so the standing of the WebGL viewers applies.
 
+## Rename Columns
+
+`core.rename`, `Add ▸ Transform ▸ Rename Columns`. Give one or more columns a different name,
+leaving their values, dtypes and units alone.
+
+**It is the general form of the two import nodes' `ID column`**, and that is the case it exists
+for. Coda addresses exactly two columns by literal name — `neuronId` and `type` — so somebody
+else's table, whose id is `root_id` and whose cell typing is `cell_type`, meets a Neurons socket,
+a `typesOf` lookup or a Profile roll-up and quietly answers nothing. Upload Table and Table from
+URL fix that at the point of import; nothing could fix it for a table that was **fetched** or
+**joined**, which is what this is. `Table from URL → Rename Columns → Skeletons` is the chain.
+
+**Renaming onto `neuronId` promotes to Neurons; renaming it away demotes.** The demotion has to
+happen — the column is gone, so every downstream `idColumn()` would fail at run time on a kind
+that is no longer true — and the promotion is what makes the node worth more than a cosmetic
+tidy-up. What it will *not* do is promote a table it did not touch: `core.stack` states the rule
+this respects, that a `neurons` kind is a **claim** the ids are neurons of a dataset and a plain
+table which happens to carry a `neuronId` never made it. So the promotion needs an *applied*
+rename naming the column, which is why the kind is read off `renamePlan`'s `applied` map rather
+than off the pairs — a row naming a column an upstream edit removed has renamed nothing at all.
+
+**`renamePlan` is the one analysis all four readers share** — the schema half, the value half,
+the node's `validate` and its card. Computed separately it was the same walk two and three
+times over per keystroke, and worse, the card and the badge answered "which columns are
+missing" from two expressions free to drift apart. `resolveFilters` one node over has the same
+shape for the same reason.
+
+### The rows are a list, not a pair of params
+
+A `columns` picker plus a matching list of new names needs no widget and is wrong in the way
+that is hardest to see: the two lists are positional, so deleting the second of three columns
+silently shifts every name after it onto the wrong column. A row carrying both halves cannot
+come apart.
+
+Stored the way `out.table` stores its filter clauses — an opaque `string[]` of JSON pairs
+(`nodes/lib/renames.ts`), legible in a `.coda.json` — and for the same reason: a column name is
+not a safe left-hand side for a delimited encoding, since a wide pivot names its columns after
+label values and an uploaded CSV's header can hold anything at all.
+
+**A blank row is component state, never a param.** `+ Add` draws a row and writes nothing:
+`renames` is in the provenance key, so a row that renames nothing would mark the node stale and
+everything downstream with it, for a control nobody has used yet. What the store holds is what
+the run will do. A half-filled row — a column picked, no name yet — *is* stored, because that one
+is a row mid-edit and dropping it would delete it from under the cursor on the next round trip.
+
+**The column picker follows `ParamField`'s three-state rule and shares its widgets to do so.**
+Unknown is not missing, and this node sits directly behind the node that makes that distinction
+matter: `Table from URL` keeps its schema per URL in a session-scoped map, so a fresh session
+publishes none. The always-present `column…` placeholder is what keeps the select out of
+`SelectField`'s no-options branch, which renders *disabled* — the failure `columnField.test.tsx`
+records, reached here from a second widget — and it doubles as the way back to unset.
+
+### Nothing refuses; four things warn
+
+Invariant 5's corollary: a node passing a whole table through has no business blocking every node
+downstream over a half-typed row. So a missing source column, a blank target, two rows aiming at
+one name, and the Neurons demotion are all warnings, and the run happens regardless.
+
+**Two rows aiming at one name suffix the second**, which is `renamedColumns`' collision rule.
+That function had to be generalised for this: the mapping **is not injective** and a widget lets
+somebody express that in two keystrokes, where the import nodes' two renames have fixed and
+distinct targets and could never reach it. Taking both literally emits two columns of one name —
+`makeTable`'s ragged throw at best, a silently overwritten column at worst. It now allocates
+every output name through one `uniqueName` set in two passes: renamed columns claim their names
+first, so a column that only *happens* to hold a target name is the one that gets suffixed rather
+than the one somebody chose.
+
+### Both emitters, and the R trap
+
+`df.rename(columns=…)` and `rename(any_of(c(new = "old")))`. Two facts behind those, each
+verified against the real library:
+
+- **`any_of` rather than a bare `rename`**, because bare `rename` **errors** on a column the
+  frame does not carry (`Can't rename columns that don't exist`) where Coda's rule is that such a
+  row renames nothing. `any_of` is the tidyselect form with pandas' tolerance.
+- **R does not take a trailing comma in `c()`.** `c(a = 1,)` is `argument 2 is empty` — a
+  parse-time error in a document knitr aborts on, not a stylistic wart. Python takes one in a
+  dict, so the same shape one file over is perfectly legal, which is exactly how it got written.
+  Caught by running the generated chunk.
+
+**The mapping is resolved against the incoming schema before it is written out** (`renameMapping`),
+so a collision comes out as the suffix Coda applies rather than as two columns of one name in
+pandas or `rename`'s "Names must be unique" in R. With no schema — a Pivot upstream, a first run
+— it falls back to the pairs as typed, which is the same answer whenever nothing collides and is
+the honest limit of what can be known at export time.
+
+### What it costs, and what was seen
+
+**+6.70 kB raw / +2.19 kB gzipped on the main chunk** (1,163.87 → 1,170.57), measured against a
+build of `HEAD` in a clean worktree — that covers the Join changes as well. Both exporter chunks
+carry the emitters and `main` carries neither `renameMapping` nor the join scratch key.
+
+Driven in a real browser over CDP against `pnpm dev`, since a four-column grid in a 320px card is
+exactly what jsdom cannot see: both themes, two rows laid out at 130/9/130/18 with nothing
+overflowing the card, `+ Add` growing it to 234px, the unwired card saying `Connect a table.`,
+and no console errors. The one thing it showed that the tests could not is that
+`cellBodyFiber (missing)` **truncates** in a 130px select — the marker is cut mid-word — so the
+select carries its full value in a `title`, and the badge and the foot line both name the column
+anyway.
+
 ## Select One: stepping through a collection
 
 `core.selectOne`, `Add ▸ Transform ▸ Select One`. Forward and back through a table's rows, a
@@ -610,6 +710,77 @@ spelling reproducing both, in pandas and in navis alike; the emitter branches on
 because a `NeuronList` takes it directly where a frame needs `.iloc`. The fixture carries **two**
 Select One nodes for exactly that reason, or the golden file records only the half that happens
 to be a DataFrame.
+
+## Join: four directions, and one key column
+
+`core.join`, `Add ▸ Transform ▸ Join`. Annotate the left table with matching rows from the
+right. `Type` offers **left**, **inner**, **outer** and **right** — the complete set, and
+`right` is not redundant with swapping the wires, because the output's columns stay in
+left-then-right order either way, so nothing downstream has to be repointed to try the other
+one.
+
+**A duplicated key annotates; it never multiplies.** The side being *matched into* is
+deduplicated first — the right for `left`/`inner`/`outer`, the left for `right` — first
+occurrence winning. Which side that is flips with the direction, and getting it wrong costs a
+row count rather than an error, which is why both emitters compute it rather than hardcoding
+the right.
+
+The consequence for `outer` is worth stating, because the obvious reading is the other one: a
+**second** right row carrying a key the left also carries is *not* an unmatched row. It lost the
+dedupe, and resurrecting it in the outer tail would reinstate exactly the multiplication the
+rule prevents — drawn, worse, as a left-null row for a key that plainly matched. So "unmatched"
+means *no left row carries this key*, never "this particular right row was not the one picked".
+
+### The key column is one column, filled from whichever side had the row
+
+The right key is dropped as redundant with the left's — it always has been — so a row arriving
+from the right alone would otherwise have no key at all, which is the single most useful column
+on it. It is filled from the right instead. That is exactly `dplyr::full_join(by = join_by(a ==
+b))`; pandas keeps **both** key columns, and the notebook emitter rebuilds Coda's shape rather
+than inheriting that. The alternative — keeping both, only under `outer`/`right` — was declined
+because an output schema that changes shape with the join direction empties a downstream picker
+every time somebody tries a different one.
+
+**Where the two key dtypes differ, that column is reconciled by `mergedDType`.** Only `outer` and `right` can
+put a right-hand key value into the left-hand key column, and only then do the dtypes have to
+reconcile. Matching is by text already, so a `str` root id meeting an `i64` neuron id joins
+perfectly well — but writing that string into a column *declared* `i64` breaks invariant 3, and
+every picker, sort and formatter downstream believes the declaration. `mergedDType` is this
+file's one statement of "can these two reconcile, and into what", so `i64` meeting `f64` stays a
+number here exactly as it does in `stackColumns` and `combineColumns`, and only a genuine
+disagreement goes to `str` — coercing to the left's dtype would silently round a wide id
+(invariant 8). A left or inner join is untouched by it, which keeps the common case's numeric
+sorting exactly as it was. `validate` names the resulting dtype on the card, because a column
+changing dtype under every picker downstream is not something to discover after a run.
+
+**Row order.** `left`/`inner`/`outer` keep the left's order, with the outer tail after it in the
+right's. `right` keeps the right's throughout, which is what makes it the mirror of `left`.
+
+### What was measured rather than assumed
+
+The emitted code was **run against pandas 2.3 and dplyr 1.2 and compared row-for-row with
+`joinTables`**, over all four directions and both key-naming cases. Three findings, each of
+which was a plausible wrong answer before it was checked:
+
+- **`drop(columns=[rightKey])` deletes the wrong column.** pandas suffixes the right key when
+  its name collides with a left column (`postType_r`) and leaves it alone when it does not — so
+  one spelling is right in one case and destroys the left table's own column in the other, with
+  no error. The emitter renames the right key to a scratch name before the merge instead, which
+  makes the drop knowable without needing the schema at export time. Same scratch-key idiom the
+  label joins already use.
+- **`left_on` and `right_on` naming the *same* column already produce one coalesced key column**
+  in pandas, under `outer` and `right` alike — so the common case needs neither the fill nor the
+  drop, and gets neither.
+- **dplyr's `right_join` returns a different row *order*.** Coda emits one row per right-table
+  row in the right's order; dplyr 1.2 puts matched rows in the left's order and unmatched right
+  rows after them. The rows themselves are identical, so the chunk says so in a `NOTE` rather
+  than contorting itself — reproducing the order needs a row-number column added, arranged on
+  and dropped, in every right join.
+
+**One pre-existing divergence was fixed on the way.** Coda has always dropped the right key
+column; the Python emitter never did, so any join whose keys were named differently produced a
+notebook with an extra column the canvas did not have. It was invisible because the fixture's
+only Join used the same name on both sides — which is why the fixture now carries three.
 
 ## Stack Tables: the vertical Join
 

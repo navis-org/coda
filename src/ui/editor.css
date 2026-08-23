@@ -5803,6 +5803,58 @@ details[open] > summary.tile__label {
 }
 
 /* ---------------------------------------------------------------------------
+ * Rename Columns card
+ *
+ * Shares `.list-body` with the paste-target cards and the pager — the padding and the foot
+ * line are the same object — and adds the rows and the Add button.
+ * ------------------------------------------------------------------------- */
+
+.rename-body__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+/*
+ * One line per rename, because a rename is one act: stacking the picker above the name field
+ * would draw two controls where there is one decision, and double the height of the commonest
+ * card state at that. `minmax(0, 1fr)` rather than `1fr` on both, or a long column name sets
+ * the track's minimum to its own content width and pushes the ✕ off the card.
+ */
+.rename-body__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.rename-body__arrow {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+/*
+ * Square, so a column of them reads as a margin rather than as four differently-sized buttons,
+ * and muted until hovered: removing a row is destructive and there is one on every line, so it
+ * should not be the loudest thing on the card.
+ */
+.rename-body__remove {
+  flex: none;
+  padding: 0;
+  width: 18px;
+  line-height: 16px;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.rename-body__remove:hover {
+  color: var(--text-primary);
+}
+.rename-body__add {
+  align-self: flex-start;
+  font-size: 10px;
+  padding: 1px 6px;
+}
+
+/* ---------------------------------------------------------------------------
  * Upload Table card
  * ------------------------------------------------------------------------- */
 

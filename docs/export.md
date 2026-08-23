@@ -189,8 +189,23 @@ query starts answering from the other connectome.
 
 ### What was verified rather than assumed
 
-Three findings, each of which was a wrong answer before it was checked:
+Six findings, each of which was a wrong answer before it was checked:
 
+- **`merge(...).drop(columns=[rightKey])` deletes the wrong column, half the time.** pandas
+  suffixes a join's right key where its name collides with a left column (`postType_r`) and
+  leaves it alone where it does not — so one spelling is correct in one case and silently
+  destroys the left table's own column in the other. Measured against pandas 2.3. The Join
+  emitter renames the right key to a scratch name before merging, which makes the drop knowable
+  without the schema. See *Join* in `docs/nodes.md` for what Coda's own shape is, and note the
+  pre-existing bug this exposed: the emitter never dropped that column at all, so every join
+  with differently-named keys produced a notebook column the canvas did not have.
+- **`left_on` and `right_on` naming the *same* column already yield one coalesced key column**,
+  under `how='outer'` and `'right'` alike — so the common case needs neither a fill nor a drop
+  and gets neither. That is what makes the branch worth having rather than always scratching.
+- **R does not accept a trailing comma in `c()`.** `c(a = 1,)` is `argument 2 is empty`, which
+  is a parse error in a document knitr aborts on rather than a wart. Python takes one in a dict,
+  so the same generated shape one language over is perfectly legal — which is how it got
+  written. Caught by running the chunk, not by reading it.
 - **`df.sample(random_state=n)` is the wrong sampler.** It is a Mersenne Twister; Coda's Sample
   node is mulberry32. Same seed, entirely different rows — a notebook that silently disagreed
   with the canvas while looking perfectly reasonable. `coda_sample_rows` is the generator
@@ -204,6 +219,13 @@ Three findings, each of which was a wrong answer before it was checked:
 - **`import navis` does not expose `navis.interfaces.neuprint`.** The package root does not
   import `interfaces`, so the obvious spelling is valid syntax, a well-bound name, and an
   `AttributeError` at runtime. Hence `import navis.interfaces.neuprint as neu`.
+
+The first three were established by **running the emitted code against pandas 2.3 and dplyr 1.2
+and comparing row-for-row with the op it mirrors** — all four join directions and both
+key-naming cases. That pass also turned up a divergence that is being *kept*: dplyr's
+`right_join` orders matched rows by the left table and unmatched right rows after them, where
+Coda emits one row per right-table row in the right's order. The rows are identical, so the
+chunk says so in a `NOTE` rather than adding a row-number column to arrange on and drop.
 
 Every signature the emitters produce was read off **neuprint-python 0.6.3** and **navis 2.0**
 by introspection, not recalled. Two that surprise: `fetch_neurons` returns a _pair_ (neurons,

@@ -184,7 +184,12 @@ function matchAgainst(
   suffix: string,
 ): LabelMatchResult {
   const named = selectRows(labels, [...rowForLabel.values()])
-  const joined = joinTables(neurons, named, matchColumn, labelColumn, 'inner', suffix)
+  const joined = joinTables(neurons, named, {
+    leftKey: matchColumn,
+    rightKey: labelColumn,
+    how: 'inner',
+    suffix,
+  })
 
   // Which labels found anything, counted off the result rather than during the join — the
   // same "derive it from what came back" rule `unmatchedLabels` follows.

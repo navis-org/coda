@@ -22,8 +22,8 @@ import { availableColumns, columnsKnown } from '../../core/node'
  * right. Reported on exactly that chain: `ID column: neuronId (missing)` above
  * `Supervoxel ID column: no column`, on a node that then ran correctly.
  */
-const UNKNOWN_COLUMNS = 'not run yet'
-const UNKNOWN_HINT =
+export const UNKNOWN_COLUMNS = 'not run yet'
+export const UNKNOWN_HINT =
   'The upstream columns are not known until this has run. This is what will be used.'
 
 export interface ParamFieldProps {
@@ -272,7 +272,7 @@ function NumberField({ label, value, integer, min, max, step, onChange }: Number
 
 // ---------------------------------------------------------------------------
 
-interface TextFieldProps {
+export interface TextFieldProps {
   label: string
   value: string
   placeholder?: string
@@ -287,7 +287,7 @@ interface TextFieldProps {
  * downstream node updates as you type without every keystroke becoming an undo step
  * (the store coalesces those by param id).
  */
-function TextField({ label, value, placeholder, mono, multiline, onChange }: TextFieldProps) {
+export function TextField({ label, value, placeholder, mono, multiline, onChange }: TextFieldProps) {
   const [text, setText] = useState(value)
   const [focused, setFocused] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -357,7 +357,7 @@ function TextField({ label, value, placeholder, mono, multiline, onChange }: Tex
 
 // ---------------------------------------------------------------------------
 
-interface SelectFieldProps {
+export interface SelectFieldProps {
   label: string
   value: string
   options: Array<{ value: string; label: string }>
@@ -366,7 +366,7 @@ interface SelectFieldProps {
   onChange: (value: string) => void
 }
 
-function SelectField({ label, value, options, empty, title, onChange }: SelectFieldProps) {
+export function SelectField({ label, value, options, empty, title, onChange }: SelectFieldProps) {
   if (options.length === 0) {
     return (
       <select className="field nodrag" aria-label={label} title={title} disabled>

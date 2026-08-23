@@ -629,6 +629,12 @@ google_sheet <- coda_google_sheet(
 google_sheet <- coda_join_annotations(upload_table, google_sheet)
 ```
 
+```{r rename-columns}
+# ── Rename Columns ──
+rename_columns <- table_from_url |>
+  rename(any_of(c(`neuronId` = "root_id", `type` = "cell_type")))
+```
+
 ```{r connectivity}
 # ── Connectivity ──
 connectivity <- coda_edge_list(
@@ -1014,13 +1020,45 @@ build_network <- graph_from_data_frame(
 
 ```{r join}
 # ── Join ──
-# NOTE: Coda keeps the first matching row from the right table, so a
+# NOTE: Coda keeps the first matching row from the other table, so a
 # duplicated key annotates rather than multiplies. `distinct` is what
 # reproduces that — without it the join returns every matching pair.
 join <- select_columns |>
   left_join(
     group_by_df_2 |> distinct(`preType`, .keep_all = TRUE),
     by = join_by(`preType` == `preType`),
+    suffix = c("", "_r")
+  )
+```
+
+```{r join-2}
+# ── Join ──
+# NOTE: Coda keeps the first matching row from the other table, so a
+# duplicated key annotates rather than multiplies. `distinct` is what
+# reproduces that — without it the join returns every matching pair.
+join_2 <- select_columns |>
+  full_join(
+    group_by_df_2 |> distinct(`postType`, .keep_all = TRUE),
+    by = join_by(`preType` == `postType`),
+    suffix = c("", "_r")
+  )
+```
+
+```{r join-3}
+# ── Join ──
+# NOTE: Coda keeps the first matching row from the other table, so a
+# duplicated key annotates rather than multiplies. `distinct` is what
+# reproduces that — without it the join returns every matching pair.
+# NOTE: Row **order** differs here, and only here. Coda emits one row per
+# right-table row in the right table's order; dplyr 1.2 puts the matched
+# rows in the left table's order and the unmatched right rows after them.
+# Measured against both rather than surmised — the rows themselves are
+# identical — so add an `arrange()` only if something downstream depends on
+# the order.
+join_3 <- select_columns |> distinct(`preType`, .keep_all = TRUE) |>
+  right_join(
+    group_by_df_2,
+    by = join_by(`preType` == `postType`),
     suffix = c("", "_r")
   )
 ```

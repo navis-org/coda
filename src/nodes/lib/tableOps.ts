@@ -25,6 +25,7 @@ import type { CellValue, ColumnData, MatrixValue, TableValue } from '../../core/
 import { JOIN_SEPARATOR, getColumn, makeMatrix, makeTable, selectRows } from '../../core/values'
 import { ID_COLUMN_NAME, idText } from '../../core/ids'
 import { TYPE_COLUMN_NAME } from '../../data/annotations/types'
+import type { Rename } from './renames'
 
 // ---------------------------------------------------------------------------
 // Filter
@@ -469,33 +470,67 @@ export function uploadIsNeurons(schema: TableSchema | undefined, idColumn: strin
 }
 
 /**
+ * Which of a set of renames actually applies, keyed by the column it renames.
+ *
+ * Pairs rather than one id column, because there are names Coda addresses a table by —
+ * `neuronId` and `type` — and they are applied in one pass so a column cannot be both the
+ * source of one rename and the collision victim of the other. The first pair naming a source
+ * wins, so the same column picked twice is the id rather than half of each.
+ *
+ * A pair whose source is not in the table, or which names nothing to rename *to*, is **dropped
+ * here** — which is what makes the map the honest answer to "what will this do". Both the kind
+ * rule and the node's warnings read it, and a stale pair naming a column an upstream edit
+ * removed must not count as an applied rename in either.
+ */
+export function resolveRenames(
+  names: readonly string[],
+  renames: readonly Rename[],
+): Map<string, string> {
+  const from = new Map<string, string>()
+  for (const { from: source, to } of renames) {
+    if (source && to && names.includes(source) && !from.has(source)) from.set(source, to)
+  }
+  return from
+}
+
+/**
  * Apply a set of renames, suffixing any column that merely already held a target name.
  *
- * `[from, to]` pairs rather than one id column, because there are two names Coda addresses a
- * table by — `neuronId` and `type` — and they are applied in one pass so a column cannot be
- * both the source of one rename and the collision victim of the other. The first pair naming
- * a source wins, so the same column picked twice is the id rather than half of each.
+ * Two passes, and the order is the whole of it: every renamed column claims its name first, so
+ * a column that only *happens* to hold that name is the one that gets suffixed rather than the
+ * one somebody chose. That is `joinedColumns`' call about a collision and the wide pivot's.
+ *
+ * Allocating through a single `uniqueName` set is what makes it safe for a rename set somebody
+ * is typing, where the import nodes' two-rename case could not reach it: **the mapping is not
+ * injective**, so `a → x` beside `b → x` is a real state, and taking each target literally
+ * would emit two columns called `x` — a table whose `data` has one array where its schema
+ * claims two, which is `makeTable`'s "ragged columns" throw at best and a silently overwritten
+ * column at worst. It is the same non-injectivity the annotation providers were caught by, and
+ * `annotationColumns` is that fix one layer down.
  */
-function renamedColumns(
-  names: readonly string[],
-  renames: ReadonlyArray<readonly [string, string]>,
-): string[] {
-  const from = new Map<string, string>()
-  for (const [source, target] of renames) {
-    if (source && names.includes(source) && !from.has(source)) from.set(source, target)
-  }
+function renamedColumns(names: readonly string[], from: ReadonlyMap<string, string>): string[] {
   if (from.size === 0) return [...names]
 
-  const targets = new Set(from.values())
-  // Everything that survives untouched, so a suffix search never lands on one of them.
-  const taken = new Set(names.filter((n) => !from.has(n)))
-  return names.map((name) => {
+  const out = new Array<string>(names.length)
+  const taken = new Set<string>()
+  names.forEach((name, i) => {
     const target = from.get(name)
-    if (target !== undefined) return target
-    // The chosen column wins the name; a column that merely already had it is suffixed, the
-    // same call `joinedColumns` and the wide pivot make about a collision.
-    return targets.has(name) ? uniqueName(taken, name) : name
+    if (target !== undefined) out[i] = uniqueName(taken, target)
   })
+  names.forEach((name, i) => {
+    if (out[i] === undefined) out[i] = uniqueName(taken, name)
+  })
+  return out
+}
+
+/** The renamed schema, keeping each column's dtype and unit — only the name changes. */
+function renameColumns(
+  schema: TableSchema,
+  names: readonly string[],
+  from: ReadonlyMap<string, string>,
+): TableSchema {
+  const renamed = renamedColumns(names, from)
+  return { columns: schema.columns.map((c, i) => ({ ...c, name: renamed[i]! })) }
 }
 
 /**
@@ -513,10 +548,10 @@ export interface UploadShape {
   textColumns?: readonly string[]
 }
 
-function renamesOf(shape: UploadShape): Array<readonly [string, string]> {
+function renamesOf(shape: UploadShape): Rename[] {
   return [
-    [shape.idColumn ?? '', ID_COLUMN_NAME] as const,
-    [shape.typeColumn ?? '', TYPE_COLUMN_NAME] as const,
+    { from: shape.idColumn ?? '', to: ID_COLUMN_NAME },
+    { from: shape.typeColumn ?? '', to: TYPE_COLUMN_NAME },
   ]
 }
 
@@ -544,14 +579,12 @@ export function uploadShapeSchema(
 ): TableSchema | undefined {
   if (!schema) return undefined
   const text = new Set(shape.textColumns ?? [])
-  const names = renamedColumns(
-    schema.columns.map((c) => c.name),
-    renamesOf(shape),
-  )
+  const names = schema.columns.map((c) => c.name)
+  const renamed = renamedColumns(names, resolveRenames(names, renamesOf(shape)))
   return {
     columns: schema.columns.map((c, i) =>
       // The unit goes with the dtype: a count of synapses read as text is no longer a count.
-      text.has(c.name) ? column(names[i]!, 'str') : { ...c, name: names[i]! },
+      text.has(c.name) ? column(renamed[i]!, 'str') : { ...c, name: renamed[i]! },
     ),
   }
 }
@@ -575,6 +608,127 @@ export function uploadShapeTable(table: TableValue, shape: UploadShape): TableVa
     data,
     uploadIsNeurons(table.schema, shape.idColumn ?? '') ? 'neurons' : 'table',
   )
+}
+
+// ---------------------------------------------------------------------------
+// Rename columns
+// ---------------------------------------------------------------------------
+
+/**
+ * Everything a set of renames does to a table, worked out once.
+ *
+ * Four things read this — the schema half, the value half, the node's `validate` and its card —
+ * and each of them wants a different pair of the fields. Computed separately they were the same
+ * walk two and three times over per keystroke, and worse, the card and the badge answered
+ * "which columns are missing" from two expressions that could drift apart. `resolveFilters`
+ * one node over has the same shape and the same reason.
+ */
+export interface RenamePlan {
+  /** The finished columns. Undefined only when the input schema is. */
+  schema: TableSchema | undefined
+  /** The renames that actually apply, source → target, in the order they were declared. */
+  applied: ReadonlyMap<string, string>
+  /** Sources this table does not carry. Empty while the schema is unknown — see below. */
+  missing: string[]
+  /** Whether the result claims to be Neurons. */
+  neurons: boolean
+}
+
+/** Whether any applied rename targets this name. */
+function renamesOnto(applied: ReadonlyMap<string, string>, name: string): boolean {
+  for (const to of applied.values()) if (to === name) return true
+  return false
+}
+
+export function renamePlan(
+  schema: TableSchema | undefined,
+  renames: readonly Rename[],
+  wasNeurons = false,
+): RenamePlan {
+  const names = schema?.columns.map((c) => c.name) ?? []
+  const applied = resolveRenames(names, renames)
+  const renamed = schema ? renameColumns(schema, names, applied) : undefined
+  /*
+   * Nothing is missing while the schema is unknown, rather than everything: a port publishing
+   * no schema is not a port whose table lacks these columns — a Pivot publishes none until it
+   * has run. `columnSchemaFor`'s rule, and reporting it here is what lets both readers state it
+   * without each remembering to guard.
+   */
+  const missing = schema
+    ? renames.filter((r) => r.from && !names.includes(r.from)).map((r) => r.from)
+    : []
+  return {
+    schema: renamed,
+    applied,
+    missing,
+    /*
+     * Both directions, and each is a different statement. Renaming `neuronId` **away** has to
+     * demote: the column is gone, so `idColumn()` throws on every node downstream that believed
+     * the kind. Renaming a column **onto** `neuronId` promotes, which is what makes this the
+     * general form of Upload Table's `ID column` — the fix for somebody else's table, usable
+     * mid-chain on one that was fetched or joined rather than only at the point of import.
+     *
+     * What it will not do is promote a table it did not touch. `core.stack` states the rule
+     * this respects: a `neurons` kind is a *claim* that the ids are neurons of a dataset, and a
+     * plain table that happens to carry a `neuronId` never made it. So the promotion reads
+     * `applied`, a pair whose source is not in the table having renamed nothing at all.
+     */
+    neurons:
+      Boolean(findColumn(renamed, ID_COLUMN_NAME)) &&
+      (wasNeurons || renamesOnto(applied, ID_COLUMN_NAME)),
+  }
+}
+
+/** Schema in, schema out — the half `inferOutputs` needs. */
+export function renameSchema(
+  schema: TableSchema | undefined,
+  renames: readonly Rename[],
+): TableSchema | undefined {
+  return renamePlan(schema, renames).schema
+}
+
+/**
+ * Every column whose name actually changes, as `[from, to]` — what an emitter writes out.
+ *
+ * Derived from the finished schema rather than from the pairs, and that is what makes a
+ * generated `rename` exact rather than approximate. `renamedColumns` does two things the pairs
+ * alone do not say: it suffixes a *second* rename onto one target, and it suffixes a column
+ * that merely already **held** a target name — so `root_id → neuronId` on a table that has a
+ * `neuronId` already is two renames, one of which nobody typed. Emitting the pairs would put
+ * two columns of one name in somebody's DataFrame, which pandas permits and every later
+ * `df[col]` then answers with a frame instead of a series.
+ *
+ * With no schema — a Pivot upstream, or a first run — it falls back to the pairs as typed,
+ * which is the same answer whenever nothing collides, and is the honest limit of what can be
+ * known at export time.
+ */
+export function renameMapping(
+  schema: TableSchema | undefined,
+  renames: readonly Rename[],
+): Array<[string, string]> {
+  const renamed = renameSchema(schema, renames)
+  if (!schema || !renamed) {
+    return renames.filter((r) => r.from && r.to).map((r) => [r.from, r.to])
+  }
+  const out: Array<[string, string]> = []
+  schema.columns.forEach((c, i) => {
+    const to = renamed.columns[i]!.name
+    if (to !== c.name) out.push([c.name, to])
+  })
+  return out
+}
+
+export function renameTable(table: TableValue, renames: readonly Rename[]): TableValue {
+  const plan = renamePlan(table.schema, renames, table.kind === 'neurons')
+  const schema = plan.schema!
+  const data: Record<string, ColumnData> = {}
+  // The arrays are handed over by reference rather than copied. Columns are immutable by
+  // contract (`core/values.ts`), and this op changes nothing but the key they sit under — so a
+  // rename over a 165,000-row index costs one object rather than a second copy of the table.
+  table.schema.columns.forEach((c, i) => {
+    data[schema.columns[i]!.name] = getColumn(table, c.name)
+  })
+  return makeTable(schema, data, plan.neurons ? 'neurons' : 'table')
 }
 
 // ---------------------------------------------------------------------------
@@ -1126,7 +1280,52 @@ export function groupByTable(
 // Join
 // ---------------------------------------------------------------------------
 
-export type JoinHow = 'inner' | 'left'
+export type JoinHow = 'inner' | 'left' | 'outer' | 'right'
+
+export const JOIN_OPTIONS: Array<{ value: JoinHow; label: string }> = [
+  { value: 'left', label: 'left (every left row)' },
+  { value: 'inner', label: 'inner (matched only)' },
+  { value: 'outer', label: 'outer (every row of both)' },
+  { value: 'right', label: 'right (every right row)' },
+]
+
+/**
+ * The two keys, the direction and the collision suffix, as one argument.
+ *
+ * An object rather than four positional arguments, on `UploadShape`'s reasoning: two of them
+ * are column names, so a caller that swapped them would type-check, run, and join on the wrong
+ * pair — against a real table, silently, since a key matching nothing yields an empty inner
+ * join rather than an error.
+ */
+export interface JoinSpec {
+  leftKey: string
+  rightKey: string
+  how: JoinHow
+  /** Appended to a right-hand column name colliding with a left-hand one. */
+  suffix?: string
+}
+
+/**
+ * Whether this direction can emit a row that came from the right side alone.
+ *
+ * Exported because it decides three separate things in three layers — whether the key column
+ * reconciles here, whether the node's badge mentions it, and whether the notebook cell writes a
+ * fill. Written out at each of them, a fifth direction is three edits with nothing failing when
+ * one is missed, and each failure is a *plausible* wrong answer rather than an error.
+ */
+export function keepsUnmatchedRight(how: JoinHow): boolean {
+  return how === 'outer' || how === 'right'
+}
+
+/** First row per key. A later row whose key was already seen is never matched — see below. */
+function firstByKey(key: ReadonlyArray<ColumnData>, length: number): Map<string, number> {
+  const index = new Map<string, number>()
+  for (let i = 0; i < length; i++) {
+    const k = rowKey(key, i)
+    if (!index.has(k)) index.set(k, i)
+  }
+  return index
+}
 
 /** Right-side columns get a suffix when they collide with a left-side name. */
 export function joinedColumns(
@@ -1148,67 +1347,185 @@ export function joinedColumns(
   return { columns, rightNames }
 }
 
+/**
+ * The dtype the surviving key column takes, or undefined where it keeps the left's.
+ *
+ * Only an `outer` or a `right` join can put a right-hand key value into the left-hand key
+ * column, and only then do the two sides' dtypes have to reconcile. Matching is by text
+ * already, so a `str` root id meeting an `i64` neuron id joins perfectly well — but writing
+ * that string into a column *declared* `i64` breaks invariant 3, and every picker, sort and
+ * formatter downstream believes the declaration.
+ *
+ * **`mergedDType` decides, not a bare `!==`**, because it is this file's one statement of "can
+ * these two reconcile, and into what" — the same question `stackColumns` and `combineColumns`
+ * ask. It reconciles `i64` with `f64`, so a count joined against a ratio stays a number here
+ * exactly as it does there; a `!==` test would send that pair to text, take the column out of
+ * every numeric picker and flip it to locale collation, with three ops in one file disagreeing
+ * about one rule. Anything genuinely irreconcilable goes to `str`, which loses nothing —
+ * coercing to the left's dtype would silently round a wide id (invariant 8).
+ *
+ * Exported so the node's badge can name the dtype rather than restating the condition.
+ */
+export function joinKeyDType(
+  left: TableSchema | undefined,
+  right: TableSchema | undefined,
+  spec: JoinSpec,
+): DType | undefined {
+  if (!keepsUnmatchedRight(spec.how)) return undefined
+  const l = findColumn(left, spec.leftKey)
+  const r = findColumn(right, spec.rightKey)
+  if (!l || !r || l.dtype === r.dtype) return undefined
+  return mergedDType(l.dtype, r.dtype) ?? 'str'
+}
+
+/**
+ * The columns a join publishes, and how to read the right side into them.
+ *
+ * One function behind both halves, so the widening rule is stated once: `joinSchema` returns
+ * its columns and `joinTables` builds its data from the same call, which is invariant 3 by
+ * construction rather than by two functions agreeing.
+ */
+function joinLayout(left: TableSchema, right: TableSchema, spec: JoinSpec) {
+  const { columns, rightNames } = joinedColumns(left, right, spec.rightKey, spec.suffix ?? '_r')
+  const keyDType = joinKeyDType(left, right, spec)
+  return {
+    columns: keyDType
+      ? columns.map((c) => (c.name === spec.leftKey ? column(c.name, keyDType) : c))
+      : columns,
+    rightNames,
+    keyDType,
+  }
+}
+
 export function joinSchema(
   left: TableSchema | undefined,
   right: TableSchema | undefined,
-  rightKey: string | undefined,
-  suffix: string,
+  spec: JoinSpec,
 ): TableSchema | undefined {
   if (!left || !right) return undefined
-  return { columns: joinedColumns(left, right, rightKey ?? '', suffix).columns }
+  return { columns: joinLayout(left, right, spec).columns }
 }
 
-export function joinTables(
-  left: TableValue,
-  right: TableValue,
-  leftKey: string,
-  rightKey: string,
-  how: JoinHow,
-  suffix = '_r',
-): TableValue {
+/**
+ * Key join of two tables.
+ *
+ * ## Duplicate keys annotate; they never multiply
+ *
+ * The side being *matched into* is deduplicated by key — the right for `left`/`inner`/`outer`,
+ * the left for `right` — first occurrence winning. A many-to-many join would silently multiply
+ * rows, which is rarely what anyone wants when annotating a table, and a row count that grew by
+ * a factor nobody asked for is hard to notice and harder to trace.
+ *
+ * The consequence for `outer` is worth stating, because the obvious reading is the other one: a
+ * *second* right row carrying a key the left also carries is **not** an unmatched row. It was
+ * dropped by the dedupe, and resurrecting it in the outer tail would reinstate exactly the
+ * multiplication the rule prevents — drawn, worse, as a left-null row for a key that plainly
+ * matched. So "unmatched" means *no left row carries this key*, never "this particular right
+ * row was not the one picked".
+ *
+ * ## One key column, filled from whichever side had the row
+ *
+ * The right key is dropped as redundant with the left's, so a row that came from the right
+ * alone would otherwise have no key at all — the single most useful column on it. It is filled
+ * from the right instead, which is exactly what `dplyr::full_join(by = join_by(a == b))` does.
+ * pandas keeps both key columns instead; the emitter reproduces this rather than inheriting
+ * that, since an output schema that changed shape with the join direction would empty a
+ * downstream picker every time somebody tried a different one.
+ *
+ * ## Row order
+ *
+ * `left`/`inner`/`outer` keep the left's order, with the outer tail — right-only rows — after
+ * it in the right's. `right` keeps the right's order throughout, which is what makes it the
+ * mirror of `left` rather than "a left join with the wires swapped": the columns stay in
+ * left-then-right order, so nothing downstream has to be repointed to use it.
+ */
+export function joinTables(left: TableValue, right: TableValue, spec: JoinSpec): TableValue {
+  const { leftKey, rightKey, how } = spec
   if (!findColumn(left.schema, leftKey)) throw new Error(`Left key "${leftKey}" not found`)
   if (!findColumn(right.schema, rightKey)) throw new Error(`Right key "${rightKey}" not found`)
 
-  const { columns, rightNames } = joinedColumns(left.schema, right.schema, rightKey, suffix)
-  const schema: TableSchema = { columns }
+  const { columns, rightNames, keyDType } = joinLayout(left.schema, right.schema, spec)
 
-  // Index the right side by key. First match wins for duplicate keys — a many-to-many
-  // join would silently multiply rows, which is rarely what you want when you're
-  // annotating a table.
+  /*
+   * Keys are compared through `rowKey`, this file's cell rule, rather than a second spelling of
+   * it — so a Join and a Deduplicate cannot come to disagree about whether two null-keyed rows
+   * are the same row, which is a different row count and no error. The one-column arrays are
+   * hoisted for the same reason `dedupeTable` and `groupByTable` hoist theirs: it is read once
+   * per row.
+   */
+  const leftKeyCols = [getColumn(left, leftKey)]
   const rightKeyData = getColumn(right, rightKey)
-  const index = new Map<string, number>()
-  for (let i = 0; i < right.length; i++) {
-    const k = String(rightKeyData[i] ?? '\u0000')
-    if (!index.has(k)) index.set(k, i)
-  }
+  const rightKeyCols = [rightKeyData]
 
-  const leftKeyData = getColumn(left, leftKey)
-  const leftRows: number[] = []
+  /** Which left and right row each output row draws from. Null on the side it did not come from. */
+  const leftRows: Array<number | null> = []
   const rightRows: Array<number | null> = []
-  for (let i = 0; i < left.length; i++) {
-    const match = index.get(String(leftKeyData[i] ?? '\u0000'))
-    if (match === undefined) {
-      if (how === 'left') {
-        leftRows.push(i)
-        rightRows.push(null)
-      }
-      continue
+
+  if (how === 'right') {
+    const leftIndex = firstByKey(leftKeyCols, left.length)
+    for (let i = 0; i < right.length; i++) {
+      leftRows.push(leftIndex.get(rowKey(rightKeyCols, i)) ?? null)
+      rightRows.push(i)
     }
-    leftRows.push(i)
-    rightRows.push(match)
+  } else {
+    const rightIndex = firstByKey(rightKeyCols, right.length)
+    /*
+     * Which right rows something matched, marked as we go. The alternative — a Set of every
+     * left key, built in a second pass — answers the same question by re-reading every left
+     * row and retaining a copy of each key as a string: 23 ms and ~13 MB at 165,000 rows,
+     * against 0.5 ms and 165 KB for this.
+     */
+    const matched = how === 'outer' ? new Uint8Array(right.length) : undefined
+    for (let i = 0; i < left.length; i++) {
+      const match = rightIndex.get(rowKey(leftKeyCols, i))
+      if (match === undefined) {
+        if (how !== 'inner') {
+          leftRows.push(i)
+          rightRows.push(null)
+        }
+        continue
+      }
+      if (matched) matched[match] = 1
+      leftRows.push(i)
+      rightRows.push(match)
+    }
+    if (matched) {
+      for (let i = 0; i < right.length; i++) {
+        // Only the row the dedupe kept, and only where nothing on the left matched its key.
+        if (matched[i] || rightIndex.get(rowKey(rightKeyCols, i)) !== i) continue
+        leftRows.push(null)
+        rightRows.push(i)
+      }
+    }
   }
 
   const data: Record<string, ColumnData> = {}
   for (const col of left.schema.columns) {
     const src = getColumn(left, col.name)
-    data[col.name] = leftRows.map((i) => src[i] ?? null)
+    data[col.name] = leftRows.map((i) => (i === null ? null : (src[i] ?? null)))
   }
   for (const { source, out } of rightNames) {
     const src = getColumn(right, source)
     data[out] = rightRows.map((i) => (i === null ? null : (src[i] ?? null)))
   }
 
-  return makeTable(schema, data, left.kind)
+  if (keepsUnmatchedRight(how)) {
+    const key = data[leftKey]!
+    for (let i = 0; i < key.length; i++) {
+      if (leftRows[i] === null) key[i] = rightKeyData[rightRows[i]!] ?? null
+      // Only text needs coercing: `i64` reconciled with `f64` is a number on both sides.
+      if (keyDType === 'str' && key[i] !== null) key[i] = String(key[i])
+    }
+  }
+
+  /*
+   * The *left* table's kind, whichever direction this is, because the output's columns are the
+   * left's followed by the right's annotations — so what a row is about has not changed. An
+   * outer or right join can add rows the left never had, and a `neurons` claim about those is
+   * exactly as good as the claim about the right table they came from, which either met a
+   * Neurons socket or did not.
+   */
+  return makeTable({ columns }, data, left.kind)
 }
 
 // ---------------------------------------------------------------------------

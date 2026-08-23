@@ -16,6 +16,9 @@ import {
   groupByTable,
   joinSchema,
   joinTables,
+  renameMapping,
+  renameSchema,
+  renameTable,
   matrixToTable,
   normalizeMatrix,
   MAX_PIVOT_CELLS,
@@ -410,6 +413,7 @@ describe('select', () => {
 })
 
 describe('join', () => {
+  const LEFT = { leftKey: 'neuronId', rightKey: 'neuronId', how: 'left' } as const
   const NEURONS = tableSchema(column('neuronId', 'i64'), column('type', 'str'))
   const neurons = () =>
     tableFromRows(
@@ -422,8 +426,8 @@ describe('join', () => {
     )
 
   it('annotates the left table and matches its declared schema', () => {
-    const declared = joinSchema(CONNECTIVITY, NEURONS, 'neuronId', '_r')
-    const out = joinTables(conn(), neurons(), 'neuronId', 'neuronId', 'left')
+    const declared = joinSchema(CONNECTIVITY, NEURONS, LEFT)
+    const out = joinTables(conn(), neurons(), LEFT)
     expect(out.schema.columns.map((c) => c.name)).toEqual(declared!.columns.map((c) => c.name))
     expect(out.schema.columns.map((c) => c.name)).toEqual([
       'neuronId',
@@ -434,14 +438,14 @@ describe('join', () => {
   })
 
   it('keeps unmatched left rows as null on a left join', () => {
-    const out = joinTables(conn(), neurons(), 'neuronId', 'neuronId', 'left')
+    const out = joinTables(conn(), neurons(), LEFT)
     expect(out.length).toBe(6)
     const idx = (out.data.neuronId as number[]).indexOf(3)
     expect((out.data.type as (string | null)[])[idx]).toBeNull()
   })
 
   it('drops unmatched left rows on an inner join', () => {
-    const out = joinTables(conn(), neurons(), 'neuronId', 'neuronId', 'inner')
+    const out = joinTables(conn(), neurons(), { ...LEFT, how: 'inner' })
     expect(out.length).toBe(5)
     expect(out.data.neuronId).not.toContain(3)
   })
@@ -451,9 +455,212 @@ describe('join', () => {
       tableSchema(column('neuronId', 'i64'), column('weight', 'i64')),
       [{ neuronId: 1, weight: 999 }],
     )
-    const out = joinTables(conn(), right, 'neuronId', 'neuronId', 'left')
+    const out = joinTables(conn(), right, LEFT)
     expect(out.schema.columns.map((c) => c.name)).toContain('weight_r')
     expect(out.schema.columns.map((c) => c.name)).toContain('weight')
+  })
+
+  /*
+   * The two directions that can emit a row the left never had. Both hinge on the same two
+   * questions — which right rows count as unmatched, and what the surviving key column holds
+   * for them — so they are tested against the same right table, which carries an id the left
+   * has (2), one it does not (9), and a *second* row for an id it does (1).
+   */
+  const WIDER = tableSchema(column('neuronId', 'i64'), column('side', 'str'))
+  const wider = () =>
+    tableFromRows(WIDER, [
+      { neuronId: 2, side: 'R' },
+      { neuronId: 9, side: 'L' },
+      { neuronId: 1, side: 'L' },
+      { neuronId: 1, side: 'R' },
+    ])
+
+  it('appends right-only rows on an outer join and fills their key from the right', () => {
+    const out = joinTables(conn(), wider(), { ...LEFT, how: 'outer' })
+    // Six left rows, then the one right row whose key the left does not carry at all.
+    expect(out.length).toBe(7)
+    expect(out.data.neuronId).toEqual([1, 1, 1, 2, 2, 3, 9])
+    expect(out.data.side).toEqual(['L', 'L', 'L', 'R', 'R', null, 'L'])
+    // The right key column is dropped as redundant, so without the fill row 9 has no id at all.
+    expect(out.data.partnerType?.[6]).toBeNull()
+  })
+
+  it('does not resurrect a duplicate right row whose key did match', () => {
+    // `neuronId: 1` appears twice on the right; the second row lost the dedupe. Re-emitting it
+    // in the outer tail would reinstate the multiplication that rule exists to prevent, drawn
+    // as a left-null row for a key that plainly matched.
+    const out = joinTables(conn(), wider(), { ...LEFT, how: 'outer' })
+    expect(out.data.neuronId?.filter((id) => id === 1)).toHaveLength(3)
+    expect(out.data.side?.[6]).toBe('L')
+  })
+
+  it('keeps every right row in the right table order on a right join', () => {
+    const out = joinTables(conn(), wider(), { ...LEFT, how: 'right' })
+    expect(out.length).toBe(4)
+    expect(out.data.neuronId).toEqual([2, 9, 1, 1])
+    // Each right row takes the *first* left row carrying its key — the mirror of a left join's
+    // dedupe, so a right join annotates rather than multiplying too.
+    expect(out.data.weight).toEqual([20, null, 30, 30])
+    expect(out.data.side).toEqual(['R', 'L', 'L', 'R'])
+  })
+
+  it('leaves the columns in left-then-right order whichever direction it runs', () => {
+    const names = (how: 'left' | 'inner' | 'outer' | 'right') =>
+      joinTables(conn(), wider(), { ...LEFT, how }).schema.columns.map((c) => c.name)
+    // What makes `right` a direction rather than "swap the wires": nothing downstream moves.
+    expect(names('right')).toEqual(names('left'))
+    expect(names('outer')).toEqual(names('left'))
+  })
+
+  it('widens the key to text where the two sides disagree, and only where it can bite', () => {
+    const textIds = tableSchema(column('neuronId', 'str'), column('side', 'str'))
+    const right = () => tableFromRows(textIds, [{ neuronId: '9', side: 'L' }])
+    const spec = { ...LEFT, how: 'outer' } as const
+
+    const out = joinTables(conn(), right(), spec)
+    expectSchemaAgreement(joinSchema(CONNECTIVITY, textIds, spec), out)
+    expect(out.schema.columns[0]!.dtype).toBe('str')
+    // Both sides stringified, or the column's values disagree with its own declaration.
+    expect(out.data.neuronId).toEqual(['1', '1', '1', '2', '2', '3', '9'])
+
+    // A left join can never put a right key value in that column, so nothing widens.
+    const kept = joinTables(conn(), right(), { ...LEFT, how: 'left' })
+    expect(kept.schema.columns[0]!.dtype).toBe('i64')
+    expect(kept.data.neuronId).toEqual([1, 1, 1, 2, 2, 3])
+  })
+
+  it('reconciles two numeric keys rather than sending them to text', () => {
+    /*
+     * `mergedDType`, not a bare `!==` — it is this file's one statement of "can these two
+     * reconcile, and into what", and it widens `i64` with `f64` exactly as `stackColumns` and
+     * `combineColumns` do. Answering `str` here would take the column out of every numeric
+     * picker and flip it to locale collation, with three ops in one file disagreeing.
+     */
+    const floats = tableSchema(column('neuronId', 'f64'), column('side', 'str'))
+    const spec = { ...LEFT, how: 'outer' } as const
+    const out = joinTables(conn(), tableFromRows(floats, [{ neuronId: 9, side: 'L' }]), spec)
+    expectSchemaAgreement(joinSchema(CONNECTIVITY, floats, spec), out)
+    expect(out.schema.columns[0]!.dtype).toBe('f64')
+    // Numbers on both sides, so nothing is stringified on the way through.
+    expect(out.data.neuronId).toEqual([1, 1, 1, 2, 2, 3, 9])
+  })
+
+  it('agrees with its declared schema in every direction', () => {
+    for (const how of ['left', 'inner', 'outer', 'right'] as const) {
+      const spec = { ...LEFT, how }
+      expectSchemaAgreement(joinSchema(CONNECTIVITY, WIDER, spec), joinTables(conn(), wider(), spec))
+    }
+  })
+})
+
+describe('rename', () => {
+  const FOREIGN = tableSchema(
+    column('root_id', 'str'),
+    column('cell_type', 'str'),
+    column('w', 'i64', 'synapses'),
+  )
+  const foreign = (kind: 'table' | 'neurons' = 'table') =>
+    tableFromRows(FOREIGN, [{ root_id: '1', cell_type: 'LC4', w: 5 }], kind)
+
+  it('renames only the names, and agrees with its declared schema', () => {
+    const renames = [{ from: 'root_id', to: 'neuronId' }]
+    const out = renameTable(foreign(), renames)
+    expectSchemaAgreement(renameSchema(FOREIGN, renames), out)
+    // The dtype and the unit ride along — that is the whole difference between this and the
+    // import nodes' `Text columns`, which widens.
+    expect(out.schema.columns).toEqual([
+      column('neuronId', 'str'),
+      column('cell_type', 'str'),
+      column('w', 'i64', 'synapses'),
+    ])
+    expect(out.data.neuronId).toEqual(['1'])
+  })
+
+  it('suffixes a column that merely already held the target name', () => {
+    // The chosen column wins the name; `joinedColumns`' call about a collision, and the wide
+    // pivot's. Without it the table's schema claims two columns its data has one of.
+    const clash = tableSchema(column('neuronId', 'i64'), column('root_id', 'str'))
+    const out = renameSchema(clash, [{ from: 'root_id', to: 'neuronId' }])
+    expect(out!.columns.map((c) => c.name)).toEqual(['neuronId_2', 'neuronId'])
+  })
+
+  it('suffixes the second of two renames aiming at one name', () => {
+    /*
+     * The mapping is not injective, and the Rename card lets somebody express that in two
+     * keystrokes. Taking both literally emits two columns of one name, which is `makeTable`'s
+     * ragged throw at best and a silently overwritten column at worst.
+     */
+    const out = renameTable(foreign(), [
+      { from: 'root_id', to: 'label' },
+      { from: 'cell_type', to: 'label' },
+    ])
+    expect(out.schema.columns.map((c) => c.name)).toEqual(['label', 'label_2', 'w'])
+    expect(out.data.label).toEqual(['1'])
+    expect(out.data.label_2).toEqual(['LC4'])
+  })
+
+  it('swaps two names rather than collapsing them', () => {
+    const out = renameSchema(FOREIGN, [
+      { from: 'root_id', to: 'cell_type' },
+      { from: 'cell_type', to: 'root_id' },
+    ])
+    expect(out!.columns.map((c) => c.name)).toEqual(['cell_type', 'root_id', 'w'])
+  })
+
+  it('ignores a rename naming a column the table does not carry', () => {
+    expect(renameSchema(FOREIGN, [{ from: 'gone', to: 'x' }])!.columns.map((c) => c.name)).toEqual([
+      'root_id',
+      'cell_type',
+      'w',
+    ])
+  })
+
+  describe('the kind', () => {
+    it('promotes on an applied rename onto neuronId and demotes when it is renamed away', () => {
+      expect(renameTable(foreign(), [{ from: 'root_id', to: 'neuronId' }]).kind).toBe('neurons')
+
+      const neurons = tableFromRows(
+        tableSchema(column('neuronId', 'str')),
+        [{ neuronId: '1' }],
+        'neurons',
+      )
+      expect(renameTable(neurons, [{ from: 'neuronId', to: 'segment' }]).kind).toBe('table')
+    })
+
+    it('does not promote a table it did not touch', () => {
+      // `core.stack`'s rule: a plain table that happens to carry a `neuronId` never made the
+      // claim, so a rename of some *other* column is not the moment it starts making one.
+      const carries = tableFromRows(
+        tableSchema(column('neuronId', 'str'), column('cell_type', 'str')),
+        [{ neuronId: '1', cell_type: 'LC4' }],
+      )
+      expect(renameTable(carries, [{ from: 'cell_type', to: 'type' }]).kind).toBe('table')
+    })
+  })
+
+  describe('renameMapping', () => {
+    it('answers the finished names, so a collision comes out as the suffix rather than a clash', () => {
+      // What an emitter writes. `root_id → neuronId` on a table that already has one is *two*
+      // renames, only one of which anybody typed — and emitting the pairs alone would put two
+      // columns of one name in somebody's DataFrame.
+      const clash = tableSchema(column('neuronId', 'i64'), column('root_id', 'str'))
+      expect(renameMapping(clash, [{ from: 'root_id', to: 'neuronId' }])).toEqual([
+        ['neuronId', 'neuronId_2'],
+        ['root_id', 'neuronId'],
+      ])
+    })
+
+    it('falls back to the pairs as typed when there is no schema to resolve against', () => {
+      // A Pivot upstream, or a first run. The same answer whenever nothing collides, and the
+      // honest limit of what can be known at export time.
+      expect(renameMapping(undefined, [{ from: 'root_id', to: 'neuronId' }])).toEqual([
+        ['root_id', 'neuronId'],
+      ])
+    })
+
+    it('reports nothing for a rename that changes no name', () => {
+      expect(renameMapping(FOREIGN, [{ from: 'gone', to: 'x' }])).toEqual([])
+    })
   })
 })
 
