@@ -10,7 +10,7 @@
  */
 
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { App } from '../../App'
 import { MockSource } from '../../data/mock/MockSource'
@@ -262,5 +262,87 @@ describe('the stored preference', () => {
       useGraphStore.getState().togglePanel('minimap')
     })
     expect(loadPanels().minimap).toBe(true)
+  })
+})
+
+/**
+ * The New menu, which is the list of places somebody can begin.
+ *
+ * Two things worth pinning, and neither would fail loudly. **Every backend offers its escape
+ * hatch**: those are the entry point for a server this build ships no node for, and CATMAID's was
+ * simply absent for as long as the menu had one hand-written "Other" entry — a missing menu item
+ * looks exactly like a menu. And **the specialist volumes are held back**, which is `starter:
+ * false`; asserting that against the flag would be checking the menu against the expression it
+ * is built from, so the three are named.
+ */
+describe('the New menu', () => {
+  /*
+   * Adding a CATMAID node makes `validate` peek at that instance's project list, and a peek that
+   * cannot answer starts the listing — which is the design (invariant 2) and is a real request
+   * leaving the process. Stubbed so the case is hermetic; the rejection is swallowed exactly as
+   * a dead server's would be, which is the state the assertions below run in anyway.
+   */
+  beforeEach(() => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.reject(new Error('no network in tests'))),
+    )
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  function openNew(): HTMLElement {
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: /^New/ }))
+    const panel = document.querySelector('.dropdown__panel')
+    if (!(panel instanceof HTMLElement)) throw new Error('New menu did not open')
+    return panel
+  }
+
+  const itemTitles = (panel: HTMLElement) =>
+    [...panel.querySelectorAll('.dropdown__item strong')].map((el) => el.textContent)
+
+  it('offers a custom node for every backend, under that backend’s heading', () => {
+    const panel = openNew()
+    // Headings and items in document order, so an item's group is the last heading before it.
+    const rows = [...panel.querySelectorAll('.dropdown__heading, .dropdown__item strong')]
+    const groupOf = (label: string) => {
+      const at = rows.findIndex((el) => el.textContent === label)
+      expect(at).toBeGreaterThan(-1)
+      return rows
+        .slice(0, at)
+        .reverse()
+        .find((el) => el.classList.contains('dropdown__heading'))?.textContent
+    }
+    expect(groupOf('Custom neuPrint')).toBe('neuPrint')
+    expect(groupOf('Custom CAVE')).toBe('CAVE')
+    expect(groupOf('Custom CATMAID')).toBe('CATMAID')
+  })
+
+  it('keeps the datasets people start from and drops the specialist volumes', () => {
+    const titles = itemTitles(openNew())
+    for (const kept of ['MaleCNS', 'Hemibrain', 'MANC', 'FlyWire FAFB']) {
+      expect(titles).toContain(kept)
+    }
+    for (const dropped of ['Optic Lobe', 'FIB-19', 'Mushroom Body']) {
+      expect(titles).not.toContain(dropped)
+    }
+  })
+
+  it('builds a starter from a custom entry', () => {
+    const panel = openNew()
+    const item = [...panel.querySelectorAll('.dropdown__item')].find(
+      (el) => el.querySelector('strong')?.textContent === 'Custom CATMAID',
+    )
+    if (!(item instanceof HTMLElement)) throw new Error('No Custom CATMAID entry')
+    act(() => {
+      fireEvent.click(item)
+    })
+    const types = useGraphStore.getState().graph.nodes.map((node) => node.type)
+    expect(types).toContain('dataset.catmaid')
+    // The generic starter: a dataset, a browser and somewhere for the picks to land.
+    expect(types).toContain('neuron.explore')
   })
 })

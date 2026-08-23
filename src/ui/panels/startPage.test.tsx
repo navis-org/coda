@@ -16,8 +16,9 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { App } from '../../App'
 import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
+import { getNodeDef } from '../../core/registry'
 import { EXAMPLES } from '../../examples'
-import { DATASET_FAMILIES } from '../../nodes/lib/datasetFamilies'
+import { starterFamilies } from '../../nodes/lib/datasetFamilies'
 import '../../nodes'
 import { useGraphStore } from '../../store/graphStore'
 import { loadStartPageDismissed } from '../../store/persistence'
@@ -61,11 +62,11 @@ function card(title: string): HTMLElement {
 
 describe('Start page', () => {
   describe('what it offers', () => {
-    it('shows every example and every live dataset', () => {
+    it('shows every example and every live dataset worth starting from', () => {
       render(<StartPage />)
       const titles = cardTitles()
       for (const example of EXAMPLES) expect(titles).toContain(example.name)
-      for (const family of DATASET_FAMILIES.filter((f) => f.sourceId !== 'mock')) {
+      for (const family of starterFamilies().filter((f) => f.sourceId !== 'mock')) {
         expect(titles).toContain(family.label)
       }
       expect(titles).toHaveLength(exampleCards().length + datasetCards().length)
@@ -76,6 +77,23 @@ describe('Start page', () => {
       // The rail says "live neuPrint"; the mock families are what the examples already run on.
       expect(cardTitles()).not.toContain('Hemibrain (mini)')
       expect(cardTitles()).toContain('Hemibrain')
+    })
+
+    /*
+     * Named rather than derived from the flag, deliberately. Asserting `starter !== false` here
+     * would be the rail checked against the same expression it is built from, which is not an
+     * assertion — it passes whatever the table says. These three are the decision.
+     */
+    it('holds the specialist volumes back, without unregistering them', () => {
+      render(<StartPage />)
+      const titles = cardTitles()
+      for (const label of ['Optic Lobe', 'FIB-19', 'Mushroom Body']) {
+        expect(titles).not.toContain(label)
+      }
+      // Still nodes, still addable: what the flag decides is where somebody *begins*.
+      for (const key of ['opticlobe', 'fib19', 'mushroombody']) {
+        expect(getNodeDef(`dataset.${key}`)).toBeDefined()
+      }
     })
 
     it('draws a tile for every card, so a new example is never blank', () => {

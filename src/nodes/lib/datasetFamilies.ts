@@ -133,6 +133,25 @@ export interface DatasetFamily {
    */
   synthetic?: boolean
   /**
+   * Whether this family is offered as a *starting point*. Absent means yes.
+   *
+   * Read by the two surfaces that build a starter graph — the toolbar's New menu and the start
+   * page's dataset rail — and by nothing else. It is a statement about **where somebody begins**,
+   * not about the dataset: the node is registered either way, `Add ▸ Dataset` lists all of
+   * them, and a saved graph holding one opens exactly as before.
+   *
+   * The three it is set on are neuPrint's specialist volumes: FIB-19 is a superseded pilot,
+   * Mushroom Body is a single dedicated reconstruction, and Optic Lobe is one lobe. Somebody who
+   * wants one of those knows they want it and will reach for the node; somebody opening the New
+   * menu is choosing a connectome to work in, and six neuPrint entries make that a longer
+   * decision than it is.
+   *
+   * One flag for both surfaces rather than a filter in each, because they build the *same*
+   * starter through `buildStarter` — a family worth starting from in one and not the other is
+   * the kind of split that ends up depending on which file somebody edited last.
+   */
+  starter?: boolean
+  /**
    * Which client library each exporter builds on. A language absent means it cannot emit this
    * family at all, and `canExportNotebook` refuses that format.
    *
@@ -225,6 +244,8 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     guide:
       'One optic lobe, reconstructed to the column — medulla, lobula and lobula plate. Columnar cell types repeat across the retinotopic array, so this is the dataset where a type is a population of hundreds rather than a handful, and where averaging across a type actually means something.',
     glyph: 'optic',
+    // One lobe rather than a brain: reached for deliberately, not started from. See `starter`.
+    starter: false,
   },
   {
     key: 'fib19',
@@ -238,6 +259,8 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     guide:
       'An early FIB-SEM volume from before the hemibrain, covering the mushroom body and its surrounds. Small, partial and largely of historical interest — useful mainly as a fast dataset to try a pipeline on, or for comparing against the reconstructions that followed it.',
     glyph: 'brain',
+    // Superseded by the hemibrain it preceded. See `starter`.
+    starter: false,
   },
   {
     key: 'mushroombody',
@@ -250,6 +273,8 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     guide:
       'A dedicated mushroom body reconstruction: Kenyon cells, the output neurons and the dopaminergic neurons that modulate them. It is the one dataset here whose id carries no version, so its version dropdown has nothing to pin and the node simply names the dataset.',
     glyph: 'brain',
+    // One structure rather than a brain. See `starter`.
+    starter: false,
   },
 ]
 
@@ -360,6 +385,16 @@ export const DATASET_FAMILIES: DatasetFamily[] = [
 /** Node types are `dataset.<family key>`. Never change it; it is in every saved file. */
 export const DATASET_NODE_PREFIX = 'dataset.'
 
+/**
+ * The families offered as a starting point, in table order. See `DatasetFamily.starter`.
+ *
+ * A function rather than a constant for `startCards`' reason: this is read by the UI, and a
+ * module-level constant computed here would make import order load-bearing for nothing.
+ */
+export function starterFamilies(): DatasetFamily[] {
+  return DATASET_FAMILIES.filter((family) => family.starter !== false)
+}
+
 export function datasetFamily(key: string): DatasetFamily | undefined {
   return DATASET_FAMILIES.find((f) => f.key === key)
 }
@@ -417,15 +452,50 @@ export function backendForNodeType(type: string): DatasetBackend | undefined {
 }
 
 /**
+ * A backend's escape hatch: the node that names a server and a dataset by hand.
+ *
+ * One per backend, and the list is what stops the three drifting apart. They are **not**
+ * families — a family is a dataset Coda ships an entry for, and the whole point of these is the
+ * dataset it does not — but three surfaces need to treat them as one kind of thing: the New menu
+ * offers one under each backend's heading, the canvas tints their cards, and a share advisory
+ * names the credential they will need. Without a list, each of those was a hand-written `if` per
+ * backend, and the CATMAID one was simply missing from all three.
+ *
+ * Nothing here is presentation. The label and the blurb come off the `NodeDefinition`, which is
+ * where they are already written and the only place they can stay in step with the node.
+ */
+export interface CustomDatasetNode {
+  /** Node type. In every saved file that holds one. */
+  type: string
+  /**
+   * The *default* registered source for this backend.
+   *
+   * A custom node routinely points somewhere else — that is what it is for — and resolves its
+   * own source from its params at infer time. What this names is the instance to ask a
+   * backend-level question of, which is what a starter needs before any dataset is chosen.
+   */
+  sourceId: string
+  /** Key of `BACKENDS`. */
+  backend: string
+}
+
+export const CUSTOM_DATASET_NODES: CustomDatasetNode[] = [
+  { type: 'dataset.neuprint', sourceId: 'neuprint', backend: 'neuprint' },
+  { type: 'dataset.cave', sourceId: 'cave', backend: 'cave' },
+  { type: 'dataset.catmaid', sourceId: 'catmaid', backend: 'catmaid' },
+]
+
+/**
  * The custom nodes, which are not families and still have a backend.
  *
- * `Custom neuPrint` and `Custom CAVE` name their own server and dataset by hand, so there is no
- * table entry to read a backend off — but a reader looking at the canvas needs the same signal
- * from them as from a named one.
+ * Derived from the table above rather than restated, because a fourth backend adding its escape
+ * hatch and forgetting the tint is a card that reads as an untinted one — a wrong signal rather
+ * than a missing one.
  */
 const CUSTOM_BACKENDS: Record<string, DatasetBackend | undefined> = {
-  'dataset.neuprint': BACKENDS.neuprint,
-  'dataset.cave': BACKENDS.cave,
+  ...Object.fromEntries(
+    CUSTOM_DATASET_NODES.map((custom) => [custom.type, BACKENDS[custom.backend]]),
+  ),
   // The superseded generic picker, still registered so a saved graph loads.
   'neuron.dataset': BACKENDS.neuprint,
 }

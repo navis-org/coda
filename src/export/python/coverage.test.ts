@@ -31,6 +31,10 @@ const NO_EMITTER: Record<string, string> = {
     'onto what this backend answers \u2014 but no emitter has been written for it, so it ' +
     'degrades to a TODO rather than emitting neuprint-python against a server neuPrint has ' +
     'never heard of.',
+  'dataset.catmaid':
+    'A CATMAID instance named by hand \u2014 the same reason as `dataset.catmaid.fafb`, and no ' +
+    'different for being a server this build ships no node for. pymaid would emit it; nobody ' +
+    'has written that emitter.',
   'note.text': 'An annotation. It becomes a markdown cell, which the walk does directly.',
   'dataset.mock.hemibrain':
     'Synthetic, so a graph holding one is refused before the walk starts. An emitter here ' +

@@ -23,6 +23,8 @@ import { DEFAULT_SERVER } from '../../data/neuprint/servers'
 import { resetDatastackRecords } from '../../data/cave/datastack'
 import { DATASTACK_SPECS, specFor } from '../../data/cave/spec'
 import { CaveSource } from '../../data/cave/CaveSource'
+import { CatmaidSource } from '../../data/catmaid/CatmaidSource'
+import { DEFAULT_CATMAID_SERVER } from '../../data/catmaid/credentials'
 import { resetCredentials as resetCaveCredentials, setToken } from '../../data/cave/credentials'
 import { peekRootCheck, resetRootChecks } from '../../data/cave/rootIds'
 import { resetCache } from '../../data/cache'
@@ -428,5 +430,123 @@ describe('the root-drift advisory follows the wiring', () => {
     bare = addNode(bare, node('dataset.cave', { datastack: 'somewhere', neuronTable: 'n' }))
     await scheduler.run(bare, { mode: 'full' })
     expect(peekRootCheck('somewhere:783')).toBeUndefined()
+  })
+})
+
+/**
+ * `Custom CATMAID`, whose one interesting control is the project dropdown.
+ *
+ * A CATMAID project id is a bare integer whose meaning is per-instance — `1` is FAFB on VFB and
+ * something else on a lab server — so the list has to come from the server, which puts this in
+ * `Custom CAVE`'s position rather than `Custom neuPrint`'s: the control is empty on **every**
+ * reload until a listing lands, and an empty select is invariant 2's usual silent failure.
+ *
+ * A fresh source per case, because `peekDatasets` starts its listing once per instance and
+ * remembers — so a shared one would make "not listed yet" pass or fail by test order.
+ */
+describe('Custom CATMAID', () => {
+  const PROJECTS = [
+    { id: 1, title: 'Adult Brain', comment: null },
+    { id: 7, title: 'L1 larva', comment: null },
+  ]
+
+  beforeEach(() => {
+    vi.stubGlobal('fetch', (url: string) =>
+      Promise.resolve(
+        String(url).includes('/projects/')
+          ? new Response(JSON.stringify(PROJECTS), { status: 200 })
+          : new Response('{"detail":"not stubbed"}', { status: 404 }),
+      ),
+    )
+    registerSource(new CatmaidSource(DEFAULT_CATMAID_SERVER, 'catmaid', 'CATMAID'))
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  /** The `project` param's options, resolved against the live registry. */
+  function projectOptions(params: ParamValues = {}): EnumOption[] {
+    const param = (requireNodeDef('dataset.catmaid').params ?? []).find(
+      (p) => p.id === 'project',
+    )
+    if (!param || param.kind !== 'enum') throw new Error('no project enum')
+    return typeof param.options === 'function'
+      ? param.options(ctxFor('dataset.catmaid', params))
+      : param.options
+  }
+
+  it('says the list has not arrived rather than offering an empty select', () => {
+    // "Not yet" is not "not here" — the peek has only just started the listing.
+    expect(projectOptions().map((o) => o.label)).toEqual(['Projects not listed yet'])
+  })
+
+  it('keeps a stored project as an option while the list is unknown, and claims nothing', () => {
+    // The list is per-instance, so it is absent on every reload; a pinned project blanking for a
+    // second reads as having been forgotten. Offered *plainly* — labelling it "(not listed)"
+    // here would be the looking-versus-not-here conflation, about a project that is listed.
+    const options = projectOptions({ project: '7' })
+    expect(options.map((o) => o.value)).toEqual(['', '7'])
+    expect(options.map((o) => o.label)).toEqual(['Projects not listed yet', '7'])
+  })
+
+  it('marks a stored project the server does not offer, once it has answered', async () => {
+    await requireSource('catmaid').listDatasets()
+    const options = projectOptions({ project: '4' })
+    expect(options.map((o) => o.value)).toEqual(['', '1', '7', '4'])
+    expect(options.at(-1)?.label).toBe('4 (not listed)')
+  })
+
+  it('names each project once the server answers, since a bare id identifies nothing', async () => {
+    await requireSource('catmaid').listDatasets()
+    const options = projectOptions()
+    expect(options.map((o) => o.value)).toEqual(['', '1', '7'])
+    expect(options.map((o) => o.label)).toEqual([
+      'Pick a project',
+      'Adult Brain (1)',
+      'L1 larva (7)',
+    ])
+  })
+
+  it('publishes the source for the server it names, not the default one', () => {
+    // The whole reason a source is registered per instance: two CATMAIDs share no project ids,
+    // no annotation graph and no volume list, so reading them as one is a wrong answer.
+    const type = requireNodeDef('dataset.catmaid').inferOutputs?.(
+      ctxFor('dataset.catmaid', { server: 'lab.example.org', project: '1' }),
+    )?.['dataset']
+    expect(datasetRef(type)).toEqual({
+      sourceId: 'catmaid:https://lab.example.org',
+      datasetId: '1',
+    })
+  })
+
+  it('asks for a project rather than resolving one, since there is no newest', () => {
+    const def = requireNodeDef('dataset.catmaid')
+    expect((def.validate?.(ctxFor('dataset.catmaid')) ?? []).join(' ')).toContain(
+      'Pick a project',
+    )
+  })
+
+  it('says nothing about a stored project until the list arrives, then names what is offered', async () => {
+    const def = requireNodeDef('dataset.catmaid')
+    // Unknown is not empty: otherwise every card warns for the first second of every load.
+    expect(def.validate?.(ctxFor('dataset.catmaid', { project: '4' }))).toEqual([])
+    await requireSource('catmaid').listDatasets()
+    const issues = def.validate?.(ctxFor('dataset.catmaid', { project: '4' })) ?? []
+    expect(issues.join(' ')).toContain('No project "4"')
+    expect(issues.join(' ')).toContain('1 (Adult Brain)')
+    expect(def.validate?.(ctxFor('dataset.catmaid', { project: '7' }))).toEqual([])
+  })
+
+  it('runs to a dataset carrying the project title', async () => {
+    const scheduler = new Scheduler({ resolveSource: (id) => requireSource(id) })
+    let g = emptyGraph('custom-catmaid')
+    g = addNode(g, node('dataset.catmaid', { project: '7' }))
+    await scheduler.run(g, { mode: 'full' })
+
+    const value = scheduler.output('ds', 'dataset')
+    if (!isDatasetValue(value)) throw new Error(scheduler.info('ds').error ?? 'no dataset')
+    expect(value.datasetId).toBe('7')
+    expect(value.label).toBe('L1 larva')
   })
 })

@@ -527,11 +527,12 @@ carrying data (network links, and their arrowheads) takes `muted` instead: 4.9:1
 | `nodes/query/idsFromLabel.test.ts`       | exact vs regex, the anchoring, the union reaching one query, and empty meaning empty                                             |
 | `ui/nodes/idsFromLabelBody.test.tsx`     | the card: every non-advanced param rendered, and the unmatched line naming the labels                                            |
 | `nodes/lib/datasetFamilies.test.ts`      | version ordering, latest-vs-pinned resolution, and the deployment/base-URL mapping                                               |
-| `nodes/dataset/dataset.test.ts`          | per-dataset nodes infer what they evaluate, the custom node's lazy source, that the superseded node still runs, and the drift advisory following the annotation chain in both directions |
+| `nodes/dataset/dataset.test.ts`          | per-dataset nodes infer what they evaluate, the custom node's lazy source, that the superseded node still runs, the drift advisory following the annotation chain in both directions, and CATMAID's project dropdown: not-listed-yet apart from lists-none, a stored value kept, and a source per instance |
 | `ui/nodes/datasetBody.test.tsx`          | preview above fields, the version dropdown, the resolved id, and no expand button                                                |
 | `data/mock/morphology.test.ts`           | tree validity, determinism, tube meshes, synapse placement                                                                       |
 | `store/inference.test.ts`                | inference against a source that has not learned its listing yet, and the re-infer signal                                         |
 | `ui/panels/startPage.test.tsx`           | start page: both rails, a tile per card, the replace-confirm, close-vs-dismiss, and both ways back                               |
+| `ui/panels/panels.test.tsx`              | (also) the New menu: an escape hatch under every backend's heading, and the three volumes held back without being unregistered   |
 | `nodes/lib/profileStats.test.ts`         | the profile roll-ups: distinct partners, nested-ROI filtering, the last-parenthesis side rule, NT column matching                |
 | `nodes/lib/networkOps.test.ts`           | filter order, ranking after the weight cut, and the recomputed degree roll-ups                                                   |
 | `nodes/output/profile.test.ts`           | that Profile is a tap, and that paging is free while pinning is not                                                              |
@@ -1978,6 +1979,8 @@ reader needs and a fourth backend should be one entry rather than four edits.
 - **`Custom CAVE`** joins `Custom neuPrint`, and needs more than it: a datastack has no
   privileged table, so the node names its neuron table and registers a spec through
   `registerDatastackSpec` — synchronously and with no network, `neuPrintSourceFor`'s rule.
+  (`Custom CATMAID` completes the set; the three are listed in `CUSTOM_DATASET_NODES` — see
+  *One escape hatch per backend* under **Dataset nodes**.)
 
   **Its Materialization is a dropdown fed by a per-datastack peek**, not by the listing. That is
   forced rather than chosen: `listDatasets` lists only datastacks with a spec in the *static*
@@ -5827,6 +5830,56 @@ private `options()`. A call site that forgets the base URL does not fail; it qui
 _default_ deployment and returns plausible data from the wrong server. `neuPrintSourceFor()`
 registers one instance per deployment, lazily, from `inferOutputs` — synchronous and network-free,
 which is what makes that safe.
+
+### One escape hatch per backend, and where somebody starts
+
+**`Custom neuPrint`, `Custom CAVE` and `Custom CATMAID` are one kind of thing**, and
+`CUSTOM_DATASET_NODES` in `datasetFamilies.ts` is the list of them. They are deliberately *not*
+families — a family is a dataset Coda ships an entry for, and the whole point of these is the one
+it does not — but three surfaces have to treat them alike: the New menu offers one under each
+backend's heading, the canvas tints their cards through `backendForNodeType`, and a share
+advisory names the credential a recipient will need. Each of those was a hand-written `if` per
+backend before, and **CATMAID's was missing from all three**, which is what a missing menu item
+looks like: a menu.
+
+Nothing in that table is presentation. The label and the blurb come off the `NodeDefinition`,
+which is where they already are and the only place they can stay in step with the card.
+
+**`Custom CATMAID`'s Project is a dropdown rather than a text field**, which is the one place it
+departs from its neuPrint twin, and the reason is what an id *is* on each backend. A neuPrint
+dataset id is a name somebody reads off a paper (`hemibrain:v1.2.1`); a CATMAID project id is a
+bare integer whose meaning is positional — `1` is FAFB on VFB and something else on a lab server —
+so asking for one typed is asking somebody to go and read it out of the CATMAID web UI first.
+`/projects/` is a plain GET a browser can make anonymously, so the list is simply available. It is
+`Custom CAVE`'s Materialization dropdown arrived at from the same constraint, and it carries the
+same two rules: **a stored value is kept as an option while the list is unknown** (per-instance,
+so absent on *every* reload) — offered *plainly* there and only labelled `(not listed)` once the
+server has actually answered without it, which is the looking-versus-not-here distinction
+`uploadBody` records — and **the three empty states are said apart**: not listed yet, a server
+that lists none, and nothing picked. There is deliberately no "Latest": a project has no
+ordering, so empty means *unchosen* and `validate` says so rather than resolving one.
+
+Its Annotations socket and edge-set params are read off `BACKENDS.catmaid` rather than written
+out, so this node and the family node cannot part company about what a CATMAID dataset offers.
+Both are absent today. `catmaidServerLabel` is its own two lines rather than `serverLabel`, which
+is neuPrint's and normalises anything it cannot parse — an empty field included — to
+`neuprint.janelia.org`: naming the wrong server in a message about a server is worse than naming
+none.
+
+**+3.08 kB raw / +1.02 kB gzipped on the main chunk**, measured against a build of `HEAD` in a
+clean worktree.
+
+**`DatasetFamily.starter` decides where somebody *begins*, and nothing else.** Absent means yes;
+`starter: false` on Optic Lobe, FIB-19 and Mushroom Body keeps them out of the New menu and off
+the start page's dataset rail. The node is registered either way, `Add ▸ Dataset` lists all of
+them, and a saved graph holding one opens unchanged — this is not a judgement on the dataset but
+on how long the first decision should be. One flag read by both surfaces rather than a filter in
+each, because they build the *same* graph through `buildStarter`; a family offered in one and not
+the other is a split that ends up depending on which file was edited last.
+
+Both tests **name the three** rather than asserting `starter !== false`, which would be the menu
+checked against the expression it is built from — an assertion that passes whatever the table
+says.
 
 **`hidden: true` keeps a superseded type loading without offering it.** Registration is what
 makes a saved file load (an unregistered type renders as "Unknown node" and drops its params);

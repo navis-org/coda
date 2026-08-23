@@ -7,8 +7,12 @@
  * version — stays a dropdown, defaulting to the newest one the server reports.
  *
  * Every node here is built by the same factory from the table in `datasetFamilies.ts`, so a new
- * dataset is a table entry rather than a file. `Custom neuPrint` is the escape hatch for a
- * deployment or dataset the table does not know.
+ * dataset is a table entry rather than a file. Beside them sits one **escape hatch per backend**
+ * — `Custom neuPrint`, `Custom CAVE`, `Custom CATMAID` — for a server or dataset the table does
+ * not know, listed in `CUSTOM_DATASET_NODES`. Each asks a different number of questions, and the
+ * difference is the backend rather than an inconsistency: neuPrint needs a deployment and a
+ * dataset id, CATMAID a server and a project chosen from what that server lists, and CAVE a
+ * datastack plus which of its tables mean neurons, because nothing in a datastack says.
  */
 
 import type { CompanionSpec } from '../../core/companion'
@@ -34,6 +38,8 @@ import {
   versionsFor,
 } from '../lib/datasetFamilies'
 import { DATASTACK_SPECS, datasetIdFor, registerDatastackSpec } from '../../data/cave/spec'
+import { DEFAULT_CATMAID_SERVER } from '../../data/catmaid/credentials'
+import { catmaidSourceFor, normaliseCatmaidServer } from '../../data/catmaid/registry'
 import { materializationsFor, peekMaterializations } from '../../data/cave/datastack'
 import {
   ANNOTATIONS_INPUT,
@@ -598,3 +604,175 @@ export const customNeuPrintNode = registerNode({
     return { dataset: value }
   },
 })
+
+/**
+ * `Custom CATMAID` — any CATMAID instance, any project.
+ *
+ * The third escape hatch, and the one that is *most* of the backend rather than an edge case.
+ * neuPrint has a canonical deployment and CAVE a global service that lists datastacks; CATMAID
+ * is **software**, so there is no canonical anything — every instance is somebody's server, and
+ * the one family Coda ships an entry for (VFB's public FAFB) is one deployment out of however
+ * many labs are running it. A named node for each is not a table anybody could keep.
+ *
+ * Two questions, in the order they have to be asked. The **server** decides which instance, and
+ * `catmaidSourceFor` registers one source per instance — that separation is what keeps two
+ * servers' project ids, annotation graphs and volume lists from being read as one, since none of
+ * those mean anything across instances. The **project** is then a number from *that* server.
+ *
+ * **The project is a dropdown rather than a text field**, which is the one place this departs
+ * from `Custom neuPrint`'s shape. A neuPrint dataset id is a name somebody can read off a paper
+ * (`hemibrain:v1.2.1`); a CATMAID project id is a bare integer whose only meaning is positional
+ * — `1` is FAFB here and something else on a lab server — so asking somebody to type one is
+ * asking them to go and read it out of the CATMAID web UI first. `/projects/` is a plain GET
+ * that a browser can make anonymously against a public instance, so the list is available
+ * without a token and the node can simply offer it. It is `Custom CAVE`'s Materialization
+ * dropdown, arrived at from the same constraint.
+ *
+ * **No Annotations socket and no edge-set params**, matching the family nodes exactly — read off
+ * `BACKENDS.catmaid` rather than written out, so the flag and the two node shapes cannot part
+ * company. CATMAID carries its labels as annotations *on* the neuron, so there is nothing for an
+ * external table to replace; the edge set is a product judgement stated on the flag.
+ */
+export const customCatmaidNode = registerNode({
+  type: 'dataset.catmaid',
+  label: 'Custom CATMAID',
+  category: 'dataset',
+  description: 'Any CATMAID instance and project, named by hand.',
+  guide:
+    'The escape hatch for a CATMAID server Coda ships no node for — a lab instance, or a second ' +
+    'project on one it does know. Type the server URL and pick a project from the list the ' +
+    'server answers with; project ids are per-instance, so the list is the only way to know ' +
+    'which number is which volume. Reading a public instance needs no credential, but a server ' +
+    'behind a login or basic auth wants a row under Connections ▸ CATMAID before the list ' +
+    'appears — credentials there are per host, since two instances are two unrelated accounts.',
+  companion: DESCRIPTION_COMPANION,
+  cost: 'cheap',
+  outputs: [{ id: 'dataset', label: 'Dataset', type: T.dataset() }],
+  // Read off the backend table rather than hardcoded, so this node and the family nodes cannot
+  // disagree about what a CATMAID dataset offers. Both are false today.
+  ...(BACKENDS.catmaid?.acceptsAnnotations ? { inputs: [ANNOTATIONS_INPUT] } : {}),
+  params: [
+    {
+      id: 'server',
+      kind: 'string',
+      label: 'Server',
+      placeholder: DEFAULT_CATMAID_SERVER,
+      help: 'CATMAID instance URL. Credentials for it, if it needs any, live under Connections ▸ CATMAID and are matched by host.',
+      default: DEFAULT_CATMAID_SERVER,
+    },
+    {
+      id: 'project',
+      kind: 'enum',
+      label: 'Project',
+      help: 'Which project on this server. Ids are per-instance, so the list comes from the server rather than from a name you could type.',
+      default: '',
+      /*
+       * Three states, said apart, because a dropdown that is empty for two different reasons is a
+       * control nobody can act on:
+       *
+       *  - **not listed yet** — the peek starts the listing and answers `undefined` until it
+       *    lands (or fails). The stored value is kept as an option throughout, which the family
+       *    nodes never need: their listing is one call every dataset node in the graph shares,
+       *    where this one is per-instance and so absent on *every* reload. Without it a pinned
+       *    project blanks for a second and reads as having been forgotten.
+       *  - **listed and empty** — the server answered and has nothing to offer. That is a fact
+       *    about the instance and is worth saying outright.
+       *  - **listed** — one option each, `title (id)`, since a bare number identifies nothing.
+       *
+       * There is deliberately no "Latest". A project is a choice with no ordering to it, so an
+       * empty value means *unchosen* rather than *newest*, and `validate` says so.
+       */
+      options: (ctx) => {
+        const chosen = String(ctx.params.project ?? '').trim()
+        // Two labels for one kept value, and the difference is the whole of the rule above:
+        // while the list is unknown the id is offered *plainly*, because "not listed" is a claim
+        // nobody is in a position to make yet.
+        const waiting = chosen ? [{ value: chosen, label: chosen }] : []
+        const unlisted = chosen ? [{ value: chosen, label: `${chosen} (not listed)` }] : []
+        const projects = catmaidSourceFor(String(ctx.params.server ?? '')).peekDatasets()
+        if (!projects) {
+          return [{ value: '', label: 'Projects not listed yet' }, ...waiting]
+        }
+        if (projects.length === 0) {
+          return [{ value: '', label: 'This server lists no projects' }, ...unlisted]
+        }
+        return [
+          { value: '', label: 'Pick a project' },
+          ...projects.map((project) => ({
+            value: project.id,
+            label: `${project.label} (${project.id})`,
+          })),
+          // A stored project this server does not list is kept rather than silently dropped, so
+          // the select still shows what the graph says. `validate` reports it.
+          ...(projects.some((project) => project.id === chosen) ? [] : unlisted),
+        ]
+      },
+    },
+    REFRESH_PARAM,
+    // See `DatasetBackend.edgeSets`. Empty for CATMAID today; derived so one character reverses it.
+    ...(BACKENDS.catmaid?.edgeSets === false ? [] : EDGE_SET_PARAMS),
+  ],
+
+  inferOutputs: (ctx) => {
+    // Registers the source for this instance if this is the first sight of it. Synchronous and
+    // network-free, which is what makes it safe from inference — `neuPrintSourceFor`'s rule.
+    const source = catmaidSourceFor(String(ctx.params.server ?? ''))
+    const project = String(ctx.params.project ?? '').trim()
+    return { dataset: T.dataset(source.id, project || undefined) }
+  },
+
+  validate: (ctx) => {
+    const source = catmaidSourceFor(String(ctx.params.server ?? ''))
+    const project = String(ctx.params.project ?? '').trim()
+    if (!project) return ['Pick a project — the list fills in once the server answers']
+    const projects = source.peekDatasets()
+    // Undefined means the listing has not arrived, which is not a problem to report: the same
+    // silence `versionsFor` keeps, and without it every card warns for the first second of a load.
+    if (projects && !projects.some((entry) => entry.id === project)) {
+      return [
+        projects.length
+          ? `No project "${project}" on ${catmaidServerLabel(ctx.params.server)} — it offers ${projects
+              .map((entry) => `${entry.id} (${entry.label})`)
+              .join(', ')}`
+          : `${catmaidServerLabel(ctx.params.server)} lists no projects`,
+      ]
+    }
+    return []
+  },
+
+  evaluate: async (ctx) => {
+    const registered = catmaidSourceFor(String(ctx.params.server ?? ''))
+    const source = ctx.resolveSource(registered.id)
+    const project = String(ctx.params.project ?? '').trim()
+    if (!project) throw new Error('No project chosen')
+
+    const projects = await source.listDatasets(ctx.signal)
+    const info = projects.find((entry) => entry.id === project)
+    if (!info) {
+      throw new Error(
+        `No project "${project}" on ${catmaidServerLabel(ctx.params.server)}. Available: ${projects
+          .map((entry) => `${entry.id} (${entry.label})`)
+          .join(', ')}`,
+      )
+    }
+    return {
+      dataset: {
+        kind: 'dataset',
+        sourceId: registered.id,
+        datasetId: info.id,
+        label: info.label,
+      } satisfies DatasetValue,
+    }
+  },
+})
+
+/**
+ * The instance's host, for a message about it.
+ *
+ * Not `serverLabel`, which is neuPrint's and normalises anything it cannot parse — an empty
+ * field included — to `neuprint.janelia.org`. Naming the wrong server in a message about a
+ * server is worse than naming none.
+ */
+function catmaidServerLabel(raw: unknown): string {
+  return normaliseCatmaidServer(String(raw ?? '')).replace(/^https?:\/\//, '')
+}

@@ -8,8 +8,9 @@ import { peekExportWarnings, requestExportWarnings, useExportWarnings } from '..
 import { AssistantIcon, InspectorIcon, ShareIcon } from '../Icons'
 import { getSource } from '../../data/source'
 import { EXAMPLES } from '../../examples'
-import type { DatasetFamily } from '../../nodes/lib/datasetFamilies'
-import { DATASET_FAMILIES } from '../../nodes/lib/datasetFamilies'
+import type { CustomDatasetNode, DatasetFamily } from '../../nodes/lib/datasetFamilies'
+import { CUSTOM_DATASET_NODES, starterFamilies } from '../../nodes/lib/datasetFamilies'
+import { getNodeDef } from '../../core/registry'
 import type { StarterSpec } from '../../examples/starters'
 import type { WorkflowSummary } from '../../store/library'
 import { findByName } from '../../store/library'
@@ -421,15 +422,32 @@ function NewMenu({
 }) {
   const groups = useMemo(() => {
     const bySource = new Map<string, DatasetFamily[]>()
-    for (const family of DATASET_FAMILIES) {
+    // Only the families offered as a starting point — see `DatasetFamily.starter`. Every dataset
+    // node stays in `Add ▸ Dataset`; what this list decides is where somebody *begins*.
+    for (const family of starterFamilies()) {
       const held = bySource.get(family.sourceId)
       if (held) held.push(family)
       else bySource.set(family.sourceId, [family])
+    }
+    /*
+     * A backend's escape hatch goes under that backend's own heading rather than into a trailing
+     * "Other", which is what it used to be when there was one of them. Three collected under a
+     * heading of their own would sort every custom node away from the datasets it is a custom
+     * version *of*, and would leave a reader to work out which of the three matches the group
+     * they were just looking at.
+     *
+     * The second loop is what gives a backend with *no* starter family a heading of its own —
+     * the state any backend is in before its family table has an entry, and the state a backend
+     * lands in if every one of its families is later marked `starter: false`.
+     */
+    for (const custom of CUSTOM_DATASET_NODES) {
+      if (!bySource.has(custom.sourceId)) bySource.set(custom.sourceId, [])
     }
     return [...bySource.entries()].map(([sourceId, families]) => ({
       sourceId,
       label: getSource(sourceId)?.label ?? sourceId,
       families,
+      custom: CUSTOM_DATASET_NODES.filter((entry) => entry.sourceId === sourceId),
     }))
   }, [])
 
@@ -461,27 +479,44 @@ function NewMenu({
               <span>{family.description}</span>
             </button>
           ))}
+          {group.custom.map((custom) => (
+            <CustomDatasetItem key={custom.type} custom={custom} onDataset={onDataset} />
+          ))}
         </div>
       ))}
-
-      <div className="dropdown__group">
-        <div className="dropdown__heading">Other</div>
-        <button
-          type="button"
-          className="dropdown__item"
-          onClick={() =>
-            onDataset({
-              nodeType: 'dataset.neuprint',
-              label: 'Custom neuPrint',
-              sourceId: 'neuprint',
-            })
-          }
-        >
-          <strong>Custom neuPrint</strong>
-          <span>Name a server and dataset by hand</span>
-        </button>
-      </div>
     </>
+  )
+}
+
+/**
+ * One escape hatch, named by its own node definition.
+ *
+ * The label and the blurb are read off the registry rather than restated here, which is the
+ * whole reason `CUSTOM_DATASET_NODES` carries no presentation: a menu entry saying something the
+ * card does not is the drift this codebase keeps writing up, and it is invisible — both strings
+ * look perfectly reasonable on their own.
+ */
+function CustomDatasetItem({
+  custom,
+  onDataset,
+}: {
+  custom: CustomDatasetNode
+  onDataset: (spec: StarterSpec) => void
+}) {
+  const def = getNodeDef(custom.type)
+  if (!def) return null
+  return (
+    <button
+      type="button"
+      className="dropdown__item"
+      title={def.description}
+      onClick={() =>
+        onDataset({ nodeType: custom.type, label: def.label, sourceId: custom.sourceId })
+      }
+    >
+      <strong>{def.label}</strong>
+      <span>{def.description}</span>
+    </button>
   )
 }
 

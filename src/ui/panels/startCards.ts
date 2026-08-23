@@ -20,7 +20,7 @@ import { getNodeDef } from '../../core/registry'
 import { EXAMPLES } from '../../examples'
 import type { StarterSpec } from '../../examples/starters'
 import type { DatasetGlyph } from '../../nodes/lib/datasetFamilies'
-import { DATASET_FAMILIES } from '../../nodes/lib/datasetFamilies'
+import { starterFamilies } from '../../nodes/lib/datasetFamilies'
 import type { WorkflowSummary } from '../../store/library'
 import { formatAgo, plural } from '../format'
 
@@ -81,26 +81,33 @@ export function exampleCards(): ExampleCard[] {
 }
 
 /**
- * One card per live dataset family.
+ * One card per live dataset family worth starting from.
  *
  * The mock families are excluded because the rail says these are live datasets that want a
  * token — putting the synthetic ones under that caption would be a lie, and they are already
  * what every example on the other rail runs on. Filtering on "not the mock" rather than on
  * "is neuPrint" means a source added later shows up here on its own.
+ *
+ * `starterFamilies` is the other filter, and it is shared with the toolbar's New menu rather
+ * than repeated: both rails build the *same* graph through `buildStarter`, so a family offered
+ * in one and not the other is a split that would end up depending on which file was edited last.
+ * See `DatasetFamily.starter` — the nodes it holds back are still in `Add ▸ Dataset`.
  */
 export function datasetCards(): DatasetCard[] {
-  return DATASET_FAMILIES.filter((family) => family.sourceId !== 'mock').map((family) => ({
-    kind: 'dataset',
-    id: family.key,
-    title: family.label,
-    blurb: family.description,
-    glyph: family.glyph,
-    starter: {
-      nodeType: `dataset.${family.key}`,
-      label: family.label,
-      sourceId: family.sourceId,
-    },
-  }))
+  return starterFamilies()
+    .filter((family) => family.sourceId !== 'mock')
+    .map((family) => ({
+      kind: 'dataset',
+      id: family.key,
+      title: family.label,
+      blurb: family.description,
+      glyph: family.glyph,
+      starter: {
+        nodeType: `dataset.${family.key}`,
+        label: family.label,
+        sourceId: family.sourceId,
+      },
+    }))
 }
 
 /**

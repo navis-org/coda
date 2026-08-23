@@ -18,6 +18,9 @@ const NO_EMITTER: Record<string, string> = {
     'A CATMAID project rather than a neuPrint dataset. The natverse has `catmaid` (rcatmaid), ' +
     'which is the R counterpart of pymaid and would map as cleanly, but no emitter has been ' +
     'written for either language \u2014 see the Python note.',
+  'dataset.catmaid':
+    'A CATMAID instance named by hand \u2014 see `dataset.catmaid.fafb`. Naming the server ' +
+    'changes nothing about the translation: there is no emitter in either language.',
   'dataset.cave':
     'A CAVE datastack named by hand, so it has the same reason as `dataset.flywire`: this ' +
     'document is built on neuprintr and there is no fafbseg/CAVE emitter yet.',
