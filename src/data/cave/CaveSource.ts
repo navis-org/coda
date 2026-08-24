@@ -29,6 +29,7 @@ import type {
   DatasetAnnotations,
   CellValue,
   ColumnData,
+  GeometryUnits,
   MatrixValue,
   MeshGeometry,
   MeshesValue,
@@ -37,6 +38,7 @@ import type {
   TableValue,
 } from '../../core/values'
 import { boundsOf, getRow, makeTable, selectRows, tableFromRows } from '../../core/values'
+import { geometryFrame } from '../transforms/spaces'
 import type {
   AdjacencyRequest,
   ConnectivityRequest,
@@ -307,6 +309,14 @@ export class CaveSource implements DataSource {
   // -------------------------------------------------------------------------
   // Schemas
   // -------------------------------------------------------------------------
+
+  /**
+   * Units and template space together. Always nanometres here; see `geometryFrame` for why the
+   * two travel as one and when the space half is withheld.
+   */
+  private frame(datasetId: string): { units: GeometryUnits; space?: string } {
+    return geometryFrame(this.id, datasetId, 'nm')
+  }
 
   schemasFor(datasetId: string): SourceSchemas {
     const parsed = splitDatasetId(datasetId)
@@ -902,7 +912,7 @@ export class CaveSource implements DataSource {
        */
       detail: { lod: 0, levels: 1, triangles, decimated: true },
       // Nanometres, and not by conversion: a graphene fragment decodes to world coordinates.
-      units: 'nm',
+      ...this.frame(req.datasetId),
     }
   }
 
@@ -958,7 +968,7 @@ export class CaveSource implements DataSource {
       attributes: await this.morphologyAttributes(req, items),
       bounds: boundsOf(items.map((i) => i.positions)),
       // The cache publishes `rep_coord_nm`, so no conversion happens anywhere.
-      units: 'nm',
+      ...this.frame(req.datasetId),
     }
   }
 
@@ -1028,7 +1038,12 @@ export class CaveSource implements DataSource {
 
     const total = perSide.reduce((sum, [, rows]) => sum + rows.length, 0)
     req.onProgress?.(0.7, `${total} synapses`)
-    return synapsePoints(perSide, synapses, this.schemasFor(req.datasetId).synapses)
+    return synapsePoints(
+      perSide,
+      synapses,
+      this.schemasFor(req.datasetId).synapses,
+      this.frame(req.datasetId),
+    )
   }
 
   /** Where a datastack's meshes live, asked for once. */
@@ -1308,6 +1323,8 @@ function synapsePoints(
   perSide: ReadonlyArray<readonly ['pre' | 'post', CaveRow[]]>,
   spec: SynapseTableSpec,
   schema: SourceSchemas['synapses'],
+  /** From `CaveSource.frame`, so the datastack-to-space rule stays in one place. */
+  frame: { units: GeometryUnits; space?: string },
 ): PointsValue {
   const total = perSide.reduce((sum, [, rows]) => sum + rows.length, 0)
   const positions = new Float32Array(total * 3)
@@ -1355,7 +1372,7 @@ function synapsePoints(
       weight: weights,
     }),
     bounds: boundsOf([positions]),
-    units: 'nm',
+    ...frame,
   }
 }
 

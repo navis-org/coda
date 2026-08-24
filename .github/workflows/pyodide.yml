@@ -1,4 +1,4 @@
-# The Python half of the NBLAST node, actually executed.
+# The Python half of Coda's numerical backend, actually executed.
 #
 # Split out from `deploy.yml` for exactly the reason `export.yml` is: this needs something the
 # rest of the suite does not have. vitest has no Pyodide and jsdom has no `Worker`, so nothing
@@ -19,12 +19,20 @@ on:
       - 'src/pyodide/**'
       - 'scripts/probe-nblast.mjs'
       - 'scripts/probe-linkage.mjs'
+      - 'scripts/probe-transform.mjs'
+      # The landmark files and their manifest: the transform probe reads the real ones, so a
+      # regenerated set is a change to what this job checks even when no Python moved.
+      - 'public/transforms/**'
+      - 'src/data/transforms/manifest.json'
       - '.github/workflows/pyodide.yml'
   pull_request:
     paths:
       - 'src/pyodide/**'
       - 'scripts/probe-nblast.mjs'
       - 'scripts/probe-linkage.mjs'
+      - 'scripts/probe-transform.mjs'
+      - 'public/transforms/**'
+      - 'src/data/transforms/manifest.json'
   workflow_dispatch:
 
 jobs:
@@ -57,5 +65,14 @@ jobs:
       # a probe checks is one function's contract. The second boot costs a few seconds against
       # a job that only runs when `src/pyodide/**` changes.
       - run: node scripts/probe-linkage.mjs
+        env:
+          PYODIDE_PATH: node_modules/pyodide
+
+      # The landmark transforms, against the **real** landmark files rather than a fixture —
+      # which is what lets one assertion cover the whole read path: a thin-plate spline
+      # reproduces its own landmarks exactly, so a column read in the wrong order or a unit
+      # conversion applied twice lands kilometres out rather than fractions of a nanometre.
+      # It also exercises `from_coefs`, which is the path every session after the first takes.
+      - run: node scripts/probe-transform.mjs
         env:
           PYODIDE_PATH: node_modules/pyodide

@@ -190,6 +190,28 @@ export interface NetworkValue {
  */
 export type GeometryUnits = 'nm' | 'voxels'
 
+/**
+ * Which template space coordinates are in — `FLYWIRE`, `JRCFIB2022M`, `MANC`.
+ *
+ * The fact `units` is not. Two neurons from different datasets can carry identical numbers and
+ * be nowhere near each other, so a comparison across spaces is meaningless however honest the
+ * units are — which is why NBLAST across datasets used to be recorded as unavailable rather
+ * than refused. Named by flybrains' template id rather than by the dataset, because a dataset
+ * is not a frame: `JRCFIB2018F` and `JRCFIB2018Fraw` are both "the hemibrain" and are a factor
+ * of eight apart.
+ *
+ * **Absent means unknown**, the third thing `units` also distinguishes. Every dataset with no
+ * registration anywhere says nothing here — the optic lobe, FIB-19, the mushroom body, the
+ * synthetic connectomes — and so does a Custom node pointing at a deployment this build has
+ * never heard of. Unknown is not a refusal; it is the ordinary state, and a consumer that
+ * cannot proceed says which space it needed.
+ *
+ * A plain string rather than a union of the ids `data/transforms/manifest.json` happens to
+ * carry today: the manifest is generated, this file is `src/core`, and a type that had to be
+ * regenerated alongside a data file would make adding a landmark set a code change.
+ */
+export type TemplateSpaceId = string
+
 /** One neuron's branching morphology, SWC-style, in parallel typed arrays. */
 export interface SkeletonGeometry {
   /**
@@ -221,6 +243,7 @@ export interface SkeletonsValue {
   readonly attributes: TableValue
   readonly bounds: Bounds3
   readonly units?: GeometryUnits
+  readonly space?: TemplateSpaceId
 }
 
 export interface MeshGeometry {
@@ -276,6 +299,7 @@ export interface MeshesValue {
   readonly bounds: Bounds3
   readonly detail?: MeshDetail
   readonly units?: GeometryUnits
+  readonly space?: TemplateSpaceId
 }
 
 /**
@@ -290,6 +314,7 @@ export interface PointsValue {
   readonly attributes: TableValue
   readonly bounds: Bounds3
   readonly units?: GeometryUnits
+  readonly space?: TemplateSpaceId
 }
 
 /**
@@ -351,6 +376,48 @@ export interface LinkageValue {
   readonly distanceLabel?: string
 }
 
+/**
+ * A landmark-based spatial transform, as a value on a wire.
+ *
+ * **Not a table of six columns**, on `LayoutValue`'s and `LinkageValue`'s exact argument: a
+ * transform is not data *about* anything, it is a mapping computed *for* one pair of spaces.
+ * As a table it would accept any six numeric columns, need six pickers wherever it was used,
+ * and be silently destroyed by a Sort upstream of whatever applied it — and the result of that
+ * would be neurons in plausible wrong places rather than an error.
+ *
+ * The pairs are held in **nanometres on both sides**, converted at whatever edge read them, so
+ * everything downstream of here works in one unit. That conversion is exact for a 3-D
+ * thin-plate spline, whose kernel is homogeneous of degree one — see `data/transforms`.
+ *
+ * `id` is **provenance, not content**: whatever produced the landmarks, hashed the way the
+ * scheduler hashes everything else (`DatasetAnnotations.key` is the same idea). It keys the
+ * fitted-coefficient cache, so it has to change exactly when the landmarks would and no more
+ * often — hashing three thousand float64s on every edit would be the alternative, and a
+ * provenance key is already lying around.
+ */
+export interface TransformValue {
+  readonly kind: 'transform'
+  /** Provenance of whatever produced the landmarks. Keys the fitted-spline cache. */
+  readonly id: string
+  /** `count * 3` float64, xyz interleaved, nanometres. */
+  readonly source: Float64Array
+  /** The partner of each source landmark, same layout, same units. */
+  readonly target: Float64Array
+  readonly count: number
+  /** What the card calls it. */
+  readonly label?: string
+  /**
+   * The template space the target side is in, where whoever built this said so.
+   *
+   * Stamped onto geometry that goes through it, which is what lets everything downstream keep
+   * checking — a second Transform, a Mirror looking for the right landmarks, NBLAST comparing
+   * two sets. **Absent means unknown rather than unchanged**, the rule `units` established:
+   * a custom transform whose author did not say lands geometry in a space nobody can name, and
+   * saying so is better than claiming it stayed where it was.
+   */
+  readonly targetSpace?: string
+}
+
 export type Value =
   | TableValue
   | MatrixValue
@@ -362,6 +429,7 @@ export type Value =
   | PointsValue
   | LayoutValue
   | LinkageValue
+  | TransformValue
 
 // ---------------------------------------------------------------------------
 // Constructors
@@ -569,6 +637,10 @@ export function isMatrixValue(v: Value | undefined): v is MatrixValue {
   return !!v && v.kind === 'matrix'
 }
 
+export function isTransformValue(v: Value | undefined): v is TransformValue {
+  return !!v && v.kind === 'transform'
+}
+
 export function isDatasetValue(v: Value | undefined): v is DatasetValue {
   return !!v && v.kind === 'dataset'
 }
@@ -653,6 +725,19 @@ export function unitsLabel(units: GeometryUnits | undefined): string {
   return units ?? 'units unknown'
 }
 
+/**
+ * How a geometry value's template space reads in a footer.
+ *
+ * Printed always, on `unitsLabel`'s rule and for `unitsLabel`'s reason. The **id**, not a
+ * friendly name: the id is what has to match for two sets to be comparable, it is what navis
+ * and flybrains call the same frame, and a footer reading "Hemibrain" could not tell
+ * `JRCFIB2018F` from `JRCFIB2018Fraw`. The prose label lives on the space's manifest entry,
+ * for dropdowns and messages, which are the surfaces with room for it.
+ */
+export function spaceLabel(space: TemplateSpaceId | undefined): string {
+  return space ?? 'space unknown'
+}
+
 /** Row count summary used in node footers: "1,234 rows". */
 export function describeValue(v: Value | undefined): string {
   if (!v) return '—'
@@ -669,19 +754,26 @@ export function describeValue(v: Value | undefined): string {
     case 'skeletons':
       return (
         `${v.items.length} skeleton${v.items.length === 1 ? '' : 's'} · ` +
-        `${skeletonPointCount(v).toLocaleString()} pts · ${unitsLabel(v.units)}`
+        `${skeletonPointCount(v).toLocaleString()} pts · ` +
+        `${spaceLabel(v.space)} · ${unitsLabel(v.units)}`
       )
     case 'meshes':
       return (
         `${v.items.length} mesh${v.items.length === 1 ? '' : 'es'} · ` +
-        `${meshTriangleCount(v).toLocaleString()} tris · ${unitsLabel(v.units)}`
+        `${meshTriangleCount(v).toLocaleString()} tris · ` +
+        `${spaceLabel(v.space)} · ${unitsLabel(v.units)}`
       )
     case 'points':
-      return `${v.attributes.length.toLocaleString()} points · ${unitsLabel(v.units)}`
+      return (
+        `${v.attributes.length.toLocaleString()} points · ` +
+        `${spaceLabel(v.space)} · ${unitsLabel(v.units)}`
+      )
     case 'layout': {
       const count = Object.keys(v.positions).length
       return `${count.toLocaleString()} placed${v.algorithm ? ` · ${v.algorithm}` : ''}`
     }
+    case 'transform':
+      return `${v.count.toLocaleString()} landmarks${v.targetSpace ? ` → ${v.targetSpace}` : ''}`
     case 'linkage': {
       const cut = v.clusters ? ` · ${new Set(v.clusters).size} clusters` : ''
       return `${v.labels.length} leaves${v.method ? ` · ${v.method}` : ''}${cut}`

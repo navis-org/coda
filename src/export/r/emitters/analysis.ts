@@ -4,6 +4,8 @@
 import { MAX_SERIES } from '../../../ui/colors'
 import { clusterColor } from '../../../ui/encoding'
 import { rCol as col, rStr, rVector } from '../r'
+import type { LANDMARK_SIDES } from '../../../nodes/transform/landmarkTransform'
+import { LANDMARK_AXES, landmarkParamId } from '../../../nodes/transform/landmarkTransform'
 import { registerEmitter, registerHelper } from '../registry'
 import type { EmitContext } from '../types'
 import { neuronIds, selectionIds } from './common'
@@ -726,3 +728,91 @@ function labelsToNeuronsEmitter(ctx: EmitContext): string[] {
 
 registerEmitter('cluster.selectedToNeurons', labelsToNeuronsEmitter)
 registerEmitter('cluster.clustersToNeurons', labelsToNeuronsEmitter)
+
+// ---------------------------------------------------------------------------
+// Landmark transforms
+// ---------------------------------------------------------------------------
+
+/**
+ * Landmark Transform, as `nat::tpsreg`.
+ *
+ * This one was nearly written off. nat's landmark surface *looks* like file I/O —
+ * `read.landmarks`, `write.landmarks`, `cmtklandmarks()` handing a pair to CMTK's own binaries
+ * — and the version installed on the machine this was checked against (1.8.25) has no spline
+ * fitter at all. It does now: `tpsreg()` moved into nat from `elmr` in **1.9.0**, and current
+ * nat is 1.11.0.
+ *
+ * So the natverse has a first-class equivalent after all, and a close one. `tpsreg(sample,
+ * reference)` builds the object, `xformpoints.tpsreg` lets `xform()` and everything built on it
+ * apply it, and `swap` runs it backwards. It even makes the same two decisions Coda's bridge
+ * did independently: the solve is cached for the session keyed by the landmarks, and the
+ * inverse is a re-fit rather than an inversion.
+ *
+ * **`sample` is the space you are coming from and `reference` the one you are going to**, which
+ * is nat's convention and the *opposite* of the `refmat`/`tarmat` names in the `Morpho::tps3d`
+ * underneath — nat's own documentation flags the clash. Getting it backwards produces a
+ * transform that runs and moves neurons the wrong way.
+ *
+ * `Morpho` is a **Suggests** rather than an Import, so it is not pulled in by installing nat and
+ * the note says so. That is the one thing a reader has to act on before this cell runs.
+ */
+registerEmitter('core.landmarkTransform', (ctx) => {
+  const table = ctx.wired('in')
+  const out = ctx.output('transform')
+
+  // Through the node's own id builder, so a renamed param breaks the build rather than
+  // quietly emitting the "unset columns" TODO.
+  const columns = (side: (typeof LANDMARK_SIDES)[number]) =>
+    LANDMARK_AXES.map((axis) => ctx.column(landmarkParamId(side, axis)) ?? '')
+
+  const from = columns('source')
+  const to = columns('target')
+  if ([...from, ...to].some((name) => !name)) {
+    return ctx.todo('Landmark Transform has unset coordinate columns — pick all six.')
+  }
+
+  ctx.library('nat')
+  const matrix = (names: string[], units: unknown) => {
+    const cols = `as.matrix(${table}[, c(${names.map(rStr).join(', ')})])`
+    return units === 'um' ? `${cols} * 1000` : cols
+  }
+
+  return [
+    ...ctx.note(
+      'nat::tpsreg() needs nat >= 1.9.0 and the Morpho package, which is a Suggests rather ' +
+        'than a hard dependency — install.packages("Morpho") if this fails. Coda fits the same ' +
+        'spline with navis-fastcore; the two agree to well under a nanometre.',
+    ),
+    `${out} <- nat::tpsreg(`,
+    `  ${matrix(from, ctx.params.sourceUnits)},`,
+    `  ${matrix(to, ctx.params.targetUnits)}`,
+    `)`,
+  ]
+})
+
+/**
+ * Transform Neurons, but only where a transform is wired.
+ *
+ * The registry branch is refused for the reason `neuron.mirror` is refused wholesale: it needs a
+ * templatebrain object per space, and the natverse spreads those across a package each with the
+ * hemibrain having none at all. A supplied `tpsreg` needs no template symbol whatsoever, so that
+ * branch translates exactly — `xform()` dispatches through `xformpoints.tpsreg` and works on a
+ * neuronlist as readily as on a matrix.
+ *
+ * Registered rather than left in `NO_EMITTER` because the two branches genuinely differ: one is
+ * a gap in what R can name, the other is a cell that runs.
+ */
+registerEmitter('neuron.xform', (ctx) => {
+  const supplied = ctx.input('transform')
+  if (!supplied) {
+    return ctx.todo(
+      'Transform Neurons uses the registrations Coda ships, which are keyed by template space ' +
+        'name. The natverse spreads its templatebrain objects across a package each — FAFB14 ' +
+        'in nat.flybrains, FlyWire in fafbseg, MANC in malevnc, MaleCNS in malecns — and the ' +
+        'hemibrain has none at all, so a faithful cell needs a space-to-package table nobody ' +
+        'has written. Wire a Landmark Transform instead and this emits. See neuron.mirror.',
+    )
+  }
+  ctx.library('nat')
+  return [`${ctx.output('out')} <- xform(${ctx.wired('in')}, reg = ${supplied})`]
+})

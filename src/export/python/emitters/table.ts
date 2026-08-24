@@ -27,6 +27,7 @@ import { decodeRenames } from '../../../nodes/lib/renames'
 import type { AggFn } from '../../../nodes/lib/tableOps'
 import { findColumn, isNumericDType } from '../../../core/types'
 import { pyList, pyStr, pyValue } from '../py'
+import { STACK_LABELS } from '../../../nodes/transform/stackNeurons'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
 
@@ -422,32 +423,46 @@ registerEmitter('core.join', (ctx) => {
 // Stack
 // ---------------------------------------------------------------------------
 
-registerEmitter('core.stack', (ctx) => {
-  const top = ctx.wired('top')
-  const bottom = ctx.wired('bottom')
-
+/**
+ * Two data frames end to end: `core.stack`'s whole body, and the branch of `neuron.stack` that
+ * handles points.
+ *
+ * Shared rather than copied, because the copy had already lost a line — the points branch
+ * returned its `pd.concat` *before* reaching `ctx.require('pandas')`, so an unlabelled stack
+ * emitted a pandas call into a notebook that never imported pandas. One `require` at the top,
+ * ahead of every return, is what makes that unrepresentable.
+ */
+function stackFrames(
+  ctx: EmitContext,
+  top: string,
+  bottom: string,
+  labels: { source: string; top: string; bottom: string },
+): string[] {
   ctx.require('pandas')
   const out = ctx.output('out')
-  const sourceColumn = String(ctx.params.sourceColumn ?? '')
-
-  if (!sourceColumn) {
+  if (!labels.source) {
     // `concat` unions the columns and fills the gaps with NaN, which is exactly what the
     // node does — a column only one side carries is not recorded for the other's rows.
     return [`${out} = pd.concat([${top}, ${bottom}], ignore_index=True)`]
   }
-
-  const topLabel = String(ctx.params.topLabel ?? 'Top')
-  const bottomLabel = String(ctx.params.bottomLabel ?? 'Bottom')
   return [
     `${out} = pd.concat(`,
     `    [`,
-    `        ${top}.assign(**{${pyStr(sourceColumn)}: ${pyStr(topLabel)}}),`,
-    `        ${bottom}.assign(**{${pyStr(sourceColumn)}: ${pyStr(bottomLabel)}}),`,
+    `        ${top}.assign(**{${pyStr(labels.source)}: ${pyStr(labels.top)}}),`,
+    `        ${bottom}.assign(**{${pyStr(labels.source)}: ${pyStr(labels.bottom)}}),`,
     `    ],`,
     `    ignore_index=True,`,
     `)`,
   ]
-})
+}
+
+registerEmitter('core.stack', (ctx) =>
+  stackFrames(ctx, ctx.wired('top'), ctx.wired('bottom'), {
+    source: String(ctx.params.sourceColumn ?? ''),
+    top: String(ctx.params.topLabel ?? 'Top'),
+    bottom: String(ctx.params.bottomLabel ?? 'Bottom'),
+  }),
+)
 
 // ---------------------------------------------------------------------------
 // Sample
@@ -578,4 +593,57 @@ registerEmitter('core.selectOne', (ctx) => {
 
   ctx.require('pandas')
   return [`${out} = ${src}.iloc[${empty ? '0:0' : `${from}:${from + 1}`}]`]
+})
+
+/**
+ * Stack Neurons, as a `navis.NeuronList`.
+ *
+ * The geometry twin of `core.stack` above, and the two differ in the *object* rather than the
+ * verb: a table stacks with `pd.concat`, a collection of neurons with `NeuronList`, which is
+ * what every downstream navis call takes. `[*a, *b]` rather than `a + b` — `NeuronList` does
+ * define addition, but a reader seeing `+` on two of them has to go and check whether it
+ * concatenates or does arithmetic on the neurons, and the answer differs by library.
+ *
+ * **The source column becomes a per-neuron attribute**, which is navis' equivalent of the same
+ * fact: neurons carry arbitrary attributes, `NeuronList` gathers them into `.summary()`, and
+ * `plot3d(..., color_by=)` reads one. So the co-visualisation gesture survives the translation.
+ * Assigned in a loop rather than a comprehension, because it is a side effect.
+ *
+ * **A point cloud takes the other branch entirely.** `neuron.synapses` is a DataFrame in this
+ * translation rather than a neuron object, so stacking it is `pd.concat` — the same code
+ * `core.stack` emits. Read off `inputType` rather than guessed, since the two produce
+ * completely different cells.
+ */
+registerEmitter('neuron.stack', (ctx) => {
+  const top = ctx.wired('top')
+  const bottom = ctx.wired('bottom')
+  const out = ctx.output('out')
+  const sourceColumn = String(ctx.params.sourceColumn ?? '').trim()
+  const topLabel = String(ctx.params.topLabel ?? STACK_LABELS.top)
+  const bottomLabel = String(ctx.params.bottomLabel ?? STACK_LABELS.bottom)
+
+  // Points are a frame on this side; skeletons and meshes are neuron objects. Unknown takes
+  // the neuron branch, which is what this node is overwhelmingly used for.
+  if (ctx.inputType('top')?.kind === 'points') {
+    return stackFrames(ctx, top, bottom, {
+      source: sourceColumn,
+      top: topLabel,
+      bottom: bottomLabel,
+    })
+  }
+
+  ctx.require('navis')
+  if (!sourceColumn) return [`${out} = navis.NeuronList([*${top}, *${bottom}])`]
+
+  return [
+    ...ctx.note(
+      'Coda adds the source as a column on the attribute table; navis carries it as an ' +
+        'attribute on each neuron, which is what plot3d(color_by=) and NeuronList.summary() read.',
+    ),
+    `for _n in ${top}:`,
+    `    _n.${sourceColumn} = ${pyStr(topLabel)}`,
+    `for _n in ${bottom}:`,
+    `    _n.${sourceColumn} = ${pyStr(bottomLabel)}`,
+    `${out} = navis.NeuronList([*${top}, *${bottom}])`,
+  ]
 })

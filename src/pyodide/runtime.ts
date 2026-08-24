@@ -31,6 +31,7 @@
 
 import LINKAGE_PY from './linkage.py?raw'
 import NBLAST_PY from './nblast.py?raw'
+import WARP_PY from './warp.py?raw'
 import sources from './sources.json'
 import type { PyArg, PyResult } from './types'
 
@@ -70,6 +71,13 @@ const MODULES: Record<string, PyModule> = {
   // first — a graph that clusters an Adjacency matrix never touches NBLAST at all.
   linkage: {
     source: LINKAGE_PY,
+    packages: ['numpy', sources.fastcoreWheel],
+    label: `numpy · navis-fastcore ${sources.fastcoreVersion}`,
+  },
+  // The third, and the same two packages again — `TpsTransform` is in the wheel Coda already
+  // pins, so a mirror on a runtime that has scored anything costs a `runPython` of one file.
+  warp: {
+    source: WARP_PY,
     packages: ['numpy', sources.fastcoreWheel],
     label: `numpy · navis-fastcore ${sources.fastcoreVersion}`,
   },

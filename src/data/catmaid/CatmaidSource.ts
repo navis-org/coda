@@ -22,6 +22,7 @@
 import { ID_COLUMN_NAME, numericIds } from '../../core/ids'
 import type {
   CellValue,
+  GeometryUnits,
   MatrixValue,
   MeshesValue,
   MeshGeometry,
@@ -38,6 +39,7 @@ import {
   selectRows,
   tableFromRows,
 } from '../../core/values'
+import { geometryFrame } from '../transforms/spaces'
 import { mapWithConcurrency } from '../concurrency'
 import { compileLabelMatch, compileRegex, refuseUnfilterable } from '../neuronFilter'
 import { loadCachedTable, neuronIndexKey } from '../neuronIndex'
@@ -258,6 +260,14 @@ export class CatmaidSource implements DataSource {
    * once something asks — a listing that fetched 80 volumes to name them would make opening the
    * dataset picker an expensive act.
    */
+  /**
+   * Units and template space together. Always nanometres here; see `geometryFrame` for why the
+   * two travel as one and when the space half is withheld.
+   */
+  private frame(datasetId: string): { units: GeometryUnits; space?: string } {
+    return geometryFrame(this.id, datasetId, 'nm')
+  }
+
   private describeProject(project: CatmaidProject): DatasetInfo {
     return {
       id: String(project.id),
@@ -641,7 +651,7 @@ export class CatmaidSource implements DataSource {
       bounds: boundsOf(items.map((item) => item.positions)),
       // Project coordinates are nanometres — see `POINTS_ARE_NM`. Declared rather than left
       // absent, because NBLAST refuses anything that is not `nm` and absent means unknown.
-      units: 'nm',
+      ...this.frame(req.datasetId),
     }
   }
 
@@ -706,7 +716,7 @@ export class CatmaidSource implements DataSource {
       positions,
       attributes: tableFromRows(this.schemas.synapses, rows),
       bounds: boundsOf([positions]),
-      units: 'nm',
+      ...this.frame(req.datasetId),
     }
   }
 
@@ -758,7 +768,7 @@ export class CatmaidSource implements DataSource {
       items,
       attributes: tableFromRows(ROI_MESH_SCHEMA, rows),
       bounds: boundsOf(items.map((item) => item.positions)),
-      units: 'nm',
+      ...this.frame(req.datasetId),
     }
   }
 

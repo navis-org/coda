@@ -41,9 +41,10 @@ contain `coda_dotprops`, and `main-*.js` should not match `jsdelivr` at all.
 fastcore embeds runs out at a 40 um distance bin and past it every cell is about -10 — so a set
 handed over in nm scores every pair as if no two neurons had ever been near each other,
 uniformly, with nothing anywhere to say why. `NM_PER_UM` in `nodes/lib/nblastOps.ts` is the
-whole of the fix and `nblast.test.ts` pins it. The related limit is that NBLAST **across**
-datasets means nothing without a template-space registration, which Coda has no route to yet;
-within one dataset it is exactly the usual analysis.
+whole of the fix and `nblast.test.ts` pins it. The related limit *was* that NBLAST **across**
+datasets means nothing without a template-space registration. There is a route now — geometry
+carries the template space it is in, beside its units, and `checkNblastSpaces` refuses a
+cross-space comparison by name and points at `Transform Neurons`.
 
 **So geometry now carries its units, and the conversion is checked rather than assumed.**
 `GeometryUnits` (`core/values.ts`) rides on `SkeletonsValue`, `MeshesValue` and `PointsValue`,
@@ -205,9 +206,9 @@ proxy it came from, while every proxy taken is still destroyed where it was take
 The CDN is a third-party runtime dependency this app otherwise does not have; the wheel is
 1.1 MB and could sit in `public/` while the runtime is still borrowed. And the honest way to
 price the whole thing is not "ten megabytes for NBLAST" but "ten megabytes for a numerical
-backend" — `linkage` (the Dendrogram TODO), the CMTK/Elastix/TPS transforms (the template-space
-TODO), geodesic distances and Strahler for morphometrics, and "custom nodes using Python" all
-come out of the same download. Judged as one node it is disproportionate; judged as a backend it
+backend" — `linkage` (the Dendrogram TODO) and the landmark transforms (`warp.py`) have both
+since landed on it, and geodesic distances, Strahler for morphometrics and "custom nodes using
+Python" all come out of the same download. Judged as one node it is disproportionate; judged as a backend it
 is cheap. That is the decision the spike exists to inform.
 
 **The second capability has now landed and the prediction held.** Clustering (below) is

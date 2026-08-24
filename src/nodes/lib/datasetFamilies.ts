@@ -19,6 +19,13 @@
  */
 
 import type { DatasetInfo } from '../../data/source'
+/*
+ * `backendOf` used to live here and now lives beside the source registry that mints these ids,
+ * because `src/data` needs it too — `data/transforms/spaces.ts` decides a dataset's template
+ * space, and the backend behind a source id is half of what identifies one. Re-spelling the
+ * colon rule there would be the exact drift `backendName` below records happening to the table
+ * it reads.
+ */
 import { getSource } from '../../data/source'
 
 /**
@@ -97,25 +104,6 @@ export const BACKENDS: Record<string, DatasetBackend> = {
     id: 'mock',
     label: '',
   },
-}
-
-/**
- * The backend behind a source id — a key of `BACKENDS`.
- *
- * The part before the colon, since a non-default deployment registers under a keyed id:
- * `neuprint:https://…` (see `sourceIdForServer`) and `catmaid:https://…` are still
- * neuPrint and CATMAID as far as which API answers them, which is the whole of what a reader of
- * this wants to know. `cave` and `mock` register once each and come back unchanged.
- *
- * Here rather than beside either caller because there are now two, in layers that cannot see
- * each other: the notebook exporter gates an emitter on it, and a node's `validate` gates a
- * refusal on it. It was private to the first, and the second would have been a second spelling
- * of the colon rule — which is the drift `backendName`'s own comment records happening to
- * the table it reads.
- */
-export function backendOf(sourceId: string): string {
-  const at = sourceId.indexOf(':')
-  return at === -1 ? sourceId : sourceId.slice(0, at)
 }
 
 /**

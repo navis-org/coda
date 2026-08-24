@@ -108,10 +108,12 @@ function sliceElements(v: IterableValue, indices: number[]): IterableValue {
       items,
       attributes,
       bounds: items.length ? boundsOf(items.map((item) => item.positions)) : EMPTY_BOUNDS,
-      // Carried through for the same reason `detail` is, one branch below: units are a fact
-      // about where the coordinates came from, and taking one neuron out does not change it.
-      // Dropping them would leave a single skeleton claiming to be in units nobody knows.
+      // Carried through for the same reason `detail` is, one branch below: units and template
+      // space are facts about where the coordinates came from, and taking one neuron out does
+      // not change either. Dropping them would leave a single skeleton claiming to be in units
+      // nobody knows, in a space nothing downstream could refuse to mirror.
       ...(v.units ? { units: v.units } : {}),
+      ...(v.space ? { space: v.space } : {}),
     }
   }
 
@@ -126,6 +128,7 @@ function sliceElements(v: IterableValue, indices: number[]): IterableValue {
     // viewer's `mesh LOD n/m` caption disappear the moment anything selected a single mesh.
     ...(v.detail ? { detail: v.detail } : {}),
     ...(v.units ? { units: v.units } : {}),
+    ...(v.space ? { space: v.space } : {}),
   }
 }
 

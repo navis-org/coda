@@ -368,6 +368,18 @@ describe('skeletons', () => {
     expect(skeletons.units).toBe('nm')
   })
 
+  it('claims no template space, because project 1 is only FAFB on Virtual Fly Brain', async () => {
+    /*
+     * The positional-id rule, demonstrated by the fixture rather than argued: this source is
+     * `catmaid-test`, not the bare `catmaid` that *is* VFB's deployment, so its project 1 is
+     * whatever this server numbered first. Answering FAFB14 here would put somebody's neurons
+     * through a mirror fitted for a different animal. See `spaceForDataset`.
+     */
+    stubFetch(defaultRoutes)
+    const skeletons = await source().fetchSkeletons({ datasetId: '1', neuronIds: ['16'] })
+    expect(skeletons.space).toBeUndefined()
+  })
+
   it('clamps an unset radius to zero rather than drawing a negative tube', async () => {
     stubFetch(defaultRoutes)
     const skeletons = await source().fetchSkeletons({ datasetId: '1', neuronIds: ['16'] })

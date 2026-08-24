@@ -11,6 +11,7 @@
  *   diamond        Matrix
  *   square         Dataset
  *   small dot      Number / String / Boolean — recessive, achromatic
+ *   diamond        Transform (geometry hue — a mapping applied to geometry)
  */
 
 import type { CodaType } from '../core/types'
@@ -56,6 +57,15 @@ export function socketStyle(type: CodaType | undefined): SocketStyle {
     // colourblind gate; see colors.ts.
     case 'linkage':
       return { family: 'matrix', shape: 'ring' }
+    /*
+     * A transform is a thing you apply *to* geometry, so it takes geometry's hue — and diamond
+     * is the shape that family has left. Diamond is also the matrix family's, which is the
+     * existing many-to-one trade rather than a new one (see `linkage` above): hue plus the
+     * always-visible label carry the difference. A seventh chromatic family would fail the
+     * all-pairs colourblind gate; see colors.ts.
+     */
+    case 'transform':
+      return { family: 'geometry', shape: 'diamond' }
     case 'number':
     case 'string':
     case 'boolean':

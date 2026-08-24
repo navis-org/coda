@@ -94,6 +94,15 @@ export type CodaType =
    * and be quietly destroyed by an upstream Sort. See `LinkageValue`.
    */
   | { kind: 'linkage' }
+  /**
+   * A landmark-based spatial transform.
+   *
+   * Its own kind for `layout`'s and `linkage`'s reason: it is a mapping computed *for* one pair
+   * of spaces rather than data about neurons. As a table of six columns it would take any six
+   * numeric ones and be destroyed by an upstream Sort, which downstream is neurons in the wrong
+   * place rather than an error. See `TransformValue`.
+   */
+  | { kind: 'transform' }
 
 export type TypeKind = CodaType['kind']
 
@@ -143,6 +152,7 @@ export const T = {
     schema ? { kind: 'points', schema } : { kind: 'points' },
   layout: (): CodaType => ({ kind: 'layout' }),
   linkage: (): CodaType => ({ kind: 'linkage' }),
+  transform: (): CodaType => ({ kind: 'transform' }),
 } as const
 
 /** Types whose values are tabular, i.e. carry a `TableSchema`. */

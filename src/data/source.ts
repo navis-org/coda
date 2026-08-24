@@ -695,6 +695,26 @@ export const CANONICAL_SCHEMAS: SourceSchemas = {
 // Source registry
 // ---------------------------------------------------------------------------
 
+/**
+ * The backend behind a source id — a key of `BACKENDS`.
+ *
+ * The part before the colon, since a non-default deployment registers under a keyed id:
+ * `neuprint:https://…` (see `sourceIdForServer`) and `catmaid:https://…` are still
+ * neuPrint and CATMAID as far as which API answers them, which is the whole of what a reader of
+ * this wants to know. `cave` and `mock` register once each and come back unchanged.
+ *
+ * Here, beside the registry that mints these ids, because the readers are in three layers that
+ * cannot all see each other: a node's `validate` gates a refusal on it, the notebook exporter
+ * gates an emitter on it, and `data/transforms/spaces.ts` decides a dataset's template space
+ * with it. It began private to the exporter and moved once already; each move happened because
+ * the alternative was a second spelling of the colon rule — which is the drift `backendName`'s
+ * own comment records happening to the table it reads.
+ */
+export function backendOf(sourceId: string): string {
+  const at = sourceId.indexOf(':')
+  return at === -1 ? sourceId : sourceId.slice(0, at)
+}
+
 const sources = new Map<string, DataSource>()
 
 export function registerSource(source: DataSource): DataSource {

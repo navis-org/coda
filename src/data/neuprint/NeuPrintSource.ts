@@ -61,6 +61,7 @@ import {
   throwIfAborted,
 } from '../source'
 import { datasetSummaryKey, loadCachedTable, neuronIndexKey } from '../neuronIndex'
+import { geometryFrame } from '../transforms/spaces'
 import { fetchRoiMeshSet } from './roiMeshes'
 import { superRoisFrom } from './roiHierarchy'
 import type { MeshSource } from '../precomputed'
@@ -462,6 +463,28 @@ export class NeuPrintSource implements DataSource {
     return geometryUnitsFor(this.states.get(datasetId)?.scale)
   }
 
+  /**
+   * Units and template space together, from whatever scale this dataset yielded.
+   *
+   * The pairing rule — and why a dataset in unknown voxels claims no space — is
+   * `geometryFrame`'s. This just supplies the units half.
+   */
+  private frame(datasetId: string): { units: GeometryUnits; space?: string } {
+    return geometryFrame(this.id, datasetId, this.unitsFor(datasetId))
+  }
+
+  /**
+   * The same, for geometry that is in physical nanometres whatever `Meta` said.
+   *
+   * Precomputed meshes take no voxel scale, so their frame does not depend on a lookup that may
+   * have failed — and a dataset can therefore be in its template space for meshes and in
+   * unknown voxels for skeletons at the same time. Not a contradiction: two fetches, two
+   * provenances.
+   */
+  private nmFrame(datasetId: string): { units: GeometryUnits; space?: string } {
+    return geometryFrame(this.id, datasetId, 'nm')
+  }
+
   /** Extra neuron properties this dataset's queries should request. */
   private extras(datasetId: string): string[] {
     return this.states.get(datasetId)?.discovered?.extras ?? []
@@ -662,7 +685,7 @@ export class NeuPrintSource implements DataSource {
         items: [],
         attributes: emptyTable(ROI_MESH_SCHEMA),
         bounds: EMPTY_BOUNDS,
-        units: this.unitsFor(req.datasetId),
+        ...this.frame(req.datasetId),
       }
     }
 
@@ -684,7 +707,7 @@ export class NeuPrintSource implements DataSource {
       items: result.items,
       attributes: tableFromRows(ROI_MESH_SCHEMA, rows),
       bounds: boundsOf(result.items.map((item) => item.positions)),
-      units: this.unitsFor(req.datasetId),
+      ...this.frame(req.datasetId),
     }
   }
 
@@ -727,7 +750,7 @@ export class NeuPrintSource implements DataSource {
         items: [],
         attributes: emptyTable(schema),
         bounds: EMPTY_BOUNDS,
-        units: this.unitsFor(req.datasetId),
+        ...this.frame(req.datasetId),
       }
     }
 
@@ -795,7 +818,7 @@ export class NeuPrintSource implements DataSource {
       items: ordered,
       attributes: makeTable(schema, data),
       bounds: boundsOf(ordered.map((item) => item.positions)),
-      units: this.unitsFor(req.datasetId),
+      ...this.frame(req.datasetId),
     }
   }
 
@@ -809,7 +832,7 @@ export class NeuPrintSource implements DataSource {
         positions: new Float32Array(0),
         attributes: emptyTable(schema),
         bounds: EMPTY_BOUNDS,
-        units: this.unitsFor(req.datasetId),
+        ...this.frame(req.datasetId),
       }
     }
     req.onProgress?.(0.15, 'querying')
@@ -843,7 +866,7 @@ export class NeuPrintSource implements DataSource {
       positions,
       attributes: makeTable(schema, data),
       bounds: boundsOf([positions]),
-      units: this.unitsFor(req.datasetId),
+      ...this.frame(req.datasetId),
     }
   }
 
@@ -868,8 +891,8 @@ export class NeuPrintSource implements DataSource {
         attributes: emptyTable(schema),
         bounds: EMPTY_BOUNDS,
         // Precomputed meshes arrive in physical nanometres and take no voxel scale, so unlike
-        // every other geometry here their units do not depend on what `Meta` said.
-        units: 'nm',
+        // every other geometry here their frame does not depend on what `Meta` said.
+        ...this.nmFrame(req.datasetId),
       }
     }
 
@@ -921,7 +944,7 @@ export class NeuPrintSource implements DataSource {
       ...(result.lod !== undefined && result.levels !== undefined
         ? { detail: { lod: result.lod, levels: result.levels, triangles: result.triangles } }
         : {}),
-      units: 'nm',
+      ...this.nmFrame(req.datasetId),
     }
   }
 

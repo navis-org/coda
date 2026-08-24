@@ -480,16 +480,15 @@ function ValuePreviewInner({
     )
   }
 
-  // Scalars print themselves. A layout and a linkage have nothing to draw on their own — one
-  // is an arrangement for someone else's nodes, the other a tree wired to no Dendrogram — so
-  // both fall back to the same summary the footer shows.
+  /*
+   * Scalars print themselves. A layout, a linkage and a transform have nothing to draw on their
+   * own — an arrangement for someone else's nodes, a tree wired to no Dendrogram, a mapping with
+   * nothing passing through it — so all three fall back to the summary the footer shows.
+   */
+  const summarised = value.kind === 'layout' || value.kind === 'linkage' || value.kind === 'transform'
   return (
     <div className="viewer">
-      <div className="viewer__empty">
-        {value.kind === 'layout' || value.kind === 'linkage'
-          ? describeValue(value)
-          : String(value.value)}
-      </div>
+      <div className="viewer__empty">{summarised ? describeValue(value) : String(value.value)}</div>
     </div>
   )
 }

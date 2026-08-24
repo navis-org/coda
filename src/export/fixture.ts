@@ -364,6 +364,96 @@ export function everythingGraph(): CodaGraph {
       params: { selected: 0, live: true },
     },
 
+    /*
+     * With `Space` set, which is the branch that emits code. Unset, both emitters refuse — the
+     * canvas reads the space off the *value* and an exporter has only params — and a fixture
+     * that took the refusal would put a TODO in both goldens and record nothing about the call.
+     * The hemibrain fixture is genuinely `JRCFIB2018F`, so this is the honest setting as well
+     * as the informative one.
+     */
+    {
+      id: 'mirror',
+      type: 'neuron.mirror',
+      col: 3,
+      row: 11,
+      params: { space: 'JRCFIB2018F' },
+    },
+
+    /*
+     * Its sibling, on the same skeletons and set the same way. `JRCFIB2018F` is a brain space,
+     * so this takes the branch that *emits* — the nerve-cord branch refuses, and a fixture that
+     * exercised the refusal would record nothing about the call it is here to pin.
+     */
+    {
+      id: 'xform',
+      type: 'neuron.xform',
+      col: 3,
+      row: 12,
+      params: { space: 'JRCFIB2018F' },
+    },
+
+    /*
+     * The mirrored set stacked back onto the original — the co-visualisation shape, and the one
+     * that exercises the source column. Skeletons rather than synapses, so this takes the
+     * NeuronList branch; the points branch is `core.stack`'s code and is covered by that node.
+     */
+    {
+      id: 'stackneurons',
+      type: 'neuron.stack',
+      col: 4,
+      row: 11,
+      params: { sourceColumn: 'side', topLabel: 'Original', bottomLabel: 'Mirrored' },
+    },
+
+    /*
+     * A second one, on points, because both emitters **branch on the input kind** and emit
+     * unrelated cells for the two: a neuron list concatenates as an object, a point cloud as a
+     * frame. One node would record whichever branch it happened to take. Same reasoning as the
+     * two NBLAST nodes above.
+     *
+     * It also gives R a stack it can actually emit. The one above is fed by Mirror Neurons,
+     * which R declines, so that cell is a cascade — which is the honest depiction of R's gap
+     * rather than a hole in the coverage, but it does mean nothing would exercise the R
+     * emitter's code without this.
+     */
+    /*
+     * A custom registration, built from the uploaded table and wired into both consumers. Two
+     * branches ride on it that nothing else reaches: `navis.xform` rather than `xform_brain`,
+     * and `mirror_brain(warp=<transform>)` rather than a bool. Both are exact translations
+     * where the registry branches are approximations, so a golden that skipped them would
+     * record only the lossy half of this node.
+     */
+    {
+      id: 'landmarks',
+      type: 'core.landmarkTransform',
+      col: 3,
+      row: 13,
+      params: {
+        sourceX: 'x',
+        sourceY: 'y',
+        sourceZ: 'z',
+        targetX: 'x2',
+        targetY: 'y2',
+        targetZ: 'z2',
+        targetUnits: 'um',
+        targetSpace: 'JRC2018U',
+      },
+    },
+    {
+      id: 'xformcustom',
+      type: 'neuron.xform',
+      col: 4,
+      row: 13,
+      params: {},
+    },
+    {
+      id: 'stackpoints',
+      type: 'neuron.stack',
+      col: 4,
+      row: 7,
+      params: { sourceColumn: 'batch', topLabel: 'Run 1', bottomLabel: 'Run 2' },
+    },
+
     {
       id: 'upload',
       type: 'core.uploadTable',
@@ -569,6 +659,16 @@ export function everythingGraph(): CodaGraph {
     ['dedupe', 'out', 'group', 'in'],
     ['sort', 'out', 'pick', 'in'],
     ['skel', 'skeletons', 'pickSkel', 'in'],
+    ['skel', 'skeletons', 'mirror', 'in'],
+    ['skel', 'skeletons', 'xform', 'in'],
+    ['skel', 'skeletons', 'stackneurons', 'top'],
+    ['mirror', 'out', 'stackneurons', 'bottom'],
+    ['upload', 'out', 'landmarks', 'in'],
+    ['landmarks', 'transform', 'xformcustom', 'transform'],
+    ['skel', 'skeletons', 'xformcustom', 'in'],
+    ['landmarks', 'transform', 'mirror', 'warp'],
+    ['syn', 'points', 'stackpoints', 'top'],
+    ['syn', 'points', 'stackpoints', 'bottom'],
     ['group', 'out', 'select', 'in'],
     ['select', 'out', 'join', 'left'],
     ['group', 'out', 'join', 'right'],

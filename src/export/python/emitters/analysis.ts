@@ -7,9 +7,12 @@
 import { MAX_SERIES } from '../../../ui/colors'
 import { clusterColor } from '../../../ui/encoding'
 import { pyList, pyStr } from '../py'
+import type { LANDMARK_SIDES } from '../../../nodes/transform/landmarkTransform'
+import { LANDMARK_AXES, landmarkParamId } from '../../../nodes/transform/landmarkTransform'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
 import { pySelection, selectionIds } from './common'
+import { COMMON_SPACE, nerveCordIn } from '../../../data/transforms/spaces'
 
 // ---------------------------------------------------------------------------
 // Build Network
@@ -620,3 +623,196 @@ function labelsToNeuronsEmitter(ctx: EmitContext): string[] {
 
 registerEmitter('cluster.selectedToNeurons', labelsToNeuronsEmitter)
 registerEmitter('cluster.clustersToNeurons', labelsToNeuronsEmitter)
+
+// ---------------------------------------------------------------------------
+// Mirror Neurons
+// ---------------------------------------------------------------------------
+
+/**
+ * `navis.mirror_brain`, which is the function Coda's mirror is a re-implementation of.
+ *
+ * A faithful translation rather than an approximation of one: navis flips about
+ * `bbox.min + bbox.max` along the template's mirror axis, and Coda's `flipAt` is generated from
+ * that same bounding box by `scripts/gen-transforms.py`. The two cannot drift, because only one
+ * of them is written down.
+ *
+ * **`warp` is passed explicitly either way**, never left to the default. navis' default is
+ * `"auto"` — apply the correction wherever a registration exists — so an omitted argument would
+ * emit a notebook that does more or less than the canvas did depending on the template, and
+ * disagrees with it by several micrometres without saying so.
+ *
+ * The two sides use *different landmarks for the same correction*, which is worth knowing
+ * before comparing outputs to the nanometre: Coda ships a copy of navis-flybrains' own mirror
+ * sets, so a space flybrains has since re-fitted would differ until `gen-transforms.py` is
+ * re-run. The affine halves cannot differ at all — `check-mirror.py` holds them to exact
+ * agreement — so any discrepancy is the spline and is bounded by what the landmarks disagree
+ * about.
+ *
+ * Coda's space ids **are** flybrains' template names, which is not luck: `spaces.ts` took them
+ * from flybrains so this translation could be a variable rather than a lookup table.
+ */
+registerEmitter('neuron.mirror', (ctx) => {
+  const src = ctx.wired('in')
+  const out = ctx.output('out')
+  const space = String(ctx.params.space ?? '')
+
+  /*
+   * A space this cell cannot name. The canvas reads it off the geometry at run time, which is a
+   * value; an exporter has only params and types. Rather than guess a template — and mirror
+   * somebody's neurons about the wrong midline in a file they will run tomorrow — it says so.
+   */
+  if (!space) {
+    return ctx.todo(
+      'Mirror Neurons read the template space off the geometry, which this exporter cannot ' +
+        'see. Set Space on the node, or pass template= here by hand.',
+    )
+  }
+
+  ctx.require('navis')
+  ctx.require('flybrains')
+  /*
+   * `warp=` takes a Transform as readily as a bool — that is navis' own signature — so a wired
+   * Landmark Transform translates by *name* rather than by being approximated. The flip still
+   * comes from the template, which is what the canvas does too.
+   */
+  const supplied = ctx.input('warp')
+  const warp = supplied ?? (ctx.params.warp === false ? 'False' : 'True')
+  return [`${out} = navis.mirror_brain(${src}, template="${space}", warp=${warp})`]
+})
+
+/**
+ * Transform Neurons, as `navis.xform_brain`.
+ *
+ * The verb is the same and the *route* is not, which is the thing this cell has to be honest
+ * about. Coda fits one thin-plate spline through landmarks generated offline against the full
+ * navis stack; navis walks its bridging graph through whatever CMTK and H5 registrations are
+ * installed. So the notebook is not a reproduction of the canvas — it is the **long route the
+ * canvas took a shortcut through**, which is the better answer of the two and worth having.
+ *
+ * How much better: measured on 500 FlyWire shell vertices, the two agree to **0.9 µm median**.
+ * That is the cost of the shortcut, and it is smaller than the difference between two animals.
+ *
+ * **A nerve cord bound for `JRC2018U` is refused rather than emitted**, and this is the one that
+ * would otherwise be a silent wrong answer. That template is a brain with no nerve cord in it.
+ * Coda registers a VNC to `JRCVNC2018U` and then *places* it beside the brain by a fixed affine;
+ * navis has no such registration, so `xform_brain` routes a nerve cord through a brain
+ * deformation field instead — 100% of sample points land outside it, it warns as much, and the
+ * answer comes back 97 µm from Coda's. A cell that runs, warns and returns nonsense is worse
+ * than a TODO.
+ *
+ * Scoped to that target, deliberately. A nerve cord bound for *another dataset's* space is a
+ * route navis may well have directly and better — `MANC → JRCFIB2022M` is one — so refusing
+ * every VNC transform would decline cells that are correct.
+ *
+ * **A dataset-to-dataset target routes differently on the two sides**, and the note says so
+ * without overstating it. Coda goes out through the hub and back; navis finds its own route,
+ * usually direct. That costs Coda a second fit and — measured, restricted to the region the
+ * target actually covers — about the sum of the two one-hop errors, 1.3–1.9 µm, with no
+ * compounding. Where the two really part company is a target that does not cover the neuron at
+ * all, and there neither answer means much: navis' own deformation field warns on the same
+ * region.
+ */
+registerEmitter('neuron.xform', (ctx) => {
+  const src = ctx.wired('in')
+  const out = ctx.output('out')
+
+  /*
+   * A supplied transform short-circuits the whole route question, here as on the canvas —
+   * `navis.xform` applies a Transform directly where `xform_brain` looks one up by template.
+   * This is the branch that needs no note at all: both sides are running the same spline over
+   * the same landmarks, so there is nothing to be approximate about.
+   */
+  const supplied = ctx.input('transform')
+  if (supplied) {
+    ctx.require('navis')
+    return [`${out} = navis.xform(${src}, transform=${supplied})`]
+  }
+
+  const space = String(ctx.params.space ?? '')
+
+  /*
+   * The same gap `neuron.mirror` has, and for the same reason: the canvas reads the source space
+   * off the geometry, which is a *value*, and an exporter has only params and types. Guessing a
+   * template here would transform somebody's neurons out of a space they were never in, in a
+   * file they run tomorrow.
+   */
+  if (!space) {
+    return ctx.todo(
+      'Transform Neurons read the source space off the geometry, which this exporter cannot ' +
+        'see. Set Space on the node, or pass source= here by hand.',
+    )
+  }
+
+  const target = String(ctx.params.target ?? COMMON_SPACE.id)
+
+  if (target === COMMON_SPACE.id && nerveCordIn(space).any) {
+    return ctx.todo(
+      `${space} contains a nerve cord, and ${COMMON_SPACE.id} is a brain template with none. ` +
+        'Coda registers the VNC to JRCVNC2018U and places it beside the brain by a fixed ' +
+        'affine; navis has no equivalent registration and would route it through a brain ' +
+        'deformation field, which returns coordinates ~97 µm away with only a warning. ' +
+        'Transform to JRCVNC2018U instead, or place it yourself with ' +
+        'navis.transforms.AffineTransform.',
+    )
+  }
+
+  ctx.require('navis')
+  ctx.require('flybrains')
+  const note =
+    target === COMMON_SPACE.id
+      ? 'navis walks its full bridging graph here, where Coda fitted one spline through ' +
+        'landmarks sampled from that same graph. The two agree to about 0.9 µm; this is the ' +
+        'more accurate of the pair. Note the result is in micrometres, which navis carries on ' +
+        'the neuron — anything downstream needing nanometres should convert rather than assume.'
+      : `Coda goes out through ${COMMON_SPACE.id} and back where navis routes directly, so ` +
+        'expect one to two micrometres of disagreement — about the sum of the two one-hop ' +
+        'errors, which is what composing splines costs. Where the target does not cover the ' +
+        'neuron (the hemibrain is one hemisphere) neither answer means much; navis warns about ' +
+        'that region itself.'
+  return [
+    ...ctx.note(note),
+    `${out} = navis.xform_brain(${src}, source="${space}", target="${target}")`,
+  ]
+})
+
+/**
+ * Landmark Transform, as `navis.transforms.TPStransform`.
+ *
+ * The one place the translation is exact rather than merely faithful: Coda fits this spline
+ * with navis-fastcore's `TpsTransform`, which agrees with `navis.transforms.TPStransform` to
+ * ~1e-14 relative — the same relationship the clustering emitter has to `scipy`. So the
+ * notebook is not approximating the canvas here, it is running the other implementation of the
+ * identical fit.
+ *
+ * Units are multiplied in rather than declared, because navis carries a unit on a *neuron* and
+ * this is a bare array. Emitted only where the factor is not 1, so the ordinary nanometre case
+ * reads as plainly as it is.
+ */
+registerEmitter('core.landmarkTransform', (ctx) => {
+  const table = ctx.wired('in')
+  const out = ctx.output('transform')
+
+  // Through the node's own id builder, so a renamed param breaks the build rather than
+  // quietly emitting the "unset columns" TODO.
+  const columns = (side: (typeof LANDMARK_SIDES)[number]) =>
+    LANDMARK_AXES.map((axis) => ctx.column(landmarkParamId(side, axis)) ?? '')
+
+  const from = columns('source')
+  const to = columns('target')
+  if ([...from, ...to].some((name) => !name)) {
+    return ctx.todo('Landmark Transform has unset coordinate columns — pick all six.')
+  }
+
+  ctx.require('navis')
+  const scaled = (names: string[], units: unknown) => {
+    const values = `${table}[[${names.map(pyStr).join(', ')}]].values`
+    return units === 'um' ? `${values} * 1000` : values
+  }
+
+  return [
+    `${out} = navis.transforms.TPStransform(`,
+    `    ${scaled(from, ctx.params.sourceUnits)},`,
+    `    ${scaled(to, ctx.params.targetUnits)},`,
+    `)`,
+  ]
+})

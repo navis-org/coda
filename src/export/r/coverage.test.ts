@@ -24,7 +24,18 @@ const NO_EMITTER: Record<string, string> = {
   'dataset.cave':
     'A CAVE datastack named by hand, so it has the same reason as `dataset.flywire`: this ' +
     'document is built on neuprintr and there is no fafbseg/CAVE emitter yet.',
-  'cave.updateRootIds': 'A CAVE chunkedgraph repair — see the Python note.',
+  'cave.updateRootIds': 'A CAVE chunkedgraph repair \u2014 see the Python note.',
+  'neuron.mirror':
+    '`nat.templatebrains::mirror_brain` is the exact counterpart of the function Python emits, ' +
+    'and the obstacle is the *template*, not the verb. Python has one registry \u2014 ' +
+    '`import flybrains` binds every fly template navis can mirror about, which is why the ' +
+    'emitter can pass Coda\u2019s space id straight through. The natverse spreads the same five ' +
+    'across a package each: FAFB14 is in nat.flybrains, FlyWire is in fafbseg, MANC is in ' +
+    'malevnc, MaleCNS is in malecns, and the hemibrain has no templatebrain object in R at all. ' +
+    'A faithful emitter therefore needs a space-to-package table, and an unfaithful one emits a ' +
+    'bare symbol that does not resolve \u2014 which is the `navis.interfaces` failure ' +
+    'check-export.py was written for, in a language whose equivalent check cannot run here ' +
+    'because the packages are not installed. Refusing is the smaller lie.',
   'annotation.caveTable':
     'An annotation source. It has no neuPrint counterpart at all — neuPrint carries its cell ' +
     'typing as properties on the neuron, so there is nothing for a generated chunk to fetch ' +

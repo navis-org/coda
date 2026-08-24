@@ -8,6 +8,7 @@
  */
 
 import type {
+  GeometryUnits,
   MatrixValue,
   MeshGeometry,
   MeshesValue,
@@ -19,6 +20,7 @@ import type {
 import { numericIds } from '../../core/ids'
 import type { CellValue } from '../../core/values'
 import { boundsOf, cableLength, makeMatrix, tableFromRows } from '../../core/values'
+import { geometryFrame } from '../transforms/spaces'
 import type {
   AdjacencyRequest,
   CoarseGeometry,
@@ -530,7 +532,7 @@ export class MockSource implements DataSource {
       items,
       attributes: tableFromRows(ROI_MESH_SCHEMA, rows),
       bounds: boundsOf(items.map((m) => m.positions)),
-      units: 'nm',
+      ...this.frame(req.datasetId),
     }
   }
 
@@ -571,8 +573,9 @@ export class MockSource implements DataSource {
       attributes: tableFromRows(this.schemas.morphology, rows),
       bounds: boundsOf(items.map((s) => s.positions)),
       // Synthetic, but generated in nm-like units, so it says so rather than leaving a
-      // consumer to guess — the brain is simply a small one.
-      units: 'nm',
+      // consumer to guess — the brain is simply a small one. The space half comes back empty,
+      // which is the honest answer: nobody registered a connectome Coda invented on load.
+      ...this.frame(req.datasetId),
     }
   }
 
@@ -586,7 +589,7 @@ export class MockSource implements DataSource {
       items,
       attributes: skeletons.attributes,
       bounds: boundsOf(items.map((m) => m.positions)),
-      units: 'nm',
+      ...this.frame(req.datasetId),
     }
   }
 
@@ -635,11 +638,21 @@ export class MockSource implements DataSource {
       positions: buffer,
       attributes: tableFromRows(this.schemas.synapses, rows),
       bounds: boundsOf([buffer]),
-      units: 'nm',
+      ...this.frame(req.datasetId),
     }
   }
 
   // -------------------------------------------------------------------------
+
+  /**
+   * Units and template space together. Always nanometres, and always no space: nobody
+   * registered a connectome generated in the browser on load. Routed through `geometryFrame`
+   * anyway rather than written out, so the rule has no exceptions to remember — which is what
+   * `no source stamps units without a space` in `transforms.test.ts` is checking.
+   */
+  private frame(datasetId: string): { units: GeometryUnits; space?: string } {
+    return geometryFrame(this.id, datasetId, 'nm')
+  }
 
   private require(datasetId: string) {
     const connectome = getConnectome(datasetId)

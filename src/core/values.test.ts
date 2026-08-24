@@ -2,22 +2,25 @@
  * What a value says about itself in one line.
  *
  * `describeValue` is the node footer, so it is read far more often than anything else here and
- * had no coverage at all. The geometry kinds now state their **units** there, which is the
- * whole reason this file exists: nanometres is an app-wide invariant enforced at one seam, and
- * the footer is where a value that missed that seam admits it.
+ * had no coverage at all. The geometry kinds state their **units** and their **template space**
+ * there, which is the whole reason this file exists: both are facts a value can only get right
+ * at the seam it was built at, and the footer is where one that missed that seam admits it.
  */
 
 import { describe, expect, it } from 'vitest'
 
 import { column, tableSchema } from './types'
 import type { Bounds3, MeshesValue, PointsValue, SkeletonsValue } from './values'
-import { describeValue, emptyTable, makeTable, unitsLabel } from './values'
+import { describeValue, emptyTable, makeTable, spaceLabel, unitsLabel } from './values'
 
 const SCHEMA = tableSchema(column('neuronId', 'i64'))
 const attributes = makeTable(SCHEMA, { neuronId: [7] })
 const BOUNDS: Bounds3 = { min: [0, 0, 0], max: [1, 1, 1] }
 
-function skeletons(units?: SkeletonsValue['units']): SkeletonsValue {
+function skeletons(
+  units?: SkeletonsValue['units'],
+  space?: SkeletonsValue['space'],
+): SkeletonsValue {
   return {
     kind: 'skeletons',
     items: [
@@ -31,6 +34,7 @@ function skeletons(units?: SkeletonsValue['units']): SkeletonsValue {
     attributes,
     bounds: BOUNDS,
     ...(units ? { units } : {}),
+    ...(space ? { space } : {}),
   }
 }
 
@@ -38,18 +42,32 @@ describe('describeValue — geometry', () => {
   it('names the units even when they are the expected ones', () => {
     // Printed always, not only when wrong: a line that appears only on failure is a line
     // nobody learns to look at, and the reader has to be able to tell nm from voxels here.
-    expect(describeValue(skeletons('nm'))).toBe('1 skeleton · 2 pts · nm')
+    expect(describeValue(skeletons('nm', 'FLYWIRE'))).toBe('1 skeleton · 2 pts · FLYWIRE · nm')
   })
 
   it('says voxels, which is a real answer rather than a failure', () => {
     // neuPrint publishes voxels and the conversion needs a voxel size it did not give. The
     // coordinates are still voxels; nobody knows how big one is. NBLAST refuses on this.
-    expect(describeValue(skeletons('voxels'))).toBe('1 skeleton · 2 pts · voxels')
+    // A space cannot be claimed without the scale either — see `geometryFrame` — so the two
+    // unknowns arrive together, which is what this pairing is here to keep visible.
+    expect(describeValue(skeletons('voxels'))).toBe('1 skeleton · 2 pts · space unknown · voxels')
   })
 
   it('distinguishes unknown from both of them', () => {
-    expect(describeValue(skeletons())).toBe('1 skeleton · 2 pts · units unknown')
+    expect(describeValue(skeletons())).toBe('1 skeleton · 2 pts · space unknown · units unknown')
     expect(unitsLabel(undefined)).toBe('units unknown')
+    expect(spaceLabel(undefined)).toBe('space unknown')
+  })
+
+  it('names the space by its template id rather than by a dataset', () => {
+    /*
+     * `JRCFIB2018F` rather than "Hemibrain", and the difference is a factor of eight: the raw
+     * hemibrain is `JRCFIB2018Fraw`, also "the hemibrain", and a footer that could not tell
+     * them apart would answer a question nobody asked. The prose name lives on the manifest
+     * entry, for dropdowns.
+     */
+    expect(describeValue(skeletons('nm', 'JRCFIB2018F'))).toContain('JRCFIB2018F')
+    expect(spaceLabel('JRCFIB2018F')).toBe('JRCFIB2018F')
   })
 
   it('says the same for meshes and for points', () => {
@@ -65,6 +83,7 @@ describe('describeValue — geometry', () => {
       attributes,
       bounds: BOUNDS,
       units: 'nm',
+      space: 'MANC',
     }
     const points: PointsValue = {
       kind: 'points',
@@ -73,13 +92,17 @@ describe('describeValue — geometry', () => {
       bounds: BOUNDS,
       units: 'voxels',
     }
-    expect(describeValue(meshes)).toBe('1 mesh · 1 tris · nm')
-    expect(describeValue(points)).toBe('1 points · voxels')
+    expect(describeValue(meshes)).toBe('1 mesh · 1 tris · MANC · nm')
+    expect(describeValue(points)).toBe('1 points · space unknown · voxels')
   })
 
   it('still summarises an empty geometry set', () => {
     expect(
-      describeValue({ ...skeletons('nm'), items: [], attributes: emptyTable(SCHEMA) }),
-    ).toBe('0 skeletons · 0 pts · nm')
+      describeValue({
+        ...skeletons('nm', 'FLYWIRE'),
+        items: [],
+        attributes: emptyTable(SCHEMA),
+      }),
+    ).toBe('0 skeletons · 0 pts · FLYWIRE · nm')
   })
 })

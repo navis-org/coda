@@ -619,6 +619,18 @@ roi_viewer_rois <- neuprint_ROIs(superLevel = FALSE, conn = hemibrain_neuprint)
 roi_viewer_rois
 ```
 
+```{r landmark-transform}
+# ── Landmark Transform ──
+# NOTE: nat::tpsreg() needs nat >= 1.9.0 and the Morpho package, which is a
+# Suggests rather than a hard dependency — install.packages("Morpho") if
+# this fails. Coda fits the same spline with navis-fastcore; the two agree
+# to well under a nanometre.
+landmark_transform <- nat::tpsreg(
+  as.matrix(upload_table[, c("x", "y", "z")]),
+  as.matrix(upload_table[, c("x2", "y2", "z2")]) * 1000
+)
+```
+
 ```{r google-sheet}
 # ── Google Sheet ──
 google_sheet <- coda_google_sheet(
@@ -772,6 +784,28 @@ filter_df <- connectivity_graph |> filter(`weight` >= 10)
 select_one <- skeletons |> slice(1)
 ```
 
+```{r mirror-neurons}
+# ── Mirror Neurons ──
+# TODO: "Mirror Neurons" has no notebook equivalent yet, so this step is
+# missing from the translation. Everything downstream of it refers to
+# variables that were never bound.
+```
+
+```{r transform-neurons}
+# ── Transform Neurons ──
+# TODO: Transform Neurons uses the registrations Coda ships, which are keyed
+# by template space name. The natverse spreads its templatebrain objects
+# across a package each — FAFB14 in nat.flybrains, FlyWire in fafbseg, MANC
+# in malevnc, MaleCNS in malecns — and the hemibrain has none at all, so a
+# faithful cell needs a space-to-package table nobody has written. Wire a
+# Landmark Transform instead and this emits. See neuron.mirror.
+```
+
+```{r transform-neurons-2}
+# ── Transform Neurons ──
+transform_neurons_2 <- xform(skeletons, reg = landmark_transform)
+```
+
 ```{r nblast-k-nn}
 # ── NBLAST k-NN ──
 # TODO: nat.nblast has no shortlisted k-nearest search. The honest
@@ -833,10 +867,24 @@ plot3d(skeletons)
 n_3d_view <- tibble(neuronId = numeric(0))
 ```
 
+```{r stack-neurons}
+# ── Stack Neurons ──
+stack_neurons <- bind_rows(
+  synapses |> mutate(`batch` = "Run 1"),
+  synapses |> mutate(`batch` = "Run 2")
+)
+```
+
 ```{r sort-df}
 # ── Sort ──
 sort_df <- filter_df |> arrange(desc(`weight`))
 sort_df <- sort_df |> head(500)
+```
+
+```{r stack-neurons-2}
+# ── Stack Neurons ──
+# TODO: nothing upstream produced a value — "Mirror Neurons" was not
+# translated.
 ```
 
 ```{r linkage}

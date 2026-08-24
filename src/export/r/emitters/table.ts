@@ -11,6 +11,7 @@ import type { AggFn } from '../../../nodes/lib/tableOps'
 import { aggColumnName, combineLayout, renameMapping } from '../../../nodes/lib/tableOps'
 import { decodeRenames } from '../../../nodes/lib/renames'
 import { rCol, rStr, rValue, rVector } from '../r'
+import { STACK_LABELS } from '../../../nodes/transform/stackNeurons'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
 
@@ -384,26 +385,41 @@ registerEmitter('core.join', (ctx) => {
   ]
 })
 
-registerEmitter('core.stack', (ctx) => {
-  const top = ctx.wired('top')
-  const bottom = ctx.wired('bottom')
+/**
+ * Two data frames end to end: `core.stack`'s whole body, and the points branch of
+ * `neuron.stack`.
+ *
+ * Shared rather than copied, because the copy had drifted three ways — `rbind` for
+ * `bind_rows`, which errors outright on frames whose columns differ where the node null-fills;
+ * a bare column name where `col()` quotes one that needs it; and no `ctx.library('dplyr')` at
+ * all. Each of the three is invisible until somebody runs the document.
+ */
+function stackFrames(
+  ctx: EmitContext,
+  top: string,
+  bottom: string,
+  labels: { source: string; top: string; bottom: string },
+): string[] {
   ctx.library('dplyr')
   const out = ctx.output('out')
-  const sourceColumn = String(ctx.params.sourceColumn ?? '')
-
   // `bind_rows` unions the columns and fills the gaps with NA, which is what the node does —
   // a column only one side carries is not recorded for the other's rows.
-  if (!sourceColumn) return [`${out} <- bind_rows(${top}, ${bottom})`]
-
-  const topLabel = String(ctx.params.topLabel ?? 'Top')
-  const bottomLabel = String(ctx.params.bottomLabel ?? 'Bottom')
+  if (!labels.source) return [`${out} <- bind_rows(${top}, ${bottom})`]
   return [
     `${out} <- bind_rows(`,
-    `  ${top} |> mutate(${col(sourceColumn)} = ${rStr(topLabel)}),`,
-    `  ${bottom} |> mutate(${col(sourceColumn)} = ${rStr(bottomLabel)})`,
+    `  ${top} |> mutate(${col(labels.source)} = ${rStr(labels.top)}),`,
+    `  ${bottom} |> mutate(${col(labels.source)} = ${rStr(labels.bottom)})`,
     `)`,
   ]
-})
+}
+
+registerEmitter('core.stack', (ctx) =>
+  stackFrames(ctx, ctx.wired('top'), ctx.wired('bottom'), {
+    source: String(ctx.params.sourceColumn ?? ''),
+    top: String(ctx.params.topLabel ?? 'Top'),
+    bottom: String(ctx.params.bottomLabel ?? 'Bottom'),
+  }),
+)
 
 // ---------------------------------------------------------------------------
 // Sample
@@ -537,4 +553,48 @@ registerEmitter('core.tableFromUrl', (ctx) => {
   const url = String(ctx.params.url ?? '').trim()
   if (!url) return ctx.todo('This Table from URL node has no URL.')
   return [`${out} <- read_csv(${rStr(url)}, show_col_types = FALSE)`, ...shapingLines(ctx, out)]
+})
+
+/**
+ * Stack Neurons, as a `nat` neuronlist.
+ *
+ * `c()` on two neuronlists concatenates them *and* merges the attached data frames, which is
+ * the same pairing this node has to keep — the geometry and its attribute table move together
+ * or every neuron after the join wears somebody else\u2019s name.
+ *
+ * The source column is assigned through the neuronlist\u2019s own `[, 'col'] <-`, which writes
+ * to that attached frame. That is what `plot3d(..., soma = )` and the nat colour helpers read,
+ * so the co-visualisation gesture survives here as it does in Python.
+ *
+ * **Points take the `rbind` branch**, being a data frame on this side rather than a neuron
+ * object — read off `inputType` rather than guessed, since the two emit unrelated cells.
+ */
+registerEmitter('neuron.stack', (ctx) => {
+  const top = ctx.wired('top')
+  const bottom = ctx.wired('bottom')
+  const out = ctx.output('out')
+  const sourceColumn = String(ctx.params.sourceColumn ?? '').trim()
+  const topLabel = String(ctx.params.topLabel ?? STACK_LABELS.top)
+  const bottomLabel = String(ctx.params.bottomLabel ?? STACK_LABELS.bottom)
+
+  if (ctx.inputType('top')?.kind === 'points') {
+    return stackFrames(ctx, top, bottom, {
+      source: sourceColumn,
+      top: topLabel,
+      bottom: bottomLabel,
+    })
+  }
+
+  ctx.library('nat')
+  if (!sourceColumn) return [`${out} <- c(${top}, ${bottom})`]
+
+  return [
+    ...ctx.note(
+      'c() merges the neuronlists and their attached data frames together, which is the ' +
+        'pairing Coda keeps between the geometry and its attribute table.',
+    ),
+    `${top}[, ${rStr(sourceColumn)}] <- ${rStr(topLabel)}`,
+    `${bottom}[, ${rStr(sourceColumn)}] <- ${rStr(bottomLabel)}`,
+    `${out} <- c(${top}, ${bottom})`,
+  ]
 })

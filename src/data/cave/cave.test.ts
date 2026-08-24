@@ -483,6 +483,10 @@ describe('synapses', () => {
     })
 
     expect(points.units).toBe('nm')
+    // And the frame the numbers are in, which travels with the units for the reason
+    // `geometryFrame` records: a comparison across spaces is meaningless however honest the
+    // units are, and nothing downstream could refuse one without this.
+    expect(points.space).toBe('FLYWIRE')
     expect(points.attributes.length).toBe(3)
     expect(points.positions.length).toBe(9)
     expect([...points.positions.slice(0, 3)]).toEqual([561124, 235604, 142360])

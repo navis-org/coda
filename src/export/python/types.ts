@@ -53,6 +53,7 @@ export type PyModule =
   | 'seaserpent'
   | 'navis'
   | 'navisNeuprint'
+  | 'flybrains'
   | 'networkx'
   | 'matplotlib'
   | 'seaborn'
@@ -88,6 +89,14 @@ export const MODULES: Record<PyModule, ModuleSpec> = {
     statement: 'import navis.interfaces.neuprint as neu',
     pip: 'navis',
   },
+  /*
+   * Imported for its **side effect**, which is why the statement is a bare import of a package
+   * nothing then names. `import flybrains` registers every fly template and every transform
+   * between them into `navis.transforms.registry`, and `navis.mirror_brain(template='FLYWIRE')`
+   * resolves the name out of that registry. Without the import the call raises about an unknown
+   * template — a failure a golden-file snapshot cannot see, because the text reads perfectly.
+   */
+  flybrains: { statement: 'import flybrains  # noqa: F401  (registers the fly templates)', pip: 'flybrains' },
   neuprint: { from: 'neuprint', pip: 'neuprint-python' },
   /*
    * The CAVE client, for a datastack rather than a connectome server. `CAVEclient` is the only

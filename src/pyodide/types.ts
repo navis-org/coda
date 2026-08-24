@@ -84,6 +84,26 @@ export function int32From(result: PyResult, key: string): Int32Array {
   return value
 }
 
+/**
+ * Read a float32 array a Python function promised.
+ *
+ * A numpy float32 array crosses as a `Float32Array` — checked against the runtime rather than
+ * assumed, in `scripts/probe-transform.mjs`, because it is the same class of thing
+ * `float64From`'s note is about. Worth using wherever the values are going straight into
+ * geometry buffers, which are float32 already: float64 out would double the transfer to
+ * deliver precision the destination cannot hold.
+ */
+export function float32From(result: PyResult, key: string): Float32Array {
+  const value = result[key]
+  if (!(value instanceof Float32Array)) {
+    throw new Error(
+      `Python returned no flat float32 array called "${key}" ` +
+        `(got ${Array.isArray(value) ? 'a nested Array — ravel it' : typeof value})`,
+    )
+  }
+  return value
+}
+
 /** Read a float64 array a Python function promised. */
 export function float64From(result: PyResult, key: string): Float64Array {
   const value = result[key]

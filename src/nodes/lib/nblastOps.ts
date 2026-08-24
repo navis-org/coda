@@ -129,6 +129,35 @@ export function checkNblastUnits(side: string, skeletons: SkeletonsValue): void 
   )
 }
 
+/**
+ * Refuse a comparison between two template spaces, which is a comparison of nothing.
+ *
+ * NBLAST asks how well one neuron's arbor lies *along* another's, so it is entirely a question
+ * about where the two sit. Two reconstructions in unrelated coordinate systems are hundreds of
+ * micrometres apart and differently scaled: every pair scores like two neurons that have never
+ * met — uniformly, confidently, and with nothing anywhere to say why. Exactly the shape of the
+ * nanometres-versus-micrometres trap `checkNblastUnits` exists for, one level up.
+ *
+ * `docs/python-pyodide.md` recorded this as out of reach — *"NBLAST across datasets means
+ * nothing without a template-space registration, which Coda has no route to yet"*. There is a
+ * route now, so this stops being a caveat in a document and becomes a refusal that names it.
+ *
+ * **Absent means unknown on either side and lets the comparison through**, which is
+ * `checkNblastUnits`' rule and matters more here: a synthetic connectome and an unregistered
+ * Custom dataset both produce spaceless geometry, and refusing on a fact nobody stated would
+ * break the mock chains every example runs on. What is refused is two sides that *both* say,
+ * and disagree.
+ */
+export function checkNblastSpaces(query: SkeletonsValue, target: SkeletonsValue): void {
+  if (!query.space || !target.space || query.space === target.space) return
+  throw new Error(
+    `Query skeletons are in ${query.space} and Target skeletons are in ${target.space}. NBLAST ` +
+      'scores how well two arbors lie along each other, so across two coordinate systems it ' +
+      'would score every pair as a stranger and say nothing about it. Put both sides through ' +
+      'Transform Neurons first.',
+  )
+}
+
 /** Refuse an oversized comparison, naming both sides so it is clear which one to cut. */
 export function checkNblastSize(rows: number, cols: number): void {
   if (rows * cols > MAX_NBLAST_PAIRS) {
@@ -175,7 +204,12 @@ export function nblastSidesFrom(
     refuse('Target', targetValue.items.length)
 
   checkNblastUnits('Query', queryValue)
-  if (targetValue) checkNblastUnits('Target', targetValue)
+  if (targetValue) {
+    checkNblastUnits('Target', targetValue)
+    // Only meaningful with two sides. An all-by-all is one set against itself, which is in one
+    // space by construction however little it says about which.
+    checkNblastSpaces(queryValue, targetValue)
+  }
 
   return { query: queryValue, ...(targetValue ? { target: targetValue } : {}) }
 }

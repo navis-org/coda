@@ -20,10 +20,11 @@ import type {
   SourceSchemas,
 } from '../../data/source'
 import { withAnnotations } from '../../data/annotations/schema'
-import { backendName, backendOf } from './datasetFamilies'
+import { backendName } from './datasetFamilies'
 import {
   CANONICAL_SCHEMAS,
   allSources,
+  backendOf,
   canTracePaths,
   capabilityOf,
   getSource,
