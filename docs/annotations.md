@@ -190,6 +190,20 @@ names a different datastack to read the table out of, which is the cross-datasta
 only one the wire was ever needed for. Found by writing the node's first test, which is exactly
 the gap invariant 5's corollary records about `out.barChart`.
 
+**Both halves of that grammar are checked on the card, and both used to fail two layers below
+it.** The socket takes a `T.dataset()` and the port is a *reference* naming a datastack, so a
+Dataset from any other backend is accepted at the type level and handed straight through as one:
+`male-cns:v1.0` split on the colon gives a version of `v1.0`, and what came back at Run was
+`"male-cns:v1.0" does not name a CAVE dataset. Expected datastack:materialization.` — thrown in
+`data/annotations/caveTable.ts`, a sentence about a grammar, for a mistake made on a wire. The
+typed half had the same throw for the more obvious reason: `datastack:materialization` is stated
+in the field's help but only the placeholder shows the colon, so a bare `flywire_fafb_public` is
+the natural thing to type. `validate` now answers both — the wire through `foreignBackend`, the
+field through `splitDatasetId`, which is the reader `datasetIdFor` writes for rather than a second
+spelling of the rule. `Update root IDs` had the identical gap on its own reference port, and
+`nodes/lib/datasetParam.ts` records why the shared check names a *backend* where everything else
+about a Dataset socket names a capability.
+
 ### SeaTable, verified rather than read
 
 Everything here was probed live against FlyTable. Four calls, and the auth scheme is **`Token`**,

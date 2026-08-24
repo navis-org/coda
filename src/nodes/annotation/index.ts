@@ -47,7 +47,9 @@ import {
 import { annotationColumn, namedColumns } from '../../data/annotations/types'
 import { SEATABLE_HOSTS } from '../../data/annotations/credentials'
 import { peekBases, resolveWorkspace } from '../../data/annotations/seaTable'
+import { splitDatasetId } from '../../data/cave/spec'
 import { joinAnnotations, joinedSchema } from '../lib/annotationOps'
+import { foreignBackend } from '../lib/datasetParam'
 import { ANNOTATIONS_INPUT, annotationSchemaFrom } from '../lib/annotationParams'
 import { datasetRef } from '../../core/types'
 
@@ -177,9 +179,39 @@ export const caveTableNode = registerNode({
   }),
 
   validate: (ctx) => {
-    if (!ctx.inputs.dataset && !String(ctx.params.datastack ?? '').trim()) {
+    /*
+     * Both halves of "which datastack" are checked here, because both had the same failure and it
+     * happened in `data/annotations/caveTable.ts` — `"…" does not name a CAVE dataset. Expected
+     * datastack:materialization.`, thrown at Run, two layers below the card that caused it.
+     *
+     * The wire is the first half. This input is a *reference* naming a datastack, so a Dataset
+     * from any other backend is handed straight through as one: `male-cns:v1.0` split on the colon
+     * gives a version of `v1.0`, and the message that came back was about the grammar rather than
+     * about the wire. Checked before the param, since a wire wins over it.
+     */
+    const foreign = foreignBackend(ctx.inputs.dataset, 'cave')
+    if (foreign) {
+      return [
+        `A ${foreign} dataset names no CAVE datastack — wire a CAVE Dataset here, or unwire ` +
+          `this input and name the datastack instead`,
+      ]
+    }
+    const datastack = String(ctx.params.datastack ?? '').trim()
+    if (!ctx.inputs.dataset && !datastack) {
       return [
         'Name a datastack, e.g. flywire_fafb_public:783 — or wire one to the Dataset input',
+      ]
+    }
+    /*
+     * The typed half. `datastack:materialization` is the whole grammar and the field's help says
+     * so, but the placeholder is the only thing that shows the colon — so a bare
+     * `flywire_fafb_public` is the obvious thing to type and it reached the same throw. Through
+     * `splitDatasetId`, which is the reader `datasetIdFor` writes for, rather than a second
+     * spelling of the rule; only checked when nothing is wired, since a wire makes the field inert.
+     */
+    if (!ctx.inputs.dataset && !splitDatasetId(datastack)) {
+      return [
+        `"${datastack}" names no materialization — CAVE numbers them, e.g. ${datastack}:783`,
       ]
     }
     if (!String(ctx.params.table ?? '').trim()) return ['Name an annotation table']

@@ -20,6 +20,7 @@ import type {
   SourceSchemas,
 } from '../../data/source'
 import { withAnnotations } from '../../data/annotations/schema'
+import { backendName, backendOf } from './datasetFamilies'
 import {
   CANONICAL_SCHEMAS,
   allSources,
@@ -61,6 +62,37 @@ export function sourceSupports(
 /** The source behind a Dataset socket, for a message that names it. */
 export function sourceLabel(type: CodaType | undefined): string | undefined {
   return sourceFromType(type)?.label
+}
+
+/**
+ * The backend on a Dataset socket where it is **not** the one asked for, spelled for prose —
+ * `neuPrint`, `CATMAID` — or undefined where it matches, or where the type does not say yet.
+ *
+ * `sourceSupports` is the check for anything reachable through `DataSource`, and it is the one to
+ * reach for first: a capability is per dataset, so it can say "this datastack has no skeletons"
+ * where a backend name can only say "CAVE". This is for the other kind — a node whose work is
+ * written against one backend's own API rather than against the seam. `Update root IDs` calls a
+ * chunkedgraph and `CAVE table` reads an annotation table; neither is a source method, so there is
+ * no capability to declare and no per-dataset answer to give. Both used to accept any Dataset and
+ * fail at Run, one of them with `"male-cns:v1.0" does not name a CAVE dataset` — a message about a
+ * grammar, three layers from the wire that caused it.
+ *
+ * Returns the name rather than a boolean so the node writes its own sentence. What is wrong
+ * differs per node even when the check does not — root ids do not move outside CAVE, and a
+ * neuPrint dataset names no datastack — and one shared message would have to be vague about both.
+ *
+ * **An unresolved socket refuses nothing**, which is `capabilityOf`'s rule and matters more here:
+ * no `sourceId` is the ordinary state before a listing lands (invariant 2), and the reference
+ * ports these two nodes use are also the ports somebody leaves unwired on purpose.
+ */
+export function foreignBackend(
+  type: CodaType | undefined,
+  backend: string,
+): string | undefined {
+  const sourceId = datasetRef(type)?.sourceId
+  if (!sourceId) return undefined
+  const actual = backendOf(sourceId)
+  return actual === backend ? undefined : backendName(actual)
 }
 
 /**

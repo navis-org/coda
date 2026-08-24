@@ -19,6 +19,9 @@ import { cacheSet, resetCache } from '../../data/cache'
 import { resetCredentials, setToken } from '../../data/cave/credentials'
 import { resetDatastackRecords } from '../../data/cave/datastack'
 import { resetRootChecks } from '../../data/cave/rootIds'
+import { addEdge, addNode, emptyGraph } from '../../core/graph'
+import type { CodaGraph, GraphNode } from '../../core/graph'
+import { inferGraph } from '../../core/inference'
 import { defaultParams, findParam, resolveColumn } from '../../core/node'
 import type { ColumnParam } from '../../core/node'
 import { T } from '../../core/types'
@@ -307,5 +310,66 @@ describe('the pickers before any schema has arrived', () => {
     const landed = T.table(tableSchema(column('sv', 'str'), column('root', 'str')))
     expect(resolve('supervoxelColumn', { supervoxelColumn: 'sv' }, landed)).toBe('sv')
     expect(resolve('supervoxelColumn', { supervoxelColumn: 'sv' })).toBe('sv')
+  })
+})
+
+/**
+ * The Dataset input, wired to a backend that has no chunkedgraph.
+ *
+ * A reference port naming a datastack accepts any Dataset at the type level, so this used to be
+ * made on the canvas, run, and refuse with `Cannot read a materialization out of "male-cns:v1.0"`
+ * — the colon split failing three layers from the wire that caused it. Nothing about a neuPrint or
+ * CATMAID id *can* be repaired here: a body id is a property on a node and does not move.
+ */
+describe('a Dataset from another backend', () => {
+  const issues = (g: CodaGraph, id: string) =>
+    (inferGraph(g).nodes[id]?.issues ?? []).map((i) => i.message).join(' ')
+
+  const node = (id: string, type: string, params: Record<string, unknown> = {}): GraphNode => ({
+    id,
+    type,
+    position: { x: 0, y: 0 },
+    params: { ...defaultParams(requireNodeDef(type)), ...params } as GraphNode['params'],
+  })
+
+  /** One dataset node wired to the reference port, and nothing else. */
+  const wired = (dataset: GraphNode): CodaGraph => {
+    let g = emptyGraph('x')
+    g = addNode(g, dataset)
+    g = addNode(g, node('upd', 'cave.updateRootIds'))
+    return addEdge(g, {
+      source: dataset.id,
+      sourceHandle: 'dataset',
+      target: 'upd',
+      targetHandle: 'dataset',
+    })
+  }
+
+  it('refuses at edit time, naming the backend rather than the grammar', () => {
+    const message = issues(wired(node('np', 'dataset.neuprint', { dataset: 'male-cns:v1.0' })), 'upd')
+    expect(message).toContain('neuPrint')
+    expect(message).toContain('CAVE')
+    // Not the sentence `evaluate` used to produce, which was about a colon.
+    expect(message).not.toContain('Cannot read a materialization')
+  })
+
+  it('says nothing about a CAVE dataset, which is the case it must not catch', () => {
+    const cave = node('ds', 'dataset.cave', {
+      datastack: 'flywire_fafb_public',
+      version: '783',
+      neuronTable: 'neurons',
+    })
+    expect(issues(wired(cave), 'upd')).not.toContain('chunkedgraph')
+  })
+
+  /*
+   * An unwired reference port is the ordinary state of this node while somebody builds around it,
+   * and an unresolved one is invariant 2's cold session. Neither is a foreign backend, and a
+   * refusal on either would put a badge on every card for the first second of a load.
+   */
+  it('says nothing with the port unwired', () => {
+    let g = emptyGraph('x')
+    g = addNode(g, node('upd', 'cave.updateRootIds'))
+    expect(issues(g, 'upd')).not.toContain('chunkedgraph')
   })
 })

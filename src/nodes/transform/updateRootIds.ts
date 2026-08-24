@@ -28,6 +28,7 @@ import { idText } from '../../core/ids'
 import type { CellValue, ColumnData } from '../../core/values'
 import { isTableValue, makeTable } from '../../core/values'
 import { rootsForSupervoxels, staleRoots } from '../../data/cave/rootIds'
+import { foreignBackend } from '../lib/datasetParam'
 
 export const updateRootIdsNode = registerNode({
   type: 'cave.updateRootIds',
@@ -105,6 +106,19 @@ export const updateRootIdsNode = registerNode({
   },
 
   validate: (ctx) => {
+    /*
+     * The chunkedgraph is the whole of what this node does, and it is CAVE's alone: a neuPrint
+     * body id is a property on a node and a CATMAID skeleton id is a row key — neither moves, so
+     * there is nothing here to repair and no service to ask. Wired to one anyway, this reached
+     * `evaluate`, split `male-cns:v1.0` on the colon and refused with "Cannot read a
+     * materialization out of" — a sentence about a grammar, for a mistake made on a wire.
+     */
+    const foreign = foreignBackend(ctx.inputs.dataset, 'cave')
+    if (foreign) {
+      return [
+        `Root ids only move in CAVE — a ${foreign} dataset has no chunkedgraph to look them up in`,
+      ]
+    }
     if (!ctx.column('supervoxelColumn')) {
       return [
         'Pick the column holding each row’s supervoxel id — the ids cannot be updated without it',

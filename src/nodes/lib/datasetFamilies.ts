@@ -99,6 +99,39 @@ export const BACKENDS: Record<string, DatasetBackend> = {
   },
 }
 
+/**
+ * The backend behind a source id — a key of `BACKENDS`.
+ *
+ * The part before the colon, since a non-default deployment registers under a keyed id:
+ * `neuprint:https://…` (see `sourceIdForServer`) and `catmaid:https://…` are still
+ * neuPrint and CATMAID as far as which API answers them, which is the whole of what a reader of
+ * this wants to know. `cave` and `mock` register once each and come back unchanged.
+ *
+ * Here rather than beside either caller because there are now two, in layers that cannot see
+ * each other: the notebook exporter gates an emitter on it, and a node's `validate` gates a
+ * refusal on it. It was private to the first, and the second would have been a second spelling
+ * of the colon rule — which is the drift `backendName`'s own comment records happening to
+ * the table it reads.
+ */
+export function backendOf(sourceId: string): string {
+  const at = sourceId.indexOf(':')
+  return at === -1 ? sourceId : sourceId.slice(0, at)
+}
+
+/**
+ * How a backend is spelled in prose, since a source id is lower case and a name is not.
+ *
+ * Read off `BACKENDS` rather than restated: that was a second table of the same fact and it had
+ * already fallen behind — a third backend arrived and the exporter's TODOs would have read
+ * "has no catmaid equivalent yet". The `|| id` keeps a source id nobody has registered a
+ * backend for readable rather than blank, and it is also what gives the mock its own name back:
+ * its label is deliberately empty, because `Hemibrain (mini) (Mock)` is the kind of name a rule
+ * produces when nobody checked it against the values.
+ */
+export function backendName(id: string): string {
+  return BACKENDS[id]?.label || id
+}
+
 /** Which silhouette the node's thumbnail placeholder draws. Falls back to `specimen`. */
 export type DatasetGlyph = 'brain' | 'vnc' | 'cns' | 'optic' | 'specimen'
 

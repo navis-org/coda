@@ -602,6 +602,57 @@ describe('annotation nodes — refusals', () => {
     expect(issues(wired, 'cave')).toBe('')
   })
 
+  /**
+   * The wire, and the field, both saying `datastack:materialization` — the two ways this node was
+   * handed something that is not one.
+   *
+   * Both used to reach `data/annotations/caveTable.ts` and throw `"…" does not name a CAVE
+   * dataset. Expected datastack:materialization.` at Run: a sentence about a grammar, two layers
+   * below the card, for a wire anybody could make. The Dataset input is a *reference* naming a
+   * datastack, so nothing about a neuPrint Dataset makes it refusable at the type level.
+   */
+  it('refuses a Dataset from another backend, naming it and both ways out', () => {
+    let g = emptyGraph('x')
+    g = addNode(g, node('np', 'dataset.neuprint', { dataset: 'male-cns:v1.0' }))
+    g = addNode(g, node('cave', 'annotation.caveTable', { table: 'nuclei' }))
+    g = addEdge(g, {
+      source: 'np',
+      sourceHandle: 'dataset',
+      target: 'cave',
+      targetHandle: 'dataset',
+    })
+    const message = issues(g, 'cave')
+    expect(message).toContain('neuPrint')
+    expect(message).toContain('wire a CAVE Dataset')
+    // The other way out is the field this wire makes inert, and it has to be said: unwiring is
+    // not an obvious repair for a node whose own datastack param is ignored while a wire exists.
+    expect(message).toContain('unwire')
+
+    // The same wiring from a CAVE dataset is silent, which is the case the check must not catch.
+    expect(issues(chain(), 'cave')).toBe('')
+  })
+
+  it('asks a typed datastack for its materialization, since the colon is the whole grammar', () => {
+    let g = emptyGraph('x')
+    g = addNode(
+      g,
+      node('cave', 'annotation.caveTable', { datastack: 'flywire_fafb_public', table: 'nuclei' }),
+    )
+    // Names the fix with the datastack already in it, rather than restating the grammar: the help
+    // on the field states it and the placeholder is the only thing that shows the colon.
+    expect(issues(g, 'cave')).toContain('flywire_fafb_public:783')
+
+    let pinned = emptyGraph('x')
+    pinned = addNode(
+      pinned,
+      node('cave', 'annotation.caveTable', {
+        datastack: 'flywire_fafb_public:783',
+        table: 'nuclei',
+      }),
+    )
+    expect(issues(pinned, 'cave')).toBe('')
+  })
+
   it('asks for the value column only once Pivot on is set', () => {
     const g = chain()
     expect(issues(g, 'cave')).toBe('')

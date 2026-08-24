@@ -13,7 +13,7 @@ import { inferGraph } from '../../core/inference'
 import type { NodeDefinition, ParamValues } from '../../core/node'
 import { defaultParams, makeInferContext } from '../../core/node'
 import { getNodeDef, isAnnotation } from '../../core/registry'
-import { BACKENDS } from '../../nodes/lib/datasetFamilies'
+import { backendName, backendOf } from '../../nodes/lib/datasetFamilies'
 import type { CodaType } from '../../core/types'
 import type { ExportRefusal, TodoStep } from '../canExport'
 import { canExportNotebook, nodeLabel } from '../canExport'
@@ -86,30 +86,6 @@ function outputName(base: string, def: NodeDefinition, portId: string): string {
   const outputs = def.outputs ?? []
   if (outputs.length <= 1) return base
   return `${base}_${pyIdent(portId, 'out')}`
-}
-
-/**
- * The backend behind a source id.
- *
- * `neuprint`, `cave`, `mock` — the part before the colon, since a non-default neuPrint
- * deployment registers as `neuprint:https://…` (see `sourceIdForServer`) and is still neuPrint
- * as far as which library can query it.
- */
-function backendOf(sourceId: string): string {
-  const at = sourceId.indexOf(':')
-  return at === -1 ? sourceId : sourceId.slice(0, at)
-}
-
-/**
- * How a backend is spelled in prose, since a source id is lower case and a name is not.
- *
- * Read off `BACKENDS` rather than restated: this was a second table of the same fact and it had
- * already fallen behind — a third backend arrived and its TODOs would have read "has no catmaid
- * equivalent yet". The `?? foreign` keeps a source id nobody has registered a backend for
- * readable rather than blank.
- */
-function backendName(id: string): string {
-  return BACKENDS[id]?.label || id
 }
 
 /**
