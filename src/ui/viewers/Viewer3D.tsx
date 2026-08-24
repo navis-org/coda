@@ -948,7 +948,18 @@ function MeshChannel({
       {items.map((item, index) =>
         visible(index) ? (
           <MeshItem
-            key={`${prefix}-${item.id}-${index}`}
+            /*
+             * Keyed by id, with the index only as a fallback for an item that has none.
+             *
+             * It was `id`-and-index, which is stable for a value that only ever grows at the end
+             * — and a streamed one does not. `onPartial` publishes what has arrived *in final
+             * order*, so body 40 appears at index 3 and then at index 27 as the ones before it
+             * land. Folding the index into the key makes every one of those a different
+             * component: React unmounts it, `MeshItem`'s `useMemo` mints a fresh
+             * `BufferGeometry`, and a 300-body fill rebuilds the whole scene a dozen times over
+             * for geometry that never changed.
+             */
+            key={`${prefix}-${item.id || index}`}
             positions={item.positions}
             indices={item.indices}
             color={colorAt(index)}

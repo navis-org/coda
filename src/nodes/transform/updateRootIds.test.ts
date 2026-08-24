@@ -131,6 +131,7 @@ function run(table: TableValue, params: Record<string, unknown> = {}) {
     signal: new AbortController().signal,
     progress: () => undefined,
     reportFetched: () => undefined,
+    publish: () => undefined,
   })
 }
 

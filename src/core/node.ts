@@ -430,6 +430,31 @@ export interface EvalContext<P extends ParamValues = ParamValues> {
   /** Report 0..1 progress for the node's status bar. */
   progress(fraction: number, note?: string): void
   /**
+   * Show a partial result while this node is still running.
+   *
+   * The 3D viewer draws from its *inputs* rather than from its own output — `ValuePreview`'s
+   * `out.viewer3d` branch reads `inputValues` — so a fetch node that publishes as bodies land
+   * paints them into the scene with nothing downstream having to re-run. That is the whole
+   * mechanism: no second evaluation, no re-entrant pass, just the value on the wire growing.
+   *
+   * **What is published never enters the provenance cache.** A half-finished result stored
+   * under the node's key would claim to be the whole answer (invariant 4), so a superseded run
+   * could leave 40 of 300 meshes on screen looking complete and never fetch the rest. It lives
+   * in run state instead and is dropped the moment the node settles, either onto the real
+   * result or onto nothing.
+   *
+   * Two rules for the caller, both about what the renderer does with what arrives:
+   *
+   * - **Publish in the same order the final result will use**, so an item keeps its React key
+   *   and its built `BufferGeometry` across publishes instead of being torn down and rebuilt.
+   * - **Throttle.** Every call repaints every card in the graph, and a skeleton channel rebuilds
+   *   one merged vertex buffer per publish. `PUBLISH_INTERVAL_MS` in `geometryCache.ts` is the
+   *   one place that decides how often.
+   *
+   * Ignored after the run is superseded or aborted, so a node need not check `signal` first.
+   */
+  publish(outputs: Record<string, Value>): void
+  /**
    * Say when the data behind this result was actually read from a server.
    *
    * For a node declaring `dataCache`: a run that answers from `loadCachedTable` is

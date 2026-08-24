@@ -30,9 +30,10 @@ function recorder(bytes = 12) {
       ids,
       key: (id) => `t:${id}`,
       bytes: () => bytes,
-      fetch: (missing) => {
+      fetch: (missing, deliver) => {
         calls.push([...missing])
-        return Promise.resolve(new Map(missing.map((id) => [id, body(Number(id))])))
+        for (const id of missing) deliver(id, body(Number(id)))
+        return Promise.resolve()
       },
       ...extra,
     })
@@ -91,9 +92,10 @@ describe('what it asks for', () => {
         ids,
         key: (id) => `t:${id}`,
         bytes: () => 12,
-        fetch: (missing) => {
+        fetch: (missing, deliver) => {
           calls.push([...missing])
-          return Promise.resolve(new Map(missing.filter((id) => id !== '2').map((id) => [id, body(1)])))
+          for (const id of missing) if (id !== '2') deliver(id, body(1))
+          return Promise.resolve()
         },
       })
     const first = await ask(['1', '2'])
@@ -126,9 +128,10 @@ describe('what it hands back', () => {
         ids,
         key: (id) => `m:lod${lod}:${id}`,
         bytes: () => 12,
-        fetch: (missing) => {
+        fetch: (missing, deliver) => {
           calls.push([...missing])
-          return Promise.resolve(new Map(missing.map((id) => [id, body(lod)])))
+          for (const id of missing) deliver(id, body(lod))
+          return Promise.resolve()
         },
       })
       return new Map(ordered)
@@ -230,6 +233,134 @@ describe('the budget', () => {
     await request(['2'])
     // 2 was evicted and had to be fetched again; 1 and 3 survived.
     expect(calls.map((c) => c.join())).toEqual(['1', '2', '3', '2'])
+  })
+})
+
+describe('streaming a partial answer', () => {
+  /**
+   * Deliver `ids` in the given order, collecting whatever `onPartial` was handed.
+   *
+   * `stepMs` advances a stubbed clock between deliveries, because the rate limit is the thing
+   * standing between one delivery and the next publish. Left at 0 — deliveries inside one tick —
+   * exactly one publish fires, which is the rate-limit test; set past the interval and every
+   * delivery publishes, which is the only way the *ordering* assertion sees more than one id.
+   */
+  const stream = async (
+    ids: string[],
+    arrivals: string[],
+    { stepMs = 0, readyBefore }: { stepMs?: number; readyBefore?: Promise<unknown> } = {},
+  ) => {
+    let clock = 1_000
+    const now = vi.spyOn(Date, 'now').mockImplementation(() => clock)
+    try {
+      const partials: string[][] = []
+      const { ordered } = await cachedGeometry<Body>({
+        ids,
+        key: (id) => `s:${id}`,
+        bytes: () => 12,
+        onPartial: (pairs) => partials.push(pairs.map(([id]) => id)),
+        ...(readyBefore ? { readyBefore } : {}),
+        fetch: async (missing, deliver) => {
+          for (const id of arrivals) {
+            if (!missing.includes(id)) continue
+            // Advanced before the delivery, so the interval a publish is measured against has
+            // already moved — a real fan-out spends the time fetching, not after handing over.
+            clock += stepMs
+            deliver(id, body(Number(id)))
+            // A real fan-out yields between bodies; `readyBefore` settles on a microtask.
+            await Promise.resolve()
+          }
+        },
+      })
+      return { partials, final: ordered.map(([id]) => id) }
+    } finally {
+      now.mockRestore()
+    }
+  }
+
+  it('publishes in the caller’s order, not the order the network answered', async () => {
+    /*
+     * The load-bearing property, and the reason `onPartial` hands over pairs rather than the
+     * arrivals themselves. `Viewer3D` keys mesh items by id and reads colour and visibility by
+     * *index* into the attribute table, so a partial ordered by arrival would draw a growing
+     * scene that reshuffled its own colours as bodies landed.
+     *
+     * `3` arrives first and must still be published last, behind the `1` and `2` that follow it.
+     */
+    const { partials, final } = await stream(['1', '2', '3'], ['3', '1', '2'], { stepMs: 400 })
+    expect(final).toEqual(['1', '2', '3'])
+    expect(partials).toEqual([['3'], ['1', '3'], ['1', '2', '3']])
+  })
+
+  it('rate-limits, so a 300-body sweep does not repaint the graph 300 times', async () => {
+    /*
+     * Leading edge only, and no timer: the complete answer this call returns *is* the trailing
+     * edge. Three deliveries inside one tick cannot be 250 ms apart, so exactly one publishes —
+     * which is also what makes this assertion deterministic rather than a race on the clock.
+     */
+    const { partials } = await stream(['1', '2', '3'], ['1', '2', '3'])
+    expect(partials).toHaveLength(1)
+    expect(partials[0]).toEqual(['1'])
+  })
+
+  it('holds every publish until the caller’s other request has landed', async () => {
+    /*
+     * The attribute rows race the geometry, and a partial assembled without them carries a null
+     * `type` for every body — so a scene set to colour by type would fill in grey and restyle
+     * itself wholesale at the end. Stated here rather than three times in the sources, each of
+     * which had grown its own spelling of "has it landed yet".
+     */
+    let land = () => {}
+    const rows = new Promise<void>((resolve) => (land = resolve))
+    const held = await stream(['1', '2'], ['1', '2'], { stepMs: 400, readyBefore: rows })
+    expect(held.partials).toEqual([])
+    // The answer is still complete; only the *streaming* was withheld.
+    expect(held.final).toEqual(['1', '2'])
+
+    land()
+    await rows
+    resetGeometryCache()
+    const after = await stream(['1', '2'], ['1', '2'], { stepMs: 400, readyBefore: rows })
+    expect(after.partials).toEqual([['1'], ['1', '2']])
+  })
+
+  it('publishes anyway when that other request failed, rather than never', async () => {
+    // Settled, not fulfilled: a source that could not label its bodies should still draw them.
+    const rejected = Promise.reject(new Error('no labels'))
+    rejected.catch(() => undefined)
+    const { partials } = await stream(['1'], ['1'], { stepMs: 400, readyBefore: rejected })
+    expect(partials).toEqual([['1']])
+  })
+
+  it('says nothing at all when everything was already held', async () => {
+    // No arrival to report, and the caller's own return value is already the whole thing. A
+    // publish here would be a repaint of the graph to say what the next line says anyway.
+    await stream(['1'], ['1'])
+    const { partials } = await stream(['1'], ['1'])
+    expect(partials).toEqual([])
+  })
+
+  it('caches each body as it lands rather than at the end of the sweep', async () => {
+    /*
+     * `deliver` writes through immediately, which is what makes a run cancelled at body 250 of
+     * 300 cost 50 requests on the retry rather than 300. The old contract could not: the map was
+     * only visible once the whole fan-out had resolved.
+     */
+    let seen: string[] = []
+    await cachedGeometry<Body>({
+      ids: ['1', '2'],
+      key: (id) => `d:${id}`,
+      bytes: () => 12,
+      fetch: (missing, deliver) => {
+        deliver('1', body(1))
+        seen = [...missing]
+        expect(geometryCacheStats().entries).toBe(1)
+        deliver('2', body(2))
+        return Promise.resolve()
+      },
+    })
+    expect(seen).toEqual(['1', '2'])
+    expect(geometryCacheStats().entries).toBe(2)
   })
 })
 

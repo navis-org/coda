@@ -10,6 +10,7 @@ import { T, column, tableSchema } from './types'
 import { defaultParams } from './node'
 import { registerNode, requireNodeDef } from './registry'
 import { Scheduler } from './scheduler'
+import type { Value } from './values'
 import { isTableValue, tableFromRows } from './values'
 
 /** Zero-latency source so tests don't wait on the simulated round trip. */
@@ -400,5 +401,87 @@ describe('clearing a node’s data cache', () => {
     replaced = addNode(replaced, { id: 'n', type, position: { x: 0, y: 0 }, params: {} })
     await sched.run(replaced, { mode: 'full' })
     expect(seen).toEqual([false])
+  })
+})
+
+/**
+ * Partial results published mid-run.
+ *
+ * The mechanism the 3D viewer streams through: a fetch node hands over what has arrived, the
+ * value on its output port grows, and `ValuePreview`'s `out.viewer3d` branch — which reads its
+ * *inputs* rather than its own output — draws it. Nothing downstream re-runs, which is the whole
+ * reason this is cheap enough to do four times a second.
+ *
+ * What has to be true is the part that is easy to get wrong: a preview is **not** a cache entry.
+ * A half-finished value stored under the node's provenance key would claim to be the answer for
+ * that key, so a cancelled run would leave a scene that looks complete and that no later run
+ * would even be scheduled to fix.
+ */
+describe('publishing a partial result', () => {
+  const ROW = tableSchema(column('x', 'i64'))
+  const rows = (n: number) => tableFromRows(ROW, Array.from({ length: n }, (_, x) => ({ x })))
+
+  /** A node that publishes `steps` growing tables, then optionally throws. */
+  function register(type: string, steps: number, fail = false) {
+    registerNode({
+      type,
+      label: type,
+      category: 'utility',
+      cost: 'cheap',
+      inputs: [],
+      outputs: [{ id: 'out', label: 'Out', type: T.table() }],
+      inferOutputs: () => ({ out: T.table() }),
+      evaluate: (ctx) => {
+        for (let n = 1; n <= steps; n++) {
+          ctx.publish({ out: rows(n) })
+          seen.push(rowCount(scheduler.output('n', 'out')))
+        }
+        if (fail) throw new Error('nope')
+        return { out: rows(steps + 1) }
+      },
+    })
+  }
+
+  const rowCount = (value: Value | undefined) => (isTableValue(value) ? value.length : -1)
+
+  let scheduler: Scheduler
+  let seen: number[]
+
+  function graphOver(type: string): CodaGraph {
+    return addNode(emptyGraph('publish-test'), { id: 'n', type, position: { x: 0, y: 0 }, params: {} })
+  }
+
+  beforeEach(() => {
+    scheduler = makeScheduler()
+    seen = []
+  })
+
+  it('shows what has been published while the node is still running', async () => {
+    register('test.publish.growing', 3)
+    const g = graphOver('test.publish.growing')
+    await scheduler.run(g, { mode: 'full' })
+    // Read from inside `evaluate`, which is the only moment a preview is the visible value.
+    expect(seen).toEqual([1, 2, 3])
+  })
+
+  it('hands over to the real result the moment the node settles', async () => {
+    register('test.publish.settles', 2)
+    const g = graphOver('test.publish.settles')
+    await scheduler.run(g, { mode: 'full' })
+    // Three rows, not the two the last publish carried.
+    expect(rowCount(scheduler.output('n', 'out'))).toBe(3)
+  })
+
+  it('drops a partial when the run fails rather than leaving it on screen', async () => {
+    /*
+     * The geometry is still in `geometryCache`, so the next run redraws it at once — but a
+     * half-filled scene standing next to an `error` badge, with nothing saying which half, is
+     * exactly the "looks complete but isn't" failure the previews map exists to avoid.
+     */
+    register('test.publish.fails', 2, true)
+    const g = graphOver('test.publish.fails')
+    await scheduler.run(g, { mode: 'full' })
+    expect(scheduler.info('n').state).toBe('error')
+    expect(scheduler.output('n', 'out')).toBeUndefined()
   })
 })

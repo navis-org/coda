@@ -121,6 +121,20 @@ export interface GraphState {
   selection: string[]
   /** Bumped whenever scheduler node states change, to invalidate memoised selectors. */
   runVersion: number
+  /**
+   * Bumped when a running node publishes or drops a partial result — see `Scheduler.onPreview`.
+   *
+   * Its own counter rather than a second use of `runVersion`, because of who has to subscribe.
+   * `runVersion` is read by selectors that already return something that moves with it (a node's
+   * own state, a stale count); a card drawing from its *inputs* has no such thing — the 3D
+   * viewer's own output and state are unchanged while its upstream fills in, so nothing it
+   * selects would differ and zustand would skip the render. `void s.runVersion` inside a selector
+   * subscribes to nothing on its own: the comparison is on what the selector *returns*.
+   *
+   * So this is selected directly, as the primitive invariant 7 requires. Every card re-renders
+   * when it moves, which is why `PUBLISH_INTERVAL_MS` bounds how often that can be.
+   */
+  previewVersion: number
   past: HistoryEntry[]
   future: HistoryEntry[]
   /** Transient messages (load warnings, run failures) shown in the status bar. */
@@ -445,6 +459,7 @@ let runToken = 0
 export const useGraphStore = create<GraphState>((set, get) => {
   const scheduler = new Scheduler({
     resolveSource: (id) => requireSource(id),
+    onPreview: () => set((s) => ({ previewVersion: s.previewVersion + 1 })),
     onStateChange: () =>
       set((s) => {
         // A finished run can reveal the shape of a node nothing could infer statically
@@ -701,6 +716,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     inference: inferGraph(initialGraph),
     selection: [],
     runVersion: 0,
+    previewVersion: 0,
     past: [],
     future: [],
     notice: initial?.warnings.length ? initial.warnings.join(' · ') : undefined,

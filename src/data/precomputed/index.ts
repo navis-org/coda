@@ -81,6 +81,11 @@ export interface MeshResult {
 /** One body's geometry without its id — what the session cache holds, keyed by the id. */
 type MeshBody = Omit<MeshResult, 'neuronId'>
 
+/** Cache pairs back into results. Both mesh paths and both partial hooks put the id back on. */
+function named(pairs: ReadonlyArray<[string, MeshBody]>): MeshResult[] {
+  return pairs.map(([neuronId, mesh]) => ({ neuronId, ...mesh }))
+}
+
 export interface FetchMeshesResult {
   meshes: MeshResult[]
   /** Which detail level was used; undefined for single-level sources. */
@@ -151,6 +156,18 @@ export interface FetchMeshesOptions extends FetchOptions {
   refresh?: boolean
   /** When the geometry came from a server; see `GeometryRequest.onFetched`. */
   onFetched?: (at: number) => void
+  /**
+   * Hand back the meshes decoded so far, in final order, while the rest are still in flight.
+   *
+   * Wired to the **fragment** sweep only. A manifest is not drawable — it is the pyramid, not the
+   * geometry — and the level cannot even be chosen until the last one lands, since `chooseLod`
+   * sums across the batch. So on a cold multi-resolution run nothing streams until the manifest
+   * phase is done, which the measurements above put at 87% of the wall clock. The sweep after
+   * that is what fills in, and a re-run with the manifests already cached streams from the start.
+   */
+  onPartial?: (meshes: MeshResult[]) => void
+  /** Held until this settles, and passed straight through — see `CachedGeometryRequest`. */
+  readyBefore?: Promise<unknown>
 }
 
 /**
@@ -167,6 +184,15 @@ export async function fetchMeshes(
 ): Promise<FetchMeshesResult> {
   const budget = options.triangleBudget ?? DEFAULT_TRIANGLE_BUDGET
   const concurrency = options.concurrency ?? BUCKET_CONCURRENCY
+  /*
+   * How a partial reaches the caller, once for both mesh formats.
+   *
+   * `undefined` when nobody asked, which is what keeps `cachedGeometry` from walking the id list
+   * every 250 ms for a caller that would only discard the result — the thumbnail path is the one
+   * that never wants this.
+   */
+  const forwardPartial =
+    options.onPartial && ((pairs: ReadonlyArray<[string, MeshBody]>) => options.onPartial?.(named(pairs)))
 
   if (source.format === 'legacy') {
     let done = 0
@@ -176,17 +202,17 @@ export async function fetchMeshes(
       bytes: (m) => byteLengthOf(m.positions, m.indices),
       refresh: options.refresh,
       onFetched: options.onFetched,
-      fetch: async (want) => {
-        const out = new Map<string, MeshBody>()
+      onPartial: forwardPartial,
+      readyBefore: options.readyBefore,
+      fetch: async (want, deliver) => {
         await mapWithConcurrency(want, concurrency, async (neuronId) => {
           const mesh = await readLegacyMesh(source.base, BigInt(neuronId), options)
           options.onProgress?.(++done, want.length, 'fragments')
-          if (mesh) out.set(neuronId, mesh)
+          if (mesh) deliver(neuronId, mesh)
         })
-        return out
       },
     })
-    const meshes = ordered.map(([neuronId, mesh]) => ({ neuronId, ...mesh }))
+    const meshes = named(ordered)
     return {
       meshes,
       levels: 1,
@@ -216,14 +242,12 @@ export async function fetchMeshes(
     // `refresh` only, no `onFetched`: the age badge should describe the *geometry*, and a cached
     // manifest beside a freshly fetched mesh would report the result as older than it is.
     refresh: options.refresh,
-    fetch: async (want) => {
-      const out = new Map<string, MultiResManifest>()
+    fetch: async (want, deliver) => {
       await mapWithConcurrency(want, concurrency, async (neuronId) => {
         const manifest = await readManifest(source.base, BigInt(neuronId), info, options)
         options.onProgress?.(++read, want.length, 'manifests')
-        if (manifest) out.set(neuronId, manifest)
+        if (manifest) deliver(neuronId, manifest)
       })
-      return out
     },
   })
   const missing = [...manifests.missing]
@@ -264,8 +288,9 @@ export async function fetchMeshes(
     bytes: (m) => byteLengthOf(m.positions, m.indices),
     refresh: options.refresh,
     onFetched: options.onFetched,
-    fetch: async (want) => {
-      const out = new Map<string, MeshBody>()
+    onPartial: forwardPartial,
+    readyBefore: options.readyBefore,
+    fetch: async (want, deliver) => {
       await mapWithConcurrency(want, concurrency, async (neuronId) => {
         const manifest = pyramids.get(neuronId)!
         const mesh = await readLodFragments(
@@ -277,12 +302,11 @@ export async function fetchMeshes(
           options,
         )
         options.onProgress?.(++done, want.length, 'fragments')
-        if (mesh) out.set(neuronId, mesh)
+        if (mesh) deliver(neuronId, mesh)
       })
-      return out
     },
   })
-  const meshes: MeshResult[] = fragments.ordered.map(([neuronId, mesh]) => ({ neuronId, ...mesh }))
+  const meshes = named(fragments.ordered)
   // A body whose manifest read but whose fragments did not is missing too, and only this list
   // knows it — the manifest sweep above could not.
   missing.push(...fragments.missing)

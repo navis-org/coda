@@ -79,6 +79,27 @@ export interface SkeletonSegments {
  * makes it unpickable: geometry that is not there cannot be raycast, so hiding a key and
  * clicking where it used to be does nothing, rather than quietly selecting an invisible neuron.
  */
+/**
+ * Segments per skeleton, memoised on the geometry's identity.
+ *
+ * The count is a pure function of `parents`, which is immutable once decoded — the same licence
+ * `boundsOf` and `cableLength` take. It earns its keep because this build is not a once-per-fetch
+ * thing any more: a streamed value mints a fresh `SkeletonsValue` four times a second, and
+ * hiding a legend key rebuilds too, so the counting pass over every node of every neuron was
+ * being paid a dozen times for an answer that never changes. A number per item, so unlike
+ * caching the segment buffers themselves it costs nothing to hold.
+ */
+const SEGMENT_COUNT = new WeakMap<SkeletonsValue['items'][number], number>()
+
+function segmentsIn(item: SkeletonsValue['items'][number]): number {
+  const hit = SEGMENT_COUNT.get(item)
+  if (hit !== undefined) return hit
+  let n = 0
+  for (let i = 0; i < item.parents.length; i++) if (item.parents[i]! >= 0) n++
+  SEGMENT_COUNT.set(item, n)
+  return n
+}
+
 export function buildSkeletonSegments(
   skeletons: SkeletonsValue,
   visible: (itemIndex: number) => boolean = () => true,
@@ -86,7 +107,7 @@ export function buildSkeletonSegments(
   let segments = 0
   skeletons.items.forEach((item, itemIndex) => {
     if (!visible(itemIndex)) return
-    for (let i = 0; i < item.parents.length; i++) if (item.parents[i]! >= 0) segments++
+    segments += segmentsIn(item)
   })
 
   const positions = new Float32Array(segments * 6)

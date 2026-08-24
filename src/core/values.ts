@@ -562,16 +562,50 @@ export const EMPTY_BOUNDS: Bounds3 = { min: [0, 0, 0], max: [0, 0, 0] }
  * Un-grown boxes collapse to the origin rather than carrying infinities out: a viewer that
  * frames on `Infinity` shows nothing and blames nothing.
  */
+/**
+ * Per-buffer boxes, so a scene that grows re-measures only what is new.
+ *
+ * A `Float32Array` of geometry is immutable by convention here — the transform nodes build a
+ * `new Float32Array` rather than writing through their input, which is the same property
+ * `geometryCache` depends on to hand back the array it holds rather than a copy. That makes a
+ * box a pure function of the buffer's identity.
+ *
+ * What forced it: `onPartial` re-assembles the whole answer four times a second while a fetch
+ * runs, and `boundsOf` was the dominant cost of doing so — a full pass over every vertex of
+ * every body that had already arrived, ~12 times over for a 300-body run. Memoised, the first
+ * publish measures each body once and every later one unions a handful of boxes.
+ *
+ * `null` for a buffer with no vertices, which must not fold a zero box into a real one.
+ */
+const BUFFER_BOUNDS = new WeakMap<Float32Array, Bounds3 | null>()
+
+function boundsOfBuffer(positions: Float32Array): Bounds3 | null {
+  if (positions.length === 0) return null
+  const min: [number, number, number] = [Infinity, Infinity, Infinity]
+  const max: [number, number, number] = [-Infinity, -Infinity, -Infinity]
+  for (let i = 0; i < positions.length; i += 3) {
+    for (let axis = 0; axis < 3; axis++) {
+      const v = positions[i + axis]!
+      if (v < min[axis]!) min[axis] = v
+      if (v > max[axis]!) max[axis] = v
+    }
+  }
+  return Number.isFinite(min[0]) ? { min, max } : null
+}
+
 export function boundsOf(buffers: readonly Float32Array[]): Bounds3 {
   const min: [number, number, number] = [Infinity, Infinity, Infinity]
   const max: [number, number, number] = [-Infinity, -Infinity, -Infinity]
   for (const positions of buffers) {
-    for (let i = 0; i < positions.length; i += 3) {
-      for (let axis = 0; axis < 3; axis++) {
-        const v = positions[i + axis]!
-        if (v < min[axis]!) min[axis] = v
-        if (v > max[axis]!) max[axis] = v
-      }
+    let box = BUFFER_BOUNDS.get(positions)
+    if (box === undefined) {
+      box = boundsOfBuffer(positions)
+      BUFFER_BOUNDS.set(positions, box)
+    }
+    if (box === null) continue
+    for (let axis = 0; axis < 3; axis++) {
+      if (box.min[axis]! < min[axis]!) min[axis] = box.min[axis]!
+      if (box.max[axis]! > max[axis]!) max[axis] = box.max[axis]!
     }
   }
   if (!Number.isFinite(min[0])) return EMPTY_BOUNDS
@@ -585,7 +619,14 @@ export function boundsOf(buffers: readonly Float32Array[]): Bounds3 {
  * nanometres (see `data/neuprint/units.ts`), and a traversal fix applied to one copy would
  * silently make the fixtures stop standing in for the thing they replace.
  */
+const CABLE_LENGTH = new WeakMap<SkeletonGeometry, number>()
+
 export function cableLength(skeleton: SkeletonGeometry): number {
+  // Memoised on the geometry's identity, for `boundsOf`'s reason and with the same licence: a
+  // skeleton is immutable once decoded, and this is one `Math.hypot` per node — the largest
+  // single cost of re-assembling a partial answer while a fetch streams.
+  const hit = CABLE_LENGTH.get(skeleton)
+  if (hit !== undefined) return hit
   let total = 0
   for (let i = 0; i < skeleton.parents.length; i++) {
     const parent = skeleton.parents[i]!
@@ -596,6 +637,7 @@ export function cableLength(skeleton: SkeletonGeometry): number {
       skeleton.positions[i * 3 + 2]! - skeleton.positions[parent * 3 + 2]!,
     )
   }
+  CABLE_LENGTH.set(skeleton, total)
   return total
 }
 

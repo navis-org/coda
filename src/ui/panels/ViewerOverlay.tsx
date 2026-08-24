@@ -41,6 +41,10 @@ export function ViewerOverlay() {
   const setParam = useGraphStore((s) => s.setParam)
   const setNotice = useGraphStore((s) => s.setNotice)
   const nodeInputs = useGraphStore((s) => s.nodeInputs)
+  // Subscribed to, not read, for `CodaNodeView`'s reason: `nodeInputs(id)` is called during
+  // render, so a scene streaming in behind a fullscreen viewer moves nothing this component
+  // selects. Without it the card fills in and the overlay over it does not.
+  void useGraphStore((s) => s.previewVersion)
   // A primitive, not `s.panels` — that object is minted fresh on every toggle, so selecting
   // the whole thing would change identity on every unrelated tick. See invariant 7.
   const styleOpen = useGraphStore((s) => s.panels.style)

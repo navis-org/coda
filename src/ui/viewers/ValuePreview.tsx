@@ -206,6 +206,73 @@ function ValuePreviewInner({
     )
   }
 
+  const selection = idList(node.params.selection)
+
+  /*
+   * Above the `!value` guard, on `out.rois`' terms and for a sharper reason.
+   *
+   * This node's own output is the *selection* — empty until it runs — while the scene is on its
+   * inputs. Below the guard, a 3D View could only draw after its own evaluation, which is one
+   * whole scheduler step after the geometry it draws arrived. That is invisible on a finished
+   * run and fatal to a streamed one: `ctx.publish` grows the value on the upstream port while
+   * the fetch node is still running, and this card is the thing that has to notice.
+   *
+   * Gated on an input actually being present rather than rendering unconditionally, so a graph
+   * that has never run still says "No result yet" instead of standing up a WebGL context to
+   * draw nothing.
+   */
+  if (node.type === 'out.viewer3d') {
+    const skeletons = inputValues?.skeletons
+    const meshes = inputValues?.meshes
+    const points = inputValues?.points
+    const volumes = inputValues?.volumes
+    if (skeletons || meshes || points || volumes) return (
+      <LazyViewer3D
+        skeletons={isSkeletonsValue(skeletons) ? skeletons : undefined}
+        meshes={isMeshesValue(meshes) ? meshes : undefined}
+        points={isPointsValue(points) ? points : undefined}
+        volumes={isMeshesValue(volumes) ? volumes : undefined}
+        skeletonColor={readColorSpec('skeleton', node.params, ctx.column)}
+        meshColor={readColorSpec('mesh', node.params, ctx.column)}
+        pointColor={readColorSpec('point', node.params, ctx.column)}
+        volumeColor={readColorSpec('volume', node.params, ctx.column)}
+        skeletonWidth={Number(node.params.skeletonWidth ?? 1)}
+        // Every fallback here has to equal the node's declared default: a graph saved before a
+        // param existed has no key for it, and this is the value it then gets.
+        meshOpacity={Number(node.params.meshOpacity ?? 1)}
+        pointSize={Number(node.params.pointSize ?? 60)}
+        volumeOpacity={Number(node.params.volumeOpacity ?? 0.12)}
+        // The node id, so the card and the overlay share one camera instead of resetting each
+        // other — the same prop the network viewer takes for its layout and camera.
+        viewerId={node.id}
+        background={String(node.params.background ?? 'theme') as BackgroundChoice}
+        // Read defensively rather than cast: these three are written by the legend, so a graph
+        // saved before it existed has no key for them at all.
+        // Through the reader beside `readColorSpec`, because `colorParams({ legend })` is what
+        // names these params — spelling `skeletonHidden` here is a fifth place that has to agree
+        // with the factory that generates it and the viewer that writes it back.
+        hidden={{
+          skeleton: readHiddenKeys('skeleton', node.params),
+          mesh: readHiddenKeys('mesh', node.params),
+          point: readHiddenKeys('point', node.params),
+          volume: readHiddenKeys('volume', node.params),
+        }}
+        // `!== false`, so a graph saved before these existed draws everything — which is what
+        // it did. Reading them as `=== true` would open every old file with an empty scene.
+        shown={{
+          skeletons: node.params.showSkeletons !== false,
+          meshes: node.params.showMeshes !== false,
+          points: node.params.showPoints !== false,
+          volumes: node.params.showVolumes !== false,
+        }}
+        selection={selection}
+        onSelectionChange={onSelectionChange}
+        {...(onParamChange ? { onParamChange } : {})}
+        {...shared}
+      />
+    )
+  }
+
   if (!value) {
     return (
       <div className="viewer">
@@ -213,8 +280,6 @@ function ValuePreviewInner({
       </div>
     )
   }
-
-  const selection = idList(node.params.selection)
 
   if (node.type === 'out.network' && isNetworkValue(value)) {
     // The node filters its own output, so the caption compares what it drew against what
@@ -261,59 +326,6 @@ function ValuePreviewInner({
         edgeLabelColumn={ctx.column('edgeLabelColumn')}
         selection={selection}
         onSelectionChange={onSelectionChange}
-        {...shared}
-      />
-    )
-  }
-
-  if (node.type === 'out.viewer3d') {
-    // The 3D node's own output is the *selection*; the scene comes from its inputs.
-    const skeletons = inputValues?.skeletons
-    const meshes = inputValues?.meshes
-    const points = inputValues?.points
-    const volumes = inputValues?.volumes
-    return (
-      <LazyViewer3D
-        skeletons={isSkeletonsValue(skeletons) ? skeletons : undefined}
-        meshes={isMeshesValue(meshes) ? meshes : undefined}
-        points={isPointsValue(points) ? points : undefined}
-        volumes={isMeshesValue(volumes) ? volumes : undefined}
-        skeletonColor={readColorSpec('skeleton', node.params, ctx.column)}
-        meshColor={readColorSpec('mesh', node.params, ctx.column)}
-        pointColor={readColorSpec('point', node.params, ctx.column)}
-        volumeColor={readColorSpec('volume', node.params, ctx.column)}
-        skeletonWidth={Number(node.params.skeletonWidth ?? 1)}
-        // Every fallback here has to equal the node's declared default: a graph saved before a
-        // param existed has no key for it, and this is the value it then gets.
-        meshOpacity={Number(node.params.meshOpacity ?? 1)}
-        pointSize={Number(node.params.pointSize ?? 60)}
-        volumeOpacity={Number(node.params.volumeOpacity ?? 0.12)}
-        // The node id, so the card and the overlay share one camera instead of resetting each
-        // other — the same prop the network viewer takes for its layout and camera.
-        viewerId={node.id}
-        background={String(node.params.background ?? 'theme') as BackgroundChoice}
-        // Read defensively rather than cast: these three are written by the legend, so a graph
-        // saved before it existed has no key for them at all.
-        // Through the reader beside `readColorSpec`, because `colorParams({ legend })` is what
-        // names these params — spelling `skeletonHidden` here is a fifth place that has to agree
-        // with the factory that generates it and the viewer that writes it back.
-        hidden={{
-          skeleton: readHiddenKeys('skeleton', node.params),
-          mesh: readHiddenKeys('mesh', node.params),
-          point: readHiddenKeys('point', node.params),
-          volume: readHiddenKeys('volume', node.params),
-        }}
-        // `!== false`, so a graph saved before these existed draws everything — which is what
-        // it did. Reading them as `=== true` would open every old file with an empty scene.
-        shown={{
-          skeletons: node.params.showSkeletons !== false,
-          meshes: node.params.showMeshes !== false,
-          points: node.params.showPoints !== false,
-          volumes: node.params.showVolumes !== false,
-        }}
-        selection={selection}
-        onSelectionChange={onSelectionChange}
-        {...(onParamChange ? { onParamChange } : {})}
         {...shared}
       />
     )

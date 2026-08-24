@@ -111,6 +111,7 @@ function evalContext(
     params,
     refresh: false,
     reportFetched: () => undefined,
+    publish: () => undefined,
     input: (portId) => inputs[portId],
     inputKey: (portId) => (inputs[portId] ? `${portId}-key` : undefined),
     column: (paramId) => {

@@ -97,6 +97,20 @@ export interface SchedulerHost {
   resolveSource(sourceId: string): DataSource
   /** Called whenever node run state changes, so the UI can repaint. Should be cheap. */
   onStateChange?(): void
+  /**
+   * Called when a running node publishes or drops a partial result.
+   *
+   * Separate from `onStateChange` because the two ask different questions of the UI. A state
+   * change moves a badge, and a card subscribes to it through its *own* node's state; a preview
+   * changes what is on somebody *else's* card — the 3D viewer draws from its inputs, so the node
+   * whose value moved is not the node that has to repaint. Nothing about the publishing node's
+   * state changed, so a host listening only to `onStateChange` would compute the same answer and
+   * never re-render.
+   *
+   * Also cheaper: `onStateChange` re-walks the graph for observed schemas, which a partial
+   * geometry value cannot have changed, and this fires four times a second during a fetch.
+   */
+  onPreview?(): void
 }
 
 export class Scheduler {
@@ -109,6 +123,20 @@ export class Scheduler {
    * the run, so a request made against an expensive node survives every cheap pass in between.
    */
   private forceRefresh = new Set<string>()
+  /**
+   * Partial outputs a still-running node has published through `ctx.publish`.
+   *
+   * Deliberately *not* a `CacheEntry`. A cache entry is keyed by provenance and is the answer
+   * for that key (invariant 4); a preview is a half-finished value that happens to be worth
+   * drawing. Storing one as the other is how a run cancelled at body 40 of 300 would leave a
+   * scene that looks complete and that nothing would ever re-fetch — the entry's key would
+   * match, so no later run would even be scheduled.
+   *
+   * Read *before* the cache by `output`/`outputs`, because while a node is running the preview
+   * is the newer truth and whatever the cache holds belongs to a key that has already moved.
+   * Dropped when the node settles, which is what makes that precedence safe to state so simply.
+   */
+  private previews = new Map<string, Record<string, Value>>()
   private abort: AbortController | undefined
   /** Bumped on every run; results from a superseded run are discarded. */
   private generation = 0
@@ -134,11 +162,12 @@ export class Scheduler {
 
   /** Cached outputs of a node, if fresh or stale-but-present. Viewers read this. */
   outputs(nodeId: string): Record<string, Value> | undefined {
-    return this.cache.get(nodeId)?.outputs
+    return this.previews.get(nodeId) ?? this.cache.get(nodeId)?.outputs
   }
 
+  /** One statement of the preview-before-cache rule, so the two cannot come to disagree. */
   output(nodeId: string, portId: string): Value | undefined {
-    return this.cache.get(nodeId)?.outputs[portId]
+    return this.outputs(nodeId)?.[portId]
   }
 
   get busy(): boolean {
@@ -409,6 +438,17 @@ export class Scheduler {
             // Oldest wins: a node making several fetches is only as fresh as its stalest one.
             fetchedAt = fetchedAt === undefined ? at : Math.min(fetchedAt, at)
           },
+          (partial) => {
+            /*
+             * Checked here rather than left to the caller: `publish` is handed to a fetch that
+             * is already unwinding when a run is superseded, and the last few bodies in flight
+             * land after that. Dropping them silently is the whole point — the newer run owns
+             * the screen from the moment it starts.
+             */
+            if (generation !== this.generation || controller.signal.aborted) return
+            this.previews.set(nodeId, partial)
+            this.host.onPreview?.()
+          },
         )
         const outputs = await def.evaluate(ctx)
 
@@ -446,6 +486,19 @@ export class Scheduler {
           state: 'error',
           error: errorMessage(err),
         })
+      } finally {
+        /*
+         * The preview dies with the run that made it, however that run ended.
+         *
+         * On success the real outputs are already in the cache and the preview is the same
+         * value one publish out of date. On an error or a cancel there is no result to show, and
+         * a partial scene left standing beside a `stale` badge is the "looks complete but isn't"
+         * failure this whole mechanism is arranged to avoid — the geometry is still in
+         * `geometryCache`, so the next run redraws it at once anyway.
+         */
+        // Announced, not just deleted: on an error or a cancel nothing else will move, and a
+        // card drawing from this node's port would otherwise keep the dropped partial on screen.
+        if (this.previews.delete(nodeId)) this.host.onPreview?.()
       }
     }
 
@@ -550,12 +603,14 @@ export class Scheduler {
     nodeId: string,
     refresh: boolean,
     reportFetched: (at: number) => void,
+    publish: (outputs: Record<string, Value>) => void,
   ): EvalContext {
     const types = inputTypes as Record<string, never>
     return {
       params,
       refresh,
       reportFetched,
+      publish,
       input: (portId) => inputs[portId],
       inputKey: (portId) => inputKeys[portId],
       column: (paramId) => {
@@ -585,8 +640,9 @@ export class Scheduler {
 
   private pruneCache(graph: CodaGraph): void {
     const alive = new Set(graph.nodes.map((n) => n.id))
-    for (const id of [...this.cache.keys()]) if (!alive.has(id)) this.cache.delete(id)
-    for (const id of [...this.states.keys()]) if (!alive.has(id)) this.states.delete(id)
+    for (const held of [this.cache, this.previews, this.states]) {
+      for (const id of [...held.keys()]) if (!alive.has(id)) held.delete(id)
+    }
     // A deleted node's pending request would otherwise be spent by whatever reused its id.
     for (const id of [...this.forceRefresh]) if (!alive.has(id)) this.forceRefresh.delete(id)
   }

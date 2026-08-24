@@ -143,6 +143,24 @@ function CodaNodeViewImpl({
     const port = (getNodeDef(node.type)?.outputs ?? [])[0]
     return port ? s.nodeOutput(id, port.id) : undefined
   })
+  /*
+   * Subscribed to, not read — the tick that makes a streamed scene appear.
+   *
+   * `nodeInputs(id)` below is called during render rather than selected, so nothing about it can
+   * schedule one. For a viewer drawing from its inputs that is the *only* thing on the card that
+   * moves while an upstream fetch fills in: its own output and its own state are both unchanged,
+   * so every selector above returns exactly what it returned before and zustand skips the render.
+   *
+   * **Constant for everything that is not a viewer**, which is what keeps the cost proportional
+   * to the scene rather than to the graph. A publish is four times a second and re-rendering a
+   * card also costs two `nodeInputs` walks (a `find` over the nodes plus an `edgeInto` scan per
+   * port), so on a sixty-node graph the ungated version was tens of thousands of array scans a
+   * second to repaint the two cards that could have changed. `def` is stable per node and the
+   * selector still returns a primitive — invariant 7 holds either way.
+   */
+  const previewable = getNodeDef(node.type)
+  const drawsPreviews = previewable !== undefined && isViewer(previewable)
+  void useGraphStore((s) => (drawsPreviews ? s.previewVersion : 0))
   // A number or undefined, so the snapshot is a primitive — invariant 7.
   const fetchedAt = useGraphStore((s) => {
     void s.runVersion

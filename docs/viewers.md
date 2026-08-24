@@ -833,6 +833,24 @@ follow — image Y increases ventrally, so a +Y up shows every brain upside down
 the trackball has no up constraint, and a re-frame restores it so one after a roll does not land
 the new scene on its side.
 
+### The scene fills in as it downloads
+
+The card draws what has arrived while the fetch is still running — see **A partial result** in
+[core.md](core.md) for the mechanism. Two consequences that belong here rather than there:
+
+**Mesh items are keyed by id, not by id-and-index.** `onPartial` publishes what has arrived *in
+final order*, which is a sparse list that gets denser: body 40 appears at index 3 and then at
+index 27 as the ones before it land. Folding the index into the React key made every one of those
+a different component — unmounted, and its `BufferGeometry` rebuilt — so a 300-body fill would
+rebuild the whole scene a dozen times over for geometry that never changed. The index survives
+only as a fallback for an item with no id.
+
+**Skeletons pay a real cost per publish and meshes do not.** `SkeletonLines` is one merged
+`LineSegments` for the whole channel, memoised on the value's identity — and a partial mints a
+fresh identity by definition, so every publish rebuilds the merged vertex buffer. Meshes are a
+component per body with its own memo, so a publish costs only the new ones. That asymmetry is
+why the publish interval is a quarter second rather than a frame.
+
 ### The camera is framed once, then left alone
 
 `CameraRig` replaced a "re-frame whenever the extent changes" rule that sounded helpful and was

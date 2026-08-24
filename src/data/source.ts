@@ -281,6 +281,20 @@ export interface GeometryRequest {
    * `CachedTableSpec.onFetched`: the stored time for a hit, `Date.now()` for a fresh read.
    */
   onFetched?: (at: number) => void
+  /**
+   * Hand back a partial answer as bodies land, so the scene fills instead of appearing at once.
+   *
+   * The same shape this call will eventually resolve to, holding a subset of the items **in the
+   * order the full answer will use** — the node wires it straight to `ctx.publish`, and the
+   * renderer keys items positionally, so an out-of-order partial would tear down and rebuild
+   * every `BufferGeometry` after it. `cachedGeometry`'s `onPartial` satisfies that by
+   * construction and rate-limits the calls; a source should not be inventing its own.
+   *
+   * Only the fan-out fetches call it. `fetchSynapses` inherits it through `SynapseRequest` and
+   * never will: a synapse cloud is one query for the whole set, so there is no arrival to report
+   * until there is an answer.
+   */
+  onPartial?: (partial: SkeletonsValue | MeshesValue) => void
   signal?: AbortSignal
 }
 

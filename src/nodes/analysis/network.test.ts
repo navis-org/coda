@@ -431,6 +431,7 @@ function evalContext(def: NodeDefinition, params: ParamValues, edges: TableValue
     params,
     refresh: false,
     reportFetched: () => undefined,
+    publish: () => undefined,
     input: (portId) => (portId === 'edges' ? edges : undefined),
     inputKey: (portId) => (portId === 'edges' ? 'edges-key' : undefined),
     column: (paramId) => {

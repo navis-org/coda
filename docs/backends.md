@@ -13,6 +13,38 @@ read it before adding a fourth backend's geometry path, because getting the key 
 both directions: too narrow and nothing ever hits, too broad and a body is served at a detail
 level nobody asked for.
 
+**Three of the four fan-outs also stream.** `cachedGeometry`'s `fetch` hands each body over
+through `deliver` as it lands rather than returning a map at the end, so a source can build a
+partial answer and pass it to `GeometryRequest.onPartial` — see **A partial result** in
+[core.md](core.md). neuPrint skeletons, neuPrint meshes and CAVE meshes are all one independent
+request per body and stream from the first arrival. Two do not:
+
+- **Precomputed multi-resolution meshes** stream only their fragment sweep. `chooseLod` sums
+  `totalBytes` across the whole batch, so no fragment can be requested until the last manifest
+  has landed — and measured against hemibrain at 300 bodies, the manifest sweep is 1,913 ms of a
+  2,381 ms cold run. A re-run with the manifests already cached streams from the start, because
+  they get their own cache entry and are level-independent. Breaking the barrier properly means
+  changing what `Detail` *means* — a per-body byte budget, or a level committed from a prefix of
+  the manifests — which is a semantics decision, not plumbing.
+- **CAVE level-2 skeletons cannot stream at all.** `readL2Skeletons` is not a per-neuron fan-out
+  that happens to be batched: it reads every neuron's chunk graph, pools the chunk ids across the
+  whole set, and reads their coordinates in as few requests as it takes. No skeleton exists until
+  that pooled read lands. Making it streamable means reading attributes per neuron — more
+  requests for a slower result, which is the opposite of the trade that made the batching worth
+  writing.
+
+A source that streams starts its **attribute** query alongside the geometry and hands the promise
+to `cachedGeometry` as `readyBefore`; nothing publishes until it settles. A partial assembled
+without those rows carries a null `type` for every body, so a scene set to colour by type fills
+in grey and then restyles itself wholesale when the last body arrives — and awaiting them
+*before* the fetch is worse, since on CAVE's cold path that is a 139,255-row index build standing
+between the user and the first byte of geometry.
+
+The rule is in the shared layer because all three sources need it and each had grown its own
+spelling of "has it landed" — a boolean beside a nullable result, a shadow copy of the awaited
+value, and a re-derivation of the condition that decided whether to fetch at all. Settled rather
+than fulfilled: a source that could not label its bodies should still draw them.
+
 **`fetchRoiMeshes` is the exception, and it is a gap rather than a decision.** Region shells are
 the largest download in the app — 29 MB for hemibrain's primary set, 62 MB for male-CNS's — and
 adding one region to the `ROI Meshes` picker re-fetches every other one, which is exactly the case

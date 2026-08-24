@@ -84,6 +84,52 @@ describe('the inspector stands a WebGL viewer down', () => {
   })
 })
 
+/**
+ * The precondition for a streamed scene, which is a DOM fact and so visible here.
+ *
+ * `neuron.skeletons` publishes partial values through `ctx.publish` while it is still fetching;
+ * the growing value lands on its output port and the 3D View card draws it *without the 3D View
+ * node having run*. That only works if this branch sits above `ValuePreview`'s `!value` guard —
+ * the node's own output is the selection table, which is empty until it evaluates, one whole
+ * scheduler step after the geometry arrived.
+ *
+ * Same failure shape as `out.rois` and `out.datasetSummary` before it, and the same reason a
+ * suite full of tests that render `Viewer3D` directly would never see it.
+ */
+describe('a 3D scene draws before its own node has run', () => {
+  function card(inputValues: Record<string, unknown>) {
+    const def = requireNodeDef('out.viewer3d')
+    const params = defaultParams(def)
+    return render(
+      <ValuePreview
+        node={{ id: 'v', type: 'out.viewer3d', position: { x: 0, y: 0 }, params } as never}
+        value={undefined}
+        ctx={makeInferContext(def, params, { skeletons: T.skeletons() })}
+        inputValues={inputValues as never}
+      />,
+    )
+  }
+
+  it('draws what is on its input port while its own output is still empty', async () => {
+    const skeletons = await new MockSource({ latencyMs: 0 }).fetchSkeletons({
+      datasetId: 'hemibrain-mini',
+      neuronIds: ['1', '2', '3'],
+    })
+    card({ skeletons })
+    // The Suspense fallback of the lazy WebGL chunk is the tell that a viewer was mounted;
+    // jsdom has no WebGL, so this is as far as the scene itself gets.
+    expect(screen.getByText(/loading 3D renderer/)).toBeTruthy()
+    expect(screen.queryByText(/No result yet/)).toBeNull()
+  })
+
+  it('still says so when nothing has arrived on any port', () => {
+    // The other half of the gate: drawing unconditionally would stand up a WebGL context on
+    // every 3D View in a graph that has never been run, to show an empty box.
+    card({})
+    expect(screen.getByText(/No result yet/)).toBeTruthy()
+  })
+})
+
 describe('a card does not draw while the overlay owns its node', () => {
   beforeEach(() => {
     clearStorage()

@@ -632,6 +632,51 @@ export class CatmaidSource implements DataSource {
      * declares `dataCache` and the card carries a `cached 12m ago ⟳` badge. Nothing here ages
      * silently; it just does not expire on its own.
      */
+    /*
+     * The label index, started here rather than awaited after the download.
+     *
+     * It was already the last thing this method did; starting it alongside the fetch costs
+     * nothing (it is cached and shares its in-flight promise) and is what lets a partial answer
+     * carry real `name`/`type`/`instance` columns. `readyBefore` below is what holds the first
+     * publish until it settles — a project with no annotations legitimately resolves to nothing,
+     * so "has it landed" is the promise's business rather than a truthiness test on the result.
+     */
+    let index: Awaited<ReturnType<CatmaidSource['labelIndex']>> | undefined
+    const indexReady = this.labelIndex(req.datasetId, options)
+      .catch(() => undefined)
+      .then((i) => (index = i))
+
+    /** The same walk for a partial and for the final answer — see `NeuPrintSource`. */
+    const assemble = (pairs: ReadonlyArray<[string, SkeletonGeometry]>): SkeletonsValue => {
+      const items = pairs.map(([, item]) => item)
+      const rows: Array<Record<string, CellValue>> = pairs.map(([id, item]) => {
+        const labels = index?.labels.get(Number(id)) ?? EMPTY_LABELS
+        return {
+          [ID_COLUMN_NAME]: Number(id),
+          name: labels.name,
+          type: labels.type,
+          instance: labels.instance,
+          points: item.parents.length,
+          /*
+           * Measured from the geometry rather than fetched. `cableLength` is shared with the
+           * neuPrint decoder and the mock so the three cannot disagree, the points are already
+           * nanometres, and the tree is in hand — so the alternative was an extra round trip
+           * against a shared community server for a number already sitting in memory.
+           */
+          cableLength: cableLength(item),
+        }
+      })
+      return {
+        kind: 'skeletons',
+        items,
+        attributes: tableFromRows(this.schemas.morphology, rows),
+        bounds: boundsOf(items.map((item) => item.positions)),
+        // Project coordinates are nanometres — see `POINTS_ARE_NM`. Declared rather than left
+        // absent, because NBLAST refuses anything that is not `nm` and absent means unknown.
+        ...this.frame(req.datasetId),
+      }
+    }
+
     let done = 0
     const skeletons = await cachedGeometry<SkeletonGeometry>({
       ids: ids.map(String),
@@ -649,47 +694,20 @@ export class CatmaidSource implements DataSource {
        * what the cache was for. Labels stay outside, because they come from the project-wide
        * annotation index rather than from the skeleton.
        */
-      fetch: async (missing) => {
-        const out = new Map<string, SkeletonGeometry>()
+      readyBefore: indexReady,
+      onPartial: req.onPartial && ((pairs) => req.onPartial?.(assemble(pairs))),
+      fetch: async (missing, deliver) => {
         await mapWithConcurrency(missing, SKELETON_CONCURRENCY, async (id) => {
           const skeleton = await compactSkeleton(this.server, projectId, Number(id), false, options)
           done += 1
           req.onProgress?.(done / missing.length, 'skeletons')
-          out.set(id, decodeCompactSkeleton(id, skeleton))
+          deliver(id, decodeCompactSkeleton(id, skeleton))
         })
-        return out
       },
     })
 
-    const index = await this.labelIndex(req.datasetId, options).catch(() => undefined)
-    const items = skeletons.ordered.map(([, item]) => item)
-    const rows: Array<Record<string, CellValue>> = skeletons.ordered.map(([id, item]) => {
-      const labels = index?.labels.get(Number(id)) ?? EMPTY_LABELS
-      return {
-        [ID_COLUMN_NAME]: Number(id),
-        name: labels.name,
-        type: labels.type,
-        instance: labels.instance,
-        points: item.parents.length,
-        /*
-         * Measured from the geometry rather than fetched. `cableLength` is shared with the
-         * neuPrint decoder and the mock so the three cannot disagree, the points are already
-         * nanometres, and the tree is in hand — so the alternative was an extra round trip
-         * against a shared community server for a number already sitting in memory.
-         */
-        cableLength: cableLength(item),
-      }
-    })
-
-    return {
-      kind: 'skeletons',
-      items,
-      attributes: tableFromRows(this.schemas.morphology, rows),
-      bounds: boundsOf(items.map((item) => item.positions)),
-      // Project coordinates are nanometres — see `POINTS_ARE_NM`. Declared rather than left
-      // absent, because NBLAST refuses anything that is not `nm` and absent means unknown.
-      ...this.frame(req.datasetId),
-    }
+    await indexReady
+    return assemble(skeletons.ordered)
   }
 
   /**

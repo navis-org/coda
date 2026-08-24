@@ -897,44 +897,62 @@ export class CaveSource implements DataSource {
      * it goes in the key. `decimateGridFor` depends on both the triangle budget and the batch
      * size, so a scene grown from twenty neurons to forty legitimately re-reads them all.
      */
+    // Started alongside the download rather than before it, and nothing publishes until it lands
+    // — see `morphologyTypes`.
+    let types: Map<string, string> | undefined
+    const typesReady = this.morphologyTypes(req).then((t) => (types = t))
+
+    /**
+     * The whole value from one walk, so a partial and the final answer cannot build it two ways.
+     *
+     * Items carry their own id rather than being zipped against a second list by index — the
+     * shape `NeuPrintSource.fetchMeshes` already uses, and the one that cannot fall out of step.
+     * `detail` is the only field a partial has no honest answer for, since it describes the
+     * whole batch, so it arrives as an argument rather than being recomputed here.
+     */
+    const assemble = (
+      pairs: ReadonlyArray<[string, Omit<MeshGeometry, 'id'>]>,
+      detail?: MeshesValue['detail'],
+    ): MeshesValue => {
+      const items: MeshGeometry[] = pairs.map(([id, mesh]) => ({ id, ...mesh }))
+      return {
+        kind: 'meshes',
+        items,
+        attributes: this.morphologyTable(req, items, types),
+        bounds: boundsOf(items.map((i) => i.positions)),
+        ...(detail ? { detail } : {}),
+        // Nanometres, and not by conversion: a graphene fragment decodes to world coordinates.
+        ...this.frame(req.datasetId),
+      }
+    }
+
     let done = 0
-    const fetched = await cachedGeometry<{ positions: Float32Array; indices: Uint32Array }>({
+    const fetched = await cachedGeometry<Omit<MeshGeometry, 'id'>>({
       ids: req.neuronIds,
       key: (id) => `cave:${this.id}:${req.datasetId}:mesh:${grid}:${id}`,
       bytes: (m) => byteLengthOf(m.positions, m.indices),
       refresh: req.refresh,
       onFetched: req.onFetched,
-      fetch: async (missing) => {
-        const out = new Map<string, { positions: Float32Array; indices: Uint32Array }>()
+      readyBefore: typesReady,
+      onPartial: req.onPartial && ((pairs) => req.onPartial?.(assemble(pairs))),
+      fetch: async (missing, deliver) => {
         await mapWithConcurrency(missing, MESH_CONCURRENCY, async (neuronId) => {
           const mesh = await readGrapheneMesh(source, neuronId, grid, fragmentLimit, options)
           req.onProgress?.(++done / missing.length, `${done}/${missing.length} meshes`)
-          if (mesh) out.set(neuronId, { positions: mesh.positions, indices: mesh.indices })
+          if (mesh) deliver(neuronId, { positions: mesh.positions, indices: mesh.indices })
         })
-        return out
       },
     })
 
-    // One list carrying its own id, rather than a second list of ids zipped by index — the shape
-    // `NeuPrintSource.fetchMeshes` already uses, and the one that cannot fall out of step.
-    const items: MeshGeometry[] = fetched.ordered.map(([id, mesh]) => ({ id, ...mesh }))
-    const triangles = items.reduce((sum, item) => sum + item.indices.length / 3, 0)
-
-    return {
-      kind: 'meshes',
-      items,
-      attributes: await this.morphologyAttributes(req, items),
-      bounds: boundsOf(items.map((i) => i.positions)),
-      /*
-       * One level, and decimated — which the caption has to say. Graphene publishes supervoxel
-       * fragments at full resolution, so `lod`/`levels` describe nothing here; what a reader
-       * needs to know is that 98% of the triangles were merged away, on the same rule that keeps
-       * `labels thinned` and `cells merged` on screen.
-       */
-      detail: { lod: 0, levels: 1, triangles, decimated: true },
-      // Nanometres, and not by conversion: a graphene fragment decodes to world coordinates.
-      ...this.frame(req.datasetId),
-    }
+    const triangles = fetched.ordered.reduce((sum, [, m]) => sum + m.indices.length / 3, 0)
+    await typesReady
+    /*
+     * One level, and decimated — which the caption has to say. Graphene publishes supervoxel
+     * fragments at full resolution, so `lod`/`levels` describe nothing here; what a reader needs
+     * to know is that 98% of the triangles were merged away, on the same rule that keeps `labels
+     * thinned` and `cells merged` on screen.
+     */
+    return assemble(fetched.ordered, { lod: 0, levels: 1, triangles, decimated: true })
   }
 
   /**
@@ -994,16 +1012,26 @@ export class CaveSource implements DataSource {
       bytes: (s) => byteLengthOf(s.positions, s.radii, s.parents),
       refresh: req.refresh,
       onFetched: req.onFetched,
-      fetch: async (missing) => {
+      /*
+       * No `onPartial`, and this is the one geometry fetch that cannot have one.
+       *
+       * `readL2Skeletons` is not a per-neuron fan-out that happens to be batched: it reads every
+       * neuron's chunk graph, pools the chunk ids across the whole set, and reads their
+       * coordinates in as few requests as it takes (`ATTRIBUTE_BATCH`). No skeleton exists until
+       * that pooled read lands, so there is nothing to hand over early. Making it streamable
+       * means reading attributes per neuron, which is more requests for a slower result — the
+       * opposite trade to the one that made the batching worth writing.
+       */
+      fetch: async (missing, deliver) => {
         const read = await readL2Skeletons(source, missing, options, req.onProgress)
-        return new Map(read.map((item) => [item.id, item]))
+        for (const item of read) deliver(item.id, item)
       },
     })
     const items = skeletons.ordered.map(([, item]) => item)
     return {
       kind: 'skeletons',
       items,
-      attributes: await this.morphologyAttributes(req, items),
+      attributes: this.morphologyTable(req, items, await this.morphologyTypes(req)),
       bounds: boundsOf(items.map((i) => i.positions)),
       // The cache publishes `rep_coord_nm`, so no conversion happens anywhere.
       ...this.frame(req.datasetId),
@@ -1121,21 +1149,35 @@ export class CaveSource implements DataSource {
    * encoding reads — so a mesh set with no type column would draw in one colour with a picker
    * offering nothing. The index is already in hand by the time anyone fetches morphology.
    */
-  private async morphologyAttributes(
-    // Only the id and the point count are read, which both geometry kinds carry — so meshes and
-    // skeletons share this rather than each building an attribute table that could disagree
-    // about which columns a morphology row has.
+  /**
+   * The type lookup a morphology attribute table needs, or nothing when the chain supplies it.
+   *
+   * With a chain wired its labels *are* the labels, so `type` comes from `labelsFor` and the
+   * datastack's index is neither needed nor consulted. It was awaited unconditionally and then
+   * overwrote the chain's own `type` one line later — the opposite of what the socket promises,
+   * and on a cold path (Meshes fed by an id list that never went through Find Neurons) it built
+   * a whole 139,255-row index to label twenty meshes.
+   *
+   * Separate from the table build so that the streaming path can start it alongside the download
+   * and publish once it lands, rather than either blocking the download on it or publishing a
+   * scene whose every `type` is null and then restyling it wholesale.
+   */
+  private async morphologyTypes(req: GeometryRequest): Promise<Map<string, string> | undefined> {
+    return req.annotations ? undefined : await this.typeLookup(req)
+  }
+
+  /**
+   * The table itself, synchronous, so a partial answer can be assembled inside a callback.
+   *
+   * Only the id and the point count are read, which both geometry kinds carry — so meshes and
+   * skeletons share this rather than each building an attribute table that could disagree about
+   * which columns a morphology row has.
+   */
+  private morphologyTable(
     req: GeometryRequest,
     items: ReadonlyArray<{ id: string; positions: Float32Array }>,
-  ): Promise<TableValue> {
-    /*
-     * With a chain wired its labels *are* the labels, so `type` comes from `labelsFor` and the
-     * datastack's index is neither needed nor consulted. It was awaited unconditionally and then
-     * overwrote the chain's own `type` one line later — the opposite of what the socket promises,
-     * and on a cold path (Meshes fed by an id list that never went through Find Neurons) it built
-     * a whole 139,255-row index to label twenty meshes.
-     */
-    const types = req.annotations ? undefined : await this.typeLookup(req)
+    types: Map<string, string> | undefined,
+  ): TableValue {
     return tableFromRows(
       withAnnotations(this.schemasFor(req.datasetId), req.annotations?.table.schema).morphology,
       items.map((item) => ({

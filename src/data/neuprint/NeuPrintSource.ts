@@ -64,7 +64,7 @@ import { datasetSummaryKey, loadCachedTable, neuronIndexKey } from '../neuronInd
 import { geometryFrame } from '../transforms/spaces'
 import { fetchRoiMeshSet } from './roiMeshes'
 import { superRoisFrom } from './roiHierarchy'
-import type { MeshSource } from '../precomputed'
+import type { MeshResult, MeshSource } from '../precomputed'
 import { DEFAULT_TRIANGLE_BUDGET, fetchMeshes, openMeshSource } from '../precomputed'
 import { byteLengthOf, cachedGeometry } from '../geometryCache'
 import {
@@ -115,6 +115,44 @@ import { mapWithConcurrency } from '../concurrency'
  * fifty sockets against a server other people are using.
  */
 const SKELETON_CONCURRENCY = 6
+
+/**
+ * The neuron columns a morphology attribute row carries, named once.
+ *
+ * It was written out three times — the query's return type, its accumulator, and now the
+ * assembler that turns pairs into a value — and the three had to agree for a column to reach a
+ * colour picker at all. Naming it is what lets the streaming path state that a partial is built
+ * from the same rows as the final answer rather than merely look as if it is.
+ */
+interface NeuronRow {
+  type: string | null
+  instance: string | null
+  status: string | null
+  size: number | null
+}
+
+/**
+ * The columns a morphology row shares between skeletons and meshes, appended in one place.
+ *
+ * The two assemblers differ only in `points` (nodes against vertices) and `cableLength` (a
+ * number against null); everything before that was the same five pushes written twice, which is
+ * invariant 3's failure one layer down — a new morphology column added to one and not the other
+ * gives an attribute table and an item list that disagree, visible only after a run.
+ */
+function pushNeuronRow(
+  data: Record<string, ColumnData>,
+  neuronId: string,
+  row: NeuronRow | undefined,
+): void {
+  // The column is `i64` because neuPrint's ids are nine to eleven digits and exact as doubles —
+  // invariant 8's "what a source publishes does not change". A source whose ids are wider
+  // declares `str` and pushes `neuronId` itself.
+  data['neuronId']!.push(Number(neuronId))
+  data['type']!.push(row?.type ?? null)
+  data['instance']!.push(row?.instance ?? null)
+  data['status']!.push(row?.status ?? null)
+  data['size']!.push(row?.size ?? null)
+}
 
 /**
  * A neuron id out of a Cypher response, as the same decimal text a `NeuronId` carries.
@@ -766,8 +804,42 @@ export class NeuPrintSource implements DataSource {
      * The attribute query is not cached and stays one round trip for the whole set — see
      * `fetchNeuronRows`.
      */
-    const [attributes, skeletons] = await Promise.all([
-      this.fetchNeuronRows(req.datasetId, req.neuronIds, req.signal),
+    /*
+     * Assembly hoisted out of the return, because a partial answer is the same walk over fewer
+     * pairs. Writing it twice is what invariant 3's reasoning warns about one layer down: the
+     * attribute table and the item list are two halves of one value, and a partial that built
+     * them differently would colour the streamed scene by a different rule than the final one.
+     */
+    const assemble = (
+      pairs: ReadonlyArray<[string, SkeletonGeometry]>,
+      meta: Map<string, NeuronRow>,
+    ): SkeletonsValue => {
+      const data: Record<string, ColumnData> = {}
+      for (const col of schema.columns) data[col.name] = []
+      for (const [neuronId, item] of pairs) {
+        pushNeuronRow(data, neuronId, meta.get(neuronId))
+        data['points']!.push(item.parents.length)
+        data['cableLength']!.push(cableLength(item))
+      }
+      const items = pairs.map(([, item]) => item)
+      return {
+        kind: 'skeletons',
+        items,
+        attributes: makeTable(schema, data),
+        bounds: boundsOf(items.map((item) => item.positions)),
+        ...this.frame(req.datasetId),
+      }
+    }
+
+    // Started here so it races the geometry rather than gating it; `readyBefore` is what holds
+    // the first publish until it lands. `rows` is only how the partial reads what landed.
+    let rows: Map<string, NeuronRow> = new Map()
+    const attributesReady = this.fetchNeuronRows(req.datasetId, req.neuronIds, req.signal).then(
+      (r) => (rows = r),
+    )
+
+    const [, skeletons] = await Promise.all([
+      attributesReady,
       cachedGeometry<SkeletonGeometry>({
         ids: req.neuronIds,
         // The voxel scale is folded in because it is applied *before* the geometry is stored: a
@@ -777,9 +849,10 @@ export class NeuPrintSource implements DataSource {
         bytes: (s) => byteLengthOf(s.positions, s.radii, s.parents),
         refresh: req.refresh,
         onFetched: req.onFetched,
-        fetch: async (missing) => {
+        readyBefore: attributesReady,
+        onPartial: req.onPartial && ((ordered) => req.onPartial?.(assemble(ordered, rows))),
+        fetch: async (missing, deliver) => {
           let fetched = 0
-          const out = new Map<string, SkeletonGeometry>()
           await mapWithConcurrency(missing, SKELETON_CONCURRENCY, async (neuronId) => {
             throwIfAborted(req.signal)
             const swc = await fetchSkeleton(req.datasetId, neuronId, this.options(req.signal))
@@ -796,39 +869,15 @@ export class NeuPrintSource implements DataSource {
              * bodies were asked for.
              */
             req.onProgress?.(++fetched / missing.length, `${fetched}/${missing.length} skeletons`)
-            out.set(neuronId, skeleton)
+            deliver(neuronId, skeleton)
           })
-          return out
         },
       }),
     ])
 
     // `ordered` is already in the *requested* order rather than the order the network answered,
     // so a partly-cached batch draws the same way a fresh one does. See `CachedGeometryResult`.
-    const data: Record<string, ColumnData> = {}
-    for (const col of schema.columns) data[col.name] = []
-    for (const [neuronId, item] of skeletons.ordered) {
-      const meta = attributes.get(neuronId)
-      // The column is `i64` because neuPrint's ids are nine to eleven digits and exact as
-      // doubles — invariant 8's "what a source publishes does not change". A source whose ids
-      // are wider declares `str` and pushes `neuronId` itself.
-      data['neuronId']!.push(Number(neuronId))
-      data['type']!.push(meta?.type ?? null)
-      data['instance']!.push(meta?.instance ?? null)
-      data['status']!.push(meta?.status ?? null)
-      data['size']!.push(meta?.size ?? null)
-      data['points']!.push(item.parents.length)
-      data['cableLength']!.push(cableLength(item))
-    }
-
-    const items = skeletons.ordered.map(([, item]) => item)
-    return {
-      kind: 'skeletons',
-      items,
-      attributes: makeTable(schema, data),
-      bounds: boundsOf(items.map((item) => item.positions)),
-      ...this.frame(req.datasetId),
-    }
+    return assemble(skeletons.ordered, rows)
   }
 
   async fetchSynapses(req: SynapseRequest): Promise<PointsValue> {
@@ -913,12 +962,54 @@ export class NeuPrintSource implements DataSource {
       )
     }
 
-    const [attributes, result] = await Promise.all([
-      this.fetchNeuronRows(req.datasetId, req.neuronIds, req.signal),
+    /** Same two halves from the same walk, for a partial and for the final answer alike. */
+    const assemble = (
+      meshes: readonly MeshResult[],
+      meta: Map<string, NeuronRow>,
+      detail?: { lod: number; levels: number; triangles: number },
+    ): MeshesValue => {
+      const data: Record<string, ColumnData> = {}
+      for (const col of schema.columns) data[col.name] = []
+      for (const mesh of meshes) {
+        pushNeuronRow(data, mesh.neuronId, meta.get(mesh.neuronId))
+        // `points` is vertices here, matching what a mesh actually has.
+        data['points']!.push(mesh.positions.length / 3)
+        data['cableLength']!.push(null)
+      }
+      return {
+        kind: 'meshes',
+        items: meshes.map((mesh) => ({
+          id: mesh.neuronId,
+          positions: mesh.positions,
+          indices: mesh.indices,
+        })),
+        attributes: makeTable(schema, data),
+        bounds: boundsOf(meshes.map((mesh) => mesh.positions)),
+        ...(detail ? { detail } : {}),
+        ...this.nmFrame(req.datasetId),
+      }
+    }
+
+    // Raced rather than awaited first, and held by `readyBefore` — see `fetchSkeletons`.
+    let rows: Map<string, NeuronRow> = new Map()
+    const attributesReady = this.fetchNeuronRows(req.datasetId, req.neuronIds, req.signal).then(
+      (r) => (rows = r),
+    )
+
+    const [, result] = await Promise.all([
+      attributesReady,
       fetchMeshes(source, req.neuronIds, {
         ...(req.signal ? { signal: req.signal } : {}),
         ...(req.refresh ? { refresh: true } : {}),
         ...(req.onFetched ? { onFetched: req.onFetched } : {}),
+        /*
+         * No `detail` on a partial. The caption reads "level 3 of 4 · 1.4M triangles", and the
+         * triangle count is only true of the whole batch — a growing one would tick upward and
+         * read as the level changing under the viewer, which is the one thing that caption exists
+         * to rule out. It arrives with the complete answer.
+         */
+        readyBefore: attributesReady,
+        onPartial: req.onPartial && ((meshes) => req.onPartial?.(assemble(meshes, rows))),
         triangleBudget: req.triangleBudget ?? DEFAULT_TRIANGLE_BUDGET,
         onProgress: (done, total, phase) => {
           req.onProgress?.(
@@ -929,34 +1020,13 @@ export class NeuPrintSource implements DataSource {
       }),
     ])
 
-    const data: Record<string, ColumnData> = {}
-    for (const col of schema.columns) data[col.name] = []
-    for (const mesh of result.meshes) {
-      const meta = attributes.get(mesh.neuronId)
-      data['neuronId']!.push(Number(mesh.neuronId))
-      data['type']!.push(meta?.type ?? null)
-      data['instance']!.push(meta?.instance ?? null)
-      data['status']!.push(meta?.status ?? null)
-      data['size']!.push(meta?.size ?? null)
-      // `points` is vertices here, matching what a mesh actually has.
-      data['points']!.push(mesh.positions.length / 3)
-      data['cableLength']!.push(null)
-    }
-
-    return {
-      kind: 'meshes',
-      items: result.meshes.map((mesh) => ({
-        id: mesh.neuronId,
-        positions: mesh.positions,
-        indices: mesh.indices,
-      })),
-      attributes: makeTable(schema, data),
-      bounds: boundsOf(result.meshes.map((mesh) => mesh.positions)),
-      ...(result.lod !== undefined && result.levels !== undefined
-        ? { detail: { lod: result.lod, levels: result.levels, triangles: result.triangles } }
-        : {}),
-      ...this.nmFrame(req.datasetId),
-    }
+    return assemble(
+      result.meshes,
+      rows,
+      result.lod !== undefined && result.levels !== undefined
+        ? { lod: result.lod, levels: result.levels, triangles: result.triangles }
+        : undefined,
+    )
   }
 
   /** Per-dataset scratch space, created on first use. Everything cached per dataset uses it. */
@@ -1032,26 +1102,8 @@ export class NeuPrintSource implements DataSource {
     datasetId: string,
     neuronIds: readonly string[],
     signal?: AbortSignal,
-  ): Promise<
-    Map<
-      string,
-      {
-        type: string | null
-        instance: string | null
-        status: string | null
-        size: number | null
-      }
-    >
-  > {
-    const out = new Map<
-      string,
-      {
-        type: string | null
-        instance: string | null
-        status: string | null
-        size: number | null
-      }
-    >()
+  ): Promise<Map<string, NeuronRow>> {
+    const out = new Map<string, NeuronRow>()
     if (neuronIds.length === 0) return out
     const cypher = [
       'MATCH (n:Neuron)',

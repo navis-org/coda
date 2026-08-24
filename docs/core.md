@@ -113,6 +113,57 @@ saved file, and carried to whoever you send the graph to — and that every node
 grows its own param. `dataset.*` and `core.tableFromUrl` still carry theirs; they are the obvious
 next candidates, and `refreshParam` stays for them.
 
+## A partial result, while the node is still running
+
+`ctx.publish(outputs)` puts a half-finished value on a node's output port without the node having
+returned. `neuron.skeletons` and `neuron.meshes` use it, so a 3D scene fills in as bodies land
+instead of appearing all at once at the end. Measured on 60 hand-traced FAFB skeletons through
+CATMAID: the scene went 7 → 10 → 19 → 22 → 29 → 38 → 45 → 55 → 60 over the 2.5 s the fetch took,
+where before it was 4.5 s of nothing and then everything.
+
+**Nothing downstream re-runs.** That is what makes it cheap enough to do four times a second, and
+it works because the 3D viewer draws from its **inputs** rather than from its own output —
+`ValuePreview`'s `out.viewer3d` branch reads `inputValues`. The value on the upstream port *is*
+the scene, so growing it is the whole mechanism. No re-entrant scheduler pass, no second
+evaluation, nothing new in a saved file.
+
+Three things had to be true, and each was a separate bug waiting:
+
+**A preview is not a cache entry.** It lives in `Scheduler.previews`, read *before* the cache by
+`output`/`outputs` and dropped the moment the node settles — onto the real result, or onto
+nothing. A partial stored under the node's provenance key would be the answer *for that key*
+(invariant 4), so a run cancelled at body 250 of 300 would leave a scene that looks complete and
+that no later run would even be scheduled to fix. The geometry is still in `geometryCache`, so
+dropping it costs a redraw rather than a re-download.
+
+**`onPreview` is its own host hook, not `onStateChange`.** A state change moves a badge, and a
+card subscribes to it through its *own* node's state; a preview changes what is on somebody
+else's card. `void s.runVersion` inside a selector subscribes to nothing on its own — zustand
+compares what the selector *returns* — so the 3D View card, whose own output and state are both
+unchanged while its upstream fills in, would never re-render. `previewVersion` is selected
+directly, as the primitive invariant 7 requires — and returned as a constant for anything that is
+not a viewer, so the repaint cost tracks the scene rather than the size of the graph.
+
+**The viewer branch sits above `ValuePreview`'s `!value` guard**, on `out.rois`' terms. This
+node's own output is the selection table, empty until it evaluates — one whole scheduler step
+after the geometry arrived. Below the guard the card could only ever draw a finished run. It is
+gated on an input actually being present, so a graph that has never run still says "No result
+yet" instead of standing up a WebGL context to draw an empty box.
+
+Rate-limiting lives in one place, `PUBLISH_INTERVAL_MS` in `geometryCache.ts`, because the cost
+is not local: every publish repaints every viewer card, and a skeleton channel rebuilds its one
+merged vertex buffer each time. Leading edge only and no timer — the complete answer is the
+trailing edge. It is per fetch rather than global, which is only safe because the scheduler runs
+nodes one at a time; two morphology nodes in a graph do not publish concurrently.
+
+**Re-assembling a partial has to be cheap, or the feature pays for itself twice.** Every publish
+rebuilds the whole value from every body that has arrived, so anything derived per body was being
+recomputed a dozen times over a fetch — `cableLength` (one `Math.hypot` per skeleton node),
+`boundsOf` (a pass over every vertex) and the skeleton segment count. All three are now memoised
+on the geometry's identity through a `WeakMap`, which is sound for the same reason
+`geometryCache` can hand back the array it holds rather than a copy: transforms build a new
+`Float32Array` instead of writing through their input.
+
 ## Auto-run
 
 A checkbox beside Run. On, every change re-runs the **whole** graph, expensive nodes included;

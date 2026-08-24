@@ -117,6 +117,12 @@ export const skeletonsNode = registerNode({
       // see `EvalContext.refresh` and `reportFetched`.
       ...(ctx.refresh ? { refresh: true } : {}),
       onFetched: ctx.reportFetched,
+      /*
+       * Straight onto the wire as bodies land. The port name has to be this node's own output
+       * port, because that is what the 3D viewer reads through `nodeInputs` — nothing downstream
+       * re-runs, so the value on the port *is* the scene. See `EvalContext.publish`.
+       */
+      onPartial: (partial) => ctx.publish({ skeletons: partial }),
       signal: ctx.signal,
     })
     return { skeletons }
@@ -201,6 +207,9 @@ export const meshesNode = registerNode({
       onProgress: ctx.progress,
       ...(ctx.refresh ? { refresh: true } : {}),
       onFetched: ctx.reportFetched,
+      // As above. On a multi-resolution source nothing arrives until the manifest sweep is done,
+      // because the level cannot be chosen before then — see `fetchMeshes`' `onPartial`.
+      onPartial: (partial) => ctx.publish({ meshes: partial }),
       signal: ctx.signal,
     })
     return { meshes }
