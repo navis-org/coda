@@ -40,7 +40,7 @@ export const joinNode = registerNode({
   category: 'transform',
   description: 'Annotate the left table with matching rows from the right table.',
   guide:
-    'Annotate the left table with matching rows from the right — cell types onto an edge list, your own annotations onto a query result. Type decides which rows survive: left keeps every left row, inner only the matched ones, outer every row of both sides, right every right row. A right-hand column whose name collides with one on the left gets a suffix rather than being dropped, because in a scientific pipeline an ugly name beats a column that quietly disappeared; a duplicated key annotates rather than multiplying, so only the first matching row is taken. Two inputs, chained for more.',
+    'Annotate the left table with matching rows from the right. Join type decides which rows survive: left keeps every left row, inner only matches, outer all rows, right every right row. Right-hand columns that collide get a suffix rather than being dropped. Chain for more tables.',
   cost: 'cheap',
   inputs: [
     { id: 'left', label: 'Left', type: T.table() },

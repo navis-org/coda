@@ -26,6 +26,13 @@ import '../nodes'
 import { EXAMPLES } from '../examples'
 import type { NodeCategory, NodeDefinition, ParamDef } from '../core/node'
 import { listableNodeDefs } from '../core/registry'
+/*
+ * Shared with the help figures, which print a parameter's value in the same awkward cases —
+ * `resolved live`, `first compatible`, an enum's option label. There was one copy here; a second
+ * would have been a second place to get them wrong. Headless, so it loads in Node at build time
+ * like the rest of this module.
+ */
+import { paramIsPicker, paramValueLabel } from '../help/paramText'
 import { socketStyle } from '../ui/socketStyle'
 import type { SocketFamily, SocketShape } from '../ui/socketStyle'
 
@@ -48,7 +55,7 @@ export interface GuideParam {
   advanced: boolean
   /** Cannot change what `evaluate` returns, so editing it stales nothing. */
   presentational: boolean
-  /** The default, rendered the way the card renders it — an enum shows its option's label. */
+  /** The default, rendered the way the card renders it — see `help/paramText.ts`. */
   value: string
   /** Draws as a dropdown or a column picker, so the preview gives it a ▾. */
   picker: boolean
@@ -94,41 +101,9 @@ function paramsOf(def: NodeDefinition): GuideParam[] {
       ...(p.help ? { help: p.help } : {}),
       advanced: p.advanced === true,
       presentational: p.presentational === true,
-      value: defaultLabel(p),
-      picker: p.kind === 'enum' || p.kind === 'column' || p.kind === 'columns',
+      value: paramValueLabel(p),
+      picker: paramIsPicker(p),
     }))
-}
-
-/**
- * What the card would show in the value chip.
- *
- * An enum prints its *option's* label rather than the stored value, because that is what the
- * picker shows and a guide that said `outputs` where the app says `downstream (outputs)` would
- * be describing a different control. Options can be computed rather than fixed — from the
- * resolved input types (Filter's operator list is dtype-aware), from a dataset listing that has
- * not arrived (every Version picker), or from another param (Custom CAVE's Materialization
- * follows its Datastack). None can be evaluated without a graph, so they resolve to the honest
- * answer rather than to a guess. Deliberately not "depends on the input", which was true of the
- * first case and of neither of the others.
- */
-function defaultLabel(p: ParamDef): string {
-  switch (p.kind) {
-    case 'enum': {
-      if (typeof p.options === 'function') return 'resolved live'
-      const hit = p.options.find((o) => o.value === p.default)
-      return hit?.label ?? p.options[0]?.label ?? '—'
-    }
-    case 'boolean':
-      return p.default ? 'on' : 'off'
-    case 'column':
-      return p.default || (p.optional ? 'none' : 'first compatible')
-    case 'columns':
-      return p.default.length ? p.default.join(', ') : 'all'
-    case 'ids':
-      return p.default.length ? `${p.default.length} selected` : 'none'
-    default:
-      return p.default === '' ? '—' : String(p.default)
-  }
 }
 
 function portsOf(ports: readonly NonNullable<NodeDefinition['inputs']>[number][]): GuidePort[] {

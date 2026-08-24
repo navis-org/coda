@@ -44,7 +44,7 @@ export const downloadNode = registerNode({
   category: 'utility',
   description: 'Write the incoming value to a file, on every run or on demand.',
   guide:
-    'Write whatever is on the wire to a file — CSV for a table, SWC for skeletons, OBJ for meshes, SVG or PNG for the chart in the node feeding it. Put it at the end of a chain and every run refreshes its own outputs, which is what makes a pipeline re-runnable tomorrow. It passes its input through, so it is a tap like the viewers; changing a filename costs no run, and pressing Run over an unchanged graph writes nothing.',
+    'Save whatever is connected to a file — CSV for tables, SWC for skeletons, OBJ for meshes, SVG or PNG for an upstream chart.',
   cost: 'expensive',
   // `T.any()`: a Download node refusing what it was wired to would be the one node in the tree
   // that cares what it is carrying, and it does not.

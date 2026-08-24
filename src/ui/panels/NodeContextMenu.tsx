@@ -1,6 +1,7 @@
 import { useRef } from 'react'
 
 import { getNodeDef, isAnnotation } from '../../core/registry'
+import { hasHelp } from '../../help/registry'
 import { useGraphStore } from '../../store/graphStore'
 import { useDismissOnOutside } from '../useDismiss'
 
@@ -111,6 +112,20 @@ export function NodeContextMenu({ screenPosition, nodeId, onClose }: NodeContext
       >
         Duplicate <kbd>⌘D</kbd>
       </button>
+      {/* Named "What this node does" rather than "Help", because a menu item called Help in an
+          app with three published guides is ambiguous about which of them it opens. */}
+      {def && hasHelp(def.type) && (
+        <>
+          <div className="context-menu__sep" />
+          <button
+            type="button"
+            className="context-menu__item"
+            onClick={act(() => store.openHelp(def.type))}
+          >
+            What this node does
+          </button>
+        </>
+      )}
       <div className="context-menu__sep" />
       <button
         type="button"

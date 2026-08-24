@@ -22,6 +22,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { makeInferContext } from '../../core/node'
 import { getNodeDef } from '../../core/registry'
 import { describeValue } from '../../core/values'
+import { hasHelp } from '../../help/registry'
 import { useGraphStore } from '../../store/graphStore'
 import { exportBaseName } from '../export'
 import { formatDuration } from '../format'
@@ -44,6 +45,7 @@ export function ViewerOverlay() {
   // the whole thing would change identity on every unrelated tick. See invariant 7.
   const styleOpen = useGraphStore((s) => s.panels.style)
   const togglePanel = useGraphStore((s) => s.togglePanel)
+  const openHelp = useGraphStore((s) => s.openHelp)
 
   const info = useGraphStore((s) => {
     void s.runVersion
@@ -148,6 +150,17 @@ export function ViewerOverlay() {
               title={styleOpen ? 'Hide the style panel' : 'Show the style panel'}
             >
               Style
+            </button>
+          )}
+          {hasHelp(node.type) && (
+            <button
+              type="button"
+              className="btn btn--ghost"
+              title={`What ${def.label} does, and what it assumes`}
+              aria-label={`Help for ${def.label}`}
+              onClick={() => openHelp(node.type)}
+            >
+              ?
             </button>
           )}
           <button

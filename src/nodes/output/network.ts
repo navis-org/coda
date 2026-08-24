@@ -38,7 +38,7 @@ export const networkViewNode = registerNode({
   category: 'visualisation',
   description: 'Node-link view of a network, with data-driven colour and size.',
   guide:
-    'The node-link drawing: neurons or types as discs, connections as links, laid out by force, layers, a circle or a grouped ring. Colour and size are data-driven through the styling panel, so a hub can be large and a class can be blue without leaving the viewer. Note that its three filters — minimum link weight, top N nodes, hide isolated — genuinely change what the node returns rather than only what it draws, which is why that tab carries a warning and everything downstream of it goes stale.',
+    'Draw an interactive network diagram. Let`s you pull out nodes for downstream analysis.',
   cost: 'cheap',
   /*
    * Tabs for the overlay's styling panel, Cytoscape's Style tab being the reference: the

@@ -165,12 +165,10 @@ export const selectedToNeuronsNode = define({
   inputLabel: 'Selected',
   description: 'Turn a Dendrogram selection into neurons.',
   guide:
-    'A Dendrogram selects branches, and a branch is a set of *names* — which is all a tree ' +
-    'knows about its leaves. This turns those names back into neurons, so the clade you picked ' +
-    'can go to a Neuroglancer link, a 3D view or a Skeletons fetch. Wire the neuron table that ' +
-    'was clustered into Neurons and set "Match on" to whatever NBLAST used for "Label by"; if ' +
-    'the tree is labelled by neuron id, which is the default, you can leave Neurons unwired and ' +
-    'the ids are read straight off. Every column of the matched neurons comes through.',
+    'A Dendrogram selects branch names, not neurons. This turns those names back into the ' +
+    'clustered neurons, ready for Neuroglancer, a 3D view, or Skeletons. Wire the original ' +
+    'neuron table and set "Match on" to what NBLAST used for "Label by"; if it was neuron ' +
+    'id (the default), leave Neurons unwired.',
 })
 
 export const clustersToNeuronsNode = define({
@@ -180,10 +178,8 @@ export const clustersToNeuronsNode = define({
   expects: 'cluster',
   description: 'Put cluster numbers back onto the neurons they belong to.',
   guide:
-    'Cut Tree gives one row per leaf with its cluster number, and a leaf is a name rather than ' +
-    'a neuron. This puts those numbers back onto the neurons — so Neuroglancer can colour ' +
-    'segments by cluster, a Filter can take one group, and Group By can count them. Wire the ' +
-    'neuron table that was clustered into Neurons and set "Match on" to whatever NBLAST used ' +
-    'for "Label by". Where a label names several neurons, as a cell type does, every one of ' +
-    'them comes back carrying that cluster.',
+    'Cut Tree gives cluster numbers for leaf names, not neurons. This maps those clusters ' +
+    'back onto the neurons they came from, so Neuroglancer can colour by cluster, Filter ' +
+    'can isolate a group, or Group By can count. Wire the original neuron table and set ' +
+    '"Match on" to what NBLAST used for "Label by".',
 })

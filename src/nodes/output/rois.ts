@@ -77,7 +77,7 @@ export const roisNode = registerNode({
   description:
     "The dataset's neuropils drawn together in a named anatomical plane, coloured by how completely each is traced.",
   guide:
-    'The dataset’s neuropils drawn together in a named anatomical plane — frontal, dorsal or lateral — coloured by how completely each is reconstructed, or simply by region. Answers “where is LO(R), and how much of it can I trust” in one picture. There is no free camera, and that is what makes it affordable: three fixed projections mean each region is fetched once, flattened, measured and then discarded, so a map costs kilobytes rather than the tens of megabytes the meshes themselves weigh.',
+    'Neuropils drawn together on a fixed anatomical plane — frontal, dorsal or lateral — that can be exploded to separate overlapping regions. Various coloring options including reconstruction completeness.',
   cost: 'cheap',
   // Landscape, unlike Profile's and Dataset Summary's portrait boxes: a fly brain is wider than
   // it is tall in every one of the three planes, so a portrait card wastes the axis the picture

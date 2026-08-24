@@ -39,16 +39,16 @@ export const linkageNode = registerNode({
   label: 'Linkage',
   category: 'analysis',
   description: 'Cluster a score matrix into a merge tree.',
+  /*
+   * Three sentences, for the reason NBLAST's is: this node has a help document, and the overlay
+   * prints this above it under a `TL;DR` label. What used to be here — the reordered second
+   * output, the automatic distance conversion — is in that document, where there is room to say
+   * why each matters. `help.test.ts` holds the ceiling.
+   */
   guide:
-    'Turn a matrix of how-alike-is-every-pair into a tree of what groups with what — the ' +
-    'usual next step after NBLAST, and it works on any square matrix over one population, ' +
-    'including an Adjacency of a set against itself. The tree records every merge rather than ' +
-    'a single grouping, so wire it to a Dendrogram to look at it and to Cut Tree to take ' +
-    'groups out of it at whichever level you want. The second output is the same matrix with ' +
-    'its rows and columns reordered to match the tree: send that to a Heatmap and the ' +
-    'clusters show up as blocks down the diagonal. Scores are turned into distances ' +
-    'automatically — a similarity of 1 is a distance of 0 — which is what the matrix says ' +
-    'about itself when it comes from NBLAST.',
+    'Perform hierarchical/agglomerative clustering on a distance or similarty matrix. ' +
+    'This is the usual next step after NBLAST, and works on any square matrix over one population. ' +
+    'Can be wired into a Dendrogram, Cut Tree, or Heatmap node to see the groups and their scores.',
   cost: 'expensive',
   inputs: [{ id: 'in', label: 'Matrix', type: T.matrix() }],
   outputs: [

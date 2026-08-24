@@ -21,7 +21,7 @@ export const roiCountsNode = registerNode({
   category: 'query',
   description: 'Pre/post synapse counts per ROI for the incoming neurons.',
   guide:
-    'Where these neurons put their synapses: one row per neuron per region, pre and post counted separately. Long form rather than wide, so it composes with Group By and Pivot instead of needing a reshape of its own, and so the column set does not change with the dataset’s region list. Note that neuPrint’s region counts nest — a synapse in LO(R) is counted again in OL(R) — so summing across every region roughly doubles the total.',
+    'Where these neurons put their synapses by region: one row per neuron per ROI, with pre and post separate. Long form composes with Group By and Pivot without needing a separate reshape. Region counts nest—each synapse is counted multiple times—so summing all rows roughly doubles the true total.',
   cost: 'expensive',
   inputs: [
     { id: 'dataset', label: 'Dataset', type: T.dataset() },

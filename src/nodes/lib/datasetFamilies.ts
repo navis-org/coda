@@ -217,7 +217,7 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     description:
       'Central brain of an adult female fly. The most heavily annotated fly connectome.',
     guide:
-      'The dataset most published fly circuit work is built on, and the one with the richest annotation: cell type, class, cell body fibre, soma radius, hemilineage. It is one hemisphere of the central brain, so a neuron whose partner sits on the other side has that partner truncated rather than missing — worth remembering before reading a low synapse count as weak.',
+      'Approximately one hemisphere of the central brain (with bits of the right optic lobe). Rich annotations: cell type, class, cell body fibre, soma radius, hemilineage, etc.',
     glyph: 'brain',
   },
   {
@@ -330,7 +330,7 @@ const CAVE_FAMILIES: DatasetFamily[] = [
     description:
       'Whole adult female fly brain, publicly released. Proofread neurons with hierarchical cell annotations.',
     guide:
-      'The public FlyWire segmentation of a whole female brain, read through CAVE rather than neuPrint — so it needs a CAVE token rather than a neuPrint one, and its version dropdown names a materialization rather than a release. Coda downloads its cell annotations once per dataset and searches them locally, so the first query waits and every one after it is immediate. Connectivity comes from a server-side roll-up of the synapse table; skeletons, meshes, synapses, paths and per-region counts are not wired up yet and the nodes that need them decline rather than failing.',
+      'Public FlyWire segmentation read through CAVE, so version is a materialization number. Cell annotations download once per dataset and search locally—first query waits, rest are instant. Skeletons, meshes, synapses, paths and per-region counts are not wired up; nodes that need them decline rather than fail.',
     glyph: 'brain',
     /*
      * Python only. `caveclient` is a faithful route in — the dataset cell is a real `CAVEclient`
@@ -370,7 +370,7 @@ const CATMAID_FAMILIES: DatasetFamily[] = [
     description:
       'Whole adult female fly brain, manually traced. Public tracings published on Virtual Fly Brain.',
     guide:
-      'The FAFB volume as traced in CATMAID and published by Virtual Fly Brain — a few thousand carefully reconstructed neurons rather than a whole-brain segmentation, which is the opposite trade from FlyWire on the same EM. CATMAID has no cell-type field, so Coda derives type and instance from the annotations a neuron carries, and everything else it carries lands in one searchable `annotations` column. The whole instance is indexed in about two seconds, so Explore is immediate; skeletons are densely traced and large, so the Skeletons node has a lower ceiling here than elsewhere. Reading needs no token, but CATMAID answers connectivity only over POST, which a browser cannot do anonymously — see docs/catmaid_vfb.md.',
+      'A few thousand carefully hand-traced neurons on the same FAFB volume as FlyWire—the opposite trade of curated depth for whole-brain coverage. No cell-type field; Coda derives type from annotations. Connectivity needs authenticated POST access.',
     glyph: 'brain',
   },
 ]

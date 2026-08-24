@@ -1,0 +1,300 @@
+/*
+ * Figures inside a help document.
+ *
+ * Lives beside the model rather than in `editor.css`, because the model is deliberately headless
+ * so a second surface — the node guide page, which has no React — can draw the same figures. A
+ * stylesheet that only the app's bundle imported would make that a rewrite instead of a
+ * renderer.
+ *
+ * Every colour is a token from `theme.css`. Nothing here picks a hue: the category tints, the
+ * socket families and the surfaces are the same variables the real card resolves, so a figure
+ * and the node it draws cannot disagree about what a Dataset socket looks like, and both follow
+ * a theme switch together. Same rule, and the same reason, as `nodeguide.css`.
+ *
+ * Geometry is *not* here. Card sizes and positions come from `figures.ts`, which computes them
+ * so they can be tested — jsdom performs no layout, so a figure laid out by CSS would be covered
+ * by nothing at all.
+ */
+
+.cfig {
+  position: relative;
+  margin: 14px 0;
+  /* The model's units are CSS pixels at 1:1; the box scrolls rather than scaling, because a
+     figure shrunk to fit is a figure whose 10px labels are 7px. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 2px;
+}
+
+.cfig__stage {
+  position: relative;
+}
+
+.cfig__wires {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.cfig__wire {
+  fill: none;
+  stroke: var(--socket-scalar);
+  stroke-width: 1.6;
+}
+.cfig__wire[data-fam='table'] {
+  stroke: var(--socket-table);
+}
+.cfig__wire[data-fam='matrix'] {
+  stroke: var(--socket-matrix);
+}
+.cfig__wire[data-fam='dataset'],
+.cfig__wire[data-fam='geometry'] {
+  stroke: var(--socket-dataset);
+}
+
+.cfig__card {
+  position: absolute;
+  box-sizing: border-box;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  overflow: hidden;
+  font-size: 10px;
+  line-height: 1.2;
+}
+/*
+ * The focus ring marks the node the document is about. An outline rather than a border, because
+ * a border would change the card's box and the geometry it is drawn at came from the model.
+ */
+.cfig__card[data-focus='true'] {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.cfig__head {
+  display: flex;
+  align-items: center;
+  height: 25px;
+  padding: 0 7px;
+  gap: 5px;
+  background: color-mix(in srgb, var(--cat) 16%, var(--surface-2));
+  border-bottom: 1px solid var(--border);
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cfig__card {
+  --cat: var(--cat-utility);
+}
+.cfig__card[data-category='dataset'] {
+  --cat: var(--cat-dataset);
+}
+.cfig__card[data-backend='cave'] {
+  --cat: var(--cat-dataset-cave);
+}
+.cfig__card[data-backend='catmaid'] {
+  --cat: var(--cat-dataset-catmaid);
+}
+.cfig__card[data-backend='mock'] {
+  --cat: var(--cat-dataset-mock);
+}
+.cfig__card[data-category='query'] {
+  --cat: var(--cat-query);
+}
+.cfig__card[data-category='transform'] {
+  --cat: var(--cat-transform);
+}
+.cfig__card[data-category='analysis'] {
+  --cat: var(--cat-analysis);
+}
+.cfig__card[data-category='visualisation'] {
+  --cat: var(--cat-visualisation);
+}
+
+.cfig__band {
+  padding-top: 5px;
+}
+.cfig__row {
+  display: flex;
+  align-items: center;
+  height: 17px;
+  padding: 0 6px;
+  gap: 5px;
+  color: var(--text-secondary);
+}
+.cfig__side {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+.cfig__side--out {
+  justify-content: flex-end;
+}
+.cfig__port-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/*
+ * The socket pips, transcribed from `.socket` in `editor.css` and `.pip` in `nodeguide.css` —
+ * three copies of one grammar, which is the price of three surfaces that must not import each
+ * other. The shapes are the load-bearing channel: only three chromatic families clear the
+ * colourblind gate, so `ring` and `circle` share a hue and differ in fill. See `colors.ts`.
+ */
+.cfig__pip {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--socket-scalar);
+  flex: none;
+  /* Half outside the card, like a real handle sitting on the card's edge. */
+  margin-left: -10px;
+  box-shadow: 0 0 0 1.5px var(--surface-2);
+}
+.cfig__side--out .cfig__pip {
+  margin-left: 0;
+  margin-right: -10px;
+}
+.cfig__pip[data-fam='table'] {
+  background: var(--socket-table);
+}
+.cfig__pip[data-fam='matrix'] {
+  background: var(--socket-matrix);
+}
+.cfig__pip[data-fam='dataset'],
+.cfig__pip[data-fam='geometry'] {
+  background: var(--socket-dataset);
+}
+.cfig__pip[data-shape='ring'] {
+  background: var(--surface-2);
+  border: 2px solid var(--socket-table);
+}
+.cfig__pip[data-shape='ring'][data-fam='matrix'] {
+  border-color: var(--socket-matrix);
+}
+.cfig__pip[data-shape='ring'][data-fam='dataset'],
+.cfig__pip[data-shape='ring'][data-fam='geometry'] {
+  border-color: var(--socket-dataset);
+}
+.cfig__pip[data-shape='ring'][data-fam='scalar'],
+.cfig__pip[data-shape='ring'][data-fam='any'] {
+  border-color: var(--socket-scalar);
+}
+.cfig__pip[data-shape='square'] {
+  border-radius: 2px;
+}
+.cfig__pip[data-shape='diamond'] {
+  border-radius: 1px;
+  transform: rotate(45deg);
+  width: 7px;
+  height: 7px;
+}
+.cfig__pip[data-shape='hex'] {
+  border-radius: 1px;
+  clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%);
+}
+.cfig__pip[data-shape='dot'] {
+  width: 5px;
+  height: 5px;
+}
+/* An optional input recedes, the same admission the guide's socket list makes. */
+.cfig__pip[data-req='false'] {
+  opacity: 0.45;
+}
+
+.cfig__param {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 17px;
+  padding: 0 7px;
+  gap: 6px;
+  color: var(--text-muted);
+}
+.cfig__param-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cfig__param-value {
+  flex: none;
+  max-width: 60%;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--surface-3, var(--surface-1));
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* A setting the figure's own source names: the one thing on the card the text is about. */
+.cfig__param[data-called='true'] .cfig__param-value {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  color: var(--text-primary);
+}
+.cfig__more {
+  height: 15px;
+  padding: 0 7px;
+  color: var(--text-muted);
+  font-size: 9.5px;
+}
+
+.cfig__caption {
+  margin: 6px 0 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+/* A figure that could not be built says so, rather than rendering as a gap. */
+.cfig__problems {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--status-error) 45%, transparent);
+  border-radius: 4px;
+  color: var(--status-error);
+  font-size: 11px;
+}
+.cfig__problems ul {
+  margin: 2px 0 0;
+  padding-left: 16px;
+}
+
+/* --- the settings figure --- */
+
+.cfig-params {
+  margin: 14px 0;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  overflow: hidden;
+}
+.cfig-params__row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(0, 2fr);
+  gap: 4px 14px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.cfig-params__row:last-child {
+  border-bottom: none;
+}
+.cfig-params__name {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.cfig-params__meta {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.cfig-params__help {
+  grid-column: 2;
+  color: var(--text-secondary);
+}

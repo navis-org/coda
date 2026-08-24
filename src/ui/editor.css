@@ -461,6 +461,40 @@
 }
 
 /*
+ * The help button. Same box as the fold, so the header's controls stay one row of equal squares,
+ * but muted further: it is the only one of the five that does nothing to the graph, and a `?`
+ * competing with `▶` for attention on every documented card would be a permanent distraction on
+ * a canvas somebody is working in.
+ *
+ * Rendered only where a document exists (`hasHelp`), which is what keeps the header from
+ * acquiring a fifth control everywhere to serve the handful of nodes that need one.
+ */
+.coda-node__help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  flex: none;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  opacity: 0.75;
+}
+.coda-node__help:hover {
+  background: var(--accent);
+  border-color: transparent;
+  color: #fff;
+  opacity: 1;
+}
+
+/*
  * Per-node run button. Enabled only when running would do something — a node's provenance
  * key covers its upstream, so `ok` means there is genuinely nothing to do and a live-looking
  * button would be a dead click.
@@ -4367,6 +4401,127 @@ a.viewer-actions__btn {
   text-decoration-thickness: 2px;
 }
 
+/*
+ * An internal cross-reference — `[Skeletons](#query.skeletons)` in a help document.
+ *
+ * A `<button>` rather than an `<a>`, because there is no such anchor on the page (see
+ * `MarkdownView`), which means every button reset has to be undone here or a link mid-sentence
+ * arrives with the browser's own font, a baseline of its own, and a box around it.
+ */
+.markdown__link--internal {
+  font: inherit;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  /* `baseline` rather than the default `middle`, or a link sits a pixel high in its line. */
+  vertical-align: baseline;
+}
+
+/* --- the extended blocks, which only a help document produces --- */
+
+.markdown__pre {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  line-height: 1.5;
+  /* Its own scroll container: a long line in a sample must not make the document scroll. */
+  overflow-x: auto;
+}
+
+/*
+ * A callout is a *tone*, and the tone is carried by a left rule plus a worded title — never by
+ * the background alone. Same rule as the run states on a node card: three-percent tints are
+ * indistinguishable in either theme, and a reader who cannot see the hue still needs to know
+ * whether they are reading an aside or a warning.
+ */
+.markdown__callout {
+  margin: 0 0 10px;
+  padding: 8px 12px;
+  border-left: 3px solid var(--cal);
+  border-radius: 0 4px 4px 0;
+  background: color-mix(in srgb, var(--cal) 9%, transparent);
+  --cal: var(--text-muted);
+}
+.markdown__callout[data-tone='warning'] {
+  --cal: var(--status-stale);
+}
+.markdown__callout[data-tone='tip'] {
+  --cal: var(--accent);
+}
+.markdown__callout-title {
+  margin-bottom: 3px;
+  color: var(--text-primary);
+  font-weight: 600;
+  font-size: 0.95em;
+}
+.markdown__callout-body {
+  font-size: inherit;
+}
+.markdown__callout-body > *:last-child {
+  margin-bottom: 0;
+}
+
+.markdown__table-scroll {
+  margin: 0 0 12px;
+  overflow-x: auto;
+}
+.markdown__table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.95em;
+}
+.markdown__table th,
+.markdown__table td {
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.markdown__table th {
+  color: var(--text-primary);
+  font-weight: 600;
+  border-bottom-color: var(--border-strong);
+  white-space: nowrap;
+}
+
+.markdown__figure {
+  margin: 0 0 12px;
+}
+/*
+ * A white plate under every figure image, and it is not cosmetic.
+ *
+ * The diagrams these carry are drawn on white or on transparency, with black ink — which in dark
+ * mode is either a bright rectangle with a hard edge or, worse, black ink on a dark surface and
+ * therefore invisible. The plate makes both render the same in either theme. Inverting instead
+ * was rejected: these figures use colour semantically (a red query against a black target), and
+ * an inverted red is a different claim.
+ */
+.markdown__figure img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  padding: 8px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.markdown__figure figcaption {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 0.92em;
+}
+/* An image whose file is not in `src/help/images` draws its alt text, and says it is standing
+   in for something rather than looking like a stray sentence. */
+.markdown__missing {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
 /* --------------------------------------------------------------------------
  * Minimap toggle
  * -------------------------------------------------------------------------- */
@@ -6459,4 +6614,117 @@ details[open] > summary.tile__label {
 .react-flow__edge.coda-edge--reference .react-flow__edge-path {
   stroke-dasharray: 2 4;
   opacity: 0.75;
+}
+
+/* --------------------------------------------------------------------------
+ * The help overlay
+ * -------------------------------------------------------------------------- */
+
+/*
+ * A reading surface, so it is narrower and shorter than the viewer overlay it shares a backdrop
+ * with. A viewer wants every pixel — a chart is the content — where a document has an optimal
+ * measure and gets worse past it; `max-width` on the panel rather than on the prose keeps the
+ * figures, which are wider than the text column, inside the same box.
+ */
+.help-panel {
+  /* `FIGURE_FIT_WIDTH` (988) plus this panel's 28px of padding on each side, so a five-card
+     pipeline figure fits without scrolling. CSS cannot import the constant; `figures.ts` carries
+     the other half of this comment. */
+  max-width: 1044px;
+  max-height: 900px;
+}
+
+.help-scroll {
+  display: block;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.help-doc {
+  padding: 20px 28px 32px;
+}
+
+/*
+ * The node's own one-line summary, above the document.
+ *
+ * Set larger than the body and in the primary ink, because it is the sentence the node guide and
+ * the node browser also show: a reader arriving from either recognises where they are before
+ * reading a word of the long form.
+ */
+.help-doc__lede {
+  margin: 0 0 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-primary);
+  font-size: 14.5px;
+  line-height: 1.55;
+  max-width: 70ch;
+}
+
+/*
+ * Muted, small-caps and inline, so it reads as a label on the paragraph rather than as a heading
+ * above it. A heading would put a section break between the summary and the document, which is
+ * the opposite of what a lede is.
+ */
+.help-doc__tldr {
+  margin-right: 8px;
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  vertical-align: 1px;
+}
+
+.help-doc__status {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/*
+ * Headings are sized here rather than by `.markdown`'s node-card scale.
+ *
+ * `.markdown__heading` is one size for every level, which is right on a card where a blurb has
+ * two headings and no hierarchy to show. A document has three levels and is read by scanning
+ * them, so the level has to be visible — `data-level` carries it, since the tag chosen by
+ * `MarkdownView` (h3/h4/h5) is about document outline rather than about size.
+ */
+.help-doc .markdown__heading[data-level='1'] {
+  margin: 26px 0 8px;
+  font-size: 19px;
+  letter-spacing: -0.01em;
+}
+.help-doc .markdown__heading[data-level='2'] {
+  margin: 22px 0 6px;
+  font-size: 15.5px;
+}
+.help-doc .markdown__heading[data-level='3'] {
+  margin: 18px 0 4px;
+  font-size: 13.5px;
+  color: var(--text-secondary);
+}
+.help-doc .markdown__heading[data-level='1']:first-child,
+.help-doc .markdown__heading[data-level='2']:first-child {
+  margin-top: 0;
+}
+
+/*
+ * `.overlay .markdown` caps the measure at 70ch, which is right for a dataset blurb expanded
+ * full size and wrong here: it would squeeze a four-card figure into the width of the prose.
+ * The cap moves down onto the text blocks below, so the measure is kept where it is about
+ * reading and released where it is about a diagram.
+ */
+.overlay .help-doc .markdown {
+  max-width: none;
+}
+.overlay .help-doc__body {
+  font-size: 13.5px;
+  line-height: 1.65;
+}
+/* A figure is wider than the measure, and deliberately not constrained to it. */
+.help-doc__body > .markdown__p,
+.help-doc__body > .markdown__list,
+.help-doc__body > .markdown__heading,
+.help-doc__body > .markdown__callout {
+  max-width: 70ch;
 }

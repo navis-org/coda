@@ -88,14 +88,10 @@ export const caveTableNode = registerNode({
   category: 'dataset',
   description: 'Neuron labels from an annotation table inside a CAVE datastack.',
   guide:
-    'Reads a CAVE annotation table — nuclei, somas, a lab’s own cell typing — and hands it to a ' +
-    'Dataset as its labels. Name the datastack holding the table; wire the Dataset input only to ' +
-    'read a table out of a *different* datastack than the one being annotated, since a dataset ' +
-    'wired both ways round is a cycle. The table has to carry a root id column directly; the datastack’s ' +
-    'built-in typing, which is keyed through a reference table, is what a Dataset uses when ' +
-    'nothing is wired. Set Pivot on for a table that is one row per (neuron, kind, value) rather ' +
-    'than one row per neuron. What comes out is an ordinary neuron table, so a Filter or a Sort ' +
-    'can sit between here and the Dataset, and a Table node beside it shows what you actually got.',
+    'Reads a CAVE annotation table and hands it to a Dataset as its labels. Name the datastack; ' +
+    'wire the Dataset input to read from a different datastack only (wiring both ways is a cycle). ' +
+    'Set Pivot on for a one-row-per-(neuron, kind, value) table. The output is ordinary neuron ' +
+    'table data, so Filter or Sort can edit the chain before the Dataset.',
   cost: 'expensive',
   dataCache: true,
   /*
@@ -369,12 +365,10 @@ export const flyTableNode = buildSeaTableNode({
   label: 'FlyTable',
   host: SEATABLE_HOSTS.flytable,
   guide:
-    'FlyTable is the LMB’s SeaTable deployment, and it is where FlyWire’s live cell typing ' +
-    'actually lives — and the only place Aedes has any at all. Reading a base takes an account ' +
-    'token (Connections ▸ FlyTable) and downloads the whole table: the endpoint that can select ' +
-    'columns sends no CORS headers, so a browser has to take every column. It is cached, so the ' +
-    'wait is once per base. What comes out is an ordinary neuron table — wire a Table node to ' +
-    'see it, and a Filter or Select between here and the Dataset to tidy it first.',
+    'FlyTable is the LMB’s SeaTable deployment, where FlyWire’s live cell typing lives. It ' +
+    'downloads whole bases (the column-selection endpoint is not browser-readable), cached once ' +
+    'per base per session. The output is ordinary neuron table data, so a Table node shows what ' +
+    'you got, and Filter or Sort can tidy it before the Dataset.',
 })
 
 export const seaTableNode = buildSeaTableNode({
@@ -414,13 +408,7 @@ export const googleSheetNode = registerNode({
   category: 'dataset',
   description: 'Neuron labels from a shared Google Sheet, read through its CSV export URL.',
   guide:
-    'Reads a Google Sheet nobody has to log in to see — Share ▸ Anyone with the link ▸ Viewer — ' +
-    'and hands it to a Dataset as its labels. Paste the address bar of the sheet: the document ' +
-    'and the tab both come out of it, so the Tab field is only needed to read a different tab ' +
-    'from the one that was open. Coda sends no credentials, so a sheet restricted to named ' +
-    'people cannot be read at all. What comes out is an ordinary neuron table, so a Filter or a ' +
-    'Sort can sit between here and the Dataset, and a Table node beside it shows what you ' +
-    'actually got.',
+    'Reads a Google Sheet that needs no login — Share as anyone-with-link ▸ Viewer. Paste the URL into Sheet; Tab selects a different tab by its numeric gid. The output is an ordinary neuron table, so Filter or Sort can edit it before the Dataset.',
   cost: 'expensive',
   dataCache: true,
   inputs: [ANNOTATIONS_INPUT],

@@ -21,7 +21,7 @@ export const findNeuronsNode = registerNode({
   category: 'query',
   description: 'Search a dataset for neurons by type, instance, status, size or ROI.',
   guide:
-    'The workhorse query: narrow a dataset down to the neurons you mean, by type, instance, status, synapse count or region. Patterns are regular expressions and neuPrint anchors them at both ends, so LC.* matches LC4 but not LPLC1 — that is Neo4j’s behaviour rather than ours. The limit defaults to 0, meaning everything, which is deliberate and worth respecting: these queries run against a shared production server.',
+    'The workhorse query: narrow to the neurons you mean, by type, instance, status, synapse count or region. Patterns are regular expressions anchored at both ends, so LC.* matches LC4 but not LPLC1. The limit defaults to 0 (everything)—deliberately, as these queries run against a live production server.',
   cost: 'expensive',
   inputs: [{ id: 'dataset', label: 'Dataset', type: T.dataset() }],
   outputs: [{ id: 'neurons', label: 'Neurons', type: T.neurons() }],

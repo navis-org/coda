@@ -45,7 +45,7 @@ export const inputIdsNode = registerNode({
   category: 'query',
   description: 'A list of neuron IDs, typed or pasted, as a table.',
   guide:
-    'Neuron IDs you already have — from a paper, a spreadsheet, a colleague. Paste them in any form; brackets, quotes, commas and newlines are all separators, so a Python list or a spreadsheet column goes straight in. The Dataset input is optional: without it the IDs come out as a one-column table, which is already enough for Connectivity or Skeletons; with it you get the full neuron rows and, more usefully, a count of which IDs the dataset has never heard of.',
+    'A list of neuron IDs you already have — from a paper, a spreadsheet, a colleague. Paste them in any form; brackets and newlines are separators. Wire a Dataset to get full rows and a count of IDs it never heard of; unwired it just emits the IDs as a one-column table.',
   cost: 'expensive',
   inputs: [
     // Optional on both: a typed list alone is a complete question, and a node unusable until

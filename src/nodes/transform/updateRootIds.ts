@@ -35,12 +35,10 @@ export const updateRootIdsNode = registerNode({
   category: 'transform',
   description: 'Repoint stale CAVE root ids at a materialization, using their supervoxel ids.',
   guide:
-    'A CAVE root id changes whenever proofreading touches its segment, so an annotation base ' +
-    'drifts out of step with a pinned materialization and its rows quietly stop matching any ' +
-    'neuron. Given a supervoxel id — the stable handle a root id is not — this looks up what ' +
-    'each stale row’s segment became and rewrites the id. Rows that were already current are ' +
-    'left alone and cost nothing, and every answer is cached permanently, because what a ' +
-    'supervoxel belonged to at a past instant never changes.',
+    'Root ids drift when proofreading touches a segment, leaving annotation tables out of sync ' +
+    'with the materialization. This node repairs them by looking up what each stale id’s ' +
+    'supervoxel became and rewriting only stale entries. Unedited tables cost one staleness ' +
+    'check and no further lookups.',
   cost: 'expensive',
   dataCache: true,
   inputs: [

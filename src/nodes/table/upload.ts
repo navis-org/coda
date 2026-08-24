@@ -39,7 +39,7 @@ export const uploadTableNode = registerNode({
   category: 'utility',
   description: 'Bring in a CSV of your own — annotations, cell types, an embedding.',
   guide:
-    'Your own CSV: annotations, custom cell types, an embedding. The only node here with no inputs and no data source behind it. Delimiter, header and each column’s type are worked out from the file rather than configured, and naming an ID column renames it to neuronId so the result meets the rest of the app as neurons. The rows live in this browser rather than in the graph, so a .coda.json sent to a colleague arrives without them — the card says which file is missing and offers to pick it again.',
+    'Your own CSV: annotations, cell types, embeddings. The only node with no inputs and no backend. Rows live in this browser, not in the graph — a .coda.json sent to a colleague arrives without them. The card shows which file is missing if you need to pick it again.',
   // No network and no parse: `evaluate` is one IndexedDB read of an already-parsed table.
   cost: 'cheap',
   inputs: [],

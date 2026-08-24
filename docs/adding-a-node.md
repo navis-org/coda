@@ -67,6 +67,13 @@ Everything else on the guide page is derived — sockets, settings, defaults, th
 "seen in" cross-reference against the bundled examples. Adding a node is these two strings and
 nothing else; see `src/nodeguide/data.ts`.
 
+**A third length exists and is optional.** A node whose behaviour genuinely needs pages — NBLAST,
+the clustering pair, anything with a non-obvious implicit rule — gets a markdown file at
+`src/help/nodes/<type>.md`, which puts a `?` on its card opening an in-app document with figures
+drawn from the registry. The file's existence *is* the switch; there is nothing to declare here.
+Most nodes should not have one: if the surprising thing fits in `guide`, it belongs in `guide`.
+See [docs/help.md](help.md).
+
 ## Cost
 
 | | when it runs | use for |

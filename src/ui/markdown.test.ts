@@ -31,7 +31,11 @@ function links(blocks: MarkdownBlock[]): { text: string; href: string }[] {
   }
   for (const block of blocks) {
     if (block.kind === 'list') walkList(block)
-    else walkInline(block.children)
+    else if (block.kind === 'callout') found.push(...links(block.blocks))
+    else if (block.kind === 'table') {
+      for (const cells of [block.head, ...block.rows])
+        for (const cell of cells) walkInline(cell)
+    } else if (block.kind !== 'fence' && block.kind !== 'image') walkInline(block.children)
   }
   return found
 }

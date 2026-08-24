@@ -4,6 +4,7 @@ import { useGraphStore } from './store/graphStore'
 import { applyTheme } from './store/persistence'
 import { AssistantPanel } from './ui/panels/AssistantPanel'
 import { Editor } from './ui/Editor'
+import { HelpOverlay } from './ui/help/HelpOverlay'
 import { Inspector } from './ui/panels/Inspector'
 import { ShareDialog } from './ui/panels/ShareDialog'
 import { SharedLinkGate } from './ui/panels/SharedLinkGate'
@@ -31,6 +32,12 @@ export function App() {
       <AssistantPanel />
       <StatusBar />
       <ViewerOverlay />
+      {/*
+       * Above the viewer overlay, because it is opened *from* one: an expanded chart has a `?`
+       * of its own, and a help document that rendered underneath the thing it was opened from
+       * would read as the button doing nothing.
+       */}
+      <HelpOverlay />
       <ShareDialog />
       {/* Last, and on top: it can be reopened over an expanded viewer. */}
       <StartPage />

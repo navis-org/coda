@@ -28,13 +28,7 @@ export const dedupeNode = registerNode({
   label: 'Deduplicate',
   category: 'transform',
   description: 'Drop repeated rows, comparing on the chosen columns.',
-  guide:
-    'Drop rows that repeat. Name the columns to compare on — a neuron id, say — or leave it ' +
-    'empty to compare whole rows, which is what finds exact duplicates in a file. Keep decides ' +
-    'which row of a repeated set survives: first, last, or none at all, the last being "only ' +
-    'the rows nobody disagrees about" rather than a tidier version of the other two. It keeps ' +
-    'whole rows, so it is not Group By: nothing is aggregated and every column comes through ' +
-    'with the value it had.',
+  guide: 'Drop rows that repeat. Name the columns to compare on, or leave empty to compare whole rows for exact duplicates. Keep decides which row survives: first, last, or none at all—only rows nobody disagrees about. Keeps whole rows unchanged; unlike Group By, nothing is aggregated.',
   cost: 'cheap',
   inputs: [{ id: 'in', label: 'Table', type: T.table() }],
   outputs: [{ id: 'out', label: 'Table', type: T.table() }],

@@ -62,13 +62,7 @@ export const dendrogramNode = registerNode({
   label: 'Dendrogram',
   category: 'visualisation',
   description: 'Draw a merge tree, and select branches of it.',
-  guide:
-    'The picture of a Linkage: every neuron a leaf, every merge a bracket, and the height of ' +
-    'a bracket the distance at which those two groups joined — so a tall bracket means two ' +
-    'things that are not much alike, and the flat runs near the bottom are the tight groups. ' +
-    'Click a bracket to select everything under it and the Selected output carries those ' +
-    'names, which a Join turns back into neurons for a 3D view. Put a Cut Tree in front of it ' +
-    'and the branches are coloured by cluster.',
+  guide: 'A diagram of the hierarchical relationship between objects. Typically an output from hierarchical clustering (see linkage).',
   cost: 'cheap',
   defaultSize: { width: 560, height: 420 },
   inputs: [{ id: 'in', label: 'Tree', type: T.linkage() }],

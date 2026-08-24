@@ -33,7 +33,7 @@ export const scatterNode = registerNode({
   category: 'visualisation',
   description: 'Plot two numeric columns against each other, with colour, size and shape.',
   guide:
-    'Two numeric columns against each other, with colour, size and shape as three more channels — seaborn’s scatterplot, plus log axes and a linear fit. Drawn to a canvas rather than as SVG because an embedding of a whole dataset is a hundred thousand points, and export re-draws the same picture as vector so nothing is lost. Lasso a group of points and they come out of the Selected port as neurons, which is what makes it a way of choosing rather than only of looking.',
+    'Two numeric columns against each other with colour, size and shape as encoding channels — seaborn’s scatterplot, rendered to canvas for large datasets. Lasso to select points as output; log axes and linear trends available.',
   cost: 'cheap',
   defaultSize: { width: 460, height: 380 },
   /*

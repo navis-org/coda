@@ -41,15 +41,18 @@ export const nblastNode = registerNode({
   label: 'NBLAST',
   category: 'analysis',
   description: 'Score how alike neurons are in shape, as a matrix.',
+  /*
+   * Held to three sentences, unlike most, because this node has a help document and the overlay
+   * prints this above it under a `TL;DR` label — see `docs/help.md`. Everything that used to be
+   * here and is not now (the scoring, the Pyodide download, the throughput) is in that document,
+   * which is the surface with room for it. Two or three sentences is what `core/node.ts` asks
+   * of every `guide`; this one was eight.
+   */
   guide:
-    'Compare neurons by shape rather than by connectivity: every neuron is reduced to points ' +
-    'with a tangent vector each, and every pair scored on how well one set lies along the ' +
-    'other. Wire one set of Skeletons for an all-by-all — the usual way in, and what a ' +
-    'Heatmap or a clustering wants — or wire a second set to score one group against another. ' +
-    'Scores are normalised to a self-match of 1 by default, so 0.6 means "much of this neuron ' +
-    'has a counterpart in that one" and a negative score means the two actively disagree. The ' +
-    'first Run downloads a Python runtime of about ten megabytes; every run after it is ' +
-    'immediate, and the comparison itself is roughly fifteen thousand pairs a second.',
+    'Compare neurons by shape rather than by connectivity, scoring every pair on how well one ' +
+    'neuron’s arbor lies along the other’s. Wire one set of Skeletons for an all-by-all — the ' +
+    'usual way in — or a second set to score one group against another. The result is a ' +
+    'matrix, ready for a Heatmap or a clustering.',
   cost: 'expensive',
   inputs: [
     { id: 'query', label: 'Query', type: T.skeletons() },
@@ -65,9 +68,9 @@ export const nblastNode = registerNode({
       min: 0,
       step: 0.5,
       help:
-        'Space the points evenly before comparing, in micrometres. NBLAST counts points, so ' +
-        'without this a finely traced neurite outvotes a coarsely traced one. 0 leaves each ' +
-        'skeleton exactly as it was traced.',
+        'Space the points evenly before comparing, in micrometres. Too fine and your NBLAST will ' +
+        'take forever. Too coarse and your scores will be meaningless. 1 µm is the convention, and the default. '+
+        ' Setting it to 0 leaves each skeleton exactly as it was traced.',
     },
     {
       id: 'symmetry',

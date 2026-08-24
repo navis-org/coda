@@ -33,15 +33,7 @@ export const cutTreeNode = registerNode({
   label: 'Cut Tree',
   category: 'analysis',
   description: 'Take groups out of a merge tree, by count or by distance.',
-  guide:
-    'A tree holds every grouping at once; this picks one. Ask for a number of clusters and ' +
-    'you get exactly that many — the tallest merges are undone until there are enough — or ' +
-    'cut at a distance and take however many groups fall out below it, which is the honest ' +
-    'way round when the question is "how alike do two neurons have to be to count as the same ' +
-    'thing". The result is one row per neuron with its cluster number, so a Join puts that ' +
-    'number back on the neuron table and everything downstream can colour by it. Clusters are ' +
-    'numbered left to right as the dendrogram draws them, and the tree passes through carrying ' +
-    'the cut, so a Dendrogram wired after this one is coloured by group.',
+  guide: 'Cut a tree into groups by count (exactly N clusters) or by distance threshold. Cheap — just union-find, no Python — so you can retry it while looking at the dendrogram. Clusters table joins back onto neurons. Tree carries the cut for Dendrogram to colour branches by group.',
   cost: 'cheap',
   inputs: [{ id: 'in', label: 'Tree', type: T.linkage() }],
   outputs: [

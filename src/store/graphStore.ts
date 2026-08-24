@@ -265,6 +265,16 @@ export interface GraphState {
    */
   expandedNodeId: string | undefined
   expandNode(nodeId: string | undefined): void
+  /**
+   * Node **type** whose help document is open, if any.
+   *
+   * A type rather than a node id, and that is the whole design: a help document is about a kind
+   * of node, so it opens from a card, from the inspector, from the node browser — where nothing
+   * has been placed on the canvas yet — and from a cross-reference in another document. A node
+   * id would have made the browser's entry point impossible and the cross-reference meaningless.
+   */
+  helpType: string | undefined
+  openHelp(type: string | undefined): void
 
   // --- document ------------------------------------------------------------
   setGraph(graph: CodaGraph, options?: { history?: boolean; tag?: string }): void
@@ -808,6 +818,8 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
     expandedNodeId: undefined,
     expandNode: (nodeId) => set({ expandedNodeId: nodeId }),
+    helpType: undefined,
+    openHelp: (type) => set({ helpType: type }),
 
     // --- document ----------------------------------------------------------
 

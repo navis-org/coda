@@ -89,6 +89,10 @@ symptom to recognise — which usually points nowhere near the cause.
   ceiling checked before allocation** — neither picker knows what the other did.
 - **Module init order.** `graphStore.ts` imports `../nodes` for its side effect. Without
   it, ordering in `main.tsx` becomes load-bearing and silently drops every node.
+- **`parseMarkdown`'s extended kinds are opt-in, and that is a safety property.** Fences,
+  callouts, tables and images parse only under `{ extended: true }`. A dataset blurb arrives from
+  whatever deployment a Custom node points at; an image in one is a tracking pixel, and a fence
+  is a directive some renderer may act on. Only `src/help` opts in.
 - **Type regexes are anchored.** `MockSource` wraps user patterns in `^(?:…)$` to match
   Neo4j's `=~`, so `LC.*` matches `LC4` but **not** `LPLC1`. Don't "fix" this.
 - **`localStorage` is undefined** under Node 26 + jsdom. Tests use `clearStorage()` /
@@ -157,6 +161,9 @@ file, pulling all 620 kB back into every session and undoing the split.
   indicator, the start page.
 - [docs/pages.md](docs/pages.md) — overview, tutorial and node guide. Extra vite entries;
   each must stay out of the main chunk.
+- [docs/help.md](docs/help.md) — the `?` on a node: the in-app overlay, the markdown documents in
+  `src/help/nodes/`, and the figures that draw real registry objects. Read before adding a
+  document or a fence language.
 
 Two notes cut across all of them. **jsdom performs no layout and has no WebGL**, so
 anything about geometry or pixels must be driven in a real browser; several entries record

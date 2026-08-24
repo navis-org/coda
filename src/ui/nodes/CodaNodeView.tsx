@@ -26,6 +26,7 @@ import {
   makeInferContext,
 } from '../../core/node'
 import { getNodeDef } from '../../core/registry'
+import { hasHelp } from '../../help/registry'
 import type { NodeRunState } from '../../core/scheduler'
 import type { CodaType } from '../../core/types'
 import { isAssignable, typeLabel } from '../../core/types'
@@ -121,6 +122,7 @@ function CodaNodeViewImpl({
   const runNode = useGraphStore((s) => s.runNode)
   const cancelRun = useGraphStore((s) => s.cancelRun)
   const expandNode = useGraphStore((s) => s.expandNode)
+  const openHelp = useGraphStore((s) => s.openHelp)
   const needsRun = useGraphStore((s) => {
     void s.runVersion
     return s.needsRun(id)
@@ -452,6 +454,25 @@ function CodaNodeViewImpl({
               }}
             >
               ⤢
+            </button>
+          )}
+          {/*
+           * `?` appears because a document exists for this node type and for no other reason —
+           * see `src/help/registry.ts`. So most cards never grow a fifth button, and the ones
+           * that do are the ones where somebody was moved to write several pages.
+           */}
+          {hasHelp(node.type) && (
+            <button
+              type="button"
+              className="coda-node__help nodrag"
+              title={`What ${def.label} does, and what it assumes`}
+              aria-label={`Help for ${def.label}`}
+              onClick={(e) => {
+                e.stopPropagation()
+                openHelp(node.type)
+              }}
+            >
+              ?
             </button>
           )}
           {/* Stays in the header rather than on the band it controls: folded, the band is not

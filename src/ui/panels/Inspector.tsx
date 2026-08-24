@@ -12,6 +12,7 @@ import { makeInferContext } from '../../core/node'
 import { getNodeDef } from '../../core/registry'
 import { typeLabel } from '../../core/types'
 import { describeValue } from '../../core/values'
+import { hasHelp } from '../../help/registry'
 import { useGraphStore, useSelectedNode } from '../../store/graphStore'
 import { exportBaseName } from '../export'
 import { formatDuration } from '../format'
@@ -22,6 +23,7 @@ import { ValuePreview } from '../viewers/ValuePreview'
 export function Inspector() {
   const open = useGraphStore((s) => s.panels.inspector)
   const togglePanel = useGraphStore((s) => s.togglePanel)
+  const openHelp = useGraphStore((s) => s.openHelp)
   const node = useSelectedNode()
   const selectionCount = useGraphStore((s) => s.selection.length)
   const inference = useGraphStore((s) => s.inference)
@@ -106,6 +108,19 @@ export function Inspector() {
             {def.type} · {def.cost}
           </div>
         </div>
+        {/* Beside the chevron rather than in the body: the inspector scrolls, and a control
+            that scrolls away is one somebody has to go looking for. */}
+        {hasHelp(def.type) && (
+          <button
+            type="button"
+            className="btn btn--ghost inspector__help"
+            title={`What ${def.label} does, and what it assumes`}
+            aria-label={`Help for ${def.label}`}
+            onClick={() => openHelp(def.type)}
+          >
+            ?
+          </button>
+        )}
         <CollapseButton onCollapse={() => togglePanel('inspector')} />
       </div>
 

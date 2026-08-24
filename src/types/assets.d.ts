@@ -48,6 +48,20 @@ interface ImportMetaEnv {
   readonly BASE_URL: string
 }
 
+/**
+ * `import.meta.glob`, declared minimally for the same reason everything else here is: this
+ * project does not pull in `vite/client`.
+ *
+ * Typed as `Record<string, unknown>` rather than with the conditional overloads Vite ships,
+ * because the two shapes a caller wants — a lazy `() => Promise<string>` and an eager `string` —
+ * are decided by `eager`, and encoding that here would be a type-level restatement of Vite's
+ * own. `src/help/registry.ts` asserts the shape it asked for at each call site, which is one
+ * assertion beside the options that produced it rather than a generic three lines deep.
+ */
 interface ImportMeta {
   readonly env: ImportMetaEnv
+  glob(
+    pattern: string,
+    options?: { eager?: boolean; query?: string; import?: string },
+  ): Record<string, unknown>
 }

@@ -57,7 +57,7 @@ import { colorParams, readColorSpec } from '../lib/encodingParams'
  * length, and the URL is the harder limit in practice: male-CNS publishes a 38 kB state
  * before a single neuron id is added, and each coloured segment costs ~40 bytes more.
  */
-const MAX_SEGMENTS = 1000
+const MAX_SEGMENTS = 10000
 
 /** Neuroglancer renders on black, so the dark palette is the right one whatever Coda's theme is. */
 const VIEWER_MODE = 'dark' as const
@@ -79,9 +79,9 @@ export const neuroglancerNode = registerNode({
   type: 'out.neuroglancer',
   label: 'Neuroglancer',
   category: 'visualisation',
-  description: "Open the incoming neurons in the dataset's own neuroglancer scene.",
+  description: "View neurons in the dataset's own neuroglancer scene.",
   guide:
-    'Opens the incoming neurons in the dataset’s own published neuroglancer scene — the EM volume, the region meshes and the synapse layers that scene already carries, with your neurons added to it. The node emits a URL and the card embeds it, so it is both a viewer and something to paste into an email. Every setting is inspector-only, because a row of pickers above a 400-pixel embed takes a tenth of the space somebody opened the node for.',
+    'View neurons in the dataset’s neuroglancer scene. Emits a URL that works both as a viewer and as a shareable link.',
   cost: 'cheap',
   /*
    * Big enough that the embed is worth having on the canvas at all. Only a starting point —
@@ -193,12 +193,12 @@ export const neuroglancerNode = registerNode({
       id: 'limit',
       kind: 'int',
       label: 'Max neurons',
-      default: 200,
+      default: 500,
       min: 1,
       max: MAX_SEGMENTS,
       step: 10,
       advanced: true,
-      help: 'Nothing is downloaded here — this bounds how much neuroglancer is asked to draw, and how long the link gets.',
+      help: 'Bounds how much neuroglancer is asked to draw, and how long the link gets.',
     },
     {
       id: 'viewer',
