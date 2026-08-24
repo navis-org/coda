@@ -20,6 +20,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { CodaMark } from '../CodaMark'
 import { useGraphStore } from '../../store/graphStore'
+import cambridgeDark from '../logos/cambridge-dark.png?url'
+import cambridgeLight from '../logos/cambridge-light.png?url'
+import lmbDark from '../logos/lmb-dark.png?url'
+import lmbLight from '../logos/lmb-light.png?url'
 import { datasetGlyph } from '../nodes/DatasetPreview'
 import { nodeGlyph } from './NodeThumbnail'
 import type { DatasetCard, ExampleCard, StartCard, WorkflowCard } from './startCards'
@@ -27,6 +31,11 @@ import { datasetCards, exampleCards, workflowCards } from './startCards'
 
 const REPO_URL = 'https://github.com/navis-org/coda'
 const ISSUES_URL = `${REPO_URL}/issues`
+/** The group that develops Coda, named in the credits line. */
+const GROUP_URL = 'https://flyconnecto.me/'
+/** The two institutions behind that group, credited by their marks in the same row. */
+const LMB_URL = 'https://mrclmb.ac.uk/'
+const CAMBRIDGE_URL = 'https://www.zoo.cam.ac.uk/research/groups/connectomics'
 /*
  * The scroll-through introduction, built as a second entry alongside the app —
  * and what "Docs" in the credits row points at, since it is the document
@@ -206,6 +215,12 @@ export function StartPage() {
          * and the actions come to ~700px of the bar's 972, so they share a line; the credits run
          * ~850px and cannot join them without wrapping. The credits go last, where a colophon
          * goes, which also leaves the keys above them in the order they were already in.
+         *
+         * The funder logos share that last row rather than taking a third, and sit at its right
+         * end: they are what "Developed by ... (Cambridge, UK)" is attributing, so they belong beside
+         * that sentence and not under the whole bar. They cost the credits a line — ~850px of
+         * text plus ~285px of logo does not fit 972 — which is why the text is allowed to wrap
+         * to two and the logos are sized to stand about as tall as the two lines together.
          */}
         <div className="start__bar">
           <div className="start__bar-row">
@@ -241,29 +256,84 @@ export function StartPage() {
               Close
             </button>
           </div>
-          <div className="start__links">
-            <span>
-              Developed by Fly Connectomics Group (Cambridge) · Source Code at{' '}
-              <a href={REPO_URL} target="_blank" rel="noreferrer noopener">
-                github.com/navis-org/coda
-              </a>{' '}
-              · Open an{' '}
-              <a href={ISSUES_URL} target="_blank" rel="noreferrer noopener">
-                issue
-              </a>{' '}
-              for bugs and feature requests ·{' '}
-              <a href={OVERVIEW_URL} target="_blank" rel="noreferrer noopener">
-                Overview
-              </a>{' '}
-              ·{' '}
-              <a href={TUTORIAL_URL} target="_blank" rel="noreferrer noopener">
-                Docs
-              </a>{' '}
-              ·{' '}
-              <a href={NODE_GUIDE_URL} target="_blank" rel="noreferrer noopener">
-                Node guide
+          <div className="start__credits">
+            <div className="start__links">
+              <span>
+                Developed by{' '}
+                <a href={GROUP_URL} target="_blank" rel="noreferrer noopener">
+                  Fly Connectomics Group
+                </a>{' '}
+                (Cambridge, UK) · Source Code at{' '}
+                <a href={REPO_URL} target="_blank" rel="noreferrer noopener">
+                  github.com/navis-org/coda
+                </a>{' '}
+                · Open an{' '}
+                <a href={ISSUES_URL} target="_blank" rel="noreferrer noopener">
+                  issue
+                </a>{' '}
+                for bugs and feature requests ·{' '}
+                <a href={OVERVIEW_URL} target="_blank" rel="noreferrer noopener">
+                  Overview
+                </a>{' '}
+                ·{' '}
+                <a href={TUTORIAL_URL} target="_blank" rel="noreferrer noopener">
+                  Docs
+                </a>{' '}
+                ·{' '}
+                <a href={NODE_GUIDE_URL} target="_blank" rel="noreferrer noopener">
+                  Node guide
+                </a>
+              </span>
+            </div>
+
+            {/*
+             * Both inks of each logo ship, and CSS hides the wrong one — see `.start__logo`
+             * in `editor.css`. Picking in JS would have to resolve `theme: 'system'` through
+             * `matchMedia` and listen for changes; this keeps the swap in the one place the
+             * rest of the theming already lives, and `display: none` also takes the hidden
+             * copy out of the accessibility tree, so each logo is announced exactly once.
+             */}
+            <div className="start__logos">
+              {/*
+               * One anchor per institution wrapping both inks, rather than a link per image:
+               * the hidden copy is `display: none` and so out of the accessibility tree, which
+               * leaves each link named once, by the `alt` of whichever ink is showing.
+               */}
+              <a
+                className="start__logo-link"
+                href={LMB_URL}
+                target="_blank"
+                rel="noreferrer noopener"
+              >
+                <img
+                  className="start__logo start__logo--light"
+                  src={lmbLight}
+                  alt="MRC Laboratory of Molecular Biology"
+                />
+                <img
+                  className="start__logo start__logo--dark"
+                  src={lmbDark}
+                  alt="MRC Laboratory of Molecular Biology"
+                />
               </a>
-            </span>
+              <a
+                className="start__logo-link"
+                href={CAMBRIDGE_URL}
+                target="_blank"
+                rel="noreferrer noopener"
+              >
+                <img
+                  className="start__logo start__logo--cam start__logo--light"
+                  src={cambridgeLight}
+                  alt="University of Cambridge"
+                />
+                <img
+                  className="start__logo start__logo--cam start__logo--dark"
+                  src={cambridgeDark}
+                  alt="University of Cambridge"
+                />
+              </a>
+            </div>
           </div>
         </div>
       </div>

@@ -170,6 +170,85 @@ describe('Start page', () => {
       expect(overview.getAttribute('href')).toBe(`${import.meta.env.BASE_URL}overview.html`)
       expect(overview.getAttribute('rel')).toContain('noopener')
     })
+
+    /* The group that develops this — an external site, so the same rel applies. */
+    it('links the group to its own site', () => {
+      render(<StartPage />)
+      const group = screen.getByRole('link', { name: 'Fly Connectomics Group' })
+      expect(group.getAttribute('href')).toBe('https://flyconnecto.me/')
+      expect(group.getAttribute('rel')).toContain('noopener')
+    })
+
+    /*
+     * The funder logos. Which *ink* shows is CSS, across the same three scopes `theme.css`
+     * uses, and jsdom loads no stylesheet — so that part is checked in a browser, not here.
+     * What this pins is the half jsdom can see and that a refactor would quietly drop: both
+     * marks are present, each in both inks, and every one carries the institution's name as
+     * `alt`. A logo whose only label is its filename is one no screen reader can attribute.
+     */
+    it('credits both funders, in both inks, each named', () => {
+      render(<StartPage />)
+      for (const name of ['MRC Laboratory of Molecular Biology', 'University of Cambridge']) {
+        const marks = screen.getAllByAltText(name)
+        expect(marks).toHaveLength(2)
+        expect(marks.map((m) => m.className)).toEqual([
+          expect.stringContaining('start__logo--light'),
+          expect.stringContaining('start__logo--dark'),
+        ])
+        // Every one resolves to a real emitted asset rather than an empty src.
+        for (const mark of marks) expect(mark.getAttribute('src')).toBeTruthy()
+      }
+    })
+
+    /*
+     * One anchor per institution, wrapping both inks — so a mark is clickable whichever ink is
+     * showing, and neither link doubles up.
+     *
+     * Found by `alt` and walked up to the anchor rather than by role and name: jsdom loads no
+     * stylesheet, so the ink that CSS hides is still in its accessibility tree here and the
+     * link's computed name is both `alt`s concatenated. That is a jsdom artifact, not a bug in
+     * the markup — in a browser exactly one is `display: none` and the name is the single one.
+     */
+    it('makes each funder mark a link to that institution', () => {
+      render(<StartPage />)
+      const target = (alt: string) => {
+        const links = screen.getAllByAltText(alt).map((m) => m.closest('a'))
+        // Both inks hang off the *same* anchor, so the pair collapses to one link.
+        expect(new Set(links).size).toBe(1)
+        const link = links[0]!
+        expect(link.getAttribute('rel')).toContain('noopener')
+        return link.getAttribute('href')
+      }
+      expect(target('MRC Laboratory of Molecular Biology')).toBe('https://mrclmb.ac.uk/')
+      expect(target('University of Cambridge')).toBe(
+        'https://www.zoo.cam.ac.uk/research/groups/connectomics',
+      )
+    })
+
+    /*
+     * Each mark is a link to its institution, and *one* anchor wraps both inks rather than one
+     * per image — which is what leaves the link named once in a browser, where the unused ink
+     * is `display: none` and so out of the accessibility tree. Asserted through `closest`
+     * rather than by accessible name on purpose: jsdom loads no stylesheet, so both inks are
+     * live to it and the name it computes is the alt text twice over. The wrapping is the
+     * property that matters and the one a refactor to a link-per-image would break.
+     */
+    it('links each funder mark to its institution, one anchor per pair', () => {
+      render(<StartPage />)
+      const links = [
+        ['MRC Laboratory of Molecular Biology', 'https://mrclmb.ac.uk/'],
+        ['University of Cambridge', 'https://www.zoo.cam.ac.uk/research/groups/connectomics'],
+      ] as const
+      for (const [name, href] of links) {
+        const anchors = screen.getAllByAltText(name).map((mark) => mark.closest('a'))
+        expect(anchors).toHaveLength(2)
+        // Both inks hang off the same anchor — not two anchors that happen to agree.
+        expect(anchors[0]).not.toBeNull()
+        expect(anchors[1]).toBe(anchors[0])
+        expect(anchors[0]!.getAttribute('href')).toBe(href)
+        expect(anchors[0]!.getAttribute('rel')).toContain('noopener')
+      }
+    })
   })
 
   describe('picking something', () => {

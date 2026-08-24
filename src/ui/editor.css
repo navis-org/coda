@@ -5006,6 +5006,104 @@ a.viewer-actions__btn {
   opacity: 0.5;
 }
 
+/*
+ * The credits row: the colophon on the left, the funder logos hard right.
+ *
+ * `min-width: 0` on the text is what lets it wrap instead of forcing the row wider than the
+ * bar — a flex item's default `min-width: auto` refuses to shrink below its content, which
+ * would push the logos off the panel rather than wrap the sentence.
+ */
+.start__credits {
+  display: flex;
+  align-items: center;
+  gap: 16px 24px;
+}
+.start__credits > .start__links {
+  flex: 1;
+  min-width: 0;
+}
+
+.start__logos {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+/*
+ * The marks are links now, and the affordance has to live on the anchor rather than on the
+ * image: the same brand rules that rule out an `opacity` on a logo rule out fading one on
+ * hover. So the anchor takes a plate behind the mark instead — the surround changes, the mark
+ * never does. `display: flex` so the box wraps the image tightly rather than leaving the
+ * inline-baseline gap under it, which would sit the plate visibly low.
+ */
+.start__logo-link {
+  display: flex;
+  align-items: center;
+  padding: 4px 6px;
+  margin: -4px -6px;
+  border-radius: var(--radius-sm);
+  /* No `border-bottom`: `.start__links a` underlines its links, and a rule under a logo reads
+   * as part of the artwork. This one is identified as a link by the plate and the cursor. */
+  transition: background-color 120ms ease;
+}
+.start__logo-link:hover {
+  background: var(--surface-hover);
+}
+.start__logo-link:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .start__logo-link {
+    transition: none;
+  }
+}
+
+/*
+ * Sized by height, not width, and the two heights differ on purpose: the LMB mark sets three
+ * lines of text against Cambridge's two, so equal heights would leave its wordmark noticeably
+ * smaller. 36px and 28px bring both to ~136px wide, which is what actually reads as a matched
+ * pair. `width: auto` keeps each on its own aspect ratio.
+ */
+.start__logo {
+  height: 36px;
+  width: auto;
+  /*
+   * Full strength, deliberately. Both are institutional marks used under their owners' brand
+   * rules, which do not allow recolouring or fading them — so the pair is toned down by being
+   * small and last in the reading order, never by `opacity`.
+   */
+}
+.start__logo--cam {
+  height: 28px;
+}
+
+/*
+ * Which ink shows. Three scopes, mirroring `theme.css`: light on the bare selector so it is the
+ * fallback, then dark under `prefers-color-scheme` and again under an explicit `data-theme`, so
+ * the app's own toggle wins in both directions. Getting this wrong is invisible in the theme
+ * that happens to be open and shows a white logo on a white panel in the other.
+ */
+.start__logo--dark {
+  display: none;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .start__logo--light {
+    display: none;
+  }
+  :root:not([data-theme='light']) .start__logo--dark {
+    display: block;
+  }
+}
+:root[data-theme='dark'] .start__logo--light {
+  display: none;
+}
+:root[data-theme='dark'] .start__logo--dark {
+  display: block;
+}
+
 /* --- the bar ------------------------------------------------------------- */
 
 /*

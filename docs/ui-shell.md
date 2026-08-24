@@ -243,6 +243,37 @@ its job; `App.smoke.test.tsx` and `explore.test.tsx` call `closeStartPage()` in 
 and one test opens it deliberately. A new App-mounting test that starts failing on
 `getByText('Coda')` or `findByRole('dialog')` is hitting exactly this.
 
+**The funder logos ship in both inks, and CSS picks.** `src/ui/logos/` holds a light and a dark
+variant of each mark, imported with `?url` so vite hashes them and emits
+`new URL(..., import.meta.url)` — which resolves from the module and so survives `base: './'`
+without going through `BASE_URL` the way a `public/` asset has to. `.start__logo--light` /
+`--dark` are toggled across the same three scopes `theme.css` uses (bare `:root`, then
+`prefers-color-scheme`, then `[data-theme]`), because the app's own toggle has to win over the
+system setting in *both* directions — the default preference is `'dark'`, so an app that only
+honoured the media query would show white-on-white to anyone whose OS is in light mode. Picking
+in JS instead would mean resolving `theme: 'system'` through `matchMedia` and subscribing to it;
+`display: none` also drops the unused copy out of the accessibility tree, so each mark is
+announced once rather than twice. Verified in Chrome across all four preference × system
+combinations — jsdom loads no CSS and would call any of them passing.
+
+Both marks are used under their owners' brand rules, so **nothing recolours or fades them**: no
+`opacity`, no filter — including on hover, now that each is a link. The affordance lives on the
+anchor instead: a plate behind the mark (`--surface-hover`) and the usual focus outline, so the
+surround changes and the artwork never does. No `border-bottom` either, though `.start__links a`
+underlines its links — a rule under a logo reads as part of the artwork.
+
+**One anchor wraps both inks**, not one per image. The unused ink is `display: none` and so out
+of the accessibility tree, which leaves each link named exactly once by the `alt` of whichever
+ink is showing — checked in Chrome, where exactly one ink per anchor survives `display: none`.
+The unit test asserts the wrapping through `closest('a')` rather than by accessible name,
+because jsdom loads no stylesheet: both inks are live to it and the name it computes is the alt
+text twice over.
+
+The pair is subordinated by being small and last. The two heights
+differ (36px LMB, 28px Cambridge) because LMB sets three lines of text to Cambridge's two —
+equal heights make its wordmark read smaller. Those numbers bring both to ~136px wide, which is
+what actually looks like a matched pair.
+
 **The version comes from `package.json` through a vite `define`** (`__APP_VERSION__`), not a
 JSON import, which would land the whole manifest in the bundle. An alpha that cannot say which
 alpha it is makes every bug report ambiguous — so bump `package.json` when the build changes
