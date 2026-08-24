@@ -11,10 +11,10 @@ queried. Can be wired straight into Build Network with `Source: preId, Target: p
 > For large queries, consider providing a local edge table via the `Edge data` button on the dataset card.
 
 
-### Example: Edges to Network to Graph visualization
+### Example: Edges to Build Network to Network Viewer
 
 ```coda-graph
-caption: Connectivity wired into the pattern for visualization
+caption: Connectivity Graph wired into the pattern for visualization
 neuron.connectivity as conn { direction: outputs, hops: 1 }
 net.build as build
 out.network as net

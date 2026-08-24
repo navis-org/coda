@@ -1,16 +1,16 @@
 # The four browsing widgets
 
-Explore, Profile, Dataset Summary and ROIs — the surfaces that fetch for themselves.
+Explore Dataset, Neuron Profile, Dataset Summary and ROI Viewer — the surfaces that fetch for themselves.
 
 Moved verbatim out of `CLAUDE.md`.
 
 
-## Explore: the browsing widget
+## Explore Dataset: the browsing widget
 
 The entry point for someone who does not yet know what to ask for. `Find Neurons` is
-procedural — state a regex, get a result; `Explore` holds a dataset's **entire** neuron table,
+procedural — state a regex, get a result; `Explore Dataset` holds a dataset's **entire** neuron table,
 searches it as you type, pages through it and lets you tick individual neurons. `New ▸ <dataset>`
-builds `Dataset → Explore → Table`, which is what the start page's dataset rail opens.
+builds `Dataset → Explore Dataset → Table`, which is what the start page's dataset rail opens.
 
 **The whole dataset is downloaded once and searched locally.** Fuzzy-matching every field of
 every neuron cannot be a query per keystroke against a shared production Neo4j. Measured on
@@ -37,7 +37,7 @@ paid for: 26 MB of every-neuron-every-property becomes an ordinary table for a g
 chart with no second query against a shared production Neo4j. It sits **last** in the output
 list so the two ports every saved graph is wired to keep their socket positions, and so a link
 dragged off the node still starts from `Hits`. Note what it is _not_ — an escape from
-provenance: a downstream `Filter` on `All` re-runs locally, but Explore itself is still
+provenance: a downstream `Filter` on `All` re-runs locally, but Explore Dataset itself is still
 `expensive`, so the first Run of a session still waits for the index.
 
 **Node `expensive`, widget live — the split is the design.** Typing filters the widget's own copy
@@ -188,7 +188,7 @@ unchanged, which is the half that would actually regress.
 
 Some CAVE datastacks let anyone attach free-form text to a neuron — FlyWire's
 `neuron_information_v2` is one row per (neuron, `tag`), with a `pt_supervoxel_id` beside it so a
-stale root id can be repaired. Explore's `Additional tags` param names a column holding those,
+stale root id can be repaired. Explore Dataset's `Additional tags` param names a column holding those,
 and the row draws them **apart from the chips and deliberately unlike them**: their own line
 below, smaller type, no palette slot, a hairline border rather than a tint. A tinted chip would
 say they came from a known field, which is exactly what they did not — they are somebody's prose
@@ -249,7 +249,7 @@ emitters were corrected to say "needs a value column" while the node's own `vali
 "numeric". `dtypesOf` resolves it for the two readers that exist (`availableColumns` and
 `validateColumnParams`), both of which already had the params in hand.
 
-**Searching is on by default with an opt-out**, and both halves are `Explore`'s only params that
+**Searching is on by default with an opt-out**, and both halves are `Explore Dataset`'s only params that
 are *not* presentational: together they decide which column is kept out of the haystack, and that
 changes which rows `Hits` returns. A picker quietly changing a port's contents while claiming to
 be a drawing knob is what `presentational` must never mean. `excludedFromSearch` is one function
@@ -276,10 +276,10 @@ upload node reported a `Type column` naming a column its file does not carry, an
 with the same three params written out a second time, did not. The one real difference is where
 the schema is found, so that is the argument.
 
-**`chips` is labelled `Fields` now, on Explore and on Profile.** The value is a list of *columns*
+**`chips` is labelled `Fields` now, on Explore Dataset and on Neuron Profile.** The value is a list of *columns*
 where `Additional tags` names a column of *values*; two controls called Tags meaning opposite
 halves of one row is the confusion the rename avoids. The **id stays `chips`** — that is what a
-saved graph carries. Profile was renamed too though only Explore was reported: leaving one of the
+saved graph carries. Neuron Profile was renamed too though only Explore Dataset was reported: leaving one of the
 pair called Tags puts the same confusion one widget over.
 
 **A card shows the same tags as the overlay.** There was a cap on chips in `compact`, on the
@@ -314,18 +314,18 @@ a definition lives in `src/nodes` and must stay headless. A body renders in the 
 overlay from the same prop bundle, so it cannot ship working in one and broken in the other, and
 it sets the card width through `--node-width` rather than `width` so the run ring still follows.
 
-## Profile: one neuron at a time
+## Neuron Profile: one neuron at a time
 
-`out.profile`, the counterpart to Explore one level in — Explore answers "what is in this
-dataset?", Profile answers "what is this cell?". Modelled on Codex's Cell Details page. It takes
-a whole neuron collection and pages through it, so it works on an Explore selection or a
-Connectivity result, not only a hand-picked body.
+`out.profile`, the counterpart to Explore Dataset one level in — Explore Dataset answers "what is in this
+dataset?", Neuron Profile answers "what is this cell?". Modelled on Codex's Cell Details page. It takes
+a whole neuron collection and pages through it, so it works on an Explore Dataset selection or a
+Connectivity Graph result, not only a hand-picked body.
 
 **Browse free, pin to commit — the whole design turns on this.** `page` is presentational, so
 flipping through twenty-seven neurons costs nothing and invalidates nothing; `selection` is not,
 and it is what the `Current` port emits. Had the page index fed `Current` directly, every press
 of the pager would mark the downstream graph stale, and with auto-run on would fire a full pass
-per page turn. Same live-widget/committed-param split that makes Explore feel like a browser.
+per page turn. Same live-widget/committed-param split that makes Explore Dataset feel like a browser.
 `profile.test.ts` asserts it through the scheduler, because dropping the flag fails no type
 check and the symptom — a graph going stale whenever anyone browses — reads as a scheduler bug.
 
@@ -358,7 +358,7 @@ is still waiting for. Not fetching for `SETTLE_MS` has no such failure mode, and
 cached skips the wait entirely — so paging back through what you have seen stays instant.
 
 **The card and the overlay show different 3D on purpose.** The card draws the cached coarse
-silhouette (free, usually already fetched by Explore); the overlay mounts a live neuroglancer
+silhouette (free, usually already fetched by Explore Dataset); the overlay mounts a live neuroglancer
 frame, in a tile that is **2×2**. A grid column is ~190px, which is not a 3D viewer — it is
 about the width of neuroglancer's own layer bar, so a one-cell tile showed the chrome and
 nothing else. The `min-height` on that rule is the half that actually does the work: rows are
@@ -384,13 +384,13 @@ Two small general changes came out of this, both worth knowing about:
   `selection`; the pager needs `page` as well. `onSelectionChange` stays as the narrow
   convenience for the three viewers that only ever write a selection.
 - **`ColumnsParam` gained `optional`.** A decorative picker with nothing to offer is not an
-  issue — Profile's `Tags` on a table whose schema is not yet known was raising a warning badge
+  issue — Neuron Profile's `Tags` on a table whose schema is not yet known was raising a warning badge
   about a control nobody had touched, which is how a real issue further down the list stops
   being read.
 
 ## Dataset Summary, and the two ROI nodes
 
-`out.datasetSummary` answers the question that comes before Explore's and Profile's: **what is
+`out.datasetSummary` answers the question that comes before Explore Dataset's and Neuron Profile's: **what is
 in this dataset at all?** Neuron counts, how they are classified, and — the part no other surface
 here can show — how completely each region has been reconstructed. Codex's Stats page is the
 reference; region completeness is the addition, and it is the most useful thing on the card,
@@ -413,9 +413,9 @@ male-CNS at all. Measured across every family: completeness is 9 kB / 229 rows o
 cached through `loadCachedTable`, so a graph holding an ROI node and two Summary cards on one
 dataset costs one request.
 
-The categorical breakdowns come from the **neuron index** — the same whole-dataset table Explore
+The categorical breakdowns come from the **neuron index** — the same whole-dataset table Explore Dataset
 searches — rolled up locally by `nodes/lib/datasetStats.ts`. That is why the Summary loads it on
-mount like Explore does, and why the shared hook below exists.
+mount like Explore Dataset does, and why the shared hook below exists.
 
 ### Four things that were verified rather than assumed
 
@@ -458,7 +458,7 @@ same distinction the Description card draws.
 
 ### The card
 
-Profile's two rules unchanged: **a tile renders only when its data exists** (hemibrain has no
+Neuron Profile's two rules unchanged: **a tile renders only when its data exists** (hemibrain has no
 `superclass`, MANC no `flow`, and a dataset with no ROI summary draws no Synapses tile rather
 than four zeros), and **looking is free** — every param but `Status` is presentational, and the
 node returns nothing, so there is no provenance to disturb.
@@ -498,7 +498,7 @@ because a slice covering the whole ring is then an ordinary full-length dash —
 whose start and end coincide degenerates and draws nothing. Labels sit beside the ring, never on
 it: slice text has to shrink with the slice, so a 3% category is either illegible or leadered out,
 where a legend row is the same width whatever the share. Colour is never the only identification,
-the same rule the socket palette and the Explore chips follow.
+the same rule the socket palette and the Explore Dataset chips follow.
 
 **A colour per chart, cycling the categorical palette by position.** Every bar being one blue made
 eight charts read as one chart in eight parts. A repeat *across tiles* is harmless — the palette's
@@ -543,7 +543,7 @@ series. The dash is what keeps it a reference at full contrast, and the label ca
 `--surface-2` behind it because it sits *on* the bars, where white-on-light-green is the one
 pairing the palette cannot survive.
 
-Pinned by reading the stylesheet, as the Profile 3D tile's rule is: vitest applies no CSS and
+Pinned by reading the stylesheet, as the Neuron Profile 3D tile's rule is: vitest applies no CSS and
 jsdom resolves no custom properties, so a declaration test is the only kind that catches a
 chart-chrome colour going invisible. Nothing else did — it looked deliberate.
 
@@ -625,7 +625,7 @@ they are". Nothing is hidden, so nothing has to be admitted — the heading carr
 Bars are scaled against the *whole* ranked list rather than the page, or page two would redraw its
 largest bar full width and read as matching page one's.
 
-**The page index is component state, not a param.** Profile's pager writes one because it feeds a
+**The page index is component state, not a param.** Neuron Profile's pager writes one because it feeds a
 `Current` port and has to survive a reload; nothing here feeds anything, so which slice of a chart
 is on screen is not a fact about the document — and a param would have to be one *per column
 name*, which is a schema the node cannot know at definition time.
@@ -640,7 +640,7 @@ hemibrain, 91% pre against 37% post. The control is on the tile rather than only
 because a switch that moves the reading that far belongs where the reading is.
 
 **`statsFor` is a `WeakMap` memo in `searchIndexFor`'s idiom**, and it is what makes a Summary
-card nearly free once Explore has paid: eight columns counted over 165,122 rows, once per table
+card nearly free once Explore Dataset has paid: eight columns counted over 165,122 rows, once per table
 identity, with the cap applied on the way out so a "show more" control costs no recount. Note the
 knock-on in the viewer — the status filter is `useMemo`'d, because a fresh filtered table per
 render would defeat the memo entirely and re-count everything on each unrelated store tick.
@@ -667,7 +667,7 @@ table it had just replaced.
 
 **Nothing is aborted on unmount, and that is deliberate.** The obvious `AbortController` is
 actively wrong once the state is shared — the first card's unmount would cancel the fetch the
-second is still waiting for, which is the trap Profile's paging already documents. There is also
+second is still waiting for, which is the trap Neuron Profile's paging already documents. There is also
 nothing to save: the result is cached, so a download completing after the last widget has gone is
 paid for and kept, where one abandoned half-way starts from zero.
 
@@ -704,9 +704,9 @@ above, the `wide`/`span` collision on the connectivity tile (an element carrying
 whichever rule the stylesheet declares later, and it is the span), and `Top cell types` at
 Codex's twenty pushing the region tiles off a 620px card.
 
-## ROIs: the volume rather than the cells
+## ROI Viewer: the volume rather than the cells
 
-`out.rois`, `Add ▸ Visualisation ▸ ROIs`. Explore answers "which neuron?", Profile "what is this
+`out.rois`, `Add ▸ Visualisation ▸ ROI Viewer`. Explore Dataset answers "which neuron?", Neuron Profile "what is this
 cell?", Dataset Summary "what is in here?" — all three about *cells*. This one is about the space
 they sit in: a dataset's neuropil shells drawn together in a named anatomical plane, coloured by
 how completely each is traced. It is the only surface here that can answer "where is `LO(R)`, and
@@ -841,7 +841,7 @@ would have produced a plausible wrong result.
   one is an `-unspecified` bucket — unassigned synapses, not a shape. So a refusal is counted, not
   raised, and the caption says `139 of 144`.
 
-**It is 29 MB gzipped for hemibrain and 62 MB for male-CNS** — four to nine times Explore's
+**It is 29 MB gzipped for hemibrain and 62 MB for male-CNS** — four to nine times Explore Dataset's
 whole-dataset neuron index. So the card opens on an explicit `Load N regions` rather than fetching
 on mount. What lands is the polyline above, cached, so the second open has no button and no wait:
 `idle` means "not stored", never "never loaded".

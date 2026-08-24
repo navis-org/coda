@@ -15,8 +15,8 @@ never reads back.
 **The contract is a faithful starting point, not a bit-identical reproduction.** It runs, and
 for the common path it answers what the canvas answered — but it is meant to be read and
 edited, so where Coda and neuprint-python genuinely differ the cell says so in a `NOTE` rather
-than contorting itself. That choice is what keeps the tier-3 nodes (Connectivity's traversal,
-Explore's search) at one generated helper each instead of a Python port of `src/nodes/lib`.
+than contorting itself. That choice is what keeps the tier-3 nodes (Connectivity Graph's traversal,
+Explore Dataset's search) at one generated helper each instead of a Python port of `src/nodes/lib`.
 
 **The exporter is loaded on demand.** `downloadNotebook` does `await import('./python/exporter')`,
 because every emitter and every generated Python helper is inert string-building that only runs
@@ -94,9 +94,9 @@ root-drift advisory needs and for the same reason.
 
 **It names the causes and counts the cascade.** A TODO binds nothing, so everything downstream
 of one is a TODO too — and telling somebody their Table node "has no notebook equivalent" when
-the Table is fine and the Explore in front of it is not sends them to the wrong card. That is the
+the Table is fine and the Explore Dataset in front of it is not sends them to the wrong card. That is the
 walk's own unwired-versus-blocked split carried out to the surface, through `TodoStep.blocked`.
-On the FlyWire starter the difference is the whole message: *"Explore" has no notebook
+On the FlyWire starter the difference is the whole message: *"Explore Dataset" has no notebook
 equivalent, so it and 2 steps after it will be left as TODO comments* rather than a list of three
 nodes, two of which translate perfectly well. A muted node also binds nothing, so a graph can
 carry blocked steps with no untranslated root — then naming the blocked ones is the only true
@@ -242,7 +242,7 @@ that is the whole point of the format.
 runs every emitter against a context that records what it asks for and answers everything, then
 checks the ids against the definition. It was written after `out.profile` was found reading an
 input called `in` on a node whose port is `neurons` — so it reported "nothing is wired to this
-Profile" for a node plainly wired on the canvas, and had done since it was written. It found four
+Neuron Profile" for a node plainly wired on the canvas, and had done since it was written. It found four
 more the same day: `out.scatter` _wrote_ `scatter_plot_table` while the walk bound
 `scatter_plot_out`, so anything downstream referenced a variable nothing assigns; `out.neuroglancer`
 bound a DataFrame to a port the graph types as a URL; and `out.viewer3d` was written as a
@@ -393,13 +393,13 @@ stashed out — the family table's one field and the refusal's stack names. Ever
 
 #### The query half, and why it was nearly free
 
-**Explore and Find Neurons emit for CAVE**, and the reason is that neither is really a query on
+**Explore Dataset and Find Neurons emit for CAVE**, and the reason is that neither is really a query on
 this backend. A CAVE datastack has no server-side neuron search — its API has no regex worth
 using — so `CaveSource` downloads the index once and filters it locally, and the notebook does
 the same over the same frame. `coda_search` is already a port of Coda's matcher and does not care
-where the frame came from, so **Explore's CAVE branch is one line**: `dataset.labels` instead of
+where the frame came from, so **Explore Dataset's CAVE branch is one line**: `dataset.labels` instead of
 `fetch_neurons(NeuronCriteria(...))`. That is why they were the first two written — on a FlyWire
-graph Explore is usually the only thing between the dataset and everything else, so a TODO there
+graph Explore Dataset is usually the only thing between the dataset and everything else, so a TODO there
 blocked the whole notebook.
 
 Find Neurons is the same frame with pandas filters on it, and the filters are **Coda's semantics
@@ -424,7 +424,7 @@ neuPrint, and live the moment a CAVE selection could be exported. It answers exa
 and `isin(['1001'])` against an `i64` column matches nothing at all.
 
 Still not written, and each declines with a TODO naming the backend rather than emitting neuPrint
-code: **Connectivity, Adjacency, Skeletons, Meshes, Synapses, Profile, Dataset Summary, ROIs,
+code: **Connectivity Graph, Adjacency, Skeletons, Meshes, Synapses, Neuron Profile, Dataset Summary, ROI Viewer,
 Neuroglancer**. The table ops downstream are backend-agnostic and already work.
 
 #### SeaTable, through sea-serpent
@@ -495,8 +495,8 @@ loophole, and R's `export.test.ts` asserts the refusal so it cannot become a sil
 
 **R's stack is the same lineage, which is why the mapping is clean** — navis is the Python port
 of `nat`, and neuprintr is the natverse's neuPrint client. Three things are genuinely *better*
-here: `neuprint_connection_table()` is query-relative, which is the shape Profile wants (so the
-Connectivity emitter reorients *into* pre/post, the opposite direction to the Python one);
+here: `neuprint_connection_table()` is query-relative, which is the shape Neuron Profile wants (so the
+Connectivity Graph emitter reorients *into* pre/post, the opposite direction to the Python one);
 `neuprint_get_paths()` takes a hop budget, which `fetch_shortest_paths` does not; and
 `neuprint_ROI_connectivity()` maps straight onto the ROI Connectivity node.
 
@@ -532,7 +532,7 @@ reference stream as the Python port — five seeds, identical.
 catches duplicate labels, and resolves functions where the packages are installed (skipped with
 a notice otherwise, `--strict` to fail instead).
 
-### Profile exports its metrics
+### Neuron Profile exports its metrics
 
 `out.profile` is the one viewer whose translation is worth more than a pass-through, because
 almost everything the card _shows_ is an ordinary roll-up rather than a drawing.
@@ -563,7 +563,7 @@ summing or the totals roughly double; and a null type sorts **last** on a tie, m
   a neuron-level result afterwards, because the neuron-level search never returns either edge.
   Cypher cannot walk a derived graph without GDS, so neither `fetch_shortest_paths` nor
   `fetch_paths` can express it. Neuron-level mode exports.
-- **The Network viewer hands over a `networkx` object with the layout commented out.**
+- **The Network Viewer hands over a `networkx` object with the layout commented out.**
   ForceAtlas2 has no drop-in twin, `spring_layout` is a different algorithm, and the
   hierarchical layouts need graphviz — a system package a generated notebook has no business
   requiring. Three options are offered as comments.

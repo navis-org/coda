@@ -29,7 +29,7 @@ function readDirection(raw: unknown): TraversalDirection {
  */
 export const connectivityNode = registerNode({
   type: 'neuron.connectivity',
-  label: 'Connectivity',
+  label: 'Connectivity Graph',
   category: 'query',
   description: 'Fetch synaptic partners for the incoming neurons, one or more hops out.',
   guide:

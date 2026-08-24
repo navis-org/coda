@@ -50,7 +50,7 @@ function profileSchema(ctx: InferContext): TableSchema {
 
 export const profileNode = registerNode({
   type: 'out.profile',
-  label: 'Profile',
+  label: 'Neuron Profile',
   category: 'visualisation',
   description:
     'Inspect one neuron at a time: identity, partners by type, regions, transmitter and shape.',
@@ -169,7 +169,7 @@ export const profileNode = registerNode({
     const names = columnNames(input.schema)
     if (names.includes('neuronId')) return []
     return [
-      `Profile needs a "neuronId" column to identify a neuron. This table has: ${
+      `Neuron Profile needs a "neuronId" column to identify a neuron. This table has: ${
         names.length ? names.join(', ') : '(no columns)'
       }`,
     ]

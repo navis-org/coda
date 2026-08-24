@@ -101,11 +101,11 @@
           <div class="node__foot"><span data-foot="find">&mdash; &middot; no Dataset connected</span></div>
         </div>
 
-        <!-- 3 · Connectivity ------------------------------------------------- -->
+        <!-- 3 · Connectivity Graph ------------------------------------------------- -->
         <div class="node" data-cat="query" data-from="1" data-key="conn" data-state="ok"
              style="left:456px; top:136px; width:176px;">
           <svg class="ring" aria-hidden="true"><rect pathLength="1"/></svg>
-          <div class="node__head"><span class="node__title">Connectivity</span><span class="node__play">&#9654;</span></div>
+          <div class="node__head"><span class="node__title">Connectivity Graph</span><span class="node__play">&#9654;</span></div>
           <div class="node__ports">
             <div class="port">
               <span class="port__in">Dataset<i class="sock sock--in" data-fam="dataset" data-shape="square" id="s-conn-in-ds"></i></span>
@@ -199,7 +199,7 @@
         <span class="detail__cap">the whole graph &mdash; everything stale, in order</span>
         <span class="detail__or">or</span>
         <div class="detail__node">
-          <span>Connectivity</span>
+          <span>Connectivity Graph</span>
           <span class="tb tb--play" data-ring="">&#9654;</span>
         </div>
         <span class="detail__cap">one node, and only what it depends on</span>
@@ -247,7 +247,7 @@
         </p>
       </div>
       <p>
-        Types also carry their <strong>column schema</strong>. <code>Connectivity</code> publishes
+        Types also carry their <strong>column schema</strong>. <code>Connectivity&nbsp;Graph</code> publishes
         <code>preType</code>, <code>postType</code>, <code>weight</code> and the rest the moment it
         is wired, so every column dropdown downstream is populated before a row is fetched.
       </p>
@@ -309,11 +309,11 @@
         </div>
         <div class="brow">
           <span class="brow__thumb" style="--c:var(--cat-visualisation)"><i></i></span>
-          <span class="brow__main"><span class="brow__name">Network</span><span class="brow__sig">Network + Layout &rarr; Network, Selected</span></span>
+          <span class="brow__main"><span class="brow__name">Network Viewer</span><span class="brow__sig">Network + Layout &rarr; Network, Selected</span></span>
         </div>
         <div class="brow">
           <span class="brow__thumb" style="--c:var(--cat-query)"><i></i></span>
-          <span class="brow__main"><span class="brow__name">Connectivity</span><span class="brow__sig">Dataset + Neurons &rarr; Table &middot; needs Run</span></span>
+          <span class="brow__main"><span class="brow__name">Connectivity Graph</span><span class="brow__sig">Dataset + Neurons &rarr; Table &middot; needs Run</span></span>
         </div>
       </div>
       <p class="fig__cap">
@@ -328,12 +328,12 @@
       <p>
         <code>Bar&nbsp;Chart</code> draws the table and passes <em>the same table on</em>, so a viewer
         drops into the middle of a chain without breaking it. <code>Table</code>,
-        <code>Heatmap</code>, <code>Scatter&nbsp;Plot</code>, <code>Network</code>,
+        <code>Heatmap</code>, <code>Scatter&nbsp;Plot</code>, <code>Network&nbsp;Viewer</code>,
         <code>3D&nbsp;Viewer</code> and an embedded neuroglancer all behave this way.
       </p>
       <p>
         Several also emit a selection. Lasso points in <code>Scatter&nbsp;Plot</code>, click nodes in
-        <code>Network</code>: the picked rows leave by a <b class="ty ty--table">Selected</b> output
+        <code>Network&nbsp;Viewer</code>: the picked rows leave by a <b class="ty ty--table">Selected</b> output
         and wire onward like anything else.
       </p>
       <div class="surface" style="margin-top:.35rem">
@@ -392,7 +392,7 @@
 </main>
 
 <!-- ==========================================================================
-     Chapter 7 · Explore feeding Profile
+     Chapter 7 · Explore Dataset feeding Neuron Profile
      ========================================================================== -->
 <section class="chapter">
   <div class="shell">
@@ -400,14 +400,14 @@
       <span class="beat__n">Chapter 7</span>
       <h2>Browsing a connectome</h2>
       <p class="lede">
-        <code>Find&nbsp;Neurons</code> needs a pattern up front. <code>Explore</code> does not.
+        <code>Find&nbsp;Neurons</code> needs a pattern up front. <code>Explore&nbsp;Dataset</code> does not.
       </p>
     </div>
 
     <div class="stack" style="margin-bottom: clamp(1.75rem, 4vh, 2.75rem);">
       <div class="split">
         <div class="point rise">
-          <h3><code>Explore</code> enables fuzzy search</h3>
+          <h3><code>Explore&nbsp;Dataset</code> enables fuzzy search</h3>
           <p>
             The dataset&rsquo;s whole neuron table is downloaded once and searched locally &mdash;
             male&#8209;CNS is 165,122 traced cells &times; 20 properties, ~7&nbsp;MB gzipped, about
@@ -429,7 +429,7 @@
         </div>
       </div>
       <div class="point rise" data-delay="2" style="max-width:var(--measure)">
-        <h3><code>Profile</code> provides neuron-level summaries</h3>
+        <h3><code>Neuron&nbsp;Profile</code> provides neuron-level summaries</h3>
         <p>
           Identity, transmitter, synapse totals, strongest partners, the per&#8209;ROI split and the
           morphology &mdash; one neuron at a time. Page through a collection freely; pin one and it
@@ -441,7 +441,7 @@
     <!-- The two widgets as they sit on a canvas: one feeding the other. -->
     <div class="pipe rise" data-delay="1">
       <div class="surface">
-        <div class="surface__bar"><strong>Explore</strong><span>hemibrain:v1.2.1</span></div>
+        <div class="surface__bar"><strong>Explore Dataset</strong><span>hemibrain:v1.2.1</span></div>
         <div class="explore__search">
           <span style="color:var(--text-muted)">&#9906;</span>
           <span class="q">LC4</span><span class="caret"></span>
@@ -501,7 +501,7 @@
       <div class="surface">
         <div class="surface__bar">
           <i class="sock" data-fam="table" data-shape="circle" style="position:static;transform:none"></i>
-          <strong>Profile</strong><span>2 of 2 &nbsp;&#8249;&nbsp;&#8250;</span>
+          <strong>Neuron Profile</strong><span>2 of 2 &nbsp;&#8249;&nbsp;&#8250;</span>
         </div>
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:1px; background:var(--border);">
           <div style="background:var(--surface-2); padding:11px 13px; display:grid; gap:3px;">

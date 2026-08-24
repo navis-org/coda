@@ -1,5 +1,5 @@
 ```coda-graph
-caption: Search in Explore and get a per-neuron summary.
+caption: Search in Explore Dataset and get a per-neuron summary.
 neuron.explore as exp
 out.profile as prof
 out.neuroglancer as ngl

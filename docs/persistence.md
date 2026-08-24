@@ -21,7 +21,7 @@ of any of this.
 The numbers are what settle it. Measured across the five bundled examples, **deflate + base64url
 is 1,540–2,004 characters** against 4,282–4,786 for the same graph as literal JSON — 2.8×, and
 the difference between a workflow that pastes anywhere and one that does not. The case that
-genuinely needs the gist is an Explore select-all: 10,000 neuron ids pack to **~56,000**, which
+genuinely needs the gist is an Explore Dataset select-all: 10,000 neuron ids pack to **~56,000**, which
 mail and chat clients cut short.
 
 ### The grammar
@@ -51,7 +51,7 @@ is a URL change and the fix for `file://` is to send the file, and a shared "bad
 neither.
 
 **Base64 is chunked.** `String.fromCharCode(...bytes)` is the one-liner and blows the call stack
-well below the size an Explore selection reaches, with nothing in the failure naming the array
+well below the size an Explore Dataset selection reaches, with nothing in the failure naming the array
 that did it.
 
 **Both writer promises are caught in `through()`.** A corrupt payload fails on _both_ ends of the
@@ -301,7 +301,7 @@ by doing that, and needs no `vi.resetModules` for anything but the store initial
 Slots accumulate — one per app-open that gets edited — so `pruneSlots` runs on the write path,
 where the budget is actually consumed, and keeps the six most recently active within two
 megabytes. Both bounds, because the failure shapes differ: six slots of a four-kilobyte example
-is nothing and six of a graph carrying a 10,000-neuron Explore selection is most of the origin's
+is nothing and six of a graph carrying a 10,000-neuron Explore Dataset selection is most of the origin's
 five. The writer's own slot is never evicted and is charged first, so a graph larger than the
 whole budget clears everything else and is still attempted rather than refused.
 
@@ -402,7 +402,7 @@ per-origin, per-profile, cleared with the site data and absent in a private wind
 is still the only durable artefact and the UI says so in both menus.
 
 **IndexedDB, and its own database.** Not `localStorage`: the autosave already keeps a full copy
-of the working graph in the ~5 MB origin budget, and an Explore select-all is ~110 kB of params
+of the working graph in the ~5 MB origin budget, and an Explore Dataset select-all is ~110 kB of params
 in one node, so a handful of saved graphs would hit quota — silently, since `saveAutosave`
 swallows that by design. Not `data/cache.ts` either, despite the IndexedDB wrapper already being
 there: that module is a _cache_, with expiry, fingerprint-as-miss and a `cacheClear`, and a graph

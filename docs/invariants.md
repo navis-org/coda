@@ -23,7 +23,7 @@ verbatim. Read the entry before arguing with the rule.
    nothing.
 
    What the gap looked like, since it is not obvious from a stack trace: a fresh tab, a
-   MaleCNS workflow, a pipeline that ran to completion, and an Explore widget beside it saying
+   MaleCNS workflow, a pipeline that ran to completion, and an Explore Dataset widget beside it saying
    "Connect a Dataset to browse its neurons". A dataset node on "Latest" reads its id out of
    `peekDatasets()`, so it published a Dataset type with **no dataset id** and the widget had
    nothing to load — while `evaluate` had the real value all along, which is why the run
@@ -110,13 +110,13 @@ verbatim. Read the entry before arguing with the rule.
    own documentation asserted a grammar no function enforced.
 
    **And it kept being written a fifth time, in the UI, where nothing enforces it.** Three sites
-   converted an id to a `number` and were found together after one was reported: Explore's
+   converted an id to a `number` and were found together after one was reported: Explore Dataset's
    `neuronIdAt` (`Number(cell)`, so an eighteen-digit root id went into the `selection` param as
    `…857200`), `PartnerRow.neuronId` in `profileStats` (`toNumber`, and then
    `a.neuronId - b.neuronId` as a tie-break, which reports two adjacent wide ids as *equal*), and
    `NeuroglancerProfileFrame`'s `neuronId: number`, which becomes a neuroglancer segment.
 
-   The Explore one is the instructive symptom, because it is precise and points nowhere near the
+   The Explore Dataset one is the instructive symptom, because it is precise and points nowhere near the
    cause: **`Hits` works and `Selected` is empty**. `Hits` is `selectRows(index, capped)` and never
    goes through the selection; `Selected` is `rowsWithIds(index, selection)`, matching a rounded
    string against exact ones. Worse, the *checkbox stayed ticked* — the widget compared its own
@@ -142,7 +142,7 @@ verbatim. Read the entry before arguing with the rule.
 
    **The column is called `neuronId`, and that is Coda's word rather than any backend's.** It
    used to be `bodyId`, which is neuPrint's property name, and it is the one column every node
-   addresses *by name* — `out.profile` validates on it, Connectivity, Skeletons, Meshes and
+   addresses *by name* — `out.profile` validates on it, Connectivity Graph, Skeletons, Meshes and
    Synapses all reach their ids through `idColumn(table, 'neuronId')` — so it is the one that has
    to be Coda's vocabulary. Everything else in a neuron table is a passthrough that only a column
    picker ever names. The precedent is `preId`/`postId`, which Coda has always coined: neuPrint

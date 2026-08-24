@@ -1,10 +1,10 @@
 ## Two nodes for one job
 
 1. **`Build Networks`** turns an edge table into nodes and links, with the roll-ups a node-link drawing needs — in/out degree, in/out weight — derived automatically.
-2. **`Network`** draws the result. Both halves are ordinary Coda attribute tables, one row per node or per link, so coloring nodes by cell type is exactly the same column picker as anywhere else.
+2. **`Network Viewer`** draws the result. Both halves are ordinary Coda attribute tables, one row per node or per link, so coloring nodes by cell type is exactly the same column picker as anywhere else.
 
 ```coda-graph
-caption: Connectivity's own guide names this pipeline — an edge list in, a network out.
+caption: Connectivity Graph's own guide names this pipeline — an edge list in, a network out.
 neuron.connectivity as conn
 net.build as build { source: preId, target: postId, weight: weight }
 out.network as net
@@ -12,18 +12,18 @@ conn -> build
 build -> net
 ```
 
-1. **Connectivity** — or any table with a source and a target column — is the edge list.
+1. **Connectivity Graph** — or any table with a source and a target column — is the edge list.
 2. **Build Network** groups it into links, summing weight where several rows join the same
    pair, and derives node degree and weight from what survives. A second `Node attrs` table can
    join extra columns onto the nodes by id.
-3. **Network** lays the result out and draws it. Its own `Network` output passes the graph
+3. **Network Viewer** lays the result out and draws it. Its own `Network` output passes the graph
    through unchanged — a viewer here is a tap, not a dead end — and a second output, `Selected`,
    carries back whatever you clicked.
 
 > [!NOTE] Why does this need two nodes?
-> First, because they both `Build Network` and `Network` are highly customizable and a single node would be overloaded with parameters/settings. Second, by splitting them, the user can play with the viewer without invalidating everything else that uses the raw network.
+> First, because they both `Build Network` and `Network Viewer` are highly customizable and a single node would be overloaded with parameters/settings. Second, by splitting them, the user can play with the viewer without invalidating everything else that uses the raw network.
 
-## `Network`'s filters change what leaves the node, not just what you see
+## `Network Viewer`'s filters change what leaves the node, not just what you see
 
 > [!WARNING] `Min link weight`, `Top nodes` and `Hide isolated` are not presentational > Everywhere else on this card, a setting only changes the picture. These three change what `evaluate` returns, so they join the provenance key and everything wired after this node goes > stale — which is why the `Filter` tab carries its own warning rather than sitting quietly beside `Layout` and the rest.
 

@@ -106,7 +106,7 @@ registerEmitter('neuron.explore', (ctx) => {
 
   const lines: string[] = [
     ...ctx.note(
-      'Explore downloads the whole neuron table once and searches it locally. On male-CNS ' +
+      'Explore Dataset downloads the whole neuron table once and searches it locally. On male-CNS ' +
         'that is around 165,000 rows; expect this chunk to take a few seconds.',
     ),
     `${all} <- neuprint_fetch_custom(`,
@@ -165,7 +165,7 @@ registerHelper({
   requires: ['dplyr'],
   source: [
     'coda_search <- function(df, query) {',
-    "  # Coda's Explore query language, matching only.",
+    "  # Coda's Explore Dataset query language, matching only.",
     '  #',
     '  # Terms are AND-ed; a leading "!" or "-" negates one. A bare word is a substring of the',
     '  # row\'s searchable text; "field=value" compares one column, with > < >= <= != and ~',
@@ -302,7 +302,7 @@ registerEmitter('out.profile', (ctx) => {
 })
 
 /**
- * Everything the Profile card shows, as a list of data frames.
+ * Everything the Neuron Profile card shows, as a list of data frames.
  *
  * Cheaper than the widget for the same reason as the Python helper: `neuprint_connection_table`
  * takes the whole id vector, so this costs three requests for a hundred neurons as readily as

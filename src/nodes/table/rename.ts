@@ -41,7 +41,7 @@ export const renameNode = registerNode({
   category: 'transform',
   description: 'Give one or more columns a different name.',
   guide:
-    'Give one or more columns a different name, leaving their values, dtypes and units alone. Mostly for making somebody else’s table speak Coda’s vocabulary: the id column has to be called neuronId before a table can meet a Neurons socket, and the cell typing has to be called type before connectivity rows, Explore chips and Profile roll-ups can read it — which is why renaming a column onto neuronId promotes the table to Neurons, and renaming neuronId away demotes it. Nothing here refuses: a row naming a column the table does not have renames nothing and says so, and two rows aiming at one name suffix the second rather than dropping a column.',
+    'Give one or more columns a different name, leaving their values, dtypes and units alone. Mostly for making somebody else’s table speak Coda’s vocabulary: the id column has to be called neuronId before a table can meet a Neurons socket, and the cell typing has to be called type before connectivity rows, Explore Dataset chips and Neuron Profile roll-ups can read it — which is why renaming a column onto neuronId promotes the table to Neurons, and renaming neuronId away demotes it. Nothing here refuses: a row naming a column the table does not have renames nothing and says so, and two rows aiming at one name suffix the second rather than dropping a column.',
   cost: 'cheap',
   inputs: [{ id: 'in', label: 'Table', type: T.table() }],
   outputs: [{ id: 'out', label: 'Table', type: T.table() }],

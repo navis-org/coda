@@ -40,7 +40,7 @@ out the other end. It is built with the app (`overview.html`), so it also opens 
 
 New to node graphs? The **[field guide](https://navis-org.github.io/coda/tutorial.html)** is a
 single scrolling page that builds a real pipeline as you read — nodes, wires, fetching data,
-Explore, the viewers, and saving your work. It is built with the app (`tutorial.html`), so it
+Explore Dataset, the viewers, and saving your work. It is built with the app (`tutorial.html`), so it
 also opens from **?&nbsp;▾ ▸ Field Guide** in the toolbar and from the welcome screen.
 
 Then the **[node guide](https://navis-org.github.io/coda/nodes.html)** (`nodes.html`, **?&nbsp;▾ ▸
@@ -51,7 +51,7 @@ at build time, so it cannot drift from the app — see
 [docs/adding-a-node.md](docs/adding-a-node.md) if you are adding one.
 
 **New ▾** offers an empty canvas or a graph already pointed at a dataset, which builds
-`Dataset → Explore → Table`.
+`Dataset → Explore Dataset → Table`.
 
 Dataset nodes are per dataset — `Add ▶ Dataset ▶ MaleCNS`, `▶ Hemibrain`, `▶ MANC`,
 `▶ Optic Lobe`, `▶ FlyWire FAFB` — so there is no backend to choose. Each has a **version**
@@ -91,7 +91,7 @@ back.
 The synthetic connectomes are dataset nodes too, so everything below works with no token. They
 come without the card — there is nobody to cite for a connectome generated in the browser.
 
-**Explore** is the node for when you do not yet know what to ask for. It holds a dataset's
+**Explore Dataset** is the node for when you do not yet know what to ask for. It holds a dataset's
 entire neuron table, searches every field as you type, pages through the results, and lets you
 tick neurons to send downstream:
 
@@ -185,7 +185,7 @@ sockets that may appear side by side (validated, not guessed — see
 
 ### Collections
 
-Every node operates on the **whole collection** by default — a Connectivity node fed 500
+Every node operates on the **whole collection** by default — a Connectivity Graph node fed 500
 neuronIds issues one batched request. Per-item logic is meant to be an explicit `ForEach`
 node wrapping a subgraph (not yet built; nothing needs it yet).
 
@@ -209,7 +209,7 @@ columns after a query can't participate in the type system.
 3. On a Dataset node, switch **Source** to neuPrint and pick a dataset.
 
 Thirteen datasets are live, including `hemibrain:v1.2.1`, `manc:v1.2.3`, `optic-lobe:v1.1`
-and `male-cns:v1.0`. Find Neurons, Connectivity, Adjacency, ROI Counts, Skeletons, Synapses
+and `male-cns:v1.0`. Find Neurons, Connectivity Graph, Adjacency, ROI Counts, Skeletons, Synapses
 and the Cypher node all work against them.
 
 **How a request gets there.** A deployment is tried **directly** first, and falls back to a
@@ -385,11 +385,11 @@ per-page selector. Clicking a column header sorts **the view only** — the foot
 because a viewer sort looks identical to a Sort node's effect but nothing downstream sees
 it.
 
-### Network and 3D
+### Network Viewer and 3D
 
 Two more viewers, both built for data-driven encoding:
 
-**Network** ([Sigma](https://www.sigmajs.org/) + graphology, WebGL). Build one with
+**Network Viewer** ([Sigma](https://www.sigmajs.org/) + graphology, WebGL). Build one with
 `Build Network`, which turns any edge table into nodes and links, derives degree/weight
 attributes, and optionally joins a node-attribute table. Four layouts: force-directed,
 circular, **layered** (feed-forward — the way circuit diagrams are drawn), and
@@ -471,11 +471,11 @@ everything but the neurons (male-CNS publishes 38 layers and 38 kB of state), an
 `Max neurons` bounds what neuroglancer is asked to draw — nothing is downloaded by Coda.
 
 **New ▸ <dataset>** wires one up for you wherever the source publishes a scene, hanging off
-the same Explore selection the table shows:
+the same Explore Dataset selection the table shows:
 
 ```
-[Dataset] ─┬─▸ [Explore] ──(Selected)─┬─▸ [Table]
-           └──────────────────────────┴─▸ [Neuroglancer]
+[Dataset] ─┬─▸ [Explore Dataset] ──(Selected)─┬─▸ [Table]
+           └──────────────────────────────────┴─▸ [Neuroglancer]
 ```
 
 Unlike every other viewer, this node's colour params are **not** presentational: they are
@@ -503,7 +503,7 @@ that selection becomes a `Neurons` table you can wire into a downstream query:
 
 ```
 [Viewer3D] Skeletons ●──
-           Selected  ──● Neurons ──▶ [Connectivity] ──▶ …
+           Selected  ──● Neurons ──▶ [Connectivity Graph] ──▶ …
 ```
 
 This is the one place data flows backwards from a viewer, so the selection is deliberately
@@ -511,7 +511,7 @@ This is the one place data flows backwards from a viewer, so the selection is de
 provenance key. Restyling never invalidates anything; selecting does, because it genuinely
 changes an output.
 
-Network node ids are strings — neuron ids at neuron level, type names at type level — so the
+Network Viewer node ids are strings — neuron ids at neuron level, type names at type level — so the
 selection's `neuronId` column is null for a type-level pick. That fails loudly at the next
 query rather than fabricating an id.
 
@@ -563,7 +563,7 @@ The **share icon** in the toolbar turns the graph into a URL, the way neuroglanc
 document goes after `#!`, so there's no server, no account and nothing to keep alive. The five
 bundled examples come out at 1.5–2 kB of address, which pastes anywhere.
 
-When a graph is too big for that — an Explore _Select all_ is the case that does it — the same
+When a graph is too big for that — an Explore Dataset _Select all_ is the case that does it — the same
 dialog uploads it to a **GitHub Gist** and hands back `#!gh://<user>/<id>` instead, forty
 characters however large the workflow. That needs a token with the `gist` scope, under
 **Connections ▸ Sharing** (the branch icon in the toolbar); _reading_ a shared gist needs
@@ -600,7 +600,7 @@ Being explicit, because the milestone was deliberately scoped to the editor:
   [`src/core/values.ts`](src/core/values.ts) are the only thing that would need to change.
 - **Muting blocks downstream** rather than passing input through Blender-style.
 - **No virtualisation.** One DOM node per graph node, and table viewers cap rendered rows.
-  Fine for tens of nodes; a 1000-node graph would need work. Explore pages rather than
+  Fine for tens of nodes; a 1000-node graph would need work. Explore Dataset pages rather than
   scrolling a long list for the same reason.
 - **The dataset list is compiled in.** Versions, ROIs and schemas are read live from the server,
   but the _families_ Coda ships a node for are a static table — node types have to exist before a
@@ -611,7 +611,7 @@ Being explicit, because the milestone was deliberately scoped to the editor:
   public hosts only), and a static build has nothing serving that path.
 - **The dataset node's preview is a placeholder** — a specimen silhouette keyed to a coarse
   anatomical kind, not a rendering of the data.
-- **Explore's index is per dataset and downloaded whole.** Fine at male-CNS's 165k neurons
+- **Explore Dataset's index is per dataset and downloaded whole.** Fine at male-CNS's 165k neurons
   (~7 MB gzipped); a dataset an order of magnitude larger would want a server-side index.
 - **Thumbnails skip the largest neurons.** They come from the coarsest published mesh, and a
   body whose coarsest level still exceeds 128 kB gets a placeholder instead — that is under a

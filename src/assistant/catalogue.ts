@@ -216,7 +216,7 @@ What makes a plan fail:
 
 Column params — set them when you can, and you often can:
 - A \`carries:\` line says which columns a port holds. Use those names. A Bar Chart fed by a
-  Connectivity node should name its category and value, not be left blank.
+  Connectivity Graph node should name its category and value, not be left blank.
 - The current-graph listing carries the same line per node, and it is the authoritative one:
   a dataset adds properties the catalogue above cannot know about.
 - When no \`carries:\` line covers what you need — anything downstream of a Pivot or a Cypher

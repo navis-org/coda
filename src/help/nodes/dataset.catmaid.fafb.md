@@ -12,4 +12,4 @@ The annotations are free-text and while the VFB instance contains a sanitized se
 
 ### Search
 
-The "Explore" widget uses a fuzzy search on the full set of annotations (similar to CATMAID's "Global Search" function). We currently do not match the more elobarate functionality of CATMAID's "Neuron Search" widget.
+The "Explore Dataset" widget uses a fuzzy search on the full set of annotations (similar to CATMAID's "Global Search" function). We currently do not match the more elobarate functionality of CATMAID's "Neuron Search" widget.

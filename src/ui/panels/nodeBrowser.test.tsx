@@ -166,10 +166,10 @@ describe('NodeBrowser filtering', () => {
       'Dataset Summary',
       'Dendrogram',
       'Heatmap',
-      'Network',
+      'Network Viewer',
       'Neuroglancer',
-      'Profile',
-      'ROIs',
+      'Neuron Profile',
+      'ROI Viewer',
       'Scatter Plot',
       'Table',
     ])
@@ -216,7 +216,7 @@ describe('NodeBrowser filtering', () => {
     expect(rowNames()).toHaveLength(defsIn('query').length)
     expect(rowNames()).toEqual(defsIn('query').map((d) => d.label))
     expect(rowNames()).toContain('Cypher')
-    expect(rowNames()).toContain('Explore')
+    expect(rowNames()).toContain('Explore Dataset')
     expect(rowNames()).toContain('IDs from Label')
   })
 

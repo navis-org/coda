@@ -26,7 +26,7 @@ The search is deliberately bounded — it does not find every route, but the str
 ### This node outputs
 
 - **Network**: the pruned graph of routes found.
-- **Layout**: a fixed ELK-layered arrangement. It is not user-configurable — any knob takes part in the provenance key and invalidates downstream work. Wire this Layout into a [Network](#out.network) viewer's Layout input to use it; when connected, it overrides that viewer's own Layout picker.
+- **Layout**: a fixed ELK-layered arrangement. It is not user-configurable — any knob takes part in the provenance key and invalidates downstream work. Wire this Layout into a [Network Viewer](#out.network)'s Layout input to use it; when connected, it overrides that viewer's own Layout picker.
 - **Paths**: one row per route, ranked by bottleneck.
 
 ```coda-params

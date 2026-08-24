@@ -43,7 +43,7 @@ registerEmitter(
     const lines: string[] = cave
       ? [
           ...ctx.note(
-            'Explore searches the whole neuron table locally. This is the datastack\u2019s own ' +
+            'Explore Dataset searches the whole neuron table locally. This is the datastack\u2019s own ' +
               'index — its neuron table joined to its annotations, or whatever is wired to the ' +
               'Dataset\u2019s Annotations socket — fetched the first time anything asks for it. ' +
               'On FlyWire that is 139,255 rows and takes a few seconds.',
@@ -52,7 +52,7 @@ registerEmitter(
         ]
       : [
           ...ctx.note(
-            'Explore downloads the whole neuron table once and searches it locally. On male-CNS ' +
+            'Explore Dataset downloads the whole neuron table once and searches it locally. On male-CNS ' +
               'that is around 165,000 rows; expect this cell to take a few seconds.',
           ),
           `${all}, _ = fetch_neurons(NeuronCriteria(client=${c}), client=${c})`,
@@ -268,7 +268,7 @@ registerHelper({
     '',
     '',
     'def coda_search(df, query):',
-    '    """Rows matching Coda\'s Explore query language.',
+    '    """Rows matching Coda\'s Explore Dataset query language.',
     '',
     '    Terms are AND-ed; a leading "!" or "-" negates one. A bare word is a substring of',
     '    the row\'s searchable text; "field=value" compares one column, with ">" "<" ">=",',

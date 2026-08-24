@@ -42,7 +42,7 @@ link:tree -> dend
 ```
 
 1. **Skeletons** fetches the morphologies. Its `Neurons` input is whatever chose the cells — `Find
-   Neurons`, `Explore`, or a pasted list.
+   Neurons`, `Explore Dataset`, or a pasted list.
 2. **NBLAST** takes the skeletons, resamples them, converts to dotprops, and scores them pairwise. The output is either a square matrix (all-by-all) or a rectangular one (query-vs-target) with the similarity scores.
 3. **[Linkage](#cluster.linkage)** turns the matrix into a merge tree. Scores are converted to distances
    automatically, because the matrix knows it carries similarities.

@@ -431,7 +431,7 @@ export class CaveSource implements DataSource {
       throw new Error(
         `${spec.datastack} publishes no table listing its neurons, so Coda cannot enumerate ` +
           `them. Wire an Annotations source to the Dataset — whatever it names becomes the ` +
-          `neuron list. Queries that start from ids you already have (Input IDs, Connectivity, ` +
+          `neuron list. Queries that start from ids you already have (Input IDs, Connectivity Graph, ` +
           `Skeletons) need no such table.`,
       )
     }

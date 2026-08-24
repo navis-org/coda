@@ -73,7 +73,7 @@ Moved verbatim out of `CLAUDE.md`.
 | `ui/nodes/paramFold.test.tsx`            | folding a card's param rows: the header button surviving the band, notes excepted, one undo step, and that it costs no run       |
 | `ui/nodes/collapsedPorts.test.tsx`       | collapse to a header: handles moved not removed, each still addressable, and the wrapper's width kept but not its height         |
 | `ui/nodes/hiddenParams.test.tsx`         | the `… N more` hint: both counts, the card with no band at all, what is not a change, and that it never closes an open inspector |
-| `nodes/lib/neuronSearch.test.ts`         | the Explore query language: parsing, matching, null rules, the fuzzy fallback, ranking, completion                               |
+| `nodes/lib/neuronSearch.test.ts`         | the Explore Dataset query language: parsing, matching, null rules, the fuzzy fallback, ranking, completion                               |
 | `data/cache.test.ts`                     | IndexedDB-less degradation, fingerprint/expiry invalidation, index dedupe                                                        |
 | `ui/explore/thumbnail.test.ts`           | silhouette projection/shading, and the data-driven row spec                                                                      |
 | `ui/explore/chips.test.ts`               | that the chip hues in `theme.css` still match `colors.ts`, that a slot follows the field, which chips each backend's vocabulary yields, and a tags column held out of all three lists |
@@ -92,7 +92,7 @@ Moved verbatim out of `CLAUDE.md`.
 | `ui/panels/panels.test.tsx`              | (also) the New menu: an escape hatch under every backend's heading, and the three volumes held back without being unregistered   |
 | `nodes/lib/profileStats.test.ts`         | the profile roll-ups: distinct partners, nested-ROI filtering, the last-parenthesis side rule, NT column matching                |
 | `nodes/lib/networkOps.test.ts`           | filter order, ranking after the weight cut, and the recomputed degree roll-ups                                                   |
-| `nodes/output/profile.test.ts`           | that Profile is a tap, and that paging is free while pinning is not                                                              |
+| `nodes/output/profile.test.ts`           | that Neuron Profile is a tap, and that paging is free while pinning is not                                                              |
 | `ui/viewers/profileViewer.test.tsx`      | the widget: pager clamping, absent tiles vs dashes, the threshold reaching a heading, card-vs-overlay, and the annotation chain reaching both fetches and the cache key |
 | `ui/markdown.test.ts`                    | the markdown subset against the real published blurbs, plus what a hostile one cannot do                                         |
 | `store/companion.test.ts`                | that a dataset node brings its Description card, as one undo step, and which families opt out                                    |
@@ -160,7 +160,7 @@ Moved verbatim out of `CLAUDE.md`.
 | `ui/raster.test.ts`                      | triangles to masks and masks to outlines: clipping, brightest-wins, a concavity kept, split blobs, and the closed-ring simplify |
 | `ui/viewers/roiProjection.test.ts`       | the three anatomical planes, an outline that keeps its notch, the explode proved non-uniform, the frame held at full, and mesh volume |
 | `data/obj.test.ts`                       | reading somebody else's OBJ: every face-index form agreeing, polygons fanned, CRLF, and what a 200 that is not a mesh says |
-| `nodes/output/rois.test.ts`              | the ROIs node: no ports at all, every control costing no run, and what it says with a source publishing no region meshes |
+| `nodes/output/rois.test.ts`              | the ROI Viewer: no ports at all, every control costing no run, and what it says with a source publishing no region meshes |
 | `data/meshDecimate.test.ts`              | vertex clustering: the silhouette surviving, no degenerate faces, determinism, and welding a seam counted apart from decimating |
 | `ui/viewers/roiOutlines.test.ts`         | what survives when the meshes are released: three planes per region, the size claim, and a fingerprint that re-fetches on a changed region list |
 | `ui/viewers/rois.test.tsx`               | the card through `ValuePreview`: that it asks before spending 60 MB, stops asking once cached, drops the rail when compact, and marks the volume an estimate |

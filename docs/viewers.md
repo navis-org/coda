@@ -155,7 +155,7 @@ takes the last match: a `cm` added in reading order would otherwise become the a
 length, with no type error and nothing failing for the cases already covered.
 
 **The schema half was already right, which is what made this a display bug rather than a data
-one.** Every `cableLength` column has carried `'nm'` since `CANONICAL_SCHEMAS`, and Explore's row
+one.** Every `cableLength` column has carried `'nm'` since `CANONICAL_SCHEMAS`, and Explore Dataset's row
 *read* it — through `statUnit` — and then used it only in a `title`. The value beside it went
 through the unit-blind formatter. So the fix is where the two met, not in either half.
 
@@ -216,7 +216,7 @@ Coda generates and `max_id` can only arrive in a file.
 
 **The name is optional and absent means "a quantity"**, which is what every caller did before
 it existed. It is passed wherever the caller has one — the table cell, the network tooltip and
-edge label, the scatter tooltip's label/colour/shape rows, the Profile and Explore chips.
+edge label, the scatter tooltip's label/colour/shape rows, the Neuron Profile and Explore Dataset chips.
 `Tiles`' `Facts` takes label/value pairs with no schema behind them and is left alone.
 
 `format.test.ts` pins the rule and `viewers.test.tsx` pins the wiring, because a cell rendering
@@ -230,8 +230,8 @@ Each column header carries a filter field, and what survives leaves by a second 
 filters its own copy on every keystroke and `evaluate` filters the real one on the committed
 param, and a second implementation in the UI would draw a row count the port does not honour.
 
-**A cell is the right-hand side of an Explore field term.** `>=10` under a count means what
-`weight>=10` means in the Explore box: same operator table, same null rule (a missing value
+**A cell is the right-hand side of an Explore Dataset field term.** `>=10` under a count means what
+`weight>=10` means in the Explore Dataset box: same operator table, same null rule (a missing value
 satisfies `!=` and nothing else), same comparison semantics, because `resolveFilters` builds
 real `FieldTerm`s and hands them to `neuronSearch.ts`'s own matcher. That reuse is why
 `prepareFieldTerms`/`fieldTermsMatch` were extracted out of `runSearch` — two loops over one
@@ -246,7 +246,7 @@ compiled as an *escaped* regex so `LC4(R)` matches itself rather than being read
 **It does not agree with the Filter node, and that is recorded rather than fixed.** The header
 *sort* shares `sortedRowIndices` with the Sort node on a stated rule — collation and null
 placement must not differ between a node and a header click. The header *filter* borrows
-Explore's grammar instead, so it lands elsewhere on both. Measured: `type == "lc4"` keeps 0 rows
+Explore Dataset's grammar instead, so it lands elsewhere on both. Measured: `type == "lc4"` keeps 0 rows
 in a Filter node (case-sensitive) and 1 in a header cell; `pre == 0` against a null keeps the
 null row in a Filter node (`Number(null)` is 0) and none in a cell. Neither is wrong on its own,
 but a graph can hold both an inch apart, so `tableFilter.ts` and `filterTable` each name the
@@ -286,7 +286,7 @@ whose bytes did not change. It lands there as `blocked` rather than `stale`. Sam
 `out.network`'s filters make, and `table.test.ts` pins it so nobody is surprised later.
 
 **Draft now, commit in a moment.** Typing filters the drawing immediately and reaches the param
-`COMMIT_DELAY_MS` (140ms) after the last keystroke — Explore's split, for Explore's reason: the
+`COMMIT_DELAY_MS` (140ms) after the last keystroke — Explore Dataset's split, for Explore Dataset's reason: the
 param is in the provenance key, so committing per keystroke is a re-run of everything downstream
 between two letters of a cell type.
 
@@ -408,7 +408,7 @@ Note what pins it. A param added without the flag fails no type check, is not ca
 appears on the card, so the column starts growing back one param at a time. `network.test.ts`
 asserts the card's contents exactly.
 
-## Network + 3D widgets
+## Network Viewer + 3D widgets
 
 **Value model.** `Network`, `Skeletons`, `Meshes` and `Points` all pair geometry/topology
 with an ordinary Coda **attribute table** (one row per node/item/point, in the same order).
@@ -491,14 +491,14 @@ and its row costs a tenth of a 150px card.
 saved file, and take part in the provenance key. Marking one presentational would let a
 stale downstream result survive a selection change.
 
-**The Network viewer filters its own output, and that is the one place it stops being a
+**The Network Viewer filters its own output, and that is the one place it stops being a
 tap.** `minLinkWeight`, `topNodes` and `hideIsolated` are **not** presentational: they change
 what `evaluate` returns, so they join the provenance key and stale everything downstream. The
 alternative — filtering only the drawing — leaves the picture disagreeing with every node
 wired after it, which is worse than the cost. `networkOps.ts` holds the logic, headless.
 
 No widget-local preview path exists, and that is deliberate: `out.network` is `cheap`, so the
-ordinary 180ms pass already redraws while you drag. Explore's live-widget/debounced-commit
+ordinary 180ms pass already redraws while you drag. Explore Dataset's live-widget/debounced-commit
 split is for an `expensive` node; copying it here would put a filtered picture beside a stale
 downstream graph and have the two disagree, which is the failure being avoided.
 
@@ -751,7 +751,7 @@ column and what a tooltip prints; _transformed space_ is that under the axis sca
 transformed, because that is the space the picture is linear in. `forward`/`inverse` are the
 only crossings and everything named `*T` is transformed.
 
-**`Max points` thins the drawing and nothing else — so it is presentational, and the Network
+**`Max points` thins the drawing and nothing else — so it is presentational, and the Network Viewer
 viewer's filters are not.** That contrast is the whole of it. `out` is the input table
 unchanged, and a lasso is tested against **every usable row rather than the drawn sample**, so
 no output can tell whether a point was painted. `out.network`'s `minLinkWeight`/`topNodes`
@@ -1196,7 +1196,7 @@ takes to boot would merge onto its defaults.
 
 **The Neurons port is `required: false`, and the empty cases do not throw.** A dataset alone
 resolves to the published scene with no segments, which is a perfectly good thing to look at
-— and an empty _table_ means the same thing, because that is what an untouched Explore
+— and an empty _table_ means the same thing, because that is what an untouched Explore Dataset
 selection is and what a starter graph opens in. Only a port wired to something that is not a
 table is an error. Getting this wrong turned the node into a dead card until someone had
 ticked a neuron, which is the opposite of an exploration surface.

@@ -94,7 +94,7 @@ downstream of your node work before anything has executed.
 - If your node changes the column set (aggregate, pivot, select, join), compute the new
   schema here. If it preserves it, pass the input schema through.
 - Preserve `neurons`-ness when your node preserves the `neuronId` column — that's what keeps
-  a filtered neuron table pluggable into `Connectivity`:
+  a filtered neuron table pluggable into `Connectivity Graph`:
 
 ```ts
 inferOutputs: (ctx) => {
@@ -242,7 +242,7 @@ which the palette and browser read, leaves it out. `neuron.dataset` is the worke
 
 ## When the node needs its own UI
 
-A node whose purpose is to be *looked at* rather than configured — Explore, the dataset nodes and
+A node whose purpose is to be *looked at* rather than configured — Explore Dataset, the dataset nodes and
 the Description card — can draw its own body instead of a list of param fields. Register a component in
 [`src/ui/nodes/nodeBodies.ts`](../src/ui/nodes/nodeBodies.ts), keyed by node type:
 
@@ -269,7 +269,7 @@ Three rules:
   only by `compact`. Design for both, or it ships working in one — and set `expandable: true`
   only if there is something worth enlarging, since that is what puts the button on the node.
 
-Widgets that write on every keystroke should follow Explore's split: filter locally and
+Widgets that write on every keystroke should follow Explore Dataset's split: filter locally and
 immediately for the user, and commit to a param on a debounce so downstream staleness stays
 meaningful. Anything purely about *viewing* — a page number, a zoom — belongs on a
 `presentational: true` param so it cannot invalidate a result.
@@ -279,7 +279,7 @@ meaningful. Anything purely about *viewing* — a page number, a zoom — belong
 Implement [`DataSource`](../src/data/source.ts) and `registerSource(new MySource())`.
 
 Optional methods are worth knowing about: `neuronIndex` supplies a dataset's whole neuron table
-so Explore can browse it (implementations must cache and deduplicate — see
+so Explore Dataset can browse it (implementations must cache and deduplicate — see
 [`src/data/neuronIndex.ts`](../src/data/neuronIndex.ts)), and `fetchCoarseGeometry` returns the
 cheapest possible mesh for one neuron, for thumbnails. Both may be omitted, and
 `fetchCoarseGeometry` may resolve `undefined` to mean "nothing cheap here" — that becomes a

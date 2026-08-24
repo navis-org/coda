@@ -36,8 +36,8 @@ needs no credential at all — see *Google Sheets, and the provider with no cred
 column is whatever the base calls it and every provider renamed onto it from the start. `type` was
 not, and missing it is entirely silent: `typesOf` reads `index.data.type` by literal name, so a
 chain publishing `cell_type` leaves `neuronType`/`partnerType` null on **every** connectivity row
-while the schema still declares them, Explore's `PRIMARY = ['type', 'instance']` falls through to
-a guess, and Profile's type roll-ups empty. `annotationColumn` in `annotations/types.ts` is the
+while the schema still declares them, Explore Dataset's `PRIMARY = ['type', 'instance']` falls through to
+a guess, and Neuron Profile's type roll-ups empty. `annotationColumn` in `annotations/types.ts` is the
 rule, applied by both providers — the same statement `data/cave/schema.ts` makes for the
 datastack's own table (`{ pt_root_id: neuronId, cell_type: 'type' }`), since an annotation chain
 is just the other route to the same neuron table. Deliberately only those two: everything else is
@@ -75,7 +75,7 @@ carries the backend's labels, which is the gap the chain was wired to close. Rea
 which also retired a match on the *text* of `CaveSource`'s refusal: that coupled the empty state
 to a sentence in `src/data` and recognised only CAVE's phrasing.
 
-**The Explore widget reads the chain off the _value_, one run later than the ports do.** A
+**The Explore Dataset widget reads the chain off the _value_, one run later than the ports do.** A
 dataset *type* carries the chain's schema; only a `DatasetValue` carries its table, because that
 table is a fetch somebody's Run paid for. So `NodeBodyProps` gained `inputValues` — the same
 thing `ValuePreview` is handed, from the `nodeInputs(id)` the card already computed — and
@@ -96,7 +96,7 @@ on the refusal's *text*, which is the thing `reportAuthFailure` exists to avoid;
 deliberately narrow (it only softens wording, and a real refusal still shows through) and the
 honest fix is the per-dataset capability that is still unwritten.
 
-**The Profile widget looked like the same gap and was not**, which is worth the sentence: it
+**The Neuron Profile widget looked like the same gap and was not**, which is worth the sentence: it
 fetches per neuron rather than loading an index, and `ValuePreview` hands it a whole
 `DatasetValue` and then peeled two strings off it. So the chain now rides along, and the profile
 cache key carries it for `neuronIndexKey`'s reason — two graphs on one datastack with different
@@ -169,9 +169,9 @@ annotation nodes chained rather than a setting, because `joinAnnotations` is a f
 Nothing queries *through* it. It is read for exactly two columns — the root id, which becomes the
 index, and the annotation table's own primary key, which is how `spec.annotations.refColumn`
 joins back — so `spec.annotations` depends on it and a datastack with neither is coherent.
-Connectivity reads the roll-up view by root id, and Skeletons, Meshes and Synapses take ids off a
-table, so `Input IDs → Connectivity` needs no neuron table whatsoever. What its absence costs is
-enumeration: Find Neurons, Explore, and the type names `typesOf` puts on every connectivity row.
+Connectivity Graph reads the roll-up view by root id, and Skeletons, Meshes and Synapses take ids off a
+table, so `Input IDs → Connectivity Graph` needs no neuron table whatsoever. What its absence costs is
+enumeration: Find Neurons, Explore Dataset, and the type names `typesOf` puts on every connectivity row.
 Hence the refusal names the wire to make rather than answering with an empty table, which would
 read as a datastack with no neurons in it.
 
@@ -575,7 +575,7 @@ table: two graphs filtering one base differently would share a cached neuron ind
 one fetched would win for the session — precisely the failure the chain key was added to prevent.
 So the dataset node pairs the table with **`ctx.inputKey('annotations')`**, the scheduler's own
 `hash(type, params, upstream)` for whatever arrived on that port. It keys the CAVE neuron index,
-the Explore widget's shared entry and the profile cache, exactly as `chainKey` did.
+the Explore Dataset widget's shared entry and the profile cache, exactly as `chainKey` did.
 
 **`ctx.inputKey(portId)` is new on `EvalContext`**, and the scheduler was already computing it —
 `desiredKeys` builds `${key}:${handle}` per port to fold into the hash, and `upstreamKey` is now

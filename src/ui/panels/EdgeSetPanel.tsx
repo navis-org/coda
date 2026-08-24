@@ -169,8 +169,8 @@ function Dialog({ nodeId }: { nodeId: string }) {
         </header>
 
         <p className="sources__privacy">
-          An edge set replaces every connectivity answer for {title} — Connectivity, Adjacency,
-          Paths and Profile all read it. It is kept in this browser and never travels in a saved
+          An edge set replaces every connectivity answer for {title} — Connectivity Graph, Adjacency,
+          Paths and Neuron Profile all read it. It is kept in this browser and never travels in a saved
           graph; what travels is its name and a content id, so the same file opened elsewhere
           matches.
         </p>

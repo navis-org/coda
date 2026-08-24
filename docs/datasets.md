@@ -117,7 +117,7 @@ stays complete.
 
 **Node bodies opt into expanding.** `NodeBodyEntry.expandable` is off by default: a dataset body
 is a preview and two fields, so a fullscreen overlay of it is whitespace, and its button would sit
-exactly where a viewer's does. Explore and the Description card set it; the dataset nodes do not.
+exactly where a viewer's does. Explore Dataset and the Description card set it; the dataset nodes do not.
 
 The preview at the top of a dataset node is a **placeholder** — a specimen silhouette, not a
 rendering of the data — but it occupies the space a real one will take. Six drawings cover every
@@ -160,7 +160,7 @@ lost:
 **The synthetic families opt out** via `DatasetFamily.synthetic`. There is nobody to cite for a
 connectome generated in the browser on load, and a credit card with no credit on it devalues the
 ones that mean something. Note the knock-on in tests: a mock starter has one fewer node than a
-neuPrint one, which is why `explore.test.tsx` still finds Explore's expand button first.
+neuPrint one, which is why `explore.test.tsx` still finds Explore Dataset's expand button first.
 
 **No outputs, which is the one deliberate departure from the `out.*` viewers.** Those pass their
 input through so they can be dropped mid-chain; this is an annotation hanging off a dataset node,
@@ -225,13 +225,13 @@ route.
 
 The one visible interaction is with the palette's link-drag, which adds the node and then
 connects it: the auto-wire lands first and `addEdge` evicts it if the drag was aimed at the same
-socket, so the two agree by construction. A drag from a _table_ output onto, say, Connectivity
+socket, so the two agree by construction. A drag from a _table_ output onto, say, Connectivity Graph
 now fills both of its inputs at once.
 
 ## Starter graphs, and the one that is not the generic shape
 
 `examples/starters.ts` — what `New ▸ <dataset>` and the start page's dataset rail both build,
-through one `buildStarter(spec)`. The generic shape is four nodes: a Dataset, an Explore, and a
+through one `buildStarter(spec)`. The generic shape is four nodes: a Dataset, an Explore Dataset, and a
 Table and a Neuroglancer view off `Selected`, plus the Description companion. Built from each
 node's own defaults, exactly like the examples, so a starter cannot drift out of sync with a
 node's param set.
@@ -263,7 +263,7 @@ by `examples.test.ts`:
   answers `200` with `*`. Measured from a real page origin: the first throws
   `TypeError: Failed to fetch`, the second returns 31,718,491 characters.
 - **Combine Columns**, because the type has to arrive in a column *called* `type` before anything
-  reads it in words — the connectivity tables, Explore's chips, Profile's roll-ups all address it
+  reads it in words — the connectivity tables, Explore Dataset's chips, Neuron Profile's roll-ups all address it
   by literal name (`annotationColumn`). The coalesce is about **precedence**, not coverage, and
   the measurement is the reason to say so: on the published file `cell_type` covers 137,720 of
   139,248 neurons and `hemibrain_type` 33,271, but only **2** neurons have the second and not the
@@ -299,7 +299,7 @@ off `All` rather than `Selected`** — every other starter avoids that, because 
 an empty search is the whole dataset and teaches the wrong lesson about what to connect; here the
 annotated neuron table *is* the thing worth looking at, and a Table showing nothing until a row
 is ticked would hide it. Everything else **opens empty**: `selection` and `page` are both written
-by the Explore *widget*, so a starter carrying either would ship whoever exported the graph's
+by the Explore Dataset *widget*, so a starter carrying either would ship whoever exported the graph's
 browsing position, and the Neuroglancer panel would open on a neuron nobody chose.
 
 **`Additional tags` is pointed at `join_tag`, and the name is derived rather than typed.**
@@ -309,7 +309,7 @@ entirely silent, since a wrong `Additional tags` does not fail, it just draws no
 other half of the pairing is `JOIN_SEPARATOR`: the aggregation joins with it and `splitTags`
 splits on it.
 
-**The starter carries one warning on a cold session: `Column "join_tag" is gone` on Explore.** It is
+**The starter carries one warning on a cold session: `Column "join_tag" is gone` on Explore Dataset.** It is
 the documented conflation in `annotationSchemaFrom`, which answers the same `undefined` for an
 unwired socket and for a chain whose columns are not known yet — so `withAnnotations` falls back
 to the *datastack's own* labels, and a chain replaces those, which makes the fallback a schema

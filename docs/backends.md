@@ -21,7 +21,7 @@ safelisted and needs no mention), no `Allow-Credentials`, and `Access-Control-Al
 **every** response including 401 and 404. That last one is the load-bearing part: the
 `reportAuthFailure` channel works by reading a 401's status, which a browser only surfaces if
 the response itself carries ACAO. All seven endpoints this app calls were verified, each path
-prefix preflighted separately (nginx CORS config is per-location), and a 4 MB Explore-shaped
+prefix preflighted separately (nginx CORS config is per-location), and a 4 MB Explore-Dataset-shaped
 index came back gzipped to 957 kB in 1.4 s. `neuprint.janelia.org` does **not** have it yet.
 
 So `routesForServer` offers two routes — the deployment itself, then the proxy path — and
@@ -134,8 +134,8 @@ rather than recalled**, and `live.test.ts` is that pass institutionalised — sk
 The single decision the whole module follows from. neuPrint runs Cypher against a shared
 production Neo4j, so `findNeurons` compiles a pattern into a query and every question is a round
 trip. CAVE's query API has **no regex worth using, no `GROUP BY`, and a 500,000-row cap** — but
-its annotations are a few tens of megabytes and are *already* what the Explore widget wants. So
-`CaveSource` fetches the neuron index once per dataset through the machinery Explore already
+its annotations are a few tens of megabytes and are *already* what the Explore Dataset widget wants. So
+`CaveSource` fetches the neuron index once per dataset through the machinery Explore Dataset already
 has, pivots it, and answers `findNeurons` from memory: 139,255 neurons in **6.7 s**, then every
 query after that is local. The cost is that the first one waits.
 
@@ -231,7 +231,7 @@ the same problem. **A datastack with no entry is not offered** — the info serv
 and most would fail on the first Run, and a dataset that appears in the picker and then fails is
 worse than one that is absent.
 
-**Connectivity prefers that view and falls back to counting synapses**, which is `connecto`'s
+**Connectivity Graph prefers that view and falls back to counting synapses**, which is `connecto`'s
 shape and arrived at for its reason. `valid_connection_v2` is the server having done the
 aggregation once: one row per ordered (pre, post) pair with `n_syn`, filterable by root id *and*
 by `n_syn`, so a minimum weight is applied before anything is sent — on one neuron's outputs,
@@ -586,7 +586,7 @@ Measured: 14,986 synapses for one neuron in 1.8 s.
 - **No polarity means two queries, not one.** CAVE has no either-end filter, and an `IN` on both
   columns of one query is an AND — which is the synapses a neuron makes onto *itself*.
 - **The cloud is query-relative**, like `fetchConnectivity`: `neuronId` is the end that matched
-  the filter and `partnerId` the other, so a Synapses node and a Connectivity node on one neuron
+  the filter and `partnerId` the other, so a Synapses node and a Connectivity Graph node on one neuron
   agree about which id is whose. `polarity` rides in the attribute table because a cloud fetched
   for both ends is two populations in one buffer.
 
@@ -645,7 +645,7 @@ than a guess:
 
 **`fetchCoarseGeometry` stays unimplemented, and that is the right answer rather than a gap.**
 There is no cheap representation to draw a thumbnail from, and the interface's own docstring says
-an absent one beats quietly downloading full detail to fill a list. So Explore on a CAVE dataset
+an absent one beats quietly downloading full detail to fill a list. So Explore Dataset on a CAVE dataset
 draws placeholders.
 
 **The cross-check that ties it together** is in `live.test.ts`: a neuron's mesh has to enclose its
@@ -677,7 +677,7 @@ column that arrives null on every row breaks every picker that believed it.
   plus 139,255 rows of transfer. Measured against live CAVE: 5.76 s to 4.04 s.
 - **`typesOf` is memoised on the index's identity.** `fetchConnectivity` is called once per hop
   per direction, so `Hops: 3, Direction: both` built the same ~108,000-entry map six times in one
-  Run, and Profile built two per page turn. A `WeakMap` on the `TableValue` is safe rather than
+  Run, and Neuron Profile built two per page turn. A `WeakMap` on the `TableValue` is safe rather than
   merely likely to hit: `cacheGet` promotes a hit into `cache.ts`'s module map and hands back the
   same object. Same idiom as `searchIndexFor` and `statsFor`.
 - **A dataset id is `datastack:materialization`** — `flywire_fafb_public:783` — following
@@ -687,8 +687,8 @@ column that arrives null on every row breaks every picker that believed it.
 - **The index is deduplicated on the root id.** A CAVE neuron table is keyed by a *point* — a
   soma, a nucleus, a representative vertex — so one segment carrying two of them is two rows for
   one neuron, and a repeated row is double-counted by everything downstream that sums a weight.
-- **Connectivity types come from the index**, not from a second query. A connectivity table
-  without them is readable by nothing, and by the time anyone runs Connectivity the index is
+- **Connectivity Graph types come from the index**, not from a second query. A connectivity table
+  without them is readable by nothing, and by the time anyone runs Connectivity Graph the index is
   already in hand. A partner outside the annotated set has no type, which is honest rather than
   a gap.
 - **There is no Base URL field**, unlike neuPrint's, and its absence is the finding: every CAVE
@@ -717,7 +717,7 @@ annotation half before it is usable at all: its CAVE datastack publishes synapse
 *no* annotations, so type, class and side live in FlyTable.
 
 Not looked at in a browser yet — the module is headless and both suites are headless, so what has
-not been seen is a FlyWire dataset node on a real canvas: the Explore widget over 139,255 neurons,
+not been seen is a FlyWire dataset node on a real canvas: the Explore Dataset widget over 139,255 neurons,
 and twenty decimated meshes with their synapses in the 3D view. Same standing as the WebGL
 viewers, and the mesh path is the half most worth looking at, since a decimation grid is a
 judgement about a picture.
@@ -864,7 +864,7 @@ Three things about it are load-bearing:
   annotation idiom — 22 of them, each naming one paper, none a field. A column per meta-annotation
   would put forty-odd in every picker downstream, most describing a *paper* rather than a neuron.
   They land in one `annotations` cell joined with `JOIN_SEPARATOR`, which is exactly the shape
-  Explore's `Additional tags` control already splits back into chips.
+  Explore Dataset's `Additional tags` control already splits back into chips.
 
 **`JOIN_SEPARATOR` moved to `src/core/values.ts` for this**, from `tableOps.ts` where it began
 beside the Group By aggregation that writes it. That was right while a node was the only thing
@@ -883,7 +883,7 @@ that looks right.
 cable lengths: **3.2 MB and about 1.4 s** — the id list, then the annotation graph's three chunks
 and the summary call all running together, which took it from 2.9 s, against neuPrint's 6.9 MB and CAVE's 139,255 rows. The
 public FAFB instance is a curated published subset rather than a whole-brain segmentation, which
-is what makes Explore over the whole of it immediate. And since `annotations/query-targets`
+is what makes Explore Dataset over the whole of it immediate. And since `annotations/query-targets`
 matches names by **substring** rather than regex — `^LC[0-9]+` matches nothing, `LC` matches 129 —
 there is no server-side search worth pushing down, so filtering is local and `neuronFilter.ts`
 gets its third consumer.
@@ -931,7 +931,7 @@ with the feature absent — comparable to CAVE's +16.4 / +5.2.
 - **A filter somebody *chose* is refused instead, and the difference is the default.** `In ROI` and
   `Min size` reach a source only when they were set, so ignoring one answers a different question
   than the card says — see `refuseUnfilterable` below. CATMAID is the case that makes it visible:
-  `volumeList` fills `DatasetInfo.rois` with eighty real neuropils so the ROIs viewer can draw
+  `volumeList` fills `DatasetInfo.rois` with eighty real neuropils so the ROI Viewer can draw
   them, which also populates Find Neurons' region picker, and `findNeurons` never read `req.roi` at
   all. A populated dropdown that narrows nothing, whose result is too *large* and looks correct.
 - **Cable length is measured, not fetched.** `core/values.ts`' `cableLength` is shared with the
@@ -967,7 +967,7 @@ field. The same change lets the response be collected rather than held beside th
 built from it, and it is what makes `typeLookup`'s old "memoised per project" docstring true by
 deleting the function.
 
-**Not looked at on a real canvas**: the dataset node's tint and tile pip, Explore over 5,601
+**Not looked at on a real canvas**: the dataset node's tint and tile pip, Explore Dataset over 5,601
 neurons, and a hundred FAFB skeletons in the 3D view. The module and both suites are headless;
 what *was* driven in a browser is the relay and the CORS behaviour, above.
 

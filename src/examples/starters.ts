@@ -125,7 +125,7 @@ function genericStarter(spec: StarterSpec): CodaGraph {
 
   return assemble(
     spec.label,
-    `Browsing ${spec.label}. Search in the Explore node, tick neurons, then Run.`,
+    `Browsing ${spec.label}. Search in the Explore Dataset node, tick neurons, then Run.`,
     [
       place('dataset', spec.nodeType, 0, spec.params),
       place('explore', 'neuron.explore', 1),
@@ -235,7 +235,7 @@ const TAG_COLUMN = aggColumnName('join', TAG_SOURCE_COLUMN)
 function flywireStarter(spec: StarterSpec): CodaGraph {
   return assemble(
     spec.label,
-    `${spec.label} with the published cell annotations and the community tags wired in as its labels. Search in the Explore node, tick neurons, then Run.`,
+    `${spec.label} with the published cell annotations and the community tags wired in as its labels. Search in the Explore Dataset node, tick neurons, then Run.`,
     [
       // The notes are right-aligned against the pipeline's left edge rather than left-aligned
       // with each other: they form a margin beside the two rows they are about.

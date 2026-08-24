@@ -93,7 +93,7 @@ neuPrint has `fetch_simple_connections`, `fetch_adjacencies` (with **per-ROI bre
 in order and colored by neuron class"). CATMAID's **Connectivity Widget** lists partners with
 a synapse-count threshold and node-filter application.
 
-→ Our `Connectivity` node needs: **min synapse count**, **top-N cap**, and
+→ Our `Connectivity Graph` node needs: **min synapse count**, **top-N cap**, and
 **per-ROI breakdown as an optional extra column**. The ROI breakdown is the important one —
 it's what turns "A → B, 40 synapses" into "A → B, 40 synapses, 32 of them in LO".
 
@@ -255,7 +255,7 @@ We have table, bar chart, heatmap. Their inventory:
 | Theirs                                                                                                                                                                                                                   | Coda viewer                            | Priority                                                                 |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------- | ------------------------------------------------------------------------ |
 | CATMAID **3D Viewer** ("neurons, synapses and image data in 3D"); neuPrint **Skeleton** view with compartment selection, synapse toggles, per-neuron colour picker, meshes-vs-skeletons switch; Codex Neuroglancer embed | `Skeleton` viewer node (three.js)      | High — it's the one output type every one of these has and we don't      |
-| neuPrint **Cytoscape** / **Graph**; CATMAID **Graph Widget** ("display and analyze neurons as nodes in a directed graph"); Codex `/network_graph`                                                                        | `Network` viewer node                  | High — a `Matrix` renders as a graph as naturally as a heatmap           |
+| neuPrint **Cytoscape** / **Graph**; CATMAID **Graph Widget** ("display and analyze neurons as nodes in a directed graph"); Codex `/network_graph`                                                                        | `Network Viewer` node                  | High — a `Matrix` renders as a graph as naturally as a heatmap           |
 | neuPrint **HeatMapTable**, **CollapsibleTable**, **SimpleTable**                                                                                                                                                         | have heatmap + table                   | Add **collapsible/grouped rows** to the table viewer                     |
 | CATMAID **Circuit Graph Plot** / **Data Plot** ("plot various skeleton properties with respect to each other")                                                                                                           | `Scatter` viewer node                  | Medium — the obvious missing chart type, and cheap next to the other two |
 | CATMAID **Synapse Fractions** ("plot input/output fraction wrt. partner neurons")                                                                                                                                        | stacked-bar with normalise-to-fraction | Low — one param on the existing bar chart                                |
@@ -330,7 +330,7 @@ Grouped by what unblocks what, not strictly by value.
 
 **Next — needs the neuPrint source, so it lands with it**
 
-6. **`Connectivity` node knobs**: min synapse count, top-N cap, per-ROI breakdown (B1).
+6. **`Connectivity Graph` node knobs**: min synapse count, top-N cap, per-ROI breakdown (B1).
 7. **`Shortest Paths`** + **`Path Length Matrix`** (B3).
 8. **ROI hierarchy** as a value type, and **`Roll Up ROIs`** (D).
 9. **Count type** (synapses / connections / reciprocal) on `Adjacency`, and more
@@ -340,7 +340,7 @@ Grouped by what unblocks what, not strictly by value.
 **Then — new value types**
 
 11. **`Skeleton Fetch`** + **`Morphometrics`** with CATMAID's exact column names (C).
-12. **Network viewer** and **Scatter viewer** (G).
+12. **Network Viewer** and **Scatter Plot** (G).
 13. **Neuroglancer deep-link node** (H) — real 3D for free, before our own viewer exists.
 14. **Colour-column convention** (G) — decide before the 3D viewer, not after.
 15. **`Arbor Split`**, **`Synapse Distribution`**, **NBLAST** — the Python-service tier (C, E).

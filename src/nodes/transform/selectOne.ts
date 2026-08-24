@@ -60,7 +60,7 @@ export const selectOneNode = registerNode({
   category: 'transform',
   description: 'Step through a table, skeletons or meshes and emit one element at a time.',
   guide:
-    'Step through a collection one element at a time — the manual For each. Explore → Select One → Skeletons → 3D View. Stepping is free (arrows move the card), Use this commits (re-runs downstream). Live mode couples browsing and committing.',
+    'Step through a collection one element at a time — the manual For each. Explore Dataset → Select One → Skeletons → 3D View. Stepping is free (arrows move the card), Use this commits (re-runs downstream). Live mode couples browsing and committing.',
   // No network and no serious CPU: taking one element of a collection already in hand.
   cost: 'cheap',
   inputs: [{ id: 'in', label: 'Items', type: T.any() }],

@@ -140,11 +140,11 @@ file, pulling all 620 kB back into every session and undoing the split.
   collapse/fold/resize, splice-onto-wire, rewiring links, fit-on-load.
 - [docs/viewers.md](docs/viewers.md) — every `out.*` widget, the shared export path,
   encodings, tooltips, table filtering, number formatting, the styling sidebar.
-- [docs/widgets.md](docs/widgets.md) — Explore, Profile, Dataset Summary, ROIs: the
-  surfaces that fetch for themselves rather than reading a wire.
+- [docs/widgets.md](docs/widgets.md) — Explore Dataset, Neuron Profile, Dataset Summary,
+  ROI Viewer: the surfaces that fetch for themselves rather than reading a wire.
 - [docs/nodes.md](docs/nodes.md) — per-node semantics: Pivot, Deduplicate, both import
-  nodes, Combine Columns, Select One, Stack, Download, Connectivity, Paths, both id nodes,
-  Text notes.
+  nodes, Combine Columns, Select One, Stack, Download, Connectivity Graph, Paths, both id
+  nodes, Text notes.
 - [docs/datasets.md](docs/datasets.md) — the family table, Custom backend nodes, the
   Description companion, auto-wiring, starter graphs.
 - [docs/backends.md](docs/backends.md) — neuPrint, CAVE, CATMAID, precomputed meshes.

@@ -66,8 +66,8 @@ taking that literally arranges a tidy grid of points.
 
 **Sizes are read from `offsetWidth`/`offsetHeight`, and both plausible alternatives are wrong
 here.** This cost a real bug — every card silently taking the 232×120 fallback, so ELK arranged a
-row of identical boxes and packed each wide card's neighbours straight through it. Explore is 520
-across, a dataset card 248, a Profile 560.
+row of identical boxes and packed each wide card's neighbours straight through it. Explore Dataset is 520
+across, a dataset card 248, a Neuron Profile 560.
 
 - `getNodes()` is `store.nodes.map((n) => ({ ...n }))` — a shallow copy of the array _the editor
   built_. In controlled mode `measured` on it is whatever we put there, which is nothing.
@@ -78,7 +78,7 @@ across, a dataset card 248, a Profile 560.
   the document — so **every graph edit wipes every measurement**, and the ResizeObserver does not
   re-fire for a card whose size did not change. Observed live: 9 measured, then 0, then 0.
 - `offsetWidth`/`offsetHeight` are layout-space and ignore CSS transforms, so they are the card's
-  size in flow units at any zoom. Verified at zoom 1.0, 0.833 and 0.694, where an Explore card's
+  size in flow units at any zoom. Verified at zoom 1.0, 0.833 and 0.694, where an Explore Dataset card's
   bounding rect reads 520, 433 and 361 while its offset size reads 520 throughout.
 
 Zoom-independence is not a nicety: these numbers go into `structureKey`, and a size that drifted
@@ -362,7 +362,7 @@ than a fixed height because 28px is merely the header's natural size, and a cont
 should grow the header rather than be clipped by it.
 
 **Fanned, not overlapped, and three is the number that matters.** No node in the registry has
-more than three ports on a side (Paths 3→3, Explore 1→3, Adjacency 3→1, Viewer3D 3→1), so a
+more than three ports on a side (Paths 3→3, Explore Dataset 1→3, Adjacency 3→1, Viewer3D 3→1), so a
 `--port-pitch` of 8px puts three 11px discs down a ~28px header overlapping by 3. Every socket
 keeps a hit target, which is what lets a dragged link still choose an input and keeps the
 drag-off rewire anchors (`reconnectRadius: 14`) distinct. Exact overlap was the other option and
@@ -398,7 +398,7 @@ surface — so a folded card is carrying one channel fewer, with the socket's `t
 prose. A real trade, taken deliberately for a state somebody chooses and reverses.
 
 **This one _was_ looked at in a browser**, unlike most of the canvas — playwright against the dev
-server, folding and collapsing a Connectivity node and a boxed Scatter. Worth recording, because
+server, folding and collapsing a Connectivity Graph node and a boxed Scatter. Worth recording, because
 it settled something the CSS alone could not: **folded sockets are not clipped and expanded ones
 are.** Expanded, a handle's containing block is `.port-row` inside `.coda-node`'s
 `overflow: hidden`, so the discs render as half-circles flush with the border; the folded band is
@@ -441,7 +441,7 @@ of its own, which renders its own controls instead of the generic rows. The card
 from `visibleParams.length`, so it is one rule rather than a list.
 
 **Where the space actually goes depends on `data-sized`.** A card with an explicit box — anything
-resized, plus Scatter, Profile and Neuroglancer by their `defaultSize` — gives the freed height to
+resized, plus Scatter, Neuron Profile and Neuroglancer by their `defaultSize` — gives the freed height to
 the preview, which is `flex: 1`. An untouched card with no `defaultSize` sizes to its content, so
 folding makes the card shorter and leaves the preview at its 210px cap. Raising that cap on the
 fold was declined: it is a second magic number for a case one drag of a corner already answers.
@@ -465,7 +465,7 @@ and wrong for the question actually being asked, which is "what else is there".)
 `… 1 hidden` on Skeletons — "more" is a claim about something else being on the card, and on
 those there is nothing. The question is asked of `activeParams` rather than of the rows that were
 drawn, because a node with a body of its own renders controls nothing here can enumerate:
-Explore's search box is on the card, so its five advanced params stay `more`.
+Explore Dataset's search box is on the card, so its five advanced params stay `more`.
 
 **Not gated on the band it sits at the end of.** The cards needing it most draw _no_ rows at all:
 `neuron.skeletons` has exactly one param and it is advanced, so an empty body was the whole of
@@ -476,9 +476,9 @@ Three exclusions, each of which would otherwise be a false claim. **`visibleIf` 
 the current values have switched off is inapplicable rather than hidden, or the number moves as
 unrelated modes are chosen. **`ParamBase.internal` next:** a nonce or a pager is machinery a
 widget writes, not a setting — without it a dataset card announced `… 1 more` about its `refresh`
-counter, and turning a page in Profile had the card claim a parameter had been changed. It stays
+counter, and turning a page in Neuron Profile had the card claim a parameter had been changed. It stays
 a real param, saved and reachable in the inspector, because the escape hatch is sanctioned; the
-flag only stops anything _advertising_ it. Note it is not a synonym for `advanced` — Explore's
+flag only stops anything _advertising_ it. Note it is not a synonym for `advanced` — Explore Dataset's
 `Rows per page` sits beside `page` and is inspector-only for space, but it is somebody's
 preference and stays countable. **An absent value is not a change:** loading does not fill missing
 params with defaults, so a graph saved before a param existed has no key for it, and comparing

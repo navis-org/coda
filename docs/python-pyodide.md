@@ -423,7 +423,7 @@ attributes, which is a change to a fetch node every graph uses and has not been 
 ### `literal`: colours somebody else already chose
 
 A fifth `ColorMode`, opt-in per node via `colorParams({ allowLiteral: true })`, offered today by
-Neuroglancer, the 3D view, the Network and the Scatter. The cells **are** the colours.
+Neuroglancer, the 3D view, the Network Viewer and the Scatter. The cells **are** the colours.
 
 **It exists because `categorical` cannot reproduce a dendrogram.** `resolveColor` ranks values
 by frequency so the commonest takes the leading slot, then folds everything past eight into one

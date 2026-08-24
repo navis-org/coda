@@ -169,7 +169,7 @@ follows from the two decisions taken there.
 **The rows never enter the `.coda.json`.** The node stores a `dataId` and the filename it came
 from; the table itself lives in IndexedDB. Three constraints force it and each one alone would be
 enough: `stableStringify` re-hashes a string param on **every** graph edit (CLAUDE.md already
-flags a 110 kB Explore selection as a stutter risk, and a whole-dataset embedding is megabytes),
+flags a 110 kB Explore Dataset selection as a stutter risk, and a whole-dataset embedding is megabytes),
 the autosave is `localStorage` at a ~5 MB origin budget with `saveAutosave` swallowing quota
 failures by design, and a `ParamValue` is `number | string | boolean | string[]` — a table can
 only ride in a graph as text.
@@ -296,7 +296,7 @@ and never disagree with the rows already stored. The pair lives in `tableOps.ts`
 half and the value half cannot disagree about the _kind_ either.
 
 - **`ID column` renames the chosen column to `neuronId`**, and the output becomes Neurons. Nodes
-  address columns by name — `out.profile` validates on it, Connectivity and Skeletons read it — so
+  address columns by name — `out.profile` validates on it, Connectivity Graph and Skeletons read it — so
   a file whose author wrote `root_id` cannot meet neuron data until it is renamed. A column that
   merely already held the name is suffixed (`neuronId_2`), the same call `joinedColumns` makes. Only
   `i64` and `str` columns are offered: a float is a measurement and a boolean is a flag, and
@@ -308,7 +308,7 @@ half and the value half cannot disagree about the _kind_ either.
   averaged. Null stays null: `String(null)` is the four-letter word "null", which would read as a
   value everywhere downstream.
 
-`ColumnSchemaSource` grew a second argument for `Text columns` — see the Explore section, where it
+`ColumnSchemaSource` grew a second argument for `Text columns` — see the Explore Dataset section, where it
 came from. A column picker on a node with **no inputs at all** has nowhere to read a schema from
 but the node's own params, which is what that argument supplies.
 
@@ -394,7 +394,7 @@ rule stopping being half-applied.
 socket, `uploadIsNeurons`. A type makes it *legible*, and missing it is entirely silent:
 `typesOf` reads `type` by literal name, so a chain publishing `cell_type` leaves
 `neuronType`/`partnerType` null on every connectivity row **while the schema still declares
-them**, Explore's `PRIMARY = ['type', 'instance']` falls through to a guess, and Profile's type
+them**, Explore Dataset's `PRIMARY = ['type', 'instance']` falls through to a guess, and Neuron Profile's type
 roll-ups empty. Reachable on the case the feature exists for: FlyWire's published annotation TSV
 names the column `cell_type`.
 
@@ -517,7 +517,7 @@ leaving their values, dtypes and units alone.
 **It is the general form of the two import nodes' `ID column`**, and that is the case it exists
 for. Coda addresses exactly two columns by literal name — `neuronId` and `type` — so somebody
 else's table, whose id is `root_id` and whose cell typing is `cell_type`, meets a Neurons socket,
-a `typesOf` lookup or a Profile roll-up and quietly answers nothing. Upload Table and Table from
+a `typesOf` lookup or a Neuron Profile roll-up and quietly answers nothing. Upload Table and Table from
 URL fix that at the point of import; nothing could fix it for a table that was **fetched** or
 **joined**, which is what this is. `Table from URL → Rename Columns → Skeletons` is the chain.
 
@@ -614,11 +614,11 @@ anyway.
 `core.selectOne`, `Add ▸ Transform ▸ Select One`. Forward and back through a table's rows, a
 skeleton set or a mesh set, emitting the element you are looking at. The manual counterpart to
 the `For each` in the TODO list — that would apply a sub-workflow to every element and collect
-the results; this walks the same collection by hand. `Explore → Select One → Skeletons → 3D` is
+the results; this walks the same collection by hand. `Explore Dataset → Select One → Skeletons → 3D` is
 the shape it exists for: one neuron of a result at a time, without editing a filter for each.
 
 **Two indices, because browsing and deciding are different acts.** `index` is what the card is
-showing and is presentational; `selected` is what the port carries and is not. That is Profile's
+showing and is presentational; `selected` is what the port carries and is not. That is Neuron Profile's
 pager/pin split exactly, and it is here for the same reason: on a chain with an expensive node in
 it, an arrow button that fires a full pass per press — and with auto-run on, fires it
 _automatically_ — is not a browsing surface, it is a way to spend ten minutes of queries on a
@@ -635,7 +635,7 @@ and the symptom (a graph going stale whenever somebody browses) reads as a sched
 
 **The choice is a position, not an identity, and that is a trade rather than an oversight.** An
 index works on everything — a `groupBy` roll-up with no id column, an uploaded CSV of embeddings,
-a mesh set — where the id-keyed selection `rowIds.ts` provides (Scatter's and Profile's) survives
+a mesh set — where the id-keyed selection `rowIds.ts` provides (Scatter's and Neuron Profile's) survives
 an upstream re-sort but needs a column naming each element. What it costs is that reordering
 upstream re-points the output. What it must not cost is a _silent_ wrong answer, which is why an
 index past the end emits the **empty collection** rather than clamping to the last element: an
@@ -914,8 +914,8 @@ apply.
 
 - **Table, Matrix, Points → CSV.** A point cloud keeps its positions with its attributes, since
   splitting them loses the row-for-row correspondence that makes it a point cloud.
-- **Network → two CSVs**, nodes and links. One file cannot hold both without inventing a shape
-  nothing reads; two is what the Network viewer's own button gives and what Gephi imports.
+- **Network Viewer → two CSVs**, nodes and links. One file cannot hold both without inventing a shape
+  nothing reads; two is what the Network Viewer's own button gives and what Gephi imports.
 - **Skeletons → SWC, Meshes → OBJ, one file per neuron.** A concatenated SWC has repeating ids and
   parses as one impossible tree. `MAX_MORPHOLOGY_FILES` caps the set at 50 and the plan _reports_
   the cap: a browser stops honouring downloads past roughly that many with no error, which reads
@@ -946,7 +946,7 @@ input is the point. `any` on an input means "I accept whatever you have", which 
 was given": a pass-through cannot _originate_ a Dataset, so offering it when dragging back from a
 Dataset socket answers the question with a node that needs the same question asked again behind it.
 
-## Connectivity: hops and direction
+## Connectivity Graph: hops and direction
 
 `Direction` offers `both`, and `Hops` traverses further than one synapse. Both changed what the
 node _emits_, which is the part to read before touching it.
@@ -961,7 +961,7 @@ backwards, and past one hop "the neuron you asked about" is not a thing a row ca
 whatever the previous hop reached.
 
 **The `DataSource` seam did not change, and that is deliberate.** `fetchConnectivity` still
-answers query-relative, because the Profile widget reads it directly through
+answers query-relative, because the Neuron Profile widget reads it directly through
 `profileStats.ts` — "these are my upstream partners" is the right shape there and the wrong
 shape here. The reorientation lives in `nodes/lib/connectivityOps.ts`, i.e. in the node.
 
@@ -1010,7 +1010,7 @@ it is the first thing to suspect if a deep traversal errors at the transport rat
 
 ## Paths: how does this reach that?
 
-`neuron.paths`, added from `Add ▸ Query ▸ Paths`. `Connectivity` answers "what is wired to
+`neuron.paths`, added from `Add ▸ Query ▸ Paths`. `Connectivity Graph` answers "what is wired to
 this?"; this answers "how does this reach that?", which is a different query with a different
 result. Three outputs: a **Network** already pruned to the feed-forward connections on a route,
 the **Layout** for it, and a **Paths** table of one row per route.
@@ -1109,7 +1109,7 @@ free and reads well as a size encoding.
 threshold" is a real finding; throwing would block everything downstream from ever drawing the
 empty result that says so.
 
-**Known limit, same as Connectivity's:** at neuron level the frontier is inlined into each
+**Known limit, same as Connectivity Graph's:** at neuron level the frontier is inlined into each
 query, so a deep neuron-level traversal builds a very large Cypher string. `validate` warns
 above three hops and warns again when `Collapse types` is off there. A warning, never a refusal
 — the same call `Find Neurons` makes about `limit: 0`.
@@ -1146,7 +1146,7 @@ render; the fingerprint is one pass and no allocation.
 
 **The layout is fixed rather than configurable, and that is the trade.** It is an _output value_,
 so a spacing slider would take part in the provenance key and stale everything downstream when
-nudged. Restyling is what the Network node's presentational params are for.
+nudged. Restyling is what the Network Viewer's presentational params are for.
 
 **`src/layout/network.ts` is a sibling of `elkGraph.ts` and shares only the engine.** That module
 maps editor cards — measured sizes, one ELK port per socket, a fixed port order so wires arrive
@@ -1175,7 +1175,7 @@ narrows a population; this resolves a **named set** — labels in, the neurons c
 **It is not `Find Neurons` with a different label, and the overlap is worth knowing so nobody
 "simplifies" one into the other.** neuPrint's `=~` anchors at both ends, so `LC4|LC6` typed into
 Find Neurons' Type field already returns exactly those two types. That case is genuinely covered.
-What is not is where the labels actually come from: the `preType` column of a Connectivity result,
+What is not is where the labels actually come from: the `preType` column of a Connectivity Graph result,
 a `groupBy` roll-up, a list pasted out of a paper. None of those can be typed into a regex field,
 and the node that turned a column into an alternation would be this node with an extra step.
 
@@ -1260,7 +1260,7 @@ or a colleague. `IDs from Label` resolves a _named_ set; this takes the ids.
 
 **The Dataset input is optional, and that is the whole design.** Unwired, the node emits the ids
 as a one-column `Neurons` table and touches no network — already enough for most of what a list
-of ids is _for_, since `Connectivity`, `Skeletons`, `Meshes`, `Synapses` and `ROI Counts` all
+of ids is _for_, since `Connectivity Graph`, `Skeletons`, `Meshes`, `Synapses` and `ROI Counts` all
 reach their ids through `idColumn(table, 'neuronId')` and read nothing else off the row. Wired, it
 fetches the full neuron rows, which buys the columns every downstream picker wants and — the part
 worth having — the ability to say **which ids the dataset has never heard of**, which is how a

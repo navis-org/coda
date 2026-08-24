@@ -9,7 +9,7 @@ Also note the `Max points` parameter: beyond that limit, the node draws a unifor
 Lasso a group of points in the viewer, and they arrive at the **Selected** output port as a table. Two parameters control what that means:
 
 - **ID column** resolves each point to a cell value — typically a neuron ID or row index. If unset, selection is unavailable; an id-less lasso returns nothing because a lasso with no id to return is misleading.
-- **Selection** captures the lasso geometry in the saved file and in the graph's provenance key, exactly as [Network](#out.network)'s `Selected` output works.
+- **Selection** captures the lasso geometry in the saved file and in the graph's provenance key, exactly as [Network Viewer](#out.network)'s `Selected` output works.
 
 ```coda-params
 caption: Interactive parameters

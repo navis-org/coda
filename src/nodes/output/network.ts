@@ -34,7 +34,7 @@ function selectionSchema(nodeSchema: TableSchema | undefined): TableSchema {
 
 export const networkViewNode = registerNode({
   type: 'out.network',
-  label: 'Network',
+  label: 'Network Viewer',
   category: 'visualisation',
   description: 'Node-link view of a network, with data-driven colour and size.',
   guide:

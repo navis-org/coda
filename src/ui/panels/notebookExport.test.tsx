@@ -252,8 +252,8 @@ describe('Export as Jupyter Notebook', () => {
 
     openSaveMenu()
     const warning = await screen.findByText(/no notebook equivalent/)
-    expect(warning.textContent).toContain('Connectivity')
-    // Explore is *not* named: it is written for both backends now.
+    expect(warning.textContent).toContain('Connectivity Graph')
+    // Explore Dataset is *not* named: it is written for both backends now.
     expect(warning.textContent).not.toContain('Explore')
     // The cascade is counted, not named: Table is fine, it just cannot be reached.
     expect(warning.textContent).toContain('1 step after it')

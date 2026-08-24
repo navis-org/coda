@@ -237,7 +237,7 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     description:
       'Whole central nervous system of an adult male fly — brain and ventral nerve cord.',
     guide:
-      'The largest fly connectome published so far: 165,122 traced neurons across brain and nerve cord, so a circuit can be followed from a sensory neuron to the muscle it drives without leaving the dataset. That size is also what you are paying for — an unbounded query here is a real load on a shared server, and Explore downloads about 7 MB before it can search.',
+      'The largest fly connectome published so far: 165,122 traced neurons across brain and nerve cord, so a circuit can be followed from a sensory neuron to the muscle it drives without leaving the dataset. That size is also what you are paying for — an unbounded query here is a real load on a shared server, and Explore Dataset downloads about 7 MB before it can search.',
     glyph: 'cns',
   },
   {
@@ -403,7 +403,7 @@ const CATMAID_FAMILIES: DatasetFamily[] = [
     description:
       'Whole adult female fly brain, manually traced. Public tracings published on Virtual Fly Brain.',
     guide:
-      'A few thousand carefully hand-traced neurons on the same FAFB volume as FlyWire—the opposite trade of curated depth for whole-brain coverage. No cell-type field; Coda derives type from annotations. Connectivity needs authenticated POST access.',
+      'A few thousand carefully hand-traced neurons on the same FAFB volume as FlyWire—the opposite trade of curated depth for whole-brain coverage. No cell-type field; Coda derives type from annotations. Connectivity Graph needs authenticated POST access.',
     glyph: 'brain',
   },
 ]

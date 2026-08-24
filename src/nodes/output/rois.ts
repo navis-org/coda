@@ -72,7 +72,7 @@ const VIEWS = [
 
 export const roisNode = registerNode({
   type: 'out.rois',
-  label: 'ROIs',
+  label: 'ROI Viewer',
   category: 'visualisation',
   description:
     "The dataset's neuropils drawn together in a named anatomical plane, coloured by how completely each is traced.",

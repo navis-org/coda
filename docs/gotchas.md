@@ -26,8 +26,8 @@ verbatim.
   sort. `wouldCreateCycle` is a separate and correct walk, so the link connects normally; then
   inference drops the target's input types and **every column picker on it empties out**, while
   a result cached from before the second wire stays on screen. It reads as a node that has lost
-  its schema. `Paths → Network` (network _and_ layout) is the first wiring that hits it by
-  design; Explore's `Hits` and `Selected` arriving at one Join is the other way in.
+  its schema. `Paths → Network Viewer` (network _and_ layout) is the first wiring that hits it by
+  design; Explore Dataset's `Hits` and `Selected` arriving at one Join is the other way in.
 
 - **A column picker used to substitute a different column, and it cost 9 GB.** `resolveColumn`
   answered "the first compatible column" whenever the stored one was not in the current schema.

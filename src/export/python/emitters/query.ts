@@ -233,7 +233,7 @@ function caveFindNeurons(ctx: EmitContext, dataset: string): string[] {
   const lines: string[] = [
     ...ctx.note(
       'A CAVE datastack has no server-side neuron query, so Coda reads its whole index once ' +
-        'and filters it here — which is what this does. Explore shares the same frame.',
+        'and filters it here — which is what this does. Explore Dataset shares the same frame.',
     ),
     `${out} = ${caveLabels(dataset)}`,
   ]

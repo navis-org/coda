@@ -45,7 +45,7 @@ coda_combine <- function(df, columns, source = FALSE) {
 
 
 coda_edge_list <- function(ids, prepost, min_weight, conn) {
-  # Coda's Connectivity output: preId -> postId, always oriented the way the synapse
+  # Coda's Connectivity Graph output: preId -> postId, always oriented the way the synapse
   # points, whichever way the traversal travelled.
   one <- function(side) {
     tbl <- neuprint_connection_table(
@@ -280,7 +280,7 @@ coda_sample_rows <- function(length, count, seed) {
 
 
 coda_search <- function(df, query) {
-  # Coda's Explore query language, matching only.
+  # Coda's Explore Dataset query language, matching only.
   #
   # Terms are AND-ed; a leading "!" or "-" negates one. A bare word is a substring of the
   # row's searchable text; "field=value" compares one column, with > < >= <= != and ~
@@ -360,7 +360,7 @@ coda_search <- function(df, query) {
 
 
 coda_traverse_connectivity <- function(seed_ids, direction, hops, min_weight, conn) {
-  # Coda's Connectivity node past one hop: a breadth-first walk returning an edge list.
+  # Coda's Connectivity Graph node past one hop: a breadth-first walk returning an edge list.
   #
   # Three rules worth keeping, each of which silently changes the answer if dropped:
   #
@@ -533,24 +533,24 @@ ids_from_label <- neuprint_search(
 ids_from_label <- ids_from_label |> filter(status == "Traced")
 ```
 
-```{r explore}
-# ── Explore ──
-# NOTE: Explore downloads the whole neuron table once and searches it
-# locally. On male-CNS that is around 165,000 rows; expect this chunk to
+```{r explore-dataset}
+# ── Explore Dataset ──
+# NOTE: Explore Dataset downloads the whole neuron table once and searches
+# it locally. On male-CNS that is around 165,000 rows; expect this chunk to
 # take a few seconds.
-explore_all <- neuprint_fetch_custom(
+explore_dataset_all <- neuprint_fetch_custom(
   "MATCH (n:Neuron) RETURN n.bodyId AS neuronId, n.type AS type, n.instance AS instance,
    n.status AS status, n.pre AS pre, n.post AS post",
   conn = hemibrain_neuprint
 )
 
-explore_hits <- coda_search(explore_all, "status!=Traced pre>100")
+explore_dataset_hits <- coda_search(explore_dataset_all, "status!=Traced pre>100")
 # NOTE: Coda caps this at 500 hits and keeps the 500 most *relevant*; the
 # ranking is not ported, so this keeps the first matches in table order
 # instead.
-explore_hits <- explore_hits |> head(500)
+explore_dataset_hits <- explore_dataset_hits |> head(500)
 
-explore_selected <- explore_all |> filter(neuronId %in% c(1001, 1005))
+explore_dataset_selected <- explore_dataset_all |> filter(neuronId %in% c(1001, 1005))
 ```
 
 ```{r cypher}
@@ -608,15 +608,15 @@ dataset_summary_top_types <- dataset_summary_neurons |>
 dataset_summary_top_types
 ```
 
-```{r rois}
-# ── ROIs ──
+```{r roi-viewer}
+# ── ROI Viewer ──
 # NOTE: Region meshes are display surfaces published for visualization — a
 # volume measured off one is an approximation rather than a figure to quote.
-rois_rois <- neuprint_ROIs(superLevel = FALSE, conn = hemibrain_neuprint)
+roi_viewer_rois <- neuprint_ROIs(superLevel = FALSE, conn = hemibrain_neuprint)
 
 # One request each. nat::plot3d() draws them once read.
-# rois_meshes <- lapply(rois_rois, neuprint_ROI_mesh, conn = hemibrain_neuprint)
-rois_rois
+# roi_viewer_meshes <- lapply(roi_viewer_rois, neuprint_ROI_mesh, conn = hemibrain_neuprint)
+roi_viewer_rois
 ```
 
 ```{r google-sheet}
@@ -635,9 +635,9 @@ rename_columns <- table_from_url |>
   rename(any_of(c(`neuronId` = "root_id", `type` = "cell_type")))
 ```
 
-```{r connectivity}
-# ── Connectivity ──
-connectivity <- coda_edge_list(
+```{r connectivity-graph}
+# ── Connectivity Graph ──
+connectivity_graph <- coda_edge_list(
   find_neurons$neuronId,
   prepost = "POST",
   min_weight = 5,
@@ -645,9 +645,9 @@ connectivity <- coda_edge_list(
 )
 ```
 
-```{r connectivity-2}
-# ── Connectivity ──
-connectivity_2 <- coda_traverse_connectivity(
+```{r connectivity-graph-2}
+# ── Connectivity Graph ──
+connectivity_graph_2 <- coda_traverse_connectivity(
   find_neurons$neuronId,
   direction = "both",
   hops = 3,
@@ -709,10 +709,10 @@ group_by_df <- find_neurons |>
   summarise(n = n(), `join_instance` = coda_join(`instance`), .groups = "drop")
 ```
 
-```{r profile}
-# ── Profile ──
-profile_out <- find_neurons
-profile_current <- profile_out |> filter(neuronId %in% c(1001))
+```{r neuron-profile}
+# ── Neuron Profile ──
+neuron_profile_out <- find_neurons
+neuron_profile_current <- neuron_profile_out |> filter(neuronId %in% c(1001))
 
 profile <- coda_profile(
   c(1001),
@@ -721,13 +721,13 @@ profile <- coda_profile(
   conn = hemibrain_neuprint
 )
 
-profile_upstream_types <- profile$upstream_types
-profile_downstream_types <- profile$downstream_types
-profile_top_upstream <- profile$top_upstream
-profile_top_downstream <- profile$top_downstream
-profile_regions <- profile$regions
+neuron_profile_upstream_types <- profile$upstream_types
+neuron_profile_downstream_types <- profile$downstream_types
+neuron_profile_top_upstream <- profile$top_upstream
+neuron_profile_top_downstream <- profile$top_downstream
+neuron_profile_regions <- profile$regions
 
-profile_upstream_types
+neuron_profile_upstream_types
 ```
 
 ```{r neuroglancer}
@@ -764,7 +764,7 @@ paths_paths <- neuprint_get_paths(
 
 ```{r filter-df}
 # ── Filter ──
-filter_df <- connectivity |> filter(`weight` >= 10)
+filter_df <- connectivity_graph |> filter(`weight` >= 10)
 ```
 
 ```{r select-one}
@@ -1063,25 +1063,25 @@ join_3 <- select_columns |> distinct(`preType`, .keep_all = TRUE) |>
   )
 ```
 
-```{r network}
-# ── Network ──
-network_out <- build_network
-network_out <- delete_edges(network_out, E(network_out)[E(network_out)$weight < 10])
-network_out <- delete_vertices(network_out, V(network_out)[degree(network_out) == 0])
+```{r network-viewer}
+# ── Network Viewer ──
+network_viewer_out <- build_network
+network_viewer_out <- delete_edges(network_viewer_out, E(network_viewer_out)[E(network_viewer_out)$weight < 10])
+network_viewer_out <- delete_vertices(network_viewer_out, V(network_viewer_out)[degree(network_viewer_out) == 0])
 
 # NOTE: Coda draws this with ForceAtlas2 in the browser. igraph has no
 # equivalent, so the graph is handed over and the layout is yours to pick —
 # uncomment one.
-# plot(network_out, layout = layout_with_fr(network_out), vertex.size = 4, vertex.label = NA)
-# plot(network_out, layout = layout_with_kk(network_out))
-# plot(network_out, layout = layout_as_tree(network_out))
+# plot(network_viewer_out, layout = layout_with_fr(network_viewer_out), vertex.size = 4, vertex.label = NA)
+# plot(network_viewer_out, layout = layout_with_kk(network_viewer_out))
+# plot(network_viewer_out, layout = layout_as_tree(network_viewer_out))
 ```
 
 ```{r stack-tables}
 # ── Stack Tables ──
 stack_tables <- bind_rows(
   join |> mutate(`origin` = "Direct"),
-  connectivity_2 |> mutate(`origin` = "Indirect")
+  connectivity_graph_2 |> mutate(`origin` = "Indirect")
 )
 ```
 

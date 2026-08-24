@@ -86,7 +86,7 @@ three, ahead of both guides), the start page's credits row, and the README.
 A second vite entry — `tutorial.html` at the root, `src/tutorial/{main.ts,tutorial.css}` — built
 into `dist/` alongside the app and published to GitHub Pages with it. Ten chapters. The first six
 share one pinned canvas that builds a real pipeline as you read — `Hemibrain → Find Neurons →
-Connectivity → Filter → Group By → Bar Chart` — then Explore/Profile, neuPrint, the keyboard and
+Connectivity Graph → Filter → Group By → Bar Chart` — then Explore Dataset/Neuron Profile, neuPrint, the keyboard and
 saving get their own set-pieces.
 
 **It imports nothing from the app but `theme.css`, and that one import is the whole design.** The
@@ -218,10 +218,10 @@ page's own logic is around 6 kB; `dist/nodes.html` must reference no `main-*` ch
 - **`internal` params are dropped and `advanced` ones are kept.** A nonce or a pager is machinery
   a widget writes — the same exclusion the card's `… N more` counter makes. An advanced param is a
   real setting that happens to live in the inspector, and a guide is exactly where somebody finds
-  out it exists. The preview card reproduces that split, so ROIs and Neuroglancer correctly draw
+  out it exists. The preview card reproduces that split, so ROI Viewer and Neuroglancer correctly draw
   with no param band at all and a `… 8 more` line.
 - **Help text is a disclosure, not a second line.** Printing every `help` inline reads well on
-  Filter and turns the Network viewer's pane into a wall of 33 settings. The dotted underline is
+  Filter and turns the Network Viewer's pane into a wall of 33 settings. The dotted underline is
   what stops a row with help looking identical to one without.
 - **The page does _not_ pin `data-theme="dark"`, unlike the field guide.** A reference kept open
   beside the editor is the wrong half of the pair to be stubborn about, so it follows

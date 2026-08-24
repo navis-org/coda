@@ -34,7 +34,7 @@ function renameLines(indent: string): string[] {
 registerEmitter('neuron.connectivity', (ctx) => {
   const c = ctx.wired('dataset')
   const neurons = ctx.wired('neurons')
-  if (!neurons) return ctx.todo('No Neurons are wired to this Connectivity node.')
+  if (!neurons) return ctx.todo('No Neurons are wired to this Connectivity Graph node.')
 
   const out = ctx.output('connections')
   const direction = String(ctx.params.direction ?? 'outputs')
@@ -130,7 +130,7 @@ registerHelper({
   ],
   source: [
     'def coda_traverse_connectivity(seed_ids, direction, hops, min_weight, client):',
-    '    """Coda\'s Connectivity node: a breadth-first walk returning an edge list.',
+    '    """Coda\'s Connectivity Graph node: a breadth-first walk returning an edge list.',
     '',
     '    Columns are preId/preType -> postId/postType, weight, hop, direction. Every row is',
     '    oriented the way the synapse points, whichever way the traversal travelled.',

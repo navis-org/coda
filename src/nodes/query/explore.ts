@@ -96,7 +96,7 @@ export function excludedFromSearch(
 
 export const exploreNode = registerNode({
   type: 'neuron.explore',
-  label: 'Explore',
+  label: 'Explore Dataset',
   category: 'query',
   description:
     'Browse every neuron in a dataset. Fuzzy search across all fields, per-field filters, and a picker.',

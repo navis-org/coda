@@ -99,7 +99,7 @@ Read-when column is the one line each will get in the rewritten CLAUDE.md.
 | 4,362 | Breaking and re-routing links | `links.md` | canvas | touching the edge menu or the drag-off rewire |
 | 4,178 | Grouped params — the styling sidebar | `param-groups.md` | ui-params | adding `paramGroups` or a composite param to a node |
 | 24,694 | Output widgets | `viewers.md` | viewers | touching `ValuePreview`, export, tooltips, table filtering, or number formatting |
-| 23,142 | Network + 3D widgets | `viewer-network.md` | viewers | touching the sigma network viewer, encodings, or the 3D view |
+| 23,142 | Network Viewer + 3D widgets | `viewer-network.md` | viewers | touching the sigma network viewer, encodings, or the 3D view |
 | 9,771 | Scatter plot | `viewer-scatter.md` | viewers | touching `out.scatter` or its canvas drawing |
 | 12,890 | Heatmap: more cells than pixels | `viewer-heatmap.md` | viewers | touching `out.heatmap`, the fold, or any SVG export builder |
 | 11,285 | Neuroglancer | `viewer-neuroglancer.md` | viewers | touching `out.neuroglancer`, scene patching, or the iframe |
@@ -118,14 +118,14 @@ Read-when column is the one line each will get in the rewritten CLAUDE.md.
 | 7,370 | Select One: stepping through a collection | `node-select-one.md` | nodes | touching `core.selectOne` or `nodes/lib/iterables.ts` |
 | 4,059 | Stack Tables: the vertical Join | `node-stack.md` | nodes | touching `core.stack` |
 | 6,929 | Download: a side effect in a reactive graph | `node-download.md` | nodes | touching `out.download`, `exportValue.ts`, or the export registry |
-| 4,210 | Connectivity: hops and direction | `node-connectivity.md` | nodes | touching `neuron.connectivity` or `connectivityOps.ts` |
+| 4,210 | Connectivity Graph: hops and direction | `node-connectivity.md` | nodes | touching `neuron.connectivity` or `connectivityOps.ts` |
 | 10,574 | Paths: how does this reach that? | `node-paths.md` | nodes | touching `neuron.paths`, `pathOps.ts`, or `T.layout()` |
 | 5,976 | IDs from Label: the inverse query | `node-ids-from-label.md` | nodes | touching `neuron.idsFromLabel` or `LabelMatch` |
 | 7,505 | Input IDs: the ids themselves | `node-input-ids.md` | nodes | touching `neuron.inputIds` or `nodes/lib/idList.ts` |
-| 22,807 | Explore: the browsing widget | `widget-explore.md` | widgets | touching Explore, the neuron index, chips, or thumbnails |
-| 5,427 | Profile: one neuron at a time | `widget-profile.md` | widgets | touching `out.profile` or `profileStats.ts` |
+| 22,807 | Explore Dataset: the browsing widget | `widget-explore.md` | widgets | touching Explore Dataset, the neuron index, chips, or thumbnails |
+| 5,427 | Neuron Profile: one neuron at a time | `widget-profile.md` | widgets | touching `out.profile` or `profileStats.ts` |
 | 22,821 | Dataset Summary, and the two ROI nodes | `widget-dataset-summary.md` | widgets | touching `out.datasetSummary`, the ROI query nodes, or `datasetStats.ts` |
-| 17,713 | ROIs: the volume rather than the cells | `widget-rois.md` | widgets | touching `out.rois`, projection, rasterising, or mesh decimation |
+| 17,713 | ROI Viewer: the volume rather than the cells | `widget-rois.md` | widgets | touching `out.rois`, projection, rasterising, or mesh decimation |
 | 3,842 | Run indicator | `run-ring.md` | ui-shell | touching the run ring or progress reporting |
 | 15,988 | Sharing a workflow | `sharing.md` | persistence | touching share links, the codec, or the gist client |
 | 9,876 | The autosave, and more than one tab | `autosave.md` | persistence | touching the autosave, tab slots, or `sessionStorage` |
