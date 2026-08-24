@@ -350,8 +350,17 @@ theme, and a table wide enough to scroll the filter row sideways.
 ## Grouped params — the styling sidebar
 
 `ParamBase.group` and `ParamBase.composite` plus `NodeDefinition.paramGroups` turn a node's
-flat param list into a tabbed panel in the expanded viewer. `out.network` is the only node
-using it so far; Cytoscape's Style tab is the reference.
+flat param list into a tabbed panel in the expanded viewer. `out.network` and `out.viewer3d`
+use it; Cytoscape's Style tab is the reference.
+
+**`out.viewer3d` groups by socket** — Skeletons, Meshes, Points, Volumes, Scene — where the
+network groups by half of the drawing. Both are the node's own structure rather than a taxonomy
+invented for the panel, which is the test to apply to a third one. Two things came out of it
+that were not the point when it started. Five tabs do not fit 268px, so `.style-tabs` wraps
+rather than scrolls: a horizontal scroller hides the last tab behind a gesture nothing on screen
+suggests. And a tabbed panel is the shape that carries the header's `Style` toggle, so grouping
+a node is also how its controls acquire a way to be *put away* — the flat rail has none, which
+is why it is always in the way on the one node whose whole face is a picture.
 
 **It is opt-in, and the opt-out is the absence of `paramGroups`.** A node declaring no groups
 keeps the flat horizontal rail it has always had, which is why adding this changed nothing for
@@ -722,10 +731,374 @@ and the link tooltip — are positioned from the renderer's _container_ coordina
 containing block on `.viewer` they anchor to whatever distant ancestor happens to be
 positioned (the node card, the overlay panel) and land nowhere near the pointer.
 
-**No visual verification exists for these two.** jsdom has no WebGL, so sigma and three
-cannot render in tests, and there is no browser automation here. Everything testable is
-tested headlessly (layouts, encodings, geometry generation, node semantics); the actual
-pixels have not been seen by anyone yet.
+**No visual verification exists in the suite for these two.** jsdom has no WebGL, so sigma and
+three cannot render in tests, and there is no browser automation checked in. Everything testable
+is tested headlessly (layouts, encodings, geometry generation, node semantics).
+
+The 3D viewer has since been driven by hand in a real browser — Chrome over CDP, against the
+bundled morphology example — and four of the bugs recorded below were found that way and by no
+other means. A green suite said nothing about any of them. If you change this viewer, do the
+same: the failures here are not "slightly wrong output", they are a control that does nothing
+and a gesture that does nothing.
+
+## The 3D viewer
+
+**Everything arithmetic lives in `viewer3dScene.ts`.** Segment building, the colour buffers,
+the material decision, the camera framing, the caption's detail note. `Viewer3D.tsx` is a
+`<Canvas>` and the components inside it, which no test can reach at all — so the split is not
+tidiness, it is the difference between covered and uncovered. Same standing as `networkDraw.ts`
+and `roiStyle.ts`.
+
+**The scene is drawn at the origin.** Connectome coordinates are absolute nanometres, so a fly
+brain sits ~10⁵ nm out; `SceneContents` translates by −centre and the camera orbits (0, 0, 0).
+`framingFor` therefore returns a camera position **in the recentred space**, which is the one
+thing about it worth remembering — it is not where the bounding box is. What forced it was the
+compass: drei's `GizmoHelper` computes its snap radius as the camera's distance to the *world
+origin* rather than to the controls' target, so on an off-origin scene one click on an axis head
+sent the camera a whole brain away. Recentring makes those two distances the same number.
+
+**Four settings that did nothing, and why each was invisible.**
+
+- **`Background`** was applied in `onCreated`, which fires once. The param moved and nothing
+  happened, forever after the first frame; so did a theme switch. It is an effect on `gl` now,
+  with an `invalidate` — under a demand frameloop a clear colour nobody redraws with is not
+  visible either.
+- **Picking.** three's raycaster defaults to a **1 world unit** line threshold. A world unit here
+  is a nanometre, roughly a fiftieth of a pixel, so selecting a neuron meant clicking inside a
+  line to a precision no pointer has. It read as a viewer that had decided not to respond.
+  `PickRadius` scales it off the scene extent.
+- **Rotation, after the camera became a trackball.** `TrackballControls` records a gesture in its
+  pointer handlers but only *integrates* it inside `update()`, which drei calls from `useFrame` —
+  and `frameloop="demand"` runs `useFrame` only when something asked for a frame. The controls
+  emit `change` from `update()`, so the event that would ask for the frame is the one the missing
+  frame was supposed to produce. Dragging did nothing whatsoever. `InvalidateOnInput` asks for a
+  frame while the pointer is down; `frameloop="always"` was the alternative and costs every card
+  on the canvas 60fps forever. `OrbitControls` hid this by integrating in its own handlers, which
+  is why swapping the camera model turned a working viewer into a still picture with no error.
+- **`Line width`** did nothing because WebGL clamps `gl.lineWidth` to 1 in every browser that
+  matters, and a material setting was never going to fix it. It needed different geometry
+  entirely — see "different geometry, not a different material" below.
+
+**Meshes are opaque, and `depthWrite` has to move with the opacity.** A translucent surface must
+not write depth or the first triangle drawn hides the ones behind it and a neuron reads as a pile
+of facets; an opaque one must, or it never occludes the skeleton running through the middle of
+it — which is the entire reason to draw a surface. `surfaceStyle` owns both, together, and is
+where a test can see them. The default flipped from a grey 0.25 ghost because a mesh set is far
+more often the whole scene than a backdrop for one, and a scene of ghosts reads as a renderer
+that has not finished loading.
+
+**Mesh colour is a peer of skeleton colour**, same factory, same modes, neither `advanced`.
+It was a constant grey in the advanced panel, which made "colour these by cell type" something
+skeletons could do and meshes could not, for no reason either socket knows about.
+
+**All three encodings resolve above the `<Canvas>`.** Not for speed — because the legend is not
+in the canvas. Mesh and point colour used to resolve inside `SceneContents`, which is precisely
+why they had no key on screen: the strip could not see them.
+
+**The canvas is stretched to its box with `!important`, and the reason is a coordinate-space
+mismatch.** A renderer measures its container with `getBoundingClientRect` — *post*-transform
+pixels — then writes that number back as a CSS width, which inside React Flow's transformed card
+is *pre*-transform. The zoom is applied twice and the canvas comes out short by exactly the zoom
+factor: measured on a card at 0.8, a 560px preview held a 458px canvas with 100px of dead surface
+down one side and the scene sitting off-centre inside it. Only the element is stretched; the
+drawing buffer keeps the screen-sized resolution the renderer chose, so this is not an upscale.
+
+**A flex child that refuses to shrink pushes the next one out of the bottom.** The card preview's
+canvas floor was 150px inside a `.viewer` that had 125px to give, so the canvas kept everything
+and the legend and caption were clipped away with nothing to suggest they had ever been there.
+80px now, matching `.coda-node__preview`'s own minimum.
+
+**PNG export is a read-back, not a re-drawing.** There is no vector form of a 3D scene, so
+`ExportSource` grew a `png` accessor beside `svg`: render one frame and call `toDataURL` in the
+*same task*, before the compositor gets a turn and the drawing buffer is gone.
+`preserveDrawingBuffer` was the alternative and taxes every frame of every scene for a button
+most sessions never press. The pixel ratio is raised to ≥2 for the read, matching the 2× every
+other viewer gets from `downloadPng`, and the compass is left out — it lives in a HUD scene, and
+a north arrow baked into a figure is somebody else's problem to undo.
+
+That accessor is also why `ViewerActions` now registers **only the accessors a viewer actually
+has**. It used to relay all four unconditionally, so presence meant nothing; the Download node
+has to ask "could this give me a PNG" without paying for one, and for a 3D scene paying for one
+means rendering a frame.
+
+**The compass axes are deliberately not from the chart palette.** They are chrome with a fixed
+meaning, and a gizmo drawn in the categorical ramp would read as three data series parked in the
+corner. Red/green/blue for X/Y/Z is what every 3D tool here shares, neuroglancer included, and
+the labels carry the same information as the colour so nothing rests on telling red from green.
+Its margin scales with the canvas: a margin is measured edge-to-centre, so drei's default 80px
+parks the compass in the middle of a card-sized picture rather than in its corner.
+
+**Camera up is −Y**, which is navis's default view and the convention the fly EM volumes here
+follow — image Y increases ventrally, so a +Y up shows every brain upside down. A default only:
+the trackball has no up constraint, and a re-frame restores it so one after a roll does not land
+the new scene on its side.
+
+### The camera is framed once, then left alone
+
+`CameraRig` replaced a "re-frame whenever the extent changes" rule that sounded helpful and was
+not: an upstream node re-running under a view somebody had turned and pulled in threw it away,
+and so did expanding a card to the overlay — those are two instances of one node, and a camera
+that lives in the component dies with it. Exactly three things move it now: the **first** time
+the scene has an extent at all (`size > 1`, not the first mount — a viewer with nothing run yet
+has a placeholder extent of 1), a **remount** restoring from `cameraMemo`, and the **Reset view**
+control, which forgets the memo and frames again.
+
+A bounds change still updates the clip planes, because those describe the *space* rather than
+the view — a scene ten times larger under an unchanged camera clips through its own near plane.
+That is the whole of what an extent change is allowed to touch.
+
+`cameraMemo.ts` is `layoutMemo.ts`'s shape and exists for the same reasons: module-level so it
+survives unmount, session-scoped so a camera never lands in a `.coda.json`, LRU-capped as a leak
+guard. The recentred scene is what makes a stored camera meaningful across a data change at all
+— swapping one neuron for a cell type moves the contents, not the space they are drawn in.
+
+**A drag is not a click, and the DOM disagrees.** `click` fires on pointerup whatever happened
+in between, so turning the scene selected whichever neuron was under the cursor when the hand
+stopped — every time. It was invisible until the trackball started working: before that,
+dragging did nothing, so nothing followed it. `PointerGestures` owns the pointer listeners (it
+is also what asks for frames) and publishes a "this gesture moved" ref through context, which
+the pick consults. `DRAG_SLOP` is 4px.
+
+**`Line width` above 1 is different geometry, not a different material.** WebGL clamps
+`gl.lineWidth` to 1 everywhere that matters, so the setting did nothing for as long as it
+existed. Above 1 the skeletons are built as `LineSegments2` — every segment an instanced
+camera-facing quad — at roughly four times the vertex data, which is why 1 keeps the cheap
+`LineSegments` path rather than the fat one being the only one. Two things it needs that a
+normal material does not: `resolution` must be the canvas size in CSS pixels and follow a
+resize, or the shader has no idea how wide a pixel is; and a hit arrives as `faceIndex`, the
+segment, where the hairline path reports a vertex. `raycaster.params.Line2.threshold` is its own
+key too, in pixels rather than nanometres — `PickRadius` sets both.
+
+**Transparent PNG is a property of the clear, not of the scene.** The context has an alpha
+channel all along; the background is opaque only because the clear alpha is 1. The cut-out drops
+it to 0 for the length of one render. It is offered only by the read-back path, and that is not
+an omission — a viewer that rasterises its own SVG has no background painted into it to begin
+with, so "no background" is not a second thing to ask for there. Worth knowing: a cut-out of
+hairlines arrives *pale*, because a one-pixel line is mostly coverage rather than colour, which
+is one more reason for the fat-line path to exist.
+
+**Opacity is a facet of the colour row** (`composite` `role: 'extra'`), not a control beside it,
+and `NumberParam.slider` is what draws it as a range — opt-in, and only sensible where the
+number is a proportion somebody sets by feel and watches the result of. A native colour input
+has no alpha channel to expose, which is why this is a channel-wide setting rather than per-key:
+per-key alpha would leave a categorical scene with no overrides unable to be translucent at all.
+
+**Every param on `out.viewer3d` is `advanced`, leaving the card with no rows.** A deliberate
+reversal of the note above about `out.network`: a card with no rows loses its `☰` fold and reads
+as a node with nothing to set. On a viewer whose whole face *is* the picture the trade goes the
+other way — twelve rows of pickers above a scene is a settings panel with a thumbnail attached.
+The legend does the colour work in place, and the caption already says what the `Selected` row
+used to. `viewer3d.test.ts` asserts the empty card *and* that everything still reaches the
+inspector, which is what makes it safe.
+
+### One live renderer per node
+
+**A viewer is a renderer, not a picture, and the WebGL ones are not free to draw twice.** The
+card, the inspector and the overlay are three independent `ValuePreview` mount points for the
+same node. Measured in Chrome on the bundled 21-neuron morphology example, with all three up:
+
+| Surfaces up | Live WebGL contexts | Uploaded per context | Draw calls for one param change |
+| --- | --- | --- | --- |
+| card | 1 | 170 kB | 55 |
+| card + inspector | 2 | 170 kB | 99 |
+| card + inspector + overlay | 3 | 170 kB | 154 |
+
+Three contexts, three copies of the same geometry on the GPU, and every invalidation paid for
+three times. It scales with the scene: a mesh set at the 1.5M-triangle budget is tens of
+megabytes, times however many surfaces happen to be open. Chrome also caps live contexts at
+about sixteen and kills the oldest to make room — and the one it kills is a card that then
+renders blank with nothing on screen to explain it.
+
+Two rules now keep it at one, and both were verified with the same instrumentation:
+
+- **`summary` stands a WebGL viewer down.** The prop was introduced for the table — a
+  60-column grid in a 320px panel is three columns behind a sideways scrollbar — and its note
+  says a viewer with a drawing of its own keeps it, "because those already draw something sized
+  to their box". True of an SVG or a canvas; false of these two in the way that costs. The
+  inspector now names what it would have drawn and offers `Open full size`. `HAS_OWN_CONTEXT`
+  in `ValuePreview.tsx` is the list, and it is short for a reason: what it names is "renders
+  through WebGL", which is a property of the viewer component rather than of the node, so
+  nothing on a `NodeDefinition` could answer it. `LazyViewers.tsx` is the other place that
+  knows, about the same two.
+- **A card does not draw while the overlay owns its node.** The overlay is modal and covers the
+  canvas, so nothing behind it is visible; the card's `showPreview` takes `expandedNodeId` into
+  account. The cost is a remount when the overlay closes, which re-frames the card's camera —
+  the right way round, since somebody who has just been working full size is not also curating
+  the thumbnail behind it.
+
+Both are DOM facts, so `liveRenderers.test.tsx` covers them in jsdom even though the thing they
+are protecting against is invisible there.
+
+### The `Volumes` socket
+
+**A second meshes input, and the duplication is the point.** A neuropil shell and a neuron are
+the same `MeshesValue` and never the same mark: one is an opaque object somebody is looking at,
+the other is faint context around it. Sharing the `Meshes` socket would mean one opacity and one
+colour encoding for both, so drawing a neuron inside a region would either bury the neuron or
+turn it to glass along with the region.
+
+Everything that follows from that is a default, not a mechanism. `volumeOpacity` starts at 0.12
+where `meshOpacity` starts at 1; `volumeColor` starts at a constant grey where the other three
+start categorical, because a categorical encoding over 63 neuropils is eight hues plus `Other`
+and reads as a claim that eight of them are special.
+
+**Volumes come last in the bounds chain and never dim.** A shell is one to two orders of
+magnitude larger than the arbour inside it, so framing on the union answers "show me this neuron
+in LO(R)" with a picture of LO(R) and a speck — the existing first-one-wins precedence already
+did the right thing, and volumes simply join the end of it. Dimming is the other half: a region
+is not a neuron, so greying it when a neuron is selected would say it had been *deselected*, a
+claim about something that was never in the selection.
+
+They are excluded from the selection for the same reason points are — `evaluate` resolves
+against skeletons then meshes, and a region has no neuron id — so the volumes legend key offers
+hide and recolour but not select.
+
+### The interactive legend
+
+Three affordances per key — recolour, select, hide — and the split across files is the same one
+the rest of this section records: what a key *means* is shared, what a key *does* is per viewer.
+
+**`resolveColor` grew `labelAt`, which is the inverse of `legend`.** A key that can be clicked
+has to say which rows it stands for, and only the resolver knows: it ranked the categories, it
+decided which eight were kept, and it folded the rest. Rows past the cap answer with
+`OTHER_LABEL` rather than with their own value — hiding `Other` has to hide all of them, which
+it cannot do if each row answers with a name that is not on the strip. `labelAt` is absent for
+constant, sequential and literal encodings, and callers read that as "not addressable by key"
+rather than as an error.
+
+**Colour overrides live in `ColorSpec`, not in the viewer.** `spec.overrides` is a
+`{key: hex}` map applied inside `resolveColor` to `at()` *and* to the legend entries, in one
+pass. Applying it in a viewer instead would put the mark and the key it is filed under in two
+different hands, which is the failure this module's opening paragraph exists to prevent. An
+override that is not a colour is ignored — `literalColor` already owns what counts as one.
+
+**Two params per channel, both `advanced`, both `presentational`, added by `colorParams` only
+under `legend: true`.** `<prefix>Hidden` is an `ids` param (the read-only count plus `clear`
+that `selection` already uses) and `<prefix>ColorOverrides` is the map as JSON. Per channel and
+not shared, because `LC4` under a skeleton colour and `LC4` under a point colour are different
+sets of rows that happen to share a word. `readColorOverrides` is deliberately tolerant: the
+value is a string in a saved file, and an unreadable one means "no overrides", which is the
+state every graph written before this existed is already in.
+
+**Presentational is the whole distinction the Network Viewer's filters record from the other
+side.** Hiding a key changes what is drawn and nothing else — the node still emits the same
+selection — so it stays out of the provenance key and stales nothing. A control that changed
+the output would have to be the opposite and say so on its tab.
+
+**Both params are `visibleIf` non-empty, which is not the usual use of that hook.** At rest they
+are an empty row and an empty text box in every panel: controls that look like something to fill
+in and are not. They appear when they hold something, which is also when the `clear` beside the
+count is worth having. Safe under invariant 4 either way, since presentational params were never
+in the key for the hiding rule to change.
+
+**A hidden item is left out of the buffers, not drawn transparent.** That is what also makes it
+unpickable — geometry that is not there cannot be raycast — so hiding a key and clicking where
+it used to be does nothing rather than quietly selecting an invisible neuron. It costs a
+geometry rebuild, which is the one restyle that does, and it earns it.
+
+**The caption counts what the legend is holding back.** Same rule as `labels thinned` and
+`meshes simplified`: a scene drawing 12 of 21 neurons looks exactly like a scene that fetched
+12, so nothing removes data from a picture silently.
+
+**Selection is offered per channel, and points do not get it.** Their rows are synapses;
+`evaluate` excludes their table from the selection for the same reason. `LegendControls` is all
+optional fields precisely so a channel can decline one — the points key renders its label as
+text where the skeleton key renders a button, because an affordance that would lie is left out
+rather than disabled. Clicking a key that is already wholly selected releases it; a key that was
+*partly* picked by hand fills in instead, or the click meant to complete the set would throw the
+set away.
+
+**`useStable` on all three specs, which this viewer should have had from the start.**
+`readColorSpec` mints a fresh object per render of the parent, so the colour memos invalidated
+on every unrelated store tick and rebuilt a 40k-segment buffer each time. The rule in CLAUDE.md
+is one line; the 3D viewer was the one place not following it. The overrides map made it
+load-bearing rather than merely wasteful.
+
+### A colour per neuron: neuroglancer's hash
+
+`segmentColor.ts`, the `hash` colour mode, and the default for the Skeletons and Meshes sockets.
+
+**The palette was answering the wrong question.** `categorical` has eight validated slots and
+folds the ninth value into an achromatic `Other` — the right rule for a *series*, where a
+repeated hue would claim two things are the same. On `neuronId` it is a claim about identity,
+and a scene of twenty neurons drew twelve of them identically grey. Colour there is not a
+category; it is *which one this is*, and identity has no cap.
+
+**It is neuroglancer's hash, not a hash.** That is the whole value: people already have these
+colours on screen, so a neuron being teal here and teal in FlyWire is the difference between two
+views of one dataset and two unrelated pictures. Inventing one would have produced colours that
+are fine and match nothing. `segmentColor.ts` is a transcription of `segment_color.ts` and
+`gpu_hash/hash_function.ts` from google/neuroglancer (Apache-2.0), down to the rotation amounts
+and the omitted final avalanche — it is *not* a complete MurmurHash, and completing it would
+give a perfectly good hash with different colours.
+
+**Seed 0 is the default because `toJSON` omits it.** `SegmentColorHash.getDefault()` is seeded
+0 and serialises to nothing, so a link carrying no `segmentColorSeed` is a link on seed 0 —
+which is every link `out.neuroglancer` emits. The agreement is by construction rather than by
+eye, and `segmentColor.test.ts` pins the colours of specific ids so a "harmless" refactor of the
+bit twiddling cannot quietly change them. Nothing there would throw; it would just be different.
+
+**Ids are hashed as text, and that is invariant 8 in the one place it would be invisible.**
+`Number('720575940621039145')` and `Number('720575940621039144')` are the same float64, so a
+hash taken after a numeric conversion is the hash of a *neighbouring segment* — and what comes
+out is a perfectly plausible colour. `BigInt` on the text, masked to 64 bits, split into the two
+32-bit halves neuroglancer combines.
+
+**Value is pinned at 1**, neuroglancer's own choice: every hash colour is fully bright, so the
+set reads on black and washes out on white. One more reason the `Background` control exists, and
+one reason this mode is **not** claimed to be accessible — the hues cover the whole circle with
+no regard for the colourblind-safety gate `colors.ts` documents. That is the trade identity
+makes, and it is why the hash lives in its own file rather than joining the validated palette,
+which stays the thing to use when colour carries meaning.
+
+**The legend keeps working, which is why the mode is not `literal`.** Every distinct value is
+its own key, so hide, solo, select and recolour stay per neuron. Two departures from
+`categorical`: keys are listed in **first-appearance order** (there are no slots to rank for),
+and the strip lists at most `HASH_LEGEND_KEYS` = 12, because a hundred 18-digit root ids is not
+a legend. The remainder is **unlisted, not folded** — those neurons still have colours of their
+own — so `CategoricalLegend.unlisted` carries the count and the strip prints `+9 more`. Twelve
+keys over twenty-one neurons with nothing said would read as a scene of twelve.
+
+**Points stay categorical.** A synapse table's useful columns are groups — polarity, partner
+type, region — and hashing four values spends the mode's one advantage on a column with no
+individuals in it, in exchange for four unvalidated hues.
+
+**`allowHash` is opt-in, and `out.neuroglancer` deliberately does not take it.** That node
+already offers `default`, which sends no colours and lets neuroglancer hash them; since Coda's
+hash *is* neuroglancer's, adding the mode there would put two spellings of one behaviour in one
+dropdown.
+
+### Switching a whole socket off
+
+`showSkeletons` / `showMeshes` / `showPoints` / `showVolumes`, and the switches at the head of
+the legend strip.
+
+**The legend could not ask this question.** Keys exist only where an encoding is categorical, so
+a *constant* colour produces no legend at all — which is what neuropil shells ship with. The one
+channel most often in the way was the one with no control anywhere that could remove it.
+
+**Folded into the `visible` predicates rather than checked at each draw site.** `NEVER` replaces
+the channel's predicate, so the caption's hidden count, the geometry builder and the raycast get
+the same answer without four places remembering to consult a flag. The socket is *also* skipped
+in the tree — an empty buffer handed to a material still costs a pass on every restyle — so
+`visible` is the authority for rows and the render gate is the authority for sockets.
+
+**The switch and the group's name are one control.** The strip already prints "skeletons" as a
+group title when more than one channel is on screen; a separate row of switches put the same
+four words in the strip twice. So `LegendControls.onToggleChannel` turns the title into the
+switch, and `ChannelToggle` is exported so the *keyless* case — the constant colour above — can
+draw the identical thing on its own.
+
+**Shown only above one wired socket**, on both counts: naming the only subject in a scene
+restates what the card is, and switching it off is a control whose single use is making the
+viewer blank.
+
+**Presentational, like the hidden-keys list and for the same reason.** What is drawn changes;
+what `Selected` carries does not, so turning a channel down to see behind it must not stale
+everything downstream.
+
+**`shown` is read as `!== false` at the ValuePreview seam.** A graph saved before these params
+existed has no key for them, and `=== true` would open every old file with an empty scene.
 
 ## Scatter plot
 

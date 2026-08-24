@@ -17,10 +17,11 @@ import {
   isSkeletonsValue,
   isTableValue,
 } from '../../core/values'
-import { readColorSpec, readSizeSpec } from '../../nodes/lib/encodingParams'
+import { readColorSpec, readHiddenKeys, readSizeSpec } from '../../nodes/lib/encodingParams'
 import { BarChartViewer } from './BarChartViewer'
 import { HeatmapViewer } from './HeatmapViewer'
 import { LazyNetworkViewer, LazyViewer3D } from './LazyViewers'
+import type { BackgroundChoice } from './viewer3dScene'
 import { NeuroglancerViewer } from './NeuroglancerViewer'
 import { chosenViewerKind } from '../../nodes/output/neuroglancer'
 import { DatasetSummaryViewer } from './DatasetSummaryViewer'
@@ -129,6 +130,26 @@ function ValuePreviewInner({
   const filterClauses = useMemo(() => decodeClauses(node.params.filters), [node.params.filters])
 
   /*
+   * A summary means "no second renderer", not just "no grid".
+   *
+   * `summary` was introduced for the table — a 60-column grid in a 320px panel is three
+   * columns behind a sideways scrollbar, where `TableSummary` turns it ninety degrees and
+   * fits. The note beside the prop says a viewer with a drawing of its own keeps it, "because
+   * those already draw something sized to their box". True of an SVG or a canvas, and false of
+   * these two in the way that matters: a WebGL viewer is a *renderer*, and drawing one twice
+   * is two graphics contexts, two copies of the geometry on the GPU and two redraws on every
+   * invalidation. Measured on a 21-neuron scene with the card, the inspector and the overlay
+   * up: 3 contexts, 170 kB uploaded into each, and one background change costing 154 draw
+   * calls across the three.
+   *
+   * So the panel names what it would have drawn and offers the way to see it properly. Which
+   * is close to what it was worth in a 320 × 300 box beside the card already showing it.
+   */
+  if (summary && node.type in HAS_OWN_CONTEXT) {
+    return <DrawnElsewhere type={node.type} {...(onExpand ? { onExpand } : {})} />
+  }
+
+  /*
    * Above the `!value` guard, and that placement is the whole reason this node renders at all.
    *
    * Every other viewer here has an output port, so after a run it has a value and the guard is
@@ -193,9 +214,7 @@ function ValuePreviewInner({
     )
   }
 
-  const selection = (Array.isArray(node.params.selection) ? node.params.selection : []).map(
-    String,
-  )
+  const selection = idList(node.params.selection)
 
   if (node.type === 'out.network' && isNetworkValue(value)) {
     // The node filters its own output, so the caption compares what it drew against what
@@ -252,20 +271,49 @@ function ValuePreviewInner({
     const skeletons = inputValues?.skeletons
     const meshes = inputValues?.meshes
     const points = inputValues?.points
+    const volumes = inputValues?.volumes
     return (
       <LazyViewer3D
         skeletons={isSkeletonsValue(skeletons) ? skeletons : undefined}
         meshes={isMeshesValue(meshes) ? meshes : undefined}
         points={isPointsValue(points) ? points : undefined}
+        volumes={isMeshesValue(volumes) ? volumes : undefined}
         skeletonColor={readColorSpec('skeleton', node.params, ctx.column)}
         meshColor={readColorSpec('mesh', node.params, ctx.column)}
         pointColor={readColorSpec('point', node.params, ctx.column)}
+        volumeColor={readColorSpec('volume', node.params, ctx.column)}
         skeletonWidth={Number(node.params.skeletonWidth ?? 1)}
-        meshOpacity={Number(node.params.meshOpacity ?? 0.25)}
+        // Every fallback here has to equal the node's declared default: a graph saved before a
+        // param existed has no key for it, and this is the value it then gets.
+        meshOpacity={Number(node.params.meshOpacity ?? 1)}
         pointSize={Number(node.params.pointSize ?? 60)}
-        background={String(node.params.background ?? 'theme') as 'theme' | 'dark' | 'light'}
+        volumeOpacity={Number(node.params.volumeOpacity ?? 0.12)}
+        // The node id, so the card and the overlay share one camera instead of resetting each
+        // other — the same prop the network viewer takes for its layout and camera.
+        viewerId={node.id}
+        background={String(node.params.background ?? 'theme') as BackgroundChoice}
+        // Read defensively rather than cast: these three are written by the legend, so a graph
+        // saved before it existed has no key for them at all.
+        // Through the reader beside `readColorSpec`, because `colorParams({ legend })` is what
+        // names these params — spelling `skeletonHidden` here is a fifth place that has to agree
+        // with the factory that generates it and the viewer that writes it back.
+        hidden={{
+          skeleton: readHiddenKeys('skeleton', node.params),
+          mesh: readHiddenKeys('mesh', node.params),
+          point: readHiddenKeys('point', node.params),
+          volume: readHiddenKeys('volume', node.params),
+        }}
+        // `!== false`, so a graph saved before these existed draws everything — which is what
+        // it did. Reading them as `=== true` would open every old file with an empty scene.
+        shown={{
+          skeletons: node.params.showSkeletons !== false,
+          meshes: node.params.showMeshes !== false,
+          points: node.params.showPoints !== false,
+          volumes: node.params.showVolumes !== false,
+        }}
         selection={selection}
         onSelectionChange={onSelectionChange}
+        {...(onParamChange ? { onParamChange } : {})}
         {...shared}
       />
     )
@@ -493,7 +541,54 @@ function ValuePreviewInner({
   )
 }
 
+/**
+ * Viewers that cost a graphics context, so a second copy of one is not free the way a second
+ * `<svg>` is.
+ *
+ * A list rather than a flag on the definition, and a short one on purpose: what it is really
+ * naming is "renders through WebGL", which is a property of the viewer component rather than
+ * of the node, and nothing on a `NodeDefinition` knows it. `LazyViewers.tsx` is the other
+ * place that knows, for the same reason and about the same two.
+ *
+ * The value is the noun the stand-down message uses. One table rather than a `Set` beside a
+ * `Record`: two lists of the same two node types are two lists that can disagree, and the way
+ * they disagree is a panel that stands down and then calls the thing "This viewer".
+ */
+const HAS_OWN_CONTEXT: Record<string, string> = {
+  'out.viewer3d': 'This 3D scene',
+  'out.network': 'This network',
+}
+
+/** What the inspector shows in place of a second renderer. */
+function DrawnElsewhere({ type, onExpand }: { type: string; onExpand?: () => void }) {
+  return (
+    <div className="viewer">
+      <div className="viewer__empty viewer__empty--stacked">
+        <span title="A WebGL viewer takes a graphics context and its own copy of the geometry on the GPU, so it is drawn in one place at a time.">
+          {HAS_OWN_CONTEXT[type] ?? 'This viewer'} is drawn on its card.
+        </span>
+        {onExpand && (
+          <button type="button" className="btn btn--ghost" onClick={onExpand}>
+            Open full size
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 /*
+ * A param read as a list of strings, for the several that are one.
+ *
+ * Absent is empty, and so is a value of the wrong shape. Loading does not fill missing params
+ * with defaults, so a graph saved before a list param existed has no key for it — which has to
+ * read as "none of them", not as a reason to throw inside a render.
+ */
+function idList(value: unknown): string[] {
+  return Array.isArray(value) ? value.map(String) : []
+}
+
+/**
  * Params arrive as `ParamValue`, so every enum has to be narrowed back to its union somewhere.
  * Here rather than in the viewer: a component that accepted a bare string would have to decide
  * what an unrecognised one means, and the honest answer — the definition's default — is a fact

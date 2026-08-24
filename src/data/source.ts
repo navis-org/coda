@@ -264,6 +264,23 @@ export interface GeometryRequest {
    * node calling it only knows that one long await is outstanding.
    */
   onProgress?: (fraction: number, note?: string) => void
+  /**
+   * Ignore any geometry already held for these ids and read them again.
+   *
+   * **Clear Cache** on the node, reaching `geometryCache.ts` — the same job `CachedTableSpec`'s
+   * flag of this name does for the persistent table store. A fact about *this run*, never about
+   * the document: it must not be saved, must not travel to whoever you send the graph to, and
+   * must not take part in the provenance key.
+   */
+  refresh?: boolean
+  /**
+   * When the geometry being returned was actually read from a server.
+   *
+   * Wired to `ctx.reportFetched`, so a card fed from the session cache can say `cached 12m ago`
+   * rather than passing off a held copy as a fresh read. Same contract and same name as
+   * `CachedTableSpec.onFetched`: the stored time for a hit, `Date.now()` for a fresh read.
+   */
+  onFetched?: (at: number) => void
   signal?: AbortSignal
 }
 

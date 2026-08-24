@@ -43,6 +43,7 @@ import { geometryFrame } from '../transforms/spaces'
 import { mapWithConcurrency } from '../concurrency'
 import { compileLabelMatch, compileRegex, refuseUnfilterable } from '../neuronFilter'
 import { loadCachedTable, neuronIndexKey } from '../neuronIndex'
+import { byteLengthOf, cachedGeometry } from '../geometryCache'
 import type { NeuronIndexRequest } from '../neuronIndex'
 import type {
   AdjacencyRequest,
@@ -57,7 +58,7 @@ import type {
   SynapseRequest,
 } from '../source'
 import { ROI_MESH_SCHEMA, reportSourceLearned, throwIfAborted } from '../source'
-import type { AnnotationListResponse, CatmaidProject } from './api'
+import type { AnnotationListResponse, CatmaidProject, CompactSkeleton } from './api'
 import type { SkeletonSummary } from './api'
 import {
   annotationList,
@@ -154,6 +155,35 @@ interface LabelIndex {
 }
 
 /** What a skeleton the annotation graph has never heard of gets. Shared, so it is one object. */
+/**
+ * One `compact-detail` response into geometry.
+ *
+ * Lifted out of `fetchSkeletons` so the session cache can hold the *result* rather than the
+ * response — see the note at its call site. CATMAID names parents by **node id**, and a skeleton
+ * is an array in no particular order, so the tree is rebuilt through an id→index map; emitting
+ * parents as ids would satisfy the type and break every consumer that walks the array once, the
+ * SWC writer included.
+ */
+function decodeCompactSkeleton(id: string, skeleton: CompactSkeleton): SkeletonGeometry {
+  const nodes = skeleton[0]
+  const positions = new Float32Array(nodes.length * 3)
+  const radii = new Float32Array(nodes.length)
+  const parents = new Int32Array(nodes.length)
+
+  const position = new Map<number, number>()
+  nodes.forEach((node, i) => position.set(node[0], i))
+  nodes.forEach((node, i) => {
+    positions[i * 3] = node[3]
+    positions[i * 3 + 1] = node[4]
+    positions[i * 3 + 2] = node[5]
+    // −1 means "unset" in CATMAID, and a negative radius drawn as a tube is a spike.
+    radii[i] = node[6] > 0 ? node[6] : 0
+    const parent = node[1]
+    parents[i] = parent === null ? -1 : (position.get(parent) ?? -1)
+  })
+  return { id, positions, radii, parents }
+}
+
 const EMPTY_LABELS: CatmaidLabels = {
   name: null,
   type: null,
@@ -591,49 +621,56 @@ export class CatmaidSource implements DataSource {
       )
     }
 
+    /*
+     * Cached per skeleton id for the session, on the same terms as neuPrint and CAVE — and this
+     * is the one backend where that is a *decision* rather than a consequence.
+     *
+     * A neuPrint body id and a CAVE root id both name immutable geometry; a CATMAID skeleton is
+     * live tracing data that somebody may be editing while you look at it. Caching it is worth
+     * far more here — CATMAID serves densely traced skeletons uncompressed, roughly a megabyte
+     * each — and the way back is **Clear Cache** on the node, which is why `neuron.skeletons`
+     * declares `dataCache` and the card carries a `cached 12m ago ⟳` badge. Nothing here ages
+     * silently; it just does not expire on its own.
+     */
     let done = 0
-    const fetched = await mapWithConcurrency(ids, SKELETON_CONCURRENCY, async (id) => {
-      const skeleton = await compactSkeleton(this.server, projectId, id, false, options)
-      done += 1
-      req.onProgress?.(done / ids.length, 'skeletons')
-      return { id, skeleton }
+    const skeletons = await cachedGeometry<SkeletonGeometry>({
+      ids: ids.map(String),
+      key: (id) => `catmaid:${this.id}:${projectId}:skel:${id}`,
+      bytes: (s) => byteLengthOf(s.positions, s.radii, s.parents),
+      refresh: req.refresh,
+      onFetched: req.onFetched,
+      /*
+       * The **decoded** geometry is what goes in, not the response it came from.
+       *
+       * Two reasons, and the second is the one that bites. A `CompactSkeleton` is an array of
+       * boxed rows, so its footprint is three or four times what a byte count over typed arrays
+       * would say — and the budget is in bytes. And decoding is not free: rebuilding the
+       * id→index map for a 16,840-node FAFB neuron on every cache *hit* would give back most of
+       * what the cache was for. Labels stay outside, because they come from the project-wide
+       * annotation index rather than from the skeleton.
+       */
+      fetch: async (missing) => {
+        const out = new Map<string, SkeletonGeometry>()
+        await mapWithConcurrency(missing, SKELETON_CONCURRENCY, async (id) => {
+          const skeleton = await compactSkeleton(this.server, projectId, Number(id), false, options)
+          done += 1
+          req.onProgress?.(done / missing.length, 'skeletons')
+          out.set(id, decodeCompactSkeleton(id, skeleton))
+        })
+        return out
+      },
     })
 
-    const items: SkeletonGeometry[] = []
-    const rows: Array<Record<string, CellValue>> = []
     const index = await this.labelIndex(req.datasetId, options).catch(() => undefined)
-
-    for (const entry of fetched) {
-      if (!entry) continue
-      const nodes = entry.skeleton[0]
-      const positions = new Float32Array(nodes.length * 3)
-      const radii = new Float32Array(nodes.length)
-      const parents = new Int32Array(nodes.length)
-
-      // CATMAID names parents by *node id*; a skeleton is an array in no particular order, so the
-      // tree is rebuilt through an id→index map. Emitting parents as ids would satisfy the type
-      // and break every consumer that walks the array.
-      const position = new Map<number, number>()
-      nodes.forEach((node, i) => position.set(node[0], i))
-      nodes.forEach((node, i) => {
-        positions[i * 3] = node[3]
-        positions[i * 3 + 1] = node[4]
-        positions[i * 3 + 2] = node[5]
-        // −1 means "unset" in CATMAID, and a negative radius drawn as a tube is a spike.
-        radii[i] = node[6] > 0 ? node[6] : 0
-        const parent = node[1]
-        parents[i] = parent === null ? -1 : (position.get(parent) ?? -1)
-      })
-
-      const item: SkeletonGeometry = { id: String(entry.id), positions, radii, parents }
-      items.push(item)
-      const labels = index?.labels.get(entry.id) ?? EMPTY_LABELS
-      rows.push({
-        [ID_COLUMN_NAME]: entry.id,
+    const items = skeletons.ordered.map(([, item]) => item)
+    const rows: Array<Record<string, CellValue>> = skeletons.ordered.map(([id, item]) => {
+      const labels = index?.labels.get(Number(id)) ?? EMPTY_LABELS
+      return {
+        [ID_COLUMN_NAME]: Number(id),
         name: labels.name,
         type: labels.type,
         instance: labels.instance,
-        points: nodes.length,
+        points: item.parents.length,
         /*
          * Measured from the geometry rather than fetched. `cableLength` is shared with the
          * neuPrint decoder and the mock so the three cannot disagree, the points are already
@@ -641,8 +678,8 @@ export class CatmaidSource implements DataSource {
          * against a shared community server for a number already sitting in memory.
          */
         cableLength: cableLength(item),
-      })
-    }
+      }
+    })
 
     return {
       kind: 'skeletons',

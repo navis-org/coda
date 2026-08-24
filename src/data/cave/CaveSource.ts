@@ -34,6 +34,7 @@ import type {
   MeshGeometry,
   MeshesValue,
   PointsValue,
+  SkeletonGeometry,
   SkeletonsValue,
   TableValue,
 } from '../../core/values'
@@ -87,6 +88,7 @@ import {
 import { codaColumn, defaultSchemas, neuronSchemaFor, schemasFor } from './schema'
 import { withAnnotations } from '../annotations/schema'
 import { MAX_L2_SKELETON_NEURONS, readL2Skeletons } from './l2'
+import { byteLengthOf, cachedGeometry } from '../geometryCache'
 import { caveScene } from './scene'
 import type { NgScene } from '../neuroglancer/scene'
 import type { DatastackSpec, NeuronTableSpec, SynapseTableSpec } from './spec'
@@ -885,18 +887,37 @@ export class CaveSource implements DataSource {
     )
     const fragmentLimit = fragmentConcurrencyFor(inFlight)
 
+    /*
+     * Cached per root id, and this is the source where it matters most: one graphene mesh is
+     * several hundred Range requests and about a megabyte, so re-fetching twenty because a
+     * twenty-first was added is thousands of round trips for nothing.
+     *
+     * Safe to hold indefinitely for the reason stated above — a root id names one immutable
+     * agglomeration, and an edit mints a new id — but the *decimation* is not part of the id, so
+     * it goes in the key. `decimateGridFor` depends on both the triangle budget and the batch
+     * size, so a scene grown from twenty neurons to forty legitimately re-reads them all.
+     */
     let done = 0
-    const raw = await mapWithConcurrency(req.neuronIds, MESH_CONCURRENCY, async (neuronId) => {
-      const mesh = await readGrapheneMesh(source, neuronId, grid, fragmentLimit, options)
-      req.onProgress?.(++done / req.neuronIds.length, `${done}/${req.neuronIds.length} meshes`)
-      return mesh
-        ? { id: neuronId, positions: mesh.positions, indices: mesh.indices }
-        : undefined
+    const fetched = await cachedGeometry<{ positions: Float32Array; indices: Uint32Array }>({
+      ids: req.neuronIds,
+      key: (id) => `cave:${this.id}:${req.datasetId}:mesh:${grid}:${id}`,
+      bytes: (m) => byteLengthOf(m.positions, m.indices),
+      refresh: req.refresh,
+      onFetched: req.onFetched,
+      fetch: async (missing) => {
+        const out = new Map<string, { positions: Float32Array; indices: Uint32Array }>()
+        await mapWithConcurrency(missing, MESH_CONCURRENCY, async (neuronId) => {
+          const mesh = await readGrapheneMesh(source, neuronId, grid, fragmentLimit, options)
+          req.onProgress?.(++done / missing.length, `${done}/${missing.length} meshes`)
+          if (mesh) out.set(neuronId, { positions: mesh.positions, indices: mesh.indices })
+        })
+        return out
+      },
     })
 
     // One list carrying its own id, rather than a second list of ids zipped by index — the shape
     // `NeuPrintSource.fetchMeshes` already uses, and the one that cannot fall out of step.
-    const items = raw.filter((m): m is MeshGeometry => m !== undefined)
+    const items: MeshGeometry[] = fetched.ordered.map(([id, mesh]) => ({ id, ...mesh }))
     const triangles = items.reduce((sum, item) => sum + item.indices.length / 3, 0)
 
     return {
@@ -961,7 +982,24 @@ export class CaveSource implements DataSource {
      */
     if (!req.annotations) void this.typeLookup(req).catch(() => undefined)
 
-    const items = await readL2Skeletons(source, req.neuronIds, options, req.onProgress)
+    /*
+     * Two requests per neuron and about 1.6 s each, so the session cache is worth more here than
+     * the code it costs. Nothing but the root id decides the geometry — the level-2 cache
+     * publishes `rep_coord_nm` and no conversion happens anywhere — so unlike the mesh above,
+     * this key needs no parameter beyond the id.
+     */
+    const skeletons = await cachedGeometry<SkeletonGeometry>({
+      ids: req.neuronIds,
+      key: (id) => `cave:${this.id}:${req.datasetId}:l2skel:${id}`,
+      bytes: (s) => byteLengthOf(s.positions, s.radii, s.parents),
+      refresh: req.refresh,
+      onFetched: req.onFetched,
+      fetch: async (missing) => {
+        const read = await readL2Skeletons(source, missing, options, req.onProgress)
+        return new Map(read.map((item) => [item.id, item]))
+      },
+    })
+    const items = skeletons.ordered.map(([, item]) => item)
     return {
       kind: 'skeletons',
       items,

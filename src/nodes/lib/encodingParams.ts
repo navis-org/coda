@@ -20,7 +20,14 @@ import type { CompositeRef, ParamDef } from '../../core/node'
  * means something — neuroglancer hash-colours each segment, which is genuinely useful and is
  * also the shortest link. In-app viewers have no such notion, so they do not enable it.
  */
-export type ColorMode = 'default' | 'constant' | 'categorical' | 'sequential' | 'literal'
+export type ColorMode =
+  | 'default'
+  | 'constant'
+  | 'categorical'
+  | 'sequential'
+  | 'literal'
+  /** One colour per distinct value, derived from the value. See `ui/segmentColor.ts`. */
+  | 'hash'
 
 /** The eight validated categorical slots, by name, so a constant colour stays in-palette. */
 export const CONSTANT_COLOR_OPTIONS = [
@@ -33,6 +40,17 @@ export const CONSTANT_COLOR_OPTIONS = [
   { value: '6', label: 'violet' },
   { value: '7', label: 'red' },
   { value: 'muted', label: 'grey' },
+  /*
+   * The two ends, outside the validated ramp on purpose.
+   *
+   * Neither is a *series* colour and neither is offered as one — they never come out of a
+   * categorical encoding, only out of somebody choosing them. What they are for is a figure:
+   * black ink on the light background a paper wants, white on a dark one. Both are therefore
+   * fixed rather than theme-flipped, because "black" that turns white when the editor's theme
+   * changes is not the thing that was asked for.
+   */
+  { value: 'black', label: 'black' },
+  { value: 'white', label: 'white' },
 ]
 
 /** Modes that map no column, so the column picker has nothing to offer. */
@@ -91,6 +109,20 @@ export interface ColorParamOptions {
    */
   allowLiteral?: boolean
   /**
+   * Offer the `hash` mode: one colour per distinct value, computed from the value.
+   *
+   * Opt-in, and the reason is not that it might be wrong — it is that it might be *redundant*.
+   * The Neuroglancer node already offers `default`, which sends no colours and lets
+   * neuroglancer hash them; since Coda's hash is neuroglancer's, adding this there would put
+   * two spellings of one behaviour in one dropdown.
+   *
+   * Everywhere else the question is whether the mark has identity worth encoding. A neuron
+   * does. A bar in a chart, an axis, a trend line do not — a hash over categories is eight
+   * arbitrary hues where the validated palette is eight chosen ones, and the palette wins
+   * whenever the colour carries meaning rather than identity.
+   */
+  allowHash?: boolean
+  /**
    * Which data-driven modes to offer; defaults to both.
    *
    * Exists because a mode can be wrong for a *mark* rather than for a node. `sequential` on a
@@ -100,6 +132,28 @@ export interface ColorParamOptions {
    * the network viewer's notes in CLAUDE.md.
    */
   modes?: Array<'categorical' | 'sequential'>
+  /**
+   * Add the two params an *interactive* legend writes: which keys are hidden, and which have
+   * been given a colour of their own.
+   *
+   * Opt-in rather than automatic, because they are only meaningful where a viewer actually
+   * draws an interactive strip — a node carrying params nothing can write is a node with two
+   * controls that never move. Both are `advanced`, so they reach the inspector (where the
+   * count and its `clear` are the way back out) and not the card.
+   */
+  legend?: boolean
+  /**
+   * Give this encoding an opacity, rendered as part of the colour row rather than beside it.
+   *
+   * A colour and how much of it comes through are one decision, and the panel now says so:
+   * `role: 'extra'` puts the slider in the colour's own row. It is a channel-wide setting, not
+   * a per-key one — a native colour input has no alpha channel to expose, and per-key alpha
+   * would leave a categorical scene with no overrides unable to be translucent at all.
+   *
+   * Only offered where the mark *has* an opacity worth setting: a surface. Lines and points
+   * would need transparent materials and a sorting story that neither has.
+   */
+  alpha?: { default: number; help?: string }
 }
 
 /**
@@ -134,11 +188,23 @@ export function colorParams(options: ColorParamOptions): ParamDef[] {
       kind: 'enum',
       label,
       default: defaultMode,
+      ...(options.allowHash
+        ? {
+            help:
+              'A colour each hashes the chosen column — neuroglancer’s own hash, so a neuron ' +
+              'keeps the colour it has in a neuroglancer view. By category uses the eight ' +
+              'validated palette slots and folds the rest into grey, which is the better ' +
+              'choice when the colour stands for a group rather than for an individual.',
+          }
+        : {}),
       options: [
         ...(options.allowDefault
           ? [{ value: 'default', label: options.allowDefault.label }]
           : []),
         { value: 'constant', label: 'single colour' },
+        // Second, because where it is offered it is usually the answer: it is the only mode
+        // that can tell a hundred neurons apart.
+        ...(options.allowHash ? [{ value: 'hash', label: 'a colour each' }] : []),
         ...(options.modes ?? ['categorical', 'sequential']).map((mode) =>
           mode === 'categorical'
             ? { value: 'categorical', label: 'by category' }
@@ -170,7 +236,132 @@ export function colorParams(options: ColorParamOptions): ParamDef[] {
       options: CONSTANT_COLOR_OPTIONS,
       visibleIf: (params) => (params[modeId] ?? defaultMode) === 'constant',
     },
+    ...(options.alpha
+      ? ([
+          {
+            ...base,
+            presentational: true,
+            advanced: options.advanced === true,
+            composite: facet('extra', { facet: 'opacity' }),
+            id: `${prefix}Opacity`,
+            kind: 'number',
+            label: `${label} opacity`,
+            default: options.alpha.default,
+            min: 0.02,
+            max: 1,
+            step: 0.02,
+            slider: true,
+            ...(options.alpha.help ? { help: options.alpha.help } : {}),
+          },
+        ] satisfies ParamDef[])
+      : []),
+    ...(options.legend
+      ? ([
+          {
+            ...base,
+            /*
+             * Presentational, and that is the whole distinction the Network Viewer's filters
+             * record from the other side. Hiding a key changes what is *drawn* and nothing
+             * else — the node still emits the same selection — so it must not join the
+             * provenance key and must not stale anything downstream. A filter that changed the
+             * output would have to be the opposite, and say so on its tab.
+             */
+            presentational: true,
+            advanced: true,
+            id: `${prefix}Hidden`,
+            kind: 'ids',
+            label: `${label} — hidden`,
+            noun: 'keys',
+            default: [],
+            help: 'Legend keys hidden from the scene. Set by the eye toggle on the legend.',
+            /*
+             * Shown only once it holds something, which is not the usual reason for a
+             * `visibleIf`.
+             *
+             * These two are written by the legend and read by nobody else, so at rest they are
+             * an empty row and an empty text box in every panel — controls that look like
+             * something to fill in and are not. When one *is* set they become worth seeing, and
+             * the `clear` beside the count is a second way out from a state the legend can also
+             * undo. Safe under invariant 4 either way: both are presentational, so neither was
+             * ever in the provenance key for the hiding rule to change.
+             */
+            visibleIf: (params) =>
+              Array.isArray(params[`${prefix}Hidden`]) &&
+              (params[`${prefix}Hidden`] as unknown[]).length > 0,
+          },
+          {
+            ...base,
+            presentational: true,
+            advanced: true,
+            id: `${prefix}ColorOverrides`,
+            kind: 'string',
+            label: `${label} — overrides`,
+            default: '',
+            help: 'Per-key colours chosen from the legend swatches, as JSON. Empty means the palette decides.',
+            visibleIf: (params) => String(params[`${prefix}ColorOverrides`] ?? '') !== '',
+          },
+        ] satisfies ParamDef[])
+      : []),
   ]
+}
+
+/**
+ * Read a `<prefix>ColorOverrides` param into a map.
+ *
+ * Tolerant on purpose: the value is a string in a saved file, and a hand-edited or truncated
+ * one is not a reason for a viewer to throw mid-render. Anything unreadable means "no
+ * overrides", which is the state every graph written before this existed is already in.
+ *
+ * It does **not** check that the values are colours. That check belongs where the colour is
+ * used — `resolveColor` already has `literalColor` and already has a rule for a cell that is
+ * not a colour — and doing it in both places is how the two acquire different rules.
+ */
+export function readColorOverrides(value: unknown): Record<string, string> {
+  if (typeof value !== 'string' || value.trim() === '') return {}
+  try {
+    const parsed: unknown = JSON.parse(value)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    const out: Record<string, string> = {}
+    for (const [key, cell] of Object.entries(parsed)) {
+      if (typeof cell === 'string') out[key] = cell
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
+/**
+ * The other half of `readColorOverrides`, so the encoding is written where it is read.
+ *
+ * It was a bare `JSON.stringify` in the 3D viewer's click handler — the decode half in
+ * `src/nodes/lib` and the encode half in a React component, which is the split invariant 3
+ * exists to object to. The next viewer that offers recolouring gets the same spelling by
+ * calling this rather than by remembering what the reader expects.
+ *
+ * An empty map writes the **empty string**, not `{}`: that is what the param's declared default
+ * is, what `visibleIf` tests for, and what `readColorSpec` treats as "no overrides".
+ */
+export function writeColorOverrides(overrides: Readonly<Record<string, string>>): string {
+  return Object.keys(overrides).length > 0 ? JSON.stringify(overrides) : ''
+}
+
+/**
+ * The legend keys hidden for one channel, off a node's params.
+ *
+ * The sibling of `readColorSpec`, and it exists for the same reason: `colorParams({ legend })`
+ * *generates* `<prefix>Hidden`, so the name is the factory's to know and not a viewer's to spell
+ * out per channel. It was four literal reads in `ValuePreview` — one per socket — against a
+ * param id built by string concatenation in the component that writes it back, with nothing to
+ * catch the two drifting apart. A hidden list that no one reads is an eye toggle that silently
+ * does nothing.
+ *
+ * Tolerant in the same way and for the same reason: the value is whatever a saved file holds,
+ * and a graph written before the legend existed has no key for it at all.
+ */
+export function readHiddenKeys(prefix: string, params: Record<string, unknown>): string[] {
+  const value = params[`${prefix}Hidden`]
+  return Array.isArray(value) ? value.map(String).filter(Boolean) : []
 }
 
 export interface SizeParamOptions {
@@ -254,6 +445,14 @@ export interface ColorSpec {
   mode: ColorMode
   column: string | undefined
   constant: string
+  /**
+   * Per-legend-key colours, chosen by hand, overriding the palette slot.
+   *
+   * Only categorical encodings have keys, so this is only consulted there. Note it is part of
+   * the *spec* rather than something a viewer applies afterwards: the legend and the marks
+   * have to agree, and one place decides.
+   */
+  overrides?: Readonly<Record<string, string>>
 }
 
 export interface SizeSpec {
@@ -268,10 +467,15 @@ export function readColorSpec(
   resolveColumn: (paramId: string) => string | undefined,
 ): ColorSpec {
   const mode = String(params[`${prefix}ColorMode`] ?? 'constant') as ColorMode
+  const overrides = readColorOverrides(params[`${prefix}ColorOverrides`])
   return {
     mode,
     column: DATALESS_MODES.has(mode) ? undefined : resolveColumn(`${prefix}ColorBy`),
     constant: String(params[`${prefix}Color`] ?? '0'),
+    // Omitted when empty rather than carried as `{}`, because these specs are memoised *by
+    // value* (`useStable`) and an always-present empty object is one more thing to serialise
+    // on every render of every viewer that never had an override.
+    ...(Object.keys(overrides).length > 0 ? { overrides } : {}),
   }
 }
 

@@ -174,6 +174,14 @@ export interface NumberParam extends ParamBase {
   min?: number
   max?: number
   step?: number
+  /**
+   * Draw it as a range slider rather than as a number field.
+   *
+   * Opt-in, and only sensible where the number is a *proportion* somebody adjusts by feel and
+   * watches the result of — an opacity, not a limit or a budget. A slider needs both bounds to
+   * mean anything, so one without `min` and `max` falls back to the field.
+   */
+  slider?: boolean
 }
 
 export interface StringParam extends ParamBase {
@@ -240,6 +248,36 @@ export interface ColumnParam extends ParamBase {
   optional?: boolean
 }
 
+/**
+ * Several values chosen from a list the node supplies — the multi-valued `enum`.
+ *
+ * `enum` : `multiEnum` :: `column` : `columns`, and the parallel is worth taking literally:
+ * the options come from the same place, the widget is the same chips-plus-add control the
+ * `columns` picker uses, and empty means whatever the node says it means rather than "invalid".
+ *
+ * It exists because the alternatives for "pick some regions" were all worse. A single `enum`
+ * cannot say two of them. An `ids` param is read-only in the inspector by design — its whole
+ * premise is that no generic widget could edit it, which is false here, since the source
+ * publishes the list. And a free-text `string` would have somebody typing `ME(R), LO(R)` by
+ * hand, exactly, parentheses included, with a silent empty result for a typo.
+ */
+export interface MultiEnumParam extends ParamBase {
+  kind: 'multiEnum'
+  default: string[]
+  /** Static, or derived from the resolved input types the way `enum`'s is. */
+  options: EnumOption[] | ((ctx: InferContext) => EnumOption[])
+  /**
+   * What an empty selection means, in words, shown where the chips would be.
+   *
+   * Required in spirit: on a picker whose options are supplied rather than typed, empty is a
+   * *decision the node interprets* — "every region", "the primary set" — and a control that
+   * shows nothing for it is a control whose most common state says nothing.
+   */
+  emptyLabel?: string
+  /** Word for one entry, for the add control's labels. Defaults to "option". */
+  noun?: string
+}
+
 /** Ordered multi-column reference (group-by keys, selected columns). */
 export interface ColumnsParam extends ParamBase {
   kind: 'columns'
@@ -270,8 +308,13 @@ export interface ColumnsParam extends ParamBase {
  * something eligible is that no generic widget could meaningfully edit it, so the node brings
  * its own card or viewer; `IdsField` is the read-and-clear fallback the inspector shows.
  *
- * Never presentational in either shape: what a viewer selected and what a card configured both
- * feed a downstream output, so they belong in the provenance key and in the saved file.
+ * Neither of those two shapes is ever presentational: what a viewer selected and what a card
+ * configured both feed a downstream output, so they belong in the provenance key and in the
+ * saved file. There is now a **third** shape that is — the 3D viewer's per-channel list of
+ * hidden legend keys — and it is worth saying why it does not break the rule rather than
+ * leaving the exception to look like a mistake. That list is read by the *drawing* and by
+ * nothing else; `evaluate` never sees it, so no downstream result can go stale behind it. The
+ * test is what reads the param, not what kind it is.
  */
 export interface IdsParam extends ParamBase {
   kind: 'ids'
@@ -281,7 +324,14 @@ export interface IdsParam extends ParamBase {
 }
 
 export type ParamDef =
-  NumberParam | StringParam | BooleanParam | EnumParam | ColumnParam | ColumnsParam | IdsParam
+  | NumberParam
+  | StringParam
+  | BooleanParam
+  | EnumParam
+  | MultiEnumParam
+  | ColumnParam
+  | ColumnsParam
+  | IdsParam
 
 /**
  * The `refresh` nonce a node carries when its data can change under fixed params.
@@ -577,6 +627,22 @@ export function validateParamValue(param: ParamDef, value: ParamValue): string |
     }
     case 'column':
       return typeof value === 'string' ? undefined : wrongType('a column name')
+    case 'multiEnum': {
+      if (!Array.isArray(value) || value.some((v) => typeof v !== 'string')) {
+        return wrongType('a list of strings')
+      }
+      // Same rule as `enum`, for the same reason: options derived from the inputs cannot be
+      // checked without them, and a plan that names a region this dataset does not publish is
+      // the node's own `validate` to refuse, with a sentence about the dataset.
+      if (typeof param.options === 'function') return undefined
+      const allowed = new Set(param.options.map((o) => o.value))
+      const stray = (value as string[]).find((v) => !allowed.has(v))
+      return stray === undefined
+        ? undefined
+        : `"${param.id}" has no option "${stray}". Options: ${param.options
+            .map((o) => o.value)
+            .join(', ')}.`
+    }
     case 'columns':
     case 'ids':
       return Array.isArray(value) && value.every((v) => typeof v === 'string')

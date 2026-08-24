@@ -209,14 +209,26 @@ registerEmitter('out.viewer3d', (ctx) => {
   const wired = ['skeletons', 'meshes', 'points']
     .map((port) => ctx.input(port))
     .filter((v): v is string => !!v)
-  if (wired.length === 0) return ctx.todo('No geometry is wired to this 3D Viewer.')
+  const volumes = ctx.input('volumes')
+  if (wired.length === 0 && !volumes) return ctx.todo('No geometry is wired to this 3D Viewer.')
 
   ctx.library('nat')
   ctx.library('dplyr')
   const selected = ctx.output('selected')
   const selection = selectionIds(ctx)
 
-  const lines = [`plot3d(${wired.join(', ')})`, '']
+  const lines = wired.length > 0 ? [`plot3d(${wired.join(', ')})`] : []
+  if (volumes) {
+    /*
+     * Shells go in through rgl rather than through `plot3d`, because what that socket carries
+     * is a list of `mesh3d` and `plot3d` has no method for one. The alpha is the card's own
+     * default: a neuropil is drawn so that something else can be seen inside it.
+     */
+    lines.push(
+      `for (.mesh in ${volumes}) rgl::shade3d(.mesh, alpha = 0.12, col = "grey70")`,
+    )
+  }
+  lines.push('')
   if (selection.length > 0) {
     lines.push(`${selected} <- tibble(neuronId = ${rVector(selection)})`)
   } else {

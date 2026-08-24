@@ -52,6 +52,12 @@ export function paramValueLabel(p: ParamDef, value?: unknown): string {
       const raw = given ? asStrings(value) : p.default
       return raw.length ? `${raw.length} selected` : 'none'
     }
+    case 'multiEnum': {
+      const raw = given ? asStrings(value) : p.default
+      // Empty is what the node says it is — "the primary set", "every region" — and printing
+      // `none` for it would state the opposite of what the picker does.
+      return raw.length ? raw.join(', ') : (p.emptyLabel ?? 'none')
+    }
     default: {
       const raw = given ? value : p.default
       return raw === '' ? '—' : String(raw)
@@ -65,5 +71,10 @@ function asStrings(value: unknown): string[] {
 
 /** Whether the app draws this param as a dropdown or a picker, so a figure can give it a ▾. */
 export function paramIsPicker(p: ParamDef): boolean {
-  return p.kind === 'enum' || p.kind === 'column' || p.kind === 'columns'
+  return (
+    p.kind === 'enum' ||
+    p.kind === 'multiEnum' ||
+    p.kind === 'column' ||
+    p.kind === 'columns'
+  )
 }

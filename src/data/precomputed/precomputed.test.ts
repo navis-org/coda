@@ -12,7 +12,7 @@
  *    exercises the edges that real data happens not to contain.
  */
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import fragmentFixture from './__fixtures__/dracoFragment.json'
 import manifestFixture from './__fixtures__/hemibrainManifest.json'
@@ -22,7 +22,13 @@ import { chooseLod, fragmentOffset, fragmentTransform, parseMultiResManifest } f
 import { hashUint64, murmurHash3x86_128 } from './murmur'
 import type { ShardingSpec } from './sharded'
 import { locate } from './sharded'
-import { PrecomputedFetchError, fetchBytes, proxied, resetTransport } from './transport'
+import {
+  PrecomputedFetchError,
+  fetchBytes,
+  proxied,
+  resetTransport,
+  transportModes,
+} from './transport'
 import { resetShardCache } from './sharded'
 
 const HEMIBRAIN_SHARDING = manifestFixture.info.sharding as ShardingSpec
@@ -351,6 +357,68 @@ describe('transport', () => {
     // Three requests, not four: the second fetch goes straight to the proxy.
     expect(seen).toHaveLength(3)
     expect(seen[2]).toBe('/gcs/private/two')
+  })
+
+  it('does not let one refusing bucket route another bucket on the same host', async () => {
+    /*
+     * The measured incident. Every FlyEM bucket is on `storage.googleapis.com`, but CORS is a
+     * property of the *bucket*: male-CNS refuses, hemibrain does not. Keyed by host, one
+     * male-CNS mesh recorded `storage.googleapis.com → proxy` and persisted it, so from then on
+     * every hemibrain read in that browser profile went through the proxy — in later sessions
+     * too, for somebody who never opened male-CNS again. On a 300-body fetch that is 3.1 s
+     * against 30.5 s, with nothing on screen to attribute it to.
+     */
+    const seen: string[] = []
+    globalThis.fetch = ((url: string) => {
+      seen.push(url)
+      // Only male-CNS refuses.
+      if (url.startsWith('https://') && url.includes('flyem-male-cns')) {
+        return Promise.reject(new TypeError('Failed to fetch'))
+      }
+      return Promise.resolve({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(new ArrayBuffer(4)),
+      } as Response)
+    }) as typeof fetch
+
+    await fetchBytes('https://storage.googleapis.com/flyem-male-cns/mesh/a')
+    expect(transportModes()['storage.googleapis.com/flyem-male-cns']).toBe('proxy')
+
+    seen.length = 0
+    await fetchBytes('https://storage.googleapis.com/neuroglancer-janelia-flyem-hemibrain/mesh/b')
+    // Direct, first try — not `/gcs/...`.
+    expect(seen).toEqual([
+      'https://storage.googleapis.com/neuroglancer-janelia-flyem-hemibrain/mesh/b',
+    ])
+    expect(transportModes()['storage.googleapis.com/neuroglancer-janelia-flyem-hemibrain']).toBe(
+      'direct',
+    )
+  })
+
+  it('drops a mode written by the host-keyed version rather than honouring it', () => {
+    // Otherwise every profile that read male-CNS once stays poisoned across the upgrade, which
+    // is the whole failure it is being upgraded out of. A bare host key cannot be migrated: it
+    // stood for whichever bucket happened to be read first.
+    // The node test env has no `window` at all, and the module guards every storage access —
+    // so a stub is what makes the persisted half reachable here.
+    const store = new Map<string, string>([
+      [
+        'coda.precomputed.transport',
+        JSON.stringify({ 'storage.googleapis.com': 'proxy', 'other.example': 'direct' }),
+      ],
+    ])
+    vi.stubGlobal('window', {
+      localStorage: {
+        getItem: (k: string) => store.get(k) ?? null,
+        setItem: (k: string, v: string) => store.set(k, v),
+        removeItem: (k: string) => store.delete(k),
+      },
+    })
+    try {
+      expect(transportModes()).toEqual({ 'other.example': 'direct' })
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   it('does not retry a 404 through the proxy', async () => {

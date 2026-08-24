@@ -534,6 +534,59 @@ registerEmitter('neuron.meshes', (ctx) => {
   ]
 })
 
+/**
+ * Neuropil shells, as `navis.Volume`s rather than as OBJ bytes.
+ *
+ * `out.rois`'s emitter reads the same endpoint through `Client.fetch_roi_mesh`, which hands
+ * back bytes — right there, because that notebook has no navis in its dependency set and a
+ * generated file that fails on an import nobody asked for is worse than one that hands over
+ * the bytes. Here the opposite holds: this node exists to feed a 3D scene, so what it must
+ * produce is something plottable, and `navis.interfaces.neuprint.fetch_roi` returns exactly
+ * that. Read off navis by introspection rather than recalled.
+ *
+ * Two things survive from that sibling because both are properties of the endpoint rather
+ * than of either card. Some regions have no mesh, and every one male-CNS refuses is an
+ * `-unspecified` bucket that collects unassigned synapses and is not a shape — so the loop
+ * catches rather than letting one 400 end the cell. And the meshes are decimated display
+ * surfaces, which matters more here than there: a node that binds them to a name invites
+ * measuring them.
+ */
+registerEmitter('neuron.roiMeshes', (ctx) => {
+  const client = ctx.wired('dataset')
+  const out = ctx.output('meshes')
+  const chosen = (Array.isArray(ctx.params.rois) ? ctx.params.rois : []).map(String)
+  const list =
+    chosen.length > 0
+      ? `[${chosen.map((roi) => JSON.stringify(roi)).join(', ')}]`
+      : `${client}.primary_rois`
+
+  ctx.require('navisNeuprint')
+  return [
+    ...ctx.note(
+      'Region meshes are one request each, and neuPrint publishes them for visualization ' +
+        'only — decimated display surfaces, so a volume measured off one is an approximation ' +
+        'rather than a figure to quote.',
+    ),
+    ...(chosen.length > 0
+      ? []
+      : [
+          `# The picker was left empty, which means the set that tiles the volume — the`,
+          `# published list nests, so "every region" draws each shell inside another one.`,
+        ]),
+    `${out} = []`,
+    `_skipped = []`,
+    `for _roi in ${list}:`,
+    `    try:`,
+    `        ${out}.append(neu.fetch_roi(_roi, client=${client}))`,
+    `    except Exception:`,
+    `        # No mesh published for this one. On male-CNS every such region is an`,
+    `        # "-unspecified" bucket, which collects unassigned synapses and is not a shape.`,
+    `        _skipped.append(_roi)`,
+    ``,
+    `print(f"{len(${out})} region meshes · {len(_skipped)} without one")`,
+  ]
+})
+
 registerEmitter('neuron.synapses', (ctx) => {
   const c = ctx.wired('dataset')
   const neurons = ctx.wired('neurons')

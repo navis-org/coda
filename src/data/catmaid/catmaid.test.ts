@@ -386,6 +386,55 @@ describe('skeletons', () => {
     for (const radius of skeletons.items[0]!.radii) expect(radius).toBeGreaterThanOrEqual(0)
   })
 
+  it('fetches only the neurons it has not already downloaded', async () => {
+    /*
+     * The end-to-end half of `geometryCache.test.ts`, at a real source, because a cache that
+     * works in isolation and is wired in wrongly is exactly as useless as no cache.
+     *
+     * What it stands in for, measured with a scheduler probe: a morphology node's provenance key
+     * is `hash(type, params, upstream keys)`, so it re-runs on *any* change to its Neurons input
+     * — widening a type pattern from `LC4` to `LC4|LC6` asked for 21 ids of which 12 had just
+     * been fetched, and an upstream Filter edit that kept every row asked for the same 12 again.
+     * Each of those is a megabyte of uncompressed skeleton on this backend.
+     *
+     * CATMAID is also where the *decision* to cache lives: unlike a neuPrint body or a CAVE root
+     * id, a skeleton here is live tracing data. It is held for the session anyway, and Clear
+     * Cache on the node is the way back — which is what `refresh` below stands for.
+     */
+    stubFetch(defaultRoutes)
+    const detail = () => calls.filter((c) => c.url.includes('/compact-detail')).length
+
+    await source().fetchSkeletons({ datasetId: '1', neuronIds: ['16'] })
+    expect(detail()).toBe(1)
+
+    const both = await source().fetchSkeletons({ datasetId: '1', neuronIds: ['16', '430'] })
+    // One more request, not two — and the held neuron is still in the answer, in the order asked.
+    expect(detail()).toBe(2)
+    expect(both.items.map((item) => item.id)).toEqual(['16', '430'])
+
+    // Clear Cache reaches it. Without this the cache would be a one-way door for a backend whose
+    // skeletons somebody is actively editing.
+    await source().fetchSkeletons({ datasetId: '1', neuronIds: ['16'], refresh: true })
+    expect(detail()).toBe(3)
+  })
+
+  it('reports the age of a held skeleton rather than passing it off as fresh', async () => {
+    // `ctx.reportFetched` is what puts `cached 12m ago ⟳` in the card's foot. A cache with no
+    // channel for this is the "control that looks like it worked" `dataCache` exists to prevent.
+    stubFetch(defaultRoutes)
+    await source().fetchSkeletons({ datasetId: '1', neuronIds: ['16'] })
+    const stored = Date.now()
+
+    const ages: number[] = []
+    await source().fetchSkeletons({
+      datasetId: '1',
+      neuronIds: ['16'],
+      onFetched: (at) => ages.push(at),
+    })
+    expect(ages).toHaveLength(1)
+    expect(ages[0]).toBeLessThanOrEqual(stored)
+  })
+
   it('refuses a set past the ceiling, naming why the ceiling is low', async () => {
     stubFetch(defaultRoutes)
     const many = Array.from({ length: 500 }, (_, i) => String(i + 1))

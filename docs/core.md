@@ -5,20 +5,59 @@ The scheduler-adjacent rules: caching, auto-run, and reference edges.
 Moved verbatim out of `CLAUDE.md`.
 
 
-## Two caches, and the two controls that clear them
+## Three caches, and the two controls that clear them
 
 `Invalidate Results` and `Clear Cache`, in the node's context menu and side by side in the
 inspector. They are different layers and the difference is not cosmetic:
 
-| | what it holds | keyed by | cleared by |
-| --- | --- | --- | --- |
-| the scheduler's result cache | what `evaluate` returned | provenance — `hash(type, params, upstream)` | Invalidate Results |
-| the data cache (`loadCachedTable` → IndexedDB) | what a *server* returned | what was fetched | Clear Cache |
+| | what it holds | keyed by | lives | cleared by |
+| --- | --- | --- | --- | --- |
+| the scheduler's result cache | what `evaluate` returned | provenance — `hash(type, params, upstream)` | the session | Invalidate Results |
+| the table cache (`loadCachedTable` → IndexedDB) | what a *server* returned | what was fetched | a month | Clear Cache |
+| the geometry cache (`geometryCache.ts`) | one neuron's skeleton or mesh | source, dataset, id, and whatever else decides the geometry | the session | Clear Cache |
 
-**Only the first was reachable, and the menu claimed otherwise.** The item read `Invalidate
-cache` with a tooltip saying "forcing a re-fetch" — and on a FlyTable node the card cleared, the
-node re-ran, and the answer came back in milliseconds with the same 79 MB of rows, because the
-second layer is keyed by the ref and kept for a month. A control that looks like it worked.
+**The third exists because the first two cannot help each other.** A morphology node's key folds
+in its upstream *provenance*, so it re-runs whenever anything about its Neurons input changes —
+and re-running means re-downloading. Probed on a 12-neuron scene: widening a type pattern from
+`LC4` to `LC4|LC6` asked the source for 21 ids of which 12 had just been fetched, and an upstream
+Filter edit that kept every row asked for the same 12 again, byte-identical list and all.
+
+**The graph is not wrong, so the fix is not in the graph.** Re-running is what a changed input
+means, and keying a node on the *content* of its input rather than its provenance is exactly what
+invariant 4 forbids — it would mean hashing every row of every table on every edit, which is the
+cost that rule exists to avoid. What is wasteful is not the re-run; it is the re-download inside
+it. So the memo sits below the `DataSource` seam, where the unit is a neuron rather than a node:
+the node still re-runs, still asks for the whole list, and the source answers the part it holds.
+Nothing about the graph changes — no port, no param, no scheduler rule, nothing in a saved file.
+
+**Holding it is nearly free, and that is a property rather than a hope.** The cache holds the
+*same typed arrays* the values hold, so while a scene is live its geometry is referenced by the
+result cache anyway and the marginal memory is only for geometry no longer referenced anywhere.
+That is safe because the transform nodes copy rather than write through (`transformOps.ts` builds
+a `new Float32Array`) — an invariant this depends on, and one `geometryCache.test.ts` pins.
+
+**The key is the caller's to compose, and for meshes it is not just the id.** `chooseLod` picks
+one detail level for the whole batch against the triangle budget, so the same body is legitimately
+two different meshes and the level goes in the key — which also means growing a set past a budget
+boundary re-reads everything, honestly. CAVE's decimation grid is the same story. A skeleton has
+no such parameter, so skeletons hit whenever the sets overlap. **Manifests are cached separately**
+and are level-*independent*, which is what makes the level decision itself cost nothing.
+
+**Not persistent, deliberately.** Skeletons and meshes are tens to hundreds of megabytes of typed
+array, and a structured clone of that on every run has a cost of its own; the pain being fixed is
+within-session iteration. `cache.ts` remains the persistent layer, for tables.
+
+**Not a freshness policy either.** A neuPrint body id and a CAVE root id name immutable geometry —
+an edit mints a new root id — so there is nothing to go stale. A CATMAID skeleton is live tracing
+data and is held on the same terms by decision, which is why `neuron.skeletons` and `neuron.meshes`
+declare `dataCache`: Clear Cache is the way back, and `GeometryRequest.onFetched` puts
+`cached 12m ago ⟳` in the card's foot so nothing ages silently.
+
+**Only the result cache used to be reachable, and the menu claimed otherwise.** The item read
+`Invalidate cache` with a tooltip saying "forcing a re-fetch" — and on a FlyTable node the card
+cleared, the node re-ran, and the answer came back in milliseconds with the same 79 MB of rows,
+because the table cache is keyed by the ref and kept for a month. A control that looks like it
+worked.
 
 **`ctx.refresh` is what crosses the gap.** `Scheduler.clearNodeCache` invalidates the result *and*
 arms a flag; `evaluate` reads it and passes it down to whatever fetches. Session state, never the
@@ -32,9 +71,11 @@ on whether anybody typed in between. And `pruneCache` drops it with its node, si
 across loads and a stranded request would be spent by whatever took the id.
 
 **`NodeDefinition.dataCache` is one declaration meaning two things**: the button appears, and
-`evaluate` honours `ctx.refresh`. Paired deliberately — a node offering the button and ignoring
-the flag is exactly the control-that-does-nothing this replaced, and a button on a Filter would
-promise a re-fetch with no fetch behind it.
+`evaluate` honours `ctx.refresh`. It says nothing about *which* cache — the annotation nodes mean
+the IndexedDB table store, the morphology nodes mean the session geometry cache — only that there
+is one behind this node and the button reaches it. Paired deliberately — a node offering the
+button and ignoring the flag is exactly the control-that-does-nothing this replaced, and a button
+on a Filter would promise a re-fetch with no fetch behind it.
 
 **The card says how old the data is, and the label is the control.** `cached 3d ago ⟳` in the
 foot of any node that reported a fetch, clearing that node's data cache and running it. A passive

@@ -21,7 +21,7 @@ import { idColumn } from '../lib/tableOps'
  * these did not fetch, so their ceiling is this one. Restating the literal there made "parity
  * with the Skeletons node" a comment rather than a fact.
  */
-export const MAX_NEURONS = 500
+export const MAX_NEURONS = 10000
 
 /**
  * Read neuron ids off the incoming table, refusing an oversized set.
@@ -56,13 +56,22 @@ export const skeletonsNode = registerNode({
     { id: 'neurons', label: 'Neurons', type: T.neurons() },
   ],
   outputs: [{ id: 'skeletons', label: 'Skeletons', type: T.skeletons() }],
+  /*
+   * There is a cache behind this node now — `data/geometryCache.ts`, per neuron, for the session
+   * — so the declaration is the pairing `NodeDefinition.dataCache` documents: the Clear Cache
+   * button appears *and* `evaluate` honours `ctx.refresh`. A node holding downloads with no way
+   * to drop them is the control-that-does-nothing this flag exists to prevent, and it matters
+   * most on CATMAID, whose skeletons are live tracing data rather than a released dataset's
+   * fixed geometry.
+   */
+  dataCache: true,
   params: [
     {
       id: 'limit',
       kind: 'int',
       label: 'Max neurons',
       help: 'Refuse to fetch more than this many, rather than locking up the tab.',
-      default: 100,
+      default: 500,
       min: 1,
       max: MAX_NEURONS,
       step: 10,
@@ -104,6 +113,10 @@ export const skeletonsNode = registerNode({
       ...datasetRequest(dataset),
       neuronIds,
       onProgress: ctx.progress,
+      // Clear Cache reaching the session's geometry cache, and the age it reports coming back —
+      // see `EvalContext.refresh` and `reportFetched`.
+      ...(ctx.refresh ? { refresh: true } : {}),
+      onFetched: ctx.reportFetched,
       signal: ctx.signal,
     })
     return { skeletons }
@@ -123,6 +136,9 @@ export const meshesNode = registerNode({
     { id: 'neurons', label: 'Neurons', type: T.neurons() },
   ],
   outputs: [{ id: 'meshes', label: 'Meshes', type: T.meshes() }],
+  // Same pairing as Skeletons, and the cache matters more here: one graphene mesh is several
+  // hundred requests.
+  dataCache: true,
   params: [
     {
       id: 'limit',
@@ -183,6 +199,8 @@ export const meshesNode = registerNode({
       neuronIds,
       triangleBudget: Number(ctx.params.detail ?? 1_500_000) || 1_500_000,
       onProgress: ctx.progress,
+      ...(ctx.refresh ? { refresh: true } : {}),
+      onFetched: ctx.reportFetched,
       signal: ctx.signal,
     })
     return { meshes }

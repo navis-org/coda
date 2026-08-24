@@ -16,13 +16,32 @@ import type { ColorSpec, SizeSpec } from '../nodes/lib/encodingParams'
 import type { Mode } from './colors'
 import { CHART_INK, MAX_SERIES, OTHER_LABEL, seriesColor, sequentialColor } from './colors'
 import { formatCompact } from './format'
+import { segmentColor } from './segmentColor'
 
 export interface CategoricalLegend {
   kind: 'categorical'
   column: string
   entries: Array<{ label: string; color: string }>
-  /** True when values past the eighth were folded into "Other". */
+  /**
+   * True when not every value in the column has a key here.
+   *
+   * Two different things end up under one flag, deliberately, because what a *reader* needs to
+   * know is the same in both: the strip is not the whole story. Under `categorical` the
+   * remainder was folded into the achromatic "Other", which is an entry in `entries`; under
+   * `hash` the remainder is simply unlisted and still drawn in a colour of its own, because
+   * there is no folding to do. `describeLegend` renders both as `12+ values`.
+   */
   truncated: boolean
+  /**
+   * How many distinct values have no key in `entries` at all.
+   *
+   * Zero — and omitted — under `categorical`, where the remainder is folded into `Other` and
+   * `Other` *is* an entry, so nothing is unaccounted for. Under `hash` it is the count the
+   * strip has to admit to: twelve keys over twenty-one neurons, every one of them drawn in a
+   * colour of its own, and only a number can say so. Same rule as `labels thinned` and `meshes
+   * simplified` — nothing quietly leaves a picture, or its key, without saying it did.
+   */
+  unlisted?: number
 }
 
 export interface SequentialLegend {
@@ -39,6 +58,19 @@ export interface ResolvedColor {
   /** Colour for a row of the attribute table. */
   at(rowIndex: number): string
   legend: Legend
+  /**
+   * Which legend key a row belongs to, or undefined when this encoding has no keys.
+   *
+   * The inverse of `legend`, and the half an *interactive* legend needs: a key that can be
+   * clicked has to be able to say which rows it stands for. Rows past the eighth slot answer
+   * with `OTHER_LABEL`, because that is the key they are drawn under and hiding `Other` has to
+   * hide all of them.
+   *
+   * Undefined for constant, sequential and literal encodings — none of them has a key, so
+   * there is nothing a caller could do with a label. Callers should treat that as "this
+   * encoding is not addressable by key" rather than as an error.
+   */
+  labelAt?(rowIndex: number): string | undefined
 }
 
 /**
@@ -50,6 +82,20 @@ export interface ResolvedColor {
  * never compete with a categorical encoding.
  */
 const MUTED = CHART_INK.dark.muted
+
+/** What a null cell is keyed under, in every mode that has keys. */
+const NULL_KEY = '—'
+
+/**
+ * How many keys a `hash` legend lists before it gives up and says "+ more".
+ *
+ * Not `MAX_SERIES`: that eight is a *palette* limit — the number of hues that survived the
+ * colourblind-safety gate — and this is a limit on how much strip a reader will tolerate. The
+ * values here are often 18-digit root ids, so twelve is already a wide row; the rest are drawn
+ * in their own colour regardless, and hiding one of them is what the eye toggles on the listed
+ * keys cannot reach.
+ */
+export const HASH_LEGEND_KEYS = 12
 
 /**
  * Read a cell as a number, or undefined when it is absent.
@@ -64,8 +110,21 @@ function numeric(cell: unknown): number | undefined {
   return Number.isFinite(value) ? value : undefined
 }
 
+/**
+ * The two achromatic extremes are **not** theme-flipped, unlike everything else here.
+ *
+ * Every other colour in this module answers to the mode, because a chart's ink has to stay
+ * legible when the surface under it changes. These two are the case where that rule is wrong:
+ * somebody choosing black for a figure means black, and a black that turns white when the
+ * editor's theme changes is a different colour, not a preserved one. They are reachable only
+ * by choosing them — no categorical or sequential encoding ever lands here.
+ */
+const FIXED_CONSTANTS: Record<string, string> = { black: '#000000', white: '#ffffff' }
+
 function constantColor(spec: ColorSpec, mode: Mode): string {
   if (spec.constant === 'muted') return MUTED
+  const fixed = FIXED_CONSTANTS[spec.constant]
+  if (fixed) return fixed
   const slot = Number(spec.constant)
   return seriesColor(Number.isFinite(slot) ? slot : 0, mode)
 }
@@ -128,6 +187,23 @@ export function resolveColor(
   }
 
   /*
+   * A hand-picked colour wins over whatever the mode would have derived, for the mark *and*
+   * for its key.
+   *
+   * Applied here rather than in a viewer for the reason the module opens with: the legend and
+   * the thing it keys have to agree, and two places applying an override is how they stop
+   * agreeing. An override that is not a colour is ignored — `literalColor` already owns what
+   * counts as one, and a second spelling of that rule is a second answer to it.
+   */
+  const overrideOf = (label: string): string | undefined => literalColor(spec.overrides?.[label])
+
+  /** The key a row belongs to before any folding: the cell as text, or the null marker. */
+  const cellKey = (rowIndex: number): string => {
+    const cell = data[rowIndex]
+    return cell === null || cell === undefined ? NULL_KEY : String(cell)
+  }
+
+  /*
    * Literal: the cells *are* the colours, so nothing is derived and nothing is ranked.
    *
    * The point of the mode is that a producer has already decided, and the usual categorical
@@ -143,6 +219,59 @@ export function resolveColor(
     return {
       at: (rowIndex) => literalColor(data[rowIndex]) ?? MUTED,
       legend: undefined,
+    }
+  }
+
+  /*
+   * Hash: the id decides its own colour, and no two ids share one by design.
+   *
+   * The one mode with no cap on how many colours it hands out, which is what makes it right
+   * for identity and wrong for a series — see `segmentColor.ts` for the trade. Two consequences
+   * follow from there being no folding:
+   *
+   *  - **Every distinct value is its own legend key**, so hide, solo, select and recolour work
+   *    per neuron rather than per bucket. That is the whole reason this mode carries a
+   *    categorical-shaped legend at all instead of `literal`'s silence.
+   *  - **The strip lists only the first few.** A hundred 18-digit root ids is not a legend, and
+   *    the ones past the cap are still drawn in their own colour rather than folded into grey —
+   *    hence `truncated` without an `Other` entry.
+   *
+   * Listed in **first-appearance order**, unlike `categorical`, which ranks by frequency to put
+   * the commonest values in the most distinguishable slots. There are no slots here, so the only
+   * ordering that means anything is the one the table already has.
+   */
+  if (spec.mode === 'hash') {
+    // `Set` iterates in insertion order, which *is* the first-appearance order the legend wants —
+    // so it is both the dedup and the ordering, rather than a set and a parallel array to keep in
+    // step with it.
+    const unique = new Set<string>()
+    for (let row = 0; row < data.length; row++) unique.add(cellKey(row))
+
+    /*
+     * Resolved once per distinct value, not once per row.
+     *
+     * `segmentColor` is a regex, a `BigInt` parse, two murmur rounds, an HSV conversion and three
+     * `padStart` allocations. `at` is called per row when a colour buffer is built — 40k skeleton
+     * segments, 10^5 synapses — and this is now the *default* mode for two channels, so doing it
+     * per row was the whole hash pipeline run tens of thousands of times to produce a few dozen
+     * distinct answers.
+     */
+    const colors = new Map<string, string>()
+    for (const key of unique) {
+      colors.set(key, overrideOf(key) ?? (key === NULL_KEY ? MUTED : segmentColor(key)))
+    }
+    const listed = [...unique].slice(0, HASH_LEGEND_KEYS)
+
+    return {
+      at: (rowIndex) => colors.get(cellKey(rowIndex)) ?? MUTED,
+      labelAt: cellKey,
+      legend: {
+        kind: 'categorical',
+        column: spec.column,
+        entries: listed.map((label) => ({ label, color: colors.get(label)! })),
+        truncated: unique.size > HASH_LEGEND_KEYS,
+        unlisted: Math.max(0, unique.size - HASH_LEGEND_KEYS),
+      },
     }
   }
 
@@ -172,8 +301,8 @@ export function resolveColor(
   // distinguishable) slots, and everything past the cap folds into one achromatic bucket
   // rather than cycling hues — a repeated hue would imply two categories are the same.
   const counts = new Map<string, number>()
-  for (const cell of data) {
-    const key = cell === null || cell === undefined ? '—' : String(cell)
+  for (let row = 0; row < data.length; row++) {
+    const key = cellKey(row)
     counts.set(key, (counts.get(key) ?? 0) + 1)
   }
   const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
@@ -181,16 +310,31 @@ export function resolveColor(
   const slotOf = new Map(kept.map((key, index) => [key, index]))
   const truncated = ranked.length > MAX_SERIES
 
-  const entries = kept.map((label, index) => ({ label, color: seriesColor(index, mode) }))
-  if (truncated) entries.push({ label: OTHER_LABEL, color: MUTED })
+  const labelFor = (rowIndex: number): string => {
+    const key = cellKey(rowIndex)
+    return slotOf.has(key) ? key : OTHER_LABEL
+  }
+
+  /*
+   * The nine possible answers, resolved once.
+   *
+   * `overrideOf` runs `literalColor` — a `trim` and a regex — and the palette lookup is a table
+   * read; both were happening per row, on a path shared by the scatter, network and 3D viewers
+   * and driven per *point* by `buildPoints`. The set is bounded by `MAX_SERIES` plus `Other`, so
+   * there is nothing to gain by deferring any of it.
+   */
+  const slotColors = kept.map((label, index) => overrideOf(label) ?? seriesColor(index, mode))
+  const otherColor = overrideOf(OTHER_LABEL) ?? MUTED
+
+  const entries = kept.map((label, index) => ({ label, color: slotColors[index]! }))
+  if (truncated) entries.push({ label: OTHER_LABEL, color: otherColor })
 
   return {
     at: (rowIndex) => {
-      const cell = data[rowIndex]
-      const key = cell === null || cell === undefined ? '—' : String(cell)
-      const slot = slotOf.get(key)
-      return slot === undefined ? MUTED : seriesColor(slot, mode)
+      const slot = slotOf.get(cellKey(rowIndex))
+      return slot === undefined ? otherColor : slotColors[slot]!
     },
+    labelAt: labelFor,
     legend: { kind: 'categorical', column: spec.column, entries, truncated },
   }
 }

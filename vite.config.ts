@@ -339,5 +339,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+    // Module-level caches that outlive a test but not a file — see the file's own header.
+    setupFiles: ['src/test/setup.ts'],
   },
 })

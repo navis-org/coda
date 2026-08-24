@@ -24,6 +24,7 @@ import {
 import type { FetchOptions } from './transport'
 import { fetchBytes, fetchJson } from './transport'
 import { mapWithConcurrency } from '../concurrency'
+import { byteLengthOf, cachedGeometry } from '../geometryCache'
 
 export type MeshFormat = 'multilod-draco' | 'legacy'
 
@@ -77,6 +78,9 @@ export interface MeshResult {
   indices: Uint32Array
 }
 
+/** One body's geometry without its id — what the session cache holds, keyed by the id. */
+type MeshBody = Omit<MeshResult, 'neuronId'>
+
 export interface FetchMeshesResult {
   meshes: MeshResult[]
   /** Which detail level was used; undefined for single-level sources. */
@@ -91,9 +95,44 @@ export interface FetchMeshesResult {
 /** Default budget. ~1.5M triangles renders comfortably and holds a few dozen neurons coarse. */
 export const DEFAULT_TRIANGLE_BUDGET = 1_500_000
 
+/**
+ * How many bodies are read at once, in each of the two phases.
+ *
+ * **100, which is neuroglancer's own number** — `data_management_context.ts` gives its chunk
+ * queue `download: { defaultItemLimit: 100, defaultSizeLimit: Infinity }` — and these are the
+ * same Range requests against the same public buckets, so there is no reason to be more timid
+ * than the tool that made these files.
+ *
+ * It was **6**, which was never measured and cost roughly an order of magnitude. Measured in a
+ * real browser against `neuroglancer-janelia-flyem-hemibrain/v1.2/segmentation/mesh`, cache
+ * disabled, ids enumerated out of the bucket's own minishard indices so they spread across shard
+ * files (best of two runs each, interleaved so a warming network could not read as a trend):
+ *
+ * | in flight | 96 bodies | of which manifests | 32 heavy bodies |
+ * | --- | --- | --- | --- |
+ * | 6   | 10,463 ms | 7,973 ms | 3,094 ms |
+ * | 16  |  3,908 ms | 3,069 ms |     —    |
+ * | 32  |  1,944 ms | 1,589 ms |   697 ms |
+ * | 64  |  1,369 ms | 1,134 ms |   685 ms |
+ * | 100 |    819 ms |   718 ms |   692 ms |
+ *
+ * Two things to read off it. **The gain continues for as long as the limit is under the batch
+ * size** — 32 bodies plateaus at 32 because there is nothing left to overlap, while 96 bodies is
+ * still improving at 100 — so this is a *latency* budget, not a bandwidth one. And **the manifest
+ * sweep is the cost**: 87% of the wall clock at every setting, because it is one small request
+ * per body and nothing can start until the last one lands (`chooseLod` sums across the batch).
+ * That is also why manifests get their own cache entry — see `geometryCache.ts`.
+ *
+ * The one thing it spends is the HTTP/2 stream budget on `storage.googleapis.com`, which many
+ * peers default to ~100 and which CAVE's fragment reads and Explore's thumbnails also draw on.
+ * Overflow queues in the browser rather than failing, and graph nodes execute one at a time, so
+ * the realistic collision is a widget fetching alongside a run — it waits, and gets there.
+ */
+const BUCKET_CONCURRENCY = 100
+
 export interface FetchMeshesOptions extends FetchOptions {
   triangleBudget?: number
-  /** Concurrency for per-body reads. Each mesh is several requests. */
+  /** Concurrency for per-body reads; defaults to `BUCKET_CONCURRENCY`. */
   concurrency?: number
   /**
    * Skip any body whose chosen level still exceeds this many compressed bytes, reporting it
@@ -108,6 +147,10 @@ export interface FetchMeshesOptions extends FetchOptions {
   maxBytesPerBody?: number
   /** `phase` distinguishes the manifest sweep from the fragment fetch. */
   onProgress?: (done: number, total: number, phase: 'manifests' | 'fragments') => void
+  /** Clear Cache, passed straight through to `geometryCache`. */
+  refresh?: boolean
+  /** When the geometry came from a server; see `GeometryRequest.onFetched`. */
+  onFetched?: (at: number) => void
 }
 
 /**
@@ -123,19 +166,27 @@ export async function fetchMeshes(
   options: FetchMeshesOptions = {},
 ): Promise<FetchMeshesResult> {
   const budget = options.triangleBudget ?? DEFAULT_TRIANGLE_BUDGET
-  const concurrency = options.concurrency ?? 6
+  const concurrency = options.concurrency ?? BUCKET_CONCURRENCY
 
   if (source.format === 'legacy') {
-    const meshes: MeshResult[] = []
-    const missing: string[] = []
     let done = 0
-    await mapWithConcurrency(neuronIds, concurrency, async (neuronId) => {
-      const mesh = await readLegacyMesh(source.base, BigInt(neuronId), options)
-      options.onProgress?.(++done, neuronIds.length, 'fragments')
-      if (!mesh) missing.push(neuronId)
-      else meshes.push({ neuronId, ...mesh })
+    const { ordered, missing } = await cachedGeometry<MeshBody>({
+      ids: neuronIds,
+      key: (id) => `mesh:${source.base}:legacy:${id}`,
+      bytes: (m) => byteLengthOf(m.positions, m.indices),
+      refresh: options.refresh,
+      onFetched: options.onFetched,
+      fetch: async (want) => {
+        const out = new Map<string, MeshBody>()
+        await mapWithConcurrency(want, concurrency, async (neuronId) => {
+          const mesh = await readLegacyMesh(source.base, BigInt(neuronId), options)
+          options.onProgress?.(++done, want.length, 'fragments')
+          if (mesh) out.set(neuronId, mesh)
+        })
+        return out
+      },
     })
-    meshes.sort((a, b) => neuronIds.indexOf(a.neuronId) - neuronIds.indexOf(b.neuronId))
+    const meshes = ordered.map(([neuronId, mesh]) => ({ neuronId, ...mesh }))
     return {
       meshes,
       levels: 1,
@@ -145,39 +196,96 @@ export async function fetchMeshes(
   }
 
   const info = source.info!
-  const manifests = new Map<string, MultiResManifest>()
-  const missing: string[] = []
+
+  /*
+   * Manifests first, and cached in their own right.
+   *
+   * They are one request per body of a few hundred bytes, and — unlike the fragments — they do
+   * not depend on the level of detail: a manifest *is* the pyramid. So caching them means the
+   * level decision for a changed neuron set costs nothing at all, which is what makes the
+   * fragment cache reachable. Without it every re-run paid one round trip per neuron just to
+   * work out which level to ask for.
+   */
   let read = 0
-  await mapWithConcurrency(neuronIds, concurrency, async (neuronId) => {
-    const manifest = await readManifest(source.base, BigInt(neuronId), info, options)
-    options.onProgress?.(++read, neuronIds.length, 'manifests')
-    if (manifest) manifests.set(neuronId, manifest)
-    else missing.push(neuronId)
+  const manifests = await cachedGeometry<MultiResManifest>({
+    ids: neuronIds,
+    key: (id) => `mesh:${source.base}:manifest:${id}`,
+    // Small, and the arrays inside are plain numbers rather than typed. The floor keeps an
+    // entry from costing nothing in the budget and so never being evicted.
+    bytes: (m) => 256 + m.levels.length * 64,
+    // `refresh` only, no `onFetched`: the age badge should describe the *geometry*, and a cached
+    // manifest beside a freshly fetched mesh would report the result as older than it is.
+    refresh: options.refresh,
+    fetch: async (want) => {
+      const out = new Map<string, MultiResManifest>()
+      await mapWithConcurrency(want, concurrency, async (neuronId) => {
+        const manifest = await readManifest(source.base, BigInt(neuronId), info, options)
+        options.onProgress?.(++read, want.length, 'manifests')
+        if (manifest) out.set(neuronId, manifest)
+      })
+      return out
+    },
   })
+  const missing = [...manifests.missing]
+  const pyramids = new Map(manifests.ordered)
+  const lod = chooseLod([...pyramids.values()], budget)
+  const levels = Math.max(1, ...[...pyramids.values()].map((m) => m.levels.length))
 
-  const present = neuronIds.filter((id) => manifests.has(id))
-  const lod = chooseLod([...manifests.values()], budget)
-  const levels = Math.max(1, ...[...manifests.values()].map((m) => m.levels.length))
+  /**
+   * The level this body will actually be read at, which is not always `lod`: a shallow pyramid
+   * clamps. It is also the half of the cache key that matters — the same id at two levels is two
+   * different meshes, and `chooseLod` weighs the whole batch, so adding a neuron can legitimately
+   * move it. Keyed per body rather than by the batch's `lod`, so a body whose pyramid clamps
+   * keeps its cached mesh even when the batch's choice moves around it.
+   */
+  const levelOf = (neuronId: string) => Math.min(lod, pyramids.get(neuronId)!.levels.length - 1)
 
-  const meshes: MeshResult[] = []
-  let done = 0
-  await mapWithConcurrency(present, concurrency, async (neuronId) => {
-    const manifest = manifests.get(neuronId)!
-    const level = Math.min(lod, manifest.levels.length - 1)
-    if (
-      options.maxBytesPerBody !== undefined &&
-      (manifest.levels[level]?.totalBytes ?? 0) > options.maxBytesPerBody
-    ) {
+  /*
+   * The size refusal is applied *before* the cache is consulted, not inside the fetch.
+   *
+   * It is a property of the caller rather than of the body — only the thumbnail path sets it —
+   * so a mesh cached for a scene must not become visible to a caller that had asked for it to be
+   * skipped, and a body skipped for one caller must not be remembered as missing for the next.
+   */
+  const wanted = manifests.ordered
+    .map(([neuronId]) => neuronId)
+    .filter((neuronId) => {
+      if (options.maxBytesPerBody === undefined) return true
+      const totalBytes = pyramids.get(neuronId)!.levels[levelOf(neuronId)]?.totalBytes ?? 0
+      if (totalBytes <= options.maxBytesPerBody) return true
       missing.push(neuronId)
-      options.onProgress?.(++done, present.length, 'fragments')
-      return
-    }
-    const mesh = await readLodFragments(source, info, manifest, neuronId, level, options)
-    options.onProgress?.(++done, present.length, 'fragments')
-    if (mesh) meshes.push({ neuronId, ...mesh })
-  })
-  meshes.sort((a, b) => neuronIds.indexOf(a.neuronId) - neuronIds.indexOf(b.neuronId))
+      return false
+    })
 
+  let done = 0
+  const fragments = await cachedGeometry<MeshBody>({
+    ids: wanted,
+    key: (id) => `mesh:${source.base}:lod${levelOf(id)}:${id}`,
+    bytes: (m) => byteLengthOf(m.positions, m.indices),
+    refresh: options.refresh,
+    onFetched: options.onFetched,
+    fetch: async (want) => {
+      const out = new Map<string, MeshBody>()
+      await mapWithConcurrency(want, concurrency, async (neuronId) => {
+        const manifest = pyramids.get(neuronId)!
+        const mesh = await readLodFragments(
+          source,
+          info,
+          manifest,
+          neuronId,
+          levelOf(neuronId),
+          options,
+        )
+        options.onProgress?.(++done, want.length, 'fragments')
+        if (mesh) out.set(neuronId, mesh)
+      })
+      return out
+    },
+  })
+  const meshes: MeshResult[] = fragments.ordered.map(([neuronId, mesh]) => ({ neuronId, ...mesh }))
+  // A body whose manifest read but whose fragments did not is missing too, and only this list
+  // knows it — the manifest sweep above could not.
+  missing.push(...fragments.missing)
   return {
     meshes,
     lod,

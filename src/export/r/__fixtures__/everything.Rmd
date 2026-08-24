@@ -619,6 +619,17 @@ roi_viewer_rois <- neuprint_ROIs(superLevel = FALSE, conn = hemibrain_neuprint)
 roi_viewer_rois
 ```
 
+```{r roi-meshes}
+# ── ROI Meshes ──
+# NOTE: One request per region, and neuPrint publishes these for
+# visualization only — decimated display surfaces, so a volume measured off
+# one is an approximation rather than a figure to quote.
+roi_meshes_rois <- c("EB", "FB")
+roi_meshes <- lapply(roi_meshes_rois, neuprint_ROI_mesh, conn = hemibrain_neuprint)
+names(roi_meshes) <- roi_meshes_rois
+roi_meshes_rois
+```
+
 ```{r landmark-transform}
 # ── Landmark Transform ──
 # NOTE: nat::tpsreg() needs nat >= 1.9.0 and the Morpho package, which is a
@@ -862,6 +873,7 @@ nblast_df_2 <- nblast(
 ```{r n-3d-view}
 # ── 3D View ──
 plot3d(skeletons)
+for (.mesh in roi_meshes) rgl::shade3d(.mesh, alpha = 0.12, col = "grey70")
 
 # NOTE: Nothing is picked in the viewer, so Selected is empty.
 n_3d_view <- tibble(neuronId = numeric(0))

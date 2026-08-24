@@ -20,7 +20,13 @@ import { useEffect, useRef } from 'react'
 import { errorMessage } from '../core/errors'
 import type { CodaGraph, GraphNode } from '../core/graph'
 import type { Value } from '../core/values'
-import { downloadFiles, downloadPng, downloadSvg, exportBaseName } from './export'
+import {
+  downloadDataUrl,
+  downloadFiles,
+  downloadPng,
+  downloadSvg,
+  exportBaseName,
+} from './export'
 import type { ExportFormat } from './exportValue'
 import { planExport } from './exportValue'
 import { useGraphStore } from '../store/graphStore'
@@ -81,7 +87,22 @@ export async function runDownload(
      * not currently rendering — because the fixes are different and neither is guessable.
      */
     const sourceId = upstreamNodeId(graph, node.id)
-    const svg = exportSourceFor(sourceId)?.svg?.()
+    const source = exportSourceFor(sourceId)
+
+    // A WebGL viewer has no vector form, so PNG reads its drawing buffer back instead. SVG
+    // still refuses for that node, and the message below says why in the same words.
+    if (format === 'png' && !source?.svg && source?.png) {
+      try {
+        const dataUrl = source.png()
+        if (!dataUrl) throw new Error('Scene is not rendered yet')
+        downloadDataUrl(dataUrl, `${base}.png`)
+        return { written: [`${base}.png`] }
+      } catch (error) {
+        return { written: [], error: errorMessage(error) }
+      }
+    }
+
+    const svg = source?.svg?.()
     if (!svg) {
       return {
         written: [],

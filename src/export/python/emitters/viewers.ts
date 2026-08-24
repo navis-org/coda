@@ -259,20 +259,28 @@ registerEmitter('out.network', (ctx) => {
 // ---------------------------------------------------------------------------
 
 registerEmitter('out.viewer3d', (ctx) => {
-  // Three optional geometry sockets rather than one input, and the node is *not* a tap: its
+  // Four optional geometry sockets rather than one input, and the node is *not* a tap: its
   // only output is the neurons picked in the viewer. Assuming the pass-through shape every
   // other viewer has is what made this emit "nothing is wired" for a node plainly wired up.
   const wired = ['skeletons', 'meshes', 'points']
     .map((port) => ctx.input(port))
     .filter((v): v is string => !!v)
-  if (wired.length === 0) return ctx.todo('No geometry is wired to this 3D Viewer.')
+  /*
+   * Volumes are spread rather than passed, because what arrives on that socket is a *list* of
+   * shells where the other three are one object each. `[skeletons, volumes]` would hand
+   * `plot3d` a nested list; `[skeletons, *volumes]` is flat either way, and still correct if
+   * somebody wires an ordinary Meshes node there — a NeuronList unpacks too.
+   */
+  const volumes = ctx.input('volumes')
+  if (wired.length === 0 && !volumes) return ctx.todo('No geometry is wired to this 3D Viewer.')
 
   ctx.require('navis')
   const selected = ctx.output('selected')
   const selection = selectionIds(ctx)
 
   ctx.require('pandas')
-  const lines = [`navis.plot3d([${wired.join(', ')}])`, '']
+  const args = [...wired, ...(volumes ? [`*${volumes}`] : [])].join(', ')
+  const lines = [`navis.plot3d([${args}])`, '']
   if (selection.length > 0) {
     lines.push(`${selected} = pd.DataFrame({'neuronId': ${pySelection(selection)}})`)
   } else {

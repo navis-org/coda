@@ -11,14 +11,17 @@ import { describe, expect, it } from 'vitest'
 
 import { column, tableSchema } from '../core/types'
 import { tableFromRows } from '../core/values'
-import { MAX_SERIES, OTHER_LABEL, seriesColor } from './colors'
+import { CHART_INK, MAX_SERIES, OTHER_LABEL, seriesColor } from './colors'
 import {
+  HASH_LEGEND_KEYS,
   clusterColor,
   hexToRgbFloat,
   literalColor,
   resolveColor,
   resolveSize,
 } from './encoding'
+import { segmentColor } from './segmentColor'
+import { readColorOverrides } from '../nodes/lib/encodingParams'
 
 const SCHEMA = tableSchema(column('id', 'str'), column('type', 'str'), column('weight', 'f64'))
 
@@ -159,6 +162,176 @@ describe('resolveColor', () => {
     expect(resolveColor(data, spec, 'light').at(0)).not.toBe(
       resolveColor(data, spec, 'dark').at(0),
     )
+  })
+})
+
+describe('resolveColor — legend keys and overrides', () => {
+  const data = table([
+    { id: 'a', type: 'LC4', weight: 10 },
+    { id: 'b', type: 'LC4', weight: 20 },
+    { id: 'c', type: 'LC6', weight: 30 },
+  ])
+
+  it('says which key a row belongs to, which is what an interactive legend needs', () => {
+    const result = resolveColor(data, { mode: 'categorical', column: 'type', constant: '0' }, 'dark')
+    expect([0, 1, 2].map((i) => result.labelAt?.(i))).toEqual(['LC4', 'LC4', 'LC6'])
+  })
+
+  it('answers with the key a folded row is *drawn* under, not with its own value', () => {
+    // Nine categories, so the ninth folds into Other — and hiding Other has to hide every row
+    // in it, which it cannot do if those rows answer with their own names.
+    const many = table(
+      Array.from({ length: 9 }, (_, i) => ({ id: String(i), type: `T${i}`, weight: i })),
+    )
+    const result = resolveColor(many, { mode: 'categorical', column: 'type', constant: '0' }, 'dark')
+    const labels = Array.from({ length: 9 }, (_, i) => result.labelAt?.(i))
+    expect(labels.filter((label) => label === OTHER_LABEL)).toHaveLength(1)
+  })
+
+  it('has no keys to offer where there is no legend', () => {
+    for (const spec of [
+      { mode: 'constant', column: undefined, constant: '0' },
+      { mode: 'sequential', column: 'weight', constant: '0' },
+      { mode: 'literal', column: 'type', constant: '0' },
+    ] as const) {
+      expect(resolveColor(data, spec, 'dark').labelAt).toBeUndefined()
+    }
+  })
+
+  it('lets a hand-picked colour win, for the mark and its key alike', () => {
+    // Both halves, in one test on purpose: a legend that disagrees with the thing it keys is
+    // the failure this override exists inside `resolveColor` to prevent.
+    const result = resolveColor(
+      data,
+      { mode: 'categorical', column: 'type', constant: '0', overrides: { LC4: '#123456' } },
+      'dark',
+    )
+    expect(result.at(0)).toBe('#123456')
+    expect(result.at(2)).toBe(seriesColor(1, 'dark'))
+    if (result.legend?.kind !== 'categorical') throw new Error('expected categorical')
+    expect(result.legend.entries.map((e) => e.color)).toEqual([
+      '#123456',
+      seriesColor(1, 'dark'),
+    ])
+  })
+
+  it('ignores an override that is not a colour rather than painting the text', () => {
+    const result = resolveColor(
+      data,
+      { mode: 'categorical', column: 'type', constant: '0', overrides: { LC4: 'reddish' } },
+      'dark',
+    )
+    expect(result.at(0)).toBe(seriesColor(0, 'dark'))
+  })
+})
+
+describe('resolveColor — hash', () => {
+  const data = table([
+    { id: 'a', type: 'LC4', weight: 10 },
+    { id: 'b', type: 'LC4', weight: 20 },
+    { id: 'c', type: 'LC6', weight: 30 },
+  ])
+  const spec = { mode: 'hash', column: 'id', constant: '0' } as const
+
+  it('takes its colour from the value, so no two ids share one', () => {
+    const result = resolveColor(data, spec, 'dark')
+    expect([0, 1, 2].map((i) => result.at(i))).toEqual(
+      ['a', 'b', 'c'].map((id) => segmentColor(id)),
+    )
+  })
+
+  it('does not answer to the theme, unlike every palette mode', () => {
+    // A hash colour is the id's, not the surface's. Flipping it by mode would be the one thing
+    // that could make the same neuron a different colour in two Coda cards.
+    expect(resolveColor(data, spec, 'light').at(0)).toBe(resolveColor(data, spec, 'dark').at(0))
+  })
+
+  it('keeps going past the ninth value where categorical folds into grey', () => {
+    const many = table(
+      Array.from({ length: 20 }, (_, i) => ({ id: `n${i}`, type: `T${i}`, weight: i })),
+    )
+    const hashed = resolveColor(many, { mode: 'hash', column: 'id', constant: '0' }, 'dark')
+    const folded = resolveColor(many, { mode: 'categorical', column: 'id', constant: '0' }, 'dark')
+
+    const hashedColors = new Set(Array.from({ length: 20 }, (_, i) => hashed.at(i)))
+    const foldedColors = new Set(Array.from({ length: 20 }, (_, i) => folded.at(i)))
+    expect(hashedColors.size).toBe(20)
+    expect(foldedColors.size).toBe(MAX_SERIES + 1)
+  })
+
+  it('gives every distinct value its own key, which is what makes hiding work per neuron', () => {
+    const result = resolveColor(data, spec, 'dark')
+    expect([0, 1, 2].map((i) => result.labelAt?.(i))).toEqual(['a', 'b', 'c'])
+  })
+
+  it('lists the first few in table order and admits to the rest', () => {
+    /*
+     * First-appearance rather than by frequency, which is the opposite of `categorical`. There
+     * the ranking decides which values get the most distinguishable slots; here there are no
+     * slots, so the only ordering that carries information is the table's own.
+     */
+    const many = table(
+      Array.from({ length: HASH_LEGEND_KEYS + 5 }, (_, i) => ({
+        id: `n${i}`,
+        type: 'T',
+        weight: i,
+      })),
+    )
+    const legend = resolveColor(many, spec, 'dark').legend
+    if (legend?.kind !== 'categorical') throw new Error('expected categorical')
+    expect(legend.entries).toHaveLength(HASH_LEGEND_KEYS)
+    expect(legend.entries[0]?.label).toBe('n0')
+    expect(legend.truncated).toBe(true)
+    // And no `Other`: the unlisted ones keep their own colours, so folding them under a grey
+    // key would be a claim about the picture that is not true. What the strip owes instead is
+    // the count, which is the difference between "twelve neurons" and "twelve of seventeen".
+    expect(legend.entries.map((e) => e.label)).not.toContain(OTHER_LABEL)
+    expect(legend.unlisted).toBe(5)
+  })
+
+  it('has nothing unlisted when every value fits', () => {
+    const legend = resolveColor(data, spec, 'dark').legend
+    if (legend?.kind !== 'categorical') throw new Error('expected categorical')
+    expect(legend.unlisted).toBe(0)
+    expect(legend.truncated).toBe(false)
+  })
+
+  it('paints a null grey rather than hashing the word for it', () => {
+    const withNull = table([{ id: 'a', type: null, weight: 1 }])
+    const result = resolveColor(withNull, { mode: 'hash', column: 'type', constant: '0' }, 'dark')
+    expect(result.at(0)).toBe(CHART_INK.dark.muted)
+  })
+
+  it('still yields to a hand-picked colour', () => {
+    const result = resolveColor(
+      data,
+      { mode: 'hash', column: 'id', constant: '0', overrides: { a: '#123456' } },
+      'dark',
+    )
+    expect(result.at(0)).toBe('#123456')
+    expect(result.at(1)).toBe(segmentColor('b'))
+  })
+
+  it('falls back to the constant when there is no column to hash', () => {
+    const result = resolveColor(data, { mode: 'hash', column: undefined, constant: '1' }, 'dark')
+    expect(result.at(0)).toBe(seriesColor(1, 'dark'))
+    expect(result.legend).toBeUndefined()
+  })
+})
+
+describe('readColorOverrides', () => {
+  it('reads the map the legend writes', () => {
+    expect(readColorOverrides('{"LC4":"#ff0000"}')).toEqual({ LC4: '#ff0000' })
+  })
+
+  it('treats anything unreadable as no overrides, since it lives in a saved file', () => {
+    for (const value of ['', '   ', 'not json', '[1,2]', '"a string"', 'null', undefined, 42]) {
+      expect(readColorOverrides(value)).toEqual({})
+    }
+  })
+
+  it('drops non-string values but keeps the rest of the map', () => {
+    expect(readColorOverrides('{"a":"#fff","b":7}')).toEqual({ a: '#fff' })
   })
 })
 

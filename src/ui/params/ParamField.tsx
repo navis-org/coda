@@ -43,11 +43,26 @@ export function ParamField({ param, value, ctx, onChange, variant = 'node' }: Pa
 
   switch (param.kind) {
     case 'number':
-    case 'int':
+    case 'int': {
+      const numeric = typeof value === 'number' ? value : param.default
+      // A slider needs both ends to mean anything; one declared without them falls back to the
+      // field rather than rendering a control with an invented range.
+      if (param.slider && param.min !== undefined && param.max !== undefined) {
+        return (
+          <SliderField
+            label={label}
+            value={numeric}
+            min={param.min}
+            max={param.max}
+            step={param.step ?? 0.01}
+            onChange={onChange}
+          />
+        )
+      }
       return (
         <NumberField
           label={label}
-          value={typeof value === 'number' ? value : param.default}
+          value={numeric}
           integer={param.kind === 'int'}
           min={param.min}
           max={param.max}
@@ -55,6 +70,7 @@ export function ParamField({ param, value, ctx, onChange, variant = 'node' }: Pa
           onChange={onChange}
         />
       )
+    }
 
     case 'string':
       return (
@@ -139,21 +155,93 @@ export function ParamField({ param, value, ctx, onChange, variant = 'node' }: Pa
       const columns = availableColumns(param, ctx.inputs, ctx.params)
       const selected = Array.isArray(value) ? value : []
       return (
-        <ColumnsField
+        <ChipsField
           label={label}
-          available={columns}
+          available={columns.map((name) => ({ value: name, label: name }))}
           // `resolveColumns` keeps a stored list untouched while the schema is unknown, so the
           // chips have to read as kept rather than as lost.
           known={columnsKnown(param, ctx.inputs, ctx.params)}
           selected={selected}
+          noun="column"
+          emptyAvailable="no columns"
           onChange={onChange}
         />
       )
+    }
+
+    case 'multiEnum': {
+      const options = typeof param.options === 'function' ? param.options(ctx) : param.options
+      return (
+        <ChipsField
+          label={label}
+          available={options}
+          // The options come from the node, not from an upstream schema that may not have
+          // arrived — so a stored value that is not in the list is genuinely gone, never
+          // merely unseen. That is the whole difference from the `columns` case above.
+          known
+          selected={Array.isArray(value) ? value.map(String) : []}
+          noun={param.noun ?? 'option'}
+          {...(param.emptyLabel ? { emptyChip: param.emptyLabel } : {})}
+          emptyAvailable={`no ${param.noun ?? 'option'}s`}
+          onChange={onChange}
+        />
+      )
+    }
+
+    default: {
+      /*
+       * Non-exhaustive here used to mean a param that rendered *nothing* — no error, no
+       * warning, just a label with empty space beside it on the card and in the inspector.
+       * `validateParamValue` in `core/node.ts` has had this arm for the same reason; this is
+       * the other half of it.
+       */
+      const unreachable: never = param
+      return <span className="param-field__unknown">{(unreachable as ParamDef).kind}?</span>
     }
   }
 }
 
 // ---------------------------------------------------------------------------
+
+/**
+ * A proportion, adjusted by feel.
+ *
+ * Its own control rather than a flag inside `NumberField`, because the two share nothing:
+ * that one is a text input with a drag-to-scrub gesture and a mid-edit draft to protect, and
+ * this is a range with no text state at all. The number is still printed beside it — a slider
+ * that cannot be read back is a control you cannot write down.
+ */
+function SliderField({
+  label,
+  value,
+  min,
+  max,
+  step,
+  onChange,
+}: {
+  label: string
+  value: number
+  min: number
+  max: number
+  step: number
+  onChange: (value: number) => void
+}) {
+  return (
+    <div className="slider-field nodrag">
+      <input
+        type="range"
+        aria-label={label}
+        value={value}
+        min={min}
+        max={max}
+        step={step}
+        onChange={(e) => onChange(Number(e.target.value))}
+        onPointerDown={(e) => e.stopPropagation()}
+      />
+      <span className="slider-field__value">{Math.round(value * 100)}%</span>
+    </div>
+  )
+}
 
 interface NumberFieldProps {
   label: string
@@ -438,7 +526,12 @@ function IdsField({ label, noun, ids, onChange }: IdsFieldProps) {
   return (
     <div className="ids-field nodrag" aria-label={label}>
       <span className="ids-field__count">
-        {ids.length === 0 ? `no ${noun}` : `${ids.length} ${noun}`}
+        {/*
+         * `noun` is given plural, so a count of one has to walk it back — "1 neurons" and
+         * "1 keys" are the strings this printed before, and a stray plural in a two-word
+         * status line reads as a rendering bug rather than as a count.
+         */}
+        {ids.length === 1 ? `1 ${noun.replace(/s$/, '')}` : `${ids.length || 'no'} ${noun}`}
       </span>
       {ids.length > 0 && (
         <button
@@ -453,26 +546,53 @@ function IdsField({ label, noun, ids, onChange }: IdsFieldProps) {
   )
 }
 
-interface ColumnsFieldProps {
+interface ChipsFieldProps {
   label: string
-  available: string[]
-  /** Whether the port publishes a schema at all. Unknown is not empty — see `UNKNOWN_COLUMNS`. */
+  available: Array<{ value: string; label: string }>
+  /** Whether the source of the options is complete yet. Unknown is not empty — `UNKNOWN_COLUMNS`. */
   known: boolean
   selected: string[]
   onChange: (value: string[]) => void
+  /** What one entry is called, for the add control's labels. */
+  noun: string
+  /** What an empty selection *means*, where the node says it means something. */
+  emptyChip?: string
+  /** Shown when there is nothing to offer at all. */
+  emptyAvailable: string
 }
 
-/** Ordered multi-select shown as removable chips plus an add dropdown. */
-function ColumnsField({ label, available, known, selected, onChange }: ColumnsFieldProps) {
-  const remaining = available.filter((c) => !selected.includes(c))
+/**
+ * Ordered multi-select shown as removable chips plus an add dropdown.
+ *
+ * Serves both list-shaped pickers — `columns`, off an upstream schema, and `multiEnum`, off a
+ * list the node supplies. It was `ColumnsField` and said "column" in four places; a second
+ * copy for regions is how two pickers sharing a widget acquire different behaviour on the parts
+ * that are actually subtle, which are the missing-versus-not-yet-known distinction and what an
+ * empty selection is taken to mean.
+ */
+function ChipsField({
+  label,
+  available,
+  known,
+  selected,
+  onChange,
+  noun,
+  emptyChip,
+  emptyAvailable,
+}: ChipsFieldProps) {
+  const values = available.map((option) => option.value)
+  const remaining = available.filter((option) => !selected.includes(option.value))
+  const labelOf = (value: string) =>
+    available.find((option) => option.value === value)?.label ?? value
+
   return (
     <div className="columns-field nodrag">
       {selected.length === 0 && remaining.length > 0 && (
-        <span className="chip chip--empty">none</span>
+        <span className="chip chip--empty">{emptyChip ?? 'none'}</span>
       )}
       {selected.map((name) => (
         <span key={name} className="chip" title={known ? undefined : UNKNOWN_HINT}>
-          {known && !available.includes(name) ? `${name} (missing)` : name}
+          {known && !values.includes(name) ? `${name} (missing)` : labelOf(name)}
           <button
             type="button"
             title={`Remove ${name}`}
@@ -486,17 +606,17 @@ function ColumnsField({ label, available, known, selected, onChange }: ColumnsFi
         <select
           className="columns-field__add"
           value=""
-          aria-label={`Add a column to ${label}`}
-          title="Add a column"
+          aria-label={`Add a ${noun} to ${label}`}
+          title={`Add a ${noun}`}
           onChange={(e) => {
             if (e.target.value) onChange([...selected, e.target.value])
           }}
           onPointerDown={(e) => e.stopPropagation()}
         >
           <option value="">+</option>
-          {remaining.map((c) => (
-            <option key={c} value={c}>
-              {c}
+          {remaining.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
             </option>
           ))}
         </select>
@@ -509,7 +629,7 @@ function ColumnsField({ label, available, known, selected, onChange }: ColumnsFi
       */}
       {available.length === 0 && selected.length === 0 && (
         <span className="chip chip--empty" title={known ? undefined : UNKNOWN_HINT}>
-          {known ? 'no columns' : UNKNOWN_COLUMNS}
+          {known ? emptyAvailable : UNKNOWN_COLUMNS}
         </span>
       )}
     </div>

@@ -4,6 +4,24 @@ Everything under `src/data` that talks to somebody else's server.
 
 Moved verbatim out of `CLAUDE.md`.
 
+**Every _neuron_ skeleton and mesh fetch goes through `geometryCache.ts` first.** All three
+backends compose their own key and hand it the ids they were asked for; it answers the ones it
+holds and calls back with only the remainder, so a node re-running on a changed neuron set
+downloads the difference rather than the set. The reasoning, the measurement behind it and what
+belongs in a key are in [core.md](core.md#three-caches-and-the-two-controls-that-clear-them) —
+read it before adding a fourth backend's geometry path, because getting the key wrong is silent in
+both directions: too narrow and nothing ever hits, too broad and a body is served at a detail
+level nobody asked for.
+
+**`fetchRoiMeshes` is the exception, and it is a gap rather than a decision.** Region shells are
+the largest download in the app — 29 MB for hemibrain's primary set, 62 MB for male-CNS's — and
+adding one region to the `ROI Meshes` picker re-fetches every other one, which is exactly the case
+the cache was written for at ten times the bytes per item. It needs `refresh`/`onFetched` on
+`RoiMeshRequest` (which `GeometryRequest` has and this does not), a per-region key in
+`NeuPrintSource.fetchRoiMeshes`, and `dataCache: true` on the node. Note `roiOutlines.ts` caches
+only the *derived 2D outlines*, under a UI-layer key, so the ROI Viewer and the node share
+nothing today.
+
 
 ## neuPrint
 
@@ -981,9 +999,23 @@ is the only thing that maps a dataset to a bucket.
 neuPrintHTTP. `neuroglancer-janelia-flyem-hemibrain`, `manc-seg-v1p2` and `flyem-optic-lobe`
 all send `Access-Control-Allow-Origin: *`, so they are fetched directly and work in a static
 deploy even where the Cypher API cannot reach. `flyem-male-cns` sends no CORS headers at all,
-so `transport.ts` retries it through the `/gcs` proxy and remembers, per host, which route
-worked. A browser reports a CORS refusal as an opaque `TypeError`, so trying is the only way
-to find out — which is why the answer is cached rather than probed each time.
+so `transport.ts` retries it through the `/gcs` proxy and remembers which route worked. A
+browser reports a CORS refusal as an opaque `TypeError`, so trying is the only way to find out —
+which is why the answer is cached rather than probed each time.
+
+**That answer is cached per _bucket_, and it used to be per host.** All four of those buckets are
+`storage.googleapis.com`, but CORS is configured per bucket — so a host key meant one male-CNS
+mesh recorded `storage.googleapis.com → proxy`, **persisted it to localStorage**, and from then
+on routed every hemibrain, MANC and optic-lobe read through the proxy without ever retrying
+direct. In later sessions too, for somebody who never opened male-CNS again.
+
+Measured on a 300-body hemibrain fetch: **3.1 s direct, 30.5 s through the dev proxy**. The
+requests are all issued either way — the browser reports 100 in flight — they just queue behind a
+single-origin HTTP/1.1 hop. It was invisible while the concurrency was 6, because then both
+routes were slow; raising it to 100 is what made the difference legible. Entries written by the
+host-keyed version are dropped on load rather than migrated: a bare host stood for whichever
+bucket happened to be read first, so it cannot be mapped onto one, and keeping it would leave
+every affected profile poisoned across the upgrade.
 
 **Find the source through `/api/npexplorer/nglayers/<dataset>.json`, not `Meta`.** The Meta
 node is unreliable (hemibrain has `neuroglancerMeta`, manc:v1.2.3 has nothing); the nglayers
@@ -1048,6 +1080,39 @@ unsplit blob rather than a large neuron. It was 128 kB, pitched just above p90 t
 cheap — which blanked the giant fibres and big tracts, i.e. both the heaviest coarse meshes and
 the bodies someone browsing is most likely to want. A page is priced by the median, not by the
 ceiling, so raising it costs the typical page nothing.
+
+**100 bodies in flight, which is neuroglancer's own number** (`data_management_context.ts`:
+`download: { defaultItemLimit: 100 }`). It was 6, which had never been measured and cost about an
+order of magnitude. Measured in a real browser against the hemibrain bucket with the HTTP cache
+disabled, ids enumerated out of the bucket's own minishard indices so they spread across shard
+files, best of two interleaved runs each:
+
+| in flight | 96 bodies | of which manifests | 32 heavy bodies |
+| --- | --- | --- | --- |
+| 6 | 10,463 ms | 7,973 ms | 3,094 ms |
+| 16 | 3,908 ms | 3,069 ms | — |
+| 32 | 1,944 ms | 1,589 ms | 697 ms |
+| 64 | 1,369 ms | 1,134 ms | 685 ms |
+| 100 | 819 ms | 718 ms | 692 ms |
+
+**The gain continues while the limit is under the batch size** — 32 bodies plateaus at 32, where
+there is nothing left to overlap, while 96 is still improving at 100. So this is a latency budget,
+not a bandwidth one, and the number to compare it against is how many neurons a scene holds.
+
+**The manifest sweep is where the time goes**: ~87% of the wall clock at every setting. One small
+request per body, and nothing can start until the last one lands, because `chooseLod` sums across
+the batch. That is the barrier, and it is why manifests get a cache entry of their own — being
+level-independent, they survive a change of detail that invalidates every fragment.
+
+One measurement, one machine, one network; the shape is what matters rather than the milliseconds.
+What it spends is the HTTP/2 stream budget on `storage.googleapis.com`, which many peers default to
+~100 and which CAVE's fragment reads and Explore's thumbnails also draw on — overflow queues in
+the browser rather than failing, and graph nodes execute one at a time.
+
+**The other concurrency numbers are deliberately not this one.** `ROI_MESH_CONCURRENCY` is 4 and
+neuPrint skeletons are 6 because those hit **neuPrintHTTP**, a shared production server, not a
+bucket; CATMAID is 8 against somebody's tracing instance; CAVE's fragment budget is a measured 32
+shared across neurons in flight. Only the object-store path gets the bucket number.
 
 **Detail is chosen, not fixed.** `chooseLod` picks the finest level fitting a triangle budget
 across the whole batch, using the manifest's compressed byte sizes as the pre-decode proxy at

@@ -66,6 +66,7 @@ import { fetchRoiMeshSet } from './roiMeshes'
 import { superRoisFrom } from './roiHierarchy'
 import type { MeshSource } from '../precomputed'
 import { DEFAULT_TRIANGLE_BUDGET, fetchMeshes, openMeshSource } from '../precomputed'
+import { byteLengthOf, cachedGeometry } from '../geometryCache'
 import {
   fetchDatasets,
   fetchRoiCompleteness,
@@ -754,51 +755,59 @@ export class NeuPrintSource implements DataSource {
       }
     }
 
-    // One request per body, a few at a time. Attributes come from a single neuron query so
-    // the type/status columns are one round trip rather than one per skeleton.
-    let fetched = 0
-    const [attributes, items] = await Promise.all([
+    /*
+     * One request per body, a few at a time — for the bodies not already held.
+     *
+     * `cachedGeometry` is what makes adding a neuron to a scene cost one request rather than
+     * twenty-one: the node above re-runs on any change to its Neurons input, by invariant 4, and
+     * asks for the whole list every time. Progress counts against the *missing* list, so a
+     * mostly-cached run says `2/2` rather than crawling to `21/21` with nineteen instant steps.
+     *
+     * The attribute query is not cached and stays one round trip for the whole set — see
+     * `fetchNeuronRows`.
+     */
+    const [attributes, skeletons] = await Promise.all([
       this.fetchNeuronRows(req.datasetId, req.neuronIds, req.signal),
-      mapWithConcurrency(req.neuronIds, SKELETON_CONCURRENCY, async (neuronId) => {
-        throwIfAborted(req.signal)
-        const swc = await fetchSkeleton(req.datasetId, neuronId, this.options(req.signal))
-        const skeleton = skeletonFromSwc(neuronId, swc)
-        // neuPrint returns voxels; the scene is in nanometres so meshes line up.
-        scalePositions(skeleton.positions, scale)
-        scaleRadii(skeleton.radii, scale)
-        /*
-         * Counted on *completion*, in a closure. An ordinal handed out when the task was
-         * dispatched runs backwards here: six workers start at once and finish in whatever
-         * order the network returns, so progress went 0.6 → 0.4 → 0.8 → 0.2 → 1.
-         *
-         * Fractions rather than counts, because the node calling this does not know how many
-         * bodies were asked for.
-         */
-        req.onProgress?.(
-          ++fetched / req.neuronIds.length,
-          `${fetched}/${req.neuronIds.length} skeletons`,
-        )
-        return skeleton
+      cachedGeometry<SkeletonGeometry>({
+        ids: req.neuronIds,
+        // The voxel scale is folded in because it is applied *before* the geometry is stored: a
+        // cached skeleton is already in nanometres, and a dataset whose `Meta` changed scale
+        // would otherwise hand back the old one silently.
+        key: (id) => `neuprint:${this.id}:${req.datasetId}:skel:${scale.join(',')}:${id}`,
+        bytes: (s) => byteLengthOf(s.positions, s.radii, s.parents),
+        refresh: req.refresh,
+        onFetched: req.onFetched,
+        fetch: async (missing) => {
+          let fetched = 0
+          const out = new Map<string, SkeletonGeometry>()
+          await mapWithConcurrency(missing, SKELETON_CONCURRENCY, async (neuronId) => {
+            throwIfAborted(req.signal)
+            const swc = await fetchSkeleton(req.datasetId, neuronId, this.options(req.signal))
+            const skeleton = skeletonFromSwc(neuronId, swc)
+            // neuPrint returns voxels; the scene is in nanometres so meshes line up.
+            scalePositions(skeleton.positions, scale)
+            scaleRadii(skeleton.radii, scale)
+            /*
+             * Counted on *completion*, in a closure. An ordinal handed out when the task was
+             * dispatched runs backwards here: six workers start at once and finish in whatever
+             * order the network returns, so progress went 0.6 → 0.4 → 0.8 → 0.2 → 1.
+             *
+             * Fractions rather than counts, because the node calling this does not know how many
+             * bodies were asked for.
+             */
+            req.onProgress?.(++fetched / missing.length, `${fetched}/${missing.length} skeletons`)
+            out.set(neuronId, skeleton)
+          })
+          return out
+        },
       }),
     ])
 
-    /*
-     * Keyed by the *requested* id rather than by one rebuilt from the geometry.
-     * `mapWithConcurrency` writes `results[index]`, so `items` is index-aligned with
-     * `req.neuronIds` — which means the exact id is already to hand and there is no
-     * `string → number → string` round trip to get back to it.
-     */
-    const byId = new Map<string, SkeletonGeometry>()
-    req.neuronIds.forEach((id, i) => {
-      const item = items[i]
-      if (item) byId.set(id, item)
-    })
-    const rows = req.neuronIds.filter((id) => byId.has(id))
-
+    // `ordered` is already in the *requested* order rather than the order the network answered,
+    // so a partly-cached batch draws the same way a fresh one does. See `CachedGeometryResult`.
     const data: Record<string, ColumnData> = {}
     for (const col of schema.columns) data[col.name] = []
-    for (const neuronId of rows) {
-      const item = byId.get(neuronId)!
+    for (const [neuronId, item] of skeletons.ordered) {
       const meta = attributes.get(neuronId)
       // The column is `i64` because neuPrint's ids are nine to eleven digits and exact as
       // doubles — invariant 8's "what a source publishes does not change". A source whose ids
@@ -812,12 +821,12 @@ export class NeuPrintSource implements DataSource {
       data['cableLength']!.push(cableLength(item))
     }
 
-    const ordered = rows.map((id) => byId.get(id)!)
+    const items = skeletons.ordered.map(([, item]) => item)
     return {
       kind: 'skeletons',
-      items: ordered,
+      items,
       attributes: makeTable(schema, data),
-      bounds: boundsOf(ordered.map((item) => item.positions)),
+      bounds: boundsOf(items.map((item) => item.positions)),
       ...this.frame(req.datasetId),
     }
   }
@@ -908,6 +917,8 @@ export class NeuPrintSource implements DataSource {
       this.fetchNeuronRows(req.datasetId, req.neuronIds, req.signal),
       fetchMeshes(source, req.neuronIds, {
         ...(req.signal ? { signal: req.signal } : {}),
+        ...(req.refresh ? { refresh: true } : {}),
+        ...(req.onFetched ? { onFetched: req.onFetched } : {}),
         triangleBudget: req.triangleBudget ?? DEFAULT_TRIANGLE_BUDGET,
         onProgress: (done, total, phase) => {
           req.onProgress?.(

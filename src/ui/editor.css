@@ -2121,6 +2121,36 @@ select.field {
   padding: 10px;
   line-height: 1.5;
 }
+/*
+ * A proportion slider. The readout is tabular so the row does not twitch as the number
+ * changes width under the thumb.
+ */
+.slider-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.slider-field input[type='range'] {
+  flex: 1;
+  min-width: 40px;
+  accent-color: var(--accent);
+  height: 14px;
+}
+.slider-field__value {
+  font-size: 10px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  min-width: 30px;
+  text-align: right;
+}
+
+/* An empty state that carries an action as well as a sentence. */
+.viewer__empty--stacked {
+  flex-direction: column;
+  gap: 8px;
+}
+
 .viewer__scroll {
   overflow: auto;
   min-height: 0;
@@ -2510,6 +2540,134 @@ select.field {
   flex: none;
 }
 
+/*
+ * The interactive legend.
+ *
+ * Three affordances per key — recolour, select, hide — in a strip whose type is 10px, so each
+ * one has to read as a control without taking any more room than the swatch and the word it
+ * replaces. Everything here is about staying the same size as the static version.
+ */
+
+/*
+ * A native colour input, shrunk to exactly the swatch it stands in for. The three rules are
+ * the standard incantation: without them a colour input keeps a chunky border and 2px of
+ * padding around the swatch, and the key grows by a third.
+ */
+.legend__swatch--input {
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  appearance: none;
+}
+.legend__swatch--input::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+.legend__swatch--input::-webkit-color-swatch {
+  border: none;
+  border-radius: 2px;
+}
+.legend__swatch--input::-moz-color-swatch {
+  border: none;
+  border-radius: 2px;
+}
+
+/* A label that selects. Underlined only on hover: eight permanently underlined words in a
+ * 10px strip read as a paragraph of links rather than as a key. */
+.legend__label {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.legend__label:hover {
+  text-decoration: underline;
+}
+.legend__item[data-selected] .legend__label {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* The eye. A filled dot for shown, a hollow one for hidden — the same glyph either way, so
+ * the row does not reflow when it changes. */
+.legend__eye {
+  border: none;
+  background: none;
+  padding: 0 1px;
+  font-size: 8px;
+  line-height: 1;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0.55;
+}
+.legend__eye:hover {
+  opacity: 1;
+  color: var(--text-secondary);
+}
+
+/* The unlisted remainder. Muted, because it is a note about the key rather than a key. */
+.legend__more {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/*
+ * The whole-socket switches at the head of the 3D strip.
+ *
+ * Shaped like a key rather than like a button — same dot, same 10px word — because that is
+ * what it is: one step coarser than the keys beside it, not a different kind of control. An
+ * off channel goes struck-through for the same reason a hidden key does, and stays at full
+ * legibility, since it is the thing you have to find in order to turn it back on.
+ */
+.legend__channel {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.legend__channel:hover {
+  color: var(--text-primary);
+}
+.legend__channel[aria-pressed='false'] {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+
+/*
+ * A hidden key stays legible rather than fading out. It is the control you need to find in
+ * order to undo it, and a key at 30% opacity in a 10px strip is one nobody finds.
+ */
+.legend__item[data-hidden] {
+  opacity: 0.6;
+}
+.legend__item[data-hidden] .legend__label {
+  text-decoration: line-through;
+}
+.legend__item[data-hidden] .legend__eye {
+  opacity: 1;
+}
+
+.legend__reset button {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--text-muted);
+  cursor: pointer;
+  text-decoration: underline;
+}
+.legend__reset button:hover {
+  color: var(--text-secondary);
+}
+
 .colorbar {
   display: flex;
   align-items: center;
@@ -2724,6 +2882,12 @@ select.field {
 
 .style-tabs {
   display: flex;
+  /*
+   * Wrapping rather than scrolling, which matters from five tabs on — `out.viewer3d` has one
+   * per socket plus the scene, and they do not fit 268px. A horizontal scroller would hide the
+   * last tab behind a gesture nothing on screen suggests; two rows are merely two rows.
+   */
+  flex-wrap: wrap;
   flex: none;
   padding: 0 6px;
   gap: 2px;
@@ -2784,7 +2948,14 @@ select.field {
  */
 .style-row {
   display: grid;
-  grid-template-columns: 58px 1fr;
+  /*
+   * `minmax(0, 1fr)` rather than `1fr`, which is the canonical grid blowout: a bare `1fr` is
+   * `minmax(auto, 1fr)`, and its `auto` floor is the *min-content* of whatever is in the track.
+   * Measured on the Volumes tab, where the colour row carries an opacity slider: the row was
+   * 247px inside a 268px sidebar and its controls ran 28px past the panel's right edge, clipping
+   * the readout. A slider is the first control here whose min-content exceeds the column.
+   */
+  grid-template-columns: 58px minmax(0, 1fr);
   align-items: center;
   column-gap: 8px;
   row-gap: 4px;
@@ -2813,6 +2984,8 @@ select.field {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 10px;
+  /* A direct grid child, not inside `__controls`, so it needs its own floor. */
+  min-width: 0;
 }
 .style-facet {
   display: flex;
@@ -3329,6 +3502,28 @@ a.dropdown__item {
   outline: none;
 }
 
+/*
+ * The canvas fills its box, whatever size the renderer thinks it is — and the `!important` is
+ * the whole point, because what it overrides is an inline style.
+ *
+ * Measured on a card at React Flow zoom 0.8: a 560px preview held a 458px canvas, with 100px
+ * of dead surface down the right-hand side and the scene sitting off to the left inside it.
+ * The cause is a layering one. A renderer measures its container with `getBoundingClientRect`,
+ * which reports *post-transform* pixels, and then writes that number back as a CSS width —
+ * but CSS pixels inside the transformed card are pre-transform, so the zoom is applied twice
+ * and the canvas comes out short by exactly the zoom factor. Nothing is wrong with either
+ * half; they simply measure in different spaces.
+ *
+ * Only the element is stretched. The drawing buffer keeps the size the renderer chose, which
+ * is the *screen* size, so this is resolution-correct rather than an upscale: zoomed in, the
+ * buffer is larger and the picture is sharper. And the zoom is uniform, so an aspect ratio
+ * computed from the measurement still matches the box it is displayed in.
+ */
+.viewer3d-canvas canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+
 /* Sigma injects its own absolutely-positioned layers. */
 .network-canvas > .sigma-container {
   position: absolute;
@@ -3557,10 +3752,19 @@ a.viewer-actions__btn {
   text-overflow: ellipsis;
 }
 
-/* The inline node preview needs a floor, or a flex container collapses it to nothing. */
+/*
+ * The inline node preview needs a floor, or a flex container collapses it to nothing.
+ *
+ * 80px rather than the 150 it was, matching `.coda-node__preview`'s own minimum. A floor is a
+ * refusal to shrink, and in a `.viewer` — column flex, `overflow: hidden` — a child that
+ * refuses to shrink does not overflow *itself*: it pushes whatever comes after it out of the
+ * bottom. What came after it was the legend and the caption. On a card whose preview had 125px
+ * to give, a 150px floor meant the canvas kept every pixel and the two rows that name the
+ * colours and count the neurons were clipped away with nothing to suggest they existed.
+ */
 .coda-node__preview .network-canvas,
 .coda-node__preview .viewer3d-canvas {
-  min-height: 150px;
+  min-height: 80px;
 }
 
 /* Selection written by a viewer, shown read-only on the node. */

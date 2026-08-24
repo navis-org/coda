@@ -65,7 +65,11 @@ export function DownloadBody({ node, ctx, compact, setParam, onError }: NodeBody
     if (format === 'svg' || format === 'png') {
       // A picture belongs to the upstream viewer and exists only while that card is drawing,
       // so what is reported is the *availability*, not a plan.
-      const ready = Boolean(exportSourceFor(sourceId)?.svg?.())
+      // Presence for the WebGL case, a call for the vector one: asking a 3D scene whether it
+      // is ready means rendering a frame and reading it back, which is not a thing to do on
+      // every render of a card that is merely on screen.
+      const source = exportSourceFor(sourceId)
+      const ready = Boolean(source?.svg?.() ?? (format === 'png' ? source?.png : undefined))
       return { files: [`${base}.${format}`], ready, chart: true }
     }
     if (!value) return { files: [], ready: false, chart: false }

@@ -290,6 +290,32 @@ export function serializeSvg(svg: SVGSVGElement): string {
   return new XMLSerializer().serializeToString(clone)
 }
 
+/**
+ * A raster that already exists, handed over as a `data:` URL.
+ *
+ * Every other picture in Coda is vector first — a real `<svg>` or one synthesised from the
+ * spec it was drawn from — and `downloadPng` rasterises that. The 3D scene is the exception
+ * and it is a structural one: three.js paints to a WebGL drawing buffer, so the only honest
+ * "the picture as it stands" is a read-back of that buffer. `toDataURL` is what performs the
+ * read, and it must be called synchronously in the same task as the render that filled the
+ * buffer, which is why the caller hands over a string rather than a canvas.
+ */
+export function downloadDataUrl(dataUrl: string, filename: string): void {
+  const comma = dataUrl.indexOf(',')
+  if (comma < 0) throw new Error('Not a data URL')
+  const header = dataUrl.slice(0, comma)
+  const body = dataUrl.slice(comma + 1)
+  const mime = header.slice(5).split(';')[0] || 'application/octet-stream'
+  if (!header.includes(';base64')) {
+    triggerDownload(new Blob([decodeURIComponent(body)], { type: mime }), filename)
+    return
+  }
+  const binary = atob(body)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  triggerDownload(new Blob([bytes], { type: mime }), filename)
+}
+
 export function downloadSvg(svg: SVGSVGElement, filename: string): void {
   const blob = new Blob([serializeSvg(svg)], { type: 'image/svg+xml;charset=utf-8' })
   triggerDownload(blob, filename)

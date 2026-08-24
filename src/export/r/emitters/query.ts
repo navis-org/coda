@@ -387,6 +387,38 @@ registerEmitter('neuron.roiCompleteness', (ctx) => {
   ]
 })
 
+/**
+ * Neuropil shells, fetched rather than described.
+ *
+ * `out.rois`'s R emitter leaves its `lapply` commented, because that card is a *widget* that
+ * fetches for itself and the notebook is describing what it does. This is a node whose output
+ * something downstream reads, so a commented fetch would leave the next chunk referring to a
+ * name that was never bound. One request per region is the cost, and the note says so.
+ */
+registerEmitter('neuron.roiMeshes', (ctx) => {
+  const conn = ctx.wired('dataset')
+  ctx.library('neuprintr')
+  const chosen = (Array.isArray(ctx.params.rois) ? ctx.params.rois : []).map(String)
+  const out = ctx.output('meshes')
+  const names = `${out}_rois`
+
+  return [
+    ...ctx.note(
+      'One request per region, and neuPrint publishes these for visualization only — ' +
+        'decimated display surfaces, so a volume measured off one is an approximation rather ' +
+        'than a figure to quote.',
+    ),
+    chosen.length > 0
+      ? `${names} <- c(${chosen.map((roi) => JSON.stringify(roi)).join(', ')})`
+      : // Empty means the set that tiles the volume; the published list nests, so "every
+        // region" would draw each shell inside another one.
+        `${names} <- neuprint_ROIs(superLevel = FALSE, conn = ${conn})`,
+    `${out} <- lapply(${names}, neuprint_ROI_mesh, conn = ${conn})`,
+    `names(${out}) <- ${names}`,
+    `${names}`,
+  ]
+})
+
 registerEmitter('neuron.rawCypher', (ctx) => {
   const conn = ctx.wired('dataset')
   ctx.library('neuprintr')

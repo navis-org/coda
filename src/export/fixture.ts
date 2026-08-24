@@ -570,6 +570,15 @@ export function everythingGraph(): CodaGraph {
       row: 2,
       params: { minLinkWeight: 10, hideIsolated: true },
     },
+    {
+      // Named regions rather than the empty picker, so the golden shows the branch that puts a
+      // literal list in the cell — the primary-set branch is the one `out.rois` already covers.
+      id: 'roimesh',
+      type: 'neuron.roiMeshes',
+      col: 2,
+      row: 9,
+      params: { rois: ['EB', 'FB'] },
+    },
     { id: 'v3d', type: 'out.viewer3d', col: 3, row: 5 },
     { id: 'ng', type: 'out.neuroglancer', col: 3, row: 6 },
     { id: 'profile', type: 'out.profile', col: 3, row: 7, params: { selection: ['1001'] } },
@@ -702,6 +711,8 @@ export function everythingGraph(): CodaGraph {
     ['cut', 'clusters', 'clu', 'labels'],
     ['find', 'neurons', 'clu', 'neurons'],
     ['skel', 'skeletons', 'v3d', 'skeletons'],
+    ['ds', 'dataset', 'roimesh', 'dataset'],
+    ['roimesh', 'meshes', 'v3d', 'volumes'],
     ['stack', 'out', 'muted', 'in'],
     ['url', 'out', 'rename', 'in'],
     ['upload', 'out', 'gsheet', 'annotations'],

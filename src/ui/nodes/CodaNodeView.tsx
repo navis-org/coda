@@ -122,6 +122,8 @@ function CodaNodeViewImpl({
   const runNode = useGraphStore((s) => s.runNode)
   const cancelRun = useGraphStore((s) => s.cancelRun)
   const expandNode = useGraphStore((s) => s.expandNode)
+  /* A primitive, so the snapshot compares by identity — invariant 7. */
+  const expandedNodeId = useGraphStore((s) => s.expandedNodeId)
   const openHelp = useGraphStore((s) => s.openHelp)
   const needsRun = useGraphStore((s) => {
     void s.runVersion
@@ -261,9 +263,24 @@ function CodaNodeViewImpl({
         (p) => !p.advanced && (!p.visibleIf || p.visibleIf(node.params)),
       )
 
+  /*
+   * Not while the overlay is showing this same node.
+   *
+   * A viewer is a *renderer*, not a picture: the network and 3D viewers each take a WebGL
+   * context of their own and upload their own copy of the geometry to the GPU, so a node drawn
+   * in two places at once is two contexts, two copies and two redraws on every invalidation —
+   * measured at 3 contexts and 3 × 170 kB for a 21-neuron scene with the card, the inspector
+   * and the overlay all up. The overlay is modal and larger, so while it owns a node there is
+   * nothing behind it worth paying for.
+   *
+   * The cost of standing down is a remount when the overlay closes, which re-frames the card's
+   * camera. That is the right way round: somebody who has just been working full size is not
+   * also curating the thumbnail behind it.
+   */
   const showPreview =
     isViewer(def) &&
     !node.collapsed &&
+    expandedNodeId !== id &&
     (outputValue !== undefined || SELF_DRAWING_NODE_TYPES.has(node.type))
 
   /*
