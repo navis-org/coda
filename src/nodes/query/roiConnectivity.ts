@@ -26,17 +26,24 @@ import { requireDataset, sourceLabel, sourceSupports } from '../lib/datasetParam
 /**
  * Which published number the matrix cells carry.
  *
- * Both travel in the table; this decides only what gets reshaped. The default is `count`
- * because it is the one whose meaning is settled: neuPrint publishes `weight` alongside it and
- * the two are *not* the same measure in different units — on hemibrain `AB(L)→BU(L)` reports
- * `count: 13, weight: 3.11`, so weight is scaled or normalised rather than additive. Offering
- * it is right, because it is what the server said; defaulting to it would put a number on a
- * legend without being able to say what the number is.
+ * Both travel in the table; this decides only what gets reshaped. `weight` leads and is the
+ * default, because it is the number neuPrint publishes as a region pair's headline. `count` is
+ * beside it, and the two are *not* the same measure in different units — on hemibrain
+ * `AB(L)→BU(L)` reports `count: 13, weight: 3.11`, so weight is scaled or normalised rather
+ * than additive. Which is why the matrix carries the chosen measure's label with it: neither
+ * number means anything on a legend that does not say which of the two it is.
  */
 const MEASURES = [
   { value: 'weight', label: 'Weight (as published)' },
   { value: 'count', label: 'Connections' },
 ] as const
+
+/**
+ * Named once, so the declared default and the fallback `evaluate` reaches for when a graph
+ * carries no `measure` at all cannot drift apart — they did, and a test that ran the node on
+ * its own default was reading the other column.
+ */
+const DEFAULT_MEASURE: (typeof MEASURES)[number]['value'] = 'weight'
 
 export const roiConnectivityNode = registerNode({
   type: 'neuron.roiConnectivity',
@@ -44,7 +51,11 @@ export const roiConnectivityNode = registerNode({
   category: 'query',
   description: 'Region-to-region connectivity for the whole dataset, as a matrix and a table.',
   guide:
-    'Region-to-region connectivity for the whole dataset.',
+    'Region-to-region connectivity for the whole dataset, precomputed on neuPrint’s side, so a ' +
+    'whole connectome answers in a few hundred kilobytes. Emits a matrix for the Heatmap and a ' +
+    'long table for everything else. The table carries both of neuPrint’s numbers and Cells ' +
+    'picks which fills the matrix; weight is scaled in a way the server does not document, so ' +
+    'the legend names the measure it drew.',
   cost: 'expensive',
   inputs: [{ id: 'dataset', label: 'Dataset', type: T.dataset() }],
   outputs: [
@@ -57,7 +68,7 @@ export const roiConnectivityNode = registerNode({
       kind: 'enum',
       label: 'Cells',
       help: 'Which published number fills the matrix. Both are always in the Links table.',
-      default: 'weight',
+      default: DEFAULT_MEASURE,
       options: MEASURES.map((m) => ({ value: m.value, label: m.label })),
     },
   ],
@@ -85,7 +96,7 @@ export const roiConnectivityNode = registerNode({
 
     ctx.progress(0.2, 'regions')
     const links = await fetch({ datasetId: dataset.datasetId, signal: ctx.signal })
-    const measure = String(ctx.params.measure ?? 'count')
+    const measure = String(ctx.params.measure ?? DEFAULT_MEASURE)
     const label = MEASURES.find((m) => m.value === measure)?.label ?? measure
 
     return { matrix: linksToMatrix(links, measure, label), links }

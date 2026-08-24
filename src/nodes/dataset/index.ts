@@ -194,7 +194,11 @@ export const customCaveNode = registerNode({
   category: 'dataset',
   description: 'Any CAVE datastack and materialization, named by hand.',
   guide:
-    'This node allows working with arbitrary CAVE datastacks that Coda ships no preconfigured node for. ',
+    'This node allows working with arbitrary CAVE datastacks that Coda ships no preconfigured ' +
+    'node for. Unlike its neuPrint twin it needs more than a name: a datastack is a segmentation ' +
+    'plus whatever tables somebody attached to it, with nothing marking one of them as the ' +
+    'neurons — so name that table and the column its root ids are in. Materializations expire, ' +
+    'so pin one you have checked.',
   companion: DESCRIPTION_COMPANION,
   cost: 'cheap',
   inputs: [ANNOTATIONS_INPUT],

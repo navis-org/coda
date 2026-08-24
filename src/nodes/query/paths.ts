@@ -85,7 +85,11 @@ export const pathsNode = registerNode({
   category: 'query',
   description: 'Find the strongest routes from one set of neurons to another.',
   guide:
-    'Find the strongest feed-forward routes from sources to targets, ranked by their weakest link.',
+    'Not “what is wired to this?” but “how does this reach that?” — the strongest feed-forward ' +
+    'routes from sources to targets, ranked by their weakest link rather than by a sum, since a ' +
+    'chain is only as strong as its narrowest step. Collapse types traverses the type-level ' +
+    'graph, which is usually the circuit somebody means. Three outputs: the pruned network, a ' +
+    'layout for it, and one row per route.',
   cost: 'expensive',
   /*
    * No `defaultSize`, deliberately. It sizes React Flow's *wrapper*, and only a resizable card

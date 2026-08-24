@@ -32,9 +32,14 @@ export const tableViewNode = registerNode({
   type: 'out.table',
   label: 'Table',
   category: 'visualisation',
-  description: 'A table widget to load your data into. Allows sorting and per-column filtering.',
+  description:
+    'A table widget to load your data into. Allows sorting and per-column filtering.',
   guide:
-    'Lets you inspect any tabular data: sortable and filterable.',
+    'Lets you inspect any tabular data: rows and columns, sortable, paged and exportable as CSV. ' +
+    'Like every viewer here it passes its input straight through, so it can be dropped into the ' +
+    'middle of a chain without breaking anything downstream. Sorting is view-only and costs no ' +
+    'run; the per-column filters under the headers are not, and what they keep leaves by the ' +
+    'second port.',
   cost: 'cheap',
   inputs: [{ id: 'in', label: 'Table', type: T.table() }],
   outputs: [

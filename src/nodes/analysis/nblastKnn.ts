@@ -42,7 +42,11 @@ export const nblastKnnNode = registerNode({
   category: 'analysis',
   description: 'Find each neuron’s most similar neurons, as a table of matches.',
   guide:
-    'A version of NBLAST that gives you the top-k matches for each query neuron.',
+    'A version of NBLAST that gives you the top-k matches for each query neuron. Each row is one ' +
+    'match — neuron, neighbour, rank and score — so Build Network turns it straight into a ' +
+    'similarity graph. The shortlist that makes this cheap is approximate; the scores are ' +
+    'exact. With a Target wired, a neuron in both sets matches itself at 1.00 and spends one ' +
+    'of its k places doing so.',
   cost: 'expensive',
   inputs: [
     { id: 'query', label: 'Query', type: T.skeletons() },
@@ -90,7 +94,7 @@ export const nblastKnnNode = registerNode({
       advanced: true,
       help:
         'Space the points evenly before comparing, in micrometres. Too fine and your NBLAST will ' +
-        'take forever. Too coarse and your scores will be meaningless. 1 µm is the convention, and the default. '+
+        'take forever. Too coarse and your scores will be meaningless. 1 µm is the convention, and the default. ' +
         ' Setting it to 0 leaves each skeleton exactly as it was traced.',
     },
     {

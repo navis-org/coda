@@ -177,18 +177,24 @@ describe('neuron.roiConnectivity', () => {
     const named = new Set([...getColumn(links, 'source'), ...getColumn(links, 'target')])
     expect(new Set(matrix.rowLabels)).toEqual(named)
 
-    // Every row of the table lands in the cell it names.
+    /*
+     * Every row of the table lands in the cell it names, holding whichever of the two published
+     * numbers the node defaults to. Read off the definition rather than named here: which
+     * measure leads is a product decision that has already moved once, and this test is about
+     * the reshape landing in the right cell, not about which column it reshaped.
+     */
+    const measure = String(defaultParams(requireNodeDef('neuron.roiConnectivity')).measure)
     const index = new Map(matrix.rowLabels.map((l, i) => [l, i]))
     const source = getColumn(links, 'source')
     const target = getColumn(links, 'target')
-    const count = getColumn(links, 'count') as number[]
+    const drawn = getColumn(links, measure) as number[]
     for (let row = 0; row < links.length; row++) {
       const cell =
         matrix.values[
           index.get(String(source[row]))! * matrix.rowLabels.length +
             index.get(String(target[row]))!
         ]
-      expect(cell).toBe(count[row])
+      expect(cell).toBe(drawn[row])
     }
   })
 

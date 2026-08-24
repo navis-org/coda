@@ -172,7 +172,7 @@ describe('the help overlay', () => {
     act(() => {
       link.click()
     })
-    await waitFor(() => expect(screen.getByText(/What a linkage is/)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/What's a linkage/)).toBeTruthy())
     // The store still holds where the reader came in, so Back has somewhere to go.
     expect(useGraphStore.getState().helpType).toBe('neuron.nblast')
 

@@ -1,4 +1,4 @@
-# Have it your way
+## Have it your way
 
 This node offers 4 distinct strategies to draw samples from your data:
 

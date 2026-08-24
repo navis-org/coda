@@ -55,7 +55,11 @@ export const profileNode = registerNode({
   description:
     'Inspect one neuron at a time: identity, partners by type, regions, transmitter and shape.',
   guide:
-    'Inspect one neuron at a time: identity, partners by type, regions, transmitter and shape.',
+    'Inspect one neuron at a time: identity and classification, partners rolled up by type in ' +
+    'both directions, synapses by region, transmitter call, and a 3D view of the cell. It takes ' +
+    'a whole collection rather than one body, so it works on an Explore selection or a ' +
+    'connectivity result. Paging through the neurons is free; pinning one sends it out of the ' +
+    'Current port and is what marks the graph stale.',
   cost: 'cheap',
   defaultSize: { width: 560, height: 620 },
   inputs: [
