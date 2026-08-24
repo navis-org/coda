@@ -104,16 +104,14 @@
  * outlined card into a filled block — a presentation attribute of `fill="none"` loses to a
  * stylesheet. Hence the explicit reset, with `data-fill` for the few parts that are solid.
  *
- * `.rail-icon` is the same reset under a name that does not claim to be about layout: Fit
- * Selected is a view button that happens to be drawn the same way.
+ * Named for the rail rather than for layout: the same reset serves the view buttons, the layout
+ * buttons and the lock, all of which are line drawings.
  */
-.react-flow__controls-button .layout-icon,
 .react-flow__controls-button .rail-icon {
   fill: none;
   stroke: currentColor;
   stroke-width: 1.2;
 }
-.react-flow__controls-button .layout-icon [data-fill],
 .react-flow__controls-button .rail-icon [data-fill] {
   fill: currentColor;
   stroke: none;
@@ -128,16 +126,16 @@
 }
 
 /*
- * The one control in the rail that holds state, so it is the one that gets a colour. Zoom and
- * Fit are verbs and look identical whatever the canvas is doing; auto-layout being on is a fact
- * about the editor that has to be visible without hovering for a tooltip.
+ * The controls in the rail that hold state, so they are the ones that get a colour. Zoom and Fit
+ * are verbs and look identical whatever the canvas is doing; auto-layout or the lock being on is
+ * a fact about the editor that has to be visible without hovering for a tooltip.
  */
-.react-flow__controls-button.layout-toggle--on {
+.react-flow__controls-button.rail-toggle--on {
   background: var(--accent-soft);
   border-color: var(--accent);
   color: var(--accent);
 }
-.react-flow__controls-button.layout-toggle--on:hover {
+.react-flow__controls-button.rail-toggle--on:hover {
   background: var(--accent-soft);
 }
 

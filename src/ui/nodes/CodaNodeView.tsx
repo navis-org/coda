@@ -106,10 +106,19 @@ function CodaNodeViewImpl({
   id,
   data,
   selected,
+  draggable,
 }: {
   id: string
   data: CodaNodeData
   selected?: boolean
+  /**
+   * React Flow's answer to "may this card be dragged?", which with no per-node `draggable` in
+   * this app is exactly `!locked` — the canvas passes the lock in as `nodesDraggable`. Taken as
+   * a prop rather than read from the store, because this component is mounted once per card and
+   * a subscription here costs a selector call on every store write, per card, for a flag that
+   * moves twice a session. See `resizable`.
+   */
+  draggable?: boolean
 }) {
   const node = data.node
   const [renaming, setRenaming] = useState(false)
@@ -305,8 +314,14 @@ function CodaNodeViewImpl({
    * Only viewers resize, and only while they are showing one. A transform node's height is
    * decided by its params, so a drag handle there would promise a control that does nothing,
    * and a collapsed node is a title bar — stretching that means nothing either.
+   *
+   * A locked canvas has no handles at all rather than handles that refuse: `NodeResizer` runs
+   * its own pointer gesture and never consults `nodesDraggable`, so the prop that stops a drag
+   * does nothing to a resize — this is where that has to be said again. `resizeNodes` refuses
+   * the write as a backstop, which without this would draw a card being stretched and snap it
+   * back on release.
    */
-  const resizable = isViewer(def) && !node.collapsed
+  const resizable = isViewer(def) && !node.collapsed && draggable !== false
   /**
    * True when React Flow's wrapper carries an explicit width for this card, so the card fills it
    * rather than taking `--node-width`.

@@ -34,6 +34,7 @@ const { useGraphStore } = await import('../../store/graphStore')
 const { clearStorage, installJsdomStubs, installStorageStub } =
   await import('../../test/jsdomStubs')
 const { buildCommandItems } = await import('./paletteItems')
+const { FIT_VIEW_OPTIONS } = await import('../fitView')
 
 beforeAll(() => {
   installJsdomStubs({ width: 900, height: 600 })
@@ -93,8 +94,10 @@ describe('the Fit Selected button', () => {
     fireEvent.click(fitSelectedButton())
     const options = fitOptions()
     expect(options?.nodes?.map((n) => n.id)).toEqual([first, second])
-    // The same framing a load's fit uses, so one selected card is not blown up to fill a monitor.
-    expect(options?.maxZoom).toBe(1)
+    // The shared framing, asserted against the constant rather than against its numbers: the
+    // padding and the zoom ceiling are a tuning knob, and what has to hold is that all three
+    // fits read the same one.
+    expect(options).toMatchObject(FIT_VIEW_OPTIONS)
   })
 
   it('is disabled with nothing selected, and says why', () => {

@@ -40,10 +40,13 @@ function NoteCardImpl({
   id,
   data,
   selected,
+  draggable,
 }: {
   id: string
   data: CodaNodeData
   selected?: boolean
+  /** `!locked`, handed down by React Flow — see `CodaNodeView`'s note on the same prop. */
+  draggable?: boolean
 }) {
   const node = data.node
   const setParam = useGraphStore((s) => s.setParam)
@@ -64,7 +67,9 @@ function NoteCardImpl({
       <NodeResizer
         minWidth={MIN_NOTE_WIDTH}
         minHeight={MIN_NOTE_HEIGHT}
-        isVisible={selected === true}
+        // Gone rather than refusing while the canvas is locked — `CodaNodeView`'s `resizable`
+        // records why a resize needs its own answer instead of `nodesDraggable`.
+        isVisible={selected === true && draggable !== false}
         lineClassName="coda-node__resize-line"
         handleClassName="coda-node__resize-handle"
       />

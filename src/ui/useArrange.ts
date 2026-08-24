@@ -85,6 +85,14 @@ export interface ArrangeHandle {
 export function useArrange(): ArrangeHandle {
   const { getNodes, getInternalNode, getZoom } = useReactFlow()
   const autoLayout = useGraphStore((s) => s.autoLayout)
+  /*
+   * A locked canvas arranges nothing. `arrangeNodes` refuses the write anyway; what this saves is
+   * the work in front of it — `measure()` reads `offsetWidth`/`offsetHeight` off every card, which
+   * is a forced synchronous layout per card, and a short measurement then enters a
+   * `requestAnimationFrame` retry loop that re-renders the canvas each time. This effect runs on
+   * every commit, and a locked graph still gets plenty of those from param edits.
+   */
+  const locked = useGraphStore((s) => s.locked)
   const graph = useGraphStore((s) => s.graph)
 
   const [overrides, setOverrides] = useState<ReadonlyMap<string, XY> | null>(null)
@@ -385,6 +393,23 @@ export function useArrange(): ArrangeHandle {
   const retries = useRef(0)
 
   useEffect(() => {
+    /*
+     * Before `measure()`, deliberately. Below the measurement this read as a guard and cost as
+     * much as no guard at all.
+     *
+     * `lastKey` is left alone: on unlock the effect re-runs with `armed` false, so `firstArm` is
+     * true and the arrange happens whatever the key says. The pending timer *is* cleared, or an
+     * arrange scheduled a moment before the lock would land on a frozen canvas.
+     */
+    if (locked) {
+      armed.current = false
+      if (pending.current) {
+        clearTimeout(pending.current)
+        pending.current = undefined
+      }
+      return
+    }
+
     const measured = measure()
     /*
      * Wait until every card has a size, and *come back* if one does not.
@@ -436,7 +461,7 @@ export function useArrange(): ArrangeHandle {
     lastKey.current = key
     if (pending.current) clearTimeout(pending.current)
     pending.current = setTimeout(arrange, AUTO_DELAY_MS)
-  }, [autoLayout, graph, arrange, measure, measureTick])
+  }, [autoLayout, locked, graph, arrange, measure, measureTick])
 
   useEffect(
     () => () => {

@@ -1,9 +1,13 @@
 /**
- * The framing both fits share, and the "fit what is selected" half.
+ * The framing every fit shares, and the two fits themselves.
  *
- * `FIT_VIEW_OPTIONS` lived in `Editor.tsx` until a second caller wanted it. It is shared so a
- * freshly opened graph, React Flow's own initial fit and Fit Selected all frame alike, and
- * `maxZoom: 1` so a two-node graph — or one selected card — is not blown up to fill a monitor.
+ * `FIT_VIEW_OPTIONS` lived in `Editor.tsx` until a second caller wanted it. It is shared so that
+ * React Flow's own initial fit, a load's fit, the rail's Fit View and Fit Selected all frame
+ * alike — the padding and the zoom ceiling are a tuning knob, and the thing that has to hold is
+ * that one turn of it moves all four. It did not: the palette's Fit View passed a bare duration
+ * and framed to React Flow's defaults, so the same command landed differently depending on which
+ * surface you reached it from. Both fits are hooks here now, and nothing calls `fitView` with a
+ * hand-written option set.
  */
 
 import { useCallback } from 'react'
@@ -13,8 +17,23 @@ import { useGraphStore } from '../store/graphStore'
 
 export const FIT_VIEW_OPTIONS = { padding: 0.05, maxZoom: 3 }
 
-/** Matches the duration a load's fit animates over, so the two read as the same gesture. */
-const FIT_DURATION = 240
+/**
+ * One duration for every viewport animation the rail and the palette start — the two fits and
+ * the two zoom steps — so the whole set reads as one gesture family rather than four.
+ */
+export const FIT_DURATION = 240
+
+/**
+ * Frame the whole graph — the rail's Fit View, the `View ▸ Fit View` command, and the fit a load
+ * asks for. The shared options are the entire point; see the module note.
+ */
+export function useFitAll(): () => void {
+  const { fitView } = useReactFlow()
+  return useCallback(
+    () => void fitView({ ...FIT_VIEW_OPTIONS, duration: FIT_DURATION }),
+    [fitView],
+  )
+}
 
 /**
  * Frame the current selection — the button in the controls rail, the `§` key and the palette

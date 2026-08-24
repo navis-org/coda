@@ -112,6 +112,13 @@ function Drawer({ takeFocus }: { takeFocus: boolean }) {
   }, [draft])
 
   const ready = useSyncExternalStore(subscribeCredentials, isConfigured)
+  /*
+   * A locked canvas refuses a plan at `applyAssistantPlan`, which is the right backstop and the
+   * wrong place to *first* find out: the request has been to the model and back by then, and the
+   * answer was knowable before it was sent. So the composer stands down the way it does with no
+   * provider configured — same control, same explanation in the placeholder.
+   */
+  const locked = useGraphStore((s) => s.locked)
 
   return (
     <aside className="assistant" aria-label="Assistant">
@@ -175,15 +182,21 @@ function Drawer({ takeFocus }: { takeFocus: boolean }) {
           ref={askRef}
           className="field"
           value={draft}
-          placeholder={ready ? 'Ask for a change…' : 'Pick a provider under Connections first'}
-          disabled={!ready}
+          placeholder={
+            locked
+              ? 'The canvas is locked — unlock it to ask for a change'
+              : ready
+                ? 'Ask for a change…'
+                : 'Pick a provider under Connections first'
+          }
+          disabled={!ready || locked}
           spellCheck={false}
           onChange={(event) => setDraft(event.target.value)}
         />
         <button
           type="submit"
           className="btn btn--primary"
-          disabled={!ready || busy || !draft.trim()}
+          disabled={!ready || locked || busy || !draft.trim()}
         >
           Ask
         </button>

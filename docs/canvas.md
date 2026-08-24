@@ -49,7 +49,7 @@ covers which loads ask; `ui/fitOnLoad.test.tsx` covers that the request is spent
 
 `ui/fitView.ts` holds `FIT_VIEW_OPTIONS` — the framing React Flow's initial fit, a load's fit and
 Fit Selected all share — and `useFitSelected`, which the three surfaces that offer it all call:
-the rail button (`ui/panels/FitSelectedControl.tsx`), the `§` key, and the `View ▸ Fit Selected`
+the rail button (`ui/panels/ViewControls.tsx`), the `§` key, and the `View ▸ Fit Selected`
 palette command.
 
 **An unmeasurable selection is checked for before the call rather than left to React Flow.**
@@ -70,6 +70,60 @@ Its icon takes `.rail-icon`, which is `.layout-icon`'s fill reset under a name t
 to be about layout; React Flow's own disabled styling is `fill-opacity`, which does nothing to a
 stroked line drawing, so `editor.css` dims the whole button instead. `ui/panels/fitSelected.test.tsx`
 pins which ids each surface asks for, and that the empty case asks for nothing.
+
+## The lock
+
+One toggle in the rail (`ui/panels/LockControl.tsx`) freezes three things: the **viewport**, the
+cards' **geometry** and the graph's **structure**. What it deliberately leaves alone is everything
+that is not the canvas — selecting a card, editing its params, muting, collapsing, expanding a
+result, running, exporting, and opening another graph. `GraphState.locked` carries the full list.
+
+**Session-only, and not in the document.** Not in the `.coda.json`, not in a share link, not in
+`localStorage`: a graph somebody sends you never arrives frozen, and a lock left on by yesterday
+is not something to rediscover by finding the canvas dead. Every reload starts unlocked.
+
+It is enforced in three places, and all three are needed:
+
+- **React Flow's props**, for the gestures the library owns outright and no handler of ours would
+  see — `panOnDrag`, `zoomOnScroll`, `zoomOnPinch`, `nodesDraggable`, `nodesConnectable`,
+  `edgesReconnectable`, `deleteKeyCode`. Box-select is *not* among them: selecting changes
+  nothing, and the inspector, the help overlay and every viewer are reached through it.
+- **The store**, as a silent backstop on every action that moves or restructures anything —
+  including `undo`/`redo`, since with add and delete refused a live ⌘Z would be the one way left
+  to restructure a frozen graph. `applyAssistantPlan` is the one guard that answers back, because
+  a model cannot see the rail and the panel needs something to show.
+- **Every surface**, visibly. This is the half that decides whether the feature reads as a lock or
+  as an editor that has started ignoring clicks: each rail button, toolbar button, context-menu
+  item and palette row it covers is disabled and says "the canvas is locked" in its tooltip or
+  hint, and the keyboard and the two pane gestures raise a notice instead of doing nothing. The
+  assistant's composer stands down too — the store refuses a plan, but finding out *there* costs
+  a model round trip for an answer the panel already had. The wording lives in `ui/lockCopy.ts`:
+  written out per site it drifted into three phrasings inside one change, and that sentence is
+  the entire user-visible explanation of the feature.
+
+Two consequences worth knowing before changing it. **A resize needs its own answer**: `NodeResizer`
+runs its own pointer gesture and never consults `nodesDraggable`, so the handles are removed
+(`CodaNodeView`'s `resizable`, `NoteCard`'s `isVisible`) rather than left to be refused after the
+card has already been drawn stretched. And **a load still fits**: opening a graph reframes the
+viewport even while locked, because the alternative — a freshly opened graph parked off-screen
+with every way of bringing it into view disabled — is the worse failure. The lock survives the
+open; it is about how you are working, not about the document.
+
+The rail's zoom and fit buttons are **ours** for this reason: React Flow disables its own at the
+zoom limits and nowhere else, so a locked canvas would still have three live buttons that move the
+viewport. See `ui/panels/ViewControls.tsx`.
+
+The store's guards are **fail-open** — one `if (frozen()) return` per action, with nothing to
+remind the author of the next structural action that the lock exists. What makes that safe is a
+partition test: `store/lock.test.ts` classifies every action on `GraphState` as canvas-editing or
+not, and a new one that is neither fails the suite until somebody decides which it is.
+
+`store/lock.test.ts` pins what the store refuses and what it deliberately still does;
+`ui/panels/lock.test.tsx` pins that every surface says so. **The gestures at the props are not
+covered anywhere**, and cannot be: jsdom dispatches no real pointer sequences and has no wheel or
+pinch. Wheel, trackpad pinch, pane drag, card drag, resize handle, socket drag and wire rewire
+each need checking by hand in a browser — inert with the lock on, working again after unlocking —
+and that check has not been run against this implementation yet.
 
 ## Automatic layout
 

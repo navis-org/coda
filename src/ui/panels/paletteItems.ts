@@ -16,6 +16,7 @@ import { downloadGraph, downloadNotebook, downloadRmd } from '../export'
 import { canExportNotebook } from '../../export/canExport'
 import { peekExportWarnings } from '../exportWarnings'
 import { appElement, toggleFullscreen } from '../fullscreen'
+import { LOCKED_HINT } from '../lockCopy'
 import { EXAMPLES } from '../../examples'
 import { plural } from '../format'
 
@@ -74,11 +75,20 @@ export interface CommandContext {
   fitSelected: () => void
 }
 
-/** Node-insertion items, optionally filtered to those that can accept a dragged type. */
-export function buildNodeItems(filter?: {
-  type: CodaType
-  from: 'source' | 'target'
-}): PaletteItem[] {
+/**
+ * Node-insertion items, optionally filtered to those that can accept a dragged type.
+ *
+ * `locked` disables every row rather than dropping them. A palette that answers "find neurons"
+ * with nothing at all reads as a broken search — a list of greyed rows saying why reads as the
+ * lock, which is what it is.
+ */
+export function buildNodeItems(
+  filter?: {
+    type: CodaType
+    from: 'source' | 'target'
+  },
+  locked = false,
+): PaletteItem[] {
   const items: PaletteItem[] = []
 
   for (const { category, defs } of nodeDefsByCategory()) {
@@ -112,7 +122,11 @@ export function buildNodeItems(filter?: {
         action: 'Add',
         group: categoryLabel(category),
         label: def.label,
-        ...(def.description ? { hint: def.description } : {}),
+        ...(locked
+          ? { hint: LOCKED_HINT, disabled: true }
+          : def.description
+            ? { hint: def.description }
+            : {}),
         nodeType: def.type,
         portId,
       })
@@ -154,6 +168,13 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
    */
   const notebookWarning = peekExportWarnings(store.graph, 'python')
   const rmdWarning = peekExportWarnings(store.graph, 'r')
+  /*
+   * The lock, on every row it covers — nothing that moves a card, restructures the graph or
+   * moves the viewport. Deliberately *not* on Run, Clear Results, Mute, Collapse, Expand,
+   * Open/Save/Share or the exports: none of those is a canvas edit, and a lock that quietly
+   * stopped a run would be a different feature. `GraphState.locked` has the full list.
+   */
+  const locked = store.locked
 
   const items: PaletteItem[] = [
     {
@@ -204,7 +225,8 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
       label: 'Undo',
       action: 'Edit',
       shortcut: '⌘Z',
-      disabled: store.past.length === 0,
+      ...(locked ? { hint: LOCKED_HINT } : {}),
+      disabled: locked || store.past.length === 0,
       perform: () => store.undo(),
     },
     {
@@ -212,7 +234,8 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
       label: 'Redo',
       action: 'Edit',
       shortcut: '⇧⌘Z',
-      disabled: store.future.length === 0,
+      ...(locked ? { hint: LOCKED_HINT } : {}),
+      disabled: locked || store.future.length === 0,
       perform: () => store.redo(),
     },
     {
@@ -220,7 +243,8 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
       label: 'Duplicate Selection',
       action: 'Edit',
       shortcut: '⌘D',
-      disabled: selection.length === 0,
+      ...(locked ? { hint: LOCKED_HINT } : {}),
+      disabled: locked || selection.length === 0,
       perform: () => store.duplicateSelection(),
     },
     {
@@ -255,7 +279,8 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
       label: 'Delete Selection',
       action: 'Edit',
       shortcut: '⌫',
-      disabled: selection.length === 0,
+      ...(locked ? { hint: LOCKED_HINT } : {}),
+      disabled: locked || selection.length === 0,
       perform: () => store.deleteNodes(selection),
     },
 
@@ -333,7 +358,8 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
       id: 'cmd:browse-nodes',
       action: 'Add',
       label: 'Browse All Nodes…',
-      hint: 'Open the node browser, with previews and category filters',
+      hint: locked ? LOCKED_HINT : 'Open the node browser, with previews and category filters',
+      disabled: locked,
       shortcut: 'Tab',
       perform: () => store.requestNodeBrowser(),
     },
@@ -355,17 +381,35 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
       id: 'cmd:fit',
       label: 'Fit View',
       action: 'View',
-      hint: 'Zoom to show the whole graph',
+      hint: locked ? LOCKED_HINT : 'Zoom to show the whole graph',
+      disabled: locked,
       perform: fitView,
     },
     {
       id: 'cmd:fit-selected',
       label: 'Fit Selected',
       action: 'View',
-      hint: selection.length ? 'Zoom to show what is selected' : 'Select a node first',
+      hint: locked
+        ? LOCKED_HINT
+        : selection.length
+          ? 'Zoom to show what is selected'
+          : 'Select a node first',
       shortcut: '§',
-      disabled: selection.length === 0,
+      disabled: locked || selection.length === 0,
       perform: fitSelected,
+    },
+    {
+      /*
+       * A toggle, so one row that says which way it goes rather than a pair. Under `View`
+       * beside the fits: what it is chiefly about is the canvas staying where you put it.
+       */
+      id: 'cmd:lock',
+      label: locked ? 'Unlock Canvas' : 'Lock Canvas',
+      action: 'View',
+      hint: locked
+        ? 'Let the canvas pan, zoom, drag and rewire again'
+        : 'Freeze the view, the cards and the wiring — params and Run carry on',
+      perform: () => store.toggleLocked(),
     },
     {
       id: 'cmd:fullscreen',

@@ -198,6 +198,28 @@ export interface GraphState {
    */
   autoLayout: boolean
   setAutoLayout(enabled: boolean): void
+  /**
+   * Canvas lock: the viewport, the cards' geometry and the graph's structure all frozen.
+   *
+   * What it stops is every *canvas* gesture and every command that would move or restructure
+   * anything — pan, zoom, drag, resize, wiring, add, delete, duplicate, arrange, auto-layout,
+   * undo, redo, and an assistant plan. What it deliberately leaves alone is everything that is
+   * not the canvas: selecting a card, editing its params, muting, collapsing, expanding a
+   * result, running, exporting, and opening another graph.
+   *
+   * **Session-only, and not part of the document.** It is not in the `.coda.json`, not in a
+   * share link and not in `localStorage`: a graph somebody sends you never arrives frozen, and
+   * a lock left on by yesterday's session is not something to rediscover by finding the canvas
+   * dead. Every reload starts unlocked.
+   *
+   * The guards below are a **backstop**, not the mechanism. Every surface that can reach one of
+   * them is disabled while this is on and says why, because a button that silently does nothing
+   * is the failure this whole feature would otherwise read as. What the guards buy is that a
+   * path somebody adds later — or one that skips the UI, as the assistant does — cannot quietly
+   * edit a locked graph.
+   */
+  locked: boolean
+  toggleLocked(): void
   /** How the layout is computed. Per-user, in `localStorage`; see `persistence.ts`. */
   layoutOptions: LayoutOptions
   setLayoutOptions(patch: Partial<LayoutOptions>): void
@@ -616,6 +638,15 @@ export const useGraphStore = create<GraphState>((set, get) => {
    */
   let gestureStart: { tag: string; graph: CodaGraph } | undefined
 
+  /**
+   * Whether the canvas is locked, and therefore whether a structural or geometric edit may land.
+   *
+   * Asked by every action `locked` names, and by none of the others — the lock is about the
+   * canvas, so a param edit, a mute or a collapse goes through untouched. Not folded into
+   * `commit`, which is exactly where it would have caught those too.
+   */
+  const frozen = () => get().locked
+
   /** Apply a graph mutation, recording history unless told otherwise. */
   function commit(
     mutate: (graph: CodaGraph) => CodaGraph,
@@ -756,6 +787,10 @@ export const useGraphStore = create<GraphState>((set, get) => {
       // touch something reads as broken.
     },
 
+    // Off on every load; the field's note says why that is the design rather than a gap.
+    locked: false,
+    toggleLocked: () => set((s) => ({ locked: !s.locked })),
+
     layoutOptions: layoutPrefs.options,
     setLayoutOptions: (patch) => {
       const options = { ...get().layoutOptions, ...patch }
@@ -776,6 +811,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     arrangeNodes: (positions) => {
+      if (frozen()) return
       commit(
         (g) => ({
           ...g,
@@ -981,6 +1017,9 @@ export const useGraphStore = create<GraphState>((set, get) => {
     // --- editing -----------------------------------------------------------
 
     addNode: (type, position) => {
+      // The empty id says "nothing was added". Every caller is gated on `locked` before it asks,
+      // so nobody reads it; what this stops is a path added later that is not.
+      if (frozen()) return ''
       const def = requireNodeDef(type)
       const node: GraphNode = {
         id: newId('n'),
@@ -1004,6 +1043,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     spliceNode: (nodeId, edgeId, moves) => {
+      if (frozen()) return
       // A drag ends auto-layout, the same reason `moveNodes` says: the position is one somebody
       // chose, and the next structural edit would otherwise put the card straight back.
       if (get().autoLayout) get().setAutoLayout(false)
@@ -1036,6 +1076,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     moveNodes: (moves, commitToHistory) => {
+      if (frozen()) return
       /*
        * A drag ends auto-layout.
        *
@@ -1062,6 +1103,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     resizeNodes: (sizes, commitToHistory) => {
+      if (frozen()) return
       const byId = new Map(sizes.map((s) => [s.id, s.size]))
       commit(
         (g) => ({
@@ -1140,6 +1182,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     duplicateSelection: () => {
+      if (frozen()) return
       const { graph, selection } = get()
       if (selection.length === 0) return
       const selected = new Set(selection)
@@ -1176,7 +1219,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     deleteNodes: (nodeIds) => {
-      if (nodeIds.length === 0) return
+      if (frozen() || nodeIds.length === 0) return
       commit((g) => removeNodes(g, nodeIds))
       set((s) => ({
         selection: s.selection.filter((id) => !nodeIds.includes(id)),
@@ -1187,11 +1230,12 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     deleteEdges: (edgeIds) => {
-      if (edgeIds.length === 0) return
+      if (frozen() || edgeIds.length === 0) return
       commit((g) => removeEdges(g, edgeIds))
     },
 
     connect: (edge) => {
+      if (frozen()) return false
       const check = get().canConnect(
         { nodeId: edge.source, portId: edge.sourceHandle },
         { nodeId: edge.target, portId: edge.targetHandle },
@@ -1216,6 +1260,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
      * and answering a miss by deleting the link would be a trap.
      */
     reconnect: (edgeId, next) => {
+      if (frozen()) return false
       const check = get().canConnect(
         { nodeId: next.source, portId: next.sourceHandle },
         { nodeId: next.target, portId: next.targetHandle },
@@ -1239,6 +1284,15 @@ export const useGraphStore = create<GraphState>((set, get) => {
     // --- assistant ---------------------------------------------------------
 
     applyAssistantPlan: (plan) => {
+      /*
+       * The one guard that answers back. Everything else the lock stops is a gesture or a menu
+       * row, and both are disabled on screen; a plan arrives from a model that cannot see the
+       * rail, so the refusal has to be something the panel can show — and `errors` is already
+       * the channel it feeds back into the conversation.
+       */
+      if (frozen()) {
+        return { ok: false, errors: ['The canvas is locked — unlock it to apply a plan.'] }
+      }
       const result = applyPlan(get().graph, plan)
       if (!result.ok) return result
 
@@ -1274,6 +1328,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     // --- history -----------------------------------------------------------
 
     undo: () => {
+      if (frozen()) return
       const { past, graph, future } = get()
       const entry = past.at(-1)
       if (!entry) return
@@ -1286,6 +1341,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     redo: () => {
+      if (frozen()) return
       const { future, graph, past } = get()
       const entry = future.at(-1)
       if (!entry) return

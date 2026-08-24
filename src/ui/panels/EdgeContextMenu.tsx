@@ -14,6 +14,7 @@ import { useRef } from 'react'
 import type { CodaGraph } from '../../core/graph'
 import { getNodeDef } from '../../core/registry'
 import { useGraphStore } from '../../store/graphStore'
+import { LOCKED_HINT } from '../lockCopy'
 import { useDismissOnOutside } from '../useDismiss'
 
 export interface EdgeContextMenuProps {
@@ -82,6 +83,10 @@ export function EdgeContextMenu({ screenPosition, edgeId, onClose }: EdgeContext
           store.deleteEdges([edgeId])
           onClose()
         }}
+        // The one item this menu has, so a locked canvas leaves a menu that only names the wire.
+        // That is the point: naming which wire is under the pointer is worth something on its own.
+        disabled={store.locked}
+        title={store.locked ? LOCKED_HINT : undefined}
       >
         Delete link <kbd>⌫</kbd>
       </button>

@@ -32,6 +32,7 @@ import {
   SPACING_RANGE,
 } from '../../layout/options'
 import { useGraphStore } from '../../store/graphStore'
+import { lockedTitle } from '../lockCopy'
 import { useDismissOnOutside } from '../useDismiss'
 
 const ALGORITHM_LABELS: Record<LayoutAlgorithm, string> = {
@@ -72,7 +73,7 @@ const DIRECTION_GLYPHS: Record<LayoutDirection, string> = {
 /** Three cards and a wire — the same thing the button does, drawn small. */
 function ArrangeIcon() {
   return (
-    <svg className="layout-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+    <svg className="rail-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
       <rect x="0.5" y="5.5" width="4" height="5" rx="1" />
       <rect x="11.5" y="1.5" width="4" height="5" rx="1" />
       <rect x="11.5" y="9.5" width="4" height="5" rx="1" />
@@ -84,7 +85,7 @@ function ArrangeIcon() {
 /** The same cards, with the arrow that says it keeps happening. */
 function AutoLayoutIcon() {
   return (
-    <svg className="layout-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+    <svg className="rail-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
       <rect x="0.5" y="5.5" width="4" height="5" rx="1" />
       <rect x="11.5" y="9.5" width="4" height="5" rx="1" />
       <path d="M4.5 8h3.5v4h3.5" strokeLinecap="round" />
@@ -106,7 +107,7 @@ function AutoLayoutIcon() {
  */
 function RoutingIcon({ routing }: { routing: EdgeRouting }) {
   return (
-    <svg className="layout-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+    <svg className="rail-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
       <rect x="0.5" y="1.5" width="4" height="4" rx="1" />
       <rect x="11.5" y="10.5" width="4" height="4" rx="1" />
       {routing === 'curved' ? (
@@ -120,7 +121,7 @@ function RoutingIcon({ routing }: { routing: EdgeRouting }) {
 
 function OptionsIcon() {
   return (
-    <svg className="layout-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+    <svg className="rail-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
       <path d="M2 4h12M2 8h12M2 12h12" strokeLinecap="round" />
       <circle cx="5" cy="4" r="1.6" data-fill="" />
       <circle cx="10.5" cy="8" r="1.6" data-fill="" />
@@ -138,6 +139,13 @@ export function LayoutControls({ onArrange }: { onArrange: () => void }) {
   const setLayoutOptions = useGraphStore((s) => s.setLayoutOptions)
   // Primitives, not the whole selection array — this only asks whether the button is scoped.
   const scoped = useGraphStore((s) => s.selection.length >= 2)
+  /*
+   * Both arranging and auto-layout move cards, so both stand down while the canvas is locked.
+   * The routing toggle does not: it changes how a wire is *drawn* and no position, so it is a
+   * restyle rather than a canvas edit. The options bubble stays open too — reading and setting a
+   * preference costs nothing while frozen — with only its own Arrange button disabled.
+   */
+  const locked = useGraphStore((s) => s.locked)
 
   const [open, setOpen] = useState(false)
   const bubbleRef = useRef<HTMLDivElement>(null)
@@ -151,7 +159,14 @@ export function LayoutControls({ onArrange }: { onArrange: () => void }) {
     <>
       <ControlButton
         onClick={onArrange}
-        title={scoped ? 'Arrange the selected nodes' : 'Arrange all nodes'}
+        disabled={locked}
+        title={
+          locked
+            ? lockedTitle('Arrange')
+            : scoped
+              ? 'Arrange the selected nodes'
+              : 'Arrange all nodes'
+        }
         aria-label={scoped ? 'Arrange the selected nodes' : 'Arrange all nodes'}
       >
         <ArrangeIcon />
@@ -159,12 +174,15 @@ export function LayoutControls({ onArrange }: { onArrange: () => void }) {
 
       <ControlButton
         onClick={() => setAutoLayout(!autoLayout)}
-        className={autoLayout ? 'layout-toggle--on' : undefined}
+        disabled={locked}
+        className={autoLayout ? 'rail-toggle--on' : undefined}
         aria-pressed={autoLayout}
         title={
-          autoLayout
-            ? 'Auto-layout is on — dragging a node turns it off'
-            : 'Re-arrange after every structural change'
+          locked
+            ? lockedTitle('Auto-layout')
+            : autoLayout
+              ? 'Auto-layout is on — dragging a node turns it off'
+              : 'Re-arrange after every structural change'
         }
         aria-label="Auto-layout"
       >
@@ -180,7 +198,7 @@ export function LayoutControls({ onArrange }: { onArrange: () => void }) {
        */}
       <ControlButton
         onClick={toggleEdgeRouting}
-        className={orthogonal ? 'layout-toggle--on' : undefined}
+        className={orthogonal ? 'rail-toggle--on' : undefined}
         aria-pressed={orthogonal}
         title={`Wires: ${ROUTING_LABELS[edgeRouting].name} — ${ROUTING_LABELS[edgeRouting].hint}`}
         aria-label={`Wire routing: ${ROUTING_LABELS[edgeRouting].name}`}
@@ -300,7 +318,7 @@ export function LayoutControls({ onArrange }: { onArrange: () => void }) {
             </label>
 
             <div className="layout-bubble__foot">
-              <button type="button" className="btn" onClick={onArrange}>
+              <button type="button" className="btn" onClick={onArrange} disabled={locked}>
                 Arrange now
               </button>
             </div>

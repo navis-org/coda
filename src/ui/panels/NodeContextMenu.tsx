@@ -3,6 +3,7 @@ import { useRef } from 'react'
 import { getNodeDef, isAnnotation } from '../../core/registry'
 import { hasHelp } from '../../help/registry'
 import { useGraphStore } from '../../store/graphStore'
+import { LOCKED_HINT } from '../lockCopy'
 import { useDismissOnOutside } from '../useDismiss'
 
 export interface NodeContextMenuProps {
@@ -108,7 +109,8 @@ export function NodeContextMenu({ screenPosition, nodeId, onClose }: NodeContext
         type="button"
         className="context-menu__item"
         onClick={act(() => store.duplicateSelection())}
-        disabled={store.selection.length === 0}
+        disabled={store.locked || store.selection.length === 0}
+        title={store.locked ? LOCKED_HINT : undefined}
       >
         Duplicate <kbd>⌘D</kbd>
       </button>
@@ -131,6 +133,8 @@ export function NodeContextMenu({ screenPosition, nodeId, onClose }: NodeContext
         type="button"
         className="context-menu__item context-menu__item--danger"
         onClick={act(() => store.deleteNodes(targets))}
+        disabled={store.locked}
+        title={store.locked ? LOCKED_HINT : undefined}
       >
         Delete <kbd>⌫</kbd>
       </button>

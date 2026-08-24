@@ -49,15 +49,17 @@ import { CodaNodeView } from './nodes/CodaNodeView'
 import { NoteCard } from './nodes/NoteCard'
 import { CodaEdge } from './CodaEdge'
 import { CommandPalette } from './panels/CommandPalette'
-import { FitSelectedControl } from './panels/FitSelectedControl'
 import { LayoutControls } from './panels/LayoutControls'
+import { LockControl } from './panels/LockControl'
+import { ViewControls } from './panels/ViewControls'
 import { EdgeContextMenu } from './panels/EdgeContextMenu'
 import { NodeBrowser } from './panels/NodeBrowser'
 import { NodeContextMenu } from './panels/NodeContextMenu'
 import type { PaletteItem } from './panels/paletteItems'
 import { buildCommandItems, buildNodeItems } from './panels/paletteItems'
 import { requestExportWarnings, useExportWarnings } from './exportWarnings'
-import { FIT_VIEW_OPTIONS, useFitSelected } from './fitView'
+import { FIT_VIEW_OPTIONS, useFitAll, useFitSelected } from './fitView'
+import { LOCKED_NOTICE } from './lockCopy'
 import { appElement, toggleFullscreen } from './fullscreen'
 import { typeColorVar } from './socketStyle'
 import { useArrange } from './useArrange'
@@ -71,6 +73,16 @@ import { useDownloads } from './useDownloads'
  * drawing a 200x150 projection into whatever box CSS produced.
  */
 const MINIMAP_SIZE = { width: 180, height: 120 }
+
+/*
+ * Module constants rather than array literals in the JSX, because React Flow diffs these three by
+ * *identity*: a fresh array per render re-runs `panZoom.update` (rebuilding d3-zoom's filters) and
+ * tears down and re-adds `useKeyPress`'s four window listeners. This canvas re-renders on every
+ * graph, selection, run-status and notice change, so that was happening constantly.
+ */
+const PAN_BUTTONS = [0, 1, 2]
+const MULTI_SELECT_KEYS = ['Meta', 'Control']
+const DELETE_KEYS = ['Delete', 'Backspace']
 
 /*
  * Two card renderers, chosen per node by `isAnnotation`. A text note has no header, no sockets
@@ -129,8 +141,23 @@ function EditorCanvas() {
   const minimapOpen = useGraphStore((s) => s.panels.minimap)
   const togglePanel = useGraphStore((s) => s.togglePanel)
 
-  const { screenToFlowPosition, fitView } = useReactFlow()
+  const { screenToFlowPosition } = useReactFlow()
+  const fitAll = useFitAll()
   const fitSelected = useFitSelected()
+  // A primitive — invariant 7. What the lock covers is written up on `GraphState.locked`.
+  const locked = useGraphStore((s) => s.locked)
+  /**
+   * Refuse a gesture the lock covers, and say so. `true` means "handled — stop here".
+   *
+   * Five call sites reach this: the node browser, the palette's pick, both pane gestures and the
+   * keyboard. Reads through `getState()` rather than the subscribed flag so the callbacks that
+   * hold it keep their identity — `openBrowser` is a dependency of the keyboard effect.
+   */
+  const refuseIfLocked = useCallback((): boolean => {
+    if (!useGraphStore.getState().locked) return false
+    setNotice(LOCKED_NOTICE)
+    return true
+  }, [setNotice])
   const { arrange, overrides: arrangeOverrides, routes: arrangeRoutes } = useArrange()
   // A primitive, so the snapshot identity check is satisfied — invariant 7.
   const edgeRouting = useGraphStore((s) => s.edgeRouting)
@@ -492,12 +519,15 @@ function EditorCanvas() {
 
   const openBrowser = useCallback(
     (screenPosition: { x: number; y: number }) => {
+      // The single gate for adding a node: Tab, ⇧A, the toolbar's + Add and the palette's
+      // `Browse All Nodes…` all arrive here, so one check covers the lot.
+      if (refuseIfLocked()) return
       setMenu(null)
       setContextMenu(null)
       setEdgeMenu(null)
       setBrowserAt(screenToFlowPosition(screenPosition))
     },
-    [screenToFlowPosition],
+    [screenToFlowPosition, refuseIfLocked],
   )
 
   /**
@@ -522,20 +552,20 @@ function EditorCanvas() {
     // `Inspector`'s `void s.runVersion` is the same idiom in a selector.
     void exportWarningsRevision
     if (!menu) return []
-    if (menu.filter) return buildNodeItems(menu.filter)
+    if (menu.filter) return buildNodeItems(menu.filter, locked)
     return [
       ...buildCommandItems({
         store: liveStore ?? useGraphStore.getState(),
-        fitView: () => void fitView({ duration: 200 }),
+        fitView: fitAll,
         fitSelected,
       }),
-      ...buildNodeItems(),
+      ...buildNodeItems(undefined, locked),
     ]
     // `liveStore` is the whole state object while the palette is open, so this recomputes
     // whenever anything changes — which is what keeps `disabled` flags honest. The revision is
     // in the list for the same reason: an export warning that lands after the palette opened
     // has to reach the row it is about.
-  }, [menu, liveStore, fitView, fitSelected, exportWarningsRevision])
+  }, [menu, liveStore, locked, fitAll, fitSelected, exportWarningsRevision])
 
   /** Run a command, or insert a node and wire it to the drag origin. */
   const handlePick = useCallback(
@@ -548,6 +578,14 @@ function EditorCanvas() {
         return
       }
       if (!item.nodeType) {
+        setMenu(null)
+        return
+      }
+
+      // The palette's node rows are disabled while locked, so this is the backstop — and the
+      // one that matters, because `addNode` answers a locked canvas with an empty id and the
+      // auto-wire below would then blame the *link* for a node that was never added.
+      if (refuseIfLocked()) {
         setMenu(null)
         return
       }
@@ -576,7 +614,7 @@ function EditorCanvas() {
       }
       setMenu(null)
     },
-    [menu, setNotice],
+    [menu, refuseIfLocked, setNotice],
   )
 
   /*
@@ -643,8 +681,8 @@ function EditorCanvas() {
   useEffect(() => {
     if (fitRequest === handledFit.current) return
     handledFit.current = fitRequest
-    void fitView({ ...FIT_VIEW_OPTIONS, duration: 240 })
-  }, [fitRequest, fitView])
+    fitAll()
+  }, [fitRequest, fitAll])
 
   // --- keyboard -----------------------------------------------------------
 
@@ -697,13 +735,24 @@ function EditorCanvas() {
       }
       if (mod && event.key.toLowerCase() === 'z') {
         event.preventDefault()
+        if (refuseIfLocked()) return
         if (event.shiftKey) useGraphStore.getState().redo()
         else useGraphStore.getState().undo()
         return
       }
       if (mod && event.key.toLowerCase() === 'd') {
         event.preventDefault()
+        if (refuseIfLocked()) return
         useGraphStore.getState().duplicateSelection()
+        return
+      }
+      /*
+       * React Flow's own delete is switched off at the prop while locked, so nothing would
+       * happen and nothing would say why. This is the half that speaks — and it is inert unless
+       * the lock is on, because unlocked this key is React Flow's to handle.
+       */
+      if (!mod && (event.key === 'Delete' || event.key === 'Backspace') && refuseIfLocked()) {
+        event.preventDefault()
         return
       }
       if (mod && event.key.toLowerCase() === 's') {
@@ -740,6 +789,7 @@ function EditorCanvas() {
        */
       if (!mod && (event.key === '§' || event.code === 'Backquote')) {
         event.preventDefault()
+        if (refuseIfLocked()) return
         fitSelected()
         return
       }
@@ -764,7 +814,7 @@ function EditorCanvas() {
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [fitSelected, openBrowser, openPalette, setNotice])
+  }, [fitSelected, openBrowser, openPalette, refuseIfLocked, setNotice])
 
   // --- render -------------------------------------------------------------
 
@@ -836,6 +886,9 @@ function EditorCanvas() {
           // node-only palette as Tab. Right-clicking a *node* keeps its own context menu.
           event.preventDefault()
           setContextMenu(null)
+          // A canvas gesture whose only purpose is adding a node, so the lock stops it outright
+          // rather than opening a menu of rows that are all greyed out.
+          if (refuseIfLocked()) return
           openPalette(
             {
               x: 'clientX' in event ? event.clientX : 0,
@@ -846,9 +899,9 @@ function EditorCanvas() {
         }}
         onDoubleClick={(event) => {
           // Only the empty pane opens the palette; nodes use double-click to rename.
-          if ((event.target as HTMLElement).classList.contains('react-flow__pane')) {
-            openPalette({ x: event.clientX, y: event.clientY }, ADD_PREFIX)
-          }
+          if (!(event.target as HTMLElement).classList.contains('react-flow__pane')) return
+          if (refuseIfLocked()) return
+          openPalette({ x: event.clientX, y: event.clientY }, ADD_PREFIX)
         }}
         onPaneClick={() => {
           setMenu(null)
@@ -865,16 +918,29 @@ function EditorCanvas() {
          * selection box. Panning is the far more frequent action, so it gets the bare
          * gesture. Middle and right drag pan too, for trackpad-free mice.
          */
-        panOnDrag={[0, 1, 2]}
+        panOnDrag={locked ? false : PAN_BUTTONS}
         selectionOnDrag={false}
+        // Box-select survives the lock: selecting changes nothing, and the inspector, the help
+        // overlay and every viewer are still worth reaching on a frozen canvas.
         selectionKeyCode="Shift"
         // Shift is taken by box-select, so additive click-selection uses the modifiers.
-        multiSelectionKeyCode={['Meta', 'Control']}
+        multiSelectionKeyCode={MULTI_SELECT_KEYS}
         // Frees Space for the command palette (React Flow binds it to pan by default).
         panActivationKeyCode={null}
         panOnScroll={false}
         zoomOnDoubleClick={false}
-        deleteKeyCode={['Delete', 'Backspace']}
+        /*
+         * The lock, at the props React Flow reads before any handler of ours runs — the drag,
+         * the wheel, the pinch, the socket drag, the wire rewire and the Delete key. Everything
+         * else it covers is a button or a store guard; these six are gestures the library owns
+         * outright, and this is the only place they can be refused.
+         */
+        zoomOnScroll={!locked}
+        zoomOnPinch={!locked}
+        nodesDraggable={!locked}
+        nodesConnectable={!locked}
+        edgesReconnectable={!locked}
+        deleteKeyCode={locked ? null : DELETE_KEYS}
         proOptions={{ hideAttribution: true }}
         fitView
         fitViewOptions={FIT_VIEW_OPTIONS}
@@ -885,15 +951,26 @@ function EditorCanvas() {
           size={1.4}
           color="var(--canvas-dot)"
         />
-        <Controls showInteractive={false} position="bottom-left">
-          {/* Before the layout buttons: it belongs with Zoom and Fit View, which it follows. */}
-          <FitSelectedControl />
+        {/*
+         * Every button in the rail is ours — see `ViewControls` for why React Flow's own zoom
+         * and fit are switched off rather than left to sit above them. Reading order is view,
+         * then layout, then the lock that governs both.
+         */}
+        <Controls
+          showZoom={false}
+          showFitView={false}
+          showInteractive={false}
+          position="bottom-left"
+        >
+          <ViewControls />
           <LayoutControls onArrange={arrange} />
+          <LockControl />
         </Controls>
         {minimapOpen && (
           <MiniMap
-            pannable
-            zoomable
+            // The minimap moves the viewport too, which is the whole of what it is for.
+            pannable={!locked}
+            zoomable={!locked}
             position="bottom-right"
             nodeColor={(node) => {
               const graphNode = (node.data as CodaNodeData | undefined)?.node
@@ -953,9 +1030,13 @@ function EditorCanvas() {
       {browserAt && (
         <NodeBrowser
           onPick={(nodeType) => {
-            useGraphStore
-              .getState()
-              .addNode(nodeType, { x: browserAt.x - 12, y: browserAt.y - 18 })
+            // `openBrowser` refuses to open while locked, so reaching here means the lock came
+            // on with the browser already up. Same backstop as `handlePick`.
+            if (!refuseIfLocked()) {
+              useGraphStore
+                .getState()
+                .addNode(nodeType, { x: browserAt.x - 12, y: browserAt.y - 18 })
+            }
             setBrowserAt(null)
           }}
           onClose={() => setBrowserAt(null)}

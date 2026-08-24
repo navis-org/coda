@@ -18,6 +18,7 @@ import { useErrorCount, useGraphStore, useStaleCount } from '../../store/graphSt
 import { pickGraphFile } from '../../store/persistence'
 import { downloadGraph, downloadNotebook, downloadRmd } from '../export'
 import { formatAgo, plural } from '../format'
+import { LOCKED_HINT, lockedTitle } from '../lockCopy'
 import { appElement, toggleFullscreen, useIsFullscreen } from '../fullscreen'
 import { EdgeSetPanel } from './EdgeSetPanel'
 import { SourcesPanel } from './SourcesPanel'
@@ -47,6 +48,9 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
   const requestShare = useGraphStore((s) => s.requestShare)
   const undo = useGraphStore((s) => s.undo)
   const redo = useGraphStore((s) => s.redo)
+  // Both read the lock: history is a graph edit like any other, and the canvas being frozen is
+  // the reason a lit ↶ would then do nothing. Primitives — invariant 7.
+  const locked = useGraphStore((s) => s.locked)
   const canUndo = useGraphStore((s) => s.past.length > 0)
   const canRedo = useGraphStore((s) => s.future.length > 0)
 
@@ -205,8 +209,8 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
         type="button"
         className="btn btn--ghost"
         onClick={undo}
-        disabled={!canUndo}
-        title="Undo (⌘Z)"
+        disabled={locked || !canUndo}
+        title={locked ? lockedTitle('Undo') : 'Undo (⌘Z)'}
       >
         ↶
       </button>
@@ -214,8 +218,8 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
         type="button"
         className="btn btn--ghost"
         onClick={redo}
-        disabled={!canRedo}
-        title="Redo (⇧⌘Z)"
+        disabled={locked || !canRedo}
+        title={locked ? lockedTitle('Redo') : 'Redo (⇧⌘Z)'}
       >
         ↷
       </button>
@@ -291,7 +295,13 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
         Clear
       </button>
 
-      <button type="button" className="btn" onClick={onOpenBrowser} title="Browse nodes (Tab)">
+      <button
+        type="button"
+        className="btn"
+        onClick={onOpenBrowser}
+        disabled={locked}
+        title={locked ? LOCKED_HINT : 'Browse nodes (Tab)'}
+      >
         + Add <span className="btn__kbd">Tab</span>
       </button>
 
