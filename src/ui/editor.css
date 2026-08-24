@@ -103,15 +103,28 @@
  * `currentColor`. The layout icons are line drawings, and inheriting that fill turns each
  * outlined card into a filled block — a presentation attribute of `fill="none"` loses to a
  * stylesheet. Hence the explicit reset, with `data-fill` for the few parts that are solid.
+ *
+ * `.rail-icon` is the same reset under a name that does not claim to be about layout: Fit
+ * Selected is a view button that happens to be drawn the same way.
  */
-.react-flow__controls-button .layout-icon {
+.react-flow__controls-button .layout-icon,
+.react-flow__controls-button .rail-icon {
   fill: none;
   stroke: currentColor;
   stroke-width: 1.2;
 }
-.react-flow__controls-button .layout-icon [data-fill] {
+.react-flow__controls-button .layout-icon [data-fill],
+.react-flow__controls-button .rail-icon [data-fill] {
   fill: currentColor;
   stroke: none;
+}
+
+/*
+ * React Flow dims a disabled rail button with `fill-opacity`, which does nothing at all to a
+ * stroked line drawing — Fit Selected would look live with nothing selected. Dim the button.
+ */
+.react-flow__controls-button:disabled {
+  opacity: 0.45;
 }
 
 /*

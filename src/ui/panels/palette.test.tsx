@@ -45,7 +45,11 @@ beforeEach(() => {
 afterEach(cleanup)
 
 function commands(): PaletteItem[] {
-  return buildCommandItems({ store: useGraphStore.getState(), fitView: () => {} })
+  return buildCommandItems({
+    store: useGraphStore.getState(),
+    fitView: () => {},
+    fitSelected: () => {},
+  })
 }
 
 function byId(items: PaletteItem[], id: string): PaletteItem {
@@ -546,7 +550,11 @@ describe('breadcrumbs on the real item list', () => {
    */
   function rowFor(label: string): string {
     const all = [
-      ...buildCommandItems({ store: useGraphStore.getState(), fitView: () => {} }),
+      ...buildCommandItems({
+        store: useGraphStore.getState(),
+        fitView: () => {},
+        fitSelected: () => {},
+      }),
       ...buildNodeItems(),
     ]
     render(

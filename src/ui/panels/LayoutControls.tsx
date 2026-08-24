@@ -1,10 +1,10 @@
 /**
  * The four layout buttons on the canvas controls rail.
  *
- * They live in the rail beside Zoom In / Zoom Out / Fit View rather than in the toolbar because
- * that is where the other things that move the *view* are, and because a control whose effect is
- * on the canvas belongs over the canvas. React Flow's `<Controls>` renders its children as
- * further `ControlButton`s, so this is four of those and a popover.
+ * They live in the rail after Zoom In / Zoom Out / Fit View / Fit Selected rather than in the
+ * toolbar because that is where the other things that move the *view* are, and because a control
+ * whose effect is on the canvas belongs over the canvas. React Flow's `<Controls>` renders its
+ * children as further `ControlButton`s, so this is four of those and a popover.
  *
  *   ⌗  arrange now         one pass, undoable, selection-aware
  *   ⟳  auto-layout         a mode; a drag or an open turns it off

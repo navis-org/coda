@@ -129,6 +129,7 @@ Moved verbatim out of `CLAUDE.md`.
 | `nodes/lib/pathOps.test.ts`              | the bidirectional search, the feed-forward prune, bottleneck ranking, and what truncation admits                                 |
 | `nodes/query/paths.test.ts`              | the node end to end, and that the collapse reaches the _source_ rather than relabelling after                                    |
 | `ui/panels/layoutControls.test.tsx`      | the four rail buttons, the bubble, what clears the auto-layout toggle, and routes dropping on a drag but not a param edit        |
+| `ui/panels/fitSelected.test.tsx`         | Fit Selected: which ids the rail button, the `§` key and the palette command each ask React Flow to frame, and that an empty selection asks for nothing |
 | `ui/viewers/scatterPlot.test.ts`         | the scales and the log drop, the point budget's stride, the trend in transformed space, and a lasso catching rows nothing drew   |
 | `ui/viewers/scatterDraw.test.ts`         | marker geometry, the colour+shape batching, and the exported SVG                                                                 |
 | `ui/viewers/scatterViewer.test.tsx`      | the scatter caption: every admission it makes, and which legend keys stand down in a card                                        |

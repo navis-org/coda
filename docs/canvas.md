@@ -45,9 +45,35 @@ landing wholly inside the pane at its own zoom, with no console errors. `store/f
 covers which loads ask; `ui/fitOnLoad.test.tsx` covers that the request is spent, by pinning
 `useNodesInitialized` to the `false` it really returns and asserting `fitView` is called anyway.
 
+## Fitting the selection
+
+`ui/fitView.ts` holds `FIT_VIEW_OPTIONS` — the framing React Flow's initial fit, a load's fit and
+Fit Selected all share — and `useFitSelected`, which the three surfaces that offer it all call:
+the rail button (`ui/panels/FitSelectedControl.tsx`), the `§` key, and the `View ▸ Fit Selected`
+palette command.
+
+**An unmeasurable selection is checked for before the call rather than left to React Flow.**
+`fitView({ nodes })` intersects the ids with the nodes it has measured; finding none, it fits a
+zero-sized box — bounds degrade to `{0, 0, 0, 0}`, the zoom clamps to `maxZoom` and the camera
+lands on the flow origin, with the graph nowhere on screen. So an empty set does nothing at all,
+the button is disabled with nothing selected, and the key press is a no-op. A selected card is a
+rendered card, so this is the pathological case (a stale id, a hidden node), not the daily one.
+
+The key is matched by **position** as well as by what it prints — `event.code === 'Backquote'`
+alongside `event.key === '§'` — because the physical key at the top left prints `§` on an ISO Mac
+layout, `` ` `` on a US one and `^` on a German one. Nothing else in the app wants it, and every
+bare letter near the canvas is either taken (`f`, `i`, `m`, `h`) or one shift away from something
+else.
+
+The button is disabled rather than hidden, so the rail does not change height under the pointer.
+Its icon takes `.rail-icon`, which is `.layout-icon`'s fill reset under a name that does not claim
+to be about layout; React Flow's own disabled styling is `fill-opacity`, which does nothing to a
+stroked line drawing, so `editor.css` dims the whole button instead. `ui/panels/fitSelected.test.tsx`
+pins which ids each surface asks for, and that the empty case asks for nothing.
+
 ## Automatic layout
 
-Three buttons in the canvas controls rail, beside Zoom In / Zoom Out / Fit View
+Four buttons in the canvas controls rail, after Zoom In / Zoom Out / Fit View / Fit Selected
 (`ui/panels/LayoutControls.tsx`): **arrange**, **auto-layout**, and an **options** bubble.
 ELK Layered via `elkjs`. The headless half is `src/layout/`; only the buttons and the pass
 driver (`ui/useArrange.ts`) are React.

@@ -70,6 +70,8 @@ export function paletteSearchText(item: PaletteItem): string {
 export interface CommandContext {
   store: GraphState
   fitView: () => void
+  /** Frames the current selection; does nothing with nothing selected. See `ui/fitView.ts`. */
+  fitSelected: () => void
 }
 
 /** Node-insertion items, optionally filtered to those that can accept a dragged type. */
@@ -122,7 +124,7 @@ export function buildNodeItems(filter?: {
 
 /** Commands, in the order they should appear when the query is empty. */
 export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
-  const { store, fitView } = ctx
+  const { store, fitView, fitSelected } = ctx
   const selection = store.selection
   const single = selection.length === 1 ? selection[0] : undefined
   const staleCount = store.graph.nodes.filter((n) => store.needsRun(n.id)).length
@@ -355,6 +357,15 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
       action: 'View',
       hint: 'Zoom to show the whole graph',
       perform: fitView,
+    },
+    {
+      id: 'cmd:fit-selected',
+      label: 'Fit Selected',
+      action: 'View',
+      hint: selection.length ? 'Zoom to show what is selected' : 'Select a node first',
+      shortcut: '§',
+      disabled: selection.length === 0,
+      perform: fitSelected,
     },
     {
       id: 'cmd:fullscreen',

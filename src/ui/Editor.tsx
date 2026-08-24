@@ -49,6 +49,7 @@ import { CodaNodeView } from './nodes/CodaNodeView'
 import { NoteCard } from './nodes/NoteCard'
 import { CodaEdge } from './CodaEdge'
 import { CommandPalette } from './panels/CommandPalette'
+import { FitSelectedControl } from './panels/FitSelectedControl'
 import { LayoutControls } from './panels/LayoutControls'
 import { EdgeContextMenu } from './panels/EdgeContextMenu'
 import { NodeBrowser } from './panels/NodeBrowser'
@@ -56,17 +57,11 @@ import { NodeContextMenu } from './panels/NodeContextMenu'
 import type { PaletteItem } from './panels/paletteItems'
 import { buildCommandItems, buildNodeItems } from './panels/paletteItems'
 import { requestExportWarnings, useExportWarnings } from './exportWarnings'
+import { FIT_VIEW_OPTIONS, useFitSelected } from './fitView'
 import { appElement, toggleFullscreen } from './fullscreen'
 import { typeColorVar } from './socketStyle'
 import { useArrange } from './useArrange'
 import { useDownloads } from './useDownloads'
-
-/**
- * Framing for both fits: React Flow's own initial one and the one a load asks for. Shared so a
- * freshly opened graph is framed exactly as the first one was, and `maxZoom: 1` so a two-node
- * graph is not blown up to fill a monitor.
- */
-const FIT_VIEW_OPTIONS = { padding: 0.22, maxZoom: 1 }
 
 /**
  * Minimap size.
@@ -135,6 +130,7 @@ function EditorCanvas() {
   const togglePanel = useGraphStore((s) => s.togglePanel)
 
   const { screenToFlowPosition, fitView } = useReactFlow()
+  const fitSelected = useFitSelected()
   const { arrange, overrides: arrangeOverrides, routes: arrangeRoutes } = useArrange()
   // A primitive, so the snapshot identity check is satisfied — invariant 7.
   const edgeRouting = useGraphStore((s) => s.edgeRouting)
@@ -531,6 +527,7 @@ function EditorCanvas() {
       ...buildCommandItems({
         store: liveStore ?? useGraphStore.getState(),
         fitView: () => void fitView({ duration: 200 }),
+        fitSelected,
       }),
       ...buildNodeItems(),
     ]
@@ -538,7 +535,7 @@ function EditorCanvas() {
     // whenever anything changes — which is what keeps `disabled` flags honest. The revision is
     // in the list for the same reason: an export warning that lands after the palette opened
     // has to reach the row it is about.
-  }, [menu, liveStore, fitView, exportWarningsRevision])
+  }, [menu, liveStore, fitView, fitSelected, exportWarningsRevision])
 
   /** Run a command, or insert a node and wire it to the drag origin. */
   const handlePick = useCallback(
@@ -735,6 +732,18 @@ function EditorCanvas() {
         return
       }
       /*
+       * The key at the top left of the keyboard — `§` on this machine's layout, `` ` `` on a US
+       * one, `^` on a German one — so it is matched by **position** (`code`) as well as by what
+       * it prints. Nothing else in the app wants it, and every bare letter near the canvas is
+       * either taken or one shift away from something else. Unqualified, like `f` and `i`: it is
+       * about the view, and framing the selection is the thing you want right after selecting.
+       */
+      if (!mod && (event.key === '§' || event.code === 'Backquote')) {
+        event.preventDefault()
+        fitSelected()
+        return
+      }
+      /*
        * `/` rather than a letter, and unqualified. Every bare letter near the canvas is either
        * taken (`f`, `i`, `m`, `h`) or one shift away from something else — `a` would sit beside
        * `⇧A` for the node browser and mean something entirely different. `/` is the universal
@@ -755,7 +764,7 @@ function EditorCanvas() {
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [openBrowser, openPalette, setNotice])
+  }, [fitSelected, openBrowser, openPalette, setNotice])
 
   // --- render -------------------------------------------------------------
 
@@ -877,6 +886,8 @@ function EditorCanvas() {
           color="var(--canvas-dot)"
         />
         <Controls showInteractive={false} position="bottom-left">
+          {/* Before the layout buttons: it belongs with Zoom and Fit View, which it follows. */}
+          <FitSelectedControl />
           <LayoutControls onArrange={arrange} />
         </Controls>
         {minimapOpen && (
