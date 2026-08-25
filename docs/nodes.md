@@ -284,9 +284,12 @@ undetectable has to be fixed rather than configured.
   the card's error channel once, at import, rather than becoming a permanent badge — it is a fact
   about the import, not about the node's configuration.
 
-**The ceiling is checked against `file.size` before a byte is read** (`MAX_UPLOAD_BYTES`, 50 MB),
-which is the same call `pivotTable` makes when it checks label cardinalities rather than the array
-it is about to allocate. By the time a table exists the tab has already stalled.
+**Both size checks are made against `file.size` before a byte is read**, which is the same call
+`pivotTable` makes when it checks label cardinalities rather than the array it is about to
+allocate. By the time a table exists the tab has already stalled. Two tiers, because "large for a
+spreadsheet" and "too large for a browser" turned out to be two orders of magnitude apart:
+`UPLOAD_WARN_BYTES` (50 MB) says the parse will take a moment and reads the file, and
+`MAX_UPLOAD_BYTES` (200 MB) is one of the few outright refusals left — see [limits.md](limits.md).
 
 ### The two controls
 
@@ -1088,7 +1091,9 @@ pruning, kills anything that cannot reach a target in the hops that remain.
 wrong first. Eight layers of nine nodes is five million routes, each an array. Worse, with no
 shortlist there is no _bound_, so the search degenerates into the full enumeration the
 branch-and-bound exists to avoid — the first version of this hung the test run rather than
-returning slowly. `MAX_PATHS_KEPT` caps it and `truncated` says so. The shortlist is a heap
+returning slowly. `MAX_PATHS_KEPT` (50,000) caps it and `truncated` says so — on the card as well now, through
+`ctx.warn`, since a truncated ranking is "the strongest found" wearing the label "the
+strongest" and a progress note is gone by the next repaint. The shortlist is a heap
 keyed by the same comparator the final sort uses, because it is consulted on every branch: a
 sorted array re-sorted per insertion is what made the `topN: 0` case quadratic.
 

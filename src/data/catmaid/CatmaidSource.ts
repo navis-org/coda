@@ -19,6 +19,7 @@
  *     the one place this backend needs a ceiling the others do not.
  */
 
+import { describeDuration } from '../../core/limits'
 import { ID_COLUMN_NAME, numericIds } from '../../core/ids'
 import type {
   CellValue,
@@ -96,14 +97,15 @@ const ANNOTATION_CHUNK = 2000
 const SKELETON_CONCURRENCY = 8
 
 /**
- * The most skeletons one request will fetch.
+ * Where a skeleton request starts saying how long it will be.
  *
  * Set by transfer rather than by draw cost: 200 neurons is roughly 200 MB uncompressed and a
- * couple of minutes. It is far below the 500 a source publishing ready-made skeletons allows and
- * far above CAVE's graphene-mesh 20, which is the honest middle for a payload this size. The
- * ceiling moves the day the deployment turns on gzip — see `docs/catmaid_vfb.md`.
+ * couple of minutes. That was a refusal, on the reasoning that a couple of minutes is too long —
+ * which is not a call this layer gets to make for somebody with a tracing question about four
+ * hundred. So it says the number of minutes instead, and fetches. The estimate moves the day the
+ * deployment turns on gzip — see `docs/catmaid_vfb.md`.
  */
-export const MAX_CATMAID_SKELETONS = 200
+export const CATMAID_SKELETON_WARN = 200
 
 const CATMAID_CAPABILITIES: SourceCapabilities = {
   rawQuery: false,
@@ -613,11 +615,13 @@ export class CatmaidSource implements DataSource {
     const projectId = this.projectId(req.datasetId)
     const options = req.signal ? { signal: req.signal } : {}
     const ids = numericIds(req.neuronIds)
-    if (ids.length > MAX_CATMAID_SKELETONS) {
-      throw new Error(
-        `${ids.length} skeletons is above this backend's ceiling of ${MAX_CATMAID_SKELETONS}. ` +
-          `CATMAID serves densely traced skeletons uncompressed — roughly a megabyte each — so ` +
-          `this is a transfer limit rather than a drawing one. Narrow the selection upstream.`,
+    if (ids.length > CATMAID_SKELETON_WARN) {
+      // A megabyte each, eight at a time on somebody's community server: ~0.6 s a skeleton.
+      req.onWarn?.(
+        `${ids.length.toLocaleString()} skeletons from this CATMAID is around ` +
+          `${ids.length} MB and ${describeDuration(ids.length * 0.6)}. CATMAID serves densely ` +
+          `traced skeletons uncompressed, so this is a transfer cost rather than a drawing one, ` +
+          `and it is somebody's community server at the other end. Fetching anyway.`,
       )
     }
 

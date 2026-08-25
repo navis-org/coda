@@ -12,6 +12,8 @@
  * `tableOps.test.ts` asserts the agreement for each op.
  */
 
+import type { Warner } from '../../core/limits'
+import { formatBytes, refuseIfOverCrashFloor, warnOverThreshold } from '../../core/limits'
 import type { ColumnSchema, DType, TableSchema } from '../../core/types'
 import {
   column,
@@ -1533,23 +1535,35 @@ export function joinTables(left: TableValue, right: TableValue, spec: JoinSpec):
 // ---------------------------------------------------------------------------
 
 /**
- * How many distinct values the Columns field may have, and how many cells the result may be.
+ * Where a pivot starts saying what its shape costs, and where it stops being possible at all.
  *
  * A pivot's Columns field is by construction the *small* axis — every distinct value becomes a
  * column of the wide table and a column of the heatmap — so a high-cardinality field there is
- * always a mistake rather than an ambitious query, and it is a mistake that costs quadratic
- * memory before anything is drawn.
+ * usually a mistake rather than an ambitious query, and it is a mistake that costs quadratic
+ * memory before anything is drawn. "Usually", though, is why these are two tiers now rather
+ * than one: a 6,000-column connectivity matrix over a whole optic lobe is a real thing to want,
+ * and the old constants refused it in the same breath as they caught a misconfigured picker.
  *
- * Two ceilings because they catch different mistakes. A 2 × 1,000,000 pivot is only two
+ * Two thresholds because they catch different mistakes. A 2 × 1,000,000 pivot is only two
  * million cells and still produces a million-column table that `matrixToTable` would build as
  * a million JS arrays.
  *
- * The numbers are what a browser can hold, not a preference, which is why they are constants
- * rather than params — the same standing as `MAX_NEURONS` and the network viewer's node cap.
- * At the cell ceiling the result is 16 MB of Float64, plus the wide table beside it.
+ * The floors are the exception this file's guard rails keep: the accumulators are single
+ * allocations sized by the product of two independently-resolved column pickers, so past
+ * `CRASH_FLOOR_CELLS` there is no result to warn about. That is the shape of the 9 GB incident
+ * in `docs/gotchas.md` — and note that the *fix* for it was `resolveColumn` keeping a chosen
+ * column, not this check.
  */
-export const MAX_PIVOT_COLUMNS = 2_000
-export const MAX_PIVOT_CELLS = 2_000_000
+export const PIVOT_COLUMNS_WARN = 2_000
+export const PIVOT_CELLS_WARN = 2_000_000
+
+/**
+ * A separate floor from the cell one because a wide pivot is expensive in a way cells do not
+ * capture: `matrixToTable` builds one JS array *per column*, each with its own header entry in
+ * the schema, so 100,000 columns is 100,000 objects before a single value is written. At the
+ * cell floor that shape is only 670 rows tall, which is not a table anybody asked for.
+ */
+export const MAX_PIVOT_COLUMNS = 100_000
 
 /**
  * Long table -> labelled matrix.
@@ -1573,6 +1587,8 @@ export function pivotTable(
   columnsColumn: string,
   valueColumn: string | undefined,
   agg: AggFn,
+  /** Where a shape worth a sentence goes. `SILENT` for a caller with nobody to tell. */
+  ctx: Warner,
 ): MatrixValue {
   if (!findColumn(table.schema, indexColumn))
     throw new Error(`Row column "${indexColumn}" not found`)
@@ -1593,17 +1609,33 @@ export function pivotTable(
   if (colLabels.length > MAX_PIVOT_COLUMNS) {
     throw new Error(
       `"${columnsColumn}" has ${colLabels.length.toLocaleString()} distinct values, so this ` +
-        `pivot would be that many columns wide (limit ${MAX_PIVOT_COLUMNS.toLocaleString()}). ` +
-        'Columns should be the small field — a side, a status, an ROI. Group or filter first.',
+        `pivot would be that many columns wide. Past ` +
+        `${MAX_PIVOT_COLUMNS.toLocaleString()} columns the wide table is that many separate ` +
+        `arrays and there is no result on the other side of it. Columns should be the small ` +
+        `field — a side, a status, an ROI. Group or filter first.`,
     )
   }
-  if (size > MAX_PIVOT_CELLS) {
-    throw new Error(
-      `${rowLabels.length.toLocaleString()} rows × ${colLabels.length.toLocaleString()} ` +
-        `columns is ${size.toLocaleString()} cells, over the ` +
-        `${MAX_PIVOT_CELLS.toLocaleString()} a pivot will build. Narrow "${indexColumn}" or ` +
-        `"${columnsColumn}" upstream.`,
-    )
+  refuseIfOverCrashFloor(
+    `A ${rowLabels.length.toLocaleString()} x ${colLabels.length.toLocaleString()} pivot`,
+    size * 8,
+  )
+  if (colLabels.length > PIVOT_COLUMNS_WARN) {
+    warnOverThreshold(ctx, {
+      count: colLabels.length,
+      threshold: PIVOT_COLUMNS_WARN,
+      unit: `distinct values in "${columnsColumn}"`,
+      control: 'the width a pivot is usually meant to have',
+      cost: 'Columns is the small axis by construction — a side, a status, an ROI — and every distinct value is a column of the wide table beside the matrix.',
+    })
+  }
+  if (size > PIVOT_CELLS_WARN) {
+    warnOverThreshold(ctx, {
+      count: size,
+      threshold: PIVOT_CELLS_WARN,
+      unit: `cells (${rowLabels.length.toLocaleString()} x ${colLabels.length.toLocaleString()})`,
+      control: 'the size a pivot is usually meant to have',
+      cost: `That is ${formatBytes(size * 8)} of Float64, plus the wide table beside it.`,
+    })
   }
 
   const rowIndex = new Map(rowLabels.map((l, i) => [l, i]))

@@ -580,9 +580,11 @@ every run at 8 and 16 returned all 40. `mapWithConcurrency` turns a failed neuro
 `undefined` indistinguishable from a neuron that genuinely has no skeleton, so the missing ones
 do not announce themselves.
 
-`MAX_L2_SKELETON_NEURONS` is 100 — far above `MAX_MESH_NEURONS`' 20, because a skeleton is one
-chunk-graph read where a graphene mesh is several hundred requests, and far below the 500 a
-source publishing ready-made skeletons allows.
+`L2_SKELETON_WARN` is 100 — far above `MESH_WARN_NEURONS`' 20, because a skeleton is one
+chunk-graph read where a graphene mesh is several hundred requests, and far below what a source
+publishing ready-made skeletons has anything to say about. It **warns and builds** rather than
+refusing: every FlyWire question of any size arrives on this route, so refusing to pay its cost
+was refusing the dataset. See [limits.md](limits.md).
 
 **Points come out in visit order, so a parent always precedes its child.** That is the contract
 `SkeletonGeometry.parents` states and that `neuprint/decode.ts` does real work to honour;
@@ -678,10 +680,12 @@ lists supervoxel fragments at full resolution, where neuPrint's multi-resolution
 a handful at a chosen LOD. Three constants follow from that, and each is a measurement rather
 than a guess:
 
-- **`MAX_MESH_NEURONS` is 20**, against the Skeletons node's shared 500. Enforced in the *source*
-  rather than on the node, because it is a fact about graphene: the same Meshes node against
-  neuPrint is fine at 500. (A per-source ceiling on the seam is the honest fix and is a later
-  phase; the refusal names the number and the reason meanwhile.)
+- **`MESH_WARN_NEURONS` is 20**, against the shared `MAX_NEURONS` of 10,000. Said by the
+  *source* rather than by the node, because it is a fact about graphene: the same Meshes node
+  against neuPrint has nothing to remark on. It reaches the card through
+  `GeometryRequest.onWarn` — which is the per-source seam the old note here wanted, arrived at
+  from the other direction. It was a refusal until it became clear that twenty is not a
+  scientific quantity of neurons; the fetch now says what it will take and goes.
 - **`FRAGMENT_CONCURRENCY` is 32.** The work is latency, not bytes — 492 fragments averaging
   2.4 kB — so this is the number that decides the wait: 18.9 s at 12, 13.3 s at 32, 11.3 s at 64.
   Past 32 the gain is small and it is a lot of parallel requests at one host. Measured from Node,
@@ -940,9 +944,10 @@ gets its third consumer.
 
 **Skeletons are the most expensive here.** 0.9–1.3 MB each, and **the server does not gzip** —
 verified, byte-identical with and without `Accept-Encoding`. One antennal-lobe PN is 16,840 nodes
-and a large descending neuron 64,385, where a CAVE L2 skeleton is ~150. `MAX_CATMAID_SKELETONS` is
-200 at `SKELETON_CONCURRENCY` 8, which is a *transfer* ceiling rather than a drawing one and the
-refusal says so. It moves the day the deployment turns on gzip.
+and a large descending neuron 64,385, where a CAVE L2 skeleton is ~150. `CATMAID_SKELETON_WARN`
+is 200 at `SKELETON_CONCURRENCY` 8, which is a *transfer* cost rather than a drawing one and the
+warning says so, in minutes, before fetching the set anyway. It moves the day the deployment
+turns on gzip.
 
 **Coordinates are already nanometres**, and volumes share the frame with skeletons — verified by
 bbox cross-check, and again in `live.test.ts` by the rule CAVE's mesh-encloses-synapses assertion
@@ -1092,11 +1097,12 @@ from the skeleton it should wrap. `neuprint/units.ts` scales the neuPrint side u
 `Meta.voxelSize`, so `cableLength` is in nm and skeleton coordinates no longer match the raw
 API response. That is the trade, and it is checked: a mesh bbox must enclose its skeleton's.
 
-**`Max neurons` bounds requests; `Detail` bounds weight; `maxBytesPerBody` bounds one neuron.**
+**`Warn above` is about requests; `Detail` bounds weight; `maxBytesPerBody` bounds one neuron.**
 Three different guard rails. Conflating the first two is how the mesh limit ended up at 25 — a
 number from before levels of detail existed, which refused thirty neurons that would have
-arrived as a few hundred kilobytes. All three morphology nodes now share the `MAX_NEURONS`
-ceiling.
+arrived as a few hundred kilobytes. All three morphology nodes now share `MAX_NEURONS`, at
+10,000, and it is a warning threshold rather than a ceiling — the control was renamed from "Max
+neurons" when it stopped refusing, since that is the one way it could lie about what it does.
 
 The third exists for thumbnails, and it is needed because **even the coarsest level has a
 2000× spread**. Sampled across hemibrain, the coarsest level is 264 bytes at the median, 14 kB

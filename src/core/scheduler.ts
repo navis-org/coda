@@ -87,6 +87,15 @@ interface CacheEntry {
    * not run and anything recorded in run state would be gone.
    */
   fetchedAt?: number
+  /**
+   * What `ctx.warn` said about this result, in the order it was said.
+   *
+   * Here rather than in `NodeRunInfo` for `fetchedAt`'s reason, and it matters more: a caveat
+   * that expired on the next unrelated run would leave the caveated result on screen with
+   * nothing beside it. Absent when the node warned about nothing, so the common case allocates
+   * nothing.
+   */
+  warnings?: readonly string[]
 }
 
 /** Shared instance for nodes with no recorded state — see `Scheduler.info`. */
@@ -137,6 +146,16 @@ export class Scheduler {
    * Dropped when the node settles, which is what makes that precedence safe to state so simply.
    */
   private previews = new Map<string, Record<string, Value>>()
+  /**
+   * Warnings raised by the node currently executing, before there is a cache entry to hold them.
+   *
+   * The point of `ctx.warn` is that it is heard *while* the work runs — "4,000 skeletons is
+   * about four minutes" is only useful next to a Cancel button — and the entry that keeps it
+   * afterwards does not exist until the node returns. So: copied into the entry on success and
+   * dropped either way, since a failed run's caveat would sit under an error message explaining
+   * something else.
+   */
+  private liveWarnings = new Map<string, string[]>()
   private abort: AbortController | undefined
   /** Bumped on every run; results from a superseded run are discarded. */
   private generation = 0
@@ -283,6 +302,20 @@ export class Scheduler {
     return this.cache.get(nodeId)?.fetchedAt
   }
 
+  /**
+   * What this node said through `ctx.warn` about the result it is holding, as one string.
+   *
+   * Joined rather than handed over as the array, so the snapshot is a primitive and a selector
+   * over it is stable by value (invariant 7) — the same trick `error` gets for free by being a
+   * string already. The live map wins over the entry: while a node runs, what it has just said
+   * is newer than whatever its last result came with.
+   */
+  warning(nodeId: string): string | undefined {
+    const live = this.liveWarnings.get(nodeId)
+    const held = live ?? this.cache.get(nodeId)?.warnings
+    return held && held.length > 0 ? held.join(' ') : undefined
+  }
+
   // -------------------------------------------------------------------------
   // Execution
   // -------------------------------------------------------------------------
@@ -425,6 +458,16 @@ export class Scheduler {
         // Collected per execution rather than on the context object, so a node cannot read back
         // what it reported and nothing survives into the next run.
         let fetchedAt: number | undefined
+        /*
+         * The exception to that: warnings are visible while the node runs, which is the whole
+         * point of raising them before the expensive part, so they live in a map the UI reads.
+         *
+         * Cleared here as well as in the `finally`, which is not redundant: `warn` is handed to
+         * fetches that keep unwinding after a run is superseded, so a late call can repopulate
+         * the map *after* the finally has run. Without this, that stray would shadow the cache
+         * entry — the newer, real answer — for as long as the node existed.
+         */
+        this.liveWarnings.delete(nodeId)
         const ctx = this.makeEvalContext(
           def,
           node.params,
@@ -437,6 +480,14 @@ export class Scheduler {
           (at) => {
             // Oldest wins: a node making several fetches is only as fresh as its stalest one.
             fetchedAt = fetchedAt === undefined ? at : Math.min(fetchedAt, at)
+          },
+          (message) => {
+            const said = this.liveWarnings.get(nodeId) ?? []
+            // Deduped, so a warning raised inside a per-item loop says its piece once.
+            if (said.includes(message)) return
+            said.push(message)
+            this.liveWarnings.set(nodeId, said)
+            this.host.onStateChange?.()
           },
           (partial) => {
             /*
@@ -463,10 +514,12 @@ export class Scheduler {
           break
         }
 
+        const warnings = this.liveWarnings.get(nodeId)
         this.cache.set(nodeId, {
           key: keys.get(nodeId)!,
           outputs,
           ...(fetchedAt === undefined ? {} : { fetchedAt }),
+          ...(warnings && warnings.length > 0 ? { warnings } : {}),
         })
         available.add(nodeId)
         summary.executed.push(nodeId)
@@ -499,6 +552,9 @@ export class Scheduler {
         // Announced, not just deleted: on an error or a cancel nothing else will move, and a
         // card drawing from this node's port would otherwise keep the dropped partial on screen.
         if (this.previews.delete(nodeId)) this.host.onPreview?.()
+        // The entry above took a copy on success; on a failure or a cancel there is nothing to
+        // caveat, and the error is the only thing worth reading.
+        this.liveWarnings.delete(nodeId)
       }
     }
 
@@ -603,6 +659,7 @@ export class Scheduler {
     nodeId: string,
     refresh: boolean,
     reportFetched: (at: number) => void,
+    warn: (message: string) => void,
     publish: (outputs: Record<string, Value>) => void,
   ): EvalContext {
     const types = inputTypes as Record<string, never>
@@ -610,6 +667,7 @@ export class Scheduler {
       params,
       refresh,
       reportFetched,
+      warn,
       publish,
       input: (portId) => inputs[portId],
       inputKey: (portId) => inputKeys[portId],
@@ -640,7 +698,7 @@ export class Scheduler {
 
   private pruneCache(graph: CodaGraph): void {
     const alive = new Set(graph.nodes.map((n) => n.id))
-    for (const held of [this.cache, this.previews, this.states]) {
+    for (const held of [this.cache, this.previews, this.states, this.liveWarnings]) {
       for (const id of [...held.keys()]) if (!alive.has(id)) held.delete(id)
     }
     // A deleted node's pending request would otherwise be spent by whatever reused its id.

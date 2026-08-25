@@ -101,12 +101,28 @@ describe('NetworkViewer caption', () => {
     expect(screen.getByText('labels thinned')).toBeTruthy()
   })
 
-  it('refuses a graph too large to lay out, and says what to do instead', () => {
-    const huge: NetworkValue = {
+  it('draws a graph the layout cannot settle, and says the arrangement is unfinished', () => {
+    // It refused at twenty thousand. `settleDuration` is a wall-clock budget on a worker, so
+    // what actually happens up here is a *less settled* arrangement — which is a hairball
+    // somebody can look at and decide about, not a frozen tab.
+    const many: NetworkValue = {
       ...ring(3),
       nodes: tableFromRows(
         NODE_SCHEMA,
         Array.from({ length: 20_001 }, (_, i) => ({ id: `n${i}` })),
+      ),
+    }
+    draw(many)
+    expect(screen.queryByText(/Aggregate upstream/)).toBeNull()
+    expect(screen.getByText('layout unsettled')).toBeTruthy()
+  })
+
+  it('still refuses a graph it cannot build at all', () => {
+    const huge: NetworkValue = {
+      ...ring(3),
+      nodes: tableFromRows(
+        NODE_SCHEMA,
+        Array.from({ length: 100_001 }, (_, i) => ({ id: `n${i}` })),
       ),
     }
     draw(huge)

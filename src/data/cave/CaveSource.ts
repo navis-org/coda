@@ -22,6 +22,7 @@
  * datastack without one refuses rather than downloading 244 million synapse rows to count them.
  */
 
+import { describeDuration } from '../../core/limits'
 import { ID_COLUMN_NAME, idText } from '../../core/ids'
 import type { TableSchema } from '../../core/types'
 import type { NeuronId } from '../../core/ids'
@@ -61,7 +62,7 @@ import { compileLabelMatch, compileRegex, refuseUnfilterable } from '../neuronFi
 import { mapWithConcurrency } from '../concurrency'
 import type { GrapheneMeshSource } from './meshes'
 import {
-  MAX_MESH_NEURONS,
+  MESH_WARN_NEURONS,
   decimateGridFor,
   fragmentConcurrencyFor,
   openGrapheneMeshes,
@@ -87,7 +88,7 @@ import {
 } from './datastack'
 import { codaColumn, defaultSchemas, neuronSchemaFor, schemasFor } from './schema'
 import { withAnnotations } from '../annotations/schema'
-import { MAX_L2_SKELETON_NEURONS, readL2Skeletons } from './l2'
+import { L2_SKELETON_WARN, readL2Skeletons } from './l2'
 import { byteLengthOf, cachedGeometry } from '../geometryCache'
 import { caveScene } from './scene'
 import type { NgScene } from '../neuroglancer/scene'
@@ -152,7 +153,7 @@ const NANOMETRES = [1, 1, 1] as const
  *
  * Each is itself a fan-out of several hundred fragment requests, so this is one factor of what
  * reaches the bucket — `fragmentConcurrencyFor` divides the fragment budget by it, and
- * `MAX_MESH_NEURONS` bounds the queue behind it.
+ * `MESH_WARN_NEURONS` is where it starts saying how long the queue will be.
  */
 const MESH_CONCURRENCY = 3
 
@@ -852,22 +853,31 @@ export class CaveSource implements DataSource {
   /**
    * Neuron meshes, one graphene manifest and several hundred Draco fragments apiece.
    *
-   * The ceiling is enforced here rather than on the node, because it is a fact about graphene
-   * and not about the Meshes node: the same node against neuPrint's multi-resolution meshes is
-   * fine at 500, where this is 492 requests and ~1.2 MB for *one* neuron. `MAX_MESH_NEURONS`
-   * and the message name the reason, in the idiom `neuronIdsFrom` uses one layer up.
+   * The cost is said here rather than on the node, because it is a fact about graphene and not
+   * about the Meshes node: the same node against neuPrint's multi-resolution meshes is cheap at
+   * a thousand, where this is 492 requests and ~1.2 MB for *one* neuron. That is what
+   * `onWarn` exists for — the node cannot know it, and the source cannot reach the card.
+   *
+   * It was a refusal at twenty until it became clear what that meant: twenty is a figure, and a
+   * FlyWire question about a hundred neurons is an ordinary question. So the number stayed and
+   * its verdict changed — past `MESH_WARN_NEURONS` the fetch says how long it will be and then
+   * goes and does it, with `MESH_CONCURRENCY` and the session geometry cache doing the actual
+   * work of making that survivable.
    */
   async fetchMeshes(req: GeometryRequest): Promise<MeshesValue> {
     // No materialization here, deliberately: a graphene mesh is keyed by root id, and a root id
     // names one immutable agglomeration — an edit mints a new one — so the mesh for an id from
     // v783 is the same mesh whichever version named it.
     const { spec } = this.require(req.datasetId)
-    if (req.neuronIds.length > MAX_MESH_NEURONS) {
-      throw new CaveError(
-        `${req.neuronIds.length} neurons is too many meshes to fetch from ${spec.label}. A ` +
-          `graphene mesh has no level of detail, so each one is several hundred requests and ` +
-          `about a megabyte — the ceiling here is ${MAX_MESH_NEURONS}, against 500 on a source ` +
-          `that publishes multi-resolution meshes.`,
+    if (req.neuronIds.length > MESH_WARN_NEURONS) {
+      // ~1.2 MB and 492 requests apiece, eight at a time — call it four seconds a neuron.
+      req.onWarn?.(
+        `${req.neuronIds.length.toLocaleString()} graphene meshes from ${spec.label} is ` +
+          `${describeDuration(req.neuronIds.length * 4)} and around ` +
+          `${Math.round(req.neuronIds.length * 1.2)} MB. A graphene mesh has no level of ` +
+          `detail, so each one is several hundred requests — this backend is the slow case, ` +
+          `and a source publishing multi-resolution meshes would do the same set in seconds. ` +
+          `Fetching anyway; cancel if that is not what you meant.`,
       )
     }
 
@@ -971,11 +981,13 @@ export class CaveSource implements DataSource {
     const { spec } = this.require(req.datasetId)
     const options: CaveRequestOptions = req.signal ? { signal: req.signal } : {}
 
-    if (req.neuronIds.length > MAX_L2_SKELETON_NEURONS) {
-      throw new CaveError(
-        `${req.neuronIds.length} neurons is too many skeletons to build from ${spec.label}. ` +
-          `Each one is a chunk-graph read against the chunkedgraph — the ceiling here is ` +
-          `${MAX_L2_SKELETON_NEURONS}, against 500 on a source that publishes them ready-made.`,
+    if (req.neuronIds.length > L2_SKELETON_WARN) {
+      // Two chunkedgraph reads apiece, sixteen at a time: ~0.3 s a neuron once warm.
+      req.onWarn?.(
+        `${req.neuronIds.length.toLocaleString()} skeletons from ${spec.label} is ` +
+          `${describeDuration(req.neuronIds.length * 0.3)}. Each one is built from the ` +
+          `level-2 cache rather than read ready-made, so this datastack is the slow way to get ` +
+          `a skeleton. Building anyway.`,
       )
     }
 

@@ -351,14 +351,17 @@ describe('core.tableFromUrl — refusals', () => {
       text: () => Promise.reject(new Error('the body must not be read')),
     } as unknown as Response)
     const message = await errorFrom(pipeline())
-    expect(message).toMatch(/over the \d+ MB limit/)
+    // The wording is `readDelimitedResponse`'s now, and that is the point of the test moving
+    // with it: this node open-coded the whole sequence until the two copies said different
+    // things about the same limit.
+    expect(message).toMatch(/without running out of memory/)
     expect(message).not.toContain('must not be read')
   })
 
   it('still refuses an oversized body a chunked response never declared', async () => {
     // One line over, so the check refuses before the parse rather than after it.
     serve(ok('a,b\n'.repeat(MAX_UPLOAD_BYTES / 4 + 1)))
-    expect(await errorFrom(pipeline())).toMatch(/over the \d+ MB limit/)
+    expect(await errorFrom(pipeline())).toMatch(/without running out of memory/)
   })
 
   it('quotes what arrived when a 200 turns out to be an error page', async () => {

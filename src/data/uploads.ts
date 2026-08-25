@@ -55,15 +55,20 @@ const TABLE_STORE = 'tables'
 const NO_STORAGE = 'This browser has no storage available for uploads.'
 
 /**
- * Refused before a byte is read.
+ * Where an upload is worth a sentence, and where it stops being possible.
  *
- * The ceiling is on the file rather than on the parsed result, because by the time a table
- * exists the tab has already been locked up for a minute — the same call `pivotTable` makes
- * when it checks label cardinalities instead of the array it is about to allocate. 50 MB is
- * comfortably above a whole-dataset embedding (male-CNS at 165k rows and a few floats is a few
- * MB) and well below what parses without a visible stall.
+ * Both are on the *file* rather than on the parsed result, because by the time a table exists
+ * the tab has already been locked up for a minute — the same call `pivotTable` makes when it
+ * checks label cardinalities instead of the array it is about to allocate.
+ *
+ * 50 MB is comfortably above a whole-dataset embedding (male-CNS at 165k rows and a few floats
+ * is a few MB), so a file past it is unusual enough to remark on and not unusual enough to
+ * refuse — a synapse table or somebody's segment dump lands here legitimately. The refusal
+ * moves out to 200 MB, which is the file size whose parse — strings, then typed arrays, with
+ * both alive at once — approaches `CRASH_FLOOR_BYTES`.
  */
-export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+export const UPLOAD_WARN_BYTES = 50 * 1024 * 1024
+export const MAX_UPLOAD_BYTES = 200 * 1024 * 1024
 
 /** What the card can say about an upload without loading it. */
 export interface UploadMeta {

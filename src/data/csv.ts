@@ -15,7 +15,9 @@ import type { ColumnSchema, DType } from '../core/types'
 import { column, tableSchema, uniqueName } from '../core/types'
 import type { ColumnData, TableValue } from '../core/values'
 import { makeTable } from '../core/values'
-import { MAX_UPLOAD_BYTES } from './uploads'
+import type { Warner } from '../core/limits'
+import { SILENT } from '../core/limits'
+import { MAX_UPLOAD_BYTES, UPLOAD_WARN_BYTES } from './uploads'
 
 /**
  * Delimiters tried, in preference order.
@@ -369,9 +371,10 @@ export function parseDelimited(text: string): ParsedTable {
  *
  * One function because two nodes fetch delimited text — `core.tableFromUrl` and the Google
  * Sheet annotation source — and the second was written as a copy of the first, comments
- * included. What was duplicated is not boilerplate: it is the `MAX_UPLOAD_BYTES` ceiling stated
+ * included. What was duplicated is not boilerplate: it is the two upload size tiers stated
  * twice, and the rule that a 200 parsing to nothing must *quote what arrived*. Two copies of a
- * limit is how one comes to say 50 MB and the other 100.
+ * limit is how one comes to say 50 MB and the other 100 — which is exactly what happened while
+ * `core.tableFromUrl` still open-coded this instead of calling it, and the tiers moved.
  *
  * `subject` names the thing in each message — a URL for one caller, "that tab" for the other —
  * because the address is the actionable part for one and meaningless for the other. `fail`
@@ -387,11 +390,15 @@ export async function readDelimitedResponse(
   subject: string,
   fail: (message: string) => Error,
   onProgress?: (fraction: number, note: string) => void,
+  /** Told when the body is large enough to be worth a sentence. `SILENT` for a caller with
+      nobody to tell — an annotation refresh has no card of its own. */
+  warn: Warner = SILENT,
 ): Promise<ParsedTable> {
   const megabytes = (bytes: number) => Math.round(bytes / (1024 * 1024))
   const tooBig = (bytes: number) =>
     fail(
-      `${subject} is ${megabytes(bytes)} MB, over the ${megabytes(MAX_UPLOAD_BYTES)} MB limit.`,
+      `${subject} is ${megabytes(bytes)} MB, past the ${megabytes(MAX_UPLOAD_BYTES)} MB a ` +
+        `browser can parse without running out of memory. Filter it at the source, or split it.`,
     )
 
   // Before the body is read, while it is still free — the call `pivotTable` makes on shape
@@ -399,6 +406,14 @@ export async function readDelimitedResponse(
   // the parsed length is checked again below.
   const declared = Number(response.headers.get('content-length') ?? '')
   if (Number.isFinite(declared) && declared > MAX_UPLOAD_BYTES) throw tooBig(declared)
+  if (Number.isFinite(declared) && declared > UPLOAD_WARN_BYTES) {
+    // The same two tiers `UploadBody` applies to a picked file, which is the point of them
+    // living on the constants rather than at either call site.
+    warn.warn(
+      `${subject} is ${megabytes(declared)} MB — parsing will take a moment and the tab will ` +
+        `be unresponsive while it does. Reading it anyway.`,
+    )
+  }
 
   onProgress?.(0.5, 'reading')
   const text = await response.text()

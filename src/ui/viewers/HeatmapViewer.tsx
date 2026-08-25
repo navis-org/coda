@@ -5,8 +5,9 @@ import { CHART_INK, chartSurface, currentMode } from '../colors'
 import { exportBaseName as makeBaseName, matrixToCsv } from '../export'
 import { formatCompact, formatNumber } from '../format'
 import { drawHeatmap, heatmapToSvg } from './heatmapDraw'
+import { CRASH_FLOOR_CELLS } from '../../core/limits'
 import {
-  MAX_HEATMAP_CELLS,
+  HEATMAP_CELLS_WARN,
   axisMarks,
   buildHeatmapSpec,
   cellAt,
@@ -88,7 +89,7 @@ export function HeatmapViewer({
   const rows = matrix.rowLabels.length
   const cols = matrix.colLabels.length
   const cells = rows * cols
-  const oversized = cells > MAX_HEATMAP_CELLS
+  const oversized = cells > CRASH_FLOOR_CELLS
   const drawable = rows > 0 && cols > 0 && !oversized && size.width > 40 && size.height > 40
 
   /*
@@ -189,11 +190,16 @@ export function HeatmapViewer({
     )
   }
   if (oversized) {
+    /*
+     * The one shape with no picture on the other side of it — past `CRASH_FLOOR_CELLS`, which
+     * nothing upstream can produce anyway. It used to say this at four million, where the
+     * honest answer is a slower first layout and a caption; see `HEATMAP_CELLS_WARN`.
+     */
     return (
       <div className="viewer">
         <div className="viewer__empty">
-          {rows.toLocaleString()} × {cols.toLocaleString()} is too large to draw (
-          {cells.toLocaleString()} cells).
+          {rows.toLocaleString()} × {cols.toLocaleString()} is {cells.toLocaleString()} cells,
+          more than a browser can hold as one grid.
           <br />
           Aggregate upstream — e.g. group by type before pivoting.
         </div>
@@ -303,6 +309,16 @@ export function HeatmapViewer({
             title={`More cells than pixels: each block is drawn as the strongest of about ${spec.foldFactor.toLocaleString()} cells. Enlarge the card to see more of them.`}
           >
             cells merged
+          </span>
+        )}
+        {cells > HEATMAP_CELLS_WARN && !compact && (
+          // A matrix this size lays out in a few hundred milliseconds and repaints in half
+          // that, on a resize and never on a hover. Worth saying once, next to the shape.
+          <span
+            className="viewer__note"
+            title={`${cells.toLocaleString()} cells — laying this out takes a moment on the first draw and on each resize. Nothing is dropped; the blocks each stand for many cells.`}
+          >
+            large matrix
           </span>
         )}
         {thinned > 0 && !compact && (

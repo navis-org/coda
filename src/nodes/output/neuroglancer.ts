@@ -26,6 +26,9 @@
  * and 3D viewers this one is genuinely one-way. Picking neurons stays upstream.
  */
 
+import type { Warner } from '../../core/limits'
+import { warnOverThreshold } from '../../core/limits'
+import { warnAboveParam } from '../lib/limitParams'
 import { registerNode } from '../../core/registry'
 import type { ParamValues } from '../../core/node'
 import { T } from '../../core/types'
@@ -50,14 +53,18 @@ import type { ColorMode } from '../lib/encodingParams'
 import { colorParams, readColorSpec } from '../lib/encodingParams'
 
 /**
- * Ceiling on the segment count.
+ * Where the segment count starts being worth a sentence.
  *
- * A different guard rail from the morphology nodes' `Max neurons`, which bounds what *Coda*
+ * A different guard rail from the morphology nodes' `Warn above`, which is about what *Coda*
  * fetches. Nothing is fetched here — the cost is neuroglancer's own mesh loading plus URL
  * length, and the URL is the harder limit in practice: male-CNS publishes a 38 kB state
  * before a single neuron id is added, and each coloured segment costs ~40 bytes more.
+ *
+ * The reason it warns rather than refuses is that the failure it guards against is *somebody
+ * else's*: a link too long for a browser or a deployment fails visibly, at the far end, and it
+ * is not Coda's to prevent on a number nobody has measured against every neuroglancer in use.
  */
-const MAX_SEGMENTS = 10000
+const SEGMENTS_WARN = 10000
 
 /** Neuroglancer renders on black, so the dark palette is the right one whatever Coda's theme is. */
 const VIEWER_MODE = 'dark' as const
@@ -192,17 +199,13 @@ export const neuroglancerNode = registerNode({
       advanced: true,
       help: 'Draw the EM cross-sections inside the 3D panel. Off by default: they cut through the meshes.',
     },
-    {
-      id: 'limit',
-      kind: 'int',
-      label: 'Max neurons',
-      default: 500,
+    warnAboveParam({
+      threshold: SEGMENTS_WARN,
       min: 1,
-      max: MAX_SEGMENTS,
-      step: 10,
-      advanced: true,
-      help: 'Bounds how much neuroglancer is asked to draw, and how long the link gets.',
-    },
+      cost:
+        'the scene is built either way, and what it costs is neuroglancer’s own drawing plus ' +
+        'the length of the link.',
+    }),
     {
       id: 'viewer',
       kind: 'string',
@@ -256,9 +259,9 @@ export const neuroglancerNode = registerNode({
       throw new Error('Neurons input is not a table')
     }
 
-    const limit = Number(ctx.params.limit ?? 200) || 200
+    const limit = Number(ctx.params.limit ?? SEGMENTS_WARN) || SEGMENTS_WARN
     const spec = readColorSpec('segment', ctx.params, ctx.column)
-    const { segments, colors } = segmentColors(neurons, spec, limit)
+    const { segments, colors } = segmentColors(neurons, spec, limit, ctx)
 
     const published = await source.fetchViewerScene({
       datasetId: dataset.datasetId,
@@ -319,6 +322,7 @@ function segmentColors(
   neurons: TableValue | undefined,
   spec: ReturnType<typeof readColorSpec>,
   limit: number,
+  ctx: Warner,
 ): { segments: string[]; colors: Record<string, string> } {
   if (!neurons) return { segments: [], colors: {} }
 
@@ -343,11 +347,15 @@ function segmentColors(
    * perfectly viewable.
    */
   if (segments.length > limit) {
-    throw new Error(
-      `${segments.length} neurons exceeds this node's Max neurons (${limit}). Nothing is ` +
-        `downloaded here, but neuroglancer has to draw every one and they all travel in the ` +
-        `link. Raise the limit if you mean it, or filter upstream.`,
-    )
+    warnOverThreshold(ctx, {
+      count: segments.length,
+      threshold: limit,
+      unit: 'neurons',
+      control: "this node's Warn above",
+      cost:
+        'Nothing is downloaded here, but neuroglancer has to draw every one and they all ' +
+        'travel in the link, which some deployments and some browsers will cut off.',
+    })
   }
   return { segments, colors }
 }

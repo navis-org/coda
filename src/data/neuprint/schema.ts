@@ -73,10 +73,15 @@ const CORE_NAMES = new Set(
 const SUPPRESSED = new Set(['roiInfo', 'somaLocation', 'rootLocation', 'tosomaLocation'])
 
 /**
- * A picker with two hundred entries is not a picker. Datasets that genuinely carry more
- * properties than this lose the tail; `extrasTruncated` reports it so the UI can say so.
+ * Where a dataset's property list stops being offered in full.
+ *
+ * It was 40, on the reasoning that a picker with two hundred entries is not a picker — true of
+ * a *scrolling* picker, and the column pickers have had type-to-filter for a while now. What 40
+ * actually did was hide the tail of a well-annotated dataset's own properties, which is the
+ * half a specialist is looking for. Datasets carrying more than this still lose the tail;
+ * `extrasTruncated` reports it so the UI can say so.
  */
-export const MAX_EXTRA_COLUMNS = 40
+export const MAX_EXTRA_COLUMNS = 200
 
 export interface DiscoveredSchema {
   neurons: TableSchema

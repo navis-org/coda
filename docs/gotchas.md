@@ -138,10 +138,13 @@ verbatim.
   place a fetch can start on a graph's behalf, and being re-run when it lands is exactly what
   `reportSourceLearned` is for.
 
-- **`pivotTable` refuses on shape before it allocates**, and that is the backstop rather than
-  the fix — the two entries above are the fix. `MAX_PIVOT_COLUMNS` / `MAX_PIVOT_CELLS` are
-  checked against the label cardinalities, because by the time an array exists the damage is
-  done. It also allocates one accumulator per aggregation rather than all five, so `sum` costs
+- **`pivotTable` checks shape before it allocates**, and that is the backstop rather than the
+  fix — the two entries above are the fix. `PIVOT_COLUMNS_WARN` / `PIVOT_CELLS_WARN` and the
+  `MAX_*` floors beyond them are checked against the label cardinalities, because by the time an
+  array exists the damage is done. The thresholds now *warn* — a 6,000-column connectivity
+  matrix over an optic lobe is a real thing to want, and the old ceilings refused it in the same
+  breath as they caught a misconfigured picker — and only the floors, sized from
+  `CRASH_FLOOR_BYTES`, still refuse. See [limits.md](limits.md). It also allocates one accumulator per aggregation rather than all five, so `sum` costs
   8 bytes a cell instead of 40. The general form is worth carrying: **a node whose output size
   is the product of two independently-resolved columns needs a ceiling checked before
   allocation**, because neither picker knows what the other did.

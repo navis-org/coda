@@ -386,18 +386,26 @@ describe('neuron.mirror — the spline half', () => {
     expect(error).toMatch(/worker died/)
   })
 
-  it('refuses a set whose cost is out of proportion, naming both factors', () => {
+  it('says what a set whose cost is out of proportion will take, naming both factors', () => {
     /*
      * Points times landmarks, and neither is visible from the other: the landmark count comes
      * from whichever template the geometry is in, the point count from a fetch several nodes
      * upstream. Checked here directly rather than through a graph, because building three
-     * million points to prove a ceiling is a test that costs more than the thing it guards.
+     * million points to prove a threshold is a test that costs more than the thing it guards.
+     *
+     * It refused, once. The cost here is *time* — a spline allocates one buffer of the points
+     * it was handed — and a wait is the caller's to spend.
      */
-    expect(() => checkWarpSize(3_000_000, 3390)).toThrow(/3,000,000 points/)
-    expect(() => checkWarpSize(3_000_000, 3390)).toThrow(/3,390 landmarks/)
-    expect(() => checkWarpSize(3_000_000, 3390)).toThrow(/turn Warp off/)
-    // A skeleton chain cannot reach it: the Skeletons node stops at 500 neurons, and 500
-    // average skeletons is well under a million points.
-    expect(() => checkWarpSize(1_000_000, 3390)).not.toThrow()
+    const said: string[] = []
+    const ctx = { warn: (m: string) => said.push(m) }
+    checkWarpSize(ctx, 3_000_000, 3390)
+    expect(said.join(' ')).toMatch(/3,000,000 points/)
+    expect(said.join(' ')).toMatch(/3,390 landmarks/)
+    expect(said.join(' ')).toMatch(/turn Warp off/)
+    expect(said.join(' ')).toMatch(/Warping anyway/)
+
+    said.length = 0
+    checkWarpSize(ctx, 1_000_000, 3390)
+    expect(said).toEqual([])
   })
 })

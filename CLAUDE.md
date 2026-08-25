@@ -87,6 +87,11 @@ symptom to recognise — which usually points nowhere near the cause.
   per instance. Otherwise the first Run of a session behaves differently from the second.
 - **A node whose output size is the product of two independently-resolved columns needs a
   ceiling checked before allocation** — neither picker knows what the other did.
+- **A guard rail warns; it does not refuse.** Coda's ceilings were all `throw`s, at numbers a
+  prototype could demonstrate — 100 neurons for NBLAST, 20 for a CAVE mesh batch — and a refusal
+  is a claim that there is no useful answer, which for a count is almost never true. `ctx.warn`
+  is the channel; `CRASH_FLOOR_BYTES` is the only thing left that refuses, and only for an
+  allocation. Time is never a refusal. See [docs/limits.md](docs/limits.md).
 - **Module init order.** `graphStore.ts` imports `../nodes` for its side effect. Without
   it, ordering in `main.tsx` becomes load-bearing and silently drops every node.
 - **`parseMarkdown`'s extended kinds are opt-in, and that is a safety property.** Fences,
@@ -134,6 +139,8 @@ file, pulling all 620 kB back into every session and undoing the split.
 - [docs/gotchas.md](docs/gotchas.md) — the incident behind each gotcha.
 - [docs/adding-a-node.md](docs/adding-a-node.md) — the main extension point. Start here
   for any new node.
+- [docs/limits.md](docs/limits.md) — every guard rail, its tier, and the `ctx.warn` channel.
+  **A limit warns; it does not refuse.** Read before adding a number that stops somebody.
 - [docs/core.md](docs/core.md) — the two caches and `ctx.refresh`, auto-run, reference
   edges. Read when adding `dataCache` or a `reference` port.
 - [docs/canvas.md](docs/canvas.md) — React Flow settings, ELK layout, edge routing,

@@ -32,6 +32,7 @@ import { layoutNetwork } from '../../layout/network'
 import { getColumn } from '../../core/values'
 import type { PathNode } from '../lib/pathOps'
 import {
+  MAX_PATH_STEPS,
   PATH_NETWORK_TYPE,
   PATH_TABLE_SCHEMA,
   pathStats,
@@ -247,6 +248,20 @@ export const pathsNode = registerNode({
       // the empty result that says so.
       ctx.progress(1, `no route within ${maxHops} hops`)
       return { network, layout: makeLayout({}, 'ELK layered'), paths: pathsTable([]) }
+    }
+
+    /*
+     * A truncated search is a *ranking that is not the ranking* — "the strongest found" wearing
+     * the label "the strongest" — so it belongs on the card next to the result rather than in a
+     * progress note that the next repaint wipes. The note stays as well: it is what is on screen
+     * while the layout runs.
+     */
+    if (ranked.truncated) {
+      ctx.warn(
+        `The route search hit its step budget (${MAX_PATH_STEPS.toLocaleString()} steps), so ` +
+          `these are the strongest routes *found* rather than the strongest routes. Raising ` +
+          `Min synapses or lowering Max hops thins the graph the search walks.`,
+      )
     }
 
     ctx.progress(0.95, 'laying out')

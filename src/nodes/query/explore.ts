@@ -61,19 +61,21 @@ import { rowsWithIds } from '../lib/tableOps'
 const lastRefresh = new Map<string, number>()
 
 /**
- * The most neurons one "select all" click may add.
+ * Where one "select all" click starts warning about what it is adding.
  *
  * A selection is provenance, not a view: it lands in the saved file and in the cache key of
  * every node downstream, so `stableStringify` walks the whole array on every graph edit. Ten
- * thousand neuron ids is ~110 kB of string per key computation, which is affordable; the whole
- * of male-CNS is 165,122 of them and about 1.9 MB, which is not — it would make typing in an
- * unrelated node stutter.
+ * thousand neuron ids is ~110 kB of string per key computation, which is nothing; the whole of
+ * male-CNS is 165,122 of them and about 1.9 MB, which is enough to make typing in an unrelated
+ * node stutter.
  *
- * A ceiling on the *click*, deliberately, not on the param. Ticking rows by hand can still
- * carry the total past it, and a graph loaded from a file is never rewritten. What is being
- * refused is the one gesture that can add six figures of ids without meaning to.
+ * About the *click*, deliberately, not the param. Ticking rows by hand can still carry the
+ * total past it, and a graph loaded from a file is never rewritten. What this watches is the
+ * one gesture that can add six figures of ids without meaning to — and it says so rather than
+ * refusing, because "every VPN in the dataset" is a legitimate thing to want and the
+ * alternative was a disabled button explaining that the answer is too big to have.
  */
-export const MAX_SELECT_ALL = 10_000
+export const SELECT_ALL_WARN = 25_000
 
 /**
  * The column kept out of the free-text haystack, if any.
@@ -125,7 +127,7 @@ export const exploreNode = registerNode({
       kind: 'ids',
       label: 'Selected',
       noun: 'neurons',
-      help: `Neurons ticked in the list. Written by the widget; kept when the search changes. "Select all" adds at most ${MAX_SELECT_ALL.toLocaleString()} at a time.`,
+      help: `Neurons ticked in the list. Written by the widget; kept when the search changes. "Select all" adds every match, and says so above ${SELECT_ALL_WARN.toLocaleString()}, since every id travels in every downstream cache key.`,
       default: [],
     },
     {

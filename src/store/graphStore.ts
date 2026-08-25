@@ -445,6 +445,14 @@ export interface GraphState {
    */
   nodeFetchedAt(nodeId: string): number | undefined
   /**
+   * What this node warned about the result it is holding, or undefined.
+   *
+   * One string rather than a list, so the snapshot is a primitive (invariant 7). Read through
+   * `runVersion` like `nodeInfo`: a warning is raised while the node runs and then belongs to
+   * its cached result, so neither end of its life is a graph edit.
+   */
+  nodeWarning(nodeId: string): string | undefined
+  /**
    * Realised values arriving at a node's input ports. Viewers with several inputs (the 3D
    * scene takes skeletons, meshes and points) need these, since a node's own output cache
    * only holds what it produced.
@@ -1409,6 +1417,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
     nodeOutput: (nodeId, portId) => scheduler.output(nodeId, portId),
     nodeFetchedAt: (nodeId) => scheduler.fetchedAt(nodeId),
+    nodeWarning: (nodeId) => scheduler.warning(nodeId),
     setNotice: (notice) => set({ notice }),
   }
 })

@@ -7,6 +7,8 @@
  * where a test can see them.
  */
 
+import type { Warner } from '../../core/limits'
+import { CRASH_FLOOR_CELLS, refuseIfOverCrashFloor, warnOverThreshold } from '../../core/limits'
 import type { TableSchema } from '../../core/types'
 import { column, tableSchema } from '../../core/types'
 import type { CellValue, LinkageValue, MatrixValue, TableValue } from '../../core/values'
@@ -57,14 +59,30 @@ export const LINKAGE_SYMMETRY_OPTIONS = SYMMETRY_OPTIONS.map((option) =>
 )
 
 /**
- * How many observations one node may cluster.
+ * Where clustering starts saying what it is about to do.
  *
- * The linkage itself is `O(n^2)` in the condensed vector and single-threaded in wasm, but the
- * binding limit is the *drawing*: a dendrogram of a few thousand leaves is a grey smear with
- * no label on it. Above the NBLAST node's own ceiling this cannot be reached from a score
- * matrix anyway; it is here for a Pivot or an Adjacency, which can be the whole of male-CNS.
+ * The linkage itself is `O(n^2)` in the condensed vector and single-threaded in wasm; what this
+ * number was really about is the *drawing*, because a dendrogram of a few thousand leaves is a
+ * grey smear with no label on it. That was a poor reason to refuse the **tree**: the Cut Tree
+ * node takes the same linkage and hands back cluster numbers, which is a table, and a table of
+ * twenty thousand rows is perfectly readable. Refusing the clustering because one of its two
+ * consumers cannot draw it was the viewer's opinion arriving three nodes upstream.
+ *
+ * So it warns, and the dendrogram says its own piece about labels (`MAX_LEAVES_DRAWN`).
  */
-export const MAX_LINKAGE_OBSERVATIONS = 2000
+export const LINKAGE_OBSERVATIONS_WARN = 2000
+
+/**
+ * The observation count at which the condensed distance vector — `n(n-1)/2` float64s, in one
+ * allocation — reaches `CRASH_FLOOR_BYTES`. About 11,585.
+ *
+ * Derived rather than written down. It was `MAX_LINKAGE_OBSERVATIONS = 11_000`, "rounded down
+ * to a number that reads as a decision rather than as arithmetic", and rounding is exactly what
+ * made it a second, quietly wrong spelling of the floor: the check that used it refused at
+ * 11,000 while `refuseIfOverCrashFloor` — the thing that decides — did not fire until 11,586.
+ * The floor is arithmetic, so it should read as arithmetic.
+ */
+export const MAX_LINKAGE_OBSERVATIONS = Math.floor(Math.sqrt(2 * CRASH_FLOOR_CELLS))
 
 /** Cluster numbers and the leaf order, one row per observation. */
 export function clusterSchema(): TableSchema {
@@ -85,7 +103,7 @@ export function clusterSchema(): TableSchema {
  * because they share an index, which is a confident wrong tree with nothing anywhere to say
  * so. Everything else here is arithmetic; this one is about meaning.
  */
-export function checkLinkageInput(matrix: MatrixValue): void {
+export function checkLinkageInput(ctx: Warner, matrix: MatrixValue): void {
   const n = matrix.rowLabels.length
   if (n !== matrix.colLabels.length) {
     throw new Error(
@@ -103,12 +121,23 @@ export function checkLinkageInput(matrix: MatrixValue): void {
   if (n < 2) {
     throw new Error(`Clustering needs at least 2 observations, got ${n}`)
   }
-  if (n > MAX_LINKAGE_OBSERVATIONS) {
-    throw new Error(
-      `${n.toLocaleString()} observations is over this node's ceiling of ` +
-        `${MAX_LINKAGE_OBSERVATIONS.toLocaleString()}. A dendrogram of that many leaves has ` +
-        `no readable labels on it — filter or group upstream.`,
-    )
+  // The one refusal about size left here: the condensed vector is a single allocation, and
+  // past the floor there is no tree on the other side of it to warn about.
+  refuseIfOverCrashFloor(
+    `A linkage over ${n.toLocaleString()} observations`,
+    ((n * (n - 1)) / 2) * 8,
+  )
+  if (n > LINKAGE_OBSERVATIONS_WARN) {
+    warnOverThreshold(ctx, {
+      count: n,
+      threshold: LINKAGE_OBSERVATIONS_WARN,
+      unit: 'observations',
+      control: "this node's warn-above",
+      cost:
+        'Linkage is single-threaded and grows with the square of that, and a dendrogram of ' +
+        'that many leaves has no readable labels on it — Cut Tree hands the same clustering ' +
+        'back as a table.',
+    })
   }
 }
 

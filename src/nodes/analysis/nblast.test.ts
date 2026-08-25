@@ -184,10 +184,30 @@ describe('nblastOps — the flattening', () => {
     expect(() => checkNblastUnits('Query', skeletonsFixture())).not.toThrow()
   })
 
-  it('refuses an oversized comparison, naming both sides', () => {
-    expect(() => checkNblastSize(600, 600)).toThrow(/600 x 600/)
-    expect(() => checkNblastSize(600, 600)).toThrow(/pairs a second/)
-    expect(() => checkNblastSize(100, 100)).not.toThrow()
+  it('says what an oversized comparison will cost, naming both sides, and scores it anyway', () => {
+    // It used to throw here. 600 x 600 is a cell type against its own hemisphere, which is an
+    // ordinary question, and refusing it on a seventeen-second measurement was the guard rail
+    // deciding which science was possible — see `NBLAST_PAIRS_WARN`.
+    const said: string[] = []
+    const ctx = { warn: (m: string) => said.push(m) }
+    checkNblastSize(ctx, 600, 600)
+    expect(said.join(' ')).toMatch(/600 x 600/)
+    expect(said.join(' ')).toMatch(/pairs a second/)
+    // The house closing clause, from `warnOverThreshold` rather than hand-written here — which
+    // is the point: `core/limits.ts` records why that half must survive being copied.
+    expect(said.join(' ')).toMatch(/Going ahead anyway/)
+
+    said.length = 0
+    checkNblastSize(ctx, 100, 100)
+    expect(said).toEqual([])
+  })
+
+  it('still refuses the one size that has no matrix on the other side of it', () => {
+    // The crash floor, and the only refusal left in this file that is about size: a
+    // 10,000-square all-by-all is 800 MB of Float64 in a single allocation.
+    expect(() => checkNblastSize({ warn: () => undefined }, 10_000, 10_000)).toThrow(
+      /would allocate/,
+    )
   })
 })
 
@@ -282,10 +302,34 @@ describe('neuron.nblast — running', () => {
     )
   })
 
-  it('refuses above Max neurons, naming the side that is too big', async () => {
+  it('warns above Warn above, naming the side that is large, and scores it', async () => {
+    mockedRun.mockImplementation((request: NblastRequest) =>
+      Promise.resolve(
+        scores(request.query.offsets.length - 1, request.query.offsets.length - 1),
+      ),
+    )
     const scheduler = makeScheduler()
     await scheduler.run(pipeline({ limit: 2 }), { mode: 'full' })
-    expect(scheduler.info('nb').error).toMatch(/on Query exceeds this node's Max neurons \(2\)/)
-    expect(mockedRun).not.toHaveBeenCalled()
+
+    expect(scheduler.info('nb').error ?? scheduler.info('nb').state).toBe('ok')
+    expect(scheduler.warning('nb')).toMatch(
+      /neurons on Query is past this node's Warn above \(2\)/,
+    )
+    // The whole difference from the old behaviour: there is a result under the warning.
+    expect(mockedRun).toHaveBeenCalled()
+  })
+
+  it('keeps the warning on the result, so a re-run that answers from cache still says it', async () => {
+    mockedRun.mockImplementation((request: NblastRequest) =>
+      Promise.resolve(
+        scores(request.query.offsets.length - 1, request.query.offsets.length - 1),
+      ),
+    )
+    const scheduler = makeScheduler()
+    const graph = pipeline({ limit: 2 })
+    await scheduler.run(graph, { mode: 'full' })
+    await scheduler.run(graph, { mode: 'full' })
+    // Nothing re-ran, and the caveat is still under the matrix it is a caveat about.
+    expect(scheduler.warning('nb')).toMatch(/Warn above/)
   })
 })

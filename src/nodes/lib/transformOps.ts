@@ -34,6 +34,8 @@
  * that is one boolean wide.
  */
 
+import type { Warner } from '../../core/limits'
+import { describeDuration } from '../../core/limits'
 import type { CodaType, ColumnSchema, TableSchema } from '../../core/types'
 import { T, column, tableSchema, uniqueName } from '../../core/types'
 import type {
@@ -352,14 +354,15 @@ function withoutSpaceKey(value: GeometryValue): GeometryValue {
 }
 
 /**
- * What a spline costs, and the ceiling that stops a tab from locking up on one.
+ * What a spline costs, and where it starts saying so.
  *
  * The cost is **points times landmarks** — every point is a reduction over every landmark —
  * and neither factor is visible from the other: the landmark count comes from the template the
  * geometry happens to be in, and the point count from a fetch several nodes upstream. That is
  * the shape `docs/gotchas.md` records for a node whose output size is a product of two
  * independently-resolved things, and the answer is the same: check before allocating, and name
- * both factors when refusing.
+ * both factors — the difference is that naming them is now the whole of what happens, because
+ * a warp that takes a minute is a minute, not an error.
  *
  * The budget is set from a measurement rather than a guess. In this runtime, single-threaded,
  * the throughput is about 8.9e8 point-landmark products per second (262k points per second
@@ -367,22 +370,28 @@ function withoutSpaceKey(value: GeometryValue): GeometryValue {
  * therefore roughly eleven seconds on the machine that was measured, and perhaps half a minute
  * on a slow laptop.
  *
- * What it allows in practice: 2.9 million points against FlyWire's mirror, which is about two
- * thousand average skeletons — comfortably past the Skeletons node's own 500-neuron ceiling, so
- * no skeleton chain can reach this. **Meshes can.** One hemibrain neuron at the finest level of
- * detail is around 100,000 vertices, so this bites at about thirty of them, and the message
- * says which knob moves.
+ * What it passes without comment: 2.9 million points against FlyWire's mirror, which is about
+ * two thousand average skeletons. **Meshes reach it easily** — one hemibrain neuron at the
+ * finest level of detail is around 100,000 vertices, so this speaks at about thirty of them,
+ * and the message says which knob moves.
+ *
+ * Nothing here refuses. The cost is *time*, and a wait is the caller's to spend — the crash
+ * floor is about allocations, and a spline allocates one buffer of the points it was already
+ * handed.
  */
-export const MAX_WARP_PRODUCT = 1e10
+export const WARP_PRODUCT_WARN = 1e10
 
-export function checkWarpSize(points: number, landmarks: number): void {
+/** Point-landmark products a second, measured single-threaded in this runtime. */
+const WARP_PRODUCTS_PER_SECOND = 8.9e8
+
+export function checkWarpSize(ctx: Warner, points: number, landmarks: number): void {
   const product = points * landmarks
-  if (product <= MAX_WARP_PRODUCT) return
-  const seconds = Math.round(product / 8.9e8)
-  throw new Error(
+  if (product <= WARP_PRODUCT_WARN) return
+  ctx.warn(
     `Warping ${points.toLocaleString()} points through ${landmarks.toLocaleString()} landmarks ` +
-      `would take around ${seconds} seconds in the browser, single-threaded. Fetch fewer ` +
-      'neurons, take meshes at a coarser level of detail, or turn Warp off for a plain flip.',
+      `is ${describeDuration(product / WARP_PRODUCTS_PER_SECOND)} in the browser, ` +
+      `single-threaded. Warping anyway — cancel and fetch fewer neurons, take meshes at a ` +
+      `coarser level of detail, or turn Warp off for a plain flip.`,
   )
 }
 
@@ -599,12 +608,12 @@ export function checkLandmarkCount(rows: number): void {
 export async function warpGeometry(
   value: GeometryValue,
   legs: readonly LandmarkPairs[],
-  options: { progress: Report; signal?: AbortSignal; space?: string | null },
+  options: { progress: Report; signal?: AbortSignal; space?: string | null; warn: Warner },
 ): Promise<GeometryValue> {
   const points = geometryPointCount(value)
-  // Every leg pays the full point count, and the ceiling is about wall-clock rather than about
+  // Every leg pays the full point count, and the estimate is about wall-clock rather than about
   // the journey — a set that would take eleven seconds outbound takes eleven seconds back.
-  for (const leg of legs) checkWarpSize(points, leg.count)
+  for (const leg of legs) checkWarpSize(options.warn, points, leg.count)
 
   /*
    * Gathered once and scattered once, however many legs there are: the intermediate buffers are

@@ -274,6 +274,7 @@ export const xformNode = registerNode({
         out: await warpGeometry(value, [supplied], {
           progress: (fraction, note) => ctx.progress(0.1 + 0.9 * fraction, note),
           signal: ctx.signal,
+          warn: ctx,
           space: supplied.targetSpace ?? null,
         }),
       }
@@ -363,6 +364,7 @@ export const xformNode = registerNode({
       out: await warpGeometry(value, pairs, {
         progress: (fraction, note) => ctx.progress(0.1 + 0.9 * fraction, note),
         signal: ctx.signal,
+        warn: ctx,
         space: target,
       }),
     }

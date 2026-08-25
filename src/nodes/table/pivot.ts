@@ -106,6 +106,7 @@ export const pivotNode = registerNode({
       cols,
       agg === 'count' ? undefined : ctx.column('value'),
       agg,
+      ctx,
     )
     return { matrix, table: matrixToTable(matrix, rows) }
   },

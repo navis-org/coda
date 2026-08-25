@@ -252,12 +252,19 @@ describe('neuron.nblastKnn — running', () => {
     expect(new Set(getColumn(matches, 'rank'))).toEqual(new Set([1, 2, 3]))
   })
 
-  it('refuses above Max neurons, naming the side that is too big', async () => {
+  it('warns above Warn above, naming the side that is large, and searches it anyway', async () => {
+    mockedKnn.mockImplementation((request: NblastKnnRequest) =>
+      Promise.resolve(knnResult(request.query.offsets.length - 1, request.k)),
+    )
     const scheduler = new Scheduler({ resolveSource: () => source })
     await scheduler.run(pipeline({ limit: 2 }), { mode: 'full' })
-    expect(scheduler.info('knn').error).toMatch(
-      /on Query exceeds this node's Max neurons \(2\)/,
+
+    // This node is the one built for large sets — its cost grows with Candidates rather than
+    // with the square of the population — so refusing it on a count was the wrong verdict from
+    // the wrong node. It says the number and gets on with it.
+    expect(scheduler.warning('knn')).toMatch(
+      /neurons on Query is past this node's Warn above \(2\)/,
     )
-    expect(mockedKnn).not.toHaveBeenCalled()
+    expect(mockedKnn).toHaveBeenCalled()
   })
 })

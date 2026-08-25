@@ -575,8 +575,9 @@ const morphology: ExampleGraph = {
           height: 135,
           text: `
           **One search, two questions.** Both morphology nodes read the same neuron list, so the
-          skeletons and the synapses are guaranteed to be about the same cells. The limits on each are
-          what keeps a first look at a type from pulling hundreds of megabytes.`,
+          skeletons and the synapses are guaranteed to be about the same cells. **Warn above** on each
+          is set low here, so a first look at a type says what it is about to pull rather than
+          quietly pulling hundreds of megabytes.`,
         },
         {
           id: 'step2',

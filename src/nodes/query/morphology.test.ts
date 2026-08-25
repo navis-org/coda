@@ -1,10 +1,16 @@
 /**
- * The morphology fetch nodes' `Max neurons` guard rail.
+ * The morphology fetch nodes' `Warn above` guard rail.
  *
- * Worth pinning because the number and the reason drifted apart once. The mesh limit was 25,
- * picked before levels of detail existed and never re-derived: with detail selection doing the
- * real work, that refused thirty neurons that would have arrived as a few hundred kilobytes.
- * And the message blamed "this viewer", which has no cap of its own and is not what refuses.
+ * Worth pinning because the number and the reason have drifted apart twice. The mesh limit was
+ * 25, picked before levels of detail existed and never re-derived: with detail selection doing
+ * the real work, that refused thirty neurons that would have arrived as a few hundred
+ * kilobytes. And the message blamed "this viewer", which has no cap of its own and was not what
+ * refused.
+ *
+ * The second drift is the one these tests are now about. The number said "refuse", and a
+ * refusal is a claim that there is no useful answer — which for a count is almost never true.
+ * So the same threshold now says what the fetch will cost and then fetches: `ctx.warn`, and the
+ * result underneath it. See `core/limits.ts`.
  */
 
 import { beforeAll, describe, expect, it } from 'vitest'
@@ -18,6 +24,8 @@ import { MockSource } from '../../data/mock/MockSource'
 import type { DataSource, SourceCapabilities } from '../../data/source'
 import { registerSource, requireSource } from '../../data/source'
 import { T } from '../../core/types'
+import { MAX_NEURONS } from './morphology'
+
 import '../index'
 
 beforeAll(() => {
@@ -33,17 +41,27 @@ function limitParam(type: string) {
   return param
 }
 
-describe('Max neurons', () => {
-  it('shares one ceiling across all three morphology nodes', () => {
+describe('Warn above', () => {
+  it('shares one threshold across all three morphology nodes', () => {
     for (const type of MORPHOLOGY_NODES) {
-      expect(limitParam(type).max, type).toBe(500)
+      expect(limitParam(type).max, type).toBe(MAX_NEURONS)
+      expect(defaultParams(requireNodeDef(type)).limit, type).toBe(MAX_NEURONS)
     }
   })
 
-  it('lets Meshes fetch as many as the other two allow', () => {
-    // The old 25 was the odd one out, and its own ceiling was 200 for no recorded reason.
-    expect(defaultParams(requireNodeDef('neuron.meshes')).limit).toBe(500)
-    expect(limitParam('neuron.meshes').max).toBe(500)
+  it('is ten thousand, which is where every backend is into tens of minutes', () => {
+    // Pinned as a literal in exactly one place. The three nodes above are pinned to *each
+    // other*, so raising the shared number moves all of them and lands here.
+    expect(MAX_NEURONS).toBe(10000)
+  })
+
+  it('is a threshold rather than a cap, and says so on the card', () => {
+    // The label carried "Max" while the behaviour was a refusal, and kept it for a while
+    // afterwards — which is the one way this control can lie about what it does.
+    for (const type of MORPHOLOGY_NODES) {
+      expect(limitParam(type).label, type).toBe('Warn above')
+      expect(limitParam(type).help ?? '', type).toMatch(/threshold, not a cap/)
+    }
   })
 
   it('keeps a Detail budget alongside it, since that is what bounds mesh weight', () => {
@@ -87,17 +105,19 @@ function pipeline(geometryType: string, limit: number): CodaGraph {
   return setNodeParam(g, 'geo', 'limit', limit)
 }
 
-describe('refusing an oversized set', () => {
+describe('an oversized set', () => {
   it.each(MORPHOLOGY_NODES)('%s names the real constraint, not the viewer', async (type) => {
     const sched = new Scheduler({ resolveSource: (id) => requireSource(id) })
     await sched.run(pipeline(type, 1), { mode: 'full' })
 
     const info = sched.info('geo')
-    expect(info.state).toBe('error')
-    expect(info.error).toMatch(/exceeds this node's Max neurons \(1\)/)
-    expect(info.error).toMatch(/Raise the limit if you mean it, or filter upstream/)
+    // The whole change: there is a result under the sentence. It used to be `error`, and
+    // everything downstream was blocked by a wait somebody had not been asked about.
+    expect(info.error ?? info.state).toBe('ok')
+    expect(sched.warning('geo')).toMatch(/neurons is past this node's Warn above \(1\)/)
+    expect(sched.warning('geo')).toMatch(/cancel and filter upstream/)
     // The message used to say this, and both halves of it were wrong.
-    expect(info.error).not.toMatch(/this viewer can draw/)
+    expect(sched.warning('geo')).not.toMatch(/this viewer can draw/)
   })
 
   it('explains the cost in terms specific to each node', async () => {
@@ -109,14 +129,25 @@ describe('refusing an oversized set', () => {
     for (const [type, pattern] of Object.entries(costs)) {
       const sched = new Scheduler({ resolveSource: (id) => requireSource(id) })
       await sched.run(pipeline(type, 1), { mode: 'full' })
-      expect(sched.info('geo').error, type).toMatch(pattern)
+      expect(sched.warning('geo'), type).toMatch(pattern)
     }
+  })
+
+  it('keeps the warning with the result, not with the run that produced it', async () => {
+    // A second Run answers from the provenance cache without evaluating, and the caveat is
+    // about the value rather than about the run — see `CacheEntry.warnings`.
+    const sched = new Scheduler({ resolveSource: (id) => requireSource(id) })
+    const graph = pipeline('neuron.skeletons', 1)
+    await sched.run(graph, { mode: 'full' })
+    await sched.run(graph, { mode: 'full' })
+    expect(sched.warning('geo')).toMatch(/Warn above/)
   })
 
   it('says nothing when the set fits', async () => {
     const sched = new Scheduler({ resolveSource: (id) => requireSource(id) })
     await sched.run(pipeline('neuron.meshes', 500), { mode: 'full' })
     expect(sched.info('geo').state).toBe('ok')
+    expect(sched.warning('geo')).toBeUndefined()
   })
 })
 

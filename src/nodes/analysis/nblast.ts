@@ -34,6 +34,7 @@ import {
 } from '../lib/nblastOps'
 // The ceiling is the *fetch's*, not this node's: nothing can reach here that the Skeletons
 // node would not hand over. Imported rather than restated, or "parity" is a comment.
+import { warnAboveParam } from '../lib/limitParams'
 import { MAX_NEURONS } from '../query/morphology'
 
 export const nblastNode = registerNode({
@@ -120,17 +121,13 @@ export const nblastNode = registerNode({
         'Weight each point by how strongly its neighbourhood is a line rather than a blob, ' +
         'which plays down tufts and branch points.',
     },
-    {
-      id: 'limit',
-      kind: 'int',
-      label: 'Max neurons',
-      default: 100,
+    warnAboveParam({
+      threshold: MAX_NEURONS,
       min: 2,
-      max: MAX_NEURONS,
-      step: 10,
-      advanced: true,
-      help: 'Refuse either side above this, rather than locking the tab up scoring.',
-    },
+      cost:
+        'the comparison runs either way, and the node says what the pair count comes to in ' +
+        'minutes as well.',
+    }),
   ],
 
   /*
@@ -143,14 +140,15 @@ export const nblastNode = registerNode({
 
   evaluate: async (ctx) => {
     const { query, target: targetValue } = nblastSidesFrom(
+      ctx,
       ctx.input('query'),
       ctx.input('target'),
-      Number(ctx.params.limit ?? 100),
+      Number(ctx.params.limit ?? MAX_NEURONS),
     )
 
     const rows = query.items.length
     const cols = targetValue ? targetValue.items.length : rows
-    checkNblastSize(rows, cols)
+    checkNblastSize(ctx, rows, cols)
 
     ctx.progress(0.01, `${rows} neurons`)
     const result = await runNblast(

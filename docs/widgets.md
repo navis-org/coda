@@ -95,13 +95,16 @@ as ASCII. An LC4 showed its lobula arbor, thin neurite and terminal tuft; male-C
 showed the giant fibre's descending axon. That needed a token and a network, so it is not in the
 suite.
 
-**Select-all is capped at `MAX_SELECT_ALL` (10,000) and refuses rather than truncates.** A
-selection is provenance — it is in the saved file and in every downstream cache key — so
-`stableStringify` walks the whole array on every graph edit: 10k neuron ids is ~110 kB per key
-computation, the whole of male-CNS is ~1.9 MB and would make typing in an unrelated node
-stutter. The button stays rendered while refused (a limit reads as a limit; a missing button
-reads as a missing feature) and its title says what to do. The ceiling is on the _click_, not
-on the param: ticking rows by hand still can pass it, and a loaded file is never rewritten.
+**Select-all never truncates, and no longer refuses: past `SELECT_ALL_WARN` (25,000) it says
+what it costs and selects.** A selection is provenance — it is in the saved file and in every
+downstream cache key — so `stableStringify` walks the whole array on every graph edit: 10k
+neuron ids is ~110 kB per key computation, the whole of male-CNS is ~1.9 MB and would make
+typing in an unrelated node stutter. That was a *disabled button* at 10,000 until somebody
+noticed what it said to a person asking for every VPN in the dataset: that the answer was too
+big to have. The cost is real, so the title carries it and the status bar repeats it on the way
+past; what is never done is truncation, since "+ all" quietly taking the best 10,000 of 165,122
+would be a lie told by a button. It is about the _click_, not the param: ticking rows by hand
+still passes it, and a loaded file is never rewritten. See [limits.md](limits.md).
 
 **Which fields become tags is a param, and it is inspector-only.** `chips` is `advanced` (so it
 is not on the card — a multi-select above a list of neurons spends the widget's width on its own

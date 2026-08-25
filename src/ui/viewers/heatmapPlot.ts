@@ -70,16 +70,21 @@ import { divergingColor, inkOn, sequentialColor } from '../colors'
  * and genuinely changes as the card moves. Folded, that is inherent rather than an oversight —
  * a fold to a grid nobody is looking at yet is the only way to avoid it.
  *
- * It sits above `MAX_PIVOT_CELLS` (2,000,000) on purpose, so this viewer draws anything a Pivot
- * will build.
+ * Two numbers now, because there turned out to be two questions. `HEATMAP_CELLS_WARN` is where
+ * the caption starts saying that blocks stand for many cells — a fact about *reading* the
+ * picture. Where there is no picture at all is `CRASH_FLOOR_CELLS` itself, read straight rather
+ * than aliased here: this viewer draws anything a Pivot or an NBLAST can hand it and declines
+ * only what could not have been built in the first place.
  *
- * It is deliberately not *tied* to `MAX_PIVOT_CELLS`, though. That constant bounds
- * an allocation — five accumulator arrays built from the product of two independently-resolved
- * column pickers, checked before a byte exists, because by then the tab has stalled. This one
- * bounds a drawing whose input is already in memory. Two different questions that happen to be
- * about the same shape; tying them together would make one move whenever the other did.
+ * The one at 4,000,000 used to be the refusal, and the table above is why moving it was safe:
+ * paint tracks the **grid** rather than the matrix, so sixteen times the cells is sixteen times
+ * one 23 ms fold — a stutter on first layout — and not sixteen times every frame.
+ *
+ * It is deliberately not tied to the pivot's thresholds. Those bound an allocation, checked
+ * before a byte exists; this one bounds a drawing whose input is already in memory. Two
+ * different questions that happen to be about the same shape.
  */
-export const MAX_HEATMAP_CELLS = 4_000_000
+export const HEATMAP_CELLS_WARN = 4_000_000
 
 /**
  * Steps the colour ramp is sampled into, shared by the fills and the caption's colour bar.

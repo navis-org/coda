@@ -485,3 +485,79 @@ describe('publishing a partial result', () => {
     expect(scheduler.output('n', 'out')).toBeUndefined()
   })
 })
+
+/**
+ * The warning channel: `ctx.warn`, and where what it says lives afterwards.
+ *
+ * The behaviour worth pinning is not that a string comes back — it is *when*. A guard rail's
+ * whole value is that it speaks before the expensive part, next to a Cancel button, and that
+ * what it said stays attached to the result rather than to the run that produced it. Both of
+ * those are easy to lose to a refactor and neither shows up in a type.
+ */
+describe('what a node warns about', () => {
+  function register(type: string, opts: { twice?: boolean; fail?: boolean } = {}): void {
+    registerNode({
+      type,
+      label: type,
+      category: 'utility',
+      cost: 'cheap',
+      inputs: [],
+      outputs: [{ id: 'out', label: 'Out', type: T.table() }],
+      inferOutputs: () => ({ out: T.table() }),
+      evaluate: (ctx) => {
+        ctx.warn('this is large')
+        if (opts.twice) ctx.warn('this is large')
+        // Read back from inside `evaluate`: the point of the live map is that the card can
+        // show this while the node is still working.
+        heardWhileRunning = scheduler.warning('n')
+        if (opts.fail) throw new Error('nope')
+        return { out: tableFromRows(tableSchema(column('a', 'i64')), [{ a: 1 }]) }
+      },
+    })
+  }
+
+  let scheduler: Scheduler
+  let heardWhileRunning: string | undefined
+
+  const graphOver = (type: string): CodaGraph =>
+    addNode(emptyGraph('warn-test'), { id: 'n', type, position: { x: 0, y: 0 }, params: {} })
+
+  beforeEach(() => {
+    scheduler = makeScheduler()
+    heardWhileRunning = undefined
+  })
+
+  it('is readable while the node is still running', async () => {
+    register('test.warn.live')
+    await scheduler.run(graphOver('test.warn.live'), { mode: 'full' })
+    expect(heardWhileRunning).toBe('this is large')
+  })
+
+  it('stays with the result, so a run that answers from cache still carries it', async () => {
+    register('test.warn.cached')
+    const g = graphOver('test.warn.cached')
+    await scheduler.run(g, { mode: 'full' })
+    await scheduler.run(g, { mode: 'full' })
+    // Nothing re-ran the second time; the caveat is about the value, not about the run.
+    expect(scheduler.warning('n')).toBe('this is large')
+    expect(scheduler.info('n').state).toBe('ok')
+  })
+
+  it('collapses repeats, so a warning raised in a loop says its piece once', async () => {
+    register('test.warn.repeats', { twice: true })
+    await scheduler.run(graphOver('test.warn.repeats'), { mode: 'full' })
+    expect(scheduler.warning('n')).toBe('this is large')
+  })
+
+  it('is dropped when the run fails, where the error is the only thing worth reading', async () => {
+    register('test.warn.fails', { fail: true })
+    await scheduler.run(graphOver('test.warn.fails'), { mode: 'full' })
+    expect(scheduler.info('n').state).toBe('error')
+    expect(scheduler.warning('n')).toBeUndefined()
+  })
+
+  it('says nothing for a node that warned about nothing', async () => {
+    await scheduler.run(pipeline(), { mode: 'full' })
+    expect(scheduler.warning('filter')).toBeUndefined()
+  })
+})

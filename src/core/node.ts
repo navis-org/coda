@@ -430,6 +430,32 @@ export interface EvalContext<P extends ParamValues = ParamValues> {
   /** Report 0..1 progress for the node's status bar. */
   progress(fraction: number, note?: string): void
   /**
+   * Say that this result cost something the user should know about, without refusing to
+   * produce it.
+   *
+   * The channel every guard rail speaks through. A guard rail used to be a `throw`: a set past
+   * the ceiling produced no result at all, which is the right answer only when there is no
+   * useful answer to give — and for a count, a pair total or a request budget there almost
+   * always is. What was actually wanted is "this will take four minutes", said *before* it
+   * does, with the work going ahead.
+   *
+   * So call it at the **top** of `evaluate`, before the expensive part. The warning lands on
+   * the card the moment it is raised, next to the running badge, which is what makes Cancel a
+   * real option; raising it afterwards tells somebody about a wait they have already had.
+   *
+   * Kept in the scheduler's **cache entry**, like `reportFetched` and for the same reason: a
+   * result restored from cache never runs `evaluate` again, and a warning that vanished on the
+   * next unrelated run would be a caveat that expires while the caveated result stays on screen.
+   *
+   * Repeats of the same message collapse, so a warning raised inside a per-item loop says its
+   * piece once.
+   *
+   * What it is *not* is an error channel. A node that cannot answer still throws — and a
+   * refusal that remains is one where proceeding would take the tab down with it, which is a
+   * different statement and reads as one (see `CRASH_FLOOR_BYTES`).
+   */
+  warn(message: string): void
+  /**
    * Show a partial result while this node is still running.
    *
    * The 3D viewer draws from its *inputs* rather than from its own output — `ValuePreview`'s

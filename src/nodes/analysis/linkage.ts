@@ -108,7 +108,7 @@ export const linkageNode = registerNode({
   evaluate: async (ctx) => {
     const matrix = ctx.input('in')
     if (!isMatrixValue(matrix)) throw new Error('Input is not a matrix')
-    checkLinkageInput(matrix)
+    checkLinkageInput(ctx, matrix)
 
     const method = String(ctx.params.method ?? 'ward')
     const transform = transformFor(matrix.measure, String(ctx.params.distance ?? 'auto'))

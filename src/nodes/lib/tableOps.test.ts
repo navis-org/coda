@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { compareIds, idText, isNeuronId } from '../../core/ids'
+import { CRASH_FLOOR_CELLS, SILENT } from '../../core/limits'
 import { column, columnNames, tableSchema } from '../../core/types'
 import type { TableValue } from '../../core/values'
 import { makeMatrix, tableFromRows, JOIN_SEPARATOR } from '../../core/values'
@@ -21,8 +22,8 @@ import {
   renameTable,
   matrixToTable,
   normalizeMatrix,
-  MAX_PIVOT_CELLS,
-  MAX_PIVOT_COLUMNS,
+  PIVOT_CELLS_WARN,
+  PIVOT_COLUMNS_WARN,
   pivotTable,
   sampleRowIndices,
   sampleSchema,
@@ -689,41 +690,58 @@ describe('pivot ceilings', () => {
     )
   }
 
-  it('refuses a Columns field with more distinct values than a pivot can be wide', () => {
-    const table = wide(MAX_PIVOT_COLUMNS + 1, 2)
-    // Counts are localised in the message, so match the rendered form rather than the digits.
-    expect(() => pivotTable(table, 'side', 'type', 'v', 'sum')).toThrow(
-      `${(MAX_PIVOT_COLUMNS + 1).toLocaleString()} distinct values`,
-    )
+  it('warns about a Columns field wider than a pivot is usually meant to be, and builds it', () => {
+    const table = wide(PIVOT_COLUMNS_WARN + 1, 2)
+    const said: string[] = []
+    // It used to throw here. A 6,000-column connectivity matrix over an optic lobe is a real
+    // thing to want, and the old ceiling refused it in the same breath as it caught a
+    // misconfigured picker — so the picker case gets a sentence and the matrix gets built.
+    const matrix = pivotTable(table, 'side', 'type', 'v', 'sum', { warn: (m) => said.push(m) })
+    expect(matrix.colLabels.length).toBe(PIVOT_COLUMNS_WARN + 1)
+    expect(said.join(' ')).toContain('"type"')
+    expect(said.join(' ')).toContain('Columns is the small axis')
   })
 
-  it('names the field and says which way round a pivot goes', () => {
-    // The message has to be actionable by someone who did not choose this shape on purpose,
-    // because in the reported case nobody did.
-    try {
-      pivotTable(wide(MAX_PIVOT_COLUMNS + 1, 2), 'side', 'type', 'v', 'sum')
-      expect.unreachable('should have refused')
-    } catch (error) {
-      const message = String(error)
-      expect(message).toContain('"type"')
-      expect(message).toContain('Columns should be the small field')
-    }
+  it('says nothing to a SILENT warner, and still applies the floors below', () => {
+    // `SILENT` is "there is nobody to tell", never "skip the check" — which is exactly what the
+    // `ctx?: Warner` this replaced could not distinguish, since one condition carried both.
+    expect(() =>
+      pivotTable(wide(PIVOT_COLUMNS_WARN + 1, 2), 'side', 'type', 'v', 'sum', SILENT),
+    ).not.toThrow()
   })
 
-  it('refuses on total cells even when each axis is individually allowed', () => {
-    // 1,500 x 1,500 is under the column cap on both axes and over two million cells.
+  it('warns on total cells even when each axis is individually unremarkable', () => {
+    // 1,500 x 1,500 is unremarkable on both axes and over two million cells.
     const side = 1_500
     const table = tableFromRows(
       tableSchema(column('a', 'str'), column('b', 'str'), column('v', 'i64')),
       Array.from({ length: side }, (_, i) => ({ a: `A${i}`, b: `B${i}`, v: i })),
     )
-    expect(() => pivotTable(table, 'a', 'b', 'v', 'sum')).toThrow(/cells/)
-    expect(side * side).toBeGreaterThan(MAX_PIVOT_CELLS)
+    const said: string[] = []
+    pivotTable(table, 'a', 'b', 'v', 'sum', { warn: (m) => said.push(m) })
+    expect(said.join(' ')).toMatch(/cells/)
+    expect(side * side).toBeGreaterThan(PIVOT_CELLS_WARN)
+  })
+
+  it('still refuses the shape that has no matrix on the other side of it', () => {
+    /*
+     * The crash floor, and the reason this file keeps one at all: the accumulators are single
+     * allocations sized by the product of two independently-resolved pickers, so there is
+     * nothing to warn *about* past it. 8,200 squared is 67 million cells — 538 MB of Float64
+     * — from a table of 8,200 rows.
+     */
+    const side = 8_200
+    const table = tableFromRows(
+      tableSchema(column('a', 'str'), column('b', 'str'), column('v', 'i64')),
+      Array.from({ length: side }, (_, i) => ({ a: `A${i}`, b: `B${i}`, v: i })),
+    )
+    expect(side * side).toBeGreaterThan(CRASH_FLOOR_CELLS)
+    expect(() => pivotTable(table, 'a', 'b', 'v', 'sum', SILENT)).toThrow(/would allocate/)
   })
 
   it('builds the shape a pivot is actually for', () => {
     // The same data the refusal above was about, the right way round: many rows, few columns.
-    const matrix = pivotTable(wide(5_000, 3), 'type', 'side', 'v', 'sum')
+    const matrix = pivotTable(wide(5_000, 3), 'type', 'side', 'v', 'sum', SILENT)
     expect(matrix.rowLabels).toHaveLength(5_000)
     expect(matrix.colLabels).toHaveLength(3)
   })
@@ -731,7 +749,7 @@ describe('pivot ceilings', () => {
 
 describe('pivot', () => {
   it('builds a labelled matrix with sorted labels', () => {
-    const m = pivotTable(conn(), 'neuronId', 'partnerType', 'weight', 'sum')
+    const m = pivotTable(conn(), 'neuronId', 'partnerType', 'weight', 'sum', SILENT)
     expect(m.rowLabels).toEqual(['1', '2', '3'])
     expect(m.colLabels).toEqual(['DNp02', 'PLP003', 'PVLP002'])
     const at = (r: number, c: number) => m.values[r * m.colLabels.length + c]
@@ -742,7 +760,7 @@ describe('pivot', () => {
   })
 
   it('counts rows when asked to', () => {
-    const m = pivotTable(conn(), 'neuronId', 'partnerType', undefined, 'count')
+    const m = pivotTable(conn(), 'neuronId', 'partnerType', undefined, 'count', SILENT)
     expect(m.values[0]).toBe(2)
   })
 
@@ -752,7 +770,7 @@ describe('pivot', () => {
    * describing different pivots.
    */
   it('reshapes the same pivot into a wide table', () => {
-    const m = pivotTable(conn(), 'neuronId', 'partnerType', 'weight', 'sum')
+    const m = pivotTable(conn(), 'neuronId', 'partnerType', 'weight', 'sum', SILENT)
     const wide = matrixToTable(m, 'neuronId')
 
     expect(wide.schema.columns.map((c) => c.name)).toEqual(['neuronId', ...m.colLabels])
@@ -782,7 +800,7 @@ describe('pivot', () => {
   it('reshapes an empty pivot to a table of the same width', () => {
     const empty = tableFromRows(CONNECTIVITY, [])
     const wide = matrixToTable(
-      pivotTable(empty, 'neuronId', 'partnerType', 'weight', 'sum'),
+      pivotTable(empty, 'neuronId', 'partnerType', 'weight', 'sum', SILENT),
       'neuronId',
     )
     expect(wide.length).toBe(0)

@@ -16,6 +16,7 @@ import { hasHelp } from '../../help/registry'
 import { useGraphStore, useSelectedNode } from '../../store/graphStore'
 import { exportBaseName } from '../export'
 import { formatDuration } from '../format'
+import { nodeIssues } from '../nodes/nodeIssues'
 import { ParamField } from '../params/ParamField'
 import { familyColorVar, socketStyle } from '../socketStyle'
 import { ValuePreview } from '../viewers/ValuePreview'
@@ -45,6 +46,12 @@ export function Inspector() {
     if (!node) return undefined
     const port = (getNodeDef(node.type)?.outputs ?? [])[0]
     return port ? s.nodeOutput(node.id, port.id) : undefined
+  })
+  // What the run said about the result that is here — a guard rail passed, a draw sampled. A
+  // string or undefined, so the snapshot stays a primitive (invariant 7). See `EvalContext.warn`.
+  const runWarning = useGraphStore((s) => {
+    void s.runVersion
+    return node ? s.nodeWarning(node.id) : undefined
   })
 
   const def = node ? getNodeDef(node.type) : undefined
@@ -90,7 +97,13 @@ export function Inspector() {
   }
 
   const params = (def.params ?? []).filter((p) => !p.visibleIf || p.visibleIf(node.params))
-  const issues = types?.issues ?? []
+  /*
+   * Run state and edit-time issues in one list, ranked by `nodeIssues` — the same ranking the
+   * card takes its single line from, so the top of this list and the card's line are always the
+   * same sentence. Note what this adds over the inference issues alone: a run *error* now
+   * appears here at all, which it did not before.
+   */
+  const issues = nodeIssues(info ?? { state: 'idle' }, types?.issues, runWarning)
   /*
    * An annotation has no ports and is never evaluated, so the Ports and Result sections would be
    * an empty list, an empty viewer and two buttons that do nothing. Its params are still shown —

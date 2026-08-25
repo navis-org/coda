@@ -57,7 +57,10 @@ export const cutTreeNode = registerNode({
       label: 'Clusters',
       default: 4,
       min: 1,
-      max: 500,
+      // The linkage this cuts can carry eleven thousand leaves, and cutting one into thousands
+      // of small groups is a normal thing to do with it — 500 was the dendrogram's readable
+      // limit standing in for the tree's.
+      max: 10_000,
       visibleIf: (params) => params.mode !== 'height',
       help:
         'Exactly this many groups come back. A tree of fewer leaves than this gives one ' +

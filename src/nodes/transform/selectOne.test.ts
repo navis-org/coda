@@ -50,8 +50,9 @@ function pipeline(
 ): CodaGraph {
   let g = emptyGraph('select-one-test')
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: 'optic-lobe-mini' }))
-  // Narrowed for the geometry branches: `Max neurons` on the morphology nodes is a refusal
-  // ceiling, not a truncation, so a wide population errors there rather than fetching a few.
+  // Narrowed for the geometry branches: the morphology nodes fetch what they are given — the
+  // `Warn above` threshold is a sentence, not a truncation — so a wide population here would
+  // really fetch the lot.
   const pattern = via ? 'LC4' : 'LC.*'
   g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: pattern, status: 'Traced' }))
   g = addNode(g, node('pick', 'core.selectOne', params))

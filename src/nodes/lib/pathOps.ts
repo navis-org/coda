@@ -355,20 +355,27 @@ export interface RankedPath {
  * fraction of this, and a run that reaches it is one where the pruned graph turned out to be
  * dense enough that the number of distinct routes is not a thing anybody wants listed. It is
  * reported rather than swallowed — a silently truncated ranking claims to be "the strongest"
- * when it is only "the strongest found".
+ * when it is only "the strongest found" — and the node now says so through `ctx.warn` as well
+ * as in the progress note, since a note is gone by the next repaint and the caveat is not.
+ *
+ * Ten times what it was. A step is a pointer chase over an adjacency map, so half a million of
+ * them is a few tens of milliseconds — the old number was not protecting anything, and a
+ * six-hop question on a dense optic-lobe graph hit it while a five-hop one did not, which made
+ * the brake look like a property of the connectome.
  */
-export const MAX_PATH_STEPS = 500_000
+export const MAX_PATH_STEPS = 5_000_000
 
 /**
  * The ceiling on the shortlist when `topN` is 0.
  *
  * "Every route" is not a thing that can be delivered on a dense graph — eight layers of nine
  * nodes is five million routes, each one an array — so 0 means "as many as are worth listing",
+ * now ten times as many as it used to (fifty thousand arrays is tens of megabytes, not a tab),
  * and hitting this reports `truncated` exactly as running out of steps does. It is also what
  * keeps the branch-and-bound working in that mode: with no shortlist there is no bound, and
  * without a bound the search degenerates into the full enumeration this exists to avoid.
  */
-export const MAX_PATHS_KEPT = 5_000
+export const MAX_PATHS_KEPT = 50_000
 
 export interface RankResult {
   paths: RankedPath[]
@@ -379,11 +386,31 @@ export interface RankResult {
 function comparePaths(a: RankedPath, b: RankedPath): number {
   // Strongest first, then shortest, then by name — the last two only so that two runs of the
   // same query list the same routes in the same order.
-  return (
-    b.bottleneck - a.bottleneck ||
-    a.hops - b.hops ||
-    a.keys.join(' ').localeCompare(b.keys.join(' '))
-  )
+  return b.bottleneck - a.bottleneck || a.hops - b.hops || compareKeys(a.keys, b.keys)
+}
+
+/**
+ * Two routes by name, key by key.
+ *
+ * The obvious spelling is `a.keys.join(' ').localeCompare(b.keys.join(' '))`, and it was that
+ * until the step budget went up tenfold. This runs on **every heap comparison** — the shortlist
+ * consults its weakest member on every branch — and on a graph where routes tie on bottleneck
+ * and hop count, which uniform weights produce by construction, the tiebreak *is* the
+ * comparison. Two array joins and a full-string collation per comparison measured 337 ms on
+ * the truncation test against 32 ms for this.
+ *
+ * Element-wise stops at the first difference, which is usually the first hop, and allocates
+ * nothing. The order it produces is not identical to the joined form's for keys that differ
+ * only across a space boundary; that is fine, because what is being bought here is *a* stable
+ * order rather than a particular one.
+ */
+function compareKeys(a: readonly string[], b: readonly string[]): number {
+  const shared = Math.min(a.length, b.length)
+  for (let i = 0; i < shared; i++) {
+    const cmp = a[i]!.localeCompare(b[i]!)
+    if (cmp !== 0) return cmp
+  }
+  return a.length - b.length
 }
 
 /**

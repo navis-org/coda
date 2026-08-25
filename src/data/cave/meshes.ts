@@ -26,7 +26,7 @@
  * **What it costs is requests, and there is no level of detail to trade against.** A graphene
  * manifest lists supervoxel fragments at full resolution — 492 requests and ~1.2 MB for one
  * neuron — where neuPrint's multi-resolution meshes answer in a handful at a chosen LOD. That
- * is why `MAX_MESH_NEURONS` is what it is, and why `fetchCoarseGeometry` stays unimplemented:
+ * is why `MESH_WARN_NEURONS` is what it is, and why `fetchCoarseGeometry` stays unimplemented:
  * there is no cheap representation to draw a thumbnail from, and the interface's own docstring
  * says an absent one is better than quietly downloading full detail to fill a list. Measured on
  * one neuron: 13.3 s to fetch, and 1,276,736 triangles before decimation.
@@ -43,14 +43,21 @@ import { caveGet } from './client'
 import { parseGrapheneSource } from './graphene'
 
 /**
- * How many neurons a mesh request will take.
+ * Where a graphene mesh request starts saying how long it will be.
  *
- * Far below the 500 the Skeletons node shares, and the gap is the whole point: at 492 requests
- * and ~1.2 MB apiece, 500 neurons is a quarter of a million requests. This is a *source* refusal
- * rather than a param maximum because the ceiling is a fact about graphene rather than about the
- * node — the same node against neuPrint's multi-resolution meshes is fine at 500.
+ * Far below the ten thousand the neuron-count controls share, and the gap is the whole point:
+ * at 492 requests and ~1.2 MB apiece, a thousand neurons is half a million requests. It is said
+ * by the *source* rather than by the node because it is a fact about graphene rather than about
+ * the Meshes node — the same node against neuPrint's multi-resolution meshes has nothing to warn
+ * about at all.
+ *
+ * It was `MAX_MESH_NEURONS = 20`, and a refusal. Twenty was never a scientific quantity of
+ * neurons; what it protected against was an unbounded fan-out, and `MESH_CONCURRENCY` plus the
+ * session geometry cache are what actually do that. So the number survives as the point where
+ * the cost is worth a sentence, and the fetch goes ahead — see `core/limits.ts` for why every
+ * guard rail in the tree made the same move.
  */
-export const MAX_MESH_NEURONS = 20
+export const MESH_WARN_NEURONS = 20
 
 /**
  * Triangles a decimated mesh comes out at, per grid step.

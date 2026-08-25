@@ -37,8 +37,8 @@
 import { registerNode } from '../../core/registry'
 import type { TableSchema } from '../../core/types'
 import { T, columnNames, findColumn } from '../../core/types'
-import { parseDelimited } from '../../data/csv'
-import { MAX_UPLOAD_BYTES, reportUploadLearned } from '../../data/uploads'
+import { readDelimitedResponse } from '../../data/csv'
+import { reportUploadLearned } from '../../data/uploads'
 import { importShapeIssues, importShapeParams, readImportShape } from '../lib/importParams'
 import { uploadIsNeurons, uploadShapeSchema, uploadShapeTable } from '../lib/tableOps'
 
@@ -160,38 +160,20 @@ export const tableFromUrlNode = registerNode({
       throw new Error(`${url} returned ${response.status} ${response.statusText}`.trim())
     }
 
-    // Before the body is read, when it is still free — the same call `pivotTable` makes on
-    // shape rather than on the array it is about to allocate. Absent on a chunked response,
-    // which is why the parsed size is checked again below.
-    const declared = Number(response.headers.get('content-length') ?? '')
-    if (Number.isFinite(declared) && declared > MAX_UPLOAD_BYTES) {
-      throw new Error(
-        `${url} is ${Math.round(declared / (1024 * 1024))} MB, over the ` +
-          `${Math.round(MAX_UPLOAD_BYTES / (1024 * 1024))} MB limit.`,
-      )
-    }
-
-    ctx.progress(0.5, 'reading')
-    const text = await response.text()
-    if (text.length > MAX_UPLOAD_BYTES) {
-      throw new Error(
-        `${url} is ${Math.round(text.length / (1024 * 1024))} MB, over the ` +
-          `${Math.round(MAX_UPLOAD_BYTES / (1024 * 1024))} MB limit.`,
-      )
-    }
-
-    ctx.progress(0.8, 'parsing')
-    const parsed = parseDelimited(text)
-    if (parsed.table.schema.columns.length === 0 || parsed.table.length === 0) {
-      /*
-       * Very often an HTML error page served with a 200, which parses into one useless column.
-       * Saying what arrived is what turns "no rows" into something actionable.
-       */
-      const head = text.trim().slice(0, 60)
-      throw new Error(
-        `${url} had no rows to read.${head ? ` It starts: ${JSON.stringify(head)}` : ''}`,
-      )
-    }
+    /*
+     * The size tiers, the read, the parse and the "200 that parsed to nothing" refusal, all
+     * from `readDelimitedResponse` — which was written to hold exactly this and named this node
+     * as one of its two callers, while this node went on open-coding it. The cost of that came
+     * due the moment the upload limit gained a second tier: the shared copy grew a warning and
+     * a new message, and this one silently kept the old sentence with the new number in it.
+     */
+    const parsed = await readDelimitedResponse(
+      response,
+      url,
+      (message) => new Error(message),
+      ctx.progress,
+      ctx,
+    )
 
     const idColumn = String(ctx.params.idColumn ?? '')
     if (idColumn && !findColumn(parsed.table.schema, idColumn)) {

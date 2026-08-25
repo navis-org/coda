@@ -28,7 +28,7 @@ import { registerDatastackSpec, resetRuntimeSpecs } from './spec'
 import { caveScene } from './scene'
 import { readL2Skeletons } from './l2'
 import { segmentationLayerIndex } from '../neuroglancer/scene'
-import { MAX_MESH_NEURONS, decimateGridFor, fragmentConcurrencyFor } from './meshes'
+import { MESH_WARN_NEURONS, decimateGridFor, fragmentConcurrencyFor } from './meshes'
 import { quoteWideIntegers, parseCaveJson } from './json'
 import {
   reportAuthFailure,
@@ -639,7 +639,7 @@ describe('meshes', () => {
     expect(fragmentConcurrencyFor(3) * 3).toBeLessThanOrEqual(32)
   })
 
-  it('refuses a set no graphene segmentation could serve, and says why', async () => {
+  it('says what a large graphene set will cost, and fetches it anyway', async () => {
     installFetch()
     /*
      * Built as text, not by adding to a number: `720575940000000000 + i` is past
@@ -647,13 +647,25 @@ describe('meshes', () => {
      * exact trap, reproduced inside a CAVE test. It passed, because only `.length` is read.
      */
     const ids = Array.from(
-      { length: MAX_MESH_NEURONS + 1 },
+      { length: MESH_WARN_NEURONS + 1 },
       (_, i) => `7205759406288${String(57000 + i)}`,
     )
     expect(new Set(ids).size).toBe(ids.length)
-    await expect(
-      new CaveSource().fetchMeshes({ datasetId: DATASET, neuronIds: ids }),
-    ).rejects.toThrow(/no level of detail, so each one is several hundred requests/)
+
+    /*
+     * This used to reject on the count alone. Twenty graphene meshes is a slow fetch, not an
+     * impossible one, and the difference between those two is the whole of what `onWarn` was
+     * added for — so what is pinned is that the warning is raised *and the fetch starts*. It
+     * then dies on the stub, which serves no mesh fragments; that it got that far is the point.
+     */
+    const said: string[] = []
+    await new CaveSource()
+      .fetchMeshes({ datasetId: DATASET, neuronIds: ids, onWarn: (m) => said.push(m) })
+      .catch(() => undefined)
+    expect(said.join(' ')).toMatch(
+      /no level of detail, so each one is several hundred requests/,
+    )
+    expect(said.join(' ')).toMatch(/Fetching anyway/)
   })
 })
 

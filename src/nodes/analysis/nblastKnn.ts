@@ -34,6 +34,7 @@ import {
   nblastSidesFrom,
 } from '../lib/nblastOps'
 // The Skeletons node's ceiling, imported rather than restated — see `nblast.ts`.
+import { warnAboveParam } from '../lib/limitParams'
 import { MAX_NEURONS } from '../query/morphology'
 
 export const nblastKnnNode = registerNode({
@@ -60,7 +61,10 @@ export const nblastKnnNode = registerNode({
       label: 'Matches per neuron',
       default: 5,
       min: 1,
-      max: 100,
+      // A thousand rather than the old hundred. The output is one row per match, so this
+      // multiplies the result rather than the search — 10,000 neurons at k=1,000 is ten million
+      // rows, which is a table Coda can build and a person can filter.
+      max: 1000,
       help:
         'How many neighbours to keep for each neuron, best first. With a Target wired, a ' +
         'neuron that appears in both sets spends one of these on itself.',
@@ -103,7 +107,10 @@ export const nblastKnnNode = registerNode({
       label: 'Candidates',
       default: 200,
       min: 10,
-      max: 2000,
+      // Capped at the shared neuron ceiling rather than at 2,000: a shortlist longer than the
+      // population it is drawn from is the point where this stops being a shortlist at all,
+      // and that population is what `MAX_NEURONS` bounds.
+      max: MAX_NEURONS,
       step: 10,
       advanced: true,
       help:
@@ -139,17 +146,13 @@ export const nblastKnnNode = registerNode({
         'Weight each point by how strongly its neighbourhood is a line rather than a blob, ' +
         'which plays down tufts and branch points.',
     },
-    {
-      id: 'limit',
-      kind: 'int',
-      label: 'Max neurons',
-      default: 100,
+    warnAboveParam({
+      threshold: MAX_NEURONS,
       min: 2,
-      max: MAX_NEURONS,
-      step: 10,
-      advanced: true,
-      help: 'Refuse either side above this, rather than locking the tab up scoring.',
-    },
+      cost:
+        'the search runs either way. This is the node built for large sets — its cost grows ' +
+        'with Candidates rather than with the square of the population.',
+    }),
   ],
 
   /*
@@ -174,9 +177,10 @@ export const nblastKnnNode = registerNode({
 
   evaluate: async (ctx) => {
     const { query, target: targetValue } = nblastSidesFrom(
+      ctx,
       ctx.input('query'),
       ctx.input('target'),
-      Number(ctx.params.limit ?? 100),
+      Number(ctx.params.limit ?? MAX_NEURONS),
     )
 
     ctx.progress(0.01, `${query.items.length} neurons`)

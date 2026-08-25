@@ -22,7 +22,7 @@ import { isMeshesValue } from '../../core/values'
 import { MockSource } from '../../data/mock/MockSource'
 import type { DataSource, RoiMeshRequest } from '../../data/source'
 import { registerSource } from '../../data/source'
-import { MAX_REGIONS } from './roiMeshes'
+import { REGIONS_WARN } from './roiMeshes'
 
 import '../index'
 
@@ -129,12 +129,15 @@ describe('neuron.roiMeshes', () => {
     expect(issues.join(' ')).not.toContain('ME(R),')
   })
 
-  it('caps an oversized selection, since each region is a request', () => {
+  it('says a long selection is a lot, and points at the picker that asks for the set', () => {
+    // It refused at 60 until it was noticed that naming the primary set by hand was refused
+    // while asking for the same set by leaving the picker empty was fine.
     const def = requireNodeDef('neuron.roiMeshes')
-    const many = Array.from({ length: MAX_REGIONS + 1 }, (_, i) => `R${i}`)
+    const many = Array.from({ length: REGIONS_WARN + 1 }, (_, i) => `R${i}`)
     const g = graph({ rois: many })
     const issues = def.validate!(contextFor(g, def))
-    expect(issues.some((issue) => issue.includes(String(MAX_REGIONS)))).toBe(true)
+    expect(issues.join(' ')).toContain(String(REGIONS_WARN + 1))
+    expect(issues.join(' ')).toContain('primary set')
   })
 
   it('is expensive, so a whole primary set never fetches on a keystroke', () => {

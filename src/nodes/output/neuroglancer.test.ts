@@ -99,6 +99,7 @@ function evalContext(
   params: ParamValues,
   table: TableValue | undefined,
   source: DataSource,
+  said: string[] = [],
 ): EvalContext {
   const inputs: Record<string, Value | undefined> = { dataset: DATASET, neurons: table }
   const types: Record<string, CodaType | undefined> = {
@@ -111,6 +112,7 @@ function evalContext(
     params,
     refresh: false,
     reportFetched: () => undefined,
+    warn: (message) => said.push(message),
     publish: () => undefined,
     input: (portId) => inputs[portId],
     inputKey: (portId) => (inputs[portId] ? `${portId}-key` : undefined),
@@ -136,10 +138,11 @@ async function sceneFrom(
     { neuronId: 10003, type: 'DNp01' },
   ]),
   source = stubSource(),
+  said: string[] = [],
 ): Promise<{ url: string; scene: NgScene }> {
   const d = def()
   const params = { ...defaultParams(d), ...overrides } as ParamValues
-  const out = await d.evaluate(evalContext(d, params, table ?? undefined, source))
+  const out = await d.evaluate(evalContext(d, params, table ?? undefined, source, said))
   const url = asString(out['url'])
   const scene = parseSceneUrl(url)
   if (!scene) throw new Error(`no scene in ${url.slice(0, 80)}`)
@@ -333,14 +336,16 @@ describe('colour', () => {
 })
 
 describe('guard rails', () => {
-  it('refuses more neurons than the limit, and blames the right cost', async () => {
-    // Not a fetch limit — nothing is downloaded here. Saying so is what stops this being
-    // read as the morphology nodes' ceiling.
+  it('says so above the threshold, blames the right cost, and still builds the scene', async () => {
+    // Not a fetch limit — nothing is downloaded here. Saying so is what stops this being read
+    // as the morphology nodes' threshold. And it is a link that fails at the far end if it
+    // fails at all, which is why this node of all of them has no business refusing.
     const many = neurons(Array.from({ length: 6 }, (_, i) => ({ neuronId: i + 1, type: 'A' })))
-    await expect(sceneFrom({ limit: 5 }, many)).rejects.toThrow(
-      /exceeds this node's Max neurons \(5\)/,
-    )
-    await expect(sceneFrom({ limit: 5 }, many)).rejects.toThrow(/Nothing is downloaded here/)
+    const said: string[] = []
+    const { scene } = await sceneFrom({ limit: 5 }, many, stubSource(), said)
+    expect(said.join(' ')).toMatch(/6 neurons is past this node's Warn above \(5\)/)
+    expect(said.join(' ')).toMatch(/Nothing is downloaded here/)
+    expect(layersOf(scene)[1]!['segments']).toHaveLength(6)
   })
 
   it('says so when the dataset publishes no scene', async () => {

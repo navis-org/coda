@@ -282,6 +282,20 @@ export interface GeometryRequest {
    */
   onFetched?: (at: number) => void
   /**
+   * Say that this request will cost something the caller should know about, without refusing it.
+   *
+   * Wired to `ctx.warn`, and the reason it crosses the seam at all is that the cost is a fact
+   * about the *backend* rather than about the node: a hundred neurons is one query against
+   * neuPrint's ready-made skeletons and about fifty thousand requests against graphene meshes.
+   * The node cannot know that, and the source cannot reach the card, so the number that used to
+   * be a per-source refusal (`MAX_MESH_NEURONS`, `MAX_CATMAID_SKELETONS`) travels back this way
+   * instead.
+   *
+   * Called before the work starts, so the warning is on the card while there is still something
+   * to cancel. Repeats collapse at the far end, so a source may say it from inside a loop.
+   */
+  onWarn?: (message: string) => void
+  /**
    * Hand back a partial answer as bodies land, so the scene fills instead of appearing at once.
    *
    * The same shape this call will eventually resolve to, holding a subset of the items **in the

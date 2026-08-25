@@ -174,11 +174,11 @@ describe('the hint on the card', () => {
   })
 
   it('adds the changed clause when one carries a value somebody chose', async () => {
-    // The morphology example raises Max neurons on both geometry nodes.
+    // The morphology example lowers Warn above on both geometry nodes.
     render(<App />)
     const card = await cardFor(nodeIdOfType('neuron.skeletons'))
     expect(hintOf(card)!.textContent).toBe('… 1 hidden (1 changed)')
-    expect(hintOf(card)!.getAttribute('title')).toContain('Max neurons (changed)')
+    expect(hintOf(card)!.getAttribute('title')).toContain('Warn above (changed)')
   })
 
   it('says "hidden" rather than "more" when there is nothing else on the card', async () => {

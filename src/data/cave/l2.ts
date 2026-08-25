@@ -42,13 +42,17 @@ import type { CaveRequestOptions } from './client'
 export const L2_CONCURRENCY = 16
 
 /**
- * The ceiling, enforced in the source because it is a fact about this route.
+ * Where an L2 skeleton build starts saying how long it will be.
  *
- * Far above `MAX_MESH_NEURONS`, which is 20 because one graphene mesh is several hundred
- * requests; a skeleton is two. Far below the 500 a source publishing ready-made skeletons
- * allows, because those are one request each and served from a bucket.
+ * Far above `MESH_WARN_NEURONS`, which is 20 because one graphene mesh is several hundred
+ * requests; a skeleton is two. Far below what a source publishing ready-made skeletons has to
+ * say about, because those are one request each and served from a bucket.
+ *
+ * A refusal at 100 until it stopped being one. Every FlyWire question of any size arrives here
+ * — a cell type is often several hundred cells — so this route's cost is the cost of using
+ * FlyWire at all, and refusing to pay it was refusing the dataset.
  */
-export const MAX_L2_SKELETON_NEURONS = 100
+export const L2_SKELETON_WARN = 100
 
 /** What the L2 cache is asked for: a position, and something to call a radius. */
 const ATTRIBUTES = ['rep_coord_nm', 'max_dt_nm']

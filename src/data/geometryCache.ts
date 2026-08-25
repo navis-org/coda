@@ -57,8 +57,10 @@ import type { NeuronId } from '../core/ids'
  *
  * A guard rail rather than a target, for the reason in the header: while a result is live its
  * arrays are referenced anyway, so this bounds the *orphaned* tail. Sized so the common loop —
- * adjust the neuron set, run again — always hits: a full `Max neurons` batch of skeletons is on
- * the order of 100 MB, and this holds that plus the batch before it.
+ * adjust the neuron set, run again — always hits: a 500-skeleton batch is on the order of 100 MB,
+ * and this holds that plus the batch before it. Note what the guard-rail rework changed here:
+ * the morphology nodes will now fetch ten thousand if asked, so a batch can be well past this
+ * and the tail is evicted rather than the fetch refused. See docs/limits.md.
  */
 const BUDGET_BYTES = 256 * 1024 * 1024
 

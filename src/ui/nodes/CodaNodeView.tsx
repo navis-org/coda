@@ -39,6 +39,7 @@ import { socketStyle } from '../socketStyle'
 import { ValuePreview } from '../viewers/ValuePreview'
 import { CacheAge } from './CacheAge'
 import { nodeBody } from './nodeBodies'
+import { nodeIssues } from './nodeIssues'
 import { NodeRunRing } from './NodeRunRing'
 import { ResultDownload } from './ResultDownload'
 
@@ -175,6 +176,17 @@ function CodaNodeViewImpl({
     void s.runVersion
     return s.nodeFetchedAt(id)
   })
+  /*
+   * What the last run said it was doing anyway — a set past a guard rail, a draw that was
+   * sampled. A string or undefined, so this is a primitive too.
+   *
+   * It arrives *during* the run, which is the point: the warning names a wait before the wait,
+   * with Cancel an inch away. See `EvalContext.warn`.
+   */
+  const runWarning = useGraphStore((s) => {
+    void s.runVersion
+    return s.nodeWarning(id)
+  })
   const clearNodeCache = useGraphStore((s) => s.clearNodeCache)
   // Only the multi-input viewers need these, so they are resolved lazily per render rather
   // than subscribed to; `runVersion` above already ties this component to scheduler ticks.
@@ -270,13 +282,12 @@ function CodaNodeViewImpl({
   const inputs = def.inputs ?? []
   const outputs = def.outputs ?? []
   const rowCount = Math.max(inputs.length, outputs.length)
-  const issues = types?.issues ?? []
-  const errorIssue = issues.find((i) => i.severity === 'error')
-  const warningIssue = issues.find((i) => i.severity === 'warning')
-  const shownIssue: NodeIssue | undefined =
-    info.state === 'error' && info.error
-      ? { severity: 'error', message: info.error }
-      : (errorIssue ?? warningIssue)
+  // Type errors carry a `portId`; the socket ring below reads them directly, since that is a
+  // question about one port rather than about the node.
+  const typeIssues = types?.issues ?? []
+  // One line: the worst of what this node has to say. The inspector shows the same list whole,
+  // and the ranking is `nodeIssues`' so the two cannot drift apart.
+  const shownIssue: NodeIssue | undefined = nodeIssues(info, types?.issues, runWarning)[0]
 
   /*
    * A node with its own body owns the whole area below the sockets. Its params are still real
@@ -566,7 +577,7 @@ function CodaNodeViewImpl({
             const output = outputs[row]
             const inputType = input ? types?.inputs[input.id] : undefined
             const outputType = output ? (types?.outputs[output.id] ?? output.type) : undefined
-            const inputPortError = issues.some(
+            const inputPortError = typeIssues.some(
               (i) => i.severity === 'error' && input && i.portId === input.id,
             )
 

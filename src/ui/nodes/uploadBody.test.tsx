@@ -23,7 +23,12 @@ import { defaultParams, makeInferContext } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
 import { column, tableSchema } from '../../core/types'
 import { tableFromRows } from '../../core/values'
-import { MAX_UPLOAD_BYTES, putUpload, resetUploads } from '../../data/uploads'
+import {
+  MAX_UPLOAD_BYTES,
+  UPLOAD_WARN_BYTES,
+  putUpload,
+  resetUploads,
+} from '../../data/uploads'
 import '../../nodes'
 import { installJsdomStubs } from '../../test/jsdomStubs'
 import { UploadBody } from './UploadBody'
@@ -153,18 +158,30 @@ describe('bringing data in', () => {
     expect(onError).not.toHaveBeenCalled()
   })
 
-  it('refuses an oversized file before reading a byte of it', async () => {
+  it('refuses a file no browser could parse, before reading a byte of it', async () => {
     const { setParam, onError } = draw()
     const huge = fakeFile('embedding.csv', CSV, MAX_UPLOAD_BYTES + 1)
-    // If the ceiling were checked after `text()` resolved, the tab would already have stalled.
+    // If the floor were checked after `text()` resolved, the tab would already have stalled.
     Object.defineProperty(huge, 'text', {
       value: () => Promise.reject(new Error('must not be read')),
     })
     pick(huge)
 
     await waitFor(() => expect(onError).toHaveBeenCalled())
-    expect(String(onError.mock.calls[0]![0])).toMatch(/over the .* limit/)
+    expect(String(onError.mock.calls[0]![0])).toMatch(/running out of memory/)
     expect(setParam).not.toHaveBeenCalled()
+  })
+
+  it('reads a merely large file, and says it will take a moment', async () => {
+    // 50 MB was the refusal. A synapse table or somebody's segment dump lands there
+    // legitimately, and "large for a spreadsheet" and "too large for a browser" turned out to
+    // be two orders of magnitude apart.
+    const { setParam, onError } = draw()
+    pick(fakeFile('big.csv', CSV, UPLOAD_WARN_BYTES + 1))
+
+    await waitFor(() => expect(onError).toHaveBeenCalled())
+    expect(String(onError.mock.calls[0]![0])).toMatch(/Reading it anyway/)
+    await waitFor(() => expect(setParam).toHaveBeenCalledWith('fileName', 'big.csv'))
   })
 
   it('refuses a file with nothing in it rather than storing an empty table', async () => {

@@ -32,14 +32,15 @@ import { ROI_MESH_SCHEMA } from '../../data/source'
 import { datasetInfoFromType, datasetRequest, requireDataset, sourceSupports } from '../lib/datasetParam'
 
 /**
- * Ceiling on an explicit region list.
+ * Where an explicit region list starts being worth a sentence.
  *
- * It bounds the *typed* selection only — an empty list means the source's primary set, which is
- * 63 regions on hemibrain and 144 on male-CNS, and which the source picks precisely because it
- * knows better than a number here would. What this refuses is somebody chipping a hundred
- * regions into the picker one at a time and then wondering why the tab is unresponsive.
+ * It watches the *typed* selection only — an empty list means the source's primary set, which
+ * is 63 regions on hemibrain and 144 on male-CNS, and which the source picks precisely because
+ * it knows better than a number here would. Note what that means about the old refusal at 60:
+ * naming the primary set by hand was refused while asking for the same set by leaving the
+ * picker empty was fine.
  */
-export const MAX_REGIONS = 60
+export const REGIONS_WARN = 60
 
 export const roiMeshesNode = registerNode({
   type: 'neuron.roiMeshes',
@@ -109,8 +110,13 @@ export const roiMeshesNode = registerNode({
         issues.push(`This dataset has no region called ${missing.join(', ')}`)
       }
     }
-    if (chosen.length > MAX_REGIONS) {
-      issues.push(`${chosen.length} regions exceeds this node's limit of ${MAX_REGIONS}`)
+    if (chosen.length > REGIONS_WARN) {
+      // An edit-time warning, which is where this one belongs: the picker is right there, and
+      // `NodeIssue`'s 'warning' severity has said "this is fine, but" since before `ctx.warn`.
+      issues.push(
+        `${chosen.length} regions is a lot to ask for one shell at a time; leaving the picker ` +
+          `empty asks the source for its primary set instead`,
+      )
     }
     return issues
   },
@@ -122,13 +128,14 @@ export const roiMeshesNode = registerNode({
       throw new Error(`${source.label} does not provide region meshes`)
     }
 
+    /*
+     * No run-time warning to match the one in `validate` above. The predicate is the same and
+     * reads the same param, so nothing a run learns can change the answer — saying it twice
+     * would put two sentences about one fact in the inspector, and change the card's wording
+     * the moment somebody pressed Run. A threshold on a *param* belongs at edit time, where
+     * the picker is.
+     */
     const rois = asNames(ctx.params.rois)
-    if (rois.length > MAX_REGIONS) {
-      throw new Error(
-        `${rois.length} regions exceeds this node's limit of ${MAX_REGIONS}. Each shell is a ` +
-          `separate request. Choose fewer, or empty the picker for the primary set.`,
-      )
-    }
 
     ctx.progress(0.02, rois.length > 0 ? `${rois.length} regions` : 'the primary set')
     const meshes = await source.fetchRoiMeshes({

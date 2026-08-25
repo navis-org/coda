@@ -194,8 +194,8 @@ describe('the dendrogram card', () => {
     expect(screen.getByText('labels thinned')).toBeTruthy()
   })
 
-  it('refuses a tree too big to draw rather than emitting a smear', () => {
-    const n = 4000
+  /** A caterpillar tree of `n` leaves: enough shape to draw, cheap to build. */
+  function caterpillar(n: number) {
     const labels = Array.from({ length: n }, (_, i) => `n${i}`)
     const merges = new Float64Array((n - 1) * 4)
     for (let i = 0; i < n - 1; i++) {
@@ -204,7 +204,20 @@ describe('the dendrogram card', () => {
       merges[i * 4 + 2] = (i + 1) / n
       merges[i * 4 + 3] = i + 2
     }
-    draw(makeLinkage(merges, labels, Int32Array.from(labels.map((_, i) => i))))
-    expect(screen.getByText(/too many to draw/)).toBeTruthy()
+    return makeLinkage(merges, labels, Int32Array.from(labels.map((_, i) => i)))
+  }
+
+  it('draws a tree with more leaves than it can label, and says that is what it is', () => {
+    // It refused at three thousand. The shape of a ten-thousand-leaf clustering is a real
+    // picture even when no single leaf can be read — and Cut Tree is the node for the question
+    // that needs the leaves.
+    draw(caterpillar(4000))
+    expect(screen.queryByText(/more than one card can hold/)).toBeNull()
+    expect(screen.getByText('structure only')).toBeTruthy()
+  })
+
+  it('still refuses the tree that is more SVG than a card can hold', () => {
+    draw(caterpillar(20_001))
+    expect(screen.getByText(/more than one card can hold/)).toBeTruthy()
   })
 })

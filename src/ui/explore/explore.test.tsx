@@ -35,7 +35,7 @@ import { MockSource } from '../../data/mock/MockSource'
 import type { Value } from '../../core/values'
 import { makeTable } from '../../core/values'
 import { column, tableSchema } from '../../core/types'
-import { MAX_SELECT_ALL } from '../../nodes/query/explore'
+import { SELECT_ALL_WARN } from '../../nodes/query/explore'
 import { cacheGet, cacheSet, resetCache } from '../../data/cache'
 import { getConnectome } from '../../data/mock/generate'
 import { resetIndexLoads } from '../../data/neuronIndex'
@@ -55,7 +55,7 @@ import { resetThumbnailCache } from './NeuronThumbnail'
 const DATASET = 'hemibrain-mini'
 
 /**
- * A source whose index is one neuron past the select-all ceiling.
+ * A source whose index is one neuron past the select-all warning.
  *
  * The mock connectomes are a few hundred neurons — the point of them — so the only way to see
  * what the widget does with a result too big to select is to hand it one.
@@ -65,7 +65,7 @@ const DATASET = 'hemibrain-mini'
  * file. Everything not named here still runs the mock's own implementation.
  */
 function oversizedSource(): DataSource {
-  const rows = MAX_SELECT_ALL + 1
+  const rows = SELECT_ALL_WARN + 1
   const index = makeTable(
     tableSchema(column('neuronId', 'i64'), column('type', 'str')),
     {
@@ -117,6 +117,8 @@ function setup(
   const def = requireNodeDef('neuron.explore')
   const params: ParamValues = { ...defaults(def.params), ...initial }
   const writes: Array<[string, ParamValue]> = []
+  /** What the body sent to the status bar. `onError` is the notice channel, not only errors. */
+  const notices: string[] = []
   /** Stands in for undo, a loaded file, or the inspector writing the param directly. */
   let external: (paramId: string, value: ParamValue) => void = () => {}
 
@@ -136,13 +138,17 @@ function setup(
           writes.push([id, value])
           setCurrent((held) => ({ ...held, [id]: value }))
         }}
-        onError={() => {}}
+        onError={(message) => notices.push(message)}
       />
     )
   }
 
   render(<Harness />)
-  return { writes, external: (id: string, value: ParamValue) => act(() => external(id, value)) }
+  return {
+    writes,
+    notices,
+    external: (id: string, value: ParamValue) => act(() => external(id, value)),
+  }
 }
 
 function defaults(
@@ -346,31 +352,37 @@ describe('ExploreBody', () => {
     expect(selection).toContain('999999')
   })
 
-  it('refuses to select all of a result too big to be a selection', async () => {
-    // A selection is provenance: it lands in the saved file and in every downstream cache key,
-    // so an unbounded one makes an unrelated edit stringify megabytes. Refused rather than
-    // truncated — "+ all" that quietly took the first 10,000 would be a lie told by a button.
-    const { writes } = setup({ pageSize: 5 }, 'mock-huge')
+  it('selects a result too big to be comfortable, and says what that costs', async () => {
+    /*
+     * A selection is provenance: it lands in the saved file and in every downstream cache key,
+     * so an unbounded one makes an unrelated edit stringify megabytes. That was a *disabled
+     * button* until it was pointed out what it said to somebody asking for every VPN in the
+     * dataset — that the answer was too big to have. It is never truncated, though: "+ all"
+     * that quietly took the first 10,000 would be a lie told by a button.
+     */
+    const { writes, notices } = setup({ pageSize: 5 }, 'mock-huge')
     await ready()
     const button = screen.getByText('+ all') as HTMLButtonElement
-    expect(button.disabled).toBe(true)
-    expect(button.title).toMatch(/Narrow the search/)
+    expect(button.disabled).toBe(false)
+    expect(button.title).toMatch(/every downstream cache key/)
 
     fireEvent.click(button)
-    expect(writes.filter(([id]) => id === 'selection')).toHaveLength(0)
+    expect(writes.filter(([id]) => id === 'selection').at(-1)?.[1]).toHaveLength(
+      SELECT_ALL_WARN + 1,
+    )
+    expect(notices.join(' ')).toMatch(/editing this graph will feel slower/)
   })
 
-  it('offers select-all again once the search is under the ceiling', async () => {
-    // Still rendered while refused, so the limit reads as a limit rather than as a feature
-    // that is missing on big datasets.
-    const { writes } = setup({ pageSize: 5 }, 'mock-huge')
+  it('says nothing about an ordinary-sized select-all', async () => {
+    const { writes, notices } = setup({ pageSize: 5 }, 'mock-huge')
     await ready()
     await type('neuronId==1000')
 
     const button = screen.getByText('+ all') as HTMLButtonElement
-    await waitFor(() => expect(button.disabled).toBe(false))
+    await waitFor(() => expect(button.title).toMatch(/Select all 1 /))
     fireEvent.click(button)
     expect(writes.filter(([id]) => id === 'selection').at(-1)?.[1]).toEqual(['1000'])
+    expect(notices).toEqual([])
   })
 
   it('keeps the selection when the search changes', async () => {

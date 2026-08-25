@@ -12,33 +12,56 @@ import { registerNode } from '../../core/registry'
 import { T } from '../../core/types'
 import { isTableValue } from '../../core/values'
 import { requireDataset, schemasFromType, sourceSupports } from '../lib/datasetParam'
+import type { Warner } from '../../core/limits'
+import { warnOverThreshold } from '../../core/limits'
+import { warnAboveParam } from '../lib/limitParams'
 import { idColumn } from '../lib/tableOps'
 
 /**
- * Ceiling on every morphology node's `Max neurons`, so one number governs all three.
+ * Where every neuron-count control starts warning, so one number governs all of them.
  *
- * Exported because it governs more than three now: nothing can reach the NBLAST nodes that
- * these did not fetch, so their ceiling is this one. Restating the literal there made "parity
- * with the Skeletons node" a comment rather than a fact.
+ * Exported because it governs more than the three nodes here: nothing can reach the NBLAST
+ * nodes that these did not fetch, so their threshold is this one. Restating the literal there
+ * made "parity with the Skeletons node" a comment rather than a fact.
+ *
+ * It used to be a **refusal** at 500 — and 25 for meshes, and 100 for synapses, each picked
+ * before the thing that governs the cost existed. It is now the point at which the node says
+ * what it is about to do and then does it (see `core/limits.ts`), which is why the same number
+ * can be both the default and the maximum of the control: past ten thousand neurons every
+ * backend in the tree is into tens of minutes, and that is worth a sentence on the card
+ * whatever anybody set.
  */
 export const MAX_NEURONS = 10000
 
 /**
- * Read neuron ids off the incoming table, refusing an oversized set.
+ * Read neuron ids off the incoming table, saying so when the set is a large one.
  *
- * `cost` names what actually gets expensive, because it differs per node and the limit is
- * otherwise unexplainable. The old message blamed "this viewer", which was wrong twice
- * over: the viewer has no cap of its own, and drawing is not the constraint — fetching is.
+ * `cost` names what actually gets expensive, because it differs per node and the number is
+ * otherwise unexplainable. Two earlier versions of this message were wrong in ways worth
+ * keeping in view: the first blamed "this viewer", which has no cap of its own and is not what
+ * was refusing, and the second refused at all — a fetch of four thousand skeletons is a long
+ * wait, not an impossibility, and the node's job is to say which.
+ *
+ * An empty input still throws. That is not a guard rail: there is nothing to fetch, so there
+ * is no result to warn about.
  */
-function neuronIdsFrom(value: Value | undefined, limit: number, cost: string): string[] {
+function neuronIdsFrom(
+  ctx: Warner,
+  value: Value | undefined,
+  limit: number,
+  cost: string,
+): string[] {
   if (!isTableValue(value)) throw new Error('Neurons input is not a table')
   const ids = idColumn(value, 'neuronId')
   if (ids.length === 0) throw new Error('No neuronIds in the incoming neuron table')
   if (ids.length > limit) {
-    throw new Error(
-      `${ids.length} neurons exceeds this node's Max neurons (${limit}). ${cost} ` +
-        `Raise the limit if you mean it, or filter upstream.`,
-    )
+    warnOverThreshold(ctx, {
+      count: ids.length,
+      threshold: limit,
+      unit: 'neurons',
+      control: "this node's Warn above",
+      cost,
+    })
   }
   return ids
 }
@@ -66,17 +89,11 @@ export const skeletonsNode = registerNode({
    */
   dataCache: true,
   params: [
-    {
-      id: 'limit',
-      kind: 'int',
-      label: 'Max neurons',
-      help: 'Refuse to fetch more than this many, rather than locking up the tab.',
-      default: 500,
+    warnAboveParam({
+      threshold: MAX_NEURONS,
       min: 1,
-      max: MAX_NEURONS,
-      step: 10,
-      advanced: true,
-    },
+      cost: 'the fetch goes ahead either way, one request per skeleton.',
+    }),
   ],
 
   // Advertising the attribute schema at edit time is what lets the 3D viewer's
@@ -104,15 +121,18 @@ export const skeletonsNode = registerNode({
     if (!source.fetchSkeletons) throw new Error(`${source.label} does not provide skeletons`)
 
     const neuronIds = neuronIdsFrom(
+      ctx,
       ctx.input('neurons'),
-      Number(ctx.params.limit ?? 100),
-      'Each skeleton is a separate request.',
+      Number(ctx.params.limit ?? MAX_NEURONS),
+      'Each skeleton is a separate request, and a few thousand of them is minutes rather than seconds.',
     )
     ctx.progress(0.02, `${neuronIds.length} neurons`)
     const skeletons = await source.fetchSkeletons({
       ...datasetRequest(dataset),
       neuronIds,
       onProgress: ctx.progress,
+      // A cost only the backend knows: see `GeometryRequest.onWarn`.
+      onWarn: ctx.warn,
       // Clear Cache reaching the session's geometry cache, and the age it reports coming back —
       // see `EvalContext.refresh` and `reportFetched`.
       ...(ctx.refresh ? { refresh: true } : {}),
@@ -146,24 +166,21 @@ export const meshesNode = registerNode({
   // hundred requests.
   dataCache: true,
   params: [
-    {
-      id: 'limit',
-      kind: 'int',
-      label: 'Max neurons',
-      /*
-       * Was 25, chosen before levels of detail existed and never re-derived. Detail now
-       * governs weight: at the coarsest level a hemibrain neuron is ~11 kB, so refusing 30
-       * of them was refusing a few hundred kilobytes. What the count still bounds is
-       * *requests* — roughly three round trips each for a sharded source — and transfer on
-       * a source with no levels at all, where every neuron arrives at full resolution.
-       */
-      help: 'Detail governs how heavy each mesh is; this bounds how many are fetched. Sources with no levels of detail (male-CNS) send full resolution regardless — a few megabytes per neuron.',
-      default: MAX_NEURONS,
+    /*
+     * Was 25, chosen before levels of detail existed and never re-derived. Detail now governs
+     * weight: at the coarsest level a hemibrain neuron is ~11 kB, so refusing 30 of them was
+     * refusing a few hundred kilobytes. What the count still bounds is *requests* — roughly
+     * three round trips each for a sharded source — and transfer on a source with no levels at
+     * all, where every neuron arrives at full resolution.
+     */
+    warnAboveParam({
+      threshold: MAX_NEURONS,
       min: 1,
-      max: MAX_NEURONS,
-      step: 10,
-      advanced: true,
-    },
+      cost:
+        'the fetch goes ahead either way. Detail governs how heavy each mesh is and this is ' +
+        'about how many — a source with no levels of detail (male-CNS) sends full resolution ' +
+        'regardless, a few megabytes per neuron.',
+    }),
     {
       id: 'detail',
       kind: 'enum',
@@ -195,6 +212,7 @@ export const meshesNode = registerNode({
     if (!source.fetchMeshes) throw new Error(`${source.label} does not provide meshes`)
 
     const neuronIds = neuronIdsFrom(
+      ctx,
       ctx.input('neurons'),
       Number(ctx.params.limit ?? MAX_NEURONS),
       'Each mesh is a separate fetch, and a source without levels of detail sends full resolution.',
@@ -205,6 +223,8 @@ export const meshesNode = registerNode({
       neuronIds,
       triangleBudget: Number(ctx.params.detail ?? 1_500_000) || 1_500_000,
       onProgress: ctx.progress,
+      // A cost only the backend knows: see `GeometryRequest.onWarn`.
+      onWarn: ctx.warn,
       ...(ctx.refresh ? { refresh: true } : {}),
       onFetched: ctx.reportFetched,
       // As above. On a multi-resolution source nothing arrives until the manifest sweep is done,
@@ -249,16 +269,11 @@ export const synapsesNode = registerNode({
       min: 1,
       step: 1,
     },
-    {
-      id: 'limit',
-      kind: 'int',
-      label: 'Max neurons',
-      default: 100,
+    warnAboveParam({
+      threshold: MAX_NEURONS,
       min: 1,
-      max: MAX_NEURONS,
-      step: 10,
-      advanced: true,
-    },
+      cost: 'the query goes ahead either way, and it returns a row per synapse.',
+    }),
   ],
 
   inferOutputs: (ctx) => ({
@@ -278,8 +293,9 @@ export const synapsesNode = registerNode({
     if (!source.fetchSynapses) throw new Error(`${source.label} does not provide synapses`)
 
     const neuronIds = neuronIdsFrom(
+      ctx,
       ctx.input('neurons'),
-      Number(ctx.params.limit ?? 100),
+      Number(ctx.params.limit ?? MAX_NEURONS),
       'These arrive in one query, but it returns a row per synapse — thousands per neuron.',
     )
     const polarity = String(ctx.params.polarity ?? '')
@@ -289,6 +305,8 @@ export const synapsesNode = registerNode({
       ...datasetRequest(dataset),
       neuronIds,
       onProgress: ctx.progress,
+      // A cost only the backend knows: see `GeometryRequest.onWarn`.
+      onWarn: ctx.warn,
       ...(polarity === 'pre' || polarity === 'post' ? { polarity } : {}),
       minWeight: Number(ctx.params.minWeight ?? 1),
       signal: ctx.signal,

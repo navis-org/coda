@@ -37,4 +37,4 @@ neuron.nblastKnn: k, nCandidates
 
 - **Symmetry**, **Resample**, **Normalise**, **Weight by alpha**: same semantics as [NBLAST](#neuron.nblast); read that node's help for details.
 - **Tangent neighbours**: points used to fit the tangent vector at each skeleton point. 5 is the convention.
-- **Max neurons**: refuses either side above this limit, rather than locking the tab up scoring.
+- **Warn above**: says so before scoring either side above this many, and then scores. A threshold, not a cap — this is the node built for large sets, since its cost grows with **Candidates** rather than with the square of the population.

@@ -13,13 +13,15 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { CRASH_FLOOR_CELLS } from '../../core/limits'
 import { column, tableSchema } from '../../core/types'
+import type { MatrixValue } from '../../core/values'
 import { makeMatrix, tableFromRows } from '../../core/values'
 import { MAX_BAR_THICKNESS, SURFACE_GAP } from '../colors'
 import { installDownloadCapture, installJsdomStubs } from '../../test/jsdomStubs'
 import { BarChartViewer } from './BarChartViewer'
 import { HeatmapViewer } from './HeatmapViewer'
-import { MAX_HEATMAP_CELLS } from './heatmapPlot'
+import { HEATMAP_CELLS_WARN } from './heatmapPlot'
 import { TableViewer } from './TableViewer'
 
 beforeAll(() => installJsdomStubs({ width: 800, height: 400 }))
@@ -270,18 +272,46 @@ describe('HeatmapViewer', () => {
     expect(screen.getByText('cells merged')).toBeTruthy()
   })
 
-  it('still refuses a matrix past the ceiling, and says what to do', () => {
-    const cols = Math.ceil(Math.sqrt(MAX_HEATMAP_CELLS))
-    const rows = Math.floor(MAX_HEATMAP_CELLS / cols) + 1
+  it('draws a matrix past the old ceiling, and says it is a large one', () => {
+    /*
+     * Four million cells was the refusal until the measurement in `heatmapPlot.ts` was read
+     * back: paint tracks the *grid* rather than the matrix, so this costs one slower fold on
+     * first layout and nothing per frame. A 2,000-square NBLAST is exactly the picture this
+     * viewer exists for.
+     */
     const labels = (p: string, n: number) => Array.from({ length: n }, (_, i) => `${p}${i}`)
+    const side = 2_100
     const matrix = makeMatrix(
-      labels('r', rows),
-      labels('c', cols),
-      new Float64Array(rows * cols),
+      labels('r', side),
+      labels('c', side),
+      new Float64Array(side * side),
     )
-    expect(rows * cols).toBeGreaterThan(MAX_HEATMAP_CELLS)
+    expect(side * side).toBeGreaterThan(HEATMAP_CELLS_WARN)
+
     render(<HeatmapViewer matrix={matrix} />)
-    expect(screen.getByText(/too large to draw/)).toBeTruthy()
+    expect(screen.queryByText(/more than a browser can hold/)).toBeNull()
+    expect(screen.getByText('large matrix')).toBeTruthy()
+  })
+
+  it('still refuses the one shape a browser cannot hold as a grid', () => {
+    /*
+     * Built by hand rather than through `makeMatrix`, which checks that the values are all
+     * there — this is a test about the *labels*, and allocating the 536 MB it describes to
+     * prove that would be a test costing more than the thing it guards. Same call
+     * `linkageOps.test.ts` makes about its own floor.
+     */
+    const labels = (p: string, n: number) => Array.from({ length: n }, (_, i) => `${p}${i}`)
+    const side = Math.ceil(Math.sqrt(CRASH_FLOOR_CELLS)) + 1
+    const matrix: MatrixValue = {
+      kind: 'matrix',
+      rowLabels: labels('r', side),
+      colLabels: labels('c', side),
+      values: new Float64Array(0),
+    }
+    expect(side * side).toBeGreaterThan(CRASH_FLOOR_CELLS)
+
+    render(<HeatmapViewer matrix={matrix} />)
+    expect(screen.getByText(/more than a browser can hold/)).toBeTruthy()
     expect(screen.getByText(/Aggregate upstream/)).toBeTruthy()
   })
 

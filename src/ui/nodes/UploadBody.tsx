@@ -29,6 +29,7 @@ import { getNodeDef } from '../../core/registry'
 import { parseDelimited } from '../../data/csv'
 import {
   MAX_UPLOAD_BYTES,
+  UPLOAD_WARN_BYTES,
   peekUploadMeta,
   putUpload,
   subscribeUploadLearned,
@@ -117,13 +118,23 @@ export function UploadBody({ node, ctx, compact, setParam, onError }: NodeBodyPr
       // Clear it, or picking the same file twice in a row fires no change event at all.
       event.target.value = ''
       if (!file) return
-      // Checked against the file's own size, before a byte is read — the same call
-      // `pivotTable` makes about shape rather than about the array it is about to allocate.
+      /*
+       * Checked against the file's own size, before a byte is read — the same call `pivotTable`
+       * makes about shape rather than about the array it is about to allocate. Two tiers: the
+       * refusal is where the parse would run the tab out of memory, and below it a large file
+       * is announced and read, because "large for a spreadsheet" and "too large for a browser"
+       * are two orders of magnitude apart and this used to conflate them.
+       */
       if (file.size > MAX_UPLOAD_BYTES) {
         onError(
-          `"${file.name}" is ${formatBytes(file.size)}, over the ${formatBytes(MAX_UPLOAD_BYTES)} limit for an upload.`,
+          `"${file.name}" is ${formatBytes(file.size)}, past the ${formatBytes(MAX_UPLOAD_BYTES)} a browser can parse without running out of memory. Split it, or filter it before uploading.`,
         )
         return
+      }
+      if (file.size > UPLOAD_WARN_BYTES) {
+        onError(
+          `"${file.name}" is ${formatBytes(file.size)} — parsing will take a moment and the tab will be unresponsive while it does. Reading it anyway.`,
+        )
       }
       void file.text().then(
         (text) => ingest(file.name, text),

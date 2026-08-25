@@ -245,6 +245,7 @@ describe('every store action is on one side of the lock', () => {
     'nodeInputs',
     'nodeOutput',
     'nodeFetchedAt',
+    'nodeWarning',
     'setNotice',
   ]
 

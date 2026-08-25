@@ -1,6 +1,7 @@
-import { useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useMemo, useRef, useState } from 'react'
 
 import type { LinkageValue } from '../../core/values'
+import type { Mode } from '../colors'
 import { CHART_INK, MAX_SERIES, chartSurface, currentMode } from '../colors'
 import { clusterColor } from '../encoding'
 import { exportBaseName as makeBaseName } from '../export'
@@ -27,8 +28,27 @@ export interface DendrogramViewerProps {
 /** Room a leaf label needs along its axis before the next one starts overlapping it. */
 const LABEL_PITCH = { right: 11, down: 7 }
 
-/** Above this many leaves the brackets are hairlines and there is nothing to click. */
-const MAX_LEAVES_DRAWN = 3000
+/**
+ * Above `LEAVES_WARN` the brackets are hairlines and there is nothing to click; above
+ * `MAX_LEAVES_DRAWN` there is no SVG worth building at all.
+ *
+ * `_WARN` rather than something more descriptive so that `grep _WARN` finds the whole tier —
+ * see docs/limits.md, which invites exactly that sweep.
+ *
+ * Two numbers, because "you will not enjoy reading this" and "this cannot be drawn" are
+ * different statements and the first was standing in for the second. A tree of ten thousand
+ * leaves is 20,000 path elements: heavy, laid out once — see `DendrogramLinks`, which is what
+ * makes "once" true — and a perfectly good picture of *structure* even when no individual label
+ * can be read. Cut Tree is the node for the other question.
+ *
+ * `MAX_LEAVES_DRAWN` is **not reachable today**: every linkage comes through
+ * `checkLinkageInput`, whose own floor is lower, so nothing in the app can build a tree this
+ * big. It is kept rather than deleted because the alternative is a viewer whose only bound is a
+ * constant three modules upstream — the arrangement `MAX_HEATMAP_CELLS` was in until it turned
+ * out that connectivity matrices reach that viewer without passing through a pivot at all.
+ */
+const LEAVES_WARN = 3000
+const MAX_LEAVES_DRAWN = 20_000
 
 /**
  * A merge tree, drawn.
@@ -108,6 +128,56 @@ export function DendrogramViewer({
 
   const exportSource: ExportSource = useMemo(() => ({ svg: () => svgRef.current }), [])
 
+  /*
+   * Both handed to the memoised `<DendrogramLinks>` below, so both have to be stable — a fresh
+   * closure per render would defeat the memo and put every bracket back through reconciliation
+   * on each pointer move, which is the whole cost being avoided.
+   *
+   * `setHover` is a `useState` setter and stable by construction; `ref` is a ref object, so
+   * reading `ref.current` inside needs no dependency.
+   */
+  const commit = useCallback(
+    (observations: number[], additive: boolean): void => {
+      if (!onSelectionChange) return
+      const emit = (set: Iterable<number>): void => onSelectionChange([...set].map(String))
+      if (!additive) {
+        // A branch already wholly selected clears, so a second click on the same bracket undoes
+        // the first — otherwise the only way out of a selection is to find empty canvas.
+        const same =
+          observations.length === selected.size && observations.every((o) => selected.has(o))
+        emit(same ? [] : observations)
+        return
+      }
+      const next = new Set(selected)
+      const allIn = observations.every((o) => next.has(o))
+      for (const o of observations) {
+        if (allIn) next.delete(o)
+        else next.add(o)
+      }
+      emit(next)
+    },
+    [onSelectionChange, selected],
+  )
+
+  // Only the click needs the leaves under a branch, so the walk that finds them happens once
+  // per click rather than once per render.
+  const pick = useCallback(
+    (link: DendrogramLink, additive: boolean): void =>
+      commit(observationsUnder(shape, link), additive),
+    [commit, shape],
+  )
+
+  const hoverAt = useCallback(
+    (link: DendrogramLink, event: React.MouseEvent): void => {
+      // Container coordinates, not the viewport's: the card sits inside a transformed pane.
+      // See `tooltipPoint`.
+      setHover({ link, ...tooltipPoint(event, ref.current) })
+    },
+    [ref],
+  )
+
+  const clearHover = useCallback(() => setHover(null), [])
+
   const leafCount = shape.leaves.length
   if (leafCount === 0) {
     return (
@@ -120,10 +190,10 @@ export function DendrogramViewer({
     return (
       <div className="viewer">
         <div className="viewer__empty">
-          {leafCount.toLocaleString()} leaves is too many to draw as a tree.
+          {leafCount.toLocaleString()} leaves is {(leafCount * 2).toLocaleString()} SVG paths,
+          more than one card can hold.
           <br />
-          Group or filter upstream — a dendrogram past a few hundred leaves has no readable
-          labels on it.
+          Group or filter upstream, or take the clustering as a table through Cut Tree.
         </div>
       </div>
     )
@@ -154,26 +224,6 @@ export function DendrogramViewer({
   // how a branch and the neuron it stands for come to be drawn in different colours.
   const colorFor = (cluster: number): string => clusterColor(cluster, mode)
 
-  const commit = (observations: number[], additive: boolean): void => {
-    if (!onSelectionChange) return
-    const emit = (set: Iterable<number>): void => onSelectionChange([...set].map(String))
-    if (!additive) {
-      // A branch already wholly selected clears, so a second click on the same bracket undoes
-      // the first — otherwise the only way out of a selection is to find empty canvas.
-      const same =
-        observations.length === selected.size && observations.every((o) => selected.has(o))
-      emit(same ? [] : observations)
-      return
-    }
-    const next = new Set(selected)
-    const allIn = observations.every((o) => next.has(o))
-    for (const o of observations) {
-      if (allIn) next.delete(o)
-      else next.add(o)
-    }
-    emit(next)
-  }
-
   return (
     <div className="viewer">
       <div
@@ -199,43 +249,18 @@ export function DendrogramViewer({
             <rect width={size.width} height={size.height} fill={surface} />
 
             <g transform={`translate(${originX} ${originY})`}>
-              {shape.links.map((link) => {
-                const path = linkPath(link, orientation, box)
-                const isSelected = selectedLinks[shape.leaves.length + link.merge] === 1
-                return (
-                  <g key={link.merge}>
-                    {/* A fat transparent copy, so a hairline bracket is still clickable —
-                        the same trick `BaseEdge`'s interactionWidth plays on a wire. */}
-                    <path
-                      d={path}
-                      fill="none"
-                      stroke="transparent"
-                      strokeWidth={10}
-                      style={{ cursor: onSelectionChange ? 'pointer' : 'default' }}
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        // Only the click needs the leaves under this branch, so the walk that
-                        // finds them happens once per click rather than once per render.
-                        commit(observationsUnder(shape, link), event.metaKey || event.ctrlKey)
-                      }}
-                      onMouseMove={(event) =>
-                        // Container coordinates, not the viewport's: the card sits inside a
-                        // transformed pane. See `tooltipPoint`.
-                        setHover({ link, ...tooltipPoint(event, ref.current) })
-                      }
-                      onMouseLeave={() => setHover(null)}
-                    />
-                    <path
-                      d={path}
-                      fill="none"
-                      stroke={isSelected ? ink.primary : colorFor(link.cluster)}
-                      strokeWidth={isSelected ? 2.2 : 1.2}
-                      strokeLinejoin="round"
-                      pointerEvents="none"
-                    />
-                  </g>
-                )
-              })}
+              <DendrogramLinks
+                shape={shape}
+                orientation={orientation}
+                boxWidth={box.width}
+                boxHeight={box.height}
+                selectedLinks={selectedLinks}
+                mode={mode}
+                interactive={onSelectionChange !== undefined}
+                onPick={pick}
+                onHover={hoverAt}
+                onLeave={clearHover}
+              />
 
               {/*
                * The hover emphasis as one extra path rather than a `strokeWidth` inside the
@@ -315,6 +340,16 @@ export function DendrogramViewer({
           {selected.size > 0 ? ` · ${selected.size} selected` : ''}
         </span>
         {thinned && labelsDrawn && <span className="viewer__note">labels thinned</span>}
+        {leafCount > LEAVES_WARN && (
+          // Drawn, and worth saying that what is on screen is structure rather than leaves:
+          // the brackets are hairlines at this size and there is nothing to click.
+          <span
+            className="viewer__note"
+            title="More leaves than this drawing can separate: the shape is readable, individual leaves are not. Cut Tree hands the same clustering back as a table."
+          >
+            structure only
+          </span>
+        )}
         {clusterCount > MAX_SERIES && <span className="viewer__note">colours repeat</span>}
         <ViewerActions
           baseName={baseName ?? makeBaseName(undefined, 'dendrogram')}
@@ -327,3 +362,86 @@ export function DendrogramViewer({
     </div>
   )
 }
+
+/**
+ * The brackets, memoised away from the tooltip.
+ *
+ * The tree is `2n` `<path>` elements and nothing about any of them changes on a hover — only
+ * the tooltip and the one emphasis path above do. The file already knew half of this: the
+ * emphasis is drawn as an extra path rather than as a `strokeWidth` that reads `hover`,
+ * precisely so a pointer move does not change every bracket's *props*. What that did not avoid
+ * is the re-render itself, because `setHover` re-runs the component and React reconciles the
+ * whole map again.
+ *
+ * Measured in jsdom, which has no layout or paint and is therefore a floor: at 19,000 leaves —
+ * 38,000 paths — a first render is ~700 ms and *each pointer move* was another 230–320 ms. That
+ * was tolerable while the viewer refused above 3,000 leaves; it is not now that it draws up to
+ * the linkage floor.
+ *
+ * Every prop is a primitive or a memoised value, which is what makes `memo` bite: `shape` and
+ * `selectedLinks` come from `useMemo`, the box is passed as two numbers rather than as an
+ * object literal, and all three callbacks are `useCallback`s in the parent.
+ */
+interface DendrogramLinksProps {
+  shape: ReturnType<typeof dendrogramShape>
+  orientation: DendrogramOrientation
+  boxWidth: number
+  boxHeight: number
+  selectedLinks: Uint8Array
+  mode: Mode
+  interactive: boolean
+  onPick: (link: DendrogramLink, additive: boolean) => void
+  onHover: (link: DendrogramLink, event: React.MouseEvent) => void
+  onLeave: () => void
+}
+
+const DendrogramLinks = memo(function DendrogramLinks({
+  shape,
+  orientation,
+  boxWidth,
+  boxHeight,
+  selectedLinks,
+  mode,
+  interactive,
+  onPick,
+  onHover,
+  onLeave,
+}: DendrogramLinksProps) {
+  const box = { width: boxWidth, height: boxHeight }
+  const ink = CHART_INK[mode]
+  return (
+    <>
+      {shape.links.map((link) => {
+        const path = linkPath(link, orientation, box)
+        const isSelected = selectedLinks[shape.leaves.length + link.merge] === 1
+        return (
+          <g key={link.merge}>
+            {/* A fat transparent copy, so a hairline bracket is still clickable — the same
+                trick `BaseEdge`'s interactionWidth plays on a wire. */}
+            <path
+              d={path}
+              fill="none"
+              stroke="transparent"
+              strokeWidth={10}
+              style={{ cursor: interactive ? 'pointer' : 'default' }}
+              onClick={(event) => {
+                event.stopPropagation()
+                onPick(link, event.metaKey || event.ctrlKey)
+              }}
+              onMouseMove={(event) => onHover(link, event)}
+              onMouseLeave={onLeave}
+            />
+            <path
+              d={path}
+              fill="none"
+              stroke={isSelected ? ink.primary : clusterColor(link.cluster, mode)}
+              strokeWidth={isSelected ? 2.2 : 1.2}
+              strokeLinejoin="round"
+              pointerEvents="none"
+            />
+          </g>
+        )
+      })}
+    </>
+  )
+})

@@ -435,12 +435,20 @@ describe('skeletons', () => {
     expect(ages[0]).toBeLessThanOrEqual(stored)
   })
 
-  it('refuses a set past the ceiling, naming why the ceiling is low', async () => {
+  it('says what a large set costs on this backend, and fetches it', async () => {
+    // It refused at two hundred, on the reasoning that a couple of minutes is too long — which
+    // is not a call this layer gets to make for somebody with a tracing question about four
+    // hundred neurons. It says the number of minutes instead.
     stubFetch(defaultRoutes)
     const many = Array.from({ length: 500 }, (_, i) => String(i + 1))
-    await expect(source().fetchSkeletons({ datasetId: '1', neuronIds: many })).rejects.toThrow(
-      /uncompressed/,
-    )
+    const said: string[] = []
+    await source().fetchSkeletons({
+      datasetId: '1',
+      neuronIds: many,
+      onWarn: (message) => said.push(message),
+    })
+    expect(said.join(' ')).toMatch(/uncompressed/)
+    expect(said.join(' ')).toMatch(/Fetching anyway/)
   })
 })
 

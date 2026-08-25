@@ -20,7 +20,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { idText } from '../../core/ids'
 import { datasetRef } from '../../core/types'
 import { isDatasetValue } from '../../core/values'
-import { MAX_SELECT_ALL, excludedFromSearch } from '../../nodes/query/explore'
+import { SELECT_ALL_WARN, excludedFromSearch } from '../../nodes/query/explore'
 import {
   completeSearch,
   parseSearch,
@@ -40,7 +40,14 @@ import { useNeuronIndex } from '../useNeuronIndex'
  */
 const DEBOUNCE_MS = 140
 
-export function ExploreBody({ node, ctx, compact, inputValues, setParam }: NodeBodyProps) {
+export function ExploreBody({
+  node,
+  ctx,
+  compact,
+  inputValues,
+  setParam,
+  onError,
+}: NodeBodyProps) {
   /*
    * The value's dataset id when there is one, the type's otherwise — never one paired with the
    * other's chain. A dataset node on "Latest" publishes no id until its listing lands, so the
@@ -233,10 +240,22 @@ export function ExploreBody({ node, ctx, compact, inputValues, setParam }: NodeB
   )
 
   const selectVisible = useCallback(() => selectRowsInto(visible), [selectRowsInto, visible])
-  const selectAll = useCallback(
-    () => selectRowsInto(result.rows),
-    [selectRowsInto, result.rows],
-  )
+  /*
+   * Every match, however many that is — with a sentence in the status bar when it is a number
+   * that will be felt. It used to be a disabled button above ten thousand, which told somebody
+   * asking for "every VPN in the dataset" that the answer was too big to be had; the cost is
+   * real (every id lands in every downstream cache key) but it is a cost, not an impossibility.
+   */
+  const selectAll = useCallback(() => {
+    if (result.rows.length > SELECT_ALL_WARN) {
+      onError(
+        `Selecting ${formatNumber(result.rows.length)} neurons. Every id travels in the saved ` +
+          `file and in the cache key of every node downstream, so editing this graph will feel ` +
+          `slower — narrow the search and select again if that is not what you meant.`,
+      )
+    }
+    selectRowsInto(result.rows)
+  }, [selectRowsInto, result.rows, onError])
 
   const accept = useCallback(
     (index: number) => {
@@ -455,19 +474,18 @@ export function ExploreBody({ node, ctx, compact, inputValues, setParam }: NodeB
             )}
             {hits > 0 && (
               /*
-               * Offered but refused above the ceiling, rather than hidden: a button that
-               * vanishes on a big result reads as a missing feature, where a disabled one with
-               * a reason reads as a limit and says how to get under it. And it is refused
-               * rather than truncated — "+ all" that quietly selected the best 10,000 of
-               * 165,122 would be a lie told by a button.
+               * Never truncated and no longer refused. "+ all" that quietly selected the best
+               * 10,000 of 165,122 would be a lie told by a button, which is why the disabled
+               * state existed; but a button that refuses the whole of a dataset is a different
+               * lie — that the selection cannot be had — and the honest third option is to say
+               * what it will cost in the title and again in the status bar on the way past.
                */
               <button
                 type="button"
                 className="explore__link"
-                disabled={hits > MAX_SELECT_ALL}
                 title={
-                  hits > MAX_SELECT_ALL
-                    ? `Too many to select at once: ${formatNumber(hits)} match, and a selection is capped at ${formatNumber(MAX_SELECT_ALL)}. Narrow the search first.`
+                  hits > SELECT_ALL_WARN
+                    ? `Select all ${formatNumber(hits)} matching neurons — a selection this size travels in every downstream cache key and will make editing feel slower`
                     : `Select all ${formatNumber(hits)} matching neurons`
                 }
                 onClick={selectAll}

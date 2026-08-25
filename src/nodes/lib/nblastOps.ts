@@ -7,6 +7,13 @@
  * side of the seam is one call.
  */
 
+import type { Warner } from '../../core/limits'
+import {
+  describeDuration,
+  formatBytes,
+  refuseIfOverCrashFloor,
+  warnOverThreshold,
+} from '../../core/limits'
 import type { DType, TableSchema } from '../../core/types'
 import { column, findColumn, tableSchema } from '../../core/types'
 import type { CellValue, MatrixValue, SkeletonsValue, TableValue } from '../../core/values'
@@ -31,14 +38,27 @@ import type { NblastKnnResult, NblastResult, PointSet } from '../../pyodide/nbla
 export const NM_PER_UM = 1000
 
 /**
- * How many pairs one node may ask for.
+ * Pairs a second, measured on this wheel: single-threaded in wasm at a thousand points a
+ * neuron, about 15,000.
  *
- * Measured on this wheel, single-threaded in wasm at a thousand points a neuron: about 15k
- * pairs a second. So this ceiling is roughly seventeen seconds of scoring, and it is checked
- * against the two counts *before* anything is marshalled — the same rule `pivotTable` follows
- * for the same reason, that by the time the array exists the tab has already stalled.
+ * The one number the estimate below is built from, so a faster runtime moves the warning rather
+ * than the other way round.
  */
-const MAX_NBLAST_PAIRS = 250_000
+const NBLAST_PAIRS_PER_SECOND = 15_000
+
+/**
+ * Where a comparison starts saying how long it will be: about seventeen seconds of scoring.
+ *
+ * This was `MAX_NBLAST_PAIRS`, and it refused. Two hundred and fifty thousand pairs is a 500 x
+ * 500 all-by-all, which sounds generous until you notice that a cell type against its own
+ * hemisphere is routinely twice that — so the guard rail was deciding which comparisons were
+ * scientifically permissible on the basis of a seventeen-second measurement. It now says how
+ * many minutes it will be, in front of a Cancel button, and scores.
+ *
+ * Checked against the two counts *before* anything is marshalled, so the sentence arrives
+ * before the wait rather than after it.
+ */
+const NBLAST_PAIRS_WARN = 250_000
 
 /**
  * How the two directions of a pair are combined, and what each is called on a card.
@@ -158,31 +178,45 @@ export function checkNblastSpaces(query: SkeletonsValue, target: SkeletonsValue)
   )
 }
 
-/** Refuse an oversized comparison, naming both sides so it is clear which one to cut. */
-export function checkNblastSize(rows: number, cols: number): void {
-  if (rows * cols > MAX_NBLAST_PAIRS) {
-    throw new Error(
-      `${rows} x ${cols} is ${(rows * cols).toLocaleString()} pairs, over this node's ceiling ` +
-        `of ${MAX_NBLAST_PAIRS.toLocaleString()}. Scoring runs single-threaded in the browser ` +
-        `at roughly 15,000 pairs a second — filter upstream, or raise Max neurons only if you ` +
-        `mean to wait.`,
-    )
-  }
+/**
+ * Say what an oversized comparison will cost, naming both sides so it is clear which one to cut
+ * — and refuse only the one that cannot produce a matrix at all.
+ */
+export function checkNblastSize(ctx: Warner, rows: number, cols: number): void {
+  const pairs = rows * cols
+  refuseIfOverCrashFloor(
+    `A ${rows.toLocaleString()} x ${cols.toLocaleString()} score matrix`,
+    pairs * 8,
+  )
+  if (pairs <= NBLAST_PAIRS_WARN) return
+  warnOverThreshold(ctx, {
+    count: pairs,
+    threshold: NBLAST_PAIRS_WARN,
+    unit: `pairs (${rows.toLocaleString()} x ${cols.toLocaleString()})`,
+    control: 'what this node scores without comment',
+    cost:
+      `That is ${describeDuration(pairs / NBLAST_PAIRS_PER_SECOND)} of scoring — it runs ` +
+      `single-threaded in the browser at roughly ${NBLAST_PAIRS_PER_SECOND.toLocaleString()} ` +
+      `pairs a second — and the matrix comes to ${formatBytes(pairs * 8)}.`,
+  })
 }
 
 /**
- * Read both sides of a comparison, refusing everything that must not reach the runtime.
+ * Read both sides of a comparison: refuse what must not reach the runtime, and say what the
+ * rest will cost.
  *
  * Both NBLAST nodes ask the same four questions of their inputs — is this a skeleton set, is
- * it empty, is it over the ceiling, is it in nanometres — and asked at each node they were the
- * same twenty lines twice, including the messages. The precedent is `neuronIdsFrom` in
+ * it empty, is it a big one, is it in nanometres — and asked at each node they were the same
+ * twenty lines twice, including the messages. The precedent is `neuronIdsFrom` in
  * `query/morphology.ts`, which folds the identical three concerns for the three fetch nodes.
  *
- * The units check is the one that earns the sharing: it is the guard whose absence produces a
- * confident wrong matrix rather than an error, so a fix applied to one copy and not the other
- * is the worst shape this could take.
+ * The four are not the same *kind* of question, and that is the distinction the guard rails
+ * lost for a while. Wrong units produce a confident wrong matrix, so that one refuses and
+ * always will. A large set produces a correct matrix slowly, so it warns — which is why the
+ * count is checked here and the seventeen-second ceiling that used to sit beside it is gone.
  */
 export function nblastSidesFrom(
+  ctx: Warner,
   queryValue: Value | undefined,
   targetValue: Value | undefined,
   limit: number,
@@ -193,15 +227,17 @@ export function nblastSidesFrom(
   }
   if (queryValue.items.length === 0) throw new Error('No skeletons on the Query input')
 
-  const refuse = (side: string, count: number): never => {
-    throw new Error(
-      `${count} neurons on ${side} exceeds this node's Max neurons (${limit}). ` +
-        `Filter upstream, or raise the limit if you mean it.`,
-    )
+  const saySo = (side: string, count: number): void => {
+    warnOverThreshold(ctx, {
+      count,
+      threshold: limit,
+      unit: `neurons on ${side}`,
+      control: "this node's Warn above",
+      cost: 'Scoring is single-threaded in the browser and grows with the product of the two sides.',
+    })
   }
-  if (queryValue.items.length > limit) refuse('Query', queryValue.items.length)
-  if (targetValue && targetValue.items.length > limit)
-    refuse('Target', targetValue.items.length)
+  if (queryValue.items.length > limit) saySo('Query', queryValue.items.length)
+  if (targetValue && targetValue.items.length > limit) saySo('Target', targetValue.items.length)
 
   checkNblastUnits('Query', queryValue)
   if (targetValue) {

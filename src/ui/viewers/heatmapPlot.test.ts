@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest'
 import { makeMatrix } from '../../core/values'
 import { sequentialColor } from '../colors'
 import {
-  MAX_HEATMAP_CELLS,
+  HEATMAP_CELLS_WARN,
   axisMarks,
   RAMP_STEPS,
   buildHeatmapSpec,
@@ -229,11 +229,12 @@ describe('the ramp lookup', () => {
   })
 })
 
-describe('the ceiling', () => {
+describe('the caption threshold', () => {
   it('sits far above what the old per-cell drawing could reach', () => {
     // 20,000 was a fact about SVG rather than about matrices: it refused an NBLAST score matrix
-    // at the Skeletons node's own 500-neuron limit, which is 250,000 cells.
-    expect(MAX_HEATMAP_CELLS).toBeGreaterThanOrEqual(500 * 500)
+    // at a 500-neuron all-by-all, which is 250,000 cells. That number is now not even remarked
+    // on — and remarking is all this one does, since the refusal is `CRASH_FLOOR_CELLS`.
+    expect(HEATMAP_CELLS_WARN).toBeGreaterThanOrEqual(500 * 500)
   })
 })
 

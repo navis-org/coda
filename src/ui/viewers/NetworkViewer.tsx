@@ -130,8 +130,20 @@ export interface NetworkViewerProps {
   onError?: (message: string) => void
 }
 
-/** Past this, a force layout takes long enough that it needs a different approach. */
-const MAX_NODES = 20_000
+/**
+ * Where the caption says the layout will not have settled (`NODES_WARN`), and where there is no
+ * drawing at all (`MAX_NODES`). Named for the tier rather than for the symptom so that
+ * `grep _WARN` finds it — see docs/limits.md.
+ *
+ * The refusal used to be the first of these. It moved once it was clear what actually happens
+ * to a large graph here: `settleDuration` is a **wall-clock** budget on a layout that runs in a
+ * worker, so a bigger graph gets a *less settled* arrangement rather than a frozen tab — the
+ * failure is a hairball, which is a thing somebody can look at and decide about. Sigma draws in
+ * WebGL and does not care. What the hundred thousand is about is the graph build and the edge
+ * arrays, which are ordinary JS objects.
+ */
+const NODES_WARN = 20_000
+const MAX_NODES = 100_000
 
 /**
  * Hover tooltips need sigma's edge picking pass, which renders every link a second time
@@ -1092,7 +1104,8 @@ export function NetworkViewer({
     return (
       <div className="viewer">
         <div className="viewer__empty">
-          {network.nodes.length.toLocaleString()} nodes is more than this viewer will lay out.
+          {network.nodes.length.toLocaleString()} nodes is more than this viewer can build a
+          graph for.
           <br />
           Aggregate upstream — group connectivity by type before building the network.
         </div>
@@ -1228,6 +1241,17 @@ export function NetworkViewer({
         {thinned && !compact && (
           <span className="viewer__note" title="Too many labels to draw them all — zoom in.">
             labels thinned
+          </span>
+        )}
+        {network.nodes.length > NODES_WARN && !compact && (
+          // The layout is time-budgeted, so past this it stops where it got to rather than
+          // where it converged. Said plainly, because a half-settled hairball otherwise reads
+          // as the connectome's shape.
+          <span
+            className="viewer__note"
+            title="More nodes than the layout budget settles: the arrangement stops where it got to, so distance between nodes means less than usual. Re-layout to keep going, or group upstream."
+          >
+            layout unsettled
           </span>
         )}
         {stableGiven && !compact && (

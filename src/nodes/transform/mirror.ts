@@ -233,6 +233,7 @@ export const mirrorNode = registerNode({
       out: await warpGeometry(flipped, [pairs], {
         progress: (fraction, note) => ctx.progress(0.1 + 0.9 * fraction, note),
         signal: ctx.signal,
+        warn: ctx,
       }),
     }
   },

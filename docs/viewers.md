@@ -4,7 +4,6 @@ Every viewer, its export path, and the styling panel they share.
 
 Moved verbatim out of `CLAUDE.md`.
 
-
 ## Output widgets
 
 `ValuePreview` picks a viewer by node type, then by value kind, and forwards a shared prop
@@ -29,7 +28,7 @@ without export or expand.
   Two corrections, and only doing one leaves it subtly wrong: the pointer has to be made
   relative to the containing block, **and** the distance divided by the zoom, because a length
   inside a `scale(z)` pane is drawn `z` times as long. `offsetWidth` ignores transforms where
-  `getBoundingClientRect()` has applied them, so their ratio *is* the zoom — the identity the
+  `getBoundingClientRect()` has applied them, so their ratio _is_ the zoom — the identity the
   auto-layout measurement leans on. `tooltipPoint()` is that, shared by Heatmap, Bar Chart,
   Scatter and Dendrogram; `NetworkViewer` never had the bug because it was already `absolute`
   over sigma's container coordinates, which is what `.viewer`'s own `position: relative` comment
@@ -40,6 +39,7 @@ without export or expand.
   That is `.viewer__scroll` for three of them and `.viewer` for the scatter, whose tooltip is a
   sibling of its plot box — passing the wrong one is off by that element's own offset, which on
   a card looks like a styling choice rather than a bug.
+
 - **Fullscreen** uses the real Fullscreen API on the overlay panel. `.overlay__panel:fullscreen`
   resets the backdrop padding and rounding, because in fullscreen the panel _is_ the root
   element and would otherwise render as a floating card with bars around it.
@@ -58,7 +58,7 @@ place appears in all three and none of them can disagree about a filename.
 
 **A network exports as GraphML**, alongside the two CSVs it has always written. Chosen over GML —
 the other format Cytoscape, NetworkX, Gephi, igraph and yEd all read — for one reason: it is the
-only one that carries Coda's attribute tables *with their types*. A `<key>` declares `attr.type`
+only one that carries Coda's attribute tables _with their types_. A `<key>` declares `attr.type`
 up front, so `i64` arrives as a long and `f64` as a double rather than as whatever the reader
 infers from the first literal it meets, and an absent value is an omitted element rather than a
 zero somebody has to notice. GML implies types by literal syntax and restricts key names to
@@ -76,7 +76,7 @@ Four things in the writer that each produce a plausible wrong file:
   parse error. An **empty string is kept**, unlike a null, because this is a serializer: an
   omitted element reads back as a missing key and turns a blank cell into a `KeyError`.
 - **XML 1.0 forbids most C0 control characters outright**, and there is no escape for them —
-  `&#1;` is as illegal as the byte, so a document carrying one is *rejected* rather than read
+  `&#1;` is as illegal as the byte, so a document carrying one is _rejected_ rather than read
   leniently. `xmlText` strips them; tab, newline and carriage return are legal and stay. Written
   as `\u0000`-style escapes for the reason `uploads.ts` records about its separator.
 - **`id`, `source` and `target` are never repeated as attributes**, the same subtraction
@@ -88,8 +88,8 @@ Four things in the writer that each produce a plausible wrong file:
 
 The document is built as **string parts, not through `XMLSerializer`** — the whole point of
 chunking at 2,000 rows is that a 20,000-node network never becomes one huge string, and a DOM is
-that string plus an object per element. `exportValue.test.ts` still asserts against a *parsed*
-document (hence its `@vitest-environment jsdom`), because a snapshot of well-formed-*looking* XML
+that string plus an object per element. `exportValue.test.ts` still asserts against a _parsed_
+document (hence its `@vitest-environment jsdom`), because a snapshot of well-formed-_looking_ XML
 is exactly what a file with an unescaped `&` in a region name produces.
 
 **CSV stays what `auto` picks.** GraphML is the better file for Cytoscape and NetworkX; a
@@ -111,7 +111,7 @@ a fold — do not say the same thing twice on one card.
 `formatsFor` never comes back empty for a real value, because JSON is the universal fallback — so
 "any node whose result is downloadable" is really "every node with a result", and the nine dataset
 nodes gain a ⤓ writing a four-line JSON handle. It was kept because that file is valid and
-meaningful (it names the *resolved* version, which is the provenance question an unpinned
+meaningful (it names the _resolved_ version, which is the provenance question an unpinned
 `Latest` leaves open), so it is a control that delivers rather than one that promises. The
 narrowing, if it ever reads as noise, is `defaultFormat(value) !== 'json'` — one predicate, no
 list — and `resultDownload.test.tsx` is where that case is pinned.
@@ -127,8 +127,8 @@ the summary in a foot.
 ### A length is not a count either
 
 `formatCompact` is unit-blind — it reads magnitude and nothing else — so a cable length of
-2,980,158 nm rendered as **`3M`**: a magnitude carried entirely by a suffix meaning *million*,
-next to a stored unit meaning *nano*. About as misleading as a number can be, and it is the
+2,980,158 nm rendered as **`3M`**: a magnitude carried entirely by a suffix meaning _million_,
+next to a stored unit meaning _nano_. About as misleading as a number can be, and it is the
 figure every paper about a fly neuron quotes in millimetres.
 
 `formatMeasure(value, unit)` in `ui/format.ts` walks the SI ladder — nm, µm, mm, m — picking the
@@ -137,7 +137,7 @@ number instead of becoming `0 µm`. `2,980,158.182` reads `2.98 mm`; the giant f
 22,484,326 reads `22.48 mm`.
 
 **The unit travels with the number here and does not for a count**, which is the asymmetry worth
-knowing before adding a fourth unit. Which unit a *length* wants depends on its magnitude, so
+knowing before adding a fourth unit. Which unit a _length_ wants depends on its magnitude, so
 `2.98` alone says nothing — where `12.9K` beside a `pre` label says everything. So `synapses` and
 `voxels` fall through to `formatCompact` unchanged: a count has no ladder, and a voxel is not a
 fraction of anything. Those three are the only units declared anywhere in the tree.
@@ -156,24 +156,24 @@ length, with no type error and nothing failing for the cases already covered.
 
 **The schema half was already right, which is what made this a display bug rather than a data
 one.** Every `cableLength` column has carried `'nm'` since `CANONICAL_SCHEMAS`, and Explore Dataset's row
-*read* it — through `statUnit` — and then used it only in a `title`. The value beside it went
+_read_ it — through `statUnit` — and then used it only in a `title`. The value beside it went
 through the unit-blind formatter. So the fix is where the two met, not in either half.
 
 **Glanceable on screen, exact on hover.** The row's title carries the stored figure **verbatim** —
-`cableLength (nm): 2980158.182` — rather than through `formatNumber`, which groups *and* rounds:
+`cableLength (nm): 2980158.182` — rather than through `formatNumber`, which groups _and_ rounds:
 that takes CATMAID's own 4003103.2328612693 down to `4,003,103.233`, which is neither exact nor
 pasteable and so answers the one question the hover exists for with a different number. It goes
 through `formatExact`, which is `formatCell`'s id branch renamed and exported: the reason is
 identical in both places — a grouped number is a string no query accepts, and under another locale
 not even the same string — and it had been written out privately for ids until a second caller
 wanted it. The unit sits on the **label** rather than after the value, so it survives an absent one;
-what a column is *in* is the one thing an empty cell can still say.
+what a column is _in_ is the one thing an empty cell can still say.
 
 The **Table** viewer is deliberately untouched: it prints the exact value with the unit in its
 header, and a table is where exact values are read — the compact forms are for the glanceable
 surfaces.
 
-Note what is *not* covered, and it is wider than one axis: **every chart that formats a magnitude
+Note what is _not_ covered, and it is wider than one axis: **every chart that formats a magnitude
 without seeing the column's unit still reads `3M`** — the scatter's axis ticks (`scatterDraw`), the
 heatmap's colourbar and its printed cells, and both legend ramps (`LegendKeys`, `describeLegend`).
 The scatter and the legends need the unit threaded through the plot spec and the encoding
@@ -181,7 +181,7 @@ resolution, which is a change to every viewer. The heatmap is nearer, and instru
 is still not a one-liner: `pivotMatrix` copies the value column's unit into `MatrixValue.valueLabel`,
 so `Pivot` on a `cableLength` draws `0 – 3M` beside a caption reading `· nm` today — but a chart
 states its unit **once**, in that caption, so scaling the bar means scaling the printed cell values
-with it and moving the caption to the *display* unit. Doing only the bar leaves the card
+with it and moving the caption to the _display_ unit. Doing only the bar leaves the card
 disagreeing with itself, which is worse than the number it fixes.
 
 **`nodes` joined `STATS` with it.** It is CATMAID's `size` — a skeleton's node count is what says
@@ -241,11 +241,11 @@ the comparison here.**
 **What a cell decides that a query token does not is the meaning of a bare value**, and it is
 decided from the column's dtype. On a number `10` is `== 10` — read as a substring it would
 match 100 and 210, which is nobody's intent in a synapse count. On text it is a substring,
-compiled as an *escaped* regex so `LC4(R)` matches itself rather than being read as a group.
+compiled as an _escaped_ regex so `LC4(R)` matches itself rather than being read as a group.
 
 **It does not agree with the Filter node, and that is recorded rather than fixed.** The header
-*sort* shares `sortedRowIndices` with the Sort node on a stated rule — collation and null
-placement must not differ between a node and a header click. The header *filter* borrows
+_sort_ shares `sortedRowIndices` with the Sort node on a stated rule — collation and null
+placement must not differ between a node and a header click. The header _filter_ borrows
 Explore Dataset's grammar instead, so it lands elsewhere on both. Measured: `type == "lc4"` keeps 0 rows
 in a Filter node (case-sensitive) and 1 in a header cell; `pre == 0` against a null keeps the
 null row in a Filter node (`Number(null)` is 0) and none in a cell. Neither is wrong on its own,
@@ -255,7 +255,7 @@ every saved `core.filter` returns — not a tidy-up.
 
 **Nothing in it ever throws.** A half-typed cell, a regex that does not compile, a column an
 upstream edit removed — none of those may block the graph, because `out.table` is a tap and a
-refusal there reaches everything downstream of the *pass-through* too. A clause that cannot be
+refusal there reaches everything downstream of the _pass-through_ too. A clause that cannot be
 applied is dropped and reported; `validate` says so on the node and the cell wears
 `data-invalid`. Note which way that errs: dropping shows **more** rows than intended, where
 letting an unresolvable column reach `prepareFieldTerms` marks it `unknown`, which matches no
@@ -264,14 +264,14 @@ row — so one stale column name would empty the table and read as a node that h
 **A problem carries its column beside the message, never inside it.** The cell that draws the
 red border has to know which column a problem belongs to, and recovering that by substring-
 matching the prose is both fragile and wrong: `Filter on "pre": "abc" is not a number` quotes
-the offending *value* too, so a table with a column called `abc` would see that column marked
+the offending _value_ too, so a table with a column called `abc` would see that column marked
 broken. Same reasoning as `reportAuthFailure` — matching on message text rots silently.
 `validate` flattens to strings for the badge; the viewer indexes by column.
 
 **`filterRowIndices` answers `undefined` for "every row", not an identity array.** The
 unfiltered case is the common one and a table here can be the whole of male-CNS, so
 `Array.from({length}, (_, i) => i)` is 165,000 elements built and discarded — once per
-`evaluate` and once per *render*. Both callers already treat "all rows" specially, so the
+`evaluate` and once per _render_. Both callers already treat "all rows" specially, so the
 sentinel costs neither a branch.
 
 **Filtering is data; sorting is still a view.** The two controls sit inches apart and mean
@@ -280,7 +280,7 @@ for the sort. Sorting stays out of the provenance key deliberately — a header 
 cheapest gesture anyone makes on a table, and staling the graph for it would read as a
 scheduler bug.
 
-**The bill, which is not visible from the port that pays it.** A cache key is one per *node*, so
+**The bill, which is not visible from the port that pays it.** A cache key is one per _node_, so
 editing a filter invalidates `out.table` whole and reaches a chain hanging off `Table` as well —
 whose bytes did not change. It lands there as `blocked` rather than `stale`. Same trade
 `out.network`'s filters make, and `table.test.ts` pins it so nobody is surprised later.
@@ -301,7 +301,7 @@ tick. Same trap `useStable` was extracted for: **memoise by value.**
 **The field lives inside its `<th>`, not in a second row.** `.data-table th` is
 `position: sticky; top: 0`, so a second sticky row would need the first one's height as its
 offset — a height that varies with whether the column declares a unit. One sticky element that
-grows cannot drift. The knock-on is that the column *name* became a `<button>`, which is what
+grows cannot drift. The knock-on is that the column _name_ became a `<button>`, which is what
 sorts; clicking the field does not. `width: 100%; min-width: 0` on the field is what stops a
 filtered column widening as somebody types.
 
@@ -333,7 +333,7 @@ the Pivot, whose wide schema is observed rather than inferred, so no clause on i
 export time and the golden would record only the branch that binds `filtered = out`.
 
 **One pre-existing bug surfaced with it.** The overlay's rail draws each param's label itself
-*and* passed no `variant` to `ParamField`, whose checkbox draws its own — so a presentational
+_and_ passed no `variant` to `ParamField`, whose checkbox draws its own — so a presentational
 boolean rendered `Show filter row / Show filter row`. `out.table`'s filter-row toggle is the
 first boolean to reach that rail, which is why it had survived: every other param kind ignores
 `showLabel`. The rail now passes `variant="inspector"`, as `ParamRows` already did. Exactly the
@@ -344,7 +344,7 @@ a `ParamField`.
 class jsdom cannot see: the field sits inside the sticky header (`th` 129–177, field 152–171,
 first row starting at 177), column widths do not move as a filter is typed (468/468/481 before
 and after), the numeric, regex and invalid cases all behave, and the card shows the row at its
-own width with the toggle disabled while filtering. What is *not* covered anywhere is the light
+own width with the toggle disabled while filtering. What is _not_ covered anywhere is the light
 theme, and a table wide enough to scroll the filter row sideways.
 
 ## Grouped params — the styling sidebar
@@ -359,7 +359,7 @@ invented for the panel, which is the test to apply to a third one. Two things ca
 that were not the point when it started. Five tabs do not fit 268px, so `.style-tabs` wraps
 rather than scrolls: a horizontal scroller hides the last tab behind a gesture nothing on screen
 suggests. And a tabbed panel is the shape that carries the header's `Style` toggle, so grouping
-a node is also how its controls acquire a way to be *put away* — the flat rail has none, which
+a node is also how its controls acquire a way to be _put away_ — the flat rail has none, which
 is why it is always in the way on the one node whose whole face is a picture.
 
 **It is opt-in, and the opt-out is the absence of `paramGroups`.** A node declaring no groups
@@ -753,8 +753,8 @@ and `roiStyle.ts`.
 brain sits ~10⁵ nm out; `SceneContents` translates by −centre and the camera orbits (0, 0, 0).
 `framingFor` therefore returns a camera position **in the recentred space**, which is the one
 thing about it worth remembering — it is not where the bounding box is. What forced it was the
-compass: drei's `GizmoHelper` computes its snap radius as the camera's distance to the *world
-origin* rather than to the controls' target, so on an off-origin scene one click on an axis head
+compass: drei's `GizmoHelper` computes its snap radius as the camera's distance to the _world
+origin_ rather than to the controls' target, so on an off-origin scene one click on an axis head
 sent the camera a whole brain away. Recentring makes those two distances the same number.
 
 **Four settings that did nothing, and why each was invisible.**
@@ -768,7 +768,7 @@ sent the camera a whole brain away. Recentring makes those two distances the sam
   line to a precision no pointer has. It read as a viewer that had decided not to respond.
   `PickRadius` scales it off the scene extent.
 - **Rotation, after the camera became a trackball.** `TrackballControls` records a gesture in its
-  pointer handlers but only *integrates* it inside `update()`, which drei calls from `useFrame` —
+  pointer handlers but only _integrates_ it inside `update()`, which drei calls from `useFrame` —
   and `frameloop="demand"` runs `useFrame` only when something asked for a frame. The controls
   emit `change` from `update()`, so the event that would ask for the frame is the one the missing
   frame was supposed to produce. Dragging did nothing whatsoever. `InvalidateOnInput` asks for a
@@ -796,9 +796,9 @@ in the canvas. Mesh and point colour used to resolve inside `SceneContents`, whi
 why they had no key on screen: the strip could not see them.
 
 **The canvas is stretched to its box with `!important`, and the reason is a coordinate-space
-mismatch.** A renderer measures its container with `getBoundingClientRect` — *post*-transform
+mismatch.** A renderer measures its container with `getBoundingClientRect` — _post_-transform
 pixels — then writes that number back as a CSS width, which inside React Flow's transformed card
-is *pre*-transform. The zoom is applied twice and the canvas comes out short by exactly the zoom
+is _pre_-transform. The zoom is applied twice and the canvas comes out short by exactly the zoom
 factor: measured on a card at 0.8, a 560px preview held a 458px canvas with 100px of dead surface
 down one side and the scene sitting off-centre inside it. Only the element is stretched; the
 drawing buffer keeps the screen-sized resolution the renderer chose, so this is not an upscale.
@@ -810,7 +810,7 @@ and the legend and caption were clipped away with nothing to suggest they had ev
 
 **PNG export is a read-back, not a re-drawing.** There is no vector form of a 3D scene, so
 `ExportSource` grew a `png` accessor beside `svg`: render one frame and call `toDataURL` in the
-*same task*, before the compositor gets a turn and the drawing buffer is gone.
+_same task_, before the compositor gets a turn and the drawing buffer is gone.
 `preserveDrawingBuffer` was the alternative and taxes every frame of every scene for a button
 most sessions never press. The pixel ratio is raised to ≥2 for the read, matching the 2× every
 other viewer gets from `downloadPng`, and the compass is left out — it lives in a HUD scene, and
@@ -838,8 +838,8 @@ the new scene on its side.
 The card draws what has arrived while the fetch is still running — see **A partial result** in
 [core.md](core.md) for the mechanism. Two consequences that belong here rather than there:
 
-**Mesh items are keyed by id, not by id-and-index.** `onPartial` publishes what has arrived *in
-final order*, which is a sparse list that gets denser: body 40 appears at index 3 and then at
+**Mesh items are keyed by id, not by id-and-index.** `onPartial` publishes what has arrived _in
+final order_, which is a sparse list that gets denser: body 40 appears at index 3 and then at
 index 27 as the ones before it land. Folding the index into the React key made every one of those
 a different component — unmounted, and its `BufferGeometry` rebuilt — so a 300-body fill would
 rebuild the whole scene a dozen times over for geometry that never changed. The index survives
@@ -861,7 +861,7 @@ the scene has an extent at all (`size > 1`, not the first mount — a viewer wit
 has a placeholder extent of 1), a **remount** restoring from `cameraMemo`, and the **Reset view**
 control, which forgets the memo and frames again.
 
-A bounds change still updates the clip planes, because those describe the *space* rather than
+A bounds change still updates the clip planes, because those describe the _space_ rather than
 the view — a scene ten times larger under an unchanged camera clips through its own near plane.
 That is the whole of what an extent change is allowed to touch.
 
@@ -892,7 +892,7 @@ channel all along; the background is opaque only because the clear alpha is 1. T
 it to 0 for the length of one render. It is offered only by the read-back path, and that is not
 an omission — a viewer that rasterises its own SVG has no background painted into it to begin
 with, so "no background" is not a second thing to ask for there. Worth knowing: a cut-out of
-hairlines arrives *pale*, because a one-pixel line is mostly coverage rather than colour, which
+hairlines arrives _pale_, because a one-pixel line is mostly coverage rather than colour, which
 is one more reason for the fat-line path to exist.
 
 **Opacity is a facet of the colour row** (`composite` `role: 'extra'`), not a control beside it,
@@ -903,10 +903,10 @@ per-key alpha would leave a categorical scene with no overrides unable to be tra
 
 **Every param on `out.viewer3d` is `advanced`, leaving the card with no rows.** A deliberate
 reversal of the note above about `out.network`: a card with no rows loses its `☰` fold and reads
-as a node with nothing to set. On a viewer whose whole face *is* the picture the trade goes the
+as a node with nothing to set. On a viewer whose whole face _is_ the picture the trade goes the
 other way — twelve rows of pickers above a scene is a settings panel with a thumbnail attached.
 The legend does the colour work in place, and the caption already says what the `Selected` row
-used to. `viewer3d.test.ts` asserts the empty card *and* that everything still reaches the
+used to. `viewer3d.test.ts` asserts the empty card _and_ that everything still reaches the
 inspector, which is what makes it safe.
 
 ### One live renderer per node
@@ -915,11 +915,11 @@ inspector, which is what makes it safe.
 card, the inspector and the overlay are three independent `ValuePreview` mount points for the
 same node. Measured in Chrome on the bundled 21-neuron morphology example, with all three up:
 
-| Surfaces up | Live WebGL contexts | Uploaded per context | Draw calls for one param change |
-| --- | --- | --- | --- |
-| card | 1 | 170 kB | 55 |
-| card + inspector | 2 | 170 kB | 99 |
-| card + inspector + overlay | 3 | 170 kB | 154 |
+| Surfaces up                | Live WebGL contexts | Uploaded per context | Draw calls for one param change |
+| -------------------------- | ------------------- | -------------------- | ------------------------------- |
+| card                       | 1                   | 170 kB               | 55                              |
+| card + inspector           | 2                   | 170 kB               | 99                              |
+| card + inspector + overlay | 3                   | 170 kB               | 154                             |
 
 Three contexts, three copies of the same geometry on the GPU, and every invalidation paid for
 three times. It scales with the scene: a mesh set at the 1.5M-triangle budget is tens of
@@ -964,7 +964,7 @@ and reads as a claim that eight of them are special.
 magnitude larger than the arbour inside it, so framing on the union answers "show me this neuron
 in LO(R)" with a picture of LO(R) and a speck — the existing first-one-wins precedence already
 did the right thing, and volumes simply join the end of it. Dimming is the other half: a region
-is not a neuron, so greying it when a neuron is selected would say it had been *deselected*, a
+is not a neuron, so greying it when a neuron is selected would say it had been _deselected_, a
 claim about something that was never in the selection.
 
 They are excluded from the selection for the same reason points are — `evaluate` resolves
@@ -974,7 +974,7 @@ hide and recolour but not select.
 ### The interactive legend
 
 Three affordances per key — recolour, select, hide — and the split across files is the same one
-the rest of this section records: what a key *means* is shared, what a key *does* is per viewer.
+the rest of this section records: what a key _means_ is shared, what a key _does_ is per viewer.
 
 **`resolveColor` grew `labelAt`, which is the inverse of `legend`.** A key that can be clicked
 has to say which rows it stands for, and only the resolver knows: it ranked the categories, it
@@ -985,7 +985,7 @@ constant, sequential and literal encodings, and callers read that as "not addres
 rather than as an error.
 
 **Colour overrides live in `ColorSpec`, not in the viewer.** `spec.overrides` is a
-`{key: hex}` map applied inside `resolveColor` to `at()` *and* to the legend entries, in one
+`{key: hex}` map applied inside `resolveColor` to `at()` _and_ to the legend entries, in one
 pass. Applying it in a viewer instead would put the mark and the key it is filed under in two
 different hands, which is the failure this module's opening paragraph exists to prevent. An
 override that is not a colour is ignored — `literalColor` already owns what counts as one.
@@ -1023,7 +1023,7 @@ geometry rebuild, which is the one restyle that does, and it earns it.
 optional fields precisely so a channel can decline one — the points key renders its label as
 text where the skeleton key renders a button, because an affordance that would lie is left out
 rather than disabled. Clicking a key that is already wholly selected releases it; a key that was
-*partly* picked by hand fills in instead, or the click meant to complete the set would throw the
+_partly_ picked by hand fills in instead, or the click meant to complete the set would throw the
 set away.
 
 **`useStable` on all three specs, which this viewer should have had from the start.**
@@ -1037,17 +1037,17 @@ load-bearing rather than merely wasteful.
 `segmentColor.ts`, the `hash` colour mode, and the default for the Skeletons and Meshes sockets.
 
 **The palette was answering the wrong question.** `categorical` has eight validated slots and
-folds the ninth value into an achromatic `Other` — the right rule for a *series*, where a
+folds the ninth value into an achromatic `Other` — the right rule for a _series_, where a
 repeated hue would claim two things are the same. On `neuronId` it is a claim about identity,
 and a scene of twenty neurons drew twelve of them identically grey. Colour there is not a
-category; it is *which one this is*, and identity has no cap.
+category; it is _which one this is_, and identity has no cap.
 
 **It is neuroglancer's hash, not a hash.** That is the whole value: people already have these
 colours on screen, so a neuron being teal here and teal in FlyWire is the difference between two
 views of one dataset and two unrelated pictures. Inventing one would have produced colours that
 are fine and match nothing. `segmentColor.ts` is a transcription of `segment_color.ts` and
 `gpu_hash/hash_function.ts` from google/neuroglancer (Apache-2.0), down to the rotation amounts
-and the omitted final avalanche — it is *not* a complete MurmurHash, and completing it would
+and the omitted final avalanche — it is _not_ a complete MurmurHash, and completing it would
 give a perfectly good hash with different colours.
 
 **Seed 0 is the default because `toJSON` omits it.** `SegmentColorHash.getDefault()` is seeded
@@ -1058,7 +1058,7 @@ bit twiddling cannot quietly change them. Nothing there would throw; it would ju
 
 **Ids are hashed as text, and that is invariant 8 in the one place it would be invisible.**
 `Number('720575940621039145')` and `Number('720575940621039144')` are the same float64, so a
-hash taken after a numeric conversion is the hash of a *neighbouring segment* — and what comes
+hash taken after a numeric conversion is the hash of a _neighbouring segment_ — and what comes
 out is a perfectly plausible colour. `BigInt` on the text, masked to 64 bits, split into the two
 32-bit halves neuroglancer combines.
 
@@ -1083,7 +1083,7 @@ individuals in it, in exchange for four unvalidated hues.
 
 **`allowHash` is opt-in, and `out.neuroglancer` deliberately does not take it.** That node
 already offers `default`, which sends no colours and lets neuroglancer hash them; since Coda's
-hash *is* neuroglancer's, adding the mode there would put two spellings of one behaviour in one
+hash _is_ neuroglancer's, adding the mode there would put two spellings of one behaviour in one
 dropdown.
 
 ### Switching a whole socket off
@@ -1092,19 +1092,19 @@ dropdown.
 the legend strip.
 
 **The legend could not ask this question.** Keys exist only where an encoding is categorical, so
-a *constant* colour produces no legend at all — which is what neuropil shells ship with. The one
+a _constant_ colour produces no legend at all — which is what neuropil shells ship with. The one
 channel most often in the way was the one with no control anywhere that could remove it.
 
 **Folded into the `visible` predicates rather than checked at each draw site.** `NEVER` replaces
 the channel's predicate, so the caption's hidden count, the geometry builder and the raycast get
-the same answer without four places remembering to consult a flag. The socket is *also* skipped
+the same answer without four places remembering to consult a flag. The socket is _also_ skipped
 in the tree — an empty buffer handed to a material still costs a pass on every restyle — so
 `visible` is the authority for rows and the render gate is the authority for sockets.
 
 **The switch and the group's name are one control.** The strip already prints "skeletons" as a
 group title when more than one channel is on screen; a separate row of switches put the same
 four words in the strip twice. So `LegendControls.onToggleChannel` turns the title into the
-switch, and `ChannelToggle` is exported so the *keyless* case — the constant colour above — can
+switch, and `ChannelToggle` is exported so the _keyless_ case — the constant colour above — can
 draw the identical thing on its own.
 
 **Shown only above one wired socket**, on both counts: naming the only subject in a scene
@@ -1260,9 +1260,22 @@ and the caption. Same standing as the WebGL viewers.
 than about matrices: every cell was a `<g>` wrapping a `<rect>` carrying its own `onMouseMove`
 and `onMouseLeave`, so the cap was really 40,000 DOM nodes and as many listeners on one card. It
 landed on exactly the pictures this viewer exists for — an NBLAST score matrix at the Skeletons
-node's own 500-neuron ceiling is 250,000 cells, and `Linkage → Ordered → Heatmap` is *meant* to
-be read at that size, where the structure is texture rather than cells. The ceiling is now
-**4,000,000**, which is above `MAX_PIVOT_CELLS`, so the viewer draws anything a Pivot will build.
+node's own 500-neuron ceiling is 250,000 cells, and `Linkage → Ordered → Heatmap` is _meant_ to
+be read at that size, where the structure is texture rather than cells.
+
+There are two numbers now, and the same reasoning ran a second time. `HEATMAP_CELLS_WARN`
+(**4,000,000**) was the refusal; it is now where the caption says `large matrix`, because the
+measurement above says paint tracks the **grid** rather than the matrix — sixteen times the
+cells is sixteen times one 23 ms fold on first layout, not sixteen times every frame. The
+refusal moved out to `CRASH_FLOOR_CELLS` itself, read straight rather than aliased, so this
+viewer draws anything a Pivot or an NBLAST can build and declines only what could not have been
+built. See [limits.md](limits.md).
+
+**The fold is the part that scales, and it is on the resize path.** `buildHeatmapSpec` is
+memoised on the card's width and height and `useElementSize` has no debounce, so a resize drag
+re-folds once per pixel step: 12 ms at 2M cells, 40–56 ms at 8M, 65–104 ms at 16M. Below the old
+4M ceiling that was invisible; at the new one it is a laggy drag on a matrix that could not
+previously be drawn at all, which is the trade the caption names.
 
 `heatmapPlot.ts` is the headless half — geometry, the fold, the hit test — and `heatmapDraw.ts`
 is the canvas pass and the standalone SVG, both reading one spec. `scatterPlot`/`scatterDraw`'s
@@ -1291,7 +1304,7 @@ keeps both tails rather than only the positive one, and a sequential fold keeps 
 rather than the largest magnitude. Same brightest-wins rule as `raster.ts`.
 
 **The winning cell's index is kept**, so the tooltip over a folded block names a real row, column
-and value — and says `strongest of ~N cells` beside it. That admission is on the *card* as well
+and value — and says `strongest of ~N cells` beside it. That admission is on the _card_ as well
 as in the overlay, which matters, because the caption's `cells merged` note stands down under
 `compact` as every viewer note here does. A folded picture that said nothing anywhere would be
 the failure `labels thinned` already exists to prevent.
@@ -1320,7 +1333,7 @@ black in the file. `axisMarks`/`valueMarks` in `heatmapPlot.ts` now return place
 card for the chrome as well as for the cells.
 
 **A `TextMark` carries its baseline, and absent means alphabetic.** `dominant-baseline: central`
-centres text across its *reading* direction, so on a column label turned -90° it moves the label
+centres text across its _reading_ direction, so on a column label turned -90° it moves the label
 sideways by half a cap height and the whole band drifts off the columns it names. Applying it
 uniformly is the obvious tidy-up and it is wrong; it was caught by pixel-diffing against the
 previous build, since jsdom performs no layout and nothing else here can see a two-pixel move.
@@ -1334,14 +1347,14 @@ previous build, since jsdom performs no layout and nothing else here can see a t
   both scales in both modes. The ramps are piecewise-linear in RGB and the output is 8 bits a
   channel, so the whole blue ramp is **453 distinct colours** and the diverging scale 621–1,006;
   against those, 512 steps is within **one** channel value of exact for sequential and **two** for
-  diverging, and 256 measures the same. The scatter's objection is real for a *categorical*
+  diverging, and 256 measures the same. The scatter's objection is real for a _categorical_
   palette, where a substituted slot means a different category; here a colour is a magnitude and
   the substitute is the same magnitude to within a rounding step. Without the table, 285,000
   `sequentialColor` calls cost **65 ms against 2 ms**, per render.
 - **Cells are batched by ramp bucket, and carried as flat corners.** One path and one fill per
   bucket, so a bounded number of fills for any number of cells — the scatter's colour+shape
   batching arrived at from the other direction, since there the sequential ramp defeats the
-  batching and here the ramp *is* the batching. Every cell is the same size, so only `x, y` is
+  batching and here the ramp _is_ the batching. Every cell is the same size, so only `x, y` is
   stored per cell and the width and height are read off the spec once: that alone took a
   four-million-cell repaint from **77 ms to 46 ms**, most of the difference being garbage no
   longer made.
@@ -1369,17 +1382,17 @@ exports as 54 `<path>` elements carrying 82,236 subpaths, 2.0 MB, and parses cle
 the same shape: two owners for one declaration.
 
 `serializeSvg` set the namespace with `setAttribute('xmlns', …)`, which creates an ordinary
-attribute in the *null* namespace that merely happens to be spelled `xmlns` — so `XMLSerializer`
+attribute in the _null_ namespace that merely happens to be spelled `xmlns` — so `XMLSerializer`
 emitted it beside the declaration it already writes for an element created in the SVG namespace,
 and **every chart this app exported carried `xmlns` twice**. A duplicate attribute is a fatal XML
 well-formedness error rather than something a reader recovers from, and SVG is parsed as XML:
 `DOMParser` returns a `parsererror` document for it. It affected the bar chart, the scatter, the
-network and the dendrogram alike, and it failed to *parse* rather than looking slightly wrong,
+network and the dendrogram alike, and it failed to _parse_ rather than looking slightly wrong,
 which is why nothing about the string ever caught it.
 
 And `serializeSvg` appended a `<style>` inlining the font **unconditionally**, beside the one each
 builder already appends — measured on a real export: two style blocks, the serializer's saying
-`sans-serif`, because `getComputedStyle` on a *detached* element resolves nothing and a
+`sans-serif`, because `getComputedStyle` on a _detached_ element resolves nothing and a
 synthesised export is always detached. Only document order saved it: `insertBefore` happened to
 put the dead declaration first. Moving that to an append, or a builder dropping its own, would
 have silently stripped the typeface from every exported chart.
@@ -1450,7 +1463,7 @@ because they are not uniform and the differences are load-bearing:
 | `hemibrain:v1.2.1` | `{ layers }` and nothing else — no dimensions, position or layout              |
 | `hemibrain:v1.1`   | `{ layers, badlayers }`; `badlayers` is Explorer bookkeeping, not viewer state |
 | `manc:v1.2.3`      | full state, `layout: "3d"`, and a stray `segmentColors` for one body           |
-| `male-cns:v0.9`    | full state, 38 layers, 38 kB before a single neuron id is added                  |
+| `male-cns:v0.9`    | full state, 38 layers, 38 kB before a single neuron id is added                |
 
 So the module supplies `layout` and `showSlices` when absent — neuroglancer's own defaults
 open hemibrain in 4-panel with EM planes cutting through the neurons — clears manc's stray

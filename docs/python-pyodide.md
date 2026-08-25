@@ -343,7 +343,9 @@ what somebody wants to look at is the matrix they have, arranged so its structur
 
 `DendrogramViewer` is **SVG rather than canvas**, which is the opposite of `ScatterViewer`'s
 call and for the opposite reason: a scatter is fed by an embedding of a whole dataset, where
-this is bounded by `MAX_LINKAGE_OBSERVATIONS` and by what a reader can take in. What SVG buys
+this is bounded by `MAX_LEAVES_DRAWN` and, well before it, by what a reader can take in — past
+`LEAVES_WARN` the caption says `structure only` rather than the card saying nothing at all.
+What SVG buys
 is the whole export path free (`ViewerActions` clones the live `<svg>`), hit testing on every
 branch with no quadtree, and labels the browser lays out.
 

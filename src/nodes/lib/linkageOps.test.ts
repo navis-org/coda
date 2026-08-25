@@ -14,6 +14,7 @@ import type { LinkageValue } from '../../core/values'
 import { getColumn, makeLinkage, makeMatrix } from '../../core/values'
 import {
   LINKAGE_METHODS,
+  LINKAGE_OBSERVATIONS_WARN,
   MAX_LINKAGE_OBSERVATIONS,
   checkLinkageDistances,
   checkLinkageInput,
@@ -58,17 +59,20 @@ function tree(clusters?: Int32Array): LinkageValue {
   )
 }
 
+/** For the checks that are not about size; the size ones collect what was said. */
+const NO_WARN = { warn: () => undefined }
+
 describe('checkLinkageInput', () => {
   const square = (labels: string[]) =>
     makeMatrix(labels, labels.slice(), new Float64Array(labels.length ** 2))
 
   it('accepts a square matrix over one population', () => {
-    expect(() => checkLinkageInput(square(['a', 'b']))).not.toThrow()
+    expect(() => checkLinkageInput(NO_WARN, square(['a', 'b']))).not.toThrow()
   })
 
   it('refuses a matrix that is not square, naming NBLAST with a Target as the usual cause', () => {
     const rect = makeMatrix(['a', 'b'], ['x'], new Float64Array(2))
-    expect(() => checkLinkageInput(rect)).toThrow(/square/)
+    expect(() => checkLinkageInput(NO_WARN, rect)).toThrow(/square/)
   })
 
   it('refuses a square matrix whose rows and columns are different things', () => {
@@ -76,24 +80,43 @@ describe('checkLinkageInput', () => {
     // is perfectly square, and clustering it would treat row 3 and column 3 as one observation
     // because they happen to share an index — a confident wrong tree with nothing to say so.
     const crossed = makeMatrix(['a', 'b'], ['x', 'y'], new Float64Array(4))
-    expect(() => checkLinkageInput(crossed)).toThrow(/different things/)
+    expect(() => checkLinkageInput(NO_WARN, crossed)).toThrow(/different things/)
   })
 
   it('refuses fewer than two observations, which is what fastcore itself says', () => {
-    expect(() => checkLinkageInput(square(['a']))).toThrow(/at least 2/)
+    expect(() => checkLinkageInput(NO_WARN, square(['a']))).toThrow(/at least 2/)
   })
 
-  it('refuses more observations than a dendrogram could carry labels for', () => {
-    const many = Array.from({ length: MAX_LINKAGE_OBSERVATIONS + 1 }, (_, i) => `n${i}`)
+  it('warns about more observations than a dendrogram could carry labels for, and clusters them', () => {
+    const many = Array.from({ length: LINKAGE_OBSERVATIONS_WARN + 1 }, (_, i) => `n${i}`)
     // Not a `makeMatrix`, which would allocate 4 million cells for a message about the count.
+    const shape = {
+      kind: 'matrix' as const,
+      rowLabels: many,
+      colLabels: many,
+      values: new Float64Array(0),
+    }
+    const said: string[] = []
+    checkLinkageInput({ warn: (m: string) => said.push(m) }, shape)
+    // A tree is not a dendrogram: Cut Tree takes the same linkage and hands back a table, and
+    // twenty thousand rows of that is perfectly readable. The drawing says its own piece.
+    expect(said.join(' ')).toMatch(/no readable labels/)
+    expect(said.join(' ')).toMatch(/Going ahead anyway/)
+  })
+
+  it('refuses only the size whose condensed vector cannot be allocated', () => {
+    // `MAX_LINKAGE_OBSERVATIONS` is derived from the floor rather than rounded to a readable
+    // number, so this `+ 1` really is the first refused size — the rounded 11,000 it replaced
+    // was 586 short of where `refuseIfOverCrashFloor` actually fires.
+    const many = Array.from({ length: MAX_LINKAGE_OBSERVATIONS + 1 }, (_, i) => `n${i}`)
     expect(() =>
-      checkLinkageInput({
+      checkLinkageInput(NO_WARN, {
         kind: 'matrix',
         rowLabels: many,
         colLabels: many,
         values: new Float64Array(0),
       }),
-    ).toThrow(/ceiling/)
+    ).toThrow(/would allocate/)
   })
 })
 
