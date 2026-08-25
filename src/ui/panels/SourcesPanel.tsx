@@ -78,6 +78,8 @@ import {
   getModel,
   getProviderId,
   setBaseUrl as setAiBaseUrl,
+  getThinking,
+  setThinking,
   setKey,
   setModel,
   setProviderId,
@@ -1343,6 +1345,7 @@ function ProviderForm({
   const [key, setKeyField] = useState(() => getKey(provider.id) ?? '')
   const [model, setModelField] = useState(() => getModel(provider.id))
   const [base, setBaseField] = useState(() => getAiBaseUrl(provider.id))
+  const [think, setThinkField] = useState(() => getThinking(provider.id))
   const [probe, setProbe] = useState<
     Probe<{ label: string; context: number; warning?: string | undefined }>
   >({ state: 'idle' })
@@ -1479,6 +1482,16 @@ function ProviderForm({
             ; usage is billed to your account.
           </>
         )}
+        {/* Last, so the note reads as a summary of a page rather than around a link in it. */}
+        {provider.guideUrl && (
+          <>
+            {' '}
+            <a href={provider.guideUrl} target="_blank" rel="noreferrer">
+              Full setup guide
+            </a>
+            .
+          </>
+        )}
       </p>
 
       {provider.needsKey && (
@@ -1560,6 +1573,28 @@ function ProviderForm({
         )}
       </div>
 
+      {/*
+       * A speed control, so the hint states the measurement rather than describing the switch.
+       * Off by default: on a reasoning model the thinking is most of the wait — 254 s against
+       * 49 s for the same question — and the plans did not get worse without it.
+       */}
+      {provider.thinkingSwitch && (
+        <div className="sources__field">
+          <label className="sources__check">
+            <input
+              type="checkbox"
+              checked={think}
+              onChange={(e) => setThinkField(e.target.checked)}
+            />
+            <span>Let the model reason before answering</span>
+          </label>
+          <span className="sources__hint">
+            Slower, often by a lot — one measured question took 254s with reasoning and 49s
+            without, for plans that were as good. Turn it on if a request comes back wrong.
+          </span>
+        </div>
+      )}
+
       <div className="sources__actions">
         <button
           type="button"
@@ -1592,6 +1627,7 @@ function ProviderForm({
             setKey(provider.id, key)
             setModel(provider.id, model)
             if (provider.editableBaseUrl) setAiBaseUrl(provider.id, base)
+            if (provider.thinkingSwitch) setThinking(provider.id, think)
             // Closes, like the neuPrint tab's Save: the confirmation lands in the status bar,
             // which is behind this dialog, so staying open would report nothing at all.
             notify(`Assistant set to ${provider.label}`)

@@ -28,6 +28,7 @@ import {
   setKey,
   setModel,
   setProviderId,
+  setThinking,
   subscribeAuthFailure,
 } from './credentials'
 import type { StubbedCall } from './fixture'
@@ -320,16 +321,72 @@ describe('Gemini', () => {
 describe('Ollama', () => {
   const ask = { ...ASK, model: 'qwen2.5-coder:14b' }
 
-  it('sets the context window, because the default silently truncates the prompt', async () => {
+  it('asks for a window the prompt actually fits in', async () => {
     /*
-     * The worst failure available: no error, and a confident plan about a node catalogue the
-     * model was never shown. Ollama's default context is a few thousand tokens; ours is ~13k.
+     * Two failures behind one number. Ollama's default context is a few thousand tokens, which
+     * loses the catalogue with no error and produces a confident plan about a node list the
+     * model never saw. And the floor here used to be 16384, from when the catalogue was ~13k
+     * tokens — measured since at `prompt_eval_count: 16587` on an *empty* canvas, 17,687 with
+     * the plan schema attached, so every request overran its own window. Asserted as a floor
+     * over the real measurement rather than as equality: raising `NUM_CTX` is fine, and only
+     * dropping it back under the prompt is the regression.
      */
     respond({ message: { content: '{}' } })
     await ollama.complete(ask)
 
     const body = calls[0]!.body as { options?: { num_ctx?: number } }
-    expect(body.options?.num_ctx).toBeGreaterThanOrEqual(16384)
+    expect(body.options?.num_ctx).toBeGreaterThan(17_687)
+  })
+
+  it('says the prompt did not fit, rather than passing on Ollama’s account of it', async () => {
+    /*
+     * The four-minute stall. A prompt over the window is truncated from the front, the user
+     * turn is what falls off, and the structured-output path then refuses a conversation with
+     * no question in it — as a 500 reading `no user query found in messages`, which names the
+     * last step and none of the ones a person can act on. Arrives minutes late, because the
+     * prompt is evaluated before any of it, so untranslated it reads as a hang that ended in
+     * a riddle.
+     */
+    respond({ error: 'no user query found in messages' }, 500)
+    await expect(ollama.complete(ask)).rejects.toThrow(
+      /did not fit qwen2\.5-coder:14b's context window/,
+    )
+    await expect(ollama.complete(ask)).rejects.toThrow(/ollama show qwen2\.5-coder:14b/)
+  })
+
+  it('leaves every other 500 alone, since a crashed runner is not a small window', async () => {
+    // Keyed on the message, not the status: an out-of-memory load returns 500 too, and telling
+    // somebody to pull a bigger model is the opposite of the fix.
+    respond({ error: 'model runner has unexpectedly stopped' }, 500)
+    await expect(ollama.complete(ask)).rejects.toThrow(/model runner has unexpectedly stopped/)
+  })
+
+  it('turns reasoning off by sending false, because it is most of the wait', async () => {
+    /*
+     * Measured on one machine, warm model, same question: `qwen3.8:latest` answered in 254 s
+     * with reasoning and 49 s without — 6k characters of thinking against a 1.6k-character
+     * plan, and both plans applied.
+     */
+    respond({ message: { content: '{}' } })
+    await ollama.complete({ ...ask, think: false })
+    expect((calls[0]!.body as { think?: unknown }).think).toBe(false)
+  })
+
+  it('turns reasoning *on* by saying nothing, which is not symmetry', async () => {
+    /*
+     * Measured: Ollama accepts `think: false` from any model and answers normally, but rejects
+     * `think: true` from one without the capability — `"qwen2.5:0.5b" does not support
+     * thinking`. Coda's own default model is such a model, so honouring the checkbox with a
+     * `true` would break the default setup for everyone who ticked it. Absent leaves the
+     * model's own behaviour, which is what "on" means.
+     */
+    respond({ message: { content: '{}' } })
+    await ollama.complete({ ...ask, think: true })
+    expect((calls[0]!.body as { think?: unknown }).think).toBeUndefined()
+
+    respond({ message: { content: '{}' } })
+    await ollama.complete(ask)
+    expect((calls[0]!.body as { think?: unknown }).think).toBeUndefined()
   })
 
   it('sends the schema for grammar-constrained decoding, which is what a small model needs', async () => {
@@ -430,6 +487,30 @@ describe('every provider', () => {
       expect(provider.defaultBaseUrl, provider.id).toMatch(/^https?:\/\//)
       expect(providerFor(provider.id)).toBe(provider)
     }
+  })
+
+  it('carries the reasoning setting only to a provider that has the switch', async () => {
+    /*
+     * Off is the stored default, so the request has to *say* so — a provider filling nothing in
+     * would leave a local model reasoning for minutes on every question. And a cloud provider
+     * must not be handed the field at all: its reasoning is not a per-request boolean and the
+     * ones here would reject or ignore it, either of which is worse than not asking.
+     */
+    setProviderId('ollama')
+    respond({ message: { content: '{}' } })
+    await complete(ASK)
+    expect((calls[0]!.body as { think?: unknown }).think).toBe(false)
+
+    setThinking('ollama', true)
+    respond({ message: { content: '{}' } })
+    await complete(ASK)
+    expect((calls[0]!.body as { think?: unknown }).think).toBeUndefined()
+
+    setProviderId('anthropic')
+    setKey('anthropic', 'k')
+    respond(messagesReply('{}'))
+    await complete(ASK)
+    expect((calls[0]!.body as { think?: unknown }).think).toBeUndefined()
   })
 
   it('reports usage in the same shape, zeroed where it has no cache to speak of', async () => {
@@ -545,6 +626,58 @@ describe('a model that accepts the schema and ignores it', () => {
     respond({ models: [{ name: 'llama3.1:8b' }] })
     const found = await ollama.listModels!({})
     expect(found[0]!.label).not.toContain('ignores')
+    expect((await ollama.verify({ model: 'llama3.1:8b' })).warning).toBeUndefined()
+  })
+})
+
+describe('a model whose window is smaller than the prompt', () => {
+  /*
+   * The one that used to be a four-minute stall ending in `no user query found in messages`.
+   * `/api/tags` carries `details.context_length` and has all along; reading it is what turns a
+   * failure that costs a whole prompt evaluation into a line under the Test button.
+   */
+  const tags = (...models: Array<{ name: string; context?: number }>) => ({
+    models: models.map((m) => ({
+      name: m.name,
+      details: { format: 'gguf', ...(m.context ? { context_length: m.context } : {}) },
+    })),
+  })
+
+  it('marks a window the prompt cannot fit in, in the dropdown', async () => {
+    respond(tags({ name: 'gemma2:9b', context: 8192 }))
+    expect((await ollama.listModels!({}))[0]!.label).toContain('8k window')
+  })
+
+  it('says nothing about a window with room in it', async () => {
+    // The number that matters to somebody choosing is the one that rules a model out. A note
+    // beside every model that is fine hides the one that is not.
+    respond(tags({ name: 'qwen3.8:latest', context: 262_144 }))
+    expect((await ollama.listModels!({}))[0]!.label).toBe('qwen3.8:latest')
+  })
+
+  it('warns on Test, where the alternative is finding out four minutes into a question', async () => {
+    respond(tags({ name: 'gemma2:9b', context: 8192 }))
+    const check = await ollama.verify({ model: 'gemma2:9b' })
+    expect(check.warning).toMatch(/8k context window/)
+    expect(check.warning).toMatch(/at least 32k/)
+  })
+
+  it('carries both caveats when a model has both', async () => {
+    // One string, because the panel prints one line — and dropping the second would have Test
+    // call the setting fine in whichever respect it happened to check first.
+    respond({
+      models: [{ name: 'small:mlx', details: { format: 'safetensors', context_length: 8192 } }],
+    })
+    const check = await ollama.verify({ model: 'small:mlx' })
+    expect(check.warning).toMatch(/GGUF/)
+    expect(check.warning).toMatch(/8k context window/)
+  })
+
+  it('claims nothing where the listing does not say', async () => {
+    // Older Ollama builds omit `context_length`. Unknown is not small — the same rule the
+    // format check follows, and the same one the column pickers do.
+    respond(tags({ name: 'llama3.1:8b' }))
+    expect((await ollama.listModels!({}))[0]!.label).toBe('llama3.1:8b')
     expect((await ollama.verify({ model: 'llama3.1:8b' })).warning).toBeUndefined()
   })
 })

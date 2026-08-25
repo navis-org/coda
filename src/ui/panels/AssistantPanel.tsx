@@ -9,7 +9,7 @@
  * anything the edit left for you to finish.
  *
  * **The heavy half is loaded on demand.** `converse.ts` carries the node catalogue and the
- * rules — the ~28k-character system prompt — and `await import()`ing it here is what keeps that
+ * rules — the ~65k-character system prompt — and `await import()`ing it here is what keeps that
  * out of the main chunk until somebody asks a question. Same doctrine as elkjs and the
  * exporters: verify with `pnpm build` that `converse-*.js` stays its own chunk and that the
  * prompt's own text is absent from `main-*.js`.
@@ -29,11 +29,33 @@ import type { ChatEntry } from '../assistantChat'
 import {
   appendChat,
   chatBusy,
+  chatBusySince,
   chatEntries,
   clearChat,
   setChatBusy,
+  stopChat,
   subscribeChat,
 } from '../assistantChat'
+
+/**
+ * How long a wait goes unnarrated.
+ *
+ * A cloud provider answers inside this and the line never changes, which is the point — a
+ * counter on a two-second wait is noise. Past it the number is the only thing distinguishing a
+ * model that is working from one that is not, and Ollama on a 27B model spends three to five
+ * minutes on Coda's prompt.
+ */
+const NARRATE_AFTER_MS = 4000
+
+/**
+ * When a wait stops looking normal and starts looking broken.
+ *
+ * Not a limit and not a timeout — the request is still running and may well answer. It is the
+ * point at which somebody watching deserves to be told that this is what a local model does,
+ * rather than left to conclude the app has hung. Which is what happened: reported as "goes to
+ * Thinking and never returns anything", against a request that would have answered.
+ */
+const SLOW_AFTER_MS = 45_000
 
 export function AssistantPanel() {
   const open = useGraphStore((s) => s.panels.assistant)
@@ -51,9 +73,36 @@ export function AssistantPanel() {
   return <Drawer takeFocus={asked} />
 }
 
+/**
+ * Seconds since the wait started, ticking.
+ *
+ * Reads the *start* from the chat module and counts from it here, rather than storing an
+ * elapsed value that something would have to keep current: the store notifies on real events,
+ * and a clock is not one. The interval exists only while a question is in flight.
+ */
+function useElapsed(busy: boolean): number {
+  const since = useSyncExternalStore(subscribeChat, chatBusySince)
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!busy) return
+    setNow(Date.now())
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [busy, since])
+  return since ? now - since : 0
+}
+
+/** `2:41`, so a five-minute wait does not have to be read as `321s`. */
+function clock(ms: number): string {
+  const total = Math.floor(ms / 1000)
+  if (total < 60) return `${total}s`
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`
+}
+
 function Drawer({ takeFocus }: { takeFocus: boolean }) {
   const entries = useSyncExternalStore(subscribeChat, chatEntries)
   const busy = useSyncExternalStore(subscribeChat, chatBusy)
+  const elapsed = useElapsed(busy)
   const [draft, setDraft] = useState('')
   const togglePanel = useGraphStore((s) => s.togglePanel)
   const logRef = useRef<HTMLDivElement>(null)
@@ -68,7 +117,8 @@ function Drawer({ takeFocus }: { takeFocus: boolean }) {
 
     setDraft('')
     appendChat({ kind: 'you', text })
-    setChatBusy(true)
+    const controller = new AbortController()
+    setChatBusy(true, controller)
 
     try {
       // Loaded here, not imported at the top: this is the module that carries the catalogue,
@@ -80,6 +130,7 @@ function Drawer({ takeFocus }: { takeFocus: boolean }) {
         request: text,
         graph: () => store().graph,
         apply: (plan) => store().applyAssistantPlan(plan),
+        signal: controller.signal,
       })
 
       if (outcome.ok) {
@@ -101,7 +152,14 @@ function Drawer({ takeFocus }: { takeFocus: boolean }) {
         })
       }
     } catch (error) {
-      appendChat({ kind: 'failed', text: errorMessage(error) })
+      // A cancel is not a failure, and reporting it in the error tone would be the panel
+      // blaming the model for something the user did. `requestPlan` keeps it a DOMException all
+      // the way up precisely so this can be told apart here.
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        appendChat({ kind: 'stopped' })
+      } else {
+        appendChat({ kind: 'failed', text: errorMessage(error) })
+      }
     } finally {
       setChatBusy(false)
       // After the log has grown, not before — otherwise it scrolls to where it used to end.
@@ -168,7 +226,20 @@ function Drawer({ takeFocus }: { takeFocus: boolean }) {
         {entries.map((entry, index) => (
           <Entry key={index} entry={entry} />
         ))}
-        {busy && <p className="assistant__working">Thinking…</p>}
+        {busy && (
+          <div className="assistant__working">
+            <span>Thinking{elapsed >= NARRATE_AFTER_MS ? ` — ${clock(elapsed)}` : '…'}</span>
+            <button type="button" className="btn btn--ghost" onClick={stopChat}>
+              Stop
+            </button>
+          </div>
+        )}
+        {busy && elapsed >= SLOW_AFTER_MS && (
+          <p className="assistant__note">
+            Still going. A model running locally can take several minutes on a prompt this size
+            — the whole node catalogue goes with every question.
+          </p>
+        )}
       </div>
 
       <form
@@ -208,6 +279,10 @@ function Drawer({ takeFocus }: { takeFocus: boolean }) {
 function Entry({ entry }: { entry: ChatEntry }) {
   if (entry.kind === 'you') {
     return <p className="assistant__said">{entry.text}</p>
+  }
+
+  if (entry.kind === 'stopped') {
+    return <p className="assistant__note">Stopped. Nothing was changed.</p>
   }
 
   if (entry.kind === 'failed') {

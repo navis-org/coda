@@ -13,7 +13,7 @@
  * misleading. It is also one endpoint against a dependency that would have to be lazily loaded.
  *
  * **The only provider here with cache *control*,** which is most of what it costs to run: the
- * ~13k-token catalogue is marked as a breakpoint, so every turn after the first reads it at a
+ * ~16.5k-token catalogue is marked as a breakpoint, so every turn after the first reads it at a
  * tenth of the price instead of paying for it again.
  */
 
@@ -111,7 +111,7 @@ export const anthropic: AiProvider = {
       max_tokens: MAX_TOKENS,
       /*
        * An array rather than a bare string so the breakpoint can go on it. The catalogue is
-       * ~13k tokens and identical on every call, far above Opus 5's 512-token minimum, so
+       * ~16.5k tokens and identical on every call, far above Opus 5's 512-token minimum, so
        * every call after the first reads it at a tenth of the price. That holds only while the
        * prefix is byte-identical: anything per-request belongs in `messages`, never here.
        *

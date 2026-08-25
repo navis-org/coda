@@ -6,11 +6,12 @@
  * rather than left to arrive as a bare "could not reach".
  *
  * **The context window is the one that fails silently, so it is set here.** Ollama's default
- * `num_ctx` is a few thousand tokens and the catalogue alone is ~13k: left alone, the prompt is
- * *quietly truncated* from the front and the model answers confidently about a node list it was
- * never shown. That is the worst failure available — no error, a plausible wrong plan — so
+ * `num_ctx` is a few thousand tokens and the catalogue alone is ~16.5k: left alone, the prompt
+ * is *quietly truncated* from the front and the model answers confidently about a node list it
+ * was never shown. That is the worst failure available — no error, a plausible wrong plan — so
  * `num_ctx` is sent on every request. A model whose trained context is smaller will clamp, and
- * the effect is the same, which is why `verify` says what the request is going to ask for.
+ * the effect is the same, which is why `verify` says what the request is going to ask for and
+ * why `pulled` reads each model's own window back out of `/api/tags`.
  *
  * **The model list is asked for, not declared.** `models` below is a shortlist of reasonable
  * things to pull; what is *on the machine* is whatever the user ran `ollama pull` for, and no
@@ -18,6 +19,12 @@
  * model you can pick and none of them may be — reported from a real install whose two models
  * appeared nowhere in the five offered. `listModels` reads `/api/tags`, which `verify` was
  * already reading to name what is installed when a chat 404s.
+ *
+ * **Reasoning is off by default, and that is a speed decision.** A thinking model spends most
+ * of the wait on it: `qwen3.8:latest` answered the same question in 254 s with reasoning and
+ * 49 s without, on a warm model — 6k characters of thinking against a 1.6k-character plan.
+ * Both applied. `thinkingSwitch` is what puts the choice in Connections; `complete` below has
+ * the asymmetry it has to be sent with.
  *
  * **Cross-origin.** Ollama refuses browsers it has not been told about; the user sets
  * `OLLAMA_ORIGINS`. There is nothing this app can do about it, so the network error names it.
@@ -35,20 +42,46 @@ import { AiError } from './types'
 const BASE_URL = 'http://localhost:11434'
 
 /**
- * Room for the ~13k-token prompt and a plan on top of it, without asking a laptop for a 32k
- * KV cache it will feel. Below this the catalogue is silently cut; far above it, the memory is
- * spent on context nothing uses.
+ * Room for the prompt and a plan on top of it.
+ *
+ * **Measured, not estimated, and it moved.** This was 16384 while the catalogue was ~13k
+ * tokens. It is not any more: `buildSystemPrompt()` is 65,076 characters, and Ollama counted
+ * `prompt_eval_count: 16587` for it against an *empty canvas* — 17,687 once the plan schema
+ * goes on as `format`. Every assistant request therefore overran the window it asked for
+ * before the user had put a single node down.
+ *
+ * That does not degrade the way the header above describes. Ollama truncates the overflow from
+ * the front, the *user turn* is what falls off the end, and its structured-output path then
+ * rejects a conversation with no user query left in it — a 500 reading `no user query found in
+ * messages`, arriving four minutes later because the prompt is evaluated first. `overflowed`
+ * below is that failure named; this number is it fixed. The same request at 32768 answered
+ * with a plan that applied.
+ *
+ * Costs a laptop a 32k KV cache, which is the trade being made knowingly: below ~20k there is
+ * no room to answer in, and a window that cannot hold the question is not a cheaper setting.
  */
-const NUM_CTX = 16384
+const NUM_CTX = 32768
 
 interface TagsResponse {
-  models?: Array<{ name?: string; size?: number; details?: { format?: string } }>
+  models?: Array<{
+    name?: string
+    size?: number
+    details?: { format?: string; context_length?: number }
+  }>
 }
 
 /** What `pulled` knows about a model beyond its name. */
 interface PulledModel extends ModelOption {
   /** Whether `format` is likely to be honoured — see `STRUCTURED_FORMAT`. */
   structured: boolean
+  /**
+   * The window the model was *trained* with, as `/api/tags` reports it, or 0 where it does not.
+   *
+   * Zero is "not said", never "small": older Ollama builds omit the field entirely, and marking
+   * every model on one as too small would be a claim about a build nobody has seen — the same
+   * unknown-is-not-empty rule `structured` follows two lines up.
+   */
+  context: number
 }
 
 /**
@@ -71,6 +104,29 @@ interface PulledModel extends ModelOption {
  */
 const STRUCTURED_FORMAT = 'gguf'
 
+/**
+ * The prompt did not fit, said as the thing the user can act on.
+ *
+ * Ollama's own words for this are `no user query found in messages`, HTTP 500 — which describes
+ * the *last* step of the failure and none of the ones that matter. What happened: the prompt
+ * exceeded the window, Ollama truncated it from the front, the user's turn was what fell off,
+ * and the structured-output path then found a conversation with nothing to answer. Worse, the
+ * prompt is evaluated before any of that, so the 500 lands minutes later and reads as a hang.
+ *
+ * Keyed on the message rather than on the status, because 500 is also what a crashed runner
+ * and an out-of-memory load return, and neither is fixed by pulling a bigger model.
+ */
+function overflowed(model: string): never {
+  throw new AiError(
+    `The prompt did not fit ${model}'s context window. Ollama truncated it from the front until ` +
+      `the question itself was gone, then refused what was left. Coda asks for ` +
+      `${NUM_CTX / 1024}k tokens and sends ~18k of prompt, but a model clamps to the window it ` +
+      `was trained with — check that with \`ollama show ${model}\`, and pick one offering at ` +
+      `least ${NUM_CTX / 1024}k.`,
+    500,
+  )
+}
+
 interface ChatResponse {
   model?: string
   message?: { content?: string }
@@ -83,6 +139,18 @@ interface ChatResponse {
 function sizeLabel(bytes: number | undefined): string {
   if (!bytes) return ''
   return bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.round(bytes / 1e6)} MB`
+}
+
+/**
+ * A window smaller than the one every request asks for, said in the dropdown.
+ *
+ * Only when it is *too small*. A model with room to spare gets no note, because the number
+ * that matters to somebody choosing from this list is the one that rules a model out — printing
+ * `262k window` beside the six that are fine is six lines of reassurance hiding the one refusal.
+ */
+function contextNote(context: number): string {
+  if (!context || context >= NUM_CTX) return ''
+  return `${Math.round(context / 1024)}k window — too small for Coda's prompt`
 }
 
 /**
@@ -101,11 +169,17 @@ async function pulled(base: string, signal?: AbortSignal | undefined): Promise<P
     .filter((m) => m.name)
     .map((m) => {
       const structured = (m.details?.format ?? STRUCTURED_FORMAT) === STRUCTURED_FORMAT
-      const notes = [sizeLabel(m.size), structured ? '' : 'ignores JSON schema'].filter(Boolean)
+      const context = m.details?.context_length ?? 0
+      const notes = [
+        sizeLabel(m.size),
+        contextNote(context),
+        structured ? '' : 'ignores JSON schema',
+      ].filter(Boolean)
       return {
         id: m.name!,
         label: notes.length ? `${m.name} — ${notes.join(' · ')}` : m.name!,
         structured,
+        context,
       }
     })
     .sort((a, b) => a.id.localeCompare(b.id))
@@ -115,23 +189,33 @@ export const ollama: AiProvider = {
   id: 'ollama',
   label: 'Ollama (local)',
   needsKey: false,
-  note: 'A model on your own machine — no key, no account, nothing leaves the computer. Needs OLLAMA_ORIGINS set so the browser is allowed to call it, and a model with a large enough context for a ~13k-token prompt. A page served over https may be blocked from reaching a plain-http local server, so this is most reliable on a local dev server.',
+  /*
+   * Corrected once measured: this used to say OLLAMA_ORIGINS is needed, flatly. Ollama allows
+   * `http://localhost:*` whatever is configured, so a locally served Coda needs nothing — and
+   * telling somebody on a dev server to go and set an environment variable sends them to fix
+   * the one thing that was never broken. It is the hosted origin that has to be named.
+   */
+  note: 'A model on your own machine — no key, no account, nothing leaves the computer. Needs a model with a context window of at least 32k, because the prompt is ~18k tokens. Served from localhost this works as it stands; the hosted app additionally needs OLLAMA_ORIGINS set so the browser is allowed to call it, and some browsers block an https page from reaching a plain-http local server at all.',
+  guideUrl: 'https://github.com/navis-org/coda/blob/main/docs/ollama.md',
   models: [
     { id: 'qwen2.5-coder:14b', label: 'Qwen2.5 Coder 14B' },
     { id: 'qwen2.5:14b', label: 'Qwen2.5 14B' },
     { id: 'llama3.1:8b', label: 'Llama 3.1 8B' },
     { id: 'mistral-nemo', label: 'Mistral Nemo' },
-    { id: 'gemma2:9b', label: 'Gemma 2 9B' },
+    // No `gemma2:9b`. It was offered here while the prompt was ~13k tokens and its 8k window
+    // merely truncated it; against ~18k the request cannot be served at all, so listing it
+    // under "Available to pull" would be offering a model that answers nothing.
   ],
   defaultModel: 'qwen2.5-coder:14b',
   defaultBaseUrl: BASE_URL,
   editableBaseUrl: true,
+  thinkingSwitch: true,
   schemaSupport: 'native',
 
   async listModels({ baseUrl, signal }) {
-    // Narrowed to the declared shape rather than handed back whole: `structured` is this
-    // module's own bookkeeping, and a caller that started reading it would be depending on a
-    // field the interface never promised.
+    // Narrowed to the declared shape rather than handed back whole: `structured` and `context`
+    // are this module's own bookkeeping, and a caller that started reading them would be
+    // depending on fields the interface never promised.
     const found = await pulled(baseUrl || BASE_URL, signal)
     return found.map(({ id, label }) => ({ id, label }))
   },
@@ -160,18 +244,41 @@ export const ollama: AiProvider = {
      * unknown-is-not-empty rule the column pickers follow.
      */
     const chosen = installed.find((m) => m.id === id)
+
+    /*
+     * Two caveats, and a model can carry both — an MLX build with a small window is one pull,
+     * not two. Joined rather than ranked: `KeyCheck.warning` is one string because the panel
+     * prints one line, and dropping the second would make Test say the setting is fine in the
+     * respect it happens to check first.
+     */
+    const warnings: string[] = []
+    if (chosen && !chosen.structured) {
+      warnings.push(
+        `${id} is not a GGUF build, so it runs on an engine that accepts the JSON schema ` +
+          `and ignores it — plans may come back in the wrong shape. A GGUF build of the same ` +
+          `model honours it.`,
+      )
+    }
+    /*
+     * The failure this catches used to arrive as a four-minute stall — see `NUM_CTX`. Ollama
+     * clamps `num_ctx` to the window the model was trained with, and a prompt that does not fit
+     * has its user turn truncated away, so the request 500s after the whole prompt has been
+     * evaluated. `/api/tags` has said so all along; nothing was reading it.
+     */
+    if (chosen && contextNote(chosen.context)) {
+      warnings.push(
+        `${id} was trained with a ${Math.round(chosen.context / 1024)}k context window and ` +
+          `Coda's prompt is ~18k tokens, so Ollama will clamp the request and the prompt will ` +
+          `not fit. Asking will fail rather than answer badly. Pull a model with at least ` +
+          `${NUM_CTX / 1024}k.`,
+      )
+    }
+
     return {
       model: id,
       label: names.length ? `${id} — ${names.length} models installed` : id,
       context: NUM_CTX,
-      ...(chosen && !chosen.structured
-        ? {
-            warning:
-              `${id} is not a GGUF build, so it runs on an engine that accepts the JSON schema ` +
-              `and ignores it — plans may come back in the wrong shape. A GGUF build of the same ` +
-              `model honours it.`,
-          }
-        : {}),
+      ...(warnings.length ? { warning: warnings.join(' ') } : {}),
     }
   },
 
@@ -190,12 +297,22 @@ export const ollama: AiProvider = {
       // single biggest thing a small local model needs help with. Needs a reasonably recent
       // Ollama; an older one rejects the object and says so.
       ...(request.schema ? { format: request.schema } : {}),
+      /*
+       * Off is a `false`; on is *silence*. Not symmetry for its own sake — measured: Ollama
+       * accepts `think: false` from any model and answers normally, and rejects `think: true`
+       * from one without the capability with `"qwen2.5:0.5b" does not support thinking`, HTTP
+       * 400. Coda's own default model is such a model, so sending `true` to honour a checkbox
+       * would break the default setup for everyone who ticked it. Omitting leaves the model's
+       * own behaviour, which is what "on" means anyway.
+       */
+      ...(request.think === false ? { think: false } : {}),
       options: { num_ctx: NUM_CTX },
     }
 
     const { status, ok, payload } = await postJson(`${base}/api/chat`, {}, body, request.signal)
     if (!ok) {
       const message = messageIn(payload, `Ollama returned ${status}.`)
+      if (/no user query found in messages/i.test(message)) overflowed(model)
       if (status === 404) {
         throw new AiError(
           `${message} — is the model pulled? Try \`ollama pull ${model}\`.`,
@@ -209,7 +326,7 @@ export const ollama: AiProvider = {
 
     /*
      * The one provider where truncation is the *ordinary* case rather than the edge: the
-     * context is fixed at `NUM_CTX` and the prompt is already ~13k tokens of it, so a long plan
+     * context is fixed at `NUM_CTX` and the prompt is already ~18k tokens of it, so a long plan
      * runs out of room. Untreated it reaches `parsePlan` and is reported as "the reply was not
      * JSON", which sends somebody looking for a bug in the plan format.
      */

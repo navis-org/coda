@@ -9,7 +9,14 @@
  * and has to translate before this can recognise it.
  */
 
-import { getBaseUrl, getKey, getModel, getProviderId, reportAuthFailure } from './credentials'
+import {
+  getBaseUrl,
+  getKey,
+  getModel,
+  getProviderId,
+  getThinking,
+  reportAuthFailure,
+} from './credentials'
 import { PROVIDERS, providerFor } from './providers'
 import type { CompletionRequest, CompletionResult, KeyCheck } from './types'
 import { AiError } from './types'
@@ -41,6 +48,9 @@ export async function complete(request: CompletionRequest): Promise<CompletionRe
       ...(apiKey ? { apiKey } : {}),
       model: request.model ?? getModel(id),
       baseUrl: request.baseUrl ?? getBaseUrl(id),
+      // Only where the provider offers the switch: everywhere else `think` stays absent, and
+      // absent means "whatever the model does on its own".
+      ...(provider.thinkingSwitch ? { think: request.think ?? getThinking(id) } : {}),
     })
   } catch (error) {
     // One place to raise the channel, so a provider only has to get its *status* right.

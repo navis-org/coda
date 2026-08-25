@@ -17,6 +17,14 @@
  * summary, what the applier said, and the token cost per turn — so read the output rather than
  * the pass/fail. A green run means every plan applied; it does not mean the graphs were *good*,
  * which is a judgement to make by eye.
+ *
+ * **One Node limit to know about before blaming a local model.** Node's `fetch` gives up if no
+ * response *headers* arrive within 300 seconds, and there is no knob for it short of adding
+ * `undici` as a dependency. Ollama sends nothing until the whole answer is ready, so a model
+ * that takes longer than five minutes per question fails here as `UND_ERR_HEADERS_TIMEOUT` —
+ * a limit of the runner, not of the setup. Browsers have no such ceiling, so the app itself is
+ * unaffected; measured at 5m39s for a 27B model on the first question below, which is close
+ * enough to the line to be worth saying.
  */
 
 /*
@@ -29,6 +37,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 
 import '../nodes'
 import { setKey, setModel, setProviderId } from '../data/ai/credentials'
+import { providerFor } from '../data/ai/registry'
 import type { CodaGraph } from '../core/graph'
 import { emptyGraph } from '../core/graph'
 import { applyPlan } from './apply'
@@ -39,6 +48,29 @@ const KEY = process.env.ANTHROPIC_API_KEY
 const PROVIDER = process.env.CODA_ASSISTANT_PROVIDER ?? 'anthropic'
 const MODEL = process.env.CODA_ASSISTANT_MODEL
 
+/**
+ * Whether there is anything to run against.
+ *
+ * A key for the providers that need one — and *nothing* for Ollama, which is the whole of what
+ * it offers. Gating this file on `ANTHROPIC_API_KEY` regardless made the one loop that can be
+ * run for free the one loop nobody could run, which is how a prompt grew past the context
+ * window Ollama was being asked for without any of this noticing.
+ *
+ *   CODA_ASSISTANT_PROVIDER=ollama CODA_ASSISTANT_MODEL=qwen3.8:latest \
+ *     pnpm vitest run src/assistant/live.test.ts
+ */
+const RUNNABLE = Boolean(KEY) || providerFor(PROVIDER)?.needsKey === false
+
+/**
+ * Per-question ceiling.
+ *
+ * Cloud answers land in seconds and used to sit under two minutes here. A 27B model on a laptop
+ * spends three to five on Coda's prompt — measured at 5m39s for the pipeline question — so the
+ * old limit failed a request that was working. Generous rather than tuned: this file is read
+ * for what it prints, and a timeout is only here to stop a wedged run forever.
+ */
+const PER_QUESTION_MS = 900_000
+
 /*
  * Configured the way a user would, through the credential store, rather than by threading
  * overrides down through `runTurn`. That keeps the loop's signature about the conversation —
@@ -47,9 +79,9 @@ const MODEL = process.env.CODA_ASSISTANT_MODEL
  *   CODA_ASSISTANT_PROVIDER=openai ANTHROPIC_API_KEY=sk-… pnpm vitest run src/assistant/live.test.ts
  */
 beforeAll(() => {
-  if (!KEY) return
+  if (!RUNNABLE) return
   setProviderId(PROVIDER)
-  setKey(PROVIDER, KEY)
+  if (KEY) setKey(PROVIDER, KEY)
   if (MODEL) setModel(PROVIDER, MODEL)
 })
 
@@ -92,76 +124,96 @@ async function ask(graph: CodaGraph, request: string): Promise<CodaGraph> {
   return next
 }
 
-describe.skipIf(!KEY)('against the real API', () => {
-  it('builds a pipeline from scratch', async () => {
-    const graph = await ask(
-      emptyGraph(),
-      'Using the mini hemibrain dataset, find the LC4 neurons, get what they connect to, ' +
-        'and chart the strongest partner types.',
-    )
-    console.log(`\n${describeGraph(graph)}\n`)
-    expect(graph.nodes.length).toBeGreaterThan(2)
-  }, 120_000)
+describe.skipIf(!RUNNABLE)('against the real API', () => {
+  it(
+    'builds a pipeline from scratch',
+    async () => {
+      const graph = await ask(
+        emptyGraph(),
+        'Using the mini hemibrain dataset, find the LC4 neurons, get what they connect to, ' +
+          'and chart the strongest partner types.',
+      )
+      console.log(`\n${describeGraph(graph)}\n`)
+      expect(graph.nodes.length).toBeGreaterThan(2)
+    },
+    PER_QUESTION_MS,
+  )
 
-  it('edits a graph it did not build', async () => {
-    const start = await ask(
-      emptyGraph(),
-      'Give me the mini hemibrain dataset wired to Find Neurons.',
-    )
-    const graph = await ask(
-      start,
-      'Add a table showing the results, and limit the query to 50.',
-    )
-    console.log(`\n${describeGraph(graph)}\n`)
-    expect(graph.nodes.some((n) => n.type === 'out.table')).toBe(true)
-  }, 120_000)
+  it(
+    'edits a graph it did not build',
+    async () => {
+      const start = await ask(
+        emptyGraph(),
+        'Give me the mini hemibrain dataset wired to Find Neurons.',
+      )
+      const graph = await ask(
+        start,
+        'Add a table showing the results, and limit the query to 50.',
+      )
+      console.log(`\n${describeGraph(graph)}\n`)
+      expect(graph.nodes.some((n) => n.type === 'out.table')).toBe(true)
+    },
+    PER_QUESTION_MS,
+  )
 
-  it('reaches for the specialised node instead of assembling one by hand', async () => {
-    /*
-     * The discriminator the easy cases cannot be: "how does A reach B" has a node — `neuron.paths`,
-     * which takes sources *and* targets and does a bidirectional search on the type-collapsed
-     * graph. A chain of Connectivity nodes is structurally valid, applies cleanly, and answers a
-     * different question, so the applier will never object. Finding it means having read past
-     * the handful of node types every other case needs.
-     *
-     * A failure here is a finding about the model, not a bug in the code.
-     */
-    const graph = await ask(
-      emptyGraph(),
-      'On the mini hemibrain, how do the LC4 neurons reach DNp01? Show me the routes.',
-    )
-    console.log(`\n  chose: ${graph.nodes.map((n) => n.type).join(', ')}\n`)
-    expect(graph.nodes.some((n) => n.type === 'neuron.paths')).toBe(true)
-  }, 120_000)
+  it(
+    'reaches for the specialised node instead of assembling one by hand',
+    async () => {
+      /*
+       * The discriminator the easy cases cannot be: "how does A reach B" has a node — `neuron.paths`,
+       * which takes sources *and* targets and does a bidirectional search on the type-collapsed
+       * graph. A chain of Connectivity nodes is structurally valid, applies cleanly, and answers a
+       * different question, so the applier will never object. Finding it means having read past
+       * the handful of node types every other case needs.
+       *
+       * A failure here is a finding about the model, not a bug in the code.
+       */
+      const graph = await ask(
+        emptyGraph(),
+        'On the mini hemibrain, how do the LC4 neurons reach DNp01? Show me the routes.',
+      )
+      console.log(`\n  chose: ${graph.nodes.map((n) => n.type).join(', ')}\n`)
+      expect(graph.nodes.some((n) => n.type === 'neuron.paths')).toBe(true)
+    },
+    PER_QUESTION_MS,
+  )
 
-  it('removes and rewires, not only adds', async () => {
-    // `remove` and `disconnect` are unit-tested and have never been exercised by a real model.
-    // A plan that only ever appends would pass every other case here.
-    const built = await ask(
-      emptyGraph(),
-      'On the mini hemibrain, find LC4 neurons, get their connections, and bar-chart them.',
-    )
-    const graph = await ask(
-      built,
-      'Drop the bar chart — show the connections in a table instead.',
-    )
-    console.log(`\n${describeGraph(graph)}\n`)
-    expect(graph.nodes.some((n) => n.type === 'out.barChart')).toBe(false)
-    expect(graph.nodes.some((n) => n.type === 'out.table')).toBe(true)
-  }, 180_000)
+  it(
+    'removes and rewires, not only adds',
+    async () => {
+      // `remove` and `disconnect` are unit-tested and have never been exercised by a real model.
+      // A plan that only ever appends would pass every other case here.
+      const built = await ask(
+        emptyGraph(),
+        'On the mini hemibrain, find LC4 neurons, get their connections, and bar-chart them.',
+      )
+      const graph = await ask(
+        built,
+        'Drop the bar chart — show the connections in a table instead.',
+      )
+      console.log(`\n${describeGraph(graph)}\n`)
+      expect(graph.nodes.some((n) => n.type === 'out.barChart')).toBe(false)
+      expect(graph.nodes.some((n) => n.type === 'out.table')).toBe(true)
+    },
+    PER_QUESTION_MS,
+  )
 
-  it('declines rather than inventing, when asked for something Coda cannot do', async () => {
-    // The interesting failure is a plan full of plausible node types that do not exist. An
-    // empty plan with a sentence saying so is the right answer.
-    const outcome = await requestPlan({
-      graph: emptyGraph(),
-      messages: [{ role: 'user', content: 'Run a t-test between two groups of neurons.' }],
-    })
-    if (!outcome.ok) expect.fail(outcome.error)
-    console.log(`\n  “${outcome.plan.summary}”`)
+  it(
+    'declines rather than inventing, when asked for something Coda cannot do',
+    async () => {
+      // The interesting failure is a plan full of plausible node types that do not exist. An
+      // empty plan with a sentence saying so is the right answer.
+      const outcome = await requestPlan({
+        graph: emptyGraph(),
+        messages: [{ role: 'user', content: 'Run a t-test between two groups of neurons.' }],
+      })
+      if (!outcome.ok) expect.fail(outcome.error)
+      console.log(`\n  “${outcome.plan.summary}”`)
 
-    const result = applyPlan(emptyGraph(), outcome.plan)
-    // Whatever it proposes must at least be applicable — inventing a node type is the failure.
-    if (!result.ok) expect.fail(`invented something: ${result.errors.join(' ')}`)
-  }, 120_000)
+      const result = applyPlan(emptyGraph(), outcome.plan)
+      // Whatever it proposes must at least be applicable — inventing a node type is the failure.
+      if (!result.ok) expect.fail(`invented something: ${result.errors.join(' ')}`)
+    },
+    PER_QUESTION_MS,
+  )
 })

@@ -47,6 +47,19 @@ const FIELDS = {
     clean: (raw: string) => raw.trim().replace(/\/+$/, ''),
     fallback: (id: string) => providerFor(id)?.defaultBaseUrl ?? '',
   },
+  /*
+   * Reasoning, as `'on'` or nothing.
+   *
+   * A boolean in a table of strings, and it rides here rather than getting a pair of its own
+   * because the rule it needs is the table's: a value equal to the default is not stored, so
+   * off costs no storage and a later build changing the default moves everyone who never
+   * chose. Off *is* the default — see `AiProvider.thinkingSwitch` for the measurement.
+   */
+  think: {
+    prefix: 'coda.ai.think.',
+    clean: (raw: string) => (raw === 'on' ? 'on' : ''),
+    fallback: () => '',
+  },
 } as const
 
 type Field = keyof typeof FIELDS
@@ -73,6 +86,7 @@ const held: Record<Field, Map<string, string>> = {
   key: new Map(),
   model: new Map(),
   base: new Map(),
+  think: new Map(),
 }
 let loaded = false
 
@@ -158,6 +172,21 @@ export function getBaseUrl(id: string = getProviderId()): string {
 
 export function setBaseUrl(id: string, raw: string | undefined): void {
   write('base', id, raw)
+}
+
+/**
+ * Whether the model should reason before answering. Off unless the user turned it on.
+ *
+ * Off by default because on a local model it is most of the wait — 254 s against 49 s for the
+ * same question, measured — and because the plans did not get worse without it. On is the
+ * escape hatch for a request where they might.
+ */
+export function getThinking(id: string = getProviderId()): boolean {
+  return read('think', id) === 'on'
+}
+
+export function setThinking(id: string, on: boolean): void {
+  write('think', id, on ? 'on' : '')
 }
 
 /** Is the selected provider ready to be asked something? */

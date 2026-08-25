@@ -13,25 +13,40 @@
  * **It must stay byte-identical between calls.** It is the cached prefix (see `client.ts`), so
  * anything per-request — the current graph, a timestamp — belongs in the user turn instead.
  *
- * **It is ~12.7k tokens, and that is worth trimming — measured, so nobody has to guess where.**
- * 27.8k chars of catalogue against 2.9k of rules; ~2.4 chars per token, because identifiers
- * (`edgeWeightInfluence`, `countDistinct`) tokenize far worse than the ~4 prose gets, which is
- * why a character count under-estimates this by half. Inside the catalogue:
+ * **It is 65,076 characters — re-measured, because the last figure here was written at 49 nodes
+ * and there are now 77.** Ollama counts 16,587 tokens for it, 17,687 with the plan schema
+ * attached; a Claude tokenizer will read it higher, since identifiers (`edgeWeightInfluence`,
+ * `countDistinct`) tokenize far worse than prose. 62.1k of that is catalogue against 2.9k of
+ * rules. Inside the catalogue, across 334 params of which 110 are `presentational`:
  *
- *  - param `help` text is 10.8k chars, **39%** — the largest single component
- *  - eight of the forty-nine nodes are **43%** of it, `out.network` alone 11% at 3k chars,
- *    being thirty-three mostly-presentational encoding and layout knobs
- *  - node descriptions are 3.4k, and the rest is ports, `carries:` lines and enum options
+ *  - param `help` text is 32.5k chars, **52%** — by far the largest single component
+ *  - eight of the seventy-seven nodes are **41%** of the param text: `out.viewer3d` (30 params),
+ *    `out.network` (33), `neuron.cleanMeshes`, `out.scatter` and the NBLAST family
+ *  - node descriptions are 5.2k, and the rest is ports, `carries:` lines and enum options
  *
- * The cheapest good trade is dropping `help` from `presentational` params (-15%): those are the
- * knobs a user turns in the styling panel, and they are the ones least likely to need prose.
- * Dropping presentational params outright is -24% — but then `plannableParams` has to refuse
- * them too, or the model is refused for using a param it was never shown, and the assistant
- * loses "colour the network by type" entirely. Dropping all help is -39% and goes too far:
- * `help` is what says `minWeight` prunes edges rather than filtering neurons.
+ * What each trim is worth, rendered and counted rather than reasoned about (±3%, the model of
+ * the renderer used to measure them is not this one):
  *
- * Not done yet because it is a quality trade against ~25c a session, and the prompt at this
- * size one-shot every plan in the first live run. See `_TODOs.md`.
+ *  - drop `help` on `presentational` params: **-13%**, to ~14.7k tokens
+ *  - drop presentational params outright: **-20%** — but `plannableParams` has to refuse them
+ *    too, or the model is refused for using a param it was never shown, and the assistant loses
+ *    "colour the network by type" entirely
+ *  - drop all `help`: **-55%**, to ~8.1k, and goes too far: `help` is what says `minWeight`
+ *    prunes edges rather than filtering neurons
+ *  - name, description and ports only — an index, no params: **-75%**, to ~5k
+ *
+ * **Do not make the catalogue per-request, and do not fetch it in pieces.** The reason is
+ * stronger than the Anthropic cache discount that first motivated byte-identity. Measured
+ * against Ollama on one machine: the first question of a session pays 120 s of prompt
+ * evaluation, and *every question after it pays 4.4 s* — a 27x drop, because llama.cpp reuses
+ * the KV cache for the longest common prefix and only the user turn is new. A catalogue that
+ * varied per request would re-pay the 120 s on every turn. An index-plus-lookup design keeps
+ * the reuse only if the index stays the prefix and the detail is appended after it, and it
+ * still costs an extra generation round trip — which on a local model is minutes, against a
+ * prefill that is already amortised to seconds. The size is worth trimming for the KV memory
+ * and the first-turn cost, not for per-turn speed.
+ *
+ * See `_TODOs.md`.
  */
 
 import type { ParamDef } from '../core/node'

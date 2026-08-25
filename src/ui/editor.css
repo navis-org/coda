@@ -3992,6 +3992,16 @@ a.viewer-actions__btn {
   padding: 0;
   text-align: center;
 }
+/* A switch rather than a labelled field: the label reads left-to-right beside the box. */
+.sources__check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+}
+.sources__check > span {
+  color: var(--text-secondary);
+}
 .sources__hint {
   font-size: 10px;
   color: var(--text-muted);
@@ -6845,10 +6855,27 @@ details[open] > summary.tile__label {
 .assistant__warnings li[data-severity='error'] {
   color: var(--text-primary);
 }
-.assistant__working {
+/*
+ * The lines that are neither a question nor an answer: the wait, a wait that got long enough to
+ * need explaining, and a wait you ended. Muted, because none of them is an outcome.
+ */
+.assistant__working,
+.assistant__note {
   margin: 0;
   font-size: 11.5px;
   color: var(--text-muted);
+}
+.assistant__working {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 22px;
+  /* Tabular, or a ticking counter shifts the Stop button sideways once a second. */
+  font-variant-numeric: tabular-nums;
+}
+.assistant__note {
+  line-height: 1.5;
+  max-width: 62ch;
 }
 
 .assistant__ask {

@@ -408,7 +408,7 @@ export interface GraphState {
    * rather than an error.
    *
    * Deliberately takes a *plan*, not a request. Asking the model lives in
-   * `assistant/converse.ts`, which reaches the network and pulls in the ~28k-character
+   * `assistant/converse.ts`, which reaches the network and pulls in the ~65k-character
    * catalogue; keeping it out of here is what lets the panel `await import()` that half and
    * leave it out of the main chunk, the same doctrine as elkjs and the exporters.
    */

@@ -132,7 +132,7 @@ export function raiseHttpError(
  * them and none can rely on a status code.
  *
  * Normalised here rather than left to each provider because the one that skipped them was the
- * one that needs them most: Ollama runs a local model at a fixed context against a ~13k-token
+ * one that needs them most: Ollama runs a local model at a fixed context against a ~18k-token
  * prompt, so a truncated reply is its ordinary case rather than its edge case — and untreated
  * it reaches `parsePlan` and is reported as "the reply was not JSON", which sends somebody
  * looking for a bug in the plan format.

@@ -231,6 +231,75 @@ describe('when the plan does not fit', () => {
   })
 })
 
+describe('a wait that has not ended', () => {
+  /**
+   * A request that hangs until it is called off — which is a local model on a slow machine,
+   * near enough. The abort has to survive as a `DOMException` all the way from here to the
+   * panel or the cancel is reported as a failure.
+   */
+  function stubHanging(): void {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async (_url: string, init?: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () =>
+              reject(new DOMException('aborted', 'AbortError')),
+            )
+          }),
+      ),
+    )
+  }
+
+  it('can be called off, and says nothing was changed', async () => {
+    /*
+     * The reported symptom was "goes to Thinking and never returns anything" — against a model
+     * that would have answered in about five minutes. Whatever else is true of that wait, the
+     * only way out of it used to be reloading the page and losing the transcript.
+     */
+    stubHanging()
+    render(<AssistantPanel />)
+
+    fireEvent.change(screen.getByRole('textbox'), {
+      target: { value: 'find LC4 neurons and chart their strongest partners' },
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
+    })
+    expect(screen.queryByText('Thinking…')).not.toBeNull()
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
+    })
+
+    await waitFor(() => expect(screen.getByText(/Stopped/)).not.toBeNull())
+    expect(graph().nodes).toHaveLength(0)
+    // A cancel is not a failure: reporting it in the error tone would have the panel blame the
+    // model for something the user did.
+    expect(document.querySelector('[data-tone="error"]')).toBeNull()
+  })
+
+  it('leaves the composer usable again afterwards', async () => {
+    // Busy is what disables Ask, so a stop that did not clear it would lock the panel for good.
+    stubHanging()
+    render(<AssistantPanel />)
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'anything' } })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
+    })
+
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull())
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'again' } })
+    expect((screen.getByRole('button', { name: 'Ask' }) as HTMLButtonElement).disabled).toBe(
+      false,
+    )
+  })
+})
+
 describe('what the edit left behind', () => {
   it('surfaces an unset picker, since nothing else on screen would', async () => {
     // A Group By downstream of a query cannot have its key chosen before anything has run.

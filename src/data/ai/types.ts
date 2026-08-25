@@ -38,6 +38,14 @@ export interface CompletionRequest {
   messages: Array<{ role: 'user' | 'assistant'; content: string }>
   /** JSON Schema the reply must satisfy. Omit for prose. */
   schema?: object | undefined
+  /**
+   * Whether the model should reason before answering, where the provider takes a switch for it.
+   *
+   * `undefined` leaves the model's own default alone, which is what a provider without
+   * `thinkingSwitch` gets and what "on" means — see `AiProvider.thinkingSwitch` for why "on"
+   * is an omission rather than a `true`.
+   */
+  think?: boolean | undefined
   signal?: AbortSignal | undefined
   /** Overrides the stored values. The Connections panel uses these to test a candidate key. */
   apiKey?: string | undefined
@@ -110,6 +118,15 @@ export interface AiProvider {
   label: string
   /** Where a key comes from. Absent for a provider that needs none. */
   keyUrl?: string
+  /**
+   * Where the setup is written down, for a provider whose setup is more than pasting a key.
+   *
+   * Only Ollama, and the note alone is why: installing a runtime, picking a model by its context
+   * window, and letting the browser through takes a page, not the two sentences a panel has room
+   * for. A link is the honest form of that — the alternative is a note that gets longer every
+   * time somebody hits a new way for it not to work.
+   */
+  guideUrl?: string
   /** False for a local provider. Governs whether the panel demands a key before enabling Ask. */
   needsKey: boolean
   /** Shown under the key field: what this provider is, and anything it needs set up. */
@@ -126,6 +143,20 @@ export interface AiProvider {
   defaultBaseUrl: string
   /** True where the endpoint is the user's to choose — a local server on another port. */
   editableBaseUrl?: boolean
+  /**
+   * True where reasoning is a per-request switch the user should be offered.
+   *
+   * Only Ollama, and it is a *speed* control rather than a quality one, which is why it is
+   * offered at all. Measured on one machine, same question, warm model: `qwen3.8:latest`
+   * answered in **254 s** with reasoning and **49 s** without — 75% of the wait was 6k
+   * characters of thinking nobody reads. Both plans applied, and the shorter run was the better
+   * graph of the two, which is a tie at n=1 rather than a win.
+   *
+   * The cloud providers have reasoning too and are deliberately not wired to this: Anthropic's
+   * is adaptive and inside a `max_tokens` this file already sets, and none of them is where the
+   * minutes go.
+   */
+  thinkingSwitch?: boolean
   schemaSupport: SchemaSupport
   /**
    * What is *actually* available, asked of the provider.

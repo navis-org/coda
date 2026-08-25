@@ -4,11 +4,15 @@ Coda's assistant (the robot icon in the toolbar, or `/`) describes a change and 
 
 This guide is the whole setup, in four steps — install, pull a model, let the browser in, point Coda at it. Budget twenty minutes, most of it waiting for a download.
 
-Two things worth knowing before you spend the disk space:
+Three things worth knowing before you spend the disk space:
 
-- **Coda's prompt is large.** The node catalogue it sends is ~13k tokens, so a model with a small
-  context window is not just slower, it is wrong — see [step 2](#2-pull-a-model).
-- **The mileage on local plans may vary.** Coda's assistant has been tested against Anthropic's latest models; other providers (including Ollama) have had their reachability checked and nothing else. Depending on which model you pull, the quality of the plans may be lower than what you get from frontier models in the cloud.
+- **Coda's prompt is large.** The node catalogue it sends is ~16.5k tokens, ~18k once the plan
+  schema goes on, so a model with a small context window is not slower — it *cannot answer at
+  all* — see [step 2](#2-pull-a-model).
+- **The first answer of a session is the slow one**, and reasoning models are slower again. Both
+  are measured below — [why the first question is the slow one](#why-the-first-question-is-the-slow-one)
+  and [reasoning](#reasoning-and-why-it-is-off) — and neither is a fault to go looking for.
+- **Local plans are better than this guide used to claim.** `qwen3.8:latest` (27B, q4, on an M3 Max) passes the whole of Coda's assistant test suite — all five cases, zero repair rounds across seven questions, 14–83 s each on a warm model. That is one model on one machine, so pull a smaller one and the quality may well drop; but "local means worse plans" is no longer something to assume.
 
 ---
 
@@ -51,13 +55,16 @@ The second should answer `Ollama is running`. That endpoint is exactly what Coda
 
 | Requirement | Why | What happens if it is not met |
 | --- | --- | --- |
-| **≥ 16k context** | The node catalogue alone is ~13k tokens; Coda asks for `num_ctx: 16384` on every request | The prompt is **silently truncated from the front** and the model answers confidently about a node list it was never shown |
+| **≥ 32k context** | The node catalogue alone is ~16.5k tokens and the whole prompt is ~18k; Coda asks for `num_ctx: 32768` on every request | The prompt is **truncated from the front** — and since your question is the *last* thing in it, that is what falls off. Ollama then refuses a conversation with no question in it, `no user query found in messages`, several minutes in. Coda translates that one; see [troubleshooting](#troubleshooting) |
 | **A GGUF build** | Coda sends its plan schema as `format`, which becomes a compiled grammar in llama.cpp. Other engines accept the field and ignore it | Plans come back in the wrong shape — valid JSON, so nothing raises, with no actions in it |
-| **Fits in memory** | The weights plus a 16k KV cache have to sit in RAM or VRAM | It spills to CPU and a single plan takes minutes |
+| **Fits in memory** | The weights plus a 32k KV cache have to sit in RAM or VRAM | It spills to CPU and a single plan takes minutes |
 
-Coda handles the first by asking for 16k explicitly, which is why the Ollama default of 4k on a
+Coda handles the first by asking for 32k explicitly, which is why the Ollama default of 4k on a
 machine with under 24 GiB of VRAM is not a problem — but a model that was *trained* with a
-smaller window clamps, and nothing reports it.
+smaller window **clamps to its own**, whatever Coda asks for. That used to go unreported. It no
+longer does: Coda reads each model's window out of `/api/tags`, marks a short one in the
+dropdown (`gemma2:9b — 5.4 GB · 8k window — too small for Coda's prompt`), and says so under
+**Test** before you have spent a question on it.
 
 ### Recommendations
 
@@ -70,13 +77,15 @@ Sizes and context windows below were read off ollama.com:
 | `qwen2.5:14b` | 9.0 GB | 32K | The general-purpose sibling of the default |
 | `mistral-nemo` | 7.1 GB | 128K | 12B, a reasonable middle |
 | `llama3.1:8b` | 4.9 GB | 128K | The smallest worth trying |
-| ~~`gemma2:9b`~~ | 5.4 GB | **8K** | **Avoid.** Its window is below Coda's prompt |
+| ~~`gemma2:9b`~~ | 5.4 GB | **8K** | **Will not work.** Its window is less than half Coda's prompt |
 
 Pick by the memory you have, not by the leaderboard: roughly 8 GB of RAM → an 8B model, 16 GB → 12–14B comfortably, 32 GB+ → anything on the list.
 
-`gemma2:9b` is in Coda's own "Available to pull" list and is the one entry there that predates
-the prompt getting large. It will answer, and it will answer about a catalogue it only half
-received.
+`gemma2:9b` used to be in Coda's own "Available to pull" list, from when the prompt was ~13k
+tokens and an 8k window merely cut it in half. Against ~18k it cannot be served at all, so it is
+no longer offered — if you already have it pulled, it appears under **On this machine** with the
+warning above rather than being hidden, because a model you own is a fact and Coda's job is to
+say what is wrong with it.
 
 ```shell
 ollama pull qwen2.5-coder:14b
@@ -101,10 +110,10 @@ ollama ps
 
 ```
 NAME                     ID              SIZE      PROCESSOR    CONTEXT    UNTIL
-qwen2.5-coder:14b        …               10 GB     100% GPU     16384      4 minutes from now
+qwen2.5-coder:14b        …               10 GB     100% GPU     32768      4 minutes from now
 ```
 
-`CONTEXT` should read at least `16384`. Less than that is a model clamping to its own trained window, which is the silent-truncation case above. `PROCESSOR` should say `100% GPU`, or be CPU-only knowingly — a split means the model did not fit and every plan will crawl.
+`CONTEXT` should read `32768`. Less than that is a model clamping to its own trained window, which is the truncation case above. `PROCESSOR` should say `100% GPU`, or be CPU-only knowingly — a split means the model did not fit and every plan will crawl.
 
 ---
 
@@ -215,18 +224,19 @@ Several origins are comma-separated: `OLLAMA_ORIGINS="https://navis-org.github.i
 3. **Provider** → `Ollama (local)`. The key field disappears; there is nothing to paste.
 4. **Server** → `http://localhost:11434` (already filled in; change it only if you moved the port with `OLLAMA_HOST`).
 5. **Model** → the dropdown separates **On this machine** from **Available to pull**. Yours is in the first group. If the list looks stale, press **↻** beside it — that asks the server what is installed rather than guessing.
-6. Press **Test**.
-7. Press **Save**. The assistant does not use the new provider until you do.
+6. **Let the model reason before answering** → leave it off unless you have a reason. See [reasoning](#reasoning-and-why-it-is-off) below.
+7. Press **Test**.
+8. Press **Save**. The assistant does not use the new provider until you do.
 
 A working Test reads:
 
 ```
-Works — qwen2.5-coder:14b — 3 models installed, 16k context
+Works — qwen2.5-coder:14b — 3 models installed, 32k context
 ```
 
-The `16k context` is what Coda is going to ask for, not what the model can do — so it says the same thing for every model. Confirm the model's own window in the table above.
+The `32k context` is what Coda is going to ask for, not what the model can do — so it says the same thing for every model. What the *model* can do is the amber line below it, when there is something to say.
 
-A second line in amber under that is the MLX/GGUF warning from step 2. It sits *beside* the success rather than replacing it, and it means what it says: the connection works, the answers may be malformed.
+That amber line carries the two caveats from step 2, and a model can earn both at once: the MLX/GGUF warning, and a trained window too small for the prompt. Neither replaces the success line. The first means the connection works and the answers may be malformed; the second means asking will fail rather than answer badly, and names the fix.
 
 ---
 
@@ -239,6 +249,50 @@ Press `/`, or the robot icon in the toolbar. Type a change:
 The plan applies to the canvas immediately — the graph above *is* the preview, and the whole edit is one `Ctrl-Z` / `⌘Z`. Below the ask box you get a summary of what changed and anything the edit left for you to finish.
 
 Local models do better with one change at a time. If a plan comes back empty or malformed, ask for a smaller step before blaming the setup.
+
+The drawer counts the wait and offers **Stop**. A local model is slow enough that an unchanging
+"Thinking…" is indistinguishable from a hang, and the whole node catalogue goes with every
+question — so a first answer of several minutes is normal, and the second is faster (see below).
+
+---
+
+## Reasoning, and why it is off
+
+Coda sends `think: false` unless you tick the box. On a reasoning model — the `qwen3` family,
+`deepseek-r1` — that is most of the wait:
+
+| Same question, warm model | Total |
+| --- | --- |
+| reasoning on | **254 s** — 6,044 characters of thinking, then a 1,577-character plan |
+| reasoning off | **49 s** — the plan, and nothing else |
+
+Both plans applied. The faster one was the better graph of the two, which at one sample each is a
+tie rather than a win — so the switch is there. Turn it on if a request comes back wrong, not
+before.
+
+Ticking the box does not send `think: true`, it stops sending the field. That is deliberate:
+Ollama accepts `think: false` from *any* model, but rejects `think: true` from one without the
+capability (`"qwen2.5:0.5b" does not support thinking`), and Coda's default model is one of
+those. Silence means "whatever the model does on its own", which is what "on" means anyway.
+
+## Why the first question is the slow one
+
+The prompt is evaluated once and then reused. Measured on one machine, three different questions
+against the same system prompt:
+
+| | Prompt evaluation |
+| --- | --- |
+| first question after the model loads | **120.1 s** |
+| every question after it | **4.4 s** |
+
+llama.cpp keeps the KV cache for the longest common prefix, and Coda's catalogue is byte-identical
+between calls by construction — so only your question is new. The 16.5k-token prompt is a one-off
+cost per model load, not a per-question one.
+
+Two things reset it: the model unloading (`ollama ps` shows the countdown; the default
+`keep_alive` is five minutes), and anything that changes the prompt. This is why Coda does not
+trim its catalogue per request or fetch node details on demand — either would re-pay the two
+minutes on every question.
 
 ---
 
@@ -267,7 +321,8 @@ Coda's messages are specific on purpose; each one below names its own fix.
 | `Could not reach http://localhost:11434. Is the server running, and is it set to accept requests from this page?` | One of three: Ollama is not running (`curl http://localhost:11434`), the origin is not allowed ([step 3](#3-let-the-browser-in)), or the browser blocked it before it was sent (Safari, or a denied Chrome prompt). A browser reports all three identically, which is why the message lists them |
 | `<model> is not pulled on this machine. Run ollama pull <model>, or choose one you have: …` | Coda asked `/api/tags` and the name in the dropdown is not among the answers. The models it lists after the colon are really there |
 | `Nothing pulled yet — run ollama pull … , then refresh` | The server answered and has no models. Pull one, then press **↻** |
-| `The reply hit the length limit before it finished, so the plan is incomplete. Ask for a smaller change.` | The answer ran out of room inside the 16k window. Genuinely ask for less — or use a model with a larger window |
+| `The prompt did not fit <model>'s context window. Ollama truncated it from the front until the question itself was gone…` | The model clamped `num_ctx` to its own trained window and Coda's ~18k-token prompt did not fit. `ollama show <model>` prints that window; pull one with at least 32k. **This is the one that looks like a hang** — the prompt is evaluated before the refusal, so on a 27B model the error lands three to five minutes after you asked |
+| `The reply hit the length limit before it finished, so the plan is incomplete. Ask for a smaller change.` | The answer ran out of room inside the 32k window. Genuinely ask for less — or use a model with a larger window |
 | `… is not a GGUF build, so it runs on an engine that accepts the JSON schema and ignores it` | The MLX trap. Pull the plain tag |
 | A plan that reads like a sensible sentence but changes nothing | Same cause as the row above, or a model whose context clamped below the prompt. Check `ollama ps` |
 | `address already in use` when starting `ollama serve` | The desktop app is already running one. Use it, or quit the app first |
