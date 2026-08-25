@@ -92,6 +92,9 @@ symptom to recognise — which usually points nowhere near the cause.
   is a claim that there is no useful answer, which for a count is almost never true. `ctx.warn`
   is the channel; `CRASH_FLOOR_BYTES` is the only thing left that refuses, and only for an
   allocation. Time is never a refusal. See [docs/limits.md](docs/limits.md).
+- **A buffer handed to `callPython` is detached the moment the call is posted**, so read
+  anything about it — its length above all — *before* the await. A check against a transferred
+  buffer's `length` compares a real count against 0 and always fails.
 - **Module init order.** `graphStore.ts` imports `../nodes` for its side effect. Without
   it, ordering in `main.tsx` becomes load-bearing and silently drops every node.
 - **`parseMarkdown`'s extended kinds are opt-in, and that is a safety property.** Fences,

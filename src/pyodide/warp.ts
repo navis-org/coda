@@ -62,7 +62,7 @@ type WarpRequest = {
 }
 
 type ApplyRequest = WarpRequest & {
-  /** `N * 3` float32, xyz interleaved. **A copy** — see `warpPoints`. */
+  /** `N * 3` float32, xyz interleaved. **Transferred, not copied** — see `warpPoints`. */
   points: Float32Array
 }
 
@@ -164,6 +164,12 @@ export async function warpPoints(
 ): Promise<WarpResult> {
   const coefficients = await coefficientsFor(pairs, options)
 
+  // Read before the call, not after: `points` is *transferred*, so the moment `callPython`
+  // posts the message this buffer is detached and its `length` reads 0. The guard below used
+  // to ask the detached array how long it had been, and every warp of a non-empty geometry
+  // failed with "returned N points for 0".
+  const expected = points.length
+
   const request: ApplyRequest = {
     key: pairs.id,
     source: copyOf(pairs.source),
@@ -184,10 +190,10 @@ export async function warpPoints(
   if (positions.length !== count * 3) {
     throw new Error(`Warp returned ${positions.length} numbers for ${count} points`)
   }
-  if (count * 3 !== points.length) {
+  if (count * 3 !== expected) {
     // A silent length change would scatter every coordinate after the discrepancy onto the
     // wrong point, which is a neuron that still draws.
-    throw new Error(`Warp returned ${count} points for ${points.length / 3}`)
+    throw new Error(`Warp returned ${count} points for ${expected / 3}`)
   }
   return { positions, fitMs: numberFrom(result, 'fitMs'), applyMs: numberFrom(result, 'applyMs') }
 }

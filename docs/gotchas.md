@@ -171,6 +171,23 @@ verbatim.
   It is also what makes `Text columns` safe on both import nodes, whose schema is empty before the
   first run by construction.
 
+- **A buffer handed to `callPython` is detached the moment the call is posted**, so anything
+  read *about* it — its length above all — has to be read before the `await`, not after. This is
+  the second half of the transfer trap, and it is the half that fails loudly rather than
+  silently: `warpPoints` gathers a fresh point buffer, transfers it, and then checked the
+  returned count against `points.length` — which by then is 0, on a buffer the worker owns. So
+  every Transform Neurons and Mirror Neurons run on a non-empty geometry died with `Warp
+  returned 642 points for 0`, a message naming the two numbers and neither cause. The check is
+  worth keeping — a length change would scatter every coordinate after the discrepancy onto the
+  wrong point, i.e. neurons that all still draw — so the fix is one `const expected =
+  points.length` above the call, not a weaker guard.
+
+  Nothing in the suite could see it. `xform.test.ts` and `mirror.test.ts` both `vi.mock` the
+  whole of `pyodide/warp`, and jsdom has no `Worker` to detach anything, so the wrapper's own
+  arithmetic never ran against a real transfer. `warp.test.ts` is the layer that does: it mocks
+  `callPython` and detaches the argument with `structuredClone(buf, { transfer: [buf] })`,
+  which is the one line that makes the bug reproducible on the main thread.
+
 - **Module init order.** `graphStore.ts` imports `../nodes` for its side effect, because it
   resolves node types the moment it loads the autosaved graph. Without that import,
   ordering in `main.tsx` becomes load-bearing and a bad order silently drops every node.
