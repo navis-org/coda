@@ -172,3 +172,78 @@ def coda_nblast(query, target, normalize, symmetry, use_alpha):
         )
     # C-contiguous float64 is what `getBuffer('f64')` on the JS side reads without a copy.
     return np.ascontiguousarray(scores, dtype=np.float64)
+
+
+def coda_synapse_sets(point_set):
+    """Concatenated synapse points in, a list of `(N, 4)` arrays out.
+
+    The syNBLAST counterpart of `coda_dotprops`, and much the smaller of the two: a synapse
+    has no tangent vector to fit, so there is no `k`, no neighbourhood and no resampling —
+    just the points, grouped, with a connector type in the fourth column.
+
+    `points` is xyz interleaved, float32, every neuron laid after the last; `offsets` says
+    where each one starts, counted in points; `types` is one small integer per point. The
+    type column is what `by_type` compares on, and fastcore wants it numeric — the mapping
+    from Coda's `polarity` strings onto 0 and 1 happens on the JavaScript side, where the
+    column and its dtype are still in view.
+
+    **Every group here is non-empty by construction.** The caller groups a point cloud by
+    `neuronId`, so a neuron with no synapses has no group rather than an empty one — which
+    matters because a `(0, 4)` array is a neuron fastcore has nothing to compare.
+    """
+    xyz = np.frombuffer(point_set["points"], dtype=np.float32).reshape(-1, 3)
+    types = np.frombuffer(point_set["types"], dtype=np.int32)
+    off = np.frombuffer(point_set["offsets"], dtype=np.int32)
+
+    # One `(N, 4)` allocation for the whole cloud, with the float32 -> float64 widening
+    # happening on the way *into* it. The obvious spelling — `.astype(np.float64)` first, then
+    # a per-neuron `np.empty` copied into — allocates the full cloud twice and writes it twice,
+    # which at the half-million synapses `checkSynblastSize` warns at is 28 MB where 16 would
+    # do. The per-neuron blocks are then row slices of a C-contiguous array, which are
+    # themselves C-contiguous, so fastcore takes them as views rather than as copies.
+    blocks = np.empty((len(xyz), 4), dtype=np.float64)
+    blocks[:, :3] = xyz
+    blocks[:, 3] = types
+    return [blocks[int(off[i]) : int(off[i + 1])] for i in range(len(off) - 1)]
+
+
+def coda_synblast_run(request, report=None):
+    """syNBLAST: compare neurons by where their synapses are rather than by their shape.
+
+    For every query connector the nearest target connector *of the same type* is found and
+    the euclidean distance scored through the same FCWB lookup matrix `coda_nblast` uses,
+    with the dot product fixed at 1 — a synapse has no direction. So the scores are on the
+    same scale as an NBLAST and mean something quite different: two neurons with identical
+    arbors that talk to different partners in different places score low here and high there.
+
+    **Points are micrometres**, for the reason the module docstring gives: the same lookup
+    matrix runs out at a 40 um distance bin, so a set handed over in nanometres scores every
+    pair as strangers, uniformly, with nothing anywhere to say why.
+
+    No progress is reported from inside the comparison. fastcore builds an index and then
+    scores, neither of which exposes a per-neuron hook, and `coda_nblast`'s measurement of
+    what chunking costs applies here unchanged.
+    """
+    req = request.to_py()
+    query = coda_synapse_sets(req["query"])
+    target_set = req.get("target")
+    target = coda_synapse_sets(target_set) if target_set else None
+
+    if report is not None:
+        rows, cols = len(query), len(target) if target else len(query)
+        report(0.2, f"scoring {rows} x {cols}")
+
+    symmetry = str(req["symmetry"])
+    scores = fc.synblast(
+        query,
+        target,
+        by_type=bool(req["byType"]),
+        normalize=bool(req["normalize"]),
+        symmetry=None if symmetry == "none" else symmetry,
+    )
+    scores = np.ascontiguousarray(scores, dtype=np.float64)
+    return {
+        "scores": scores.ravel(),
+        "rows": scores.shape[0],
+        "cols": scores.shape[1],
+    }

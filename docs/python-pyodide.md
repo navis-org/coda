@@ -493,3 +493,153 @@ which is the only reason a viewer computing hex in JS survives a theme switch at
 
 What has **not** been looked at is a tree at the few-hundred-leaf end, where the label thinning
 actually bites, and the `Ordered` matrix beside a Heatmap at a size where the blocks matter.
+
+## Four more capabilities, and what the sixth one cost
+
+`nblast` → `linkage` → `warp` → **`skeletons`, `meshes`, `matches`**, plus `synblast` inside
+`nblast.py`. The claim `runtime.ts` makes about the second capability being nearly free has now
+been tested five times, and it holds: `MODULES` is six identical rows, because everything Coda
+asks Python for lives in the one 1.1 MB wheel it already pins. A graph that resamples skeletons
+without ever scoring anything pays the same ten megabytes the first NBLAST would have; a graph
+that does both pays it once.
+
+**Measured on this build.** The Pyodide worker chunk went 20.1 kB → 47.6 kB, carrying the three
+new `.py` files inlined. `main-*.js` still matches `jsdelivr` nowhere, and `np.frombuffer`,
+`navis_fastcore` and `resample_skeleton` appear in the worker chunk and in no other. The node
+definitions and their ops added 12.9 kB to `nodes-*.js` and the eight new emitters 11.7 kB
+across the two exporter chunks — neither of which is on the Python side of anything.
+
+### The one protocol change in five capabilities
+
+`PyArg` gained `Uint32Array`, for triangle indices. That is the first time the wire has moved
+since `nblast.ts` was written, and it is worth being precise about how small it is: `engine.ts`
+collects transferables with `ArrayBuffer.isView`, which already covered it, so the change is one
+member of a union and one reader (`uint32From`). Nothing about "a capability is a `.py`, its
+types and a wrapper" changed.
+
+The reason it was needed rather than worked around: `MeshGeometry.indices` is a `Uint32Array`,
+and every face argument in fastcore's mesh module wants numpy's `uint32`. Narrowing to `Int32Array`
+on the way over would have bought a cast on both sides to deliver the same bits.
+
+### syNBLAST: the same matrix, a different question
+
+`neuron.synblast`, `Add ▸ Analysis ▸ syNBLAST`. Synapses in, a score matrix out — the same
+`MatrixValue` NBLAST produces, on the same scale, out of the same embedded FCWB lookup table
+with the dot product fixed at 1 because a connector has no direction. So the Heatmap, Linkage,
+Dendrogram, NBLAST Matches and Download all took it with nothing new to learn, which is the
+third time that has now paid off.
+
+**What differs is the shape of the input, and that is where all the work is.** A
+`SkeletonsValue` is already one item per neuron with one attribute row each; a `PointsValue` is
+one flat cloud with one row per *synapse* and the neuron in a column. So `synblastOps.ts` groups
+first, and every consequence is recorded there:
+
+- **First-appearance order**, not sorted. Both backends answer neuron by neuron today, which is
+  precisely why the test fixture is deliberately interleaved — a grouping written as "start a
+  new group when the id changes" passes on real data and is wrong.
+- **The key is the id as text.** Invariant 8 doing real work rather than ceremony: two CAVE root
+  ids differing in the last two digits are one key once either has been through a float64, which
+  is a matrix row silently comparing two neurons at once.
+- **A neuron with no synapses has no group**, which is the *opposite* of `dotpropSetFrom`'s rule
+  and not an inconsistency: there the item list is the neuron list and dropping one
+  desynchronises the labels, whereas here the group list and the labels are built from the same
+  groups.
+- **An orphan connector gets a row called `(no id)`** rather than being dropped, because dropping
+  changes what the matrix is a comparison of and there is no channel that survives a cached
+  result to say so.
+- **The label is read at a group's first point.** A `type` column is constant within a neuron by
+  construction, so the choice is invisible where it is used as intended and predictable where it
+  is not.
+
+`by_type` is on by default and goes **off** when the polarity picker is cleared, rather than
+staying on and comparing every connector against every other — which is `by_type=False` wearing
+a label that says otherwise.
+
+### Clean Skeletons and Clean Meshes: four operations, one crossing
+
+Two nodes, `neuron.cleanSkeletons` and `neuron.cleanMeshes`, each folding four optional fastcore
+operations into a single call. One call rather than four nodes for two reasons, and the second
+is the load-bearing one: every extra crossing re-marshals every point, and **the order is the
+part that is easy to get wrong**. Heal before anything that walks the tree; smooth before
+resampling, because the Gaussian's kernel is a distance and gives the same answer at any node
+density; strip internal membrane before anything that moves a vertex, because it is the only
+step that reads the original geometry.
+
+Resample and downsample are **one enum**, not two switches. That is a structural way of saying
+"mutually exclusive" — there is no state in which both ran, because there is one field holding
+one of three values.
+
+Three things about them are worth knowing before changing either:
+
+- **The item count never changes**, and both `skeletonsFromResult` and `meshesFromResult` refuse
+  a result where it did. A neuron that resampled to nothing stays in the collection as an empty
+  one, because `SkeletonsValue` promises one attribute row per item *in the same order* and a
+  set that came back one shorter puts every label after it on the wrong neuron — and draws.
+- **The two silent failures are re-indexing failures**, one per node, and neither raises.
+  `resample_skeleton` mints fresh node ids from `max + 1` and `downsample_skeleton` returns the
+  originals with gaps, so `skeletons.py`'s `_reindex` is what turns them back into row numbers —
+  parents that were not re-based still draw, as a neuron whose branches have been shuffled. On
+  the mesh side the equivalent is a face index that is no longer local to its own mesh, which
+  renders as a cloud of stray triangles between two neurons. The probes assert both.
+- **Distances are micrometres on the card and nanometres on the wire**, and the multiplication
+  happens in `cleanOps.ts` rather than in Python — the opposite split from NBLAST's, deliberately.
+  There the points are converted; here they are left exactly as they are and the *controls* are
+  scaled, so nothing round-trips through a second scale. `checkCleanUnits` refuses voxel
+  coordinates, but **only where a distance is actually in play**: keeping every Nth node counts
+  hops and means the same thing in either unit.
+
+**`detail` is dropped wherever the face count could have moved.** Not only because the triangle
+count would be stale — `detailNote` reads `decimated` as *"this source publishes one level of
+detail, so meshes were simplified on arrival to fit the triangle budget — raise Detail on the
+Meshes node"*, every clause of which is false about a mesh somebody decimated here on purpose.
+Two levels of detail in one collection is no level of detail; so is a level that has been
+overwritten. Same call `stackGeometry` makes.
+
+**Drop internal membrane is the one that changes a number rather than a picture.** A neuron mesh
+out of EM segmentation carries an enormous amount of surface folded *into* the cell rather than
+bounding it, so any area or volume taken from a raw one is wrong by a lot. It is also by a wide
+margin the expensive step — a ray cast per face per pass — and it requires **outward winding**,
+which nothing checks because there is nothing cheap to check it against: an inward-wound mesh
+comes back empty and an inconsistently wound one quietly loses healthy membrane. Coda's meshes
+arrive outward-wound from every source and `mirrorGeometry` reverses each triple straight back,
+so the node states the requirement rather than testing for it.
+
+### NBLAST Matches: the bridge between the two shapes
+
+`neuron.nblastMatches` takes a matrix and returns the long table every other node wants —
+`query`, `target`, `rank`, `score` — in three modes that are `top_matches`, `matches_above` and
+`count_matches`. It works on **any** `MatrixValue`, not only NBLAST's; the name is a compromise
+for the palette, and its `guide` says the general case out loud.
+
+**It does not have to cross the bridge, and that is stated on the node rather than hidden.** At
+Coda's matrix sizes a partial sort is microseconds of JavaScript, and fastcore's implementation
+exists for matrices tens of gigabytes wide. What it buys is *parity*: `percentage` is a band
+around each group's **own** best value rather than a quantile of the matrix, and `skip_self` is
+the **diagonal** rather than a comparison of names. Both are decisions somebody would otherwise
+re-make slightly differently, and a match table that disagrees with navis by a rule nobody wrote
+down is worse than one that is a few milliseconds slower. `probe-matches.mjs` is the only probe
+in the family that asserts *numbers*, against a brute-force count written from those definitions.
+
+Three smaller decisions:
+
+- **The value column is `score` whatever the matrix called its cells.** Naming it from
+  `valueLabel` was the first shape and breaks invariant 3 — the label is data, so `inferOutputs`
+  cannot know it, and a schema promising `score` where the run produced `nblastScore` breaks
+  every downstream picker the moment somebody presses Run. The exporter could not know it either.
+- **`query` / `target` rather than `queryId` / `targetId`.** A matrix has no attribute table; its
+  labels are strings, and might be cell types. `knnSchema` can type its id columns from the
+  source's own `neuronId` because it has two `SkeletonsValue`s to read; this has nothing.
+- **`n` is clamped, not raised on.** fastcore refuses `n` above the scanned axis, and the user
+  set "top 20" on a card that cannot see how wide the matrix is until it runs.
+
+### Three more probes
+
+`probe-skeletons.mjs`, `probe-meshes.mjs` and `probe-matches.mjs` (`pnpm probe:skeletons` etc.),
+plus a syNBLAST section in `probe-nblast.mjs`, all wired into `.github/workflows/pyodide.yml`
+behind the same `src/pyodide/**` path filter. Each runs the real `.py` against the real wheel
+through the same entry point the worker calls.
+
+They divide the work with the vitest files rather than duplicating them: the probe owns whether
+fastcore resampled correctly and whether the marshalling survived the trip, and the `.test.ts`
+owns whether the right buffers went over and the right neurons came back. Neither can do the
+other's job — vitest has no Pyodide, and a probe has no scheduler.

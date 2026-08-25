@@ -73,6 +73,19 @@ export function codaNeurons(ctx: EmitContext, frame: string): string {
 }
 
 /**
+ * The same pairing for a synapse frame: `coda_synapses` renames neuprint-python's `type`
+ * (which means pre or post) onto Coda's `polarity`.
+ *
+ * Its own function rather than an argument to `codaNeurons`, because the two are applied to
+ * one frame in turn and each is guarded on a different column — one helper taking a rename map
+ * would carry both guards and read as one rule where there are two.
+ */
+export function codaSynapses(ctx: EmitContext, frame: string): string {
+  ctx.helper('coda_synapses')
+  return `${frame} = coda_synapses(${frame})`
+}
+
+/**
  * Is the dataset on this port a CAVE datastack?
  *
  * Read off the resolved *type*, which carries the source id — the same thing the walk's backend

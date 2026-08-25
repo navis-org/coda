@@ -30,6 +30,14 @@ export type PyArg =
   | Float32Array
   | Float64Array
   | Int32Array
+  /*
+   * Triangle indices, and the one member of this union that is not a coordinate or a count.
+   * `MeshGeometry.indices` is a `Uint32Array` because a vertex index is unsigned and a
+   * hemibrain neuron at the finest level of detail has more of them than an int16 can name —
+   * and numpy's `uint32` is what every face argument in fastcore's mesh module asks for, so
+   * narrowing to int32 on the way over would buy a cast on both sides for nothing.
+   */
+  | Uint32Array
   | PyArg[]
   | { [key: string]: PyArg }
 
@@ -113,6 +121,25 @@ export function float64From(result: PyResult, key: string): Float64Array {
     throw new Error(
       `Python returned no flat float64 array called "${key}" ` +
         `(got ${Array.isArray(value) ? 'a nested Array — ravel it' : typeof value})`,
+    )
+  }
+  return value
+}
+
+/**
+ * Read a uint32 array a Python function promised.
+ *
+ * Triangle indices, and nothing else so far. The failure this names is the mirror image of
+ * `int32From`'s: numpy's default integer dtype is `int64`, so a face array that was built
+ * rather than cast — `np.vstack` of two `uint32` arrays keeps `uint32`, but `np.concatenate`
+ * with anything wider does not — arrives as a `BigInt64Array` and compares equal to nothing.
+ */
+export function uint32From(result: PyResult, key: string): Uint32Array {
+  const value = result[key]
+  if (!(value instanceof Uint32Array)) {
+    throw new Error(
+      `Python returned no flat uint32 array called "${key}" ` +
+        `(got ${value instanceof BigInt64Array ? 'int64 — cast it to uint32' : typeof value})`,
     )
   }
   return value

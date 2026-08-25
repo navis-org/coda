@@ -22,7 +22,7 @@ import type { EmitContext } from '../types'
 /** What "neuPrint" means unless a node says otherwise. */
 const DEFAULT_DEPLOYMENT = 'https://neuprint.janelia.org'
 import { neuprintProperty } from '../../../data/neuprint/schema'
-import { caveLabels, codaNeurons, isCaveDataset, neuronIds } from './common'
+import { caveLabels, codaNeurons, codaSynapses, isCaveDataset, neuronIds } from './common'
 
 // ---------------------------------------------------------------------------
 // Dataset
@@ -609,6 +609,15 @@ registerEmitter('neuron.synapses', (ctx) => {
     `    client=${c},`,
     `)`,
     codaNeurons(ctx, out),
+    // `coda_neurons` one column further on: neuprint-python's `type` means pre or post, and
+    // Coda calls that `polarity`. Left unrenamed, a syNBLAST or a Filter downstream addresses
+    // a column this frame does not have — or, worse, reads `type` and gets polarity.
+    codaSynapses(ctx, out),
+    ...ctx.note(
+      'neuprint-python calls the pre/post column "type"; Coda calls it "polarity" and keeps ' +
+        '"type" for the cell type, which this frame does not carry — join it from a neuron ' +
+        'table if you need it.',
+    ),
   ]
 })
 

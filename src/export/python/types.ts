@@ -53,6 +53,7 @@ export type PyModule =
   | 'seaserpent'
   | 'navis'
   | 'navisNeuprint'
+  | 'fastcore'
   | 'flybrains'
   | 'networkx'
   | 'matplotlib'
@@ -89,6 +90,23 @@ export const MODULES: Record<PyModule, ModuleSpec> = {
     statement: 'import navis.interfaces.neuprint as neu',
     pip: 'navis',
   },
+  /*
+   * The only module here that is not a *translation* of what Coda did — it is the thing Coda
+   * did. `navis-fastcore` is the wheel `src/pyodide/` loads, so a cell calling it runs the
+   * same Rust on the same arguments, and the four nodes that emit it (`Clean Skeletons`,
+   * `Clean Meshes`, `syNBLAST`, `NBLAST Matches`) are exact rather than approximate.
+   *
+   * navis is the more idiomatic route for some of them and is still preferred where it has a
+   * real equivalent — `nblast`, `resample_skeleton` — but it does not wrap `drop_internals`,
+   * the boundary-capping trio, `synblast`'s array form, or `top_matches`/`matches_above` at
+   * all, and its `smooth_skeleton` is a node-count window rather than the distance kernel
+   * Coda's card asks for. Emitting navis there would name a function whose argument means
+   * something else.
+   *
+   * `fastcore` rather than `fc` as the alias: this appears once or twice in a notebook, and
+   * two letters is a name a reader has to go and look up.
+   */
+  fastcore: { statement: 'import navis_fastcore as fastcore', pip: 'navis-fastcore' },
   /*
    * Imported for its **side effect**, which is why the statement is a bare import of a package
    * nothing then names. `import flybrains` registers every fly template and every transform

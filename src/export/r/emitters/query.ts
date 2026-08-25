@@ -466,7 +466,20 @@ registerEmitter('neuron.synapses', (ctx) => {
     neuronIds(neurons),
     ...(polarity ? [`prepost = ${rStr(polarity.toUpperCase())}`] : []),
   ]
+  /*
+   * **This frame is in neuprintr's vocabulary, not Coda's**, and unlike every other R cell here
+   * nothing normalises it: `neuprint_get_synapses` returns `bodyid` and `prepost` (0/1) where
+   * Coda's point cloud carries `neuronId` and `polarity` ("pre"/"post"). The Python side gained
+   * `coda_synapses` for exactly this; R has `coda_neurons` and the same seam, and the mapping
+   * would be a factor rather than a rename, so it is a TODO with the gap named rather than a
+   * silent inconsistency between the two exports of one graph.
+   */
   return [
+    ...ctx.note(
+      'neuprintr returns bodyid and prepost (0/1) where Coda carries neuronId and polarity ' +
+        '("pre"/"post"). Any cell below that names a synapse column will need one or the ' +
+        'other spelling — the notebook export normalises these, this one does not yet.',
+    ),
     `${ctx.output('points')} <- neuprint_get_synapses(${args.join(', ')}, conn = ${conn})`,
   ]
 })

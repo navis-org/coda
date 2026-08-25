@@ -206,6 +206,88 @@ export function everythingGraph(): CodaGraph {
      * branches are genuinely different calls (`cut_tree` against `fcluster`, `k =` against
      * `h =`), so one node would record only whichever happened to be the default.
      */
+    /*
+     * syNBLAST, off the synapse cloud. One node rather than two: its emitter branches on a
+     * wired Target the same way NBLAST's does, but that branch is three lines of the same
+     * closure — where NBLAST's is a different fastcore function — so the all-by-all is the
+     * one worth recording and the pair is not.
+     */
+    {
+      id: 'synblast',
+      type: 'neuron.synblast',
+      col: 3,
+      row: 8,
+      params: { symmetry: 'mean', polarityColumn: 'polarity', labelColumn: 'type' },
+    },
+
+    /*
+     * Both cleaning nodes, and two of the first because its emitter's `method` is a three-way
+     * branch that produces genuinely different fastcore calls — `resample_skeleton` returns
+     * six arrays and interpolates the radii, `downsample_skeleton` returns four and gathers
+     * them. One node would record whichever happened to be set. Same reasoning as the two
+     * NBLAST nodes and the two Cut nodes.
+     */
+    {
+      id: 'cleanskel',
+      type: 'neuron.cleanSkeletons',
+      col: 3,
+      row: 9,
+      params: { heal: true, healMaxDist: 10, smooth: 2, method: 'resample', spacing: 1 },
+    },
+    {
+      id: 'cleanskeldown',
+      type: 'neuron.cleanSkeletons',
+      col: 3,
+      row: 10,
+      params: { method: 'downsample', factor: 4 },
+    },
+    /*
+     * Every mesh step on at once. Unlike the skeleton pipeline these four are independent
+     * `if`s rather than a branch, so one node with all of them set reaches every line.
+     */
+    {
+      id: 'cleanmesh',
+      type: 'neuron.cleanMeshes',
+      col: 3,
+      row: 11,
+      params: {
+        dropInternals: true,
+        fillHoles: true,
+        ratio: 0.25,
+        smooth: 10,
+        method: 'taubin',
+        volumeCorrection: true,
+      },
+    },
+
+    /*
+     * All three match modes, because they are three different fastcore functions returning
+     * three different shapes — and the two cutoff spellings, because `percentage` is a band
+     * around each row's own best and `threshold` is one number, which is the pair most likely
+     * to be conflated by whoever edits this next.
+     */
+    {
+      id: 'matchtop',
+      type: 'neuron.nblastMatches',
+      col: 4,
+      row: 8,
+      params: { mode: 'top', n: 5, skipSelf: true, direction: 'higher' },
+    },
+    {
+      id: 'matchabove',
+      type: 'neuron.nblastMatches',
+      col: 4,
+      row: 9,
+      params: { mode: 'above', cutoff: 'percentage', percentage: 0.05, skipSelf: true },
+    },
+    {
+      id: 'matchcount',
+      type: 'neuron.nblastMatches',
+      col: 4,
+      row: 10,
+      params: { mode: 'count', cutoff: 'threshold', threshold: 0.4, skipSelf: false },
+    },
+
     { id: 'linkage', type: 'cluster.linkage', col: 4, row: 5, params: { method: 'average' } },
     { id: 'cut', type: 'cluster.cut', col: 5, row: 5, params: { mode: 'count', count: 4 } },
     {
@@ -697,6 +779,13 @@ export function everythingGraph(): CodaGraph {
     ['group', 'out', 'tableFilt', 'in'],
     ['group', 'out', 'net', 'edges'],
     ['net', 'network', 'netview', 'in'],
+    ['syn', 'points', 'synblast', 'query'],
+    ['skel', 'skeletons', 'cleanskel', 'in'],
+    ['skel', 'skeletons', 'cleanskeldown', 'in'],
+    ['mesh', 'meshes', 'cleanmesh', 'in'],
+    ['nblast', 'scores', 'matchtop', 'in'],
+    ['nblast', 'scores', 'matchabove', 'in'],
+    ['nblast', 'scores', 'matchcount', 'in'],
     ['skel', 'skeletons', 'nblastKnn', 'query'],
     ['skel', 'skeletons', 'nblast', 'query'],
     ['skel', 'skeletons', 'nblastPair', 'query'],

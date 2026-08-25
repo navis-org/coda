@@ -90,6 +90,10 @@ sentence whatever anybody set.
 | Where                          | Threshold                       | What it says                                                                                                                                                                      |
 | ------------------------------ | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `nblastOps.checkNblastSize`    | 250,000 pairs                   | The pair total and what it comes to in minutes, at a measured 15,000 pairs/second. Was a refusal.                                                                                 |
+| `synblastOps.checkSynblastSize` | 500,000 synapses (both sides)   | syNBLAST's cost is not NBLAST's: there is no tangent-vector fit, so the work scales with the *connector* count rather than the neuron count, and a hundred neurons is anywhere between two thousand and two hundred thousand synapses. Kept **beside** `checkNblastSize` rather than replacing it, because a user who wired in a whole dataset and one who wired in twelve enormous neurons need different sentences. |
+| `cleanOps.checkResampleSize`    | 5,000,000 nodes                 | Total cable over the spacing — the shape [gotchas.md](gotchas.md) records for an output sized by two independently-resolved things, since the spacing is on the card and the cable arrived from a fetch several nodes up. Names both node counts. Set inside the crash floor (25.6 M nodes) rather than at it, or the warning would only ever fire in the last fifth before a refusal. |
+| `cleanOps.checkDropInternalsSize` | 2e8 ray casts                 | Triangles × rays × passes. Stripping internal membrane fires a ray off every face and asks whether it escapes, so a set of forty full-resolution neurons is tens of millions of casts, single-threaded. Names Rays, Passes, *and* the Detail param upstream that moves it most. |
+| `matchOps.checkMatchSize`       | (no threshold — a clamp)        | Not a size warning at all: `n` above what the matrix can offer is cut down and said so, because fastcore raises there and the user set "top 20" on a card that cannot see how wide the matrix is until it runs. |
 | `linkageOps.checkLinkageInput` | 2,000 observations              | Linkage is single-threaded and quadratic, and a dendrogram of that many leaves has no labels. Points at Cut Tree, which hands the same clustering back as a table. Was a refusal. |
 | `tableOps.pivotTable`          | 2,000 columns / 2,000,000 cells | Which axis is the small one, and what the matrix weighs. Was two refusals.                                                                                                        |
 | `transformOps.checkWarpSize`   | 1e10 point-landmark products    | The wait, at a measured 8.9e8/second. Was a refusal.                                                                                                                              |
@@ -120,7 +124,7 @@ an empty card. The caption is the viewer's version of `ctx.warn`.
 | Network    | 20,000 nodes — `layout unsettled` | 100,000 nodes. `settleDuration` is a wall-clock budget on a worker, so a big graph gets a _less settled_ arrangement, not a frozen tab. |
 | Dendrogram | 3,000 leaves — `structure only`   | 20,000 leaves, which is 40,000 SVG paths.                                                                                               |
 
-### The seven refusals
+### The refusals
 
 Everything below is an allocation, sized against `CRASH_FLOOR_BYTES` (512 MB — roughly where a
 desktop tab starts failing allocations rather than swapping, with the inputs, the GPU upload and
@@ -139,6 +143,14 @@ the undo stack alongside it).
   graph and an SVG that cannot be built.
 - `MAX_UPLOAD_BYTES` (200 MB) — checked against `file.size` before a byte is read, because by
   the time a table exists the tab has already stalled.
+- `checkResampleSize`'s node budget — a resampled skeleton is 20 bytes a node (three float32
+  coordinates, a float32 radius, an int32 parent), so a metre of cable at a spacing somebody
+  typed in nanometres by mistake is gigabytes. The estimate is exact rather than a heuristic:
+  `resample_skeleton` divides each segment into `round(length / spacing)` parts.
+- `matchOps.MAX_MATCHES` — `matches_above` is the one mode whose output size nothing on the card
+  bounds; a threshold of zero on a similarity matrix returns every cell. fastcore takes
+  `max_matches` and raises rather than allocating, which is the right half of the answer; this is
+  the other half, `CRASH_FLOOR_CELLS / 4` because a match is four cells.
 
 ## Numbers that are not guard rails
 
@@ -160,7 +172,11 @@ Left alone deliberately, so a sweep like this one does not come back for them:
 - **`MAX_ROOTS_CHECKED` (250,000)** — a backstop on somebody else's service that already reports
   `checked` against `total`, so it is on the warn tier by construction.
 - **Correctness refusals.** Not limits at all, and they must never become warnings: mismatched
-  NBLAST units (`checkNblastUnits`), a non-square or cross-population matrix into clustering,
+  NBLAST units (`checkNblastUnits`), a distance control applied to voxel coordinates
+  (`cleanOps.checkCleanUnits` — and note it refuses *only* where a distance is actually in play,
+  since keeping every Nth node counts hops and means the same thing in either unit), a self-skip
+  asked of a rectangular matrix (`matchOps.checkSkipSelf` — fastcore's `skip_self` is the
+  diagonal, which a rectangle has none of), a non-square or cross-population matrix into clustering,
   wrong coordinate spaces, an id that would lose precision (invariant 8), and CAVE's neuron index
   refusing when a query comes back at exactly `CAVE_MAX_ROWS` — the server says it truncated in a
   `warning` header its CORS policy does not expose, so counting is the only tell a browser has,

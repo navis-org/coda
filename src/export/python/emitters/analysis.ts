@@ -9,6 +9,9 @@ import { clusterColor } from '../../../ui/encoding'
 import { pyList, pyStr } from '../py'
 import type { LANDMARK_SIDES } from '../../../nodes/transform/landmarkTransform'
 import { LANDMARK_AXES, landmarkParamId } from '../../../nodes/transform/landmarkTransform'
+import { matchParamsFrom } from '../../../nodes/lib/matchOps'
+import { meshCleanParamsFrom, skeletonCleanParamsFrom } from '../../../nodes/lib/cleanOps'
+import { NM_PER_UM } from '../../../nodes/lib/nblastOps'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
 import { pySelection, selectionIds } from './common'
@@ -814,5 +817,428 @@ registerEmitter('core.landmarkTransform', (ctx) => {
     `    ${scaled(from, ctx.params.sourceUnits)},`,
     `    ${scaled(to, ctx.params.targetUnits)},`,
     `)`,
+  ]
+})
+
+// ---------------------------------------------------------------------------
+// syNBLAST
+// ---------------------------------------------------------------------------
+
+/**
+ * The second node whose Python is the *same implementation* rather than a translation.
+ *
+ * `navis.synblast` exists and is deliberately not what this emits. navis's version takes
+ * neurons carrying a `connectors` table, and Coda's input is a bare point cloud — the frame
+ * `fetch_synapses` returned, several nodes upstream, possibly filtered since. Rebuilding
+ * `TreeNeuron`s from it in order to hand them to a wrapper around the very function below
+ * would be a longer cell doing the same arithmetic with one more thing to go wrong.
+ *
+ * fastcore takes `(N, 4)` arrays — `[x, y, z, type]` — which is what the frame already is.
+ */
+registerEmitter('neuron.synblast', (ctx) => {
+  const query = ctx.wired('query')
+  const target = ctx.input('target')
+  ctx.require('fastcore')
+  ctx.require('numpy')
+
+  const out = ctx.output('scores')
+  const polarity = ctx.column('polarityColumn')
+  const label = ctx.column('labelColumn')
+  const symmetry = String(ctx.params.symmetry ?? 'mean')
+  const groups = `${ctx.name}_groups`
+  const build = `${ctx.name}_connectors`
+  // Namespaced like every other name this file binds. Unprefixed, two syNBLAST nodes in one
+  // notebook would each define `VOXEL_UM` at top level and the second would silently overwrite
+  // whatever the reader had corrected in the first.
+  const voxelUm = `${ctx.name}_voxel_um`
+
+  const lines: string[] = [
+    ...ctx.note(
+      'syNBLAST is calibrated in micrometres like NBLAST, and neuprint-python returns synapse ' +
+        'locations in raw voxels — 8 nm on the hemibrain. Check this factor against your ' +
+        'dataset: nothing in the graph records it.',
+    ),
+    `${voxelUm} = 8 / 1000`,
+    ``,
+    /*
+     * A closure rather than two copies of the group-by, because the target side needs exactly
+     * the same treatment and the two coming apart is a matrix compared against itself in
+     * different units. Emitted as a `def` so the notebook reads as one idea.
+     */
+    `def ${build}(frame):`,
+    `    """One (N, 4) array of [x, y, z, type] per neuron, in first-appearance order."""`,
+    `    out, labels = [], []`,
+    `    for key, rows in frame.groupby('neuronId', sort=False):`,
+    `        block = np.empty((len(rows), 4))`,
+    `        block[:, :3] = rows[['x', 'y', 'z']].to_numpy() * ${voxelUm}`,
+    polarity
+      ? `        block[:, 3] = (rows[${pyStr(polarity)}] == 'post').astype(float)`
+      : `        block[:, 3] = 0.0`,
+    `        out.append(block)`,
+    /*
+     * Guarded rather than indexed, and this is the one line where the notebook cannot simply
+     * mirror the canvas. Coda's label picker offers every column of *its* synapse schema, and
+     * neuprint-python's frame carries fewer of them — `type` is the cell type in Coda and is
+     * not in this frame at all (see the Synapses cell). Falling back to the neuron id is what
+     * Coda itself does for an empty cell, so the shape of the answer is the same either way.
+     */
+    label
+      ? `        labels.append(` +
+        `str(rows[${pyStr(label)}].iloc[0]) if ${pyStr(label)} in rows.columns else str(key))`
+      : `        labels.append(str(key))`,
+    `    return out, labels`,
+    ``,
+    `${groups}, ${groups}_labels = ${build}(${query})`,
+  ]
+
+  if (target) lines.push(`${groups}_t, ${groups}_t_labels = ${build}(${target})`)
+
+  if (label) {
+    lines.push(
+      ...ctx.note(
+        `Coda labels the rows by "${label}". neuprint-python's synapse frame carries fewer ` +
+          `columns than Coda's does — notably not the cell type — so this falls back to the ` +
+          `neuron id where the column is absent. Join it on from a neuron table to match.`,
+      ),
+    )
+  }
+
+  if (!polarity) {
+    lines.push(
+      ...ctx.note(
+        'No polarity column is set on this node, so every connector is one pool and an input ' +
+          'is compared against an output. `by_type` is off to match.',
+      ),
+    )
+  }
+
+  lines.push(
+    `${out} = fastcore.synblast(`,
+    `    ${groups},`,
+    ...(target ? [`    ${groups}_t,`] : [`    None,`]),
+    `    by_type=${polarity ? 'True' : 'False'},`,
+    `    normalize=${ctx.params.normalize !== false ? 'True' : 'False'},`,
+    `    symmetry=${symmetry === 'none' ? 'None' : pyStr(symmetry)},`,
+    `)`,
+    // A bare ndarray out of fastcore; Coda's matrix carries its labels, and every viewer and
+    // clustering cell downstream indexes by them.
+    `${out} = pd.DataFrame(`,
+    `    ${out},`,
+    `    index=${groups}_labels,`,
+    `    columns=${target ? `${groups}_t_labels` : `${groups}_labels`},`,
+    `)`,
+  )
+  ctx.require('pandas')
+  return lines
+})
+
+// ---------------------------------------------------------------------------
+// NBLAST Matches
+// ---------------------------------------------------------------------------
+
+/**
+ * The third same-implementation cell, and the one where it matters most.
+ *
+ * A top-N per row is four lines of pandas and everybody writes them slightly differently. The
+ * two rules worth preserving exactly are fastcore's: `percentage` is a band around each
+ * group's **own** best value rather than a quantile of the matrix, and `skip_self` is the
+ * *diagonal* rather than a comparison of labels. A notebook that re-derived either would
+ * disagree with the canvas on precisely the rows a reader would go and check.
+ */
+registerEmitter('neuron.nblastMatches', (ctx) => {
+  const src = ctx.wired('in')
+  ctx.require('fastcore')
+  ctx.require('numpy')
+  ctx.require('pandas')
+
+  const out = ctx.output('matches')
+  /*
+   * Through the node's own decoder rather than transcribed. `decodeRenames` and
+   * `resolveFilters` set this precedent for the same reason: a param's *interpretation* — that
+   * `axis` is the string `'0'` but means the number 0, that `skipSelf` is `!== false` — lives
+   * in `nodes/lib` and the emitters import it, so a notebook cannot come to disagree with the
+   * canvas about what a control did.
+   */
+  const p = matchParamsFrom(ctx.params)
+  const { mode, axis, direction, skipSelf, cutoff } = p
+
+  const m = `${ctx.name}_m`
+  const groups = `${ctx.name}_groups`
+  const targets = `${ctx.name}_targets`
+
+  const lines: string[] = [
+    `${m} = np.ascontiguousarray(${src}, dtype=float)`,
+    // The labels of the scanned axis, and of the other one. Which is which is the whole of
+    // what `axis` controls, so both are bound rather than indexed inline.
+    axis === 0
+      ? `${groups} = list(getattr(${src}, 'index', range(${m}.shape[0])))`
+      : `${groups} = list(getattr(${src}, 'columns', range(${m}.shape[1])))`,
+    axis === 0
+      ? `${targets} = list(getattr(${src}, 'columns', range(${m}.shape[1])))`
+      : `${targets} = list(getattr(${src}, 'index', range(${m}.shape[0])))`,
+  ]
+
+  /*
+   * `distances` is Coda's "Best means", and `auto` reads `MatrixValue.measure` — which lives on
+   * the *value* and not on the type, so it is decided at run time and an emitter cannot see it.
+   * It is not guessable either: the same port carries an NBLAST similarity, a Pivot's counts
+   * and a normalised distance matrix. So `auto` emits the majority answer and says so, which
+   * is the convention every other unknowable here follows.
+   */
+  const distances = direction === 'lower'
+
+  const common = [
+    `    axis=${axis},`,
+    `    distances=${distances ? 'True' : 'False'},`,
+    `    skip_self=${skipSelf ? 'True' : 'False'},`,
+  ]
+  const cut =
+    cutoff === 'percentage'
+      ? `    percentage=${p.percentage},`
+      : `    threshold=${p.threshold},`
+
+  if (direction === 'auto') {
+    lines.push(
+      ...ctx.note(
+        'Best means is on "from the matrix", which Coda answers by reading what the matrix ' +
+          'says its cells are. A DataFrame has nowhere to carry that, so this assumes higher ' +
+          'is better. Set distances=True below if this is a distance matrix.',
+      ),
+    )
+  }
+
+  if (mode === 'count') {
+    lines.push(
+      `_counts = fastcore.count_matches(`,
+      `    ${m},`,
+      cut,
+      ...common,
+      `)`,
+      `${out} = pd.DataFrame({'query': ${groups}, 'matches': _counts})`,
+    )
+    return lines
+  }
+
+  if (mode === 'top') {
+    lines.push(
+      /*
+       * `n` is clamped here exactly as `clampN` clamps it on the canvas, and that is not
+       * belt-and-braces: fastcore *raises* when `n` exceeds the scanned axis, so a graph that
+       * Coda ran fine — clamped, with a warning — used to export a notebook that failed on a
+       * cell the reader did not write. The clamp needs the matrix's own width, which only the
+       * notebook has, so it is emitted rather than resolved.
+       */
+      `_n = min(${p.n}, ${m}.shape[${axis === 0 ? 1 : 0}]${skipSelf ? ' - 1' : ''})`,
+      `_idx, _values = fastcore.top_matches(`,
+      `    ${m},`,
+      `    n=_n,`,
+      ...common,
+      `)`,
+      // fastcore pads a short group with -1 / NaN to keep the two arrays rectangular. Kept out
+      // of the frame rather than carried into it, exactly as Coda drops it.
+      `_rows, _n = _idx.shape`,
+      `_group = np.repeat(np.arange(_rows), _n)`,
+      `_rank = np.tile(np.arange(1, _n + 1), _rows)`,
+      `_flat_idx, _flat_val = _idx.ravel(), _values.ravel()`,
+      `_keep = _flat_idx >= 0`,
+    )
+  } else {
+    lines.push(
+      `_offsets, _flat_idx, _flat_val = fastcore.matches_above(`,
+      `    ${m},`,
+      cut,
+      ...common,
+      `)`,
+      `_counts = np.diff(_offsets)`,
+      `_group = np.repeat(np.arange(len(_counts)), _counts)`,
+      `_rank = np.concatenate([np.arange(1, c + 1) for c in _counts]) if len(_flat_idx) else _flat_idx`,
+      `_keep = np.ones(len(_flat_idx), dtype=bool)`,
+    )
+  }
+
+  lines.push(
+    `${out} = pd.DataFrame({`,
+    `    'query': np.asarray(${groups}, dtype=object)[_group[_keep]],`,
+    `    'target': np.asarray(${targets}, dtype=object)[_flat_idx[_keep]],`,
+    `    'rank': _rank[_keep],`,
+    `    'score': _flat_val[_keep],`,
+    `})`,
+  )
+  return lines
+})
+
+// ---------------------------------------------------------------------------
+// Clean Skeletons / Clean Meshes
+// ---------------------------------------------------------------------------
+
+/**
+ * Both cleaning nodes emit **fastcore**, not navis, and that is a considered choice.
+ *
+ * navis wraps some of this and would read more idiomatically over a `NeuronList` — but only
+ * some. `navis.smooth_skeleton` is a moving average over a *node count* where Coda's control
+ * is a Gaussian whose kernel is a *distance*, so emitting it would name a function whose one
+ * argument means something else; and navis wraps neither `drop_internals` nor the
+ * boundary-capping trio at all. Half a pipeline in navis and half in fastcore is worse than
+ * either, and fastcore is what the canvas actually ran.
+ *
+ * The cost is that both cells loop over the neurons rather than mapping over a `NeuronList`,
+ * which is what a reader would have to write anyway to reach these functions.
+ */
+
+const CLEAN_UNITS_NOTE =
+  'Coda holds coordinates in nanometres and these controls are micrometres, so the distances ' +
+  'below are the card’s values times 1000. If your neurons are in other units — neuprintr and ' +
+  'raw neuprint-python both return voxels — scale them to match.'
+
+registerEmitter('neuron.cleanSkeletons', (ctx) => {
+  const src = ctx.wired('in')
+  ctx.require('fastcore')
+  ctx.require('numpy')
+  ctx.require('pandas')
+  ctx.require('navis')
+
+  const out = ctx.output('out')
+  // The node's own decoder and the node's own constant. `NM_PER_UM` is the one number
+  // `docs/python-pyodide.md` calls "the whole of the fix" for the nm/µm trap, and a literal
+  // 1000 here would be a second, unpinned spelling of it in the half of the codebase where a
+  // wrong scale produces a plausible neuron rather than an error.
+  const p = skeletonCleanParamsFrom(ctx.params)
+  const { heal, method } = p
+  const healMaxDist = p.healMaxDist * NM_PER_UM
+  const smooth = p.smooth * NM_PER_UM
+  const spacing = p.spacing * NM_PER_UM
+  const factor = p.factor
+
+  const body: string[] = [
+    `    nodes = _neuron.nodes.reset_index(drop=True)`,
+    // Row numbers as node ids, which is what Coda's `parents` array already is — and what
+    // makes every fastcore call below index straight back into `coords` and `radii`.
+    `    ids = np.arange(len(nodes))`,
+    `    lookup = pd.Series(ids, index=nodes['node_id'])`,
+    `    parents = np.where(`,
+    `        nodes['parent_id'] >= 0, lookup.reindex(nodes['parent_id']).to_numpy(), -1`,
+    `    ).astype(np.int64)`,
+    `    coords = nodes[['x', 'y', 'z']].to_numpy(dtype=float)`,
+    `    radii = nodes['radius'].to_numpy(dtype=float)`,
+  ]
+
+  if (heal) {
+    body.push(
+      `    parents = fastcore.heal_skeleton(`,
+      `        ids, parents, coords, method='ALL',`,
+      `        max_dist=${healMaxDist > 0 ? healMaxDist : 'None'},`,
+      `    )`,
+    )
+  }
+  if (smooth > 0) {
+    body.push(
+      `    coords = fastcore.smooth_skeleton_gaussian(ids, parents, coords, ${smooth})`,
+    )
+  }
+  if (method === 'resample' && spacing > 0) {
+    body.push(
+      `    ids, parents, coords, source, alpha, _ = fastcore.resample_skeleton(`,
+      `        ids, parents, coords, ${spacing}`,
+      `    )`,
+      // fastcore's own prescription for carrying a per-node column across a resample.
+      `    radii = radii[source[:, 0]] * (1 - alpha) + radii[source[:, 1]] * alpha`,
+    )
+  } else if (method === 'downsample' && factor > 1) {
+    body.push(
+      `    keep, parents, _, _ = fastcore.downsample_skeleton(ids, parents, ${factor})`,
+      `    coords, radii, ids = coords[keep], radii[keep], keep`,
+    )
+  }
+
+  return [
+    ...ctx.note(CLEAN_UNITS_NOTE),
+    // A loop rather than `NeuronList.apply`, because every call below takes bare arrays. The
+    // neuron *count* never changes, which is what keeps the list joinable to its metadata.
+    `_cleaned = []`,
+    `for _neuron in navis.NeuronList(${src}):`,
+    ...body,
+    /*
+     * `ids` and `parents` are already a matching pair of *node ids* at this point, whichever
+     * branch ran — resampling mints fresh ones and downsampling keeps a subset of the
+     * originals, and both return parents in the same numbering as the ids beside them. navis
+     * takes arbitrary node ids, so nothing is re-based here. Coda's own `parents` array holds
+     * row *positions* instead, which is why `skeletons.py` re-indexes and this does not.
+     */
+    `    _out = pd.DataFrame({`,
+    `        'node_id': ids,`,
+    `        'parent_id': parents,`,
+    `        'x': coords[:, 0], 'y': coords[:, 1], 'z': coords[:, 2],`,
+    `        'radius': radii,`,
+    `    })`,
+    `    _cleaned.append(navis.Skeleton(_out, id=_neuron.id, units=_neuron.units))`,
+    `${out} = navis.NeuronList(_cleaned)`,
+  ]
+})
+
+registerEmitter('neuron.cleanMeshes', (ctx) => {
+  const src = ctx.wired('in')
+  ctx.require('fastcore')
+  ctx.require('numpy')
+  ctx.require('navis')
+
+  const out = ctx.output('out')
+  const p = meshCleanParamsFrom(ctx.params)
+  const { dropInternals, fillHoles, ratio, smooth } = p
+
+  const body: string[] = [`    v, f = _neuron.vertices.astype(float), _neuron.faces.astype(np.uint32)`]
+
+  if (dropInternals) {
+    body.push(
+      `    v, f, _keep, _passes = fastcore.drop_internals(`,
+      `        v, f,`,
+      `        threshold=${p.openness},`,
+      `        n_rays=${p.rays},`,
+      `        iterations=${p.passes},`,
+      `    )`,
+    )
+  }
+  if (fillHoles) {
+    body.push(
+      `    _he = fastcore.boundary_halfedges(f)`,
+      `    if len(_he):`,
+      `        _rings, _offsets = fastcore.trace_loops(_he)`,
+      `        _caps = fastcore.triangulate_rings(_rings, _offsets, v)`,
+      // The caps re-use the boundary vertices and mint none, so this is a face append.
+      `        if len(_caps):`,
+      `            f = np.vstack([f, _caps]).astype(np.uint32)`,
+    )
+  }
+  if (ratio < 1) {
+    body.push(`    v, f, _vmap = fastcore.simplify_mesh(f, v, ratio=${ratio})`)
+  }
+  if (smooth > 0) {
+    body.push(
+      `    v = fastcore.smooth_mesh(`,
+      `        f, v,`,
+      `        method=${pyStr(p.method)},`,
+      `        iterations=${smooth},`,
+      `        weights='cotangent',`,
+      // Without this an open mesh's rim rolls inwards under any of these filters, and a neuron
+      // cut off at the edge of a dataset is open by construction.
+      `        preserve_border=True,`,
+      `        volume_correction=${p.volumeCorrection ? 'True' : 'False'},`,
+      `    )`,
+    )
+  }
+
+  return [
+    ...(dropInternals
+      ? ctx.note(
+          'Faces must be wound outward for Drop internal membrane: rays are fired into the ' +
+            'hemisphere each normal points into, so an inward-wound mesh reads as entirely ' +
+            'buried and comes back empty, and an inconsistently wound one loses healthy ' +
+            'membrane without saying so.',
+        )
+      : []),
+    `_cleaned = []`,
+    `for _neuron in navis.NeuronList(${src}):`,
+    ...body,
+    `    _cleaned.append(navis.Mesh((v, f), id=_neuron.id, units=_neuron.units))`,
+    `${out} = navis.NeuronList(_cleaned)`,
   ]
 })

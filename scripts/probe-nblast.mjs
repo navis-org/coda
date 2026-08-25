@@ -18,7 +18,7 @@
  * `lib/pyodideProbe.mjs`; what stays here is the request shapes and the assertions.
  */
 
-import { bootPyodide, probeReport, readRepoFile, sources } from './lib/pyodideProbe.mjs'
+import { bootPyodide, lcg, probeReport, readRepoFile, sources } from './lib/pyodideProbe.mjs'
 
 const py = await bootPyodide()
 
@@ -40,8 +40,8 @@ function neurons(count, points) {
   const xyz = new Float32Array(count * points * 3)
   const parents = new Int32Array(count * points)
   const offsets = new Int32Array(count + 1)
-  let seed = 7
-  const rand = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff - 0.5)
+  const next = lcg(7)
+  const rand = () => next() - 0.5
   for (let n = 0; n < count; n++) {
     const base = n * points
     offsets[n + 1] = base + points
@@ -144,6 +144,111 @@ const knn = py.globals.get('coda_nblast_knn_run')
   }
 }
 knn.destroy()
+
+/*
+ * syNBLAST, which shares this file because it shares the module — and which is a different
+ * shape of input rather than a variant of the same one. Where `coda_dotprops` takes a tree,
+ * this takes clouds of connectors with a type per point, and the two things worth asserting
+ * are the two a wrong answer would still satisfy on its own: a self-match of exactly 1, and a
+ * pair of overlapping clouds outscoring a pair that are sixty micrometres apart. Either alone
+ * passes on a matrix that is entirely constant.
+ */
+const synblast = py.globals.get('coda_synblast_run')
+{
+  // Three clouds: two on top of each other, one far away. Micrometres, as the bridge takes
+  // them — the same conversion `synapseSetFrom` applies on the way in.
+  const per = 40
+  const centres = [
+    [0, 0, 0],
+    [0.2, 0, 0],
+    [60, 60, 60],
+  ]
+  const points = new Float32Array(centres.length * per * 3)
+  const types = new Int32Array(centres.length * per)
+  const offsets = new Int32Array(centres.length + 1)
+  const next = lcg(13)
+  const rand = () => (next() - 0.5) * 4
+
+  centres.forEach((centre, n) => {
+    offsets[n + 1] = (n + 1) * per
+    for (let i = 0; i < per; i++) {
+      const at = (n * per + i) * 3
+      points[at] = centre[0] + rand()
+      points[at + 1] = centre[1] + rand()
+      points[at + 2] = centre[2] + rand()
+      // Alternating pre and post, so `by_type` has two groups to keep apart rather than one.
+      types[n * per + i] = i % 2
+    }
+  })
+
+  t = performance.now()
+  const proxy = attempt('synblast: the call itself', () =>
+    synblast({
+      query: { points, types, offsets },
+      byType: true,
+      normalize: true,
+      symmetry: 'mean',
+    }),
+  )
+  if (proxy) {
+    const out = proxy.toJs({ dict_converter: Object.fromEntries })
+    proxy.destroy()
+    const ms = performance.now() - t
+    const at = (r, c) => out.scores[r * out.cols + c]
+    console.log(
+      `synblast 3 x ${per} pts    ${ms.toFixed(0)} ms   ${out.rows}x${out.cols}   ` +
+        `near=${at(0, 1).toFixed(3)} far=${at(0, 2).toFixed(3)}`,
+    )
+    check('synblast: square over one set', out.rows === 3 && out.cols === 3)
+    check('synblast: scores are flat float64', out.scores instanceof Float64Array)
+    check('synblast: one score per pair', out.scores.length === out.rows * out.cols)
+    check('synblast: every score is finite', out.scores.every(Number.isFinite))
+    // Normalised, so a neuron against itself is exactly 1. The check that catches a matrix
+    // handed over unnormalised, or transposed onto the wrong diagonal.
+    check(
+      'synblast: a neuron matches itself at 1',
+      [0, 1, 2].every((i) => Math.abs(at(i, i) - 1) < 1e-6),
+    )
+    // The one that catches a scoring matrix fed the wrong units: at 60 um every pair is out
+    // past the last distance bin and scores the same, so this comparison collapses.
+    check('synblast: the overlapping pair beats the distant one', at(0, 1) > at(0, 2))
+    check(
+      'synblast: symmetry=mean is symmetric',
+      [0, 1, 2].every((r) => [0, 1, 2].every((c) => Math.abs(at(r, c) - at(c, r)) < 1e-6)),
+    )
+  }
+}
+{
+  // With a Target wired, which is a different fastcore call and a rectangular result.
+  const per = 30
+  const query = {
+    points: new Float32Array(2 * per * 3),
+    types: new Int32Array(2 * per),
+    offsets: Int32Array.from([0, per, 2 * per]),
+  }
+  const next = lcg(5)
+  const rand = () => (next() - 0.5) * 4
+  for (let i = 0; i < 2 * per; i++) {
+    query.points[i * 3] = rand() + (i < per ? 0 : 30)
+    query.points[i * 3 + 1] = rand()
+    query.points[i * 3 + 2] = rand()
+  }
+  const target = {
+    points: query.points.slice(0, per * 3),
+    types: query.types.slice(0, per),
+    offsets: Int32Array.from([0, per]),
+  }
+  const proxy = attempt('synblast target: the call itself', () =>
+    synblast({ query, target, byType: false, normalize: true, symmetry: 'none' }),
+  )
+  if (proxy) {
+    const out = proxy.toJs({ dict_converter: Object.fromEntries })
+    proxy.destroy()
+    check('synblast target: the result is 2 x 1', out.rows === 2 && out.cols === 1)
+    check('synblast target: the identical neuron scores best', out.scores[0] > out.scores[1])
+  }
+}
+synblast.destroy()
 
 run.destroy()
 finish(py)

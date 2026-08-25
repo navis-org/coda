@@ -20,6 +20,9 @@ on:
       - 'scripts/probe-nblast.mjs'
       - 'scripts/probe-linkage.mjs'
       - 'scripts/probe-transform.mjs'
+      - 'scripts/probe-skeletons.mjs'
+      - 'scripts/probe-meshes.mjs'
+      - 'scripts/probe-matches.mjs'
       # The landmark files and their manifest: the transform probe reads the real ones, so a
       # regenerated set is a change to what this job checks even when no Python moved.
       - 'public/transforms/**'
@@ -31,6 +34,9 @@ on:
       - 'scripts/probe-nblast.mjs'
       - 'scripts/probe-linkage.mjs'
       - 'scripts/probe-transform.mjs'
+      - 'scripts/probe-skeletons.mjs'
+      - 'scripts/probe-meshes.mjs'
+      - 'scripts/probe-matches.mjs'
       - 'public/transforms/**'
       - 'src/data/transforms/manifest.json'
   workflow_dispatch:
@@ -74,5 +80,30 @@ jobs:
       # conversion applied twice lands kilometres out rather than fractions of a nanometre.
       # It also exercises `from_coefs`, which is the path every session after the first takes.
       - run: node scripts/probe-transform.mjs
+        env:
+          PYODIDE_PATH: node_modules/pyodide
+
+      # The skeleton pipeline. What it checks above everything else is `_reindex`: parent ids
+      # that were not re-based onto row numbers still *draw*, as a neuron whose branches have
+      # been shuffled, so every case asserts that every parent is -1 or an index into its own
+      # neuron. The empty neuron in its fixture is there because the item count is an
+      # invariant — the attribute table is index-aligned with it.
+      - run: node scripts/probe-skeletons.mjs
+        env:
+          PYODIDE_PATH: node_modules/pyodide
+
+      # The mesh pipeline, whose equivalent silent failure is a face index that is no longer
+      # local to its own mesh — a cloud of stray triangles between two neurons rather than an
+      # error. Its fixture is one closed icosphere and one with a face cut out, which is the
+      # pair that tells "fill holes did something" from "fill holes capped a closed mesh".
+      - run: node scripts/probe-meshes.mjs
+        env:
+          PYODIDE_PATH: node_modules/pyodide
+
+      # Match extraction, and the one probe that checks *numbers* rather than marshalling —
+      # because parity is the entire reason that node crosses the bridge. `percentage` is a
+      # band around each group's own best, `skip_self` is the diagonal, and both are asserted
+      # against a brute-force count written from the definition.
+      - run: node scripts/probe-matches.mjs
         env:
           PYODIDE_PATH: node_modules/pyodide

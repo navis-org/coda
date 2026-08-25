@@ -160,8 +160,10 @@ file, pulling all 620 kB back into every session and undoing the split.
   connectome: the Annotations socket, SeaTable, Google Sheets, root-id drift.
 - [docs/export.md](docs/export.md) — the notebook and R Markdown exporters, the refusal
   policy, the emitter registry, the goldens.
-- [docs/python-pyodide.md](docs/python-pyodide.md) — the Pyodide bridge, NBLAST and
-  clustering. Read before adding a Python-backed capability.
+- [docs/python-pyodide.md](docs/python-pyodide.md) — the Pyodide bridge and everything on it:
+  NBLAST, syNBLAST, clustering, landmark warps, Clean Skeletons, Clean Meshes, NBLAST Matches.
+  Read before adding a Python-backed capability — the six existing ones all declare the same two
+  packages, which is the finding rather than a coincidence.
 - [docs/persistence.md](docs/persistence.md) — share links, the autosave across tabs, the
   browser shelf.
 - [docs/ui-shell.md](docs/ui-shell.md) — panels, fullscreen and the manifest, the run

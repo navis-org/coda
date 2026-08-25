@@ -20,17 +20,11 @@
  * distances were meant — none of which fails, and all of which produce a tree.
  */
 
-import { bootPyodide, probeReport, readRepoFile, sources } from './lib/pyodideProbe.mjs'
+import { bootPyodide, lcg, loadModule, probeReport } from './lib/pyodideProbe.mjs'
 
 const py = await bootPyodide()
 
-let t = performance.now()
-await py.loadPackage(['numpy', sources.fastcoreWheel], { messageCallback: () => {} })
-console.log(`numpy + fastcore     ${(performance.now() - t).toFixed(0)} ms`)
-
-t = performance.now()
-py.runPython(readRepoFile('src/pyodide/linkage.py'))
-console.log(`linkage.py           ${(performance.now() - t).toFixed(0)} ms`)
+await loadModule(py, 'src/pyodide/linkage.py')
 
 const { check, attempt, finish } = probeReport()
 
@@ -41,8 +35,7 @@ const { check, attempt, finish } = probeReport()
  */
 function blocked(n, groups) {
   const scores = new Float64Array(n * n)
-  let seed = 11
-  const rand = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff)
+  const rand = lcg(11)
   for (let r = 0; r < n; r++) {
     for (let c = 0; c < n; c++) {
       const same = r % groups === c % groups
@@ -61,7 +54,7 @@ for (const [n, method] of [
   [400, 'single'],
 ]) {
   const notes = []
-  t = performance.now()
+  const t = performance.now()
   const proxy = attempt(`${method} n=${n}: the call itself`, () =>
     run(
       {

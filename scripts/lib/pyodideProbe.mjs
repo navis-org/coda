@@ -1,10 +1,10 @@
 /**
  * The half of a Pyodide probe that is not about the capability being probed.
  *
- * `probe-nblast.mjs` and `probe-linkage.mjs` each run one `src/pyodide/*.py` against the real
- * navis-fastcore wheel, and each needs the same four things before it can: find Pyodide, boot
- * it, count failures, and exit on the tally. Only the request shapes and the assertions differ,
- * and those stay in the scripts.
+ * Each `probe-*.mjs` runs one `src/pyodide/*.py` against the real navis-fastcore wheel, and
+ * each needs the same handful of things before it can: find Pyodide, boot it, load the module,
+ * seed a reproducible fixture, count failures, and exit on the tally. Only the request shapes
+ * and the assertions differ, and those stay in the scripts.
  *
  * It exists because the second probe was written by copying the first, which is how the
  * `PYODIDE_PATH` note below — earned once — came to be missing from one of them.
@@ -62,6 +62,39 @@ export async function bootPyodide() {
 /** Read a file under the repo root — the `.py` a probe is about to run, in practice. */
 export function readRepoFile(relative) {
   return readFileSync(join(root, relative), 'utf8')
+}
+
+/**
+ * Install a capability's packages and run its `.py`, with both timings.
+ *
+ * The fifth thing every probe needs, and it arrived the way the header describes the other
+ * four arriving: five scripts had these seven lines, written by copying whichever one was
+ * nearest. `probe-nblast.mjs` deliberately keeps its own two `loadPackage` calls, because
+ * timing numpy and the wheel apart is one of the things it reports.
+ *
+ * `messageCallback` is silenced rather than left to Pyodide's default, which prints a line per
+ * wheel and buries the probe's own output in CI.
+ */
+export async function loadModule(py, relative, packages = ['numpy', sources.fastcoreWheel]) {
+  let t = performance.now()
+  await py.loadPackage(packages, { messageCallback: () => {} })
+  console.log(`packages             ${(performance.now() - t).toFixed(0)} ms`)
+
+  t = performance.now()
+  py.runPython(readRepoFile(relative))
+  console.log(`${relative.split('/').pop().padEnd(20)} ${(performance.now() - t).toFixed(0)} ms`)
+}
+
+/**
+ * A reproducible stream of numbers in `[0, 1)`, seeded.
+ *
+ * Six copies of this LCG had accumulated across the probes, each with its own `- 0.5` or `* 4`
+ * inlined. The scaling stays at the call site — that part genuinely differs — and what is
+ * shared is the one thing that must not: these probes pin assertions to specific fixtures, so
+ * "reproducible" has to mean the same thing in all of them.
+ */
+export function lcg(seed) {
+  return () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff)
 }
 
 /**

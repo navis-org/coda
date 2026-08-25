@@ -6,6 +6,7 @@ import { clusterColor } from '../../../ui/encoding'
 import { rCol as col, rStr, rVector } from '../r'
 import type { LANDMARK_SIDES } from '../../../nodes/transform/landmarkTransform'
 import { LANDMARK_AXES, landmarkParamId } from '../../../nodes/transform/landmarkTransform'
+import { matchParamsFrom } from '../../../nodes/lib/matchOps'
 import { registerEmitter, registerHelper } from '../registry'
 import type { EmitContext } from '../types'
 import { neuronIds, selectionIds } from './common'
@@ -815,4 +816,179 @@ registerEmitter('neuron.xform', (ctx) => {
   }
   ctx.library('nat')
   return [`${ctx.output('out')} <- xform(${ctx.wired('in')}, reg = ${supplied})`]
+})
+
+// ---------------------------------------------------------------------------
+// syNBLAST, and the two cleaning nodes
+// ---------------------------------------------------------------------------
+
+/**
+ * Three TODOs, and the reasons are three different shapes of gap.
+ *
+ * The natverse is a *port target* rather than a translation for these. `nat.nblast` scores
+ * dotprops and has no synapse-based variant at all; `nat` has resampling and stitching but its
+ * smoothing kernel is not the one Coda's card describes; and the mesh half — quadric
+ * decimation, ray-cast openness, boundary capping — lives across `Rvcg` and `Morpho` in
+ * functions whose arguments do not line up with fastcore's.
+ *
+ * Each of these could be emitted as *something*. What stops it is `docs/export.md`'s rule that
+ * a cell must be what the canvas did: a smoothing call whose one argument means a node count
+ * where Coda's meant a distance is a cell that runs, produces plausible neurons, and is not
+ * the result on screen. A TODO naming the gap is the honest degradation, and it is what
+ * `neuron.nblastKnn` already does one function above.
+ *
+ * All three point at the notebook, which *is* exact — `navis-fastcore` is a Python package and
+ * the Python exporter calls the same wheel Coda runs.
+ */
+
+registerEmitter('neuron.synblast', (ctx) =>
+  ctx.todo(
+    'The natverse has no synapse-based NBLAST. nat.nblast scores dotprops — tangent vectors ' +
+      'fitted to skeleton points — and syNBLAST compares connector positions with the dot ' +
+      'product fixed at 1, which is a different score out of the same lookup matrix. Export ' +
+      'this graph as a notebook instead: navis-fastcore is a Python package, so that cell ' +
+      'calls the same implementation Coda ran.',
+  ),
+)
+
+registerEmitter('neuron.cleanSkeletons', (ctx) =>
+  ctx.todo(
+    'nat has resample() and stitch_neurons(), which are close to two of the four steps here, ' +
+      'but its smoothing takes a window in nodes where this node takes a Gaussian width in ' +
+      'micrometres along the neurite — a cell that ran would produce plausible neurons that ' +
+      'are not the ones on screen. Export as a notebook for the exact pipeline; it calls ' +
+      'navis-fastcore, which is what Coda ran.',
+  ),
+)
+
+registerEmitter('neuron.cleanMeshes', (ctx) =>
+  ctx.todo(
+    'Mesh decimation and smoothing exist in Rvcg (vcgQEdecim, vcgSmooth) but stripping ' +
+      'invaginated internal membrane has no equivalent anywhere in R, and it is the step that ' +
+      'changes what a surface area or a volume means. Export as a notebook, which calls the ' +
+      'same navis-fastcore functions Coda ran.',
+  ),
+)
+
+// ---------------------------------------------------------------------------
+// NBLAST Matches
+// ---------------------------------------------------------------------------
+
+/**
+ * The one of the four that translates cleanly, because it is arithmetic on a matrix rather
+ * than a call into somebody's neuron library.
+ *
+ * Two of fastcore's rules have to survive the translation and both are easy to lose:
+ * `percentage` is a band around **each row's own** best value rather than a quantile of the
+ * matrix, and `skip_self` is the *diagonal* rather than a comparison of names. Written out
+ * here in base R so both are visible rather than buried in a helper.
+ */
+registerEmitter('neuron.nblastMatches', (ctx) => {
+  const src = ctx.wired('in')
+  const out = ctx.output('matches')
+  // The node's own decoder, for the reason the Python emitter uses it: three transcriptions of
+  // "the card stores `axis` as text and means an axis number" is three places to get it wrong,
+  // and only one of them has a test.
+  const p = matchParamsFrom(ctx.params)
+  const { mode, axis, direction, skipSelf, cutoff } = p
+  const lower = direction === 'lower'
+
+  const lines: string[] = [
+    `m_ <- as.matrix(${src})`,
+    // `axis = 1` is the transpose and nothing else, which is what keeps the rest of this cell
+    // written once. fastcore strides the buffer instead; the answer is the same.
+    ...(axis === 1 ? [`m_ <- t(m_)`] : []),
+  ]
+
+  if (skipSelf) {
+    lines.push(
+      // The diagonal, exactly as fastcore means it — not a match on names.
+      `diag(m_) <- ${lower ? 'Inf' : '-Inf'}`,
+    )
+  }
+  if (lower) {
+    lines.push(
+      ...ctx.note('This is a distance matrix, so the sign is flipped and lower scores rank first.'),
+      `m_ <- -m_`,
+    )
+  }
+
+  if (direction === 'auto') {
+    lines.push(
+      ...ctx.note(
+        'Best means is on "from the matrix", which Coda answers by reading what the matrix ' +
+          'says its cells are. A plain matrix has nowhere to carry that, so this assumes ' +
+          'higher is better.',
+      ),
+    )
+  }
+
+  const scoreBack = lower ? '-' : ''
+
+  if (mode === 'top') {
+    lines.push(
+      `n_ <- min(${p.n}, ncol(m_)${skipSelf ? ' - 1' : ''})`,
+      `${out} <- do.call(rbind, lapply(seq_len(nrow(m_)), function(i) {`,
+      `  ord <- order(m_[i, ], decreasing = TRUE)[seq_len(n_)]`,
+      // A row that ran out of finite cells — everything masked, or NA in the matrix — yields
+      // fewer rows rather than rows naming a match that is not there. fastcore pads with -1
+      // and Coda drops the padding; this is the same outcome by not creating it.
+      `  ord <- ord[is.finite(m_[i, ord])]`,
+      `  if (!length(ord)) return(NULL)`,
+      `  data.frame(`,
+      `    query = rownames(m_)[i],`,
+      `    target = colnames(m_)[ord],`,
+      `    rank = seq_along(ord),`,
+      `    score = ${scoreBack}m_[i, ord],`,
+      `    stringsAsFactors = FALSE`,
+      `  )`,
+      `}))`,
+    )
+    return lines
+  }
+
+  // The cutoff, per row, as a vector — which is what makes the percentage band a band around
+  // each row's own best rather than around the matrix's.
+  lines.push(
+    cutoff === 'percentage'
+      ? `cut_ <- apply(m_, 1, function(r) max(r[is.finite(r)], -Inf)) * (1 - ${p.percentage})`
+      : `cut_ <- rep(${lower ? -p.threshold : p.threshold}, nrow(m_))`,
+  )
+
+  if (cutoff === 'percentage') {
+    lines.push(
+      ...ctx.note(
+        'The band is around each row’s own best score, not the matrix’s — 0.05 keeps ' +
+          'everything within 5% of that neuron’s top match. Note this multiplies, so it ' +
+          'behaves as intended only for positive scores, which normalised NBLAST gives.',
+      ),
+    )
+  }
+
+  if (mode === 'count') {
+    lines.push(
+      `${out} <- data.frame(`,
+      `  query = rownames(m_),`,
+      `  matches = vapply(seq_len(nrow(m_)), function(i) sum(m_[i, ] >= cut_[i], na.rm = TRUE), integer(1)),`,
+      `  stringsAsFactors = FALSE`,
+      `)`,
+    )
+    return lines
+  }
+
+  lines.push(
+    `${out} <- do.call(rbind, lapply(seq_len(nrow(m_)), function(i) {`,
+    `  hit <- which(is.finite(m_[i, ]) & m_[i, ] >= cut_[i])`,
+    `  if (!length(hit)) return(NULL)`,
+    `  hit <- hit[order(m_[i, hit], decreasing = TRUE)]`,
+    `  data.frame(`,
+    `    query = rownames(m_)[i],`,
+    `    target = colnames(m_)[hit],`,
+    `    rank = seq_along(hit),`,
+    `    score = ${scoreBack}m_[i, hit],`,
+    `    stringsAsFactors = FALSE`,
+    `  )`,
+    `}))`,
+  )
+  return lines
 })

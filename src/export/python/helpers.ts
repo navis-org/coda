@@ -91,6 +91,33 @@ registerHelper({
 })
 
 /**
+ * `coda_neurons` one column further on, for a synapse frame.
+ *
+ * The same job — neuprint-python's vocabulary into Coda's — and it sits beside it rather than
+ * inline at the call site because of the collision. neuprint-python calls the pre/post column
+ * **`type`**; Coda calls it `polarity` and keeps `type` for the neuron's **cell type**, which
+ * `NeuPrintSource` fetches alongside in the same Cypher. So a bare
+ * `rename(columns={'type': 'polarity'})` on a frame that somehow carries both would produce
+ * two columns named `polarity`, and every column param downstream would address whichever
+ * pandas handed back. Guarded and idempotent, exactly as `coda_neurons` is, for exactly that
+ * reason.
+ *
+ * Coda's `type` is genuinely **absent** from this frame rather than misnamed — the library
+ * never fetches it — and no rename can conjure it. That is a gap the emitters state in a note
+ * rather than something a helper can close.
+ */
+registerHelper({
+  name: 'coda_synapses',
+  source: [
+    'def coda_synapses(df):',
+    '    """neuprint-python synapse columns as Coda names them: `type` is the polarity."""',
+    "    if df is None or 'type' not in df.columns or 'polarity' in df.columns:",
+    '        return df',
+    "    return df.rename(columns={'type': 'polarity'})",
+  ],
+})
+
+/**
  * Coda's Combine Columns node, both halves.
  *
  * `df[columns].bfill(axis=1).iloc[:, 0]` is the obvious pandas spelling and is a *different

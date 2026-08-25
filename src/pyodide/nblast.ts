@@ -142,3 +142,63 @@ export async function runNblastKnn(
   }
   return { idx, scores, rows, k }
 }
+
+/**
+ * One neuron set's synapses, flattened.
+ *
+ * `PointSet`'s sibling and deliberately not the same type: a dotprop set carries a tree, and
+ * a synapse set carries a connector type instead. Neither field means anything to the other
+ * call, and one type with both halves optional is how two callers come to disagree about
+ * which of them is required.
+ *
+ * **Points are micrometres**, converted on the way in for the reason `PointSet` records.
+ */
+export type SynapseSet = {
+  /** xyz interleaved, one neuron after the last. */
+  points: Float32Array
+  /**
+   * A small integer per point — Coda maps `polarity` onto 0 for pre and 1 for post.
+   *
+   * Read only when `byType` is set. Where the point cloud carries no polarity column at all
+   * every point is 0, which makes `byType` a comparison every synapse passes; the node turns
+   * the control off rather than leaving it on and meaningless.
+   */
+  types: Int32Array
+  /** Where each neuron starts, counted in points. Length is `count + 1`. */
+  offsets: Int32Array
+}
+
+export type SynblastRequest = {
+  query: SynapseSet
+  /** Absent means an all-by-all, which is fastcore's own `target=None`. */
+  target?: SynapseSet
+  /** Compare a presynapse only against presynapses, and a postsynapse only against those. */
+  byType: boolean
+  normalize: boolean
+  symmetry: NblastSymmetry
+}
+
+/**
+ * Score two neuron sets by where their synapses are rather than by their shape.
+ *
+ * The result is a `NblastResult` and not a type of its own, because it is the same thing: a
+ * row-major score matrix on the same scale, out of the same FCWB lookup table. What differs
+ * is the question, and that belongs on the node rather than in the shape of the answer.
+ */
+export async function runSynblast(
+  request: SynblastRequest,
+  options: CallOptions = {},
+): Promise<NblastResult> {
+  const result = await callPython(
+    { module: 'nblast', fn: 'coda_synblast_run', args: [request] },
+    options,
+  )
+
+  const rows = numberFrom(result, 'rows')
+  const cols = numberFrom(result, 'cols')
+  const scores = float64From(result, 'scores')
+  if (scores.length !== rows * cols) {
+    throw new Error(`syNBLAST returned ${scores.length} scores for a ${rows} x ${cols} comparison`)
+  }
+  return { scores, rows, cols }
+}

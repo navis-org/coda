@@ -169,19 +169,19 @@ describe('nblastOps — the flattening', () => {
 
   it('refuses coordinates that are not nanometres, naming the side', () => {
     const voxels: SkeletonsValue = { ...skeletonsFixture(), units: 'voxels' }
-    expect(() => checkNblastUnits('Query', voxels)).toThrow(/Query skeletons are in voxels/)
+    expect(() => checkNblastUnits('Query', voxels, 'skeletons', 'Skeletons')).toThrow(/Query skeletons are in voxels/)
     // The message has to point at where the fact is visible, since nothing about the scores
     // would have shown it.
-    expect(() => checkNblastUnits('Query', voxels)).toThrow(/Skeletons node's footer/)
+    expect(() => checkNblastUnits('Query', voxels, 'skeletons', 'Skeletons')).toThrow(/Skeletons node's footer/)
   })
 
   it('lets nanometres and unknown through, which are not the same thing', () => {
     // Unknown is what a value built before units existed says, and no source produces it
     // today. Refusing on it would refuse on a fact nobody stated.
     expect(() =>
-      checkNblastUnits('Query', { ...skeletonsFixture(), units: 'nm' }),
+      checkNblastUnits('Query', { ...skeletonsFixture(), units: 'nm' }, 'skeletons', 'Skeletons'),
     ).not.toThrow()
-    expect(() => checkNblastUnits('Query', skeletonsFixture())).not.toThrow()
+    expect(() => checkNblastUnits('Query', skeletonsFixture(), 'skeletons', 'Skeletons')).not.toThrow()
   })
 
   it('says what an oversized comparison will cost, naming both sides, and scores it anyway', () => {
@@ -297,7 +297,7 @@ describe('neuron.nblast — running', () => {
     const fetched = scheduler.output('skel', 'skeletons')
     if (!isSkeletonsValue(fetched)) throw new Error('expected skeletons')
     expect(fetched.units).toBe('nm')
-    expect(() => checkNblastUnits('Query', { ...fetched, units: 'voxels' })).toThrow(
+    expect(() => checkNblastUnits('Query', { ...fetched, units: 'voxels' }, 'skeletons', 'Skeletons')).toThrow(
       /wrong scale/,
     )
   })

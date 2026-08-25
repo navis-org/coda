@@ -702,6 +702,10 @@ skeletons <- neuprint_read_neurons(head(find_neurons$neuronId, 20), conn = hemib
 
 ```{r synapses}
 # ── Synapses ──
+# NOTE: neuprintr returns bodyid and prepost (0/1) where Coda carries
+# neuronId and polarity ("pre"/"post"). Any cell below that names a synapse
+# column will need one or the other spelling — the notebook export
+# normalises these, this one does not yet.
 synapses <- neuprint_get_synapses(find_neurons$neuronId, prepost = "PRE", conn = hemibrain_neuprint)
 ```
 
@@ -817,6 +821,26 @@ select_one <- skeletons |> slice(1)
 transform_neurons_2 <- xform(skeletons, reg = landmark_transform)
 ```
 
+```{r clean-skeletons}
+# ── Clean Skeletons ──
+# TODO: nat has resample() and stitch_neurons(), which are close to two of
+# the four steps here, but its smoothing takes a window in nodes where this
+# node takes a Gaussian width in micrometres along the neurite — a cell that
+# ran would produce plausible neurons that are not the ones on screen.
+# Export as a notebook for the exact pipeline; it calls navis-fastcore,
+# which is what Coda ran.
+```
+
+```{r clean-skeletons-2}
+# ── Clean Skeletons ──
+# TODO: nat has resample() and stitch_neurons(), which are close to two of
+# the four steps here, but its smoothing takes a window in nodes where this
+# node takes a Gaussian width in micrometres along the neurite — a cell that
+# ran would produce plausible neurons that are not the ones on screen.
+# Export as a notebook for the exact pipeline; it calls navis-fastcore,
+# which is what Coda ran.
+```
+
 ```{r nblast-k-nn}
 # ── NBLAST k-NN ──
 # TODO: nat.nblast has no shortlisted k-nearest search. The honest
@@ -879,12 +903,27 @@ for (.mesh in roi_meshes) rgl::shade3d(.mesh, alpha = 0.12, col = "grey70")
 n_3d_view <- tibble(neuronId = numeric(0))
 ```
 
+```{r clean-meshes}
+# ── Clean Meshes ──
+# TODO: nothing upstream produced a value — "Meshes" was not translated.
+```
+
 ```{r stack-neurons}
 # ── Stack Neurons ──
 stack_neurons <- bind_rows(
   synapses |> mutate(`batch` = "Run 1"),
   synapses |> mutate(`batch` = "Run 2")
 )
+```
+
+```{r synblast}
+# ── syNBLAST ──
+# TODO: The natverse has no synapse-based NBLAST. nat.nblast scores dotprops
+# — tangent vectors fitted to skeleton points — and syNBLAST compares
+# connector positions with the dot product fixed at 1, which is a different
+# score out of the same lookup matrix. Export this graph as a notebook
+# instead: navis-fastcore is a Python package, so that cell calls the same
+# implementation Coda ran.
 ```
 
 ```{r sort-df}
@@ -897,6 +936,65 @@ sort_df <- sort_df |> head(500)
 # ── Stack Neurons ──
 # TODO: nothing upstream produced a value — "Mirror Neurons" was not
 # translated.
+```
+
+```{r nblast-matches}
+# ── NBLAST Matches ──
+m_ <- as.matrix(nblast_df)
+diag(m_) <- -Inf
+n_ <- min(5, ncol(m_) - 1)
+nblast_matches <- do.call(rbind, lapply(seq_len(nrow(m_)), function(i) {
+  ord <- order(m_[i, ], decreasing = TRUE)[seq_len(n_)]
+  ord <- ord[is.finite(m_[i, ord])]
+  if (!length(ord)) return(NULL)
+  data.frame(
+    query = rownames(m_)[i],
+    target = colnames(m_)[ord],
+    rank = seq_along(ord),
+    score = m_[i, ord],
+    stringsAsFactors = FALSE
+  )
+}))
+```
+
+```{r nblast-matches-2}
+# ── NBLAST Matches ──
+m_ <- as.matrix(nblast_df)
+diag(m_) <- -Inf
+# NOTE: Best means is on "from the matrix", which Coda answers by reading
+# what the matrix says its cells are. A plain matrix has nowhere to carry
+# that, so this assumes higher is better.
+cut_ <- apply(m_, 1, function(r) max(r[is.finite(r)], -Inf)) * (1 - 0.05)
+# NOTE: The band is around each row’s own best score, not the matrix’s —
+# 0.05 keeps everything within 5% of that neuron’s top match. Note this
+# multiplies, so it behaves as intended only for positive scores, which
+# normalised NBLAST gives.
+nblast_matches_2 <- do.call(rbind, lapply(seq_len(nrow(m_)), function(i) {
+  hit <- which(is.finite(m_[i, ]) & m_[i, ] >= cut_[i])
+  if (!length(hit)) return(NULL)
+  hit <- hit[order(m_[i, hit], decreasing = TRUE)]
+  data.frame(
+    query = rownames(m_)[i],
+    target = colnames(m_)[hit],
+    rank = seq_along(hit),
+    score = m_[i, hit],
+    stringsAsFactors = FALSE
+  )
+}))
+```
+
+```{r nblast-matches-3}
+# ── NBLAST Matches ──
+m_ <- as.matrix(nblast_df)
+# NOTE: Best means is on "from the matrix", which Coda answers by reading
+# what the matrix says its cells are. A plain matrix has nowhere to carry
+# that, so this assumes higher is better.
+cut_ <- rep(0.4, nrow(m_))
+nblast_matches_3 <- data.frame(
+  query = rownames(m_),
+  matches = vapply(seq_len(nrow(m_)), function(i) sum(m_[i, ] >= cut_[i], na.rm = TRUE), integer(1)),
+  stringsAsFactors = FALSE
+)
 ```
 
 ```{r linkage}

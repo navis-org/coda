@@ -16,7 +16,14 @@ import {
 } from '../../core/limits'
 import type { DType, TableSchema } from '../../core/types'
 import { column, findColumn, tableSchema } from '../../core/types'
-import type { CellValue, MatrixValue, SkeletonsValue, TableValue } from '../../core/values'
+import type {
+  CellValue,
+  GeometryUnits,
+  MatrixValue,
+  SkeletonsValue,
+  TableValue,
+  TemplateSpaceId,
+} from '../../core/values'
 import {
   getColumn,
   isSkeletonsValue,
@@ -139,13 +146,32 @@ export function nblastLabels(skeletons: SkeletonsValue, column: string | undefin
  * a fact nobody stated, which is the same distinction `columnSchemaFor` draws between a schema
  * that is missing and one that is empty.
  */
-export function checkNblastUnits(side: string, skeletons: SkeletonsValue): void {
-  if (skeletons.units === undefined || skeletons.units === 'nm') return
+export function checkNblastUnits(
+  side: string,
+  geometry: { units?: GeometryUnits },
+  /*
+   * What to call the geometry, and which node's footer to point at.
+   *
+   * **Required, not defaulted**, which is the one thing about this signature worth arguing
+   * about. The parameter it replaced was `skeletons`, and the type is now structural — any
+   * geometry value satisfies it — so a defaulted noun means a fourth caller that forgets these
+   * two strings gets a grammatically perfect error saying "Query skeletons are in voxels — the
+   * Skeletons node's footer says which units it got" *about a set of meshes*. Silently wrong
+   * prose, in the one guard rail whose entire job is to name the cause. Required, that caller
+   * fails to compile instead.
+   *
+   * Two words rather than one because they are not derivable from each other: syNBLAST's
+   * inputs are *synapses* and come off the **Synapses** node.
+   */
+  noun: string,
+  sourceNode: string,
+): void {
+  if (geometry.units === undefined || geometry.units === 'nm') return
   throw new Error(
-    `${side} skeletons are in ${skeletons.units}, not nanometres, so NBLAST would compare them ` +
+    `${side} ${noun} are in ${geometry.units}, not nanometres, so NBLAST would compare them ` +
       `at the wrong scale and say nothing about it. This happens when the dataset's Meta ` +
       `publishes no voxelSize or no unit this build recognises, so the fetch had nothing to ` +
-      `convert with — the Skeletons node's footer says which units it got.`,
+      `convert with — the ${sourceNode} node's footer says which units it got.`,
   )
 }
 
@@ -168,10 +194,15 @@ export function checkNblastUnits(side: string, skeletons: SkeletonsValue): void 
  * break the mock chains every example runs on. What is refused is two sides that *both* say,
  * and disagree.
  */
-export function checkNblastSpaces(query: SkeletonsValue, target: SkeletonsValue): void {
+export function checkNblastSpaces(
+  query: { space?: TemplateSpaceId },
+  target: { space?: TemplateSpaceId },
+  /** Required, for `checkNblastUnits`' reason. */
+  noun: string,
+): void {
   if (!query.space || !target.space || query.space === target.space) return
   throw new Error(
-    `Query skeletons are in ${query.space} and Target skeletons are in ${target.space}. NBLAST ` +
+    `Query ${noun} are in ${query.space} and Target ${noun} are in ${target.space}. NBLAST ` +
       'scores how well two arbors lie along each other, so across two coordinate systems it ' +
       'would score every pair as a stranger and say nothing about it. Put both sides through ' +
       'Transform Neurons first.',
@@ -239,12 +270,12 @@ export function nblastSidesFrom(
   if (queryValue.items.length > limit) saySo('Query', queryValue.items.length)
   if (targetValue && targetValue.items.length > limit) saySo('Target', targetValue.items.length)
 
-  checkNblastUnits('Query', queryValue)
+  checkNblastUnits('Query', queryValue, 'skeletons', 'Skeletons')
   if (targetValue) {
-    checkNblastUnits('Target', targetValue)
+    checkNblastUnits('Target', targetValue, 'skeletons', 'Skeletons')
     // Only meaningful with two sides. An all-by-all is one set against itself, which is in one
     // space by construction however little it says about which.
-    checkNblastSpaces(queryValue, targetValue)
+    checkNblastSpaces(queryValue, targetValue, 'skeletons')
   }
 
   return { query: queryValue, ...(targetValue ? { target: targetValue } : {}) }
