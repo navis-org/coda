@@ -52,6 +52,12 @@ Fit Selected all share — and `useFitSelected`, which the three surfaces that o
 the rail button (`ui/panels/ViewControls.tsx`), the `§` key, and the `View ▸ Fit Selected`
 palette command.
 
+**One key, two fits.** `§` frames the selection when there is one and the whole graph when there
+is not — "show me what I mean" is the same intent at both scales, and a shortcut that is inert
+exactly when nothing is selected is one people stop reaching for. The rail keeps them as two
+buttons, where each can say which it is; the palette moves the `§` badge between its two rows so
+what it advertises is what the key would do right now.
+
 **An unmeasurable selection is checked for before the call rather than left to React Flow.**
 `fitView({ nodes })` intersects the ids with the nodes it has measured; finding none, it fits a
 zero-sized box — bounds degrade to `{0, 0, 0, 0}`, the zoom clamps to `maxZoom` and the camera

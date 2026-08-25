@@ -9,8 +9,9 @@
  *
  * The load-bearing case is the empty one. `fitView({ nodes })` intersects the ids with the nodes
  * it has measured, and an empty intersection fits a zero-sized box at the flow origin — the
- * camera ends up nowhere near the graph. Nothing may be asked of it, hence a disabled button and
- * a key press that does nothing rather than a call with an empty list.
+ * camera ends up nowhere near the graph. So no surface may ever pass an empty list: the button is
+ * disabled, and the `§` key frames the *whole graph* instead, which is a fit with no `nodes` at
+ * all rather than a fit of nothing.
  */
 
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
@@ -119,10 +120,14 @@ describe('the § key', () => {
     expect(fitOptions()?.nodes?.map((n) => n.id)).toEqual([first])
   })
 
-  it('asks for nothing with nothing selected — an empty list frames the origin', () => {
+  it('frames the whole graph with nothing selected', () => {
     render(<App />)
+    fitView.mockClear()
     fireEvent.keyDown(window, { key: '§', code: 'Backquote' })
-    expect(fitView).not.toHaveBeenCalled()
+    // No `nodes` key at all — the one thing that must never be passed here is an empty list,
+    // which frames the origin rather than the graph.
+    expect(fitOptions()?.nodes).toBeUndefined()
+    expect(fitOptions()?.maxZoom).toBe(FIT_VIEW_OPTIONS.maxZoom)
   })
 
   it('leaves a field being typed in alone', () => {
@@ -137,6 +142,31 @@ describe('the § key', () => {
   })
 })
 
+describe('the § badge in the palette', () => {
+  /*
+   * The key runs whichever fit the selection calls for, so the badge has to sit on the row that
+   * would actually run. A badge that stayed on Fit Selected would advertise a disabled row.
+   */
+  const fitRow = (id: string) =>
+    buildCommandItems({
+      store: useGraphStore.getState(),
+      fitView: () => {},
+      fitSelected: () => {},
+    }).find((i) => i.id === id)
+
+  it('sits on Fit View while nothing is selected', () => {
+    expect(fitRow('cmd:fit')?.shortcut).toBe('§')
+    expect(fitRow('cmd:fit-selected')?.shortcut).toBeUndefined()
+  })
+
+  it('moves to Fit Selected as soon as something is', () => {
+    render(<App />)
+    select(nodeIds().slice(0, 1))
+    expect(fitRow('cmd:fit-selected')?.shortcut).toBe('§')
+    expect(fitRow('cmd:fit')?.shortcut).toBeUndefined()
+  })
+})
+
 describe('the palette command', () => {
   it('is offered, and disabled exactly while nothing is selected', () => {
     const item = () =>
@@ -147,7 +177,6 @@ describe('the palette command', () => {
       }).find((i) => i.id === 'cmd:fit-selected')
 
     expect(item()?.label).toBe('Fit Selected')
-    expect(item()?.shortcut).toBe('§')
     expect(item()?.disabled).toBe(true)
     select(nodeIds().slice(0, 1))
     expect(item()?.disabled).toBe(false)

@@ -786,11 +786,19 @@ function EditorCanvas() {
        * it prints. Nothing else in the app wants it, and every bare letter near the canvas is
        * either taken or one shift away from something else. Unqualified, like `f` and `i`: it is
        * about the view, and framing the selection is the thing you want right after selecting.
+       *
+       * **One key, two fits, chosen by the selection.** With nothing selected it frames the whole
+       * graph rather than doing nothing — "show me what I mean" is the same intent at both
+       * scales, and a key that is inert exactly when you have not selected anything is a key you
+       * stop reaching for. The rail keeps the two as separate buttons, where each can say which
+       * it is; a shortcut has no such room. The palette moves the `§` badge between its two rows
+       * to match, so what it advertises is what the key would do right now.
        */
       if (!mod && (event.key === '§' || event.code === 'Backquote')) {
         event.preventDefault()
         if (refuseIfLocked()) return
-        fitSelected()
+        if (selected.length) fitSelected()
+        else fitAll()
         return
       }
       /*
@@ -814,7 +822,7 @@ function EditorCanvas() {
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [fitSelected, openBrowser, openPalette, refuseIfLocked, setNotice])
+  }, [fitAll, fitSelected, openBrowser, openPalette, refuseIfLocked, setNotice])
 
   // --- render -------------------------------------------------------------
 

@@ -382,6 +382,14 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
       label: 'Fit View',
       action: 'View',
       hint: locked ? LOCKED_HINT : 'Zoom to show the whole graph',
+      /*
+       * `§` sits on whichever of these two rows it would actually run right now: the key frames
+       * the selection when there is one and the whole graph when there is not, so a badge that
+       * stayed put would be advertising the wrong fit half the time. The list is rebuilt on every
+       * store change, which is what lets a shortcut move like this — the same thing that keeps
+       * the `disabled` flags honest.
+       */
+      ...(selection.length === 0 ? { shortcut: '§' } : {}),
       disabled: locked,
       perform: fitView,
     },
@@ -394,7 +402,7 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
         : selection.length
           ? 'Zoom to show what is selected'
           : 'Select a node first',
-      shortcut: '§',
+      ...(selection.length > 0 ? { shortcut: '§' } : {}),
       disabled: locked || selection.length === 0,
       perform: fitSelected,
     },
