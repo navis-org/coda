@@ -8,14 +8,15 @@
  * rather than leaning on whatever the operator happens to do with `NaN`, even where the two
  * agree — the ones that agree today are the ones that break quietly if this is ever edited.
  *
- * The other half is **case**. Coda compares text case-insensitively (`cellMatches` lowercases
- * both sides, and a `~` regex carries the `i` flag), where pandas is case-sensitive
- * throughout. Every text comparison therefore lowercases explicitly.
+ * The other half is **case**, and it is per term rather than global. `FieldTerm.ignoreCase`
+ * says which rule a term was built under — a search box's (insensitive) or Find Neurons'
+ * (sensitive, because its twin is compiled to Neo4j's `=~`) — so every text comparison reads
+ * the flag rather than assuming, and pandas' own case-sensitive default is never leaned on.
  */
 
 import type { TableSchema } from '../../../core/types'
 import { findColumn, isNumericDType } from '../../../core/types'
-import type { FieldTerm } from '../../../nodes/lib/neuronSearch'
+import type { FieldTerm } from '../../../data/terms'
 import { pyStr } from '../py'
 import { PY_COMPARISON, col } from './table'
 
@@ -33,9 +34,10 @@ function maskFor(frame: string, term: FieldTerm, schema: TableSchema | undefined
 
   let mask: string
   if (term.op === 'match') {
-    // `case=False` is the `i` flag Coda's regexes carry; `na=False` keeps a missing value out,
+    // `case` follows the term's own flag — insensitive for a search box, sensitive for a Find
+    // Neurons row whose twin is compiled to Neo4j's `=~`. `na=False` keeps a missing value out,
     // which is the null rule rather than a convenience.
-    mask = `${c}.astype(str).str.contains(${pyStr(term.value)}, regex=True, case=False, na=False)`
+    mask = `${c}.astype(str).str.contains(${pyStr(term.value)}, regex=True, case=${term.ignoreCase ? 'False' : 'True'}, na=False)`
   } else if (numeric) {
     const number = Number(term.value)
     const literal = Number.isFinite(number) ? String(number) : pyStr(term.value)
@@ -47,12 +49,16 @@ function maskFor(frame: string, term: FieldTerm, schema: TableSchema | undefined
         ? `(${c}.isna() | (${c} != ${literal}))`
         : `(${c}.notna() & (${c} ${PY_COMPARISON[term.op]} ${literal}))`
   } else {
-    const value = pyStr(term.value.toLowerCase())
-    const lowered = `${c}.astype(str).str.lower()`
+    // Lowered on both sides only where the term asks for it; a case-sensitive term compares the
+    // characters as they are, which is what Neo4j's `=` does on the same clause.
+    const value = pyStr(term.ignoreCase ? term.value.toLowerCase() : term.value)
+    const compared = term.ignoreCase
+      ? `${c}.astype(str).str.lower()`
+      : `${c}.astype(str)`
     mask =
       term.op === 'ne'
-        ? `(${c}.isna() | (${lowered} != ${value}))`
-        : `(${c}.notna() & (${lowered} ${PY_COMPARISON[term.op]} ${value}))`
+        ? `(${c}.isna() | (${compared} != ${value}))`
+        : `(${c}.notna() & (${compared} ${PY_COMPARISON[term.op]} ${value}))`
   }
 
   // Negation is applied *after* the null rule, exactly as `fieldTermsMatch` applies it — so

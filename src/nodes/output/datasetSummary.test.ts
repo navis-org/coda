@@ -136,17 +136,19 @@ describe('out.datasetSummary', () => {
     expect(refresh?.presentational).toBe(true)
   })
 
-  it('defaults to every neuron, unlike the query nodes', () => {
+  it('defaults to every neuron, as a summary must', () => {
     /*
-     * `Find Neurons` and `IDs from Label` both default to `Traced` so one label does not return
-     * two counts in two nodes. This defaults to everything, because the index it counts carries
-     * everything and a summary that quietly omitted 11,300 of male-CNS's 176,422 neurons would
-     * answer a different question than its title.
+     * The index this counts carries everything, and a summary that quietly omitted 11,300 of
+     * male-CNS's 176,422 neurons would answer a different question than its title.
+     *
+     * This used to be stated as a *contrast* with the query nodes, which both defaulted to
+     * `Traced`. Find Neurons no longer does — a fresh one filters nothing — so `IDs from Label`
+     * is what the contrast is with, and it is the last node carrying that default.
      */
     const status = requireNodeDef('out.datasetSummary').params?.find((p) => p.id === 'status')
     expect(status?.default).toBe('')
     expect(
-      requireNodeDef('neuron.findNeurons').params?.find((p) => p.id === 'status')?.default,
+      requireNodeDef('neuron.idsFromLabel').params?.find((p) => p.id === 'status')?.default,
     ).toBe('Traced')
   })
 })

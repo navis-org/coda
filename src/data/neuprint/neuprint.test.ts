@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { NUMERIC_DTYPES } from '../../core/types'
 import { cableLength, getColumn } from '../../core/values'
+import type { FilterRow } from '../filterRows'
 
 import { NeuPrintSource, THUMBNAIL_MAX_BYTES, meshProgressFraction } from './NeuPrintSource'
 import {
@@ -208,18 +209,91 @@ describe('query building', () => {
   it('matches type, status, size and ROI together', () => {
     const query = findNeuronsCypher({
       datasetId: 'hemibrain:v1.2.1',
-      typePattern: 'LC.*',
-      statuses: ['Traced'],
-      minSize: 1000,
+      rows: [
+        { field: 'type', op: 'matches', values: ['LC.*'] },
+        { field: 'status', op: 'is', values: ['Traced'] },
+        { field: 'size', op: 'ge', values: ['1000'] },
+      ],
       roi: 'LO(R)',
       limit: 25,
     })
-    expect(query).toContain("n.type =~ 'LC.*'")
-    expect(query).toContain("n.status IN ['Traced']")
-    expect(query).toContain('n.size >= 1000')
+    // Anchored explicitly rather than leaning on `=~` doing it: the same pattern string is what
+    // `toTerm` hands to a local source, where JavaScript would not anchor it, so the server and
+    // the index are compiled from one spelling instead of two that happen to agree.
+    expect(query).toContain("n.`type` =~ '^(?:LC.*)$'")
+    expect(query).toContain("n.`status` = 'Traced'")
+    expect(query).toContain('n.`size` >= 1000')
     // Neo4j 5 removed `exists()` for properties; not every neuPrint server is on 4.
     expect(query).toContain('n.`LO(R)` IS NOT NULL')
     expect(query).toContain('LIMIT 25')
+  })
+
+  describe('filter rows', () => {
+    const clause = (row: FilterRow) =>
+      findNeuronsCypher({ datasetId: 'x', rows: [row] })
+        .split('\n')
+        .find((line) => line.startsWith('WHERE'))!
+
+    it('keeps a neuron with no value at all on a negated row', () => {
+      /*
+       * The sharpest edge in the compiler, and it fails silently both ways.
+       *
+       * Coda's rule is that a missing value satisfies a negated comparison — `status is not
+       * Traced` returns the untraced *and* the unlabelled, which is what somebody auditing a
+       * dataset for gaps means. Cypher does not: `NOT (n.status = 'Traced')` over a null is
+       * null, and `WHERE` keeps only true, so the unlabelled would vanish with no error and no
+       * count to compare against.
+       */
+      expect(clause({ field: 'status', op: 'isNot', values: ['Traced'] })).toContain(
+        "(NOT (n.`status` = 'Traced') OR n.`status` IS NULL)",
+      )
+      expect(clause({ field: 'type', op: 'notContains', values: ['LC'] })).toContain(
+        'OR n.`type` IS NULL',
+      )
+    })
+
+    it('compiles a set to an indexed IN list rather than an alternation', () => {
+      // Same neurons either way; `IN` uses the index neuPrint keeps on the properties people
+      // look neurons up by, where `=~ '^(?:LC4|LC6)$'` scans every :Neuron in the dataset.
+      expect(clause({ field: 'type', op: 'isIn', values: ['LC4', 'LC6'] })).toContain(
+        "n.`type` IN ['LC4','LC6']",
+      )
+    })
+
+    it('writes the unanchored operators out as anchored patterns', () => {
+      // `=~` matches the whole value, so "contains" has to say so explicitly.
+      expect(clause({ field: 'type', op: 'contains', values: ['LC'] })).toContain(
+        "n.`type` =~ '.*LC.*'",
+      )
+      expect(clause({ field: 'type', op: 'startsWith', values: ['LC'] })).toContain(
+        "n.`type` =~ 'LC.*'",
+      )
+    })
+
+    it('escapes a literal so its metacharacters are not read as syntax', () => {
+      // Two escapings, and both are load-bearing. `SMP001(a)` unescaped is a regex group, so it
+      // would match `SMP001a` instead of itself; and a backslash inside a Cypher string literal
+      // has to be doubled again, or the pattern that reaches Neo4j is not the one built here.
+      expect(clause({ field: 'type', op: 'contains', values: ['SMP001(a)'] })).toContain(
+        String.raw`'.*SMP001\\(a\\).*'`,
+      )
+    })
+
+    it('carries case per row, both ways', () => {
+      expect(
+        clause({ field: 'type', op: 'is', values: ['LC4'], ignoreCase: true }),
+      ).toContain("toLower(n.`type`) = 'lc4'")
+      // `(?i)` is Java's inline flag, which is what Neo4j's regex engine reads.
+      expect(
+        clause({ field: 'type', op: 'matches', values: ['lc.*'], ignoreCase: true }),
+      ).toContain("'(?i)^(?:lc.*)$'")
+    })
+
+    it('tests presence rather than comparing to the empty string alone', () => {
+      expect(clause({ field: 'type', op: 'isEmpty', values: [] })).toContain(
+        "(n.`type` IS NULL OR n.`type` = '')",
+      )
+    })
   })
 
   it('omits the WHERE clause entirely when nothing is filtered', () => {
@@ -302,9 +376,9 @@ describe('query building', () => {
       const query = findNeuronsCypher({
         datasetId: 'x',
         labels: { field: 'type', values: ['LC4'] },
-        statuses: ['Traced'],
+        rows: [{ field: 'status', op: 'is', values: ['Traced'] }],
       })
-      expect(query).toContain("n.`type` IN ['LC4'] AND n.status IN ['Traced']")
+      expect(query).toContain("n.`status` = 'Traced' AND n.`type` IN ['LC4']")
     })
   })
 
@@ -330,9 +404,9 @@ describe('query building', () => {
       const query = findNeuronsCypher({
         datasetId: 'x',
         neuronIds: ['7'],
-        statuses: ['Traced'],
+        rows: [{ field: 'status', op: 'is', values: ['Traced'] }],
       })
-      expect(query).toContain("n.bodyId IN [7] AND n.status IN ['Traced']")
+      expect(query).toContain("n.`status` = 'Traced' AND n.bodyId IN [7]")
     })
   })
 

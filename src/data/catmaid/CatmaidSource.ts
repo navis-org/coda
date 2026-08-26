@@ -42,7 +42,8 @@ import {
 } from '../../core/values'
 import { geometryFrame } from '../transforms/spaces'
 import { mapWithConcurrency } from '../concurrency'
-import { compileLabelMatch, compileRegex, refuseUnfilterable } from '../neuronFilter'
+import { compileLabelMatch, preparedRows, refuseUnfilterableRoi } from '../neuronFilter'
+import { fieldTermsMatch } from '../terms'
 import { loadCachedTable, neuronIndexKey } from '../neuronIndex'
 import { byteLengthOf, cachedGeometry } from '../geometryCache'
 import type { NeuronIndexRequest } from '../neuronIndex'
@@ -124,6 +125,9 @@ const CATMAID_CAPABILITIES: SourceCapabilities = {
   /* No per-region completeness or region-to-region table is published. */
   roiSummary: false,
   roiCounts: false,
+  // The volume list is real and drawable; narrowing a *query* by one is not — see the
+  // capability note. These two came apart here, which is why the flag exists.
+  roiFilter: false,
   roiMeshes: true,
 }
 
@@ -495,17 +499,20 @@ export class CatmaidSource implements DataSource {
    * is a case-insensitive substring, so pushing a pattern down would answer a different question
    * from every other backend and would do it silently.
    *
-   * **`req.statuses` is ignored outright.** CATMAID publishes no statuses, so `DatasetInfo`
-   * carries none and the picker offers only `Any` — but a node's stored default survives into the
-   * request regardless, and a source that filtered on it would drop every row for a value nobody
-   * chose. That failure is live on CAVE today; it is not repeated here.
+   * **A status or a size filter can no longer arrive at all**, and that is the row model doing
+   * its job rather than a check being skipped. CATMAID publishes neither, so neither is in
+   * `CATMAID_NEURON_SCHEMA`, so neither is in the field dropdown — where before, `status` was a
+   * named field of the request carrying a node default of `Traced` that this source had to
+   * *ignore* to avoid dropping every row for a value nobody chose. A row naming a field this
+   * dataset does not have is refused by `preparedRows` with a message that names it; the case
+   * that reaches it is a graph saved against another backend and repointed here.
    *
-   * **`req.roi` is refused rather than ignored**, and the difference is that somebody chose it.
-   * `volumeList` fills `DatasetInfo.rois` with eighty real neuropils so the ROIs viewer can draw
-   * them, which also populates Find Neurons' **In ROI** — and answering "which skeletons are in
-   * this volume" needs a spatial query CATMAID has no bulk endpoint for. Silently ignoring it
-   * returns a result that is too *large* and looks exactly like a correct one. `minSize` goes the
-   * same way: it means a voxel count, and CATMAID measures a neuron in nodes and cable.
+   * **`req.roi` is refused rather than ignored**, and it is the one that still needs refusing,
+   * because a region is not a column in any schema. `volumeList` fills `DatasetInfo.rois` with
+   * eighty real neuropils so the ROIs viewer can draw them, which also populates Find Neurons'
+   * **In ROI** — and answering "which skeletons are in this volume" needs a spatial query CATMAID
+   * has no bulk endpoint for. Silently ignoring it returns a result that is too *large* and looks
+   * exactly like a correct one.
    */
   async findNeurons(req: FindNeuronsRequest): Promise<TableValue> {
     const index = await this.neuronIndex({
@@ -513,37 +520,28 @@ export class CatmaidSource implements DataSource {
       ...(req.signal ? { signal: req.signal } : {}),
     })
 
-    refuseUnfilterable(req, { size: false, roi: false }, 'CATMAID')
+    refuseUnfilterableRoi(req, 'CATMAID')
 
-    const typeRe = compileRegex(req.typePattern, 'type')
-    const instanceRe = compileRegex(req.instancePattern, 'instance')
+    const prepared = preparedRows(index, req, 'CATMAID')
     const labelMatch = compileLabelMatch(req.labels)
     const wanted = req.neuronIds ? new Set(numericIds(req.neuronIds)) : undefined
 
     /*
-     * Columns hoisted and the row built **only** for `labelMatch`, which is the one filter that
-     * needs a whole row. `CaveSource` documents the same fix: materialising every row first cost
-     * it 139,255 objects per query, "discarded, overwhelmingly, by the very next line".
+     * Columns are hoisted by `prepareFieldTerms` and the row built **only** for `labelMatch`,
+     * which is the one filter that needs a whole row. `CaveSource` documents the same fix:
+     * materialising every row first cost it 139,255 objects per query, "discarded,
+     * overwhelmingly, by the very next line".
      *
      * And the result is `selectRows` rather than a rebuilt table, which matters beyond the
      * allocation: `tableFromRows` mints a fresh `TableValue`, throwing away the object identity
      * that `searchIndexFor` and `statsFor` key their `WeakMap`s on.
      */
     const ids = index.data[ID_COLUMN_NAME] ?? []
-    const types = index.data.type ?? []
-    const instances = index.data.instance ?? []
 
     const matched: number[] = []
     for (let i = 0; i < index.length; i += 1) {
       if (wanted && !wanted.has(Number(ids[i]))) continue
-      if (typeRe) {
-        const value = types[i]
-        if (typeof value !== 'string' || !typeRe.test(value)) continue
-      }
-      if (instanceRe) {
-        const value = instances[i]
-        if (typeof value !== 'string' || !instanceRe.test(value)) continue
-      }
+      if (!fieldTermsMatch(prepared, i)) continue
       if (labelMatch && !labelMatch(getRow(index, i))) continue
       matched.push(i)
       if (req.limit && matched.length >= req.limit) break

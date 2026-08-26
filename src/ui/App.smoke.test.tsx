@@ -166,7 +166,7 @@ describe('App', () => {
     })
 
     await waitFor(() => {
-      expect(screen.getByText(/Invalid type regex/)).toBeTruthy()
+      expect(screen.getByText(/Invalid regex for "type"/)).toBeTruthy()
     })
   })
 

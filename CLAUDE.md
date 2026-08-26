@@ -101,8 +101,10 @@ symptom to recognise — which usually points nowhere near the cause.
   callouts, tables and images parse only under `{ extended: true }`. A dataset blurb arrives from
   whatever deployment a Custom node points at; an image in one is a tracking pixel, and a fence
   is a directive some renderer may act on. Only `src/help` opts in.
-- **Type regexes are anchored.** `MockSource` wraps user patterns in `^(?:…)$` to match
-  Neo4j's `=~`, so `LC.*` matches `LC4` but **not** `LPLC1`. Don't "fix" this.
+- **Whole-string patterns are anchored, in one place.** `anchoredPattern` (`data/terms.ts`)
+  wraps them in `^(?:…)$` to match Neo4j's `=~`, so `LC.*` matches `LC4` but **not** `LPLC1`.
+  Every builder goes through it — a request pattern, a filter row lowered for a local source,
+  and the same row compiled to Cypher. Don't "fix" this.
 - **`localStorage` is undefined** under Node 26 + jsdom. Tests use `clearStorage()` /
   `installStorageStub()` from `src/test/jsdomStubs.ts`.
 - **React Flow needs measurements.** In jsdom, unmeasured nodes are `visibility: hidden`,

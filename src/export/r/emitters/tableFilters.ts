@@ -13,13 +13,14 @@
  *    the rule Coda states — a missing value satisfies `!=` and nothing else — has to be written
  *    out. Every predicate below guards with `!is.na()` or `is.na() |` for exactly that, never
  *    leaning on what the operator does with `NA`.
- *  - **R's comparisons are case-sensitive and its `grepl` is too by default**, where Coda
- *    lowercases both sides of a text compare and carries the `i` flag on every `~` regex.
+ *  - **R's comparisons are case-sensitive and its `grepl` is too by default.** Coda's rule is
+ *    per term rather than global — `FieldTerm.ignoreCase` — so both are written out from the
+ *    flag rather than left to R's default agreeing with Coda's by accident.
  */
 
 import type { TableSchema } from '../../../core/types'
 import { findColumn, isNumericDType } from '../../../core/types'
-import type { FieldTerm } from '../../../nodes/lib/neuronSearch'
+import type { FieldTerm } from '../../../data/terms'
 import { rNum, rStr } from '../r'
 import { R_COMPARISON } from './table'
 
@@ -41,9 +42,10 @@ function predicateFor(term: FieldTerm, schema: TableSchema | undefined): string 
 
   let predicate: string
   if (term.op === 'match') {
-    // `perl = TRUE` is the closer of R's two engines to JavaScript's; `ignore.case` is the
-    // `i` flag every Coda regex carries.
-    predicate = `!is.na(${c}) & grepl(${rStr(term.value)}, as.character(${c}), ignore.case = TRUE, perl = TRUE)`
+    // `perl = TRUE` is the closer of R's two engines to JavaScript's; `ignore.case` follows the
+    // term's own flag, which is what keeps a Find Neurons regex case-sensitive here and an
+    // Explore one insensitive — see `FieldTerm.ignoreCase`.
+    predicate = `!is.na(${c}) & grepl(${rStr(term.value)}, as.character(${c}), ignore.case = ${term.ignoreCase ? 'TRUE' : 'FALSE'}, perl = TRUE)`
   } else if (numeric) {
     const number = Number(term.value)
     const literal = Number.isFinite(number) ? rNum(number) : rStr(term.value)
@@ -52,12 +54,16 @@ function predicateFor(term: FieldTerm, schema: TableSchema | undefined): string 
         ? `(is.na(${c}) | ${c} != ${literal})`
         : `(!is.na(${c}) & ${c} ${R_COMPARISON[term.op]} ${literal})`
   } else {
-    const value = rStr(term.value.toLowerCase())
-    const lowered = `tolower(as.character(${c}))`
+    // `tolower` on both sides only where the term asks for it; a case-sensitive term compares
+    // the characters as they are, which is what Neo4j's `=` does on the same clause.
+    const value = rStr(term.ignoreCase ? term.value.toLowerCase() : term.value)
+    const compared = term.ignoreCase
+      ? `tolower(as.character(${c}))`
+      : `as.character(${c})`
     predicate =
       term.op === 'ne'
-        ? `(is.na(${c}) | ${lowered} != ${value})`
-        : `(!is.na(${c}) & ${lowered} ${R_COMPARISON[term.op]} ${value})`
+        ? `(is.na(${c}) | ${compared} != ${value})`
+        : `(!is.na(${c}) & ${compared} ${R_COMPARISON[term.op]} ${value})`
   }
 
   // Negation applies after the null rule, exactly as `fieldTermsMatch` applies it.

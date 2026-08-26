@@ -590,7 +590,7 @@ describe('breadcrumbs on the real item list', () => {
   it('uses the middle segment where it earns its place', () => {
     expect(rowFor('Dark')).toBe('View ▶ Theme ▶ Dark')
     expect(rowFor('Find Neurons')).toBe(
-      'Add ▶ Query ▶ Find Neurons ▶ Search a dataset for neurons by type, instance, status, size or ROI.',
+      'Add ▶ Query ▶ Find Neurons ▶ Search a dataset for neurons, by any field the dataset publishes.',
     )
   })
 })

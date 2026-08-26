@@ -162,14 +162,17 @@ describe('parseSearch', () => {
       'post<=10',
       'type~LC',
     ]
+    // `ignoreCase: true` on every one of them: a search box is insensitive, and the flag is
+    // written out at the construction site rather than defaulted — see `FieldTerm.ignoreCase`.
+    const insensitive = { negate: false, ignoreCase: true }
     expect(ops.map((q) => parseSearch(q).terms[0])).toEqual([
-      { kind: 'field', field: 'type', op: 'eq', value: 'LC4', negate: false },
-      { kind: 'field', field: 'type', op: 'ne', value: 'LC4', negate: false },
-      { kind: 'field', field: 'post', op: 'gt', value: '10', negate: false },
-      { kind: 'field', field: 'post', op: 'lt', value: '10', negate: false },
-      { kind: 'field', field: 'post', op: 'ge', value: '10', negate: false },
-      { kind: 'field', field: 'post', op: 'le', value: '10', negate: false },
-      { kind: 'field', field: 'type', op: 'match', value: 'LC', negate: false },
+      { kind: 'field', field: 'type', op: 'eq', value: 'LC4', ...insensitive },
+      { kind: 'field', field: 'type', op: 'ne', value: 'LC4', ...insensitive },
+      { kind: 'field', field: 'post', op: 'gt', value: '10', ...insensitive },
+      { kind: 'field', field: 'post', op: 'lt', value: '10', ...insensitive },
+      { kind: 'field', field: 'post', op: 'ge', value: '10', ...insensitive },
+      { kind: 'field', field: 'post', op: 'le', value: '10', ...insensitive },
+      { kind: 'field', field: 'type', op: 'match', value: 'LC', ...insensitive },
     ])
   })
 

@@ -367,7 +367,7 @@ registerHelper({
 /**
  * An anchored, case-sensitive regex over one column — Coda's own filter, and Neo4j's `=~`.
  *
- * `str.fullmatch` is the exact pandas equivalent of `compileRegex`'s `^(?:…)$`: anchored at both
+ * `str.fullmatch` is the exact pandas equivalent of `anchoredPattern`'s `^(?:…)$`: anchored at both
  * ends, case-sensitive, and `na=False` so a missing value is not a match. `str.match` anchors
  * only the start and would quietly widen every pattern.
  *

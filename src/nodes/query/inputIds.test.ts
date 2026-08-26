@@ -167,12 +167,13 @@ describe('neuron.inputIds — with a dataset', () => {
 
   it('does not filter by status, unlike every other query node here', async () => {
     // Inheriting the usual `Traced` default would drop a neuron somebody named by id — and
-    // then report that id as missing from the dataset, which is worse than dropping it.
+    // then report that id as missing from the dataset, which is worse than dropping it. Now
+    // that a status is an ordinary filter row, "no status filter" means "no rows at all".
     const ids = await realIds(2)
     const scheduler = makeScheduler()
     await scheduler.run(pipeline({ ids: ids.join(' ') }, true), { mode: 'full' })
     const req = findNeurons.mock.calls[0]![0] as FindNeuronsRequest
-    expect(req.statuses).toBeUndefined()
+    expect(req.rows ?? []).toEqual([])
   })
 
   it('returns the full neuron rows, not just the ids back', async () => {
@@ -230,7 +231,7 @@ describe('neuron.inputIds — the wired IDs table', () => {
   async function unioned(typed: string): Promise<number[]> {
     let g = emptyGraph('union')
     g = addNode(g, node('ds', 'neuron.dataset', { dataset: DATASET }))
-    g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC4', status: 'Traced' }))
+    g = addNode(g, node('find', 'neuron.findNeurons', { rows: [{ field: 'type', op: 'matches', values: ['LC4'] }], status: 'Traced' }))
     g = addNode(g, node('ids', 'neuron.inputIds', { ids: typed }))
     g = addEdge(g, {
       source: 'ds',

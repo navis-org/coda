@@ -116,7 +116,12 @@ const partners: ExampleGraph = {
           id: 'find',
           type: 'neuron.findNeurons',
           col: 1,
-          params: { typePattern: 'LC.*', status: 'Traced' },
+          params: {
+            filters: [
+              '{"f":"type","op":"matches","v":["LC.*"]}',
+              '{"f":"status","op":"is","v":["Traced"]}',
+            ],
+          },
         },
         {
           id: 'conn',
@@ -224,14 +229,24 @@ const matrix: ExampleGraph = {
           type: 'neuron.findNeurons',
           col: 1,
           row: 0,
-          params: { typePattern: 'LC.*|LPLC.*', status: 'Traced' },
+          params: {
+            filters: [
+              '{"f":"type","op":"matches","v":["LC.*|LPLC.*"]}',
+              '{"f":"status","op":"is","v":["Traced"]}',
+            ],
+          },
         },
         {
           id: 'targets',
           type: 'neuron.findNeurons',
           col: 1,
           row: 1.1,
-          params: { typePattern: 'DNp.*|PVLP.*|PLP.*|AOTU.*', status: 'Traced' },
+          params: {
+            filters: [
+              '{"f":"type","op":"matches","v":["DNp.*|PVLP.*|PLP.*|AOTU.*"]}',
+              '{"f":"status","op":"is","v":["Traced"]}',
+            ],
+          },
         },
         {
           id: 'adj',
@@ -318,7 +333,12 @@ const roiSummary: ExampleGraph = {
           id: 'find',
           type: 'neuron.findNeurons',
           col: 1,
-          params: { typePattern: 'KC.*', status: 'Traced' },
+          params: {
+            filters: [
+              '{"f":"type","op":"matches","v":["KC.*"]}',
+              '{"f":"status","op":"is","v":["Traced"]}',
+            ],
+          },
         },
         { id: 'roi', type: 'neuron.roiCounts', col: 2 },
         {
@@ -410,7 +430,12 @@ const network: ExampleGraph = {
           id: 'find',
           type: 'neuron.findNeurons',
           col: 1,
-          params: { typePattern: 'LC.*|LPLC.*', status: 'Traced' },
+          params: {
+            filters: [
+              '{"f":"type","op":"matches","v":["LC.*|LPLC.*"]}',
+              '{"f":"status","op":"is","v":["Traced"]}',
+            ],
+          },
         },
         {
           id: 'conn',
@@ -518,7 +543,12 @@ const morphology: ExampleGraph = {
           type: 'neuron.findNeurons',
           col: 1,
           row: 0.5,
-          params: { typePattern: 'LC4|LC6', status: 'Traced' },
+          params: {
+            filters: [
+              '{"f":"type","op":"isIn","v":["LC4","LC6"]}',
+              '{"f":"status","op":"is","v":["Traced"]}',
+            ],
+          },
         },
         { id: 'skel', type: 'neuron.skeletons', col: 2, row: 0, params: { limit: 30 } },
         {

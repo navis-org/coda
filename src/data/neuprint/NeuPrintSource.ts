@@ -231,6 +231,7 @@ export class NeuPrintSource implements DataSource {
     // failure, and is reported as such.
     roiCounts: true,
     roiSummary: true,
+    roiFilter: true,
     roiMeshes: true,
   }
   readonly schemas: SourceSchemas = CANONICAL_SCHEMAS

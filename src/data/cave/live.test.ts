@@ -113,7 +113,7 @@ live('CAVE, live', () => {
   }, 300_000)
 
   it('finds neurons by an anchored pattern, locally', async () => {
-    const table = await source.findNeurons({ datasetId: DATASET, typePattern: 'DNp01' })
+    const table = await source.findNeurons({ datasetId: DATASET, rows: [{ field: 'type', op: 'matches', values: ['DNp01'] }] })
     expect(table.length).toBeGreaterThan(0)
     expect(new Set(table.data.type)).toEqual(new Set(['DNp01']))
   }, 300_000)

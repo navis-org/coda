@@ -191,9 +191,14 @@ verbatim.
 - **Module init order.** `graphStore.ts` imports `../nodes` for its side effect, because it
   resolves node types the moment it loads the autosaved graph. Without that import,
   ordering in `main.tsx` becomes load-bearing and a bad order silently drops every node.
-- **Type regexes are anchored.** `MockSource` wraps user patterns in `^(?:…)$` to match
-  Neo4j's `=~` semantics. So `LC.*` matches `LC4` but **not** `LPLC1`. Don't "fix" this —
-  the real neuPrint source behaves the same way because Neo4j does.
+- **Whole-string patterns are anchored, in one place.** `anchoredPattern` in `data/terms.ts`
+  wraps a user pattern in `^(?:…)$` to match Neo4j's `=~` semantics, so `LC.*` matches `LC4`
+  but **not** `LPLC1`. Don't "fix" this — the real neuPrint source behaves the same way
+  because Neo4j does. Everything that builds a whole-string match goes through that one
+  function: `compileRegex` for a request pattern, `toTerm` lowering a **matches** filter row
+  for a local source, and `rowClause` compiling the same row to Cypher. The `(?:…)` is
+  load-bearing on its own — without it a user pattern carrying a top-level `|` has its
+  alternation spliced into the surrounding one and quietly matches a superset.
 - **`localStorage` is undefined** under Node 26 + jsdom unless `--localstorage-file` is
   passed. `persistence.ts` try/catches every access, so the app degrades; tests use
   `clearStorage()` from `src/test/jsdomStubs.ts`.

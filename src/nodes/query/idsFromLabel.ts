@@ -1,6 +1,6 @@
 import { registerNode } from '../../core/registry'
 import { datasetRequest } from '../lib/datasetParam'
-import { T } from '../../core/types'
+import { T, findColumn } from '../../core/types'
 import { isTableValue, tableFromRows } from '../../core/values'
 import {
   ANY_OPTION,
@@ -176,13 +176,27 @@ export const idsFromLabelNode = registerNode({
       return { neurons: tableFromRows(schema, []) }
     }
 
-    const status = String(ctx.params.status ?? '')
     ctx.progress(0.1, `${labels.length} label${labels.length === 1 ? '' : 's'}`)
+
+    /*
+     * The status filter only where the dataset has a status to filter on.
+     *
+     * This node's `Traced` default is the same one Find Neurons used to carry, and it had the
+     * same failure: a source publishing no statuses still received the stored default, filtered
+     * on a column it does not have, and answered nothing at all for a value nobody chose. It is
+     * live on CAVE. `schemasForDataset` is the dataset's own neuron schema, so this asks the only
+     * question that settles it — does this dataset have such a field?
+     */
+    const status = String(ctx.params.status ?? '')
+    const rows =
+      status && findColumn(schema, 'status')
+        ? [{ field: 'status', op: 'is' as const, values: [status] }]
+        : undefined
 
     const neurons = await source.findNeurons({
       ...datasetRequest(dataset),
       labels: match,
-      statuses: status ? [status] : undefined,
+      ...(rows ? { rows } : {}),
       signal: ctx.signal,
     })
 

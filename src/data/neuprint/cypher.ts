@@ -22,6 +22,8 @@ import type {
   SynapseRequest,
 } from '../source'
 import { isNeuronId } from '../../core/ids'
+import type { FilterRow } from '../filterRows'
+import { anchoredPattern, escapeRegex } from '../terms'
 import { CORE_NEURON_COLUMNS, neuprintProperty } from './schema'
 
 /**
@@ -119,15 +121,118 @@ function labelClause(match: LabelMatch): string {
   return `${prop} IN ${stringList(match.values)}`
 }
 
+/**
+ * One `FilterRow` as a `WHERE` fragment.
+ *
+ * The counterpart of `toTerm`, and the pair has to agree: the same row runs here against a
+ * server and there against an index a source already holds, and a graph that answered two
+ * different sets depending on the backend would be the whole point of the row model undone.
+ *
+ * Three things here are decisions rather than transcription.
+ *
+ * **`isIn` compiles to `IN`, not to an alternation.** neuPrint indexes the properties people
+ * look neurons up by, and `n.type IN ['LC4','LC6']` uses that index where the equivalent
+ * `n.type =~ '^(?:LC4|LC6)$'` forces a scan of every `:Neuron` in the dataset. Same set, and the
+ * reason `isIn` exists as an operator rather than being left to a regex somebody writes.
+ *
+ * **`matches` is anchored and the others are not.** Neo4j's `=~` matches the *whole* value, so a
+ * `contains` has to be written `.*x.*` explicitly. `anchoredPattern` is the same helper `toTerm`
+ * uses, so the `(?:…)` wrapping that stops a user's top-level `|` escaping its own row is
+ * decided once rather than twice.
+ *
+ * **Case rides on the row.** `(?i)` is Java's inline flag, which is what Neo4j's regex engine
+ * reads, and `toLower()` on both sides is the literal form's equivalent. Neither is a default:
+ * `FieldTerm.ignoreCase` explains why this is per row rather than global.
+ */
+function rowClause(row: FilterRow): string {
+  const prop = `n.${escapeIdentifier(neuprintProperty(row.field))}`
+  const value = row.values[0] ?? ''
+  // One spelling of the case fold, used by all three of the forms below. Written out three
+  // separate times before this, which is a hazard rather than noise: `nullSafeNot` has to wrap
+  // *exactly* the positive clause, and two long strings that must stay character-identical is
+  // how that stops being true.
+  const foldValue = (v: string) => (row.ignoreCase ? v.toLowerCase() : v)
+  const fold = (expr: string) => (row.ignoreCase ? `toLower(${expr})` : expr)
+  const lit = (v: string) => escapeString(foldValue(v))
+  const re = (pattern: string) =>
+    `${prop} =~ ${escapeString(row.ignoreCase ? `(?i)${pattern}` : pattern)}`
+  // Each pair is built once and negated by the operator, the way `toTerm` takes one `negate`
+  // argument rather than writing the positive form out twice.
+  const orNull = (clause: string, negate: boolean) => (negate ? nullSafeNot(clause, prop) : clause)
+
+  switch (row.op) {
+    case 'is':
+    case 'isNot':
+      return orNull(`${fold(prop)} = ${lit(value)}`, row.op === 'isNot')
+    case 'isIn':
+    case 'isNotIn':
+      return orNull(
+        `${fold(prop)} IN ${stringList(row.values.map(foldValue))}`,
+        row.op === 'isNotIn',
+      )
+    case 'contains':
+    case 'notContains':
+      return orNull(re(`.*${escapeRegex(value)}.*`), row.op === 'notContains')
+    case 'startsWith':
+      return re(`${escapeRegex(value)}.*`)
+    case 'endsWith':
+      return re(`.*${escapeRegex(value)}`)
+    case 'matches':
+      // Anchored, because the same row is compiled to Neo4j's `=~`, which matches the whole
+      // value. An unanchored local match would train the wrong intuition and then change the
+      // result the day the graph is pointed at neuPrint.
+      return re(anchoredPattern(value))
+    case 'gt':
+      return `${prop} > ${numberLiteral(value)}`
+    case 'ge':
+      return `${prop} >= ${numberLiteral(value)}`
+    case 'lt':
+      return `${prop} < ${numberLiteral(value)}`
+    case 'le':
+      return `${prop} <= ${numberLiteral(value)}`
+    case 'isEmpty':
+      return `(${prop} IS NULL OR ${prop} = '')`
+    case 'notEmpty':
+      return `(${prop} IS NOT NULL AND ${prop} <> '')`
+  }
+}
+
+/**
+ * `NOT (clause)`, written so that a neuron with no value at all survives it.
+ *
+ * **The sharpest edge in the whole compiler**, and it fails silently in both directions if it is
+ * got wrong. Coda's rule — stated once in `terms.ts` and written out the long way in both export
+ * compilers — is that a missing value satisfies a negated comparison: `status is not Traced`
+ * returns the untraced *and* the unlabelled, which is what somebody auditing a dataset for gaps
+ * is asking for.
+ *
+ * Cypher does not do that. `NOT (n.status = 'Traced')` over a null `status` evaluates to null,
+ * and `WHERE` keeps only *true* — so the unlabelled neurons vanish, with no error and no row
+ * count to compare against. The `OR … IS NULL` is what makes the server agree with the index.
+ */
+function nullSafeNot(clause: string, prop: string): string {
+  return `(NOT (${clause}) OR ${prop} IS NULL)`
+}
+
+/**
+ * A numeric literal for a comparison, or the string form when it is not a number.
+ *
+ * `resolveRows` refuses a non-numeric ordering comparison before it can reach here, so the
+ * fallback is unreachable rather than lenient — but emitting an unquoted `NaN` into Cypher would
+ * be a syntax error at the server rather than a wrong answer, and this keeps it a wrong answer
+ * nobody can reach instead.
+ */
+function numberLiteral(value: string): string {
+  const number = Number(value)
+  return Number.isFinite(number) ? String(number) : escapeString(value)
+}
+
 export function findNeuronsCypher(
   req: FindNeuronsRequest,
   extraProperties: string[] = [],
 ): string {
   const where: string[] = []
-  // `=~` anchors at both ends, so a bare `LC.*` matches `LC4` but not `LPLC1`. `MockSource`
-  // reproduces that deliberately; don't "fix" either side.
-  if (req.typePattern) where.push(`n.type =~ ${escapeString(req.typePattern)}`)
-  if (req.instancePattern) where.push(`n.instance =~ ${escapeString(req.instancePattern)}`)
+  for (const row of req.rows ?? []) where.push(rowClause(row))
   // Empty values matches nothing, so the caller is expected not to send one — see `LabelMatch`.
   if (req.labels && req.labels.values.length > 0) where.push(labelClause(req.labels))
   /*
@@ -141,8 +246,6 @@ export function findNeuronsCypher(
    * would otherwise return the entire dataset is not a trade worth repeating.
    */
   if (req.neuronIds) where.push(`n.bodyId IN ${idList(req.neuronIds)}`)
-  if (req.statuses?.length) where.push(`n.status IN ${stringList(req.statuses)}`)
-  if (req.minSize && req.minSize > 0) where.push(`n.size >= ${Math.floor(req.minSize)}`)
   // A neuron carries one boolean property per ROI it innervates, so presence is the test.
   // `IS NOT NULL` rather than `exists(...)`: the latter was removed for properties in
   // Neo4j 5, and neuPrint's servers are not all on the same major version.

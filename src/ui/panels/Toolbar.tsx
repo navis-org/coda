@@ -153,7 +153,7 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
               }}
             >
               <strong>Show Welcome Dialog</strong>
-              <span>What Coda is, and a few places to begin</span>
+              <span>Quick start plus a few useful links.</span>
             </button>
             {/*
              * A link rather than a button, so it can be opened in a new tab the
@@ -172,7 +172,7 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
               onClick={close}
             >
               <strong>Overview</strong>
-              <span>What Coda is, in one scroll</span>
+              <span>Highlight reel</span>
             </a>
             <a
               className="dropdown__item"
@@ -182,7 +182,7 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
               onClick={close}
             >
               <strong>Field Guide</strong>
-              <span>Nodes, wires, queries and viewers, from the beginning</span>
+              <span>Explains the basic concepts.</span>
             </a>
             {/*
              * The reference half of the pair. The field guide is read once, front to back;
@@ -197,7 +197,7 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
               onClick={close}
             >
               <strong>Node Guide</strong>
-              <span>Every node: what it takes, what it hands on, what it draws</span>
+              <span>Catalogue of all nodes</span>
             </a>
           </>
         )}

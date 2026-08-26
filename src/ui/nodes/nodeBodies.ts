@@ -29,6 +29,7 @@ import { IdsFromLabelBody } from './IdsFromLabelBody'
 import { InputIdsBody } from './InputIdsBody'
 import { LabelsToNeuronsBody } from './LabelsToNeuronsBody'
 import { PathsBody } from './PathsBody'
+import { FindNeuronsBody } from './FindNeuronsBody'
 import { RenameBody } from './RenameBody'
 import { SelectOneBody } from './SelectOneBody'
 import { UploadBody } from './UploadBody'
@@ -154,6 +155,12 @@ export const NODE_BODIES: Record<string, NodeBodyEntry> = {
    * rows are the whole widget and a fullscreen panel of four of them is whitespace.
    */
   'core.rename': { Component: RenameBody, width: 320 },
+  /*
+   * Wider than Rename's, because a filter is three controls on a line rather than two: a field,
+   * an operator and a value. Not `expandable` for Rename's reason — the rows are the whole
+   * widget, and a fullscreen panel of four of them is whitespace.
+   */
+  'neuron.findNeurons': { Component: FindNeuronsBody, width: 360 },
 }
 
 export function nodeBody(type: string): NodeBodyEntry | undefined {

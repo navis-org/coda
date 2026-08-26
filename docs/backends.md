@@ -195,20 +195,39 @@ means, and it has to decide the same thing the mock does and the same thing Neo4
 quietly returns two answers. `compileRegex` and `compileLabelMatch` moved out of `MockSource`
 when CAVE became their second consumer; a copy is how the two drift.
 
-**`refuseUnfilterable` is the third thing in it, and it is about a filter a backend cannot answer
-*at all*.** Both local sources met that and each got it wrong in a different direction, neither
-visible from the result. `CaveSource` read `index.data.size` — a column no CAVE index has —
-through `Number(undefined ?? 0)`, so any non-zero **Min size** compared 0 against the threshold and
-dropped every row: a node reporting "0 neurons" for a datastack full of them. `CatmaidSource` never
-read `req.roi` at all while publishing eighty regions to pick from, so the answer came back too
-*large*. An empty result and an unnarrowed one both look like answers, which is what makes a
-refusal the only one of the three that can be acted on; it names the control as the card labels it.
+**`preparedRows` is the third thing in it, and it is what a local source runs a query with.** A
+`FindNeuronsRequest` carries `rows` — `{field, operator, value}`, ANDed — and this compiles them
+against the neuron index that will answer them, through `resolveRows` and `prepareFieldTerms`.
+Both of those are shared with Explore's search box and the Table viewer's header cells, which is
+the strongest form of the rule above: not two implementations that agree, one function.
 
-Note which filters this covers and why. `Min size` and `In ROI` reach a source **only when
-somebody set them** — 0 and `Any` are dropped by the node — so a refusal fails a decision rather
-than a default. `status` is deliberately excluded: its default is `Traced`, so refusing there would
-fail a value nobody chose, and a source that cannot answer it ignores it instead. That is the split
-`CatmaidSource` already documents, made checkable.
+**An unfilterable row throws rather than matching nothing**, and that is the decision worth
+defending. `prepareFieldTerms` marks a column the table does not have as `unknown`, which matches
+no row — right for the Table viewer, where an emptied table reads as a node that has broken and
+can be seen. Here it would answer a *query* with nothing at all, indistinguishable from a dataset
+that genuinely holds no such neurons.
+
+That failure is what the row model retired, and it is worth recording what it replaced.
+`refuseUnfilterable` used to take `minSize` and `roi` as named fields of the request, because the
+card offered **Min size** and **In ROI** whatever was wired to it. `CaveSource` read
+`index.data.size` — a column no CAVE index has — through `Number(undefined ?? 0)`, so any non-zero
+**Min size** compared 0 against the threshold and dropped every row: a node reporting "0 neurons"
+for a datastack full of them. `CatmaidSource` never read `req.roi` at all while publishing eighty
+regions to pick from, so the answer came back too *large*. An empty result and an unnarrowed one
+both look like answers, which is what makes a refusal the only one of the three that can be acted
+on; it names the field as the card labels it.
+
+Two of those three are now unreachable rather than caught. A row names a field of the dataset's
+**own** neuron schema, so `size` on a CAVE datastack is not a filter that gets refused — it is a
+field that was never in the dropdown, and the same goes for `status` on CATMAID. What is left is a
+graph saved against one backend and repointed at another, which `resolveRows` reports on the card
+before anything runs and `preparedRows` refuses at the seam if it gets that far.
+
+**`refuseUnfilterableRoi` is all that survives, and a region is why.** It cannot become a row
+because it is not a column in any schema: in neuPrint a neuron carries one boolean property per
+ROI it innervates. So it stays a named axis, and the card gates it on `capabilities.roiFilter` —
+whether the source can *answer* one — rather than on `DatasetInfo.rois` being non-empty. Those two
+came apart on CATMAID and that is exactly the flag's reason for existing.
 
 It is also deliberately **not** `compileLabelMatch`'s rule, whose absent value matches nothing on
 purpose: that is neuPrint's `WHERE` semantics for a *property* a dataset may legitimately lack per
@@ -523,8 +542,10 @@ exists" rule, and `neuron.roiCounts` gained the `sourceSupports` gate its two RO
 already had.
 
 Two absences show up as data rather than as flags. A CAVE dataset reports **no ROIs and no
-statuses**, so Find Neurons' region and status pickers offer nothing to filter by — which is the
-honest state rather than a control that would match nothing.
+statuses** — and since a filter row names a field of the datastack's own neuron schema, and the
+region picker reads `capabilities.roiFilter`, neither is offered on the card at all. That is the
+honest state rather than a control that would match nothing, and it is stronger than the state
+before the row model, where both were offered and answered wrongly.
 
 ### Skeletons come from the level-2 cache, and the capability is per dataset
 
@@ -979,16 +1000,19 @@ with the feature absent — comparable to CAVE's +16.4 / +5.2.
 - **The volume mesh is X3D**, `<IndexedTriangleSet>`, parsed by hand rather than through
   `DOMParser` so this layer stays usable without a DOM. An out-of-range index is refused rather
   than passed on, because it draws as one enormous spike across the scene rather than as an error.
-- **A source that publishes no statuses must also *ignore* the parameter.** `DatasetInfo.statuses`
-  is empty because CATMAID has none — but a node's stored `Traced` default survives into the
-  request regardless, and filtering on it drops every row for a value nobody chose. That failure
-  is live on CAVE today; `findNeurons` here ignores `statuses` outright and a test pins it.
-- **A filter somebody *chose* is refused instead, and the difference is the default.** `In ROI` and
-  `Min size` reach a source only when they were set, so ignoring one answers a different question
-  than the card says — see `refuseUnfilterable` below. CATMAID is the case that makes it visible:
-  `volumeList` fills `DatasetInfo.rois` with eighty real neuropils so the ROI Viewer can draw
-  them, which also populates Find Neurons' region picker, and `findNeurons` never read `req.roi` at
-  all. A populated dropdown that narrows nothing, whose result is too *large* and looks correct.
+- **A source that publishes no statuses used to have to *ignore* the parameter.**
+  `DatasetInfo.statuses` is empty because CATMAID has none — but a node's stored `Traced` default
+  survived into the request regardless, and filtering on it drops every row for a value nobody
+  chose. This source ignored `statuses` outright and a test pinned it; the same failure was live
+  on CAVE. It is unreachable now: a status is an ordinary filter row, CATMAID's schema has no
+  `status` for one to name, and a fresh Find Neurons carries no rows at all.
+- **A filter somebody *chose* is refused instead, and the difference is the default.** That
+  distinction still holds for `In ROI`, the one filter that cannot be a row — see
+  `refuseUnfilterableRoi`. CATMAID is the case that makes it visible: `volumeList` fills
+  `DatasetInfo.rois` with eighty real neuropils so the ROI Viewer can draw them, which also used
+  to populate Find Neurons' region picker, and `findNeurons` never read `req.roi` at all. A
+  populated dropdown that narrows nothing, whose result is too *large* and looks correct. The
+  picker now reads `capabilities.roiFilter`, which is the question that was actually being asked.
 - **Cable length is measured, not fetched.** `core/values.ts`' `cableLength` is shared with the
   neuPrint decoder and the mock so the three cannot disagree, and CATMAID's points are already
   nanometres — so the Skeletons node computes it from the tree in hand rather than spending a

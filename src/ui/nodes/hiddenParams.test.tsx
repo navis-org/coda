@@ -168,9 +168,13 @@ describe('across the registry', () => {
 describe('the hint on the card', () => {
   it('reports the count on a node whose advanced params are all at their defaults', async () => {
     // The general case, and the one the earlier changed-only version stayed silent for.
+    //
+    // Six rather than four, because Find Neurons keeps the four params its filter rows replaced
+    // — readable so that older graphs keep working, `advanced` so they stay off the card, and
+    // deliberately *not* `visibleIf`-hidden, which would drop them from the provenance key.
     render(<App />)
     const card = await cardFor(nodeIdOfType('neuron.findNeurons'))
-    expect(hintOf(card)!.textContent).toBe('… 4 more')
+    expect(hintOf(card)!.textContent).toBe('… 6 more')
   })
 
   it('adds the changed clause when one carries a value somebody chose', async () => {
@@ -189,9 +193,13 @@ describe('the hint on the card', () => {
     expect(skeletons.querySelectorAll('.coda-node__params .param')).toHaveLength(0)
     expect(hintOf(skeletons)!.textContent).toContain('hidden')
 
-    // Find Neurons draws two rows above its four, so those four are genuinely *more*.
+    // Find Neurons draws its filter rows, so its six hidden params are genuinely *more*. Note
+    // what it does **not** draw: it has a body now, so there are no generic `.param` rows to
+    // count — which is the case the next test states abstractly. "More" is true because there is
+    // something else on the card, not because that something is a param row.
     const find = await cardFor(nodeIdOfType('neuron.findNeurons'))
-    expect(find.querySelectorAll('.coda-node__params .param').length).toBeGreaterThan(0)
+    expect(find.querySelectorAll('.coda-node__params .param')).toHaveLength(0)
+    expect(find.querySelector('.filter-body__rows')).toBeTruthy()
     expect(hintOf(find)!.textContent).toContain('more')
   })
 
@@ -227,18 +235,20 @@ describe('the hint on the card', () => {
     const card = await cardFor(find)
 
     act(() => useGraphStore.getState().setParam(find, 'limit', 50))
-    await waitFor(() => expect(hintOf(card)!.textContent).toBe('… 4 more (1 changed)'))
+    await waitFor(() => expect(hintOf(card)!.textContent).toBe('… 6 more (1 changed)'))
 
     act(() => useGraphStore.getState().setParam(find, 'minSize', 10_000))
-    await waitFor(() => expect(hintOf(card)!.textContent).toBe('… 4 more (2 changed)'))
+    await waitFor(() => expect(hintOf(card)!.textContent).toBe('… 6 more (2 changed)'))
 
-    // `Status` is on the card, so changing it is not something the card failed to report.
-    act(() => useGraphStore.getState().setParam(find, 'status', 'Any'))
-    expect(hintOf(card)!.textContent).toBe('… 4 more (2 changed)')
+    // A legacy param counts as changed like any other — it is a real value that still reaches
+    // the query, which is exactly why it is `advanced` rather than hidden.
+    act(() => useGraphStore.getState().setParam(find, 'status', 'Traced'))
+    await waitFor(() => expect(hintOf(card)!.textContent).toBe('… 6 more (3 changed)'))
 
     act(() => useGraphStore.getState().setParam(find, 'limit', 0))
     act(() => useGraphStore.getState().setParam(find, 'minSize', 0))
-    await waitFor(() => expect(hintOf(card)!.textContent).toBe('… 4 more'))
+    act(() => useGraphStore.getState().setParam(find, 'status', ''))
+    await waitFor(() => expect(hintOf(card)!.textContent).toBe('… 6 more'))
   })
 
   it('stays away from a dataset card, whose one hidden param is a nonce', async () => {

@@ -1172,14 +1172,123 @@ to the _first_ output — where "24 nodes · 31 links" is the right thing to say
 body can say "not run yet" in its own words. Not `expandable`: there is nothing here that
 benefits from room, and the routes themselves are a table.
 
+## Find Neurons: a filter builder, not a form
+
+`neuron.findNeurons`, the workhorse entry query. It used to be five fixed boxes — `Type`,
+`Instance`, `Status`, `Min size`, `In ROI` — and those were **neuPrint's fields spelled as a
+card**, because neuPrint was the first backend. It is a list of filter rows now:
+`{field, operator, value}`, combined with AND, with the field list taken from the dataset's own
+discovered neuron schema.
+
+### What the old shape cost, measured in wrong answers
+
+Three of the four backends paid for it, and every one of the failures returned a **count** rather
+than an error — which is the worst kind, because a number looks like an answer.
+
+- **CAVE, `Min size`.** A plain number on the card whatever was wired to it. `CaveSource` read
+  `index.data.size` — a column no CAVE index has — through `Number(undefined ?? 0)`, so any
+  non-zero floor compared 0 against it and dropped **every** row. A node reporting "0 neurons"
+  for a datastack full of them.
+- **CATMAID, `In ROI`.** `volumeList` fills `DatasetInfo.rois` with eighty real neuropils so the
+  ROI Viewer can draw them, and the picker read that list. `findNeurons` never read `req.roi` at
+  all: a populated dropdown that narrowed nothing, whose result was too *large*.
+- **CAVE, `Status`.** The worst of the three, because nobody chose it. The default was `Traced`,
+  it survived into the request whatever the picker offered, and a datastack that publishes no
+  status matched no row. The exported CAVE notebook carried a cell reproducing it and a NOTE
+  explaining the fix — see [export.md](export.md).
+
+`refuseUnfilterable` was written to catch the first two. It could not catch the third, for the
+reason its own comment gave: refusing there would fail a value nobody had chosen.
+
+### Rows make two of those unreachable rather than caught
+
+A row names a field of the dataset's **own** neuron schema, which Coda already discovers per
+dataset — so hemibrain offers `cellBodyFiber`, manc `hemilineage`, a FlyWire datastack
+`super_class` and `cell_sub_class`, CATMAID `annotations` and `cableLength`. `size` on CAVE is not
+a filter that gets refused; it is a field that was never in the dropdown. Same for `status` on
+CATMAID. What is left to refuse is a graph saved against one backend and repointed at another,
+which `validate` reports **on the card before anything runs** — possible here and not in
+`out.table` because a Dataset socket carries its schema at edit time.
+
+Which way that errs is the decision. `tableFilter.ts` *drops* a clause it cannot apply and shows
+more rows, which is right for a tap. Dropping one here sends a broader query to a shared
+production Neo4j and returns neurons nobody asked for — so a row is reported, never dropped.
+
+### Rows are ANDed, and there is no bracketing
+
+The same call `neuronSearch.ts` made for the search box: "every extra operator is something a
+newcomer can get wrong, and the graph already has a Filter node for anything this cannot express."
+Two further reasons apply here and not there. **`NeuronCriteria` has no disjunction at all**, so
+one OR group would force every exported neuPrint notebook to abandon it for a local pandas
+filter — and it is precisely because rows are independent that the exporter can push some down and
+mask the rest. And the thing people reach for OR to say is a *set*, which `is one of` says
+directly and faster: it compiles to an indexed `IN` list where an alternation forces a scan.
+
+### `In ROI` is the one control that is not a row
+
+A region is not a column. In neuPrint a neuron carries one boolean property per ROI it
+innervates, so the test is `n.\`LO(R)\` IS NOT NULL` and the name appears in no schema — a
+schema-driven dropdown cannot offer it. So it stays a named axis, gated on the new
+`capabilities.roiFilter`: whether the source can **answer** a region filter, not whether it
+publishes a region list. Those two came apart on CATMAID, which is the whole reason the flag
+exists rather than a `rois.length > 0` check.
+
+### One term model, three surfaces
+
+A row is not executable. It lowers two ways and the pair is the design: `toTerm` to a `FieldTerm`
+for a source filtering an index it already holds (CAVE, CATMAID, the mock), and `findNeuronsCypher`
+to a `WHERE` clause for neuPrint. `FieldTerm` and its matcher moved down to `data/terms.ts` so
+that both layers can call the same code — `src/nodes` imports `src/data` and never the reverse —
+and it is the same model Explore's search box and the Table viewer's header cells run on.
+
+The friendly operators lower into the **existing** `CompareOp` vocabulary rather than widening it:
+`contains` is an unanchored escaped regex, `matches` an anchored one, `is one of` an anchored
+alternation, `is empty` a negated `.`. So `tableFilter.ts` and both export compilers needed no new
+cases and cannot fall behind a row shape they have never heard of.
+
+**The one thing that had to be added is `ignoreCase`, and it is written out at every construction
+site rather than defaulted.** The two surfaces genuinely disagree: a search box is
+case-insensitive, and Find Neurons is not, because its rows are also compiled to Neo4j's `=~`
+and `=`, which are case-sensitive. That divergence was not new — Explore's `~` had always been
+insensitive where `findNeuronsCypher`'s `=~` was not — it was simply unrepresentable, and so lived
+as an undocumented difference between two files.
+
+### The sharpest edge: negation and nulls across the seam
+
+Coda's rule is that a **missing value satisfies a negated comparison**: `status is not Traced`
+returns the untraced *and* the unlabelled, which is what somebody auditing a dataset for gaps
+means. Cypher does not do that. `NOT (n.status = 'Traced')` over a null `status` evaluates to
+null, and `WHERE` keeps only *true*, so the unlabelled vanish with no error and no count to
+compare against. Every negated row therefore compiles to `(NOT (…) OR n.prop IS NULL)`. Get it
+wrong and one graph returns different neurons on CAVE and on neuPrint, silently.
+
+### A new node filters nothing, and the old params still work
+
+No rows, no status, no limit — an honest "everything in this dataset", uniform across backends.
+The old `Traced` default was a filter nobody chose. Note the cost of the other direction, which is
+real: a fresh node on hemibrain now asks for all 176,422 neurons including untraced fragments.
+
+**The five old params are still declared and still read**, folded into rows by
+`nodes/lib/findNeuronsRows.ts`. A load-time migration was considered and rejected: `addNode` and
+`defaultParams` never go through `deserializeGraph`, so it would have caught saved files and
+missed the six starter graphs, the export golden, and some fifty tests that build the node by
+writing `{ typePattern: 'LC.*' }` directly.
+
+They are `advanced`, **not** `visibleIf`-hidden, and that is invariant 4 rather than taste:
+`normalizeParams` drops a hidden param from the provenance key, so one that still reached
+`evaluate` would let a stale result survive an edit to it. Saved graphs are unaffected by the
+changed `status` default because `defaultParams` wrote the old value into every node when it was
+created. The card shows legacy params as ordinary rows and converts them in the edit that touches
+them — a conversion somebody performed, rather than one that happened to their file on load.
+
 ## IDs from Label: the inverse query
 
 `neuron.idsFromLabel`, added from `Add ▸ Query ▸ IDs from Label`. Every other query node
 narrows a population; this resolves a **named set** — labels in, the neurons carrying them out.
 
 **It is not `Find Neurons` with a different label, and the overlap is worth knowing so nobody
-"simplifies" one into the other.** neuPrint's `=~` anchors at both ends, so `LC4|LC6` typed into
-Find Neurons' Type field already returns exactly those two types. That case is genuinely covered.
+"simplifies" one into the other.** A `type is one of LC4, LC6` row in Find Neurons returns exactly
+those two types, and does it through the same indexed `IN` list. That case is genuinely covered.
 What is not is where the labels actually come from: the `preType` column of a Connectivity Graph result,
 a `groupBy` roll-up, a list pasted out of a paper. None of those can be typed into a regex field,
 and the node that turned a column into an alternation would be this node with an extra step.
@@ -1191,10 +1300,13 @@ for, and a node that silently dropped the text field the moment a wire arrived w
 owns the union, deduplicating with first-occurrence order kept, because that order is what the
 unmatched report is printed in.
 
-**`LabelMatch` is a new member of `FindNeuronsRequest`, not a third pattern field.** The seam had
+**`LabelMatch` is a member of `FindNeuronsRequest`, not a third pattern field.** The seam had
 `typePattern` and `instancePattern`, hardcoded to the only two fields anyone had needed; a lookup
 on `class` or `hemilineage` would have been that same edit twice more. So the request names the
 **property**, which is what lets the field picker read the dataset's _discovered_ neuron schema.
+That reasoning is the seed of the filter rows above — applied once more, to its conclusion — and
+`LabelMatch` survives beside them because this node resolves a named set rather than narrowing a
+population, which is a different question with a different empty state.
 The literal form compiles to `n.\`type\` IN […]`, which neuPrint has indexed — the equivalent
 regex alternation expresses the same set and forces a scan of every `:Neuron` in the dataset.
 

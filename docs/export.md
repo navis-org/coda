@@ -403,18 +403,25 @@ graph Explore Dataset is usually the only thing between the dataset and everythi
 blocked the whole notebook.
 
 Find Neurons is the same frame with pandas filters on it, and the filters are **Coda's semantics
-rather than pandas' defaults**: `coda_match` uses `str.fullmatch` (anchored at both ends,
-case-sensitive — `compileRegex`'s `^(?:…)$`, which is Neo4j's `=~`), where `str.match` anchors
-only the start and would quietly widen every pattern. And a column the datastack does not publish
-**matches no row**, which is `CaveSource`'s own rule rather than an accident, and reachable here
-because a datastack's columns are whatever its annotations carry.
+rather than pandas' defaults**. Both backends now go through `filterMasks` — the compiler
+`out.table`'s header filters already used — so the null rule (a missing value satisfies `!=` and
+nothing else) and per-term case handling arrive written out rather than approximated, and a
+`matches` row is anchored at both ends because that is what Neo4j's `=~` does.
 
-That last rule surfaced a live bug in the app, not in the exporter: **Find Neurons' `status`
-defaults to `Traced` while its picker on a CAVE dataset offers only `Any`** (`statuses: []`), so
-the default survives into the request, `CaveSource` drops every row, and the node answers nothing
-without anybody having chosen a status. The emitted cell reproduces it — it has to agree with the
-canvas — and says so in a NOTE naming the fix, because a notebook that returned nothing silently
-would send the reader to look at their datastack.
+On neuPrint the node **partitions its rows**: what `NeuronCriteria` can carry goes into the query,
+and the rest becomes a mask on the result — same rows, one larger response, said in a NOTE. That
+partition is only ever valid because rows are ANDed; each is independent, so any subset can be
+pushed down and the remainder applied afterwards. One OR group would break it, and is most of why
+there is not one. `NeuronCriteria` has no disjunction at all.
+
+**The row model retired a bug this exporter had recorded rather than caused.** Find Neurons'
+`status` used to default to `Traced` while its picker on a CAVE dataset offered only `Any`
+(`statuses: []`), so the default survived into the request, `CaveSource` dropped every row, and
+the node answered nothing without anybody having chosen a status. The CAVE golden carried a cell
+reproducing it and a NOTE naming the fix, because a notebook that returned nothing silently would
+send the reader to look at their datastack. That cell is simply gone from the golden now: a fresh
+Find Neurons carries no rows, and a status is a field a CAVE datastack does not publish, so there
+is nothing for the card to offer and nothing for the notebook to reproduce.
 
 **`selectionIds` answered `number[]`, which is invariant 8 at a seam nobody had looked at.** A
 stored id is a string of digits and `Number('720575940628857210')` is `…216` — a different neuron,

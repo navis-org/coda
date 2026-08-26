@@ -21,6 +21,12 @@ import { parseIdList } from '../../../nodes/lib/idList'
 import { parseTypedLabels } from '../../../nodes/lib/labelLookup'
 import { rLongVector, rStr, rVector } from '../r'
 import { registerEmitter } from '../registry'
+import type { FieldTerm } from '../../../data/terms'
+import { anchoredPattern, escapeRegex } from '../../../data/terms'
+import { resolveRows } from '../../../data/filterRows'
+import { rowsFromParams } from '../../../nodes/lib/findNeuronsRows'
+import { schemasFromType } from '../../../nodes/lib/datasetParam'
+import { filterPredicates } from './tableFilters'
 import type { EmitContext } from '../types'
 import { neuprintProperty } from '../../../data/neuprint/schema'
 import { neuronIds } from './common'
@@ -125,75 +131,93 @@ registerEmitter('neuron.dataset', (ctx) => {
 // Find Neurons
 // ---------------------------------------------------------------------------
 
+/**
+ * The pattern `neuprint_search` should be handed for one term, or undefined when it cannot be
+ * one.
+ *
+ * `neuprint_search` takes a **regex** against one field, so an `is` row has to be spelled as the
+ * anchored literal it means rather than passed through — `LC4` handed over bare would also match
+ * `LC4b`, which is a different set with nothing to say so. `anchoredPattern` and `escapeRegex`
+ * are the same two the local matcher and the Cypher compiler use, so all three agree by
+ * construction.
+ *
+ * A negated or case-insensitive term is not searchable and becomes a `dplyr` predicate instead;
+ * so does everything that is not a plain text comparison.
+ */
+function searchPattern(term: FieldTerm): string | undefined {
+  if (term.negate || term.ignoreCase) return undefined
+  if (term.op === 'match') return term.value
+  if (term.op === 'eq') return anchoredPattern(escapeRegex(term.value))
+  return undefined
+}
+
 registerEmitter('neuron.findNeurons', (ctx) => {
   const conn = ctx.wired('dataset')
   ctx.library('neuprintr')
   const out = ctx.output('neurons')
 
-  const typePattern = String(ctx.params.typePattern ?? '')
-  const instancePattern = String(ctx.params.instancePattern ?? '')
-  const status = String(ctx.params.status ?? '')
+  const schema = schemasFromType(ctx.inputType('dataset')).neurons
+  // `resolveRows` lowers unchecked when the schema has not arrived, so this reads the same in
+  // both emitters rather than each carrying its own unknown-is-not-missing branch.
+  const resolved = resolveRows(schema, rowsFromParams(ctx.params))
   const roi = String(ctx.params.roi ?? '')
-  const minSize = Number(ctx.params.minSize ?? 0)
   const limit = Number(ctx.params.limit ?? 0)
 
-  const lines: string[] = []
+  const lines: string[] = resolved.problems.flatMap((p) => ctx.note(p.message))
 
   /*
-   * `neuprint_search` takes one field and one pattern, where Coda's node narrows on several at
-   * once. So the search runs on whichever pattern is set and the rest become filters on the
-   * returned metadata — the same rows, one larger response, and stated so nobody reads the
-   * absence of a `status=` argument as the status having been ignored.
+   * `neuprint_search` takes one field and one pattern, where Coda's node narrows on several rows
+   * at once. So the search runs on whichever row can be one — type first, then instance — and
+   * every other row becomes a filter on the returned metadata. The same rows, one larger
+   * response, and stated so that nobody reads the absence of a `status=` argument as the status
+   * having been ignored.
    */
-  ctx.helper('coda_neurons')
-  if (typePattern) {
-    lines.push(
-      `${out} <- neuprint_search(`,
-      `  ${rStr(typePattern)},`,
-      `  field = "type",`,
-      `  meta = TRUE,`,
-      `  conn = ${conn}`,
-      `) |> coda_neurons()`,
-    )
-  } else if (instancePattern) {
-    lines.push(
-      `${out} <- neuprint_search(`,
-      `  ${rStr(instancePattern)},`,
-      `  field = "instance",`,
-      `  meta = TRUE,`,
-      `  conn = ${conn}`,
-      `) |> coda_neurons()`,
-    )
-  } else {
+  const searchable = resolved.terms.findIndex(
+    (t) => (t.field === 'type' || t.field === 'instance') && searchPattern(t) !== undefined,
+  )
+  if (searchable === -1) {
     return ctx.todo(
-      'This Find Neurons has no type or instance pattern. neuprint_search needs one — an ' +
-        'unbounded query against a shared production Neo4j is not something to generate.',
+      'This Find Neurons has no type or instance filter that neuprint_search can express. It ' +
+        'needs one — an unbounded query against a shared production Neo4j is not something to ' +
+        'generate.',
     )
   }
 
-  const filters: string[] = []
-  if (instancePattern && typePattern) filters.push(`grepl(${rStr(instancePattern)}, instance)`)
-  if (status) filters.push(`status == ${rStr(status)}`)
+  const search = resolved.terms[searchable]!
+  const rest = resolved.terms.filter((_, i) => i !== searchable)
+
+  ctx.helper('coda_neurons')
+  lines.push(
+    `${out} <- neuprint_search(`,
+    `  ${rStr(searchPattern(search)!)},`,
+    `  field = ${rStr(search.field)},`,
+    `  meta = TRUE,`,
+    `  conn = ${conn}`,
+    `) |> coda_neurons()`,
+  )
+
   // An ROI restriction is a different question — `neuprint_bodies_in_ROI` answers it — so it
   // is reported rather than silently dropped from a search that cannot express it.
-  const roiNote = roi
-    ? ctx.note(
+  if (roi) {
+    lines.push(
+      ...ctx.note(
         `Coda restricts this to neurons with synapses in ${roi}. neuprint_search cannot ` +
           'express that; neuprint_bodies_in_ROI() is how to intersect the result.',
-      )
-    : []
-  if (minSize > 0) filters.push(`size >= ${minSize}`)
+      ),
+    )
+  }
 
-  lines.push(...roiNote)
-
-  if (filters.length > 0) {
+  if (rest.length > 0) {
     ctx.library('dplyr')
     lines.push(
       ...ctx.note(
-        "neuprint_search narrows on one field, so Coda's other criteria are applied to the " +
+        "neuprint_search narrows on one field, so Coda's other filters are applied to the " +
           'result rather than in the query. Same rows, one larger response.',
       ),
-      `${out} <- ${out} |> filter(${filters.join(', ')})`,
+      // `filter()` ANDs its arguments, which is what a list of rows means — and it is the same
+      // compiler `out.table`'s header filters use, so the null rule and the per-term case
+      // handling arrive written out rather than approximated.
+      `${out} <- ${out} |> filter(${filterPredicates(rest, schema).join(', ')})`,
     )
   }
   if (limit > 0) {

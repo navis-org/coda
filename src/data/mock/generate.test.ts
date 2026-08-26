@@ -76,7 +76,7 @@ describe('MockSource', () => {
   it('anchors type regexes the way Neo4j =~ does', async () => {
     const table = await source.findNeurons({
       datasetId: 'optic-lobe-mini',
-      typePattern: 'LC.*',
+      rows: [{ field: 'type', op: 'matches', values: ['LC.*'] }],
     })
     const types = new Set(table.data.type as string[])
     expect(types).toEqual(new Set(['LC4', 'LC6', 'LC9', 'LC11']))
@@ -85,7 +85,7 @@ describe('MockSource', () => {
   })
 
   it('returns the canonical neuron schema', async () => {
-    const table = await source.findNeurons({ datasetId: 'optic-lobe-mini', typePattern: 'LC4' })
+    const table = await source.findNeurons({ datasetId: 'optic-lobe-mini', rows: [{ field: 'type', op: 'matches', values: ['LC4'] }] })
     expect(table.kind).toBe('neurons')
     expect(table.schema.columns.map((c) => c.name)).toEqual([
       'neuronId',
@@ -102,7 +102,7 @@ describe('MockSource', () => {
     const all = await source.findNeurons({ datasetId: 'optic-lobe-mini' })
     const traced = await source.findNeurons({
       datasetId: 'optic-lobe-mini',
-      statuses: ['Traced'],
+      rows: [{ field: 'status', op: 'is', values: ['Traced'] }],
     })
     expect(traced.length).toBeLessThan(all.length)
     expect(new Set(traced.data.status as string[])).toEqual(new Set(['Traced']))
@@ -114,7 +114,7 @@ describe('MockSource', () => {
   })
 
   it('fetches downstream partners sorted by weight', async () => {
-    const lc4 = await source.findNeurons({ datasetId: 'optic-lobe-mini', typePattern: 'LC4' })
+    const lc4 = await source.findNeurons({ datasetId: 'optic-lobe-mini', rows: [{ field: 'type', op: 'matches', values: ['LC4'] }] })
     const conn = await source.fetchConnectivity({
       datasetId: 'optic-lobe-mini',
       neuronIds: lc4.data.neuronId!.map(String),
@@ -130,7 +130,7 @@ describe('MockSource', () => {
   })
 
   it('honours minWeight', async () => {
-    const lc4 = await source.findNeurons({ datasetId: 'optic-lobe-mini', typePattern: 'LC4' })
+    const lc4 = await source.findNeurons({ datasetId: 'optic-lobe-mini', rows: [{ field: 'type', op: 'matches', values: ['LC4'] }] })
     const conn = await source.fetchConnectivity({
       datasetId: 'optic-lobe-mini',
       neuronIds: lc4.data.neuronId!.map(String),
@@ -141,8 +141,8 @@ describe('MockSource', () => {
   })
 
   it('builds a type-level adjacency matrix', async () => {
-    const lc = await source.findNeurons({ datasetId: 'optic-lobe-mini', typePattern: 'LC.*' })
-    const dn = await source.findNeurons({ datasetId: 'optic-lobe-mini', typePattern: 'DNp.*' })
+    const lc = await source.findNeurons({ datasetId: 'optic-lobe-mini', rows: [{ field: 'type', op: 'matches', values: ['LC.*'] }] })
+    const dn = await source.findNeurons({ datasetId: 'optic-lobe-mini', rows: [{ field: 'type', op: 'matches', values: ['DNp.*'] }] })
     const m = await source.fetchAdjacency({
       datasetId: 'optic-lobe-mini',
       sourceIds: lc.data.neuronId!.map(String),
@@ -165,7 +165,21 @@ describe('MockSource', () => {
 
   it('reports an invalid regex instead of matching nothing', async () => {
     await expect(
-      source.findNeurons({ datasetId: 'optic-lobe-mini', typePattern: '[' }),
-    ).rejects.toThrow(/Invalid type pattern/)
+      source.findNeurons({
+        datasetId: 'optic-lobe-mini',
+        rows: [{ field: 'type', op: 'matches', values: ['['] }],
+      }),
+    ).rejects.toThrow(/Invalid regex for "type"/)
+  })
+
+  it('refuses a row naming a field this dataset does not have', async () => {
+    // `prepareFieldTerms` would mark it unknown and match no row, which answers a query with
+    // nothing at all — indistinguishable from a dataset that genuinely holds no such neurons.
+    await expect(
+      source.findNeurons({
+        datasetId: 'optic-lobe-mini',
+        rows: [{ field: 'hemilineage', op: 'is', values: ['x'] }],
+      }),
+    ).rejects.toThrow(/no "hemilineage"/)
   })
 })

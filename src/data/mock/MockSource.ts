@@ -19,7 +19,7 @@ import type {
 } from '../../core/values'
 import { numericIds } from '../../core/ids'
 import type { CellValue } from '../../core/values'
-import { boundsOf, cableLength, makeMatrix, tableFromRows } from '../../core/values'
+import { boundsOf, cableLength, makeMatrix, selectRows, tableFromRows } from '../../core/values'
 import { geometryFrame } from '../transforms/spaces'
 import type {
   AdjacencyRequest,
@@ -49,7 +49,8 @@ import {
   throwIfAborted,
 } from '../source'
 import { loadCachedTable, neuronIndexKey } from '../neuronIndex'
-import { compileLabelMatch, compileRegex } from '../neuronFilter'
+import { compileLabelMatch, preparedRows } from '../neuronFilter'
+import { fieldTermsMatch } from '../terms'
 import type { MockConnection, MockConnectome } from './generate'
 import { getConnectome, mockDatasetIds, mockDatasetMeta } from './generate'
 import {
@@ -87,6 +88,7 @@ export class MockSource implements DataSource {
     // the mock behind.
     roiCounts: true,
     roiSummary: true,
+    roiFilter: true,
     roiMeshes: true,
   }
   readonly schemas: SourceSchemas = CANONICAL_SCHEMAS
@@ -143,43 +145,24 @@ export class MockSource implements DataSource {
     await delay(this.latencyMs, req.signal)
     const connectome = this.require(req.datasetId)
 
-    const typeRe = compileRegex(req.typePattern, 'type')
-    const instanceRe = compileRegex(req.instancePattern, 'instance')
-    const labelTest = compileLabelMatch(req.labels)
-    // Present-and-empty means no neurons, matching the seam's documented rule and the Cypher
-    // builder's `IN []` — a mock that read it as "no filter" would let a node pass its tests
-    // here and return the whole dataset against the real source.
-    const wantedIds = req.neuronIds ? new Set(numericIds(req.neuronIds)) : undefined
-    const statuses = req.statuses?.length ? new Set(req.statuses) : undefined
-    const minSize = req.minSize ?? 0
-
-    let roiBodies: Set<number> | undefined
-    if (req.roi) {
-      roiBodies = new Set(
-        connectome.roiCounts
-          .filter((rc) => rc.roi === req.roi && rc.pre + rc.post > 0)
-          .map((rc) => rc.neuronId),
-      )
-    }
-
-    const matched = connectome.neurons.filter((n) => {
-      if (typeRe && !typeRe.test(n.type)) return false
-      if (instanceRe && !instanceRe.test(n.instance)) return false
-      if (labelTest && !labelTest(n as unknown as Record<string, unknown>)) return false
-      if (wantedIds && !wantedIds.has(n.neuronId)) return false
-      if (statuses && !statuses.has(n.status)) return false
-      if (n.size < minSize) return false
-      if (roiBodies && !roiBodies.has(n.neuronId)) return false
-      return true
-    })
-
-    // Stable order: by type then neuronId, so results are reproducible run to run.
-    matched.sort((a, b) => a.type.localeCompare(b.type) || a.neuronId - b.neuronId)
-    const limited = req.limit && req.limit > 0 ? matched.slice(0, req.limit) : matched
-
-    return tableFromRows(
+    /*
+     * The whole dataset as a table first, then row indices out of it.
+     *
+     * Built up front rather than filtered as objects because `preparedRows` hoists one column
+     * array per term and addresses rows by index — the same shape `CaveSource` and
+     * `CatmaidSource` use, which is what lets all three share one matcher instead of three
+     * hand-rolled loops that agree today. A mock connectome is small enough that materialising
+     * it costs nothing worth measuring.
+     *
+     * Sorted before the table is built, so an index means the same row every run: by type then
+     * neuronId, which is the order this source has always returned.
+     */
+    const sorted = [...connectome.neurons].sort(
+      (a, b) => a.type.localeCompare(b.type) || a.neuronId - b.neuronId,
+    )
+    const all = tableFromRows(
       this.schemas.neurons,
-      limited.map((n) => ({
+      sorted.map((n) => ({
         neuronId: n.neuronId,
         type: n.type,
         instance: n.instance,
@@ -190,6 +173,35 @@ export class MockSource implements DataSource {
       })),
       'neurons',
     )
+
+    const prepared = preparedRows(all, req, 'This mock dataset')
+    const labelTest = compileLabelMatch(req.labels)
+    // Present-and-empty means no neurons, matching the seam's documented rule and the Cypher
+    // builder's `IN []` — a mock that read it as "no filter" would let a node pass its tests
+    // here and return the whole dataset against the real source.
+    const wantedIds = req.neuronIds ? new Set(numericIds(req.neuronIds)) : undefined
+
+    let roiBodies: Set<number> | undefined
+    if (req.roi) {
+      roiBodies = new Set(
+        connectome.roiCounts
+          .filter((rc) => rc.roi === req.roi && rc.pre + rc.post > 0)
+          .map((rc) => rc.neuronId),
+      )
+    }
+
+    const matched: number[] = []
+    for (let i = 0; i < sorted.length; i++) {
+      const n = sorted[i]!
+      if (wantedIds && !wantedIds.has(n.neuronId)) continue
+      if (roiBodies && !roiBodies.has(n.neuronId)) continue
+      if (labelTest && !labelTest(n as unknown as Record<string, unknown>)) continue
+      if (!fieldTermsMatch(prepared, i)) continue
+      matched.push(i)
+      if (req.limit && req.limit > 0 && matched.length >= req.limit) break
+    }
+
+    return selectRows(all, matched)
   }
 
   /**

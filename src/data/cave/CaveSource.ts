@@ -58,7 +58,8 @@ import type { NeuronIndexRequest } from '../neuronIndex'
 import type { Edge } from '../connectivity'
 import { matrixFromEdges, typesOf } from '../connectivity'
 import { loadCachedTable, neuronIndexKey } from '../neuronIndex'
-import { compileLabelMatch, compileRegex, refuseUnfilterable } from '../neuronFilter'
+import { compileLabelMatch, preparedRows, refuseUnfilterableRoi } from '../neuronFilter'
+import { fieldTermsMatch } from '../terms'
 import { mapWithConcurrency } from '../concurrency'
 import type { GrapheneMeshSource } from './meshes'
 import {
@@ -142,6 +143,8 @@ const CAVE_CAPABILITIES: SourceCapabilities = {
    */
   viewerScene: true,
   roiSummary: false,
+  // A CAVE datastack publishes no regions at all.
+  roiFilter: false,
   roiMeshes: false,
 }
 
@@ -610,41 +613,35 @@ export class CaveSource implements DataSource {
       ...(req.signal ? { signal: req.signal } : {}),
     })
 
-    const typeRe = compileRegex(req.typePattern, 'type')
-    const instanceRe = compileRegex(req.instancePattern, 'instance')
+    const prepared = preparedRows(index, req, 'This CAVE datastack')
     const labelTest = compileLabelMatch(req.labels)
     // Present-and-empty means no neurons, never "no filter" — the seam's documented rule, and
     // the one an unconfigured node depends on.
     const wantedIds = req.neuronIds ? new Set<string>(req.neuronIds) : undefined
-    const statuses = req.statuses?.length ? new Set(req.statuses) : undefined
 
     /*
-     * Two filters a CAVE datastack has nothing to answer with, refused before a row is read.
+     * The one filter a CAVE datastack has nothing to answer with, refused before a row is read.
      *
      * `roi` is unreachable from the UI here — the picker is fed from `DatasetInfo.rois`, which is
-     * empty — so this is what a graph saved against another backend meets. `minSize` is not:
-     * **Min size** is a plain number on the card whatever the dataset, and it used to be applied
-     * per row against `index.data.size`, a column no CAVE index has. `Number(undefined ?? 0)` is
-     * 0, so every neuron failed and the node answered nothing at all.
+     * empty — so this is what a graph saved against another backend meets. `minSize` and `status`
+     * used to need the same treatment and no longer do: they are rows now, and a row can only
+     * name a column this datastack's own schema publishes. The failure that motivated it was
+     * `Number(index.data.size?.[i] ?? 0)` against a column no CAVE index has, which put every
+     * neuron below any non-zero floor and answered nothing at all.
      */
-    refuseUnfilterable(req, { size: false, roi: false }, 'This CAVE datastack')
+    refuseUnfilterableRoi(req, 'This CAVE datastack')
 
     /*
-     * Columns hoisted, and a row record built only where one is genuinely needed. Every filter
-     * but `labels` reads a single cell by a fixed name, so materialising the whole row first cost
-     * 139,255 objects per query — discarded, overwhelmingly, by the very next line.
+     * Columns are hoisted by `prepareFieldTerms`, and a row record is built only for `labels` —
+     * the one filter that genuinely needs a whole row. Materialising every row first cost 139,255
+     * objects per query, discarded overwhelmingly by the very next line.
      */
     const ids = index.data[ID_COLUMN_NAME] ?? []
-    const types = index.data.type
-    const instances = index.data.instance
-    const statusValues = index.data.status
 
     const matched: number[] = []
     for (let i = 0; i < index.length; i++) {
       if (wantedIds && !wantedIds.has(String(ids[i]))) continue
-      if (typeRe && !typeRe.test(String(types?.[i] ?? ''))) continue
-      if (instanceRe && !instanceRe.test(String(instances?.[i] ?? ''))) continue
-      if (statuses && !statuses.has(String(statusValues?.[i] ?? ''))) continue
+      if (!fieldTermsMatch(prepared, i)) continue
       if (labelTest && !labelTest(getRow(index, i))) continue
       matched.push(i)
     }

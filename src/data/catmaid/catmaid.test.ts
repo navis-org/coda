@@ -522,38 +522,50 @@ describe('what a CATMAID dataset says about itself', () => {
   })
 
   /*
-   * The other half, and the half that matters: a node's `status` default survives into the
-   * request whatever the picker offers, so a source publishing no statuses must also *ignore*
-   * the parameter. Filtering on it drops every row for a value nobody chose — which is live on
-   * CAVE today, and is not repeated here.
+   * The other half, and it has changed shape rather than gone away.
+   *
+   * A status filter used to arrive here as a *named field of the request*, carrying a node
+   * default of `Traced` that nobody chose — so this source had to ignore it, because filtering
+   * would have dropped every row. It is a filter row now, and CATMAID publishes no `status`, so
+   * the field is not in the schema, not in the dropdown, and not something a new node can send.
+   * What can still arrive is a graph saved against neuPrint and repointed here, and that is a
+   * refusal naming the field rather than a silently unnarrowed answer.
    */
-  it('ignores a status filter rather than dropping every row', async () => {
+  it('refuses a status filter rather than ignoring it or dropping every row', async () => {
     setInstances([{ server: 'catmaid.example.org', token: 't' }])
     stubFetch(defaultRoutes)
-    const all = await source().findNeurons({ datasetId: '1' })
-    const filtered = await source().findNeurons({ datasetId: '1', statuses: ['Traced'] })
-    expect(all.length).toBeGreaterThan(0)
-    expect(filtered.length).toBe(all.length)
+    expect((await source().findNeurons({ datasetId: '1' })).length).toBeGreaterThan(0)
+    await expect(
+      source().findNeurons({
+        datasetId: '1',
+        rows: [{ field: 'status', op: 'is', values: ['Traced'] }],
+      }),
+    ).rejects.toThrow(/no "status"/)
   })
 
   /*
-   * The opposite call to `statuses`, and the difference is that somebody chose it. `volumeList`
-   * fills `DatasetInfo.rois` with eighty real neuropils so the ROIs viewer can draw them — which
-   * also populates Find Neurons' **In ROI** — and `findNeurons` had no way to honour it. Ignoring
-   * a region somebody picked returns a result that is too *large* and looks exactly like a
-   * correct one; `Min size` is the same, since CATMAID measures a neuron in nodes and cable
-   * rather than voxels.
+   * A region is the one filter that cannot become a row, because it is not a column in any
+   * schema. `volumeList` fills `DatasetInfo.rois` with eighty real neuropils so the ROIs viewer
+   * can draw them — which also used to populate Find Neurons' **In ROI** — and `findNeurons` has
+   * no way to honour it. Ignoring a region somebody picked returns a result that is too *large*
+   * and looks exactly like a correct one, so it is refused; the card no longer offers it at all,
+   * because `capabilities.roiFilter` is what the picker reads now rather than the list.
    */
-  it('refuses a region or size filter rather than quietly not applying it', async () => {
+  it('refuses a region filter rather than quietly not applying it', async () => {
     setInstances([{ server: 'catmaid.example.org', token: 't' }])
     stubFetch(defaultRoutes)
     await expect(source().findNeurons({ datasetId: '1', roi: 'AL_R' })).rejects.toThrow(
       /In ROI/,
     )
-    await expect(source().findNeurons({ datasetId: '1', minSize: 1000 })).rejects.toThrow(
-      /Min size/,
-    )
-    // Neither is sent unless it was set: both default to a value the node drops.
+    // A size filter cannot even be built: CATMAID measures a neuron in nodes and cable rather
+    // than voxels, so there is no `size` in its schema for a row to name.
+    await expect(
+      source().findNeurons({
+        datasetId: '1',
+        rows: [{ field: 'size', op: 'ge', values: ['1000'] }],
+      }),
+    ).rejects.toThrow(/no "size"/)
+    // Not sent unless it was set: the node drops its default.
     expect((await source().findNeurons({ datasetId: '1' })).length).toBeGreaterThan(0)
   })
 

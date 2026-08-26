@@ -45,23 +45,20 @@
  */
 
 import type { ColumnSchema, TableSchema } from '../../core/types'
-import { isNumericDType } from '../../core/types'
-import type { CellValue, ColumnData, TableValue } from '../../core/values'
-
-export type CompareOp = 'eq' | 'ne' | 'gt' | 'lt' | 'ge' | 'le' | 'match'
+import type { TableValue } from '../../core/values'
+/*
+ * The term model itself lives in `src/data/terms.ts`, because the sources that filter a neuron
+ * index locally need the same matcher and `src/data` cannot import `src/nodes`. This file keeps
+ * the *language* — the tokenizer, the fuzzy fallback, the ranking and the completion — and
+ * builds terms for it. Imported rather than re-exported: a second spelling of `FieldTerm` is
+ * how the two halves would drift back apart.
+ */
+import type { CompareOp, FieldTerm } from '../../data/terms'
+import { fieldTermsMatch, prepareFieldTerms, resolveColumn } from '../../data/terms'
 
 export interface TextTerm {
   kind: 'text'
   /** Already lowercased. */
-  value: string
-  negate: boolean
-}
-
-export interface FieldTerm {
-  kind: 'field'
-  /** As typed; resolved against the schema case-insensitively at match time. */
-  field: string
-  op: CompareOp
   value: string
   negate: boolean
 }
@@ -209,7 +206,16 @@ export function parseSearch(text: string): ParsedSearch {
         continue
       }
     }
-    terms.push({ kind: 'field', field: split.field, op: split.op, value, negate })
+    // Insensitive, which is what a search box has always been here. Explicit rather than
+    // defaulted — see `FieldTerm.ignoreCase`.
+    terms.push({
+      kind: 'field',
+      field: split.field,
+      op: split.op,
+      value,
+      negate,
+      ignoreCase: true,
+    })
   }
 
   return { terms, errors }
@@ -331,118 +337,6 @@ export function isSubsequence(needle: string, hay: string): boolean {
     }
   }
   return false
-}
-
-function resolveColumn(table: TableValue, field: string): ColumnSchema | undefined {
-  const lower = field.toLowerCase()
-  return table.schema.columns.find((c) => c.name.toLowerCase() === lower)
-}
-
-/**
- * Compare one cell against one field term.
- *
- * A missing value satisfies `!=` and nothing else. So `status!=Traced` returns the untraced
- * *and* the unlabelled, which is what someone auditing a dataset for gaps is asking for; SQL's
- * three-valued logic would drop the unlabelled from both sides of the comparison and never say
- * it had. Every other operator, `==` included, treats null as "no value to compare".
- */
-function cellMatches(
-  cell: CellValue,
-  term: FieldTerm,
-  numeric: boolean,
-  regex?: RegExp,
-): boolean {
-  if (cell === null || cell === undefined) return term.op === 'ne'
-
-  if (term.op === 'match') return regex ? regex.test(String(cell)) : false
-
-  if (numeric) {
-    const left = typeof cell === 'number' ? cell : Number(cell)
-    const right = Number(term.value)
-    if (!Number.isFinite(left) || !Number.isFinite(right)) return false
-    switch (term.op) {
-      case 'eq':
-        return left === right
-      case 'ne':
-        return left !== right
-      case 'gt':
-        return left > right
-      case 'lt':
-        return left < right
-      case 'ge':
-        return left >= right
-      case 'le':
-        return left <= right
-    }
-  }
-
-  const left = String(cell).toLowerCase()
-  const right = term.value.toLowerCase()
-  switch (term.op) {
-    case 'eq':
-      return left === right
-    case 'ne':
-      return left !== right
-    // Lexicographic, so `type>M` is at least meaningful rather than silently false.
-    case 'gt':
-      return left > right
-    case 'lt':
-      return left < right
-    case 'ge':
-      return left >= right
-    case 'le':
-      return left <= right
-  }
-}
-
-/**
- * One field term with everything that does not vary by row already resolved.
- *
- * Split out from `runSearch` because the table viewer's per-column filters are field terms
- * and nothing else, so they get to reuse the *semantics* — the null rule, numeric-versus-
- * lexicographic comparison, case-insensitive regex — rather than agreeing with them. Two
- * loops over one matcher; the alternative is two matchers that drift on the first null.
- *
- * Precondition: a `match` term's value must already compile, which `parseSearch` and
- * `resolveFilters` both guarantee by dropping the ones that do not. Constructing it here
- * rather than per row is most of what makes a 165k-row scan affordable.
- */
-export interface PreparedFieldTerm {
-  term: FieldTerm
-  data: ColumnData | undefined
-  numeric: boolean
-  regex: RegExp | undefined
-  /** The column is not in this table, so nothing can match it. */
-  unknown: boolean
-}
-
-export function prepareFieldTerms(
-  table: TableValue,
-  terms: readonly FieldTerm[],
-): PreparedFieldTerm[] {
-  return terms.map((term) => {
-    const column = resolveColumn(table, term.field)
-    const data = column ? table.data[column.name] : undefined
-    return {
-      term,
-      data,
-      numeric: column ? isNumericDType(column.dtype) : false,
-      regex: term.op === 'match' ? new RegExp(term.value, 'i') : undefined,
-      // An unknown field cannot match anything; `validateSearch` is what tells the user why.
-      unknown: !column || !data,
-    }
-  })
-}
-
-/** Whether one row satisfies every prepared term. */
-export function fieldTermsMatch(prepared: readonly PreparedFieldTerm[], row: number): boolean {
-  for (const entry of prepared) {
-    const matched = entry.unknown
-      ? false
-      : cellMatches(entry.data![row] ?? null, entry.term, entry.numeric, entry.regex)
-    if (matched === entry.term.negate) return false
-  }
-  return true
 }
 
 export interface SearchResult {
@@ -693,7 +587,7 @@ export function completeSearch(
     }
   }
 
-  const column = resolveColumn(table, split.field)
+  const column = resolveColumn(table.schema, split.field)
   if (!column || column.dtype !== 'str') return empty
 
   const values = rankStrings(

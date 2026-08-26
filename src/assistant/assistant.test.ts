@@ -99,9 +99,12 @@ describe('applying a plan', () => {
 
     const find = nodeFor(result, 'find')
     expect(find.params.typePattern).toBe('LC.*')
-    // Untouched params keep the definition's default rather than arriving undefined.
-    expect(find.params.status).toBe('Traced')
+    // Untouched params keep the definition's default rather than arriving undefined. Find
+    // Neurons' `status` default is empty now — a fresh node filters nothing — so `limit` and
+    // `filters` are what say the merge happened.
+    expect(find.params.status).toBe('')
     expect(find.params.limit).toBe(0)
+    expect(find.params.filters).toEqual([])
 
     const chart = nodeFor(result, 'chart')
     expect(chart.title).toBe('Partners')

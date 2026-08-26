@@ -52,7 +52,10 @@ const card = (id: string) => {
   return el
 }
 const lockButton = () => button('Lock canvas')
-const addButton = () => screen.getByRole('button', { name: /\+ Add/ }) as HTMLButtonElement
+// Named precisely rather than by prefix: a node card can carry its own "+ Add" button —
+// Rename's rows, Find Neurons' filters — and `/\+ Add/` matches those too.
+const addButton = () =>
+  screen.getByRole('button', { name: /\+ Add Tab/ }) as HTMLButtonElement
 const browser = () => screen.queryByRole('dialog', { name: 'Add a node' })
 const lock = () => act(() => useGraphStore.setState({ locked: true }))
 

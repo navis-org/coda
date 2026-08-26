@@ -503,15 +503,15 @@ Everything below runs locally.
 ```{r find-neurons}
 # ── Find Neurons ──
 find_neurons <- neuprint_search(
-  "LC.*",
+  "^(?:LC.*)$",
   field = "type",
   meta = TRUE,
   conn = hemibrain_neuprint
 ) |> coda_neurons()
-# NOTE: neuprint_search narrows on one field, so Coda's other criteria are
+# NOTE: neuprint_search narrows on one field, so Coda's other filters are
 # applied to the result rather than in the query. Same rows, one larger
 # response.
-find_neurons <- find_neurons |> filter(status == "Traced", size >= 50000)
+find_neurons <- find_neurons |> filter((!is.na(.data[["status"]]) & as.character(.data[["status"]]) == "Traced"), (!is.na(.data[["size"]]) & .data[["size"]] >= 50000))
 find_neurons <- find_neurons |> head(200)
 ```
 

@@ -6287,7 +6287,10 @@ details[open] > summary.tile__label {
  * line are the same object — and adds the rows and the Add button.
  * ------------------------------------------------------------------------- */
 
-.rename-body__rows {
+/* Shared with `.filter-body__rows`: a filter row is the same kind of object a rename row is, and
+ * two identical declaration blocks are how the two stop looking alike. */
+.rename-body__rows,
+.filter-body__rows {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -6306,7 +6309,8 @@ details[open] > summary.tile__label {
   gap: 4px;
   min-width: 0;
 }
-.rename-body__arrow {
+.rename-body__arrow,
+.filter-body__novalue {
   font-size: 10px;
   color: var(--text-muted);
 }
@@ -7067,4 +7071,43 @@ details[open] > summary.tile__label {
 .help-doc__body > .markdown__heading,
 .help-doc__body > .markdown__callout {
   max-width: 70ch;
+}
+
+/* ---------------------------------------------------------------------------
+ * Find Neurons card
+ *
+ * Shares `.list-body` and Rename's remove/add buttons — the padding, the foot line and the ✕
+ * are the same objects, and a filter row is the same kind of thing a rename row is.
+ * ------------------------------------------------------------------------- */
+
+/*
+ * One line per filter, because a filter is one act. `minmax(0, …)` on all three tracks rather
+ * than `1fr`, or a long field name sets its track's minimum to its own content width and pushes
+ * the ✕ off the card — the failure `.rename-body__row` records, on a row with one more control.
+ * The operator track is the *widest* of the three, which is the opposite of the guess: a field
+ * name and a value are unbounded but usually short, where the operator list has a fixed longest
+ * member — `does not contain` — and truncating it to `does not conta…` loses the word that says
+ * which way the condition runs. Measured in a browser at 360px: an equal split clipped
+ * `matches regex` to `matches reg…`, which jsdom cannot see.
+ */
+.filter-body__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+/*
+ * A row naming a field this dataset does not have. Marked rather than removed: substituting a
+ * different field would be a different question, and dropping it would send a broader query to
+ * a shared production server — so it stays, visibly, until somebody decides.
+ */
+.filter-body__row--broken select:first-child {
+  border-color: var(--danger);
+}
+/* Where the value field would be, for an operator that takes none. Keeps the ✕ column aligned
+ * down the card rather than jumping left on an "is empty" row. Shares Rename's arrow styling —
+ * both are a muted glyph holding a grid track open. */
+.filter-body__novalue {
+  text-align: center;
 }

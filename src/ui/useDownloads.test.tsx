@@ -85,7 +85,11 @@ async function open(params: Record<string, unknown> = {}) {
     useGraphStore.getState().loadGraph(graphWith(params))
   })
   return await waitFor(() => {
-    const body = document.querySelector('.list-body')
+    // Via its own button rather than by taking the first `.list-body` on the page: several cards
+    // share that class — Find Neurons is one, and it is upstream of the Download in this graph,
+    // so it comes first in the DOM. `renameBody.test.tsx` and `selectOneBody.test.tsx` reach
+    // theirs the same way.
+    const body = document.querySelector('.download-body__go')?.closest('.list-body')
     if (!body) throw new Error('no Download body rendered')
     return body as HTMLElement
   })

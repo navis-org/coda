@@ -33,7 +33,29 @@ export const DODGE_GAP = 48
  * synchronous and so cannot await the engine. Here because this module already owns the
  * arithmetic about where a block of nodes sits.
  */
-export const COL_WIDTH = 288
+/*
+ * How far apart a hand-placed graph puts its columns.
+ *
+ * 288 was 232 (the default card) plus a 56px gap, and it stopped being enough the moment a node
+ * brought its own body: `NODE_BODIES` sets 360 for Find Neurons and 320 for Rename Columns, so a
+ * hand-placed graph drew the next column *underneath* the previous card. Measured in a browser on
+ * the first starter graph, which jsdom cannot show: Find Neurons spanned 262→542 while
+ * Connectivity Graph began at 486.
+ *
+ * **A constant cannot be right for every graph, so what is checked is the graphs.** Node widths
+ * are declared in two places — `NodeDefinition.defaultSize`, which `resolveSize` already reads,
+ * and `NODE_BODIES[type].width`, which lives in `src/ui` where this module may not look — and the
+ * widest of either (`out.rois` at 620, Explore at 520) exceeds this. Those do not overlap in the
+ * bundled graphs, but only because a viewer ends a chain and Explore appears in none of them,
+ * which is an accident of those graphs rather than a property of this number. So
+ * `placeGuards.test.ts` asserts the thing that actually matters — that no bundled graph puts one
+ * card on top of another — and this figure is what makes that true today.
+ *
+ * The fix that would retire the guesswork is one width declaration both layers can read: folding
+ * `NODE_BODIES[type].width` onto the node definition would let `place` advance by each column's
+ * real widest node. That is a change to the definition shape, and is left alone here.
+ */
+export const COL_WIDTH = 416
 export const ROW_HEIGHT = 190
 /** Where the first node of a hand-placed graph lands on an empty canvas. */
 export const GRID_ORIGIN = { x: 60, y: 80 } as const

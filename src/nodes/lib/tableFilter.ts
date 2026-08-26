@@ -65,8 +65,9 @@ import { findColumn, isNumericDType } from '../../core/types'
 import type { TableValue } from '../../core/values'
 import { selectRows } from '../../core/values'
 import { decodePairs, encodePair } from './paramPairs'
-import type { CompareOp, FieldTerm } from './neuronSearch'
-import { fieldTermsMatch, leadingOperator, prepareFieldTerms, unquote } from './neuronSearch'
+import type { CompareOp, FieldTerm } from '../../data/terms'
+import { escapeRegex, fieldTermsMatch, prepareFieldTerms } from '../../data/terms'
+import { leadingOperator, unquote } from './neuronSearch'
 
 /** One column's filter, as it is stored and as the header cell shows it. */
 export interface FilterClause {
@@ -164,15 +165,22 @@ export function parseExpression(text: string): ParsedExpression | undefined {
   return { op: split.op, value, negate }
 }
 
-/** Escape a literal so it can ride in a regex — what makes a bare `LC4(R)` match itself. */
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
 /** What a bare value means in a column of this type. See the header. */
 function bareTerm(column: string, value: string, negate: boolean, dtype: DType): FieldTerm {
-  if (isNumericDType(dtype)) return { kind: 'field', field: column, op: 'eq', value, negate }
-  return { kind: 'field', field: column, op: 'match', value: escapeRegex(value), negate }
+  // `ignoreCase` is the search box's rule, which is this file's whole premise: a header cell
+  // means what the same text means in Explore. Written out rather than defaulted — see
+  // `FieldTerm.ignoreCase`.
+  if (isNumericDType(dtype)) {
+    return { kind: 'field', field: column, op: 'eq', value, negate, ignoreCase: true }
+  }
+  return {
+    kind: 'field',
+    field: column,
+    op: 'match',
+    value: escapeRegex(value),
+    negate,
+    ignoreCase: true,
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -270,6 +278,7 @@ export function resolveFilters(
       op: parsed.op,
       value: parsed.value,
       negate: parsed.negate,
+      ignoreCase: true,
     })
   }
 

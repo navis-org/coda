@@ -329,9 +329,9 @@ describe('finding neurons', () => {
   it('anchors a pattern at both ends, as neuPrint’s =~ does', async () => {
     installFetch()
     const cave = source()
-    expect((await cave.findNeurons({ datasetId: DATASET, typePattern: 'CB.*' })).length).toBe(1)
+    expect((await cave.findNeurons({ datasetId: DATASET, rows: [{ field: 'type', op: 'matches', values: ['CB.*'] }] })).length).toBe(1)
     // Anchored: the pattern has to describe the whole value.
-    expect((await cave.findNeurons({ datasetId: DATASET, typePattern: 'B09' })).length).toBe(0)
+    expect((await cave.findNeurons({ datasetId: DATASET, rows: [{ field: 'type', op: 'matches', values: ['B09'] }] })).length).toBe(0)
   })
 
   it('reads an id list as text, so a wide id is not rounded on the way in', async () => {
@@ -349,19 +349,26 @@ describe('finding neurons', () => {
   })
 
   /*
-   * `Min size` is a plain number on the Find Neurons card whatever the dataset — unlike `Status`
-   * and `In ROI`, whose pickers are fed from what the dataset reports. So it reaches a CAVE
-   * source configured, and CAVE has no `size` column: the filter used to read `index.data.size`
-   * through `Number(undefined ?? 0)`, compare 0 against the threshold and drop **every** row.
+   * `Min size` used to be a plain number on the Find Neurons card whatever the dataset — unlike
+   * `Status` and `In ROI`, whose pickers were fed from what the dataset reports. So it reached a
+   * CAVE source configured, and CAVE has no `size` column: the filter read `index.data.size`
+   * through `Number(undefined ?? 0)`, compared 0 against the threshold and dropped **every** row.
    * A node answering "0 neurons" for a datastack full of them, with nothing saying why.
+   *
+   * It is a filter row now, so the card cannot offer a field this datastack does not publish and
+   * the case is unreachable from a new node. What still reaches here is a graph saved against
+   * neuPrint and repointed at CAVE — refused, naming the field, rather than answering empty.
    */
   it('refuses a size filter it has nothing to answer with, rather than emptying the result', async () => {
     installFetch()
     const cave = source()
-    await expect(cave.findNeurons({ datasetId: DATASET, minSize: 1000 })).rejects.toThrow(
-      /Min size/,
-    )
-    // And an unset one is not a filter at all — the node sends `undefined` for its default 0.
+    await expect(
+      cave.findNeurons({
+        datasetId: DATASET,
+        rows: [{ field: 'size', op: 'ge', values: ['1000'] }],
+      }),
+    ).rejects.toThrow(/no "size"/)
+    // And no rows at all is not a filter — a fresh Find Neurons sends exactly that.
     expect((await cave.findNeurons({ datasetId: DATASET })).length).toBe(4)
   })
 

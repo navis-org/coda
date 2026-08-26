@@ -30,6 +30,7 @@ import type {
 } from '../core/values'
 import type { NgScene } from './neuroglancer/scene'
 import type { NeuronIndexRequest } from './neuronIndex'
+import type { FilterRow } from './filterRows'
 
 export type { NeuronIndexRequest } from './neuronIndex'
 
@@ -127,10 +128,24 @@ export interface FindNeuronsRequest {
    * chain is a fact about the wiring rather than about the dataset.
    */
   annotations?: DatasetAnnotations
-  /** Regex matched against neuron type. Empty means "any". */
-  typePattern?: string
-  /** Regex matched against instance name. */
-  instancePattern?: string
+  /**
+   * The query itself: a list of `{field, operator, value}` rows, ANDed.
+   *
+   * Replaces `typePattern`, `instancePattern`, `statuses` and `minSize`, which were neuPrint's
+   * own fields spelled as an interface. Every other backend paid for that: a **Min size** box on
+   * a card whose datastack publishes no size, a `status` default of `Traced` filtering on a
+   * column CAVE does not have, an **In ROI** dropdown of eighty real neuropils that narrowed
+   * nothing. All three answered with a wrong count rather than an error.
+   *
+   * A row names a field of the dataset's **own** neuron schema, so what can be asked is what the
+   * backend publishes — see `filterRows.ts` for the model and for the two lowerings every source
+   * is expected to use rather than reimplement.
+   *
+   * Empty or absent means no narrowing at all, which is a real answer and a costly one: it is an
+   * unbounded `MATCH (n:Neuron)`. The node above decides whether to warn about that; a source
+   * honours it.
+   */
+  rows?: readonly FilterRow[]
   /** Exact (or regex) match of one property against a set of labels. */
   labels?: LabelMatch
   /**
@@ -142,9 +157,17 @@ export interface FindNeuronsRequest {
    * at a shared production Neo4j is a hazard, not a default.
    */
   neuronIds?: readonly NeuronId[]
-  statuses?: string[]
-  minSize?: number
-  /** ROI the neuron must innervate. */
+  /**
+   * ROI the neuron must innervate.
+   *
+   * **Not a row, and it cannot be one.** In neuPrint a region is not a column: a neuron carries
+   * one boolean property per ROI it innervates, so the test is `n.\`LO(R)\` IS NOT NULL` and the
+   * name appears in no neuron schema. A field list driven by the schema therefore cannot offer
+   * it, which is why this stays a named axis of its own — gated, on the card, by whether the
+   * source can actually answer it rather than by whether `DatasetInfo.rois` is non-empty. Those
+   * two came apart on CATMAID, whose volume list fills the picker while `findNeurons` could not
+   * read it.
+   */
   roi?: string
   limit?: number
   signal?: AbortSignal
@@ -405,6 +428,19 @@ export interface SourceCapabilities {
    * reported an error — on a neuron whose connectivity had loaded perfectly well.
    */
   roiCounts: boolean
+  /**
+   * Whether a neuron query can be narrowed to a **region**.
+   *
+   * Separate from every other ROI capability, and from `DatasetInfo.rois` above all, because
+   * those two came apart and produced a silent wrong answer. CATMAID's `volumeList` fills `rois`
+   * with eighty real neuropils so the ROI Viewer can draw them — and answering "which skeletons
+   * are in this volume" needs a spatial query it has no bulk endpoint for. Find Neurons' region
+   * picker read the *list*, so it offered eighty options that narrowed nothing and returned a
+   * result too large to look wrong.
+   *
+   * A populated list is therefore not the question a card should ask. This is.
+   */
+  roiFilter: boolean
   /**
    * Whether the source publishes a *mesh* per region — the neuropil shells themselves.
    *
