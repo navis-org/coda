@@ -16,7 +16,10 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { emptyGraph } from '../../core/graph'
+import { inferGraph } from '../../core/inference'
+import type { StubbedCall } from '../../data/ai/fixture'
 import { messagesReply, stubFetch } from '../../data/ai/fixture'
+import { pivotGraph, pivotObserved } from '../../assistant/fixture'
 import { resetCredentials, setKey } from '../../data/ai/credentials'
 import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
@@ -68,7 +71,7 @@ const BAD_WIRE = JSON.stringify({
 })
 
 /** Answer each request in turn, so a repair round can be given a different reply. */
-function stubReplies(...texts: string[]): { calls: number } {
+function stubReplies(...texts: string[]): { calls: number; sent: StubbedCall[] } {
   const recorded = stubFetch(
     (name, value) => vi.stubGlobal(name, vi.fn(value as never)),
     texts.map(messagesReply),
@@ -77,7 +80,22 @@ function stubReplies(...texts: string[]): { calls: number } {
     get calls() {
       return recorded.length
     },
+    // What actually went on the wire. Some questions are only answerable there: whether the
+    // panel told the model something is not visible in the graph it got back.
+    sent: recorded,
   }
+}
+
+/**
+ * The *turns* of a request, as one string — deliberately not the system prompt.
+ *
+ * Scoped after the first version of these tests passed for the wrong reason: the catalogue
+ * names plenty of columns in its own help text, so a whole-body search finds any column name
+ * whether or not the canvas ever mentioned it. The question here is only ever what the panel
+ * said about *this graph*, and that lives in the user turn.
+ */
+function asked(call: StubbedCall): string {
+  return JSON.stringify(call.body.messages)
 }
 
 /**
@@ -297,6 +315,43 @@ describe('a wait that has not ended', () => {
     expect((screen.getByRole('button', { name: 'Ask' }) as HTMLButtonElement).disabled).toBe(
       false,
     )
+  })
+})
+
+describe('what the canvas already knows', () => {
+  it('tells the model the columns a run produced, not the blank inference would give', async () => {
+    /*
+     * The panel reads the *store's* inference rather than inferring afresh, and this is the
+     * difference: the store's carries the observed schema, a fresh one cannot. Asserted on the
+     * request body, because the whole failure was invisible anywhere else — the model left a
+     * picker unset and looked like it had simply chosen not to fill it in.
+     */
+    const { graph, pivotId } = pivotGraph()
+    act(() =>
+      useGraphStore.setState({
+        graph,
+        inference: inferGraph(graph, { observedSchemas: pivotObserved(pivotId) }),
+      }),
+    )
+
+    const stub = stubReplies(PIPELINE)
+    render(<AssistantPanel />)
+    await ask('chart the pivot')
+
+    expect(asked(stub.sent[0]!)).toContain('partnerType')
+  })
+
+  it('says nothing about them before a run, because there is nothing to say', async () => {
+    // Unknown is not none. A blank here is the honest answer and the rules tell the model to
+    // leave the picker alone; the bug was reporting a blank when the app knew better.
+    const { graph } = pivotGraph()
+    act(() => useGraphStore.setState({ graph, inference: inferGraph(graph) }))
+
+    const stub = stubReplies(PIPELINE)
+    render(<AssistantPanel />)
+    await ask('chart the pivot')
+
+    expect(asked(stub.sent[0]!)).not.toContain('partnerType')
   })
 })
 

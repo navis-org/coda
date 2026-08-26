@@ -13,11 +13,11 @@
  * **It must stay byte-identical between calls.** It is the cached prefix (see `client.ts`), so
  * anything per-request — the current graph, a timestamp — belongs in the user turn instead.
  *
- * **It is 65,076 characters — re-measured, because the last figure here was written at 49 nodes
- * and there are now 77.** Ollama counts 16,587 tokens for it, 17,687 with the plan schema
- * attached; a Claude tokenizer will read it higher, since identifiers (`edgeWeightInfluence`,
- * `countDistinct`) tokenize far worse than prose. 62.1k of that is catalogue against 2.9k of
- * rules. Inside the catalogue, across 334 params of which 110 are `presentational`:
+ * **It is 65,230 characters — re-measured, because the last figure here was written at 49 nodes
+ * and there are now 77.** Ollama counted 16,587 tokens for it at 65,076 characters, 17,687 with
+ * the plan schema attached; a Claude tokenizer will read it higher, since identifiers
+ * (`edgeWeightInfluence`, `countDistinct`) tokenize far worse than prose. 62.1k of that is
+ * catalogue against 3.1k of rules. Inside the catalogue, across 334 params of which 110 are `presentational`:
  *
  *  - param `help` text is 32.5k chars, **52%** — by far the largest single component
  *  - eight of the seventy-seven nodes are **41%** of the param text: `out.viewer3d` (30 params),
@@ -74,7 +74,7 @@ function renderPort(port: PortDef, side: 'in' | 'out'): string {
   return `${port.id}${optional} (${typeLabel(port.type)})`
 }
 
-function renderParam(param: ParamDef): string {
+function renderParam(param: ParamDef, detail: CatalogueDetail): string {
   const bits: string[] = [param.id, param.kind]
 
   if (param.kind === 'enum' || param.kind === 'multiEnum') {
@@ -103,7 +103,9 @@ function renderParam(param: ParamDef): string {
   }
 
   const line = bits.join(' ')
-  return param.help ? `${line} — ${param.help}` : line
+  // `lean` keeps the name, the kind, the bounds and the enum options — everything a plan can be
+  // *refused* for getting wrong — and drops only the prose. See `CatalogueDetail`.
+  return detail === 'full' && param.help ? `${line} — ${param.help}` : line
 }
 
 /**
@@ -167,7 +169,7 @@ function producedColumns(def: NodeDefinition): string[] {
   return carriesLines(nodeTypes(inferGraph(probe), 'probe').outputs)
 }
 
-function renderNode(def: NodeDefinition): string {
+function renderNode(def: NodeDefinition, detail: CatalogueDetail): string {
   const lines: string[] = []
   lines.push(`## ${def.type} — ${def.label} (${def.category}, ${def.cost})`)
   if (def.description) lines.push(def.description)
@@ -184,17 +186,55 @@ function renderNode(def: NodeDefinition): string {
   const params = plannableParams(def)
   if (params.length) {
     lines.push('params:')
-    for (const param of params) lines.push(`  ${renderParam(param)}`)
+    for (const param of params) lines.push(`  ${renderParam(param, detail)}`)
   }
   return lines.join('\n')
 }
 
+/**
+ * How much of each param is printed.
+ *
+ * `full` is everything. `lean` drops the `help` prose and keeps the name, kind, bounds and enum
+ * options — which is to say it keeps everything a plan can be *refused* for getting wrong, and
+ * drops only what a setting means. That is 52% of the catalogue: 62.1k characters against 28.9k.
+ *
+ * As a whole system prompt that is 31,984 characters against 65,230. Ollama counts **9,167
+ * tokens against 16,643**; Anthropic reads the same text higher and counts **15,036 against
+ * 25,935**, mean over eighteen turns each. Either way it is a 42–45% cut in what every request
+ * carries.
+ *
+ * It does **not** buy a smaller `num_ctx`, though that was the first thing assumed of it — see
+ * `data/ai/ollama.ts`, where the measurement is.
+ *
+ * **`lean` is the default, and that was measured rather than argued.** Three full-suite reps at
+ * each level against Sonnet 5 and three against `qwen3.8:latest`: **15/15 and 15/15** on Sonnet,
+ * 39/40 lean against 37/40 full locally, zero refusals either way. The case `help` prose should
+ * matter most for — finding `neuron.paths` rather than assembling a chain of Connectivity nodes
+ * by hand — produced the *identical* six-node graph on all six Sonnet runs, lean and full alike.
+ * Nothing measurable was lost with half the prompt gone.
+ *
+ * `full` stays because that comparison has to remain runnable: a catalogue that grows a new kind
+ * of prose, or a different default model, re-opens the question. `live.test.ts` runs either level
+ * — see `CODA_ASSISTANT_CATALOGUE` there, and `scripts/compare-catalogue.sh`, which is the whole
+ * experiment in one command.
+ *
+ * Carried as an argument rather than as a module-level setting, and that is the same decision
+ * `PlanRequest.inference` makes one file over: a knob a caller chooses per request needs no
+ * mutable global, and a global would be reachable by anything, at any time, to invalidate every
+ * cached prefix — Anthropic's and the local KV cache both. Choosing a level *once* is not what
+ * the header above forbids; varying the catalogue *per request* is, and a caller passing a
+ * constant does neither.
+ */
+export type CatalogueDetail = 'full' | 'lean'
+
+const DEFAULT_DETAIL: CatalogueDetail = 'lean'
+
 /** Every node a plan may name, grouped by the categories the add menu already uses. */
-export function catalogueText(): string {
+export function catalogueText(detail: CatalogueDetail = DEFAULT_DETAIL): string {
   const sections: string[] = []
   for (const { category, defs } of nodeDefsByCategory()) {
     sections.push(`# ${category}`)
-    for (const def of defs) sections.push(renderNode(def))
+    for (const def of defs) sections.push(renderNode(def, detail))
   }
   return sections.join('\n\n')
 }
@@ -228,6 +268,10 @@ How a plan is written:
 What makes a plan fail:
 - A node type that is not in the catalogue above, a port that node does not have, a param that
   node does not have, or a value of the wrong kind.
+- A param value written in the wrong JSON type. The catalogue names each param's kind right
+  after its id: a \`number\` or \`int\` takes \`3\`, not \`"3"\`; a \`boolean\` takes \`true\`, not
+  \`"true"\`; an \`enum\` takes one of its listed options *exactly as written*, quoted even when
+  the option looks like a number; a \`multiEnum\` takes a list of them.
 - A wire the type system refuses. Read the port types: an output only fits an input of a type
   it is assignable to, and \`any\` accepts anything.
 - A wire that would make a cycle.
@@ -237,13 +281,20 @@ Column params — set them when you can, and you often can:
   Connectivity Graph node should name its category and value, not be left blank.
 - The current-graph listing carries the same line per node, and it is the authoritative one:
   a dataset adds properties the catalogue above cannot know about.
-- When no \`carries:\` line covers what you need — anything downstream of a Pivot or a Cypher
-  publishes no columns until the graph has been run — leave the param at its default and say
-  so in your reply. Guessing a column name that does not exist fails at run time.
+- When no \`carries:\` line covers what you need, leave the param at its default and say so in
+  your reply. Guessing a column name that does not exist fails at run time. A Pivot or a raw
+  Cypher is the usual case: what it emits depends on the data, so it publishes nothing until
+  the graph has been run — and once it has, its real columns are in the listing like any
+  other's. A missing line means unknown, never none.
 
 What is fine, and should not stop you:
 - A column you genuinely cannot know yet, per the above.
 - A required input left unwired, when the user has not said what should feed it.
+- An empty canvas. Add every node the request needs, the Dataset included — there is nothing
+  to wait for and nothing that has to be there first.
+- Not knowing the data. You cannot see it: whether a type exists, how many rows there are, what
+  a column holds. Build the pipeline that would answer the question, and never report a lookup
+  you did not make.
 
 Two things to be careful about:
 - Query nodes hit a shared production database. Do not add more of them than the request needs,
@@ -253,10 +304,11 @@ Two things to be careful about:
   their dataset input.
 
 Answer with a plan and nothing else. If the request needs no edit — a question about the graph,
-or something you cannot do — return an empty plan whose \`summary\` says so in one sentence.
+or something no node in the catalogue does — return an empty plan whose \`summary\` says so in one
+sentence. Being unsure how to build something is not one of those cases: attempt it.
 `.trim()
 
-let cachedPrompt: string | undefined
+const cachedPrompt = new Map<CatalogueDetail, string>()
 
 /**
  * The cached prefix: the rules, then the catalogue.
@@ -271,7 +323,10 @@ let cachedPrompt: string | undefined
  * registry is append-only and `registerNode` throws on a duplicate, so nothing can invalidate
  * it afterwards.
  */
-export function buildSystemPrompt(): string {
-  cachedPrompt ??= `${RULES}\n\n---\n\nThe node catalogue. Every type a plan may name is here.\n\n${catalogueText()}`
-  return cachedPrompt
+export function buildSystemPrompt(detail: CatalogueDetail = DEFAULT_DETAIL): string {
+  const held = cachedPrompt.get(detail)
+  if (held !== undefined) return held
+  const built = `${RULES}\n\n---\n\nThe node catalogue. Every type a plan may name is here.\n\n${catalogueText(detail)}`
+  cachedPrompt.set(detail, built)
+  return built
 }

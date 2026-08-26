@@ -6,9 +6,9 @@
  * rather than left to arrive as a bare "could not reach".
  *
  * **The context window is the one that fails silently, so it is set here.** Ollama's default
- * `num_ctx` is a few thousand tokens and the catalogue alone is ~16.5k: left alone, the prompt
- * is *quietly truncated* from the front and the model answers confidently about a node list it
- * was never shown. That is the worst failure available — no error, a plausible wrong plan — so
+ * `num_ctx` is a few thousand tokens and the catalogue alone is ~9k, ~10k with the plan schema
+ * and more once the canvas is described: left alone, the prompt is *quietly truncated* from the
+ * front and the model answers confidently about a node list it was never shown. That is the worst failure available — no error, a plausible wrong plan — so
  * `num_ctx` is sent on every request. A model whose trained context is smaller will clamp, and
  * the effect is the same, which is why `verify` says what the request is going to ask for and
  * why `pulled` reads each model's own window back out of `/api/tags`.
@@ -59,6 +59,20 @@ const BASE_URL = 'http://localhost:11434'
  *
  * Costs a laptop a 32k KV cache, which is the trade being made knowingly: below ~20k there is
  * no room to answer in, and a window that cannot hold the question is not a cheaper setting.
+ *
+ * **It stays 32768 even though the catalogue since halved, and that is the second measurement.**
+ * The `lean` catalogue took the prompt to 9,167 tokens, which looked like it bought 16384 back
+ * and a laptop half its KV cache. It does not: the prompt is only the fixed part. On a 37-node
+ * canvas `describeGraph` adds 6,558 characters and the plan schema 2,681, for 42,015 in total —
+ * ~12k tokens before the model has written a word, and a plan for a graph that size is a
+ * thousand or two more. 16384 would leave about 2k of headroom on a canvas people will
+ * reasonably build, and the failure when it runs out is `overflowed` below: minutes of prompt
+ * evaluation, then a 500 that reads as a hang.
+ *
+ * Nor can the window follow the canvas. Ollama reloads the model when `num_ctx` changes, which
+ * discards the KV prefix — the thing that takes a session's first question from 120 s to 4.4 s.
+ * A window that tracked the graph would re-pay that on every resize. Fixed and generous is the
+ * setting that costs memory once instead of time repeatedly.
  */
 const NUM_CTX = 32768
 
@@ -120,7 +134,8 @@ function overflowed(model: string): never {
   throw new AiError(
     `The prompt did not fit ${model}'s context window. Ollama truncated it from the front until ` +
       `the question itself was gone, then refused what was left. Coda asks for ` +
-      `${NUM_CTX / 1024}k tokens and sends ~18k of prompt, but a model clamps to the window it ` +
+      `${NUM_CTX / 1024}k tokens and sends ~10k of prompt before your canvas is described, but ` +
+      `a model clamps to the window it ` +
       `was trained with — check that with \`ollama show ${model}\`, and pick one offering at ` +
       `least ${NUM_CTX / 1024}k.`,
     500,
@@ -195,7 +210,7 @@ export const ollama: AiProvider = {
    * telling somebody on a dev server to go and set an environment variable sends them to fix
    * the one thing that was never broken. It is the hosted origin that has to be named.
    */
-  note: 'A model on your own machine — no key, no account, nothing leaves the computer. Needs a model with a context window of at least 32k, because the prompt is ~18k tokens. Served from localhost this works as it stands; the hosted app additionally needs OLLAMA_ORIGINS set so the browser is allowed to call it, and some browsers block an https page from reaching a plain-http local server at all.',
+  note: 'A model on your own machine — no key, no account, nothing leaves the computer. Needs a model with a context window of at least 32k: the prompt is ~10k tokens before your canvas is described, and grows with it. Served from localhost this works as it stands; the hosted app additionally needs OLLAMA_ORIGINS set so the browser is allowed to call it, and some browsers block an https page from reaching a plain-http local server at all.',
   guideUrl: 'https://github.com/navis-org/coda/blob/main/docs/ollama.md',
   models: [
     { id: 'qwen2.5-coder:14b', label: 'Qwen2.5 Coder 14B' },
@@ -203,8 +218,9 @@ export const ollama: AiProvider = {
     { id: 'llama3.1:8b', label: 'Llama 3.1 8B' },
     { id: 'mistral-nemo', label: 'Mistral Nemo' },
     // No `gemma2:9b`. It was offered here while the prompt was ~13k tokens and its 8k window
-    // merely truncated it; against ~18k the request cannot be served at all, so listing it
-    // under "Available to pull" would be offering a model that answers nothing.
+    // merely truncated it; against ~10k and a canvas on top the request cannot be served at
+    // all, so listing it under "Available to pull" would be offering a model that answers
+    // nothing.
   ],
   defaultModel: 'qwen2.5-coder:14b',
   defaultBaseUrl: BASE_URL,
@@ -268,7 +284,8 @@ export const ollama: AiProvider = {
     if (chosen && contextNote(chosen.context)) {
       warnings.push(
         `${id} was trained with a ${Math.round(chosen.context / 1024)}k context window and ` +
-          `Coda's prompt is ~18k tokens, so Ollama will clamp the request and the prompt will ` +
+          `Coda's prompt is ~10k tokens before the canvas is described, so Ollama will clamp ` +
+          `the request and the prompt will ` +
           `not fit. Asking will fail rather than answer badly. Pull a model with at least ` +
           `${NUM_CTX / 1024}k.`,
       )
@@ -326,7 +343,7 @@ export const ollama: AiProvider = {
 
     /*
      * The one provider where truncation is the *ordinary* case rather than the edge: the
-     * context is fixed at `NUM_CTX` and the prompt is already ~18k tokens of it, so a long plan
+     * context is fixed at `NUM_CTX` and a large canvas already spends ~12k of it, so a long plan
      * runs out of room. Untreated it reaches `parsePlan` and is reported as "the reply was not
      * JSON", which sends somebody looking for a bug in the plan format.
      */

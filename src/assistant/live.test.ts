@@ -41,12 +41,26 @@ import { providerFor } from '../data/ai/registry'
 import type { CodaGraph } from '../core/graph'
 import { emptyGraph } from '../core/graph'
 import { applyPlan } from './apply'
+import type { CatalogueDetail } from './catalogue'
+import { buildSystemPrompt } from './catalogue'
 import { describeGraph, requestPlan, runTurn } from './converse'
 import { countPlanParams } from './planShape'
 
 const KEY = process.env.ANTHROPIC_API_KEY
 const PROVIDER = process.env.CODA_ASSISTANT_PROVIDER ?? 'anthropic'
 const MODEL = process.env.CODA_ASSISTANT_MODEL
+
+/**
+ * Which catalogue to run against — `full` unless asked otherwise.
+ *
+ * The point of the switch is a comparison nobody can make by reasoning: `lean` is 53% smaller
+ * and drops what every setting *means*, keeping only what a plan can be refused for. Whether
+ * that costs plan quality is a question about seven real answers, not about the diff.
+ *
+ *   CODA_ASSISTANT_CATALOGUE=lean CODA_ASSISTANT_PROVIDER=ollama \
+ *     CODA_ASSISTANT_MODEL=qwen3.8:latest pnpm vitest run src/assistant/live.test.ts
+ */
+const CATALOGUE = (process.env.CODA_ASSISTANT_CATALOGUE ?? 'full') as CatalogueDetail
 
 /**
  * Whether there is anything to run against.
@@ -80,6 +94,9 @@ const PER_QUESTION_MS = 900_000
  */
 beforeAll(() => {
   if (!RUNNABLE) return
+  console.log(
+    `\ncatalogue: ${CATALOGUE} — ${buildSystemPrompt(CATALOGUE).length} characters of system prompt\n`,
+  )
   setProviderId(PROVIDER)
   if (KEY) setKey(PROVIDER, KEY)
   if (MODEL) setModel(PROVIDER, MODEL)
@@ -96,6 +113,7 @@ async function ask(graph: CodaGraph, request: string): Promise<CodaGraph> {
   let next = graph
   const outcome = await runTurn({
     request,
+    detail: CATALOGUE,
     graph: () => next,
     apply: (plan) => {
       const result = applyPlan(next, plan)

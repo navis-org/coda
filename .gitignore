@@ -10,3 +10,4 @@ coverage/
 .env.*
 !.env.example
 _TODOs.md
+compare-catalogue.log

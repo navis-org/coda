@@ -11,11 +11,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import '../nodes'
 import type { CodaGraph } from '../core/graph'
 import { addEdge, addNode, emptyGraph, newId } from '../core/graph'
+import { inferGraph } from '../core/inference'
 import { configurableParams, defaultParams } from '../core/node'
 import { getNodeDef, listableNodeDefs } from '../core/registry'
 import type { ApplyOk, ApplyResult } from './apply'
 import { applyPlan } from './apply'
 import { buildSystemPrompt, catalogueText } from './catalogue'
+import { pivotGraph, pivotObserved } from './fixture'
 import { messagesReply, stubFetch } from '../data/ai/fixture'
 import { describeGraph, repairPrompt, requestPlan } from './converse'
 import type { AssistantPlan } from './planShape'
@@ -210,6 +212,12 @@ describe('refusing a plan', () => {
   })
 
   it('refuses a value of the wrong kind', () => {
+    /*
+     * Still refused after `coerceParamValue` learned to read a number as an enum option, and
+     * deliberately so: nothing downstream checks a `string` param, so `4` here would become the
+     * pattern `"4"` and apply cleanly. A model putting a limit in the wrong field is exactly
+     * what that looks like, and this refusal is the only thing that ever says so.
+     */
     const message = refusal({
       add: [{ ref: 'f', type: 'neuron.findNeurons', params: { typePattern: 4 as never } }],
     })
@@ -705,6 +713,71 @@ describe('the catalogue', () => {
   })
 })
 
+describe('a value written as text', () => {
+  /*
+   * The one thing a live model was ever refused for. Thirty questions against `qwen3.8:latest`
+   * produced exactly one rejected plan, and all five problems in it were this: `hops` and
+   * `minWeight` as `"1"`, `descending` and `sortBars` as `"true"`. The repair round was told
+   * `"hops" wants a whole number, got a string` and sent a string again — the plan schema
+   * offers `anyOf: [string, number, …]` and a small model takes the first branch.
+   */
+  const withParam = (type: string, param: string, value: unknown) =>
+    applyPlan(
+      emptyGraph(),
+      plan({ add: [{ ref: 'n', type, params: { [param]: value as never } }] }),
+    )
+  /** The same plan, refused — through the file's own helper rather than a narrowing guard. */
+  const refusalFor = (type: string, param: string, value: unknown) =>
+    refusal({ add: [{ ref: 'n', type, params: { [param]: value as never } }] })
+
+  it('reads "1" as 1 where the param wants a whole number', () => {
+    expect(
+      nodeFor(expectOk(withParam('neuron.connectivity', 'hops', '2')), 'n').params.hops,
+    ).toBe(2)
+  })
+
+  it('reads "true" as true where the param wants a boolean', () => {
+    const chart = nodeFor(expectOk(withParam('out.barChart', 'sortBars', 'true')), 'n')
+    expect(chart.params.sortBars).toBe(true)
+  })
+
+  it('leaves a text param alone, since text is what it wanted', () => {
+    const found = nodeFor(expectOk(withParam('neuron.findNeurons', 'typePattern', '42')), 'n')
+    expect(found.params.typePattern).toBe('42')
+  })
+
+  it('reads 50 as "50" where the options are strings that look like numbers', () => {
+    /*
+     * The other direction, and the one the prompt fix bought on its very next run:
+     * `"pageSize" wants one of its options, got a number`. `out.table`'s options are
+     * `'25' | '50' | '100' | '500'` — told to prefer real numbers, the model obliged where it
+     * should not have. A conversion that only went one way was always going to leave the other
+     * open, whichever way the prompt leaned.
+     */
+    expect(nodeFor(expectOk(withParam('out.table', 'pageSize', 50)), 'n').params.pageSize).toBe(
+      '50',
+    )
+  })
+
+  it('still refuses a number that is not one of the options', () => {
+    // Converting a spelling is not the same as accepting a value. `validateParamValue` keeps
+    // the last word, and its message names what is on offer.
+    expect(refusalFor('out.table', 'pageSize', 37)).toMatch(/no option "37"/)
+  })
+
+  it('refuses "1.5" for a whole number rather than rounding it', () => {
+    // Converting is reading a spelling; rounding would be inventing a value. The message the
+    // model gets back names the number, which is the honest half of the answer.
+    expect(refusalFor('neuron.connectivity', 'hops', '1.5')).toMatch(/whole number/)
+  })
+
+  it('refuses text that denotes nothing, in the validator’s own words', () => {
+    expect(refusalFor('neuron.connectivity', 'hops', 'two')).toMatch(
+      /wants a whole number, got a string/,
+    )
+  })
+})
+
 describe('describing the canvas', () => {
   it('says so when there is nothing on it', () => {
     expect(describeGraph(emptyGraph())).toContain('empty')
@@ -724,6 +797,33 @@ describe('describing the canvas', () => {
     expect(text).toContain('typePattern=LC.*')
     // `status` is still at its default, so saying it would bury the one value that was set.
     expect(text).not.toContain('status=Traced')
+  })
+
+  it('says nothing about a Pivot’s columns when nothing has run', () => {
+    /*
+     * Correct, and the reason the rules tell the model to leave such a picker alone: what a
+     * Pivot emits depends on the data, so before a run there is genuinely no answer. Unknown
+     * is not none — the same rule the column pickers follow.
+     */
+    const { graph, pivotId } = pivotGraph()
+    const text = describeGraph(graph)
+    expect(text).toContain(pivotId)
+    expect(text).not.toContain('carries: partnerType')
+  })
+
+  it('names a Pivot’s real columns once the editor has observed them', () => {
+    /*
+     * The gap this closes. `inferGraph` takes the schemas that `observesOutputSchema` nodes
+     * actually produced, the store folds them in on every commit — and `describeGraph` used to
+     * infer without them, so it reported a blank where the app already knew the answer. The
+     * model was then following advice ("leave it at its default") that was only correct
+     * because of the omission.
+     */
+    const { graph, pivotId } = pivotGraph()
+    const observedSchemas = pivotObserved(pivotId)
+    const text = describeGraph(graph, inferGraph(graph, { observedSchemas }))
+    expect(text).toContain('partnerType')
+    expect(text).toContain('weight')
   })
 
   it('hands a refusal back in the plan’s own terms', () => {

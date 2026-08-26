@@ -69,7 +69,10 @@ export function planJsonSchema(): object {
     properties: {
       summary: {
         type: 'string',
-        description: "One sentence describing the edit, in the user's terms.",
+        description:
+          "One sentence describing the edit, in the user's terms. Describe only what this " +
+          'plan actually contains: this sentence is the account the user is shown, so naming ' +
+          'a node the plan does not add is a false report of what happened.',
       },
       add: {
         type: 'array',

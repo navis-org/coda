@@ -6,9 +6,10 @@ This guide is the whole setup, in four steps — install, pull a model, let the 
 
 Three things worth knowing before you spend the disk space:
 
-- **Coda's prompt is large.** The node catalogue it sends is ~16.5k tokens, ~18k once the plan
-  schema goes on, so a model with a small context window is not slower — it *cannot answer at
-  all* — see [step 2](#2-pull-a-model).
+- **Coda's prompt is large.** The node catalogue it sends is ~9k tokens, ~10k once the plan
+  schema goes on, and the description of your canvas is added on top — a 37-node graph brings the
+  total to ~12k. A model with a small context window is not slower, it *cannot answer at all* —
+  see [step 2](#2-pull-a-model).
 - **The first answer of a session is the slow one**, and reasoning models are slower again. Both
   are measured below — [why the first question is the slow one](#why-the-first-question-is-the-slow-one)
   and [reasoning](#reasoning-and-why-it-is-off) — and neither is a fault to go looking for.
@@ -55,11 +56,11 @@ The second should answer `Ollama is running`. That endpoint is exactly what Coda
 
 | Requirement | Why | What happens if it is not met |
 | --- | --- | --- |
-| **≥ 32k context** | The node catalogue alone is ~16.5k tokens and the whole prompt is ~18k; Coda asks for `num_ctx: 32768` on every request | The prompt is **truncated from the front** — and since your question is the *last* thing in it, that is what falls off. Ollama then refuses a conversation with no question in it, `no user query found in messages`, several minutes in. Coda translates that one; see [troubleshooting](#troubleshooting) |
+| **≥ 32k context** | The catalogue is ~9k tokens, ~10k with the plan schema, and your canvas is described on top of that — ~12k on a 37-node graph, before the answer. Coda asks for `num_ctx: 32768` on every request | The prompt is **truncated from the front** — and since your question is the *last* thing in it, that is what falls off. Ollama then refuses a conversation with no question in it, `no user query found in messages`, several minutes in. Coda translates that one; see [troubleshooting](#troubleshooting) |
 | **A GGUF build** | Coda sends its plan schema as `format`, which becomes a compiled grammar in llama.cpp. Other engines accept the field and ignore it | Plans come back in the wrong shape — valid JSON, so nothing raises, with no actions in it |
 | **Fits in memory** | The weights plus a 32k KV cache have to sit in RAM or VRAM | It spills to CPU and a single plan takes minutes |
 
-Coda handles the first by asking for 32k explicitly, which is why the Ollama default of 4k on a
+Coda asks for 32k rather than something tighter because the catalogue is only the fixed part of the prompt: the canvas grows it, and the failure when the total overruns is the stall in [troubleshooting](#troubleshooting) rather than a graceful degradation. Coda handles the Ollama default by asking for 32k explicitly, which is why the Ollama default of 4k on a
 machine with under 24 GiB of VRAM is not a problem — but a model that was *trained* with a
 smaller window **clamps to its own**, whatever Coda asks for. That used to go unreported. It no
 longer does: Coda reads each model's window out of `/api/tags`, marks a short one in the
@@ -82,7 +83,7 @@ Sizes and context windows below were read off ollama.com:
 Pick by the memory you have, not by the leaderboard: roughly 8 GB of RAM → an 8B model, 16 GB → 12–14B comfortably, 32 GB+ → anything on the list.
 
 `gemma2:9b` used to be in Coda's own "Available to pull" list, from when the prompt was ~13k
-tokens and an 8k window merely cut it in half. Against ~18k it cannot be served at all, so it is
+tokens and an 8k window merely cut it in half. Against ~10k and a canvas on top it cannot be served at all, so it is
 no longer offered — if you already have it pulled, it appears under **On this machine** with the
 warning above rather than being hidden, because a model you own is a fact and Coda's job is to
 say what is wrong with it.
@@ -286,8 +287,12 @@ against the same system prompt:
 | every question after it | **4.4 s** |
 
 llama.cpp keeps the KV cache for the longest common prefix, and Coda's catalogue is byte-identical
-between calls by construction — so only your question is new. The 16.5k-token prompt is a one-off
-cost per model load, not a per-question one.
+between calls by construction — so only your question is new. The prompt is a one-off cost per
+model load, not a per-question one.
+
+Those two numbers were measured when the prompt was 16,587 tokens; it is ~9k now, so the first
+question is proportionally quicker. The 27x ratio is the part that matters and does not depend on
+the size.
 
 Two things reset it: the model unloading (`ollama ps` shows the countdown; the default
 `keep_alive` is five minutes), and anything that changes the prompt. This is why Coda does not
@@ -321,7 +326,7 @@ Coda's messages are specific on purpose; each one below names its own fix.
 | `Could not reach http://localhost:11434. Is the server running, and is it set to accept requests from this page?` | One of three: Ollama is not running (`curl http://localhost:11434`), the origin is not allowed ([step 3](#3-let-the-browser-in)), or the browser blocked it before it was sent (Safari, or a denied Chrome prompt). A browser reports all three identically, which is why the message lists them |
 | `<model> is not pulled on this machine. Run ollama pull <model>, or choose one you have: …` | Coda asked `/api/tags` and the name in the dropdown is not among the answers. The models it lists after the colon are really there |
 | `Nothing pulled yet — run ollama pull … , then refresh` | The server answered and has no models. Pull one, then press **↻** |
-| `The prompt did not fit <model>'s context window. Ollama truncated it from the front until the question itself was gone…` | The model clamped `num_ctx` to its own trained window and Coda's ~18k-token prompt did not fit. `ollama show <model>` prints that window; pull one with at least 32k. **This is the one that looks like a hang** — the prompt is evaluated before the refusal, so on a 27B model the error lands three to five minutes after you asked |
+| `The prompt did not fit <model>'s context window. Ollama truncated it from the front until the question itself was gone…` | The model clamped `num_ctx` to its own trained window and Coda's prompt did not fit. `ollama show <model>` prints that window; pull one with at least 32k. **This is the one that looks like a hang** — the prompt is evaluated before the refusal, so on a 27B model the error lands three to five minutes after you asked |
 | `The reply hit the length limit before it finished, so the plan is incomplete. Ask for a smaller change.` | The answer ran out of room inside the 32k window. Genuinely ask for less — or use a model with a larger window |
 | `… is not a GGUF build, so it runs on an engine that accepts the JSON schema and ignores it` | The MLX trap. Pull the plain tag |
 | A plan that reads like a sensible sentence but changes nothing | Same cause as the row above, or a model whose context clamped below the prompt. Check `ollama ps` |

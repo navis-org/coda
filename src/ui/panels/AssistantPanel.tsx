@@ -129,6 +129,13 @@ function Drawer({ takeFocus }: { takeFocus: boolean }) {
       const outcome = await runTurn({
         request: text,
         graph: () => store().graph,
+        /*
+         * The editor's own inference, not a fresh one. It is the only one that carries what a
+         * Pivot or a raw Cypher *actually* produced — the store folds those observations in on
+         * every commit — and inferring again here would hand the model the bare answer that
+         * made it leave those pickers unset.
+         */
+        inference: () => store().inference,
         apply: (plan) => store().applyAssistantPlan(plan),
         signal: controller.signal,
       })

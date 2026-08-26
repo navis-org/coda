@@ -26,7 +26,7 @@ import type { CodaGraph, GraphNode } from '../core/graph'
 import { addEdge, edgeInto, newId, removeEdges, removeNodes, updateNode } from '../core/graph'
 import type { IssueSeverity } from '../core/inference'
 import { checkConnection, inferGraph, nodeTypes } from '../core/inference'
-import type { NodeDefinition, ParamValues } from '../core/node'
+import type { NodeDefinition, ParamDef, ParamValue, ParamValues } from '../core/node'
 import { configurableParams, defaultParams, findParam, validateParamValue } from '../core/node'
 import { getNodeDef } from '../core/registry'
 import { COL_WIDTH, GRID_ORIGIN, ROW_HEIGHT, boundsOf } from '../layout/place'
@@ -145,12 +145,10 @@ export function applyPlan(graph: CodaGraph, plan: AssistantPlan): ApplyResult {
       continue
     }
 
+    const named = Object.keys(planned.params ?? {}).map((id) => ({ id, at: `${where}.params` }))
     const params = { ...defaultParams(def), ...planned.params }
-    const problems = checkParams(
-      def,
-      params,
-      Object.keys(planned.params ?? {}).map((id) => ({ id, at: `${where}.params` })),
-    )
+    coerceNamed(def, params, named)
+    const problems = checkParams(def, params, named)
     if (problems.length) {
       errors.push(...problems)
       failedRefs.add(planned.ref)
@@ -228,14 +226,12 @@ export function applyPlan(graph: CodaGraph, plan: AssistantPlan): ApplyResult {
     const def = node && getNodeDef(node.type)
     if (!node || !def) continue
 
+    const named = changes.map((c) => ({ id: c.change.param, at: `setParams[${c.index}]` }))
     const merged: ParamValues = { ...node.params }
     for (const { change } of changes) merged[change.param] = change.value
+    coerceNamed(def, merged, named)
 
-    const problems = checkParams(
-      def,
-      merged,
-      changes.map((c) => ({ id: c.change.param, at: `setParams[${c.index}]` })),
-    )
+    const problems = checkParams(def, merged, named)
     if (problems.length) {
       errors.push(...problems)
       continue
@@ -313,6 +309,117 @@ export function applyPlan(graph: CodaGraph, plan: AssistantPlan): ApplyResult {
 // ---------------------------------------------------------------------------
 // Params
 // ---------------------------------------------------------------------------
+
+/**
+ * `"1"` where the param wants `1`, and `"true"` where it wants `true`.
+ *
+ * **The single failure mode a live model was actually refused for.** Across thirty questions
+ * against `qwen3.8:latest` exactly one plan was rejected, and this was all of it: `hops` and
+ * `minWeight` as `"1"`, `descending` and `sortBars` as `"true"` — five params over three nodes.
+ * The repair round was handed `"hops" wants a whole number, got a string` and sent a string
+ * again, which is what makes this Coda's to fix rather than the model's: the plan schema offers
+ * `anyOf: [string, number, boolean, …]` and a small model reaches for the first branch, then
+ * cannot be talked out of it.
+ *
+ * **It has to run in both directions, and the second one was found the hard way.** Adding the
+ * rule to the prompt that a number param takes `3` and not `"3"` bought a *new* refusal on the
+ * next run — `"pageSize" wants one of its options, got a number` — because `out.table`'s
+ * `pageSize` is an `enum` whose options are `'25' | '50' | '100' | '500'`, strings that happen
+ * to look like numbers. Told to prefer real numbers, the model obliged where it should not
+ * have. Whether the prompt caused that or it was always possible cannot be settled at one
+ * occurrence each, and it does not need to be: a conversion that only went one way was going
+ * to leave the other open whichever way the prompt leaned.
+ *
+ * **The bar is that something else still gets to refuse.** A number keeps its finite/integer
+ * check and its `min`/`max`; a boolean converts only from the two words that can mean it; an
+ * `enum` and a `multiEnum` are checked against their options. So a conversion here can turn a
+ * spelling into a value but cannot turn a *mistake* into one — `pageSize` as `37` still fails,
+ * naming what is on offer.
+ *
+ * That bar is why `string` and `column` are left out, though they are the easiest conversions
+ * of the lot. Nothing downstream checks them: a `string` param takes any text, so writing `50`
+ * into `typePattern` — a model putting a limit in the wrong field — would become the pattern
+ * `"50"` and apply cleanly. Refusing it is the only thing that ever says so. `assistant.test.ts`
+ * has asserted that refusal since before this function existed, and it was right to.
+ *
+ * Anything that does not convert is returned untouched, so `validateParamValue` still gets to
+ * say what is wrong in its own words. `"1.5"` for an `int` converts to `1.5` and is then refused
+ * as a non-integer, which is the honest answer; rounding it would be inventing a value.
+ *
+ * Here rather than beside `validateParamValue`, deliberately. That function is the check a
+ * `.coda.json` from another build and a future non-browser executor are *meant* to go through
+ * — `deserializeGraph` does not call it today, which is a gap rather than a reason — and a
+ * saved file holding `"1"` for a number is corruption worth hearing about, not a spelling to
+ * absorb. Teaching it to convert would make `"1"` a second legal spelling of a number
+ * everywhere, which is what invariant 8 means by a shim. This is about untrusted text from a
+ * model, which is this module's whole subject.
+ */
+function coerceParamValue(param: ParamDef, value: ParamValue): ParamValue {
+  switch (param.kind) {
+    case 'int':
+    case 'number': {
+      if (typeof value !== 'string' || !value.trim()) return value
+      const parsed = Number(value.trim())
+      return Number.isFinite(parsed) ? parsed : value
+    }
+    case 'boolean': {
+      if (typeof value !== 'string') return value
+      if (/^true$/i.test(value.trim())) return true
+      if (/^false$/i.test(value.trim())) return false
+      return value
+    }
+    /*
+     * The other direction. An enum option is a string by construction, so a number arriving in
+     * one can only be its own spelling — `50` for `pageSize` means the option `"50"`. Whether
+     * it is an option at all stays `validateParamValue`'s to say, which is what keeps this a
+     * conversion rather than an acceptance.
+     */
+    case 'enum':
+      return typeof value === 'number' || typeof value === 'boolean' ? String(value) : value
+    case 'multiEnum':
+      return Array.isArray(value) ? value.map((entry) => String(entry)) : value
+    /*
+     * Left out on purpose, per the bar above: nothing downstream checks any of these, so a
+     * conversion here could not be refused if it were wrong. Spelled out rather than left to a
+     * `default`, because `validateParamValue` mirrors this same union and says why — an arm
+     * that assigns to `never` is what makes a new param kind fail to compile instead of falling
+     * silently through a switch nobody remembered.
+     */
+    case 'string':
+    case 'column':
+    case 'columns':
+    case 'ids':
+      return value
+    default: {
+      const unhandled: never = param
+      return unhandled
+    }
+  }
+}
+
+/**
+ * Convert the named params in place, into the kinds their definitions declare.
+ *
+ * Only the ones the plan *named*: a default is already the right type, and touching one would
+ * be this function having an opinion about the node definition.
+ *
+ * In place, and both halves of that are deliberate. The callers each hand over an object they
+ * spread into existence a line earlier and nobody else holds, so copying would guard against no
+ * aliasing that exists — and the copy-on-write this replaced could not even skip reliably,
+ * since a `multiEnum` returns a fresh array whether or not an entry changed. More to the point,
+ * mutating is what removes the trap: the object the caller already has *is* the coerced one, so
+ * checking one value and storing another stops being something a comment has to ask for.
+ */
+function coerceNamed(
+  def: NodeDefinition,
+  params: ParamValues,
+  named: ReadonlyArray<{ id: string; at: string }>,
+): void {
+  for (const { id } of named) {
+    const param = findParam(def, id)
+    if (param) params[id] = coerceParamValue(param, params[id]!)
+  }
+}
 
 /**
  * Check the params a plan actually named, against the node's finished values.

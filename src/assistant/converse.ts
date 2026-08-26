@@ -9,12 +9,14 @@
 
 import type { CodaGraph } from '../core/graph'
 import type { ApplyOk, ApplyResult } from './apply'
+import type { InferenceResult } from '../core/inference'
 import { inferGraph, nodeTypes } from '../core/inference'
 import { changedParams, configurableParams } from '../core/node'
 import { getNodeDef } from '../core/registry'
 import type { CompletionResult, Usage } from '../data/ai/types'
 import { complete } from '../data/ai/registry'
 import { errorMessage } from '../core/errors'
+import type { CatalogueDetail } from './catalogue'
 import { buildSystemPrompt, carriesLines } from './catalogue'
 import type { AssistantPlan } from './planShape'
 import { parsePlan, planJsonSchema } from './plan'
@@ -26,6 +28,15 @@ export interface AssistantTurn {
 
 export interface PlanRequest {
   graph: CodaGraph
+  /**
+   * The editor's own inference of that graph, where the caller has one.
+   *
+   * Must be the inference *of this graph*, read at the same moment — see `describeGraph`, which
+   * falls back to inferring for itself when it is absent.
+   */
+  inference?: InferenceResult | undefined
+  /** How much of each param the catalogue prints. See `CatalogueDetail`. */
+  detail?: CatalogueDetail | undefined
   /** The conversation so far, oldest first. The last entry is normally the user's request. */
   messages: readonly AssistantTurn[]
   signal?: AbortSignal | undefined
@@ -45,7 +56,10 @@ export type PlanOutcome =
  * turn restating the definitions the cached catalogue already gave — and, worse, bury the two
  * values somebody actually chose.
  */
-export function describeGraph(graph: CodaGraph): string {
+export function describeGraph(
+  graph: CodaGraph,
+  inference?: InferenceResult | undefined,
+): string {
   if (graph.nodes.length === 0) return 'The canvas is empty.'
 
   /*
@@ -54,10 +68,21 @@ export function describeGraph(graph: CodaGraph): string {
    * Without this the model cannot fill in a column param even when the answer is knowable:
    * a Connectivity node advertises `preId, preType, postId, postType, weight, hop, direction`
    * at edit time, and a Bar Chart wired to one arrived with its category and value unset
-   * purely because nothing had said so. Cheap — `inferGraph` is the pass the editor already
-   * runs on every keystroke.
+   * purely because nothing had said so.
+   *
+   * **Take the editor's pass when there is one.** Inferring here from the graph alone is not
+   * the same answer: `inferGraph` accepts an `observedSchemas` map — the schemas that nodes
+   * declaring `observesOutputSchema` actually produced — and a Pivot or a raw Cypher publishes
+   * *no* columns without it, because what they emit depends on the data rather than on the
+   * params. The store keeps that map and re-infers with it on every commit; this function
+   * asked for a bare inference and so was told nothing, on a canvas where the answer was
+   * already sitting one call away. The rules then instructed the model to give up and leave
+   * the picker at its default — advice that was correct only because of the omission.
+   *
+   * The fallback is a real fallback rather than a courtesy: `assistant/live.test.ts` and the
+   * headless tests have no store, and a graph nobody has run has nothing observed anyway.
    */
-  const inference = inferGraph(graph)
+  const resolved = inference ?? inferGraph(graph)
 
   const lines: string[] = ['Nodes:']
   for (const node of graph.nodes) {
@@ -65,7 +90,7 @@ export function describeGraph(graph: CodaGraph): string {
     const label = node.title ? ` "${node.title}"` : ''
     const bits: string[] = [`  ${node.id}  ${node.type}${label}`]
 
-    for (const line of carriesLines(nodeTypes(inference, node.id).outputs)) {
+    for (const line of carriesLines(nodeTypes(resolved, node.id).outputs)) {
       bits.push(`    ${line}`)
     }
 
@@ -105,8 +130,12 @@ export function describeGraph(graph: CodaGraph): string {
 }
 
 /** The user turn: the graph, then the request. */
-function userContent(graph: CodaGraph, request: string): string {
-  return `Current graph:\n${describeGraph(graph)}\n\nRequest:\n${request}`
+function userContent(
+  graph: CodaGraph,
+  request: string,
+  inference: InferenceResult | undefined,
+): string {
+  return `Current graph:\n${describeGraph(graph, inference)}\n\nRequest:\n${request}`
 }
 
 /**
@@ -125,13 +154,16 @@ export async function requestPlan(request: PlanRequest): Promise<PlanOutcome> {
 
   const messages = [
     ...turns.map((t) => ({ role: t.role, content: t.content })),
-    { role: 'user' as const, content: userContent(request.graph, last.content) },
+    {
+      role: 'user' as const,
+      content: userContent(request.graph, last.content, request.inference),
+    },
   ]
 
   let result: CompletionResult
   try {
     result = await complete({
-      system: buildSystemPrompt(),
+      system: buildSystemPrompt(request.detail),
       messages,
       schema: planJsonSchema(),
       ...(request.signal ? { signal: request.signal } : {}),
@@ -189,6 +221,16 @@ export interface TurnRequest {
    * second surface pass a store getter without this module knowing there is a store.
    */
   graph: () => CodaGraph
+  /**
+   * The editor's inference of that graph, read in the same breath as `graph` above.
+   *
+   * Optional because the headless callers have no store to read it from. Supplying it is what
+   * lets the listing name the columns a Pivot or a raw Cypher actually produced — see
+   * `describeGraph`.
+   */
+  inference?: (() => InferenceResult) | undefined
+  /** How much of each param the catalogue prints. See `CatalogueDetail`. */
+  detail?: CatalogueDetail | undefined
   /** Applies a plan, or refuses it. The store's `applyAssistantPlan`, or a bare `applyPlan`. */
   apply: (plan: AssistantPlan) => ApplyResult
   request: string
@@ -214,6 +256,9 @@ export async function runTurn(turn: TurnRequest): Promise<TurnOutcome> {
     const outcome = await requestPlan({
       graph: turn.graph(),
       messages,
+      // Read here, beside the graph, so the two cannot describe different moments.
+      inference: turn.inference?.(),
+      detail: turn.detail,
       ...(turn.signal ? { signal: turn.signal } : {}),
     })
     if (!outcome.ok) return { ok: false, error: outcome.error }
