@@ -14,7 +14,9 @@
  *   diamond        Transform (geometry hue — a mapping applied to geometry)
  */
 
+import { getNodeDef } from '../core/registry'
 import type { CodaType } from '../core/types'
+import { backendForNodeType } from '../nodes/lib/datasetFamilies'
 
 export type SocketFamily = 'table' | 'matrix' | 'dataset' | 'geometry' | 'scalar' | 'any'
 export type SocketShape = 'circle' | 'ring' | 'diamond' | 'square' | 'dot' | 'hex'
@@ -92,4 +94,29 @@ export function familyColorVar(family: SocketFamily): string {
 
 export function typeColorVar(type: CodaType | undefined): string {
   return familyColorVar(socketStyle(type).family)
+}
+
+/**
+ * The tint a node wears: its backend's, or its category's, or nothing.
+ *
+ * Three surfaces draw a node as a coloured box — the add-node thumbnail, the Zoo card's minimap,
+ * and the node header itself (in CSS, via `[data-category]`). The first two resolved the ladder
+ * by hand, character for character, including the fallback-inside-`var()` trick that lets a
+ * backend nobody has styled yet fall through to the generic dataset token. A fourth backend
+ * arriving and reaching one of them but not the other is a wrong signal rather than a missing
+ * one, which is the failure `datasetFamilies.ts` already documents for the card tint.
+ *
+ * `fallback` is what an **unregistered** type gets, and it is a parameter because the honest
+ * answer differs by surface: a thumbnail is only ever built from a real definition, while a Zoo
+ * card is drawn from a layout digest that may name a node this build no longer has — and there,
+ * drawing it as visibly unknown is the point.
+ *
+ * Not in `colors.ts`, which has no imports at all and is the palette itself. This file already
+ * owns "which token does this thing wear" and already resolves two other ladders.
+ */
+export function nodeTintVar(type: string, fallback = 'var(--border)'): string {
+  const backend = backendForNodeType(type)
+  if (backend) return `var(--cat-dataset-${backend.id}, var(--cat-dataset))`
+  const def = getNodeDef(type)
+  return def ? `var(--cat-${def.category})` : fallback
 }

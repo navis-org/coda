@@ -22,6 +22,7 @@
  * until the recipient presses Run.
  */
 
+import { fetchText } from '../fetchText'
 import type { ShareRef } from './fragment'
 import { decodePacked } from './fragment'
 import { readGist } from './gist'
@@ -80,42 +81,10 @@ export async function resolveShareRef(ref: ShareRef): Promise<string> {
     case 'gist':
       return readGist(ref.id, ref.revision)
     case 'gcs':
-      return fetchText(
-        `https://storage.googleapis.com/${ref.bucket}/${ref.path}`,
-        `The bucket "${ref.bucket}" may not allow cross-origin reads. That is set on the bucket by whoever owns it, not by Coda.`,
-      )
+      return fetchText(`https://storage.googleapis.com/${ref.bucket}/${ref.path}`, {
+        hint: `The bucket "${ref.bucket}" may not allow cross-origin reads. That is set on the bucket by whoever owns it, not by Coda.`,
+      })
     case 'https':
       return fetchText(ref.url)
   }
-}
-
-/**
- * A plain GET with the two failures worth telling apart.
- *
- * A browser reports a cross-origin refusal as an opaque `TypeError` indistinguishable from a
- * dead host — the constraint `data/precomputed/transport.ts` works around by trying and
- * remembering, and the reason `core.tableFromUrl` names both in its message. Same rule here:
- * the fix for one is nothing like the fix for the other, and saying only "network error" sends
- * somebody to check their wifi over a header that host never sent.
- *
- * `credentials: 'omit'` is the default for a cross-origin fetch and is stated anyway: nothing
- * about following a workflow link should carry the reader's cookies to the host it points at.
- *
- * Named `fetchText` rather than `fetchJson`, which is what `precomputed/transport.ts` already
- * exports — two functions of one name two directories apart is a grep hazard, and this one hands
- * the body back unparsed anyway.
- */
-async function fetchText(url: string, hint?: string): Promise<string> {
-  let response: Response
-  try {
-    response = await fetch(url, { credentials: 'omit', redirect: 'follow' })
-  } catch {
-    throw new Error(
-      `Could not fetch ${url}. The host may be unreachable, or it may not allow cross-origin reads — a browser refuses those without saying so.${hint ? ` ${hint}` : ''}`,
-    )
-  }
-  if (!response.ok) {
-    throw new Error(`${url} returned ${response.status} ${response.statusText}`.trim())
-  }
-  return response.text()
 }

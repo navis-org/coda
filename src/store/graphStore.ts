@@ -41,11 +41,8 @@ import { Scheduler } from '../core/scheduler'
 import type { TableSchema } from '../core/types'
 import type { Value } from '../core/values'
 import { isTableValue } from '../core/values'
-import { MockSource } from '../data/mock/MockSource'
-import { NeuPrintSource } from '../data/neuprint/NeuPrintSource'
-import { catmaidSourceFor } from '../data/catmaid/registry'
-import { CaveSource } from '../data/cave/CaveSource'
-import { registerSource, requireSource, subscribeSourceLearned } from '../data/source'
+import { registerBuiltinSources } from '../data/builtins'
+import { requireSource, subscribeSourceLearned } from '../data/source'
 import { subscribeUploadLearned } from '../data/uploads'
 import { subscribeEdgeSetsLearned } from '../data/edges/store'
 import { subscribeAnnotationsLearned } from '../data/annotations'
@@ -86,12 +83,8 @@ import {
 // than relying on import order in main.tsx keeps that from silently breaking.
 import '../nodes'
 
-// Register built-in sources once, at module load. Mock goes first so it stays the default
-// for a fresh graph: the examples must open and run with no token and no network.
-registerSource(new MockSource())
-registerSource(new NeuPrintSource())
-registerSource(new CaveSource())
-catmaidSourceFor(undefined)
+// Registered once, at module load. See `data/builtins.ts` for the set and the ordering.
+registerBuiltinSources()
 
 const AUTO_RUN_DELAY_MS = 180
 
@@ -302,6 +295,16 @@ export interface GraphState {
   startPageDismissed: boolean
   openStartPage(): void
   closeStartPage(): void
+  /**
+   * Whether the Zoo browser is up.
+   *
+   * A plain boolean owned by the store, like `startPageOpen` and unlike the palette's request
+   * counter, because two unrelated surfaces open it — the toolbar's Examples menu and the
+   * command palette — and neither is an ancestor of the other or of where it mounts.
+   */
+  zooOpen: boolean
+  openZoo(): void
+  closeZoo(): void
   setStartPageDismissed(dismissed: boolean): void
   /**
    * Node whose output is open in the full-size viewer overlay, if any. In the store because
@@ -882,6 +885,12 @@ export const useGraphStore = create<GraphState>((set, get) => {
 
     openStartPage: () => set({ startPageOpen: true }),
     closeStartPage: () => set({ startPageOpen: false }),
+
+    zooOpen: false,
+    // Closes the start page on the way in: both are full-screen modals, and the Examples menu
+    // is reachable from behind one.
+    openZoo: () => set({ zooOpen: true, startPageOpen: false }),
+    closeZoo: () => set({ zooOpen: false }),
     setStartPageDismissed: (dismissed) => {
       saveStartPageDismissed(dismissed)
       set({ startPageDismissed: dismissed })

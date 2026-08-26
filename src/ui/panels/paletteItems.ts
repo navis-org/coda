@@ -512,6 +512,14 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
     },
   )
 
+  items.push({
+    id: 'zoo:browse',
+    label: 'Browse Community Workflows',
+    action: 'Example',
+    hint: 'Search the Coda Zoo — workflows shared by other people.',
+    perform: () => store.openZoo(),
+  })
+
   for (const example of EXAMPLES) {
     items.push({
       id: `example:${example.id}`,

@@ -20,7 +20,7 @@ import type { NodeCategory, NodeDefinition, PortDef } from '../../core/node'
 
 import type { DatasetBackend } from '../../nodes/lib/datasetFamilies'
 import { BACKENDS, backendForNodeType } from '../../nodes/lib/datasetFamilies'
-import { socketStyle } from '../socketStyle'
+import { nodeTintVar, socketStyle } from '../socketStyle'
 import type { SocketShape } from '../socketStyle'
 import { plural } from '../format'
 
@@ -39,12 +39,12 @@ export function NodeThumbnail({ def }: NodeThumbnailProps) {
   const outputs = (def.outputs ?? []).slice(0, MAX_DOTS)
   /*
    * A dataset tile is tinted by *backend*, matching its card. Falls through to the category
-   * token for everything else, and for a backend nobody has styled yet.
+   * token for everything else, and for a backend nobody has styled yet. The fallback argument
+   * never fires here — a thumbnail is built from a definition, so the type is registered by
+   * construction — and is passed anyway so the expression says what it resolves to.
    */
   const backend = backendForNodeType(def.type)
-  const tint = backend
-    ? `var(--cat-dataset-${backend.id}, var(--cat-dataset))`
-    : `var(--cat-${def.category})`
+  const tint = nodeTintVar(def.type, `var(--cat-${def.category})`)
 
   /*
    * An annotation is drawn as what it is on the canvas: a framed box of text, no header strip

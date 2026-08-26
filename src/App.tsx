@@ -10,6 +10,7 @@ import { ShareDialog } from './ui/panels/ShareDialog'
 import { ShortcutsDialog } from './ui/panels/ShortcutsDialog'
 import { SharedLinkGate } from './ui/panels/SharedLinkGate'
 import { StartPage } from './ui/panels/StartPage'
+import { ZooGate } from './ui/panels/ZooGate'
 import { StatusBar } from './ui/panels/StatusBar'
 import { Toolbar } from './ui/panels/Toolbar'
 import { ViewerOverlay } from './ui/panels/ViewerOverlay'
@@ -47,6 +48,12 @@ export function App() {
       <ShortcutsDialog />
       {/* Last, and on top: it can be reopened over an expanded viewer. */}
       <StartPage />
+      {/*
+       * Under the start page rather than over it: `openZoo` closes the start page on the way in,
+       * so the two are never both up, and the ordering only decides which wins if that ever
+       * stops being true — where the welcome modal is the safer thing to be looking at.
+       */}
+      <ZooGate />
       {/*
        * Above even the start page: a link somebody followed is the most specific intent on the
        * screen, and the store already withholds the welcome modal when there is one.

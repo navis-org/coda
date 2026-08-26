@@ -42,6 +42,7 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
   const setGraphName = useGraphStore((s) => s.setGraphName)
   const newGraph = useGraphStore((s) => s.newGraph)
   const loadExample = useGraphStore((s) => s.loadExample)
+  const openZoo = useGraphStore((s) => s.openZoo)
   const refreshLibrary = useGraphStore((s) => s.refreshLibrary)
   const loadStarter = useGraphStore((s) => s.loadStarter)
   const runAll = useGraphStore((s) => s.runAll)
@@ -123,22 +124,43 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
       </Dropdown>
 
       <Dropdown label="Examples">
-        {(close) =>
-          EXAMPLES.map((example) => (
-            <button
-              key={example.id}
-              type="button"
-              className="dropdown__item"
-              onClick={() => {
-                loadExample(example.id)
-                close()
-              }}
-            >
-              <strong>{example.name}</strong>
-              <span>{example.summary}</span>
-            </button>
-          ))
-        }
+        {(close) => (
+          <>
+            {EXAMPLES.map((example) => (
+              <button
+                key={example.id}
+                type="button"
+                className="dropdown__item"
+                onClick={() => {
+                  loadExample(example.id)
+                  close()
+                }}
+              >
+                <strong>{example.name}</strong>
+                <span>{example.summary}</span>
+              </button>
+            ))}
+            {/*
+             * Last, under a rule, and that placement is the whole statement: the rows above are
+             * bundled, run on synthetic data and open instantly, while this one goes to a public
+             * repository over the network. Mixing a fetch into that list would make five local
+             * things and one remote thing look like six of the same kind.
+             */}
+            <div className="dropdown__group">
+              <button
+                type="button"
+                className="dropdown__item"
+                onClick={() => {
+                  openZoo()
+                  close()
+                }}
+              >
+                <strong>Browse Workflows…</strong>
+                <span>Search the Coda Zoo — workflows shared by other people.</span>
+              </button>
+            </div>
+          </>
+        )}
       </Dropdown>
 
       {/*

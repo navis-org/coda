@@ -291,7 +291,7 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     label: 'Mushroom Body',
     description: 'Reconstruction of the mushroom body`s alpha lobe.',
     guide:
-      'Reconstruction of the alpha lobe of the mushroom body in a male Drosophila. One of the earliest fly connectomes.',
+      'Dense reconstruction of the alpha (vertical) lobe of the mushroom body in a male Drosophila. One of the earliest fly connectomes, contains 983 neurons.',
     glyph: 'brain',
     // One structure rather than a brain. See `starter`.
     starter: false,

@@ -1,0 +1,23 @@
+{
+  // Node-side developer tools that import the app's own modules — today, the Zoo index
+  // generator. Its own project because such a script needs both halves of the environment:
+  // `src` is written against the DOM lib, and a CLI needs `node:` modules.
+  //
+  // Standalone rather than a project reference, and that is not a preference: a composite
+  // reference requires the referenced project to emit, and `tsconfig.app.json` is `noEmit`
+  // because nothing in this repository consumes Coda as a library.
+  //
+  // The include lists the scripts and the ambient declarations, and **not** `src`. TypeScript
+  // already pulls in every file a script imports; listing `src` would only add the files it does
+  // *not* import — which `tsconfig.app.json` checks anyway. Measured: 1140 files and 4.9 s with
+  // `src`, 202 files and 1.4 s without, both clean. The `.d.ts` entry is required, or
+  // `__APP_VERSION__`, `import.meta.env` and the `?url`/`?worker` module declarations go missing.
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    "composite": false,
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.scripts.tsbuildinfo"
+  },
+  "include": ["scripts/**/*.ts", "src/**/*.d.ts"]
+}

@@ -12,11 +12,12 @@
  * visible reason, because you forgot a filter was on.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 
 import type { NodeCategory, NodeDefinition } from '../../core/node'
 import { listableNodeDefs, nodeDefsByCategory } from '../../core/registry'
 import { typeLabel } from '../../core/types'
+import { useListNav } from '../useListNav'
 import { fuzzyRank } from './fuzzy'
 import { NodeThumbnail } from './NodeThumbnail'
 import { Highlight } from './Highlight'
@@ -38,9 +39,7 @@ const CATEGORY_LABELS: Record<NodeCategory, string> = {
 export function NodeBrowser({ onPick, onClose }: NodeBrowserProps) {
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState<NodeCategory | 'all'>('all')
-  const [activeIndex, setActiveIndex] = useState(0)
   const panelRef = useRef<HTMLDivElement>(null)
-  const listRef = useRef<HTMLDivElement>(null)
 
   /** Registry order, grouped by category — the order rows appear in with no query. */
   const ordered = useMemo(() => nodeDefsByCategory().flatMap((group) => group.defs), [])
@@ -61,31 +60,9 @@ export function NodeBrowser({ onPick, onClose }: NodeBrowserProps) {
     ])
   }, [query, category, ordered])
 
-  useEffect(() => setActiveIndex(0), [ranked])
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.stopPropagation()
-        onClose()
-      }
-    }
-    window.addEventListener('keydown', onKeyDown, true)
-    return () => window.removeEventListener('keydown', onKeyDown, true)
-  }, [onClose])
-
-  useEffect(() => {
-    listRef.current
-      ?.querySelector('[aria-selected="true"]')
-      ?.scrollIntoView({ block: 'nearest' })
-  }, [activeIndex])
-
-  const step = (direction: 1 | -1) => {
-    setActiveIndex((current) => {
-      if (ranked.length === 0) return 0
-      return (current + direction + ranked.length) % ranked.length
-    })
-  }
+  // Escape, the reset on a new result set, the scroll-into-view and the wrapping step were all
+  // written out here first; `useListNav` is where they live now that three modals want them.
+  const nav = useListNav(ranked.length, ranked, onClose)
 
   const commit = (index: number) => {
     const entry = ranked[index]
@@ -117,15 +94,10 @@ export function NodeBrowser({ onPick, onClose }: NodeBrowserProps) {
               if (e.target.value) setCategory('all')
             }}
             onKeyDown={(e) => {
-              if (e.key === 'ArrowDown') {
+              if (nav.onKeyDown(e)) return
+              if (e.key === 'Enter') {
                 e.preventDefault()
-                step(1)
-              } else if (e.key === 'ArrowUp') {
-                e.preventDefault()
-                step(-1)
-              } else if (e.key === 'Enter') {
-                e.preventDefault()
-                commit(activeIndex)
+                commit(nav.activeIndex)
               }
             }}
           />
@@ -168,7 +140,7 @@ export function NodeBrowser({ onPick, onClose }: NodeBrowserProps) {
           ))}
         </div>
 
-        <div className="node-browser__list" ref={listRef} role="listbox" aria-label="Nodes">
+        <div className="node-browser__list" ref={nav.listRef} role="listbox" aria-label="Nodes">
           {ranked.map((entry, index) => {
             const def = entry.item
             return (
@@ -177,8 +149,8 @@ export function NodeBrowser({ onPick, onClose }: NodeBrowserProps) {
                 type="button"
                 className="node-row"
                 role="option"
-                aria-selected={index === activeIndex}
-                onMouseEnter={() => setActiveIndex(index)}
+                aria-selected={index === nav.activeIndex}
+                onMouseEnter={() => nav.setActiveIndex(index)}
                 onClick={() => commit(index)}
                 onDoubleClick={() => commit(index)}
               >

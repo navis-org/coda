@@ -106,6 +106,17 @@ symptom to recognise — which usually points nowhere near the cause.
   have. `Editor.tsx` still owns the *bindings*; adding one means adding an entry here too.
 - **Module init order.** `graphStore.ts` imports `../nodes` for its side effect. Without
   it, ordering in `main.tsx` becomes load-bearing and silently drops every node.
+  The same trap one level in: a Node-side script needs `registerBuiltinSources()` as well, or
+  the nodes resolve and then every dataset node reports "Data source is not registered". Both
+  failures are total and both read as a data problem. `src/data/builtins.ts` is the one set.
+- **One `fetchText`, in `src/data/fetchText.ts`.** Its own comment warns that two functions of
+  one name two directories apart is a grep hazard — and it was then copied from
+  `share/resolve.ts` into `zoo/source.ts`, making the warning true in the codebase that wrote it.
+  A cross-origin GET that has to tell "unreachable" from "CORS refused" is that function.
+- **A generated file that is committed must not carry a wall clock.** `ZooIndex.updatedAt` is
+  the newest entry's commit date, not `Date.now()`, so `zoo-index --check` can byte-compare it.
+  Stamped from a clock, the file differs from itself on every run — and the check that catches a
+  contributor who forgot to regenerate silently stops working.
 - **`parseMarkdown`'s extended kinds are opt-in, and that is a safety property.** Fences,
   callouts, tables and images parse only under `{ extended: true }`. A dataset blurb arrives from
   whatever deployment a Custom node points at; an image in one is a tracking pixel, and a fence
@@ -180,6 +191,10 @@ file, pulling all 620 kB back into every session and undoing the split.
   packages, which is the finding rather than a coincidence.
 - [docs/persistence.md](docs/persistence.md) — share links, the autosave across tabs, the
   browser shelf.
+- [docs/zoo.md](docs/zoo.md) — the Coda Zoo: the GitHub repository of deposited workflows, why
+  the index is a committed file rather than an API listing, and why the validator lives here
+  rather than there. Read before changing `ZooIndex` — a generator and a reader that disagree
+  produce an index that passes CI and renders as nothing.
 - [docs/ui-shell.md](docs/ui-shell.md) — panels, fullscreen and the manifest, the run
   indicator, the start page.
 - [docs/pages.md](docs/pages.md) — overview, tutorial and node guide. Extra vite entries;

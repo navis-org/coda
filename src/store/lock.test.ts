@@ -213,6 +213,10 @@ describe('every store action is on one side of the lock', () => {
     'attachEdgeSet',
     'openStartPage',
     'closeStartPage',
+    // Opening a *browser* of workflows is a panel. Opening one of them is `loadGraph`, which
+    // is a document load and is on the same side as opening a file.
+    'openZoo',
+    'closeZoo',
     'setStartPageDismissed',
     'expandNode',
     'openHelp',

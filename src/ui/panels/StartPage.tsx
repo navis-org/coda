@@ -26,6 +26,7 @@ import lmbDark from '../logos/lmb-dark.png?url'
 import lmbLight from '../logos/lmb-light.png?url'
 import { datasetGlyph } from '../nodes/DatasetPreview'
 import { nodeGlyph } from './NodeThumbnail'
+import { REPLACE_GRAPH_QUESTION } from '../replaceConfirm'
 import type { DatasetCard, ExampleCard, StartCard, WorkflowCard } from './startCards'
 import { datasetCards, exampleCards, workflowCards } from './startCards'
 import { shortcutKeys } from '../shortcuts'
@@ -502,7 +503,7 @@ function Card({ card, confirming, onPick, onCancel }: CardProps) {
 
       {confirming && (
         <div className="start-card__confirm">
-          <p>Replace the current graph? This clears the undo history.</p>
+          <p>{REPLACE_GRAPH_QUESTION}</p>
           <div>
             <button type="button" className="btn btn--primary" onClick={() => onPick(card)}>
               Replace

@@ -3043,7 +3043,8 @@ select.field {
   max-height: 760px;
 }
 
-.node-browser__search {
+.node-browser__search,
+.zoo__search {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -3074,7 +3075,8 @@ select.field {
   white-space: nowrap;
 }
 
-.node-browser__chips {
+.node-browser__chips,
+.zoo__tags {
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
@@ -3132,14 +3134,16 @@ select.field {
   color: var(--text-secondary);
 }
 
-.node-browser__list {
+.node-browser__list,
+.zoo__list {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   padding: 6px;
 }
 
-.node-row {
+.node-row,
+.zoo-row {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -3152,11 +3156,14 @@ select.field {
   cursor: pointer;
 }
 .node-row:hover,
-.node-row[aria-selected='true'] {
+.node-row[aria-selected='true'],
+.zoo-row:hover,
+.zoo-row[aria-selected='true'] {
   background: var(--surface-hover);
   border-color: var(--border);
 }
-.node-row[aria-selected='true'] {
+.node-row[aria-selected='true'],
+.zoo-row[aria-selected='true'] {
   background: var(--accent-soft);
 }
 
@@ -3168,7 +3175,8 @@ select.field {
   color: var(--text-secondary);
 }
 
-.node-row__text {
+.node-row__text,
+.zoo-row__text {
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -3180,7 +3188,8 @@ select.field {
   font-weight: 550;
   color: var(--text-primary);
 }
-.node-row__desc {
+.node-row__desc,
+.zoo-row__summary {
   font-size: 11.5px;
   color: var(--text-muted);
   line-height: 1.4;
@@ -7307,4 +7316,204 @@ details[open] > summary.tile__label {
  * both are a muted glyph holding a grid track open. */
 .filter-body__novalue {
   text-align: center;
+}
+
+/* --------------------------------------------------------------------------
+ * The Zoo browser
+ *
+ * Master–detail inside the same `.overlay__panel` the add-node browser uses: search on top,
+ * tag chips under it, then a scrolling list beside a fixed detail column. Wider than the node
+ * browser because the right-hand column holds a README, and a description column narrower than
+ * about 380px turns every paragraph into a stack of two-word lines.
+ * -------------------------------------------------------------------------- */
+
+.zoo {
+  max-width: 1180px;
+  max-height: 820px;
+}
+
+/* The Refresh button is a chip — it wears `.chip-filter` in the markup, and all that is left
+   here is that it must not stretch, and what it looks like mid-fetch. */
+.zoo__refresh {
+  flex: none;
+}
+.zoo__refresh:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.zoo__body {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+}
+
+/* The zoo's list is a flex *row* child, so it is the inline axis that has to be allowed to
+   shrink. Everything else about it is the node browser's list. */
+.zoo__list {
+  min-width: 0;
+}
+
+.zoo__detail {
+  flex: none;
+  width: 400px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 18px;
+  border-left: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.zoo__empty {
+  padding: 28px 18px;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.zoo__empty p {
+  margin: 0 0 8px;
+}
+
+/* --- a row ---------------------------------------------------------------- */
+
+/* A zoo row is a node-browser row with a bigger picture in it, so it wants a little more
+   vertical room. Everything else — the hover ink, the selected tint, the radius — comes from
+   `.node-row`, because two modals sitting on the same `.overlay__panel` highlighting in two
+   different colours is a divergence nobody chose. */
+.zoo-row {
+  padding: 8px 10px;
+}
+
+.zoo-row__text strong {
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--text-primary);
+}
+.zoo-row__meta {
+  font-size: 11px;
+  color: var(--text-tertiary, var(--text-secondary));
+}
+
+/*
+ * "Runs with no token" is the one thing on a row worth marking, because it is the difference
+ * between an entry the reader can open right now and one that sends them to Connections first.
+ *
+ * A pill in `--accent-soft`, and deliberately **not** `--status-ok`. That token is documented in
+ * theme.css as a fixed, never-themed value "always paired with a glyph", and it is a dot's
+ * background everywhere it is used properly: #0ca30c carrying 11px prose on the light panel is
+ * under the 4.5:1 floor, which is the exact trap `--status-warn` right above it exists to
+ * record. `--accent-soft` is already a validated background behind body text — it is what a
+ * selected chip wears — so this reuses a measured pairing instead of inventing one.
+ */
+.zoo-row__requires[data-free] {
+  padding: 1px 6px;
+  border-radius: 9px;
+  background: var(--accent-soft);
+  color: var(--text-primary);
+}
+
+/* --- the thumbnail -------------------------------------------------------- */
+
+.zoo-thumb {
+  flex: none;
+  display: block;
+  background: var(--canvas);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.zoo-thumb--empty {
+  background: var(--surface-2);
+}
+
+/* --- the detail column ---------------------------------------------------- */
+
+.zoo__title {
+  margin: 12px 0 4px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.zoo__summary {
+  margin: 0 0 12px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.zoo__facts {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 3px 10px;
+  margin: 0 0 14px;
+  font-size: 11.5px;
+}
+.zoo__facts dt {
+  color: var(--text-secondary);
+}
+.zoo__facts dd {
+  margin: 0;
+  color: var(--text-primary);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.zoo__readme {
+  font-size: 12px;
+  line-height: 1.55;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.zoo__error {
+  margin: 12px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--status-error);
+}
+
+/*
+ * Sticky, so the button that actually does the thing does not scroll away under a long README.
+ * The background is opaque rather than a blur: it sits over body text, and text through frosted
+ * glass is the one place that effect stops being decorative and starts being unreadable.
+ */
+.zoo__actions {
+  position: sticky;
+  bottom: -16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+  padding: 12px 0;
+  background: var(--surface-2);
+}
+.zoo__confirm-text {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+.zoo__source-link {
+  margin-left: auto;
+  font-size: 11.5px;
+}
+
+/* --- the footer ----------------------------------------------------------- */
+
+.zoo__foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-secondary);
+  flex: none;
+}
+.zoo__foot > a {
+  margin-left: auto;
+}
+/* Dropped entries are somebody's contribution failing to load. Marked, and the reasons are in
+ * the title attribute — enough to report, without a banner for a problem nobody here can fix. */
+.zoo__dropped {
+  color: var(--status-warn, var(--text-secondary));
+  cursor: help;
 }
