@@ -127,6 +127,8 @@ Moved verbatim out of `CLAUDE.md`.
 | `ui/panels/nodeMenu.test.tsx`            | the node menu's two caches: Results rather than "cache", and Clear Cache gated on the node declaring one                        |
 | `ui/viewers/tableSummary.test.tsx`       | the inspector's text readout: every column listed, an id kept whole, a long value cut but recoverable, and no dash for no rows |
 | `ui/nodes/cacheAge.test.tsx`             | `cached 3d ago ⟳`: the age surviving a restored result, the click reaching both caches, and no threshold hiding a fresh one     |
+| `data/datasetCache.test.ts`              | "everything cached for this dataset" as a question about keys: one version not claiming another's (`hemibrain:v1.2` vs `v1.2.1`), the oldest entry winning, and an entry predating the timestamp sidecar still being found |
+| `ui/nodes/datasetCacheAge.test.tsx`      | the dataset card's `cached 3d ago ⟳`: that it reads the cache rather than the run, starts no download by being on screen, notices one another card started, and offers `no cache` as text rather than a button |
 | `ui/nodes/runWarning.test.tsx`           | a run warning reaching the card in the line a refusal used to take, standing aside for a run error, reaching the inspector — and `nodeIssues`' ranking, which both surfaces read |
 | `ui/nodes/noteCard.test.tsx`             | the note card: markdown as prose, no node chrome, Escape abandoning an edit, the frame toggle                                    |
 | `nodes/lib/connectivityOps.test.ts`      | the traversal: the pre→post swap, the both-ends dedupe, no re-expansion, minWeight pruning                                       |

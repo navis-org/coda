@@ -225,7 +225,7 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     description:
       'Whole central nervous system of an adult male fly — brain and ventral nerve cord.',
     guide:
-      'The largest fly connectome published so far: 165,122 traced neurons across brain and nerve cord, so a circuit can be followed from a sensory neuron to the muscle it drives without leaving the dataset. That size is also what you are paying for — an unbounded query here is a real load on a shared server, and Explore Dataset downloads about 7 MB before it can search.',
+      'The largest fly connectome published so far: 168k proofread neurons across brain and nerve cord, so a circuit can be followed from a sensory neuron to the motor neurons driving muscles.',
     glyph: 'cns',
   },
   {
@@ -236,7 +236,7 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     family: 'hemibrain',
     label: 'Hemibrain',
     description:
-      'Central brain of an adult female fly. The most heavily annotated fly connectome.',
+      'Approximately half a central brain of an adult female fly.',
     guide:
       'Approximately one hemisphere of the central brain (with bits of the right optic lobe). Rich annotations: cell type, class, cell body fibre, soma radius, hemilineage, etc.',
     glyph: 'brain',
@@ -248,9 +248,9 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     notebook: NEUPRINT_NOTEBOOK,
     family: 'manc',
     label: 'MANC',
-    description: 'Male adult nerve cord — the ventral nerve cord, motor and premotor circuits.',
+    description: 'Nerve cord of a male adult fly.',
     guide:
-      'The ventral nerve cord on its own: motor neurons, the premotor circuits driving them, and the descending neurons arriving from the brain. Pairs naturally with MaleCNS, which contains the same territory in a whole-animal volume; MANC is the older and more heavily curated reconstruction of it.',
+      'The ventral nerve cord on its own: motor neurons, the premotor circuits driving them, and the descending neurons arriving from the brain.',
     glyph: 'vnc',
   },
   {
@@ -261,11 +261,11 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     family: 'optic-lobe',
     label: 'Optic Lobe',
     description:
-      'The right optic lobe: medulla, lobula and lobula plate, columnar to the core.',
+      'The right optic lobe: medulla, lobula and lobula plate with bits of the central brain and the lamina',
     guide:
-      'One optic lobe, reconstructed to the column — medulla, lobula and lobula plate. Columnar cell types repeat across the retinotopic array, so this is the dataset where a type is a population of hundreds rather than a handful, and where averaging across a type actually means something.',
+      'One optic lobe: medulla, lobula and lobula plate with bits of the central brain and the lamina. This is part of the MaleCNS dataset and was released before the full dataset. Mostly kept as reference for the early papers that used it.',
     glyph: 'optic',
-    // One lobe rather than a brain: reached for deliberately, not started from. See `starter`.
+    // Superseded by MaleCNS: reached for deliberately, not started from. See `starter`.
     starter: false,
   },
   {
@@ -276,11 +276,10 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     family: 'fib19',
     label: 'FIB-19',
     description:
-      'An early FIB-SEM volume of the mushroom body and surrounds. Small and partial.',
+      'Partial reconstruction of a female fly`s visual system: medulla, lobula and lobula plate.',
     guide:
-      'An early FIB-SEM volume from before the hemibrain, covering the mushroom body and its surrounds. Small, partial and largely of historical interest — useful mainly as a fast dataset to try a pipeline on, or for comparing against the reconstructions that followed it.',
+      'A partial reconstruction covering portions of the fly medulla, lobula, and lobula plate to reveal connectivity patterns in the visual motion detection pathway.',
     glyph: 'brain',
-    // Superseded by the hemibrain it preceded. See `starter`.
     starter: false,
   },
   {
@@ -290,9 +289,9 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     notebook: NEUPRINT_NOTEBOOK,
     family: 'mushroombody',
     label: 'Mushroom Body',
-    description: 'Mushroom body reconstruction. Carries no version in its dataset id.',
+    description: 'Reconstruction of the mushroom body`s alpha lobe.',
     guide:
-      'A dedicated mushroom body reconstruction: Kenyon cells, the output neurons and the dopaminergic neurons that modulate them. It is the one dataset here whose id carries no version, so its version dropdown has nothing to pin and the node simply names the dataset.',
+      'Reconstruction of the alpha lobe of the mushroom body in a male Drosophila. One of the earliest fly connectomes.',
     glyph: 'brain',
     // One structure rather than a brain. See `starter`.
     starter: false,
@@ -349,7 +348,7 @@ const CAVE_FAMILIES: DatasetFamily[] = [
     family: 'flywire_fafb_public',
     label: 'FlyWire FAFB',
     description:
-      'Whole adult female fly brain, publicly released. Proofread neurons with hierarchical cell annotations.',
+      'Whole adult female fly brain (optic lobes + central brain).',
     guide:
       'Public FlyWire segmentation read through CAVE, so version is a materialization number. Cell annotations download once per dataset and search locally—first query waits, rest are instant. Skeletons, meshes, synapses, paths and per-region counts are not wired up; nodes that need them decline rather than fail.',
     glyph: 'brain',
@@ -389,9 +388,9 @@ const CATMAID_FAMILIES: DatasetFamily[] = [
     family: '1',
     label: 'FAFB',
     description:
-      'Whole adult female fly brain, manually traced. Public tracings published on Virtual Fly Brain.',
+      'Early manual reconstructions in an female fly brain. Published data hosted by VFB.',
     guide:
-      'A few thousand carefully hand-traced neurons on the same FAFB volume as FlyWire—the opposite trade of curated depth for whole-brain coverage. No cell-type field; Coda derives type from annotations. Connectivity Graph needs authenticated POST access.',
+      'A few thousand hand-traced neurons on the same image volume as FlyWire.',
     glyph: 'brain',
   },
 ]

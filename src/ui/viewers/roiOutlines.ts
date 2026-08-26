@@ -26,6 +26,7 @@
  */
 
 import { cacheGet, cacheSet } from '../../data/cache'
+import { datasetCacheKey } from '../../data/neuronIndex'
 import type { DataSource } from '../../data/source'
 import type { MeshesValue } from '../../core/values'
 import type { RoiView } from './roiProjection'
@@ -93,8 +94,12 @@ export interface LoadRoiOutlinesOptions {
 /** In-flight loads, so two cards on one dataset share a download rather than racing. */
 const inFlight = new Map<string, Promise<RoiOutlineSet>>()
 
+/**
+ * Through `datasetCacheKey` rather than spelled out, so the dataset card's ⟳ reaches these too:
+ * outlines traced from a release's region meshes are exactly as stale as the release.
+ */
 function cacheKey(sourceId: string, datasetId: string): string {
-  return `roi-outlines:${sourceId}:${datasetId}`
+  return datasetCacheKey('roi-outlines', sourceId, datasetId)
 }
 
 function fingerprintOf(rois: readonly string[]): string {

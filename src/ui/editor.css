@@ -944,6 +944,27 @@ select.field {
   color: var(--text-primary);
 }
 
+/* Not a control: `no cache` states a fact, and nothing about it should invite a 26 MB download.
+   Faded rather than hidden, for `CacheAge`'s reason — a line that appears only when something is
+   wrong is one nobody learns to read. */
+.coda-node__cache--empty,
+.coda-node__cache--busy {
+  cursor: default;
+  color: var(--text-muted);
+  opacity: 0.75;
+}
+.coda-node__cache--empty:hover,
+.coda-node__cache--busy:hover {
+  color: var(--text-muted);
+}
+/* The fetch this card started, named while it runs. Truncated rather than allowed to widen the
+   footer: the phase note is the source's wording and can be a sentence. */
+.coda-node__cache--busy {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .coda-node__issue {
   padding: 3px 8px 4px calc(8px + var(--state-bar));
   font-size: 10px;

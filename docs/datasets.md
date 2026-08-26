@@ -60,6 +60,19 @@ _default_ deployment and returns plausible data from the wrong server. `neuPrint
 registers one instance per deployment, lazily, from `inferOutputs` — synchronous and network-free,
 which is what makes that safe.
 
+### Two ⟳ on one card, and they mean different things
+
+The card's own foot carries `⟳` beside the dataset id: that re-fetches the **listing** — versions,
+labels, neuron counts — and bumps the `refresh` nonce so downstream re-runs. It is metadata,
+kilobytes, and it is what makes a newly published version appear in the dropdown.
+
+The node's foot below it carries `cached 3d ago ⟳`, which is about the **downloaded data**: the
+neuron index behind Explore and Find Neurons, the region outlines, the roll-ups. Different size,
+different lifetime, different button. `no cache` when none of it has been downloaded, which is the
+state a dataset node sits in until something asks it for neurons. See
+[core.md](core.md#the-dataset-card-asks-the-cache-instead-because-it-fetched-none-of-it) for why
+that one has to peek at the cache rather than report what it fetched.
+
 ### One escape hatch per backend, and where somebody starts
 
 **`Custom neuPrint`, `Custom CAVE` and `Custom CATMAID` are one kind of thing**, and

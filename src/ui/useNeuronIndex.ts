@@ -176,6 +176,64 @@ function ensureLoaded(
  * with different annotations hold genuinely different tables, and sharing one entry would serve
  * the first one looked at to the other for the session.
  */
+/**
+ * Re-download this dataset's index, discarding every cached copy.
+ *
+ * Module-level rather than a method on the handle, because the two things that ask for it are
+ * not the same shape. A widget *displaying* the index presses reload and watches its own state;
+ * the dataset card presses it having just dropped the persistent entries, and must be able to
+ * start a download for a dataset **no widget is currently showing** — which is most of them.
+ * A hook cannot serve the second case without mounting, and mounting `useNeuronIndex` is itself
+ * a download.
+ */
+export function reloadNeuronIndex(
+  sourceId: string,
+  datasetId: string,
+  annotations?: DatasetAnnotations,
+): void {
+  const key = entryKey(sourceId, datasetId, annotations)
+  const entry = entryFor(key)
+  entry.reloads++
+  entry.loading = false
+  entry.state = NONE
+  ensureLoaded(key, sourceId, datasetId, annotations)
+}
+
+/** The shared entry's state, subscribed to but never started. See `useNeuronIndexState`. */
+function useEntryState(key: string | undefined): NeuronIndexState {
+  const subscribe = useCallback(
+    (onChange: () => void) => {
+      if (!key) return () => {}
+      const entry = entryFor(key)
+      entry.listeners.add(onChange)
+      return () => {
+        entry.listeners.delete(onChange)
+      }
+    },
+    [key],
+  )
+
+  const getSnapshot = useCallback(() => (key ? entryFor(key).state : NONE), [key])
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+}
+
+/**
+ * What the shared load is doing, **without asking for one**.
+ *
+ * The half of `useNeuronIndex` that a card which does not want the table can afford. Mounting
+ * the full hook starts a download, so a dataset node — of which a canvas holds several, none of
+ * them displaying neurons — cannot use it merely to say `downloading…` under its own ⟳.
+ *
+ * Reads `none` when nobody has asked, which is the honest answer rather than a missing one.
+ */
+export function useNeuronIndexState(
+  sourceId: string | undefined,
+  datasetId: string | undefined,
+  annotations?: DatasetAnnotations,
+): NeuronIndexState {
+  return useEntryState(sourceId && datasetId ? entryKey(sourceId, datasetId, annotations) : undefined)
+}
+
 export function useNeuronIndex(
   sourceId: string | undefined,
   datasetId: string | undefined,
@@ -192,20 +250,7 @@ export function useNeuronIndex(
   const chain = useRef(annotations)
   chain.current = annotations
 
-  const subscribe = useCallback(
-    (onChange: () => void) => {
-      if (!key) return () => {}
-      const entry = entryFor(key)
-      entry.listeners.add(onChange)
-      return () => {
-        entry.listeners.delete(onChange)
-      }
-    },
-    [key],
-  )
-
-  const getSnapshot = useCallback(() => (key ? entryFor(key).state : NONE), [key])
-  const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+  const state = useEntryState(key)
 
   /*
    * From an effect, never from render. `ensureLoaded` publishes synchronously on several paths,
@@ -222,13 +267,9 @@ export function useNeuronIndex(
   }, [key, sourceId, datasetId])
 
   const reload = useCallback(() => {
-    if (!key || !sourceId || !datasetId) return
-    const entry = entryFor(key)
-    entry.reloads++
-    entry.loading = false
-    entry.state = NONE
-    ensureLoaded(key, sourceId, datasetId, chain.current)
-  }, [key, sourceId, datasetId])
+    if (!sourceId || !datasetId) return
+    reloadNeuronIndex(sourceId, datasetId, chain.current)
+  }, [sourceId, datasetId])
 
   return { state, reload }
 }

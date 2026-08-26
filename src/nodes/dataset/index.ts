@@ -192,7 +192,7 @@ export const customCaveNode = registerNode({
   type: 'dataset.cave',
   label: 'Custom CAVE',
   category: 'dataset',
-  description: 'Any CAVE datastack and materialization, named by hand.',
+  description: 'Any CAVE datastack configured by hand.',
   guide:
     'This node allows working with arbitrary CAVE datastacks that Coda ships no preconfigured ' +
     'node for. Unlike its neuPrint twin it needs more than a name: a datastack is a segmentation ' +
@@ -520,10 +520,10 @@ export const customNeuPrintNode = registerNode({
   type: 'dataset.neuprint',
   label: 'Custom neuPrint',
   category: 'dataset',
-  description: 'Any neuPrint deployment and dataset, named by hand.',
+  description: 'Configure a neuPrint dataset by hand.',
   guide:
-    'The escape hatch for a dataset Coda ships no node for: a release newer than this build, a ' +
-    'private deployment, or a neuPrint instance somewhere else entirely. Type the server and the ' +
+    'The escape hatch for a dataset Coda ships no preset for: a release newer than this build, a ' +
+    'private dataset, or a neuPrint instance somewhere else entirely. Type the server and the ' +
     'dataset id exactly as that server names it, version included. Note that Server here means a ' +
     'neuPrint deployment, not the Base URL override under Connections — the two are different ' +
     'settings and naming one does not set the other.',
@@ -636,7 +636,7 @@ export const customCatmaidNode = registerNode({
   type: 'dataset.catmaid',
   label: 'Custom CATMAID',
   category: 'dataset',
-  description: 'Any CATMAID instance and project, named by hand.',
+  description: 'Any CATMAID project, configured by hand.',
   guide:
     'The escape hatch for a CATMAID server Coda ships no node for — a lab instance, or a second ' +
     'project on one it does know. Type the server URL and pick a project from the list the ' +

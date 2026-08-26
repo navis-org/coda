@@ -13,7 +13,7 @@ inspector. They are different layers and the difference is not cosmetic:
 | | what it holds | keyed by | lives | cleared by |
 | --- | --- | --- | --- | --- |
 | the scheduler's result cache | what `evaluate` returned | provenance — `hash(type, params, upstream)` | the session | Invalidate Results |
-| the table cache (`loadCachedTable` → IndexedDB) | what a *server* returned | what was fetched | a month | Clear Cache |
+| the table cache (`loadCachedTable` → IndexedDB) | what a *server* returned | what was fetched | a month | Clear Cache, or the dataset card's ⟳ |
 | the geometry cache (`geometryCache.ts`) | one neuron's skeleton or mesh | source, dataset, id, and whatever else decides the geometry | the session | Clear Cache |
 
 **The third exists because the first two cannot help each other.** A morphology node's key folds
@@ -106,6 +106,53 @@ written for the millisecond end (`<1ms`, `142ms`, `2.4s`); this answers a differ
 rounds rather than refining — nobody deciding whether to re-read a base is served by `2.7d`. It
 **floors**, so nothing is ever reported as older than it is: `23h` stays `23h` until it really is
 a day.
+
+### The dataset card asks the cache instead, because it fetched none of it
+
+`cached 3d ago ⟳` on a dataset node, and everything above about *where the number comes from* is
+inverted. A dataset node's `evaluate` resolves metadata: a listing, a version, a label. It never
+touches the thing that goes stale. **The neuron index is downloaded a card away** — by Explore, by
+Dataset Summary, by Neuron Profile — under `neuron-index:{source}:{dataset}` and kept for a month,
+and `ctx.reportFetched` cannot carry an age across that gap because no fetch happened here.
+
+**Why a month is the wrong number for some datasets and there is nothing to fix.** It is right for
+a released connectome: neuPrint publishes a new dataset *version* rather than editing one in place,
+so the expiry is about eventually noticing a re-release. It is wrong for one still being proofread,
+where a re-release lands in minutes to days — and the only symptom is a count that quietly does not
+change. Shortening the expiry would make every static dataset re-download 26 MB for nothing. So the
+answer is not a better default; it is saying which copy you are looking at.
+
+So this variant **looks**, and looking costs something reporting does not:
+
+- **The age is a peek, not a read.** IndexedDB has no partial read — `store.get` deserialises the
+  whole structured clone — so a card asking only *when* would pay 26 MB per card per session for
+  one number. `cache.ts` keeps a second object store holding nothing but `{savedAt, fingerprint}`,
+  written beside the value; `cachePeek` reads that. Entries written before that store existed have
+  no record in it, so the peek falls back to one full read and **leaves a sidecar behind** — paid
+  once per key, and nothing has to be re-downloaded to get there.
+- **It must notice a download it did not start.** `onCacheChange` announces every write and delete,
+  and the card re-peeks. Without it the age would be right on mount and wrong from the first Run,
+  which is worse than absent — a number that is *sometimes* maintained is one nobody can use.
+- **It must not fetch to find out.** Mounting `useNeuronIndex` starts a download, and a canvas
+  holds several dataset cards; that is why `useNeuronIndexState` exists, subscribing to the shared
+  entry without asking for one.
+
+**The ⟳ drops everything keyed to the dataset**, which is what `datasetCacheKey` is for: one
+convention — `kind:sourceId:datasetId[:variant]` — so the inverse question has a single answer.
+Clearing only the index would leave ROI outlines traced from the old release and a summary counting
+the old neurons, behind a card claiming it had cleared the cache. `kind` may not contain a colon,
+and that is load-bearing rather than tidy: a neuPrint dataset id is itself `hemibrain:v1.2.1`, so
+the scope is matched as a whole segment and never by prefix — otherwise `hemibrain:v1.2` drops
+`v1.2.1`'s 26 MB. Then it re-downloads, through the same shared `reloadNeuronIndex` any Explore
+card on that dataset is watching, and says `loading neurons` in the foot while it runs.
+
+**Not the geometry cache**, and that is not an oversight — it is in memory for the session and
+holds geometry named by an immutable id, per the section above.
+
+**`no cache` is text, not a button.** Everything else here is an affordance because somebody
+reading an age wants a fresher copy; nobody reading `no cache` on a card they have just dropped
+onto the canvas wants a 26 MB download, and a ⟳ under the pointer is how they would get one by
+accident. It is still *shown*, for the same reason `cached 0s ago` is.
 
 **It replaced the annotation nodes' `refresh` nonce.** A nonce works, and invariant 4 is why they
 exist at all; what it costs is that re-fetching becomes an **edit** — in the provenance key, in the

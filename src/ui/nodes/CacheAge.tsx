@@ -31,9 +31,25 @@ export interface CacheAgeProps {
   fetchedAt: number | undefined
   /** Clear this node's data cache and run it again. */
   onRefresh: () => void
+  /**
+   * What to say when there is no age — by default, nothing at all.
+   *
+   * A node reports a fetch only after it has run, so on the nodes this started with "no age"
+   * means "not yet run" and the footer already says so in words. A dataset card is the other
+   * case: the cache it speaks for is filled by *other* cards, so its empty state is a fact
+   * about the dataset rather than about the run, and `no cache` is the answer.
+   *
+   * Deliberately not a button. Everything else here is an affordance because somebody reading
+   * an age wants a fresher copy; nobody reading `no cache` on a card they have just dropped
+   * onto the canvas wants a 26 MB download, and a ⟳ an inch from the pointer is how they would
+   * get one by accident.
+   */
+  empty?: string
+  /** Extra detail for the title, appended to what the age already says. */
+  title?: string
 }
 
-export function CacheAge({ fetchedAt, onRefresh }: CacheAgeProps) {
+export function CacheAge({ fetchedAt, onRefresh, empty, title }: CacheAgeProps) {
   /*
    * A counter rather than a stored age: the value is derived at render from `Date.now()`, so a
    * card mounted at any point shows the right number without waiting for the first tick, and
@@ -46,7 +62,14 @@ export function CacheAge({ fetchedAt, onRefresh }: CacheAgeProps) {
     return () => clearInterval(id)
   }, [fetchedAt])
 
-  if (fetchedAt === undefined) return null
+  if (fetchedAt === undefined) {
+    if (empty === undefined) return null
+    return (
+      <span className="coda-node__cache coda-node__cache--empty" title={title}>
+        {empty}
+      </span>
+    )
+  }
   const age = formatAge(Date.now() - fetchedAt)
   return (
     <button
@@ -54,7 +77,7 @@ export function CacheAge({ fetchedAt, onRefresh }: CacheAgeProps) {
       className="coda-node__cache nodrag"
       // `nodrag` because the foot sits on a draggable card, and a control that pans the canvas
       // when you press it is not a control.
-      title={`Data read ${age} ago — click to fetch it again`}
+      title={`Data read ${age} ago — click to fetch it again${title ? `. ${title}` : ''}`}
       onClick={(event) => {
         event.stopPropagation()
         onRefresh()

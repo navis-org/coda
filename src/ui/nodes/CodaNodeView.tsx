@@ -29,8 +29,8 @@ import { getNodeDef } from '../../core/registry'
 import { hasHelp } from '../../help/registry'
 import type { NodeRunState } from '../../core/scheduler'
 import type { CodaType } from '../../core/types'
-import { isAssignable, typeLabel } from '../../core/types'
-import { describeValue } from '../../core/values'
+import { datasetRef, isAssignable, typeLabel } from '../../core/types'
+import { describeValue, isDatasetValue } from '../../core/values'
 import { useGraphStore } from '../../store/graphStore'
 import { exportBaseName } from '../export'
 import { formatDuration } from '../format'
@@ -38,6 +38,7 @@ import { ParamField } from '../params/ParamField'
 import { socketStyle } from '../socketStyle'
 import { ValuePreview } from '../viewers/ValuePreview'
 import { CacheAge } from './CacheAge'
+import { DatasetCacheAge } from './DatasetCacheAge'
 import { nodeBody } from './nodeBodies'
 import { nodeIssues } from './nodeIssues'
 import { NodeRunRing } from './NodeRunRing'
@@ -281,6 +282,12 @@ function CodaNodeViewImpl({
 
   const inputs = def.inputs ?? []
   const outputs = def.outputs ?? []
+  /*
+   * The dataset this card *is*, if it is one — read off the inferred output type rather than off
+   * the node's params, so a version dropdown and the cache line can never name different
+   * releases. Undefined on every other node, which is what gates the cache clause below.
+   */
+  const datasetOut = datasetRef(types?.outputs?.['dataset'])
   const rowCount = Math.max(inputs.length, outputs.length)
   // Type errors carry a `portId`; the socket ring below reads them directly, since that is a
   // question about one port rather than about the node.
@@ -759,6 +766,21 @@ function CodaNodeViewImpl({
                 void runNode(id)
               }}
             />
+            {/*
+             * The same clause for a dataset card, reading the cache rather than the run.
+             *
+             * A dataset node fetches none of what goes stale — its `evaluate` resolves metadata,
+             * while the neuron index behind every Explore and Find Neurons is downloaded later
+             * and kept for a month. So `fetchedAt` above is always undefined here and this looks
+             * the age up instead. See `DatasetCacheAge`.
+             */}
+            {datasetOut && (
+              <DatasetCacheAge
+                sourceId={datasetOut.sourceId}
+                datasetId={datasetOut.datasetId}
+                annotations={isDatasetValue(outputValue) ? outputValue.annotations : undefined}
+              />
+            )}
             {/*
              * Write this node's result to a file, for the cards that have no viewer to ask.
              *

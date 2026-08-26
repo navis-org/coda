@@ -172,7 +172,7 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
               onClick={close}
             >
               <strong>Overview</strong>
-              <span>Highlight reel</span>
+              <span>The highlights reel.</span>
             </a>
             <a
               className="dropdown__item"
@@ -465,7 +465,7 @@ function NewMenu({
     <>
       <button type="button" className="dropdown__item" onClick={onEmpty}>
         <strong>Empty</strong>
-        <span>A blank canvas</span>
+        <span>Start building on an empty canvas</span>
       </button>
 
       {groups.map((group) => (

@@ -19,10 +19,14 @@
  *  3. **Invalidate on shape change.** The fingerprint is the column list, so an index cached
  *     before schema discovery learned about `superclass` is a miss rather than a table whose
  *     columns disagree with the type the editor is advertising downstream.
+ *
+ * A fourth job arrived with the dataset card's `cached 3d ago ⟳`, and it belongs here for the
+ * same reason the key builders do: it is the **inverse** of a key. Given a dataset, which
+ * entries are about it, how old is the oldest, and drop them all. See `datasetCacheKey`.
  */
 
 import type { DatasetAnnotations, TableValue } from '../core/values'
-import { cacheGetEntry, cacheSet } from './cache'
+import { cacheDelete, cacheGetEntry, cacheKeys, cachePeek, cacheSet } from './cache'
 
 export interface NeuronIndexRequest {
   datasetId: string
@@ -106,16 +110,36 @@ export function loadCachedTable(spec: CachedTableSpec): Promise<TableValue> {
 }
 
 /**
- * Cache key for a source's neuron index. One place, so a reader and a writer agree.
+ * The shape every dataset-scoped cache key has: `kind:sourceId:datasetId[:variant]`.
  *
- * `variant` is for a source whose index depends on something outside the dataset id — CAVE's,
- * where a wired annotation chain replaces the labels, so two graphs on one datastack hold
- * genuinely different tables. It is part of the key rather than of the fingerprint because a
- * fingerprint mismatch is a *miss that overwrites*: the second chain would evict the first, and
- * the two would take turns re-fetching for the rest of the session.
+ * A convention rather than three key builders that merely resemble each other, because
+ * something has to be able to ask the *opposite* question — "everything cached for this
+ * dataset" — and answer it from the key alone. That is what the dataset card's `cached 3d ago`
+ * reports and what its ⟳ drops, and a card that knew about the index but not the ROI outlines
+ * would leave a stale copy behind while claiming to have cleared one.
+ *
+ * `kind` must not contain a colon; everything after the first one is the dataset scope. That is
+ * load-bearing rather than tidy: a neuPrint dataset id is itself `hemibrain:v1.2.1`, so the
+ * scope cannot be found by counting segments and is matched as a whole string instead.
+ *
+ * `variant` is for a cache whose contents depend on something outside the dataset id — the
+ * neuron index under a wired annotation chain, where two graphs on one datastack hold genuinely
+ * different tables. It is part of the key rather than of the fingerprint because a fingerprint
+ * mismatch is a *miss that overwrites*: the second chain would evict the first, and the two
+ * would take turns re-fetching for the rest of the session.
  */
+export function datasetCacheKey(
+  kind: string,
+  sourceId: string,
+  datasetId: string,
+  variant = '',
+): string {
+  return `${kind}:${sourceId}:${datasetId}${variant && `:${variant}`}`
+}
+
+/** Cache key for a source's neuron index. One place, so a reader and a writer agree. */
 export function neuronIndexKey(sourceId: string, datasetId: string, variant = ''): string {
-  return `neuron-index:${sourceId}:${datasetId}${variant && `:${variant}`}`
+  return datasetCacheKey('neuron-index', sourceId, datasetId, variant)
 }
 
 /**
@@ -127,10 +151,70 @@ export function neuronIndexKey(sourceId: string, datasetId: string, variant = ''
  * node and two Summary cards pointed at one dataset and there is no reason for three requests.
  *
  * `kind` is in the key rather than a separate store because the two summaries have different
- * shapes and a shared key would let one answer for the other.
+ * shapes and a shared key would let one answer for the other. It joins the *prefix* rather than
+ * sitting between the source and the dataset, so `datasetCacheKey`'s one rule covers this too.
  */
 export function datasetSummaryKey(kind: string, sourceId: string, datasetId: string): string {
-  return `dataset-summary:${kind}:${sourceId}:${datasetId}`
+  return datasetCacheKey(`dataset-summary-${kind}`, sourceId, datasetId)
+}
+
+/** Whether a cache key names this dataset, whatever kind of thing it holds. */
+function isDatasetCacheKey(key: string, sourceId: string, datasetId: string): boolean {
+  const kindEnd = key.indexOf(':')
+  if (kindEnd < 0) return false
+  const scope = `${sourceId}:${datasetId}`
+  const rest = key.slice(kindEnd + 1)
+  if (!rest.startsWith(scope)) return false
+  // Either the whole scope, or the scope plus a variant — never a longer dataset id that merely
+  // starts with this one, which is how `hemibrain:v1.2` would otherwise claim `v1.2.1`'s cache.
+  const tail = rest.slice(scope.length)
+  return tail === '' || tail.startsWith(':')
+}
+
+/** Every key the cache holds for this dataset — index, roll-ups, region outlines, variants. */
+async function datasetCacheKeys(sourceId: string, datasetId: string): Promise<string[]> {
+  return (await cacheKeys()).filter((key) => isDatasetCacheKey(key, sourceId, datasetId))
+}
+
+/**
+ * When the *oldest* thing cached for this dataset was fetched, or undefined if nothing is.
+ *
+ * The oldest rather than the newest, because this number is read as "how old is what I am
+ * looking at" and the answer is only as good as the stalest part of it. A summary re-fetched
+ * this morning does not make a month-old neuron index fresh.
+ *
+ * Judged on the same expiry `loadCachedTable` applies, so an entry too old to be served reads
+ * as no cache rather than as a very old one — the card and the loader agree about what is there.
+ */
+export async function peekDatasetCache(
+  sourceId: string,
+  datasetId: string,
+): Promise<number | undefined> {
+  const keys = await datasetCacheKeys(sourceId, datasetId)
+  const entries = await Promise.all(
+    keys.map((key) => cachePeek(key, { maxAgeMs: NEURON_INDEX_MAX_AGE_MS })),
+  )
+  let oldest: number | undefined
+  for (const entry of entries) {
+    if (!entry) continue
+    if (oldest === undefined || entry.savedAt < oldest) oldest = entry.savedAt
+  }
+  return oldest
+}
+
+/**
+ * Drop everything cached for this dataset.
+ *
+ * By key rather than by expiry, so an entry already too old to be served goes too: it is
+ * invisible to `peekDatasetCache` and would otherwise sit in the store forever, since nothing
+ * else ever deletes one.
+ */
+export async function dropDatasetCache(sourceId: string, datasetId: string): Promise<void> {
+  const keys = await datasetCacheKeys(sourceId, datasetId)
+  await Promise.all(keys.map((key) => cacheDelete(key)))
+  // The in-flight map is keyed the same way, so a load started before the drop would otherwise
+  // be handed to the caller that pressed ⟳ — the very copy it asked to replace.
+  for (const key of keys) inFlight.delete(key)
 }
 
 /** Test seam: drop in-flight state between cases. */
