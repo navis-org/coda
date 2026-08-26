@@ -45,6 +45,7 @@ Moved verbatim out of `CLAUDE.md`.
 | `nodes/query/roiMeshes.test.ts`          | the region-mesh node: omitted-versus-empty `rois` at the source seam, the picker's options coming from the dataset, the unknown-region and size refusals |
 | `nodes/output/viewer3d.test.ts`          | the 3D node's shape: the deliberately empty card against everything still reaching the inspector, the tab-per-socket arrangement, the hash colour default, the per-socket switches, opacity as a facet of the colour row |
 | `ui/viewers/cameraMemo.test.ts`          | the camera that outlives its component: per viewer, absent until framed, forgotten on reset, LRU by last write |
+| `ui/viewers/sceneMemo.test.ts`           | the neuroglancer state that outlives its iframe: per viewer, gated on base and identity, forgotten on reload, LRU by last write |
 | `ui/viewers/liveRenderers.test.tsx`      | one live renderer per node: the inspector standing a WebGL viewer down, a card dropping its preview while the overlay owns it, and the streaming precondition — a 3D scene drawing from its input port before its own node has run, without drawing an empty box for a graph that never ran |
 | `ui/viewers/viewer3dScene.test.ts`       | the 3D viewer's whole testable half: segment building, the colour and dimming buffers, the one-pass key→ids index, hit→neuron, the opacity/`depthWrite` pair, framing in the recentred space, the pinned background, and the legend's four gestures (visibility, key→ids, select-whole-key, hide/solo) |
 | `ui/viewers/networkViewer.test.tsx`      | the caption: counts, the label-thinning admission, size refusal                                                                  |
@@ -85,7 +86,7 @@ Moved verbatim out of `CLAUDE.md`.
 | `ui/viewers/dendrogram.test.tsx`         | the card through `ValuePreview`: a click handing back exactly the leaves under it, and every admission the caption makes           |
 | `data/neuroglancer/scene.test.ts`        | scene editing against the real published shapes, the URL round-trip, and `middleauth+` following the viewer rather than the backend |
 | `nodes/output/neuroglancer.test.ts`      | what lands in the link: segments, colour agreement with the 3D view, the limit, and which viewer the segmentation is authenticated for |
-| `ui/viewers/neuroglancerViewer.test.tsx` | that a restyle navigates the frame rather than remounting it, and that Reload does the opposite — a fresh document, and no merge into one still booting |
+| `ui/viewers/neuroglancerViewer.test.tsx` | that a restyle navigates the frame rather than remounting it, and that Reload does the opposite — a fresh document, and no merge into one still booting. Also the card-to-overlay hand-off: the state is read while the frame is still in the document, and the next mount resumes it rather than the published scene |
 | `ui/nodes/nodeResize.test.tsx`           | handles outside the clipping card, resize not invalidating a result, gesture undo                                                |
 | `ui/nodes/paramFold.test.tsx`            | folding a card's param rows: the header button surviving the band, notes excepted, one undo step, and that it costs no run       |
 | `ui/nodes/collapsedPorts.test.tsx`       | collapse to a header: handles moved not removed, each still addressable, and the wrapper's width kept but not its height         |

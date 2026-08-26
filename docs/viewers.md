@@ -1615,6 +1615,41 @@ merging, so a static deploy loses the preservation, not the viewer.
 Note the split: the **frame** goes to the proxied path, the **link** stays the absolute public
 URL. A copyable link that pointed at `/ng` on someone's dev server would be useless.
 
+**A remount is the other way the state dies, and none of the above touches it.** Expanding a
+Neuroglancer card reset the view, and closing the expansion reset it again — because the card
+stands down while the overlay owns the node (`showPreview` in `CodaNodeView`, and the reason is
+measured: two instances of a viewer are two of everything it holds), so each transition is an
+unmount and a fresh mount with an empty frame. Nothing about merging helps when the component
+itself has gone.
+
+`sceneMemo` is the answer, and it is `cameraMemo` one seam further out: a module-level,
+session-scoped map, keyed by the graph node id, holding what the frame was last showing. Read on
+the way out; the next mount navigates to *that*, with the current selection spliced in, instead of
+to the published scene. It carries the whole state rather than a camera because there is no
+smaller unit that helps — the frame is re-pointed with one URL either way — and because the panel
+layout and the layers the user hid or added die with the iframe exactly as the camera does.
+
+Three things it has to get right, each of which was a way to get it wrong:
+
+1. **The gate is the *applied* scene's identity, not the stored state's.** A live scene differs
+   from the built one on precisely the keys the user moved, so `sceneIdentity(live)` would never
+   match anything and the memo would be dead code. What the memo stores alongside the state is
+   the identity of the scene that was *asked for* when it was read — the same comparison
+   `canMerge` makes, which is the same question: same place, same deployment.
+2. **The read is a `useLayoutEffect` cleanup.** React runs a layout cleanup while the subtree is
+   still in the document and a passive one after the host node has been removed, and **a detached
+   iframe has no browsing context** — so from `useEffect` the read returns null every time, and a
+   null here is indistinguishable from the cross-origin degrade. The test's `contentWindow` stub
+   is a getter that honours `isConnected` for that reason; move the capture to `useEffect` and one
+   test fails.
+3. **Reload forgets.** That button is how somebody escapes a frame that has gone wrong, so
+   resuming into the state it went wrong in is the one outcome it must not have.
+
+Same-origin only, since it reuses the same read `spliceSegments` needs, and it degrades the same
+way: no proxy, no memory, and the embed behaves as it did. The frame in `Neuron Profile` passes no
+`viewerId` and so remembers nothing — it is a tile showing one neuron at the published framing,
+with no identity of its own to hand anything to.
+
 **Merges are debounced** (`MERGE_DEBOUNCE_MS`), trailing-edge, and only merges — the first
 navigation is immediate. Auto-run turns one upstream edit into a scene per keystroke, and
 applying each had neuroglancer rebuilding its layers several times a second. Only the last of

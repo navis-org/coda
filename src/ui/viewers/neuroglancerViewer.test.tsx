@@ -18,9 +18,15 @@ import { tableFromRows } from '../../core/values'
 import { parseSceneUrl, sceneUrl } from '../../data/neuroglancer/scene'
 import { installJsdomStubs } from '../../test/jsdomStubs'
 import { NeuroglancerViewer } from './NeuroglancerViewer'
+import { resetSceneMemos } from './sceneMemo'
 
 beforeAll(() => installJsdomStubs({ width: 800, height: 500 }))
-beforeEach(() => vi.useFakeTimers())
+beforeEach(() => {
+  vi.useFakeTimers()
+  // Module-level and session-scoped by design, so one test's frame would otherwise be resumed
+  // by the next one's — see `sceneMemo`.
+  resetSceneMemos()
+})
 afterEach(() => {
   cleanup()
   vi.useRealTimers()
@@ -87,12 +93,23 @@ function scaleBox(container: HTMLElement): HTMLElement | null {
  * jsdom never loads the document, so it has no `contentWindow.location` to read. Where the
  * viewer is proxied the real thing does, and that is the difference between editing the user's
  * state and overwriting it.
+ *
+ * A getter rather than a value, so it is honest about the one thing that decides whether the
+ * state survives a remount: **a detached iframe has no browsing context**, so its
+ * `contentWindow` is null. jsdom would happily keep answering from a removed element, which
+ * would let the read on the way out pass here and return nothing in a browser — and a nothing
+ * that looks exactly like the cross-origin degrade. This is what makes the capture a
+ * `useLayoutEffect`: React runs a layout cleanup while the subtree is still in the document
+ * and a passive one after it has gone.
  */
 function frameShowing(container: HTMLElement, scene: unknown): void {
   const found = frame(container)!
   Object.defineProperty(found, 'contentWindow', {
     configurable: true,
-    value: { location: { hash: `#!${encodeURIComponent(JSON.stringify(scene))}` } },
+    get: () =>
+      found.isConnected
+        ? { location: { hash: `#!${encodeURIComponent(JSON.stringify(scene))}` } }
+        : null,
   })
 }
 
@@ -334,6 +351,159 @@ describe('updating a viewer the user has edited', () => {
     const patch = parseSceneUrl(frame(container)?.getAttribute('src') ?? '')!
     const layers = patch['layers'] as Array<Record<string, unknown>>
     expect(layers.map((l) => l['name'])).toEqual(['em', 'hemibrain:v1.2.1'])
+  })
+})
+
+describe('resuming across a remount', () => {
+  /*
+   * The complaint this answers: expanding a Neuroglancer card reset the view, and closing the
+   * expansion reset it again. Nothing in the merge path helps, because the component itself goes
+   * away — the card stands down while the overlay owns the node, and each is a mount of its own.
+   * So the live state is read on the way out and the next mount navigates to *that*.
+   */
+
+  /** What the viewer holds after someone moved the camera, hid a layer and added one. */
+  const live = {
+    position: [900, 900, 900],
+    layout: '3d',
+    layers: [
+      { type: 'image', name: 'em', source: 'precomputed://gs://b/em', visible: false },
+      { ...SEGMENTATION, segments: ['1'] },
+      { type: 'segmentation', name: 'mine', source: 'precomputed://gs://b/rois' },
+    ],
+  }
+
+  /** A mount that loaded, was read, and went away — the card handing the node to the overlay. */
+  function handOff(url = URL_A, viewerId = 'ng1'): void {
+    const first = render(
+      <NeuroglancerViewer url={url} color={CATEGORICAL} datasetId={OWNED} viewerId={viewerId} />,
+    )
+    frameLoaded(first.container)
+    frameShowing(first.container, live)
+    first.unmount()
+  }
+
+  it('opens where the last instance was left, not at the published camera', () => {
+    handOff()
+    const { container } = render(
+      <NeuroglancerViewer url={URL_B} color={CATEGORICAL} datasetId={OWNED} viewerId="ng1" />,
+    )
+
+    const scene = frameScene(container)!
+    // The camera, and the layer edits with it.
+    expect(scene['position']).toEqual([900, 900, 900])
+    const layers = scene['layers'] as Array<Record<string, unknown>>
+    expect(layers.map((l) => l['name'])).toEqual(['em', 'hemibrain:v1.2.1', 'mine'])
+    expect(layers[0]!['visible']).toBe(false)
+    // And the selection the node is emitting *now*, spliced into it.
+    expect(layers[1]!['segments']).toEqual(['1', '2'])
+  })
+
+  it('sends the resumed state as a full navigation, not as a merge', () => {
+    // There is nothing to merge into: the frame is new and holds no document. The whole point
+    // of resuming through the *state* rather than the URL form is that one navigation carries
+    // everything, which the `#!+` form could not do here.
+    handOff()
+    const { container } = render(
+      <NeuroglancerViewer url={URL_B} color={CATEGORICAL} datasetId={OWNED} viewerId="ng1" />,
+    )
+    expect(frameSrc(container).includes('#!+')).toBe(false)
+  })
+
+  it('remembers nothing for a frame with no viewerId', () => {
+    // A frame with no identity of its own — the profile tile — has nothing to be handed to.
+    const first = render(<NeuroglancerViewer url={URL_A} color={CATEGORICAL} datasetId={OWNED} />)
+    frameLoaded(first.container)
+    frameShowing(first.container, live)
+    first.unmount()
+
+    const { container } = render(
+      <NeuroglancerViewer url={URL_A} color={CATEGORICAL} datasetId={OWNED} />,
+    )
+    expect(frameScene(container)).toEqual(parseSceneUrl(URL_A))
+  })
+
+  it('refuses to resume into a different scene', () => {
+    // Another dataset, so the remembered camera is framed on a volume that is no longer there —
+    // the same gate a merge goes through, and for the same reason.
+    handOff()
+    const { container } = render(
+      <NeuroglancerViewer url={URL_OTHER} color={CATEGORICAL} datasetId={OWNED} viewerId="ng1" />,
+    )
+    expect(frameScene(container)).toEqual(parseSceneUrl(URL_OTHER))
+  })
+
+  it('keeps each viewer to itself', () => {
+    handOff()
+    const { container } = render(
+      <NeuroglancerViewer url={URL_A} color={CATEGORICAL} datasetId={OWNED} viewerId="ng2" />,
+    )
+    expect(frameScene(container)).toEqual(parseSceneUrl(URL_A))
+  })
+
+  it('remembers nothing it could not read', () => {
+    // Cross-origin, so there was never a state to store. The embed behaves as it did.
+    const first = render(
+      <NeuroglancerViewer url={URL_A} color={CATEGORICAL} datasetId={OWNED} viewerId="ng1" />,
+    )
+    frameLoaded(first.container)
+    first.unmount()
+
+    const { container } = render(
+      <NeuroglancerViewer url={URL_B} color={CATEGORICAL} datasetId={OWNED} viewerId="ng1" />,
+    )
+    expect(frameScene(container)).toEqual(parseSceneUrl(URL_B))
+  })
+
+  it('remembers nothing before the frame has loaded', () => {
+    // Whatever `location.hash` reads as then belongs to no scene this component has applied.
+    const first = render(
+      <NeuroglancerViewer url={URL_A} color={CATEGORICAL} datasetId={OWNED} viewerId="ng1" />,
+    )
+    frameShowing(first.container, live)
+    first.unmount()
+
+    const { container } = render(
+      <NeuroglancerViewer url={URL_B} color={CATEGORICAL} datasetId={OWNED} viewerId="ng1" />,
+    )
+    expect(frameScene(container)).toEqual(parseSceneUrl(URL_B))
+  })
+
+  it('falls back to the published scene when the layers no longer line up', () => {
+    // The splice bails — the user deleted one of our layers — and there is no merge tier to fall
+    // to on a fresh frame. Replaying their state with the wrong selection in it would be worse.
+    const first = render(
+      <NeuroglancerViewer url={URL_A} color={CATEGORICAL} datasetId={OWNED} viewerId="ng1" />,
+    )
+    frameLoaded(first.container)
+    frameShowing(first.container, { ...live, layers: [live.layers[0], live.layers[2]] })
+    first.unmount()
+
+    const { container } = render(
+      <NeuroglancerViewer url={URL_B} color={CATEGORICAL} datasetId={OWNED} viewerId="ng1" />,
+    )
+    expect(frameScene(container)).toEqual(parseSceneUrl(URL_B))
+  })
+
+  it('drops the remembered state when the viewer is reloaded', () => {
+    // Reload is how somebody gets out of a frame that has gone wrong. Resuming into the state it
+    // went wrong in is the one thing that button must not do — neither in the frame it opens nor
+    // in the next instance to mount.
+    handOff()
+    const second = render(
+      <NeuroglancerViewer url={URL_A} color={CATEGORICAL} datasetId={OWNED} viewerId="ng1" />,
+    )
+    act(() => {
+      fireEvent.click(screen.getByLabelText('Reload the viewer'))
+    })
+    expect(frameScene(second.container)).toEqual(parseSceneUrl(URL_A))
+    // The remounted frame holds no document, so the way out leaves nothing behind either.
+    second.unmount()
+
+    const { container } = render(
+      <NeuroglancerViewer url={URL_A} color={CATEGORICAL} datasetId={OWNED} viewerId="ng1" />,
+    )
+    expect(frameScene(container)).toEqual(parseSceneUrl(URL_A))
   })
 })
 

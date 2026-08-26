@@ -41,12 +41,19 @@
  * a randomised colour seed — because the merge is per top-level key and `layers` is replaced
  * whole. Sending a shorter layer list to dodge that deletes the EM volume instead.
  *
+ * **A remount is the other way that state dies, and `sceneMemo` is what carries it across.**
+ * None of the above helps when the component itself goes away: expanding the card hands the node
+ * to the overlay, which is a second instance, so the card stands down and the overlay opens a
+ * frame of its own — and closing it does the same in reverse. Given a `viewerId`, the live state
+ * is read on the way out and the next mount navigates to *that*, with the current selection
+ * spliced in, instead of to the published scene. Same-origin only, like the splice it reuses.
+ *
  * Merges are debounced. Auto-run turns one upstream edit into a stream of scenes, and applying
  * each would have neuroglancer rebuilding its layers several times a second underneath whatever
  * the user is doing with the mouse.
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 import type { TableValue } from '../../core/values'
 import type { NgScene, ViewerKind } from '../../data/neuroglancer/scene'
@@ -65,6 +72,7 @@ import type { ColorSpec } from '../../nodes/lib/encodingParams'
 import { errorMessage } from '../../core/errors'
 import { describeLegend, resolveColor } from '../encoding'
 import { copyText } from '../export'
+import { forgetScene, recallScene, rememberScene } from './sceneMemo'
 import { ViewerActions } from './ViewerActions'
 import { plural } from '../format'
 
@@ -104,6 +112,14 @@ export interface NeuroglancerViewerProps {
    */
   datasetId?: string | undefined
   extraLayers?: number | undefined
+  /**
+   * A key this embed's live state is remembered under, so a remount resumes rather than resets.
+   *
+   * The graph node id, exactly as `Viewer3D` and `NetworkViewer` take one: the card and the
+   * overlay are two instances of one node and only the id says so. Undefined means remember
+   * nothing, which is what a frame with no identity of its own should do.
+   */
+  viewerId?: string | undefined
   compact?: boolean
   baseName?: string
   onExpand?: () => void
@@ -155,6 +171,7 @@ export function NeuroglancerViewer({
   viewerType,
   datasetId,
   extraLayers = 0,
+  viewerId,
   compact = false,
   baseName,
   onExpand,
@@ -219,19 +236,41 @@ export function NeuroglancerViewer({
       applied.base === split.base &&
       applied.identity === identity
 
+    /*
+     * What a *previous* instance of this viewer was showing, when there was one and it was
+     * looking at the same place through the same deployment.
+     *
+     * Only consulted when there is no live frame to read — that is the whole case it exists for:
+     * the card and the overlay are never up at once, so the hand-off between them arrives here
+     * as a fresh mount with an empty frame. The gate is the one `canMerge` uses, asked of the
+     * scene that *was* applied rather than of the state read back: see `sceneMemo`.
+     */
+    const remembered = viewerId ? recallScene(viewerId) : undefined
+    const resumable =
+      remembered && remembered.base === split.base && remembered.identity === identity
+        ? remembered.scene
+        : undefined
+
     // Recorded when the navigation happens, not when it is scheduled, so a burst that is
     // cancelled and superseded does not leave the frame's state misremembered.
     const navigate = () => {
       /*
-       * Three ways to apply an update, best first.
+       * Two questions, and they are independent: *what* state to write, and *how* to write it.
        *
-       * 1. Splice: read what the viewer is showing, put our selection into that, write it back.
-       *    Everything the user has done — hidden layers, layers of their own, ordering, camera
-       *    — is in the state we started from, so none of it is lost. Needs a same-origin frame.
-       * 2. Merge: send our own layer list. Correct, but it is *ours*, so their layer edits go.
-       * 3. Replace: the whole scene, for a first load or a different dataset.
+       * What. Best first:
+       * 1. Splice: take the state the viewer is showing — or, on a fresh mount, the one the last
+       *    instance was showing — and put our selection into it. Everything the user has done,
+       *    hidden layers, layers of their own, ordering, camera, is in the state we started
+       *    from, so none of it is lost. Needs a same-origin frame to have been read.
+       * 2. The scene the node built. Correct, but it is *ours*, so their layer edits go.
+       *
+       * How. A patch (`#!+`) merges onto what the document already holds, so it is the only
+       * form worth sending to a frame that has one — and the only form that is *safe* to send,
+       * since the full form resets first. A fresh frame has nothing to merge into and takes the
+       * full form, which is exactly why resuming has to happen through the state rather than
+       * through the URL form: the whole scene, restored in one navigation.
        */
-      const live = canMerge ? readLiveScene(frame) : undefined
+      const live = canMerge ? readLiveScene(frame) : resumable
       const spliced =
         live && datasetId
           ? spliceSegments(
@@ -240,11 +279,10 @@ export function NeuroglancerViewer({
               ownedLayerNames(split.scene, datasetId, extraLayers),
             )
           : undefined
-      frame.src = spliced
-        ? scenePatchUrl(frameBase, spliced, kind)
-        : canMerge
-          ? scenePatchUrl(frameBase, split.scene, kind)
-          : sceneUrl(frameBase, split.scene, kind)
+      const scene = spliced ?? split.scene
+      frame.src = canMerge
+        ? scenePatchUrl(frameBase, scene, kind)
+        : sceneUrl(frameBase, scene, kind)
       appliedRef.current = { url, base: split.base, identity, viewerType }
     }
 
@@ -257,7 +295,46 @@ export function NeuroglancerViewer({
     // `reloadCount` belongs here rather than only on the element: the effect's own guard
     // returns early for a URL already applied, so a remount with no reason to renavigate would
     // leave a blank frame.
-  }, [url, reloadCount, viewerType, datasetId, extraLayers])
+  }, [url, reloadCount, viewerType, datasetId, extraLayers, viewerId])
+
+  /*
+   * Read the live state on the way out, so the next instance can resume it.
+   *
+   * `useLayoutEffect`, and that is the load-bearing part: React runs a layout cleanup while the
+   * subtree is still in the document, and a passive one after the host node has been removed. A
+   * detached iframe has no `contentWindow`, so the passive version reads `undefined` every time
+   * and remembers nothing — a null result that looks exactly like the cross-origin degrade.
+   *
+   * `viewerId` is the only dependency, so in practice this runs once and its cleanup fires on
+   * unmount; everything else it reads is a ref, deliberately, so a re-render cannot make it
+   * fire early. Nothing is stored before the first `load` or for a hand-edited URL
+   * (`appliedRef` undefined), because in neither case is there a state belonging to a scene
+   * this component can name.
+   */
+  useLayoutEffect(() => {
+    if (!viewerId) return
+    return () => {
+      /*
+       * The ref read *in* the cleanup, which is what the exhaustive-deps warning objects to and
+       * is deliberate: Reload remounts the iframe element (`key={reloadCount}`), so an element
+       * captured when the effect ran would be the discarded one by the time this fires. React
+       * detaches a host ref after running the layout destroys above it, so the current one is
+       * still there — the same ordering the read itself depends on.
+       */
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      const frame = frameRef.current
+      const applied = appliedRef.current
+      if (!frame || !applied || !loadedRef.current) return
+      const live = readLiveScene(frame)
+      if (live) {
+        rememberScene(viewerId, {
+          base: applied.base,
+          identity: applied.identity,
+          scene: live,
+        })
+      }
+    }
+  }, [viewerId])
 
   if (!url) {
     return (
@@ -292,6 +369,10 @@ export function NeuroglancerViewer({
   const reload = () => {
     appliedRef.current = undefined
     loadedRef.current = false
+    // And the remembered state, which is the third thing a reload has to throw away: this is the
+    // button somebody presses when the frame has gone wrong, so resuming into it is the one
+    // outcome it must not have. Reload means the published scene.
+    if (viewerId) forgetScene(viewerId)
     setReloadCount((n) => n + 1)
   }
 

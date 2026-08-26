@@ -377,6 +377,10 @@ function ValuePreviewInner({
         viewerType={chosenViewerKind(node.params)}
         datasetId={dataset?.kind === 'dataset' ? dataset.datasetId : undefined}
         extraLayers={extra?.kind === 'layers' ? extra.items.length : 0}
+        // The node id, so the card and the overlay are one continuous viewer session rather than
+        // two — the same prop, for the same reason, as the 3D viewer's camera and the network
+        // viewer's layout. Here it carries the entire neuroglancer state, camera included.
+        viewerId={node.id}
         {...shared}
       />
     )
