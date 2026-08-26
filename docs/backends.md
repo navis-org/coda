@@ -547,6 +547,52 @@ region picker reads `capabilities.roiFilter`, neither is offered on the card at 
 honest state rather than a control that would match nothing, and it is stronger than the state
 before the row model, where both were offered and answered wrongly.
 
+### Segment properties, and what they unlock
+
+`segmentProperties.ts` reads the `neuroglancer_segment_properties` sidecar — one inline document
+listing every segment a source names. It is what turns a bucket of eighteen-digit keys into
+something a person can pick from, and it is the single dependency behind three answers that are
+otherwise impossible here: region *names* for the ROI Meshes picker, a browsable index for
+Explore, and a `findNeurons` filtered by anything the sidecar publishes.
+
+**It is not read by the probe.** The probe runs from an edit-time peek on a `cheap` node, and this
+is a much larger document — hemibrain's segmentation publishes 22,706 labelled ids against its ROI
+source's 63 — so downloading it because somebody typed a URL is invariant 6's hazard. It loads on
+first *ask*, and the peek that cannot answer starts it and fires `reportSourceLearned`, which is
+how the region picker fills a moment later.
+
+**Every route to it goes through `neuronIndex`**, i.e. through `loadCachedTable` like every other
+source's index — so it persists across sessions, honours Explore's refresh and the node menu's
+Clear Cache, and reports its age to the dataset card. It had a memo of its own, which got none of
+that and meant the region picker read a copy the cached path could never invalidate.
+
+**Every property becomes a column, and the type decides which.** `label` and `description` are
+named by their *type* rather than their id — the id of a label property need not be `label`, and a
+picker downstream expects one name on every source that publishes one. `tags` is an index list
+into a shared vocabulary, folded to one cell with `JOIN_SEPARATOR` so Explore splits it back into
+chips. A `number` without a recognised `data_type` is skipped rather than guessed at, and a
+property whose `values` length does not match the id count is dropped whole — a short array shifts
+every label onto the wrong segment, which is a table that looks well-formed and names the wrong
+neurons.
+
+**`findNeurons` is answered locally**, through the same `preparedRows`/`compileLabelMatch` helpers
+`CaveSource` and `CatmaidSource` use, so `LC.*` means the same anchored thing on all three.
+Checked live: `LC1[0-2]` over hemibrain's 22,706 returns exactly LC10, LC11 and LC12.
+
+**Region shells default to every label, and `primary` is always true.** Both differ from neuPrint,
+where the default is the subset that tiles the volume — because nothing in a sidecar says which of
+its labels nest. `primary` is the licence to sum, and a source that cannot distinguish has no
+grounds to withhold it from some rows and not others. `MeshGeometry.id` carries the *label*, not
+the segment id, because that is what `ROI_MESH_SCHEMA` says a region is called.
+
+**Unsharded multi-resolution meshes exist after all.** `readManifest` used to refuse them —
+"no source in use here is built this way" — and hemibrain's region shells are built exactly that
+way: `v1.2/rois/mesh` publishes `1` and `1.index` side by side. The manifest is the `.index`
+object and the fragments are the plain one, so `dataStart` is **0** rather than
+`manifestOffset - Σ sizes`: that subtraction exists because in a shard the fragments sit
+immediately before the manifest in one file with no pointer to them, and here they are a separate
+object starting at its first byte.
+
 ### Skeletons come from the level-2 cache, and the capability is per dataset
 
 **A CAVE datastack's skeletons depend on its chunkedgraph, not on the backend**, so
@@ -1050,11 +1096,121 @@ deleting the function.
 neurons, and a hundred FAFB skeletons in the 3D view. The module and both suites are headless;
 what *was* driven in a browser is the relay and the CORS behaviour, above.
 
-## Precomputed meshes
+## Precomputed
 
 `src/data/precomputed/` reads neuroglancer precomputed meshes. It knows nothing about
-neuPrint — FlyWire and CAVE are the obvious next consumers — and `src/data/neuprint/nglayers.ts`
-is the only thing that maps a dataset to a bucket.
+neuPrint — FlyWire and CAVE were the obvious next consumers and both now use it — and
+`src/data/neuprint/nglayers.ts` maps a *neuPrint dataset* to a bucket. Since the
+`Neuroglancer Source` node it is also reachable directly: a URL somebody pastes becomes a
+`PrecomputedSource`, which is a `DataSource` that answers geometry and refuses everything else.
+See [datasets.md](datasets.md) for why that is a *datasource* rather than a dataset.
+
+### One parser for the three spellings of a source
+
+`data/neuroglancer/sourceUrl.ts`. Neuroglancer accepts a legacy scheme prefix
+(`precomputed://gs://…`), the current pipe syntax (`gs://…|neuroglancer-precomputed:`) and, in
+practice, whatever somebody copied out of a layer's Source box. All three name one directory, and
+a reader has no reason to know which they got — so they collapse onto one canonical string, which
+is also the registry key. Two spellings landing on two keys would re-probe the same `info` and
+hand two nodes different dataset ids for one bucket.
+
+**The location keeps its own scheme.** `gs://bucket/path` is not turned into an HTTP URL until
+something asks for `url`, because the object-store form is what a layer's `source` field wants
+back. `middleauth+` is stripped as part of normalising: it is an instruction to a viewer rather
+than part of an address, and the two viewer flavours disagree about whether it belongs (see
+`#middleauth+ is spelunker's, not neuroglancer's` above).
+
+**`precomputedToHttp` is narrower than the parser on two axes and stays that way.** It is
+`meshSourceFromState`'s candidate filter, and the preference order it feeds is measured rather
+than derived — the paragraphs below record what preferring the wrong candidate cost. So it
+requires the format to have been *stated* (a bare `gs://` is not enough, where the parser reads
+one as precomputed) and the location to be a bucket. It moved here out of `nglayers.ts` when the
+node arrived; leaving a copy behind would have made the "two functions of one name two directories
+apart" warning in `fetchText.ts` true a second time.
+
+### What is at the end of a URL, read once
+
+`probe.ts` reads the same `info` documents `openMeshSource` does and keeps the whole answer rather
+than the one branch a fetch needs. A **card** needs the rest: whether this is a segmentation or an
+image stack, whether there are meshes at all, and whether they are multi-resolution or the flat
+kind. It is memoised per URL, **failures included**, because the node above it is `cheap` — see
+[datasets.md](datasets.md) for that trade and for the optimistic-capability rule that goes with it.
+
+It also **opens** the mesh and skeleton directories, through `openMeshSource`/`openSkeletonSource`
+rather than by re-reading `@type` itself — so the card's verdict and the fetch's cannot disagree
+about one URL. Both are opened together rather than in sequence; they are independent reads and
+this runs from an edit-time peek, where a wasted round trip is visible. The opened sources are
+kept on the description, which is what makes the first Run cost **no requests of its own**.
+
+**What comes back from that open is an optimisation, not a verdict**, and the distinction is
+load-bearing. A transient failure is indistinguishable from an unreadable directory, and the probe
+is then cached as a *success* — so `meshDir` keys its refusal on whether the source **names** a
+mesh directory and re-opens when the cached copy is absent. Keying it on the opened copy meant one
+CORS blip produced "publishes no meshes" for the rest of the session, on a source whose
+`capabilitiesFor` still said it had them.
+
+**An abort is not remembered.** Cancelling a run says nothing about the bytes, and a memoised
+"This operation was aborted" sat on a card with a perfectly good URL. It rejects rather than
+resolving a verdict, which is also the scheduler's own rule for an aborted run.
+
+**`fetchInfo` memoises `/info` by URL**, successes only. An `info` is the published description of
+a released dataset and is immutable under a fixed URL, which is what makes the cache correct
+rather than merely convenient — and without it one document was fetched three times for a pasted
+segmentation: once by the probe, once by `openMeshSource`, and once more by `readMultiResInfo`
+inside it. That last pair is pre-existing and every backend's mesh open paid it. Failures are not
+held (they are usually transient, the same reason `remember` refuses to persist `unreachable`),
+and in-flight requests are not deduplicated, because sharing one promise would let one caller's
+`AbortSignal` reject for every other.
+
+Checked against the live buckets (`live.test.ts`, `PRECOMPUTED_LIVE=1`):
+
+    male-CNS v1.0     segmentation, mesh: multi-res-meshes (draco), skeletons: skeletons-malecns/…
+    hemibrain v1.2    segmentation, mesh: mesh (draco), segment_properties: segment_properties
+    male-CNS supervoxels   segmentation, no mesh directory at all
+    male-CNS synapses      neuroglancer_annotations_v1
+
+Two of those are the cases the classification exists for. **male-CNS's volume declares
+`mesh: multi-res-meshes`** while the viewer state it publishes advertises
+`meshes-malecns/single-res-meshes` — following the volume is the correct branch, and it is the
+same finding the preference order below records from the other direction. And **a segmentation
+with no mesh directory is a real, common thing**, so "is a segmentation" and "has geometry" have
+to be separate questions or a Meshes node runs and fetches nothing.
+
+### Skeletons
+
+`skeletons.ts`, and the format is four lines: `uint32 numVertices`, `uint32 numEdges`,
+`float32 positions[n][3]`, `uint32 edges[m][2]`, then one contiguous array per entry of
+`info.vertex_attributes`. What makes it a module is the three things that are not in the bytes.
+
+**The edges are a graph and `SkeletonGeometry` is a tree.** Nothing in the format says otherwise:
+the edge list is undirected, unordered, and may hold cycles or disconnected components. The
+conversion is `spanningForest` in `data/skeletonTree.ts` — breadth-first, one root per component,
+points emitted in visit order so a parent always precedes its child. It moved there out of
+`cave/l2.ts` when this became its second caller, and the reason to move rather than copy is that a
+cycle surviving into `parents` makes every consumer that walks to a root loop forever. What stayed
+in CAVE is the part that is about CAVE: dropping chunks with no cache entry *before* the walk, so
+it routes around them instead of orphaning their children.
+
+**`radius` is a convention in `vertex_attributes`, not a field**, and usually there is not one.
+male-CNS publishes `{"@type": "neuroglancer_skeletons"}` and nothing else — no transform, no
+attributes — so every radius is 0, the same answer `cave/l2.ts` gives a chunk with no distance
+transform. Attributes are contiguous per-attribute arrays in declared order, so reaching a
+`radius` behind another attribute means stepping over it by size; a lookup by name would read the
+wrong bytes. Only a single-component `float32` is read, because a `uint8` radius is in a quantised
+unit this has no scale for — a plausible number in the wrong units is worse than an honest zero.
+
+**Coordinates are already nanometres.** Measured: male-CNS vertices come out around 3.6e5, in a
+volume ~93,800 voxels of 8 nm across. A reader that scaled them by the voxel size would put every
+skeleton 8× away from the mesh of the same neuron, with nothing failing, because both sets are
+internally consistent — which is why `live.test.ts` fetches one body both ways and asserts the
+boxes overlap. An `info` *may* carry a `transform`, and this applies the **full** 3×4 affine where
+`fragmentTransform` uses only its diagonal. Not an inconsistency: the mesh transform runs per
+vertex over millions of quantised vertices and every mesh source in reach is a pure scale, where a
+skeleton is hundreds of points and the full matrix costs nothing.
+
+**No manifest sweep, so it streams from the first arrival** — one request per body, at the same
+bucket concurrency the mesh path uses, and `onProgress` gets the whole bar rather than the mesh
+path's four-fifths.
 
 **Meshes need no token and usually no proxy.** They come from public object stores, not from
 neuPrintHTTP. `neuroglancer-janelia-flyem-hemibrain`, `manc-seg-v1p2` and `flyem-optic-lobe`

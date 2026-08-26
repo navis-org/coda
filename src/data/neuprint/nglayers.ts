@@ -29,6 +29,7 @@
 
 import type { NgScene } from '../neuroglancer/scene'
 import { objectStoreUrl } from '../precomputed/transport'
+import { parseNgSource } from '../neuroglancer/sourceUrl'
 import type { RequestOptions } from './client'
 import { get } from './client'
 
@@ -87,17 +88,28 @@ function urls(layer: NgLayer): string[] {
 }
 
 /**
- * Convert a neuroglancer source URL to something `fetch` accepts.
+ * A layer `source` string as a mesh directory URL, or undefined if it is not a candidate.
  *
- * Only object-store schemes are handled. `dvid://` is deliberately not: DVID serves meshes
- * through a completely different API (a keyvalue instance of `.ngmesh` blobs), and silently
- * mapping it to an HTTP URL would produce 404s that look like missing neurons.
+ * Two narrowings on top of `parseNgSource`, and both are facts about **filtering a published
+ * state's layer list** rather than about neuroglancer URLs — which is why they live here instead
+ * of beside the parser.
+ *
+ * **The format must have been stated.** `parseNgSource` reads a bare `gs://…` as precomputed,
+ * because somebody pasting one into a node means precomputed. A `source` field with no format is
+ * a different thing: a string nobody wrote as a source. The preference order below is measured
+ * (see docs/backends.md — preferring the wrong candidate downloaded male-CNS at full resolution
+ * with nothing failing), so widening what counts as a candidate re-opens that decision.
+ *
+ * **The location must be an object store.** `dvid://` is the case: DVID serves meshes through a
+ * completely different API, and mapping it onto a bucket host turns "unsupported source" into
+ * "every neuron is missing". Asked of `objectStoreUrl`, which owns which schemes are buckets and
+ * answers undefined for the rest, rather than re-spelled as a regex here.
  */
-export function precomputedToHttp(source: string): string | undefined {
-  const match = /^(?:precomputed|zarr|n5):\/\/(.+)$/.exec(source.trim())
-  // The bucket mapping itself is `objectStoreUrl`, shared with the CAVE mesh reader, which
-  // meets the same `gs://` without a neuroglancer prefix in front of it.
-  return match ? objectStoreUrl(match[1]!) : undefined
+export function meshCandidateUrl(source: string): string | undefined {
+  const ref = parseNgSource(source)
+  if (!ref?.stated) return undefined
+  if (ref.scheme !== 'precomputed' && ref.scheme !== 'zarr' && ref.scheme !== 'n5') return undefined
+  return objectStoreUrl(ref.location)
 }
 
 export interface MeshSourceRef {
@@ -129,13 +141,13 @@ export function meshSourceFromState(
   // The volume names its own preferred mesh subdirectory in its `info`, so following it is
   // how a dataset's own choice gets honoured — see the header for why that beats a hint.
   const volume = candidates.find(
-    (url) => !/_propert(y|ies)\/?$/i.test(url) && precomputedToHttp(url),
+    (url) => !/_propert(y|ies)\/?$/i.test(url) && meshCandidateUrl(url),
   )
   const hinted = matching(MESH_HINTS)
 
   for (const source of [multires, volume, hinted]) {
     if (!source) continue
-    const url = precomputedToHttp(source)
+    const url = meshCandidateUrl(source)
     if (url) return { url, source }
   }
   return undefined

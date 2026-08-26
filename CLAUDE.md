@@ -92,6 +92,11 @@ symptom to recognise — which usually points nowhere near the cause.
   is a claim that there is no useful answer, which for a count is almost never true. `ctx.warn`
   is the channel; `CRASH_FLOOR_BYTES` is the only thing left that refuses, and only for an
   allocation. Time is never a refusal. See [docs/limits.md](docs/limits.md).
+- **An edge list is not a skeleton.** `SkeletonGeometry.parents` is a rooted tree in *visit order*
+  — a parent always precedes its child — where both backends that build one start from an
+  undirected graph that may hold cycles and disconnected components. `spanningForest`
+  (`src/data/skeletonTree.ts`) is the one walk; a cycle that survives into `parents` makes every
+  consumer that walks to a root loop forever.
 - **A buffer handed to `callPython` is detached the moment the call is posted**, so read
   anything about it — its length above all — *before* the await. A check against a transferred
   buffer's `length` compares a real count against 0 and always fails.
@@ -178,9 +183,12 @@ file, pulling all 620 kB back into every session and undoing the split.
   nodes, Combine Columns, Select One, Stack, Download, Connectivity Graph, Paths, both id
   nodes, Text notes.
 - [docs/datasets.md](docs/datasets.md) — the family table, Custom backend nodes, the
-  Description companion, auto-wiring, starter graphs.
-- [docs/backends.md](docs/backends.md) — neuPrint, CAVE, CATMAID, precomputed meshes.
-  Read the relevant one before touching anything under `src/data`.
+  Description companion, auto-wiring, starter graphs. Also **datasource vs dataset**: a
+  Neuroglancer Source emits a `Dataset` so the geometry nodes take it, and `SourceCapabilities`
+  is the only thing keeping that honest.
+- [docs/backends.md](docs/backends.md) — neuPrint, CAVE, CATMAID, precomputed. Read the
+  relevant one before touching anything under `src/data`. `precomputedToHttp` is deliberately
+  narrower than the source parser beside it and the reason is a measured one; don't widen it.
 - [docs/annotations.md](docs/annotations.md) — labels that do not come from the
   connectome: the Annotations socket, SeaTable, Google Sheets, root-id drift.
 - [docs/export.md](docs/export.md) — the notebook and R Markdown exporters, the refusal

@@ -16,6 +16,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import fragmentFixture from './__fixtures__/dracoFragment.json'
 import manifestFixture from './__fixtures__/hemibrainManifest.json'
+import type { RestoreFetch } from '../../test/precomputedStubs'
+import { serveDracoWasmFromDisk } from '../../test/precomputedStubs'
+import { meshProgress } from './index'
 import { concatMeshes, parseLegacyFragment } from './legacy'
 import type { MultiResInfo } from './multires'
 import { chooseLod, fragmentOffset, fragmentTransform, parseMultiResManifest } from './multires'
@@ -450,6 +453,51 @@ describe('transport', () => {
   })
 })
 
+describe('mesh fetch progress', () => {
+  /** The fraction `meshProgress` reports for one call, so the split can be read directly. */
+  function at(done: number, total: number, phase: 'manifests' | 'fragments'): number {
+    let fraction = -1
+    meshProgress((f) => (fraction = f))(done, total, phase)
+    return fraction
+  }
+
+  it('gives manifests the first fifth and fragments the rest', () => {
+    // A manifest is a few hundred bytes; the fragments behind it are megabytes. An even split
+    // would race to 50% in the first second and then look hung.
+    expect(at(0, 8, 'manifests')).toBeCloseTo(0.05, 5)
+    expect(at(8, 8, 'manifests')).toBeCloseTo(0.2, 5)
+    expect(at(0, 8, 'fragments')).toBeCloseTo(0.2, 5)
+    expect(at(8, 8, 'fragments')).toBeCloseTo(1, 5)
+  })
+
+  it('never decreases, including across the phase boundary', () => {
+    // An indicator that runs backwards is worse than none — and it did, until the skeleton
+    // path stopped using a dispatch-order ordinal as a completion count.
+    const sequence = [
+      ...Array.from({ length: 9 }, (_, i) => at(i, 8, 'manifests')),
+      ...Array.from({ length: 9 }, (_, i) => at(i, 8, 'fragments')),
+    ]
+    for (let i = 1; i < sequence.length; i++) {
+      expect(sequence[i]!).toBeGreaterThanOrEqual(sequence[i - 1]!)
+    }
+  })
+
+  it('stays in range for a degenerate total', () => {
+    expect(at(0, 0, 'manifests')).toBeCloseTo(0.2, 5)
+    expect(at(5, 2, 'fragments')).toBeCloseTo(1, 5)
+  })
+
+  it('captions the phase, so the two bars are told apart on the card', () => {
+    // The note travelled beside the fraction as a copied template literal before this was one
+    // function; a source that got one and not the other is what the pairing prevents.
+    const notes: Array<string | undefined> = []
+    const report = meshProgress((_f, note) => notes.push(note))
+    report(3, 8, 'manifests')
+    report(3, 8, 'fragments')
+    expect(notes).toEqual(['3/8 manifests', '3/8 meshes'])
+  })
+})
+
 // ---------------------------------------------------------------------------
 // The Draco decoder. This is the piece most worth covering and the hardest to reach: the
 // production path fetches the wasm by URL, which Node's fetch will not do for a file. So the
@@ -459,30 +507,15 @@ describe('transport', () => {
 // ---------------------------------------------------------------------------
 
 describe('draco decoding', () => {
-  const original = globalThis.fetch
+  let restore: RestoreFetch = () => {}
+  afterEach(() => restore())
 
-  afterEach(() => {
-    globalThis.fetch = original
-  })
-
-  function serveWasmFromDisk() {
-    globalThis.fetch = (async () => {
-      const { readFile } = await import('node:fs/promises')
-      const { createRequire } = await import('node:module')
-      const require = createRequire(import.meta.url)
-      const path = require.resolve('draco3d/draco_decoder.wasm')
-      const bytes = await readFile(path)
-      return {
-        ok: true,
-        status: 200,
-        arrayBuffer: async () =>
-          bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
-      } as Response
-    }) as typeof fetch
+  async function serveWasmFromDisk() {
+    restore = await serveDracoWasmFromDisk()
   }
 
   it('decodes a real neuroglancer fragment and places it in nanometres', async () => {
-    serveWasmFromDisk()
+    await serveWasmFromDisk()
     const { decodeDracoFragment } = await import('./draco')
     const raw = Buffer.from(fragmentFixture.base64, 'base64')
     const bytes = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength)
@@ -519,7 +552,7 @@ describe('draco decoding', () => {
   }, 60_000)
 
   it('rejects bytes that are not a Draco mesh instead of returning empty geometry', async () => {
-    serveWasmFromDisk()
+    await serveWasmFromDisk()
     const { decodeDracoFragment } = await import('./draco')
     await expect(
       decodeDracoFragment(

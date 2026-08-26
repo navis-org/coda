@@ -65,7 +65,7 @@ import { geometryFrame } from '../transforms/spaces'
 import { fetchRoiMeshSet } from './roiMeshes'
 import { superRoisFrom } from './roiHierarchy'
 import type { MeshResult, MeshSource } from '../precomputed'
-import { DEFAULT_TRIANGLE_BUDGET, fetchMeshes, openMeshSource } from '../precomputed'
+import { DEFAULT_TRIANGLE_BUDGET, fetchMeshes, meshProgress, openMeshSource } from '../precomputed'
 import { byteLengthOf, cachedGeometry } from '../geometryCache'
 import {
   fetchDatasets,
@@ -1012,12 +1012,7 @@ export class NeuPrintSource implements DataSource {
         readyBefore: attributesReady,
         onPartial: req.onPartial && ((meshes) => req.onPartial?.(assemble(meshes, rows))),
         triangleBudget: req.triangleBudget ?? DEFAULT_TRIANGLE_BUDGET,
-        onProgress: (done, total, phase) => {
-          req.onProgress?.(
-            meshProgressFraction(done, total, phase),
-            `${done}/${total} ${phase === 'manifests' ? 'manifests' : 'meshes'}`,
-          )
-        },
+        ...(req.onProgress ? { onProgress: meshProgress(req.onProgress) } : {}),
       }),
     ])
 
@@ -1128,25 +1123,6 @@ export class NeuPrintSource implements DataSource {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Map a mesh fetch's two phases onto one 0..1 fraction.
- *
- * They cost wildly different amounts: a manifest is a few hundred bytes per body, while the
- * fragments behind it are megabytes. Splitting the bar evenly would race to the halfway mark
- * in the first second and then appear to hang — the failure mode of every progress bar that
- * measures the cheap half. So manifests get the first fifth and fragments the remaining four.
- *
- * Never decreases, including across the phase boundary, which is the property that matters:
- * an indicator that goes backwards is worse than none.
- */
-export function meshProgressFraction(
-  done: number,
-  total: number,
-  phase: 'manifests' | 'fragments',
-): number {
-  const share = total > 0 ? Math.min(1, Math.max(0, done / total)) : 1
-  return phase === 'manifests' ? 0.05 + share * 0.15 : 0.2 + share * 0.8
-}
 
 /** `hemibrain:v1.2.1` -> label "hemibrain", version "v1.2.1". */
 export function splitDatasetId(id: string): [string, string | undefined] {

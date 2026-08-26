@@ -25,6 +25,8 @@
  * curated context is worth having until you want to paste the link somewhere.
  */
 
+import { uniqueName } from '../../core/types'
+
 /** A neuroglancer viewer state. Opaque apart from the handful of keys touched here. */
 export type NgScene = Readonly<Record<string, unknown>>
 
@@ -62,6 +64,16 @@ export interface SceneOptions {
   layers?: NgLayerSet | undefined
   /** Cross-section planes inside the 3D panel. Off unless asked for; they hide the meshes. */
   showSlices?: boolean | undefined
+  /**
+   * Layers to add to the published ones — what a `Neuroglancer Source` node contributes.
+   *
+   * **Appended, never merged in.** Order in this list is neuroglancer's draw and panel order, and
+   * a published scene is somebody's curated arrangement; inserting into it would reorder theirs.
+   * Added *after* `layers: 'segmentation'` has done its filtering, too: that option is about how
+   * much of the *published* scene to carry, and a layer somebody wired up explicitly is not
+   * published context to be trimmed.
+   */
+  extraLayers?: ReadonlyArray<Readonly<Record<string, unknown>>> | undefined
 }
 
 /**
@@ -140,7 +152,7 @@ export function buildScene(published: NgScene | undefined, options: SceneOptions
   const scene: Record<string, unknown> = { ...base }
   for (const key of NON_VIEWER_KEYS) delete scene[key]
 
-  scene['layers'] = kept
+  scene['layers'] = [...kept, ...withUniqueNames(options.extraLayers ?? [], kept)]
   scene['layout'] =
     options.layout ?? (typeof base['layout'] === 'string' ? base['layout'] : '3d')
   scene['showSlices'] =
@@ -166,6 +178,36 @@ export function buildScene(published: NgScene | undefined, options: SceneOptions
   }
 
   return scene
+}
+
+/**
+ * Extra layers renamed where they would collide with something already in the scene.
+ *
+ * Neuroglancer keys layers by name and a duplicate is not a merge — the second one wins and the
+ * first becomes unreachable, silently. Names here are whatever somebody typed on a node card, so
+ * a scene that already publishes `segmentation` and a datasource left on its default is not an
+ * unusual case; it is the first one anybody will hit.
+ *
+ * Suffixed rather than refused, because the name is a label rather than an identity: nothing
+ * downstream looks a layer up by it except `ownedLayerNames`, which reads the name back off the
+ * scene this produced.
+ *
+ * The suffixing itself is `uniqueName` from `core/types.ts`, which calls itself "the one statement
+ * of Coda's collision rule" and records that the two hand-rolled copies before it had already
+ * parted company on the case that matters. A third loop here would be the same bet again for the
+ * sake of a space instead of an underscore.
+ */
+function withUniqueNames(
+  extras: ReadonlyArray<Readonly<Record<string, unknown>>>,
+  kept: readonly NgLayer[],
+): Array<Record<string, unknown>> {
+  const taken = new Set(
+    kept.map((layer) => layer.name).filter((name): name is string => typeof name === 'string'),
+  )
+  return extras.map((layer) => {
+    const wanted = typeof layer['name'] === 'string' && layer['name'] ? layer['name'] : 'layer'
+    return { ...layer, name: uniqueName(taken, wanted) }
+  })
 }
 
 /**
@@ -447,42 +489,83 @@ export function proxiedViewer(viewerBase: string | undefined): string | undefine
 const SEGMENT_FIELDS = ['segments', 'segmentColors', 'segmentDefaultColor'] as const
 
 /**
- * The layer this app writes into: the one `buildScene` decorated.
+ * The layers **this app wrote** into a scene it built.
  *
- * Identified by carrying a `segments` array, which `buildScene` sets on exactly one layer —
- * always, even when the selection is empty. That is what makes it findable again inside a
- * state the user has since edited.
+ * It cannot be recovered from the scene alone, and that is the whole of why this takes arguments.
+ * The obvious test — "carries a `segments` array" — is what the code did, and it is wrong against
+ * the real states: **male-CNS publishes sixteen layers with a preset `segments` array**, MANC
+ * eight and optic-lobe seven, none of them ours. Reading those as ours means `spliceSegments`
+ * copies our copy of a shell layer over the live one (reverting a selection the user made in it),
+ * and — worse — a user who deletes any one of the sixteen makes the splice bail to the merge tier,
+ * which throws away every layer edit they have made. Silently, and for a layer that has nothing to
+ * do with us.
+ *
+ * `buildScene` knows the answer exactly: the dataset's own segmentation layer, found by
+ * `segmentationLayerIndex`, and the `extraLayers` it appended to the end. So the caller supplies
+ * what it knows — the dataset id and how many extras it sent — and this applies the same two
+ * rules. The single-layer version was correct in practice only because the published layers
+ * carrying `segments` happen to come *after* the dataset's own on both real states; that is not a
+ * property anybody guaranteed.
  */
-function ownedLayerName(scene: NgScene): string | undefined {
-  for (const layer of layerList(scene)) {
-    if (Array.isArray(layer['segments']) && typeof layer.name === 'string') return layer.name
+export function ownedLayerNames(
+  scene: NgScene,
+  datasetId: string,
+  extraCount: number,
+): string[] {
+  const layers = layerList(scene)
+  const extrasAt = layers.length - Math.max(0, extraCount)
+  const names: string[] = []
+
+  const target = segmentationLayerIndex(scene, datasetId)
+  // Guarded against `target` landing inside the extras: an extra layer named after the dataset
+  // family would otherwise be counted twice and the real one not at all.
+  if (target >= 0 && target < extrasAt) {
+    const name = layers[target]?.name
+    if (typeof name === 'string') names.push(name)
   }
-  return undefined
+  for (let at = extrasAt; at < layers.length; at++) {
+    const name = layers[at]?.name
+    if (typeof name === 'string') names.push(name)
+  }
+  return names
 }
 
 /**
- * Put this app's selection into a state the *viewer* currently holds.
+ * Put this app's layers into a state the *viewer* currently holds.
  *
  * The answer to "why can't we just change the segments and leave everything else alone" —
  * because a merge's finest granularity is a top-level key, and `layers` is one key, so writing
  * it replaces the whole list. Starting from the live state instead means the list we write back
- * already contains the user's hidden layers, their added layers and their ordering; only the
- * one layer's selection differs.
+ * already contains the user's hidden layers, their added layers and their ordering; only our own
+ * layers' selections differ.
  *
- * Resolves undefined when the layer is not in the live state — the user deleted it, and
- * re-adding a layer they removed would be a worse answer than starting over.
+ * `owned` names them — see `ownedLayerNames` for why it cannot be worked out from `next`. Each is
+ * matched to the live layer of the same name and only `SEGMENT_FIELDS` are copied, so a layer the
+ * user has since restyled keeps their opacity and their shader.
+ *
+ * Resolves undefined when **any** of them is missing from the live state — the user deleted one,
+ * or a datasource node was wired up after the frame loaded, so the list itself has changed rather
+ * than a selection within it. Re-adding a layer somebody removed would be a worse answer than
+ * starting over, and the caller already has a better tier to fall back to: the merge form sends
+ * our whole layer list, which is exactly what a changed list needs.
  */
-export function spliceSegments(live: NgScene, next: NgScene): NgScene | undefined {
-  const name = ownedLayerName(next)
-  if (name === undefined) return undefined
+export function spliceSegments(
+  live: NgScene,
+  next: NgScene,
+  owned: readonly string[],
+): NgScene | undefined {
+  if (owned.length === 0) return undefined
+  const ours = new Map<string, NgLayer>()
+  for (const layer of layerList(next)) {
+    if (typeof layer.name === 'string' && owned.includes(layer.name)) ours.set(layer.name, layer)
+  }
+  if (ours.size !== owned.length) return undefined
 
-  const source = layerList(next).find((layer) => layer.name === name)
-  const liveLayers = layerList(live)
-  const index = liveLayers.findIndex((layer) => layer.name === name)
-  if (!source || index < 0) return undefined
-
-  const layers = liveLayers.map((layer, at) => {
-    if (at !== index) return layer
+  let matched = 0
+  const layers = layerList(live).map((layer) => {
+    const source = typeof layer.name === 'string' ? ours.get(layer.name) : undefined
+    if (!source) return layer
+    matched++
     const patched: Record<string, unknown> = { ...layer }
     for (const key of SEGMENT_FIELDS) {
       if (key in source) patched[key] = source[key]
@@ -490,7 +573,7 @@ export function spliceSegments(live: NgScene, next: NgScene): NgScene | undefine
     }
     return patched
   })
-  return { ...live, layers }
+  return matched === ours.size ? { ...live, layers } : undefined
 }
 
 /** Split a viewer URL back into the instance it points at and the scene it carries. */

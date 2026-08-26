@@ -14,9 +14,9 @@
  */
 
 import type { ShardingSpec } from './sharded'
-import { locate, readMinishard, readObject } from './sharded'
+import { locate, readShardedObject } from './sharded'
 import type { FetchOptions } from './transport'
-import { fetchJson } from './transport'
+import { PrecomputedFetchError, fetchBytes, fetchInfo } from './transport'
 
 export interface MultiResInfo {
   '@type': 'neuroglancer_multilod_draco'
@@ -58,7 +58,9 @@ export async function readMultiResInfo(
   base: string,
   options: FetchOptions = {},
 ): Promise<MultiResInfo> {
-  return fetchJson<MultiResInfo>(`${base}/info`, options)
+  // Through the memo: `openMeshSource` has just read this same document to decide it was
+  // multi-resolution, so a plain fetch here is the second request for one immutable file.
+  return fetchInfo<MultiResInfo>(base, options)
 }
 
 /**
@@ -212,21 +214,45 @@ export async function readManifest(
   options: FetchOptions = {},
 ): Promise<MultiResManifest | undefined> {
   if (!info.sharding) {
-    // Unsharded multi-res: the manifest is a plain `<id>.index` object and the fragments
-    // live in `<id>`. No source in use here is built this way, so rather than ship an
-    // untested path, say so.
-    throw new Error('Unsharded multi-resolution meshes are not supported yet')
+    /*
+     * Unsharded: the manifest is a plain `<id>.index` object and the fragments live in `<id>`.
+     * hemibrain's ROI meshes are built this way — `v1.2/rois/mesh` publishes `1` and `1.index`
+     * side by side — which is what makes the region shells reachable at all.
+     *
+     * `dataStart` is **0**, not `manifestOffset - total`. That subtraction exists because in a
+     * shard the fragments sit immediately *before* the manifest in one file with no pointer to
+     * them; here they are a separate object and start at its first byte. Passing the parsed total
+     * back in would arrive at the same 0 the long way round.
+     */
+    let buffer: ArrayBuffer
+    try {
+      buffer = await fetchBytes(`${base}/${neuronId}.index`, options)
+    } catch (error) {
+      // A missing index means no mesh for this segment, which is normal — the same answer the
+      // sharded path gives when a minishard holds no entry for the key.
+      if (error instanceof PrecomputedFetchError && error.status === 404) return undefined
+      throw error
+    }
+    return { ...parseMultiResManifest(buffer, 0), dataStart: 0 }
   }
-  const location = locate(base, neuronId, info.sharding)
-  const entries = await readMinishard(location, info.sharding, options)
-  const entry = entries.find((e) => e.key === neuronId)
-  if (!entry) return undefined
-  const buffer = await readObject(location.url, entry, info.sharding, options)
+  const held = await readShardedObject(base, neuronId, info.sharding, options)
+  if (!held) return undefined
   // The manifest's own offset is what locates the fragment data that precedes it.
-  return parseMultiResManifest(buffer, entry.offset)
+  return parseMultiResManifest(held.buffer, held.entry.offset)
 }
 
-/** Shard file a segment's fragments live in — the same file as its manifest. */
-export function shardUrl(base: string, neuronId: bigint, spec: ShardingSpec): string {
-  return locate(base, neuronId, spec).url
+/**
+ * The object a segment's fragments live in.
+ *
+ * Two layouts behind one name: sharded, they share the shard file with their own manifest;
+ * unsharded, they are the plain `<id>` object beside the `<id>.index` that describes them. Both
+ * are read with a Range request off `fragmentOffset`, which is what lets the fetch path stay one
+ * branch shorter than the format is.
+ */
+export function fragmentsUrl(
+  base: string,
+  neuronId: bigint,
+  spec: ShardingSpec | undefined,
+): string {
+  return spec ? locate(base, neuronId, spec).url : `${base}/${neuronId}`
 }

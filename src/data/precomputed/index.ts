@@ -19,10 +19,10 @@ import {
   fragmentTransform,
   readManifest,
   readMultiResInfo,
-  shardUrl,
+  fragmentsUrl,
 } from './multires'
 import type { FetchOptions } from './transport'
-import { fetchBytes, fetchJson } from './transport'
+import { fetchBytes, fetchInfo } from './transport'
 import { mapWithConcurrency } from '../concurrency'
 import { byteLengthOf, cachedGeometry } from '../geometryCache'
 
@@ -56,16 +56,15 @@ export async function openMeshSource(
   options: FetchOptions = {},
 ): Promise<MeshSource> {
   const base = url.replace(/\/+$/, '')
-  const info = await fetchJson<RawInfo>(`${base}/info`, options)
+  const info = await fetchInfo<RawInfo>(base, options)
 
   if (info['@type'] === 'neuroglancer_multiscale_volume') {
     if (!info.mesh) throw new Error(`${base} is a volume with no mesh subdirectory`)
     return openMeshSource(`${base}/${info.mesh}`, options)
   }
   if (info['@type'] === 'neuroglancer_multilod_draco') {
+    // Unsharded is supported now — hemibrain's ROI meshes are built that way; see `readManifest`.
     const multi = await readMultiResInfo(base, options)
-    if (!multi.sharding)
-      throw new Error(`${base} is multi-resolution but unsharded, which is unsupported`)
     return { base, format: 'multilod-draco', info: multi, levels: 0 }
   }
   // 'neuroglancer_legacy_mesh', or an info with no @type.
@@ -168,6 +167,36 @@ export interface FetchMeshesOptions extends FetchOptions {
   onPartial?: (meshes: MeshResult[]) => void
   /** Held until this settles, and passed straight through — see `CachedGeometryRequest`. */
   readyBefore?: Promise<unknown>
+}
+
+/**
+ * Report a mesh fetch's two phases as one 0..1 fraction and one caption.
+ *
+ * Here rather than in a backend, because `'manifests' | 'fragments'` is this module's own
+ * vocabulary: `fetchMeshes` is what emits those phases, and every source that calls it has to
+ * turn the pair into the one bar and the one line a node card draws. It was written out inside
+ * `NeuPrintSource` and copied verbatim into the next source that needed it, which put the split
+ * below in two places and its test in one.
+ *
+ * **The two phases cost wildly different amounts.** A manifest is a few hundred bytes per body,
+ * while the fragments behind it are megabytes — so an even split races to the halfway mark in the
+ * first second and then appears to hang, which is the failure mode of every progress bar that
+ * measures the cheap half. Manifests get the first fifth and fragments the remaining four.
+ *
+ * The fraction never decreases, including across the phase boundary, which is the property that
+ * matters: an indicator that goes backwards is worse than none.
+ */
+export function meshProgress(
+  onProgress: (fraction: number, note?: string) => void,
+): NonNullable<FetchMeshesOptions['onProgress']> {
+  return (done, total, phase) => {
+    const share = total > 0 ? Math.min(1, done / total) : 1
+    const manifests = phase === 'manifests'
+    onProgress(
+      manifests ? 0.05 + share * 0.15 : 0.2 + share * 0.8,
+      `${done}/${total} ${manifests ? 'manifests' : 'meshes'}`,
+    )
+  }
 }
 
 /**
@@ -329,7 +358,7 @@ async function readLodFragments(
 ): Promise<{ positions: Float32Array; indices: Uint32Array } | undefined> {
   const level = manifest.levels[lod]
   if (!level || level.sizes.length === 0) return undefined
-  const url = shardUrl(source.base, BigInt(neuronId), info.sharding!)
+  const url = fragmentsUrl(source.base, BigInt(neuronId), info.sharding)
 
   // One Range request spanning the whole level, then sliced locally: the fragments are
   // contiguous, and one request for 300 kB beats forty for 8 kB each.

@@ -37,46 +37,25 @@ import { caveScene } from './scene'
 import { segmentationLayerIndex } from '../neuroglancer/scene'
 import { registerDatastackSpec } from './spec'
 import { ID_COLUMN_NAME } from '../../core/ids'
+import type { RestoreFetch } from '../../test/precomputedStubs'
+import { serveDracoWasmFromDisk } from '../../test/precomputedStubs'
 
 const TOKEN = process.env.CAVE_TOKEN
 const DATASET = 'flywire_fafb_public:783'
 /** One real proofread neuron, used as the seed for every connectivity check below. */
 const SEED = '720575940628857210'
 
-/**
- * The Draco decoder's wasm, off disk.
- *
- * `draco.ts` imports it with `?url`, which resolves to a path only a browser can fetch — so
- * under Node the mesh path dies before it decodes anything. `precomputed.test.ts` replaces
- * `fetch` outright for the same reason; here it has to pass everything else through, because
- * the point of this file is that the requests are real.
- */
-async function serveDracoWasmFromDisk(): Promise<void> {
-  const real = globalThis.fetch
-  const { readFile } = await import('node:fs/promises')
-  const { createRequire } = await import('node:module')
-  const require = createRequire(import.meta.url)
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    if (String(input).endsWith('draco_decoder.wasm')) {
-      const bytes = await readFile(require.resolve('draco3d/draco_decoder.wasm'))
-      return {
-        ok: true,
-        status: 200,
-        arrayBuffer: async () =>
-          bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
-      } as Response
-    }
-    return real(input, init)
-  }) as typeof fetch
-}
-
 const live = TOKEN ? describe : describe.skip
 
+let restoreFetch: RestoreFetch = () => {}
 beforeAll(async () => {
   setToken(TOKEN)
-  await serveDracoWasmFromDisk()
+  restoreFetch = await serveDracoWasmFromDisk()
 })
-afterAll(() => resetCredentials())
+afterAll(() => {
+  restoreFetch()
+  resetCredentials()
+})
 
 live('CAVE, live', () => {
   const source = new CaveSource()

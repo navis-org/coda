@@ -103,6 +103,17 @@ export type CodaType =
    * place rather than an error. See `TransformValue`.
    */
   | { kind: 'transform' }
+  /**
+   * Neuroglancer layers, ready to be added to a scene.
+   *
+   * Its own kind for `layout`'s reason: it is not data about neurons, it is a *presentation* of
+   * somebody else's data expressed in another tool's vocabulary. As a table it would take any
+   * columns at all; as a Dataset it would be accepted by every query node in the app, none of
+   * which could do anything with it.
+   *
+   * Carries no schema, because a layer is opaque JSON — see `LayersValue`.
+   */
+  | { kind: 'layers' }
 
 export type TypeKind = CodaType['kind']
 
@@ -153,6 +164,7 @@ export const T = {
   layout: (): CodaType => ({ kind: 'layout' }),
   linkage: (): CodaType => ({ kind: 'linkage' }),
   transform: (): CodaType => ({ kind: 'transform' }),
+  layers: (): CodaType => ({ kind: 'layers' }),
 } as const
 
 /** Types whose values are tabular, i.e. carry a `TableSchema`. */
@@ -207,6 +219,8 @@ export function typeLabel(t: CodaType | undefined): string {
       return 'Layout'
     case 'linkage':
       return 'Linkage'
+    case 'layers':
+      return 'Layers'
     case 'dataset':
       return t.datasetId ? `Dataset(${t.datasetId})` : 'Dataset'
     default:

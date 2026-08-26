@@ -57,6 +57,7 @@ import {
   scenePatchUrl,
   viewerKind,
   sceneUrl,
+  ownedLayerNames,
   spliceSegments,
   splitSceneUrl,
 } from '../../data/neuroglancer/scene'
@@ -86,6 +87,23 @@ export interface NeuroglancerViewerProps {
    * exactly the host the table gets wrong — and this card is where that is seen.
    */
   viewerType?: ViewerKind | undefined
+  /**
+   * Which dataset the scene was built for, and how many layers came off the Extra layers socket.
+   *
+   * The pair `ownedLayerNames` needs, and props for `viewerType`'s reason stated one field up: the
+   * URL cannot carry them. A published state ships preset `segments` on layers that are not ours —
+   * male-CNS on sixteen of them — so "the layers with a selection" is not the question, and only
+   * the node that built the scene knows these two facts.
+   *
+   * `datasetId` absent means updates fall to the merge tier rather than guessing. That is the
+   * honest degrade: splicing writes into somebody's live state, and doing it to the wrong layer is
+   * worse than sending our own list.
+   *
+   * Two primitives rather than one object because they belong in the effect's dependency list, and
+   * an object rebuilt each render would re-navigate the frame on every parent render.
+   */
+  datasetId?: string | undefined
+  extraLayers?: number | undefined
   compact?: boolean
   baseName?: string
   onExpand?: () => void
@@ -135,6 +153,8 @@ export function NeuroglancerViewer({
   color,
   scale = 1,
   viewerType,
+  datasetId,
+  extraLayers = 0,
   compact = false,
   baseName,
   onExpand,
@@ -212,7 +232,14 @@ export function NeuroglancerViewer({
        * 3. Replace: the whole scene, for a first load or a different dataset.
        */
       const live = canMerge ? readLiveScene(frame) : undefined
-      const spliced = live ? spliceSegments(live, split.scene) : undefined
+      const spliced =
+        live && datasetId
+          ? spliceSegments(
+              live,
+              split.scene,
+              ownedLayerNames(split.scene, datasetId, extraLayers),
+            )
+          : undefined
       frame.src = spliced
         ? scenePatchUrl(frameBase, spliced, kind)
         : canMerge
@@ -230,7 +257,7 @@ export function NeuroglancerViewer({
     // `reloadCount` belongs here rather than only on the element: the effect's own guard
     // returns early for a URL already applied, so a remount with no reason to renavigate would
     // leave a blank frame.
-  }, [url, reloadCount, viewerType])
+  }, [url, reloadCount, viewerType, datasetId, extraLayers])
 
   if (!url) {
     return (

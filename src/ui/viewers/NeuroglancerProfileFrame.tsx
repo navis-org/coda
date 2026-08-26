@@ -142,6 +142,9 @@ export function NeuroglancerProfileFrame({
         scene,
       )}
       color={SEGMENT_COLOR}
+      // This frame builds its own scene from the same `buildScene` and adds no extra layers, so
+      // the one layer it owns is the dataset's own segmentation.
+      datasetId={datasetId}
       compact
       onError={onError}
     />

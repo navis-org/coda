@@ -35,6 +35,12 @@ const NO_EMITTER: Record<string, string> = {
     'A CATMAID instance named by hand \u2014 the same reason as `dataset.catmaid.fafb`, and no ' +
     'different for being a server this build ships no node for. pymaid would emit it; nobody ' +
     'has written that emitter.',
+  'dataset.ngsource':
+    'A neuroglancer datasource \u2014 a bucket URL, not a server. `cloudvolume` is the faithful ' +
+    'route and navis wraps it (`navis.read_precomputed`), but nothing downstream would use the ' +
+    'result yet: the morphology emitters are written against neuprint-python, so a cell binding ' +
+    'a CloudVolume would sit above a Meshes cell that is itself a TODO for this backend. One ' +
+    'emitter is worth writing when the pair is.',
   'note.text': 'An annotation. It becomes a markdown cell, which the walk does directly.',
   'dataset.mock.hemibrain':
     'Synthetic, so a graph holding one is refused before the walk starts. An emitter here ' +

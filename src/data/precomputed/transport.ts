@@ -230,6 +230,35 @@ export async function fetchJson<T>(url: string, options: FetchOptions = {}): Pro
   return JSON.parse(new TextDecoder().decode(bytes)) as T
 }
 
+/**
+ * A precomputed directory's `info`, read at most once per URL per session.
+ *
+ * An `info` is immutable under a fixed URL — it is the published description of a released
+ * dataset — which is what makes a cache correct here rather than merely convenient. Without it
+ * the same document is fetched repeatedly by callers that cannot see each other: opening one
+ * draco mesh source reads it twice on its own (`openMeshSource`, then `readMultiResInfo`), and
+ * the Neuroglancer Source node's probe reads it again before the first Run.
+ *
+ * **Only successes are held.** A failure is usually transient — an unreachable host, a proxy not
+ * started yet — and a sticky one would outlive its cause, which is the same reason
+ * `remember` refuses to persist `unreachable`. Callers that want a failure remembered say so at
+ * their own level; `precomputed/probe.ts` does.
+ *
+ * **In-flight requests are not deduplicated**, deliberately. Sharing one promise would mean one
+ * caller's `AbortSignal` rejecting for every other caller — and the requests this exists to
+ * remove are sequential rather than concurrent, so there is nothing to gain against that risk.
+ */
+export async function fetchInfo<T>(base: string, options: FetchOptions = {}): Promise<T> {
+  const url = `${base.replace(/\/+$/, '')}/info`
+  const held = infos.get(url)
+  if (held !== undefined) return held as T
+  const body = await fetchJson<T>(url, options)
+  infos.set(url, body)
+  return body
+}
+
+const infos = new Map<string, unknown>()
+
 /** How each bucket is currently being reached. Surfaced by the Sources panel. */
 export function transportModes(): Record<string, Mode> {
   load()
@@ -238,6 +267,9 @@ export function transportModes(): Record<string, Mode> {
 
 export function resetTransport(): void {
   modes.clear()
+  // The `info` memo is network state learned by this module too, and every test that resets one
+  // wants the other — a held `info` from a previous case answers a stubbed fetch that never ran.
+  infos.clear()
   loaded = false
   try {
     window.localStorage?.removeItem(MODE_KEY)

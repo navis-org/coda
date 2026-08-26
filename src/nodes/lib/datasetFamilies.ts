@@ -68,6 +68,20 @@ export interface DatasetBackend {
   edgeSets?: boolean
 }
 
+/**
+ * `precomputed` is deliberately **not** here, though `PrecomputedSource` registers under it and
+ * `backendOf` reads it.
+ *
+ * This table is not a list of backends: `NodeThumbnail`'s `BACKEND_IDS` is `Object.keys` of it and
+ * draws one pip per entry, so an entry is a slot in a positional mark on every dataset tile in the
+ * browser. Adding one for a backend no *node type* maps to — `backendForNodeType` reads
+ * `DATASET_FAMILIES` and `CUSTOM_DATASET_NODES`, and `dataset.ngsource` is in neither — gives every
+ * existing tile a fifth pip that can never light, and shifts the slot `mock` had.
+ *
+ * What an entry would have bought is one capital letter: `backendName` falls back to `|| id`, so
+ * an exporter's TODO says "precomputed" rather than "neuroglancer". That fallback exists for
+ * exactly this case, and it is the cheaper of the two.
+ */
 export const BACKENDS: Record<string, DatasetBackend> = {
   neuprint: {
     id: 'neuprint',

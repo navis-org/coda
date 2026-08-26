@@ -62,6 +62,13 @@ const URL_B = sceneUrl(undefined, sceneWith(['1', '2']))
 const URL_OTHER = sceneUrl(undefined, sceneWith(['9'], [900, 900, 900]))
 const CATEGORICAL = { mode: 'categorical' as const, column: 'type', constant: '0' }
 
+/**
+ * What the node knows and the URL cannot carry: which dataset the scene was built for, and how
+ * many layers came off the Extra layers socket. Without it the splice is skipped and updates fall
+ * to the merge tier — see the prop's own note.
+ */
+const OWNED = 'hemibrain:v1.2.1'
+
 function frame(container: HTMLElement): HTMLIFrameElement | null {
   return container.querySelector('iframe')
 }
@@ -266,6 +273,28 @@ describe('updating a viewer the user has edited', () => {
     // The complaint this answers: every update used to restore *our* layer list, so layers the
     // user hid came back and layers they added disappeared.
     const { container, rerender } = render(
+      <NeuroglancerViewer url={URL_A} neurons={NEURONS} color={CATEGORICAL} datasetId={OWNED} />,
+    )
+    frameLoaded(container)
+    frameShowing(container, live)
+
+    rerender(
+      <NeuroglancerViewer url={URL_B} neurons={NEURONS} color={CATEGORICAL} datasetId={OWNED} />,
+    )
+    flushMerge()
+
+    const patch = parseSceneUrl(frame(container)?.getAttribute('src') ?? '')!
+    const layers = patch['layers'] as Array<Record<string, unknown>>
+    expect(layers.map((l) => l['name'])).toEqual(['em', 'hemibrain:v1.2.1', 'mine'])
+    expect(layers[0]!['visible']).toBe(false)
+    expect(layers[1]!['segments']).toEqual(['1', '2'])
+  })
+
+  it('merges rather than splicing when nothing said which layers are ours', () => {
+    // The honest degrade. Splicing writes into somebody's live state, and doing it to the wrong
+    // layer is worse than sending our own list — a published scene ships preset selections on
+    // layers that are not ours, so this is not guessable from the scene.
+    const { container, rerender } = render(
       <NeuroglancerViewer url={URL_A} neurons={NEURONS} color={CATEGORICAL} />,
     )
     frameLoaded(container)
@@ -275,10 +304,11 @@ describe('updating a viewer the user has edited', () => {
     flushMerge()
 
     const patch = parseSceneUrl(frame(container)?.getAttribute('src') ?? '')!
-    const layers = patch['layers'] as Array<Record<string, unknown>>
-    expect(layers.map((l) => l['name'])).toEqual(['em', 'hemibrain:v1.2.1', 'mine'])
-    expect(layers[0]!['visible']).toBe(false)
-    expect(layers[1]!['segments']).toEqual(['1', '2'])
+    // Our list, not theirs: `mine` is gone, which is the merge tier's documented cost.
+    expect((patch['layers'] as Array<Record<string, unknown>>).map((l) => l['name'])).toEqual([
+      'em',
+      'hemibrain:v1.2.1',
+    ])
   })
 
   it('sends the frame to the proxied path, and the link stays absolute', () => {

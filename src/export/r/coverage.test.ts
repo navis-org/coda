@@ -25,6 +25,11 @@ const NO_EMITTER: Record<string, string> = {
     'A CAVE datastack named by hand, so it has the same reason as `dataset.flywire`: this ' +
     'document is built on neuprintr and there is no fafbseg/CAVE emitter yet.',
   'cave.updateRootIds': 'A CAVE chunkedgraph repair \u2014 see the Python note.',
+  'dataset.ngsource':
+    'A neuroglancer datasource. `fafbseg::read_cloudvolume_meshes` is the R counterpart of the ' +
+    'cloudvolume route named in the Python note, and it is blocked on the same thing rather ' +
+    'than on the language: this document is built on neuprintr, so the Meshes node downstream ' +
+    'has nothing to emit against a bucket either.',
   'neuron.mirror':
     '`nat.templatebrains::mirror_brain` is the exact counterpart of the function Python emits, ' +
     'and the obstacle is the *template*, not the verb. Python has one registry \u2014 ' +

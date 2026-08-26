@@ -16,7 +16,7 @@ import { NUMERIC_DTYPES } from '../../core/types'
 import { cableLength, getColumn } from '../../core/values'
 import type { FilterRow } from '../filterRows'
 
-import { NeuPrintSource, THUMBNAIL_MAX_BYTES, meshProgressFraction } from './NeuPrintSource'
+import { NeuPrintSource, THUMBNAIL_MAX_BYTES } from './NeuPrintSource'
 import {
   datasetSegment,
   forgetRoutes,
@@ -25,7 +25,7 @@ import {
   runCypher,
   tagQuery,
 } from './client'
-import { meshSourceFromState, precomputedToHttp } from './nglayers'
+import { meshCandidateUrl, meshSourceFromState } from './nglayers'
 import { fetchRoiMeshSet, roiMeshPath } from './roiMeshes'
 import {
   IDENTITY_SCALE,
@@ -1178,24 +1178,31 @@ describe('route selection', () => {
 
 describe('mesh source resolution', () => {
   it('maps precomputed object-store URLs to fetchable HTTP', () => {
-    expect(precomputedToHttp('precomputed://gs://bucket/a/b')).toBe(
+    expect(meshCandidateUrl('precomputed://gs://bucket/a/b')).toBe(
       'https://storage.googleapis.com/bucket/a/b',
     )
     // Virtual-hosted style for S3: the path-style endpoint 301s, and fetch will not follow a
     // redirect that drops CORS headers.
-    expect(precomputedToHttp('precomputed://s3://bucket/a/b')).toBe(
+    expect(meshCandidateUrl('precomputed://s3://bucket/a/b')).toBe(
       'https://bucket.s3.amazonaws.com/a/b',
     )
-    expect(precomputedToHttp('precomputed://gs://bucket/a/b/')).toBe(
+    expect(meshCandidateUrl('precomputed://gs://bucket/a/b/')).toBe(
       'https://storage.googleapis.com/bucket/a/b',
     )
+  })
+
+  it('refuses a source that states no format at all', () => {
+    // `parseNgSource` reads a bare bucket as precomputed, because somebody pasting one into a
+    // node means precomputed. A layer `source` with no format is a different thing, and the
+    // preference order below is measured against states whose sources all carry one.
+    expect(meshCandidateUrl('gs://bucket/a/b')).toBeUndefined()
   })
 
   it('refuses dvid:// rather than mangling it into a 404', () => {
     // DVID serves meshes through an entirely different API. Pretending it is an object store
     // would turn "unsupported source" into "every neuron is missing".
     expect(
-      precomputedToHttp('dvid://https://emdata5.janelia.org/8e29f/segmentation'),
+      meshCandidateUrl('dvid://https://emdata5.janelia.org/8e29f/segmentation'),
     ).toBeUndefined()
   })
 
@@ -1368,34 +1375,6 @@ describe('voxel to nanometre conversion', () => {
     const nm = scalePositions(voxels, voxelScale([8, 8, 8], 'nanometers') ?? IDENTITY_SCALE)
     expect(nm[0]).toBe(704)
     expect(nm[3]).toBe(125024)
-  })
-})
-
-describe('mesh fetch progress', () => {
-  it('gives manifests the first fifth and fragments the rest', () => {
-    // A manifest is a few hundred bytes; the fragments behind it are megabytes. An even split
-    // would race to 50% in the first second and then look hung.
-    expect(meshProgressFraction(0, 8, 'manifests')).toBeCloseTo(0.05, 5)
-    expect(meshProgressFraction(8, 8, 'manifests')).toBeCloseTo(0.2, 5)
-    expect(meshProgressFraction(0, 8, 'fragments')).toBeCloseTo(0.2, 5)
-    expect(meshProgressFraction(8, 8, 'fragments')).toBeCloseTo(1, 5)
-  })
-
-  it('never decreases, including across the phase boundary', () => {
-    // An indicator that runs backwards is worse than none — and it did, until the skeleton
-    // path stopped using a dispatch-order ordinal as a completion count.
-    const sequence = [
-      ...Array.from({ length: 9 }, (_, i) => meshProgressFraction(i, 8, 'manifests')),
-      ...Array.from({ length: 9 }, (_, i) => meshProgressFraction(i, 8, 'fragments')),
-    ]
-    for (let i = 1; i < sequence.length; i++) {
-      expect(sequence[i]!).toBeGreaterThanOrEqual(sequence[i - 1]!)
-    }
-  })
-
-  it('stays in range for a degenerate total', () => {
-    expect(meshProgressFraction(0, 0, 'manifests')).toBeCloseTo(0.2, 5)
-    expect(meshProgressFraction(5, 2, 'fragments')).toBeCloseTo(1, 5)
   })
 })
 

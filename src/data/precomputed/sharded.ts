@@ -171,3 +171,24 @@ export async function readObject(
   })
   return spec.data_encoding === 'gzip' ? gunzip(bytes) : bytes
 }
+
+/**
+ * One object out of a sharded store, or undefined when the store holds no such key.
+ *
+ * The four-step `locate` → `readMinishard` → find the key → `readObject` walk, once. Both the
+ * mesh manifests and the skeleton blobs need it and each had written it out; a missing key is an
+ * ordinary answer in both (not every segment is reconstructed), so the undefined is the shared
+ * part rather than an afterthought.
+ */
+export async function readShardedObject(
+  base: string,
+  key: bigint,
+  spec: ShardingSpec,
+  options: FetchOptions = {},
+): Promise<{ buffer: ArrayBuffer; entry: MinishardEntry } | undefined> {
+  const location = locate(base, key, spec)
+  const entries = await readMinishard(location, spec, options)
+  const entry = entries.find((e) => e.key === key)
+  if (!entry) return undefined
+  return { buffer: await readObject(location.url, entry, spec, options), entry }
+}

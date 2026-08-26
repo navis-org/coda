@@ -537,3 +537,70 @@ describe('which viewer the segmentation is authenticated for', () => {
     expect(segmentationSource(back.scene)).toBe(GRAPHENE)
   })
 })
+
+describe('extra layers', () => {
+  const SHELL = { type: 'segmentation', name: 'brain shell', source: 'precomputed://gs://b/shell' }
+
+  /** The scene the node emits, with a layer set on the Extra layers socket. */
+  async function sceneWithExtras(
+    items: ReadonlyArray<Record<string, unknown>>,
+    params: ParamValues = {},
+  ): Promise<NgScene> {
+    const d = def()
+    const ctx = evalContext(d, { ...defaultParams(d), ...params }, undefined, stubSource())
+    const withLayers: EvalContext = {
+      ...ctx,
+      input: (port: string) =>
+        port === 'layers' ? ({ kind: 'layers', items } as Value) : ctx.input(port),
+    }
+    const out = await d.evaluate(withLayers)
+    const scene = parseSceneUrl(asString(out['url']))
+    if (!scene) throw new Error('no scene in the emitted URL')
+    return scene
+  }
+
+  it('adds them after everything the dataset publishes', async () => {
+    const scene = await sceneWithExtras([SHELL])
+    expect(layersOf(scene).map((l) => l['name'])).toEqual([
+      'em',
+      'manc:v1.2.3',
+      'neuropils',
+      'brain shell',
+    ])
+  })
+
+  it('keeps them when the published layers are trimmed to the neurons', async () => {
+    // `Layers: neurons only` is about how much of the *dataset's* scene to carry. A layer wired
+    // up on purpose is not published context to trim, and dropping it would make the two
+    // controls interact in a way neither one's label mentions.
+    const scene = await sceneWithExtras([SHELL], { layers: 'segmentation' })
+    expect(layersOf(scene).map((l) => l['name'])).toEqual(['manc:v1.2.3', 'brain shell'])
+  })
+
+  it('carries the layer’s own settings into the link verbatim', async () => {
+    const scene = await sceneWithExtras([{ ...SHELL, objectAlpha: 0.3, segments: ['12345'] }])
+    const shell = layersOf(scene).find((l) => l['name'] === 'brain shell')!
+    expect(shell['objectAlpha']).toBe(0.3)
+    expect(shell['segments']).toEqual(['12345'])
+  })
+
+  it('leaves the neuron selection on the dataset’s own layer', async () => {
+    // The pairing that matters: an extra segmentation layer carries `segments` of its own, and
+    // the two sets must not be confused for one another at either end of the round trip.
+    const scene = await sceneWithExtras([{ ...SHELL, segments: ['99'] }])
+    const layers = layersOf(scene)
+    expect(layers[1]!['name']).toBe('manc:v1.2.3')
+    expect(layers[1]!['segments']).toEqual([])
+    expect(layers[3]!['segments']).toEqual(['99'])
+  })
+
+  it('refuses something connected to the socket that is not a layer set', async () => {
+    const d = def()
+    const ctx = evalContext(d, defaultParams(d), undefined, stubSource())
+    const wrong: EvalContext = {
+      ...ctx,
+      input: (port: string) => (port === 'layers' ? num(1) : ctx.input(port)),
+    }
+    await expect(d.evaluate(wrong)).rejects.toThrow(/not a layer set/)
+  })
+})

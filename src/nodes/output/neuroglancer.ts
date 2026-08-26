@@ -107,6 +107,15 @@ export const neuroglancerNode = registerNode({
      * requiring a neuron table first would make the empty case a dead card instead.
      */
     { id: 'neurons', label: 'Neurons', type: T.neurons(), required: false },
+    /*
+     * Layers from `Neuroglancer Source` nodes, added after everything the dataset publishes.
+     *
+     * One socket rather than several, because an input port takes one wire and those nodes chain:
+     * the value on this wire is the whole list, in wiring order. It is the socket that makes a
+     * brain shell, a second dataset's segmentation or somebody's own annotation layer reachable
+     * without Coda having to know about any of them.
+     */
+    { id: 'layers', label: 'Extra layers', type: T.layers(), required: false },
   ],
   outputs: [{ id: 'url', label: 'Link', type: T.string() }],
   params: [
@@ -164,7 +173,7 @@ export const neuroglancerNode = registerNode({
       label: 'Layers',
       default: 'all',
       advanced: true,
-      help: 'Everything the dataset publishes — EM, ROI meshes, synapses — or just the neurons. Neurons-only makes a far shorter link; male-CNS publishes 38 layers.',
+      help: 'How much of what the *dataset* publishes to carry — EM, ROI meshes, synapses — or just the neurons. Neurons-only makes a far shorter link; male-CNS publishes 38 layers. Anything on the Extra layers socket is added either way: you wired it up, so it is not published context to trim.',
       options: [
         { value: 'all', label: 'as published' },
         { value: 'segmentation', label: 'neurons only' },
@@ -273,6 +282,11 @@ export const neuroglancerNode = registerNode({
       )
     }
 
+    const extra = ctx.input('layers')
+    if (extra !== undefined && extra.kind !== 'layers') {
+      throw new Error('Extra layers input is not a layer set')
+    }
+
     const scene = buildScene(published, {
       datasetId: dataset.datasetId,
       segments,
@@ -280,6 +294,7 @@ export const neuroglancerNode = registerNode({
       layout: String(ctx.params.layout ?? '3d') as NgLayout,
       layers: String(ctx.params.layers ?? 'all') as NgLayerSet,
       showSlices: ctx.params.showSlices === true,
+      ...(extra ? { extraLayers: extra.items } : {}),
     })
 
     const viewer = viewerBaseFor(

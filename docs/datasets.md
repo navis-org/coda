@@ -138,6 +138,101 @@ dataset and a seventh is never required: the glyph is keyed to a coarse anatomic
 in the family table, with `specimen` as the fallback, so a dataset added tomorrow is never blank.
 Same rule as `NodeThumbnail`, same reason.
 
+## A datasource is not a dataset
+
+`Neuroglancer Source` (`dataset.ngsource`) sits in this directory and in the Dataset menu, and it
+is not one of the things above. A dataset is a **connectome**: neurons with types and statuses,
+connectivity, regions, a published viewer state, a version to pin. A **datasource** is a single
+address holding a single kind of data — what a neuroglancer layer's `source` box names. Paste one
+and `Meshes` can fetch from it, with `Input IDs` supplying the segment ids, because there is no
+neuron table to pick them out of.
+
+**It emits `Dataset` anyway, and the socket is labelled `Datasource`.** `Meshes`, `Skeletons` and
+`ROI Meshes` all take a Dataset socket and resolve `dataset.sourceId` out of the registry, so a
+datasource that emits one plugs into all three with no change to any of them. The distinction
+lives in the socket's *label*, where somebody reading the canvas needs it, rather than in a second
+type nothing could enforce anything with — a `datasource` kind assignable to `dataset` would let
+exactly the same wires be made.
+
+**`SourceCapabilities` is what keeps it honest.** `meshes`, `skeletons`, `neuronIndex` and
+`roiMeshes` are gated from the same `info` — a segmentation names its mesh directory, its skeleton
+directory and its segment properties in one document, so the probe learns all four at once and
+each node refuses on its own card. Most segmentations name no skeleton directory at all, which is
+the ordinary answer rather than an edge case. `roiMeshes` needs **both** a mesh directory and a
+sidecar: without names the region picker would offer eighteen-digit segment ids.
+
+**A source with segment properties stops needing Input IDs.** The sidecar is a neuron index, so
+Explore can browse it and Find Neurons can query it — locally, through the same
+`preparedRows`/`compileLabelMatch` helpers CAVE and CATMAID use, which is what stops three
+backends disagreeing about whether `LC.*` matches `LPLC1`. Without one, the ids come from an Input
+IDs node and the refusal says so, naming what the source publishes instead.
+
+**Connectivity is the one thing left that refuses at Run rather than on the card.**
+`fetchConnectivity` and `fetchAdjacency` are *required* members of `DataSource`, so
+`PrecomputedSource` implements them by throwing — a message rather than an empty table, which
+under a green node would read as a connectome with nothing connected. There is no capability for
+`sourceSupports` to gate on, so the refusal lands late. The deeper fix is to make the pair
+optional and add a `connectivity` capability, exactly as `fetchRoiCounts`/`roiCounts` were split
+when the second backend arrived (see the account in `data/source.ts`). `findNeurons` used to be in
+this paragraph and no longer is: it is answered from the sidecar, and gated by `neuronIndex`.
+
+**The source is registered lazily, by URL.** `precomputedSourceFor` is `neuPrintSourceFor`
+one-for-one: nodes resolve a source out of the global registry, so a node pointing at a bucket
+needs a registered source for that bucket, and the only moment that can happen is when something
+asks. Hence no entry in `builtins.ts` — there is no default bucket the way there is a default
+neuPrint deployment. The key is the canonical spelling, so `precomputed://gs://b/p`, `gs://b/p/`
+and `gs://b/p|neuroglancer-precomputed:` share one instance; two instances would re-probe the same
+`info` and give two nodes different dataset ids for one directory, which downstream reads as two
+datasets.
+
+**It emits a second thing, and that is why it is worth one node rather than two.** The `Layers`
+output is a neuroglancer layer object pointed at the same URL, for the Neuroglancer node's
+`Extra layers` socket — a brain shell, a second dataset's segmentation, somebody's own annotation
+source. One node because the two outputs answer the same question ("what is at this address") and
+a second node would ask for the URL twice; the layer-only params are all `advanced`, so the card
+stays the one field that has to be right.
+
+**More than one layer chains.** An input port takes exactly one wire (`core/graph.ts`), so
+`Datasource → Datasource → Neuroglancer` is how two layers reach one scene, in wiring order. That
+is `Stack`'s answer to the same constraint rather than a new idiom, and it is why the node has a
+`Layers` **input** as well as an output.
+
+**The settings blob is merged last, so your keys win.** Anything neuroglancer accepts —
+`objectAlpha`, `segmentDefaultColor`, a shader — is reachable without this node growing a control
+for it, including the keys it generates itself. A field that could not override `name` would be an
+arbitrary exception somebody has to discover. Bad JSON is reported on the card rather than at Run,
+because it is the one field here whose mistake is a typo: a missing brace contributing nothing
+silently looks exactly like a setting neuroglancer ignored.
+
+**Segment ids stay text on the way out.** Invariant 8 does not stop at Coda's edge — an
+eighteen-digit id put through `Number` selects a different neuron in somebody else's viewer, with
+nothing to say so. The layer's `source` is the canonical `precomputed://gs://…` spelling too,
+which is why `parseNgSource` keeps the location in its own scheme: a layer pointed at
+`storage.googleapis.com` would work only where Coda's own proxy decisions do.
+
+**Two dataset producers on a canvas means auto-wiring stops**, and that is the right answer rather
+than a regression — see the section below for the rule and why counting nodes is what it counts.
+With a connectome and a mesh bucket both on the canvas, which one a newly added `Meshes` node
+should read is a real question, and the editor has no way to answer it.
+
+**`cheap`, with the fetch memoised including its failures.** It resolves metadata and nothing
+else, so switching a URL updates the downstream column pickers without waiting for a Run — but
+the one thing anybody edits on it is a text field, which is invariant 6's hazard. `probe.ts` holds
+one small `info` per URL and holds the failure too, so a URL that 404s is asked once rather than
+once per edit-time peek. What remains is one request per committed edit, because each distinct URL
+is its own key; that is the trade `Custom CAVE` already makes for a hand-typed datastack, held
+down by the string param's debounce. `retry` is the way back from a *transient* failure and is
+passed only from `evaluate`, which runs on an explicit Run.
+
+**The capability default is optimistic and the override narrows it.** `capabilities.meshes` is
+`true` on the source and `capabilitiesFor` answers `{ meshes: false }` once the probe says the URL
+holds an image stack or a segmentation with no mesh directory. Backwards-looking at first glance,
+and it is `capabilityOf`'s own rule: an unresolved source refuses nothing. A pessimistic default
+would put "This data source has no meshes" on a perfectly good `Meshes` node for the first second
+of every load. A probe that *failed* returns `undefined` rather than `false`, because "nobody could
+read this" and "there are no meshes here" are different, and the node holding the URL is already
+reporting the first.
+
 ## Attribution: the Description companion
 
 Every published dataset node arrives with a `dataset.description` card wired to it. A connectome

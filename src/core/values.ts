@@ -418,6 +418,23 @@ export interface TransformValue {
   readonly targetSpace?: string
 }
 
+/**
+ * Neuroglancer layers, in the order they should be added to a scene.
+ *
+ * **A layer is opaque JSON here, deliberately.** Neuroglancer's layer schema is large, versioned,
+ * and differs between the two viewer flavours (`scene.ts` carries the two it has had to reconcile
+ * so far); modelling it would mean tracking somebody else's format and refusing anything it did
+ * not recognise. The one thing this app *does* to a layer is written by whoever builds it, and
+ * `Record<string, unknown>` is the honest type for the rest — the same treatment `NgScene` gets.
+ *
+ * It is in `src/core` and names no type from `src/data`, which is why it is spelled out rather
+ * than importing `NgScene`'s layer shape: core sits under data, not beside it.
+ */
+export interface LayersValue {
+  readonly kind: 'layers'
+  readonly items: ReadonlyArray<Readonly<Record<string, unknown>>>
+}
+
 export type Value =
   | TableValue
   | MatrixValue
@@ -430,6 +447,7 @@ export type Value =
   | LayoutValue
   | LinkageValue
   | TransformValue
+  | LayersValue
 
 // ---------------------------------------------------------------------------
 // Constructors
@@ -816,6 +834,8 @@ export function describeValue(v: Value | undefined): string {
     }
     case 'transform':
       return `${v.count.toLocaleString()} landmarks${v.targetSpace ? ` → ${v.targetSpace}` : ''}`
+    case 'layers':
+      return `${v.items.length} layer${v.items.length === 1 ? '' : 's'}`
     case 'linkage': {
       const cut = v.clusters ? ` · ${new Set(v.clusters).size} clusters` : ''
       return `${v.labels.length} leaves${v.method ? ` · ${v.method}` : ''}${cut}`

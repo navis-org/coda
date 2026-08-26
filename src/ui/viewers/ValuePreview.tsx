@@ -361,6 +361,13 @@ function ValuePreviewInner({
     // The scene, the segments and the colours are all in the URL the node emitted; the
     // neuron table comes along only so the legend can be drawn beside the frame.
     const neurons = inputValues?.neurons
+    /*
+     * Which layers of the scene are the app's own, for the splice — see the prop's own note. Both
+     * halves come off this node's inputs, which is the only place they exist: the URL cannot carry
+     * them, and a published state's preset selections make them unguessable from the scene.
+     */
+    const dataset = inputValues?.dataset
+    const extra = inputValues?.layers
     return (
       <NeuroglancerViewer
         url={asString(value)}
@@ -368,6 +375,8 @@ function ValuePreviewInner({
         color={readColorSpec('segment', node.params, ctx.column)}
         scale={Number(node.params.uiScale ?? 0.75)}
         viewerType={chosenViewerKind(node.params)}
+        datasetId={dataset?.kind === 'dataset' ? dataset.datasetId : undefined}
+        extraLayers={extra?.kind === 'layers' ? extra.items.length : 0}
         {...shared}
       />
     )
@@ -541,11 +550,16 @@ function ValuePreviewInner({
   }
 
   /*
-   * Scalars print themselves. A layout, a linkage and a transform have nothing to draw on their
-   * own — an arrangement for someone else's nodes, a tree wired to no Dendrogram, a mapping with
-   * nothing passing through it — so all three fall back to the summary the footer shows.
+   * Scalars print themselves. A layout, a linkage, a transform and a layer set have nothing to
+   * draw on their own — an arrangement for someone else's nodes, a tree wired to no Dendrogram, a
+   * mapping with nothing passing through it, a layer with no scene to sit in — so all four fall
+   * back to the summary the footer shows.
    */
-  const summarised = value.kind === 'layout' || value.kind === 'linkage' || value.kind === 'transform'
+  const summarised =
+    value.kind === 'layout' ||
+    value.kind === 'linkage' ||
+    value.kind === 'transform' ||
+    value.kind === 'layers'
   return (
     <div className="viewer">
       <div className="viewer__empty">{summarised ? describeValue(value) : String(value.value)}</div>

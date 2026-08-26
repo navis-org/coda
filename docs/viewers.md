@@ -1469,6 +1469,38 @@ So the module supplies `layout` and `showSlices` when absent — neuroglancer's 
 open hemibrain in 4-panel with EM planes cutting through the neurons — clears manc's stray
 colour rather than merging into it, and strips `badlayers`.
 
+**Layers of your own go on the end.** The `Extra layers` socket takes what a
+`Neuroglancer Source` node emits, and `buildScene` appends them after the published list —
+appended rather than merged in, because order is neuroglancer's draw and panel order and a
+published scene is somebody's curated arrangement. They survive `Layers: neurons only`, which is
+about how much of the *dataset's* scene to carry: a layer somebody wired up is not published
+context to trim. A name that collides with a published layer is suffixed, because neuroglancer
+keys layers by name and a duplicate is not a merge — the second wins and the first becomes
+unreachable, silently.
+
+**Which layers are ours cannot be read off the scene, and assuming it could was a bug twice.**
+The tempting test is "carries a `segments` array". Measured against the live endpoint, that is
+**sixteen of male-CNS's thirty-eight layers**, eight of MANC's eleven and seven of optic-lobe's
+seventeen — published shells and neuropil layers that ship a preset selection and have nothing to
+do with us. Reading those as ours means the splice copies our copy of a shell over the user's live
+one, and — worse — a user who deletes any one of the sixteen makes the splice bail to the merge
+tier, throwing away every layer edit they had made. Silently.
+
+So `ownedLayerNames(scene, datasetId, extraCount)` applies `buildScene`'s own two rules instead:
+the dataset's own segmentation layer, found by `segmentationLayerIndex`, and the extras appended
+to the end. Neither fact is in the scene, so both arrive as props on the viewer — for exactly the
+reason `viewerType` does, which that file already documents: the URL cannot carry them. Without a
+`datasetId` the splice is skipped and updates fall to the merge tier, which is the honest degrade:
+writing into somebody's live state is worse done wrongly than not at all.
+
+The single-layer version that came before was correct only by luck — the published layers carrying
+`segments` happen to sit *after* the dataset's own on both real multi-layer states.
+
+**A layer of ours missing from the live state declines the splice altogether.** The list itself has
+changed rather than a selection within it (a datasource wired up after the frame loaded, or a layer
+the user deleted), and the merge tier below already sends the whole list, which is exactly what
+that needs.
+
 **Two published defaults are overridden, not offered as options.** `showAxisLines` goes to
 false — the lines cross the middle of the volume and read as anatomy at a glance — and
 `selectedLayer.visible` goes to false, keeping the panel's `flex`/`size`/`layer`. MANC and

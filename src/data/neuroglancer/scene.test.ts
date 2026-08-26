@@ -14,6 +14,7 @@ import type { NgScene } from './scene'
 import {
   buildScene,
   proxiedViewer,
+  ownedLayerNames,
   spliceSegments,
   parseSceneUrl,
   sceneIdentity,
@@ -293,6 +294,201 @@ describe('updating a viewer someone is already looking through', () => {
   })
 })
 
+describe('layers added on top of what a dataset publishes', () => {
+  const SHELL = { type: 'segmentation', name: 'brain shell', source: 'precomputed://gs://b/shell' }
+
+  it('appends them after the published ones, so a curated order is not reordered', () => {
+    const scene = buildScene(MANC, {
+      datasetId: 'manc:v1.2.3',
+      segments: [1],
+      extraLayers: [SHELL],
+    })
+    const names = (scene['layers'] as Array<Record<string, unknown>>).map((l) => l['name'])
+    expect(names[names.length - 1]).toBe('brain shell')
+    expect(names.slice(0, -1)).toEqual(
+      (MANC['layers'] as Array<Record<string, unknown>>).map((l) => l['name']),
+    )
+  })
+
+  it('keeps them when the published layers are trimmed to the neurons', () => {
+    // `layers: 'segmentation'` is about how much of the *dataset's* scene to carry — 38 kB of
+    // context on male-CNS. A layer somebody wired up is not published context to trim.
+    const scene = buildScene(MANC, {
+      datasetId: 'manc:v1.2.3',
+      segments: [1],
+      layers: 'segmentation',
+      extraLayers: [SHELL],
+    })
+    expect((scene['layers'] as Array<Record<string, unknown>>).map((l) => l['name'])).toEqual([
+      'manc:v1.2.3',
+      'brain shell',
+    ])
+  })
+
+  it('renames one that collides, because a duplicate name is not a merge', () => {
+    // Neuroglancer keys layers by name and the second one wins — the first becomes unreachable,
+    // silently. A datasource left on its default name beside a scene that publishes the same one
+    // is the first case anybody will hit.
+    const scene = buildScene(MANC, {
+      datasetId: 'manc:v1.2.3',
+      segments: [1],
+      extraLayers: [{ ...SHELL, name: 'manc:v1.2.3' }, { ...SHELL, name: 'manc:v1.2.3' }],
+    })
+    const names = (scene['layers'] as Array<Record<string, unknown>>).map((l) => l['name'])
+    // `_2` rather than a space: the suffixing is `uniqueName` from `core/types.ts`, which is the
+    // one statement of Coda's collision rule, and a second loop here for the sake of a separator
+    // is the bet its own comment records losing twice.
+    expect(names.filter((n) => String(n).startsWith('manc:v1.2.3'))).toEqual([
+      'manc:v1.2.3',
+      'manc:v1.2.3_2',
+      'manc:v1.2.3_3',
+    ])
+  })
+
+  it('does not let an extra layer catch the neuron selection', () => {
+    /*
+     * The failure the splice was generalised to prevent. `segmentationLayerIndex` answers -1 for
+     * a published scene with no segmentation in it, so nothing of the published scene carries
+     * `segments` — and the old rule, "our layer is the first one with a segments array", then
+     * picked the *extra* layer and wrote the user's neurons into whatever it was displaying.
+     */
+    const imageOnly: NgScene = {
+      layers: [{ type: 'image', name: 'em', source: 'precomputed://gs://b/em' }],
+    }
+    const next = buildScene(imageOnly, {
+      datasetId: 'nothing:v1',
+      segments: [7, 8],
+      extraLayers: [{ ...SHELL, segments: ['99'] }],
+    })
+    const live: NgScene = {
+      layers: [
+        { type: 'image', name: 'em', source: 'precomputed://gs://b/em' },
+        { type: 'segmentation', name: 'brain shell', source: 'precomputed://gs://b/shell' },
+      ],
+    }
+    const layers = spliceSegments(live, next, ownedLayerNames(next, 'nothing:v1', 1))![
+      'layers'
+    ] as Array<Record<string, unknown>>
+    expect(layers[1]!['segments']).toEqual(['99'])
+  })
+
+  it('splices every layer of ours, not just the first', () => {
+    const next = buildScene(MANC, {
+      datasetId: 'manc:v1.2.3',
+      segments: [7],
+      extraLayers: [{ ...SHELL, name: 'mine', segments: ['42'] }],
+    })
+    const live: NgScene = {
+      layers: [
+        { type: 'segmentation', name: 'manc:v1.2.3', source: 'x', segments: ['1'] },
+        { type: 'segmentation', name: 'mine', source: 'y', segments: ['1'], objectAlpha: 0.2 },
+      ],
+    }
+    const layers = spliceSegments(live, next, ownedLayerNames(next, 'manc:v1.2.3', 1))![
+      'layers'
+    ] as Array<Record<string, unknown>>
+    expect(layers[0]!['segments']).toEqual(['7'])
+    expect(layers[1]!['segments']).toEqual(['42'])
+    // Only the segment fields are copied, so a layer the user restyled keeps their styling.
+    expect(layers[1]!['objectAlpha']).toBe(0.2)
+  })
+
+  it('declines when a layer of ours is not in the live state at all', () => {
+    // A datasource wired up after the frame loaded: the *list* has changed rather than a
+    // selection within it, and the caller's next tier down sends the whole list, which is
+    // exactly what that needs. Re-adding it here would also re-add one the user deleted.
+    const next = buildScene(MANC, {
+      datasetId: 'manc:v1.2.3',
+      segments: [7],
+      extraLayers: [{ ...SHELL, segments: ['42'] }],
+    })
+    const live: NgScene = {
+      layers: [{ type: 'segmentation', name: 'manc:v1.2.3', source: 'x', segments: ['1'] }],
+    }
+    expect(spliceSegments(live, next, ownedLayerNames(next, 'manc:v1.2.3', 1))).toBeUndefined()
+  })
+})
+
+describe('which layers are ours', () => {
+  /**
+   * male-CNS's real shape, trimmed: the dataset's own layer, then published shells that carry a
+   * preset `segments` array of their own. Sixteen of male-CNS's thirty-eight do; MANC has eight
+   * and optic-lobe seven.
+   */
+  const PRESET: NgScene = {
+    layers: [
+      { type: 'image', name: 'em', source: 'precomputed://gs://b/em' },
+      { type: 'segmentation', name: 'male-cns:v0.9', source: 'precomputed://gs://b/seg' },
+      {
+        type: 'segmentation',
+        name: 'brain-neuropil-shell',
+        source: 'precomputed://gs://b/shell',
+        segments: ['1', '2', '3'],
+      },
+      {
+        type: 'segmentation',
+        name: 'brain-neuropils',
+        source: 'precomputed://gs://b/np',
+        segments: ['7'],
+      },
+    ],
+  }
+
+  it('does not claim a published layer that ships its own selection', () => {
+    // The failure this exists to prevent: "every layer with a `segments` array" is sixteen layers
+    // on male-CNS, none of them ours. Claiming them means our copy of a shell overwrites the
+    // user's live one — and deleting any of the sixteen bails the splice, throwing away every
+    // layer edit they made.
+    const scene = buildScene(PRESET, { datasetId: 'male-cns:v0.9', segments: [42] })
+    expect(ownedLayerNames(scene, 'male-cns:v0.9', 0)).toEqual(['male-cns:v0.9'])
+  })
+
+  it('claims the extras it appended, and only those', () => {
+    const scene = buildScene(PRESET, {
+      datasetId: 'male-cns:v0.9',
+      segments: [42],
+      extraLayers: [{ type: 'segmentation', name: 'mine', source: 'precomputed://gs://b/x' }],
+    })
+    expect(ownedLayerNames(scene, 'male-cns:v0.9', 1)).toEqual(['male-cns:v0.9', 'mine'])
+  })
+
+  it('claims only the extras when the published scene has no segmentation of its own', () => {
+    const imageOnly: NgScene = { layers: [{ type: 'image', name: 'em', source: 'x' }] }
+    const scene = buildScene(imageOnly, {
+      datasetId: 'nothing:v1',
+      segments: [1],
+      extraLayers: [{ type: 'segmentation', name: 'mine', source: 'y', segments: ['9'] }],
+    })
+    expect(ownedLayerNames(scene, 'nothing:v1', 1)).toEqual(['mine'])
+  })
+
+  it('leaves a published preset alone through a whole splice', () => {
+    const next = buildScene(PRESET, { datasetId: 'male-cns:v0.9', segments: [42] })
+    const live: NgScene = {
+      layers: [
+        { type: 'image', name: 'em', source: 'x' },
+        { type: 'segmentation', name: 'male-cns:v0.9', source: 'y', segments: ['1'] },
+        // The user has been at it: a different selection in a shell layer, which is theirs.
+        { type: 'segmentation', name: 'brain-neuropil-shell', source: 'z', segments: ['5'] },
+      ],
+    }
+    const merged = spliceSegments(live, next, ownedLayerNames(next, 'male-cns:v0.9', 0))!
+    const layers = merged['layers'] as Array<Record<string, unknown>>
+    expect(layers[1]!['segments']).toEqual(['42'])
+    expect(layers[2]!['segments']).toEqual(['5'])
+  })
+
+  it('does not bail because the user deleted a published layer that was never ours', () => {
+    // The silent half: the old rule would have counted `brain-neuropil-shell` as ours, found it
+    // missing, and dropped the whole splice to the merge tier — losing every layer edit.
+    const next = buildScene(PRESET, { datasetId: 'male-cns:v0.9', segments: [42] })
+    const live: NgScene = {
+      layers: [{ type: 'segmentation', name: 'male-cns:v0.9', source: 'y', segments: ['1'] }],
+    }
+    expect(spliceSegments(live, next, ownedLayerNames(next, 'male-cns:v0.9', 0))).toBeDefined()
+  })
+})
+
 describe('editing the selection inside a state the viewer already holds', () => {
   /** What the viewer is showing after the user has been at it: a hidden layer, one of theirs. */
   const LIVE: NgScene = {
@@ -320,7 +516,7 @@ describe('editing the selection inside a state the viewer already holds', () => 
       segments: [7, 8],
       segmentColors: { '7': '#d95926', '8': '#199e70' },
     })
-    const merged = spliceSegments(LIVE, next)!
+    const merged = spliceSegments(LIVE, next, ownedLayerNames(next, 'manc:v1.2.3', 0))!
     const layers = merged['layers'] as Array<Record<string, unknown>>
 
     expect(layers.map((l) => l['name'])).toEqual(['em', 'manc:v1.2.3', 'mine'])
@@ -345,14 +541,18 @@ describe('editing the selection inside a state the viewer already holds', () => 
       ],
     }
     const next = buildScene(MANC, { datasetId: 'manc:v1.2.3', segments: [2] })
-    const layers = spliceSegments(live, next)!['layers'] as Array<Record<string, unknown>>
+    const layers = spliceSegments(live, next, ownedLayerNames(next, 'manc:v1.2.3', 0))!['layers'] as Array<Record<string, unknown>>
     expect(layers[0]!['segmentDefaultColor']).toBeUndefined()
     expect(layers[0]!['segments']).toEqual(['2'])
   })
 
   it('does not mutate the state it was handed', () => {
     const before = JSON.stringify(LIVE)
-    spliceSegments(LIVE, buildScene(MANC, { datasetId: 'manc:v1.2.3', segments: [9] }))
+    spliceSegments(
+      LIVE,
+      buildScene(MANC, { datasetId: 'manc:v1.2.3', segments: [9] }),
+      ['manc:v1.2.3'],
+    )
     expect(JSON.stringify(LIVE)).toBe(before)
   })
 
@@ -360,7 +560,7 @@ describe('editing the selection inside a state the viewer already holds', () => 
     // Re-adding a layer someone deleted is a worse answer than starting the scene over.
     const live: NgScene = { layers: [{ type: 'image', name: 'em' }] }
     const next = buildScene(MANC, { datasetId: 'manc:v1.2.3', segments: [1] })
-    expect(spliceSegments(live, next)).toBeUndefined()
+    expect(spliceSegments(live, next, ownedLayerNames(next, 'manc:v1.2.3', 1))).toBeUndefined()
   })
 })
 

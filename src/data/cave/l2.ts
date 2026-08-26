@@ -21,6 +21,8 @@
 import type { NeuronId } from '../../core/ids'
 import type { SkeletonGeometry } from '../../core/values'
 import { mapWithConcurrency } from '../concurrency'
+import type { TreePoint } from '../skeletonTree'
+import { spanningForest } from '../skeletonTree'
 import { caveGet, cavePost } from './client'
 import type { GrapheneSource } from './graphene'
 import type { CaveRequestOptions } from './client'
@@ -188,25 +190,21 @@ async function readAttributes(
 /**
  * The graph, as a tree.
  *
- * Four rules, each a wrong picture if lost:
+ * The walk itself is `spanningForest` in `data/skeletonTree.ts`, shared with the precomputed
+ * skeleton reader — a breadth-first forest in visit order, one root per component. What stays
+ * here is the part that is about **CAVE** rather than about trees:
  *
- *  1. **Chunks with no cache entry are dropped, before the walk rather than after.** That is
- *     `get_l2_skeleton`'s `drop_missing`, and its reasoning: a chunk absent from the cache has
- *     only its *chunk-grid* position, the corner of a box tens of microns across, so keeping it
- *     puts a node where the neuron is not. Dropping before the walk is what keeps the tree
- *     connected — removing a node from a finished tree orphans its children, where excluding it
- *     from the graph lets the walk route around through whatever else it touched.
- *     (`navis.remove_nodes` reparents for the same reason; doing it up front needs no
- *     reparenting at all.)
- *  2. **A spanning forest, breadth-first**, because the L2 graph is undirected and can hold
- *     cycles while a skeleton is a tree. A cycle surviving into `parents` makes every consumer
- *     that walks to a root loop forever.
- *  3. **Each component gets its own root**, so a neuron split by an edit is two trees rather
- *     than one with a fabricated join.
- *  4. **Points come out in visit order, so a parent always precedes its child.** That is the
- *     contract `SkeletonGeometry.parents` states and that `neuprint/decode.ts` does real work to
- *     honour; emitting in chunk-id order instead would satisfy the type and break every consumer
- *     written to walk the array once, the SWC writer included.
+ * **Chunks with no cache entry are dropped, before the walk rather than after.** That is
+ * `get_l2_skeleton`'s `drop_missing`, and its reasoning: a chunk absent from the cache has only
+ * its *chunk-grid* position, the corner of a box tens of microns across, so keeping it puts a
+ * node where the neuron is not. Dropping before the walk is what keeps the tree connected —
+ * removing a node from a finished tree orphans its children, where excluding it from the graph
+ * lets the walk route around through whatever else it touched. (`navis.remove_nodes` reparents
+ * for the same reason; doing it up front needs no reparenting at all.)
+ *
+ * Which is also why the edge list is mapped onto point indices here and not there: an edge naming
+ * a chunk that was dropped is a CAVE fact, and the shared walk has no business deciding what to
+ * do with one.
  */
 function skeletonFrom(
   neuronId: NeuronId,
@@ -214,7 +212,7 @@ function skeletonFrom(
   attributes: Readonly<Record<string, L2Entry>>,
 ): SkeletonGeometry | undefined {
   const index = new Map<string, number>()
-  const points: Array<{ at: readonly number[]; radius: number }> = []
+  const points: TreePoint[] = []
   for (const id of new Set(edges.flat())) {
     const entry = attributes[id]
     const at = entry?.rep_coord_nm
@@ -226,44 +224,12 @@ function skeletonFrom(
   }
   if (points.length === 0) return undefined
 
-  const neighbours: number[][] = points.map(() => [])
+  const indexed: Array<readonly [number, number]> = []
   for (const [a, b] of edges) {
     const from = index.get(a)
     const to = index.get(b)
     if (from === undefined || to === undefined) continue
-    neighbours[from]!.push(to)
-    neighbours[to]!.push(from)
+    indexed.push([from, to])
   }
-
-  // Visit order, and the slot each node takes in the emitted arrays. BFS reaches a parent before
-  // its children, so slots increase down every branch — rule 4.
-  const visited: number[] = []
-  const slot = new Int32Array(points.length).fill(-1)
-  const parents = new Int32Array(points.length).fill(-1)
-  for (let start = 0; start < points.length; start++) {
-    if (slot[start] !== -1) continue
-    slot[start] = visited.length
-    visited.push(start)
-    for (let head = visited.length - 1; head < visited.length; head++) {
-      const node = visited[head]!
-      for (const next of neighbours[node]!) {
-        if (slot[next] !== -1) continue
-        slot[next] = visited.length
-        visited.push(next)
-        parents[slot[next]!] = slot[node]!
-      }
-    }
-  }
-
-  const positions = new Float32Array(points.length * 3)
-  const radii = new Float32Array(points.length)
-  for (let i = 0; i < visited.length; i++) {
-    const point = points[visited[i]!]!
-    positions[i * 3] = point.at[0]!
-    positions[i * 3 + 1] = point.at[1]!
-    positions[i * 3 + 2] = point.at[2]!
-    radii[i] = point.radius
-  }
-
-  return { id: neuronId, positions, radii, parents }
+  return { id: neuronId, ...spanningForest(points, indexed) }
 }

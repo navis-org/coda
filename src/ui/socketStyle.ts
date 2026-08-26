@@ -68,6 +68,16 @@ export function socketStyle(type: CodaType | undefined): SocketStyle {
      */
     case 'transform':
       return { family: 'geometry', shape: 'diamond' }
+    /*
+     * Layers take the dataset hue, because what a Layers wire carries is a *place to read data
+     * from* rather than data — the same thing a Dataset socket carries, said in neuroglancer's
+     * vocabulary. `ring` is the one shape that hue had left. It is also the table family's and
+     * the matrix family's, which is the existing many-to-one trade rather than a new one (see
+     * `linkage` above): hue plus the always-visible label carry the difference. An eighth
+     * chromatic family would fail the all-pairs colourblind gate; see colors.ts.
+     */
+    case 'layers':
+      return { family: 'dataset', shape: 'ring' }
     case 'number':
     case 'string':
     case 'boolean':
