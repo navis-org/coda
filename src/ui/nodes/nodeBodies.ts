@@ -77,6 +77,18 @@ export interface NodeBodyEntry {
  * One constant rather than two equal numbers: the two stack vertically, and a card an inch wider
  * than the one above it reads as a mistake long before anyone measures it.
  */
+/**
+ * What a viewer's card grows to once it has something to draw.
+ *
+ * The number itself is `.coda-node--wide` in `editor.css`, which is where it is applied — this is
+ * the declaration for anything that has to *reason* about how wide a card ends up, and the
+ * comment on `NodeBodyEntry.width` above already names it. `src/ui/tour/build.ts` lays a chain of
+ * cards out left to right and needs it: a viewer declares neither a `defaultSize` nor a
+ * `NODE_BODIES.width`, so without this its slot is sized for a 232px card and the 360px one it
+ * actually draws overlaps its neighbour.
+ */
+export const WIDE_CARD_WIDTH = 360
+
 const DATASET_CARD_WIDTH = 248
 
 export const NODE_BODIES: Record<string, NodeBodyEntry> = {

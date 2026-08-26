@@ -104,6 +104,7 @@ Moved verbatim out of `CLAUDE.md`.
 | `data/mock/morphology.test.ts`           | tree validity, determinism, tube meshes, synapse placement                                                                       |
 | `store/inference.test.ts`                | inference against a source that has not learned its listing yet, and the re-infer signal                                         |
 | `ui/panels/startPage.test.tsx`           | start page: both rails, a tile per card, the replace-confirm, close-vs-dismiss, and both ways back                               |
+| `ui/panels/shortcuts.test.tsx`           | the shortcuts card and the table under it: every id its four consumer surfaces ask for, `formatChord` on both platforms, the dialog's rows against the table, and the keys it advertises dispatched at the real window listener |
 | `ui/panels/panels.test.tsx`              | (also) the New menu: an escape hatch under every backend's heading, and the three volumes held back without being unregistered   |
 | `nodes/lib/profileStats.test.ts`         | the profile roll-ups: distinct partners, nested-ROI filtering, the last-parenthesis side rule, NT column matching                |
 | `nodes/lib/networkOps.test.ts`           | filter order, ranking after the weight cut, and the recomputed degree roll-ups                                                   |

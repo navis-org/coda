@@ -29,6 +29,9 @@ importers:
       draco3d:
         specifier: ^1.5.7
         version: 1.5.7
+      driver.js:
+        specifier: ^1.8.0
+        version: 1.8.0
       elkjs:
         specifier: ^0.12.0
         version: 0.12.0
@@ -1088,6 +1091,9 @@ packages:
 
   draco3d@1.5.7:
     resolution: {integrity: sha512-m6WCKt/erDXcw+70IJXnG7M3awwQPAsZvJGX5zY7beBqpELw6RDGkYVU0W43AFxye4pDZ5i2Lbyc/NNGqwjUVQ==}
+
+  driver.js@1.8.0:
+    resolution: {integrity: sha512-+8/IO7h1v14IzWh2GP60N7T3PFZweXwdn5e5POuxRSBoCYUojsBxzqawPeXh3YZIibRy7EehYNEyxe7slwwtdg==}
 
   electron-to-chromium@1.5.408:
     resolution: {integrity: sha512-SLoprcYpJ/OH2v2ps0+N5biv9H4/KBT3+YmmDew64TwK5y9j2wv7pMOFY7IorVkyMtEyLSCRlXKLsNlakeAlPw==}
@@ -2865,6 +2871,8 @@ snapshots:
   dom-accessibility-api@0.5.16: {}
 
   draco3d@1.5.7: {}
+
+  driver.js@1.8.0: {}
 
   electron-to-chromium@1.5.408: {}
 

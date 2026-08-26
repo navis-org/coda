@@ -390,7 +390,7 @@ const CATMAID_FAMILIES: DatasetFamily[] = [
     description:
       'Early manual reconstructions in an female fly brain. Published data hosted by VFB.',
     guide:
-      'A few thousand hand-traced neurons on the same image volume as FlyWire.',
+      'A few thousand hand-traced neurons on the same image volume as FlyWire. Hosted by the Virtual Fly Brain at https://catmaid-fafb.virtualflybrain.org/.',
     glyph: 'brain',
   },
 ]

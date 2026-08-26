@@ -58,7 +58,13 @@ import { NodeContextMenu } from './panels/NodeContextMenu'
 import type { PaletteItem } from './panels/paletteItems'
 import { buildCommandItems, buildNodeItems } from './panels/paletteItems'
 import { requestExportWarnings, useExportWarnings } from './exportWarnings'
-import { FIT_VIEW_OPTIONS, useFitAll, useFitSelected } from './fitView'
+import {
+  FIT_VIEW_OPTIONS,
+  useFitAll,
+  useFitSelected,
+  useFitSelectedRequests,
+} from './fitView'
+import { isTourActive, refreshTour } from './tour/tourState'
 import { LOCKED_NOTICE } from './lockCopy'
 import { appElement, toggleFullscreen } from './fullscreen'
 import { typeColorVar } from './socketStyle'
@@ -83,6 +89,15 @@ const MINIMAP_SIZE = { width: 180, height: 120 }
 const PAN_BUTTONS = [0, 1, 2]
 const MULTI_SELECT_KEYS = ['Meta', 'Control']
 const DELETE_KEYS = ['Delete', 'Backspace']
+
+/**
+ * Unmodified keys the canvas declines while a tour is on screen — see the keydown handler.
+ *
+ * Fullscreen resizes the window, and the other three move the shell or the spotlit card sideways
+ * without firing anything driver listens for, leaving the cut-out over where the thing used to
+ * be. Everything else stays live, including the keys the tours themselves name.
+ */
+const TOUR_DECLINES = new Set(['f', 'i', 'm', 'h', '/'])
 
 /*
  * Two card renderers, chosen per node by `isAnnotation`. A text note has no header, no sockets
@@ -676,6 +691,10 @@ function EditorCanvas() {
    * The request is only ever raised for a graph with nodes, so it cannot sit pending and then
    * fire on whatever the user adds next.
    */
+  // The Guided Tour's half of the same job, from outside the provider — see `fitView.ts` for
+  // why one of these is a store field and the other a channel.
+  useFitSelectedRequests()
+
   const fitRequest = useGraphStore((s) => s.fitRequest)
   const handledFit = useRef(fitRequest)
   useEffect(() => {
@@ -701,6 +720,24 @@ function EditorCanvas() {
       }
 
       const mod = event.metaKey || event.ctrlKey
+      /*
+       * The keys a tour cannot follow, declined while one is on screen.
+       *
+       * driver's popover controls are ordinary `<button>`s, so the field guard above does not
+       * cover them and every bare letter here is live under a reader's hands. But declining the
+       * *whole* handler — which this did first — takes `Tab`, `Space`, `⇧R` and `⌘Z` with it,
+       * and those are exactly the keys the tours tell people to press: "Press `+ Add` — or hit
+       * `Tab`", "⌘Z brings it back". It also contradicts the reason `advanceWhen` is a predicate
+       * rather than a hook on one button — a step waits for *a node to exist*, precisely so the
+       * browser, the palette and a double-click all count, and a keyboard veto quietly ruled out
+       * two of the three.
+       *
+       * So the list is only what the spotlight cannot survive: the four that re-lay-out the
+       * shell or the spotlit card underneath a stage driver measured a moment ago, and has no
+       * event to learn about. `§` is absent deliberately — it moves the camera, and the camera
+       * is the one thing `onMove` already reports.
+       */
+      if (!mod && isTourActive() && TOUR_DECLINES.has(event.key.toLowerCase())) return
       const { selection: selected } = useGraphStore.getState()
 
       if (event.key === 'Escape') {
@@ -830,6 +867,9 @@ function EditorCanvas() {
     <div
       className="canvas-area"
       ref={wrapperRef}
+      // The Guided Tour's anchor for "the canvas is the document" — see `tour/steps.ts` for why
+      // the tour addresses elements by `data-tour` rather than by class or by accessible name.
+      data-tour="canvas"
       /*
        * The minimap's height, published to CSS so the toggle button — which lives outside the
        * minimap's subtree and has to sit clear of it — reads the same number the component was
@@ -916,6 +956,15 @@ function EditorCanvas() {
           setContextMenu(null)
           setEdgeMenu(null)
         }}
+        /*
+         * The tour's spotlight is placed in viewport pixels, and this canvas moves by CSS
+         * transform — which fires neither `resize` nor `scroll`, the only two things driver.js
+         * watches. Without this a pan leaves the cut-out over empty canvas, rendering perfectly
+         * and pointing at nothing. It fires for programmatic viewport animations too, so a step
+         * that frames its own card is tracked through the whole transition. A no-op when no
+         * tour is running.
+         */
+        onMove={refreshTour}
         defaultViewport={graph.viewport ?? { x: 0, y: 0, zoom: 0.85 }}
         minZoom={0.15}
         maxZoom={2.5}

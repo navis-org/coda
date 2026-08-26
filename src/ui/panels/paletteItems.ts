@@ -16,9 +16,11 @@ import { downloadGraph, downloadNotebook, downloadRmd } from '../export'
 import { canExportNotebook } from '../../export/canExport'
 import { peekExportWarnings } from '../exportWarnings'
 import { appElement, toggleFullscreen } from '../fullscreen'
+import { TOURS, startTour } from '../tour/tourState'
 import { LOCKED_HINT } from '../lockCopy'
 import { EXAMPLES } from '../../examples'
 import { plural } from '../format'
+import { shortcutKeys } from '../shortcuts'
 
 /**
  * Actions double as the palette's filter prefixes: typing `Add:` narrows the list to node
@@ -45,7 +47,7 @@ export interface PaletteItem {
   label: string
   /** Final breadcrumb segment: what it does, or the node's description. */
   hint?: string
-  /** Rendered right-aligned, e.g. "⇧R". */
+  /** Rendered right-aligned, e.g. "⇧R". Comes from `shortcutKeys`, never typed here. */
   shortcut?: string
   disabled?: boolean
   /**
@@ -185,7 +187,7 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
         staleCount > 0
           ? `Evaluate ${plural(staleCount, 'stale node')}`
           : 'Everything is already up to date',
-      shortcut: '⇧R',
+      shortcut: shortcutKeys('run-all'),
       disabled: staleCount === 0 || store.busy,
       perform: () => void store.runAll(),
     },
@@ -224,7 +226,7 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
       id: 'cmd:undo',
       label: 'Undo',
       action: 'Edit',
-      shortcut: '⌘Z',
+      shortcut: shortcutKeys('undo'),
       ...(locked ? { hint: LOCKED_HINT } : {}),
       disabled: locked || store.past.length === 0,
       perform: () => store.undo(),
@@ -233,7 +235,7 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
       id: 'cmd:redo',
       label: 'Redo',
       action: 'Edit',
-      shortcut: '⇧⌘Z',
+      shortcut: shortcutKeys('redo'),
       ...(locked ? { hint: LOCKED_HINT } : {}),
       disabled: locked || store.future.length === 0,
       perform: () => store.redo(),
@@ -242,7 +244,7 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
       id: 'cmd:duplicate',
       label: 'Duplicate Selection',
       action: 'Edit',
-      shortcut: '⌘D',
+      shortcut: shortcutKeys('duplicate'),
       ...(locked ? { hint: LOCKED_HINT } : {}),
       disabled: locked || selection.length === 0,
       perform: () => store.duplicateSelection(),
@@ -252,7 +254,7 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
       label: selectedNode?.disabled ? 'Unmute Selection' : 'Mute Selection',
       action: 'Edit',
       hint: 'Muted nodes produce nothing and stop their downstream chain',
-      shortcut: 'M',
+      shortcut: shortcutKeys('mute'),
       disabled: selection.length === 0,
       perform: () => store.toggleDisabled(selection),
     },
@@ -260,7 +262,7 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
       id: 'cmd:collapse',
       label: selectedNode?.collapsed ? 'Expand Selection' : 'Collapse Selection',
       action: 'Edit',
-      shortcut: 'H',
+      shortcut: shortcutKeys('collapse'),
       disabled: selection.length === 0,
       perform: () => store.toggleCollapsed(selection),
     },
@@ -278,7 +280,7 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
       id: 'cmd:delete',
       label: 'Delete Selection',
       action: 'Edit',
-      shortcut: '⌫',
+      shortcut: shortcutKeys('delete'),
       ...(locked ? { hint: LOCKED_HINT } : {}),
       disabled: locked || selection.length === 0,
       perform: () => store.deleteNodes(selection),
@@ -360,7 +362,7 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
       label: 'Browse All Nodes…',
       hint: locked ? LOCKED_HINT : 'Open the node browser, with previews and category filters',
       disabled: locked,
-      shortcut: 'Tab',
+      shortcut: shortcutKeys('browse-nodes'),
       perform: () => store.requestNodeBrowser(),
     },
     {
@@ -389,7 +391,7 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
        * store change, which is what lets a shortcut move like this — the same thing that keeps
        * the `disabled` flags honest.
        */
-      ...(selection.length === 0 ? { shortcut: '§' } : {}),
+      ...(selection.length === 0 ? { shortcut: shortcutKeys('fit') } : {}),
       disabled: locked,
       perform: fitView,
     },
@@ -402,7 +404,7 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
         : selection.length
           ? 'Zoom to show what is selected'
           : 'Select a node first',
-      ...(selection.length > 0 ? { shortcut: '§' } : {}),
+      ...(selection.length > 0 ? { shortcut: shortcutKeys('fit') } : {}),
       disabled: locked || selection.length === 0,
       perform: fitSelected,
     },
@@ -424,7 +426,7 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
       action: 'View',
       label: 'Toggle Fullscreen',
       hint: "Fill the screen, hiding the browser's own tabs and address bar",
-      shortcut: 'F',
+      shortcut: shortcutKeys('fullscreen'),
       // No `disabled` state to compute: whether the browser will grant it is not knowable
       // until it is asked, and a command greyed out on a guess is worse than one refused.
       perform: () => void toggleFullscreen(appElement()),
@@ -456,6 +458,28 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
   ]
 
   items.push(
+    /*
+     * Above Welcome and Shortcuts, on the same reasoning as their place in the `?` menu: of
+     * everything under Help these are the only entries that answer "which button do I press",
+     * and the palette is often the first thing somebody who is lost reaches for. Labels and
+     * blurbs come from `TOURS` so this surface cannot drift from the other two.
+     */
+    ...TOURS.map((tour) => ({
+      id: `cmd:tour:${tour.id}`,
+      action: 'Help' as const,
+      label: tour.label,
+      hint: tour.blurb,
+      perform: () => {
+        void startTour(tour.id)
+      },
+    })),
+    {
+      id: 'cmd:shortcuts',
+      action: 'Help',
+      label: 'Keyboard Shortcuts',
+      hint: 'Every key and canvas gesture, on one card',
+      perform: () => store.requestShortcuts(),
+    },
     {
       id: 'cmd:welcome',
       action: 'Help',

@@ -101,9 +101,9 @@
         Node-Based Editor
       </h2>
       <p class="lede">
-        Coda is a node-based editor for connectome data analysis. Each node does one thing
-        &mdash; fetching, analysis or visualisation &mdash; and can be freely combined to enable
-        complex analysis pipelines: search <em>Neurons</em>, run <em>NBLASTs</em>,
+        Coda is a node-based editor for <b>co</b>nnectome <b>d</b>ata <b>a</b>nalysis. Each node is a step
+        &mdash; data fetching, analysis or visualisation &mdash; and can be freely combined to enable
+        complex pipelines: search <em>Neurons</em>, run <em>NBLASTs</em>,
         visualise data <em>Neuroglancer</em>, explore <em>Networks</em> and more.
       </p>
     </div>
@@ -256,6 +256,9 @@
         <span class="h2icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-connections"/></svg></span>
         Support for (almost) every major connectome today
       </h2>
+      <p class="lede">
+        Coda doesn't host any data itself. Instead, it lets you connect to and query the original data sources.
+      </p>
     </div>
 
     <div class="split split--narrow">
@@ -780,7 +783,7 @@ group_by_df &lt;- connectivity <span class="k">|&gt;</span>
   <div class="shell">
     <h2 class="rise">Try it</h2>
     <p class="rise" data-delay="1">
-      Nothing to install. The bundled examples run on a synthetic connectome with no account.
+      Nothing to install. No account required. Just provide credentials<sup><a href="#fn1">*</a></sup> for neuPrint, CAVE, etc.
     </p>
     <div class="outro__actions rise" data-delay="2">
       <a class="cta" data-primary="true" href="./index.html">Open Coda</a>
@@ -793,6 +796,7 @@ group_by_df &lt;- connectivity <span class="k">|&gt;</span>
       Coda is in alpha. Node parameters are still moving, and a workflow saved today may not open
       in a later build.
     </p>
+    <p id="fn1" style="font-size: 0.7rem"><sup>*</sup>stored locally, nothing leaves your computer; see 'Connections' tab for details</p>
   </div>
 </section>
 

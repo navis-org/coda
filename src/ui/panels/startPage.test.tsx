@@ -358,45 +358,91 @@ describe('Start page', () => {
   })
 
   describe('the way back', () => {
+    /**
+     * Opens the `?` menu, and the named submenu inside it if one is given.
+     *
+     * The three documents moved a level down when the menu was reorganised into submenus, and
+     * these cases went red — which is the point of them. Written as a helper rather than
+     * repeated, so the *next* rearrangement is one edit here rather than four.
+     */
+    const openHelp = (submenu?: string) => {
+      fireEvent.click(screen.getByRole('button', { name: 'Help' }))
+      if (submenu) fireEvent.click(screen.getByRole('button', { name: new RegExp(submenu) }))
+    }
+
     it('reopens from the toolbar', async () => {
       act(() => useGraphStore.getState().closeStartPage())
       render(<App />)
       expect(screen.queryByRole('dialog')).toBeNull()
 
-      fireEvent.click(screen.getByRole('button', { name: 'Help' }))
-      fireEvent.click(screen.getByRole('button', { name: /Show Welcome Dialog/ }))
+      openHelp()
+      fireEvent.click(screen.getByRole('button', { name: /Welcome Dialog/ }))
       await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy())
     })
 
-    it('offers the field guide beside it, as a link so a tab can be opened', async () => {
+    it('offers the field guide under Documentation, as a link so a tab can be opened', async () => {
       act(() => useGraphStore.getState().closeStartPage())
       render(<App />)
 
-      fireEvent.click(screen.getByRole('button', { name: 'Help' }))
+      openHelp('Documentation')
       const guide = await screen.findByRole('link', { name: /Field Guide/ })
       expect(guide.getAttribute('href')).toBe(`${import.meta.env.BASE_URL}tutorial.html`)
       // A button here would lose the graph on the canvas; a link opens a tab.
       expect(guide.tagName).toBe('A')
     })
 
-    it('offers the node guide in the same menu, as a separate item', async () => {
+    it('offers the node guide in the same submenu, as a separate item', async () => {
       act(() => useGraphStore.getState().closeStartPage())
       render(<App />)
 
-      fireEvent.click(screen.getByRole('button', { name: 'Help' }))
+      openHelp('Documentation')
       const guide = await screen.findByRole('link', { name: /Node Guide/ })
       expect(guide.getAttribute('href')).toBe(`${import.meta.env.BASE_URL}nodes.html`)
       expect(guide.tagName).toBe('A')
     })
 
-    it('offers the overview in the same menu, ahead of both guides', async () => {
+    it('offers the overview in the same submenu, ahead of both guides', async () => {
       act(() => useGraphStore.getState().closeStartPage())
       render(<App />)
 
-      fireEvent.click(screen.getByRole('button', { name: 'Help' }))
+      openHelp('Documentation')
       const overview = await screen.findByRole('link', { name: /Overview/ })
       expect(overview.getAttribute('href')).toBe(`${import.meta.env.BASE_URL}overview.html`)
       expect(overview.tagName).toBe('A')
+    })
+
+    /*
+     * The shape itself, which is what the four cases above now depend on and none of them
+     * states: four rows at the top level, and nothing from either submenu visible until it is
+     * opened. Without this, a regression that flattened the menu again would leave all four
+     * green (the links would simply be there already) and the reorganisation would be gone
+     * with nothing to say so.
+     */
+    it('keeps the documents behind Documentation until it is opened', () => {
+      act(() => useGraphStore.getState().closeStartPage())
+      render(<App />)
+
+      openHelp()
+      expect(screen.queryByRole('link', { name: /Field Guide/ })).toBeNull()
+      expect(screen.queryByRole('button', { name: /Basics/ })).toBeNull()
+      // The parent rows say they lead somewhere, in the accessibility tree and not only in ▸.
+      const docs = screen.getByRole('button', { name: /Documentation/ })
+      expect(docs.getAttribute('aria-haspopup')).toBe('true')
+      expect(docs.getAttribute('aria-expanded')).toBe('false')
+
+      fireEvent.click(docs)
+      expect(docs.getAttribute('aria-expanded')).toBe('true')
+      expect(screen.getByRole('link', { name: /Field Guide/ })).toBeTruthy()
+    })
+
+    /* The tours take their short names under a heading that already says "Guides". */
+    it('offers both tours under Guides, by their short names', () => {
+      act(() => useGraphStore.getState().closeStartPage())
+      render(<App />)
+
+      openHelp('Guides')
+      expect(screen.getByRole('button', { name: /Basics/ })).toBeTruthy()
+      expect(screen.getByRole('button', { name: /Learn to Build/ })).toBeTruthy()
     })
 
     it('reopens from the palette, and that command is disabled while it is open', () => {

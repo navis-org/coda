@@ -7,6 +7,7 @@ import { Editor } from './ui/Editor'
 import { HelpOverlay } from './ui/help/HelpOverlay'
 import { Inspector } from './ui/panels/Inspector'
 import { ShareDialog } from './ui/panels/ShareDialog'
+import { ShortcutsDialog } from './ui/panels/ShortcutsDialog'
 import { SharedLinkGate } from './ui/panels/SharedLinkGate'
 import { StartPage } from './ui/panels/StartPage'
 import { StatusBar } from './ui/panels/StatusBar'
@@ -39,6 +40,11 @@ export function App() {
        */}
       <HelpOverlay />
       <ShareDialog />
+      {/*
+       * Beside the share dialog rather than below the viewer overlay: an expanded chart is one
+       * of the places somebody presses Escape and wonders what else the keyboard does.
+       */}
+      <ShortcutsDialog />
       {/* Last, and on top: it can be reopened over an expanded viewer. */}
       <StartPage />
       {/*

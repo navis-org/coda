@@ -134,7 +134,11 @@ export function ViewControls() {
       </ControlButton>
 
       <ControlButton
-        onClick={fitSelected}
+        // Wrapped rather than passed: `useFitSelected` takes an optional overrides object now,
+        // and handed straight to `onClick` it would be called with a `MouseEvent` as its
+        // options. The type checker refuses it, which is the point of the parameter being typed
+        // rather than `any` — but the wrapper is what makes the refusal go away honestly.
+        onClick={() => fitSelected()}
         disabled={locked || selected === 0}
         title={fitSelectedTitle}
         aria-label="Fit Selected"

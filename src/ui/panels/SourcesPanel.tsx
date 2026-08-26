@@ -427,6 +427,7 @@ export function SourcesPanel() {
       <button
         type="button"
         className="btn btn--ghost btn--icon"
+        data-tour="connections"
         onClick={() => setOpen(true)}
         title="Connections — data sources, API keys and sharing"
         aria-label="Connections"

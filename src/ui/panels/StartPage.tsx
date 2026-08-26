@@ -28,6 +28,8 @@ import { datasetGlyph } from '../nodes/DatasetPreview'
 import { nodeGlyph } from './NodeThumbnail'
 import type { DatasetCard, ExampleCard, StartCard, WorkflowCard } from './startCards'
 import { datasetCards, exampleCards, workflowCards } from './startCards'
+import { shortcutKeys } from '../shortcuts'
+import { TOURS, startTour } from '../tour/tourState'
 
 const REPO_URL = 'https://github.com/navis-org/coda'
 const ISSUES_URL = `${REPO_URL}/issues`
@@ -224,18 +226,22 @@ export function StartPage() {
          */}
         <div className="start__bar">
           <div className="start__bar-row">
+            {/* Glyphs from `shortcuts.ts`, so the box says ⌘ or Ctrl to match the keyboard the
+                reader actually has. The four are picked by hand rather than by a list constant
+                because the last cell pairs two of them — see the width note above. */}
             <div className="start__keys">
               <span>
-                <strong>Space</strong> commands
+                <strong>{shortcutKeys('palette')}</strong> commands
               </span>
               <span>
-                <strong>Tab</strong> add a node
+                <strong>{shortcutKeys('browse-nodes')}</strong> add a node
               </span>
               <span>
-                <strong>⇧R</strong> run
+                <strong>{shortcutKeys('run-all')}</strong> run
               </span>
               <span>
-                <strong>drag</strong> pan · <strong>⇧drag</strong> box-select
+                <strong>{shortcutKeys('pan')}</strong> pan ·{' '}
+                <strong>{shortcutKeys('box-select')}</strong> box-select
               </span>
             </div>
             <span className="toolbar__spacer" />
@@ -272,6 +278,27 @@ export function StartPage() {
                   issue
                 </a>{' '}
                 for bugs and feature requests ·{' '}
+                {/*
+                 * Buttons, not links, and the only ones in this row — the tours happen *here*,
+                 * over the editor this page is sitting on top of, rather than in a new tab. Each
+                 * closes the start page on the way, because a tour whose first stop is the
+                 * canvas cannot begin with a modal over it.
+                 */}
+                {TOURS.map((tour) => (
+                  <span key={tour.id}>
+                    <button
+                      type="button"
+                      className="start__link-button"
+                      onClick={() => {
+                        closeStartPage()
+                        void startTour(tour.id)
+                      }}
+                    >
+                      {tour.label}
+                    </button>{' '}
+                    ·{' '}
+                  </span>
+                ))}
                 <a href={OVERVIEW_URL} target="_blank" rel="noreferrer noopener">
                   Overview
                 </a>{' '}

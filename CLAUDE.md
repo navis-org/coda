@@ -95,6 +95,15 @@ symptom to recognise — which usually points nowhere near the cause.
 - **A buffer handed to `callPython` is detached the moment the call is posted**, so read
   anything about it — its length above all — *before* the await. A check against a transferred
   buffer's `length` compares a real count against 0 and always fails.
+- **`overflow-y: auto` clips the other axis too**, so a `Dropdown` holding a flyout submenu must
+  pass `flyouts` to switch the panel's scroll off. There is no "scroll one axis, overflow the
+  other" — without it the submenu renders as a horizontal scrollbar. Only the `?` menu opts out,
+  and only because it is short enough never to need the scroll.
+- **A shortcut's glyph is stored by meaning, not as text.** `src/ui/shortcuts.ts` is the one
+  table; a chord is `{ mod: true, key: 'Z' }` and `formatChord` is the only place that knows ⌘
+  from Ctrl. Four surfaces read it — the dialog, the palette badges, the status bar, the start
+  page — and when each typed its own glyph, all four told Windows to press a key it does not
+  have. `Editor.tsx` still owns the *bindings*; adding one means adding an entry here too.
 - **Module init order.** `graphStore.ts` imports `../nodes` for its side effect. Without
   it, ordering in `main.tsx` becomes load-bearing and silently drops every node.
 - **`parseMarkdown`'s extended kinds are opt-in, and that is a safety property.** Fences,

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import type { CodaGraph } from '../../core/graph'
 import { canExportNotebook } from '../../export/canExport'
@@ -22,6 +22,8 @@ import { LOCKED_HINT, lockedTitle } from '../lockCopy'
 import { appElement, toggleFullscreen, useIsFullscreen } from '../fullscreen'
 import { EdgeSetPanel } from './EdgeSetPanel'
 import { SourcesPanel } from './SourcesPanel'
+import type { TourAnchor } from '../tour/steps'
+import { TOURS, startTour } from '../tour/tourState'
 import { useDismissOnOutside } from '../useDismiss'
 
 export interface ToolbarProps {
@@ -46,6 +48,7 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
   const cancelRun = useGraphStore((s) => s.cancelRun)
   const openStartPage = useGraphStore((s) => s.openStartPage)
   const requestShare = useGraphStore((s) => s.requestShare)
+  const requestShortcuts = useGraphStore((s) => s.requestShortcuts)
   const undo = useGraphStore((s) => s.undo)
   const redo = useGraphStore((s) => s.redo)
   // Both read the lock: history is a graph edit like any other, and the canvas being frozen is
@@ -138,12 +141,28 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
         }
       </Dropdown>
 
-      {/* The way back to the start page once "Don't show again" is ticked. Same target as the
-          palette's Help ▸ Welcome to Coda. A menu rather than a bare button because a lone "?"
-          says nothing about what it does until you press it. */}
-      <Dropdown label="?" title="Help">
+      {/*
+       * The way back to the start page once "Don't show again" is ticked, plus every document
+       * and both tours. A menu rather than a bare button because a lone "?" says nothing about
+       * what it does until you press it.
+       *
+       * **Four rows, two of which open a submenu.** Flat, it was seven — and seven two-line rows
+       * is a wall you read rather than scan, in the one menu whose whole job is to be scannable
+       * by somebody who is already lost. The two groupings are the two questions actually being
+       * asked ("show me around" and "where is it written down"), and both are collapsed rather
+       * than only the second, because a menu with one submenu in it reads as an afterthought.
+       *
+       * `flyouts` turns off the panel's own `overflow-y`, which would otherwise clip the
+       * submenus — see the note on `Dropdown`.
+       */}
+      <Dropdown label="?" title="Help" tour="help" flyouts>
         {(close) => (
           <>
+            {/*
+             * First, and alone above the two groups: it is the only row that is neither a
+             * walkthrough nor a document, and it is what somebody who dismissed it is here to
+             * find again.
+             */}
             <button
               type="button"
               className="dropdown__item"
@@ -152,53 +171,91 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
                 close()
               }}
             >
-              <strong>Show Welcome Dialog</strong>
+              <strong>Welcome Dialog</strong>
               <span>Quick start plus a few useful links.</span>
             </button>
             {/*
-             * A link rather than a button, so it can be opened in a new tab the
-             * ordinary way — leaving the graph on the canvas untouched. Through
-             * `BASE_URL`, since `base` is './' and an absolute path would resolve
-             * to the domain root under a subpath deploy.
-             *
-             * Three documents, in the order somebody meets them: what Coda is,
-             * how it works, then what each node does.
+             * The tours take `short` rather than `label` — under a heading that already says
+             * "Guides", "Guided Tour" stutters. See the note on `TOURS` for why the palette and
+             * the start page keep the long name.
              */}
-            <a
+            <Submenu label="Guides" blurb="Walkthroughs, in place on this canvas.">
+              {TOURS.map((tour) => (
+                <button
+                  key={tour.id}
+                  type="button"
+                  className="dropdown__item"
+                  onClick={() => {
+                    void startTour(tour.id)
+                    close()
+                  }}
+                >
+                  <strong>{tour.short}</strong>
+                  <span>{tour.blurb}</span>
+                </button>
+              ))}
+            </Submenu>
+            <button
+              type="button"
               className="dropdown__item"
-              href={`${import.meta.env.BASE_URL}overview.html`}
-              target="_blank"
-              rel="noreferrer noopener"
-              onClick={close}
+              onClick={() => {
+                requestShortcuts()
+                close()
+              }}
             >
-              <strong>Overview</strong>
-              <span>The highlights reel.</span>
-            </a>
-            <a
-              className="dropdown__item"
-              href={`${import.meta.env.BASE_URL}tutorial.html`}
-              target="_blank"
-              rel="noreferrer noopener"
-              onClick={close}
-            >
-              <strong>Field Guide</strong>
-              <span>Explains the basic concepts.</span>
-            </a>
+              <strong>Keyboard Shortcuts</strong>
+              <span>Every key and canvas gesture, on one card.</span>
+            </button>
             {/*
-             * The reference half of the pair. The field guide is read once, front to back;
-             * this is the one somebody comes back to with a node in mind, which is why both
-             * are offered rather than the second being a section of the first.
+             * What used to be a rule across the menu: above it, things that act on the editor you
+             * are looking at; below it, documents that navigate away. The submenu now says that
+             * in a word, and the blurb says what the click costs mid-graph — which is what the
+             * rule was standing in for and could never actually state.
+             *
+             * Links rather than buttons, so they open in a new tab the ordinary way. Through
+             * `BASE_URL`, since `base` is './' and an absolute path would resolve to the domain
+             * root under a subpath deploy.
+             *
+             * Three documents, in the order somebody meets them: what Coda is, how it works,
+             * then what each node does.
              */}
-            <a
-              className="dropdown__item"
-              href={`${import.meta.env.BASE_URL}nodes.html`}
-              target="_blank"
-              rel="noreferrer noopener"
-              onClick={close}
-            >
-              <strong>Node Guide</strong>
-              <span>Catalogue of all nodes</span>
-            </a>
+            <Submenu label="Documentation" blurb="Overview, Help, Contents, etc.">
+              <a
+                className="dropdown__item"
+                href={`${import.meta.env.BASE_URL}overview.html`}
+                target="_blank"
+                rel="noreferrer noopener"
+                onClick={close}
+              >
+                <strong>Overview</strong>
+                <span>The highlights reel.</span>
+              </a>
+              <a
+                className="dropdown__item"
+                href={`${import.meta.env.BASE_URL}tutorial.html`}
+                target="_blank"
+                rel="noreferrer noopener"
+                onClick={close}
+              >
+                <strong>Field Guide</strong>
+                <span>Explains the basic concepts.</span>
+              </a>
+              {/*
+               * The reference half of the pair. The field guide is read once, front to back;
+               * this is the one somebody comes back to with a node in mind, which is why both
+               * are offered rather than the second being a section of the first.
+               */}
+              <a
+                className="dropdown__item"
+                href={`${import.meta.env.BASE_URL}nodes.html`}
+                target="_blank"
+                rel="noreferrer noopener"
+                onClick={close}
+              >
+                <strong>Node Guide</strong>
+                <span>Catalogue of all nodes</span>
+              </a>
+            </Submenu>
           </>
         )}
       </Dropdown>
@@ -246,6 +303,7 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
       <button
         type="button"
         className="btn btn--ghost btn--icon"
+        data-tour="share"
         onClick={requestShare}
         title="Share workflow — a link that opens this graph"
         aria-label="Share workflow"
@@ -262,6 +320,7 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
         type="button"
         className="btn btn--ghost btn--icon"
         aria-pressed={assistantOpen}
+        data-tour="assistant"
         title="Assistant — describe a change and let it build it (/)"
         aria-label="Assistant"
         onClick={() => togglePanel('assistant')}
@@ -278,6 +337,7 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
         type="button"
         className="btn btn--ghost btn--icon"
         aria-pressed={inspectorOpen}
+        data-tour="inspector"
         onClick={() => togglePanel('inspector')}
         title={inspectorOpen ? 'Hide the inspector (I)' : 'Show the inspector (I)'}
         aria-label="Inspector"
@@ -298,6 +358,7 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
       <button
         type="button"
         className="btn"
+        data-tour="add"
         onClick={onOpenBrowser}
         disabled={locked}
         title={locked ? LOCKED_HINT : 'Browse nodes (Tab)'}
@@ -321,6 +382,7 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
        */}
       <label
         className="autorun"
+        data-tour="autorun"
         title={
           autoRun
             ? 'Re-running the whole graph after every change. Uncheck for expensive workflows.'
@@ -339,6 +401,7 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
         <button
           type="button"
           className="btn"
+          data-tour="run"
           onClick={cancelRun}
           title="Cancel the running graph"
         >
@@ -348,6 +411,7 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
         <button
           type="button"
           className="btn btn--primary"
+          data-tour="run"
           onClick={() => void runAll()}
           disabled={staleCount === 0}
           // Explicit label: the visible content reads "Run 5 ⇧R", which is a poor name for
@@ -864,6 +928,8 @@ function Dropdown({
   label,
   title,
   onOpen,
+  tour,
+  flyouts,
   children,
 }: {
   label: string
@@ -871,6 +937,19 @@ function Dropdown({
   title?: string
   /** Fired on the transition to open — the seam for a menu whose contents have to be fetched. */
   onOpen?: () => void
+  /** `data-tour` name, for a menu the Guided Tour points at. See `tour/steps.ts`. */
+  tour?: TourAnchor
+  /**
+   * This menu contains a `Submenu`, so the panel must not clip.
+   *
+   * `.dropdown__panel` sets `overflow-y: auto` for the long menus (New, Open, Save), and
+   * `overflow-y` on a box makes `overflow-x` compute to `auto` as well — so a flyout positioned
+   * at `left: 100%` renders *inside a scrollbar*, or not at all. Opting out is safe only for a
+   * menu short enough never to need the scroll, which is the same menu short enough to want
+   * submenus. Not inferred from the children: the panel is a render prop, so nothing here can
+   * see what is in it until it is too late to style.
+   */
+  flyouts?: boolean
   children: (close: () => void) => React.ReactNode
 }) {
   const [open, setOpen] = useState(false)
@@ -880,7 +959,7 @@ function Dropdown({
   useDismissOnOutside(ref, close, { enabled: open })
 
   return (
-    <div className="dropdown" ref={ref}>
+    <div className="dropdown" ref={ref} data-tour={tour}>
       <button
         type="button"
         className="btn btn--ghost"
@@ -896,7 +975,103 @@ function Dropdown({
       >
         {label} ▾
       </button>
-      {open && <div className="dropdown__panel">{children(() => setOpen(false))}</div>}
+      {open && (
+        <div className={`dropdown__panel${flyouts ? ' dropdown__panel--flyouts' : ''}`}>
+          {children(() => setOpen(false))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * One row of a `Dropdown` that opens a panel of its own beside it.
+ *
+ * **Hover opens it and click toggles it, and both are needed.** Hover alone is unreachable by
+ * touch and by keyboard; click alone makes a pointer user press twice to read a menu that is
+ * already under the cursor. The flyout is a *child* of the row's wrapper and butts against it
+ * with no gap, so travelling from the row into it never leaves the wrapper and `pointerleave`
+ * never fires mid-journey — a gap here is the classic submenu that closes as you reach for it.
+ *
+ * Focus opens it too, and `relatedTarget` distinguishes moving *between* children (stay open)
+ * from leaving altogether (close), since `focusout` fires on every hop inside. **That path is
+ * currently unreachable, and not because of anything here:** `Editor.tsx` binds Tab globally to
+ * the node browser and exempts only text fields, so Tab inside any toolbar menu opens the
+ * browser rather than moving through the rows — measured in a browser against the untouched
+ * Examples menu, so it is app-wide and predates submenus. The handling stays because it is
+ * correct and becomes live the moment that guard learns about open menus.
+ */
+function Submenu({
+  label,
+  blurb,
+  children,
+}: {
+  label: string
+  blurb: string
+  children: React.ReactNode
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  /**
+   * Which side the flyout is on, decided from a real rect on each open.
+   *
+   * The `?` menu sits mid-toolbar, so at an ordinary window width the right side is free — but
+   * the toolbar is not fixed-width and the panel is 260px, so on a narrow window the flyout ran
+   * off the viewport with no scrollbar to reach it by. Measured rather than guessed at a
+   * breakpoint, because what matters is where this particular menu ended up, which depends on
+   * how wide the graph's name rendered.
+   */
+  const [flip, setFlip] = useState(false)
+
+  useLayoutEffect(() => {
+    if (!open) return
+    const row = ref.current?.getBoundingClientRect()
+    const panel = ref.current?.querySelector('.dropdown__flyout')?.getBoundingClientRect()
+    if (!row || !panel) return
+    setFlip(row.right + panel.width > window.innerWidth - 8)
+  }, [open])
+
+  return (
+    <div
+      className="dropdown__sub"
+      ref={ref}
+      onPointerEnter={() => setOpen(true)}
+      onPointerLeave={() => setOpen(false)}
+      onFocus={() => setOpen(true)}
+      onBlur={(event) => {
+        if (!ref.current?.contains(event.relatedTarget)) setOpen(false)
+      }}
+    >
+      <button
+        type="button"
+        className="dropdown__item dropdown__item--parent"
+        aria-haspopup="true"
+        aria-expanded={open}
+        /*
+         * Opens, and deliberately does not toggle.
+         *
+         * A toggle looked right and was wrong in all three input paths, because in every one of
+         * them something has *already* opened the flyout by the time the click lands: a pointer
+         * hovered, a keyboard focused, a tap fired `pointerenter` first. So Enter on the row a
+         * keyboard user had just opened closed it again, and a tap opened and shut it in one
+         * gesture. Closing belongs to leaving — `pointerleave`, blur, or dismissing the menu —
+         * and this stays as the fallback for the browsers that fire neither (Safari does not
+         * focus a button on click).
+         */
+        onClick={() => setOpen(true)}
+      >
+        <strong>{label}</strong>
+        <span>{blurb}</span>
+      </button>
+      {open && (
+        <div
+          className={`dropdown__panel dropdown__panel--flyouts dropdown__flyout${
+            flip ? ' dropdown__flyout--left' : ''
+          }`}
+        >
+          {children}
+        </div>
+      )}
     </div>
   )
 }

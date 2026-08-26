@@ -1,5 +1,6 @@
 import { useGraphStore, useStaleCount } from '../../store/graphStore'
 import { formatDuration, plural } from '../format'
+import { STATUS_BAR_HINTS, shortcutHint } from '../shortcuts'
 
 export function StatusBar() {
   const nodeCount = useGraphStore((s) => s.graph.nodes.length)
@@ -31,13 +32,14 @@ export function StatusBar() {
 
       <div className="toolbar__spacer" />
 
+      {/*
+       * Six of the twenty-odd, chosen in `shortcuts.ts` rather than here — these strings used
+       * to be typed out, and went on advertising `⌘Z` to Windows, which has no ⌘ key.
+       */}
       <div className="shortcut-hints">
-        <span>Space commands</span>
-        <span>drag pan</span>
-        <span>⇧drag select</span>
-        <span>⇧R run</span>
-        <span>M mute</span>
-        <span>⌘Z undo</span>
+        {STATUS_BAR_HINTS.map((id) => (
+          <span key={id}>{shortcutHint(id)}</span>
+        ))}
       </div>
     </div>
   )

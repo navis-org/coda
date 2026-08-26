@@ -1,6 +1,7 @@
 # The shell around the canvas
 
-Panels, fullscreen, the run indicator and the start page.
+Panels, fullscreen, the run indicator, the `?` menu, the keyboard-shortcut table and the
+start page.
 
 Moved verbatim out of `CLAUDE.md`.
 
@@ -197,6 +198,76 @@ Two traps in that plumbing, both hit:
 - **Weight the phases.** Reading mesh manifests is a few hundred bytes per body; the fragments
   behind them are megabytes. `meshProgressFraction` gives manifests the first fifth, so the
   bar does not reach the halfway mark in the first second and then appear to hang.
+
+## The `?` menu's submenus
+
+Four rows, two of which open a flyout: Welcome Dialog, `Guides ▸` (Basics, Learn to Build),
+Keyboard Shortcuts, `Documentation ▸` (Overview, Field Guide, Node Guide). Flat it was seven
+two-line rows, which is a wall you read rather than scan — in the one menu whose readers are by
+definition already lost.
+
+**`Dropdown` needs `flyouts` for this, and the reason is a CSS rule with no exceptions.**
+`.dropdown__panel` sets `overflow-y: auto` so the long menus (New, Open, Save, Examples) cap at
+70vh — and per spec a box with `overflow-y: auto` computes `overflow-x` to `auto` as well. There
+is no "scroll one axis, overflow the other". Without the opt-out the flyout is clipped to the
+panel's box and appears as a horizontal scrollbar. It is opt-in rather than default because only
+a menu short enough never to scroll can afford it.
+
+**The flyout butts against its row with no gap** (`left: 100%`, `top: -3px` for the panel's own
+padding) and is a DOM *child* of the row's wrapper. Both together are what stop it closing as you
+reach for it: travelling from row to flyout never leaves the wrapper, so `pointerleave` never
+fires mid-journey. A gap of even a pixel here is the classic submenu you cannot reach.
+
+**Which side it opens on is measured, not guessed.** `useLayoutEffect` reads the row and flyout
+rects on each open and flips to `right: 100%` when the right side would run off. A breakpoint
+would not do: the `?` button's x depends on how wide the graph's name rendered.
+
+**The parent row's click opens; it deliberately does not toggle.** A toggle read correctly and
+was wrong in all three input paths, because in each one something has already opened the flyout
+by the time the click lands — a pointer hovered, a keyboard focused, a tap fired `pointerenter`
+first. Enter on a row a keyboard user had just opened closed it again. Closing belongs to
+leaving.
+
+**Tab does not walk these rows, and that is not the submenu's doing.** `Editor.tsx` binds Tab
+globally to the node browser and exempts only text fields, so Tab inside *any* toolbar menu opens
+the browser — measured in a browser against the untouched Examples menu. The `onFocus`/`onBlur`
+handling on `Submenu` is correct and goes live the moment that guard learns about open menus.
+
+**The tours take `TOURS[].short` here and `label` elsewhere.** Under a heading that already says
+"Guides", "Guided Tour" stutters; in the flat command palette and the start page's link row a
+bare "Basics" says nothing. The shortening is a consequence of the nesting, so it belongs to the
+surface that nests.
+
+## Keyboard shortcuts
+
+`src/ui/shortcuts.ts` is the one table of every key and canvas gesture, and
+`ui/panels/ShortcutsDialog.tsx` draws it under `Help ▸ Keyboard Shortcuts` (and the palette's
+`Help: Keyboard Shortcuts`). Four surfaces read it: the dialog, the palette's right-aligned
+badges, the status bar's hints, and the start page's key box.
+
+**It is not a keymap.** `Editor.tsx` still owns the bindings, and React Flow owns three more at
+props it reads itself (`selectionKeyCode`, `multiSelectionKeyCode`, `deleteKeyCode`). The table
+owns the *description* only. So adding a binding means adding an entry here too — nothing
+enforces it, and a key nobody can find is a key nobody presses.
+
+**Chords are stored by meaning, not by glyph.** `{ mod: true, key: 'Z' }`, not `'⌘Z'`. All four
+surfaces used to have the glyph typed into them, which meant all four told a Windows user to
+press a key their keyboard does not have; `formatChord` is now the single place that knows ⌘
+from Ctrl, and it spells `⌫`/`⏎` out as Backspace/Enter off Apple as well. `shortcutKeys` and
+`shortcutHint` **throw** on an unknown id rather than returning `undefined` — every caller is a
+literal in the source, and a badge that silently renders nothing is exactly the kind of nothing
+nobody notices.
+
+**A phrase in the key column has to fit the key column.** The wiring gestures are named in
+words, and written out in full ("drag a link into space") they overflowed the 112px track and
+printed on top of the label beside them — a grid track does not clip. The noun each one acts on
+lives in the label instead, and `overflow-wrap: anywhere` on the `kbd` is the backstop. jsdom
+performs no layout, so the suite was green throughout; this was found in a browser and is only
+findable there.
+
+**`⌘S` is deliberately absent.** `Editor.tsx` swallows it and shows "Use the Save button",
+which is a refusal rather than a shortcut. A row for it would be the card teaching a key that
+does nothing.
 
 ## Start page
 

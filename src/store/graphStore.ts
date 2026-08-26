@@ -164,6 +164,14 @@ export interface GraphState {
   shareRequest: number
   requestShare(): void
   /**
+   * Asks for the Keyboard Shortcuts dialog.
+   *
+   * A fourth counter, for the same reason as `shareRequest`: the `?` menu and the command
+   * palette both open it, and both close on pick.
+   */
+  shortcutsRequest: number
+  requestShortcuts(): void
+  /**
    * Asks the canvas to frame the whole graph.
    *
    * Bumped by `loadGraph`, so opening a file, an example or a starter lands on the work rather
@@ -768,6 +776,8 @@ export const useGraphStore = create<GraphState>((set, get) => {
     requestNodeBrowser: () => set((s) => ({ browserRequest: s.browserRequest + 1 })),
     shareRequest: 0,
     requestShare: () => set((s) => ({ shareRequest: s.shareRequest + 1 })),
+    shortcutsRequest: 0,
+    requestShortcuts: () => set((s) => ({ shortcutsRequest: s.shortcutsRequest + 1 })),
     fitRequest: 0,
     requestFitView: () => set((s) => ({ fitRequest: s.fitRequest + 1 })),
     autoRun: loadAutoRun(),

@@ -1,0 +1,152 @@
+/*
+ * driver.js in Coda's palette.
+ *
+ * driver ships a popover styled for a white page: `#fff` on `#2d2d2d`, a 5px radius, a grey
+ * `1px solid #ccc` on its buttons. All of it is hard-coded — the only custom property the
+ * stylesheet exposes is the font family — so this file re-states the surface in tokens rather
+ * than tuning it. Everything below resolves through `theme.css`, which is what makes the tour
+ * follow a theme switch with nothing here listening for one.
+ *
+ * Loaded with `tour.ts`, i.e. only once somebody starts a tour. `driver.css` is imported
+ * immediately before it, so these rules win on order at equal specificity; the two places that
+ * need `!important` are marked and say why.
+ *
+ * **The overlay itself is not here.** driver writes its fill to `path.style.fill` from the
+ * `overlayColor` config, and an inline style beats any rule in this file — so the scrim is a
+ * `var(--canvas)` passed through the config instead. See `scrimColor` in `tour.ts`.
+ */
+
+/*
+ * Live and inert, said in attributes rather than in driver's classes — see `markElement` in
+ * `tour.ts` for why a class cannot survive here. Both rules tie with driver's own on specificity
+ * (`.driver-active [data-tour-live]` against `.driver-active .driver-active-element`;
+ * `[data-tour-inert]` against `.driver-no-interaction`, both `!important`) and win on order,
+ * which is the same thing every rule below relies on.
+ */
+.driver-active [data-tour-live],
+.driver-active [data-tour-live] * {
+  pointer-events: auto;
+}
+[data-tour-inert],
+[data-tour-inert] * {
+  pointer-events: none !important;
+}
+
+.driver-popover {
+  max-width: 360px;
+  padding: 14px 16px;
+  font-family: var(--font-ui);
+  color: var(--text-primary);
+  background: var(--surface-1);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-panel);
+}
+
+.driver-popover-title {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.005em;
+  color: var(--text-primary);
+}
+
+.driver-popover-description {
+  margin-top: 6px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.driver-popover-close-btn {
+  width: 28px;
+  height: 26px;
+  font-size: 16px;
+  color: var(--text-muted);
+}
+
+.driver-popover-close-btn:hover,
+.driver-popover-close-btn:focus {
+  color: var(--text-primary);
+}
+
+.driver-popover-footer {
+  margin-top: 14px;
+  gap: 12px;
+}
+
+.driver-popover-progress-text {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+/*
+ * The footer buttons, as `.btn` and `.btn--primary` read on the canvas — the tour is app chrome
+ * and a second button vocabulary inside it would read as somebody else's dialog.
+ */
+.driver-popover-footer-btn {
+  padding: 4px 10px;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-primary);
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+
+.driver-popover-footer-btn:hover,
+.driver-popover-footer-btn:focus {
+  background: var(--surface-hover);
+}
+
+.driver-popover-footer-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.driver-popover-next-btn {
+  color: var(--text-inverse);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.driver-popover-next-btn:hover,
+.driver-popover-next-btn:focus {
+  /* Not `--surface-hover`: that is a translucent ink meant to sit on a neutral, and over the
+     accent it lightens the fill towards the page rather than deepening it. */
+  background: color-mix(in srgb, var(--accent) 84%, black);
+}
+
+/*
+ * The arrow is drawn as a 5px border triangle on all four sides, with three of them made
+ * transparent — so its colour is a `border-*-color`, and there is one rule per side rather than
+ * one for the arrow. `!important` because driver sets the whole `border` shorthand inline as it
+ * places the popover, which would otherwise re-assert `#fff` on the visible side.
+ */
+.driver-popover-arrow-side-left {
+  border-left-color: var(--surface-1) !important;
+}
+.driver-popover-arrow-side-right {
+  border-right-color: var(--surface-1) !important;
+}
+.driver-popover-arrow-side-top {
+  border-top-color: var(--surface-1) !important;
+}
+.driver-popover-arrow-side-bottom {
+  border-bottom-color: var(--surface-1) !important;
+}
+
+/*
+ * `prefers-reduced-motion` is honoured here and nowhere else in the tour, because the tour is
+ * the one surface that animates *the whole screen* — the stage rect tweens between two cards
+ * that may be a viewport apart. driver's own duration is passed to the stage in JS; this covers
+ * the fade the stylesheet owns.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .driver-fade .driver-overlay,
+  .driver-fade .driver-popover {
+    animation: none;
+  }
+}

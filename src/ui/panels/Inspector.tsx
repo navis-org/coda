@@ -70,7 +70,7 @@ export function Inspector() {
 
   if (!node || !def || !ctx) {
     return (
-      <aside className="inspector">
+      <aside className="inspector" data-tour="inspector-panel">
         <div className="inspector__header">
           <div className="inspector__heading">
             <div className="inspector__title">Inspector</div>
@@ -113,7 +113,7 @@ export function Inspector() {
   const dataflow = def.annotation !== true
 
   return (
-    <aside className="inspector">
+    <aside className="inspector" data-tour="inspector-panel">
       <div className="inspector__header">
         <div className="inspector__heading">
           <div className="inspector__title">{node.title ?? def.label}</div>

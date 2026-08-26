@@ -3340,6 +3340,70 @@ a.dropdown__item {
   margin-top: 3px;
   padding-top: 3px;
 }
+
+/* --------------------------------------------------------------------------
+ * Submenus (the `?` menu)
+ * -------------------------------------------------------------------------- */
+
+/*
+ * The scroll, off, for a menu that holds a flyout.
+ *
+ * `.dropdown__panel` above sets `overflow-y: auto` so the long menus (New, Open, Save) cap at
+ * 70vh. Per CSS, a box with `overflow-y: auto` computes `overflow-x` to `auto` too — there is no
+ * "scroll one axis, overflow the other" — so an absolutely-positioned flyout at `left: 100%` is
+ * clipped to the panel's own box and renders as a horizontal scrollbar rather than as a menu.
+ * Safe here because a menu short enough to want submenus is a menu short enough never to scroll.
+ */
+.dropdown__panel--flyouts {
+  max-height: none;
+  overflow: visible;
+}
+
+.dropdown__sub {
+  position: relative;
+}
+
+/*
+ * The ▸ , drawn rather than typed, so it can sit at the row's right edge against a label that
+ * wraps. `::after` on the row, not a character in the label — the label is also the accessible
+ * name, and "Documentation ▸" is not what a screen reader should read out. `aria-haspopup` on
+ * the button is what says the same thing in the accessibility tree.
+ */
+.dropdown__item--parent {
+  position: relative;
+  padding-right: 20px;
+}
+.dropdown__item--parent::after {
+  content: '▸';
+  position: absolute;
+  right: 7px;
+  top: 50%;
+  transform: translateY(-50%);
+  /*
+   * 12px and `--text-secondary`, both raised from the blurb's own 10.5px/`--text-muted` after
+   * looking at it: the blurbs read fine at that weight because they are a sentence, and a lone
+   * 10px glyph at the same ink was a smudge — the one mark that says this row goes somewhere.
+   */
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.dropdown__item--parent[aria-expanded='true'] {
+  background: var(--accent-soft);
+}
+
+/*
+ * Flush against the parent row's box on the x axis — no gap, or the pointer leaves the wrapper
+ * on the way across and the flyout closes as you reach for it. `-3px` on the y is the panel's
+ * own padding, which lines the first child row up with the row that opened it.
+ */
+.dropdown__flyout {
+  top: -3px;
+  left: 100%;
+}
+.dropdown__flyout--left {
+  left: auto;
+  right: 100%;
+}
 .dropdown__heading {
   padding: 3px 8px;
   font-size: 10px;
@@ -4118,6 +4182,118 @@ a.viewer-actions__btn {
   max-width: 620px;
   height: auto;
   max-height: 640px;
+}
+
+/* --------------------------------------------------------------------------
+ * Keyboard shortcuts dialog
+ * -------------------------------------------------------------------------- */
+
+/*
+ * Hugs its content vertically, for the same reason `.share` does, and is wider than the other
+ * two dialogs because the rows come in two columns: a single column of ~25 rows runs past the
+ * viewport on a laptop, which turns a reference card into a scroll.
+ */
+/*
+ * 820px and 820px, both measured against the real card rather than chosen: at 760 the labels in
+ * the right-hand column wrapped often enough to push the last wiring row past the fold, and a
+ * reference card that scrolls is one somebody reads half of. It still scrolls below ~880px of
+ * viewport, which is the honest fallback — `max-height` caps it either way.
+ */
+.shortcuts {
+  max-width: 820px;
+  height: auto;
+  max-height: min(88vh, 820px);
+}
+
+/*
+ * `columns` rather than a grid, so the groups flow into whichever column has room. A grid would
+ * need the split chosen in advance, and the split goes lopsided the moment a group gains a row.
+ * `break-inside: avoid` on the group is what keeps a heading from being orphaned at a column
+ * foot — without it the browser is free to split a `<section>` anywhere it likes.
+ */
+.shortcuts__body {
+  padding: 12px 14px;
+  columns: 2;
+  column-gap: 26px;
+}
+@media (max-width: 720px) {
+  .shortcuts__body {
+    columns: 1;
+  }
+}
+
+.shortcuts__group {
+  break-inside: avoid;
+  margin-bottom: 14px;
+}
+.shortcuts__group h3 {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.shortcuts__group dl {
+  margin: 0;
+}
+
+/*
+ * Keys in a fixed-width first column so the labels line up down the group. `min-content` on the
+ * key column would let a row like "drag a link into space" set the width for every row above
+ * it; the wiring gestures are spelled out in words rather than glyphs, so they are allowed to
+ * wrap inside their column instead.
+ */
+.shortcuts__row {
+  display: grid;
+  grid-template-columns: 112px 1fr;
+  gap: 8px;
+  align-items: baseline;
+  padding: 3px 0;
+}
+.shortcuts__row dt {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.shortcuts__row dt kbd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 5px;
+  /*
+   * Wrapping rather than `nowrap`, as the backstop for the overflow the wiring rows hit: a key
+   * too long for its column printed straight over the label beside it, because a grid track
+   * does not clip and `nowrap` refuses the only out. Wrapping is ugly and legible; the
+   * collision was neither. `anywhere` so a single long token breaks too.
+   */
+  overflow-wrap: anywhere;
+}
+.shortcuts__row dd {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-primary);
+}
+/* The hint drops to its own line and to secondary ink: it is the half a reader skips. */
+.shortcuts__row dd span {
+  display: block;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+.shortcuts__foot {
+  flex: none;
+  padding: 8px 14px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-secondary);
 }
 
 /* `flex: 0 1 auto`, against `.sources__body`'s `flex: 1`, for the same reason. */
