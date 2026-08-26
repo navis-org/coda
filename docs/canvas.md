@@ -21,12 +21,14 @@ one. So a graph committed this render — whose cards have no size yet — is fr
 against real measurements. That is worth knowing before writing a gate for it, because the
 obvious gate is what broke it.
 
-**It was gated on `useNodesInitialized`, and that flag is false here forever.** `adoptUserNodes`
-carries a measurement forward only while the **user** node object behind it is identity-equal and
-otherwise re-seeds `measured` from `userNode.measured`; `rfNodes` mints fresh objects on every
-store change and `onNodesChange` deliberately never writes a measured size back into the document,
-so that field is permanently undefined. `updateNodeInternals` never recomputes the flag, so
-nothing brings it back. See the auto-layout section, which met the same flag from the other side.
+**It was gated on `useNodesInitialized`, and that flag read false here forever.**
+`adoptUserNodes` carries a measurement forward only while the **user** node object behind it is
+identity-equal and otherwise re-seeds `measured` from `userNode.measured`; `rfNodes` mints fresh
+objects on every store change, and nothing put a measurement back on them, so that field was
+permanently undefined. `updateNodeInternals` never recomputes the flag, so nothing brought it
+back. `measuredSizes` (see *Measurements, and who keeps them*) changes the premise — the flag
+would recover now — but the gate stays gone, because the consumer already waits. See the
+auto-layout section, which met the same flag from the other side.
 
 **What that cost is the useful half, because it read as intermittent rather than broken.** The
 **first** open of a session framed correctly and every one after it did not — and that first fit is
@@ -157,12 +159,13 @@ across, a dataset card 248, a Neuron Profile 560.
 
 - `getNodes()` is `store.nodes.map((n) => ({ ...n }))` — a shallow copy of the array _the editor
   built_. In controlled mode `measured` on it is whatever we put there, which is nothing.
-- `getInternalNode(id).measured` is the real measurement, but React Flow's `adoptUserNodes` only
-  carries it forward while the _user_ node object behind it is identity-equal, and otherwise
-  re-seeds it from `userNode.measured`. `rfNodes` rebuilds every node object on each store change
-  and `onNodesChange` deliberately does not persist React Flow's own dimension measurements into
-  the document — so **every graph edit wipes every measurement**, and the ResizeObserver does not
-  re-fire for a card whose size did not change. Observed live: 9 measured, then 0, then 0.
+- `getInternalNode(id).measured` is the real measurement, and it is only as good as what
+  `rfNodes` last handed back. `adoptUserNodes` carries it forward while the _user_ node object
+  behind it is identity-equal and otherwise re-seeds it from `userNode.measured`; `rfNodes`
+  rebuilds every node object on each store change, so before `measuredSizes` existed **every
+  graph edit wiped every measurement**, and the ResizeObserver does not re-fire for a card whose
+  size did not change. Observed live: 9 measured, then 0, then 0. They survive an edit now, but a
+  card added _this_ tick still has none — which is the case auto-layout is asked about most.
 - `offsetWidth`/`offsetHeight` are layout-space and ignore CSS transforms, so they are the card's
   size in flow units at any zoom. Verified at zoom 1.0, 0.833 and 0.694, where an Explore Dataset card's
   bounding rect reads 520, 433 and 361 while its offset size reads 520 throughout.
@@ -172,10 +175,11 @@ with the viewport would have auto-layout re-arranging the graph every time someb
 
 **`useNodesInitialized` is unreliable in this app, for the same reason, and nothing reads it any
 more.** Its store flag is computed inside `adoptUserNodes` from the internal node's `measured`,
-which the paragraph above wipes on every edit — and `updateNodeInternals`, the path the
-ResizeObserver takes, never recomputes it. So it latches **false** once the first edit lands and
-never recovers. Auto-layout was gated on it and consequently never ran at all; it asks the
-readiness question of the sizes it is about to use instead. Fit-on-load was gated on it too and
+which the paragraph above wiped on every edit — and `updateNodeInternals`, the path the
+ResizeObserver takes, never recomputes it. So it latched **false** once the first edit landed and
+never recovered. Auto-layout was gated on it and consequently never ran at all; it asks the
+readiness question of the sizes it is about to use instead, which is the more precise question
+and is why the gate stays off now that `measuredSizes` would let the flag recover. Fit-on-load was gated on it too and
 is written up under *Framing a graph that was just opened* — there the answer was different
 again, because React Flow's own `fitView()` already waits.
 
@@ -306,10 +310,12 @@ Three things about that measurement, each of which was wrong first:
   correction differs by side (`translate(-50%)` left against `translate(50%)` right) and the
   diamond sockets add a `rotate`. A rect has applied all three, and dividing the card-relative
   difference by the zoom cancels the camera exactly.
-- **React Flow's `handleBounds` is unusable**, for the reason `measure()` cannot use
-  `node.measured`: `parseHandles` returns `!userNode.measured ? undefined : …` and this app never
-  writes `measured` back, so `adoptUserNodes` wipes handle bounds on **every graph edit** and
-  React Flow re-measures asynchronously afterwards.
+- **React Flow's `handleBounds` is not the source here.** `parseHandles` returns
+  `!userNode.measured ? undefined : …`, so while nothing wrote `measured` back `adoptUserNodes`
+  wiped handle bounds on **every graph edit** and React Flow re-measured asynchronously
+  afterwards — the bounds were simply absent for a whole frame at exactly the moment a layout
+  pass wanted them. `measuredSizes` ends the wipe, but the rects are still measured a beat after
+  the card mounts, so the DOM read stays the source and this is one less thing that has to agree.
 - **A card is pinned only when every one of its sockets was measured, and only under a
   horizontal direction.** `FIXED_POS` takes coordinates literally, so one unmeasured port lands
   at (0,0) — the card's corner, on the wrong side — and ELK routes confidently into it. And ELK
@@ -420,6 +426,37 @@ there would promise a control that does nothing. Three things about it:
 - **Only `setAttributes` dimension changes are persisted.** React Flow emits `dimensions` for
   its own measurements too, on every mount and content change; storing those would write a
   measured pixel size into the document on load and fill the undo stack with things nobody did.
+
+### Measurements, and who keeps them
+
+**Every measurement is kept — in the component, never in the document.** `measuredSizes` in
+`Editor.tsx` is a `Map` of node id to the last size React Flow measured, fed from the same
+`dimensions` changes the bullet above declines to persist, and handed straight back on the next
+`rfNodes` rebuild as `measured`. Component state, because a measurement is not a decision: in the
+document it would ride undo, autosave and the saved file, which is the bug the bullet above is
+about.
+
+**The minimap is what forced it, and the symptom named the cause badly.** The map drew _some_
+cards and quietly skipped the rest, and the ones it skipped were the ones that cannot be resized.
+`MiniMapNodes` reads `nodeHasDimensions(userNode)` — the **user** node, not the measurement — and
+skips anything it has no size for. So the only cards on the map were those carrying a `node.size`
+or a `defaultSize`, plus, since a collapsed card deliberately leaves its height to the content,
+not even all of those. Four of eleven, in the `partners` example.
+
+**Two things fall out of it, both good and neither the point.** `adoptUserNodes` now carries
+handle bounds across an edit instead of wiping them (`parseHandles` returns them only when
+`userNode.measured` is set), so the cards are no longer re-measured once per graph edit; and
+`useNodesInitialized` would come good, though nothing reads it. The one thing to know is that the
+per-edit wipe used to _heal_ a stale handle position for free. It cannot any more, so a layout
+change that moves a socket without changing the card's box has to say so — which is what
+`CodaNodeView`'s `updateNodeInternals` call already does for collapse and fold, the only two that
+do it. Ports are declared on the definition and the port band sits directly under the header, so
+nothing in the body can move them.
+
+`panels.test.tsx` pins the count against the graph's. It stubs `offsetWidth`/`offsetHeight` for
+`.react-flow__node` to get there: jsdom reports zero, and React Flow drops a zero-sized
+measurement before it ever becomes a change, so without the stub the map is empty either way and
+the test would pass on the broken code.
 
 **A pointer gesture undoes to where it started.** `commit` takes a `gesture` tag, and the
 uncommitted frames of a drag or resize stash the graph as it was when the gesture began. Before

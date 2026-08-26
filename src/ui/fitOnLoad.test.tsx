@@ -4,17 +4,21 @@
  * The canvas half of fit-on-load: that opening a graph actually asks React Flow to frame it.
  *
  * `store/fitOnLoad.test.ts` pins which loads raise the request. What this pins is the thing that
- * went wrong: the effect that spends it was gated on `useNodesInitialized`, and that flag is
+ * went wrong: the effect that spends it was gated on `useNodesInitialized`, and that flag read
  * **false in this app forever** — `adoptUserNodes` re-seeds a node's `measured` from the user
- * object whenever its identity changes, `rfNodes` mints fresh objects on every store change and
- * never carries a measurement, and `updateNodeInternals` (the ResizeObserver's path) does not
- * recompute the flag. So the fit never ran, except on the first open of a session, which is
- * React Flow's own `fitView` prop resolving and nothing to do with this effect.
+ * object whenever its identity changes, `rfNodes` mints fresh objects on every store change, and
+ * `updateNodeInternals` (the ResizeObserver's path) does not recompute the flag. So the fit never
+ * ran, except on the first open of a session, which is React Flow's own `fitView` prop resolving
+ * and nothing to do with this effect.
+ *
+ * `Editor`'s `measuredSizes` carries measurements across an edit now, so the flag is no longer
+ * doomed — but the gate is gone rather than fixed, and it is the *ungated* effect this covers.
+ * The flag is still forced false here, which is the harder case: a fit asked for before anything
+ * has been measured has to be issued anyway, because React Flow's own queue is what waits.
  *
  * jsdom performs no layout, so the fit itself cannot be observed here — the framing was checked
  * in a browser and is written up in `Editor.tsx`. What *is* observable, and is the whole
- * regression, is whether `fitView` gets called at all with the flag reading false. So the flag is
- * pinned false, which is what it really is.
+ * regression, is whether `fitView` gets called at all.
  */
 
 import { act, cleanup, render } from '@testing-library/react'
@@ -27,7 +31,7 @@ vi.mock('@xyflow/react', async (importOriginal) => {
   const real = await importOriginal<typeof ReactFlow>()
   return {
     ...real,
-    // What this app's own measurements make it. See the note above.
+    // Forced false: the effect must issue the fit without waiting. See the note above.
     useNodesInitialized: () => false,
     useReactFlow: () => ({ ...real.useReactFlow(), fitView }),
   }

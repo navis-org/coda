@@ -38,6 +38,7 @@ import type {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import type { CodaGraph, GraphNode } from '../core/graph'
+import type { NodeSize } from '../layout/elkGraph'
 import { getNodeDef, isAnnotation } from '../core/registry'
 import type { CodaType } from '../core/types'
 import { referenceEdgeIds } from '../core/graph'
@@ -188,6 +189,27 @@ function EditorCanvas() {
   const resizingRef = useRef(false)
   const menuSeq = useRef(0)
 
+  /**
+   * The size React Flow last measured for each card, in flow units — held here and handed back
+   * to it on every rebuild.
+   *
+   * **The minimap is why.** It draws from `nodeLookup` and skips any node `nodeHasDimensions`
+   * says nothing about — which reads the *user* node, not the measurement. `rfNodes` mints fresh
+   * objects on every store change and `onNodesChange` deliberately never writes a measured size
+   * into the document (see the `dimensions` branch), so the only cards carrying a size there were
+   * the ones with a `node.size` or a `defaultSize`. Everything else — every node that cannot be
+   * resized, and every *collapsed* card, whose height is deliberately left to its content — was
+   * simply absent from the map. Four of the eleven cards in `partners` drew.
+   *
+   * Component state rather than the store: this is a measurement, not a decision, so it must
+   * stay out of the document, out of undo and out of the saved file. Feeding it back also stops
+   * `adoptUserNodes` from wiping `measured` on every graph edit — it carries the field forward
+   * from `userNode.measured` — so the cards are no longer re-measured once per edit.
+   */
+  const [measuredSizes, setMeasuredSizes] = useState<ReadonlyMap<string, NodeSize>>(
+    () => new Map(),
+  )
+
   const [menu, setMenu] = useState<MenuState | null>(null)
 
   /**
@@ -244,9 +266,12 @@ function EditorCanvas() {
           ...(size
             ? { width: size.width, ...(node.collapsed ? {} : { height: size.height }) }
             : {}),
+          // What React Flow itself last measured, handed straight back — see `measuredSizes`.
+          // Without it the minimap cannot see a card that carries no explicit size.
+          ...(measuredSizes.has(node.id) ? { measured: measuredSizes.get(node.id) } : {}),
         }
       }),
-    [graph.nodes, selectedSet, arrangeOverrides],
+    [graph.nodes, selectedSet, arrangeOverrides, measuredSizes],
   )
 
   /** Only the `disabled` flag is read per edge, so a set beats a node lookup per edge. */
@@ -335,10 +360,10 @@ function EditorCanvas() {
    * and the node has to have a pair of ports that fit (`spliceCandidate`, which is where every
    * decision lives).
    *
-   * The card's size comes from `offsetWidth`, the rule `useArrange` records at length: React
-   * Flow's `measured` is wiped on every graph edit here, and a bounding rect is in screen pixels
-   * and would shrink with the camera — where a hit test against flow-space path coordinates needs
-   * flow units.
+   * The card's size comes from `offsetWidth`, the rule `useArrange` records at length: a bounding
+   * rect is in screen pixels and would shrink with the camera, where a hit test against flow-space
+   * path coordinates needs flow units. `measured` would do at rest — `measuredSizes` keeps it
+   * alive now — but it lands a frame after the card does, and this runs mid-drag.
    */
   const spliceOn = useCallback((nodeId: string): string | undefined => {
     const store = useGraphStore.getState()
@@ -369,6 +394,8 @@ function EditorCanvas() {
     (changes: NodeChange<Node<CodaNodeData>>[]) => {
       const moves: Array<{ id: string; position: { x: number; y: number } }> = []
       const sizes: Array<{ id: string; size: { width: number; height: number } }> = []
+      /** Measurements seen in this batch, folded into `measuredSizes` below if any changed. */
+      const measured = new Map<string, NodeSize>()
       let selectionChanged = false
       const nextSelection = new Set(selection)
 
@@ -378,11 +405,15 @@ function EditorCanvas() {
           draggingRef.current = change.dragging === true
         } else if (change.type === 'dimensions') {
           /*
-           * Only a *deliberate* resize. React Flow emits `dimensions` for its own
-           * measurements too — every mount, every content change — and those carry no
-           * `setAttributes`. Persisting them would write a measured pixel size into the
-           * document on load and fill the undo stack with things nobody did.
+           * Every measurement is kept — the minimap needs a size for cards that have no
+           * declared one, and `measuredSizes` is where they live.
+           *
+           * Only a *deliberate* resize reaches the document, though. React Flow emits
+           * `dimensions` for its own measurements too — every mount, every content change —
+           * and those carry no `setAttributes`. Persisting them would write a measured pixel
+           * size into the document on load and fill the undo stack with things nobody did.
            */
+          if (change.dimensions) measured.set(change.id, change.dimensions)
           if (!change.setAttributes || !change.dimensions) continue
           sizes.push({ id: change.id, size: change.dimensions })
           resizingRef.current = change.resizing === true
@@ -393,6 +424,33 @@ function EditorCanvas() {
         } else if (change.type === 'remove') {
           useGraphStore.getState().deleteNodes([change.id])
         }
+      }
+
+      /*
+       * One new map per batch that actually measured something differently, and none at all
+       * otherwise: this handler runs on every drag frame, and a fresh map per frame would
+       * rebuild `rfNodes` — and with it every card — for a measurement nobody took.
+       *
+       * Deleted cards are dropped here rather than on a `remove` change, because only the
+       * keyboard deletes through React Flow — the context menu and the palette go straight to
+       * the store, and an entry that outlived its node would be a leak per deletion.
+       */
+      if (measured.size > 0) {
+        // Outside the updater, which React may run more than once and which has no business
+        // reading a store.
+        const live = new Set(useGraphStore.getState().graph.nodes.map((n) => n.id))
+        setMeasuredSizes((current) => {
+          const stale = [...current.keys()].some((id) => !live.has(id))
+          const changed = [...measured].some(([id, size]) => {
+            const previous = current.get(id)
+            return previous?.width !== size.width || previous?.height !== size.height
+          })
+          if (!changed && !stale) return current
+          const next = new Map(current)
+          for (const id of next.keys()) if (!live.has(id)) next.delete(id)
+          for (const [id, size] of measured) next.set(id, size)
+          return next
+        })
       }
 
       if (moves.length > 0) {
@@ -670,12 +728,12 @@ function EditorCanvas() {
    * against real measurements, which is exactly what a gate here was trying to arrange.
    *
    * This *was* gated on `useNodesInitialized`, which made it the only surface in the app still
-   * reading that flag, and the flag is false here forever. `adoptUserNodes` carries a
-   * measurement forward only while the **user** node object behind it is identity-equal and
-   * otherwise re-seeds `measured` from `userNode.measured`; `rfNodes` mints fresh objects on
-   * every store change and `onNodesChange` deliberately never writes a measured size back into
-   * the document, so that field is permanently undefined. `updateNodeInternals` — the path the
-   * ResizeObserver takes — never recomputes the flag, so nothing brings it back.
+   * reading that flag, and the flag was false here forever. `adoptUserNodes` computes it from
+   * `userNode.measured`, and `rfNodes` used to mint fresh objects with that field empty on every
+   * store change — so it latched false at the first edit, and `updateNodeInternals`, the path the
+   * ResizeObserver takes, never recomputes it. `measuredSizes` now feeds those measurements back
+   * and the flag would come good; the gate stays gone regardless, because the consumer already
+   * waits and a gate here only ever added a way to be wrong.
    *
    * What that cost is worth recording, because it looked like an intermittent bug rather than a
    * dead control: the **first** open of a session framed correctly and every one after it did

@@ -30,6 +30,13 @@ it drawing a 200×150 projection into whatever box CSS produced: it renders, and
 wrong. `MINIMAP_SIZE` in `Editor.tsx` is the single constant; `.canvas-area` publishes its height
 as a CSS variable inline so the toggle can clear it without a second copy of the number.
 
+**The map draws from React Flow's node lookup, and skips any card it has no size for** — the
+size on the _user_ node, which in a controlled flow is whatever the app put there. That is why
+`Editor.tsx` keeps `measuredSizes` and hands React Flow's own measurements back to it; without
+it the map showed only the cards with a `node.size` or a `defaultSize` and silently omitted
+everything that cannot be resized. The mechanism is written up under *Measurements, and who
+keeps them* in [canvas.md](canvas.md).
+
 `installStorageStub()` in `test/jsdomStubs.ts` is what makes any of the persistence testable —
 Node 26 shadows jsdom's `localStorage`, so by default every persistence path silently degrades
 and has no coverage. Opt in per suite: with storage present, autosaves leak between test files.

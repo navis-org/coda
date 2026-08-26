@@ -117,13 +117,14 @@ export function useArrange(): ArrangeHandle {
    * **Not `node.measured`, and the reason is worth the paragraph.** There are two plausible
    * sources and both are wrong here. `getNodes()` returns a shallow copy of the array *this
    * component built*, so `measured` on it is whatever we put there, which is nothing.
-   * `getInternalNode(id).measured` is the real measurement — but React Flow's `adoptUserNodes`
-   * only carries it forward while the *user* node object behind it is identity-equal, and
-   * otherwise re-seeds it from `userNode.measured`. Coda rebuilds every node object in the
-   * `rfNodes` memo on each store change and deliberately never writes React Flow's own
-   * dimension measurements back into the document, so **every graph edit wipes every
-   * measurement** — and the ResizeObserver does not re-fire for a card whose size did not
-   * change, so they do not come back. Observed directly: 9 measured, then 0, then 0.
+   * `getInternalNode(id).measured` is the real measurement, and it is only as good as what
+   * `rfNodes` last handed back. `adoptUserNodes` carries a measurement forward while the *user*
+   * node object behind it is identity-equal and otherwise re-seeds it from `userNode.measured`;
+   * Coda rebuilds every node object on each store change, so before `Editor`'s `measuredSizes`
+   * existed **every graph edit wiped every measurement** — and the ResizeObserver does not
+   * re-fire for a card whose size did not change, so they did not come back. Observed directly:
+   * 9 measured, then 0, then 0. They survive an edit now, but a card added *this* tick still has
+   * none, and that is the case auto-layout is most often asked about.
    *
    * `offsetWidth`/`offsetHeight` sidestep the whole question. They are layout-space and ignore
    * CSS transforms, so they are the card's size in flow units at *any* zoom — verified at 1.0,
@@ -369,17 +370,18 @@ export function useArrange(): ArrangeHandle {
    * Re-arrange when the *structure* changes, and only then.
    *
    * **Not gated on `useNodesInitialized`, and that is a finding rather than an oversight.** That
-   * flag is the obvious signal — it is what the fit-on-load waits for — but this app defeats it.
-   * React Flow's `adoptUserNodes` keeps an internal node's measurements only while the *user*
-   * node object behind it is identity-equal; otherwise it rebuilds the entry and re-seeds
-   * `measured` from `userNode.measured`. Coda rebuilds every node object in the `rfNodes` memo
-   * on each store change, and `onNodesChange` deliberately does not persist React Flow's own
-   * dimension measurements into the document — so `userNode.measured` is permanently undefined
-   * and the store's `nodesInitialized` latches **false** once the first edit lands.
+   * flag is the obvious signal — it is what the fit-on-load waits for — but this app defeated it
+   * for most of its life. React Flow's `adoptUserNodes` keeps an internal node's measurements
+   * only while the *user* node object behind it is identity-equal; otherwise it rebuilds the
+   * entry and re-seeds `measured` from `userNode.measured`. Coda rebuilds every node object in
+   * the `rfNodes` memo on each store change, and with nothing putting a measurement back on it
+   * `userNode.measured` was permanently undefined, so the store's `nodesInitialized` latched
+   * **false** once the first edit landed. `Editor`'s `measuredSizes` now hands them back — for
+   * the minimap, which cannot draw a card it has no size for — and the flag would recover.
    *
-   * The measurements themselves are fine; they live on the internal node, which is what
-   * `measure()` reads. So readiness is asked directly of the sizes about to be used — more
-   * precise than the flag, and unlike the flag, true.
+   * The gate stays off all the same, because the question it answers is the wrong one: it is
+   * about *every* node, and what matters here is the sizes this pass is about to use. Readiness
+   * is asked of those directly — more precise than the flag, and it was never at its mercy.
    *
    * `armed` is what makes switching the mode on arrange immediately rather than waiting for the
    * next edit — the same call `setAutoRun` makes. Seeded false, so a remount with the mode

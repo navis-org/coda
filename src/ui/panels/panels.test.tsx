@@ -45,6 +45,36 @@ const minimap = () => document.querySelector('.react-flow__minimap')
 const inspectorToggle = () => screen.getByRole('button', { name: /Inspector/ })
 
 /**
+ * Give every card a layout box, and hand back the undo.
+ *
+ * `getDimensions` — React Flow's measurement — reads `offsetWidth`/`offsetHeight`, which jsdom
+ * reports as zero for everything, and a zero-sized measurement is dropped before it becomes a
+ * change. Scoped to `.react-flow__node` so nothing else in the shell starts claiming a size it
+ * does not have.
+ */
+function stubNodeOffsets(width = 232, height = 120): () => void {
+  const dimension = (value: number) => ({
+    configurable: true,
+    get(this: HTMLElement) {
+      return this.classList.contains('react-flow__node') ? value : 0
+    },
+  })
+  const original = {
+    offsetWidth: Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetWidth'),
+    offsetHeight: Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight'),
+  }
+  Object.defineProperty(HTMLElement.prototype, 'offsetWidth', dimension(width))
+  Object.defineProperty(HTMLElement.prototype, 'offsetHeight', dimension(height))
+  // jsdom's own descriptors, put back — not deleted, which would take the zero-reporting
+  // getters every other suite in this file relies on with them.
+  return () => {
+    for (const [name, descriptor] of Object.entries(original)) {
+      if (descriptor) Object.defineProperty(HTMLElement.prototype, name, descriptor)
+    }
+  }
+}
+
+/**
  * The four icon-only buttons in the toolbar's right-hand cluster.
  *
  * Taking a label off a button takes its accessible name with it unless something puts one back,
@@ -209,6 +239,32 @@ describe('the minimap', () => {
     const element = minimap() as HTMLElement
     expect(element.style.width).toBe('180px')
     expect(element.style.height).toBe('120px')
+  })
+
+  /**
+   * Every card drawn, not just the ones that declare a size.
+   *
+   * The minimap draws from React Flow's own node lookup and skips anything it has no dimensions
+   * for — and the dimensions it reads are the *user* node's, not its measurement. Coda rebuilds
+   * every node object on each store change, so the only cards carrying a size there were the
+   * ones with a `node.size` or a `defaultSize`; everything that cannot be resized was missing
+   * from the map entirely. `Editor` now hands React Flow's own measurements back to it.
+   *
+   * jsdom performs no layout, so `offsetWidth` is zero and React Flow discards its own
+   * measurement before it ever reaches a change — hence the stub. It is what makes this
+   * observable at all here; without it the map is empty either way.
+   */
+  it('draws every card, including the ones that carry no declared size', () => {
+    const offsets = stubNodeOffsets()
+    try {
+      render(<App />)
+      fireEvent.click(screen.getByLabelText('Show minimap'))
+      const drawn = document.querySelectorAll('.react-flow__minimap-node').length
+      expect(drawn).toBe(useGraphStore.getState().graph.nodes.length)
+      expect(drawn).toBeGreaterThan(1)
+    } finally {
+      offsets()
+    }
   })
 
   it('keeps its toggle mounted whether the map is or not', () => {
