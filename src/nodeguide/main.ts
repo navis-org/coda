@@ -133,6 +133,12 @@ const NODE_GLYPH: Record<string, string> = {
     .join(''),
   'out.barChart':
     '<line x1="5" y1="5" x2="5" y2="19"/><line x1="7" y1="8" x2="19" y2="8"/><line x1="7" y1="12" x2="15" y2="12"/><line x1="7" y1="16" x2="11" y2="16"/>',
+  'out.histogram':
+    '<line x1="4" y1="19" x2="20" y2="19"/><rect x="5" y="14" width="3" height="5" fill="currentColor" stroke="none"/><rect x="8.5" y="9" width="3" height="10" fill="currentColor" stroke="none"/><rect x="12" y="6" width="3" height="13" fill="currentColor" stroke="none"/><rect x="15.5" y="12" width="3" height="7" fill="currentColor" stroke="none"/>',
+  'out.pie':
+    '<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="3"/><path d="M12 5 A7 7 0 0 1 19 12 L15 12 A3 3 0 0 0 12 8 Z" fill="currentColor" stroke="none"/>',
+  'out.distribution':
+    '<line x1="4" y1="8" x2="20" y2="8"/><rect x="8" y="5" width="7" height="6"/><line x1="11" y1="5" x2="11" y2="11"/><line x1="6" y1="16" x2="19" y2="16"/><rect x="9" y="13" width="6" height="6"/><line x1="12" y1="13" x2="12" y2="19"/>',
   'out.scatter':
     '<line x1="5" y1="5" x2="5" y2="19"/><line x1="5" y1="19" x2="19" y2="19"/><circle cx="9" cy="15" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="11" r="1.4" fill="currentColor" stroke="none"/><circle cx="11" cy="16" r="1.4" fill="currentColor" stroke="none"/><circle cx="16" cy="8" r="1.4" fill="currentColor" stroke="none"/><rect x="13.6" y="13.6" width="2.6" height="2.6" fill="currentColor" stroke="none"/>',
   'out.network':

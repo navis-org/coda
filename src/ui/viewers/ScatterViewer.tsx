@@ -82,7 +82,19 @@ const CLICK_SLOP = 3
 const LASSO_STEP = 4
 
 const MARGIN_FULL = { top: 10, right: 14, bottom: 40, left: 50 }
-const MARGIN_COMPACT = { top: 5, right: 6, bottom: 6, left: 6 }
+/*
+ * Room for tick labels, and none for axis titles.
+ *
+ * It was 6px on every side, which is a grid and an axis line with no numbers against them —
+ * i.e. a box of dots, since an axis without a scale is decoration. The numbers are what say
+ * whether the cloud spans ten synapses or ten thousand, and that is the first thing anybody
+ * asks of a scatter on a card.
+ *
+ * The titles stay behind `compact`: they need another ~22px below the ticks, and the caption
+ * under the card already reads `post vs pre`, so on this surface they would be the one label
+ * that is genuinely redundant.
+ */
+const MARGIN_COMPACT = { top: 5, right: 8, bottom: 20, left: 30 }
 
 type Gesture =
   | { kind: 'pan'; lastX: number; lastY: number; view: Viewport; moved: boolean }

@@ -645,6 +645,76 @@ export function everythingGraph(): CodaGraph {
         selection: ['1001'],
       },
     },
+    /*
+     * The three label-shaped selections, one of each: a histogram whose selection is a pair of
+     * value *ranges*, a pie whose selection is a category label, and a box plot whose selection
+     * is a group label. Each exporter resolves those into a `Selected` frame its own way, and
+     * the branch that resolves nothing is already covered by every other viewer here.
+     */
+    {
+      id: 'hist',
+      type: 'out.histogram',
+      col: 8,
+      row: 4,
+      params: {
+        value: 'pre',
+        series: 'type',
+        logX: true,
+        // Automatic bins on both sides, which is the branch where the two disagree and both
+        // documents have to say so.
+        binMode: 'auto',
+        selection: ['10:100', '100:1000:c'],
+      },
+    },
+    {
+      id: 'pie',
+      type: 'out.pie',
+      col: 8,
+      row: 5,
+      params: {
+        category: 'preType',
+        value: 'sum_weight',
+        shape: 'donut',
+        maxSlices: 6,
+        selection: ['LC4'],
+      },
+    },
+    {
+      id: 'dist',
+      type: 'out.distribution',
+      col: 8,
+      row: 6,
+      params: {
+        value: 'pre',
+        group: 'type',
+        style: 'both',
+        // The one whisker rule ggplot cannot express, so the R document's refusal note is in
+        // the golden rather than only in the emitter.
+        whiskers: 'p5p95',
+        logAxis: true,
+        maxGroups: 12,
+        selection: ['LC4'],
+      },
+    },
+    {
+      /*
+       * A second box plot, because `style` and `orientation` fan out into branches the first
+       * one cannot reach: swarm-over-box, and the axis pair swapped. Both exporters read the
+       * orientation off which of `x`/`y` is numeric, so a golden that only ever showed one way
+       * round would record half the translation.
+       */
+      id: 'dist2',
+      type: 'out.distribution',
+      col: 8,
+      row: 7,
+      params: {
+        value: 'pre',
+        group: 'type',
+        style: 'swarmBox',
+        orientation: 'columns',
+        maxGroups: 8,
+      },
+    },
     {
       id: 'netview',
       type: 'out.network',
@@ -776,6 +846,10 @@ export function everythingGraph(): CodaGraph {
     ['table', 'out', 'dl', 'in'],
 
     ['group', 'out', 'bar', 'in'],
+    ['group', 'out', 'pie', 'in'],
+    ['find', 'neurons', 'hist', 'in'],
+    ['find', 'neurons', 'dist', 'in'],
+    ['find', 'neurons', 'dist2', 'in'],
     ['group', 'out', 'tableFilt', 'in'],
     ['group', 'out', 'net', 'edges'],
     ['net', 'network', 'netview', 'in'],

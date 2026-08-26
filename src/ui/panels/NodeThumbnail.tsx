@@ -236,6 +236,37 @@ const NODE_GLYPHS: Record<string, () => React.ReactElement> = {
       <line x1={7} y1={16} x2={11} y2={16} />
     </>
   ),
+  // Vertical bars over a baseline, in a bell: what distinguishes a histogram from the bar
+  // chart above it is which axis carries the numbers, so the glyphs run the other way too.
+  'out.histogram': () => (
+    <>
+      <line x1={4} y1={19} x2={20} y2={19} />
+      <rect x={5} y={14} width={3} height={5} fill="currentColor" stroke="none" />
+      <rect x={8.5} y={9} width={3} height={10} fill="currentColor" stroke="none" />
+      <rect x={12} y={6} width={3} height={13} fill="currentColor" stroke="none" />
+      <rect x={15.5} y={12} width={3} height={7} fill="currentColor" stroke="none" />
+    </>
+  ),
+  // A ring with one segment filled: the hole is what says donut, and the segment is what says
+  // this is a share of a whole rather than a target.
+  'out.pie': () => (
+    <>
+      <circle cx={12} cy={12} r={7} />
+      <circle cx={12} cy={12} r={3} />
+      <path d="M12 5 A7 7 0 0 1 19 12 L15 12 A3 3 0 0 0 12 8 Z" fill="currentColor" stroke="none" />
+    </>
+  ),
+  // Two boxes with whiskers, horizontal, which is the orientation the viewer actually draws.
+  'out.distribution': () => (
+    <>
+      <line x1={4} y1={8} x2={20} y2={8} />
+      <rect x={8} y={5} width={7} height={6} />
+      <line x1={11} y1={5} x2={11} y2={11} />
+      <line x1={6} y1={16} x2={19} y2={16} />
+      <rect x={9} y={13} width={6} height={6} />
+      <line x1={12} y1={13} x2={12} y2={19} />
+    </>
+  ),
   // Axes with a cloud of marks, one of them square: a scatter's identity is the scatter of
   // points, and the odd mark is the shape channel saying it exists.
   'out.scatter': () => (

@@ -22,10 +22,11 @@
  */
 
 import { registerNode } from '../../core/registry'
-import { NUMERIC_DTYPES, T, columnsOfType, isTabular, schemaOf } from '../../core/types'
+import { NUMERIC_DTYPES, T, columnsOfType, schemaOf } from '../../core/types'
 import { isTableValue } from '../../core/values'
 import { colorParams, sizeParams } from '../lib/encodingParams'
 import { rowsWithKeys } from '../lib/rowIds'
+import { tapPorts } from '../lib/tapPorts'
 
 export const scatterNode = registerNode({
   type: 'out.scatter',
@@ -252,15 +253,9 @@ export const scatterNode = registerNode({
     },
   ],
 
-  inferOutputs: (ctx) => {
-    const input = ctx.inputs.in
-    if (!isTabular(input)) return { out: T.table(), selected: T.table() }
-    const schema = schemaOf(input)
-    // Neurons-ness is preserved on both ports: a lassoed cluster is still neurons, which is
-    // what keeps it pluggable straight back into Connectivity or the 3D viewer.
-    const make = input.kind === 'neurons' ? T.neurons : T.table
-    return { out: make(schema), selected: make(schema) }
-  },
+  // Neurons-ness is preserved on both ports: a lassoed cluster is still neurons, which is what
+  // keeps it pluggable straight back into Connectivity or the 3D viewer. See `tapPorts`.
+  inferOutputs: (ctx) => tapPorts(ctx.inputs.in, ['out', 'selected']),
 
   /**
    * Unknown is not empty, and conflating the two puts a warning badge on a node that is

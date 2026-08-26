@@ -1186,6 +1186,14 @@ is drawn, and a seventh that reads as "a slightly different blob" is worse than 
 Marks are **area-matched** (`SQUARE = √π/2`), or a square at the circle's radius would be 27%
 larger and shape would start encoding magnitude by accident.
 
+**A card gets tick labels; only the titles are held back for the overlay.** `drawScatter` used
+to return before the labels under `compact`, and `MARGIN_COMPACT` was 6px on every side — so a
+card showed a grid and an axis line with no numbers against them, which is a box of dots, since
+an axis without a scale is decoration. The numbers are what say whether the cloud spans ten
+synapses or ten thousand. The axis *titles* still stand down: they need another ~22px below the
+ticks, and the caption already reads `post vs pre`, so on that surface they are the one label
+that is genuinely redundant.
+
 **Gestures match the canvas underneath.** Bare drag pans, Shift-drag lassos, ⌘/Ctrl-drag boxes
 — the same assignment `panOnDrag` and `selectionKeyCode="Shift"` give the editor, so the hand
 does not change modes when the pointer crosses into a card. Navigation is far more frequent
@@ -1253,6 +1261,228 @@ state distinguishes _not known yet_ from _nothing to pick_. See invariant 5's co
 **No visual verification exists.** jsdom has no canvas beyond the accept-everything stub, so
 the marks have not been looked at by anyone; what is checked is the geometry, the exported SVG
 and the caption. Same standing as the WebGL viewers.
+
+## Histogram, pie and box plot
+
+Three nodes — `out.histogram`, `out.pie`, `out.distribution` — added together because they make
+one design decision together, and because that decision is the opposite of the scatter's.
+
+### Five charts, three nodes
+
+`out.pie` carries a `shape` enum and `out.distribution` a `style` enum, so pie/donut and
+box/violin are one node each. Both toggles change the inner radius or which marks are drawn and
+nothing else, so both are `presentational` and switching never stales anything. Two node types
+apiece would have been two glyphs, two emitters, two guide entries and two sets of tests for one
+number and one boolean.
+
+The histogram is **vertical** where the Bar Chart beside it is horizontal, and that is forced
+rather than stylistic: a bar chart's categories are ROI and cell-type names, which need rotated
+labels as columns, while a histogram's axis is a *number line* — and a number line that runs
+downwards is not something anybody reads. The box plot **defaults** to horizontal for the bar
+chart's reason, since its axis of names is the category one.
+
+### The box plot's two orientations, and the one thing that knows about them
+
+`orientation` offers groups along the bottom as well as down the side. The default is argued —
+these names need rotating 45° as columns — but a box plot is the panel most likely to have to
+sit in a figure beside other vertical ones, which is worth the rotated labels.
+
+**One `Frame` knows which axis is which, and nothing else does.** Every mark is placed in
+`(value, across)` and mapped once: the violin, the swarm, five box parts, the hit area, the
+selection outline, the gridlines and both label rails. A second `if (vertical)` anywhere else is
+how two orientations become two charts that agree about the box and disagree about the violin —
+and the asymmetry that makes that likely is written into `valuePx`: **screen y grows downwards
+and a value axis does not**, so the columns layout runs its axis bottom-to-top. Getting that
+backwards everywhere is obvious; getting it backwards in one mark is not.
+
+**The band block is centred in whatever it does not fill**, and the gridlines and the value-axis
+labels move with the block rather than with the box. Eight columns capped at 72px use 576px of
+an expanded viewer's 1,470; pinned to one end, with the axis stranded at the far edge, that
+reads as a chart that stopped drawing half way. Seen in a browser, twice — once per axis.
+
+### The swarm is packed, capped, and drawn last
+
+`swarmOffsets` walks the values in order and gives each mark the offset **nearest the centre
+line** that clears everything already placed, taking its candidates from the neighbours
+themselves (`offset ± √(4r² − d²)`). A fixed ladder of offsets — 0, ±r, ±2r — is what makes a
+swarm look like a bar chart of stacked dots; this one interlocks, which is the shape that reads
+as a distribution. Since the input is sorted, the neighbours in range are a sliding window
+rather than a scan.
+
+It packs in **pixels**, not in values, because whether two circles overlap is a question about
+the screen — so the viewer projects first and packs second, and `Frame.alongPoint` exists so a
+swarm never round-trips its positions back through the scale (which under a log axis is not the
+identity). A group that packs wider than its band is **scaled** to fit rather than clipped, so a
+squeezed swarm does not read as a skewed one.
+
+Two capping decisions. 300 marks per group, then a stable stride and `swarm thinned` in the
+caption — a swarm is a plot of every observation, which is its point and also its ceiling. And
+the Tukey outliers are **not** drawn on top of one: a swarm already shows them, and drawing them
+again doubles the marks that matter most.
+
+**Drawn last, over the box, and the box loses its fill.** The first version painted the swarm
+first, so the marks inside the IQR — most of them — were covered by the box, which is a swarm
+you cannot see. Order is violin, box, swarm; under a swarm the box is stroke-only. Same order
+`sns.boxplot` then `sns.swarmplot` gives, and both emitters follow it.
+
+### A mark is not a row, so a selection is not a set of ids
+
+This is the whole of the design and it is the one place these three depart from `out.scatter`.
+
+A lasso encloses **rows**, so the scatter stores row ids and `nodes/lib/rowIds.ts` owns what a
+row is called. A pie slice, a box and a histogram bar are **aggregates**: each stands for
+anywhere between one row and a hundred thousand. Storing the rows behind one would put a
+category's worth of ids into every saved file and every share link for a gesture whose meaning
+is one word — and the ids would then have to survive an upstream re-run, which "the LC4 slice"
+does for free.
+
+So `nodes/lib/chartSelection.ts` stores a categorical mark as **its label** and a histogram bar
+as **its range**, and both the viewer writing it and the node resolving it import that one
+module. Two agreeing implementations of "what is this mark called" drift the first time either
+is touched — the standing reason `rowIds.ts` is one module, and the reason this is too.
+
+Three consequences, each of which had to be got right:
+
+- **The range is the bar's own edges, half-open, with a closed flag on the top bar.** The flag
+  travels with the range rather than being inferred, because bin count is `presentational` and
+  therefore absent from the cache key — `evaluate` has to resolve one bar without knowing how
+  many there were. Without it the largest value in the table falls outside every bar in a
+  picture that plainly contains it.
+- **The residual slice hands back the categories folded into it, not the word `Other`.** Same
+  reason: the fold depends on `maxSlices`, which is presentational, so a stored `"Other"` would
+  quietly come to mean a different set of rows after somebody widened the chart, with nothing
+  re-running to say so.
+- **Exactly one column param per node is not `presentational`** — the one the selection is
+  resolved against. `value` on the histogram, `category` on the pie, `group` on the box plot.
+  It decides which rows `Selected` carries, so marking it presentational would let a stale
+  downstream result survive a change to it (invariant 4). Precisely the call `out.scatter`
+  makes for `idColumn`, and note that it lands on a *different* param each time: the histogram
+  names its bars after the value column and the box plot names its boxes after the group one.
+
+The cost, stated: those params are absent from the overlay's presentational-only rail, exactly
+as `idColumn` is on the scatter. They are still on the card and in the inspector.
+
+### The caps, and what each does with its tail
+
+Every one of them is a drawing decision that reports itself rather than a refusal — see
+[limits.md](limits.md).
+
+| | cap | the tail |
+| --- | --- | --- |
+| Histogram | 80 automatic bins, 200 by hand | — |
+| Histogram series | 8 + `Other` | folded, achromatic |
+| Pie | `maxSlices`, default 8 | folded, achromatic, and it remembers its members |
+| Box plot | `maxGroups`, default 24 | **dropped**, and counted in the caption |
+| Violin | 4,000 values per kernel estimate | stable stride |
+| Swarm | 300 marks per group | stable stride, `swarm thinned` in the caption |
+| Outliers | 200 marks per group | stable stride, count in the tooltip |
+
+The box plot is the odd one and deliberately so. Folding a tail into one achromatic bucket works
+for a bar and a slice because those are **sums**; pooling fifty cell types into one box makes a
+distribution that describes nothing. Dropping and saying so is the honest version of the same
+cap.
+
+Both strides are stable rather than random, for the scatter's reason: a random sample reshuffles
+per render, so a violin's shape and its outlier dots would move on every repaint and the picture
+would never be the same twice.
+
+The eight-slot fold itself is **`foldByRank` in `colors.ts`**, shared with the bar chart. It was
+four copies of one loop until these three arrived, and the copies had already drifted: two
+tie-broke equal totals by label and two did not, so two charts assigned hues from `Map`
+insertion order — i.e. from whichever row the backend happened to return first — and two were
+stable. The shared one keeps the tie-break.
+
+### Freedman–Diaconis needs a fallback, and the fallback is the interesting half
+
+`chooseBinCount` sizes a bin from the interquartile range. A column whose middle half is one
+value — `pre` on a table that is mostly zero, which is an ordinary table here — gives a width of
+zero and an infinite bin count. Sturges answers from `n` alone and cannot, which is what makes
+it the fallback rather than a second opinion. The 80-bin ceiling is the other half: FD on a
+heavy-tailed integer column asks for thousands of mostly empty bars, and the picture at 80 and
+the picture at 3,000 answer the same question.
+
+Neither exporter reproduces this exactly and both say so in a note. seaborn's `bins="auto"` is
+the larger of FD and Sturges with no cap; ggplot has no automatic rule at all and defaults to
+30. A bar count that differs is the kind of thing that gets blamed on the data.
+
+### Quantiles are computed in value space; the kernel estimate is not
+
+A quantile survives any monotone transform, so `Log axis` leaves the median, the quartiles and
+the box exactly where they were. The **Tukey fence is not** invariant, and computing fences in
+log space would silently reclassify outliers the moment somebody flipped a switch that is
+supposed to change only the axis. The violin's kernel estimate *is* computed in the space the
+axis is drawn in, because a density is a statement about area and a log axis redistributes it —
+the same rule the scatter's trend line follows.
+
+Two smaller decisions in `boxStats.ts` worth not undoing. The whisker ends at the **most extreme
+value inside the fence**, not at the fence: drawing the fence puts the whisker end at a number
+no row holds and makes it stick out past the data whenever the tail is short. And every violin is
+normalised against **one peak across all the groups**, so widths compare between them — rescaling
+each to its own maximum makes a flat distribution and a sharp one the same shape.
+
+### A pie refuses negatives, and it is the only chart here that refuses anything
+
+An angle is a share of a whole and a share cannot be less than nothing. A `-40` beside a `100`
+either draws backwards over its neighbour or quietly makes the total 60, and both are a picture
+that lies. Negatives are dropped, counted, and reported in the caption. A bar of −40 is perfectly
+readable, which is why this is a property of the pie rather than a rule.
+
+The full-circle arc is the other thing to know: a 360° sweep starts and ends at the same point,
+so a single elliptical arc renders as **nothing at all**. `arcPath` draws it as two half arcs,
+and a single-category pie is not a rare case.
+
+### Selection reads as displacement, not as colour
+
+Colour is already the categorical channel and every slice is using it, so a "selected" hue would
+either collide with a category's or say two things at once. A selected slice pulls out along its
+own bisector; a selected histogram bar takes an outline and the unselected ones dim; a selected
+box takes a band outline. Dimming is applied to the **unselected** marks rather than as a
+highlight on the selected one, so with nothing selected — the common case — every mark is at full
+strength.
+
+Every bar and every box also carries a **full-height transparent hit area** under it. Without one,
+a two-pixel bar in a long tail is a two-pixel target, and the tail is what somebody clicking a
+histogram is nearly always after.
+
+### The row scan is memoised apart from the drawing
+
+Each of the three splits its work in two — `scanValues`/`binScan`, `groupValues`/`summarise`,
+`tallyCategories`/`pieSlices` — and the viewer keys the two halves on different things. The
+first is O(rows) and depends only on the table and the columns; everything a styling control
+touches is in the second, which is O(bars) or O(groups).
+
+That split is not premature. `NumberField` fires `onChange` on **every pointer-move** of a
+scrub-drag rather than on commit, so `Bins`, `Max slices` and `Max groups` each emit ~60 param
+changes a second while dragged — in up to three live viewer instances at once. Keyed as one
+memo, a drag on `Bins` re-walked 165,000 rows per frame.
+
+Two measured numbers came out of the same pass. Freedman–Diaconis needs quartiles and therefore
+a sort; a fixed bin count needs neither, and the extent comes from the scan — so the sort is
+taken **only on the automatic branch**: 20.6 ms against 0.2 ms on 165,122 values. And
+`kdeCurve` walks a two-pointer window rather than testing every value at every grid point,
+which is what the sortedness of both inputs is for: 9.5 ms against 5.3 ms at the default cap,
+bit-identical output, and a test pins it against the naive form because a pointer that reset
+one element late would still draw a plausible violin.
+
+### What was checked in a real browser
+
+The suite covers the arithmetic (`histogramBins.ts`, `pieLayout.ts`, `boxStats.ts`, all
+headless), the mark counts, and — the part that matters most — **what a click writes back**,
+since that string is what a node resolves into rows. It cannot cover anything about pixels, so
+these were driven in Chrome against the mock optic lobe, in the card and in the expanded
+overlay. Three things it caught, all of them invisible to a green suite:
+
+- **The box plot's bands were a fixed height.** Ten groups clustered in the top third of an
+  expanded viewer with six hundred pixels of gridline under them and the tick labels pinned to
+  the bottom of the card — which reads as a chart that failed to draw. Bands now stretch to fill
+  and stop at 72px, the gridlines end where the bands do, and the axis sits directly under them.
+- **`niceTicks` rounds its top up past the data**, so the box plot drew a `600` label out in the
+  right margin with no gridline under it. Ticks are now bounded at both ends of the domain.
+- **Two `defaultSize`s were too short and one label step too tight.** The pie's ring had no
+  height left at all once its params, legend and caption were laid out — a card drawing a key to
+  a picture that was not there — and the histogram's edge labels touched at 34px per label
+  (`formatCompact(126.4)` is five glyphs at ~5.6px). All three numbers are measured now, and
+  `sortSlices` moved to the inspector to buy the ring its rows back.
 
 ## Heatmap: more cells than pixels
 

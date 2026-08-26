@@ -764,6 +764,56 @@ neuron_profile_upstream_types
 # link is built here.
 ```
 
+```{r histogram}
+# ── Histogram ──
+histogram_out <- find_neurons
+histogram_selected <- histogram_out |> filter(
+  (`pre` >= 10 & `pre` < 100) |
+  (`pre` >= 100 & `pre` <= 1000)
+)
+# NOTE: Coda picks the bin count by Freedman–Diaconis capped at 80; ggplot
+# has no automatic rule and defaults to 30, which is what is written here.
+
+ggplot(histogram_out, aes(x = `pre`, fill = `type`)) +
+  geom_histogram(bins = 30, position = "stack") +
+  scale_x_log10() +
+  theme_minimal()
+```
+
+```{r box-plot}
+# ── Box Plot ──
+box_plot_out <- find_neurons
+box_plot_selected <- box_plot_out |> filter(as.character(`type`) %in% c("LC4"))
+
+box_plot_keep <- box_plot_out |> count(`type`, sort = TRUE) |> head(12) |> pull(`type`)
+box_plot_data <- box_plot_out |> filter(`type` %in% box_plot_keep)
+# NOTE: The 5th–95th percentile whisker has no `geom_boxplot` equivalent —
+# `coef` is a multiple of the IQR — so this draws the full range instead.
+ggplot(box_plot_data, aes(x = `pre`, y = `type`)) +
+  geom_violin(alpha = 0.35) +
+  geom_boxplot(width = 0.2, coef = Inf, outlier.shape = NA) +
+  scale_x_log10() +
+  theme_minimal()
+```
+
+```{r box-plot-2}
+# ── Box Plot ──
+box_plot_2_out <- find_neurons
+# NOTE: No boxes are selected on the canvas, so Selected is empty.
+box_plot_2_selected <- box_plot_2_out |> slice(0)
+
+box_plot_2_keep <- box_plot_2_out |> count(`type`, sort = TRUE) |> head(8) |> pull(`type`)
+box_plot_2_data <- box_plot_2_out |> filter(`type` %in% box_plot_2_keep)
+ggplot(box_plot_2_data, aes(y = `pre`, x = `type`)) +
+  geom_boxplot(alpha = 0.35, coef = 1.5, outlier.shape = NA) +
+  geom_jitter(width = 0.15, height = 0, size = 0.8, alpha = 0.7) +
+  theme_minimal()
+# NOTE: Coda packs a swarm so no two marks overlap and thins it to 300 per
+# group. `geom_jitter` scatters them at random instead;
+# `ggbeeswarm::geom_quasirandom` is the faithful mark if you want to add the
+# dependency.
+```
+
 ```{r adjacency}
 # ── Adjacency ──
 adjacency <- neuprint_get_adjacency_matrix(
@@ -1145,6 +1195,27 @@ ggplot(bar_chart, aes(x = `preType`, y = `sum_weight`)) +
   labs(y = "sum_weight") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r pie-chart}
+# ── Pie Chart ──
+pie_chart_out <- group_by_df_2
+pie_chart_selected <- pie_chart_out |> filter(as.character(`preType`) %in% c("LC4"))
+
+pie_chart_totals <- pie_chart_out |>
+  count(`preType`, wt = `sum_weight`, name = "value") |>
+  arrange(desc(value))
+pie_chart_slices <- pie_chart_totals |>
+  mutate(`preType` = ifelse(row_number() <= 6, as.character(`preType`), "Other")) |>
+  group_by(`preType`) |>
+  summarise(value = sum(value), .groups = "drop") |>
+  arrange(desc(value))
+
+ggplot(pie_chart_slices, aes(x = 2, y = value, fill = `preType`)) +
+  geom_col(width = 1, colour = "white") +
+  coord_polar(theta = "y") +
+  xlim(0.5, 2.5) +
+  theme_void()
 ```
 
 ```{r table-df}

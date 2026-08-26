@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest'
 
 import { column, tableSchema } from '../core/types'
 import { tableFromRows } from '../core/values'
-import { CHART_INK, MAX_SERIES, OTHER_LABEL, seriesColor } from './colors'
+import { CHART_INK, MAX_SERIES, OTHER_LABEL, foldByRank, seriesColor } from './colors'
 import {
   HASH_LEGEND_KEYS,
   clusterColor,
@@ -523,5 +523,52 @@ describe('resolveColor — literal', () => {
       'dark',
     )
     expect(resolved.at(0)).toBe(resolved.at(2))
+  })
+})
+
+/**
+ * The eight-slots-plus-achromatic rule, which four charts now depend on.
+ *
+ * `colors.ts`'s header calls the palette validated and the cap load-bearing, and until
+ * `foldByRank` existed the rule was enforced by four copies of one loop and by nothing else.
+ * Two of those copies had already drifted apart on the tie-break, which is the case below that
+ * would have caught it.
+ */
+describe('foldByRank', () => {
+  const totals = (...pairs: [string, number][]) => new Map(pairs)
+
+  it('ranks by size and keeps the cap', () => {
+    const fold = foldByRank(totals(['a', 1], ['b', 9], ['c', 5]), 2)
+    expect(fold.kept).toEqual(['b', 'c'])
+    expect(fold.tail).toEqual(['a'])
+    expect(fold.folded).toBe(true)
+  })
+
+  it('breaks a tie by label, so insertion order cannot pick the colours', () => {
+    // The drift this exists to prevent: a backend returning the same two categories in the
+    // other order would otherwise swap their hues with nothing about the data having changed.
+    const one = foldByRank(totals(['zebra', 5], ['alpha', 5]))
+    const other = foldByRank(totals(['alpha', 5], ['zebra', 5]))
+    expect(one.kept).toEqual(other.kept)
+    expect(one.kept).toEqual(['alpha', 'zebra'])
+  })
+
+  it('gives a folded name the achromatic residual slot rather than a ninth hue', () => {
+    const fold = foldByRank(totals(...Array.from({ length: 12 }, (_, i): [string, number] => [`t${i}`, 12 - i])))
+    expect(fold.kept).toHaveLength(MAX_SERIES)
+    expect(fold.slotOf('t11')).toBe(MAX_SERIES)
+    expect(seriesColor(fold.slotOf('t11'), 'dark')).toBe(seriesColor(99, 'dark'))
+  })
+
+  it('adds Other to the legend only when something folded', () => {
+    expect(foldByRank(totals(['a', 1])).legend).toEqual(['a'])
+    expect(foldByRank(totals(['a', 1], ['b', 2]), 1).legend).toEqual(['b', OTHER_LABEL])
+  })
+
+  it('answers empty for an empty tally rather than inventing a residual', () => {
+    const fold = foldByRank(totals())
+    expect(fold.kept).toEqual([])
+    expect(fold.legend).toEqual([])
+    expect(fold.folded).toBe(false)
   })
 })

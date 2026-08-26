@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 
+import { markLabel } from '../../nodes/lib/chartSelection'
 import type { TableValue } from '../../core/values'
 import {
   CHART_INK,
@@ -9,10 +10,11 @@ import {
   SURFACE_GAP,
   chartSurface,
   currentMode,
+  foldByRank,
   seriesColor,
 } from '../colors'
 import { exportBaseName as makeBaseName, tableToCsvParts } from '../export'
-import { formatCompact, formatNumber, niceTicks, truncateLabel } from '../format'
+import { formatCompact, formatNumber, labelGutter, niceTicks, truncateLabel } from '../format'
 import type { ExportSource } from './ViewerActions'
 import { ViewerActions } from './ViewerActions'
 import { tooltipPoint } from './tooltipPoint'
@@ -97,9 +99,7 @@ export function BarChartViewer({
   }
 
   const showLegend = series.length >= 2
-  const labelWidth = compact
-    ? Math.min(72, Math.max(28, longest(bars.map((b) => b.category)) * 5.6 + 6))
-    : Math.min(120, Math.max(40, longest(bars.map((b) => b.category)) * 6 + 8))
+  const labelWidth = labelGutter(bars.map((b) => b.category), compact)
   const axisHeight = compact ? 0 : 16
   const rightPad = 40
 
@@ -287,10 +287,6 @@ export function BarChartViewer({
 
 // ---------------------------------------------------------------------------
 
-function longest(values: string[]): number {
-  return values.reduce((m, v) => Math.max(m, v.length), 0)
-}
-
 /**
  * Horizontal bar path: square at the baseline (left), rounded at the data end (right).
  * A plain `rx` would round the baseline too, detaching the bar from the axis.
@@ -331,8 +327,8 @@ function aggregate(
   const seriesTotals = new Map<string, number>()
 
   for (let i = 0; i < table.length; i++) {
-    const category = label(categories[i])
-    const seriesName = seriesData ? label(seriesData[i]) : ''
+    const category = markLabel(categories[i])
+    const seriesName = seriesData ? markLabel(seriesData[i]) : ''
     const raw = Number(values[i] ?? 0)
     const value = Number.isFinite(raw) ? raw : 0
 
@@ -342,26 +338,26 @@ function aggregate(
     seriesTotals.set(seriesName, (seriesTotals.get(seriesName) ?? 0) + value)
   }
 
-  // Rank series by magnitude, then cap. Colour follows the entity (its rank in this
-  // ordering), and stays with it as long as the data doesn't change.
-  const ranked = [...seriesTotals.entries()].sort((a, b) => b[1] - a[1]).map(([name]) => name)
-  const kept = ranked.slice(0, MAX_SERIES)
-  const folded = ranked.length > MAX_SERIES
-  const colorOf = new Map(kept.map((name, index) => [name, index]))
-  const seriesOrder = folded ? [...kept, OTHER_LABEL] : kept
+  /*
+   * Rank series by magnitude, then cap. Colour follows the entity (its rank in this ordering),
+   * and stays with it as long as the data doesn't change.
+   *
+   * Through `foldByRank` rather than inline since the histogram and the pie needed the same
+   * loop: the copy here had no tie-break, so equal totals were coloured in `Map` insertion
+   * order — i.e. by whichever row the backend happened to return first.
+   */
+  const fold = foldByRank(seriesTotals)
 
   const bars: Bar[] = [...totals.entries()].map(([category, byCategory]) => {
     const segments: Segment[] = []
     let otherTotal = 0
-    for (const name of kept) {
+    for (const name of fold.kept) {
       const value = byCategory.get(name)
       if (value === undefined || value === 0) continue
-      segments.push({ series: name, value, colorIndex: colorOf.get(name)! })
+      segments.push({ series: name, value, colorIndex: fold.slotOf(name) })
     }
-    if (folded) {
-      for (const [name, value] of byCategory) {
-        if (!colorOf.has(name)) otherTotal += value
-      }
+    if (fold.folded) {
+      for (const name of fold.tail) otherTotal += byCategory.get(name) ?? 0
       if (otherTotal > 0) {
         segments.push({ series: OTHER_LABEL, value: otherTotal, colorIndex: MAX_SERIES })
       }
@@ -377,10 +373,5 @@ function aggregate(
   else bars.sort((a, b) => a.category.localeCompare(b.category, undefined, { numeric: true }))
 
   const max = bars.reduce((m, b) => Math.max(m, b.total), 0)
-  return { bars, series: seriesColumn ? seriesOrder : [], max }
-}
-
-function label(cell: unknown): string {
-  if (cell === null || cell === undefined) return '—'
-  return String(cell)
+  return { bars, series: seriesColumn ? fold.legend : [], max }
 }

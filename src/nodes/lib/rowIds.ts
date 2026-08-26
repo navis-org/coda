@@ -50,12 +50,28 @@ export function rowsWithKeys(
   selection: unknown,
   idColumn: string | undefined,
 ): TableValue {
+  return rowsMatching(table, rowKeys(table, idColumn), selection)
+}
+
+/**
+ * The rows a selection names, given whatever names them.
+ *
+ * The half of `rowsWithKeys` that has nothing to do with ids, split out when a second kind of
+ * selection arrived: `chartSelection.rowsWithLabels` is this loop with `markLabel` in place of
+ * `rowKeys`, and had been the same eight lines written again with the arguments in a different
+ * order. What a mark is *called* differs between the two (see that module's header); which rows
+ * a set of names picks out does not.
+ */
+export function rowsMatching(
+  table: TableValue,
+  nameAt: (row: number) => string,
+  selection: unknown,
+): TableValue {
   const wanted = new Set((Array.isArray(selection) ? selection : []).map(String))
   const rows: number[] = []
   if (wanted.size > 0) {
-    const keyAt = rowKeys(table, idColumn)
     for (let row = 0; row < table.length; row++) {
-      if (wanted.has(keyAt(row))) rows.push(row)
+      if (wanted.has(nameAt(row))) rows.push(row)
     }
   }
   return selectRows(table, rows)

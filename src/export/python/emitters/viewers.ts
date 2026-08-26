@@ -15,6 +15,7 @@ import { datasetRef } from '../../../core/types'
 import { decodeClauses, resolveFilters, usesRegex } from '../../../nodes/lib/tableFilter'
 import { pyList, pyStr } from '../py'
 import { registerEmitter } from '../registry'
+import { decodeRanges } from '../../../nodes/lib/chartSelection'
 import { codaNeurons, pySelection, selectionIds } from './common'
 import { filterMasks } from './tableFilters'
 
@@ -106,6 +107,243 @@ registerEmitter('out.barChart', (ctx) => {
   lines.push(`plt.ylabel(${pyStr(value)})`, `plt.tight_layout()`, `plt.show()`)
   return lines
 })
+
+// ---------------------------------------------------------------------------
+// Histogram, pie and box/violin — the three charts with a label-shaped selection
+// ---------------------------------------------------------------------------
+
+/**
+ * A categorical selection, as a pandas mask.
+ *
+ * `.astype(str)` rather than a bare `isin`, and that is faithfulness rather than caution:
+ * Coda's `markLabel` stringifies the cell before comparing, so a selection made on a numeric
+ * category column holds `'5'` and not `5`. Without the cast the notebook would silently select
+ * nothing on exactly the graphs where the canvas selects something.
+ */
+function labelMask(frame: string, column: string, labels: readonly string[]): string {
+  return `${frame}[${frame}[${pyStr(column)}].astype(str).isin(${pyList(labels)})]`
+}
+
+registerEmitter('out.histogram', (ctx) => {
+  const src = ctx.wired('in')
+  ctx.require('seaborn')
+  ctx.require('matplotlib')
+  const out = ctx.output('out')
+  const selected = ctx.output('selected')
+  const value = ctx.column('value')
+  const series = ctx.column('series')
+
+  const lines = [`${out} = ${src}`]
+
+  // The ranges, straight out of the stored selection — the same decode the node runs, so the
+  // notebook and the canvas cut the table at the same numbers.
+  const ranges = decodeRanges(ctx.params.selection)
+  if (ranges.length > 0 && value) {
+    const clauses = ranges.map(
+      (range) =>
+        `((${out}[${pyStr(value)}] >= ${range.lo}) & (${out}[${pyStr(value)}] ` +
+        `${range.closed ? '<=' : '<'} ${range.hi}))`,
+    )
+    lines.push(
+      `${selected} = ${out}[`,
+      ...clauses.map((clause, i) => `    ${i === 0 ? ' ' : '|'} ${clause}`),
+      `]`,
+    )
+  } else {
+    lines.push(
+      ...ctx.note('No bars are selected on the canvas, so Selected is empty.'),
+      `${selected} = ${out}.iloc[0:0]`,
+    )
+  }
+
+  if (!value) {
+    return [...lines, ...ctx.note('No value column is picked, so nothing is drawn.')]
+  }
+
+  const binMode = String(ctx.params.binMode ?? 'auto')
+  const normalize = String(ctx.params.normalize ?? 'count')
+  const args = [
+    `data=${out}`,
+    `x=${pyStr(value)}`,
+    ...(series && series !== value ? [`hue=${pyStr(series)}`, `multiple='stack'`] : []),
+    binMode === 'fixed' ? `bins=${Math.round(Number(ctx.params.bins ?? 30))}` : `bins='auto'`,
+    ...(normalize === 'count' ? [] : [`stat=${pyStr(normalize)}`]),
+    ...(ctx.params.cumulative === true && normalize !== 'density' ? ['cumulative=True'] : []),
+    ...(ctx.params.logX === true ? ['log_scale=True'] : []),
+  ]
+
+  if (binMode === 'auto') {
+    // Both are "the automatic rule" and they are not the same rule, which is the sort of
+    // difference that shows up as a differently shaped picture and gets blamed on the data.
+    lines.push(
+      ...ctx.note(
+        'Coda picks bins by Freedman–Diaconis capped at 80; seaborn’s `bins="auto"` takes the ' +
+          'larger of Freedman–Diaconis and Sturges and has no cap, so the bar count can differ.',
+      ),
+    )
+  }
+  lines.push(``, `plt.figure(figsize=(8, 5))`, `sns.histplot(${args.join(', ')})`)
+  lines.push(`plt.tight_layout()`, `plt.show()`)
+  return lines
+})
+
+registerEmitter('out.pie', (ctx) => {
+  const src = ctx.wired('in')
+  ctx.require('pandas')
+  ctx.require('matplotlib')
+  const out = ctx.output('out')
+  const selected = ctx.output('selected')
+  const category = ctx.column('category')
+  const value = ctx.column('value')
+
+  const lines = [`${out} = ${src}`]
+
+  const labels = selectionIds(ctx)
+  if (labels.length > 0 && category) {
+    lines.push(`${selected} = ${labelMask(out, category, labels)}`)
+  } else {
+    lines.push(
+      ...ctx.note('No slices are selected on the canvas, so Selected is empty.'),
+      `${selected} = ${out}.iloc[0:0]`,
+    )
+  }
+
+  if (!category) {
+    return [...lines, ...ctx.note('No category column is picked, so nothing is drawn.')]
+  }
+
+  const maxSlices = Math.max(2, Math.round(Number(ctx.params.maxSlices ?? 8)))
+  const sortBySize = ctx.params.sortSlices !== false
+  const labelMode = String(ctx.params.sliceLabels ?? 'percent')
+
+  lines.push(
+    ``,
+    value
+      ? `_totals = ${out}.groupby(${pyStr(category)})[${pyStr(value)}].sum()`
+      : `_totals = ${out}[${pyStr(category)}].value_counts()`,
+    sortBySize
+      ? `_totals = _totals.sort_values(ascending=False)`
+      : `_totals = _totals.sort_index()`,
+    // `.copy()` because the residual is written back into the head, and a slice of a Series is
+    // a view — the assignment would otherwise be a SettingWithCopyWarning and, on some pandas
+    // versions, a no-op.
+    `_top = _totals.head(${maxSlices}).copy()`,
+    `if len(_totals) > ${maxSlices}:`,
+    `    _top['Other'] = _totals.iloc[${maxSlices}:].sum()`,
+    ``,
+    `plt.figure(figsize=(6, 6))`,
+    `plt.pie(`,
+    `    _top, labels=_top.index,`,
+    labelMode === 'percent'
+      ? `    autopct='%1.0f%%',`
+      : labelMode === 'value'
+        ? `    autopct=lambda pct: f'{pct * _top.sum() / 100:.0f}',`
+        : `    autopct=None,`,
+    // The hole, which is the whole of the donut/pie switch.
+    ctx.params.shape === 'pie'
+      ? `    wedgeprops=dict(edgecolor='white'),`
+      : `    wedgeprops=dict(width=0.42, edgecolor='white'),`,
+    `)`,
+    `plt.tight_layout()`,
+    `plt.show()`,
+  )
+  return lines
+})
+
+registerEmitter('out.distribution', (ctx) => {
+  const src = ctx.wired('in')
+  ctx.require('seaborn')
+  ctx.require('matplotlib')
+  const out = ctx.output('out')
+  const selected = ctx.output('selected')
+  const value = ctx.column('value')
+  const group = ctx.column('group')
+
+  const lines = [`${out} = ${src}`]
+
+  const labels = selectionIds(ctx)
+  if (labels.length > 0 && group) {
+    lines.push(`${selected} = ${labelMask(out, group, labels)}`)
+  } else {
+    lines.push(
+      ...ctx.note('No boxes are selected on the canvas, so Selected is empty.'),
+      `${selected} = ${out}.iloc[0:0]`,
+    )
+  }
+
+  if (!value) {
+    return [...lines, ...ctx.note('No value column is picked, so nothing is drawn.')]
+  }
+
+  const style = String(ctx.params.style ?? 'box')
+  const whiskers = String(ctx.params.whiskers ?? 'tukey')
+  const maxGroups = Math.max(1, Math.round(Number(ctx.params.maxGroups ?? 24)))
+  // Hoisted, as the R emitter beside it does: read twice, the two could drift into emitting
+  // `order=_order` without the line that binds it.
+  const grouped = !!group && group !== value
+
+  lines.push(``, `plt.figure(figsize=(8, 6))`)
+  if (grouped) {
+    // The cap is part of the picture, not a detail of the widget: without the `order` the
+    // notebook draws every group and the two documents disagree about what is on screen.
+    lines.push(
+      `_order = ${out}[${pyStr(group)}].value_counts().head(${maxGroups}).index`,
+    )
+  }
+  /*
+   * The value axis is `x` laid out as rows and `y` as columns — seaborn reads the orientation
+   * off which of the two is numeric, so swapping the pair is the whole translation. `order` is
+   * unaffected: it names the categorical axis whichever one that is.
+   */
+  const columns = ctx.params.orientation === 'columns'
+  const valueAxis = columns ? 'y' : 'x'
+  const groupAxis = columns ? 'x' : 'y'
+  const shared = [
+    `data=${out}`,
+    `${valueAxis}=${pyStr(value)}`,
+    ...(grouped ? [`${groupAxis}=${pyStr(group!)}`, `order=_order`] : []),
+  ]
+  const fliers = ctx.params.points === 'none' ? ['showfliers=False'] : ['fliersize=2']
+
+  if (style === 'box') {
+    lines.push(`sns.boxplot(${[...shared, whisArg(whiskers), ...fliers].join(', ')})`)
+  } else if (style === 'violin') {
+    lines.push(`sns.violinplot(${[...shared, `inner='quartile'`].join(', ')})`)
+  } else if (style === 'both') {
+    lines.push(`sns.violinplot(${[...shared, `inner='box'`].join(', ')})`)
+  } else {
+    /*
+     * A swarm on its own, or over a box drawn first so the marks sit on top of it.
+     *
+     * Coda thins a swarm past 300 marks per group; seaborn draws every point and warns when
+     * they will not fit, so a large group comes out denser here than on the canvas. Said out
+     * loud rather than reproduced — a stride that matched Coda's exactly would be a hand-rolled
+     * sample in the middle of an otherwise idiomatic cell.
+     */
+    if (style === 'swarmBox') {
+      lines.push(
+        `sns.boxplot(${[...shared, whisArg(whiskers), 'showfliers=False', `boxprops=dict(alpha=0.35)`].join(', ')})`,
+      )
+    }
+    lines.push(`sns.swarmplot(${[...shared, 'size=3'].join(', ')})`)
+    lines.push(
+      ...ctx.note(
+        'Coda thins a swarm to 300 marks per group; seaborn plots every observation, so a ' +
+          'large group is denser here than on the canvas.',
+      ),
+    )
+  }
+  if (ctx.params.logAxis === true) lines.push(`plt.${valueAxis}scale('log')`)
+  lines.push(`plt.tight_layout()`, `plt.show()`)
+  return lines
+})
+
+/** seaborn's `whis`, for each of the three rules the node offers. */
+function whisArg(rule: string): string {
+  if (rule === 'p5p95') return 'whis=(5, 95)'
+  if (rule === 'minmax') return 'whis=(0, 100)'
+  return 'whis=1.5'
+}
 
 // ---------------------------------------------------------------------------
 // Heatmap

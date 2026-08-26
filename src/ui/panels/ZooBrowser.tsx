@@ -456,7 +456,7 @@ export function ZooBrowser({ onClose }: ZooBrowserProps) {
             target="_blank"
             rel="noreferrer noopener"
           >
-            Deposit a workflow
+            Contribute a workflow
           </a>
         </div>
       </div>

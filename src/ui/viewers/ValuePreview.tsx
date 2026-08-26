@@ -19,6 +19,10 @@ import {
 } from '../../core/values'
 import { readColorSpec, readHiddenKeys, readSizeSpec } from '../../nodes/lib/encodingParams'
 import { BarChartViewer } from './BarChartViewer'
+import { DistributionViewer } from './DistributionViewer'
+import type { DistributionStyle } from './DistributionViewer'
+import { HistogramViewer } from './HistogramViewer'
+import { PieViewer } from './PieViewer'
 import { HeatmapViewer } from './HeatmapViewer'
 import { LazyNetworkViewer, LazyViewer3D } from './LazyViewers'
 import type { BackgroundChoice } from './viewer3dScene'
@@ -32,6 +36,8 @@ import { ProfileViewer } from './ProfileViewer'
 import { ExportNodeContext } from './exportRegistry'
 import { ScatterViewer } from './ScatterViewer'
 import { DendrogramViewer } from './DendrogramViewer'
+import type { WhiskerRule } from './boxStats'
+import type { Normalize } from './histogramBins'
 import type { LayoutName } from './networkLayout'
 import type { FilterClause } from '../../nodes/lib/tableFilter'
 import { decodeClauses, encodeClauses } from '../../nodes/lib/tableFilter'
@@ -413,22 +419,9 @@ function ValuePreviewInner({
   if (node.type === 'out.scatter' && isTableValue(value)) {
     const x = ctx.column('x')
     const y = ctx.column('y')
-    if (!x || !y) {
-      // "Not known yet" and "nothing to pick" are different states and want different words.
-      // A Pivot publishes its wide schema only once it has run — and not again until it does
-      // after a reload — so telling someone to pick a column they cannot see is worse than
-      // telling them the columns have not arrived.
-      const known = schemaOf(ctx.inputs.in)
-      return (
-        <div className="viewer">
-          <div className="viewer__empty">
-            {known
-              ? 'Pick two numeric columns to plot.'
-              : 'Columns not known yet — run the graph.'}
-          </div>
-        </div>
-      )
-    }
+    // "Not known yet" and "nothing to pick" are different states and want different words —
+    // see `NoColumns`, which is where that distinction now lives for every chart here.
+    if (!x || !y) return <NoColumns known={!!schemaOf(ctx.inputs.in)} what="two numeric columns" />
     const shape = ctx.column('shapeBy')
     const label = ctx.column('labelBy')
     const id = ctx.column('idColumn')
@@ -461,16 +454,11 @@ function ValuePreviewInner({
     const valueColumn = ctx.column('value')
     const series = node.params.useSeries === true ? ctx.column('series') : undefined
     if (!category || !valueColumn) {
-      // Same distinction the scatter branch draws: a Pivot publishes its wide schema only
-      // once it has run, so before that there is nothing to pick rather than a bad pick.
       return (
-        <div className="viewer">
-          <div className="viewer__empty">
-            {schemaOf(ctx.inputs.in)
-              ? 'Pick a category and a numeric value column to plot.'
-              : 'Columns not known yet — run the graph.'}
-          </div>
-        </div>
+        <NoColumns
+          known={!!schemaOf(ctx.inputs.in)}
+          what="a category and a numeric value column"
+        />
       )
     }
     return (
@@ -480,6 +468,83 @@ function ValuePreviewInner({
         valueColumn={valueColumn}
         {...(series && series !== category ? { seriesColumn: series } : {})}
         sortBars={node.params.sortBars !== false}
+        {...shared}
+      />
+    )
+  }
+
+  /*
+   * The three charts that bin, slice and summarise, in one block because they answer the same
+   * two questions the same way: which column, and what to say when it has not resolved yet.
+   *
+   * "Not known yet" and "nothing to pick" are different states and get different words — a
+   * `core.pivot` publishes its wide schema only once it has run, and again not at all after a
+   * reload, so telling somebody to pick a column they cannot see is worse than telling them the
+   * columns have not arrived. Same distinction the scatter and bar branches draw above.
+   */
+  if (node.type === 'out.histogram' && isTableValue(value)) {
+    const valueColumn = ctx.column('value')
+    if (!valueColumn) {
+      return <NoColumns known={!!schemaOf(ctx.inputs.in)} what="a numeric column" />
+    }
+    const series = ctx.column('series')
+    return (
+      <HistogramViewer
+        table={value}
+        valueColumn={valueColumn}
+        {...(series && series !== valueColumn ? { seriesColumn: series } : {})}
+        binMode={node.params.binMode === 'fixed' ? 'fixed' : 'auto'}
+        bins={Number(node.params.bins ?? 30)}
+        log={node.params.logX === true}
+        normalize={readNormalize(node.params.normalize)}
+        cumulative={node.params.cumulative === true}
+        selection={selection}
+        {...(onSelectionChange ? { onSelectionChange } : {})}
+        {...shared}
+      />
+    )
+  }
+
+  if (node.type === 'out.pie' && isTableValue(value)) {
+    const category = ctx.column('category')
+    if (!category) return <NoColumns known={!!schemaOf(ctx.inputs.in)} what="a category column" />
+    const valueColumn = ctx.column('value')
+    return (
+      <PieViewer
+        table={value}
+        categoryColumn={category}
+        {...(valueColumn && valueColumn !== category ? { valueColumn } : {})}
+        shape={node.params.shape === 'pie' ? 'pie' : 'donut'}
+        sortSlices={node.params.sortSlices !== false}
+        maxSlices={Number(node.params.maxSlices ?? 8)}
+        sliceLabels={readSliceLabels(node.params.sliceLabels)}
+        selection={selection}
+        {...(onSelectionChange ? { onSelectionChange } : {})}
+        {...shared}
+      />
+    )
+  }
+
+  if (node.type === 'out.distribution' && isTableValue(value)) {
+    const valueColumn = ctx.column('value')
+    if (!valueColumn) {
+      return <NoColumns known={!!schemaOf(ctx.inputs.in)} what="a numeric column" />
+    }
+    const group = ctx.column('group')
+    return (
+      <DistributionViewer
+        table={value}
+        valueColumn={valueColumn}
+        {...(group && group !== valueColumn ? { groupColumn: group } : {})}
+        style={readBoxStyle(node.params.style)}
+        orientation={node.params.orientation === 'columns' ? 'columns' : 'rows'}
+        points={node.params.points === 'none' ? 'none' : 'outliers'}
+        whiskers={readWhiskers(node.params.whiskers)}
+        log={node.params.logAxis === true}
+        sortByMedian={node.params.sortGroups !== false}
+        maxGroups={Number(node.params.maxGroups ?? 24)}
+        selection={selection}
+        {...(onSelectionChange ? { onSelectionChange } : {})}
         {...shared}
       />
     )
@@ -643,4 +708,43 @@ function roiLabelMode(value: unknown): RoiLabelMode {
 
 function roiHemisphere(value: unknown): 'both' | 'left' | 'right' {
   return value === 'left' || value === 'right' ? value : 'both'
+}
+
+function readNormalize(value: unknown): Normalize {
+  return value === 'percent' || value === 'density' ? value : 'count'
+}
+
+function readSliceLabels(value: unknown): 'percent' | 'value' | 'none' {
+  return value === 'value' || value === 'none' ? value : 'percent'
+}
+
+function readBoxStyle(value: unknown): DistributionStyle {
+  return value === 'violin' || value === 'both' || value === 'swarm' || value === 'swarmBox'
+    ? value
+    : 'box'
+}
+
+function readWhiskers(value: unknown): WhiskerRule {
+  return value === 'minmax' || value === 'p5p95' ? value : 'tukey'
+}
+
+/**
+ * The empty state a chart shows when its column has not resolved.
+ *
+ * One component rather than five copies, because the *distinction* it draws is the part worth
+ * getting right and is easy to lose: a schema that has not arrived is not a table with nothing
+ * in it. A `core.pivot` upstream publishes its wide columns only once it has run — and again
+ * not at all after a reload — so "pick a column" there names something nobody can see yet.
+ *
+ * The scatter and the bar chart wrote it inline first, with the distinction spelled out in a
+ * comment on each; they go through here now, so the sentence exists once.
+ */
+function NoColumns({ known, what }: { known: boolean; what: string }) {
+  return (
+    <div className="viewer">
+      <div className="viewer__empty">
+        {known ? `Pick ${what} to plot.` : 'Columns not known yet — run the graph.'}
+      </div>
+    </div>
+  )
 }

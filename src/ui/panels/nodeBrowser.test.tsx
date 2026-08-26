@@ -163,17 +163,20 @@ describe('NodeBrowser filtering', () => {
     expect(rowNames().sort()).toEqual([
       '3D View',
       'Bar Chart',
+      'Box Plot',
       'Dataset Summary',
       'Dendrogram',
       'Heatmap',
+      'Histogram',
       'Network Viewer',
       'Neuroglancer',
       'Neuron Profile',
+      'Pie Chart',
       'ROI Viewer',
       'Scatter Plot',
       'Table',
     ])
-    expect(screen.getByText('11 nodes')).toBeTruthy()
+    expect(screen.getByText('14 nodes')).toBeTruthy()
   })
 
   it('fuzzy-searches across every category, best match first', () => {

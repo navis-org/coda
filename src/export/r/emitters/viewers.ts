@@ -8,9 +8,10 @@
  */
 
 import { decodeClauses, resolveFilters, usesRegex } from '../../../nodes/lib/tableFilter'
-import { rStr, rVector } from '../r'
+import { rCol as col, rStr, rVector } from '../r'
 import { registerEmitter } from '../registry'
-import { selectionIds } from './common'
+import { decodeRanges } from '../../../nodes/lib/chartSelection'
+import { selectionIds, selectionLabels } from './common'
 import { filterPredicates } from './tableFilters'
 
 registerEmitter('out.table', (ctx) => {
@@ -79,9 +80,9 @@ registerEmitter('out.barChart', (ctx) => {
   }
 
   const aes = [
-    `x = \`${category}\``,
-    `y = \`${value}\``,
-    ...(series ? [`fill = \`${series}\``] : []),
+    `x = ${col(category)}`,
+    `y = ${col(value)}`,
+    ...(series ? [`fill = ${col(series)}`] : []),
   ]
   lines.push(
     ``,
@@ -138,7 +139,7 @@ registerEmitter('out.scatter', (ctx) => {
 
   const lines = [`${out} <- ${src}`]
   if (selection.length > 0 && idColumn) {
-    lines.push(`${selected} <- ${out} |> filter(\`${idColumn}\` %in% ${rVector(selection)})`)
+    lines.push(`${selected} <- ${out} |> filter(${col(idColumn)} %in% ${rVector(selection)})`)
   } else {
     lines.push(
       ...ctx.note('Nothing is lassoed on the canvas, so Selected is empty.'),
@@ -153,11 +154,11 @@ registerEmitter('out.scatter', (ctx) => {
   const size = ctx.column('sizeColumn')
   const shape = ctx.column('shapeBy')
   const aes = [
-    `x = \`${x}\``,
-    `y = \`${y}\``,
-    ...(hue ? [`colour = \`${hue}\``] : []),
-    ...(size ? [`size = \`${size}\``] : []),
-    ...(shape ? [`shape = \`${shape}\``] : []),
+    `x = ${col(x)}`,
+    `y = ${col(y)}`,
+    ...(hue ? [`colour = ${col(hue)}`] : []),
+    ...(size ? [`size = ${col(size)}`] : []),
+    ...(shape ? [`shape = ${col(shape)}`] : []),
   ]
   const opacity = Number(ctx.params.opacity ?? 1)
 
@@ -175,6 +176,271 @@ registerEmitter('out.scatter', (ctx) => {
   lines.push(`  theme_minimal()`)
   return lines
 })
+
+/**
+ * A categorical selection, as a dplyr predicate.
+ *
+ * `as.character()` rather than a bare `%in%`, for the same reason the notebook casts: Coda's
+ * `markLabel` stringifies the cell before comparing, so a selection made on a numeric category
+ * column holds `"5"` and not `5`. Without the cast this document would select nothing on
+ * exactly the graphs where the canvas selects something.
+ */
+function labelFilter(frame: string, column: string, labels: readonly string[]): string {
+  return `${frame} |> filter(as.character(${col(column)}) %in% ${rVector(labels)})`
+}
+
+registerEmitter('out.histogram', (ctx) => {
+  const src = ctx.wired('in')
+  ctx.library('ggplot2')
+  ctx.library('dplyr')
+  const out = ctx.output('out')
+  const selected = ctx.output('selected')
+  const value = ctx.column('value')
+  const series = ctx.column('series')
+
+  const lines = [`${out} <- ${src}`]
+
+  // The same decode the node runs, so this document and the canvas cut the table at the same
+  // numbers rather than at two readings of one stored selection.
+  const ranges = decodeRanges(ctx.params.selection)
+  if (ranges.length > 0 && value) {
+    const clauses = ranges.map(
+      (range) =>
+        `(${col(value)} >= ${range.lo} & ${col(value)} ${range.closed ? '<=' : '<'} ${range.hi})`,
+    )
+    lines.push(`${selected} <- ${out} |> filter(`, `  ${clauses.join(' |\n  ')}`, `)`)
+  } else {
+    lines.push(
+      ...ctx.note('No bars are selected on the canvas, so Selected is empty.'),
+      `${selected} <- ${out} |> slice(0)`,
+    )
+  }
+
+  if (!value) {
+    return [...lines, ...ctx.note('No value column is picked, so nothing is drawn.')]
+  }
+
+  const normalize = String(ctx.params.normalize ?? 'count')
+  const cumulative = ctx.params.cumulative === true && normalize !== 'density'
+  const fixed = String(ctx.params.binMode ?? 'auto') === 'fixed'
+  const bins = Math.max(2, Math.round(Number(ctx.params.bins ?? 30)))
+
+  /*
+   * ggplot's y is a mapping rather than a `stat=` argument, so every scaling here goes in the
+   * aesthetic — and a cumulative histogram is `cumsum()` over the bin counts rather than a
+   * flag. Stated as code rather than dropped with a note: it is the same picture, written the
+   * way this language writes it.
+   */
+  const y = cumulative
+    ? normalize === 'percent'
+      ? 'cumsum(after_stat(count)) / sum(after_stat(count)) * 100'
+      : 'cumsum(after_stat(count))'
+    : normalize === 'percent'
+      ? 'after_stat(count) / sum(after_stat(count)) * 100'
+      : normalize === 'density'
+        ? 'after_stat(density)'
+        : undefined
+
+  const aes = [
+    `x = ${col(value)}`,
+    ...(y ? [`y = ${y}`] : []),
+    ...(series && series !== value ? [`fill = ${col(series)}`] : []),
+  ]
+  // Notes go before the chain rather than inside it. A comment between two `+`-continued
+  // lines parses, but it reads as a step in the plot and it is not one.
+  if (!fixed) {
+    lines.push(
+      ...ctx.note(
+        'Coda picks the bin count by Freedman–Diaconis capped at 80; ggplot has no automatic ' +
+          'rule and defaults to 30, which is what is written here.',
+      ),
+    )
+  }
+  lines.push(
+    ``,
+    `ggplot(${out}, aes(${aes.join(', ')})) +`,
+    `  geom_histogram(bins = ${fixed ? bins : 30}, position = "stack") +`,
+  )
+  if (ctx.params.logX === true) lines.push(`  scale_x_log10() +`)
+  lines.push(`  theme_minimal()`)
+  return lines
+})
+
+registerEmitter('out.pie', (ctx) => {
+  const src = ctx.wired('in')
+  ctx.library('ggplot2')
+  ctx.library('dplyr')
+  const out = ctx.output('out')
+  const selected = ctx.output('selected')
+  const category = ctx.column('category')
+  const value = ctx.column('value')
+
+  const lines = [`${out} <- ${src}`]
+
+  const labels = selectionLabels(ctx)
+  if (labels.length > 0 && category) {
+    lines.push(`${selected} <- ${labelFilter(out, category, labels)}`)
+  } else {
+    lines.push(
+      ...ctx.note('No slices are selected on the canvas, so Selected is empty.'),
+      `${selected} <- ${out} |> slice(0)`,
+    )
+  }
+
+  if (!category) {
+    return [...lines, ...ctx.note('No category column is picked, so nothing is drawn.')]
+  }
+
+  const maxSlices = Math.max(2, Math.round(Number(ctx.params.maxSlices ?? 8)))
+  const donut = ctx.params.shape !== 'pie'
+  /*
+   * Prefixed with the node's own name, and not with an underscore.
+   * **A leading `_` is a syntax error in R** — since 4.2 it is the native pipe's placeholder —
+   * so the `_plot` idiom the Python emitters use does not carry over. Naming them after the
+   * node also keeps two charts in one document from overwriting each other's working tables.
+   */
+  const totals = `${ctx.name}_totals`
+  const slices = `${ctx.name}_slices`
+
+  lines.push(
+    ``,
+    // Tallied, then ranked by size, then folded — in that order, because which categories get
+    // a slice is decided by size whatever the display order is. dplyr alone rather than
+    // `forcats::fct_lump_n`, which says it in one call at the price of a package the setup
+    // chunk would attach for this one node.
+    `${totals} <- ${out} |>`,
+    value
+      ? `  count(${col(category)}, wt = ${col(value)}, name = "value") |>`
+      : `  count(${col(category)}, name = "value") |>`,
+    `  arrange(desc(value))`,
+    `${slices} <- ${totals} |>`,
+    `  mutate(${col(category)} = ifelse(row_number() <= ${maxSlices}, as.character(${col(category)}), "Other")) |>`,
+    `  group_by(${col(category)}) |>`,
+    `  summarise(value = sum(value), .groups = "drop") |>`,
+    ctx.params.sortSlices !== false
+      ? `  arrange(desc(value))`
+      : `  arrange(${col(category)})`,
+  )
+  lines.push(
+    ``,
+    // The donut recipe: a stacked column in polar coordinates, with the x limit deciding
+    // whether there is a hole. `theme_void` because a pie has no axes to draw.
+    `ggplot(${slices}, aes(x = 2, y = value, fill = ${col(category)})) +`,
+    `  geom_col(width = 1, colour = "white") +`,
+    `  coord_polar(theta = "y") +`,
+    donut ? `  xlim(0.5, 2.5) +` : `  xlim(0, 2.5) +`,
+    `  theme_void()`,
+  )
+  return lines
+})
+
+registerEmitter('out.distribution', (ctx) => {
+  const src = ctx.wired('in')
+  ctx.library('ggplot2')
+  ctx.library('dplyr')
+  const out = ctx.output('out')
+  const selected = ctx.output('selected')
+  const value = ctx.column('value')
+  const group = ctx.column('group')
+
+  const lines = [`${out} <- ${src}`]
+
+  const labels = selectionLabels(ctx)
+  if (labels.length > 0 && group) {
+    lines.push(`${selected} <- ${labelFilter(out, group, labels)}`)
+  } else {
+    lines.push(
+      ...ctx.note('No boxes are selected on the canvas, so Selected is empty.'),
+      `${selected} <- ${out} |> slice(0)`,
+    )
+  }
+
+  if (!value) {
+    return [...lines, ...ctx.note('No value column is picked, so nothing is drawn.')]
+  }
+
+  const grouped = !!group && group !== value
+  const style = String(ctx.params.style ?? 'box')
+  const whiskers = String(ctx.params.whiskers ?? 'tukey')
+  const maxGroups = Math.max(1, Math.round(Number(ctx.params.maxGroups ?? 24)))
+  // Not `_keep`/`_plot`: a leading underscore is a syntax error in R. See the pie emitter.
+  const keep = `${ctx.name}_keep`
+  const plot = `${ctx.name}_data`
+
+  if (grouped) {
+    // The cap is part of the picture: without it this document draws every group and the two
+    // disagree about what is on screen.
+    lines.push(
+      ``,
+      `${keep} <- ${out} |> count(${col(group)}, sort = TRUE) |> head(${maxGroups}) |> pull(${col(group)})`,
+      `${plot} <- ${out} |> filter(${col(group)} %in% ${keep})`,
+    )
+  } else {
+    lines.push(``, `${plot} <- ${out}`)
+  }
+
+  if (whiskers === 'p5p95' && style !== 'violin') {
+    // `coef` is a multiple of the IQR and cannot express a percentile pair, so this one knob
+    // does not translate — said out loud, before the chain, rather than silently drawn as
+    // Tukey.
+    lines.push(
+      ...ctx.note(
+        'The 5th–95th percentile whisker has no `geom_boxplot` equivalent — `coef` is a ' +
+          'multiple of the IQR — so this draws the full range instead.',
+      ),
+    )
+  }
+
+  // The value axis is `x` laid out as rows and `y` as columns; ggplot reads the orientation off
+  // the mapping, so swapping the pair is the whole translation.
+  const columns = ctx.params.orientation === 'columns'
+  const valueAxis = columns ? 'y' : 'x'
+  const groupAxis = columns ? 'x' : 'y'
+  const aes = grouped
+    ? `${valueAxis} = ${col(value)}, ${groupAxis} = ${col(group)}`
+    : `${valueAxis} = ${col(value)}, ${groupAxis} = ""`
+  lines.push(`ggplot(${plot}, aes(${aes})) +`)
+  if (style === 'box') {
+    const outliers = ctx.params.points === 'none' ? ', outlier.shape = NA' : ', outlier.size = 0.8'
+    lines.push(`  geom_boxplot(coef = ${coefFor(whiskers)}${outliers}) +`)
+  } else if (style === 'violin') {
+    lines.push(`  geom_violin(draw_quantiles = c(0.25, 0.5, 0.75)) +`)
+  } else if (style === 'both') {
+    lines.push(
+      `  geom_violin(alpha = 0.35) +`,
+      `  geom_boxplot(width = 0.2, coef = ${coefFor(whiskers)}, outlier.shape = NA) +`,
+    )
+  } else {
+    /*
+     * `ggbeeswarm::geom_quasirandom` is the faithful mark and is another package for one style,
+     * so this uses the jitter ggplot2 already has and says which it is. A quasirandom swarm and
+     * a jitter answer the same question; only the second is reproducible from a seed.
+     */
+    if (style === 'swarmBox') {
+      lines.push(`  geom_boxplot(alpha = 0.35, coef = ${coefFor(whiskers)}, outlier.shape = NA) +`)
+    }
+    lines.push(`  geom_jitter(width = 0.15, height = 0, size = 0.8, alpha = 0.7) +`)
+  }
+  if (ctx.params.logAxis === true) lines.push(`  scale_${valueAxis}_log10() +`)
+  lines.push(`  theme_minimal()`)
+  if (style === 'swarm' || style === 'swarmBox') {
+    lines.push(
+      ...ctx.note(
+        'Coda packs a swarm so no two marks overlap and thins it to 300 per group. ' +
+          '`geom_jitter` scatters them at random instead; `ggbeeswarm::geom_quasirandom` is ' +
+          'the faithful mark if you want to add the dependency.',
+      ),
+    )
+  }
+  return lines
+})
+
+/** `geom_boxplot`'s `coef`, for the rules it can express. */
+function coefFor(rule: string): string {
+  // Tukey's 1.5 is the default; the full range is any multiple large enough to reach it, and
+  // `Inf` is the idiomatic way to say so.
+  return rule === 'tukey' ? '1.5' : 'Inf'
+}
 
 registerEmitter('out.network', (ctx) => {
   const src = ctx.wired('in')

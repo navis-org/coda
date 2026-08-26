@@ -250,6 +250,24 @@ export function labelStep(count: number, room: number, perLabel: number): number
   return Math.max(1, Math.ceil(count / fits))
 }
 
+/**
+ * Width to reserve for a horizontal chart's row labels.
+ *
+ * Here rather than in either viewer, for the reason `labelStep` above is: the bar chart and the
+ * box plot are the same picture turned to face the same way, and two gutter rules that rounded
+ * differently would give them visibly different left margins on the same table. The numbers are
+ * measured against the 10px labels those two charts draw, not derived.
+ *
+ * Pairs with `truncateLabel(label, gutter - 8)` at the call site — the constant leaves room for
+ * the 5px tick gap and rounding, and a label allowed to fill the whole gutter touches the axis.
+ */
+export function labelGutter(labels: string[], compact: boolean): number {
+  const longest = labels.reduce((m, label) => Math.max(m, label.length), 0)
+  return compact
+    ? Math.min(72, Math.max(28, longest * 5.6 + 6))
+    : Math.min(120, Math.max(40, longest * 6 + 8))
+}
+
 /** Truncate a label to fit a pixel width, measured against an average glyph width. */
 export function truncateLabel(label: string, maxWidth: number, charWidth = 6): string {
   const maxChars = Math.max(1, Math.floor(maxWidth / charWidth))
@@ -281,11 +299,13 @@ export function formatAgo(epochMs: number, now = Date.now()): string {
  * `3 nodes`, `1 node` — the count and its noun, agreeing.
  *
  * Spelled out inline in eleven places before this, twice in adjacent lines of the same
- * template. Regular `-s` only: every noun this is asked for is one, and a table of
- * irregulars would be answering a question nobody has.
+ * template. Regular `-s` by default and an explicit plural for the rest — the escape hatch was
+ * a `suffix` parameter no caller could use, since `'category' + 'ies'` is not a word, so the
+ * one irregular noun in the app grew a private copy of this function that also dropped the
+ * thousands separator.
  */
-export function plural(n: number, noun: string, suffix = 's'): string {
-  return `${formatNumber(n)} ${noun}${n === 1 ? '' : suffix}`
+export function plural(n: number, noun: string, plural = `${noun}s`): string {
+  return `${formatNumber(n)} ${n === 1 ? noun : plural}`
 }
 
 /**

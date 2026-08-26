@@ -62,6 +62,56 @@ export function seriesColor(index: number, mode: Mode): string {
 }
 
 /**
+ * Rank a tally, keep the top `cap`, and put the rest in the residual.
+ *
+ * The eight-slots-plus-achromatic rule is the load-bearing one in this file's header — a
+ * ninth hue would repeat an earlier one and imply two categories are the same thing — and
+ * until this existed it was enforced by four separate copies of the same loop rather than by
+ * anything. The copies had already drifted: two of them tie-broke equal totals by label and
+ * two did not, so two charts assigned colours from `Map` insertion order on a tie and two were
+ * stable. Both spellings looked right in isolation.
+ *
+ * The tie-break is kept, because the alternative is a palette that shuffles when a filter
+ * upstream changes nothing but the order rows arrive in.
+ *
+ * Callers differ in what they do with `tail` and that is fine — a bar and a slice **sum** it
+ * into one residual mark, a pie additionally hands its members back when the residual is
+ * clicked, and a box plot **drops** it, because pooling fifty distributions describes nothing.
+ * What none of them may do is invent a ninth colour.
+ */
+export interface RankedFold {
+  /** Kept names, largest first. */
+  kept: string[]
+  /** Names past the cap, largest first. Empty when nothing folded. */
+  tail: string[]
+  /** Legend order: `kept`, plus `Other` when anything folded. */
+  legend: string[]
+  /** True when `tail` is non-empty. */
+  folded: boolean
+  /** Palette slot for a name — `MAX_SERIES`, the achromatic residual, for a folded one. */
+  slotOf(name: string): number
+}
+
+export function foldByRank(
+  totals: Iterable<[string, number]>,
+  cap = MAX_SERIES,
+): RankedFold {
+  const ranked = [...totals]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([name]) => name)
+  const kept = ranked.slice(0, Math.max(1, cap))
+  const tail = ranked.slice(Math.max(1, cap))
+  const slots = new Map(kept.map((name, index) => [name, index]))
+  return {
+    kept,
+    tail,
+    legend: tail.length > 0 ? [...kept, OTHER_LABEL] : kept,
+    folded: tail.length > 0,
+    slotOf: (name) => slots.get(name) ?? MAX_SERIES,
+  }
+}
+
+/**
  * Blue sequential ramp, light→dark as printed in the reference palette. Index 0 is the
  * lightest step.
  */

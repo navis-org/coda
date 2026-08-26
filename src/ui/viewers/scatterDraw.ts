@@ -281,25 +281,32 @@ export function drawScatter(
   context.restore()
 
   // --- tick labels --------------------------------------------------------
-  if (options.compact) return
+  // Drawn in `compact` too — see `MARGIN_COMPACT`. An axis line with no numbers against it is
+  // decoration, and the card is where the scale is least obvious.
   context.fillStyle = ink.muted
-  context.font = '9.5px system-ui, sans-serif'
+  context.font = `${options.compact ? 9 : 9.5}px system-ui, sans-serif`
   context.textAlign = 'center'
   context.textBaseline = 'top'
   for (const tick of spec.xTicks) {
     const x = projectTickX(spec, tick)
     if (x < plot.x - 1 || x > plot.x + plot.width + 1) continue
-    context.fillText(formatCompact(inverse(spec.xScale, tick)), x, plot.y + plot.height + 5)
+    context.fillText(
+      formatCompact(inverse(spec.xScale, tick)),
+      x,
+      plot.y + plot.height + (options.compact ? 3 : 5),
+    )
   }
   context.textAlign = 'right'
   context.textBaseline = 'middle'
   for (const tick of spec.yTicks) {
     const y = projectTickY(spec, tick)
     if (y < plot.y - 1 || y > plot.y + plot.height + 1) continue
-    context.fillText(formatCompact(inverse(spec.yScale, tick)), plot.x - 5, y)
+    context.fillText(formatCompact(inverse(spec.yScale, tick)), plot.x - (options.compact ? 3 : 5), y)
   }
 
-  if (options.showAxisTitles !== false) {
+  // Titles only where there is room below the ticks for them; the card's caption names the
+  // columns already.
+  if (!options.compact && options.showAxisTitles !== false) {
     context.fillStyle = ink.secondary
     context.font = '10px system-ui, sans-serif'
     context.textAlign = 'center'
