@@ -141,7 +141,7 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
                 close()
               }}
             >
-              <strong>Browse Workflows…</strong>
+              <strong>Browse Zoo…</strong>
               <span>Search the Coda Zoo — real workflows shared by other users.</span>
             </button>
             <div className="dropdown__group">

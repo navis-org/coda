@@ -33,7 +33,6 @@ import { shortcutKeys } from '../shortcuts'
 import { TOURS, startTour } from '../tour/tourState'
 
 const REPO_URL = 'https://github.com/navis-org/coda'
-const ISSUES_URL = `${REPO_URL}/issues`
 /** The group that develops Coda, named in the credits line. */
 const GROUP_URL = 'https://flyconnecto.me/'
 /** The two institutions behind that group, credited by their marks in the same row. */
@@ -169,8 +168,7 @@ export function StartPage() {
               result at every step.
             </p>
             <p className="start__alpha">
-              Coda is in alpha. Expect rough edges: node parameters will change, and a graph
-              saved today may not load in a later build.
+              Coda is in alpha. Expect rough edges. Feedback & feature requests are very welcome!
             </p>
           </header>
 
@@ -193,7 +191,7 @@ export function StartPage() {
 
           <Deck
             label="Examples"
-            note="built-in demo data · no token needed"
+            note="these use built-in mock data · no token needed · swap in a real dataset"
             cards={examples}
             confirming={confirming}
             onPick={pick}
