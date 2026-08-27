@@ -262,8 +262,8 @@ from the data. Here they were visible nowhere in the app at all, and the questio
 has no other answer: *why are there no cell types on BANC?* Because no annotation table is
 configured for it.
 
-So `CaveSource.codaReads` appends a short list — neurons, annotations, connectivity, synapses —
-under a **Coda reads this datastack as:** heading. Three properties, each deliberate:
+So `CaveSource.codaReads` appends a short list — neurons, annotations, connectivity, synapses and
+morphology — under a **Coda reads this datastack as:** heading. Four properties, each deliberate:
 
 - **It is marked as Coda's**, because the paragraph above it is not. The card exists to carry the
   publisher's words and a reader has no other way to tell where the quotation stops.
@@ -273,6 +273,12 @@ under a **Coda reads this datastack as:** heading. Three properties, each delibe
 - **It says which mechanism, not just which table.** `valid_connection_v2` is named as a view
   aggregated server-side, where a datastack without one reads "counted from `synapses_v3`" — which
   is why connectivity there is slower, following the same precedence `synapsesFor` applies.
+- **It reports what is *configured*, not what answered today.** The morphology row names the flat
+  segmentation bound to this materialization (`DatastackSpec.flat`) or says the graphene route,
+  and it says so from the spec rather than by probing the bucket. Probing would put a request per
+  datastack behind the dataset picker, and the answer would then be about the network rather than
+  about the datastack — which is the opposite of what every other row on this list means. It is
+  per **version**: 783's bucket is not 630's.
 
 Base markdown only, `**` and backticks. This text renders through the same path as a blurb from
 whatever deployment a Custom node points at, and `parseMarkdown`'s extended kinds are opt-in for

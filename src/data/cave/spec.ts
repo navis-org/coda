@@ -152,6 +152,38 @@ export interface DatastackSpec {
   annotations?: AnnotationTableSpec
   connections?: ConnectionViewSpec
   synapses?: SynapseTableSpec
+  /**
+   * Flat published segmentations, one per materialization version.
+   *
+   * **A datastack's own `segmentation_source` is `graphene://`, and that is a chunkedgraph
+   * rather than a bucket you can read by id.** It has to be: a root id is a *dynamic*
+   * agglomeration, and CAVE needs it for supervoxel lookups and edits. But a released
+   * materialization is frozen, and its publishers usually also flatten it into an ordinary
+   * precomputed bucket with a mesh pyramid in it — which CAVE's metadata does not mention
+   * anywhere, so nothing finds one by asking.
+   *
+   * What that is worth is measured rather than assumed, and it is the difference between
+   * *levels* and *no levels*. A graphene mesh has one level: FlyWire answers 492 supervoxel
+   * fragments and ~1.2 MB for one neuron, and `decimateMesh` is what makes a scene of them
+   * survivable. `gs://flywire_v141_m783` answers the same neuron in **two range requests**, from
+   * a 3-to-5 level pyramid whose coarsest level is one fragment of 73 kB to 1.44 MB across a
+   * sample of eight. That is what makes `fetchCoarseGeometry` — thumbnails — possible at all,
+   * and it is why `triangleBudget` can be honoured by choosing a level instead of by decimating.
+   *
+   * **Keyed by version, and sparsely, because a bucket is one materialization's ids.** A flat
+   * segmentation is keyed by the root ids that were current when it was written, so v630's
+   * bucket cannot answer for a v783 id. FlyWire publishes one for each; BANC publishes one for
+   * 888 and none for 626. An absent entry is the ordinary case and means the graphene route,
+   * which answers for any root id ever minted.
+   *
+   * **Not every flat bucket is worth using, and BANC's is the example.** Its
+   * `neuron_meshes/meshes` is `neuroglancer_legacy_mesh` — a single level, full resolution —
+   * measured at 28.4 MB and 60.8 MB for two v888 neurons, against ~200 kB of Draco for the same
+   * neuron through graphene, whose meshing agglomerates across chunkedgraph layers 2–6 rather
+   * than serving leaves. So it is left out: there is no level to draw a thumbnail from and the
+   * Meshes node would be worse off. The rule is a pyramid, not a bucket.
+   */
+  flat?: Readonly<Record<number, string>>
 }
 
 /**
@@ -175,6 +207,15 @@ export const DATASTACK_SPECS: readonly DatastackSpec[] = [
       'the wiring diagram and [Schlegel et al. 2024](https://doi.org/10.1038/s41586-024-07686-5) ' +
       'for the annotations, and see FlyWire’s own ' +
       '[citation guidelines](https://flywire.ai/guidelines).',
+    /*
+     * Both public materializations were flattened. 783 also publishes `skeletons_mip_1`, which
+     * is the only skeleton this datastack has: it has no level-2 cache, and the skeleton service
+     * it declares generates *from* that cache and is therefore empty. 630 publishes meshes only.
+     */
+    flat: {
+      630: 'precomputed://gs://flywire_v141_m630',
+      783: 'precomputed://gs://flywire_v141_m783',
+    },
     neurons: { table: 'proofread_neurons', idColumn: 'pt_root_id' },
     annotations: {
       table: 'hierarchical_neuron_annotations',

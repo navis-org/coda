@@ -62,6 +62,7 @@ import type { DType } from '../../core/types'
 import { caveDType } from './json'
 import { getServer } from './credentials'
 import { caveServerFor, datastackRecord, resetDatastackRecords } from './datastack'
+import { resetFlatSources } from './flat'
 
 /**
  * Which of CAVE's two kinds of queryable object this is.
@@ -202,6 +203,7 @@ export function resetCaveTables(): void {
 export function resetCaveState(): void {
   resetCaveTables()
   resetDatastackRecords()
+  resetFlatSources()
 }
 
 /**

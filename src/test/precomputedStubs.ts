@@ -33,6 +33,13 @@ export function serveJson(docs: Readonly<Record<string, unknown>>): {
     urls.push(String(url))
     const body = docs[String(url)]
     if (body === undefined) return Promise.resolve({ ok: false, status: 404 } as Response)
+    /*
+     * A number is a status rather than a document, and it exists because 404 stopped being the
+     * only interesting failure: `openMeshDir` forgives exactly a missing `info` and nothing else,
+     * so a test about a *transient* blip has to be able to serve one — served as an unregistered
+     * URL it would be testing the forgiven case instead.
+     */
+    if (typeof body === 'number') return Promise.resolve({ ok: false, status: body } as Response)
     const bytes = new TextEncoder().encode(JSON.stringify(body))
     return Promise.resolve({
       ok: true,
@@ -107,10 +114,20 @@ export function volumeInfo(
     mesh?: string
     skeletons?: string
     segmentProperties?: string
+    /**
+     * Publish it the way the older buckets do: `type` and `scales` and no `@type` at all.
+     *
+     * `gs://flywire_v141_m630` and `m783` are both this shape, and reading one as a legacy mesh
+     * directory is what hid two multi-resolution mesh sets and a skeleton set. See
+     * `isVolumeInfo`.
+     */
+    typeless?: boolean
   } = {},
 ): Readonly<Record<string, unknown>> {
   return {
-    '@type': 'neuroglancer_multiscale_volume',
+    ...(parts.typeless
+      ? { scales: [{ key: '16_16_40' }] }
+      : { '@type': 'neuroglancer_multiscale_volume' }),
     type: parts.type ?? 'segmentation',
     ...(parts.mesh ? { mesh: parts.mesh } : {}),
     ...(parts.skeletons ? { skeletons: parts.skeletons } : {}),

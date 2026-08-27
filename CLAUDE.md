@@ -123,6 +123,16 @@ symptom to recognise — which usually points nowhere near the cause.
   constant, and never with `>=`. And a `cell_type_reference` table carries `target_id` and no
   root id at all: reading one means the *join* endpoint, which takes `select_column_map` and only
   that, and does not honour `count=true`. Both failures read as facts about the data.
+- **`@type` is optional on a precomputed volume, and a graphene manifest is not all shards.**
+  Two ways a mesh source resolves to somewhere with no meshes in it, both reported as neurons that
+  have none. A flat segmentation published before `@type` was conventional declares only `type`,
+  `scales` and a named `mesh` — `gs://flywire_v141_m783` — and a `switch` on `@type` read it as a
+  legacy mesh directory *at the bucket root*, hiding two pyramids and a skeleton set;
+  `isVolumeInfo` is the one predicate both `openMeshSource` and `probe.ts` ask. And a verified
+  graphene manifest mixes shard reads with plain objects under `mesh_metadata.unsharded_mesh_dir`
+  — BANC, 40 sharded and 21 not — which read from the mesh root 404 one at a time, so the neuron
+  arrives whole minus every piece anyone has edited. `fragmentUrl` matches on `.shard:`.
+  See [docs/backends.md](docs/backends.md).
 - **Module init order.** `graphStore.ts` imports `../nodes` for its side effect. Without
   it, ordering in `main.tsx` becomes load-bearing and silently drops every node.
   The same trap one level in: a Node-side script needs `registerBuiltinSources()` as well, or

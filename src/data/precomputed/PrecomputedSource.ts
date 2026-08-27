@@ -72,7 +72,7 @@ import { ID_COLUMN_NAME } from '../../core/ids'
 import { geometryFrame } from '../transforms/spaces'
 import type { NgSourceRef } from '../neuroglancer/sourceUrl'
 import type { MeshResult, MeshSource } from './index'
-import { DEFAULT_TRIANGLE_BUDGET, fetchMeshes, meshProgress, openMeshSource } from './index'
+import { DEFAULT_TRIANGLE_BUDGET, fetchMeshes, meshProgress, openMeshDir } from './index'
 import type { SkeletonSource } from './skeletons'
 import { fetchSkeletons, openSkeletonSource } from './skeletons'
 import { idsForLabels, labelsOf, readSegmentProperties } from './segmentProperties'
@@ -735,7 +735,9 @@ export class PrecomputedSource implements DataSource {
           `at a segmentation that names a mesh directory, or at the mesh directory itself.`,
       )
     }
-    return source.mesh ?? openMeshSource(source.meshUrl, signal ? { signal } : {})
+    // `openMeshDir`, not `openMeshSource`: `meshUrl` is a directory the volume already named, so
+    // the question "what is this URL" is settled — and a legacy one commonly has no `info`.
+    return source.mesh ?? openMeshDir(source.meshUrl, signal ? { signal } : {})
   }
 
   /**

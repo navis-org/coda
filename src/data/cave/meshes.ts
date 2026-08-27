@@ -145,6 +145,21 @@ interface GrapheneManifest {
 export interface GrapheneMeshSource {
   /** Base URL of the fragment directory, no trailing slash. */
   fragmentBase: string
+  /**
+   * Where the *unsharded* fragments live, when the segmentation names a separate directory.
+   *
+   * `mesh_metadata.unsharded_mesh_dir`, and it is load-bearing rather than a detail. A verified
+   * manifest mixes two kinds of fragment: the frozen ones, named `~<layer>/<shard>.shard:off:len`
+   * and read out of the shard files beside them, and the ones covering *recently edited* parts of
+   * the neuron, which are plain objects in this subdirectory. BANC publishes `"dynamic"` and one
+   * neuron's manifest was 40 sharded fragments and 21 unsharded; read from the mesh root they all
+   * 404, and `mapWithConcurrency` turns each into a dropped fragment — so the neuron arrives
+   * looking whole, minus every piece anyone has touched.
+   *
+   * FlyWire's public segmentation is frozen and its manifests are entirely sharded, which is why
+   * this went unnoticed: the datastack the mesh path was built against never exercises it.
+   */
+  unshardedDir?: string
   /** Where to ask for a root id's fragment list. */
   manifestBase: string
 }
@@ -152,6 +167,7 @@ export interface GrapheneMeshSource {
 interface SegmentationInfo {
   data_dir?: string
   mesh?: string
+  mesh_metadata?: { unsharded_mesh_dir?: string }
 }
 
 /**
@@ -177,10 +193,29 @@ export async function openGrapheneMeshes(
   const bucket = objectStoreUrl(info.data_dir)
   if (!bucket) return undefined
 
+  const unsharded = info.mesh_metadata?.unsharded_mesh_dir?.replace(/^\/+|\/+$/g, '')
   return {
     fragmentBase: `${bucket}/${info.mesh.replace(/\/+$/, '')}`,
+    ...(unsharded ? { unshardedDir: unsharded } : {}),
     manifestBase: `${server}/meshing/api/v1/table/${table}/manifest`,
   }
+}
+
+/**
+ * Where one named fragment actually is.
+ *
+ * The name says which of the two it is: a sharded fragment carries `.shard:<offset>:<length>`
+ * and sits under the mesh directory, and anything else is an unsharded object under
+ * `unsharded_mesh_dir`. Matched on `.shard:` rather than on the leading `~<layer>/`, because the
+ * layer prefix is part of the *path* to the shard file and would still be there if the naming
+ * changed; the byte range is what makes it a shard read.
+ */
+function fragmentUrl(source: GrapheneMeshSource, name: string): string {
+  const base =
+    source.unshardedDir && !name.includes('.shard:')
+      ? `${source.fragmentBase}/${source.unshardedDir}`
+      : source.fragmentBase
+  return `${base}/${name}`
 }
 
 /**
@@ -215,7 +250,7 @@ export async function readGrapheneMesh(
 
   const parts = await mapWithConcurrency(fragments, fragmentLimit, async (name) => {
     const bytes = await fetchBytes(
-      `${source.fragmentBase}/${name}`,
+      fragmentUrl(source, name),
       options.signal ? { signal: options.signal } : {},
     )
     // Identity scale and offset: a graphene fragment decodes to world nanometres already, so

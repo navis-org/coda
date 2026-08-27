@@ -21,6 +21,9 @@ import { makeTable } from '../../core/values'
 import type { DataSource } from '../source'
 import { resetCache } from '../cache'
 import { resetIndexLoads } from '../neuronIndex'
+import { DRACO_INFO } from '../../test/precomputedStubs'
+import { resetPrecomputedProbes } from '../precomputed/probe'
+import { resetTransport } from '../precomputed/transport'
 import { CaveSource } from './CaveSource'
 import { CAVE_MAX_ROWS, refuseIfCapped } from './client'
 import {
@@ -31,9 +34,10 @@ import {
   tableFactsFor,
   tableListFor,
 } from './tables'
-import { registerDatastackSpec, resetRuntimeSpecs } from './spec'
+import { registerDatastackSpec, resetRuntimeSpecs, specFor } from './spec'
 import { caveScene } from './scene'
 import { readL2Skeletons } from './l2'
+import { probeFlat } from './flat'
 import { segmentationLayerIndex } from '../neuroglancer/scene'
 import { MESH_WARN_NEURONS, decimateGridFor, fragmentConcurrencyFor } from './meshes'
 import { quoteWideIntegers, parseCaveJson } from './json'
@@ -98,13 +102,63 @@ const materializations = (datastack: string, versions: number[]) =>
  * `refuseIfCapped` exists to catch. So every override and every fixture below describes rows,
  * and the count follows from it.
  */
-function installFetch(overrides: Record<string, string | number> = {}): Captured[] {
+/**
+ * The three `info` documents `gs://flywire_v141_m783` publishes, at the URLs it publishes them.
+ *
+ * Real shapes rather than convenient ones, and the top one is the whole reason `isVolumeInfo`
+ * exists: it carries `type`, `scales`, a named `mesh` and named `skeletons`, and **no `@type`**.
+ * Read as a legacy mesh directory — which is what a switch on `@type` alone does with it — it
+ * resolves to the bucket root, where no manifest exists, and every neuron comes back meshless.
+ */
+const FLAT_INFOS: Readonly<Record<string, unknown>> = {
+  'https://storage.googleapis.com/flywire_v141_m783/info': {
+    type: 'segmentation',
+    scales: [{ key: '16_16_40' }],
+    mesh: 'mesh_mip_1_err_40',
+    skeletons: 'skeletons_mip_1',
+  },
+  'https://storage.googleapis.com/flywire_v141_m783/mesh_mip_1_err_40/info': DRACO_INFO,
+  'https://storage.googleapis.com/flywire_v141_m783/skeletons_mip_1/info': {
+    '@type': 'neuroglancer_skeletons',
+    transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0],
+    vertex_attributes: [
+      { id: 'radius', data_type: 'float32', num_components: 1 },
+      { id: 'cross_sectional_area', data_type: 'float32', num_components: 1 },
+    ],
+    sharding: {
+      '@type': 'neuroglancer_uint64_sharded_v1',
+      preshift_bits: 0,
+      hash: 'murmurhash3_x86_128',
+      minishard_bits: 1,
+      shard_bits: 16,
+      minishard_index_encoding: 'gzip',
+      data_encoding: 'gzip',
+    },
+  },
+}
+
+function installFetch(
+  overrides: Record<string, string | number> = {},
+  options: { flat?: boolean } = {},
+): Captured[] {
   const captured: Captured[] = []
   vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
     const body = init?.body ? JSON.parse(String(init.body)) : undefined
     captured.push({ url, ...(body ? { body } : {}) })
     const rowsAnswer = (text: string) =>
       Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(text) } as Response)
+    /*
+     * `precomputed/transport.ts` reads bytes, not text, so a flat bucket's `info` cannot ride on
+     * `rowsAnswer` — a `Response` with no `arrayBuffer` throws inside `fetchInfo` and the probe
+     * records it as a verdict about the URL.
+     */
+    const bytesAnswer = (doc: unknown) =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        arrayBuffer: () =>
+          Promise.resolve(new TextEncoder().encode(JSON.stringify(doc)).buffer as ArrayBuffer),
+      } as Response)
     const answer = (text: string) => {
       if (!url.includes('count=true')) return rowsAnswer(text)
       const rows = JSON.parse(text) as unknown[]
@@ -187,6 +241,12 @@ function installFetch(overrides: Record<string, string | number> = {}): Captured
       return answer(fixture('segmentation.json'))
     if (url.includes('/meshing/api/v1/table/flywire_public/manifest/'))
       return answer(fixture('mesh-manifest.json'))
+    /*
+     * Off by default, and that is what makes the graphene cases above still mean something: an
+     * unserved bucket 404s, `probeFlat` reports no flat source, and the fetch falls back — which
+     * is the path every datastack without an entry takes for real.
+     */
+    if (options.flat && FLAT_INFOS[url] !== undefined) return bytesAnswer(FLAT_INFOS[url])
     return Promise.resolve({
       ok: false,
       status: 404,
@@ -203,6 +263,10 @@ beforeEach(() => {
   // Every CAVE memo — the datastack record, the table listings, the per-table facts — is module
   // level now that the annotation providers share them, so all of it outlives a test file.
   resetCaveState()
+  // The flat-bucket route reaches `precomputed`, whose `info` memo and probe verdicts are module
+  // level too — and a *failed* probe is remembered on purpose, so it would outlive this file.
+  resetPrecomputedProbes()
+  resetTransport()
   // Custom CAVE registers a spec from a node's params; it is module state like the rest.
   resetRuntimeSpecs()
   setToken('test-token')
@@ -304,6 +368,9 @@ describe('datasets and versions', () => {
     expect(flywire!.description).toContain('- Synapses — `synapses_nt_v1`')
     // Named as a view, because that is why this datastack answers connectivity without counting.
     expect(flywire!.description).toMatch(/- Connectivity — `valid_connection_v2` \(a view/)
+    // Per materialization, not per datastack: 783's bucket is not 630's, and a datastack whose
+    // version has no entry says the graphene route instead.
+    expect(flywire!.description).toContain('- Morphology — `precomputed://gs://flywire_v141_m783`')
     // The blurb still leads, and nothing was inserted into it.
     expect(flywire!.description?.startsWith('The public FlyWire segmentation')).toBe(true)
   })
@@ -318,6 +385,7 @@ describe('datasets and versions', () => {
      * anywhere in the app, and a list that silently skipped the role nobody configured would
      * answer the easy question and not the one being asked.
      */
+    expect(banc.description).toContain('- Morphology — built from the graphene segmentation')
     expect(banc.description).toContain(
       '- Annotations — none configured; wire an annotation source for cell types',
     )
@@ -827,6 +895,8 @@ describe('synapses', () => {
 
 describe('meshes', () => {
   it('asks the meshing API with verify, and reads fragments from the bucket', async () => {
+    // No flat bucket served, so this is the fallback route — which is what every datastack
+    // without a `flat` entry takes, and what FlyWire itself takes if the bucket is unreachable.
     const captured = installFetch()
     await new CaveSource()
       .fetchMeshes({ datasetId: DATASET, neuronIds: ['720575940628857210'] })
@@ -844,10 +914,87 @@ describe('meshes', () => {
     // them `flywire_public` and `flywire_fafb_public`, and taking the wrong one 404s.
     expect(manifest.url).toContain('/table/flywire_public/')
 
-    const fragment = captured.find((c) => c.url.includes('storage.googleapis.com'))!
+    const fragment = captured.find((c) => c.url.includes('/fly_v31_meshes_v2_062619/'))!
     expect(fragment.url).toContain(
-      '/seunglab2/drosophila_v0/ws_190410_FAFB_v02_ws_size_threshold_200/fly_v31_meshes_v2_062619/',
+      'https://storage.googleapis.com/seunglab2/drosophila_v0/ws_190410_FAFB_v02_ws_size_threshold_200/',
     )
+  })
+
+  it('reads a recently edited fragment from unsharded_mesh_dir, not from the mesh root', async () => {
+    /*
+     * A verified manifest mixes two kinds of fragment: frozen ones inside shard files, and plain
+     * objects covering the parts of the neuron somebody has edited since. BANC publishes the
+     * second lot under `"dynamic"` — one neuron's manifest was 40 sharded and 21 not — and read
+     * from the mesh root every one of them 404s. `mapWithConcurrency` turns each into a dropped
+     * fragment, so the neuron arrives looking whole, minus every piece anyone has touched.
+     *
+     * FlyWire's public segmentation is frozen and declares no such directory, which is why the
+     * fixture above never exercised this and the datastack that does was silently short.
+     */
+    const captured = installFetch({
+      '/segmentation/1.0/flywire_public/info': JSON.stringify({
+        data_dir: 'gs://a_bucket/seg',
+        mesh: 'graphene_meshes',
+        mesh_metadata: { unsharded_mesh_dir: 'dynamic' },
+      }),
+      '/meshing/api/v1/': JSON.stringify({
+        fragments: ['~3/529288-0.shard:8331489:4061', '305453950923010514:0:30720-32768_0-4096'],
+      }),
+    })
+    await new CaveSource()
+      .fetchMeshes({ datasetId: DATASET, neuronIds: ['720575940628857210'] })
+      .catch(() => undefined)
+
+    const bucket = 'https://storage.googleapis.com/a_bucket/seg/graphene_meshes'
+    const fragments = captured.map((c) => c.url).filter((url) => url.startsWith(bucket))
+    // The byte range is what makes a name a shard read; the `~<layer>/` prefix is part of the
+    // path to the shard file and stays under the mesh root.
+    expect(fragments).toContain(`${bucket}/~3/529288-0.shard:8331489:4061`)
+    expect(fragments).toContain(`${bucket}/dynamic/305453950923010514:0:30720-32768_0-4096`)
+  })
+
+  it('prefers the flat pyramid over graphene where the materialization publishes one', async () => {
+    /*
+     * The whole point of `DatastackSpec.flat`. Graphene has no levels: 492 supervoxel fragments
+     * and ~1.2 MB for one FlyWire neuron. The same neuron out of `gs://flywire_v141_m783` is two
+     * range requests off a 3-to-5 level pyramid, and the manifest never gets asked for.
+     */
+    const captured = installFetch({}, { flat: true })
+    await new CaveSource()
+      .fetchMeshes({ datasetId: DATASET, neuronIds: ['720575940628857210'] })
+      .catch(() => undefined)
+
+    expect(captured.filter((c) => c.url.includes('/meshing/api/v1/'))).toEqual([])
+    expect(captured.map((c) => c.url)).toContain(
+      'https://storage.googleapis.com/flywire_v141_m783/mesh_mip_1_err_40/info',
+    )
+  })
+
+  it('draws a thumbnail from the flat pyramid, and refuses where there is only graphene', async () => {
+    /*
+     * `fetchCoarseGeometry`'s contract: `undefined` means "draw a placeholder", and for graphene
+     * that is the honest answer rather than a gap — the alternative to a placeholder is a page
+     * of 25 rows fetching several hundred fragments each.
+     */
+    installFetch()
+    const bare = new CaveSource()
+    expect(
+      await bare.fetchCoarseGeometry!({ datasetId: DATASET, neuronId: '720575940628857210' }),
+    ).toBeUndefined()
+
+    vi.unstubAllGlobals()
+    resetPrecomputedProbes()
+    resetTransport()
+    const captured = installFetch({}, { flat: true })
+    // Undefined either way here, because the stub serves no shard bytes — what is being asserted
+    // is that the flat route was *taken*, which the graphene one never reaches.
+    await new CaveSource()
+      .fetchCoarseGeometry!({ datasetId: DATASET, neuronId: '720575940628857210' })
+      .catch(() => undefined)
+    expect(captured.map((c) => c.url)).toContain(
+      'https://storage.googleapis.com/flywire_v141_m783/mesh_mip_1_err_40/info',
+    )
+    expect(captured.filter((c) => c.url.includes('/meshing/api/v1/'))).toEqual([])
   })
 
   it('turns the triangle budget into a decimation grid, since graphene has no levels', async () => {
@@ -893,8 +1040,11 @@ describe('meshes', () => {
       .fetchMeshes({ datasetId: DATASET, neuronIds: ids, onWarn: (m) => said.push(m) })
       .catch(() => undefined)
     expect(said.join(' ')).toMatch(
-      /no level of detail, so each one is several hundred requests/,
+      /no level of detail, so each one is dozens to hundreds of requests/,
     )
+    // And it names the alternative, which for this datastack is not hypothetical: FlyWire's own
+    // materializations were flattened, and only a stub with no bucket sends it down this route.
+    expect(said.join(' ')).toMatch(/flat segmentation beside it does the same set in two requests/)
     expect(said.join(' ')).toMatch(/Fetching anyway/)
   })
 })
@@ -1526,6 +1676,59 @@ describe('building a skeleton from the L2 graph', () => {
     await readL2Skeletons(SOURCE, ['1', '2', '3'], {})
     expect(captured.filter((c) => c.url.includes('/lvl2_graph'))).toHaveLength(3)
     expect(captured.filter((c) => c.url.includes('/attributes'))).toHaveLength(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+
+/**
+ * Two independent ways a CAVE dataset can have skeletons, and why both have to be asked.
+ *
+ * `flywire_fafb_public` is the case that forced this: it has **no** level-2 cache, so the peek
+ * settled on a confident `false` and the Skeletons node refused — while
+ * `gs://flywire_v141_m783/skeletons_mip_1` sat beside the datastack publishing them, unmentioned
+ * anywhere in CAVE's own metadata.
+ */
+describe('where a CAVE skeleton comes from', () => {
+  it('reports skeletons once the flat bucket has answered, on a datastack with no L2 cache', async () => {
+    installFetch({}, { flat: true })
+    const source = new CaveSource()
+
+    // The first look cannot answer and starts the read — `peekL2Cache`'s contract, and the
+    // reason `capabilitiesFor` may not await one (invariant 2).
+    expect(source.capabilitiesFor!(DATASET)?.skeletons).not.toBe(true)
+    await probeFlat(specFor(DATASTACK)!, VERSION)
+    expect(source.capabilitiesFor!(DATASET)).toEqual({ skeletons: true })
+  })
+
+  it('takes the published skeletons over the chunk graph, and never asks the L2 cache', async () => {
+    /*
+     * They are not the same product. A published skeleton is a mip-1 skeletonisation — measured
+     * across ten FlyWire v783 neurons, 14,559 to 338,087 nodes each — where an L2 skeleton is one
+     * node per level-2 chunk. It is also one request per neuron rather than two.
+     */
+    const captured = installFetch({}, { flat: true })
+    await new CaveSource()
+      .fetchSkeletons!({ datasetId: DATASET, neuronIds: ['720575940628857210'] })
+      .catch(() => undefined)
+    expect(captured.filter((c) => c.url.includes('/lvl2_graph'))).toEqual([])
+    expect(captured.map((c) => c.url)).toContain(
+      'https://storage.googleapis.com/flywire_v141_m783/skeletons_mip_1/info',
+    )
+  })
+
+  it('says both routes were looked for when neither datastack has one', async () => {
+    // The message a user gets is the one thing that must not name only half of what was tried.
+    installFetch()
+    registerDatastackSpec({
+      datastack: 'no_skeletons',
+      label: 'Bare',
+      description: 'live',
+      neurons: { table: 'cell_info', idColumn: 'pt_root_id' },
+    })
+    await expect(
+      new CaveSource().fetchSkeletons!({ datasetId: 'no_skeletons:1', neuronIds: ['1'] }),
+    ).rejects.toThrow(/no level-2 cache.*no published skeletons/s)
   })
 })
 

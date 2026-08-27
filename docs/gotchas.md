@@ -188,6 +188,40 @@ verbatim.
   `callPython` and detaches the argument with `structuredClone(buf, { transfer: [buf] })`,
   which is the one line that makes the bug reproducible on the main thread.
 
+- **`@type` is optional on a precomputed volume, and a graphene manifest is not all shards.**
+  Two ways a mesh source resolves to somewhere with no meshes in it, both of which surface as
+  neurons that have none.
+
+  The first: `openMeshSource` and `probe.ts` both did `switch (info['@type'])` with `undefined`
+  falling through to "legacy mesh directory". That is right for a mesh directory and wrong for
+  every flat segmentation published before the field was conventional.
+  `gs://flywire_v141_m783/info` declares `"type": "segmentation"`, eight `scales`,
+  `"mesh": "mesh_mip_1_err_40"` and `"skeletons": "skeletons_mip_1"` — and no `@type`. Read as a
+  mesh directory it opened as `legacy` **at the bucket root**, where no manifest exists. Every
+  request 404d, and because a missing mesh is an ordinary answer (`readLegacyMesh` returns
+  `undefined` for a segment nobody meshed) it came back as an empty result rather than an error.
+  Two multi-resolution mesh pyramids and a skeleton set sat behind that, on a datastack whose
+  Skeletons node had been declining for the whole of its life. `isVolumeInfo` is now the one
+  predicate both readers ask, and it keys on the volume markers — `scales`, or a named
+  `mesh`/`skeletons` — because a mesh or skeleton directory's own `info` carries none of the
+  three. The split that goes with it: `openMeshSource` decides what a URL *is* and stays strict,
+  `openMeshDir` opens a directory somebody already named and forgives exactly a 404 (a legacy
+  directory usually publishes no `info` — banc's `neuron_meshes/meshes` is one). Only a 404: a
+  CORS blip read as "legacy" is a directory whose every fetch then 404s per neuron.
+
+  The second: a verified graphene manifest is not homogeneous. It mixes frozen fragments, named
+  `~<layer>/<shard>-0.shard:<offset>:<length>` and read out of shard files under the mesh
+  directory, with plain objects covering the parts of the neuron somebody has edited since —
+  which live under `mesh_metadata.unsharded_mesh_dir`. One BANC neuron's manifest was **40
+  sharded and 21 not**. Read from the mesh root the unsharded ones 404 individually, and
+  `mapWithConcurrency` turns each into a dropped fragment rather than a failure — which is the
+  right rule for one bad supervoxel out of 492, and here means the neuron arrives looking whole,
+  minus every piece anyone has touched, under a green node. FlyWire's public segmentation is
+  frozen and declares no such directory, so the datastack the mesh path was built against never
+  exercised it. `fragmentUrl` matches on `.shard:` rather than on the `~<layer>/` prefix, because
+  the prefix is part of the path *to* the shard file and the byte range is what makes a name a
+  shard read.
+
 - **Module init order.** `graphStore.ts` imports `../nodes` for its side effect, because it
   resolves node types the moment it loads the autosaved graph. Without that import,
   ordering in `main.tsx` becomes load-bearing and a bad order silently drops every node.

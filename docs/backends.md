@@ -519,15 +519,14 @@ a build of the same tree with the feature stashed out. Far under this codebase's
 boundary.
 
 `SourceCapabilities` does the rest, and every `false` is a node that declines at edit time rather
-than failing at run time: no skeletons, meshes or synapses (the next phase — FlyWire publishes
-precomputed skeletons per materialization and Draco meshes in a CORS-open bucket, so this is
-"not wired up" rather than "not available"), no `paths` (it needs a hop aggregated server-side,
-which CAVE has no endpoint for), no `rawQuery`, no `viewerScene`, and none of the three ROI
+than failing at run time: no `paths` (it needs a hop aggregated server-side, which CAVE has no
+endpoint for), no `rawQuery`, and none of the three ROI
 flags — FlyWire's neuropil assignments are a reference table on *synapses*, so there is no
 per-region completeness table to read, and a per-neuron breakdown would mean reading a neuron's
 synapses and grouping them, which is the work the connection roll-up exists to avoid.
 `neuronIndex`, `meshes`, `synapses` and `viewerScene` are true for the source; `skeletons` is
-answered **per dataset** through `capabilitiesFor` — see **Skeletons** below.
+answered **per dataset** through `capabilitiesFor`, because a datastack has one only if it has a
+level-2 cache or a flat bucket beside it — see **Skeletons** below.
 
 **The scene is built rather than fetched, and that is the whole of `viewerScene` here.** neuPrint
 publishes a curated state per dataset — EM, ROI shells, synapse layers, a framing — which
@@ -752,6 +751,82 @@ object and the fragments are the plain one, so `dataStart` is **0** rather than
 immediately before the manifest in one file with no pointer to them, and here they are a separate
 object starting at its first byte.
 
+### The flat segmentation beside a materialization, which CAVE does not mention
+
+A datastack's `segmentation_source` is `graphene://` and has to be: a root id is a *dynamic*
+agglomeration of supervoxels, which is what the chunkedgraph exists to serve. The cost is that
+**graphene has no level of detail** — a verified mesh manifest lists supervoxel fragments at full
+resolution — so one FlyWire neuron is 492 range requests and ~1.2 MB, `decimateMesh` is what makes
+a scene of them survivable, and there is nothing cheap enough to draw a list of thumbnails from.
+
+A *released* materialization is frozen, though, and its publishers usually also flatten it into an
+ordinary precomputed bucket with a pyramid in it. **Nothing in CAVE's metadata says so**, which is
+why `DatastackSpec.flat` names them by hand, keyed by version:
+
+```ts
+flat: {
+  630: 'precomputed://gs://flywire_v141_m630',
+  783: 'precomputed://gs://flywire_v141_m783',
+}
+```
+
+Measured over eight v783 proofread neurons, against the graphene route for the same ids:
+
+| | graphene | `gs://flywire_v141_m783` |
+| --- | --- | --- |
+| requests per neuron | 492 | 2 |
+| levels | 1 | 3–5 |
+| coarsest level | — | one fragment, 73 kB – 1.44 MB |
+| finest level | ~1.2 MB | 0.3 – 10.8 MB |
+| `triangleBudget` honoured by | decimation, exactly | choosing a level, overshooting at the floor |
+
+Four things this is, and each is a decision rather than a consequence.
+
+**Keyed by version, sparsely, and an absent entry is the ordinary case.** A flat bucket holds the
+root ids that were current when it was written, so v630's cannot answer for a v783 id. FlyWire
+published one for each of its two; BANC published one for 888 and none for 626. Where there is no
+entry the graphene route runs, and that route answers for any root id ever minted — which is why
+the fallback is not a degradation.
+
+**A pyramid, not a bucket, and BANC's is deliberately not listed.**
+`gs://lee-lab_brain-and-nerve-cord-fly-connectome/neuron_meshes/meshes` publishes no `info`, which
+by convention means `neuroglancer_legacy_mesh`: one level, full resolution. Measured on two v888
+neurons, **28.4 MB and 60.8 MB** apiece — against ~200 kB of Draco for the same neuron through
+graphene, whose meshing agglomerates across chunkedgraph layers 2–6 rather than serving leaves.
+There is no level to draw a thumbnail from and the Meshes node would be worse off, so
+`flatMeshDir` requires `multilod-draco` and falls back rather than reporting a better source than
+it has.
+
+**This is what makes `fetchCoarseGeometry` possible at all**, and CAVE was the reason the Explore
+Dataset list showed a placeholder in every row. `fetchCoarseMesh` is shared with neuPrint —
+`triangleBudget: 1`, which no level can meet, so `chooseLod` answers with the coarsest, and
+`THUMBNAIL_MAX_BYTES` turns down a single pathological body off the manifest at no download cost.
+
+**Nanometres with no conversion, and that is measured on both halves rather than assumed.** The
+mesh bounding box for `720575940633370649` is x 682,703–723,512 nm; the same neuron's published
+skeleton is 682,704–723,568. The mesh `info`'s own `transform` is what does it, and
+`fragmentTransform` already applies it. The live suite asserts the pair, because a missing
+conversion here is a scene sitting a whole factor away from the neurons beside it with nothing
+failing.
+
+### `unsharded_mesh_dir`, or the neuron that arrives whole minus everything anyone edited
+
+A verified graphene manifest mixes two kinds of fragment: the frozen ones, named
+`~<layer>/<shard>-0.shard:<offset>:<length>` and read out of shard files under the mesh directory,
+and plain objects covering the parts of the neuron somebody has edited since — which live under
+`mesh_metadata.unsharded_mesh_dir`. One BANC neuron's manifest was **40 sharded and 21 not**.
+
+Read from the mesh root every unsharded one 404s, and `mapWithConcurrency` turns each into a
+dropped fragment rather than a failure — the rule that keeps one bad supervoxel out of 492 from
+taking a neuron down. So the neuron arrives looking whole, minus every piece anyone has touched,
+under a green node.
+
+FlyWire's public segmentation is frozen and declares no such directory, which is why this went
+unnoticed: **the datastack the mesh path was built against never exercises it**, and the one that
+does is now the datastack that takes this route at all. `fragmentUrl` matches on `.shard:` rather
+than on the leading `~<layer>/` — the layer prefix is part of the path to the shard file, and the
+byte range is what makes a name a shard read.
+
 ### Skeletons come from the level-2 cache, and the capability is per dataset
 
 **A CAVE datastack's skeletons depend on its chunkedgraph, not on the backend**, so
@@ -777,8 +852,23 @@ tables the cache knows, and membership is the answer — verified against the li
 ("Dataset flywire_public does not have an L2 Cache") rather than trusted.
 
 Six of the thirteen datastacks have a cache: BANC, FANC production, FlyWire *production*,
-minnie65 public, Aedes and zheng_ca3. **`flywire_fafb_public` does not**, so the node Coda ships
-still declines — correctly, and now for the right reason.
+minnie65 public, Aedes and zheng_ca3. **`flywire_fafb_public` does not.**
+
+**Which is why there is a second route, and why both are peeked whatever the other says.**
+`gs://flywire_v141_m783/skeletons_mip_1` is a `neuroglancer_skeletons` directory with `radius` and
+`cross_sectional_area` on every vertex, published beside the materialization and mentioned nowhere
+in CAVE's metadata — see *The flat segmentation* above. It is the only skeleton FlyWire has, and
+until it was wired in `capabilitiesFor` settled on a confident `false` and the Skeletons node
+declined for the whole datastack. `peekFlat` is called before `peekL2Cache` so that its read is
+*started* even in the branch where L2 has already answered.
+
+**Published beats built, and they are not the same product.** Measured over ten v783 neurons, a
+published skeleton is 14,559 to 338,087 nodes and ~1.8 MB — roughly seventy times an L2 skeleton,
+which is one node per chunk. The published one is a better reconstruction and one request per
+neuron instead of two; what it costs is memory, which is what `FLAT_SKELETON_WARN` says. In
+practice no datastack has both, and that is the same fact twice: FlyWire's skeletons exist
+*because* it has no cache to build any from. The preference is written down anyway, because "they
+never coexist" is a fact about today's spec table rather than about CAVE.
 
 Four things in the tree building, each a wrong picture if lost. **Chunks with no cache entry are
 dropped, and dropped _before_ the walk** — after it they would orphan their children, where
@@ -1295,7 +1385,7 @@ image stack, whether there are meshes at all, and whether they are multi-resolut
 kind. It is memoised per URL, **failures included**, because the node above it is `cheap` — see
 [datasets.md](datasets.md) for that trade and for the optimistic-capability rule that goes with it.
 
-It also **opens** the mesh and skeleton directories, through `openMeshSource`/`openSkeletonSource`
+It also **opens** the mesh and skeleton directories, through `openMeshDir`/`openSkeletonSource`
 rather than by re-reading `@type` itself — so the card's verdict and the fetch's cannot disagree
 about one URL. Both are opened together rather than in sequence; they are independent reads and
 this runs from an edit-time peek, where a wasted round trip is visible. The opened sources are
@@ -1307,6 +1397,25 @@ is then cached as a *success* — so `meshDir` keys its refusal on whether the s
 mesh directory and re-opens when the cached copy is absent. Keying it on the opened copy meant one
 CORS blip produced "publishes no meshes" for the rest of the session, on a source whose
 `capabilitiesFor` still said it had them.
+
+**`@type` is optional on a volume, and both readers ask `isVolumeInfo` rather than switching on
+it.** This was a `switch (info['@type'])` with `undefined` falling to "legacy mesh directory",
+which is right for a mesh directory and wrong for every flat segmentation published before the
+field was conventional. `gs://flywire_v141_m783/info` declares `"type": "segmentation"`, eight
+`scales`, `"mesh": "mesh_mip_1_err_40"`, `"skeletons": "skeletons_mip_1"` — and no `@type` at all.
+Read as a mesh directory it opened as `legacy` **at the bucket root**, where no manifest exists; so
+every request 404d, and because a missing mesh is an ordinary answer the whole thing surfaced as
+"these neurons have no meshes" rather than as a bad URL. Two multi-resolution mesh sets and a
+skeleton set were unreachable behind it. The volume markers decide it instead — `scales`, or a
+named `mesh`/`skeletons` — and a mesh or skeleton directory's own `info` carries none of the
+three, which is what makes the test a discrimination rather than a heuristic.
+
+**`openMeshSource` resolves; `openMeshDir` opens, and only the second forgives a missing `info`.**
+A legacy mesh directory commonly publishes none — banc's `neuron_meshes` names `meshes`, and
+`meshes/info` 404s — so for a directory a volume already *named*, absent means legacy. Only a 404:
+a CORS refusal or an unreachable host read the same way would turn one blip into a directory whose
+every manifest request 404s, reported per neuron as a missing mesh. `openMeshSource`, which has to
+decide what a URL *is*, stays strict, because a URL with nothing at it is a URL nobody can use.
 
 **An abort is not remembered.** Cancelling a run says nothing about the bytes, and a memoised
 "This operation was aborted" sat on a card with a perfectly good URL. It rejects rather than

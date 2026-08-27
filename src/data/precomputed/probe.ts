@@ -24,7 +24,8 @@
  */
 
 import type { MeshSource } from './index'
-import { openMeshSource } from './index'
+import type { InfoKind } from './index'
+import { isVolumeInfo, openMeshDir } from './index'
 import type { SkeletonSource } from './skeletons'
 import { openSkeletonSource } from './skeletons'
 import { fetchInfo } from './transport'
@@ -67,12 +68,13 @@ export type PrecomputedProbe =
   | { readonly ok: true; readonly source: PrecomputedDescription }
   | { readonly ok: false; readonly error: string }
 
-/** The shape of an `info`, as far as anything here reads it. */
-interface RawInfo {
-  '@type'?: string
-  type?: string
-  mesh?: string
-  skeletons?: string
+/**
+ * The shape of an `info`, as far as anything here reads it.
+ *
+ * `InfoKind`'s fields plus the one only a card wants, so the volume test below is asked of the
+ * same document with the same rule the fetch uses.
+ */
+interface RawInfo extends InfoKind {
   segment_properties?: string
 }
 
@@ -170,31 +172,38 @@ async function classify(
   info: RawInfo,
   signal: AbortSignal | undefined,
 ): Promise<Omit<PrecomputedDescription, 'summary'>> {
-  switch (info['@type']) {
-    case 'neuroglancer_multiscale_volume': {
-      const meshUrl = info.mesh ? `${base}/${info.mesh}` : undefined
-      const skeletonUrl = info.skeletons ? `${base}/${info.skeletons}` : undefined
-      /*
-       * Both together: they are independent reads against the same bucket, and awaiting them in
-       * sequence put a whole extra round trip in front of a card that is waiting to say what it
-       * found. This runs from an edit-time peek, so that latency is visible.
-       */
-      const [mesh, skeletons] = await Promise.all([
-        tryOpen(meshUrl, openMeshSource, signal),
-        tryOpen(skeletonUrl, openSkeletonSource, signal),
-      ])
-      return {
-        kind: 'volume',
-        ...(info.type ? { volumeType: info.type } : {}),
-        ...(meshUrl ? { meshUrl } : {}),
-        ...(mesh ? { mesh } : {}),
-        ...(skeletonUrl ? { skeletonUrl } : {}),
-        ...(skeletons ? { skeletons } : {}),
-        ...(info.segment_properties
-          ? { segmentPropertiesUrl: `${base}/${info.segment_properties}` }
-          : {}),
-      }
+  /*
+   * Asked before the switch, and asked of `isVolumeInfo` rather than restated here: a volume may
+   * carry no `@type` at all, so a `switch` on that field alone sent every pre-`@type` flat
+   * segmentation down the mesh-directory branch. Sharing the predicate with `openMeshSource` is
+   * what stops the card and the fetch resolving one URL two ways.
+   */
+  if (isVolumeInfo(info)) {
+    const meshUrl = info.mesh ? `${base}/${info.mesh}` : undefined
+    const skeletonUrl = info.skeletons ? `${base}/${info.skeletons}` : undefined
+    /*
+     * Both together: they are independent reads against the same bucket, and awaiting them in
+     * sequence put a whole extra round trip in front of a card that is waiting to say what it
+     * found. This runs from an edit-time peek, so that latency is visible.
+     */
+    const [mesh, skeletons] = await Promise.all([
+      tryOpen(meshUrl, openMeshDir, signal),
+      tryOpen(skeletonUrl, openSkeletonSource, signal),
+    ])
+    return {
+      kind: 'volume',
+      ...(info.type ? { volumeType: info.type } : {}),
+      ...(meshUrl ? { meshUrl } : {}),
+      ...(mesh ? { mesh } : {}),
+      ...(skeletonUrl ? { skeletonUrl } : {}),
+      ...(skeletons ? { skeletons } : {}),
+      ...(info.segment_properties
+        ? { segmentPropertiesUrl: `${base}/${info.segment_properties}` }
+        : {}),
     }
+  }
+
+  switch (info['@type']) {
     case 'neuroglancer_skeletons':
       return { kind: 'skeletons', skeletonUrl: base, ...spread('skeletons', await tryOpen(base, openSkeletonSource, signal)) }
     case 'neuroglancer_annotations_v1':
@@ -205,12 +214,12 @@ async function classify(
     case 'neuroglancer_legacy_mesh':
     case undefined:
       /*
-       * An `info` with no `@type` at all is a legacy mesh directory. That rule is
-       * `openMeshSource`'s — banc's bucket needs it — and asking that function rather than
-       * restating the three `@type` spellings is what keeps the card's verdict and the fetch's
-       * from disagreeing about one URL.
+       * A typeless `info` that got this far named no mesh directory, no skeletons and no scales,
+       * so it is a legacy mesh directory describing itself. `openMeshDir` rather than
+       * `openMeshSource` because the question is already settled — and because it is the opener
+       * that forgives a directory with no `info` at all, which is what most legacy ones are.
        */
-      return { kind: 'meshes', meshUrl: base, ...spread('mesh', await tryOpen(base, openMeshSource, signal)) }
+      return { kind: 'meshes', meshUrl: base, ...spread('mesh', await tryOpen(base, openMeshDir, signal)) }
     default:
       return { kind: 'unknown' }
   }

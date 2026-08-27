@@ -22,7 +22,7 @@ import {
   fragmentsUrl,
 } from './multires'
 import type { FetchOptions } from './transport'
-import { fetchBytes, fetchInfo } from './transport'
+import { PrecomputedFetchError, fetchBytes, fetchInfo } from './transport'
 import { mapWithConcurrency } from '../concurrency'
 import { byteLengthOf, cachedGeometry } from '../geometryCache'
 
@@ -40,34 +40,89 @@ export interface MeshSource {
 
 interface RawInfo {
   '@type'?: string
-  mesh?: string
   sharding?: unknown
+}
+
+/**
+ * The fields of an `info` that say what kind of directory it describes.
+ *
+ * Its own type rather than each reader's `RawInfo`, because `probe.ts` asks the same question
+ * about the same document and the two answers must not be able to differ — a URL the card calls
+ * a mesh directory and the fetch calls a volume is one bug wearing two faces.
+ */
+export interface InfoKind {
+  '@type'?: string | undefined
+  type?: string | undefined
+  mesh?: string | undefined
+  skeletons?: string | undefined
+  scales?: unknown
+}
+
+/**
+ * Whether an `info` describes a multiscale volume rather than a directory of geometry.
+ *
+ * **`@type` is optional on a volume, and the older publishers omit it.** That was read as "no
+ * `@type` means a legacy mesh directory", which is right for a mesh directory and wrong for
+ * every flat segmentation published before the field was conventional — `gs://flywire_v141_m783`
+ * says `"type": "segmentation"`, `"mesh": "mesh_mip_1_err_40"`, `"skeletons":
+ * "skeletons_mip_1"`, eight `scales`, and no `@type` at all. Read as a mesh directory it opened
+ * as `legacy` at the bucket root, where the manifests are not; every request 404s, and because
+ * a missing mesh is an ordinary answer the whole thing came back as "this neuron has no mesh".
+ * Two multi-resolution mesh sets and a skeleton set were unreachable behind that.
+ *
+ * So the volume markers decide it instead: `scales`, or a named `mesh`/`skeletons` subdirectory.
+ * A mesh or skeleton directory's `info` carries none of the three — it describes one thing and
+ * has nowhere to point — which is what makes the test a discrimination rather than a heuristic.
+ */
+export function isVolumeInfo(info: InfoKind): boolean {
+  if (info['@type'] !== undefined) return info['@type'] === 'neuroglancer_multiscale_volume'
+  return info.scales !== undefined || info.mesh !== undefined || info.skeletons !== undefined
 }
 
 /**
  * Resolve a segmentation or mesh URL into a usable mesh source.
  *
- * A segmentation `info` names its mesh subdirectory, so a caller can pass either the volume
- * or the mesh directory and get the same answer. An `info` with no `@type` at all is treated
- * as legacy, which is what banc's bucket looks like.
+ * A segmentation `info` names its mesh subdirectory, so a caller can pass either the volume or
+ * the mesh directory and get the same answer.
+ *
+ * Paired with `openMeshDir`, and the split is the difference between *what is this URL* and
+ * *open this mesh directory*. Only this one has to decide, so only this one reads an `info`
+ * strictly: a URL with nothing at it is a URL nobody can use, and saying so beats resolving to
+ * an empty legacy directory whose every fetch then reports a missing neuron.
  */
 export async function openMeshSource(
   url: string,
   options: FetchOptions = {},
 ): Promise<MeshSource> {
   const base = url.replace(/\/+$/, '')
-  const info = await fetchInfo<RawInfo>(base, options)
+  const info = await fetchInfo<RawInfo & InfoKind>(base, options)
+  if (!isVolumeInfo(info)) return openMeshDir(base, options)
+  if (!info.mesh) throw new Error(`${base} is a volume with no mesh subdirectory`)
+  return openMeshDir(`${base}/${info.mesh}`, options)
+}
 
-  if (info['@type'] === 'neuroglancer_multiscale_volume') {
-    if (!info.mesh) throw new Error(`${base} is a volume with no mesh subdirectory`)
-    return openMeshSource(`${base}/${info.mesh}`, options)
-  }
+/**
+ * Open a directory already known to hold meshes.
+ *
+ * **A missing `info` is legacy here, and is not an error.** That is the rule for a directory a
+ * volume *named*: `gs://lee-lab_brain-and-nerve-cord-fly-connectome/neuron_meshes` names
+ * `meshes`, and `meshes/info` does not exist — which is ordinary, since a legacy mesh directory
+ * has nothing to declare. Only a 404 is forgiven, not any failure: a CORS refusal or an
+ * unreachable host read as "legacy" would turn one blip into a directory whose every manifest
+ * request 404s, reported per neuron as a missing mesh.
+ */
+export async function openMeshDir(url: string, options: FetchOptions = {}): Promise<MeshSource> {
+  const base = url.replace(/\/+$/, '')
+  const info = await fetchInfo<RawInfo>(base, options).catch((error: unknown) => {
+    if (error instanceof PrecomputedFetchError && error.status === 404) return {} as RawInfo
+    throw error
+  })
   if (info['@type'] === 'neuroglancer_multilod_draco') {
     // Unsharded is supported now — hemibrain's ROI meshes are built that way; see `readManifest`.
     const multi = await readMultiResInfo(base, options)
     return { base, format: 'multilod-draco', info: multi, levels: 0 }
   }
-  // 'neuroglancer_legacy_mesh', or an info with no @type.
+  // 'neuroglancer_legacy_mesh', an info with no @type, or no info at all.
   return { base, format: 'legacy', levels: 1 }
 }
 
@@ -98,6 +153,31 @@ export interface FetchMeshesResult {
 
 /** Default budget. ~1.5M triangles renders comfortably and holds a few dozen neurons coarse. */
 export const DEFAULT_TRIANGLE_BUDGET = 1_500_000
+
+/**
+ * Byte ceiling for a single thumbnail's mesh, compressed.
+ *
+ * A guard rail against a broken body, not a quality filter. It sits above the largest coarsest
+ * level measured in any dataset here — 508 kB on hemibrain, 169 kB on male-CNS — so in practice
+ * every neuron gets a thumbnail and this only fires for something pathological.
+ *
+ * The line is drawn where it is because 2 MB is what an *entire* hemibrain neuron costs at full
+ * resolution (its pyramid runs 2 MB / 280 kB / 48 kB / 11 kB). A body whose **coarsest** level
+ * is that big is not a neuron that happens to be large, it is an unsplit segmentation blob, and
+ * a placeholder is the right answer for it.
+ *
+ * Here rather than beside one backend, because two now draw thumbnails from a precomputed
+ * pyramid — neuPrint's published buckets and the flat segmentations CAVE's datastacks have
+ * beside them — and it is a property of `maxBytesPerBody` either way. FlyWire's flat coarsest
+ * level runs 73 kB to 1.44 MB across a sample of eight, so this admits all of them.
+ *
+ * It was 128 kB, chosen above p90 to keep a page of 25 rows cheap. That bought a few hundred
+ * kilobytes per page at the cost of blanking the most interesting neurons in the dataset —
+ * giant fibres and big tracts are exactly the bodies with the heaviest coarse mesh. The median
+ * is 264 bytes (hemibrain) and 7.3 kB (male-CNS), so the typical page is unchanged by this;
+ * only the tail is, and the tail is the part worth looking at.
+ */
+export const THUMBNAIL_MAX_BYTES = 2 * 1024 * 1024
 
 /**
  * How many bodies are read at once, in each of the two phases.
@@ -378,6 +458,36 @@ async function readLodFragments(
     at += size
   }
   return parts.length ? concatMeshes(parts) : undefined
+}
+
+/**
+ * The coarsest level of one body, for a thumbnail — or nothing cheap enough to draw.
+ *
+ * Every caller of this is a list of rows, so the two refusals matter more than the success. A
+ * source with no pyramid answers `undefined` rather than its only level: `DataSource
+ * .fetchCoarseGeometry` promises a browsable list ~10 kB a row, and a legacy directory would
+ * hand back several megabytes each. And `THUMBNAIL_MAX_BYTES` turns down a single pathological
+ * body, off the manifest, so the refusal costs no download.
+ *
+ * Shared because it was written twice: neuPrint reads a published bucket and CAVE reads the flat
+ * segmentation beside a datastack, and both want exactly this call. A triangle budget of one
+ * cannot be met by any level, and `chooseLod` answers that with the coarsest — which is the
+ * level wanted here, so the budget is a way of asking rather than a limit.
+ */
+export async function fetchCoarseMesh(
+  source: MeshSource,
+  neuronId: string,
+  options: FetchOptions = {},
+): Promise<MeshBody | undefined> {
+  if (source.format !== 'multilod-draco') return undefined
+  const result = await fetchMeshes(source, [neuronId], {
+    ...options,
+    triangleBudget: 1,
+    concurrency: 1,
+    maxBytesPerBody: THUMBNAIL_MAX_BYTES,
+  })
+  const mesh = result.meshes[0]
+  return mesh ? { positions: mesh.positions, indices: mesh.indices } : undefined
 }
 
 export { parseLegacyFragment } from './legacy'

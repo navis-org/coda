@@ -42,8 +42,9 @@ import {
   tableListFor,
 } from './tables'
 import { caveScene } from './scene'
+import { flatUrlFor, probeFlat } from './flat'
 import { segmentationLayerIndex } from '../neuroglancer/scene'
-import { registerDatastackSpec } from './spec'
+import { registerDatastackSpec, specFor } from './spec'
 import { ID_COLUMN_NAME } from '../../core/ids'
 import type { RestoreFetch } from '../../test/precomputedStubs'
 import { serveDracoWasmFromDisk } from '../../test/precomputedStubs'
@@ -154,25 +155,29 @@ live('CAVE, live', () => {
   }, 600_000)
 
   /*
-   * The budget is honoured rather than a fixed grid applied, which is the whole reason
-   * `decimateGridFor` exists: graphene publishes one level of detail, so the only way the Meshes
-   * node's `Detail` control can mean anything here is by deciding how hard the fetched mesh is
-   * simplified. One neuron is 1,276,736 triangles before decimation.
+   * The Detail control on the flat route, which is a published pyramid rather than a knob: a
+   * lower budget picks a coarser *level*, and nothing is simplified. The two properties that
+   * matter are that the level actually moves, and that `detail` says which of the two happened —
+   * a levelled source reporting `decimated: true` would tell a reader 98% of its triangles had
+   * been merged away when none had.
    */
-  it('decimates an arriving mesh to the triangle budget it was given', async () => {
-    const low = await source.fetchMeshes({
-      datasetId: DATASET,
-      neuronIds: [SEED],
-      triangleBudget: 150_000,
-    })
-    const triangles = low.items[0]!.indices.length / 3
-    expect(triangles).toBeLessThanOrEqual(150_000)
-    // Not so aggressive that the arbor goes — `MIN_DECIMATE_GRID` is the floor under it.
-    expect(triangles).toBeGreaterThan(5_000)
+  it('drops to a coarser published level for a lower budget, rather than decimating', async () => {
+    const [low, high] = await Promise.all([
+      source.fetchMeshes({ datasetId: DATASET, neuronIds: [SEED], triangleBudget: 150_000 }),
+      source.fetchMeshes({ datasetId: DATASET, neuronIds: [SEED], triangleBudget: 20_000_000 }),
+    ])
+    expect(low.detail?.decimated).toBeUndefined()
+    expect(low.detail?.levels).toBeGreaterThan(1)
+    expect(low.detail!.lod).toBeGreaterThan(high.detail!.lod!)
+    expect(low.items[0]!.indices.length).toBeLessThan(high.items[0]!.indices.length)
 
-    // And it says so: a source with no levels reports that it simplified, not "level 0 of 0".
-    expect(low.detail?.decimated).toBe(true)
-    expect(low.detail?.triangles).toBe(triangles)
+    /*
+     * And the budget is *overshot*, which is not a failure and has to be said: LOD 3 is the
+     * coarsest this neuron has and it is 389,116 triangles. There is no finer knob than
+     * "coarsest" on a published pyramid — see `chooseLod` — which is exactly the property the
+     * graphene route below does not share.
+     */
+    expect(low.items[0]!.indices.length / 3).toBeGreaterThan(150_000)
   }, 600_000)
 
   it('builds an adjacency matrix over real root ids', async () => {
@@ -482,6 +487,35 @@ describe.skipIf(!TOKEN)('CAVE, live — a reference table on another deployment'
     version = (await materializationsFor(BANC))[0]!
   }, 60_000)
 
+  /*
+   * The budget honoured by *simplification*, which is the whole reason `decimateGridFor` exists:
+   * graphene publishes one level of detail, so the only way the Meshes node's `Detail` control
+   * can mean anything on this route is by deciding how hard the fetched mesh is simplified.
+   *
+   * Here rather than on FlyWire because FlyWire no longer takes this route — its materializations
+   * were flattened, and `DatastackSpec.flat` prefers the published pyramid. BANC is the datastack
+   * that still exercises graphene, and its flat bucket is deliberately not listed: it publishes
+   * legacy meshes at 28.4 MB and 60.8 MB for two neurons this answers in ~200 kB of Draco.
+   */
+  it('decimates an arriving graphene mesh to the triangle budget it was given', async () => {
+    const ids = (await new CaveSource().findNeurons({ datasetId: `${BANC}:${version}`, limit: 8 }))
+      .data[ID_COLUMN_NAME] as string[]
+    const low = await new CaveSource().fetchMeshes({
+      datasetId: `${BANC}:${version}`,
+      // The first row of `backbone_proofread` is sometimes a fragment with no mesh at all; a
+      // handful of candidates is what makes this about decimation rather than about luck.
+      neuronIds: ids.slice(0, 4),
+      triangleBudget: 150_000,
+    })
+    const triangles = low.items[0]!.indices.length / 3
+    expect(triangles).toBeLessThanOrEqual(150_000)
+    // Not so aggressive that the arbor goes — `MIN_DECIMATE_GRID` is the floor under it.
+    expect(triangles).toBeGreaterThan(5_000)
+
+    // And it says so: a source with no levels reports that it simplified, not "level 0 of 0".
+    expect(low.detail?.decimated).toBe(true)
+  }, 600_000)
+
   it('reports codex_annotations as a reference table, which is what the join hangs on', async () => {
     const metadata = await tableMetadata(server, BANC, version, 'codex_annotations')
     expect(metadata.schema_type).toBe('cell_type_reference')
@@ -546,4 +580,93 @@ describe.skipIf(!TOKEN)('CAVE, live — a reference table on another deployment'
       }),
     ).rejects.toThrow(/pt_root_id not in model/)
   }, 60_000)
+})
+
+
+/**
+ * The flat segmentations published beside a materialization, against the real buckets.
+ *
+ * Everything here is a fact about somebody else's bucket that CAVE's own metadata does not
+ * mention, which is exactly the class of thing a fixture cannot keep honest. Three of them are
+ * the reason `DatastackSpec.flat` is shaped the way it is: the `info` carries no `@type`, the
+ * pyramid is real, and the skeletons exist on the one datastack with no level-2 cache to build
+ * any from.
+ *
+ * The buckets are public and CORS-open (`access-control-allow-origin: *` on
+ * storage.googleapis.com), so unlike everything above this needs no token at all. It is gated on
+ * one anyway: this file is out of `pnpm test` because it goes to the network, and a describe that
+ * ignored the gate would put eight seconds of Google Storage in the ordinary suite.
+ */
+live('CAVE, live — the flat segmentation beside a materialization', () => {
+  const FLYWIRE = specFor('flywire_fafb_public')!
+
+  it('resolves the bucket root to a volume, not to a legacy mesh directory', async () => {
+    /*
+     * `gs://flywire_v141_m783/info` declares `type`, `scales`, `mesh` and `skeletons` and **no
+     * `@type`**. Read by `@type` alone it is a legacy mesh directory at the bucket root, where
+     * no manifest exists — so every fetch 404d and, because a missing mesh is an ordinary
+     * answer, surfaced as "these neurons have no meshes" rather than as a bad URL.
+     */
+    const flat = await probeFlat(FLYWIRE, 783)
+    expect(flat?.kind).toBe('volume')
+    expect(flat?.mesh?.format).toBe('multilod-draco')
+    expect(flat?.summary).toBe('segmentation · multi-resolution meshes · skeletons')
+
+    // 630 was flattened too, and publishes meshes only — which is why the spec is keyed by
+    // version rather than by datastack.
+    const older = await probeFlat(FLYWIRE, 630)
+    expect(older?.mesh?.format).toBe('multilod-draco')
+    expect(older?.skeletonUrl).toBeUndefined()
+  }, 60_000)
+
+  it('has no entry for a materialization nobody flattened', () => {
+    // Sparse on purpose. An absent entry is the ordinary case and means the graphene route.
+    expect(flatUrlFor(FLYWIRE, 571)).toBeUndefined()
+    expect(flatUrlFor(specFor('brain_and_nerve_cord_public')!, 888)).toBeUndefined()
+  })
+
+  it('answers one neuron’s coarsest level in two requests, inside the thumbnail ceiling', async () => {
+    /*
+     * What makes a thumbnail possible at all. The same neuron through graphene is 492 supervoxel
+     * fragments and ~1.2 MB with no level to trade against; here the coarsest level is a single
+     * fragment. Measured across eight v783 neurons it runs 73 kB to 1.44 MB, so
+     * `THUMBNAIL_MAX_BYTES` admits every one of them and the ceiling only fires for something
+     * pathological.
+     */
+    const source = new CaveSource()
+    const coarse = await source.fetchCoarseGeometry!({
+      datasetId: 'flywire_fafb_public:783',
+      neuronId: '720575940633370649',
+    })
+    expect(coarse).toBeDefined()
+    expect(coarse!.indices.length).toBeGreaterThan(300)
+
+    // Nanometres by publication, via the mesh `info`'s own transform — the same frame the
+    // skeleton below lands in, which is the check that would notice a missing conversion.
+    const xs = Array.from({ length: coarse!.positions.length / 3 }, (_, i) => coarse!.positions[i * 3]!)
+    expect(Math.min(...xs)).toBeGreaterThan(600_000)
+    expect(Math.max(...xs)).toBeLessThan(800_000)
+  }, 120_000)
+
+  it('reads a published skeleton for the one datastack that can build none', async () => {
+    /*
+     * `flywire_fafb_public` has no level-2 cache — the assertion two describes up — and the
+     * skeleton service it declares generates *from* that cache, which is why it was found empty.
+     * So this bucket is the only skeleton FlyWire has, and before it was wired in the Skeletons
+     * node refused for the whole datastack.
+     */
+    const skeletons = await new CaveSource().fetchSkeletons!({
+      datasetId: 'flywire_fafb_public:783',
+      neuronIds: ['720575940633370649'],
+    })
+    const item = skeletons.items[0]!
+    expect(skeletons.units).toBe('nm')
+    expect(item.positions.length).toBe(item.parents.length * 3)
+    expect(item.parents.length).toBeGreaterThan(1_000)
+    // A rooted tree in visit order: a parent always precedes its child, which every consumer
+    // that walks to a root depends on. `spanningForest` is what guarantees it.
+    for (let i = 0; i < item.parents.length; i++) expect(item.parents[i]!).toBeLessThan(i)
+    // Same frame as the mesh above, which is the pair that says neither needed converting.
+    expect(item.positions[0]!).toBeGreaterThan(600_000)
+  }, 120_000)
 })

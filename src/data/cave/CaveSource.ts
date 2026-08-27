@@ -43,6 +43,8 @@ import { boundsOf, getRow, makeTable, selectRows, tableFromRows } from '../../co
 import { geometryFrame } from '../transforms/spaces'
 import type {
   AdjacencyRequest,
+  CoarseGeometry,
+  CoarseGeometryRequest,
   ConnectivityRequest,
   DataSource,
   DatasetInfo,
@@ -69,7 +71,16 @@ import {
   openGrapheneMeshes,
   readGrapheneMesh,
 } from './meshes'
-import { DEFAULT_TRIANGLE_BUDGET } from '../precomputed'
+import type { MeshResult, MeshSource } from '../precomputed'
+import {
+  DEFAULT_TRIANGLE_BUDGET,
+  fetchCoarseMesh,
+  fetchMeshes as fetchFlatMeshes,
+  meshProgress,
+} from '../precomputed'
+import type { SkeletonSource } from '../precomputed/skeletons'
+import { fetchSkeletons as fetchFlatSkeletons, openSkeletonSource } from '../precomputed/skeletons'
+import { FLAT_SKELETON_MB, FLAT_SKELETON_WARN, peekFlat, probeFlat } from './flat'
 import type { CaveRequestOptions, CaveRow } from './client'
 import type { DatastackInfo } from './api'
 import { CaveError } from './client'
@@ -303,13 +314,25 @@ export class CaveSource implements DataSource {
   /**
    * What this datastack can do, where it differs from the source.
    *
-   * Skeletons only, and only when the peek has landed — `undefined` while it has not, which
+   * Skeletons only, and only when a peek has landed — `undefined` while neither has, which
    * `sourceSupports` reads as "same as the source", i.e. the safe `false`. `reportSourceLearned`
-   * re-infers when the answer arrives, so the node stops refusing on its own.
+   * re-infers when an answer arrives, so the node stops refusing on its own.
+   *
+   * **Two independent sources of a skeleton, and both are peeked whatever the other says.** The
+   * level-2 cache covers six of the thirteen datastacks the info service lists; a flat bucket
+   * covers the released materializations somebody flattened. `flywire_fafb_public` is exactly the
+   * case that makes asking both necessary — it has no L2 cache at all, so this answered a settled
+   * `false` and the Skeletons node refused, while `gs://flywire_v141_m783/skeletons_mip_1` sat
+   * there publishing them. `peekFlat` is called first so its read is *started* even in the branch
+   * where L2 has already answered.
    */
   capabilitiesFor(datasetId: string): Partial<SourceCapabilities> | undefined {
     const parsed = splitDatasetId(datasetId)
-    const has = parsed ? peekL2Cache(parsed.datastack) : undefined
+    if (!parsed) return undefined
+    const spec = specFor(parsed.datastack)
+    const flat = spec ? peekFlat(spec, parsed.version) : undefined
+    if (flat?.skeletonUrl) return { skeletons: true }
+    const has = peekL2Cache(parsed.datastack)
     return has === undefined ? undefined : { skeletons: has }
   }
 
@@ -848,7 +871,81 @@ export class CaveSource implements DataSource {
   // -------------------------------------------------------------------------
 
   /**
-   * Neuron meshes, one graphene manifest and several hundred Draco fragments apiece.
+   * Neuron meshes, from whichever of the two segmentations this materialization has.
+   *
+   * **A flat bucket wins wherever there is one, and the gap is not a tuning difference.**
+   * Graphene publishes supervoxel fragments at full resolution and has no levels at all, so one
+   * FlyWire neuron is 492 range requests and ~1.2 MB, and `decimateMesh` is what makes a scene
+   * of them survivable. `gs://flywire_v141_m783` answers the same neuron in two range requests
+   * off a 3-to-5 level pyramid. See `DatastackSpec.flat` for which materializations have one and
+   * why BANC's bucket is deliberately not among them.
+   */
+  async fetchMeshes(req: GeometryRequest): Promise<MeshesValue> {
+    const { spec, version } = this.require(req.datasetId)
+    const flat = await this.flatMeshDir(spec, version, req.signal)
+    return flat ? this.flatMeshes(req, spec, flat) : this.grapheneMeshes(req, spec)
+  }
+
+  /**
+   * The flat route: a published pyramid, read by `precomputed/index.ts` unchanged.
+   *
+   * Nanometres with no conversion, and that is measured rather than assumed — the mesh bounding
+   * box for FlyWire v783's `720575940633370649` is x 682,703–723,512 nm, against 682,704–723,568
+   * for the same neuron's published skeleton. The `transform` in the mesh `info` is what does it,
+   * and `fragmentTransform` already applies it.
+   */
+  private async flatMeshes(
+    req: GeometryRequest,
+    spec: DatastackSpec,
+    source: MeshSource,
+  ): Promise<MeshesValue> {
+    let types: Map<string, string> | undefined
+    const typesReady = this.morphologyTypes(req).then((t) => (types = t))
+    const assemble = (meshes: readonly MeshResult[], detail?: MeshesValue['detail']) =>
+      this.meshValue(
+        req,
+        meshes.map((mesh) => ({ id: mesh.neuronId, positions: mesh.positions, indices: mesh.indices })),
+        types,
+        detail,
+      )
+
+    const result = await fetchFlatMeshes(source, req.neuronIds, {
+      ...(req.signal ? { signal: req.signal } : {}),
+      ...(req.refresh ? { refresh: true } : {}),
+      ...(req.onFetched ? { onFetched: req.onFetched } : {}),
+      ...(req.onProgress ? { onProgress: meshProgress(req.onProgress) } : {}),
+      triangleBudget: req.triangleBudget ?? DEFAULT_TRIANGLE_BUDGET,
+      // No `detail` on a partial: the caption's triangle count is only true of the whole batch.
+      ...(req.onPartial ? { onPartial: (meshes) => req.onPartial?.(assemble(meshes)) } : {}),
+    })
+
+    /*
+     * Reported, because it means something specific here that it does not mean for a bucket
+     * somebody pasted. A flat segmentation holds *this materialization's* root ids and no
+     * others, so a miss is usually an id from a different version rather than a neuron nobody
+     * meshed — and the graphene route, which answers for any root id ever minted, is the thing
+     * to say so.
+     */
+    if (result.missing.length > 0) {
+      req.onWarn?.(
+        `${result.missing.length.toLocaleString()} of ${req.neuronIds.length.toLocaleString()} ` +
+          `neurons have no mesh in ${spec.label}'s published segmentation for this version, so ` +
+          `they are not in this result. A flat segmentation holds the root ids that were current ` +
+          `when it was written; an id from another materialization will not be in it.`,
+      )
+    }
+
+    await typesReady
+    return assemble(
+      result.meshes,
+      result.lod !== undefined && result.levels !== undefined
+        ? { lod: result.lod, levels: result.levels, triangles: result.triangles }
+        : undefined,
+    )
+  }
+
+  /**
+   * The graphene route: one manifest and several hundred Draco fragments apiece.
    *
    * The cost is said here rather than on the node, because it is a fact about graphene and not
    * about the Meshes node: the same node against neuPrint's multi-resolution meshes is cheap at
@@ -861,20 +958,26 @@ export class CaveSource implements DataSource {
    * goes and does it, with `MESH_CONCURRENCY` and the session geometry cache doing the actual
    * work of making that survivable.
    */
-  async fetchMeshes(req: GeometryRequest): Promise<MeshesValue> {
+  private async grapheneMeshes(req: GeometryRequest, spec: DatastackSpec): Promise<MeshesValue> {
     // No materialization here, deliberately: a graphene mesh is keyed by root id, and a root id
     // names one immutable agglomeration — an edit mints a new one — so the mesh for an id from
-    // v783 is the same mesh whichever version named it.
-    const { spec } = this.require(req.datasetId)
+    // v783 is the same mesh whichever version named it. The flat route above is the opposite
+    // case, which is why it is keyed by version and this is not.
     if (req.neuronIds.length > MESH_WARN_NEURONS) {
-      // ~1.2 MB and 492 requests apiece, eight at a time — call it four seconds a neuron.
+      /*
+       * FlyWire's numbers, and deliberately the slow end rather than a mean: 492 fragments and
+       * ~1.2 MB apiece, eight at a time, which is about four seconds a neuron. How far off that
+       * is for another datastack depends on how its meshing agglomerates — BANC's answers one
+       * neuron in 61 fragments, because it serves chunkedgraph layers 2–6 rather than leaves. An
+       * estimate that is never shorter than the wait is the right kind of wrong for a warning.
+       */
       req.onWarn?.(
-        `${req.neuronIds.length.toLocaleString()} graphene meshes from ${spec.label} is ` +
+        `${req.neuronIds.length.toLocaleString()} graphene meshes from ${spec.label} is up to ` +
           `${describeDuration(req.neuronIds.length * 4)} and around ` +
           `${Math.round(req.neuronIds.length * 1.2)} MB. A graphene mesh has no level of ` +
-          `detail, so each one is several hundred requests — this backend is the slow case, ` +
-          `and a source publishing multi-resolution meshes would do the same set in seconds. ` +
-          `Fetching anyway; cancel if that is not what you meant.`,
+          `detail, so each one is dozens to hundreds of requests — this is the slow route, and ` +
+          `a materialization with a flat segmentation beside it does the same set in two ` +
+          `requests a neuron. Fetching anyway; cancel if that is not what you meant.`,
       )
     }
 
@@ -914,24 +1017,17 @@ export class CaveSource implements DataSource {
      *
      * Items carry their own id rather than being zipped against a second list by index — the
      * shape `NeuPrintSource.fetchMeshes` already uses, and the one that cannot fall out of step.
-     * `detail` is the only field a partial has no honest answer for, since it describes the
-     * whole batch, so it arrives as an argument rather than being recomputed here.
      */
     const assemble = (
       pairs: ReadonlyArray<[string, Omit<MeshGeometry, 'id'>]>,
       detail?: MeshesValue['detail'],
-    ): MeshesValue => {
-      const items: MeshGeometry[] = pairs.map(([id, mesh]) => ({ id, ...mesh }))
-      return {
-        kind: 'meshes',
-        items,
-        attributes: this.morphologyTable(req, items, types),
-        bounds: boundsOf(items.map((i) => i.positions)),
-        ...(detail ? { detail } : {}),
-        // Nanometres, and not by conversion: a graphene fragment decodes to world coordinates.
-        ...this.frame(req.datasetId),
-      }
-    }
+    ): MeshesValue =>
+      this.meshValue(
+        req,
+        pairs.map(([id, mesh]) => ({ id, ...mesh })),
+        types,
+        detail,
+      )
 
     let done = 0
     const fetched = await cachedGeometry<Omit<MeshGeometry, 'id'>>({
@@ -963,19 +1059,99 @@ export class CaveSource implements DataSource {
   }
 
   /**
-   * Skeletons from the level-2 chunk graph.
+   * Skeletons, from whichever of the two routes this materialization has.
    *
-   * Two requests per neuron — the chunk graph, then the cache's representative coordinates — and
-   * about 1.6 s. See `l2.ts` for why this rather than the skeleton service several datastacks
-   * also publish.
+   * **Published beats built, and they are not the same product.** A flat bucket's
+   * `skeletons_mip_1` is a skeletonisation of the segmentation itself — measured across ten
+   * FlyWire v783 neurons, 14,559 to 338,087 nodes with a radius and a cross-sectional area on
+   * every one. An L2 skeleton is one node per level-2 chunk, tens to a few thousand, and is the
+   * right shape for NBLAST and cable length but is a chunk decomposition rather than a
+   * reconstruction. Where a datastack has both, the published one is the better answer and costs
+   * one request per neuron instead of two.
    *
-   * The gate is per **dataset**, not per source: six of thirteen datastacks have a cache, so a
-   * flat answer is wrong for somebody whichever way it is set. `capabilitiesFor` is what carries
-   * that to the node, and this refuses again at run time because a peek can be `undefined` when
-   * the node was configured.
+   * In practice no datastack has both, and the reason is the same fact twice: FlyWire's
+   * skeletons exist *because* it has no L2 cache to build any from, and the datastacks with a
+   * cache (BANC, minnie65, Aedes) have no flat pyramid worth naming. The preference is written
+   * down anyway, because "they never coexist" is a fact about today's spec table rather than
+   * about CAVE.
+   *
+   * The gate is per **dataset**, not per source, and this refuses again at run time because a
+   * peek can be `undefined` when the node was configured.
    */
   async fetchSkeletons(req: GeometryRequest): Promise<SkeletonsValue> {
-    const { spec } = this.require(req.datasetId)
+    const { spec, version } = this.require(req.datasetId)
+    const flat = await this.flatSkeletonDir(spec, version, req.signal)
+    if (flat) return this.flatSkeletons(req, spec, flat)
+    return this.l2Skeletons(req, spec)
+  }
+
+  /**
+   * The published route: one request per neuron, out of the bucket's shard index.
+   *
+   * Nanometres already — measured, x 682,704–723,568 for FlyWire v783's `720575940633370649`,
+   * matching that neuron's mesh — so `parseSkeleton`'s identity transform is the whole of the
+   * conversion. `spanningForest` inside it is what makes `parents` a rooted tree in visit order,
+   * which is the invariant every consumer that walks to a root depends on.
+   */
+  private async flatSkeletons(
+    req: GeometryRequest,
+    spec: DatastackSpec,
+    source: SkeletonSource,
+  ): Promise<SkeletonsValue> {
+    if (req.neuronIds.length > FLAT_SKELETON_WARN) {
+      const megabytes = Math.round(req.neuronIds.length * FLAT_SKELETON_MB)
+      req.onWarn?.(
+        `${req.neuronIds.length.toLocaleString()} skeletons from ${spec.label} is around ` +
+          `${megabytes.toLocaleString()} MB and ${describeDuration(req.neuronIds.length * 0.2)}. ` +
+          `These are skeletonised at mip 1 — tens of thousands of nodes each, not the few ` +
+          `hundred a chunk-graph skeleton has — so the cost here is memory rather than the ` +
+          `wait. Fetching anyway; cancel if that is not what you meant.`,
+      )
+    }
+
+    // Started alongside the download and read from a local, never an instance field: one source
+    // serves every graph in the tab, so per-request state on `this` is one run reading another's.
+    let types: Map<string, string> | undefined
+    const typesReady = this.morphologyTypes(req).then((t) => (types = t))
+    const assemble = (items: readonly SkeletonGeometry[]): SkeletonsValue => ({
+      kind: 'skeletons',
+      items: [...items],
+      attributes: this.morphologyTable(req, items, types),
+      bounds: boundsOf(items.map((item) => item.positions)),
+      ...this.frame(req.datasetId),
+    })
+
+    const result = await fetchFlatSkeletons(source, req.neuronIds, {
+      ...(req.signal ? { signal: req.signal } : {}),
+      ...(req.refresh ? { refresh: true } : {}),
+      ...(req.onFetched ? { onFetched: req.onFetched } : {}),
+      ...(req.onPartial ? { onPartial: (items) => req.onPartial?.(assemble(items)) } : {}),
+      ...(req.onProgress
+        ? {
+            onProgress: (done: number, total: number) =>
+              req.onProgress?.(done / Math.max(1, total), `${done}/${total} skeletons`),
+          }
+        : {}),
+    })
+    if (result.missing.length > 0) {
+      req.onWarn?.(
+        `${result.missing.length.toLocaleString()} of ` +
+          `${req.neuronIds.length.toLocaleString()} neurons have no skeleton in ` +
+          `${spec.label}'s published segmentation for this version, so they are not in this ` +
+          `result.`,
+      )
+    }
+    await typesReady
+    return assemble(result.skeletons)
+  }
+
+  /**
+   * The built route: two requests per neuron against the level-2 cache.
+   *
+   * The chunk graph, then the cache's representative coordinates — about 1.6 s. See `l2.ts` for
+   * why this rather than the skeleton service several datastacks also publish.
+   */
+  private async l2Skeletons(req: GeometryRequest, spec: DatastackSpec): Promise<SkeletonsValue> {
     const options: CaveRequestOptions = req.signal ? { signal: req.signal } : {}
 
     if (req.neuronIds.length > L2_SKELETON_WARN) {
@@ -993,9 +1169,9 @@ export class CaveSource implements DataSource {
     const source = await l2SourceFor(spec.datastack, options)
     if (!source) {
       throw new CaveError(
-        `${spec.label} has no level-2 cache, so Coda cannot build skeletons for it. That is a ` +
-          `fact about the datastack rather than about this graph — meshes and synapses are ` +
-          `unaffected.`,
+        `${spec.label} has no level-2 cache to build skeletons from, and no published skeletons ` +
+          `for this materialization either. That is a fact about the datastack rather than ` +
+          `about this graph — meshes and synapses are unaffected.`,
       )
     }
 
@@ -1119,6 +1295,93 @@ export class CaveSource implements DataSource {
       synapses,
       this.schemasFor(req.datasetId).synapses,
       this.frame(req.datasetId),
+    )
+  }
+
+  /**
+   * Cheapest geometry for one neuron, for a thumbnail.
+   *
+   * The flat pyramid only, and `undefined` for everything else — which is the honest answer for
+   * graphene rather than a gap. A graphene manifest is several hundred supervoxel fragments at
+   * full resolution with no level to trade against, so the alternative to a placeholder is a
+   * page of 25 rows downloading ~30 MB. See `DataSource.fetchCoarseGeometry`.
+   */
+  async fetchCoarseGeometry(req: CoarseGeometryRequest): Promise<CoarseGeometry | undefined> {
+    const parsed = splitDatasetId(req.datasetId)
+    const spec = parsed ? specFor(parsed.datastack) : undefined
+    if (!spec || !parsed) return undefined
+    const source = await this.flatMeshDir(spec, parsed.version, req.signal)
+    if (!source) return undefined
+    return fetchCoarseMesh(source, req.neuronId, req.signal ? { signal: req.signal } : {})
+  }
+
+  /**
+   * Geometry and its attribute rows as one `MeshesValue`. Both mesh routes end here.
+   *
+   * Shared rather than written once per route, because the part that differs between them is
+   * only where the triangles came from: the attribute table, the bounds and the frame are
+   * properties of the *dataset*. Written twice, the flat route was the one that would quietly
+   * lose `space` off `frame` and put a scene a template apart from the neurons beside it.
+   *
+   * `detail` is the one field a partial has no honest answer for, since it describes the whole
+   * batch, so it arrives as an argument rather than being recomputed here.
+   */
+  private meshValue(
+    req: GeometryRequest,
+    items: MeshGeometry[],
+    types: Map<string, string> | undefined,
+    detail?: MeshesValue['detail'],
+  ): MeshesValue {
+    return {
+      kind: 'meshes',
+      items,
+      attributes: this.morphologyTable(req, items, types),
+      bounds: boundsOf(items.map((i) => i.positions)),
+      ...(detail ? { detail } : {}),
+      // Nanometres either way, and not by conversion — measured on both routes.
+      ...this.frame(req.datasetId),
+    }
+  }
+
+  /**
+   * The flat bucket's mesh directory, opened — or nothing, which is the ordinary case.
+   *
+   * **Only a pyramid counts.** A `legacy` directory is one level at full resolution, which is
+   * what graphene already gives and a good deal heavier: banc's flat bucket answers 28.4 MB and
+   * 60.8 MB for two neurons the graphene route serves in ~200 kB of Draco. So a flat bucket that
+   * turns out to publish legacy meshes is *not* used, and the caller falls back rather than
+   * being told it has a better source than it has.
+   *
+   * Costs no requests of its own: `probePrecomputed` read the bucket's `info`, followed it to
+   * the mesh directory and opened it, all memoised per URL.
+   */
+  private async flatMeshDir(
+    spec: DatastackSpec,
+    version: number,
+    signal: AbortSignal | undefined,
+  ): Promise<MeshSource | undefined> {
+    const flat = await probeFlat(spec, version, signal ? { signal } : {})
+    return flat?.mesh?.format === 'multilod-draco' ? flat.mesh : undefined
+  }
+
+  /**
+   * The flat bucket's skeleton directory, opened — or nothing.
+   *
+   * Falls back to opening it here when the probe could not: `tryOpen` swallows a transient
+   * failure and caches the probe as a *success* with no opened directory, so keying the refusal
+   * on the opened copy would report "no skeletons" for the rest of the session after one blip.
+   * `skeletonUrl` is what says the bucket *names* skeletons; see `PrecomputedSource.meshDir`.
+   */
+  private async flatSkeletonDir(
+    spec: DatastackSpec,
+    version: number,
+    signal: AbortSignal | undefined,
+  ): Promise<SkeletonSource | undefined> {
+    const flat = await probeFlat(spec, version, signal ? { signal } : {})
+    if (!flat?.skeletonUrl) return undefined
+    return (
+      flat.skeletons ??
+      (await openSkeletonSource(flat.skeletonUrl, signal ? { signal } : {}).catch(() => undefined))
     )
   }
 
@@ -1485,7 +1748,7 @@ function synapsePoints(
  * Base markdown only — `**` and backticks. `parseMarkdown`'s extended kinds are opt-in and this
  * text renders through the same path as a blurb from whatever deployment a Custom node points at.
  */
-function codaReads(spec: DatastackSpec, info: DatastackInfo): string {
+function codaReads(spec: DatastackSpec, version: number, info: DatastackInfo): string {
   const rows = [
     `- Neurons — ${spec.neurons ? `\`${spec.neurons.table}\`` : 'no table; an annotation source wired to the dataset is the neuron list'}`,
     `- Annotations — ${spec.annotations ? `\`${spec.annotations.table}\`` : 'none configured; wire an annotation source for cell types'}`,
@@ -1502,6 +1765,21 @@ function codaReads(spec: DatastackSpec, info: DatastackInfo): string {
           : 'unavailable: no roll-up view and no synapse table'
     }`,
     `- Synapses — ${synapses ? `\`${synapses}\`` : 'none published'}`,
+  )
+  /*
+   * Said from the spec rather than from a probe, and that is a deliberate narrowing of what this
+   * line claims: it reports which bucket is *configured*, exactly as every row above reports
+   * which table is configured. Probing to find out whether it answers today would put a request
+   * per datastack behind the dataset picker, and the answer would then be about the network
+   * rather than about the datastack.
+   */
+  const flat = spec.flat?.[version]
+  rows.push(
+    `- Morphology — ${
+      flat
+        ? `\`${flat}\`, the flat segmentation published for this materialization`
+        : 'built from the graphene segmentation, which has no level of detail'
+    }`,
   )
   return `**Coda reads this datastack as:**\n\n${rows.join('\n')}`
 }
@@ -1521,7 +1799,7 @@ function datasetInfoFor(
     label: `${spec.label} ${version}`,
     description:
       `${spec.description}\n\nMaterialization ${version}${dated}${ends}.` +
-      `\n\n${codaReads(spec, info)}`,
+      `\n\n${codaReads(spec, version, info)}`,
     // Absent where the spec names none, which a hand-named datastack cannot. Optional on
     // `DatasetInfo` for exactly that, so the card leaves the row off rather than guessing.
     ...(spec.species ? { species: spec.species } : {}),

@@ -82,6 +82,17 @@ carrying no colour it survives a theme switch, which a cached tile with the them
 not. Triangles are filled and depth-shaded (brightest-wins, so overlapping branches do not
 saturate); vertices alone would be a dotty cloud at that level of detail.
 
+**Which sources have them is a question about pyramids, not about backends.** `fetchCoarseGeometry`
+is optional on `DataSource` and `undefined` means "draw a placeholder", which for a source with a
+single level is the honest answer rather than a gap: the alternative is a page of 25 rows fetching
+several megabytes each. neuPrint's published buckets qualify; so does a CAVE dataset whose
+materialization has a flat segmentation beside it (`DatastackSpec.flat` — see
+[backends.md](backends.md)), which is what took FlyWire's rows from a placeholder apiece to a
+drawing. A CAVE dataset with only the `graphene://` segmentation still shows placeholders, and
+will: a graphene manifest is several hundred supervoxel fragments at full resolution with no level
+to trade against. `fetchCoarseMesh` in `precomputed/index.ts` is the one implementation both
+sources call, so the byte ceiling and the "coarsest level" trick cannot be spelled two ways.
+
 **Rasterised at 2× the box it is drawn in** (`RASTER_SCALE`), because the mesh has more detail
 than a 76px tile can hold — at 1:1 a thin neurite either landed on a pixel or vanished, and a
 HiDPI screen was upscaling the result. The browser downsamples, which is what turns the surplus

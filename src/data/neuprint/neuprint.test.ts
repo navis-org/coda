@@ -16,7 +16,8 @@ import { NUMERIC_DTYPES } from '../../core/types'
 import { cableLength, getColumn } from '../../core/values'
 import type { FilterRow } from '../filterRows'
 
-import { NeuPrintSource, THUMBNAIL_MAX_BYTES } from './NeuPrintSource'
+import { NeuPrintSource } from './NeuPrintSource'
+import { THUMBNAIL_MAX_BYTES } from '../precomputed'
 import {
   datasetSegment,
   forgetRoutes,

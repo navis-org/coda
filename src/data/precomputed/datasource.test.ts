@@ -88,14 +88,47 @@ describe('probing a precomputed directory', () => {
     expect(probe.ok && probe.source.summary).toBe('segmentation · multi-resolution meshes')
   })
 
-  it('reads an info with no @type as a legacy mesh directory', async () => {
-    // `openMeshSource` treats it as one — banc's bucket needs that — and the two must agree, or
-    // a URL this calls unreadable fetches perfectly well.
+  it('reads an info with no @type and nothing to point at as a legacy mesh directory', async () => {
+    // `openMeshDir` treats it as one — and the two must agree, or a URL this calls unreadable
+    // fetches perfectly well.
     const base = 'https://storage.googleapis.com/banc/meshes'
-    serve({ [`${base}/info`]: { scales: [] } })
+    serve({ [`${base}/info`]: {} })
     const probe = await probePrecomputed(base)
     expect(probe.ok && probe.source.kind).toBe('meshes')
     expect(probe.ok && probe.source.meshUrl).toBe(base)
+  })
+
+  it('reads a volume that declares no @type as a volume, not as a mesh directory', async () => {
+    /*
+     * `gs://flywire_v141_m783` exactly: `type`, `scales`, a named `mesh` and named `skeletons`,
+     * and no `@type` at all. Read as a legacy mesh directory it resolved to the *bucket root*,
+     * where no manifest exists — so every fetch 404d, and since a missing mesh is an ordinary
+     * answer it surfaced as "these neurons have no meshes" rather than as a bad URL.
+     */
+    const base = 'https://storage.googleapis.com/flat/seg'
+    serve({
+      [`${base}/info`]: volumeInfo({ typeless: true, mesh: 'mesh_mip_1_err_40', skeletons: 'skeletons_mip_1' }),
+      [`${base}/mesh_mip_1_err_40/info`]: DRACO_INFO,
+      [`${base}/skeletons_mip_1/info`]: { '@type': 'neuroglancer_skeletons' },
+    })
+    const probe = await probePrecomputed(base)
+    expect(probe.ok && probe.source.kind).toBe('volume')
+    expect(probe.ok && probe.source.mesh?.format).toBe('multilod-draco')
+    expect(probe.ok && probe.source.skeletonUrl).toBe(`${base}/skeletons_mip_1`)
+    expect(probe.ok && probe.source.summary).toBe('segmentation · multi-resolution meshes · skeletons')
+  })
+
+  it('opens a named mesh directory that publishes no info of its own', async () => {
+    /*
+     * banc's flat bucket: `neuron_meshes/info` names `meshes`, and `meshes/info` does not exist.
+     * That is ordinary for a legacy directory — it has nothing to declare — so the 404 is the
+     * answer rather than a failure. Only a 404: see the blip case below.
+     */
+    const base = 'https://storage.googleapis.com/lee-lab/neuron_meshes'
+    serve({ [`${base}/info`]: volumeInfo({ typeless: true, mesh: 'meshes' }) })
+    const probe = await probePrecomputed(base)
+    expect(probe.ok && probe.source.meshUrl).toBe(`${base}/meshes`)
+    expect(probe.ok && probe.source.mesh?.format).toBe('legacy')
   })
 
   it('reports an image volume as one, with no geometry to fetch', async () => {
@@ -110,9 +143,9 @@ describe('probing a precomputed directory', () => {
     // Reporting the whole URL as unreadable because of a subdirectory would hide the part that
     // did work. The mesh fetch says so properly when somebody asks for geometry.
     const base = 'https://storage.googleapis.com/half/seg'
-    serve({
-      [`${base}/info`]: volumeInfo({ mesh: 'm' }),
-    })
+    // 503 rather than an unserved URL: a *missing* `info` is a legacy mesh directory now, which
+    // is a reading of the bucket rather than a failure to read it.
+    serve({ [`${base}/info`]: volumeInfo({ mesh: 'm' }), [`${base}/m/info`]: 503 })
     const probe = await probePrecomputed(base)
     expect(probe.ok && probe.source.meshUrl).toBe(`${base}/m`)
     expect(probe.ok && probe.source.mesh?.format).toBeUndefined()
@@ -234,7 +267,7 @@ describe('PrecomputedSource', () => {
      * for the rest of the session, on a source that has them.
      */
     const base = 'https://storage.googleapis.com/blip/seg'
-    serve({ [`${base}/info`]: volumeInfo({ mesh: 'm' }) }) // `m/info` 404s: the blip.
+    serve({ [`${base}/info`]: volumeInfo({ mesh: 'm' }), [`${base}/m/info`]: 503 }) // The blip.
     const probe = await probePrecomputed(base)
     expect(probe.ok && probe.source.meshUrl).toBe(`${base}/m`)
     expect(probe.ok && probe.source.mesh).toBeUndefined()

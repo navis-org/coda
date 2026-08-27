@@ -65,7 +65,13 @@ import { geometryFrame } from '../transforms/spaces'
 import { fetchRoiMeshSet } from './roiMeshes'
 import { superRoisFrom } from './roiHierarchy'
 import type { MeshResult, MeshSource } from '../precomputed'
-import { DEFAULT_TRIANGLE_BUDGET, fetchMeshes, meshProgress, openMeshSource } from '../precomputed'
+import {
+  DEFAULT_TRIANGLE_BUDGET,
+  fetchCoarseMesh,
+  fetchMeshes,
+  meshProgress,
+  openMeshSource,
+} from '../precomputed'
 import { byteLengthOf, cachedGeometry } from '../geometryCache'
 import {
   fetchDatasets,
@@ -166,26 +172,6 @@ function pushNeuronRow(
 function idKey(raw: unknown): string {
   return String(raw)
 }
-
-/**
- * Byte ceiling for a single thumbnail's mesh, compressed.
- *
- * A guard rail against a broken body, not a quality filter. It sits above the largest coarsest
- * level measured in any dataset here — 508 kB on hemibrain, 169 kB on male-CNS — so in practice
- * every neuron gets a thumbnail and this only fires for something pathological.
- *
- * The line is drawn where it is because 2 MB is what an *entire* hemibrain neuron costs at full
- * resolution (its pyramid runs 2 MB / 280 kB / 48 kB / 11 kB). A body whose **coarsest** level
- * is that big is not a neuron that happens to be large, it is an unsplit segmentation blob, and
- * a placeholder is the right answer for it.
- *
- * It was 128 kB, chosen above p90 to keep a page of 25 rows cheap. That bought a few hundred
- * kilobytes per page at the cost of blanking the most interesting neurons in the dataset —
- * giant fibres and big tracts are exactly the bodies with the heaviest coarse mesh. The median
- * is 264 bytes (hemibrain) and 7.3 kB (male-CNS), so the typical page is unchanged by this;
- * only the tail is, and the tail is the part worth looking at.
- */
-export const THUMBNAIL_MAX_BYTES = 2 * 1024 * 1024
 
 interface DatasetState {
   info: DatasetInfo
@@ -603,18 +589,8 @@ export class NeuPrintSource implements DataSource {
    */
   async fetchCoarseGeometry(req: CoarseGeometryRequest): Promise<CoarseGeometry | undefined> {
     const source = await this.meshSourceFor(req.datasetId, req.signal)
-    if (!source || source.format !== 'multilod-draco') return undefined
-
-    // A budget of one triangle cannot be met by any level, and `chooseLod` answers that with
-    // the coarsest — which is exactly the level wanted here.
-    const result = await fetchMeshes(source, [req.neuronId], {
-      ...(req.signal ? { signal: req.signal } : {}),
-      triangleBudget: 1,
-      concurrency: 1,
-      maxBytesPerBody: THUMBNAIL_MAX_BYTES,
-    })
-    const mesh = result.meshes[0]
-    return mesh ? { positions: mesh.positions, indices: mesh.indices } : undefined
+    if (!source) return undefined
+    return fetchCoarseMesh(source, req.neuronId, req.signal ? { signal: req.signal } : {})
   }
 
   async fetchConnectivity(req: ConnectivityRequest): Promise<TableValue> {
