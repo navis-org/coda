@@ -49,6 +49,8 @@ import { byteLengthOf, cachedGeometry } from '../geometryCache'
 import type { NeuronIndexRequest } from '../neuronIndex'
 import type {
   AdjacencyRequest,
+  CoarseGeometry,
+  CoarseGeometryRequest,
   ConnectivityRequest,
   DataSource,
   DatasetInfo,
@@ -710,6 +712,46 @@ export class CatmaidSource implements DataSource {
 
     await indexReady
     return assemble(skeletons.ordered)
+  }
+
+  /**
+   * Cheapest geometry for one neuron, for a thumbnail.
+   *
+   * **A skeleton, because that is the only thing CATMAID has.** It stores tracing rather than a
+   * segmentation, so there is no mesh at any level and no pyramid to take a coarse rung off —
+   * which is why `CoarseGeometry` is a union: a mesh-shaped seam left every CATMAID row showing
+   * the placeholder glyph. The same `compact-detail` call `fetchSkeletons` makes, for one
+   * skeleton, decoded by the same function.
+   *
+   * **It is the most expensive thumbnail in the tree and there is deliberately no ceiling on
+   * it.** Measured against Virtual Fly Brain's FAFB: skeleton 16 is 940 kB in 0.70 s, and
+   * skeleton 2333007 is **4.2 MB** in 0.95 s — uncompressed, because the server does not gzip.
+   * A cold page of 25 rows is therefore tens of megabytes rather than the ~10 kB a published
+   * mesh pyramid costs.
+   *
+   * A `THUMBNAIL_MAX_BYTES`-style cut would be the obvious answer and it is the wrong one here,
+   * for the reason that constant's own docstring records from its 128 kB days: on a source whose
+   * *typical* body is already megabytes, a byte ceiling stops being a guard against a broken
+   * body and becomes a quality filter that blanks exactly the densely traced neurons anyone is
+   * looking for. The size is also knowable in advance — `skeletonSummaries` carries `num_nodes`
+   * and the index has already read it — so this is a decision rather than an impossibility.
+   *
+   * What makes it affordable instead is that a thumbnail is fetched **once per neuron ever**:
+   * `NeuronThumbnail` stores the 23 kB mask in IndexedDB, so the megabytes are paid on first
+   * sight of a row and never again. The session geometry cache is deliberately *not* written
+   * here — a background list-fill pushing 50 MB through a 256 MB LRU would evict the geometry of
+   * the scene the user is actually looking at.
+   */
+  async fetchCoarseGeometry(req: CoarseGeometryRequest): Promise<CoarseGeometry | undefined> {
+    const projectId = this.projectId(req.datasetId)
+    const options = req.signal ? { signal: req.signal } : {}
+    const [id] = numericIds([req.neuronId])
+    if (id === undefined) return undefined
+    const skeleton = await compactSkeleton(this.server, projectId, id, false, options)
+    // No emptiness check: `rasteriseSkeleton` answers a blank mask for a tree with no edges and
+    // the coverage floor turns that into the placeholder, so a second rule here is a second
+    // place for the two to disagree about what counts as nothing.
+    return { kind: 'skeleton', ...decodeCompactSkeleton(String(id), skeleton) }
   }
 
   /**

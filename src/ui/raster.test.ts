@@ -1,5 +1,5 @@
 /**
- * Triangles to masks, and masks to outlines.
+ * Triangles and lines to masks, and masks to outlines.
  *
  * The test that earns this file is the concave one. A region outline can be produced by sweeping
  * angles around a centroid and taking the furthest surface at each — it is far less code, it
@@ -11,7 +11,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { fillTriangle, simplifyClosed, traceOutlines } from './raster'
+import { drawSegment, fillTriangle, simplifyClosed, traceOutlines } from './raster'
 import type { XY } from './raster'
 
 function mask(width: number, height: number): Uint8Array {
@@ -45,6 +45,59 @@ function inside(ring: readonly XY[], point: XY): boolean {
   }
   return hit
 }
+
+describe('drawSegment', () => {
+  it('marks a connected run of pixels along a diagonal', () => {
+    /*
+     * The reason this is not two triangles. A quad two or three pixels wide, put through a
+     * barycentric fill, drops every pixel whose *centre* lands outside it — so a diagonal
+     * neurite came out dotted. Stamping along the major axis cannot leave a gap.
+     */
+    const w = 20
+    const h = 20
+    const m = mask(w, h)
+    drawSegment(m, w, h, [1, 1], [18, 18])
+    for (let i = 1; i <= 18; i++) expect(m[i * w + i]).toBe(255)
+  })
+
+  it('is brightest-wins, like the fill it sits beside', () => {
+    // A thin process crossing a thick one stays visible, and a depth-shaded drawing reads as
+    // depth rather than saturating wherever two branches overlap.
+    const m = mask(8, 8)
+    drawSegment(m, 8, 8, [0, 4], [7, 4], 200)
+    drawSegment(m, 8, 8, [4, 0], [4, 7], 90)
+    expect(m[4 * 8 + 4]).toBe(200)
+  })
+
+  it('takes thickness as a diameter, so an even width does not collapse', () => {
+    // Offsets run -floor((n-1)/2) to +floor(n/2), so a stamp of n covers n². A radius would round
+    // 2 down to a single pixel, which is the one width a caller is most likely to reach for.
+    for (const [thickness, painted] of [
+      [1, 1],
+      [2, 4],
+      [3, 9],
+    ] as const) {
+      const m = mask(9, 9)
+      drawSegment(m, 9, 9, [4, 4], [4, 4], 255, thickness)
+      expect(m.reduce((n, v) => n + (v > 0 ? 1 : 0), 0)).toBe(painted)
+    }
+  })
+
+  it('marks both ends of a sub-pixel segment rather than nothing', () => {
+    // A dense arbor has plenty of these once it is fit into a 152px tile, and a segment that
+    // rounds to zero steps must still leave its endpoints on the mask.
+    const m = mask(8, 8)
+    drawSegment(m, 8, 8, [2.1, 2.1], [2.4, 2.4])
+    expect(m[2 * 8 + 2]).toBe(255)
+  })
+
+  it('clips rather than writing outside the mask', () => {
+    const m = mask(6, 6)
+    expect(() => drawSegment(m, 6, 6, [-10, 3], [40, 3], 255, 3)).not.toThrow()
+    expect(m[3 * 6 + 0]).toBe(255)
+    expect(m[3 * 6 + 5]).toBe(255)
+  })
+})
 
 describe('fillTriangle', () => {
   it('fills the interior and nothing outside it', () => {

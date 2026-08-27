@@ -35,17 +35,13 @@ import { resetCredentials, setToken } from './credentials'
 import { caveServerFor, datastackRecord, l2SourceFor, materializationsFor } from './datastack'
 import { CAVE_MAX_ROWS, refuseIfCapped } from './client'
 import { countTable, queryTable, queryTableChecked, tableMetadata } from './api'
-import {
-  resetCaveTables,
-  tableColumnsFor,
-  tableFactsFor,
-  tableListFor,
-} from './tables'
+import { resetCaveTables, tableColumnsFor, tableFactsFor, tableListFor } from './tables'
 import { caveScene } from './scene'
 import { flatUrlFor, probeFlat } from './flat'
 import { segmentationLayerIndex } from '../neuroglancer/scene'
 import { registerDatastackSpec, specFor } from './spec'
 import { ID_COLUMN_NAME } from '../../core/ids'
+import { cableLength } from '../../core/values'
 import type { RestoreFetch } from '../../test/precomputedStubs'
 import { serveDracoWasmFromDisk } from '../../test/precomputedStubs'
 
@@ -101,7 +97,10 @@ live('CAVE, live', () => {
   }, 300_000)
 
   it('finds neurons by an anchored pattern, locally', async () => {
-    const table = await source.findNeurons({ datasetId: DATASET, rows: [{ field: 'type', op: 'matches', values: ['DNp01'] }] })
+    const table = await source.findNeurons({
+      datasetId: DATASET,
+      rows: [{ field: 'type', op: 'matches', values: ['DNp01'] }],
+    })
     expect(table.length).toBeGreaterThan(0)
     expect(new Set(table.data.type)).toEqual(new Set(['DNp01']))
   }, 300_000)
@@ -498,8 +497,9 @@ describe.skipIf(!TOKEN)('CAVE, live — a reference table on another deployment'
    * legacy meshes at 28.4 MB and 60.8 MB for two neurons this answers in ~200 kB of Draco.
    */
   it('decimates an arriving graphene mesh to the triangle budget it was given', async () => {
-    const ids = (await new CaveSource().findNeurons({ datasetId: `${BANC}:${version}`, limit: 8 }))
-      .data[ID_COLUMN_NAME] as string[]
+    const ids = (
+      await new CaveSource().findNeurons({ datasetId: `${BANC}:${version}`, limit: 8 })
+    ).data[ID_COLUMN_NAME] as string[]
     const low = await new CaveSource().fetchMeshes({
       datasetId: `${BANC}:${version}`,
       // The first row of `backbone_proofread` is sometimes a fragment with no mesh at all; a
@@ -516,6 +516,40 @@ describe.skipIf(!TOKEN)('CAVE, live — a reference table on another deployment'
     expect(low.detail?.decimated).toBe(true)
   }, 600_000)
 
+  it('draws a thumbnail from the level-2 chunk graph, since there is no pyramid here', async () => {
+    /*
+     * BANC's segmentation is `graphene://` and its flat bucket is deliberately not listed — it
+     * publishes legacy meshes at tens of megabytes a neuron — so the only cheap representation
+     * this datastack has is its level-2 chunk graph. Two small requests, and the mask that comes
+     * out of them is the thumbnail.
+     *
+     * Node counts here are real and worth pinning as a range rather than a number: they move with
+     * proofreading. Measured over four v888 neurons at the time of writing: 19, 310, 1,266 and
+     * 2,684 chunks.
+     */
+    const source = new CaveSource()
+    const ids = (await source.findNeurons({ datasetId: `${BANC}:${version}`, limit: 1 })).data[
+      ID_COLUMN_NAME
+    ] as string[]
+    const coarse = await source.fetchCoarseGeometry!({
+      datasetId: `${BANC}:${version}`,
+      neuronId: ids[0]!,
+    })
+    if (coarse?.kind !== 'skeleton') throw new Error(`expected a skeleton, got ${coarse?.kind}`)
+    expect(coarse.parents.length).toBeGreaterThan(4)
+    expect(coarse.positions.length).toBe(coarse.parents.length * 3)
+
+    /*
+     * And it is drawable, which for `rasteriseSkeleton` means at least one edge with real extent —
+     * a tree of roots, or one collapsed to a point, is a mask with nothing in it. `cableLength`
+     * is exactly that question and is `src/core`'s own, which is what keeps this in the data
+     * layer's terms: `src/data` does not import from `src/ui` (invariant 1), and the test-file
+     * exemption in the lint config is for helpers rather than a way around it. How the result
+     * actually *looks* was checked by printing four of these as ASCII — see `STROKE_FRACTION`.
+     */
+    expect(cableLength(coarse)).toBeGreaterThan(0)
+  }, 120_000)
+
   it('reports codex_annotations as a reference table, which is what the join hangs on', async () => {
     const metadata = await tableMetadata(server, BANC, version, 'codex_annotations')
     expect(metadata.schema_type).toBe('cell_type_reference')
@@ -530,7 +564,9 @@ describe.skipIf(!TOKEN)('CAVE, live — a reference table on another deployment'
      */
     const total = await countTable(server, BANC, version, { table: 'codex_annotations' })
     expect(total).toBeGreaterThan(CAVE_MAX_ROWS)
-    expect(() => refuseIfCapped(total, total, 'codex_annotations', 'they would be short')).not.toThrow()
+    expect(() =>
+      refuseIfCapped(total, total, 'codex_annotations', 'they would be short'),
+    ).not.toThrow()
   }, 120_000)
 
   it('answers the root id bare from the join, and the base count matches the joined rows', async () => {
@@ -545,9 +581,9 @@ describe.skipIf(!TOKEN)('CAVE, live — a reference table on another deployment'
       countTable(server, BANC, version, query),
     ])
     // And the same pair through the one function every read actually uses.
-    expect(await queryTableChecked(server, BANC, version, query, { consequence: 'x' })).toHaveLength(
-      rows.length,
-    )
+    expect(
+      await queryTableChecked(server, BANC, version, query, { consequence: 'x' }),
+    ).toHaveLength(rows.length)
 
     // Unsuffixed: `suffix_map` renames only what collides, and nothing here does.
     expect(Object.keys(rows[0]!)).toContain('pt_root_id')
@@ -581,7 +617,6 @@ describe.skipIf(!TOKEN)('CAVE, live — a reference table on another deployment'
     ).rejects.toThrow(/pt_root_id not in model/)
   }, 60_000)
 })
-
 
 /**
  * The flat segmentations published beside a materialization, against the real buckets.
@@ -638,12 +673,15 @@ live('CAVE, live — the flat segmentation beside a materialization', () => {
       datasetId: 'flywire_fafb_public:783',
       neuronId: '720575940633370649',
     })
-    expect(coarse).toBeDefined()
-    expect(coarse!.indices.length).toBeGreaterThan(300)
+    if (coarse?.kind !== 'mesh') throw new Error(`expected a mesh, got ${coarse?.kind}`)
+    expect(coarse.indices.length).toBeGreaterThan(300)
 
     // Nanometres by publication, via the mesh `info`'s own transform — the same frame the
     // skeleton below lands in, which is the check that would notice a missing conversion.
-    const xs = Array.from({ length: coarse!.positions.length / 3 }, (_, i) => coarse!.positions[i * 3]!)
+    const xs = Array.from(
+      { length: coarse.positions.length / 3 },
+      (_, i) => coarse.positions[i * 3]!,
+    )
     expect(Math.min(...xs)).toBeGreaterThan(600_000)
     expect(Math.max(...xs)).toBeLessThan(800_000)
   }, 120_000)

@@ -590,7 +590,8 @@ export class NeuPrintSource implements DataSource {
   async fetchCoarseGeometry(req: CoarseGeometryRequest): Promise<CoarseGeometry | undefined> {
     const source = await this.meshSourceFor(req.datasetId, req.signal)
     if (!source) return undefined
-    return fetchCoarseMesh(source, req.neuronId, req.signal ? { signal: req.signal } : {})
+    const mesh = await fetchCoarseMesh(source, req.neuronId, req.signal ? { signal: req.signal } : {})
+    return mesh && { kind: 'mesh', ...mesh }
   }
 
   async fetchConnectivity(req: ConnectivityRequest): Promise<TableValue> {

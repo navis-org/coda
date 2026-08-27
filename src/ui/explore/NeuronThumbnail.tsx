@@ -1,15 +1,23 @@
 /**
  * One neuron's thumbnail.
  *
- * Fetches the coarsest mesh the dataset publishes (~10 kB for a hemibrain neuron, versus 2.0 MB
- * at full detail), projects it to a silhouette mask and paints that. No token is involved:
- * meshes come from public neuroglancer buckets, so thumbnails work in a static deploy even
- * where the Cypher API cannot reach.
+ * Asks the source for the cheapest drawable form of one neuron, projects it to a silhouette mask
+ * and paints that. **What comes back is not always a mesh**, and this component does not care
+ * which: a published pyramid answers its coarsest level (~10 kB for a hemibrain neuron, against
+ * 2.0 MB at full detail), and a CAVE datastack with only a `graphene://` segmentation — where
+ * the cheapest mesh is the only mesh, several hundred fragments at full resolution — answers a
+ * level-2 skeleton instead. `CoarseGeometry` is the union and `thumbnail.ts` has a rasteriser
+ * for each, sharing one fit so the two draw into the same frame.
+ *
+ * **Whether a token is involved is the source's business, not this file's.** The published
+ * buckets are public and CORS-open, so a neuPrint or FlyWire row draws in a static deploy even
+ * where the Cypher API cannot reach; CAVE's level-2 endpoints redirect to auth, which costs
+ * nothing here because a CAVE list cannot be populated without a token in the first place.
  *
  * Three things keep a page of 25 of these from being a denial-of-service on the user's laptop:
  *
- *  - **A concurrency gate.** Each thumbnail is two range requests plus a Draco decode, so they
- *    are queued a few at a time rather than fired as a burst of fifty.
+ *  - **A concurrency gate.** Each thumbnail is two round trips and, on the mesh route, a wasm
+ *    decode — so they are queued a few at a time rather than fired as a burst of fifty.
  *  - **Two layers of cache, and only one of them remembers a refusal.** An in-memory map for
  *    this session and IndexedDB across sessions, keyed by dataset, neuron id and raster size. The
  *    mask is stored, not pixels, so it survives a theme change — a cached RGBA tile would be
@@ -22,9 +30,10 @@
  *    had turned down stayed a placeholder through any number of reloads, because nothing ever
  *    asked again. The session map still keeps a page turn from re-requesting, which is all it
  *    was ever needed for; the cost of forgetting across reloads is one manifest read.
- *  - **A refusal path.** `fetchCoarseGeometry` resolves undefined when a dataset has only
- *    full-resolution meshes, or when one body is pathologically heavy even at its coarsest
- *    level, and that becomes a placeholder rather than megabytes per row.
+ *  - **A refusal path.** `fetchCoarseGeometry` resolves undefined when a dataset has nothing
+ *    cheap in either shape — only full-resolution meshes and no level-2 cache — or when one body
+ *    is pathologically heavy even at its coarsest level, and that becomes a placeholder rather
+ *    than megabytes per row.
  */
 
 import { useEffect, useRef, useState } from 'react'
@@ -33,7 +42,13 @@ import { getSource } from '../../data/source'
 import { CHART_INK, currentMode } from '../colors'
 import { cacheGet, cacheSet } from '../../data/cache'
 import type { Silhouette } from './thumbnail'
-import { coverageFraction, hexToRgb, rasteriseSilhouette, silhouetteToRgba } from './thumbnail'
+import {
+  coverageFraction,
+  hexToRgb,
+  rasteriseSilhouette,
+  rasteriseSkeleton,
+  silhouetteToRgba,
+} from './thumbnail'
 
 export interface NeuronThumbnailProps {
   sourceId: string | undefined
@@ -144,7 +159,16 @@ async function loadSilhouette(
         memory.set(key, null)
         return null
       }
-      const silhouette = rasteriseSilhouette(geometry.positions, geometry.indices, pixels)
+      /*
+       * Whichever shape the source could answer cheaply — see `CoarseGeometry`. Nothing here
+       * prefers one: a datastack whose segmentation is `graphene://` has no cheap mesh at any
+       * level and a two-request skeleton, and the tile is the same tile either way because both
+       * rasterisers share one fit.
+       */
+      const silhouette =
+        geometry.kind === 'skeleton'
+          ? rasteriseSkeleton(geometry.positions, geometry.parents, pixels)
+          : rasteriseSilhouette(geometry.positions, geometry.indices, pixels)
       // A tile with almost nothing painted reads as a broken renderer rather than a neuron.
       const entry: Entry = coverageFraction(silhouette) < 0.002 ? null : silhouette
       memory.set(key, entry)

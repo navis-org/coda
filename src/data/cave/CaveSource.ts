@@ -1299,20 +1299,45 @@ export class CaveSource implements DataSource {
   }
 
   /**
-   * Cheapest geometry for one neuron, for a thumbnail.
+   * Cheapest geometry for one neuron, for a thumbnail — in whichever shape this datastack has.
    *
-   * The flat pyramid only, and `undefined` for everything else — which is the honest answer for
-   * graphene rather than a gap. A graphene manifest is several hundred supervoxel fragments at
-   * full resolution with no level to trade against, so the alternative to a placeholder is a
-   * page of 25 rows downloading ~30 MB. See `DataSource.fetchCoarseGeometry`.
+   * **Two routes, and the second is a skeleton rather than a mesh**, which is why
+   * `CoarseGeometry` is a union at all. A materialization with a flat pyramid beside it answers
+   * the coarsest published level. Everything else has only `graphene://`, where the cheapest
+   * mesh is the *only* mesh: several hundred supervoxel fragments at full resolution, ~1.2 MB,
+   * with no level to trade against — a page of 25 rows would be tens of megabytes, which is
+   * exactly the case `fetchCoarseGeometry`'s docstring says to answer `undefined` for.
+   *
+   * The level-2 chunk graph is the way out. Two small requests give the neuron's shape — a few
+   * hundred chunks with a representative coordinate each — and that is a drawing. It is what the
+   * Skeletons node already builds, so this is `readL2Skeletons` for one neuron and no new
+   * transport; `l2SourceFor` is the same gate, so a datastack with no cache still answers
+   * `undefined` and draws the placeholder.
+   *
+   * **It costs one neuron's worth of batching, knowingly.** `readL2Skeletons` pools chunk ids
+   * across a whole request and reads their coordinates in a handful of calls, which is what makes
+   * a hundred skeletons a hundred graph reads plus about three attribute reads rather than two
+   * hundred round trips. `CoarseGeometryRequest` is one neuron, so a page of 25 gives that up:
+   * 25 chunk-graph reads plus 25 attribute reads, instead of 25 plus about one. Widening the seam to a page would mean a batching protocol between the
+   * component and every source for a picture that is already gated at four concurrent and cached
+   * in IndexedDB after the first look.
    */
   async fetchCoarseGeometry(req: CoarseGeometryRequest): Promise<CoarseGeometry | undefined> {
     const parsed = splitDatasetId(req.datasetId)
     const spec = parsed ? specFor(parsed.datastack) : undefined
     if (!spec || !parsed) return undefined
-    const source = await this.flatMeshDir(spec, parsed.version, req.signal)
-    if (!source) return undefined
-    return fetchCoarseMesh(source, req.neuronId, req.signal ? { signal: req.signal } : {})
+    const options: CaveRequestOptions = req.signal ? { signal: req.signal } : {}
+
+    const pyramid = await this.flatMeshDir(spec, parsed.version, req.signal)
+    if (pyramid) {
+      const mesh = await fetchCoarseMesh(pyramid, req.neuronId, options)
+      return mesh && { kind: 'mesh', ...mesh }
+    }
+
+    const l2 = await l2SourceFor(spec.datastack, options)
+    if (!l2) return undefined
+    const [skeleton] = await readL2Skeletons(l2, [req.neuronId], options)
+    return skeleton ? { kind: 'skeleton', ...skeleton } : undefined
   }
 
   /**

@@ -21,6 +21,7 @@ import { describe, expect, it } from 'vitest'
 
 import { CatmaidSource } from './CatmaidSource'
 import { DEFAULT_CATMAID_SERVER, setInstances } from './credentials'
+import { cableLength } from '../../core/values'
 
 const LIVE = process.env.CATMAID_LIVE === '1'
 const TOKEN = process.env.CATMAID_TOKEN
@@ -44,6 +45,26 @@ live('CATMAID against the real FAFB instance', () => {
     // ignore the parameter, or a node's stored `Traced` default drops every row.
     expect(fafb?.statuses).toEqual([])
   })
+
+  it('answers a thumbnail with a real skeleton, at the size that costs', async () => {
+    /*
+     * The most expensive thumbnail in the tree, and the numbers are why there is no byte ceiling
+     * on it. Measured here: skeleton 16 is **940 kB in 0.70 s** and skeleton 2333007 is **4.2 MB
+     * in 0.95 s**, uncompressed, because this deployment does not gzip. A `THUMBNAIL_MAX_BYTES`
+     * cut pitched anywhere useful would blank exactly the densely traced neurons anyone is
+     * looking for — the failure that constant's own docstring records from its 128 kB days.
+     *
+     * What makes it affordable is that `NeuronThumbnail` stores the 23 kB mask in IndexedDB, so
+     * this is paid once per neuron ever rather than once per page turn.
+     */
+    const coarse = await source().fetchCoarseGeometry!({ datasetId: FAFB, neuronId: '16' })
+    if (coarse?.kind !== 'skeleton') throw new Error(`expected a skeleton, got ${coarse?.kind}`)
+    expect(coarse.parents.length).toBeGreaterThan(10_000)
+    expect(coarse.positions.length).toBe(coarse.parents.length * 3)
+    // Drawable: at least one edge with real extent, which is what `cableLength` measures. The
+    // spread-and-max form this replaced put 16,840 arguments through `Math.max`.
+    expect(cableLength(coarse)).toBeGreaterThan(0)
+  }, 120_000)
 
   it('fetches a skeleton in nanometres, as a tree', async () => {
     const skeletons = await source().fetchSkeletons({ datasetId: FAFB, neuronIds: ['16'] })

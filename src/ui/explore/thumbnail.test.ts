@@ -9,19 +9,22 @@
  * What is *not* checked anywhere: how a rendered thumbnail actually looks. That was verified by
  * rasterising real hemibrain, MANC and male-CNS neurons and printing the mask as ASCII — an LC4
  * showed its lobula arbor, thin neurite and terminal tuft, and male-CNS body 10001 showed the
- * giant fibre's descending axon — but that check needed a token and a network, so it cannot live
- * in the suite.
+ * giant fibre's descending axon — and again for the skeleton path, on four BANC level-2
+ * skeletons, which is where `STROKE_FRACTION` comes from. Both checks needed a token and a
+ * network, so neither can live in the suite.
  */
 
 import { describe, expect, it } from 'vitest'
 
 import { column, tableSchema } from '../../core/types'
 import { rowFields, statUnit } from './rowFields'
+import type { Silhouette } from './thumbnail'
 import {
   coverageFraction,
   emptySilhouette,
   hexToRgb,
   rasteriseSilhouette,
+  rasteriseSkeleton,
   silhouetteToRgba,
 } from './thumbnail'
 
@@ -29,8 +32,22 @@ import {
 const SQUARE_POSITIONS = new Float32Array([0, 0, 0, 10, 0, 0, 10, 10, 0, 0, 10, 0])
 const SQUARE_INDICES = new Uint32Array([0, 1, 2, 0, 2, 3])
 
-function at(silhouette: { size: number; coverage: Uint8Array }, x: number, y: number): number {
+function at(silhouette: Silhouette, x: number, y: number): number {
   return silhouette.coverage[y * silhouette.size + x] ?? 0
+}
+
+/** Smallest and largest painted coordinate on either axis — the drawing's box in the tile. */
+function bounds(silhouette: Silhouette): readonly [number, number] {
+  let min = silhouette.size
+  let max = 0
+  for (let y = 0; y < silhouette.size; y++) {
+    for (let x = 0; x < silhouette.size; x++) {
+      if (at(silhouette, x, y) === 0) continue
+      min = Math.min(min, x, y)
+      max = Math.max(max, x, y)
+    }
+  }
+  return [min, max]
 }
 
 describe('rasteriseSilhouette', () => {
@@ -125,6 +142,122 @@ describe('rasteriseSilhouette', () => {
     expect(() =>
       rasteriseSilhouette(SQUARE_POSITIONS, new Uint32Array([0, 1, 99]), 16),
     ).not.toThrow()
+  })
+})
+
+/**
+ * A plus sign: four arms from a centre node, all at one depth.
+ *
+ * Deliberately not a chain — the properties worth pinning are about *branching*, and a linear
+ * skeleton would pass a rasteriser that only ever drew from each point to the one before it.
+ */
+const CROSS_POSITIONS = new Float32Array([
+  10,
+  10,
+  0, // 0, the centre
+  0,
+  10,
+  0, // 1, west
+  20,
+  10,
+  0, // 2, east
+  10,
+  0,
+  0, // 3, north
+  10,
+  20,
+  0, // 4, south
+])
+const CROSS_PARENTS = new Int32Array([-1, 0, 0, 0, 0])
+
+describe('rasteriseSkeleton', () => {
+  it('strokes every branch of the tree, not just a chain through it', () => {
+    const result = rasteriseSkeleton(CROSS_POSITIONS, CROSS_PARENTS, 64)
+    // All four arms present: the mid-point of each, in mask coordinates.
+    expect(at(result, 32, 8)).toBeGreaterThan(0)
+    expect(at(result, 32, 55)).toBeGreaterThan(0)
+    expect(at(result, 8, 32)).toBeGreaterThan(0)
+    expect(at(result, 55, 32)).toBeGreaterThan(0)
+    // And it is lines, not a fill: the corners between the arms stay empty.
+    expect(at(result, 12, 12)).toBe(0)
+    expect(at(result, 51, 51)).toBe(0)
+  })
+
+  it('draws a continuous line, which is why segments are stamped rather than filled', () => {
+    /*
+     * The failure this is shaped to catch: a two-pixel-wide diagonal quad passed through a
+     * barycentric fill drops every pixel whose centre falls outside it, and a neurite comes out
+     * dotted. Walked along its major axis it cannot.
+     */
+    const diagonal = new Float32Array([0, 0, 0, 40, 40, 0])
+    const result = rasteriseSkeleton(diagonal, new Int32Array([-1, 0]), 64)
+    let run = 0
+    for (let y = 0; y < 64; y++)
+      if (result.coverage.subarray(y * 64, (y + 1) * 64).some((v) => v > 0)) run++
+    // Every row the line passes through is marked — no gaps along its length.
+    expect(run).toBeGreaterThanOrEqual(56)
+  })
+
+  it('keeps the drawing inside the tile, with the same padding a mesh gets', () => {
+    const result = rasteriseSkeleton(CROSS_POSITIONS, CROSS_PARENTS, 64)
+    expect(at(result, 0, 0)).toBe(0)
+    expect(at(result, 63, 63)).toBe(0)
+    // Both rasterisers share `fitToTile`, so a list of mesh rows and skeleton rows is framed the
+    // same way. Two copies of the fit would drift here and nowhere visible.
+    const mesh = rasteriseSilhouette(SQUARE_POSITIONS, SQUARE_INDICES, 64)
+    /*
+     * Within a pixel, not exactly: the fills differ by rule, since a triangle marks pixels whose
+     * *centre* is inside while a stroke marks the pixel a projected endpoint rounds to. What a
+     * shared fit guarantees is that both land in the same place, and a drifted one would be many
+     * pixels out rather than one.
+     */
+    const [skeletonMin, skeletonMax] = bounds(result)
+    const [meshMin, meshMax] = bounds(mesh)
+    expect(Math.abs(skeletonMin - meshMin)).toBeLessThanOrEqual(1)
+    expect(Math.abs(skeletonMax - meshMax)).toBeLessThanOrEqual(1)
+  })
+
+  it('shades by depth, so a flat projection still reads as a 3D object', () => {
+    // Same cross, but the east arm pushed to the back and the west arm to the front.
+    const positions = new Float32Array([10, 10, 5, 0, 10, 0, 20, 10, 10, 10, 0, 5, 10, 20, 5])
+    const result = rasteriseSkeleton(positions, CROSS_PARENTS, 64)
+    expect(at(result, 8, 32)).toBeGreaterThan(at(result, 55, 32))
+  })
+
+  it('draws several components rather than joining them through a fabricated edge', () => {
+    /*
+     * A neuron split by an edit is two trees, and `spanningForest` gives each its own root. A
+     * rasteriser that stroked point *i* to point *i−1* regardless would draw a line across the
+     * gap — a picture that is wrong rather than incomplete.
+     */
+    const positions = new Float32Array([0, 0, 0, 0, 20, 0, 20, 0, 0, 20, 20, 0])
+    const result = rasteriseSkeleton(positions, new Int32Array([-1, 0, -1, 2]), 64)
+    // The two verticals are drawn; the horizontal span between them is not.
+    expect(at(result, 4, 32)).toBeGreaterThan(0)
+    expect(at(result, 60, 32)).toBeGreaterThan(0)
+    expect(at(result, 32, 32)).toBe(0)
+  })
+
+  it('returns an empty mask rather than throwing on degenerate input', () => {
+    expect(
+      coverageFraction(rasteriseSkeleton(new Float32Array(0), new Int32Array(0), 16)),
+    ).toBe(0)
+    // One point is a tree with no edges in it, and no span to scale by either.
+    const single = new Float32Array([5, 5, 5])
+    expect(coverageFraction(rasteriseSkeleton(single, new Int32Array([-1]), 16))).toBe(0)
+  })
+
+  it('skips a parent index that points outside the point list', () => {
+    /*
+     * `parents` arrives across the `DataSource` seam, and a stale or truncated one would project
+     * `undefined` into `NaN` and stroke a segment from the neuron to the tile corner — wrong
+     * rather than absent, which is the failure this whole file is shaped to avoid.
+     */
+    const result = rasteriseSkeleton(CROSS_POSITIONS, new Int32Array([-1, 0, 99, 0, 0]), 64)
+    expect(coverageFraction(result)).toBeGreaterThan(0)
+    // The east arm is the one whose parent was bad, so its mid-point is clear.
+    expect(at(result, 55, 32)).toBe(0)
+    expect(at(result, 8, 32)).toBeGreaterThan(0)
   })
 })
 

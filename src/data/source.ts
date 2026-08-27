@@ -25,6 +25,7 @@ import type {
   MatrixValue,
   MeshesValue,
   PointsValue,
+  SkeletonGeometry,
   SkeletonsValue,
   TableValue,
 } from '../core/values'
@@ -358,12 +359,36 @@ export interface CoarseGeometryRequest {
   signal?: AbortSignal
 }
 
-/** The cheapest triangle mesh a source can produce for one neuron, in nanometres. */
-export interface CoarseGeometry {
-  /** xyz interleaved. */
-  positions: Float32Array
-  indices: Uint32Array
-}
+/**
+ * The cheapest drawable form of one neuron, in nanometres, in whichever shape the source has.
+ *
+ * A union rather than one shape, because the two backends that can answer this at all cannot
+ * answer it in the same currency. A published mesh pyramid has a coarsest level; a `graphene://`
+ * segmentation has no levels at all — one neuron is several hundred supervoxel fragments at full
+ * resolution — but its level-2 chunk graph is two small requests, so for those datastacks a
+ * skeleton is the only cheap representation in existence. Making a source fake the other one
+ * means either meshing a skeleton or decimating a mesh into a tree, both of which are work done
+ * to satisfy a type rather than to draw a picture.
+ *
+ * `kind` is required on both arms rather than inferred from which field is present: a source
+ * that forgot it would otherwise be a silent fall-through to the mesh branch and an empty tile.
+ */
+export type CoarseGeometry =
+  | {
+      kind: 'mesh'
+      /** xyz interleaved. */
+      positions: Float32Array
+      indices: Uint32Array
+    }
+  /**
+   * `SkeletonGeometry` exactly, so the L2 reader's and CATMAID's decoder both hand their output
+   * straight over — see `CaveSource.fetchCoarseGeometry`. `id` and `radii` ride along unused (on
+   * a 16,840-node FAFB skeleton the radii are ~67 kB), which is still cheaper than a second shape
+   * for the same thing. The mesh arm above is *not* `MeshGeometry` for the mirror-image reason:
+   * `MeshResult` keys on `neuronId` and `MeshGeometry` on `id`, so reusing either would mean
+   * renaming a field at the seam rather than passing a value through it.
+   */
+  | ({ kind: 'skeleton' } & SkeletonGeometry)
 
 export interface SourceSchemas {
   /** Output of findNeurons. Must include a `neuronId` column. */

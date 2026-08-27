@@ -123,6 +123,19 @@ symptom to recognise — which usually points nowhere near the cause.
   constant, and never with `>=`. And a `cell_type_reference` table carries `target_id` and no
   root id at all: reading one means the *join* endpoint, which takes `select_column_map` and only
   that, and does not honour `count=true`. Both failures read as facts about the data.
+- **A thumbnail is not always a mesh.** `CoarseGeometry` is a union — `{ kind: 'mesh' }` or
+  `{ kind: 'skeleton' } & SkeletonGeometry` — because a `graphene://` datastack has no cheap mesh
+  *at any level* while its level-2 chunk graph is two requests, so a mesh-shaped seam left BANC
+  and MICrONS with a placeholder in every row. `kind` is required on both arms: inferred from
+  which field is present, a source that forgot it is a silent fall-through to the mesh branch and
+  a blank tile. CATMAID is the same case for a different reason — tracing, no segmentation — and
+  is the expensive one: a traced FAFB skeleton is 0.9–4.2 MB uncompressed, with no byte ceiling
+  on purpose, because on a source whose typical body is megabytes a ceiling blanks the neurons
+  anybody is looking for. Both rasterisers in `src/ui/explore/thumbnail.ts` share one `fitToTile` — two
+  copies drift and frame mesh rows and skeleton rows differently in one list — and
+  `drawSegment` stamps along the major axis rather than filling a quad, because a two-pixel
+  diagonal quad through a barycentric fill draws a *dotted* neurite. See
+  [docs/widgets.md](docs/widgets.md).
 - **`@type` is optional on a precomputed volume, and a graphene manifest is not all shards.**
   Two ways a mesh source resolves to somewhere with no meshes in it, both reported as neurons that
   have none. A flat segmentation published before `@type` was conventional declares only `type`,

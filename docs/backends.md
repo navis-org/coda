@@ -797,10 +797,12 @@ There is no level to draw a thumbnail from and the Meshes node would be worse of
 `flatMeshDir` requires `multilod-draco` and falls back rather than reporting a better source than
 it has.
 
-**This is what makes `fetchCoarseGeometry` possible at all**, and CAVE was the reason the Explore
-Dataset list showed a placeholder in every row. `fetchCoarseMesh` is shared with neuPrint —
-`triangleBudget: 1`, which no level can meet, so `chooseLod` answers with the coarsest, and
-`THUMBNAIL_MAX_BYTES` turns down a single pathological body off the manifest at no download cost.
+**This is one of the two things that make `fetchCoarseGeometry` possible**, and CAVE was the
+reason the Explore Dataset list showed a placeholder in every row. `fetchCoarseMesh` is shared
+with neuPrint — `triangleBudget: 1`, which no level can meet, so `chooseLod` answers with the
+coarsest, and `THUMBNAIL_MAX_BYTES` turns down a single pathological body off the manifest at no
+download cost. The other route is the level-2 chunk graph, below, which is what a datastack with
+no flat bucket draws from.
 
 **Nanometres with no conversion, and that is measured on both halves rather than assumed.** The
 mesh bounding box for `720575940633370649` is x 682,703–723,512 nm; the same neuron's published
@@ -808,6 +810,36 @@ skeleton is 682,704–723,568. The mesh `info`'s own `transform` is what does it
 `fragmentTransform` already applies it. The live suite asserts the pair, because a missing
 conversion here is a scene sitting a whole factor away from the neurons beside it with nothing
 failing.
+
+### A thumbnail from the chunk graph, where there is no mesh cheap enough to draw
+
+A datastack with only its `graphene://` segmentation has **no cheap mesh at any level** — the
+cheapest mesh is the only mesh — so a page of 25 rows would be tens of megabytes, which is exactly
+what `DataSource.fetchCoarseGeometry` says to answer `undefined` for. That left BANC, MICrONS and
+every other chunkedgraph datastack with a placeholder in every row.
+
+The level-2 chunk graph is the way out, and it is already built: `readL2Skeletons` for one neuron,
+two small requests, a few hundred chunks with a representative coordinate each. `l2SourceFor` is
+the same gate the Skeletons node uses, so a datastack with no cache still answers `undefined`.
+
+So `CoarseGeometry` is a **union** — `{ kind: 'mesh' }` or `{ kind: 'skeleton' } & SkeletonGeometry`
+— rather than one shape both routes have to fit. Making a source fake the other one means meshing
+a skeleton or decimating a mesh into a tree, which is work done to satisfy a type rather than to
+draw a picture. The skeleton arm is `SkeletonGeometry` exactly, so the L2 reader's output needs no
+conversion at all; `kind` is required on both arms, because a source that forgot it would be a
+silent fall-through to the mesh branch and a blank tile. The rasteriser that consumes it is in
+[widgets.md](widgets.md), including where `STROKE_FRACTION` comes from.
+
+**What it costs is one neuron's worth of batching, knowingly.** `readL2Skeletons` pools chunk ids
+across a whole request and reads their coordinates in a handful of calls, which is what makes a
+hundred skeletons a hundred graph reads plus about three attribute reads rather than two hundred
+round trips. `CoarseGeometryRequest` is one neuron, so a page of 25 gives that up: 25 chunk-graph
+reads plus 25 attribute reads, instead of 25 plus about one. Widening the seam to a page would mean a batching protocol between the component and every
+source, for a picture already gated at four concurrent and cached in IndexedDB after the first
+look.
+
+Measured on four BANC v888 neurons: 19, 310, 1,266 and 2,684 chunks, and 0.4–4.0 s apiece for the
+graph read.
 
 ### `unsharded_mesh_dir`, or the neuron that arrives whole minus everything anyone edited
 
@@ -1013,10 +1045,10 @@ than a guess:
   Meshes node works to. It reduces memory and draw cost, not the wait — the requests are already
   paid by then.
 
-**`fetchCoarseGeometry` stays unimplemented, and that is the right answer rather than a gap.**
-There is no cheap representation to draw a thumbnail from, and the interface's own docstring says
-an absent one beats quietly downloading full detail to fill a list. So Explore Dataset on a CAVE dataset
-draws placeholders.
+**`fetchCoarseGeometry` does not use this route, and that is the right answer rather than a gap.**
+There is no cheap representation among these fragments to draw a thumbnail from, and the
+interface's own docstring says an absent one beats quietly downloading full detail to fill a list.
+The two routes it does use are the flat pyramid and the level-2 chunk graph, both above.
 
 **The cross-check that ties it together** is in `live.test.ts`: a neuron's mesh has to enclose its
 own presynaptic cloud. Neither is scaled by anything here — the fragments arrive in world
@@ -1325,6 +1357,31 @@ with the feature absent — comparable to CAVE's +16.4 / +5.2.
 per-neuron-per-region table), `rawQuery`, `viewerScene`, and **`meshes`** — CATMAID stores
 skeletons rather than a segmentation, so its `volumes` are neuropil shells and are `roiMeshes`,
 which is a different question. Each declines at edit time rather than failing at run time.
+
+**Thumbnails it can do, and the skeleton is what makes that possible.** `fetchCoarseGeometry` was
+absent here for the same reason `meshes` is false — there is no mesh at any level to take a coarse
+rung off — so every row of an Explore Dataset list drew the placeholder glyph. `CoarseGeometry`'s
+skeleton arm is what changes that: the same `compact-detail` call `fetchSkeletons` makes, for one
+skeleton, through the same decoder.
+
+**It is the most expensive thumbnail in the tree, and there is deliberately no ceiling on it.**
+Measured against VFB's FAFB: skeleton 16 is **940 kB in 0.70 s**, skeleton 2333007 is **4.2 MB in
+0.95 s** — uncompressed, since this deployment does not gzip. `with_tags=false` saves 0.9% and is
+not the lever. A cold page of 25 rows is therefore tens of megabytes against the ~10 kB a
+published mesh pyramid costs.
+
+A `THUMBNAIL_MAX_BYTES`-style cut is the obvious answer and the wrong one, for the reason that
+constant's own docstring records from its 128 kB days: on a source whose *typical* body is already
+megabytes, a byte ceiling stops being a guard against a broken body and becomes a quality filter
+that blanks exactly the densely traced neurons anyone is looking for. The size is knowable in
+advance too — `skeletonSummaries` carries `num_nodes` and the index has already read it — so this
+is a decision rather than an impossibility.
+
+What makes it affordable is that a thumbnail is fetched **once per neuron ever**:
+`NeuronThumbnail` stores the 23 kB mask in IndexedDB, so the megabytes are paid on first sight of
+a row and never again. The session geometry cache is deliberately *not* written here — a
+background list-fill pushing 50 MB through a 256 MB LRU would evict the geometry of the scene the
+user is actually looking at.
 
 `fetchSynapses` carries `connectorId` but **no `partnerId`**: the partner on the far side of a
 connector belongs to a different skeleton, so naming it means a second POST per connector set, and

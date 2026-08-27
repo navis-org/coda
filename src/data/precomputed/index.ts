@@ -111,7 +111,10 @@ export async function openMeshSource(
  * unreachable host read as "legacy" would turn one blip into a directory whose every manifest
  * request 404s, reported per neuron as a missing mesh.
  */
-export async function openMeshDir(url: string, options: FetchOptions = {}): Promise<MeshSource> {
+export async function openMeshDir(
+  url: string,
+  options: FetchOptions = {},
+): Promise<MeshSource> {
   const base = url.replace(/\/+$/, '')
   const info = await fetchInfo<RawInfo>(base, options).catch((error: unknown) => {
     if (error instanceof PrecomputedFetchError && error.status === 404) return {} as RawInfo
@@ -301,7 +304,8 @@ export async function fetchMeshes(
    * that never wants this.
    */
   const forwardPartial =
-    options.onPartial && ((pairs: ReadonlyArray<[string, MeshBody]>) => options.onPartial?.(named(pairs)))
+    options.onPartial &&
+    ((pairs: ReadonlyArray<[string, MeshBody]>) => options.onPartial?.(named(pairs)))
 
   if (source.format === 'legacy') {
     let done = 0
@@ -487,6 +491,10 @@ export async function fetchCoarseMesh(
     maxBytesPerBody: THUMBNAIL_MAX_BYTES,
   })
   const mesh = result.meshes[0]
+  // Untagged, and the caller adds `kind`. This module's own header promises it knows nothing
+  // about any particular source, and importing `CoarseGeometry` to stamp one word would spend
+  // that for no safety: `kind` is a *required* discriminant, so a `fetchCoarseGeometry` handing
+  // this straight back is a compile error rather than a silent fall-through to the mesh branch.
   return mesh ? { positions: mesh.positions, indices: mesh.indices } : undefined
 }
 

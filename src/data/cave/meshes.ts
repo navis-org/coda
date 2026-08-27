@@ -26,10 +26,11 @@
  * **What it costs is requests, and there is no level of detail to trade against.** A graphene
  * manifest lists supervoxel fragments at full resolution — 492 requests and ~1.2 MB for one
  * neuron — where neuPrint's multi-resolution meshes answer in a handful at a chosen LOD. That
- * is why `MESH_WARN_NEURONS` is what it is, and why `fetchCoarseGeometry` stays unimplemented:
- * there is no cheap representation to draw a thumbnail from, and the interface's own docstring
- * says an absent one is better than quietly downloading full detail to fill a list. Measured on
- * one neuron: 13.3 s to fetch, and 1,276,736 triangles before decimation.
+ * is why `MESH_WARN_NEURONS` is what it is, and why `fetchCoarseGeometry` does not come through
+ * here: there is no cheap representation among these fragments to draw a thumbnail from. It
+ * draws from the flat pyramid where a materialization has one and from the level-2 chunk graph
+ * where it does not — see `CaveSource.fetchCoarseGeometry`. Measured on one neuron: 13.3 s to
+ * fetch, and 1,276,736 triangles before decimation.
  */
 
 import { mapWithConcurrency } from '../concurrency'

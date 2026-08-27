@@ -1,10 +1,10 @@
 /**
- * Triangles to masks, and masks to outlines.
+ * Triangles and lines to masks, and masks to outlines.
  *
- * Two things live here, and they are together because the second only ever consumes what the
- * first produces. Neither knows what it is drawing: `thumbnail.ts` fills a neuron into a 96px
- * tile and shades it by depth, `roiProjection.ts` fills a neuropil into a shared frame and traces
- * its boundary, and the arithmetic underneath is the same barycentric fill either way.
+ * Three things live here, and they are together because the last only ever consumes what the
+ * first two produce. None of them knows what it is drawing: `thumbnail.ts` fills a neuron into a
+ * 96px tile and shades it by depth, `roiProjection.ts` fills a neuropil into a shared frame and
+ * traces its boundary, and the arithmetic underneath is the same barycentric fill either way.
  *
  * It was extracted from `thumbnail.ts` rather than copied into the second caller. A second copy
  * of a scanline fill is not expensive to write and is expensive to own: the two would drift on
@@ -64,6 +64,50 @@ export function fillTriangle(
       const w2 = 1 - w0 - w1
       if (w0 < 0 || w1 < 0 || w2 < 0) continue
       markPixel(mask, width, height, x, y, value)
+    }
+  }
+}
+
+/**
+ * Draw one thick segment into an 8-bit mask, brightest-wins.
+ *
+ * `fillTriangle`'s companion, for the geometry that has no faces: a skeleton is a set of edges,
+ * and a mesh silhouette's fill has nothing to work with there.
+ *
+ * **Stamped along the major axis rather than filled as a quad**, which is not the obvious choice
+ * — a segment of a given width *is* a rectangle, and `fillTriangle` would take two of them. The
+ * problem is that the rectangle is two or three pixels wide: barycentric coverage tests a pixel
+ * centre, so a thin diagonal quad drops pixels wherever no centre lands inside it, and a neurite
+ * comes out as a dotted line. Walking the segment guarantees a connected mark, which for a
+ * drawing whose whole content is thin lines matters more than exact edges do.
+ *
+ * `thickness` is the side of the square stamp in pixels, so it is a *diameter* and even values
+ * are honest — the offsets run `-floor((n-1)/2)` to `+floor(n/2)`, which is 2×2 for 2 rather
+ * than collapsing to a single pixel the way a radius would.
+ */
+export function drawSegment(
+  mask: Uint8Array,
+  width: number,
+  height: number,
+  a: XY,
+  b: XY,
+  value = 255,
+  thickness = 1,
+): void {
+  const dx = b[0] - a[0]
+  const dy = b[1] - a[1]
+  // One step per pixel of the longer axis. `ceil` rather than `round`, so a sub-pixel segment
+  // still marks both ends: an L2 chunk graph has plenty of those where the arbor is dense.
+  const steps = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dy))))
+  const stamp = Math.max(1, Math.round(thickness))
+  const from = -Math.floor((stamp - 1) / 2)
+  const to = Math.floor(stamp / 2)
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps
+    const x = Math.round(a[0] + dx * t)
+    const y = Math.round(a[1] + dy * t)
+    for (let oy = from; oy <= to; oy++) {
+      for (let ox = from; ox <= to; ox++) markPixel(mask, width, height, x + ox, y + oy, value)
     }
   }
 }

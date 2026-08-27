@@ -137,6 +137,28 @@ const FLAT_INFOS: Readonly<Record<string, unknown>> = {
   },
 }
 
+/**
+ * A level-2 chunk graph and its coordinates: `a—b—c—d`, a straight chain.
+ *
+ * At module scope because two blocks want it — the decoder tests below, and the thumbnail route,
+ * which reads the same two endpoints through the same stub. A second chunk-graph fixture is one
+ * that can drift from the one the decoder asserts against.
+ */
+const CHAIN = JSON.stringify({
+  edge_graph: [
+    ['1', '2'],
+    ['2', '3'],
+    ['3', '4'],
+  ],
+})
+const chunkAt = (n: number) => ({ rep_coord_nm: [n * 10, 0, 0], max_dt_nm: n })
+const COORDS = JSON.stringify({
+  '1': chunkAt(1),
+  '2': chunkAt(2),
+  '3': chunkAt(3),
+  '4': chunkAt(4),
+})
+
 function installFetch(
   overrides: Record<string, string | number> = {},
   options: { flat?: boolean } = {},
@@ -215,13 +237,22 @@ function installFetch(
     // Both counts, and they are deliberately the two *different* numbers the real services
     // report for `proofread_neurons`; `nuclei_v1`'s happen to agree, which is why the mismatch
     // is fixtured on the table that has one.
-    if (url.endsWith('/annotation/api/v2/aligned_volume/fafb_seung_alignment_v0/table/proofread_neurons/count'))
+    if (
+      url.endsWith(
+        '/annotation/api/v2/aligned_volume/fafb_seung_alignment_v0/table/proofread_neurons/count',
+      )
+    )
       return answer('139540')
     if (url.endsWith('/version/783/table/proofread_neurons/count')) return answer('127978')
-    if (url.endsWith('/annotation/api/v2/aligned_volume/fafb_seung_alignment_v0/table/nuclei_v1/count'))
+    if (
+      url.endsWith(
+        '/annotation/api/v2/aligned_volume/fafb_seung_alignment_v0/table/nuclei_v1/count',
+      )
+    )
       return answer('143140')
     if (url.endsWith('/version/783/table/nuclei_v1/count')) return answer('143140')
-    if (url.includes('/table/nuclei_v1/query')) return answer(fixture('table-sample-nuclei.txt'))
+    if (url.includes('/table/nuclei_v1/query'))
+      return answer(fixture('table-sample-nuclei.txt'))
     if (url.includes('/unique_string_values')) return answer(fixture('unique-strings.json'))
     if (url.includes('/table/proofread_neurons/query')) return answer(fixture('neurons.txt'))
     if (url.includes('/table/hierarchical_neuron_annotations/query')) {
@@ -370,7 +401,9 @@ describe('datasets and versions', () => {
     expect(flywire!.description).toMatch(/- Connectivity — `valid_connection_v2` \(a view/)
     // Per materialization, not per datastack: 783's bucket is not 630's, and a datastack whose
     // version has no entry says the graphene route instead.
-    expect(flywire!.description).toContain('- Morphology — `precomputed://gs://flywire_v141_m783`')
+    expect(flywire!.description).toContain(
+      '- Morphology — `precomputed://gs://flywire_v141_m783`',
+    )
     // The blurb still leads, and nothing was inserted into it.
     expect(flywire!.description?.startsWith('The public FlyWire segmentation')).toBe(true)
   })
@@ -620,9 +653,23 @@ describe('finding neurons', () => {
   it('anchors a pattern at both ends, as neuPrint’s =~ does', async () => {
     installFetch()
     const cave = source()
-    expect((await cave.findNeurons({ datasetId: DATASET, rows: [{ field: 'type', op: 'matches', values: ['CB.*'] }] })).length).toBe(1)
+    expect(
+      (
+        await cave.findNeurons({
+          datasetId: DATASET,
+          rows: [{ field: 'type', op: 'matches', values: ['CB.*'] }],
+        })
+      ).length,
+    ).toBe(1)
     // Anchored: the pattern has to describe the whole value.
-    expect((await cave.findNeurons({ datasetId: DATASET, rows: [{ field: 'type', op: 'matches', values: ['B09'] }] })).length).toBe(0)
+    expect(
+      (
+        await cave.findNeurons({
+          datasetId: DATASET,
+          rows: [{ field: 'type', op: 'matches', values: ['B09'] }],
+        })
+      ).length,
+    ).toBe(0)
   })
 
   it('reads an id list as text, so a wide id is not rounded on the way in', async () => {
@@ -938,7 +985,10 @@ describe('meshes', () => {
         mesh_metadata: { unsharded_mesh_dir: 'dynamic' },
       }),
       '/meshing/api/v1/': JSON.stringify({
-        fragments: ['~3/529288-0.shard:8331489:4061', '305453950923010514:0:30720-32768_0-4096'],
+        fragments: [
+          '~3/529288-0.shard:8331489:4061',
+          '305453950923010514:0:30720-32768_0-4096',
+        ],
       }),
     })
     await new CaveSource()
@@ -970,11 +1020,12 @@ describe('meshes', () => {
     )
   })
 
-  it('draws a thumbnail from the flat pyramid, and refuses where there is only graphene', async () => {
+  it('draws a thumbnail from the flat pyramid, and nothing where neither route exists', async () => {
     /*
-     * `fetchCoarseGeometry`'s contract: `undefined` means "draw a placeholder", and for graphene
-     * that is the honest answer rather than a gap — the alternative to a placeholder is a page
-     * of 25 rows fetching several hundred fragments each.
+     * `fetchCoarseGeometry`'s contract: `undefined` means "draw a placeholder". Reached only when
+     * *both* routes are out — no pyramid and no level-2 cache — because for graphene alone the
+     * alternative to a placeholder is a page of 25 rows fetching several hundred fragments each.
+     * The stub serves no table mapping, so the L2 gate declines too.
      */
     installFetch()
     const bare = new CaveSource()
@@ -988,13 +1039,37 @@ describe('meshes', () => {
     const captured = installFetch({}, { flat: true })
     // Undefined either way here, because the stub serves no shard bytes — what is being asserted
     // is that the flat route was *taken*, which the graphene one never reaches.
-    await new CaveSource()
-      .fetchCoarseGeometry!({ datasetId: DATASET, neuronId: '720575940628857210' })
-      .catch(() => undefined)
+    await new CaveSource().fetchCoarseGeometry!({
+      datasetId: DATASET,
+      neuronId: '720575940628857210',
+    }).catch(() => undefined)
     expect(captured.map((c) => c.url)).toContain(
       'https://storage.googleapis.com/flywire_v141_m783/mesh_mip_1_err_40/info',
     )
     expect(captured.filter((c) => c.url.includes('/meshing/api/v1/'))).toEqual([])
+  })
+
+  it('falls back to a level-2 skeleton for a thumbnail where there is no pyramid', async () => {
+    /*
+     * The route that gives a `graphene://`-only datastack thumbnails at all. Its cheapest mesh is
+     * its *only* mesh — several hundred supervoxel fragments at full resolution — where the
+     * level-2 chunk graph is two small requests and enough to draw with. `CoarseGeometry` is a
+     * union so that a source can answer in the shape it actually has.
+     */
+    const captured = installFetch({
+      '/lvl2_graph': CHAIN,
+      '/attributes': COORDS,
+      '/l2cache/api/v1/table_mapping': JSON.stringify({ flywire_public: {} }),
+    })
+    const coarse = await new CaveSource().fetchCoarseGeometry!({
+      datasetId: DATASET,
+      neuronId: '720575940628857210',
+    })
+    expect(coarse?.kind).toBe('skeleton')
+    expect(coarse?.kind === 'skeleton' && coarse.parents.length).toBe(4)
+    // Two requests, and neither of them the meshing API.
+    expect(captured.filter((c) => c.url.includes('/meshing/api/v1/'))).toEqual([])
+    expect(captured.filter((c) => c.url.includes('/lvl2_graph'))).toHaveLength(1)
   })
 
   it('turns the triangle budget into a decimation grid, since graphene has no levels', async () => {
@@ -1044,7 +1119,9 @@ describe('meshes', () => {
     )
     // And it names the alternative, which for this datastack is not hypothetical: FlyWire's own
     // materializations were flattened, and only a stub with no bucket sends it down this route.
-    expect(said.join(' ')).toMatch(/flat segmentation beside it does the same set in two requests/)
+    expect(said.join(' ')).toMatch(
+      /flat segmentation beside it does the same set in two requests/,
+    )
     expect(said.join(' ')).toMatch(/Fetching anyway/)
   })
 })
@@ -1562,17 +1639,6 @@ describe('building a skeleton from the L2 graph', () => {
     base: 'https://cave.fanc-fly.com/segmentation/table/wclee_fly_cns_001_public',
   }
 
-  /** `a—b—c—d`, a straight chain. */
-  const CHAIN = JSON.stringify({
-    edge_graph: [
-      ['1', '2'],
-      ['2', '3'],
-      ['3', '4'],
-    ],
-  })
-  const at = (n: number) => ({ rep_coord_nm: [n * 10, 0, 0], max_dt_nm: n })
-  const COORDS = JSON.stringify({ '1': at(1), '2': at(2), '3': at(3), '4': at(4) })
-
   const one = async () => (await readL2Skeletons(SOURCE, ['1'], {}))[0]
 
   it('turns the chunk graph into a tree with one root', async () => {
@@ -1653,7 +1719,7 @@ describe('building a skeleton from the L2 graph', () => {
   it('drops a chunk the cache has never heard of, keeping the rest connected', async () => {
     installFetch({
       '/lvl2_graph': CHAIN,
-      '/attributes': JSON.stringify({ '1': at(1), '2': at(2), '4': at(4) }),
+      '/attributes': JSON.stringify({ '1': chunkAt(1), '2': chunkAt(2), '4': chunkAt(4) }),
     })
     const sk = await one()
     expect(sk?.parents).toHaveLength(3)
@@ -1708,9 +1774,10 @@ describe('where a CAVE skeleton comes from', () => {
      * node per level-2 chunk. It is also one request per neuron rather than two.
      */
     const captured = installFetch({}, { flat: true })
-    await new CaveSource()
-      .fetchSkeletons!({ datasetId: DATASET, neuronIds: ['720575940628857210'] })
-      .catch(() => undefined)
+    await new CaveSource().fetchSkeletons!({
+      datasetId: DATASET,
+      neuronIds: ['720575940628857210'],
+    }).catch(() => undefined)
     expect(captured.filter((c) => c.url.includes('/lvl2_graph'))).toEqual([])
     expect(captured.map((c) => c.url)).toContain(
       'https://storage.googleapis.com/flywire_v141_m783/skeletons_mip_1/info',
@@ -1882,7 +1949,9 @@ describe('CAVE discovery', () => {
     // A real name does start one.
     expect(peekTableFacts(DATASTACK, VERSION, 'nuclei_v1')).toBeUndefined()
     await tableFactsFor(DATASTACK, VERSION, 'nuclei_v1')
-    expect(peekTableFacts(DATASTACK, VERSION, 'nuclei_v1')?.schemaType).toBe('nucleus_detection')
+    expect(peekTableFacts(DATASTACK, VERSION, 'nuclei_v1')?.schemaType).toBe(
+      'nucleus_detection',
+    )
   })
 
   /*

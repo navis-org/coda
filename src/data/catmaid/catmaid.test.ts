@@ -386,6 +386,28 @@ describe('skeletons', () => {
     for (const radius of skeletons.items[0]!.radii) expect(radius).toBeGreaterThanOrEqual(0)
   })
 
+  it('answers a thumbnail with the skeleton, since there is no mesh here at any level', async () => {
+    /*
+     * CATMAID stores tracing rather than a segmentation, so it has no mesh to take a coarse rung
+     * off — which is what `CoarseGeometry`'s skeleton arm is for. Before it existed every row of
+     * an Explore Dataset list on this backend drew the placeholder glyph.
+     */
+    stubFetch(defaultRoutes)
+    const coarse = await source().fetchCoarseGeometry!({ datasetId: '1', neuronId: '16' })
+    if (coarse?.kind !== 'skeleton') throw new Error(`expected a skeleton, got ${coarse?.kind}`)
+    expect(coarse.parents.length).toBe(compactDetailFixture.skeleton[0].length)
+    expect(coarse.positions.length).toBe(coarse.parents.length * 3)
+    // Indices, not node ids — the same rebuild `fetchSkeletons` gets, because it is the same
+    // decoder. A second one here is how a thumbnail comes to draw a different tree.
+    for (const parent of coarse.parents) expect(parent).toBeLessThan(coarse.parents.length)
+
+    // And without connector links, which are a third of the payload on a densely traced neuron
+    // and draw nothing into a 76px tile.
+    expect(calls.find((c) => c.url.includes('/compact-detail'))!.url).toContain(
+      'with_connectors=false',
+    )
+  })
+
   it('fetches only the neurons it has not already downloaded', async () => {
     /*
      * The end-to-end half of `geometryCache.test.ts`, at a real source, because a cache that

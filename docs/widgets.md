@@ -82,16 +82,70 @@ carrying no colour it survives a theme switch, which a cached tile with the them
 not. Triangles are filled and depth-shaded (brightest-wins, so overlapping branches do not
 saturate); vertices alone would be a dotty cloud at that level of detail.
 
-**Which sources have them is a question about pyramids, not about backends.** `fetchCoarseGeometry`
-is optional on `DataSource` and `undefined` means "draw a placeholder", which for a source with a
-single level is the honest answer rather than a gap: the alternative is a page of 25 rows fetching
-several megabytes each. neuPrint's published buckets qualify; so does a CAVE dataset whose
-materialization has a flat segmentation beside it (`DatastackSpec.flat` — see
+**Which sources have them is a question about what is cheap, not about backends.**
+`fetchCoarseGeometry` is optional on `DataSource` and `undefined` means "draw a placeholder",
+which for a source with nothing cheap is the honest answer rather than a gap: the alternative is a
+page of 25 rows fetching several megabytes each. neuPrint's published buckets qualify; so does a
+CAVE dataset whose materialization has a flat segmentation beside it (`DatastackSpec.flat` — see
 [backends.md](backends.md)), which is what took FlyWire's rows from a placeholder apiece to a
-drawing. A CAVE dataset with only the `graphene://` segmentation still shows placeholders, and
-will: a graphene manifest is several hundred supervoxel fragments at full resolution with no level
-to trade against. `fetchCoarseMesh` in `precomputed/index.ts` is the one implementation both
-sources call, so the byte ceiling and the "coarsest level" trick cannot be spelled two ways.
+drawing. `fetchCoarseMesh` in `precomputed/index.ts` is the one implementation both call, so the
+byte ceiling and the "coarsest level" trick cannot be spelled two ways.
+
+**`CoarseGeometry` is a union, because the second CAVE route answers a skeleton.** A datastack
+with only its `graphene://` segmentation has no cheap mesh *at any level* — the cheapest mesh is
+the only mesh, several hundred supervoxel fragments at full resolution — so a mesh-shaped seam
+left BANC, MICrONS and every other chunkedgraph datastack with a placeholder in every row. Their
+level-2 chunk graph is two small requests and enough to draw with, which is why the seam takes
+either shape rather than making a source fake the other one: meshing a skeleton, or decimating a
+mesh into a tree, is work done to satisfy a type rather than to draw a picture. `kind` is required
+on both arms — inferring it from which field is present makes a source that forgot it a silent
+fall-through to the mesh branch and an empty tile.
+
+The cost is one neuron's worth of batching, knowingly. `readL2Skeletons` pools chunk ids across a
+whole request, so a hundred skeletons is a hundred graph reads plus about three attribute reads;
+`CoarseGeometryRequest` is one neuron, so a page of 25 is 25 plus 25. Widening the seam to a page
+means a batching protocol between the component and every source, for a picture already gated at
+four concurrent and cached in IndexedDB after the first look.
+
+**CATMAID is the other source with only skeletons, and it is the expensive one.** It stores
+tracing rather than a segmentation, so there is no mesh at any level either — and its skeletons
+are traced rather than chunk-decomposed, which is a different order of size: measured against
+VFB's FAFB, skeleton 16 is 940 kB and skeleton 2333007 is 4.2 MB, uncompressed. There is
+deliberately no byte ceiling; see [backends.md](backends.md) for why one would blank the neurons
+anybody is looking for. What makes it affordable is the IndexedDB mask — a thumbnail is fetched
+**once per neuron ever**, not once per page turn.
+
+**Two rasterisers, one `fitToTile`.** `rasteriseSilhouette` fills triangles; `rasteriseSkeleton`
+strokes every non-root point to its parent, which is the same walk the SWC writer makes — so a
+tree with several roots draws as several components rather than being joined through a fabricated
+edge, and an out-of-range parent index is skipped rather than projecting `NaN` and striping the
+tile. The shared fit is the load-bearing part rather than a tidiness: the padding, the one shared
+scale that keeps aspect ratio, the image-space axes and the depth normalisation are the visual
+identity, and two copies would drift on one of them and frame mesh rows and skeleton rows
+differently in the same list.
+
+**`STROKE_FRACTION` is 0.02, and both failure modes are real.** It is a fraction of the tile
+rather than pixels, the same rule `padding` follows, so a skeleton drawn at two sizes is one
+drawing — 3 raster pixels at the 152px raster behind a 76px tile. Chosen by rasterising four BANC
+L2 skeletons and printing the mask as ASCII, the only way to look at one outside a browser.
+Coverage on a 2,684-node descending neuron: **1 px → 3.3%**, and the descending axon is the
+faintest step of the ramp and does not survive the 2× downsample; **3 px → 6.6%**, arbor structure
+and axon both legible; **5 px → 8.9%**, and the arbor fills in solid — a blob with a tail.
+
+Re-checked on FAFB, since one constant now serves a ~1,300-node chunk-graph skeleton and a
+16,840-node traced one — **thirteen times denser** — and it behaves the same way: at 1 px
+skeleton 16's descending axon is the faintest ramp step again, at 3 px it is solid, and its
+terminal tuft saturates at every width tried, so what saturates there is the arbor being genuinely
+dense rather than the stroke being wide. It is deliberately *not* a radius from the data: the L2 cache publishes `max_dt_nm` and it is the right
+idea at the wrong scale, 22–55 nm against a neuron spanning tens of microns, so a faithful radius
+is a thousandth of the tile and every neuron draws as hairlines.
+
+**`drawSegment` stamps along the major axis rather than filling a quad**, which is not the obvious
+choice — a segment of a given width *is* a rectangle, and `fillTriangle` would take two. The
+problem is that the rectangle is two or three pixels wide: a barycentric test samples a pixel
+centre, so a thin diagonal quad drops pixels wherever no centre lands inside it, and the neurite
+comes out dotted. Its `thickness` is a diameter, so an even width is honest rather than rounding
+down to a single pixel the way a radius would.
 
 **Rasterised at 2× the box it is drawn in** (`RASTER_SCALE`), because the mesh has more detail
 than a 76px tile can hold — at 1:1 a thin neurite either landed on a pixel or vanished, and a

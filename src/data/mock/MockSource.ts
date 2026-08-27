@@ -245,7 +245,10 @@ export class MockSource implements DataSource {
       .map((rc) => rc.roi)
     const skeleton = generateSkeleton(neuronId, rois, { targetPoints: 160 })
     const mesh = skeletonToTubeMesh(skeleton, 3)
-    return { positions: mesh.positions, indices: mesh.indices }
+    // A mesh rather than the skeleton it was tubed from, deliberately: the mock stands in for a
+    // source that publishes a mesh pyramid, and answering with the shape that happens to be
+    // cheaper here would leave `rasteriseSilhouette` with no end-to-end caller at all.
+    return { kind: 'mesh', positions: mesh.positions, indices: mesh.indices }
   }
 
   async fetchConnectivity(req: ConnectivityRequest): Promise<TableValue> {
