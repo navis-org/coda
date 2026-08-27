@@ -141,7 +141,7 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
                 close()
               }}
             >
-              <strong>Browse Zoo…</strong>
+              <strong>Browse Workflows…</strong>
               <span>Search the Coda Zoo — real workflows shared by other users.</span>
             </button>
             <div className="dropdown__group">
@@ -171,7 +171,7 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
                * own overview note carries the longer version once the graph is open.
                */}
               <div className="dropdown__note dropdown__note--heads-up" style={{ fontSize: 9 }}>
-                Examples use mocked-up data and require no tokens.
+                Examples use mocked-up data and require no account or token.
               </div>
             </div>
           </>

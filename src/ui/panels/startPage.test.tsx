@@ -124,12 +124,11 @@ describe('Start page', () => {
       expect(screen.getByText('Alpha')).toBeTruthy()
     })
 
-    it('points at the repository and the issue tracker', () => {
+    it('points at the repository without an issue tracker link', () => {
       render(<StartPage />)
       const repo = screen.getByRole('link', { name: 'github.com/navis-org/coda' })
       expect(repo.getAttribute('href')).toBe('https://github.com/navis-org/coda')
-      const issues = screen.getByRole('link', { name: 'issue' })
-      expect(issues.getAttribute('href')).toBe('https://github.com/navis-org/coda/issues')
+      expect(screen.queryByRole('link', { name: 'issue' })).toBeNull()
       // A target="_blank" without this hands the opened page a handle on this one.
       expect(repo.getAttribute('rel')).toContain('noopener')
     })

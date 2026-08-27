@@ -272,7 +272,7 @@ export function StartPage() {
                 (Cambridge, UK) · Source Code at{' '}
                 <a href={REPO_URL} target="_blank" rel="noreferrer noopener">
                   github.com/navis-org/coda
-                </a>{' '}
+                </a>
                 <br/>
                 <button
                   type="button"
