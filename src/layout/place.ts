@@ -40,7 +40,7 @@ export const DODGE_GAP = 48
  * brought its own body: `NODE_BODIES` sets 360 for Find Neurons and 320 for Rename Columns, so a
  * hand-placed graph drew the next column *underneath* the previous card. Measured in a browser on
  * the first starter graph, which jsdom cannot show: Find Neurons spanned 262→542 while
- * Connectivity Graph began at 486.
+ * Connectivity began at 486.
  *
  * **A constant cannot be right for every graph, so what is checked is the graphs.** Node widths
  * are declared in two places — `NodeDefinition.defaultSize`, which `resolveSize` already reads,

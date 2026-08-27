@@ -100,8 +100,8 @@ describe('adding a dataset node', () => {
 
 describe('what does not get one', () => {
   it('leaves the synthetic datasets alone — nobody to cite for a generated connectome', () => {
-    add('dataset.mock.hemibrain')
-    expect(typesIn()).toEqual(['dataset.mock.hemibrain'])
+    add('dataset.mock.opticlobe')
+    expect(typesIn()).toEqual(['dataset.mock.opticlobe'])
   })
 
   it('adds nothing beside an ordinary node', () => {
@@ -147,7 +147,7 @@ describe('starter graphs', () => {
 
   it('opens a mock starter without one', () => {
     const built = buildStarter({
-      nodeType: 'dataset.mock.hemibrain',
+      nodeType: 'dataset.mock.opticlobe',
       label: 'Mini',
       sourceId: 'mock',
     })

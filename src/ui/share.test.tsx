@@ -278,7 +278,7 @@ describe('what the dialog admits', () => {
     it('says nothing for a connectome generated in the browser', () => {
       // No server to authenticate against — and `BACKENDS.mock` carries an empty label, so a
       // rule that fired here would put `a  token` on screen.
-      expect(tokenNotes('dataset.mock.hemibrain')).toEqual([])
+      expect(tokenNotes('dataset.mock.opticlobe')).toEqual([])
     })
   })
 
@@ -313,7 +313,7 @@ describe('the gist half', () => {
     // site, so the gist and the download cannot come to disagree about what a graph is called.
     const post = fetchCalls.find(([, init]) => init?.method === 'POST')?.[1]?.body
     expect(Object.keys(JSON.parse(String(post)).files)).toEqual([
-      'lc-outputs-by-partner-type.coda.json',
+      'fetch-and-group-connectivity-by-type.coda.json',
     ])
     // In the document, which is what lets a second Share update this gist rather than litter a
     // new one — and what a recipient's copy deliberately does not carry.

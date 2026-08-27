@@ -86,7 +86,7 @@ three, ahead of both guides), the start page's credits row, and the README.
 A second vite entry — `tutorial.html` at the root, `src/tutorial/{main.ts,tutorial.css}` — built
 into `dist/` alongside the app and published to GitHub Pages with it. Ten chapters. The first six
 share one pinned canvas that builds a real pipeline as you read — `Hemibrain → Find Neurons →
-Connectivity Graph → Filter → Group By → Bar Chart` — then Explore Dataset/Neuron Profile, neuPrint, the keyboard and
+Connectivity → Filter → Group By → Bar Chart` — then Explore Dataset/Neuron Profile, neuPrint, the keyboard and
 saving get their own set-pieces.
 
 **It imports nothing from the app but `theme.css`, and that one import is the whole design.** The
@@ -207,9 +207,10 @@ page's own logic is around 6 kB; `dist/nodes.html` must reference no `main-*` ch
   so a search that reflowed it would throw away the one thing worth looking at — where in a
   pipeline the answer sits.
 - **Example names are not in the search haystack, and that was measured.** One bundled example is
-  called `LC → descending neuron matrix`, so including them had a search for `matrix` light every
-  node in that graph — the dataset, Find Neurons, the bar chart — beside the five that genuinely
-  carry one. An eight-node graph lends its title to all eight.
+  called `Build an adjacency matrix from two searches`, so including them had a search for `matrix`
+  light every node in that graph — the dataset, both Find Neurons, the heatmap — beside the five
+  that genuinely carry one. A graph lends its title to every node in it. (The example has been
+  renamed since the measurement; it still carries `matrix`, so the finding is untouched.)
 - **An enum's default prints its option's _label_.** The app's picker says `downstream (outputs)`
   where the stored value is `outputs`, and a guide naming the other one describes a control that
   is not on screen. Where `options` is a _function_ of the resolved input types (Filter's operator

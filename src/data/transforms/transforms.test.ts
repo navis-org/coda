@@ -178,7 +178,7 @@ describe('which space a dataset is in', () => {
     expect(spaceForDataset('neuprint', 'optic-lobe:v1.1')).toBeUndefined()
     expect(spaceForDataset('neuprint', 'fib19:v1.0')).toBeUndefined()
     expect(spaceForDataset('neuprint', 'mushroombody')).toBeUndefined()
-    expect(spaceForDataset('mock', 'hemibrain-mini')).toBeUndefined()
+    expect(spaceForDataset('mock', 'optic-lobe-mini')).toBeUndefined()
   })
 
   it('binds every space in the manifest to at least one dataset', () => {

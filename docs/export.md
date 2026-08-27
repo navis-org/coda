@@ -15,7 +15,7 @@ never reads back.
 **The contract is a faithful starting point, not a bit-identical reproduction.** It runs, and
 for the common path it answers what the canvas answered — but it is meant to be read and
 edited, so where Coda and neuprint-python genuinely differ the cell says so in a `NOTE` rather
-than contorting itself. That choice is what keeps the tier-3 nodes (Connectivity Graph's traversal,
+than contorting itself. That choice is what keeps the tier-3 nodes (Connectivity's traversal,
 Explore Dataset's search) at one generated helper each instead of a Python port of `src/nodes/lib`.
 
 **The exporter is loaded on demand.** `downloadNotebook` does `await import('./python/exporter')`,
@@ -145,7 +145,7 @@ the panel rather than the canvas.
 because the surrounding cells are still worth having. A `dataset.mock.*` connectome is generated
 in the browser: no server, no token, no id that means anything outside the tab — so the _first_
 cell is the one with nothing behind it, and what would come out is a notebook nobody can fix
-without knowing which real dataset was meant. Note the consequence: **all five bundled examples
+without knowing which real dataset was meant. Note the consequence: **all four bundled examples
 are refused**, which is why the golden files are built on `fixture.ts` rather than on them.
 
 **The second is a dataset from a backend *this format* has no emitter for**, which today means
@@ -450,7 +450,7 @@ neuPrint, and live the moment a CAVE selection could be exported. It answers exa
 and `isin(['1001'])` against an `i64` column matches nothing at all.
 
 Still not written, and each declines with a TODO naming the backend rather than emitting neuPrint
-code: **Connectivity Graph, Adjacency, Skeletons, Meshes, Synapses, Neuron Profile, Dataset Summary, ROI Viewer,
+code: **Connectivity, Adjacency, Skeletons, Meshes, Synapses, Neuron Profile, Dataset Summary, ROI Viewer,
 Neuroglancer**. The table ops downstream are backend-agnostic and already work.
 
 #### SeaTable, through sea-serpent
@@ -522,7 +522,7 @@ loophole, and R's `export.test.ts` asserts the refusal so it cannot become a sil
 **R's stack is the same lineage, which is why the mapping is clean** — navis is the Python port
 of `nat`, and neuprintr is the natverse's neuPrint client. Three things are genuinely *better*
 here: `neuprint_connection_table()` is query-relative, which is the shape Neuron Profile wants (so the
-Connectivity Graph emitter reorients *into* pre/post, the opposite direction to the Python one);
+Connectivity emitter reorients *into* pre/post, the opposite direction to the Python one);
 `neuprint_get_paths()` takes a hop budget, which `fetch_shortest_paths` does not; and
 `neuprint_ROI_connectivity()` maps straight onto the ROI Connectivity node.
 

@@ -39,7 +39,7 @@ beforeAll(() => {
 const PIPELINE = JSON.stringify({
   summary: 'Charted the LC4 neurons.',
   add: [
-    { ref: 'ds', type: 'dataset.mock.hemibrain', params: [], title: '' },
+    { ref: 'ds', type: 'dataset.mock.opticlobe', params: [], title: '' },
     {
       ref: 'find',
       type: 'neuron.findNeurons',
@@ -61,7 +61,7 @@ const PIPELINE = JSON.stringify({
 const BAD_WIRE = JSON.stringify({
   summary: 'A pipeline that does not fit.',
   add: [
-    { ref: 'ds', type: 'dataset.mock.hemibrain', params: [], title: '' },
+    { ref: 'ds', type: 'dataset.mock.opticlobe', params: [], title: '' },
     { ref: 'filter', type: 'core.filter', params: [], title: '' },
   ],
   remove: [],
@@ -362,7 +362,7 @@ describe('what the edit left behind', () => {
     const withGroupBy = JSON.stringify({
       summary: 'Grouped the connections.',
       add: [
-        { ref: 'ds', type: 'dataset.mock.hemibrain', params: [], title: '' },
+        { ref: 'ds', type: 'dataset.mock.opticlobe', params: [], title: '' },
         { ref: 'find', type: 'neuron.findNeurons', params: [], title: '' },
         { ref: 'g', type: 'core.groupBy', params: [], title: '' },
       ],

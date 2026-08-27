@@ -112,7 +112,7 @@ describe('a 3D scene draws before its own node has run', () => {
 
   it('draws what is on its input port while its own output is still empty', async () => {
     const skeletons = await new MockSource({ latencyMs: 0 }).fetchSkeletons({
-      datasetId: 'hemibrain-mini',
+      datasetId: 'optic-lobe-mini',
       neuronIds: ['1', '2', '3'],
     })
     card({ skeletons })

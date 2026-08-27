@@ -126,38 +126,52 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
       <Dropdown label="Examples">
         {(close) => (
           <>
-            {EXAMPLES.map((example) => (
-              <button
-                key={example.id}
-                type="button"
-                className="dropdown__item"
-                onClick={() => {
-                  loadExample(example.id)
-                  close()
-                }}
-              >
-                <strong>{example.name}</strong>
-                <span>{example.summary}</span>
-              </button>
-            ))}
             {/*
-             * Last, under a rule, and that placement is the whole statement: the rows above are
-             * bundled, run on synthetic data and open instantly, while this one goes to a public
-             * repository over the network. Mixing a fetch into that list would make five local
-             * things and one remote thing look like six of the same kind.
+             * First, above a rule, and the rule is the whole statement: this row goes to a public
+             * repository over the network, while the ones below it are bundled, run on synthetic
+             * data and open instantly. Mixing the fetch into that list would make one remote thing
+             * and four local things look like five of the same kind.
              */}
+            <button
+              type="button"
+              className="dropdown__item"
+              onClick={() => {
+                openZoo()
+                close()
+              }}
+            >
+              <strong>Browse Workflows…</strong>
+              <span>Search the Coda Zoo — real workflows shared by other users.</span>
+            </button>
             <div className="dropdown__group">
-              <button
-                type="button"
-                className="dropdown__item"
-                onClick={() => {
-                  openZoo()
-                  close()
-                }}
-              >
-                <strong>Browse Workflows…</strong>
-                <span>Search the Coda Zoo — workflows shared by other people.</span>
-              </button>
+              {EXAMPLES.map((example) => (
+                <button
+                  key={example.id}
+                  type="button"
+                  className="dropdown__item"
+                  onClick={() => {
+                    loadExample(example.id)
+                    close()
+                  }}
+                >
+                  <strong>{example.name}</strong>
+                  <span>{example.summary}</span>
+                </button>
+              ))}
+              {/*
+               * Closes the section it is about, which is why it is inside the group rather than
+               * at the foot of the menu — above the rule it would read as a note on Browse
+               * Workflows, whose graphs run on whatever their author pointed them at.
+               *
+               * Two facts, and the order is deliberate: mock data is what stops somebody reading
+               * a result off these graphs, and no-credentials is what a reader scanning the menu
+               * actually wants to know. Neither is a warning about anything going wrong, so it is
+               * gold rather than an error colour, and quiet rather than a banner. Each example's
+               * own overview note carries the longer version once the graph is open.
+               */}
+              <div className="dropdown__note dropdown__note--heads-up" style={{ fontSize: 9 }}>
+                Examples use mocked-up data and require no tokens.
+              </div>
             </div>
           </>
         )}

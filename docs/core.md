@@ -238,7 +238,7 @@ stale until you touch something reads as the setting not working.
 
 Testing note: the Filter node is `cheap`, so editing it proves nothing about auto-run — the
 ordinary pass re-runs it either way. Only an expensive node's param distinguishes the modes.
-And a `typePattern` matching nothing makes Connectivity Graph error ("No neuronIds…") and blocks
+And a `typePattern` matching nothing makes Connectivity error ("No neuronIds…") and blocks
 everything downstream, so a test that waits for zero stale nodes will hang on it.
 
 ## Reference edges — a port that names a node

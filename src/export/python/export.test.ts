@@ -111,7 +111,7 @@ describe('notebook export', () => {
     let g = emptyGraph('mock')
     g = addNode(g, {
       id: 'm',
-      type: 'dataset.mock.hemibrain',
+      type: 'dataset.mock.opticlobe',
       position: { x: 0, y: 0 },
       params: {},
     })

@@ -115,6 +115,15 @@ function skewed(rand: () => number, mean: number): number {
 // Dataset definitions
 // ---------------------------------------------------------------------------
 
+/**
+ * The one synthetic connectome.
+ *
+ * **The id stays `optic-lobe-mini` while the label reads `Demo Data`,** and the split is
+ * deliberate: the id is what a saved graph, a share link and every cache key carry, so renaming
+ * it would break files that already exist to say something only a person reads. The label is the
+ * name — there is one synthetic dataset now, and calling it after the lobe it happens to model
+ * asked a beginner to know what an optic lobe is before they could press Run.
+ */
 const OPTIC_LOBE: {
   meta: Pick<MockConnectome, 'id' | 'label' | 'description' | 'species' | 'version' | 'rois'>
   types: TypeSpec[]
@@ -122,7 +131,7 @@ const OPTIC_LOBE: {
 } = {
   meta: {
     id: 'optic-lobe-mini',
-    label: 'Optic Lobe (mini)',
+    label: 'Demo Data',
     description:
       'Synthetic right optic lobe: lamina → medulla → T4/T5 → lobula plate, plus LC projection neurons into the central brain.',
     species: 'Drosophila melanogaster',
@@ -387,272 +396,7 @@ const OPTIC_LOBE: {
   ],
 }
 
-const HEMIBRAIN: typeof OPTIC_LOBE = {
-  meta: {
-    id: 'hemibrain-mini',
-    label: 'Hemibrain MB (mini)',
-    description:
-      'Synthetic mushroom body circuit: olfactory projection neurons → Kenyon cells → MBONs, with modulatory DANs and the APL/DPM giant interneurons.',
-    species: 'Drosophila melanogaster',
-    version: 'mock-1.0',
-    rois: [
-      'AL(R)',
-      'CA(R)',
-      'PED(R)',
-      'aL(R)',
-      "a'L(R)",
-      'bL(R)',
-      "b'L(R)",
-      'gL(R)',
-      'LH(R)',
-      'SLP(R)',
-      'SMP(R)',
-    ],
-  },
-  types: [
-    {
-      type: 'DA1_lPN',
-      count: 8,
-      rois: [
-        ['AL(R)', 3],
-        ['CA(R)', 2],
-        ['LH(R)', 3],
-      ],
-      size: 320_000,
-    },
-    {
-      type: 'DL5_adPN',
-      count: 4,
-      rois: [
-        ['AL(R)', 3],
-        ['CA(R)', 2],
-        ['LH(R)', 2],
-      ],
-      size: 300_000,
-    },
-    {
-      type: 'VA1v_adPN',
-      count: 6,
-      rois: [
-        ['AL(R)', 3],
-        ['CA(R)', 2],
-        ['LH(R)', 2],
-      ],
-      size: 290_000,
-    },
-    {
-      type: 'DM1_lPN',
-      count: 5,
-      rois: [
-        ['AL(R)', 3],
-        ['CA(R)', 3],
-        ['LH(R)', 1],
-      ],
-      size: 310_000,
-    },
-    {
-      type: 'DC3_adPN',
-      count: 4,
-      rois: [
-        ['AL(R)', 3],
-        ['CA(R)', 2],
-        ['LH(R)', 2],
-      ],
-      size: 280_000,
-    },
-    {
-      type: 'KCg-m',
-      count: 60,
-      rois: [
-        ['CA(R)', 3],
-        ['PED(R)', 1],
-        ['gL(R)', 3],
-      ],
-      size: 95_000,
-    },
-    {
-      type: 'KCab-c',
-      count: 30,
-      rois: [
-        ['CA(R)', 3],
-        ['PED(R)', 2],
-        ['aL(R)', 2],
-        ['bL(R)', 2],
-      ],
-      size: 110_000,
-    },
-    {
-      type: 'KCab-s',
-      count: 25,
-      rois: [
-        ['CA(R)', 3],
-        ['PED(R)', 2],
-        ['aL(R)', 2],
-        ['bL(R)', 2],
-      ],
-      size: 108_000,
-    },
-    {
-      type: "KCa'b'-ap1",
-      count: 18,
-      rois: [
-        ['CA(R)', 3],
-        ["a'L(R)", 2],
-        ["b'L(R)", 2],
-      ],
-      size: 100_000,
-    },
-    {
-      type: 'MBON01',
-      count: 2,
-      rois: [
-        ['gL(R)', 4],
-        ['SMP(R)', 2],
-      ],
-      size: 640_000,
-    },
-    {
-      type: 'MBON03',
-      count: 2,
-      rois: [
-        ["b'L(R)", 4],
-        ['SMP(R)', 2],
-      ],
-      size: 620_000,
-    },
-    {
-      type: 'MBON05',
-      count: 2,
-      rois: [
-        ['gL(R)', 4],
-        ['SLP(R)', 2],
-      ],
-      size: 600_000,
-    },
-    {
-      type: 'MBON11',
-      count: 2,
-      rois: [
-        ['gL(R)', 3],
-        ['SMP(R)', 2],
-      ],
-      size: 580_000,
-    },
-    {
-      type: 'MBON14',
-      count: 2,
-      rois: [
-        ["a'L(R)", 4],
-        ['SMP(R)', 1],
-      ],
-      size: 590_000,
-    },
-    {
-      type: 'PPL101',
-      count: 2,
-      rois: [
-        ['aL(R)', 4],
-        ['SMP(R)', 2],
-      ],
-      size: 520_000,
-    },
-    {
-      type: 'PAM04',
-      count: 6,
-      rois: [
-        ['bL(R)', 4],
-        ['SMP(R)', 1],
-      ],
-      size: 430_000,
-    },
-    {
-      type: 'PAM11',
-      count: 5,
-      rois: [
-        ['gL(R)', 4],
-        ['SMP(R)', 1],
-      ],
-      size: 420_000,
-    },
-    {
-      type: 'APL',
-      count: 1,
-      rois: [
-        ['CA(R)', 3],
-        ['PED(R)', 2],
-        ['gL(R)', 3],
-        ['aL(R)', 2],
-      ],
-      size: 1_800_000,
-    },
-    {
-      type: 'DPM',
-      count: 1,
-      rois: [
-        ['CA(R)', 2],
-        ["b'L(R)", 3],
-        ["a'L(R)", 3],
-      ],
-      size: 1_600_000,
-    },
-    {
-      type: 'LHPV2a1',
-      count: 6,
-      rois: [
-        ['LH(R)', 4],
-        ['SLP(R)', 2],
-      ],
-      size: 380_000,
-    },
-    {
-      type: 'LHAV3a1',
-      count: 4,
-      rois: [
-        ['LH(R)', 4],
-        ['SMP(R)', 1],
-      ],
-      size: 360_000,
-    },
-  ],
-  rules: [
-    { from: 'DA1_lPN', to: 'KCg-m', weight: 6, prob: 0.12 },
-    { from: 'DA1_lPN', to: 'KCab-c', weight: 5, prob: 0.1 },
-    { from: 'DA1_lPN', to: 'LHPV2a1', weight: 22, prob: 0.6 },
-    { from: 'DL5_adPN', to: 'KCg-m', weight: 5, prob: 0.1 },
-    { from: 'DL5_adPN', to: "KCa'b'-ap1", weight: 6, prob: 0.12 },
-    { from: 'DL5_adPN', to: 'LHAV3a1', weight: 19, prob: 0.55 },
-    { from: 'VA1v_adPN', to: 'KCg-m', weight: 5, prob: 0.11 },
-    { from: 'VA1v_adPN', to: 'LHPV2a1', weight: 17, prob: 0.5 },
-    { from: 'DM1_lPN', to: 'KCab-s', weight: 7, prob: 0.13 },
-    { from: 'DM1_lPN', to: 'KCg-m', weight: 5, prob: 0.1 },
-    { from: 'DC3_adPN', to: "KCa'b'-ap1", weight: 6, prob: 0.12 },
-    { from: 'DC3_adPN', to: 'LHAV3a1', weight: 15, prob: 0.45 },
-    { from: 'KCg-m', to: 'MBON01', weight: 4, prob: 0.55 },
-    { from: 'KCg-m', to: 'MBON05', weight: 3, prob: 0.45 },
-    { from: 'KCg-m', to: 'MBON11', weight: 3, prob: 0.4 },
-    { from: 'KCab-c', to: 'MBON14', weight: 4, prob: 0.35 },
-    { from: 'KCab-s', to: 'MBON14', weight: 4, prob: 0.35 },
-    { from: "KCa'b'-ap1", to: 'MBON03', weight: 5, prob: 0.6 },
-    { from: 'KCg-m', to: 'APL', weight: 9, prob: 0.9 },
-    { from: 'APL', to: 'KCg-m', weight: 7, prob: 0.9 },
-    { from: 'KCab-c', to: 'APL', weight: 6, prob: 0.8 },
-    { from: 'APL', to: 'KCab-c', weight: 5, prob: 0.8 },
-    { from: "KCa'b'-ap1", to: 'DPM', weight: 8, prob: 0.85 },
-    { from: 'DPM', to: "KCa'b'-ap1", weight: 6, prob: 0.85 },
-    { from: 'PPL101', to: 'KCab-c', weight: 4, prob: 0.5 },
-    { from: 'PPL101', to: 'KCab-s', weight: 4, prob: 0.5 },
-    { from: 'PAM04', to: 'KCab-s', weight: 3, prob: 0.4 },
-    { from: 'PAM11', to: 'KCg-m', weight: 3, prob: 0.4 },
-    { from: 'MBON01', to: 'PAM11', weight: 12, prob: 0.7 },
-    { from: 'MBON11', to: 'PAM04', weight: 9, prob: 0.6 },
-    { from: 'MBON03', to: 'PPL101', weight: 7, prob: 0.5 },
-    { from: 'MBON05', to: 'MBON01', weight: 6, prob: 0.5 },
-    { from: 'LHPV2a1', to: 'MBON05', weight: 8, prob: 0.4 },
-    { from: 'LHAV3a1', to: 'MBON14', weight: 6, prob: 0.35 },
-  ],
-}
-
-const DEFINITIONS = [OPTIC_LOBE, HEMIBRAIN]
+const DEFINITIONS = [OPTIC_LOBE]
 
 const STATUSES = ['Traced', 'Anchor', 'Assign']
 

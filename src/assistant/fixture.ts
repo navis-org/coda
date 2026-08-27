@@ -29,7 +29,7 @@ export function pivotGraph(): { graph: CodaGraph; pivotId: string } {
   const applied = applyPlan(emptyGraph(), {
     ...emptyPlan(),
     add: [
-      { ref: 'ds', type: 'dataset.mock.hemibrain' },
+      { ref: 'ds', type: 'dataset.mock.opticlobe' },
       { ref: 'find', type: 'neuron.findNeurons' },
       { ref: 'conn', type: 'neuron.connectivity' },
       { ref: 'pivot', type: 'core.pivot' },

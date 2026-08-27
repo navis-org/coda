@@ -333,7 +333,7 @@ route.
 
 The one visible interaction is with the palette's link-drag, which adds the node and then
 connects it: the auto-wire lands first and `addEdge` evicts it if the drag was aimed at the same
-socket, so the two agree by construction. A drag from a _table_ output onto, say, Connectivity Graph
+socket, so the two agree by construction. A drag from a _table_ output onto, say, Connectivity
 now fills both of its inputs at once.
 
 ## Starter graphs, and the one that is not the generic shape

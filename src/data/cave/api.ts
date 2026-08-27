@@ -273,7 +273,7 @@ export function queryView(
  * above says why, and the v3 spelling 404s, checked again against v783 rather than inherited.
  *
  * Views are *not* in here; they are a separate endpoint (`listViews`) and a separate kind of
- * thing. `flywire_fafb_public` lists six tables and ten views, and the one Connectivity Graph
+ * thing. `flywire_fafb_public` lists six tables and ten views, and the one Connectivity
  * prefers — `valid_connection_v2` — is a view, so a listing that showed only this would omit the
  * most useful object in the datastack.
  */

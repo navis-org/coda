@@ -61,7 +61,7 @@ registerHelper({
   requires: ['neuprintr', 'dplyr'],
   source: [
     'coda_edge_list <- function(ids, prepost, min_weight, conn) {',
-    "  # Coda's Connectivity Graph output: preId -> postId, always oriented the way the synapse",
+    "  # Coda's Connectivity output: preId -> postId, always oriented the way the synapse",
     '  # points, whichever way the traversal travelled.',
     '  one <- function(side) {',
     '    tbl <- neuprint_connection_table(',
@@ -113,7 +113,7 @@ registerHelper({
   requires: ['neuprintr', 'dplyr'],
   source: [
     'coda_traverse_connectivity <- function(seed_ids, direction, hops, min_weight, conn) {',
-    "  # Coda's Connectivity Graph node past one hop: a breadth-first walk returning an edge list.",
+    "  # Coda's Connectivity node past one hop: a breadth-first walk returning an edge list.",
     '  #',
     '  # Three rules worth keeping, each of which silently changes the answer if dropped:',
     '  #',

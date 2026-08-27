@@ -92,8 +92,8 @@ describe('matrixToCsv', () => {
 
 describe('exportBaseName', () => {
   it('slugifies the graph and node names', () => {
-    expect(exportBaseName('LC outputs by partner type', 'Table')).toBe(
-      'lc-outputs-by-partner-type_table',
+    expect(exportBaseName('Fetch and group connectivity by type', 'Table')).toBe(
+      'fetch-and-group-connectivity-by-type_table',
     )
   })
 

@@ -118,7 +118,7 @@ Read-when column is the one line each will get in the rewritten CLAUDE.md.
 | 7,370 | Select One: stepping through a collection | `node-select-one.md` | nodes | touching `core.selectOne` or `nodes/lib/iterables.ts` |
 | 4,059 | Stack Tables: the vertical Join | `node-stack.md` | nodes | touching `core.stack` |
 | 6,929 | Download: a side effect in a reactive graph | `node-download.md` | nodes | touching `out.download`, `exportValue.ts`, or the export registry |
-| 4,210 | Connectivity Graph: hops and direction | `node-connectivity.md` | nodes | touching `neuron.connectivity` or `connectivityOps.ts` |
+| 4,210 | Connectivity: hops and direction | `node-connectivity.md` | nodes | touching `neuron.connectivity` or `connectivityOps.ts` |
 | 10,574 | Paths: how does this reach that? | `node-paths.md` | nodes | touching `neuron.paths`, `pathOps.ts`, or `T.layout()` |
 | 5,976 | IDs from Label: the inverse query | `node-ids-from-label.md` | nodes | touching `neuron.idsFromLabel` or `LabelMatch` |
 | 7,505 | Input IDs: the ids themselves | `node-input-ids.md` | nodes | touching `neuron.inputIds` or `nodes/lib/idList.ts` |

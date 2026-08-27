@@ -23,7 +23,7 @@ import { edgeSetsKnown, listEdgeSets, resetEdgeSets, saveEdgeSet } from '../../d
 import { sourceSupports } from '../lib/datasetParam'
 import '../index'
 
-const FAMILY = 'dataset.mock.hemibrain'
+const FAMILY = 'dataset.mock.opticlobe'
 const CATMAID = 'dataset.catmaid.fafb'
 
 beforeAll(async () => {

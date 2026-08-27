@@ -72,10 +72,10 @@ describe('Start page', () => {
       expect(titles).toHaveLength(exampleCards().length + datasetCards().length)
     })
 
-    it('keeps the synthetic datasets off the live rail', () => {
+    it('keeps the synthetic dataset off the live rail', () => {
       render(<StartPage />)
-      // The rail says "live neuPrint"; the mock families are what the examples already run on.
-      expect(cardTitles()).not.toContain('Hemibrain (mini)')
+      // The rail says "live neuPrint"; the mock family is what the examples already run on.
+      expect(cardTitles()).not.toContain('Demo Data')
       expect(cardTitles()).toContain('Hemibrain')
     })
 
@@ -254,11 +254,11 @@ describe('Start page', () => {
   describe('picking something', () => {
     it('loads an example and closes', () => {
       render(<StartPage />)
-      fireEvent.click(card('LC circuit network'))
+      fireEvent.click(card('Draw connectivity as a network diagram'))
 
       const { graph, startPageOpen } = useGraphStore.getState()
       expect(startPageOpen).toBe(false)
-      expect(graph.meta?.name).toBe('LC circuit network')
+      expect(graph.meta?.name).toBe('Draw connectivity as a network diagram')
       expect(graph.nodes.some((n) => n.type === 'net.build')).toBe(true)
     })
 
@@ -273,7 +273,7 @@ describe('Start page', () => {
 
     it('does not ask before replacing an empty canvas', () => {
       render(<StartPage />)
-      fireEvent.click(card('LC circuit network'))
+      fireEvent.click(card('Draw connectivity as a network diagram'))
       expect(useGraphStore.getState().startPageOpen).toBe(false)
     })
 
@@ -284,14 +284,14 @@ describe('Start page', () => {
       })
       render(<StartPage />)
 
-      fireEvent.click(card('LC circuit network'))
+      fireEvent.click(card('Draw connectivity as a network diagram'))
       expect(screen.getByText(/Replace the current graph/)).toBeTruthy()
       // Nothing has happened yet — the question is the whole point.
-      expect(useGraphStore.getState().graph.meta?.name).toBe('LC outputs by partner type')
+      expect(useGraphStore.getState().graph.meta?.name).toBe('Fetch and group connectivity by type')
       expect(useGraphStore.getState().startPageOpen).toBe(true)
 
       fireEvent.click(screen.getByRole('button', { name: 'Replace' }))
-      expect(useGraphStore.getState().graph.meta?.name).toBe('LC circuit network')
+      expect(useGraphStore.getState().graph.meta?.name).toBe('Draw connectivity as a network diagram')
       expect(useGraphStore.getState().startPageOpen).toBe(false)
     })
 
@@ -302,11 +302,11 @@ describe('Start page', () => {
       })
       render(<StartPage />)
 
-      fireEvent.click(card('LC circuit network'))
+      fireEvent.click(card('Draw connectivity as a network diagram'))
       fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
 
       expect(screen.queryByText(/Replace the current graph/)).toBeNull()
-      expect(useGraphStore.getState().graph.meta?.name).toBe('LC outputs by partner type')
+      expect(useGraphStore.getState().graph.meta?.name).toBe('Fetch and group connectivity by type')
       expect(useGraphStore.getState().startPageOpen).toBe(true)
     })
   })

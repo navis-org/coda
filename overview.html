@@ -158,7 +158,7 @@
           </div>
 
           <div class="node" data-cat="query" style="left: 400px; top: 100px; width: 176px">
-            <div class="node__head"><span class="node__title">Connectivity Graph</span><span class="node__play">&#9654;</span></div>
+            <div class="node__head"><span class="node__title">Connectivity</span><span class="node__play">&#9654;</span></div>
             <div class="node__ports">
               <div class="port">
                 <span class="port__in">Dataset<i class="sock sock--in" data-fam="dataset" data-shape="square"></i></span>
@@ -600,7 +600,7 @@
           <strong>LC-outputs.ipynb</strong><span class="spacer"></span>
           <span>neuprint-python &middot; pandas &middot; navis</span>
         </div>
-        <div class="code"><span class="c"># Connectivity Graph — downstream partners, one hop</span>
+        <div class="code"><span class="c"># Connectivity — downstream partners, one hop</span>
 <span class="k">from</span> neuprint <span class="k">import</span> (
     Client, NeuronCriteria, fetch_neurons, fetch_adjacencies,
     merge_neuron_properties,
@@ -702,12 +702,12 @@ group_by_df &lt;- connectivity <span class="k">|&gt;</span>
             Four nodes onto the Hemibrain dataset already on your canvas.
             <div style="margin-top: 8px">
               <div class="planrow"><em>add</em><span>Find Neurons &middot; <i>type</i> ^LC4$ &middot; <i>status</i> Traced</span></div>
-              <div class="planrow"><em>add</em><span>Connectivity Graph &middot; <i>direction</i> downstream &middot; <i>hops</i> 1</span></div>
+              <div class="planrow"><em>add</em><span>Connectivity &middot; <i>direction</i> downstream &middot; <i>hops</i> 1</span></div>
               <div class="planrow"><em>add</em><span>Group By &middot; <i>by</i> postType &middot; <i>agg</i> sum(weight)</span></div>
               <div class="planrow"><em>add</em><span>Bar Chart</span></div>
               <div class="planrow" data-op="connect"><em>wire</em><span>Hemibrain &#9656; Dataset &rarr; Find Neurons &#9656; Dataset</span></div>
-              <div class="planrow" data-op="connect"><em>wire</em><span>Find Neurons &#9656; Neurons &rarr; Connectivity Graph &#9656; Neurons</span></div>
-              <div class="planrow" data-op="connect"><em>wire</em><span>Connectivity Graph &#9656; Table &rarr; Group By &#9656; Table</span></div>
+              <div class="planrow" data-op="connect"><em>wire</em><span>Find Neurons &#9656; Neurons &rarr; Connectivity &#9656; Neurons</span></div>
+              <div class="planrow" data-op="connect"><em>wire</em><span>Connectivity &#9656; Table &rarr; Group By &#9656; Table</span></div>
               <div class="planrow" data-op="connect"><em>wire</em><span>Group By &#9656; Table &rarr; Bar Chart &#9656; Table</span></div>
             </div>
           </div>

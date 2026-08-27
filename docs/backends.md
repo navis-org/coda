@@ -322,7 +322,7 @@ the same problem. **A datastack with no entry is not offered** — the info serv
 and most would fail on the first Run, and a dataset that appears in the picker and then fails is
 worse than one that is absent.
 
-**Connectivity Graph prefers that view and falls back to counting synapses**, which is `connecto`'s
+**Connectivity prefers that view and falls back to counting synapses**, which is `connecto`'s
 shape and arrived at for its reason. `valid_connection_v2` is the server having done the
 aggregation once: one row per ordered (pre, post) pair with `n_syn`, filterable by root id *and*
 by `n_syn`, so a minimum weight is applied before anything is sent — on one neuron's outputs,
@@ -760,7 +760,7 @@ Measured: 14,986 synapses for one neuron in 1.8 s.
 - **No polarity means two queries, not one.** CAVE has no either-end filter, and an `IN` on both
   columns of one query is an AND — which is the synapses a neuron makes onto *itself*.
 - **The cloud is query-relative**, like `fetchConnectivity`: `neuronId` is the end that matched
-  the filter and `partnerId` the other, so a Synapses node and a Connectivity Graph node on one neuron
+  the filter and `partnerId` the other, so a Synapses node and a Connectivity node on one neuron
   agree about which id is whose. `polarity` rides in the attribute table because a cloud fetched
   for both ends is two populations in one buffer.
 
@@ -863,8 +863,8 @@ column that arrives null on every row breaks every picker that believed it.
 - **The index is deduplicated on the root id.** A CAVE neuron table is keyed by a *point* — a
   soma, a nucleus, a representative vertex — so one segment carrying two of them is two rows for
   one neuron, and a repeated row is double-counted by everything downstream that sums a weight.
-- **Connectivity Graph types come from the index**, not from a second query. A connectivity table
-  without them is readable by nothing, and by the time anyone runs Connectivity Graph the index is
+- **Connectivity types come from the index**, not from a second query. A connectivity table
+  without them is readable by nothing, and by the time anyone runs Connectivity the index is
   already in hand. A partner outside the annotated set has no type, which is honest rather than
   a gap.
 - **There is no Base URL field**, unlike neuPrint's, and its absence is the finding: every CAVE

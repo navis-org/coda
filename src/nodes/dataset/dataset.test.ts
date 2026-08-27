@@ -63,23 +63,23 @@ function versionOptions(type: string, params: ParamValues = {}): EnumOption[] {
 
 describe('per-dataset nodes', () => {
   it('arrives already pointed at its dataset, with no source to choose', () => {
-    const def = requireNodeDef('dataset.mock.hemibrain')
+    const def = requireNodeDef('dataset.mock.opticlobe')
     expect(def.category).toBe('dataset')
     // Version is the only question left; the old node also asked which backend and which dataset.
     expect((def.params ?? []).filter((p) => !p.advanced).map((p) => p.id)).toEqual(['version'])
   })
 
   it('infers the dataset id its evaluate will use', () => {
-    const def = requireNodeDef('dataset.mock.hemibrain')
-    const types = def.inferOutputs!(ctxFor('dataset.mock.hemibrain'))
+    const def = requireNodeDef('dataset.mock.opticlobe')
+    const types = def.inferOutputs!(ctxFor('dataset.mock.opticlobe'))
     expect(datasetRef(types['dataset'])).toEqual({
       sourceId: 'mock',
-      datasetId: 'hemibrain-mini',
+      datasetId: 'optic-lobe-mini',
     })
   })
 
   it('offers Latest plus each listed version, with no duplicate values', () => {
-    const values = versionOptions('dataset.mock.hemibrain').map((o) => o.value)
+    const values = versionOptions('dataset.mock.opticlobe').map((o) => o.value)
     expect(values[0]).toBe('')
     // A select with two options sharing a value cannot express which one is chosen.
     expect(new Set(values).size).toBe(values.length)
@@ -87,12 +87,12 @@ describe('per-dataset nodes', () => {
 
   it('names the version that Latest currently resolves to', () => {
     // "Latest" with no version beside it is a provenance question mark on a shared graph.
-    expect(versionOptions('dataset.mock.hemibrain')[0]?.label).toMatch(/Latest \(.+\)/)
+    expect(versionOptions('dataset.mock.opticlobe')[0]?.label).toMatch(/Latest \(.+\)/)
   })
 
   it('reports a version the server does not offer', () => {
-    const def = requireNodeDef('dataset.mock.hemibrain')
-    const issues = def.validate!(ctxFor('dataset.mock.hemibrain', { version: 'v9.9' }))
+    const def = requireNodeDef('dataset.mock.opticlobe')
+    const issues = def.validate!(ctxFor('dataset.mock.opticlobe', { version: 'v9.9' }))
     expect(issues[0]).toContain('v9.9')
   })
 
@@ -110,16 +110,16 @@ describe('per-dataset nodes', () => {
   })
 
   it('runs and emits a dataset value', async () => {
-    const graph = addNode(emptyGraph('t'), node('dataset.mock.hemibrain'))
+    const graph = addNode(emptyGraph('t'), node('dataset.mock.opticlobe'))
     const sched = new Scheduler({ resolveSource: (id) => requireSource(id) })
     await sched.run(graph, { mode: 'full' })
     const value = sched.output('ds', 'dataset')
-    expect(isDatasetValue(value) && value.datasetId).toBe('hemibrain-mini')
+    expect(isDatasetValue(value) && value.datasetId).toBe('optic-lobe-mini')
     expect(isDatasetValue(value) && value.sourceId).toBe('mock')
   })
 
   it('feeds a downstream query node', () => {
-    let graph = addNode(emptyGraph('t'), node('dataset.mock.hemibrain'))
+    let graph = addNode(emptyGraph('t'), node('dataset.mock.opticlobe'))
     graph = addNode(graph, {
       id: 'find',
       type: 'neuron.findNeurons',
@@ -136,7 +136,7 @@ describe('per-dataset nodes', () => {
     expect(inference.ok).toBe(true)
     // The refinement is what lets column pickers populate before anything runs.
     expect(datasetRef(inference.nodes['find']?.inputs['dataset'])?.datasetId).toBe(
-      'hemibrain-mini',
+      'optic-lobe-mini',
     )
   })
 })
@@ -190,7 +190,7 @@ describe('the superseded generic node', () => {
   it('still evaluates', async () => {
     const graph = addNode(
       emptyGraph('t'),
-      node('neuron.dataset', { source: 'mock', dataset: 'hemibrain-mini' }),
+      node('neuron.dataset', { source: 'mock', dataset: 'optic-lobe-mini' }),
     )
     const sched = new Scheduler({ resolveSource: (id) => requireSource(id) })
     await sched.run(graph, { mode: 'full' })

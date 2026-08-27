@@ -65,7 +65,7 @@ describe('framing what was just opened', () => {
     expect(fits()).toBe(before + 1)
     useGraphStore
       .getState()
-      .loadStarter({ nodeType: 'dataset.mock.hemibrain', label: 'Mini', sourceId: 'mock' })
+      .loadStarter({ nodeType: 'dataset.mock.opticlobe', label: 'Mini', sourceId: 'mock' })
     expect(fits()).toBe(before + 2)
   })
 })

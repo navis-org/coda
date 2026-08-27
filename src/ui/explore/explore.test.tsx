@@ -52,7 +52,7 @@ import { NeuronRow } from './NeuronRow'
 import { rowFields } from './rowFields'
 import { resetThumbnailCache } from './NeuronThumbnail'
 
-const DATASET = 'hemibrain-mini'
+const DATASET = 'optic-lobe-mini'
 
 /**
  * A source whose index is one neuron past the select-all warning.
@@ -203,7 +203,7 @@ describe('ExploreBody', () => {
     )
     expect(total).toBeGreaterThan(0)
 
-    await type('KC')
+    await type('LC')
     // Row count is the wrong measure — a full page stays a full page — so check the hit count
     // and that every row shown actually matches.
     await waitFor(() => {
@@ -214,7 +214,7 @@ describe('ExploreBody', () => {
       expect(hits).toBeGreaterThan(0)
     })
     for (const row of rows()) {
-      expect(row.textContent).toMatch(/KC/i)
+      expect(row.textContent).toMatch(/LC/i)
     }
   })
 
@@ -222,7 +222,7 @@ describe('ExploreBody', () => {
     const { writes } = setup()
     await ready()
 
-    fireEvent.change(searchBox(), { target: { value: 'KC' } })
+    fireEvent.change(searchBox(), { target: { value: 'LC' } })
     // A param write per keystroke would mark the node stale — and with it everything
     // downstream — on every letter.
     expect(writes.filter(([id]) => id === 'query')).toHaveLength(0)
@@ -230,13 +230,13 @@ describe('ExploreBody', () => {
     await act(async () => {
       vi.advanceTimersByTime(200)
     })
-    expect(writes.filter(([id]) => id === 'query')).toEqual([['query', 'KC']])
+    expect(writes.filter(([id]) => id === 'query')).toEqual([['query', 'LC']])
   })
 
   it('reports how many of the whole dataset matched', async () => {
     setup()
     await ready()
-    await type('KC')
+    await type('LC')
     await waitFor(() => expect(screen.getByText(/\d+ of \d+/)).toBeTruthy())
   })
 
@@ -245,7 +245,7 @@ describe('ExploreBody', () => {
     await ready()
     // No substring hit, but a subsequence one — the widget must admit it widened the search
     // rather than silently reporting a hit count for a different question.
-    await type('KCabc')
+    await type('LPL1')
     await waitFor(() => expect(screen.queryByText(/showing similar/)).toBeTruthy())
   })
 
@@ -273,7 +273,7 @@ describe('ExploreBody', () => {
     // Otherwise a node parked on page 40 shows an empty list after a search and looks broken.
     setup({ pageSize: 5, page: 6 })
     await ready()
-    await type('KC')
+    await type('LC')
     await waitFor(() => expect(rows().length).toBeGreaterThan(0))
   })
 
@@ -333,7 +333,7 @@ describe('ExploreBody', () => {
     // never one page long.
     const { writes } = setup({ pageSize: 5 })
     await ready()
-    await type('KC')
+    await type('LC')
     const hits = Number(
       /(\d+) of/.exec(screen.getByText(/of \d+ neurons|\d+ of \d+/).textContent ?? '')?.[1],
     )
@@ -391,7 +391,7 @@ describe('ExploreBody', () => {
     const { writes } = setup()
     await ready()
     fireEvent.click(within(rows()[0] as HTMLElement).getByRole('checkbox'))
-    await type('KC')
+    await type('LC')
 
     await waitFor(() => expect(screen.getByText(/1 selected/)).toBeTruthy())
     expect(writes.filter(([id]) => id === 'selection')).toHaveLength(1)
@@ -416,10 +416,10 @@ describe('ExploreBody', () => {
   it('adopts a query changed from outside, such as by undo', async () => {
     const { external } = setup()
     await ready()
-    await type('KC')
+    await type('LC')
 
-    external('query', 'MBON')
-    await waitFor(() => expect(searchBox().value).toBe('MBON'))
+    external('query', 'DNp')
+    await waitFor(() => expect(searchBox().value).toBe('DNp'))
   })
 
   it('does not let its own committed write clobber newer typing', async () => {
@@ -430,20 +430,20 @@ describe('ExploreBody', () => {
      */
     const { writes } = setup()
     await ready()
-    await type('KC')
-    expect(searchBox().value).toBe('KC')
+    await type('LC')
+    expect(searchBox().value).toBe('LC')
 
-    fireEvent.change(searchBox(), { target: { value: 'KCab' } })
+    fireEvent.change(searchBox(), { target: { value: 'LC4' } })
     // The echo of the earlier commit arrives around here; the newer text must survive it.
     await act(async () => {
       vi.advanceTimersByTime(50)
     })
-    expect(searchBox().value).toBe('KCab')
+    expect(searchBox().value).toBe('LC4')
 
     await act(async () => {
       vi.advanceTimersByTime(200)
     })
-    expect(writes.filter(([id]) => id === 'query').at(-1)).toEqual(['query', 'KCab'])
+    expect(writes.filter(([id]) => id === 'query').at(-1)).toEqual(['query', 'LC4'])
   })
 
   it('offers completions for field names and values', async () => {
@@ -810,8 +810,8 @@ describe('Explore in the editor', () => {
     render(<App />)
     act(() => {
       useGraphStore.getState().loadStarter({
-        nodeType: 'dataset.mock.hemibrain',
-        label: 'Hemibrain (mini)',
+        nodeType: 'dataset.mock.opticlobe',
+        label: 'Demo Data',
       })
     })
 
@@ -827,8 +827,8 @@ describe('Explore in the editor', () => {
     render(<App />)
     act(() => {
       useGraphStore.getState().loadStarter({
-        nodeType: 'dataset.mock.hemibrain',
-        label: 'Hemibrain (mini)',
+        nodeType: 'dataset.mock.opticlobe',
+        label: 'Demo Data',
       })
     })
 
@@ -843,8 +843,8 @@ describe('Explore in the editor', () => {
     render(<App />)
     act(() => {
       useGraphStore.getState().loadStarter({
-        nodeType: 'dataset.mock.hemibrain',
-        label: 'Hemibrain (mini)',
+        nodeType: 'dataset.mock.opticlobe',
+        label: 'Demo Data',
       })
     })
     await screen.findByLabelText('Search neurons')

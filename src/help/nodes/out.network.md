@@ -4,7 +4,7 @@
 2. **`Network Viewer`** draws the result. Both halves are ordinary Coda attribute tables, one row per node or per link, so coloring nodes by cell type is exactly the same column picker as anywhere else.
 
 ```coda-graph
-caption: Connectivity Graph's own guide names this pipeline — an edge list in, a network out.
+caption: Connectivity's own guide names this pipeline — an edge list in, a network out.
 neuron.connectivity as conn
 net.build as build { source: preId, target: postId, weight: weight }
 out.network as net
@@ -12,7 +12,7 @@ conn -> build
 build -> net
 ```
 
-1. **Connectivity Graph** — or any table with a source and a target column — is the edge list.
+1. **Connectivity** — or any table with a source and a target column — is the edge list.
 2. **Build Network** groups it into links, summing weight where several rows join the same
    pair, and derives node degree and weight from what survives. A second `Node attrs` table can
    join extra columns onto the nodes by id.

@@ -2,10 +2,16 @@
  * "Learn to Build" — the second tour, and the one that actually makes something.
  *
  * The Guided Tour says where things are. This one builds the Field Guide's pipeline a node at a
- * time, on the canvas, with the reader doing four of the moves themselves. Same question the
- * Field Guide's worked example asks — *which cell types do LC neurons drive, and how strongly* —
- * so somebody who has read the chapter arrives here recognising the shape, and somebody who does
- * this first can go and read why it works.
+ * time, on the canvas, with the reader doing four of the moves themselves. Same *pipeline* the
+ * Field Guide walks — find neurons, pull their partners, sum by partner type — so somebody who
+ * has read the chapter arrives here recognising the shape, and somebody who does this first can
+ * go and read why it works.
+ *
+ * **It is framed as a technique, not as a finding, and that is not squeamishness.** The Field
+ * Guide runs on Hemibrain; this runs on Demo Data, which is generated in the browser from a seed.
+ * The type names in it are real and everything they do is invented, so a tour that promised "a
+ * real question" and then answered it would be teaching the reader to trust a number that means
+ * nothing. The dataset step says so outright, and no later step claims a result.
  *
  * ## Three decisions worth arguing with
  *
@@ -317,9 +323,10 @@ export const LEARN_TO_BUILD: readonly TourStep[] = [
     id: 'intro',
     title: "Let's build something",
     body:
-      'This guide will teach you how to build a simple analysis pipeline in Coda. ' +
-      'To keep things interesting, we are going to answer a real question: which cell ' +
-      'types do LC neurons talk to?',
+      'This guide will teach you how to build a simple analysis pipeline in Coda: find a set of ' +
+      'neurons, pull everything they connect to, and add up the synapses per partner type. It is ' +
+      'the shape most connectivity questions take — point it at a real dataset afterwards and the ' +
+      'chain does not change.',
   },
   {
     id: 'blank',
@@ -339,9 +346,10 @@ export const LEARN_TO_BUILD: readonly TourStep[] = [
     id: 'dataset',
     title: 'The dataset node',
     body:
-      'Optic Lobe (mini) is synthetic and generated right here in your browser, so this tour ' +
-      'needs no token and no network. Swap it for Hemibrain, FlyWire or MANC later — every node ' +
-      'downstream of it stays exactly the same.',
+      'Demo Data is synthetic and generated right here in your browser, so this tour ' +
+      'needs no token and no network — and so the numbers it produces are a demonstration rather ' +
+      'than a result. Swap it for Hemibrain, FlyWire or MANC later: every node downstream of it ' +
+      'stays exactly the same, and then the answers mean something.',
     before: () => {
       ensure(DATASET)
       reveal(DATASET)
@@ -413,7 +421,7 @@ export const LEARN_TO_BUILD: readonly TourStep[] = [
     id: 'connectivity',
     title: 'Who do they talk to?',
     body:
-      'Connectivity Graph takes those neurons and returns one row per connected pair, ' +
+      'Connectivity takes those neurons and returns one row per connected pair, ' +
       'downstream by default. Look at its sockets: it takes *two* inputs, and both got wired.',
     before: () => {
       ensure(CONNECTIVITY)
@@ -444,7 +452,7 @@ export const LEARN_TO_BUILD: readonly TourStep[] = [
     title: 'That is a lot of rows',
     body:
       'One row per neuron-to-neuron connection: thousands of them, which is more than anybody ' +
-      'can read as a list. The rest of the graph turns it into an answer.',
+      'can read as a list. The rest of the graph reduces it to something you can.',
     before: () => {
       runIfStale()
       reveal(CONNECTIVITY)
@@ -475,7 +483,7 @@ export const LEARN_TO_BUILD: readonly TourStep[] = [
     title: 'Sum by partner type',
     body:
       'Group By collapses every row onto its partner type and adds up the weight — so thousands ' +
-      'of neuron-to-neuron rows become one row per cell type. That is the answer we came for. ' +
+      'of neuron-to-neuron rows become one row per cell type. That is the shape we came for. ' +
       'Small nodes rather than one big one, so each can be read, re-ordered and re-run on its ' +
       'own — and the Table is still there showing you what went in.',
     before: () => {
@@ -512,7 +520,7 @@ export const LEARN_TO_BUILD: readonly TourStep[] = [
      *
      * The reason it is already up to date is the better lesson, so the step teaches that
      * instead. Filter, Group By and Bar Chart are all `cost: 'cheap'` and re-ran on the cheap
-     * pass as they arrived; Find Neurons and Connectivity Graph are `expensive` and waited to
+     * pass as they arrived; Find Neurons and Connectivity are `expensive` and waited to
      * be asked. That split *is* Coda's execution model, and this is the one moment in the tour
      * where the reader has just watched it happen to them.
      */
@@ -522,7 +530,7 @@ export const LEARN_TO_BUILD: readonly TourStep[] = [
       'You never pressed Run for those last three, and the button has gone quiet — everything ' +
       'is already up to date. Table, Group By and Bar Chart are *cheap* nodes: pure table ' +
       'work, no server, so Coda re-runs them for you on every edit. Find Neurons and ' +
-      'Connectivity Graph are *expensive* — they query a backend, so they wait until you ask.',
+      'Connectivity are *expensive* — they query a backend, so they wait until you ask.',
     anchor: () => byTour('run'),
     side: 'bottom',
     align: 'end',

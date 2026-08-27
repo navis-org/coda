@@ -276,7 +276,7 @@ export const customCaveNode = registerNode({
       kind: 'string',
       label: 'Connection view',
       placeholder: 'valid_connection_v2',
-      help: 'A server-side roll-up of synapses into connections, if this datastack publishes one. Without it, Connectivity Graph declines.',
+      help: 'A server-side roll-up of synapses into connections, if this datastack publishes one. Without it, Connectivity declines.',
       default: '',
       advanced: true,
     },

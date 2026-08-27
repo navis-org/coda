@@ -16,7 +16,7 @@ import { getConnectome } from '../../data/mock/generate'
 import { ROI_VIEWS } from './roiProjection'
 import { buildRoiOutlines, loadRoiOutlines, resetRoiOutlineState } from './roiOutlines'
 
-const DATASET = 'hemibrain-mini'
+const DATASET = 'optic-lobe-mini'
 
 let source: MockSource
 

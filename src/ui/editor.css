@@ -3458,6 +3458,28 @@ a.dropdown__item {
 .dropdown__note--caveat + .dropdown__group {
   margin-top: 0;
 }
+/*
+ * A heads-up closing a section, in gold: the Examples menu saying its rows need no credentials.
+ *
+ * **`--status-warn` straight, not mixed towards the surface** — which is how `--caveat` above
+ * gets its quiet, and doing the same here would undo a measurement. That token is per-mode
+ * *because* no single gold clears 4.5:1 on both panels (the bright #fab219 is 1.74:1 on the
+ * light one, i.e. unreadable exactly where a light-mode reader is), and 5.41:1 light / 9.78:1
+ * dark is what buys it back. Mixing it 85% towards `--surface-1` the way the caveat does would
+ * put it back under the floor. So the quiet comes from size and italic, and the colour stays
+ * where it was measured.
+ *
+ * **It wraps, unlike `--caveat`.** That one is `nowrap` because the Save menu's longest row is
+ * 307px and its sentence measures 291px, so one line was free. This menu is narrower and its
+ * rows are example summaries that already wrap; pinning this to one line would widen the whole
+ * menu to hold it, which is the menu changing shape to suit its footnote.
+ */
+.dropdown__note--heads-up {
+  padding: 7px 8px 1px;
+  font-size: 9.5px;
+  font-style: italic;
+  color: var(--status-warn);
+}
 
 /* --- the workflow library, inside the Open and Save menus ------------------
  *

@@ -141,7 +141,7 @@ describe('inference', () => {
       position: { x: 0, y: 0 },
       params: { ...defaultParams(requireNodeDef(type)), ...params } as GraphNode['params'],
     })
-    g = addNode(g, node('ds', 'dataset.mock.hemibrain'))
+    g = addNode(g, node('ds', 'dataset.mock.opticlobe'))
     g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC.*' }))
     g = addNode(g, node('l2n', 'cluster.clustersToNeurons', { matchColumn }))
     g = addEdge(g, {

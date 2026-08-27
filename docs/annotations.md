@@ -169,8 +169,8 @@ annotation nodes chained rather than a setting, because `joinAnnotations` is a f
 Nothing queries *through* it. It is read for exactly two columns — the root id, which becomes the
 index, and the annotation table's own primary key, which is how `spec.annotations.refColumn`
 joins back — so `spec.annotations` depends on it and a datastack with neither is coherent.
-Connectivity Graph reads the roll-up view by root id, and Skeletons, Meshes and Synapses take ids off a
-table, so `Input IDs → Connectivity Graph` needs no neuron table whatsoever. What its absence costs is
+Connectivity reads the roll-up view by root id, and Skeletons, Meshes and Synapses take ids off a
+table, so `Input IDs → Connectivity` needs no neuron table whatsoever. What its absence costs is
 enumeration: Find Neurons, Explore Dataset, and the type names `typesOf` puts on every connectivity row.
 Hence the refusal names the wire to make rather than answering with an empty table, which would
 read as a datastack with no neurons in it.
@@ -503,7 +503,7 @@ reader needs and a fourth backend should be one entry rather than four edits.
 - **The backend is in the name**: `MaleCNS (neuPrint)`, `FlyWire FAFB (CAVE)`. Not decoration —
   one dataset can be published on more than one backend, and without the suffix two nodes in the
   Add menu would read identically and behave differently. A backend with an empty label adds
-  nothing, which is what keeps `Hemibrain (mini)` from becoming `Hemibrain (mini) (Mock)`. **The
+  nothing, which is what keeps `Demo Data` from becoming `Demo Data (Mock)`. **The
   node type ids are untouched**: that is what a saved graph carries.
 - **The card is tinted by backend**, through `--cat-dataset-<id>`. A *lightness* step within the
   one green, not a second hue: deuteranopia and protanopia collapse red-green hue differences and

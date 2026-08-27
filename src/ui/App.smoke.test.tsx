@@ -78,7 +78,7 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByText('Find Neurons')).toBeTruthy()
     })
-    expect(screen.getByText('Connectivity Graph')).toBeTruthy()
+    expect(screen.getByText('Connectivity')).toBeTruthy()
     expect(screen.getByText('Group By')).toBeTruthy()
 
     // Sockets advertise their inferred type in the tooltip. Both ends of the
@@ -242,7 +242,7 @@ describe('App', () => {
     // The Connectivity node's button should pull the dataset + query, but leave the
     // downstream table alone.
     const connectivityNode = screen
-      .getByText('Connectivity Graph')
+      .getByText('Connectivity')
       .closest('.coda-node') as HTMLElement
     const runButton = within(connectivityNode).getByRole('button', {
       name: 'Run this node',
@@ -266,12 +266,12 @@ describe('App', () => {
     await waitFor(() => expect(screen.getByText('Find Neurons')).toBeTruthy())
 
     await act(async () => {
-      useGraphStore.getState().loadExample('roi-summary')
+      useGraphStore.getState().loadExample('matrix')
     })
 
-    await waitFor(() => expect(screen.getByText('ROI Counts')).toBeTruthy())
-    expect(screen.getByText('Bar Chart')).toBeTruthy()
-    expect(screen.queryByText('Connectivity Graph')).toBeNull()
+    await waitFor(() => expect(screen.getByText('Adjacency')).toBeTruthy())
+    expect(screen.getByText('Heatmap')).toBeTruthy()
+    expect(screen.queryByText('Connectivity')).toBeNull()
   })
 })
 

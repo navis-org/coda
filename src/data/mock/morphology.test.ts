@@ -225,8 +225,8 @@ describe('MockSource morphology', () => {
  */
 describe('mock region meshes', () => {
   it('answers a dataset with one shell per region, named', async () => {
-    const connectome = getConnectome('hemibrain-mini')!
-    const meshes = await source.fetchRoiMeshes({ datasetId: 'hemibrain-mini' })
+    const connectome = getConnectome('optic-lobe-mini')!
+    const meshes = await source.fetchRoiMeshes({ datasetId: 'optic-lobe-mini' })
 
     expect(meshes.kind).toBe('meshes')
     expect(meshes.items).toHaveLength(connectome.rois.length)
@@ -237,7 +237,7 @@ describe('mock region meshes', () => {
   })
 
   it('builds valid triangle meshes', async () => {
-    const meshes = await source.fetchRoiMeshes({ datasetId: 'hemibrain-mini' })
+    const meshes = await source.fetchRoiMeshes({ datasetId: 'optic-lobe-mini' })
     for (const mesh of meshes.items) {
       expect(mesh.positions.length % 3).toBe(0)
       expect(mesh.indices.length % 3).toBe(0)
@@ -276,10 +276,10 @@ describe('mock region meshes', () => {
     // land inside the union of the regions it innervates. Not every point: an arbor is grown
     // with jitter and the shells are not convex hulls of it. Most of them is the honest claim,
     // and it is the one that fails if the two ever stop sharing a coordinate frame.
-    const meshes = await source.fetchRoiMeshes({ datasetId: 'hemibrain-mini' })
+    const meshes = await source.fetchRoiMeshes({ datasetId: 'optic-lobe-mini' })
     const union = boundsOf(meshes.items.map((m) => m.positions))
 
-    const connectome = getConnectome('hemibrain-mini')!
+    const connectome = getConnectome('optic-lobe-mini')!
     const neuronId = connectome.neurons[0]!.neuronId
     const rois = connectome.roiCounts
       .filter((rc) => rc.neuronId === neuronId)

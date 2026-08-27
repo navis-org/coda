@@ -103,14 +103,14 @@ describe('the family table', () => {
 })
 
 describe('versionsFor / resolveDatasetId', () => {
-  const mockHemibrain = datasetFamily('mock.hemibrain')!
+  const mockOpticLobe = datasetFamily('mock.opticlobe')!
 
   it('finds the versions a source actually lists', () => {
-    expect(versionsFor(mockHemibrain).map((v) => v.datasetId)).toEqual(['hemibrain-mini'])
+    expect(versionsFor(mockOpticLobe).map((v) => v.datasetId)).toEqual(['optic-lobe-mini'])
   })
 
   it('resolves an empty version to the newest listed', () => {
-    expect(resolveDatasetId(mockHemibrain, '')).toBe('hemibrain-mini')
+    expect(resolveDatasetId(mockOpticLobe, '')).toBe('optic-lobe-mini')
   })
 
   it('keeps a pinned version rather than silently upgrading it', () => {
@@ -121,7 +121,7 @@ describe('versionsFor / resolveDatasetId', () => {
 
   it('returns nothing when the source has listed nothing yet', () => {
     // Inference runs before any listing resolves, and must answer rather than throw.
-    const unlisted = { ...mockHemibrain, sourceId: 'not-registered' }
+    const unlisted = { ...mockOpticLobe, sourceId: 'not-registered' }
     expect(versionsFor(unlisted)).toEqual([])
     expect(resolveDatasetId(unlisted, '')).toBeUndefined()
   })

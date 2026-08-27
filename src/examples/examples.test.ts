@@ -191,25 +191,6 @@ describe('example results', () => {
       ).toBe(true)
     }
   })
-
-  it('puts the calyx first in the KC ROI summary', async () => {
-    const example = EXAMPLES.find((e) => e.id === 'roi-summary')!
-    const sched = scheduler()
-    await sched.run(example.build(), { mode: 'full' })
-
-    const table = sched.output('group', 'out')
-    if (!isTableValue(table)) throw new Error('expected a table')
-
-    const byRoi = new Map<string, number>()
-    const rois = table.data.roi as string[]
-    const posts = table.data.sum_post as number[]
-    for (let i = 0; i < table.length; i++) {
-      byRoi.set(rois[i]!, (byRoi.get(rois[i]!) ?? 0) + posts[i]!)
-    }
-    const ranked = [...byRoi.entries()].sort((a, b) => b[1] - a[1])
-    // Kenyon cells receive their input in the calyx.
-    expect(ranked[0]?.[0]).toBe('CA(R)')
-  })
 })
 
 /**
@@ -218,7 +199,7 @@ describe('example results', () => {
  * worse than an empty canvas.
  */
 describe('starters', () => {
-  const spec = { nodeType: 'dataset.mock.hemibrain', label: 'Hemibrain (mini)' }
+  const spec = { nodeType: 'dataset.mock.opticlobe', label: 'Demo Data' }
 
   it('builds with no type errors or warnings', () => {
     const inference = inferGraph(buildStarter(spec))
@@ -232,7 +213,7 @@ describe('starters', () => {
   it('wires Explore between the dataset and a viewer', () => {
     const graph = buildStarter(spec)
     expect(graph.nodes.map((n) => n.type)).toEqual([
-      'dataset.mock.hemibrain',
+      'dataset.mock.opticlobe',
       'neuron.explore',
       'out.table',
     ])
@@ -268,7 +249,7 @@ describe('starters', () => {
     // An empty `version` tracks the latest the server reports; the starter only pins when the
     // caller asked for a specific one.
     const graph = buildStarter(spec)
-    const dataset = graph.nodes.find((n) => n.type === 'dataset.mock.hemibrain')
+    const dataset = graph.nodes.find((n) => n.type === 'dataset.mock.opticlobe')
     expect(dataset?.params.version).toBe('')
   })
 

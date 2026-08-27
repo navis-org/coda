@@ -93,7 +93,7 @@ neuPrint has `fetch_simple_connections`, `fetch_adjacencies` (with **per-ROI bre
 in order and colored by neuron class"). CATMAID's **Connectivity Widget** lists partners with
 a synapse-count threshold and node-filter application.
 
-→ Our `Connectivity Graph` node needs: **min synapse count**, **top-N cap**, and
+→ Our `Connectivity` node needs: **min synapse count**, **top-N cap**, and
 **per-ROI breakdown as an optional extra column**. The ROI breakdown is the important one —
 it's what turns "A → B, 40 synapses" into "A → B, 40 synapses, 32 of them in LO".
 
@@ -330,7 +330,7 @@ Grouped by what unblocks what, not strictly by value.
 
 **Next — needs the neuPrint source, so it lands with it**
 
-6. **`Connectivity Graph` node knobs**: min synapse count, top-N cap, per-ROI breakdown (B1).
+6. **`Connectivity` node knobs**: min synapse count, top-N cap, per-ROI breakdown (B1).
 7. **`Shortest Paths`** + **`Path Length Matrix`** (B3).
 8. **ROI hierarchy** as a value type, and **`Roll Up ROIs`** (D).
 9. **Count type** (synapses / connections / reciprocal) on `Adjacency`, and more

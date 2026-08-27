@@ -14,7 +14,7 @@ queried. Can be wired straight into Build Network with `Source: preId, Target: p
 ### Example: Edges to Build Network to Network Viewer
 
 ```coda-graph
-caption: Connectivity Graph wired into the pattern for visualization
+caption: Connectivity wired into the pattern for visualization
 neuron.connectivity as conn { direction: outputs, hops: 1 }
 net.build as build
 out.network as net

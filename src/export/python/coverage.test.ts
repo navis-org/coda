@@ -42,10 +42,9 @@ const NO_EMITTER: Record<string, string> = {
     'a CloudVolume would sit above a Meshes cell that is itself a TODO for this backend. One ' +
     'emitter is worth writing when the pair is.',
   'note.text': 'An annotation. It becomes a markdown cell, which the walk does directly.',
-  'dataset.mock.hemibrain':
+  'dataset.mock.opticlobe':
     'Synthetic, so a graph holding one is refused before the walk starts. An emitter here ' +
     'would be unreachable code claiming the case is handled.',
-  'dataset.mock.opticlobe': 'Synthetic — see dataset.mock.hemibrain.',
 }
 
 describe('emitter coverage', () => {

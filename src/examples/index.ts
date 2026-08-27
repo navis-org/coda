@@ -99,17 +99,19 @@ function assemble(
 // ---------------------------------------------------------------------------
 
 /**
- * The bread-and-butter neuPrint question: what does a cell type talk to, and how
- * strongly? Exercises search → connectivity → filter → group → sort → table.
+ * The shape most connectivity questions take: search → connectivity → filter → group → sort →
+ * table. Named for the *technique*, not for a finding — every example runs on the synthetic
+ * Demo Data, so a title promising what some cell type does would be promising something the
+ * numbers underneath cannot deliver.
  */
 const partners: ExampleGraph = {
   id: 'partners',
-  name: 'LC outputs by partner type',
-  summary: 'Find LC neurons, pull downstream partners, aggregate synapses by partner type.',
+  name: 'Fetch and group connectivity by type',
+  summary: 'Find neurons, pull their downstream partners, aggregate synapses by partner type.',
   build: () =>
     assemble(
-      'LC outputs by partner type',
-      'Lobula columnar neurons and the central-brain types they drive, ranked by total synaptic weight.',
+      'Fetch and group connectivity by type',
+      'Search → connectivity → filter → group → sort → table, the chain most connectivity questions are built from. Runs on synthetic data.',
       [
         { id: 'ds', type: 'dataset.mock.opticlobe', col: 0 },
         {
@@ -162,17 +164,20 @@ const partners: ExampleGraph = {
         {
           id: 'why',
           col: 0,
-          y: -170,
+          y: -210,
           width: 700,
-          height: 160,
+          height: 200,
           text: `
-          ### What this graph answers
+          ### What this graph shows
 
-          Lobula columnar (LC) cells carry visual features out of the optic lobe. This asks which cell
-          types they drive and how strongly — one row per partner type, ranked by total synaptic weight.
+          **How** to turn a type pattern into a ranked table: find the neurons, pull their downstream
+          partners, drop the weak pairs, sum the weight per partner type, sort.
 
-          Read it left to right: each node takes the table on its left and hands a new one to its right.
-          Press Run, or ⇧R, to evaluate the whole chain.`,
+          Read it left to right — each node takes the table on its left and hands a new one to its
+          right. Press Run, or ⇧R, to evaluate the whole chain.
+
+          *The dataset is synthetic, generated in your browser from a seed. The pipeline is the point;
+          the numbers are not a finding. Swap the dataset node for a real one to see actual data.*`,
         },
         {
           id: 'step1',
@@ -216,12 +221,12 @@ const partners: ExampleGraph = {
  */
 const matrix: ExampleGraph = {
   id: 'matrix',
-  name: 'LC → descending neuron matrix',
+  name: 'Build an adjacency matrix from two searches',
   summary: 'Adjacency between two neuron sets, row-normalised, as a heatmap.',
   build: () =>
     assemble(
-      'LC → descending neuron matrix',
-      'Connection matrix from lobula columnar types onto their central-brain targets, normalised per row so each LC type sums to 1.',
+      'Build an adjacency matrix from two searches',
+      'Two independent searches feeding one matrix node, normalised per row so each row sums to 1. Runs on synthetic data.',
       [
         { id: 'ds', type: 'dataset.mock.opticlobe', col: 0, row: 0.5 },
         {
@@ -277,17 +282,21 @@ const matrix: ExampleGraph = {
         {
           id: 'why',
           col: 0,
-          y: -180,
+          y: -225,
           width: 700,
-          height: 170,
+          height: 215,
           text: `
-          ### What this graph answers
+          ### What this graph shows
 
-          An adjacency matrix. Rows are the LC types found by the upper search, columns are the
-          central-brain targets found by the lower one, and each cell is how strongly they connect.
+          **How** to build an adjacency matrix: two independent searches, one matrix node. Rows come
+          from the upper search, columns from the lower one, and each cell is the connection strength
+          between them.
 
-          Two searches feed one node, which is what the layout is showing: the matrix is the only place
-          in the graph where the two sets of neurons meet.`,
+          Two inputs into one node is what the layout is showing — the matrix is the only place in the
+          graph where the two sets of neurons meet.
+
+          *The dataset is synthetic. Its block structure was designed in, not discovered — what the
+          heatmap demonstrates is the pipeline, not a circuit.*`,
         },
         {
           id: 'step1',
@@ -308,122 +317,27 @@ const matrix: ExampleGraph = {
           height: 135,
           text: `
           **Row-normalised, so read across.** Each row is divided by its own total, so a cell says what
-          *fraction* of that LC type's output reaches a target — comparable between a type with 200 cells
-          and a type with 12. Delete the normalise node to see raw synapse counts instead.`,
+          *fraction* of that row's output reaches a given column — comparable between a type with 200
+          cells and a type with 12. Delete the normalise node to see raw synapse counts instead.`,
         },
       ],
     ),
 }
 
 /**
- * Per-ROI innervation. The interesting bit for the type system is that GroupBy on two
- * keys produces the exact column set the stacked bar chart then picks up.
- */
-const roiSummary: ExampleGraph = {
-  id: 'roi-summary',
-  name: 'Kenyon cell innervation by ROI',
-  summary: 'Per-ROI postsynapse counts for KC types, as a stacked bar chart.',
-  build: () =>
-    assemble(
-      'Kenyon cell innervation by ROI',
-      'Where Kenyon cells receive input, split by KC subtype. Calyx dominates, as it should.',
-      [
-        { id: 'ds', type: 'dataset.mock.hemibrain', col: 0 },
-        {
-          id: 'find',
-          type: 'neuron.findNeurons',
-          col: 1,
-          params: {
-            filters: [
-              '{"f":"type","op":"matches","v":["KC.*"]}',
-              '{"f":"status","op":"is","v":["Traced"]}',
-            ],
-          },
-        },
-        { id: 'roi', type: 'neuron.roiCounts', col: 2 },
-        {
-          id: 'group',
-          type: 'core.groupBy',
-          col: 3,
-          params: { by: ['roi', 'type'], agg: 'sum', value: 'post' },
-        },
-        {
-          id: 'bar',
-          type: 'out.barChart',
-          col: 4,
-          params: {
-            category: 'roi',
-            value: 'sum_post',
-            series: 'type',
-            useSeries: true,
-            sortBars: true,
-          },
-        },
-      ],
-      [
-        ['ds', 'dataset', 'find', 'dataset'],
-        ['ds', 'dataset', 'roi', 'dataset'],
-        ['find', 'neurons', 'roi', 'neurons'],
-        ['roi', 'counts', 'group', 'in'],
-        ['group', 'out', 'bar', 'in'],
-      ],
-      [
-        {
-          id: 'why',
-          col: 0,
-          y: -170,
-          width: 700,
-          height: 160,
-          text: `
-          ### What this graph answers
-
-          Kenyon cells are the mushroom body's parallel fibres. This asks where they *receive* their
-          input: postsynapse counts per brain region, split by KC subtype.
-
-          The calyx should dominate the result. That expectation is the check on whether the pipeline is
-          doing what it claims.`,
-        },
-        {
-          id: 'step1',
-          col: 2,
-          y: 430,
-          width: 520,
-          height: 130,
-          text: `
-          **One row per neuron and region.** The ROI node explodes each neuron into its per-region
-          counts, which is the shape the grouping then collapses. Two group keys go in, so what comes out
-          carries a region column, a type column and a summed count.`,
-        },
-        {
-          id: 'step2',
-          col: 4,
-          y: 430,
-          width: 480,
-          height: 130,
-          text: `
-          **Two keys make a stacked chart.** The chart reads region as the category, the summed count as
-          the value and type as the series — the three columns the grouping just produced. Change either
-          key and the chart follows.`,
-        },
-      ],
-    ),
-}
-
-/**
- * Network view of a circuit, coloured by cell type and laid out feed-forward.
+ * The same connectivity as `partners`, drawn as a node-link diagram instead of a table.
  *
- * Uses the type-level aggregation deliberately: a neuron-level network of the whole optic
- * lobe is thousands of nodes and reads as a hairball, whereas the type-level graph is the
- * circuit diagram people actually draw.
+ * Uses the type-level aggregation deliberately: a neuron-level network is thousands of nodes and
+ * reads as a hairball, whereas the type-level graph is the circuit diagram people actually draw.
  */
 const network: ExampleGraph = {
   id: 'network',
-  name: 'LC circuit network',
+  name: 'Draw connectivity as a network diagram',
   summary: 'Type-level connectivity as a node-link diagram, laid out feed-forward.',
   build: () =>
     assemble(
-      'LC circuit network',
-      'Lobula columnar neurons and their central-brain targets as a network. Node colour is cell type, node size is total outgoing weight, link width is synapse count.',
+      'Draw connectivity as a network diagram',
+      'Connectivity aggregated to type level and drawn as a network: node colour is cell type, node size is total outgoing weight, link width is synapse count. Runs on synthetic data.',
       [
         { id: 'ds', type: 'dataset.mock.opticlobe', col: 0 },
         {
@@ -487,18 +401,21 @@ const network: ExampleGraph = {
         {
           id: 'why',
           col: 0,
-          y: -180,
+          y: -230,
           width: 700,
-          height: 170,
+          height: 220,
           text: `
-          ### What this graph answers
+          ### What this graph shows
 
-          The same kind of connectivity as the first example, drawn as a circuit instead of a table:
-          nodes are cell types, links are the synapses between them, laid out so the flow reads
-          left to right.
+          **How** to get from a connectivity table to a drawing: the same chain as the first example,
+          ending in a node-link diagram instead of a table. Nodes are cell types, links are the
+          synapses between them, laid out so the flow reads left to right.
 
-          Type-level on purpose. A neuron-level network of this region is thousands of nodes and reads as
-          a hairball; the type graph is the diagram people actually draw by hand.`,
+          Type-level on purpose. A neuron-level network is thousands of nodes and reads as a hairball;
+          the type graph is the diagram people actually draw by hand.
+
+          *The dataset is synthetic — this is what the layout and the encodings do, not a circuit
+          anyone has traced.*`,
         },
         {
           id: 'step1',
@@ -527,15 +444,22 @@ const network: ExampleGraph = {
     ),
 }
 
-/** Morphology: skeletons plus their synapses, coloured by cell type and polarity. */
+/**
+ * Morphology: skeletons plus their synapses, coloured by cell type and polarity.
+ *
+ * The one example where the framing matters most. `morphology.ts` generates a plausible *shape* —
+ * a soma, a primary neurite, two arbors, tapering radii — and says in its own header that it is
+ * not biologically accurate. A title like "LC4 morphology in 3D" over a generated tree is the
+ * closest this app came to showing somebody a made-up neuron and naming a real cell.
+ */
 const morphology: ExampleGraph = {
   id: 'morphology',
-  name: 'LC4 morphology in 3D',
+  name: 'Render skeletons and synapses in 3D',
   summary: 'Skeletons and synapse locations in 3D, coloured by type and polarity.',
   build: () =>
     assemble(
-      'LC4 morphology in 3D',
-      'Lobula columnar type 4 neurons rendered in 3D, with their synapses as a point cloud coloured by polarity.',
+      'Render skeletons and synapses in 3D',
+      'One search feeding two morphology queries, both drawn in the same 3D scene, with synapses coloured by polarity. Runs on synthetic data.',
       [
         { id: 'ds', type: 'dataset.mock.opticlobe', col: 0, row: 0.5 },
         {
@@ -585,17 +509,20 @@ const morphology: ExampleGraph = {
         {
           id: 'why',
           col: 0,
-          y: -180,
+          y: -225,
           width: 660,
-          height: 165,
+          height: 210,
           text: `
-          ### What this graph answers
+          ### What this graph shows
 
-          What the cells look like. One search feeds two morphology queries — the skeletons and the
-          synapse locations — and the 3D viewer draws both in the same space.
+          **How** to draw morphology: one search feeding two morphology queries — the skeletons and the
+          synapse locations — with the 3D viewer drawing both in the same space.
 
           Both queries are expensive, so nothing is fetched until you press Run. That is the hybrid
-          model: cheap nodes re-run as you edit, network calls wait to be asked.`,
+          model: cheap nodes re-run as you edit, network calls wait to be asked.
+
+          *These shapes are generated, not traced. They have real branch structure to prune, measure
+          and colour by — they are not what any of these cells actually looks like.*`,
         },
         {
           id: 'step1',
@@ -624,7 +551,7 @@ const morphology: ExampleGraph = {
     ),
 }
 
-export const EXAMPLES: ExampleGraph[] = [partners, matrix, roiSummary, network, morphology]
+export const EXAMPLES: ExampleGraph[] = [partners, matrix, network, morphology]
 
 export function getExample(id: string): ExampleGraph | undefined {
   return EXAMPLES.find((e) => e.id === id)

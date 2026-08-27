@@ -180,7 +180,7 @@ file, pulling all 620 kB back into every session and undoing the split.
 - [docs/widgets.md](docs/widgets.md) — Explore Dataset, Neuron Profile, Dataset Summary,
   ROI Viewer: the surfaces that fetch for themselves rather than reading a wire.
 - [docs/nodes.md](docs/nodes.md) — per-node semantics: Pivot, Deduplicate, both import
-  nodes, Combine Columns, Select One, Stack, Download, Connectivity Graph, Paths, both id
+  nodes, Combine Columns, Select One, Stack, Download, Connectivity, Paths, both id
   nodes, Text notes.
 - [docs/datasets.md](docs/datasets.md) — the family table, Custom backend nodes, the
   Description companion, auto-wiring, starter graphs. Also **datasource vs dataset**: a

@@ -322,7 +322,7 @@ it sets the card width through `--node-width` rather than `width` so the run rin
 `out.profile`, the counterpart to Explore Dataset one level in — Explore Dataset answers "what is in this
 dataset?", Neuron Profile answers "what is this cell?". Modelled on Codex's Cell Details page. It takes
 a whole neuron collection and pages through it, so it works on an Explore Dataset selection or a
-Connectivity Graph result, not only a hand-picked body.
+Connectivity result, not only a hand-picked body.
 
 **Browse free, pin to commit — the whole design turns on this.** `page` is presentational, so
 flipping through twenty-seven neurons costs nothing and invalidates nothing; `selection` is not,

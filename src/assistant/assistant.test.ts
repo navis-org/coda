@@ -61,7 +61,7 @@ function parsedPlan(text: string): AssistantPlan {
 /** `Dataset → Find Neurons`, the start of nearly every pipeline. */
 const SEED: AssistantPlan = plan({
   add: [
-    { ref: 'ds', type: 'dataset.mock.hemibrain' },
+    { ref: 'ds', type: 'dataset.mock.opticlobe' },
     { ref: 'find', type: 'neuron.findNeurons', params: { typePattern: 'LC.*' } },
   ],
   connect: [{ from: { node: 'ds', port: 'dataset' }, to: { node: 'find', port: 'dataset' } }],
@@ -79,7 +79,7 @@ describe('applying a plan', () => {
         emptyGraph(),
         plan({
           add: [
-            { ref: 'ds', type: 'dataset.mock.hemibrain' },
+            { ref: 'ds', type: 'dataset.mock.opticlobe' },
             { ref: 'find', type: 'neuron.findNeurons', params: { typePattern: 'LC.*' } },
             { ref: 'conn', type: 'neuron.connectivity' },
             { ref: 'chart', type: 'out.barChart', title: 'Partners' },
@@ -166,7 +166,7 @@ describe('refusing a plan', () => {
   it('refuses a wire the type system rejects, in the same words the canvas would use', () => {
     const message = refusal({
       add: [
-        { ref: 'ds', type: 'dataset.mock.hemibrain' },
+        { ref: 'ds', type: 'dataset.mock.opticlobe' },
         { ref: 'filter', type: 'core.filter' },
       ],
       connect: [{ from: { node: 'ds', port: 'dataset' }, to: { node: 'filter', port: 'in' } }],
@@ -301,7 +301,7 @@ describe('refusing a plan', () => {
     // `refresh` is a nonce a reload button bumps. Setting it from a plan would invalidate a
     // cache entry as though it were a setting somebody chose.
     const message = refusal({
-      add: [{ ref: 'ds', type: 'dataset.mock.hemibrain', params: { refresh: 1 } }],
+      add: [{ ref: 'ds', type: 'dataset.mock.opticlobe', params: { refresh: 1 } }],
     })
 
     expect(message).toMatch(/internal/i)
@@ -848,7 +848,7 @@ describe('the loop, end to end', () => {
   const MODEL_REPLY = JSON.stringify({
     summary: 'Chart the strongest partners of the LC4 neurons.',
     add: [
-      { ref: 'ds', type: 'dataset.mock.hemibrain', params: [], title: '' },
+      { ref: 'ds', type: 'dataset.mock.opticlobe', params: [], title: '' },
       {
         ref: 'find',
         type: 'neuron.findNeurons',
@@ -1033,7 +1033,7 @@ describe('the whole registry, against the applier', () => {
       addNode(
         addNode(emptyGraph(), {
           id: 'ds1',
-          type: 'dataset.mock.hemibrain',
+          type: 'dataset.mock.opticlobe',
           position: { x: 0, y: 0 },
           params: { version: '', refresh: 0 },
         }),
@@ -1275,7 +1275,7 @@ describe('recovering a plan a weak model wrapped in an envelope of its own', () 
     const result = parsePlan(
       JSON.stringify({
         summary: 'x',
-        add: [{ ref: 'a', type: 'dataset.mock.hemibrain' }],
+        add: [{ ref: 'a', type: 'dataset.mock.opticlobe' }],
         steps: [{ add: { ref: 'b', type: 'out.table' } }],
       }),
     )

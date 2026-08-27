@@ -142,7 +142,7 @@ verbatim. Read the entry before arguing with the rule.
 
    **The column is called `neuronId`, and that is Coda's word rather than any backend's.** It
    used to be `bodyId`, which is neuPrint's property name, and it is the one column every node
-   addresses *by name* — `out.profile` validates on it, Connectivity Graph, Skeletons, Meshes and
+   addresses *by name* — `out.profile` validates on it, Connectivity, Skeletons, Meshes and
    Synapses all reach their ids through `idColumn(table, 'neuronId')` — so it is the one that has
    to be Coda's vocabulary. Everything else in a neuron table is a passthrough that only a column
    picker ever names. The precedent is `preId`/`postId`, which Coda has always coined: neuPrint

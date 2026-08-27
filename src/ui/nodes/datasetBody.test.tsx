@@ -29,10 +29,10 @@ beforeEach(() => {
 
 afterEach(cleanup)
 
-function openStarter(nodeType = 'dataset.mock.hemibrain') {
+function openStarter(nodeType = 'dataset.mock.opticlobe') {
   render(<App />)
   act(() => {
-    useGraphStore.getState().loadStarter({ nodeType, label: 'Hemibrain (mini)' })
+    useGraphStore.getState().loadStarter({ nodeType, label: 'Demo Data' })
   })
 }
 
@@ -66,7 +66,7 @@ describe('dataset node body', () => {
   it('shows the resolved dataset id, so the node says what it is about', async () => {
     openStarter()
     const card = await waitFor(datasetCard)
-    expect(within(card).getByTitle('hemibrain-mini')).toBeTruthy()
+    expect(within(card).getByTitle('optic-lobe-mini')).toBeTruthy()
   })
 
   it('pins a version when one is picked, and keeps it in the graph', async () => {
@@ -79,7 +79,7 @@ describe('dataset node body', () => {
     await waitFor(() => {
       const node = useGraphStore
         .getState()
-        .graph.nodes.find((n) => n.type === 'dataset.mock.hemibrain')
+        .graph.nodes.find((n) => n.type === 'dataset.mock.opticlobe')
       expect(node?.params.version).toBe(pinned.value)
     })
   })

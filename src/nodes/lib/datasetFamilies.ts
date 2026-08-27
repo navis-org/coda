@@ -110,9 +110,9 @@ export const BACKENDS: Record<string, DatasetBackend> = {
     label: 'CATMAID',
   },
   /*
-   * The synthetic families get a backend too, and its label is deliberately empty: `Hemibrain
-   * (mini)` already says what it is, and `Hemibrain (mini) (Mock)` is the kind of name a rule
-   * produces when nobody checked it against the values. The tint and the tile mark still apply.
+   * The synthetic family gets a backend too, and its label is deliberately empty: `Demo Data`
+   * already says what it is, and `Demo Data (Mock)` is the kind of name a rule produces when
+   * nobody checked it against the values. The tint and the tile mark still apply.
    */
   mock: {
     id: 'mock',
@@ -127,7 +127,7 @@ export const BACKENDS: Record<string, DatasetBackend> = {
  * already fallen behind — a third backend arrived and the exporter's TODOs would have read
  * "has no catmaid equivalent yet". The `|| id` keeps a source id nobody has registered a
  * backend for readable rather than blank, and it is also what gives the mock its own name back:
- * its label is deliberately empty, because `Hemibrain (mini) (Mock)` is the kind of name a rule
+ * its label is deliberately empty, because `Demo Data (Mock)` is the kind of name a rule
  * produces when nobody checked it against the values.
  */
 export function backendName(id: string): string {
@@ -312,31 +312,19 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
   },
 ]
 
-/** The synthetic connectomes, which need no token and are what the examples run on. */
+/** The synthetic connectome, which needs no token and is what the examples run on. */
 const MOCK_FAMILIES: DatasetFamily[] = [
-  {
-    key: 'mock.hemibrain',
-    sourceId: 'mock',
-    backend: 'mock',
-    family: 'hemibrain-mini',
-    label: 'Hemibrain (mini)',
-    description:
-      'Synthetic mushroom-body-like connectome generated in the browser. No token needed.',
-    guide:
-      'A connectome generated in the browser at load, shaped like a mushroom body — Kenyon cells, output neurons, a modulatory population. Nothing is fetched and no token is needed, which is what makes it the dataset the bundled examples run on and the right place to try a pipeline before pointing it at a real volume.',
-    glyph: 'brain',
-    synthetic: true,
-  },
   {
     key: 'mock.opticlobe',
     sourceId: 'mock',
     backend: 'mock',
+    // The family and dataset ids stay `optic-lobe-mini`: they are what a saved graph and a
+    // share link carry, and what the data actually is. Only the name shown changed.
     family: 'optic-lobe-mini',
-    label: 'Optic Lobe (mini)',
-    description:
-      'Synthetic optic-lobe-like connectome generated in the browser. No token needed.',
+    label: 'Demo Data',
+    description: 'Synthetic optic-lobe-like connectome generated in the browser. No token needed.',
     guide:
-      'A synthetic optic lobe, generated in the browser with the columnar repetition a real one has. Same standing as the mini hemibrain: no token, no network, deterministic from a seed — so a graph built on it gives the same answer on any machine.',
+      'A synthetic optic lobe, generated in the browser with the columnar repetition a real one has. Nothing is fetched and no token is needed — it is deterministic from a seed, so a graph built on it gives the same answer on any machine. This is the dataset the bundled examples run on and the right place to try a pipeline before pointing it at a real volume.',
     glyph: 'optic',
     synthetic: true,
   },
@@ -471,7 +459,7 @@ export function splitDataset(id: string): [family: string, version: string] {
  * The suffix is not decoration. One dataset can be published on more than one backend — MANC is
  * on neuPrint today and is a plausible CAVE datastack tomorrow — so without it two nodes in the
  * Add menu would read identically and behave differently. A backend with an empty label adds
- * nothing, which is what keeps `Hemibrain (mini)` from becoming `Hemibrain (mini) (Mock)`.
+ * nothing, which is what keeps `Demo Data` from becoming `Demo Data (Mock)`.
  */
 export function familyLabel(family: DatasetFamily): string {
   const backend = BACKENDS[family.backend]

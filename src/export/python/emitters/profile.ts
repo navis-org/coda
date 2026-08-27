@@ -170,7 +170,7 @@ registerHelper({
     '',
     '    neuronId is always the neuron being profiled and partnerId is whatever it is wired to,',
     "    whichever way the arrow points -- which is the *opposite* convention to Coda's",
-    '    Connectivity Graph node, and the right one here: "these are my upstream partners" is the',
+    '    Connectivity node, and the right one here: "these are my upstream partners" is the',
     '    question a profile asks.',
     '    """',
     '    criteria = NeuronCriteria(bodyId=list(neuron_ids), client=client)',

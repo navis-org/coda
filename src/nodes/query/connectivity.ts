@@ -29,7 +29,14 @@ function readDirection(raw: unknown): TraversalDirection {
  */
 export const connectivityNode = registerNode({
   type: 'neuron.connectivity',
-  label: 'Connectivity Graph',
+  /*
+   * `Connectivity`, not `Connectivity`. What it emits is an edge list — a table of
+   * `preId → postId` rows — and "Graph" invited the reading that this node is where a network
+   * comes from, which is `net.build` two nodes downstream. It also puts the name in the same
+   * shape as `Skeletons`, `Meshes` and `Synapses`: what you get, not what you might do with it.
+   * The node **type** is untouched, because that is what a saved graph carries.
+   */
+  label: 'Connectivity',
   category: 'query',
   description: 'Fetch synaptic partners for the incoming neurons, one or more hops out.',
   guide:

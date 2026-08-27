@@ -66,10 +66,9 @@ const NO_EMITTER: Record<string, string> = {
     'emitting neuPrint code against a dataset neuPrint has never heard of would produce a ' +
     'document that runs and answers nothing.',
   'note.text': 'An annotation. It becomes a markdown block, which the walk does directly.',
-  'dataset.mock.hemibrain':
+  'dataset.mock.opticlobe':
     'Synthetic, so a graph holding one is refused before the walk starts. An emitter here ' +
     'would be unreachable code claiming the case is handled.',
-  'dataset.mock.opticlobe': 'Synthetic — see dataset.mock.hemibrain.',
 }
 
 describe('R emitter coverage', () => {

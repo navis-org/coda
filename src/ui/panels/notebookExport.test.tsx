@@ -95,7 +95,7 @@ describe('Export as Jupyter Notebook', () => {
       let g = emptyGraph('Mocked')
       g = addNode(g, {
         id: 'm',
-        type: 'dataset.mock.hemibrain',
+        type: 'dataset.mock.opticlobe',
         position: { x: 0, y: 0 },
         params: {},
       })
@@ -252,7 +252,7 @@ describe('Export as Jupyter Notebook', () => {
 
     openSaveMenu()
     const warning = await screen.findByText(/no notebook equivalent/)
-    expect(warning.textContent).toContain('Connectivity Graph')
+    expect(warning.textContent).toContain('Connectivity')
     // Explore Dataset is *not* named: it is written for both backends now.
     expect(warning.textContent).not.toContain('Explore')
     // The cascade is counted, not named: Table is fine, it just cannot be reached.

@@ -750,7 +750,7 @@ function mockHomeRois(connectome: MockConnectome): Map<number, string> {
  *
  * neuPrint publishes `Meta.roiHierarchy` and the real source derives this from it; the mock has
  * no such tree, so the groups are declared. They are the anatomy the mock's regions actually
- * belong to — the mushroom body lobes really are one system — rather than arbitrary buckets,
+ * belong to — the three optic neuropils really are one system — rather than arbitrary buckets,
  * because a control demonstrated on nonsense teaches the wrong thing about what it is for.
  *
  * A region absent from the table has no group, which is the case that matters: hemibrain lists
@@ -761,18 +761,9 @@ const MOCK_ROI_GROUPS: Record<string, string> = {
   'ME(R)': 'Optic lobe',
   'LO(R)': 'Optic lobe',
   'LOP(R)': 'Optic lobe',
-  'CA(R)': 'Mushroom body',
-  'PED(R)': 'Mushroom body',
-  'aL(R)': 'Mushroom body',
-  "a'L(R)": 'Mushroom body',
-  'bL(R)': 'Mushroom body',
-  "b'L(R)": 'Mushroom body',
-  'gL(R)': 'Mushroom body',
   'PVLP(R)': 'Ventrolateral',
   'PLP(R)': 'Ventrolateral',
-  'SLP(R)': 'Superior',
-  'SMP(R)': 'Superior',
-  // AL(R), LH(R) and AOTU(R) are deliberately ungrouped.
+  // AOTU(R) is deliberately ungrouped.
 }
 
 function mockRoiSuper(rois: readonly string[]): Record<string, string> {

@@ -84,7 +84,7 @@ describe('buildCommandItems', () => {
   it('disables Export as Jupyter Notebook on a synthetic dataset, and says which node', () => {
     const item = byId(commands(), 'cmd:export-notebook')
     expect(item.disabled).toBe(true)
-    expect(item.hint).toContain('Optic Lobe (mini)')
+    expect(item.hint).toContain('Demo Data')
     expect(item.hint).toContain('swap in a real dataset')
   })
 

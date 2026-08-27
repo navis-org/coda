@@ -206,6 +206,32 @@ Two traps in that plumbing, both hit:
   behind them are megabytes. `meshProgressFraction` gives manifests the first fifth, so the
   bar does not reach the halfway mark in the first second and then appear to hang.
 
+## The Examples menu
+
+Two kinds of thing, in this order: **Browse Workflows…** first, then a rule, then the four
+bundled graphs. The rule is the statement — the top row goes to a public repository over the
+network, the rows under it are bundled, run on synthetic data and open instantly. Mixing the
+fetch into the list would make one remote thing and four local ones read as five of a kind. It
+used to be the other way round, with the Zoo last; the order is now pinned in
+`panels.test.tsx` rather than left to be read off the JSX.
+
+**The gold note closes the bundled group, and it is inside `.dropdown__group` on purpose.**
+Above the rule it would sit under Browse Workflows, whose graphs run on whatever their author
+pointed them at, so a "no token needed" promise there would be false. It says two things: the
+data is mock, which is what stops somebody reading a result off these graphs, and no credentials
+are needed, which is what a reader scanning the menu actually wants to know. The longer version
+lives in each example's own overview note, once the graph is open.
+
+`--status-warn` **straight, not mixed towards the surface** the way `.dropdown__note--caveat`
+gets its quiet. That token is per-mode precisely because no single gold clears 4.5:1 on both
+panels — the bright `#fab219` is 1.74:1 on the light one — and 5.41:1 light / 9.78:1 dark is
+what buys it back; mixing it 85% into `--surface-1` would put it back under the floor. The
+quiet comes from 9.5px and italic instead. It also **wraps**, unlike the caveat: that one is
+`nowrap` because the Save menu's longest row is 307px and its sentence measures 291px, so a
+line was free. This menu is narrower and its rows are example summaries that already wrap, so
+pinning the note to one line would widen the whole menu to hold its own footnote. Measured in
+Chrome in both themes: the panel is 260px with and without it.
+
 ## The `?` menu's submenus
 
 Four rows, two of which open a flyout: Welcome Dialog, `Guides ▸` (Basics, Learn to Build),
@@ -308,7 +334,7 @@ and 404s — leaving a panel that looks fine locally and flat in production.
 viewer node_ of its own `build()`, a dataset's from the family table, both reusing the art the
 app already draws (`nodeGlyph`, `datasetGlyph` — exported for this, not duplicated). Adding
 the examples rail is what forced `out.network` and `out.viewer3d` into `NODE_GLYPHS`: without
-them three of five examples drew the same generic bars. Every card also has an unused `image`
+them two of the four examples drew the same generic bars. Every card also has an unused `image`
 slot, so real screenshots drop in later without the layout moving. Same rule as
 `NodeThumbnail`: per-item artwork means the next item ships blank.
 

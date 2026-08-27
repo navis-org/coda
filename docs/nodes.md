@@ -299,7 +299,7 @@ and never disagree with the rows already stored. The pair lives in `tableOps.ts`
 half and the value half cannot disagree about the _kind_ either.
 
 - **`ID column` renames the chosen column to `neuronId`**, and the output becomes Neurons. Nodes
-  address columns by name — `out.profile` validates on it, Connectivity Graph and Skeletons read it — so
+  address columns by name — `out.profile` validates on it, Connectivity and Skeletons read it — so
   a file whose author wrote `root_id` cannot meet neuron data until it is renamed. A column that
   merely already held the name is suffixed (`neuronId_2`), the same call `joinedColumns` makes. Only
   `i64` and `str` columns are offered: a float is a measurement and a boolean is a flag, and
@@ -949,7 +949,7 @@ input is the point. `any` on an input means "I accept whatever you have", which 
 was given": a pass-through cannot _originate_ a Dataset, so offering it when dragging back from a
 Dataset socket answers the question with a node that needs the same question asked again behind it.
 
-## Connectivity Graph: hops and direction
+## Connectivity: hops and direction
 
 `Direction` offers `both`, and `Hops` traverses further than one synapse. Both changed what the
 node _emits_, which is the part to read before touching it.
@@ -1013,7 +1013,7 @@ it is the first thing to suspect if a deep traversal errors at the transport rat
 
 ## Paths: how does this reach that?
 
-`neuron.paths`, added from `Add ▸ Query ▸ Paths`. `Connectivity Graph` answers "what is wired to
+`neuron.paths`, added from `Add ▸ Query ▸ Paths`. `Connectivity` answers "what is wired to
 this?"; this answers "how does this reach that?", which is a different query with a different
 result. Three outputs: a **Network** already pruned to the feed-forward connections on a route,
 the **Layout** for it, and a **Paths** table of one row per route.
@@ -1114,7 +1114,7 @@ free and reads well as a size encoding.
 threshold" is a real finding; throwing would block everything downstream from ever drawing the
 empty result that says so.
 
-**Known limit, same as Connectivity Graph's:** at neuron level the frontier is inlined into each
+**Known limit, same as Connectivity's:** at neuron level the frontier is inlined into each
 query, so a deep neuron-level traversal builds a very large Cypher string. `validate` warns
 above three hops and warns again when `Collapse types` is off there. A warning, never a refusal
 — the same call `Find Neurons` makes about `limit: 0`.
@@ -1289,7 +1289,7 @@ narrows a population; this resolves a **named set** — labels in, the neurons c
 **It is not `Find Neurons` with a different label, and the overlap is worth knowing so nobody
 "simplifies" one into the other.** A `type is one of LC4, LC6` row in Find Neurons returns exactly
 those two types, and does it through the same indexed `IN` list. That case is genuinely covered.
-What is not is where the labels actually come from: the `preType` column of a Connectivity Graph result,
+What is not is where the labels actually come from: the `preType` column of a Connectivity result,
 a `groupBy` roll-up, a list pasted out of a paper. None of those can be typed into a regex field,
 and the node that turned a column into an alternation would be this node with an extra step.
 
@@ -1377,7 +1377,7 @@ or a colleague. `IDs from Label` resolves a _named_ set; this takes the ids.
 
 **The Dataset input is optional, and that is the whole design.** Unwired, the node emits the ids
 as a one-column `Neurons` table and touches no network — already enough for most of what a list
-of ids is _for_, since `Connectivity Graph`, `Skeletons`, `Meshes`, `Synapses` and `ROI Counts` all
+of ids is _for_, since `Connectivity`, `Skeletons`, `Meshes`, `Synapses` and `ROI Counts` all
 reach their ids through `idColumn(table, 'neuronId')` and read nothing else off the row. Wired, it
 fetches the full neuron rows, which buys the columns every downstream picker wants and — the part
 worth having — the ability to say **which ids the dataset has never heard of**, which is how a

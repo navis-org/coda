@@ -14,6 +14,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 
 import { App } from '../../App'
 import { MockSource } from '../../data/mock/MockSource'
+import { EXAMPLES } from '../../examples'
 import { registerSource } from '../../data/source'
 import '../../nodes'
 import { useGraphStore } from '../../store/graphStore'
@@ -400,5 +401,48 @@ describe('the New menu', () => {
     expect(types).toContain('dataset.catmaid')
     // The generic starter: a dataset, a browser and somewhere for the picks to land.
     expect(types).toContain('neuron.explore')
+  })
+})
+
+describe('the Examples menu', () => {
+  function openExamples(): HTMLElement {
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: /^Examples/ }))
+    const panel = document.querySelector('.dropdown__panel')
+    if (!(panel instanceof HTMLElement)) throw new Error('Examples menu did not open')
+    return panel
+  }
+
+  it('puts the Zoo first, above the rule, and the bundled graphs under it', () => {
+    /*
+     * The order is the statement, which is why it is asserted rather than left to read: the top
+     * row goes to a public repository over the network and the rest are bundled, run on
+     * synthetic data and open instantly. `.dropdown__group` is what draws the rule, so the Zoo
+     * row being outside it and every example inside it is the whole arrangement.
+     */
+    const panel = openExamples()
+    const titles = [...panel.querySelectorAll('.dropdown__item strong')].map(
+      (el) => el.textContent,
+    )
+    expect(titles[0]).toBe('Browse Workflows…')
+    expect(titles.slice(1)).toEqual(EXAMPLES.map((e) => e.name))
+
+    const group = panel.querySelector('.dropdown__group')
+    expect(group?.querySelectorAll('.dropdown__item')).toHaveLength(EXAMPLES.length)
+    expect(group?.querySelector('strong')?.textContent).not.toBe('Browse Workflows…')
+  })
+
+  it('closes the bundled section with the demo-data heads-up, inside the group', () => {
+    /*
+     * Inside `.dropdown__group` is the assertion, not decoration: above the rule the note would
+     * sit under Browse Workflows, whose graphs run on whatever their author pointed them at, and
+     * a "no token needed" promise there would be false.
+     */
+    const panel = openExamples()
+    const note = panel.querySelector('.dropdown__note--heads-up')
+    // Both facts, matched loosely: the wording is the author's, the two claims are the contract.
+    expect(note?.textContent).toMatch(/mock|demo|synthetic/i)
+    expect(note?.textContent).toMatch(/no account or token/i)
+    expect(panel.querySelector('.dropdown__group')?.contains(note!)).toBe(true)
   })
 })

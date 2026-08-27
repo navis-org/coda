@@ -211,10 +211,11 @@ function highlight(text: string, terms: readonly string[]): string {
  * with that control. Terms are ANDed.
  *
  * Example names are deliberately *not* in it, and that was measured rather than assumed. One
- * bundled example is called "LC → descending neuron matrix", so including them had a search for
- * `matrix` light every node in that graph — the dataset, Find Neurons, the bar chart — beside
- * the five that genuinely carry one. An eight-node graph lends its title to all eight, which is
- * the opposite of what a search is for.
+ * bundled example is called "Build an adjacency matrix from two searches", so including them had
+ * a search for `matrix` light every node in that graph — the dataset, both Find Neurons, the
+ * heatmap — beside the five that genuinely carry one. A graph lends its title to every node in
+ * it, which is the opposite of what a search is for. (That example has been renamed since; it
+ * still carries `matrix`, so the finding stands.)
  */
 const HAY = new Map<string, string>(
   NODES.map((n) => [

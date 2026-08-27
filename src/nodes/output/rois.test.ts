@@ -26,7 +26,7 @@ import type { DataSource } from '../../data/source'
 
 import '../index'
 
-const DATASET = 'hemibrain-mini'
+const DATASET = 'optic-lobe-mini'
 
 let source: DataSource
 

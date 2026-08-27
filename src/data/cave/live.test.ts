@@ -361,7 +361,7 @@ describe.skipIf(!TOKEN)('CAVE, live — discovery', () => {
   const DATASTACK = 'flywire_fafb_public'
   const VERSION = 783
 
-  it('lists both kinds of object, and the view Connectivity Graph prefers is only in one', async () => {
+  it('lists both kinds of object, and the view Connectivity prefers is only in one', async () => {
     resetCaveTables()
     const entries = await tableListFor(DATASTACK, VERSION)
     const names = (kind: string) => entries.filter((e) => e.kind === kind).map((e) => e.name)

@@ -28,7 +28,7 @@ function plan(patch: Partial<AssistantPlan>): AssistantPlan {
 const PIPELINE = plan({
   summary: 'Chart the LC4 neurons.',
   add: [
-    { ref: 'ds', type: 'dataset.mock.hemibrain' },
+    { ref: 'ds', type: 'dataset.mock.opticlobe' },
     { ref: 'find', type: 'neuron.findNeurons', params: { typePattern: 'LC4' } },
     { ref: 'table', type: 'out.table' },
   ],

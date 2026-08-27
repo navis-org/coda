@@ -5,7 +5,7 @@ import { getConnectome, mockDatasetIds } from './generate'
 
 describe('mock connectomes', () => {
   it('exposes the expected datasets', () => {
-    expect(mockDatasetIds()).toEqual(['optic-lobe-mini', 'hemibrain-mini'])
+    expect(mockDatasetIds()).toEqual(['optic-lobe-mini'])
   })
 
   it('is deterministic across calls', () => {
@@ -24,7 +24,7 @@ describe('mock connectomes', () => {
   })
 
   it('keeps per-ROI counts consistent with neuron totals', () => {
-    const c = getConnectome('hemibrain-mini')!
+    const c = getConnectome('optic-lobe-mini')!
     const perNeuron = new Map<number, { pre: number; post: number }>()
     for (const rc of c.roiCounts) {
       const acc = perNeuron.get(rc.neuronId) ?? { pre: 0, post: 0 }
@@ -67,10 +67,10 @@ describe('MockSource', () => {
 
   it('lists datasets with ROIs and statuses', async () => {
     const datasets = await source.listDatasets()
-    expect(datasets.map((d) => d.id)).toEqual(['optic-lobe-mini', 'hemibrain-mini'])
+    expect(datasets.map((d) => d.id)).toEqual(['optic-lobe-mini'])
     expect(datasets[0]!.rois).toContain('ME(R)')
     expect(datasets[0]!.statuses).toContain('Traced')
-    expect(source.peekDataset('optic-lobe-mini')?.label).toBe('Optic Lobe (mini)')
+    expect(source.peekDataset('optic-lobe-mini')?.label).toBe('Demo Data')
   })
 
   it('anchors type regexes the way Neo4j =~ does', async () => {

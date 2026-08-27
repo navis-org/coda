@@ -364,11 +364,13 @@ arranged or not. That is also the honest reading of the measurement — only 10 
 the bundled examples carry bend points at all, so a mode keyed *solely* to those was always going
 to look like it had half worked.
 
-Note what the routes are *worth*, measured in a browser across all five examples: as the examples
-are hand-placed, 1–2 wires cross a card each; **arranging alone** clears every one of them in four
-of the five, because ELK's placement already reserves the channels. Routing fixes the fifth. A
-modest win on a tidy graph and a real one on a wide card or a long skip — which is the honest
-reason `orthogonal` is offered as a *drawing style* rather than as a fix for crossings.
+Note what the routes are *worth*, measured in a browser across the five examples that shipped when
+this was taken — the ROI-summary one has since gone, with the synthetic hemibrain it ran on, and the
+measurement is left as recorded rather than reasoned forward. As the examples are hand-placed, 1–2
+wires cross a card each; **arranging alone** clears every one of them in four of the five, because
+ELK's placement already reserves the channels. Routing fixes the fifth. A modest win on a tidy graph
+and a real one on a wide card or a long skip — which is the honest reason `orthogonal` is offered as
+a *drawing style* rather than as a fix for crossings.
 
 **`data-routed` on the path is for the tests, and it is not laziness.** Nothing about the path
 shape distinguishes an ELK route from a computed step: measured, `getSmoothStepPath` emits between
@@ -521,7 +523,7 @@ surface — so a folded card is carrying one channel fewer, with the socket's `t
 prose. A real trade, taken deliberately for a state somebody chooses and reverses.
 
 **This one _was_ looked at in a browser**, unlike most of the canvas — playwright against the dev
-server, folding and collapsing a Connectivity Graph node and a boxed Scatter. Worth recording, because
+server, folding and collapsing a Connectivity node and a boxed Scatter. Worth recording, because
 it settled something the CSS alone could not: **folded sockets are not clipped and expanded ones
 are.** Expanded, a handle's containing block is `.port-row` inside `.coda-node`'s
 `overflow: hidden`, so the discs render as half-circles flush with the border; the folded band is

@@ -158,7 +158,7 @@ describe('Learn to Build', () => {
       if (node.type === 'dataset.mock.opticlobe' || node.type === 'dataset.description') continue
       expect(fed.has(node.id), `${node.type} was left unwired`).toBe(true)
     }
-    // Connectivity Graph takes two inputs and the tour claims both get wired.
+    // Connectivity takes two inputs and the tour claims both get wired.
     const connectivity = graph.nodes.find((n) => n.type === 'neuron.connectivity')
     expect(graph.edges.filter((e) => e.target === connectivity?.id)).toHaveLength(2)
   })
@@ -270,7 +270,7 @@ describe('Learn to Build', () => {
     }
 
     const step = LEARN_TO_BUILD.find((s) => s.id === 'cheap')
-    for (const label of ['Table', 'Group By', 'Bar Chart', 'Find Neurons', 'Connectivity Graph']) {
+    for (const label of ['Table', 'Group By', 'Bar Chart', 'Find Neurons', 'Connectivity']) {
       expect(step?.body, `the step stopped naming ${label}`).toContain(label)
     }
   })

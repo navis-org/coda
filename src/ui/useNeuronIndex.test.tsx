@@ -23,7 +23,7 @@ import { registerSource } from '../data/source'
 import { installJsdomStubs } from '../test/jsdomStubs'
 import { resetNeuronIndexState, useNeuronIndex } from './useNeuronIndex'
 
-const DATASET = 'hemibrain-mini'
+const DATASET = 'optic-lobe-mini'
 
 const TABLE: TableValue = makeTable(
   tableSchema(column('neuronId', 'i64'), column('type', 'str')),

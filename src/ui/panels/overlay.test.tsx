@@ -179,7 +179,7 @@ describe('ViewerOverlay', () => {
       fireEvent.click(within(dialog).getByLabelText('Download CSV data'))
       expect(capture.downloads).toHaveLength(1)
       // Filename combines the graph name and the node label.
-      expect(capture.downloads[0]!.filename).toBe('lc-outputs-by-partner-type_table.csv')
+      expect(capture.downloads[0]!.filename).toBe('fetch-and-group-connectivity-by-type_table.csv')
     } finally {
       capture.restore()
     }
@@ -202,7 +202,7 @@ describe('ViewerOverlay', () => {
   it('closes when a different graph is loaded', async () => {
     await openOverlay('partners', 'view')
     act(() => {
-      useGraphStore.getState().loadExample('roi-summary')
+      useGraphStore.getState().loadExample('matrix')
     })
     expect(useGraphStore.getState().expandedNodeId).toBeUndefined()
   })

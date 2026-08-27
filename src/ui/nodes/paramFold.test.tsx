@@ -18,13 +18,66 @@ import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { App } from '../../App'
+import type { CodaGraph, GraphNode } from '../../core/graph'
+import { addEdge, addNode, emptyGraph } from '../../core/graph'
 import { allNodeDefs, requireNodeDef } from '../../core/registry'
-import type { NodeDefinition } from '../../core/node'
+import type { NodeDefinition, ParamValues } from '../../core/node'
+import { defaultParams } from '../../core/node'
 import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
+import { noteNode } from '../../examples/notes'
 import { useGraphStore } from '../../store/graphStore'
 import { nodeBody } from './nodeBodies'
 import { clearStorage, installJsdomStubs } from '../../test/jsdomStubs'
+
+/**
+ * A bar chart over grouped ROI counts, plus a note — built here rather than borrowed from the
+ * bundled examples.
+ *
+ * The three cards this file needs are a viewer with several param rows above a drawing, a
+ * transform whose card *is* its rows, and a note that has neither. No example ships all three
+ * any more, and a test that quietly swapped to whichever one still nearly fits would be
+ * asserting about a different card than the comments describe.
+ */
+function chartGraph(): CodaGraph {
+  const place = (id: string, type: string, col: number, params?: Record<string, unknown>) =>
+    ({
+      id,
+      type,
+      position: { x: col * 320, y: 0 },
+      params: { ...defaultParams(requireNodeDef(type)), ...params } as ParamValues,
+    }) as GraphNode
+
+  let g = emptyGraph('param fold')
+  for (const node of [
+    place('ds', 'dataset.mock.opticlobe', 0),
+    place('find', 'neuron.findNeurons', 1, {
+      filters: ['{"f":"type","op":"matches","v":["LC.*"]}'],
+    }),
+    place('roi', 'neuron.roiCounts', 2),
+    place('group', 'core.groupBy', 3, { by: ['roi', 'type'], agg: 'sum', value: 'post' }),
+    place('bar', 'out.barChart', 4, {
+      category: 'roi',
+      value: 'sum_post',
+      series: 'type',
+      useSeries: true,
+      sortBars: true,
+    }),
+    noteNode({ id: 'why', x: 0, y: -260, width: 520, height: 120, text: 'A note.' }),
+  ]) {
+    g = addNode(g, node)
+  }
+  for (const [from, fromPort, to, toPort] of [
+    ['ds', 'dataset', 'find', 'dataset'],
+    ['ds', 'dataset', 'roi', 'dataset'],
+    ['find', 'neurons', 'roi', 'neurons'],
+    ['roi', 'counts', 'group', 'in'],
+    ['group', 'out', 'bar', 'in'],
+  ] as const) {
+    g = addEdge(g, { source: from, sourceHandle: fromPort, target: to, targetHandle: toPort })
+  }
+  return g
+}
 
 beforeAll(() => {
   installJsdomStubs({ width: 420, height: 300 })
@@ -35,7 +88,7 @@ beforeEach(() => {
   clearStorage()
   act(() => {
     useGraphStore.getState().closeStartPage()
-    useGraphStore.getState().loadExample('roi-summary')
+    useGraphStore.getState().loadGraph(chartGraph())
   })
 })
 
@@ -43,7 +96,7 @@ afterEach(cleanup)
 
 function nodeIdOfType(type: string): string {
   const found = useGraphStore.getState().graph.nodes.find((n) => n.type === type)
-  if (!found) throw new Error(`no ${type} in the example`)
+  if (!found) throw new Error(`no ${type} in the fixture`)
   return found.id
 }
 

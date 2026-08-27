@@ -33,7 +33,7 @@ import { resetRoiOutlineState } from './roiOutlines'
 import { resetRoiOutlineHooks } from './useRoiOutlines'
 import '../../nodes'
 
-const DATASET = 'hemibrain-mini'
+const DATASET = 'optic-lobe-mini'
 
 let source: MockSource
 let fetches = 0
@@ -228,13 +228,13 @@ describe('the ROIs card', () => {
     draw()
     fireEvent.click(await screen.findByRole('button', { name: /Load/ }))
     await waitFor(() => expect(screen.getByRole('img', { name: /frontal/i })).toBeTruthy())
-    // hemibrain-mini's regions fall into two groups, with AL(R) and LH(R) deliberately in
-    // neither — the optic-lobe dataset has its own, which is the point of reading them off the
-    // dataset rather than from a list in the code.
+    // optic-lobe-mini's regions fall into two groups, with AOTU(R) deliberately in neither —
+    // and the groups are the dataset's own, which is the point of reading them off the dataset
+    // rather than from a list in the code.
     fireEvent.click(screen.getByText('Groups'))
-    expect(screen.getByLabelText('Mushroom body')).toBeTruthy()
-    expect(screen.getByLabelText('Superior')).toBeTruthy()
-    expect(screen.queryByLabelText('Optic lobe')).toBeNull()
+    expect(screen.getByLabelText('Optic lobe')).toBeTruthy()
+    expect(screen.getByLabelText('Ventrolateral')).toBeTruthy()
+    expect(screen.queryByLabelText('Mushroom body')).toBeNull()
   })
 
   it('hides a group when it is unticked, and never the ungrouped regions', async () => {
@@ -243,14 +243,14 @@ describe('the ROIs card', () => {
      * it back — hemibrain lists `AL(L)` and `GNG` directly under the dataset root, so that is the
      * common case rather than an oddity.
      */
-    draw({ superRois: ['Mushroom body'] })
+    draw({ superRois: ['Optic lobe'] })
     fireEvent.click(await screen.findByRole('button', { name: /Load/ }))
     await waitFor(() => expect(screen.getByRole('img', { name: /frontal/i })).toBeTruthy())
 
-    expect(screen.getByRole('button', { name: 'CA(R)' })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'SLP(R)' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'ME(R)' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'PVLP(R)' })).toBeNull()
     // Ungrouped, so still drawn.
-    expect(screen.getByRole('button', { name: 'AL(R)' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'AOTU(R)' })).toBeTruthy()
   })
 
   it('starts from every group when the first one is unticked', async () => {
@@ -279,12 +279,12 @@ describe('the ROIs card', () => {
     await waitFor(() => expect(screen.getByRole('img', { name: /frontal/i })).toBeTruthy())
 
     fireEvent.click(screen.getByText('Groups'))
-    fireEvent.click(screen.getByLabelText('Mushroom body'))
+    fireEvent.click(screen.getByLabelText('Optic lobe'))
 
     const [, value] = changes.find(([id]) => id === 'superRois')!
-    expect(value).not.toContain('Mushroom body')
+    expect(value).not.toContain('Optic lobe')
     // Everything else stays on: the untick expanded from "all" rather than starting empty.
-    expect(value as string[]).toContain('Superior')
+    expect(value as string[]).toContain('Ventrolateral')
   })
 
   it('drops the rail on a card and keeps it in the overlay', async () => {

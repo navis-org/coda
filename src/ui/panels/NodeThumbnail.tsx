@@ -12,7 +12,7 @@
  * override still gets the generic chart glyph rather than an empty box.
  *
  * All five overrides exist because the start page derives an example's tile art from the
- * graph's terminal viewer node: without them three of the five examples showed the same
+ * graph's terminal viewer node: without them two of the four examples showed the same
  * generic bars.
  */
 

@@ -44,7 +44,7 @@ beforeEach(async () => {
 
 /** A dataset node on the canvas, and the panel opened on it. */
 function withNode(): string {
-  useGraphStore.getState().addNode('dataset.mock.hemibrain', { x: 0, y: 0 })
+  useGraphStore.getState().addNode('dataset.mock.opticlobe', { x: 0, y: 0 })
   const id = useGraphStore.getState().graph.nodes.find((n) => n.type.startsWith('dataset.'))!.id
   useGraphStore.getState().openEdgePanel(id)
   return id
