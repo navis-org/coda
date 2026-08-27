@@ -7,6 +7,7 @@ import { useGraphStore } from '../../store/graphStore'
 import { LOCKED_HINT } from '../lockCopy'
 import { shortcutKeys } from '../shortcuts'
 import { useDismissOnOutside } from '../useDismiss'
+import { AlignTools } from './AlignTools'
 
 export interface NodeContextMenuProps {
   screenPosition: { x: number; y: number }
@@ -152,6 +153,15 @@ export function NodeContextMenu({ screenPosition, nodeId, onClose }: NodeContext
           <kbd>{shortcutKeys('ungroup')}</kbd>
         </button>
       )}
+      <div className="context-menu__sep" />
+      {/*
+       * The alignment grid acts on `targets` like the rows above it — so a right-click on one
+       * card of a selected row aligns the row, and a right-click on an unselected card offers
+       * the tools greyed with the reason, which is where somebody finds out they exist.
+       */}
+      <div className="context-menu__caption">Align &amp; distribute</div>
+      <AlignTools ids={targets} />
+
       {/* Named "What this node does" rather than "Help", because a menu item called Help in an
           app with three published guides is ambiguous about which of them it opens. */}
       {def && hasHelp(def.type) && (

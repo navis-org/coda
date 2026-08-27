@@ -7790,6 +7790,62 @@ details[open] > summary.tile__label {
 }
 
 /*
+ * A caption inside a menu — a group's name, the heading over the align grid. `__header` above is
+ * the *link* menu's, which carries its own two-line endpoint layout; this is one line of small
+ * muted text and nothing else, and both are captions rather than disabled rows for the reason
+ * written there.
+ */
+.context-menu__caption {
+  padding: 5px 7px 3px;
+  max-width: 240px;
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * The align/distribute grid: two rows of four, horizontal above vertical. Laid out as rows
+ * rather than one wrapping grid so the pairing is structural — the first row is everything that
+ * moves cards sideways, the second everything that moves them up and down — and a fifth tool
+ * added to one axis cannot silently reflow into the other's row.
+ */
+.context-menu__tools {
+  padding: 1px 5px 5px;
+}
+.context-menu__tool-row {
+  display: flex;
+  gap: 3px;
+}
+.context-menu__tool {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.context-menu__tool:hover:not(:disabled) {
+  background: var(--accent-soft);
+  color: var(--text-primary);
+}
+/*
+ * Dimmed the same way a disabled row is, and for the same reason it is present at all: with one
+ * card selected these tools mean nothing, and a grid that vanished would leave nowhere to find
+ * out the feature exists. The tooltip says how many cards it wants.
+ */
+.context-menu__tool:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/*
  * The colour row in the group menu. A swatch is the one control here whose value is its own
  * label, so six of them fit on one line where six named rows would not.
  */

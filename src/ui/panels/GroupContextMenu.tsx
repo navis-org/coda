@@ -19,6 +19,7 @@ import { useGraphStore } from '../../store/graphStore'
 import { LOCKED_HINT } from '../lockCopy'
 import { shortcutKeys } from '../shortcuts'
 import { useDismissOnOutside } from '../useDismiss'
+import { AlignTools } from './AlignTools'
 
 /** Named for the reader rather than for the token: a swatch has to say something out loud. */
 const COLOR_LABELS: Record<GroupColor, string> = {
@@ -67,7 +68,7 @@ export function GroupContextMenu({
       }}
       role="menu"
     >
-      <div className="context-menu__header">{group.title || 'Untitled group'}</div>
+      <div className="context-menu__caption">{group.title || 'Untitled group'}</div>
       <button type="button" className="context-menu__item" onClick={act(onRename)}>
         {group.title ? 'Rename' : 'Name this group'}
       </button>
@@ -79,6 +80,15 @@ export function GroupContextMenu({
       >
         Select {group.nodeIds.length} nodes
       </button>
+
+      <div className="context-menu__sep" />
+      {/*
+       * The same grid the node menu carries, pointed at the frame's members rather than at the
+       * selection: a group *is* a set of cards somebody has already picked out, which is the
+       * only argument these tools take.
+       */}
+      <div className="context-menu__caption">Align &amp; distribute</div>
+      <AlignTools ids={group.nodeIds} />
 
       <div className="context-menu__sep" />
       {/*

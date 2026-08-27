@@ -180,6 +180,9 @@ describe('the context menus', () => {
     fireEvent.contextMenu(card(nodeId()))
     expect((button(/^Delete/) as HTMLButtonElement).disabled).toBe(true)
     expect((button(/^Duplicate/) as HTMLButtonElement).disabled).toBe(true)
+    // The alignment grid moves cards, so it is on the frozen side with Duplicate and Delete.
+    expect((button('Align left edges') as HTMLButtonElement).disabled).toBe(true)
+    expect(button('Align left edges').title).toMatch(/locked/i)
     // Muting and collapsing are not canvas edits, so the same menu still offers them.
     expect((button(/^(Mute|Unmute)/) as HTMLButtonElement).disabled).toBe(false)
   })

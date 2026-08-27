@@ -402,6 +402,53 @@ What has **not** been looked at is a route under a non-default algorithm: `mrtre
 edge, `force`/`stress` bend none and `radial` returns no `sections` at all, all of which read as
 "no route" and are covered headlessly.
 
+## Align & distribute
+
+Eight tools in a grid inside the node's right-click menu — align left / centre / right, align top
+/ centre / bottom, distribute horizontally, distribute vertically — and the same grid on a group
+frame's menu, pointed at its members. `ui/panels/AlignTools.tsx` draws it; `layout/align.ts` is
+the arithmetic, headless and sized from `resolveSize` like everything else here.
+
+**No new store action, and that is the design.** An alignment is a position somebody chose, so it
+goes down the *drag* path — `moveNodes(moves, true)` — rather than `arrangeNodes`. It therefore
+ends auto-layout (left on, the next structural edit would put every card straight back where ELK
+wants it), becomes one undo step, and is refused by the lock, all without a fifth thing having to
+remember any of that. The tools are dimmed with the reason on a locked canvas for the reason
+every other surface is: a control that silently does nothing reads as an editor ignoring clicks.
+
+**Both take measured sizes, including the two that could get away without them.** Only `left` and
+`top` are size-free; aligning right edges against a *declared* 232 puts every wide card's edge
+somewhere it is not, and having two of the six work differently is how the other four get written
+wrong. The read is `ui/cardSizes.ts` — `measureCardSizes`, extracted out of `useArrange` so the
+`offsetWidth` walk has one definition rather than two a couple of directories apart, which is the
+hazard `fetchText` records. It runs at click time; a menu is not where a measurement is cached.
+
+**Distribute evens the gaps, not the centres**, and on this canvas that is not a close call: cards
+run from a 232-wide transform to a 560-wide Neuron Profile, and evenly spaced *centres* with
+uneven widths is a recipe for drawing one card through its neighbour. The outermost pair is the
+anchor, so the operation is idempotent and never grows the graph's footprint. Ordering is by
+centre rather than by leading edge — a wide card whose left edge is furthest left is not
+necessarily the leftmost card, and ordering by edge makes distribute swap two neighbours. Where
+the cards are already wider than the span they sit in, the gap comes out negative and they stay
+overlapped, evenly: nothing here can invent space, a guard rail warns rather than refuses, and ⌘Z
+is one key away.
+
+**Nothing is filtered out by node kind.** Mute, collapse and fold all go through `liveNodes`,
+which drops annotations — a text note has no dataflow state to toggle. Alignment is purely
+geometric, so a note lines up with the cards it labels like anything else on the canvas.
+
+Two smaller decisions, both visible in `ui/panels/alignTools.test.tsx`. A press that changes no
+position **does not reach the store at all**: `moveNodes` mints a fresh graph whatever it is
+handed, so calling it would leave an undo step for a press that did nothing — and the second
+press of any of these tools is exactly that press. And the menu **stays open** after a press,
+unlike every other row in it: alignment is not a single decision, "align their left edges, then
+even the vertical gaps" is one thought and two presses, and a menu that closed on the first would
+make the second a fresh right-click on a card that had just moved.
+
+Positions are rounded to whole flow units. A centre line lands on a half-pixel as often as not,
+and a file people read and diff has no use for `412.5117`; two cards of the same width still get
+identical coordinates, since each is `round(centre − width / 2)` of one shared centre.
+
 ## Groups
 
 One box around a set of cards, with an optional title above its top-left corner. Made from the

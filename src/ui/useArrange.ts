@@ -14,6 +14,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useReactFlow } from '@xyflow/react'
 
 import type { MeasuredPorts, MeasuredSizes, NodeSize } from '../layout/elkGraph'
+import { measureCardSizes } from './cardSizes'
 import { arrangeScope, resolveSize } from '../layout/elkGraph'
 import { runLayout } from '../layout/engine'
 import type { XY } from '../layout/place'
@@ -139,15 +140,9 @@ export function useArrange(): ArrangeHandle {
    * neighbours packed straight through them.
    */
   const measure = useCallback((): MeasuredSizes => {
-    const sizes = new Map<string, NodeSize>()
-    // One query rather than a lookup per id: it avoids escaping ids into a selector, and a
-    // loaded file may carry any id at all.
-    for (const el of document.querySelectorAll<HTMLElement>('.react-flow__node[data-id]')) {
-      const id = el.dataset.id
-      if (id && el.offsetWidth > 0 && el.offsetHeight > 0) {
-        sizes.set(id, { width: el.offsetWidth, height: el.offsetHeight })
-      }
-    }
+    // The DOM read lives in `ui/cardSizes.ts`, because the align tools need exactly the same
+    // answer from a context menu that is nowhere near this provider.
+    const sizes = new Map<string, NodeSize>(measureCardSizes())
     // For anything with no element to read — React Flow's own measurement, when it still has
     // one. Rarely reached, and better than a fallback box.
     for (const node of getNodes()) {
