@@ -5,6 +5,8 @@ import { applyTheme } from './store/persistence'
 import { AssistantPanel } from './ui/panels/AssistantPanel'
 import { Editor } from './ui/Editor'
 import { HelpOverlay } from './ui/help/HelpOverlay'
+import { FeedbackDialog } from './ui/panels/FeedbackDialog'
+import { FeedbackNudge } from './ui/panels/FeedbackNudge'
 import { Inspector } from './ui/panels/Inspector'
 import { ShareDialog } from './ui/panels/ShareDialog'
 import { ShortcutsDialog } from './ui/panels/ShortcutsDialog'
@@ -46,6 +48,8 @@ export function App() {
        * of the places somebody presses Escape and wonders what else the keyboard does.
        */}
       <ShortcutsDialog />
+      {/* Same idiom, opened from the `?` menu, the palette, the start page and the nudge below. */}
+      <FeedbackDialog />
       {/* Last, and on top: it can be reopened over an expanded viewer. */}
       <StartPage />
       {/*
@@ -59,6 +63,11 @@ export function App() {
        * screen, and the store already withholds the welcome modal when there is one.
        */}
       <SharedLinkGate />
+      {/*
+       * A standing card, not a dialog — it withholds itself while the start page is up, so it
+       * never competes with the one modal that already asks for attention on load.
+       */}
+      <FeedbackNudge />
     </div>
   )
 }

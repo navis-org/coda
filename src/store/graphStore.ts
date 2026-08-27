@@ -14,6 +14,7 @@
 import { create } from 'zustand'
 
 import type { CodaGraph, GraphEdge, GraphGroup, GraphNode } from '../core/graph'
+import type { FeedbackCategory } from '../data/feedback'
 import type { ApplyResult } from '../assistant/apply'
 import { applyPlan } from '../assistant/apply'
 import type { AssistantPlan } from '../assistant/planShape'
@@ -165,6 +166,15 @@ export interface GraphState {
    */
   shortcutsRequest: number
   requestShortcuts(): void
+  /**
+   * Asks for the Feedback dialog, on whichever tab the caller means.
+   *
+   * A fifth counter, same idiom as `shareRequest` and `shortcutsRequest`: the `?` menu, the
+   * command palette, the start page and the periodic nudge all open it, and none of them has
+   * anywhere to hold a dialog of its own.
+   */
+  feedbackRequest: { seq: number; category: FeedbackCategory }
+  requestFeedback(category?: FeedbackCategory): void
   /**
    * Asks the canvas to frame the whole graph.
    *
@@ -808,6 +818,9 @@ export const useGraphStore = create<GraphState>((set, get) => {
     requestShare: () => set((s) => ({ shareRequest: s.shareRequest + 1 })),
     shortcutsRequest: 0,
     requestShortcuts: () => set((s) => ({ shortcutsRequest: s.shortcutsRequest + 1 })),
+    feedbackRequest: { seq: 0, category: 'general' },
+    requestFeedback: (category = 'general') =>
+      set((s) => ({ feedbackRequest: { seq: s.feedbackRequest.seq + 1, category } })),
     fitRequest: 0,
     requestFitView: () => set((s) => ({ fitRequest: s.fitRequest + 1 })),
     autoRun: loadAutoRun(),

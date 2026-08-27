@@ -226,6 +226,7 @@ describe('every store action is on one side of the lock', () => {
     'requestNodeBrowser',
     'requestShare',
     'requestShortcuts',
+    'requestFeedback',
     'requestFitView',
     'setAutoRun',
     'setAutoLayout',

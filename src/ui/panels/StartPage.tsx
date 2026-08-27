@@ -63,6 +63,7 @@ export function StartPage() {
   const dismissed = useGraphStore((s) => s.startPageDismissed)
   const closeStartPage = useGraphStore((s) => s.closeStartPage)
   const setStartPageDismissed = useGraphStore((s) => s.setStartPageDismissed)
+  const requestFeedback = useGraphStore((s) => s.requestFeedback)
   const loadExample = useGraphStore((s) => s.loadExample)
   const loadStarter = useGraphStore((s) => s.loadStarter)
   const openFromLibrary = useGraphStore((s) => s.openFromLibrary)
@@ -274,11 +275,18 @@ export function StartPage() {
                 <a href={REPO_URL} target="_blank" rel="noreferrer noopener">
                   github.com/navis-org/coda
                 </a>{' '}
-                <br/> Open an{' '}
-                <a href={ISSUES_URL} target="_blank" rel="noreferrer noopener">
-                  issue
-                </a>{' '}
-                for bugs / feature requests ·{' '}
+                <br/>
+                <button
+                  type="button"
+                  className="start__link-button"
+                  onClick={() => {
+                    closeStartPage()
+                    requestFeedback('general')
+                  }}
+                >
+                  Give feedback
+                </button>{' '}
+                ·{' '}
                 {/*
                  * Buttons, not links, and the only ones in this row — the tours happen *here*,
                  * over the editor this page is sitting on top of, rather than in a new tab. Each

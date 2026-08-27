@@ -50,6 +50,7 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
   const openStartPage = useGraphStore((s) => s.openStartPage)
   const requestShare = useGraphStore((s) => s.requestShare)
   const requestShortcuts = useGraphStore((s) => s.requestShortcuts)
+  const requestFeedback = useGraphStore((s) => s.requestFeedback)
   const undo = useGraphStore((s) => s.undo)
   const redo = useGraphStore((s) => s.redo)
   // Both read the lock: history is a graph edit like any other, and the canvas being frozen is
@@ -182,7 +183,7 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
        * and both tours. A menu rather than a bare button because a lone "?" says nothing about
        * what it does until you press it.
        *
-       * **Four rows, two of which open a submenu.** Flat, it was seven — and seven two-line rows
+       * **Five rows, two of which open a submenu.** Flat, it was seven — and seven two-line rows
        * is a wall you read rather than scan, in the one menu whose whole job is to be scannable
        * by somebody who is already lost. The two groupings are the two questions actually being
        * asked ("show me around" and "where is it written down"), and both are collapsed rather
@@ -209,6 +210,22 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
             >
               <strong>Welcome Dialog</strong>
               <span>Quick start plus a few useful links.</span>
+            </button>
+            {/*
+             * Second, and still above the two groups: bugs, feature ideas and hellos are not a
+             * walkthrough or a document either, and this is the row somebody with something to
+             * say is here for.
+             */}
+            <button
+              type="button"
+              className="dropdown__item"
+              onClick={() => {
+                requestFeedback('general')
+                close()
+              }}
+            >
+              <strong>Give Feedback</strong>
+              <span>Bug reports, feature requests, or just say hi.</span>
             </button>
             {/*
              * The tours take `short` rather than `label` — under a heading that already says

@@ -35,6 +35,8 @@ const PANELS_KEY = 'coda.panels.v1'
 const AUTORUN_KEY = 'coda.autorun.v1'
 const START_PAGE_KEY = 'coda.startPage.v1'
 const LAYOUT_KEY = 'coda.layout.v1'
+/** When the feedback nudge was last shown or dismissed, so it can wait a week before the next. */
+const FEEDBACK_NUDGE_KEY = 'coda.feedbackNudge.v1'
 
 /**
  * How many slots may exist at once, and the total they may occupy between them.
@@ -553,6 +555,23 @@ export function saveStartPageDismissed(dismissed: boolean): void {
   } catch {
     /* ignore */
   }
+}
+
+/**
+ * When the feedback nudge last showed itself or was dismissed, as epoch milliseconds.
+ *
+ * `undefined` means "never" rather than 0 — a graph opened for the first time in 1970 is not a
+ * real case, but a falsy sentinel that reads as "show it" on every load if storage is disabled
+ * would be, since the alternative there is `undefined` too, and the two would be indistinguishable.
+ */
+export function loadFeedbackNudgeAt(): number | undefined {
+  const raw = readLocal(FEEDBACK_NUDGE_KEY)
+  const value = raw ? Number(raw) : NaN
+  return Number.isFinite(value) ? value : undefined
+}
+
+export function saveFeedbackNudgeAt(at: number): void {
+  writeLocal(FEEDBACK_NUDGE_KEY, String(at))
 }
 
 export function applyTheme(preference: ThemePreference): void {

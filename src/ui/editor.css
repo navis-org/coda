@@ -4216,6 +4216,61 @@ a.viewer-actions__btn {
 }
 
 /* --------------------------------------------------------------------------
+ * Feedback dialog
+ * -------------------------------------------------------------------------- */
+
+/* Hugs its content, same reasoning as `.share`: a category tab, a field and a button. */
+.feedback {
+  max-width: 560px;
+  height: auto;
+  max-height: 680px;
+}
+.feedback__body {
+  padding: 12px 14px 14px;
+}
+/*
+ * Unlike `.field--area`, this wraps: a bug report is prose, not a pasted value that has to
+ * stay legible unbroken.
+ */
+.feedback__message {
+  height: auto;
+  min-height: 110px;
+  padding: 6px 7px;
+  line-height: 1.45;
+  resize: vertical;
+  white-space: pre-wrap;
+}
+.feedback__diagnostics {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.feedback__submit {
+  margin-top: 10px;
+}
+.feedback__link {
+  margin: 6px 0 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.feedback__link-toolong {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 6px 0 0;
+}
+.feedback__link-toolong .btn {
+  align-self: flex-start;
+}
+
+/* --------------------------------------------------------------------------
  * Keyboard shortcuts dialog
  * -------------------------------------------------------------------------- */
 
@@ -4501,6 +4556,38 @@ a.viewer-actions__btn {
   display: flex;
   gap: 6px;
   margin-top: 12px;
+}
+
+/* --------------------------------------------------------------------------
+ * Feedback nudge
+ * -------------------------------------------------------------------------- */
+
+/*
+ * A standing card, not a dialog — bottom-right so it never sits over the toolbar or the
+ * status bar's own hints, and out of the way of the canvas it is asking about.
+ */
+.feedback-nudge {
+  position: fixed;
+  right: 16px;
+  bottom: 40px;
+  z-index: 50;
+  max-width: 280px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-1);
+  box-shadow: var(--shadow-panel);
+}
+.feedback-nudge p {
+  margin: 0 0 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+.feedback-nudge__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 /* Multiline param/text fields — Cypher, tokens. */

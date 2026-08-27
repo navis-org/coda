@@ -512,6 +512,13 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
       perform: () => store.openStartPage(),
     },
     {
+      id: 'cmd:feedback',
+      action: 'Help',
+      label: 'Give Feedback',
+      hint: 'Bug reports, feature requests, or just say hi',
+      perform: () => store.requestFeedback('general'),
+    },
+    {
       id: 'cmd:report-issue',
       action: 'Help',
       label: 'Report an Issue on GitHub',
