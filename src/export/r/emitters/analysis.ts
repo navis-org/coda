@@ -1,4 +1,4 @@
-/** Build Network, Paths, Explore and Profile. */
+/** Build Network, Paths, Explore, Profile, the clustering trio, and the similarity pair. */
 
 // An emitter may reach `src/ui` — see the notebook emitter for why the palette lives there.
 import { MAX_SERIES } from '../../../ui/colors'
@@ -7,6 +7,8 @@ import { rCol as col, rStr, rVector } from '../r'
 import type { LANDMARK_SIDES } from '../../../nodes/transform/landmarkTransform'
 import { LANDMARK_AXES, landmarkParamId } from '../../../nodes/transform/landmarkTransform'
 import { matchParamsFrom } from '../../../nodes/lib/matchOps'
+import { effectiveOutput, isLongLayout } from '../../../nodes/lib/similarityOps'
+import type { SimilarityMetric, SimilarityOutput } from '../../../nodes/lib/similarityOps'
 import { registerEmitter, registerHelper } from '../registry'
 import type { EmitContext } from '../types'
 import { neuronIds, selectionIds } from './common'
@@ -991,4 +993,93 @@ registerEmitter('neuron.nblastMatches', (ctx) => {
     `}))`,
   )
   return lines
+})
+
+// ---------------------------------------------------------------------------
+// Partner Vectors and Similarity Matrix
+// ---------------------------------------------------------------------------
+
+/**
+ * Both chunks are a call into a generated helper rather than inline dplyr — the notebook
+ * exporter's reasoning, unchanged one language over: what matters here is a handful of rules a
+ * reader would transcribe subtly differently, and repeating them in every document is a chance
+ * per document to get one wrong.
+ *
+ * Params hidden by `visibleIf` are left out of the call rather than passed with their stored
+ * value, since they are excluded from the provenance key and the run this mirrors never read
+ * them.
+ */
+registerEmitter('neuron.partnerVectors', (ctx) => {
+  const src = ctx.wired('in')
+  const weight = ctx.column('weight')
+  if (!weight) return ctx.todo('This Partner Vectors node has no weight column picked.')
+
+  ctx.helper('coda_partner_vectors')
+  const neurons = ctx.input('neurons')
+  const partnerBy = String(ctx.params.partnerBy ?? 'type')
+
+  return [
+    `${ctx.output('out')} <- coda_partner_vectors(`,
+    `  ${src},`,
+    ...(neurons ? [`  neurons = ${neurons},`] : []),
+    `  partner_by = ${rStr(partnerBy)},`,
+    ...(partnerBy === 'type'
+      ? [`  untyped = ${rStr(String(ctx.params.untyped ?? 'id'))},`]
+      : []),
+    `  weight = ${rStr(weight)},`,
+    `  weighting = ${rStr(String(ctx.params.weighting ?? 'raw'))}`,
+    `)`,
+  ]
+})
+
+registerEmitter('core.similarity', (ctx) => {
+  const src = ctx.wired('in')
+  const metric = String(ctx.params.metric ?? 'cosine') as SimilarityMetric
+  // Through `effectiveOutput`: Euclidean hides the Output param, so reading it raw would put an
+  // argument in the document that the run it mirrors never used.
+  const output = effectiveOutput(
+    metric,
+    String(ctx.params.output ?? 'similarity') as SimilarityOutput,
+  )
+  const out = ctx.output('matrix')
+  const tail = [`  metric = ${rStr(metric)},`, `  output = ${rStr(output)}`, `)`]
+  // Through the same predicate the node's `visibleIf` uses, rather than this emitter's own
+  // literal — the pair were testing `layout === 'wide'` in three places with three spellings.
+  const long = isLongLayout(ctx.params)
+
+  const idColumn = long ? undefined : ctx.column('idColumn')
+  const picked = long ? [] : ctx.columns('wideFeatures')
+  const observations = long ? ctx.column('observations') : undefined
+  const features = long ? ctx.column('features') : undefined
+  // Guards before `ctx.helper`, matching Partner Vectors above: a misconfigured node that emits
+  // a TODO should not still pull two hundred lines of helper — and, here, an `install.packages`
+  // line for Matrix — into the document.
+  if (!long && (!idColumn || picked.length === 0)) {
+    return ctx.todo('This Similarity Matrix needs an Id column and at least one feature column.')
+  }
+  if (long && (!observations || !features)) {
+    return ctx.todo('This Similarity Matrix needs an Observations and a Features column.')
+  }
+  // No `ctx.library('Matrix')`: the helper declares its own package through `requires`, which is
+  // what makes it impossible to pull the helper in without it.
+  ctx.helper('coda_similarity')
+
+  if (!long) {
+    return [
+      `${out} <- coda_similarity_wide(`,
+      `  ${src},`,
+      `  id_column = ${rStr(idColumn!)},`,
+      `  columns = ${rVector(picked)},`,
+      ...tail,
+    ]
+  }
+  const value = ctx.column('value')
+  return [
+    `${out} <- coda_similarity_long(`,
+    `  ${src},`,
+    `  observations = ${rStr(observations!)},`,
+    `  features = ${rStr(features!)},`,
+    ...(value ? [`  value = ${rStr(value)},`] : []),
+    ...tail,
+  ]
 })

@@ -96,6 +96,9 @@ sentence whatever anybody set.
 | `matchOps.checkMatchSize`       | (no threshold — a clamp)        | Not a size warning at all: `n` above what the matrix can offer is cut down and said so, because fastcore raises there and the user set "top 20" on a card that cannot see how wide the matrix is until it runs. |
 | `linkageOps.checkLinkageInput` | 2,000 observations              | Linkage is single-threaded and quadratic, and a dendrogram of that many leaves has no labels. Points at Cut Tree, which hands the same clustering back as a table. Was a refusal. |
 | `tableOps.pivotTable`          | 2,000 columns / 2,000,000 cells | Which axis is the small one, and what the matrix weighs. Was two refusals.                                                                                                        |
+| `similarityOps.similarityMatrix` | 500,000,000 pair contributions | The wait, at a measured **300 million contributions per second** — the slow end of sixteen timings (four shapes × four metrics) rather than the middle, so the estimate is never shorter than the wait. The number warned on is `Σ_f \|column f\|(\|column f\|−1)/2`, computed exactly before the matrix is allocated, because what drives the cost is how many observations share their *busiest feature* and not how many observations there are. The `−1` is the diagonal, which the pass skips: a feature only one observation carries produces no pair, and on connectivity keyed by partner id that is most of the columns. The message names the driver, since filtering hub partners upstream cuts it faster than dropping neurons does. |
+| `similarityOps.similarityMatrix` | (no threshold — an admission) | How many rows repeated an observation/feature pair and were summed, and how many observations turned out to have no features at all. Neither is a size: they are things the input turned out to be, said after the fact, because an ungrouped table and a table of zeroes both produce a perfectly ordinary matrix that means something else. |
+| `partnerVectors.partnerVectorTable` | (no threshold — attributions) | Four admissions, alongside the one ceiling listed under The refusals below: edges past the first hop that the `direction` column cannot attribute, untyped partners standing in for themselves, untyped partners dropped, and rows with no usable weight. Each changes what the vectors *mean* rather than what they cost — the second one especially, since a shared "untyped" bucket is the one grouping that makes strangers look alike. |
 | `transformOps.checkWarpSize`   | 1e10 point-landmark products    | The wait, at a measured 8.9e8/second. Was a refusal.                                                                                                                              |
 | `roiMeshes`                    | 60 regions                      | That an empty picker asks the source for its primary set — which the old refusal at 60 forbade naming by hand while allowing by omission. Now an edit-time `validate` warning.    |
 | `neuroglancer`                 | 10,000 segments                 | The link length and neuroglancer's own drawing. Was a refusal, on a number nobody had measured against every deployment in use.                                                   |
@@ -153,6 +156,18 @@ the undo stack alongside it).
   bounds; a threshold of zero on a similarity matrix returns every cell. fastcore takes
   `max_matches` and raises rather than allocating, which is the right half of the answer; this is
   the other half, `CRASH_FLOOR_CELLS / 4` because a match is four cells.
+- `similarityOps.similarityMatrix`'s `n²` — the per-pair accumulator is one flat `Float64Array`
+  over the observations, so this is `CRASH_FLOOR_CELLS` read straight, at about 8,100
+  observations. It is raised **after** the sparse side is built, which is the honest place: that
+  side is `nnz` rather than `n²` and does not itself approach the floor.
+- `partnerVectors.partnerVectorTable`'s edge ceiling — the one bound in this file that is a
+  ceiling on the **input shape** rather than on the output, and it says so. An edge produces at
+  most one row per side, and the aggregation only ever brings that down — usually by orders of
+  magnitude, since the point of grouping partners by type is that many partners share one. So it
+  refuses an input that could not fit rather than an output that will not, which is the only
+  claim available before the pass runs. `SIDES × OUTPUT_COLUMNS` cells per edge, against
+  `CRASH_FLOOR_CELLS`; it also understates, since a `ColumnData` slot is a tagged `CellValue`
+  and not a float64.
 
 ## Numbers that are not guard rails
 

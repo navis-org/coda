@@ -42,6 +42,7 @@ export type RPackage =
   | 'readr'
   | 'ggplot2'
   | 'igraph'
+  | 'Matrix'
 
 export interface PackageSpec {
   /** Where it comes from, for the install comment. CRAN unless stated. */
@@ -59,6 +60,14 @@ export const PACKAGES: Record<RPackage, PackageSpec> = {
   readr: {},
   ggplot2: {},
   igraph: {},
+  /*
+   * For `coda_similarity`, and it is the reason that helper is a translation rather than an
+   * approximation: a feature matrix over partner ids is almost entirely zeroes, and base R has
+   * no sparse type to hold one in. Ships with R as a recommended package, so the install line
+   * naming it is a formality on nearly every machine — but naming it is what makes
+   * `Matrix::sparseMatrix` resolve under `--vanilla`.
+   */
+  Matrix: {},
 }
 
 export interface EmitContext<P extends ParamValues = ParamValues> {

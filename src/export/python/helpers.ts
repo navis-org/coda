@@ -217,3 +217,219 @@ registerHelper({
     '    return coda_annotation_columns(df[[id_column] + keep], id_column)',
   ],
 })
+
+/**
+ * A connectivity edge list as one long feature vector per query neuron.
+ *
+ * Mirrors `nodes/lib/partnerVectors.ts`. Three of its rules are the ones worth transcribing
+ * exactly, because getting any of them wrong produces a plausible frame rather than an error:
+ *
+ * **The direction prefix is unconditional.** `out:DA1_lPN` and `in:DA1_lPN` are two features,
+ * and dropping the prefix on a single-direction table would silently change what a stacked pair
+ * of these means.
+ *
+ * **An untyped partner falls back to its own id**, never to a shared bucket — pandas would
+ * happily group every `NaN` type together, which is the one grouping that makes strangers look
+ * alike.
+ *
+ * **Ids are compared as text.** `astype(str)` on both sides of the membership test rather than
+ * a numeric join: an eighteen-digit root id does not survive a float (invariant 8), and the
+ * `neuronId` column is carried through untouched so the frame keeps whatever dtype it arrived
+ * with.
+ *
+ * Row order is not the canvas's — Coda emits a query's features together, this emits the
+ * groupby's first-appearance order — and nothing downstream of it reads row order.
+ */
+registerHelper({
+  name: 'coda_partner_vectors',
+  requires: [['pandas']],
+  source: [
+    "def coda_partner_vectors(edges, neurons=None, partner_by='type', untyped='id',",
+    "                         weight='weight', weighting='raw'):",
+    '    """A pre/post edge list as one long feature vector per query neuron."""',
+    '    # One copy, not two: the coerced weight rides alongside rather than being written into',
+    '    # a duplicate of the caller\'s frame, which also leaves the input unmutated.',
+    "    w = pd.to_numeric(edges[weight], errors='coerce')",
+    '    keep = w.notna() & (w != 0)',
+    '    df, w = edges[keep], w[keep]',
+    '',
+    '    if neurons is not None:',
+    "        queries = set(neurons['neuronId'].astype(str))",
+    "        sides = [(df[df['preId'].astype(str).isin(queries)], 'out', 'preId', 'postId', 'postType'),",
+    "                 (df[df['postId'].astype(str).isin(queries)], 'in', 'postId', 'preId', 'preType')]",
+    '    else:',
+    "        if 'direction' not in df.columns:",
+    '            raise ValueError(',
+    '                \'Pass the neurons you asked about, or an edge list carrying a "direction" \'',
+    "                'column saying how each edge was found.')",
+    '        # `direction` only names the neuron that was asked about while the frontier still',
+    '        # is the seed set, which is the first hop.',
+    "        if 'hop' in df.columns:",
+    "            df = df[pd.to_numeric(df['hop'], errors='coerce') == 1]",
+    "        sides = [(df[df['direction'].isin(['downstream', 'both'])], 'out', 'preId', 'postId', 'postType'),",
+    "                 (df[df['direction'].isin(['upstream', 'both'])], 'in', 'postId', 'preId', 'preType')]",
+    '',
+    "    columns = ['neuronId', 'direction', 'partner', 'feature', 'weight']",
+    '    parts = []',
+    '    for frame, direction, query_col, id_col, type_col in sides:',
+    '        if frame.empty:',
+    '            continue',
+    "        if partner_by == 'type':",
+    '            if type_col not in frame.columns:',
+    "                raise ValueError('Grouping partners by cell type needs a \"%s\" column.' % type_col)",
+    "            typed = frame[type_col].astype('string').str.strip()",
+    "            have = typed.notna() & (typed != '')",
+    "            if untyped == 'drop':",
+    '                frame, typed, have = frame[have], typed[have], have[have]',
+    '            label = typed.where(have, frame[id_col].astype(str))',
+    '        else:',
+    '            label = frame[id_col].astype(str)',
+    '        parts.append(pd.DataFrame({',
+    "            'neuronId': frame[query_col].to_numpy(),",
+    "            'direction': direction,",
+    "            'partner': label.astype(str).to_numpy(),",
+    "            'weight': w.loc[frame.index].to_numpy(),",
+    '        }))',
+    '',
+    '    if not parts:',
+    '        return pd.DataFrame(columns=columns)',
+    '    long = pd.concat(parts, ignore_index=True)',
+    "    long['feature'] = long['direction'] + ':' + long['partner']",
+    '    # Repeats of one neuron/partner pair are summed, exactly as a Pivot set to sum would.',
+    "    long = (long.groupby(['neuronId', 'direction', 'partner', 'feature'],",
+    "                         sort=False, dropna=False)['weight'].sum().reset_index())",
+    "    if weighting == 'fraction':",
+    "        totals = long.groupby(['neuronId', 'direction'], sort=False)['weight'].transform('sum')",
+    "        long['weight'] = (long['weight'] / totals).fillna(0.0)",
+    '    return long[columns]',
+  ],
+})
+
+/**
+ * Pairwise similarity over sparse feature vectors.
+ *
+ * Mirrors `nodes/lib/similarityOps.ts`, including the part that module is mostly about: the
+ * dense observation × feature matrix is never built. `sparse.coo_matrix` is the same coordinate
+ * form the long table already is, `tocsr()` sums the repeated pairs, and `X @ X.T` is the one
+ * pass — the same `Σ_f |column f|²` work, done by scipy instead of by hand.
+ *
+ * Two differences from the canvas, both deliberate and neither affecting a cell:
+ *
+ * - **Labels sort lexicographically here and numerically there**, so `L10` precedes `L2` in
+ *   this index and follows it on the canvas. That is already true of the Pivot emitter, which
+ *   leaves the ordering to `pivot_table`; matching Coda would mean transcribing a collator.
+ * - Euclidean has no similarity form, so `output` is forced for it — the same exception
+ *   `effectiveOutput` makes, made in the same place rather than at each call.
+ *
+ * The weighted Jaccard is the one metric with no product form: `Σ min(a,b)` is recovered from
+ * `Σ a + Σ b − Σ |a − b|` over two rows at a time, which stays sparse but is a loop rather than
+ * a matmul. It is why the TypeScript accumulates three different sums and not one.
+ */
+registerHelper({
+  name: 'coda_similarity',
+  requires: [['pandas'], ['numpy'], ['scipySparse']],
+  source: [
+    'def _coda_gram(X, metric):',
+    '    """The per-pair sum a metric needs: a dot product, a shared count, or a sum of minima."""',
+    "    if metric == 'jaccard':",
+    '        B = X.copy()',
+    '        B.data = np.ones_like(B.data)',
+    '        return np.asarray((B @ B.T).todense())',
+    "    if metric == 'jaccardWeighted':",
+    '        # No product form, so this is the feature-major pass the canvas runs: a column of',
+    '        # the transpose is exactly the observations carrying that feature, and every pair',
+    '        # that shares it is one outer minimum. Cost is the same sum-of-squared-column-',
+    '        # heights, against O(n x nnz) for tiling one row against the whole matrix.',
+    '        n = X.shape[0]',
+    '        G = np.zeros((n, n))',
+    '        Xc = X.tocsc()',
+    '        for c in range(Xc.shape[1]):',
+    '            lo, hi = Xc.indptr[c], Xc.indptr[c + 1]',
+    '            if hi - lo < 2:',
+    '                continue',
+    '            rows, vals = Xc.indices[lo:hi], Xc.data[lo:hi]',
+    '            G[np.ix_(rows, rows)] += np.minimum.outer(vals, vals)',
+    '        return G',
+    '    return np.asarray((X @ X.T).todense())',
+    '',
+    '',
+    'def _coda_similarity(X, labels, metric, output):',
+    '    """Observations against themselves, as a square frame."""',
+    '    # `copy=False`: already-float input is the ordinary case and copying it is nnz for nothing.',
+    '    X = X.tocsr().astype(float, copy=False)',
+    '    n, width = X.shape',
+    "    if metric == 'euclidean':",
+    "        output = 'distance'",
+    '    total = np.asarray(X.sum(axis=1)).ravel()',
+    '    present = np.diff(X.indptr).astype(float)',
+    '    # Row sums of squares without building a second sparse matrix, which `X.multiply(X)`',
+    '    # would allocate in full for every metric including the two that never read it.',
+    '    squares = np.bincount(np.repeat(np.arange(n), np.diff(X.indptr)),',
+    '                          weights=X.data ** 2, minlength=n)',
+    '    G = _coda_gram(X, metric)',
+    "    with np.errstate(divide='ignore', invalid='ignore'):",
+    "        if metric == 'cosine':",
+    '            norm = np.sqrt(squares)',
+    '            S = G / np.outer(norm, norm)',
+    "        elif metric == 'euclidean':",
+    '            S = np.sqrt(np.maximum(0.0, squares[:, None] + squares[None, :] - 2.0 * G))',
+    "        elif metric == 'jaccard':",
+    '            S = G / (present[:, None] + present[None, :] - G)',
+    "        elif metric == 'jaccardWeighted':",
+    '            S = G / (total[:, None] + total[None, :] - G)',
+    "        elif metric == 'pearson':",
+    '            # Centred over the ambient feature space, counting an absent feature as the',
+    '            # zero it is -- not over the features an observation happens to have.',
+    '            mean = total / width',
+    '            sd = np.sqrt(np.maximum(0.0, squares / width - mean ** 2))',
+    '            S = (G / width - np.outer(mean, mean)) / np.outer(sd, sd)',
+    '        else:',
+    "            raise ValueError('Unknown metric: %s' % metric)",
+    '    # In place, both of them: S is n x n, and at the size this refuses at each spare copy',
+    '    # is half a gigabyte. The canvas reuses one accumulator for the same reason.',
+    '    np.nan_to_num(S, nan=0.0, posinf=0.0, neginf=0.0, copy=False)',
+    "    if output == 'distance' and metric != 'euclidean':",
+    '        np.subtract(1.0, S, out=S)',
+    '    # Written rather than computed: an observation with no features at all divides 0 by 0,',
+    '    # and a non-zero distance to itself is not a distance.',
+    "    np.fill_diagonal(S, 0.0 if output == 'distance' else 1.0)",
+    '    return pd.DataFrame(S, index=labels, columns=labels)',
+    '',
+    '',
+    "def coda_similarity_long(df, observations, features, value=None, metric='cosine',",
+    "                         output='similarity'):",
+    '    """Triplets -- observation, feature, value -- compared pairwise."""',
+    '    obs = df[observations].astype(str)',
+    '    feat = df[features].astype(str)',
+    "    w = (pd.to_numeric(df[value], errors='coerce') if value",
+    '         else pd.Series(1.0, index=df.index))',
+    '    keep = w.notna() & (w != 0)',
+    '    obs, feat, w = obs[keep], feat[keep], w[keep]',
+    '    labels = sorted(obs.unique())',
+    '    columns = sorted(feat.unique())',
+    '    # `labels` and `columns` are sorted, so the codes are one C call rather than a Python',
+    '    # dict lookup per non-zero.',
+    '    rows = np.searchsorted(labels, obs.to_numpy())',
+    '    cols = np.searchsorted(columns, feat.to_numpy())',
+    '    # `tocsr` sums duplicate coordinates, which is the coalescing step by another name.',
+    '    X = sparse.coo_matrix((w.to_numpy(float), (rows, cols)),',
+    '                          shape=(len(labels), len(columns))).tocsr()',
+    '    if value is None:',
+    '        # Presence is applied after the merge, not by passing ones in: an ungrouped table',
+    '        # listing a pair four times would otherwise carry a 4 under presence\'s name.',
+    '        X.data = np.ones_like(X.data)',
+    '    return _coda_similarity(X, labels, metric, output)',
+    '',
+    '',
+    "def coda_similarity_wide(df, id_column, columns, metric='cosine', output='similarity'):",
+    '    """One row per observation, one picked column per feature."""',
+    '    ids = df[id_column].astype(str)',
+    '    labels = sorted(ids.unique())',
+    '    rows = np.searchsorted(labels, ids.to_numpy())',
+    "    values = df[list(columns)].apply(pd.to_numeric, errors='coerce').fillna(0.0)",
+    '    # `groupby(sort=False)` rather than `np.add.at`, which is the documented unbuffered',
+    '    # ufunc path and an order of magnitude slower at this job.',
+    '    dense = values.groupby(rows, sort=True).sum().to_numpy(float)',
+    '    return _coda_similarity(sparse.csr_matrix(dense), labels, metric, output)',
+  ],
+})

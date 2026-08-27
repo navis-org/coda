@@ -274,11 +274,11 @@ export function StartPage() {
                 <a href={REPO_URL} target="_blank" rel="noreferrer noopener">
                   github.com/navis-org/coda
                 </a>{' '}
-                · Open an{' '}
+                <br/> Open an{' '}
                 <a href={ISSUES_URL} target="_blank" rel="noreferrer noopener">
                   issue
                 </a>{' '}
-                for bugs and feature requests ·{' '}
+                for bugs / feature requests ·{' '}
                 {/*
                  * Buttons, not links, and the only ones in this row — the tours happen *here*,
                  * over the editor this page is sitting on top of, rather than in a new tab. Each

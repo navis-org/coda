@@ -55,6 +55,8 @@ export { nblastNode } from './analysis/nblast'
 export { nblastKnnNode } from './analysis/nblastKnn'
 export { nblastMatchesNode } from './analysis/nblastMatches'
 export { synblastNode } from './analysis/synblast'
+export { partnerVectorsNode } from './analysis/partnerVectors'
+export { similarityNode } from './analysis/similarity'
 export { linkageNode } from './analysis/linkage'
 export { cutTreeNode } from './analysis/cutTree'
 

@@ -272,6 +272,40 @@ It runs in its own workflow (`.github/workflows/export.yml`) rather than in `dep
 path-filtered to `src/export/**`: `pip install navis` is minutes against a deploy pipeline that
 is otherwise well under one, and it is only ever worth paying when the exporter changes.
 
+### The similarity pair, and the two probes that found real bugs
+
+`coda_partner_vectors` and `coda_similarity` are the two newest generated helpers, and both are
+written in each language rather than composed out of library calls — the rules that matter are
+the ones a reader would transcribe subtly differently (an unconditional direction prefix, an
+untyped partner standing in for itself, a sparse matrix that is never densified), and a dozen
+lines of chained pandas per notebook is a chance per notebook to get one wrong.
+
+Two new module entries came with them: `scipy.sparse` on the Python side and `Matrix` on the R
+side. Both exist for the same reason the TypeScript never builds a feature matrix — a neuron ×
+partner-id array is almost entirely zeroes, and neither pandas nor base R has a type to hold one
+in. See [nodes.md](nodes.md).
+
+**The probes earned their place immediately, on both sides.** `probe-py-helpers.py` and
+`probe-r-helpers.R` run the *generated* helpers out of the goldens against the same fixture — the
+same one `partnerVectors.test.ts` uses, on purpose, because three implementations of one reshape
+drift and asking all three the same questions is the cheapest thing that notices. Each found a
+bug that reading the code did not:
+
+- **Presence was not presence.** With no Value column the helper counted 1 per *row*, so an
+  ungrouped table listing a pair four times carried a 4 — a connection count under presence's
+  name, which every metric but the presence Jaccard reads as a magnitude. Cosine answered 0.949
+  for two observations whose supports are identical. Fixed in all three implementations by
+  flattening after the merge rather than passing ones in.
+- **R's `pmax` keeps the attributes of its *first* argument**, so `pmax(0, m)` returns a bare
+  vector where `np.maximum(0, m)` returns an array. The Euclidean branch lost its `dim` and
+  `diag<-` refused it three lines later. Valid R, plausible reading, and an error only at
+  runtime — the `navis.interfaces` failure in a different language.
+
+Both probes check the metrics against the language's own: `scipy.spatial.distance.pdist` for
+cosine, Euclidean, presence Jaccard and correlation, and `stats::dist` plus `cor` in R. That is
+the comparison worth making rather than against numbers typed into the script, since the claim
+these helpers make is that a sparse route reaches the same answer as the dense one.
+
 ### The CAVE half of the notebook exporter
 
 `src/export/python/emitters/cave.ts` and `caveHelpers.ts`. A FlyWire graph now exports as a

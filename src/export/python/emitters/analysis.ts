@@ -1,5 +1,6 @@
 /**
- * The remaining data nodes: Build Network, the two importers, and Paths.
+ * The remaining data nodes: Build Network, the two importers, Paths, the clustering trio, and
+ * the connectivity-similarity pair.
  */
 
 // An emitter may reach `src/ui`, which is what keeps the palette in one place rather than
@@ -12,6 +13,8 @@ import { LANDMARK_AXES, landmarkParamId } from '../../../nodes/transform/landmar
 import { matchParamsFrom } from '../../../nodes/lib/matchOps'
 import { meshCleanParamsFrom, skeletonCleanParamsFrom } from '../../../nodes/lib/cleanOps'
 import { NM_PER_UM } from '../../../nodes/lib/nblastOps'
+import { effectiveOutput, isLongLayout } from '../../../nodes/lib/similarityOps'
+import type { SimilarityMetric, SimilarityOutput } from '../../../nodes/lib/similarityOps'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
 import { pySelection, selectionIds } from './common'
@@ -1240,5 +1243,93 @@ registerEmitter('neuron.cleanMeshes', (ctx) => {
     ...body,
     `    _cleaned.append(navis.Mesh((v, f), id=_neuron.id, units=_neuron.units))`,
     `${out} = navis.NeuronList(_cleaned)`,
+  ]
+})
+
+// ---------------------------------------------------------------------------
+// Partner Vectors and Similarity Matrix
+// ---------------------------------------------------------------------------
+
+/**
+ * Both cells are a call into a generated helper rather than inline pandas, which is the choice
+ * `coda_join` and `coda_combine` already made and for the same reason: the rules that matter
+ * here are the ones a reader would get subtly wrong — an unconditional direction prefix, an
+ * untyped partner standing in for itself, a sparse matrix that is never densified — and a
+ * dozen lines of chained pandas in every notebook is a dozen chances for one of them to be
+ * transcribed differently.
+ *
+ * Params hidden by `visibleIf` are left out of the call rather than passed with their stored
+ * value. They are excluded from the provenance key (invariant 4), so `evaluate` cannot have
+ * read them, and a cell that names one would be putting an argument in the notebook that the
+ * run it mirrors never used.
+ */
+registerEmitter('neuron.partnerVectors', (ctx) => {
+  const src = ctx.wired('in')
+  const weight = ctx.column('weight')
+  if (!weight) return ctx.todo('This Partner Vectors node has no weight column picked.')
+
+  ctx.helper('coda_partner_vectors')
+  const neurons = ctx.input('neurons')
+  const partnerBy = String(ctx.params.partnerBy ?? 'type')
+
+  return [
+    `${ctx.output('out')} = coda_partner_vectors(`,
+    `    ${src},`,
+    ...(neurons ? [`    neurons=${neurons},`] : []),
+    `    partner_by=${pyStr(partnerBy)},`,
+    ...(partnerBy === 'type' ? [`    untyped=${pyStr(String(ctx.params.untyped ?? 'id'))},`] : []),
+    `    weight=${pyStr(weight)},`,
+    `    weighting=${pyStr(String(ctx.params.weighting ?? 'raw'))},`,
+    `)`,
+  ]
+})
+
+registerEmitter('core.similarity', (ctx) => {
+  const src = ctx.wired('in')
+  const metric = String(ctx.params.metric ?? 'cosine') as SimilarityMetric
+  // Through `effectiveOutput`, not `params.output`: a metric with no similarity form hides that
+  // param, so reading it raw would emit `output='similarity'` for a node whose run could only
+  // produce distances.
+  const output = effectiveOutput(
+    metric,
+    String(ctx.params.output ?? 'similarity') as SimilarityOutput,
+  )
+  const out = ctx.output('matrix')
+  const tail = [`    metric=${pyStr(metric)},`, `    output=${pyStr(output)},`, `)`]
+  // Through the same predicate the node's `visibleIf` uses, rather than this emitter's own
+  // literal — the pair were testing `layout === 'wide'` in three places with three spellings.
+  const long = isLongLayout(ctx.params)
+
+  const idColumn = long ? undefined : ctx.column('idColumn')
+  const picked = long ? [] : ctx.columns('wideFeatures')
+  const observations = long ? ctx.column('observations') : undefined
+  const features = long ? ctx.column('features') : undefined
+  // Guards before `ctx.helper`, matching Partner Vectors above: a misconfigured node that emits
+  // a TODO should not still pull two hundred lines of helper into the document.
+  if (!long && (!idColumn || picked.length === 0)) {
+    return ctx.todo('This Similarity Matrix needs an Id column and at least one feature column.')
+  }
+  if (long && (!observations || !features)) {
+    return ctx.todo('This Similarity Matrix needs an Observations and a Features column.')
+  }
+  ctx.helper('coda_similarity')
+
+  if (!long) {
+    return [
+      `${out} = coda_similarity_wide(`,
+      `    ${src},`,
+      `    id_column=${pyStr(idColumn!)},`,
+      `    columns=${pyList(picked)},`,
+      ...tail,
+    ]
+  }
+  const value = ctx.column('value')
+  return [
+    `${out} = coda_similarity_long(`,
+    `    ${src},`,
+    `    observations=${pyStr(observations!)},`,
+    `    features=${pyStr(features!)},`,
+    ...(value ? [`    value=${pyStr(value)},`] : []),
+    ...tail,
   ]
 })

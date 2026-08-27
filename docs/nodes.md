@@ -114,6 +114,128 @@ came from because `joinTables` keys on `String(cell)`. And a column label collid
 row field's name is suffixed (`type`, `type_2`) rather than dropped, the same call
 `joinedColumns` makes.
 
+## Connectivity similarity: Partner Vectors and Similarity Matrix
+
+`neuron.partnerVectors` and `core.similarity`, both under `Add ▸ Analysis`. Together they take
+a Connectivity result to the square matrix a Linkage or a Heatmap wants:
+
+```
+Find Neurons ─┬─ Connectivity(both) ─ Partner Vectors ─ Similarity Matrix ─ Linkage ─ Dendrogram
+   Dataset ───┘        └──────────────────┘ Neurons
+```
+
+**There is no Pivot in that chain, and that is the design.** The obvious route is to pivot
+neurons against partners and compare the rows, and it is the step that does not scale: a
+thousand neurons against their partner *ids* is 150 million cells, past both `MAX_PIVOT_COLUMNS`
+and the crash floor, where the connections that actually exist number about a million. A long
+table already **is** that matrix, in the coordinate form every sparse library starts from — one
+row per non-zero, carrying its two coordinates and its value — so `similarityOps.ts` reads the
+long table directly and the wide one is never built. What comes out, observations against
+themselves, is genuinely dense and small.
+
+### Why the reshape is its own node
+
+`neuron.connectivity` emits an **edge list**: every row is `preId → postId`, oriented the way
+the synapse points, for the reasons `connectivityOps.ts` argues at length. The query neuron is
+therefore in `preId` on a downstream row and in `postId` on an upstream one, and there is no
+single column holding "the neuron this row is about". Assembling one out of the existing table
+nodes takes a Rename, a Combine Columns and a Stack *per branch* — six nodes of plumbing before
+the first real question — so Partner Vectors does it, with the aggregation folded in. No Group
+By either.
+
+Two ways to learn which end was the query, and the wired one wins. A `Neurons` table says so
+outright and works at any hop count. Without one the `direction` column is read instead, which
+records *how the traversal found the edge* — `downstream` means the row came back from asking
+about `preId`, and `both` means both endpoints were at the same hop, so the edge is internal to
+the seed set and counts for each end. That reading holds only at **hop 1**, where the frontier
+still is the seed set, so the derived route drops the rest and says how many.
+
+**The `out:` / `in:` prefix is unconditional.** A neuron that receives from a type and one that
+projects to it are not alike for it, and without the prefix the two would land on one feature.
+Applying it even for a single direction means two of these tables stack, and means a saved graph
+does not change meaning when a Connectivity node upstream is switched from `outputs` to `both`.
+`direction` and `partner` ride along as their own columns so the composite can still be filtered
+on either half.
+
+**An untyped partner falls back to its own id.** This is the em-dash trap met properly:
+`labelOf` pools every absent value into one label, which is right for a pivot axis somebody can
+look at and filter out, and wrong for a feature vector — a shared "untyped" feature makes two
+neurons alike for both touching unnamed things. Dropping them is the other, explicit choice, and
+it says that the vectors then no longer account for all of a neuron's synapses.
+
+### The metrics, and the one pass
+
+Five, and they cost **one accumulator between them** rather than five, which is `pivotTable`'s
+rule about allocating per aggregation applied to an array that is `n²` floats:
+
+| metric | per pair | per observation |
+| --- | --- | --- |
+| Cosine, Euclidean | `Σ aᵢbᵢ` | `Σ aᵢ²` |
+| Pearson | `Σ aᵢbᵢ` | `Σ aᵢ`, `Σ aᵢ²`, and the ambient `F` |
+| Jaccard (presence) | `\|A ∩ B\|` | `\|A\|` |
+| Jaccard (weighted) | `Σ min(aᵢ,bᵢ)` | `Σ aᵢ` |
+
+The sum is taken feature-first: held column-major, a feature's entries are exactly the
+observations carrying it, so every pair that shares it is one nested loop and every pair that
+does not is never visited. Total work is `Σ_f |column f|²` — see [limits.md](limits.md), where
+that is also the number the warning is built on. The diagonal is skipped, so a feature only one
+observation carries costs nothing at all; on connectivity keyed by partner id that is most of
+the columns.
+
+Everything that varies per metric — the option list, which of the three sums it needs, what its
+cells are called, whether it has a similarity form at all — is one row each in a `METRICS` table,
+the shape `AGG_OPTIONS` uses one file over. "Euclidean has no similarity form" had been written
+out four times, and the fourth (the inversion at the end of the pass) is load-bearing rather than
+defensive: without it a Euclidean matrix comes back as `1 − distance`, inside out and clustering
+without complaint.
+
+**Every value was checked against scipy on the dense form**, not against arithmetic done the
+same way twice: `similarityOps.test.ts` compares to `scipy.spatial.distance.pdist`, and
+`probe-py-helpers.py` makes the same comparison from the notebook helper's end. Pearson centres
+over the **ambient** feature space, counting an absent feature as the zero it is — centring over
+the features an observation happens to have would make two neurons with one partner each
+perfectly correlated, and agrees with `pdist(..., 'correlation')` on nothing.
+
+Not here: the Jarrell/Schlegel vertex-similarity score, which does not reduce to that table —
+`min − C₁·max·exp(−C₂·min)` is evaluated over the **union** of two vectors rather than their
+intersection, so it is a per-pair merge rather than a shared accumulation. It is a second
+traversal, not a sixth row, and adding it does not change the module's shape.
+
+### Two things that are easy to get subtly wrong
+
+**Presence is applied after the repeats are merged**, not by handing in a column of ones. An
+ungrouped table lists a pair once per connection, so a column of ones would sum to a connection
+*count* wearing presence's name — which every metric but the presence Jaccard then reads as a
+magnitude. Found by running the generated Python helper, where cosine answered 0.949 for two
+observations whose supports are identical.
+
+**The diagonal is written rather than computed.** Every metric is 1 between a vector and itself
+(0 as a distance) except over an observation with no features at all, where the ratio is 0/0.
+Left as zero that is a non-zero distance to itself, which is not a distance and which fastcore
+clusters without complaining. The empty observations are counted and said out loud instead.
+
+### What reaches Linkage
+
+`MatrixValue.measure` is **set** rather than left blank, and that is what makes
+`Similarity Matrix → Linkage` need nothing configured: Linkage inverts a similarity and leaves a
+distance alone by reading exactly that field. Pivot genuinely cannot answer it — its cells are
+whatever aggregation was picked — which is why clustering a pivot needs a Normalize in front of
+it and clustering this does not.
+
+Euclidean is the one metric with no similarity form, so its `Cells are` control is hidden by
+`visibleIf`. A hidden param is excluded from the provenance key (invariant 4), so `evaluate`
+cannot read it: `effectiveOutput` is the one place that exception is written down, and the node,
+both emitters and the value label all go through it.
+
+### The wide layout
+
+The same node takes an id column plus a multi-select of numeric columns — an uploaded embedding,
+or a `Pivot → Table` — behind a `Layout` enum with `visibleIf` pickers, which is `core.groupBy`'s
+precedent for a param whose meaning depends on another. One node rather than two because they
+answer the same question and differ only in where the features are written down; splitting them
+would put "which metric" in two places. A zero reads as absent there, which matters only to
+Jaccard (presence) — every other metric already treats a zero as contributing nothing.
+
 ## Deduplicate
 
 `core.dedupe`, `Add ▸ Transform ▸ Deduplicate`. `pandas.drop_duplicates`: name the columns to

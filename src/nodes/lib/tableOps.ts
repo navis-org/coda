@@ -1739,12 +1739,26 @@ export function matrixToTable(matrix: MatrixValue, labelColumn: string): TableVa
   return makeTable({ columns }, data)
 }
 
-/** First free name, so a column label colliding with the row field keeps both columns. */
-function labelOf(cell: CellValue | undefined): string {
+/**
+ * A cell as an axis label, with one placeholder for the absent ones.
+ *
+ * Exported for `similarityOps.ts`, which labels the same two axes from the same columns: a
+ * similarity matrix over `preId` and a Pivot over `preId` have to name their rows identically
+ * or the two cannot be joined back together, and the em dash is the visible half of that — a
+ * partner with no type is one bucket here and one bucket there.
+ *
+ * Worth knowing at the call site rather than only here: the placeholder **pools** every absent
+ * value into a single label. That is the right answer for a pivot, where a column of untyped
+ * partners is a column somebody can look at and filter out. It is the wrong answer for a
+ * feature vector, where it makes two neurons alike for both touching unnamed things — which is
+ * why `partnerVectors.ts` resolves absences itself, before it ever gets here.
+ */
+export function labelOf(cell: CellValue | undefined): string {
   return cell === null || cell === undefined ? '—' : String(cell)
 }
 
-function uniqueLabels(data: ColumnData): string[] {
+/** The distinct labels of a column, in the order a pivot axis puts them. */
+export function uniqueLabels(data: ColumnData): string[] {
   const seen = new Set<string>()
   const labels: string[] = []
   for (const cell of data) {

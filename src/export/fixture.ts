@@ -427,6 +427,56 @@ export function everythingGraph(): CodaGraph {
     { id: 'norm', type: 'core.normalize', col: 12, params: { mode: 'row' } },
 
     /*
+     * The similarity pair, twice each, because both nodes have a branch a single instance
+     * cannot reach. Partner Vectors emits a `neurons=` argument only when that optional port is
+     * wired — the other route reads the `direction` column instead — and it omits `untyped`
+     * entirely when partners are grouped by id, since `visibleIf` hides it and a hidden param
+     * is not in the provenance key. Similarity has the two layouts, and Euclidean is the metric
+     * whose Output setting is hidden, so `effectiveOutput` is only exercised by picking it.
+     */
+    {
+      id: 'pvec',
+      type: 'neuron.partnerVectors',
+      col: 8,
+      row: 2,
+      params: { partnerBy: 'type', untyped: 'id', weight: 'weight', weighting: 'raw' },
+    },
+    {
+      id: 'pvecId',
+      type: 'neuron.partnerVectors',
+      col: 8,
+      row: 3,
+      params: { partnerBy: 'id', weight: 'weight', weighting: 'fraction' },
+    },
+    {
+      id: 'simil',
+      type: 'core.similarity',
+      col: 9,
+      row: 3,
+      params: {
+        layout: 'long',
+        observations: 'neuronId',
+        features: 'feature',
+        value: 'weight',
+        metric: 'cosine',
+        output: 'similarity',
+      },
+    },
+    {
+      id: 'similWide',
+      type: 'core.similarity',
+      col: 9,
+      row: 4,
+      params: {
+        layout: 'wide',
+        idColumn: 'neuronId',
+        wideFeatures: ['pre', 'post'],
+        metric: 'euclidean',
+        output: 'similarity',
+      },
+    },
+
+    /*
      * Twice, and that is not redundancy: the emitter branches on the input's *kind*, because a
      * navis NeuronList slices as `nl[i:i+1]` where a frame needs `.iloc`. One on each side, or
      * the golden file records only the half that happens to be a DataFrame.
@@ -839,6 +889,11 @@ export function everythingGraph(): CodaGraph {
     ['select', 'out', 'joinRight', 'left'],
     ['group', 'out', 'joinRight', 'right'],
     ['conn2', 'connections', 'stack', 'bottom'],
+    ['conn', 'connections', 'pvec', 'in'],
+    ['find', 'neurons', 'pvec', 'neurons'],
+    ['conn2', 'connections', 'pvecId', 'in'],
+    ['pvec', 'out', 'simil', 'in'],
+    ['roi', 'counts', 'similWide', 'in'],
     ['stack', 'out', 'pivot', 'in'],
     ['pivot', 'matrix', 'norm', 'in'],
     ['norm', 'out', 'heat', 'in'],

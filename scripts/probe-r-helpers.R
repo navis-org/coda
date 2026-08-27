@@ -112,5 +112,114 @@ check("join: a repeated id does not cross-product",
       nrow(coda_join_annotations(dupes, right)) == 2L,
       nrow(coda_join_annotations(dupes, right)))
 
+# ---- coda_partner_vectors ---------------------------------------------------
+#
+# The same fixture `probe-py-helpers.py` uses, deliberately: these two helpers are ports of one
+# TypeScript module, and the cheapest way to catch one of them drifting is to ask both the same
+# questions. The one hop-2 edge is what tells the two routes apart — a wired `Neurons` table
+# names the queries outright and reaches it, where the `direction` column answers only for the
+# first hop.
+edges <- data.frame(
+  preId = c(1, 1, 1, 2, 20, 1, 2),
+  postId = c(10, 12, 11, 10, 1, 2, 30),
+  preType = c("A", "A", "A", "B", "Y", "A", "B"),
+  postType = c("X", "X", NA, "X", "A", "B", "Z"),
+  weight = c(3, 1, 2, 5, 7, 4, 6),
+  hop = c(1, 1, 1, 1, 1, 1, 2),
+  direction = c("downstream", "downstream", "downstream", "downstream",
+                "upstream", "both", "downstream"),
+  stringsAsFactors = FALSE)
+queries <- data.frame(neuronId = c(1, 2))
+
+vector_for <- function(frame, neuron) {
+  rows <- frame[frame$neuronId == neuron, , drop = FALSE]
+  stats::setNames(as.numeric(rows$weight), rows$feature)
+}
+same <- function(a, b) isTRUE(all.equal(a[order(names(a))], b[order(names(b))]))
+
+pv <- coda_partner_vectors(edges, neurons = queries)
+one <- vector_for(pv, 1)
+check("vectors: both directions, kept apart by the prefix",
+      same(one, c(`out:X` = 4, `out:11` = 2, `out:B` = 4, `in:Y` = 7)),
+      paste(names(one), one, collapse = " "))
+# The em-dash trap: an untyped partner stands in for itself rather than pooling with every
+# other untyped one, which is the grouping that makes strangers look alike.
+check("vectors: an untyped partner falls back to its own id", "out:11" %in% names(one))
+check("vectors: repeats of one pair are summed", one[["out:X"]] == 4)
+check("vectors: an edge inside the query set counts for both ends",
+      vector_for(pv, 2)[["in:A"]] == 4)
+check("vectors: a wired Neurons table reaches past the first hop",
+      vector_for(pv, 2)[["out:Z"]] == 6)
+
+derived <- coda_partner_vectors(edges)
+check("vectors: direction alone answers the first hop identically",
+      same(vector_for(derived, 1), one))
+check("vectors: and drops what it cannot attribute",
+      !"out:Z" %in% names(vector_for(derived, 2)))
+check("vectors: dropping untyped partners removes exactly those",
+      setequal(names(vector_for(coda_partner_vectors(edges, neurons = queries,
+                                                     untyped = "drop"), 1)),
+               c("out:X", "out:B", "in:Y")))
+byid <- vector_for(coda_partner_vectors(edges, neurons = queries, partner_by = "id"), 1)
+check("vectors: by id, every partner is its own feature",
+      same(byid, c(`out:10` = 3, `out:12` = 1, `out:11` = 2, `out:2` = 4, `in:20` = 7)),
+      paste(names(byid), byid, collapse = " "))
+frac <- vector_for(coda_partner_vectors(edges, neurons = queries, weighting = "fraction"), 1)
+# Per direction, which is the point: a neuron with far more input than output still has both
+# halves of its vector count for something.
+check("vectors: fractions are per direction", isTRUE(all.equal(frac[["out:X"]], 0.4)))
+check("vectors: a lone feature in a direction is all of it", frac[["in:Y"]] == 1)
+
+# ---- coda_similarity --------------------------------------------------------
+#
+# Checked against `stats::dist` on the dense form rather than against numbers typed in here:
+# what the helper claims is that never building that dense form gives the same answer, and the
+# only way to see that is to build it and compare.
+long <- data.frame(obs = c("a", "a", "a", "b", "b", "c"),
+                   feat = c("f1", "f2", "f2", "f1", "f2", "f3"),
+                   w = c(1, 1.5, 0.5, 2, 4, 1),
+                   stringsAsFactors = FALSE)
+# `a` is two rows on f2 summing to 2, which makes it exactly parallel to `b`.
+dense <- matrix(c(1, 2, 0, 2, 4, 0, 0, 0, 1), nrow = 3, byrow = TRUE,
+                dimnames = list(c("a", "b", "c"), NULL))
+
+euclid <- coda_similarity_long(long, "obs", "feat", value = "w", metric = "euclidean")
+check("similarity: Euclidean agrees with stats::dist on the dense form",
+      isTRUE(all.equal(unname(euclid), unname(as.matrix(dist(dense))))),
+      paste(round(euclid - as.matrix(dist(dense)), 6), collapse = " "))
+cosine <- coda_similarity_long(long, "obs", "feat", value = "w")
+reference <- dense %*% t(dense) / outer(sqrt(rowSums(dense^2)), sqrt(rowSums(dense^2)))
+check("similarity: cosine agrees with the dense product",
+      isTRUE(all.equal(unname(cosine), unname(reference))))
+check("similarity: duplicate pairs are summed, so a and b come out parallel",
+      isTRUE(all.equal(cosine["a", "b"], 1)))
+pearson <- coda_similarity_long(long, "obs", "feat", value = "w", metric = "pearson")
+# Centred over the ambient feature space, which is what `cor` on the dense rows does — and is
+# not what centring over the features an observation happens to have would give.
+check("similarity: Pearson agrees with cor on the dense form",
+      isTRUE(all.equal(unname(pearson), unname(cor(t(dense))))),
+      paste(round(pearson - cor(t(dense)), 6), collapse = " "))
+weighted <- coda_similarity_long(long, "obs", "feat", value = "w", metric = "jaccardWeighted")
+check("similarity: weighted Jaccard is min over max",
+      isTRUE(all.equal(weighted["a", "b"], 0.5)), weighted["a", "b"])
+check("similarity: and zero where nothing is shared", weighted["a", "c"] == 0)
+presence <- coda_similarity_long(long, "obs", "feat")
+check("similarity: no value column asks about presence rather than strength",
+      isTRUE(all.equal(presence["a", "b"], 1)) && presence["a", "c"] == 0,
+      paste(presence, collapse = " "))
+check("similarity: a distance is one minus the similarity, diagonal included",
+      isTRUE(all.equal(coda_similarity_long(long, "obs", "feat", value = "w",
+                                            output = "distance"), 1 - cosine)))
+# Euclidean has no similarity form, so the setting is forced rather than honoured — the same
+# exception `effectiveOutput` makes on the canvas.
+forced <- coda_similarity_long(long, "obs", "feat", value = "w", metric = "euclidean",
+                               output = "similarity")
+check("similarity: Euclidean is a distance whatever the setting says",
+      forced["a", "a"] == 0 && forced["a", "b"] > 0)
+wide <- data.frame(id = c("a", "b", "c"), f1 = c(1, 2, 0), f2 = c(2, 4, 0), f3 = c(0, 0, 1),
+                   stringsAsFactors = FALSE)
+check("similarity: the wide layout answers what the long one does",
+      isTRUE(all.equal(coda_similarity_wide(wide, "id", c("f1", "f2", "f3")), cosine)))
+
 cat("\n", if (fails > 0L) paste(fails, "failed") else "all passed", "\n", sep = "")
 quit(status = if (fails > 0L) 1L else 0L)

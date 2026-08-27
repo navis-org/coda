@@ -60,6 +60,7 @@ export type PyModule =
   | 'seaborn'
   | 'scipyCluster'
   | 'scipyDistance'
+  | 'scipySparse'
 
 export interface ModuleSpec {
   /** Emitted verbatim when the module is imported whole. */
@@ -147,6 +148,13 @@ export const MODULES: Record<PyModule, ModuleSpec> = {
    */
   scipyCluster: { from: 'scipy.cluster.hierarchy', pip: 'scipy' },
   scipyDistance: { from: 'scipy.spatial.distance', pip: 'scipy' },
+  /*
+   * Imported whole rather than by name, because the helper that uses it names five things out
+   * of it and a `from scipy.sparse import ...` line would be the longest in the setup cell for
+   * no gain. `sparse` rather than `sp`: two letters is a name a reader has to look up, which is
+   * the call `fastcore` above already makes.
+   */
+  scipySparse: { statement: 'import scipy.sparse as sparse', pip: 'scipy' },
 }
 
 // ---------------------------------------------------------------------------

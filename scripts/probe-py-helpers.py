@@ -31,6 +31,8 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import scipy.sparse as sparse
+from scipy.spatial import distance
 
 ROOT = Path(__file__).resolve().parent.parent
 FIXTURES = ROOT / "src" / "export" / "python" / "__fixtures__"
@@ -488,6 +490,128 @@ try:
     check("info: an unknown name raises", False, "no error")
 except ValueError as err:
     check("info: an unknown name raises, naming the alternatives", "nuclei_v1" in str(err), str(err))
+
+# ---- coda_partner_vectors ---------------------------------------------------
+#
+# The reshape the whole connectivity-similarity chain stands on, and the two routes through it
+# are genuinely different code: a wired `Neurons` table names the queries outright and works at
+# any hop, where the `direction` column answers the same question for the first hop only. The
+# fixture below has one hop-2 edge, which is what tells the two apart.
+pvns = load_cell(FIXTURES / "everything.ipynb", "def coda_partner_vectors(",
+                 {"pd": pd, "np": np})
+edges = pd.DataFrame({
+    "preId":     [1, 1, 1, 2, 20, 1, 2],
+    "postId":    [10, 12, 11, 10, 1, 2, 30],
+    "preType":   ["A", "A", "A", "B", "Y", "A", "B"],
+    "postType":  ["X", "X", None, "X", "A", "B", "Z"],
+    "weight":    [3, 1, 2, 5, 7, 4, 6],
+    "hop":       [1, 1, 1, 1, 1, 1, 2],
+    "direction": ["downstream", "downstream", "downstream", "downstream",
+                  "upstream", "both", "downstream"],
+})
+queries = pd.DataFrame({"neuronId": [1, 2]})
+
+
+def vector(frame, neuron):
+    rows = frame[frame["neuronId"] == neuron]
+    return dict(zip(rows["feature"], rows["weight"]))
+
+
+pv = pvns["coda_partner_vectors"](edges, neurons=queries)
+one = vector(pv, 1)
+check("vectors: both directions, kept apart by the prefix",
+      one == {"out:X": 4, "out:11": 2, "out:B": 4, "in:Y": 7}, str(one))
+# The em-dash trap: an untyped partner stands in for itself rather than pooling with every
+# other untyped one, which is the grouping that makes strangers look alike.
+check("vectors: an untyped partner falls back to its own id", "out:11" in one)
+check("vectors: repeats of one pair are summed", one.get("out:X") == 4, str(one.get("out:X")))
+check("vectors: an edge inside the query set counts for both ends",
+      vector(pv, 2).get("in:A") == 4, str(vector(pv, 2)))
+check("vectors: a wired Neurons table reaches past the first hop",
+      vector(pv, 2).get("out:Z") == 6, str(vector(pv, 2)))
+
+derived = pvns["coda_partner_vectors"](edges)
+check("vectors: direction alone answers the first hop identically",
+      vector(derived, 1) == one, str(vector(derived, 1)))
+check("vectors: and drops what it cannot attribute",
+      "out:Z" not in vector(derived, 2), str(vector(derived, 2)))
+
+dropped = pvns["coda_partner_vectors"](edges, neurons=queries, untyped="drop")
+check("vectors: dropping untyped partners removes exactly those",
+      set(vector(dropped, 1)) == {"out:X", "out:B", "in:Y"}, str(vector(dropped, 1)))
+
+byid = vector(pvns["coda_partner_vectors"](edges, neurons=queries, partner_by="id"), 1)
+check("vectors: by id, every partner is its own feature",
+      byid == {"out:10": 3, "out:12": 1, "out:11": 2, "out:2": 4, "in:20": 7}, str(byid))
+
+frac = vector(pvns["coda_partner_vectors"](edges, neurons=queries, weighting="fraction"), 1)
+# Per direction, which is the point: a neuron with far more input than output still has both
+# halves of its vector count for something.
+check("vectors: fractions are per direction", abs(frac["out:X"] - 0.4) < 1e-12, str(frac))
+check("vectors: a lone feature in a direction is all of it", frac["in:Y"] == 1.0, str(frac))
+
+# ---- coda_similarity --------------------------------------------------------
+#
+# Checked against scipy's own metrics on the dense form of the same data rather than against
+# numbers typed in here: what the helper claims is that never building that dense form gives
+# the same answer, and the only way to see that is to build it and compare.
+sns_ = load_cell(FIXTURES / "everything.ipynb", "def coda_similarity_long(",
+                 {"pd": pd, "np": np, "sparse": sparse})
+long = pd.DataFrame({
+    "obs":  ["a", "a", "a", "b", "b", "c"],
+    "feat": ["f1", "f2", "f2", "f1", "f2", "f3"],
+    "w":    [1.0, 1.5, 0.5, 2.0, 4.0, 1.0],
+})
+# `a` is two rows on f2 summing to 2, which makes it exactly parallel to `b`.
+dense = np.array([[1.0, 2.0, 0.0], [2.0, 4.0, 0.0], [0.0, 0.0, 1.0]])
+
+
+def near(a, b, tol=1e-9):
+    return bool(np.max(np.abs(np.asarray(a) - np.asarray(b))) < tol)
+
+
+for metric, scipy_name in (("cosine", "cosine"), ("euclidean", "euclidean"),
+                           ("jaccard", "jaccard"), ("pearson", "correlation")):
+    got = sns_["coda_similarity_long"](long, "obs", "feat", value="w", metric=metric)
+    reference = distance.squareform(distance.pdist(
+        dense.astype(bool) if metric == "jaccard" else dense, metric=scipy_name))
+    if metric != "euclidean":
+        reference = 1.0 - reference
+    np.fill_diagonal(reference, 0.0 if metric == "euclidean" else 1.0)
+    check(f"similarity: {metric} agrees with scipy on the dense form",
+          near(got.to_numpy(), reference), str(got.to_numpy() - reference))
+
+check("similarity: duplicate pairs are summed, so a and b come out parallel",
+      near(sns_["coda_similarity_long"](long, "obs", "feat", value="w").loc["a", "b"], 1.0))
+# scipy has no weighted Jaccard, so this one is the identity written out: sum of minima over
+# sum of maxima, which for a and b is 3/6.
+weighted = sns_["coda_similarity_long"](long, "obs", "feat", value="w",
+                                        metric="jaccardWeighted")
+check("similarity: weighted Jaccard is min over max", near(weighted.loc["a", "b"], 0.5),
+      str(weighted.loc["a", "b"]))
+check("similarity: and zero where nothing is shared", weighted.loc["a", "c"] == 0.0)
+
+presence = sns_["coda_similarity_long"](long, "obs", "feat")
+check("similarity: no value column asks about presence rather than strength",
+      near(presence.loc["a", "b"], 1.0) and presence.loc["a", "c"] == 0.0,
+      str(presence.to_numpy()))
+
+dist = sns_["coda_similarity_long"](long, "obs", "feat", value="w", output="distance")
+check("similarity: a distance is one minus the similarity, diagonal included",
+      near(dist.to_numpy(), 1.0 - sns_["coda_similarity_long"](long, "obs", "feat",
+                                                               value="w").to_numpy()))
+# Euclidean has no similarity form, so the setting is forced rather than honoured — the same
+# exception `effectiveOutput` makes on the canvas.
+euclid = sns_["coda_similarity_long"](long, "obs", "feat", value="w", metric="euclidean",
+                                      output="similarity")
+check("similarity: Euclidean is a distance whatever the setting says",
+      euclid.loc["a", "a"] == 0.0 and euclid.loc["a", "b"] > 0, str(euclid.to_numpy()))
+
+wide = pd.DataFrame({"id": ["a", "b", "c"], "f1": [1.0, 2.0, 0.0],
+                     "f2": [2.0, 4.0, 0.0], "f3": [0.0, 0.0, 1.0]})
+check("similarity: the wide layout answers what the long one does",
+      near(sns_["coda_similarity_wide"](wide, "id", ["f1", "f2", "f3"]).to_numpy(),
+           sns_["coda_similarity_long"](long, "obs", "feat", value="w").to_numpy()))
 
 print()
 print(f'{len(fails)} failed' if fails else 'all passed')
