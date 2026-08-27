@@ -87,6 +87,15 @@ looks like: a menu.
 Nothing in that table is presentation. The label and the blurb come off the `NodeDefinition`,
 which is where they already are and the only place they can stay in step with the card.
 
+**The New menu's headings are backends, not sources**, and the distinction only became visible
+when a second CATMAID instance shipped. It grouped on `sourceId` for as long as the two
+coincided — every neuPrint family is on the `neuprint` source — but a CATMAID source is keyed on
+the *server*, so `dataset.catmaid.l1` arrived under a second heading of its own reading
+`CATMAID (l1em.catmaid.virtualflybrain.org)`, next to the `CATMAID` one holding FAFB and the
+escape hatch. What the heading answers is which backend a reader is looking at. The label is
+`BACKENDS[backend].label` falling back to a source's, because the mock's is deliberately empty
+and its group keeps the `Mock connectome` heading it has always had.
+
 **`Custom CATMAID`'s Project is a dropdown rather than a text field**, which is the one place it
 departs from its neuPrint twin, and the reason is what an id *is* on each backend. A neuPrint
 dataset id is a name somebody reads off a paper (`hemibrain:v1.2.1`); a CATMAID project id is a
@@ -474,7 +483,18 @@ entirely silent, since a wrong `Additional tags` does not fail, it just draws no
 other half of the pairing is `JOIN_SEPARATOR`: the aggregation joins with it and `splitTags`
 splits on it.
 
-**The starter carries one warning on a cold session: `Column "join_tag" is gone` on Explore Dataset.** It is
+**Every starter now answers the same question, off the schema rather than off the backend.**
+`tagColumnFor` in `starters.ts` points `Additional tags` at a column literally named
+`annotations` where the source publishes one, which is CATMAID and nothing else: a neuron there
+has exactly one name and any number of annotations, and the annotations are where the lineages,
+the hemisphere, the clusterings and the papers are. Both CATMAID datasets would otherwise open
+with that whole bag drawn nowhere. **Setting the param is the only way to do it** — `tagColumn`
+is `optional`, and `resolveColumn` never gives an optional picker its declared default, because
+on an optional picker empty is a *choice* (`out.scatter`'s `idColumn: ''` is exactly that). So
+raising the default would either do nothing or, made required, fall through rule 3 to "the first
+compatible column" and put a name column of tags on every neuPrint dataset.
+
+**The FlyWire starter carries one warning on a cold session: `Column "join_tag" is gone` on Explore Dataset.** It is
 the documented conflation in `annotationSchemaFrom`, which answers the same `undefined` for an
 unwired socket and for a chain whose columns are not known yet — so `withAnnotations` falls back
 to the *datastack's own* labels, and a chain replaces those, which makes the fallback a schema

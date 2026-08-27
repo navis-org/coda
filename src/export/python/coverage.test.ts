@@ -31,6 +31,10 @@ const NO_EMITTER: Record<string, string> = {
     'onto what this backend answers \u2014 but no emitter has been written for it, so it ' +
     'degrades to a TODO rather than emitting neuprint-python against a server neuPrint has ' +
     'never heard of.',
+  'dataset.catmaid.l1':
+    'The same backend as `dataset.catmaid.fafb` on a second instance, so the same reason: ' +
+    'pymaid points at whichever server it is given and would emit both, and nobody has written ' +
+    'the emitter for either.',
   'dataset.catmaid':
     'A CATMAID instance named by hand \u2014 the same reason as `dataset.catmaid.fafb`, and no ' +
     'different for being a server this build ships no node for. pymaid would emit it; nobody ' +

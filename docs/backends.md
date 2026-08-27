@@ -1128,7 +1128,41 @@ judgement about a picture.
 
 `src/data/catmaid/`, and the third backend. The first target is Virtual Fly Brain's public FAFB
 instance, `catmaid-fafb.virtualflybrain.org`. Nothing above `src/data` knows it exists; a CATMAID
-dataset node is `dataset.fafb`, built from `DATASET_FAMILIES` exactly as the others are.
+dataset node is `dataset.catmaid.fafb`, built from `DATASET_FAMILIES` exactly as the others are.
+
+**Two instances ship preconfigured, and that is one source each.** VFB also publishes the
+first-instar larval CNS at `l1em.catmaid.virtualflybrain.org` — `dataset.catmaid.l1`, registered
+in `data/builtins.ts` beside the default and keyed `catmaid:https://l1em…` by `catmaidSourceId`.
+The pair is the clearest statement of why this backend keys its sources on the server: **both
+are project `1`**, and project 1 is a different connectome on each. Nothing else here has two
+families on two sources; `spaceForDataset`'s `exactSource` field exists for exactly this and
+binds FAFB14 to the FAFB instance alone. Everything else is shared — the same CATMAID build
+(`2021.12.21.dev295+g30203a5f8` on both), the same CSRF wall, the same absent gzip, and one
+`*.virtualflybrain.org` credential row covering both if anybody ever needs one.
+
+Where they differ is what a neuron carries. FAFB meta-annotates `neuron name` and `Cell type`,
+which is where its `type` column comes from; L1 uses neither — it has 449 meta-annotations and
+those two are not among them — so `readVocabulary` finds no vocabulary at all. It has ~71
+annotations per neuron against FAFB's handful, 8 MB of label text against 1.4 MB.
+
+**So `type` falls back to the neuron's own name**, which is the one translation `annotations.ts`
+performs rather than reads. A CATMAID neuron has exactly one name and any number of annotations;
+`type` is Coda's cross-backend column, not CATMAID's field, and the question is which of the two
+carries a row. An annotated instance answers with the annotation, because that is a controlled
+vocabulary where the name is not — FAFB's skeleton 430 is *named* `La Grosse Cellule LGC 431 JS`
+and *annotated* `DNp32_R`, and only the second joins to anything. An instance that meta-annotates
+nothing has no such answer, and the fallback is what stops Explore — whose headline is `type`,
+never `name` — drawing all 5,013 L1 rows as `untyped` with the label unused in the next column.
+
+Two rules in it, both measured. `instance` stays **null** rather than repeating the name: an
+instance is one individual *within* a type, which is exactly the distinction the `#` encodes and
+exactly what an instance with no vocabulary has not drawn. And `typeFromLabel` is **not** applied
+to a name — the `#` convention belongs to the controlled label. 53 of L1's 5,013 names contain a
+`#` and none of them mean it: they are a tracer's cross-reference to another skeleton (`BC:
+presynaptic -medial - paired with #3801211`), so splitting there truncates a sentence and calls
+the remainder a cell type. The geometry runs the other way: 5,013 skeletons of 1,000–8,000 nodes,
+57–450 kB each, against FAFB's 0.9–1.3 MB. `CATMAID_SKELETON_WARN` is a count rather than a byte
+budget and stays honest on both, if conservative here.
 
 Everything below was probed live rather than recalled, and `live.test.ts` is that pass
 institutionalised — skipped unless `CATMAID_LIVE=1`, because it is somebody's public server and

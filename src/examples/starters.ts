@@ -44,6 +44,7 @@ import type { ParamValues } from '../core/node'
 import { defaultParams } from '../core/node'
 import { ID_COLUMN_NAME } from '../core/ids'
 import { requireNodeDef } from '../core/registry'
+import { findColumn } from '../core/types'
 import { aggColumnName } from '../nodes/lib/tableOps'
 import { capabilityOf, getSource } from '../data/source'
 import { noteNode } from './notes'
@@ -115,6 +116,30 @@ function assemble(
   return graph
 }
 
+/**
+ * The column Explore's `Additional tags` opens on, or none.
+ *
+ * A source that publishes a column *named* `annotations` is publishing the thing that control
+ * exists for: several free-form labels per neuron in one cell, joined with `JOIN_SEPARATOR`.
+ * CATMAID is the only one that does — a neuron there has exactly one name and any number of
+ * annotations, and the annotations are where the lineages, the hemisphere, the clusterings and
+ * the papers live — so both its datasets would otherwise open with that whole bag drawn nowhere,
+ * because `tagColumn` is `optional` and an optional picker never takes its declared default
+ * (`resolveColumn`: on an optional picker empty is a *choice*). Setting it there instead of
+ * changing the default is what keeps that rule intact.
+ *
+ * Read off the schema rather than keyed on the backend, which is the same shape `withScene` uses
+ * above and for the same reason: it is a fact about what the source publishes, and a backend
+ * that starts publishing one gets this without an edit here. It is a *column name* doing that
+ * work rather than anything declared, which is the honest weakness of it — `ColumnSchema` is
+ * `{name, dtype, unit}` and a "these are joined tags" flag would have exactly one declarer. The picker is still filtered
+ * against the live schema downstream, so naming it costs nothing where the column is absent.
+ */
+function tagColumnFor(sourceId: string | undefined): string | undefined {
+  const neurons = sourceId ? getSource(sourceId)?.schemas.neurons : undefined
+  return findColumn(neurons, 'annotations') ? 'annotations' : undefined
+}
+
 function genericStarter(spec: StarterSpec): CodaGraph {
   /*
    * No dataset id: a starter is a node type and some params, and which dataset that resolves to
@@ -125,13 +150,14 @@ function genericStarter(spec: StarterSpec): CodaGraph {
   const withScene = spec.sourceId
     ? capabilityOf(getSource(spec.sourceId), undefined, 'viewerScene')
     : false
+  const tagColumn = tagColumnFor(spec.sourceId)
 
   return assemble(
     spec.label,
     `Browsing ${spec.label}. Search in the Explore Dataset node, tick neurons, then Run.`,
     [
       place('dataset', spec.nodeType, 0, spec.params),
-      place('explore', 'neuron.explore', 1),
+      place('explore', 'neuron.explore', 1, tagColumn ? { tagColumn } : undefined),
       place('picked', 'out.table', 2),
       ...(withScene ? [place('ngl', 'out.neuroglancer', 2, undefined, 430)] : []),
     ],

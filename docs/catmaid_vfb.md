@@ -3,6 +3,10 @@
 Measured against `https://catmaid-fafb.virtualflybrain.org` (CATMAID
 `2021.12.21.dev295+g30203a5f8`, Django 3.2-era, Python 3.9) on 2026-08-22.
 
+VFB's larval instance, `https://l1em.catmaid.virtualflybrain.org`, reports the **same build**
+and was re-checked on 2026-08-27: anonymous `GET` 200, anonymous `POST` 403, no
+`content-encoding` on a 449 kB skeleton. Both asks below are one deployment's, not one host's.
+
 Two asks, and they are independent: the first is what makes the instance reachable
 from a browser at all, the second is an eightfold saving on the single largest
 transfer Coda makes against it. The first is really an **upstream CATMAID** question

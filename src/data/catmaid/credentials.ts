@@ -30,7 +30,7 @@ import { readStorage, writeStorage } from '../localStore'
 const INSTANCES_KEY = 'coda.catmaid.instances.v1'
 
 /**
- * Virtual Fly Brain's public FAFB instance, which is the one Coda ships a dataset node for.
+ * Virtual Fly Brain's public FAFB instance, and the default a Custom node starts on.
  *
  * Named rather than assumed: CATMAID has no canonical deployment the way neuPrint does, and no
  * service that lists them the way CAVE does. This is a *default server*, not a credential — the
@@ -38,6 +38,20 @@ const INSTANCES_KEY = 'coda.catmaid.instances.v1'
  * deployment asks for one.
  */
 export const DEFAULT_CATMAID_SERVER = 'https://catmaid-fafb.virtualflybrain.org'
+
+/**
+ * Virtual Fly Brain's L1 larval instance — the same organisation, a **different server**.
+ *
+ * Beside the constant above rather than derived from it, because that is the fact worth seeing
+ * in one place: the two datasets Coda ships a CATMAID node for are two installations, and
+ * `registry.ts` mints a separate `CatmaidSource` for each. They share a credential row —
+ * `*.virtualflybrain.org` covers both, which is what host patterns are for — and share nothing
+ * else. Both are project `1` on their own server, which is exactly why a project id is never
+ * carried across instances.
+ *
+ * Neither needs a credential to read. See `docs/catmaid_vfb.md`.
+ */
+export const L1_CATMAID_SERVER = 'https://l1em.catmaid.virtualflybrain.org'
 
 /** One configured instance: which hosts it covers, and what to send them. */
 export interface CatmaidInstance {

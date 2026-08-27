@@ -13,6 +13,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import annotationListFixture from './__fixtures__/annotationlist.json'
+import annotationListL1Fixture from './__fixtures__/annotationlist-l1.json'
 import compactDetailFixtureRaw from './__fixtures__/compact-detail.json'
 import connectivityFixture from './__fixtures__/connectivity.json'
 import linksFixture from './__fixtures__/links.json'
@@ -294,6 +295,88 @@ describe('reading labels out of the annotation graph', () => {
     expect(labels.annotations).not.toContain('#R1')
     // `'; '` is `JOIN_SEPARATOR`; a second spelling is a row of tags nobody can read.
     if (labels.annotations?.includes(';')) expect(labels.annotations).toContain('; ')
+  })
+
+  /*
+   * The other kind of instance, and it is half the CATMAID deployments Coda ships a node for.
+   *
+   * The fixture is trimmed from VFB's L1 server: skeleton 4740178, named `A05q_a1l`, carrying
+   * lineage and clustering annotations under meta-annotations of its own — and neither
+   * `neuron name` nor `Cell type` anywhere on the instance. Recorded rather than written,
+   * because "an instance that meta-annotates *something else*" is the case a hand-made empty
+   * response would not reproduce: `readVocabulary` finds meta-annotations and still finds no
+   * type, which is the state that used to draw 5,013 rows as `untyped`.
+   */
+  describe('an instance that meta-annotates neither convention', () => {
+    const l1 = annotationListL1Fixture as unknown as AnnotationListResponse
+    const l1Vocabulary = readVocabulary(l1)
+
+    it('finds meta-annotations, and none of them a type', () => {
+      expect(l1Vocabulary.metaAnnotations.length).toBeGreaterThan(0)
+      expect(l1Vocabulary.metaAnnotations).not.toContain('neuron name')
+      expect(l1Vocabulary.typeAnnotations.size).toBe(0)
+      expect(l1Vocabulary.ontologyAnnotations.size).toBe(0)
+    })
+
+    const labels = labelsForSkeleton(l1, l1Vocabulary, 4740178)
+
+    it('uses the neuron’s own name as its type', () => {
+      expect(labels.name).toBe('A05q_a1l')
+      expect(labels.type).toBe('A05q_a1l')
+      // Not the name under the name: an instance is one individual within a type, and an
+      // instance that has drawn no such distinction has no instance to report.
+      expect(labels.instance).toBeNull()
+    })
+
+    it('leaves the whole bag in the annotations cell', () => {
+      expect(labels.annotations).toContain('A1L Interneurons')
+      expect(labels.annotations).toContain('NB4-1')
+      // Nothing was promoted out of it, because nothing said it was a type — and the name is
+      // not in it either, a name being CATMAID's own field rather than one of the annotations.
+      expect(labels.annotations).not.toContain('A05q_a1l')
+    })
+
+    /*
+     * The 53-of-5,013 case, and the reason `typeFromLabel` is not applied to a name. On L1 a `#`
+     * in a name points at another skeleton — `paired with #3801211` — so splitting there would
+     * call `BC: presynaptic -medial - paired with ` a cell type.
+     */
+    it('keeps a name whole, however many hashes are in it', () => {
+      const named = (name: string): AnnotationListResponse => ({
+        ...l1,
+        neuronnames: { '4740178': name },
+      })
+      for (const name of ['KC #0', 'BC: presynaptic -medial - paired with #3801211']) {
+        expect(labelsForSkeleton(named(name), l1Vocabulary, 4740178).type).toBe(name)
+      }
+    })
+  })
+
+  /*
+   * The other side of that fallback, and the reason it is keyed on the instance rather than on
+   * this neuron. FAFB types its neurons, so an untyped one there is *news* — one nobody has
+   * annotated yet — and standing its free-text name in would put prose into `partnerType`, into
+   * Group By keys and into the labels Find Neurons matches on. No fixture skeleton is in that
+   * state (all three carry a `neuron name`), so one is built from the fixture's own ids.
+   */
+  it('leaves a neuron untyped on an instance that does publish a vocabulary', () => {
+    const onlyOntology: AnnotationListResponse = {
+      ...annotations,
+      // `FBbt:00007447` and a `Paper:` tag — real annotations on skeleton 16, neither of them
+      // meta-annotated `neuron name`.
+      skeletons: {
+        '77': {
+          annotations: [
+            { id: 15980866, uid: 1 },
+            { id: 11490509, uid: 1 },
+          ],
+        },
+      },
+      neuronnames: { '77': 'some tracer’s working note' },
+    }
+    const labels = labelsForSkeleton(onlyOntology, vocabulary, 77)
+    expect(labels.name).toBe('some tracer’s working note')
+    expect(labels.type).toBeNull()
   })
 
   it('answers null rather than empty strings for a skeleton it has never seen', () => {

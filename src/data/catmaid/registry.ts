@@ -16,7 +16,7 @@
 
 import { getSource, registerSource } from '../source'
 import { CatmaidSource } from './CatmaidSource'
-import { DEFAULT_CATMAID_SERVER } from './credentials'
+import { DEFAULT_CATMAID_SERVER, L1_CATMAID_SERVER } from './credentials'
 
 /** Trailing slashes off, scheme filled in — so three spellings land on one instance. */
 export function normaliseCatmaidServer(server: string | undefined): string {
@@ -38,9 +38,27 @@ export function catmaidSourceId(server: string | undefined): string {
   return normalised === DEFAULT_CATMAID_SERVER ? 'catmaid' : `catmaid:${normalised}`
 }
 
-/** A readable label, since the source id is a URL for anything but the default. */
+/**
+ * The source id for Virtual Fly Brain's L1 larval instance.
+ *
+ * Derived rather than typed, because `catmaidSourceId` is the one place that decides how a
+ * server becomes an id and `dataset.catmaid.l1` has to resolve to the *same* source a Custom
+ * node pointed at that URL would — otherwise the two would each download their own copy of a
+ * 5,013-neuron index and disagree about nothing visible.
+ */
+export const L1_CATMAID_SOURCE_ID = catmaidSourceId(L1_CATMAID_SERVER)
+
+/**
+ * A readable label, since the source id is a URL for anything but the default.
+ *
+ * The named deployments get a name; everything else gets its hostname, which is the only thing
+ * Coda knows about a lab server and is what a reader needs when an error message says which
+ * instance declined. `CATMAID` alone stays with the default, because that is the label every
+ * error and every menu heading has always carried for it.
+ */
 function labelFor(server: string): string {
   if (server === DEFAULT_CATMAID_SERVER) return 'CATMAID'
+  if (server === L1_CATMAID_SERVER) return 'CATMAID (L1)'
   try {
     return `CATMAID (${new URL(server).hostname})`
   } catch {

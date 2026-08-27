@@ -21,6 +21,7 @@
  */
 
 import { CaveSource } from './cave/CaveSource'
+import { L1_CATMAID_SERVER } from './catmaid/credentials'
 import { catmaidSourceFor } from './catmaid/registry'
 import { MockSource } from './mock/MockSource'
 import { NeuPrintSource } from './neuprint/NeuPrintSource'
@@ -42,6 +43,11 @@ export function registerBuiltinSources(options: BuiltinSourceOptions = {}): void
   )
   registerSource(new NeuPrintSource())
   registerSource(new CaveSource())
-  // Registers itself as a side effect of being asked for the default server.
+  /*
+   * One per instance, and CATMAID is the only backend that needs two lines here: a source is
+   * keyed on the *server*, so VFB's FAFB deployment and its L1 deployment are two sources with
+   * two dataset nodes above them. Both register as a side effect of being asked for.
+   */
   catmaidSourceFor(undefined)
+  catmaidSourceFor(L1_CATMAID_SERVER)
 }

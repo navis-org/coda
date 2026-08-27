@@ -6,10 +6,13 @@ import type { ExportLanguage } from '../../nodes/lib/datasetFamilies'
 import { CodaMark } from '../CodaMark'
 import { peekExportWarnings, requestExportWarnings, useExportWarnings } from '../exportWarnings'
 import { AssistantIcon, InspectorIcon, ShareIcon } from '../Icons'
-import { getSource } from '../../data/source'
 import { EXAMPLES } from '../../examples'
-import type { CustomDatasetNode, DatasetFamily } from '../../nodes/lib/datasetFamilies'
-import { CUSTOM_DATASET_NODES, starterFamilies } from '../../nodes/lib/datasetFamilies'
+import type { CustomDatasetNode } from '../../nodes/lib/datasetFamilies'
+import {
+  BACKENDS,
+  CUSTOM_DATASET_NODES,
+  starterFamilies,
+} from '../../nodes/lib/datasetFamilies'
 import { getNodeDef } from '../../core/registry'
 import type { StarterSpec } from '../../examples/starters'
 import type { WorkflowSummary } from '../../store/library'
@@ -548,33 +551,31 @@ function NewMenu({
   onDataset: (spec: StarterSpec) => void
 }) {
   const groups = useMemo(() => {
-    const bySource = new Map<string, DatasetFamily[]>()
-    // Only the families offered as a starting point — see `DatasetFamily.starter`. Every dataset
-    // node stays in `Add ▸ Dataset`; what this list decides is where somebody *begins*.
-    for (const family of starterFamilies()) {
-      const held = bySource.get(family.sourceId)
-      if (held) held.push(family)
-      else bySource.set(family.sourceId, [family])
-    }
     /*
-     * A backend's escape hatch goes under that backend's own heading rather than into a trailing
-     * "Other", which is what it used to be when there was one of them. Three collected under a
-     * heading of their own would sort every custom node away from the datasets it is a custom
-     * version *of*, and would leave a reader to work out which of the three matches the group
-     * they were just looking at.
+     * Grouped by **backend**, not by source id, and the difference only shows on CATMAID.
+     * Everywhere else the two coincide — every neuPrint family is on the `neuprint` source — but
+     * a CATMAID source is keyed on the *server*, so FAFB and L1 are two sources and grouping on
+     * that put a second heading in the menu reading `CATMAID (l1em.catmaid.virtualflybrain.org)`
+     * beside the first. What the heading answers is "which backend am I looking at".
      *
-     * The second loop is what gives a backend with *no* starter family a heading of its own —
-     * the state any backend is in before its family table has an entry, and the state a backend
-     * lands in if every one of its families is later marked `starter: false`.
+     * Only the families offered as a starting point — see `DatasetFamily.starter`. Every dataset
+     * node stays in `Add ▸ Dataset`; what this list decides is where somebody *begins*.
+     *
+     * The key list is the **union** of both tables rather than the families' alone, which is
+     * what gives a backend with no starter family a heading of its own: the state any backend is
+     * in before its family table has an entry, and the state one lands in if every family it has
+     * is later marked `starter: false`. A backend's escape hatch then goes under that backend's
+     * own heading rather than into a trailing "Other", which is what it used to be when there
+     * was one of them — three collected under a heading of their own would sort every custom
+     * node away from the datasets it is a custom version *of*.
      */
-    for (const custom of CUSTOM_DATASET_NODES) {
-      if (!bySource.has(custom.sourceId)) bySource.set(custom.sourceId, [])
-    }
-    return [...bySource.entries()].map(([sourceId, families]) => ({
-      sourceId,
-      label: getSource(sourceId)?.label ?? sourceId,
-      families,
-      custom: CUSTOM_DATASET_NODES.filter((entry) => entry.sourceId === sourceId),
+    const families = starterFamilies()
+    const backends = [...new Set([...families, ...CUSTOM_DATASET_NODES].map((e) => e.backend))]
+    return backends.map((backend) => ({
+      backend,
+      label: BACKENDS[backend]?.heading || BACKENDS[backend]?.label || backend,
+      families: families.filter((family) => family.backend === backend),
+      custom: CUSTOM_DATASET_NODES.filter((entry) => entry.backend === backend),
     }))
   }, [])
 
@@ -586,7 +587,7 @@ function NewMenu({
       </button>
 
       {groups.map((group) => (
-        <div key={group.sourceId} className="dropdown__group">
+        <div key={group.backend} className="dropdown__group">
           <div className="dropdown__heading">{group.label}</div>
           {group.families.map((family) => (
             <button

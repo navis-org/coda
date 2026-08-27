@@ -361,21 +361,47 @@ describe('the New menu', () => {
   const itemTitles = (panel: HTMLElement) =>
     [...panel.querySelectorAll('.dropdown__item strong')].map((el) => el.textContent)
 
+  /**
+   * The heading an item sits under: headings and items in document order, so an item's group is
+   * the last heading before it. The `expect` is what makes a renamed item fail *here* rather
+   * than resolving `slice(0, -1)` to the last heading in the menu and reading as a wrong group.
+   */
+  const groupOf = (panel: HTMLElement, label: string) => {
+    const rows = [...panel.querySelectorAll('.dropdown__heading, .dropdown__item strong')]
+    const at = rows.findIndex((el) => el.textContent === label)
+    expect(at, `no menu row called "${label}"`).toBeGreaterThan(-1)
+    return rows
+      .slice(0, at)
+      .reverse()
+      .find((el) => el.classList.contains('dropdown__heading'))?.textContent
+  }
+
   it('offers a custom node for every backend, under that backend’s heading', () => {
     const panel = openNew()
-    // Headings and items in document order, so an item's group is the last heading before it.
-    const rows = [...panel.querySelectorAll('.dropdown__heading, .dropdown__item strong')]
-    const groupOf = (label: string) => {
-      const at = rows.findIndex((el) => el.textContent === label)
-      expect(at).toBeGreaterThan(-1)
-      return rows
-        .slice(0, at)
-        .reverse()
-        .find((el) => el.classList.contains('dropdown__heading'))?.textContent
-    }
-    expect(groupOf('Custom neuPrint')).toBe('neuPrint')
-    expect(groupOf('Custom CAVE')).toBe('CAVE')
-    expect(groupOf('Custom CATMAID')).toBe('CATMAID')
+    expect(groupOf(panel, 'Custom neuPrint')).toBe('neuPrint')
+    expect(groupOf(panel, 'Custom CAVE')).toBe('CAVE')
+    expect(groupOf(panel, 'Custom CATMAID')).toBe('CATMAID')
+  })
+
+  /*
+   * One heading per backend, not per source. CATMAID is the only backend where those differ —
+   * FAFB and L1 are two servers and therefore two `CatmaidSource`s — and grouping on the source
+   * put a second heading in the menu spelled as a hostname. Nothing about that fails loudly.
+   */
+  it('puts both CATMAID datasets under one heading', () => {
+    const panel = openNew()
+    const headings = [...panel.querySelectorAll('.dropdown__heading')].map(
+      (el) => el.textContent,
+    )
+    expect(headings.filter((text) => text?.startsWith('CATMAID'))).toEqual(['CATMAID'])
+    expect(groupOf(panel, 'FAFB')).toBe('CATMAID')
+    expect(groupOf(panel, 'L1')).toBe('CATMAID')
+  })
+
+  // The synthetic backend's node-name suffix is deliberately empty, so its heading comes from
+  // `DatasetBackend.heading` instead. Empty would be a group with no title at all.
+  it('still heads the synthetic group', () => {
+    expect(groupOf(openNew(), 'Demo Data')).toBe('Mock connectome')
   })
 
   it('keeps the datasets people start from and drops the specialist volumes', () => {

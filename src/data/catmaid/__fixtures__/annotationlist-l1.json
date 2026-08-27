@@ -1,0 +1,54 @@
+{
+  "skeletons": {
+    "4740178": {
+      "annotations": [
+        {
+          "uid": 12,
+          "id": 16821585
+        },
+        {
+          "uid": 88,
+          "id": 20015013
+        },
+        {
+          "uid": 88,
+          "id": 20017287
+        },
+        {
+          "uid": 56,
+          "id": 18999271
+        },
+        {
+          "uid": 74,
+          "id": 22165981
+        },
+        {
+          "uid": 166,
+          "id": 22212187
+        }
+      ]
+    }
+  },
+  "annotations": {
+    "20015013": "A1L Interneurons",
+    "18999271": "downstream of SCAN2B",
+    "20017287": "NB4-1",
+    "16821585": "Goro project akira",
+    "22212187": "sw;pairs;L",
+    "22165981": "mw A1 ds_dVNC",
+    "19785590": "Neuroblast Annotations"
+  },
+  "neuronnames": {
+    "4740178": "A05q_a1l"
+  },
+  "metaannotations": {
+    "20017287": {
+      "annotations": [
+        {
+          "uid": 88,
+          "id": 19785590
+        }
+      ]
+    }
+  }
+}

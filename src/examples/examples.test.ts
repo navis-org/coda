@@ -9,12 +9,12 @@ import { aggColumnName } from '../nodes/lib/tableOps'
 import { parseMarkdown } from '../ui/markdown'
 import { Scheduler } from '../core/scheduler'
 import { isMatrixValue, isTableValue } from '../core/values'
-import { MockSource } from '../data/mock/MockSource'
-import { CaveSource } from '../data/cave/CaveSource'
-import { NeuPrintSource } from '../data/neuprint/NeuPrintSource'
-import { registerSource, requireSource } from '../data/source'
+import { registerBuiltinSources } from '../data/builtins'
+import { requireSource } from '../data/source'
+import { L1_CATMAID_SOURCE_ID } from '../data/catmaid/registry'
 import '../nodes'
 import { EXAMPLES } from './index'
+import type { StarterSpec } from './starters'
 import { buildStarter } from './starters'
 
 /**
@@ -22,11 +22,14 @@ import { buildStarter } from './starters'
  * stops running, something in the engine, the node set, or the mock source regressed.
  */
 beforeAll(() => {
-  registerSource(new MockSource({ latencyMs: 0 }))
-  // Registered but never called: the starter only asks what this source *can* do, which is
-  // a synchronous capability read.
-  registerSource(new NeuPrintSource())
-  registerSource(new CaveSource())
+  /*
+   * The whole builtin set rather than a hand-listed subset, which is what this was until a
+   * starter began reading things off sources other than the mock — a capability for the
+   * Neuroglancer node, and now a neuron schema for `tagColumnFor`. Most of them are registered
+   * and never called; what matters is that the list cannot fall behind `builtins.ts`, which is
+   * the drift that file's own header exists to prevent.
+   */
+  registerBuiltinSources({ mockLatencyMs: 0 })
 })
 
 function scheduler(): Scheduler {
@@ -279,6 +282,38 @@ describe('starters', () => {
     )
     expect(warnings).toEqual([])
     expect(restored.nodes).toHaveLength(graph.nodes.length)
+  })
+
+  /*
+   * `tagColumn` is `optional`, and an optional picker never takes its declared default — empty
+   * is a choice there, which is what makes `out.scatter`'s `idColumn: ''` mean "row index".
+   * So a source publishing a free-form bag can only be opened on by *setting* the param, and
+   * nothing else in the suite would notice it silently going missing: the node draws fine, the
+   * graph runs fine, and the tags are simply absent.
+   */
+  const tagColumnOf = (starter: StarterSpec) =>
+    buildStarter(starter).nodes.find((n) => n.id === 'explore')?.params.tagColumn
+
+  it('opens CATMAID’s annotations as Additional tags, on both instances', () => {
+    expect(
+      tagColumnOf({ nodeType: 'dataset.catmaid.fafb', label: 'FAFB', sourceId: 'catmaid' }),
+    ).toBe('annotations')
+    expect(
+      tagColumnOf({
+        nodeType: 'dataset.catmaid.l1',
+        label: 'L1',
+        sourceId: L1_CATMAID_SOURCE_ID,
+      }),
+    ).toBe('annotations')
+  })
+
+  it('leaves it unset where the source publishes no such column', () => {
+    // Not `''` by accident and `'annotations'` by accident elsewhere: the neuPrint and mock
+    // schemas have no free-form bag, and naming a column they lack would draw an empty row.
+    expect(tagColumnOf(spec)).toBe('')
+    expect(
+      tagColumnOf({ nodeType: 'dataset.hemibrain', label: 'Hemibrain', sourceId: 'neuprint' }),
+    ).toBe('')
   })
 })
 

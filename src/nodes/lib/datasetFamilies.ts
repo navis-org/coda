@@ -27,6 +27,7 @@ import type { DatasetInfo } from '../../data/source'
  * it reads.
  */
 import { getSource } from '../../data/source'
+import { L1_CATMAID_SOURCE_ID } from '../../data/catmaid/registry'
 
 /**
  * The backends a dataset can be served by.
@@ -46,6 +47,16 @@ export interface DatasetBackend {
   id: string
   /** What goes in a node's name: `MaleCNS (neuPrint)`. Empty adds no suffix. */
   label: string
+  /**
+   * What a *menu group* of this backend's datasets is headed. Absent means `label`.
+   *
+   * Two fields because they answer two questions, and only the mock needs both: a node's name
+   * suffix must be empty there (`Demo Data (Mock)` is a name a rule produces and nobody checked),
+   * while a heading of `''` is a group with no title at all. The New menu used to reach past
+   * this and read a *source* label instead, which meant the heading of every group depended on
+   * which source a backend's first family happened to name.
+   */
+  heading?: string
   /**
    * Whether its dataset nodes take an Annotations socket.
    *
@@ -117,6 +128,7 @@ export const BACKENDS: Record<string, DatasetBackend> = {
   mock: {
     id: 'mock',
     label: '',
+    heading: 'Mock connectome',
   },
 }
 
@@ -249,8 +261,7 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     notebook: NEUPRINT_NOTEBOOK,
     family: 'hemibrain',
     label: 'Hemibrain',
-    description:
-      'Approximately half a central brain of an adult female fly.',
+    description: 'Approximately half a central brain of an adult female fly.',
     guide:
       'Approximately one hemisphere of the central brain (with bits of the right optic lobe). Rich annotations: cell type, class, cell body fibre, soma radius, hemilineage, etc.',
     glyph: 'brain',
@@ -322,7 +333,8 @@ const MOCK_FAMILIES: DatasetFamily[] = [
     // share link carry, and what the data actually is. Only the name shown changed.
     family: 'optic-lobe-mini',
     label: 'Demo Data',
-    description: 'Synthetic optic-lobe-like connectome generated in the browser. No token needed.',
+    description:
+      'Synthetic optic-lobe-like connectome generated in the browser. No token needed.',
     guide:
       'A synthetic optic lobe, generated in the browser with the columnar repetition a real one has. Nothing is fetched and no token is needed — it is deterministic from a seed, so a graph built on it gives the same answer on any machine. This is the dataset the bundled examples run on and the right place to try a pipeline before pointing it at a real volume.',
     glyph: 'optic',
@@ -349,8 +361,7 @@ const CAVE_FAMILIES: DatasetFamily[] = [
     backend: 'cave',
     family: 'flywire_fafb_public',
     label: 'FlyWire FAFB public',
-    description:
-      'Whole adult female fly brain (optic lobes + central brain).',
+    description: 'Whole adult female fly brain (optic lobes + central brain).',
     guide:
       'Public FlyWire segmentation read through CAVE, so version is a materialization number. Cell annotations download once per dataset and search locally—first query waits, rest are instant. Skeletons, meshes, synapses, paths and per-region counts are not wired up; nodes that need them decline rather than fail.',
     glyph: 'brain',
@@ -392,9 +403,15 @@ const CAVE_FAMILIES: DatasetFamily[] = [
  *
  * A CATMAID dataset is a **project**, and its id is the project's number as text — per-instance
  * rather than portable, because CATMAID is software rather than a service and there is no
- * cross-instance name to use. `1` is FAFB on Virtual Fly Brain's deployment and something else
- * on anyone's lab server; the *source* id carries which server, which is what keeps the two
- * apart. There is no version half, so `resolveDatasetId` takes the mock's branch.
+ * cross-instance name to use. There is no version half, so `resolveDatasetId` takes the mock's
+ * branch.
+ *
+ * **Both entries below are project `1`, and they are different connectomes.** One is FAFB on
+ * `catmaid-fafb.virtualflybrain.org` and the other a first-instar larval CNS on
+ * `l1em.catmaid.virtualflybrain.org` — the same organisation, two installations, and a project
+ * number that means nothing outside the one it was read from. What tells them apart is the
+ * `sourceId`, which is why this is the only backend whose families do not share one. A lab
+ * server's project 1 is a third thing again, and `Custom CATMAID` is where it goes.
  *
  * Neither exporter emits it. pymaid is the obvious Python route and `natverse`'s `catmaid` the R
  * one, but no emitter has been written for either, so both languages refuse rather than
@@ -418,6 +435,20 @@ const CATMAID_FAMILIES: DatasetFamily[] = [
     guide:
       'A few thousand hand-traced neurons on the same image volume as FlyWire. Hosted by the Virtual Fly Brain at https://catmaid-fafb.virtualflybrain.org/.',
     glyph: 'brain',
+  },
+  {
+    // `catmaid.l1` for `catmaid.fafb`'s reason: the key is a permanent flat namespace, and `l1`
+    // on its own names a developmental stage rather than a reconstruction of one.
+    key: 'catmaid.l1',
+    sourceId: L1_CATMAID_SOURCE_ID,
+    backend: 'catmaid',
+    family: '1',
+    label: 'L1',
+    description:
+      'Whole central nervous system of a first-instar fly larva. Published data hosted by VFB.',
+    guide:
+      'The larval connectome: 5,013 hand-traced neurons across the whole first-instar central nervous system, brain to abdominal neuromeres, hosted by Virtual Fly Brain at https://l1em.catmaid.virtualflybrain.org/. Unlike FAFB this instance meta-annotates nothing, so a neuron\u2019s type is its own name and its large bag of annotations shows as Additional tags.',
+    glyph: 'cns',
   },
 ]
 

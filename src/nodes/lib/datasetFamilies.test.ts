@@ -9,8 +9,8 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 
 import { DATASTACK_SPECS } from '../../data/cave/spec'
-import { MockSource } from '../../data/mock/MockSource'
-import { registerSource } from '../../data/source'
+import { registerBuiltinSources } from '../../data/builtins'
+import { getSource, requireSource } from '../../data/source'
 import {
   DEFAULT_SERVER,
   routesForServer,
@@ -29,9 +29,12 @@ import {
 } from './datasetFamilies'
 
 beforeAll(async () => {
-  const mock = registerSource(new MockSource({ latencyMs: 0 }))
-  // Populates the synchronous peek cache the version dropdown reads from.
-  await mock.listDatasets()
+  // The whole set rather than the mock alone, because the CATMAID families below assert that
+  // the source each names is one the app registers — which is a claim about `builtins.ts`.
+  registerBuiltinSources({ mockLatencyMs: 0 })
+  // Populates the synchronous peek cache the version dropdown reads from. On the instance
+  // `registerBuiltinSources` just put in place, not a second one built to hold a handle.
+  await requireSource('mock').listDatasets()
 })
 
 describe('compareVersions', () => {
@@ -99,6 +102,34 @@ describe('the family table', () => {
   it('is looked up by key', () => {
     expect(datasetFamily('malecns')?.family).toBe('male-cns')
     expect(datasetFamily('nope')).toBeUndefined()
+  })
+})
+
+/*
+ * CATMAID is the only backend whose families sit on more than one source, and the two of them
+ * are *both project 1*. Nothing else in the table can catch a `sourceId` copied from the row
+ * above: the family ids would still be distinct, the node types would still be distinct, and
+ * both nodes would quietly query FAFB — a wrong connectome under the right name, with no error
+ * anywhere. So the pairing is asserted rather than assumed.
+ */
+describe('CATMAID families', () => {
+  it('share a project id and must therefore not share a source', () => {
+    const catmaid = DATASET_FAMILIES.filter((f) => f.backend === 'catmaid')
+    expect(catmaid.map((f) => f.family)).toEqual(['1', '1'])
+    expect(new Set(catmaid.map((f) => f.sourceId)).size).toBe(catmaid.length)
+  })
+
+  it('name sources the app actually registers', () => {
+    // A family whose `sourceId` nothing registers has an empty version dropdown and publishes
+    // no dataset id, with nothing to say so — see `versionsFor`.
+    for (const family of DATASET_FAMILIES.filter((f) => f.backend === 'catmaid')) {
+      expect(getSource(family.sourceId), family.key).toBeDefined()
+    }
+    // The wire spelling, since it is what a saved graph carries and what a Custom node pointed
+    // at the same URL has to land on.
+    expect(datasetFamily('catmaid.l1')?.sourceId).toBe(
+      'catmaid:https://l1em.catmaid.virtualflybrain.org',
+    )
   })
 })
 
