@@ -32,7 +32,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { CaveSource } from './CaveSource'
 import { resetCredentials, setToken } from './credentials'
-import { datastackRecord, l2SourceFor, materializationsFor } from './datastack'
+import { caveServerFor, datastackRecord, l2SourceFor, materializationsFor } from './datastack'
+import { CAVE_MAX_ROWS, refuseIfCapped } from './client'
+import { countTable, queryTable, queryTableChecked, tableMetadata } from './api'
 import {
   resetCaveTables,
   tableColumnsFor,
@@ -453,5 +455,95 @@ describe.skipIf(!TOKEN)('CAVE, live — discovery', () => {
     resetCaveTables()
     const columns = await tableColumnsFor(DATASTACK, VERSION, 'proofread_neurons_view', 'view')
     expect(columns.map((c) => c.name)).toContain('pt_root_id')
+  }, 60_000)
+})
+
+/**
+ * BANC, and the two things a reference table is a live fact about.
+ *
+ * A different deployment on purpose — `cave.fanc-fly.com` rather than `prod.flywire-daf.com` —
+ * because that is the whole finding: the 500,000-row cap is a **per-deployment config value**,
+ * and a suite that only ever asked one server was what made `CAVE_MAX_ROWS` look like a constant.
+ * Both assertions here are about facts nobody publishes a contract for and neither is stable by
+ * construction: that this deployment does not truncate a two-million-row reply, and that a
+ * reference table's root id arrives from the join endpoint under an unsuffixed name.
+ */
+describe.skipIf(!TOKEN)('CAVE, live — a reference table on another deployment', () => {
+  const BANC = 'brain_and_nerve_cord_public'
+  /** The kind with the fewest rows, so a join query in a test stays a few hundred rows. */
+  const SMALL_KIND = 'fanc_1116_cell_type'
+  let server = ''
+  let version = 0
+
+  beforeAll(async () => {
+    setToken(TOKEN)
+    server = await caveServerFor(BANC)
+    // Newest first, and a bare integer — the same ordering the version dropdown reads.
+    version = (await materializationsFor(BANC))[0]!
+  }, 60_000)
+
+  it('reports codex_annotations as a reference table, which is what the join hangs on', async () => {
+    const metadata = await tableMetadata(server, BANC, version, 'codex_annotations')
+    expect(metadata.schema_type).toBe('cell_type_reference')
+    expect(metadata.reference_table).toBe('cell_representative_point')
+  }, 60_000)
+
+  it('holds more rows in one table than the cap Coda used to refuse at', async () => {
+    /*
+     * The bug, as a number. `count=true` on the whole table answers about two million, and the
+     * unfiltered read really does return all of them — so counting rows against `CAVE_MAX_ROWS`
+     * refused a *complete* answer, and told the user CAVE had truncated it.
+     */
+    const total = await countTable(server, BANC, version, { table: 'codex_annotations' })
+    expect(total).toBeGreaterThan(CAVE_MAX_ROWS)
+    expect(() => refuseIfCapped(total, total, 'codex_annotations', 'they would be short')).not.toThrow()
+  }, 120_000)
+
+  it('answers the root id bare from the join, and the base count matches the joined rows', async () => {
+    const query = {
+      table: 'codex_annotations',
+      filters: { equal: { classification_system: SMALL_KIND } },
+      columns: ['cell_type'],
+      reference: { table: 'cell_representative_point', columns: ['pt_root_id'] },
+    }
+    const [rows, total] = await Promise.all([
+      queryTable(server, BANC, version, query),
+      countTable(server, BANC, version, query),
+    ])
+    // And the same pair through the one function every read actually uses.
+    expect(await queryTableChecked(server, BANC, version, query, { consequence: 'x' })).toHaveLength(
+      rows.length,
+    )
+
+    // Unsuffixed: `suffix_map` renames only what collides, and nothing here does.
+    expect(Object.keys(rows[0]!)).toContain('pt_root_id')
+    expect(Object.keys(rows[0]!)).not.toContain('pt_root_id_ref')
+    // Text, not a number — invariant 8 across the join like anywhere else.
+    expect(String(rows[0]!.pt_root_id)).toMatch(/^\d{18}$/)
+
+    /*
+     * And the check itself: `count=true` is not honoured on the join endpoint, so `countTable`
+     * counts the **base** table. That is only a valid test if the join loses no rows — the
+     * foreign key the annotation service maintains says it should not, and this is what would
+     * notice if it stopped being true.
+     */
+    expect(rows).toHaveLength(total)
+    expect(() =>
+      refuseIfCapped(rows.length, total, 'codex_annotations', 'they would be short'),
+    ).not.toThrow()
+  }, 120_000)
+
+  it('refuses a column the reference table holds and this one does not', async () => {
+    /*
+     * The 500 that started this, kept as a live fact because the message is the whole reason the
+     * join is worth having: it names a column the user typed and no reason it should be wrong.
+     */
+    await expect(
+      queryTable(server, BANC, version, {
+        table: 'codex_annotations',
+        columns: ['pt_root_id', 'cell_type'],
+        limit: 1,
+      }),
+    ).rejects.toThrow(/pt_root_id not in model/)
   }, 60_000)
 })

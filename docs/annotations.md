@@ -320,11 +320,35 @@ through the `/dtable-server/` prefix — works with the route remembered as `pro
 
 It reads a table carrying a root id **directly**, wide or long — `pivotOn` turns a
 one-row-per-(neuron, kind, value) table into columns, reusing the per-kind split `CaveSource`
-already needed for the 500,000-row cap. FlyWire's `hierarchical_neuron_annotations` is *not* such
-a table: it is keyed by `target_id` into `proofread_neurons`, so reading it needs a join only the
-datastack's own spec knows how to write. That stays in `CaveSource` as the built-in, which is
-what a dataset uses when nothing is wired — and keeping it there is what lets this provider be
-about *tables* rather than about FlyWire.
+already needed to stay under a deployment's row cap. Measured on BANC's `codex_annotations`:
+1,994,371 rows across 32 `classification_system` values, the largest of them 158,265.
+
+**And it reads a table that has to be joined to find one**, which used to be the line and was
+drawn in the worst available place. A CAVE *reference* table — `cell_type_reference`, keyed by
+`target_id` into another table's `id` — carries no root id anywhere in it. The old provider did
+not decline such a table; it asked the server for `pt_root_id` and handed back
+`CAVE returned 500: pt_root_id not in model or models for codex_annotations`, which names a
+column the user typed and no reason it should be wrong. Now `read` asks the table's metadata for
+`reference_table` and, where there is one, issues the join query instead — see
+[backends.md](backends.md#a-reference-table-has-no-root-id-in-it-anywhere) for the three ways
+that endpoint differs. Nothing about it is FlyWire-specific, which is what keeps this provider
+about *tables*.
+
+`idColumn` needs no new spelling for it: on a reference table it simply names a column of the
+*referenced* table, which is the only place a root id exists. `pt_root_id` stays the default and
+stays correct.
+
+`CaveSource` still writes its own join for the built-in path, and **not** because it joins
+different tables. It does not: `flywire_fafb_public` is the only spec with an `annotations` block,
+and there the spec's `neurons.table` and `hierarchical_neuron_annotations`' `reference_table` are
+the same table — `proofread_neurons`. The real reason is cheaper than that. `buildIndex` has
+already read the neuron rows, because it needs them for the population list, so its `rootById`
+join is a Map over rows it is holding; routing it through `CaveReference` would buy a
+*server-side* join on every per-kind query to learn what is already in hand.
+
+Worth stating plainly, because the first version of this note claimed the two joined different
+tables on BANC and left the next person to either collapse the duplication on a false premise or
+preserve it for a reason that never applied.
 
 **`peekColumns` is synchronous and answers `undefined` until it knows**, the same contract
 `schemasFor` has and for the same reason. A wide table answers immediately from the ref; a long

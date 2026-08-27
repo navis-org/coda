@@ -32,7 +32,10 @@ import {
 } from './seaTable'
 import type { SeaTableConfig, SeaTableTable } from './seaTable'
 import type { CaveTableConfig } from './caveTable'
-import { pivotRows, resetCaveTableState, wideRows } from './caveTable'
+import { CAVE_TABLE_PROVIDER, pivotRows, resetCaveTableState, wideRows } from './caveTable'
+import { resetCaveState } from '../cave/tables'
+import type { CaveCall } from '../../test/caveStubs'
+import { setToken as setCaveToken, resetCredentials as resetCaveCredentials } from '../cave/credentials'
 import type { GoogleSheetConfig } from './googleSheet'
 import {
   GOOGLE_SHEET_PROVIDER,
@@ -85,6 +88,10 @@ beforeEach(() => {
   // and a peek that has already resolved cannot demonstrate what an unresolved one answers.
   resetSeaTableState()
   resetCaveTableState()
+  // The CAVE half memoises a datastack's server and a table's sampled columns too, and both
+  // outlive a test file otherwise.
+  resetCaveState()
+  setCaveToken('cave-token')
   resetGoogleSheetState()
   // Which route reached a host is module state too, and it is deliberately sticky in production.
   forgetSeaTableRoutes()
@@ -94,6 +101,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals()
   resetSeaTableCredentials()
+  resetCaveCredentials()
 })
 
 // ---------------------------------------------------------------------------
@@ -420,6 +428,180 @@ describe('what the CAVE table provider shapes', () => {
     expect(table.schema.columns.map((c) => c.name)).toEqual(['neuronId', 'type', 'type_2'])
     expect(table.data.type).toEqual(['LC4'])
     expect(table.data.type_2).toEqual(['interneuron'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+
+/**
+ * BANC's `codex_annotations`, which is the shape that broke both halves of this provider.
+ *
+ * Every number and every column name here is off the live services on the day this was written:
+ * `codex_annotations` is a `cell_type_reference` into `cell_representative_point`, holds
+ * 1,994,371 rows across 32 `classification_system` values, and carries no root id anywhere in
+ * it. The two failures it produced were `CAVE returned 500: pt_root_id not in model or models
+ * for codex_annotations` and — for the wide read, which does get an answer — a refusal claiming
+ * CAVE had truncated a table it had returned whole.
+ */
+describe('what a CAVE reference table needs', () => {
+  const DATASTACK = 'brain_and_nerve_cord_public'
+  const SERVER = 'https://cave.fanc-fly.com'
+  const config = (over: Partial<CaveTableConfig> = {}): CaveTableConfig => ({
+    dataset: `${DATASTACK}:888`,
+    table: 'codex_annotations',
+    idColumn: 'pt_root_id',
+    pivotOn: '',
+    valueColumn: '',
+    columns: '',
+    ...over,
+  })
+
+  /**
+   * One row of the join, as the server sends it.
+   *
+   * Two facts in three fields. The root id arrives **bare** — `pt_root_id`, not
+   * `pt_root_id_ref` — because `suffix_map` only renames what collides, which is what lets the
+   * pivot read the same key whether it joined or not. And `pt_supervoxel_id` is here unasked
+   * for: selecting any `*_root_id` returns the whole bound point. Both wide ids are text, which
+   * is what `parseCaveJson` has already made of them by the time this provider sees a row.
+   */
+  const joined = (rootId: string, value: string) => ({
+    pt_supervoxel_id: '75862867215530665',
+    pt_root_id: rootId,
+    cell_type: value,
+  })
+
+  /**
+   * BANC's routes, which `src/test/caveStubs.ts` deliberately does not carry.
+   *
+   * That module is the *discovery* subset against FlyWire v783, matched on fixed paths and
+   * answering fixed strings. Everything asserted below turns on what is in the request **body** —
+   * a join query against a count query against a `limit: 1` sample, all three on one path — so
+   * layering over it would mean answering by body through an interface that answers by URL.
+   * Named apart from `installCaveFetch` all the same: two same-named stubs behaving differently
+   * is how the shared one came to exist.
+   */
+  function installBancFetch(reference = 'cell_representative_point'): CaveCall[] {
+    const calls: CaveCall[] = []
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
+      const text = String(url)
+      const body = init?.body
+        ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+        : undefined
+      calls.push({ url: text, ...(body ? { body } : {}) })
+      const answer = (payload: unknown) =>
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          text: () => Promise.resolve(JSON.stringify(payload)),
+        } as Response)
+
+      if (text.includes('/info/api/v2/datastack/full/'))
+        return answer({ local_server: SERVER, aligned_volume: { name: 'brain_and_nerve_cord' } })
+      if (text.endsWith('/table/codex_annotations/metadata'))
+        return answer({
+          table_name: 'codex_annotations',
+          schema_type: 'cell_type_reference',
+          reference_table: reference,
+        })
+      if (text.includes('/unique_string_values'))
+        return answer({ classification_system: ['side', 'cell_class'] })
+      // A one-row sample, for the wide read that has to learn this table's own columns.
+      if (body?.limit === 1)
+        return answer([
+          { id: 1, valid: 't', target_id: 25908, classification_system: 'side', cell_type: 'L' },
+        ])
+      const rows = [joined('720575941626190282', 'L'), joined('720575941559989796', 'R')]
+      // The count is derived from the rows it is a count *of*, as `cave.test.ts`' stub argues at
+      // length: two hand-written numbers beside each other drift, and drifting into agreement is
+      // exactly the failure `refuseIfCapped` exists to catch.
+      if (text.includes('count=true')) return answer([{ count: rows.length }])
+      return answer(rows)
+    })
+    return calls
+  }
+
+  const provider = () => annotationProvider(CAVE_TABLE_PROVIDER)!
+
+  it('joins through the referenced table rather than asking a table for a column it has not got', async () => {
+    const calls = installBancFetch()
+    const table = await provider().fetch(
+      { provider: CAVE_TABLE_PROVIDER, config: config({ pivotOn: 'classification_system', valueColumn: 'cell_type' }) },
+      {},
+    )
+
+    const query = calls.find((c) => c.body?.tables)!
+    /*
+     * The join endpoint: no table in the path, `tables` in the body, and `select_column_map`
+     * rather than `select_columns` — the single-table spelling is rejected outright there, and
+     * the single-table *endpoint* is what answered the 500 that started this.
+     */
+    expect(query.url).toContain('/version/888/query?')
+    expect(query.url).not.toContain('/table/codex_annotations/query')
+    expect(query.body).toMatchObject({
+      tables: [
+        ['codex_annotations', 'target_id'],
+        ['cell_representative_point', 'id'],
+      ],
+      suffix_map: { codex_annotations: '', cell_representative_point: '_ref' },
+      select_column_map: {
+        codex_annotations: ['cell_type'],
+        cell_representative_point: ['pt_root_id'],
+      },
+    })
+    expect(query.body).not.toHaveProperty('select_columns')
+
+    // And the root id lands where every other read puts it, so nothing downstream can tell.
+    expect(table.data.neuronId).toEqual(['720575941626190282', '720575941559989796'])
+  })
+
+  it('counts the base table, because the join endpoint answers rows to count=true', async () => {
+    const calls = installBancFetch()
+    await provider().fetch(
+      { provider: CAVE_TABLE_PROVIDER, config: config({ pivotOn: 'classification_system', valueColumn: 'cell_type' }) },
+      {},
+    )
+    const counts = calls.filter((c) => c.url.includes('count=true'))
+    // One per kind, on the single-table path, carrying the read's own filter.
+    expect(counts).toHaveLength(2)
+    for (const count of counts) {
+      expect(count.url).toContain('/table/codex_annotations/query')
+      expect(count.body).toEqual({
+        filter_equal_dict: { codex_annotations: { classification_system: expect.any(String) } },
+      })
+    }
+  })
+
+  it('names its own columns for a wide read, since the map has to name both sides', async () => {
+    const calls = installBancFetch()
+    await provider().fetch({ provider: CAVE_TABLE_PROVIDER, config: config() }, {})
+
+    const query = calls.find((c) => c.body?.tables)!
+    /*
+     * "Everything but the id" cannot stay empty here. `select_column_map` naming one side drops
+     * the other's columns, and naming neither returns the whole join — `id_ref`, `created_ref`,
+     * `pt_position_x` and the rest offered to somebody as annotations. So the table's own set is
+     * sampled with a `limit: 1` query first.
+     */
+    expect(calls.some((c) => c.body?.limit === 1)).toBe(true)
+    expect(query.body?.select_column_map).toEqual({
+      codex_annotations: ['id', 'valid', 'target_id', 'classification_system', 'cell_type'],
+      cell_representative_point: ['pt_root_id'],
+    })
+  })
+
+  it('leaves a table that carries its own root id on the single-table path', async () => {
+    // The other half of the same rule: `reference_table` absent is not a reference table, and
+    // nothing about this read may change for one.
+    const calls = installBancFetch('')
+    await provider().fetch(
+      { provider: CAVE_TABLE_PROVIDER, config: config({ columns: 'cell_type' }) },
+      {},
+    )
+    const query = calls.find((c) => c.body?.select_columns)!
+    expect(query.url).toContain('/table/codex_annotations/query')
+    expect(query.body).toEqual({ select_columns: ['pt_root_id', 'cell_type'] })
+    expect(calls.some((c) => c.body?.tables)).toBe(false)
   })
 })
 

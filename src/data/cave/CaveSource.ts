@@ -71,10 +71,11 @@ import {
 } from './meshes'
 import { DEFAULT_TRIANGLE_BUDGET } from '../precomputed'
 import type { CaveRequestOptions, CaveRow } from './client'
-import { CaveError, refuseIfCapped } from './client'
+import type { DatastackInfo } from './api'
+import { CaveError } from './client'
 import {
   listDatastacks,
-  queryTable,
+  queryTableChecked,
   queryView,
   uniqueStringValues,
   versionsMetadata,
@@ -295,7 +296,7 @@ export class CaveSource implements DataSource {
     const versions = await versionsMetadata(info.local_server, spec.datastack, options)
     // The same filter the materialization dropdown applies — see `usableVersions`.
     return usableVersions(versions).map((v) =>
-      datasetInfoFor(spec, v.version, v.time_stamp, v.expires_on, info.viewer_site),
+      datasetInfoFor(spec, v.version, info, v.time_stamp, v.expires_on),
     )
   }
 
@@ -519,7 +520,7 @@ export class CaveSource implements DataSource {
     // Passed narrowed rather than read off `spec`, because `neurons` is optional now and a
     // method cannot inherit the caller's narrowing — a runtime guard here would be re-checking
     // something both call sites have already established.
-    const rows = await queryTable(
+    return queryTableChecked(
       server,
       spec.datastack,
       version,
@@ -527,10 +528,9 @@ export class CaveSource implements DataSource {
         table: neurons.table,
         columns: idsOnly ? [neurons.idColumn] : ['id', neurons.idColumn],
       },
+      { consequence: INCOMPLETE_INDEX },
       options,
     )
-    refuseIfCapped(rows.length, neurons.table, INCOMPLETE_INDEX)
-    return rows
   }
 
   /** The tail both paths share: the count the card reads, and the last progress tick. */
@@ -570,7 +570,7 @@ export class CaveSource implements DataSource {
     const { systems = [] } = this.state(spec.datastack)
     return Promise.all(
       systems.map(async (system) => {
-        const rows = await queryTable(
+        const rows = await queryTableChecked(
           server,
           spec.datastack,
           version,
@@ -579,9 +579,9 @@ export class CaveSource implements DataSource {
             filters: { equal: { [systemColumn]: system } },
             columns: [refColumn, valueColumn],
           },
+          { of: `${table} (${system})`, consequence: INCOMPLETE_INDEX },
           options,
         )
-        refuseIfCapped(rows.length, `${table} (${system})`, INCOMPLETE_INDEX)
         return [system, rows] as const
       }),
     )
@@ -772,7 +772,7 @@ export class CaveSource implements DataSource {
      * bound point, so the supervoxel id comes along and the transfer is about twice what the two
      * columns suggest. Measured rather than assumed, on Aedes.
      */
-    const rows = await queryTable(
+    const rows = await queryTableChecked(
       server,
       spec.datastack,
       version,
@@ -781,9 +781,9 @@ export class CaveSource implements DataSource {
         filters: { in: idFilters(synapses, ids) },
         columns: [synapses.preColumn, synapses.postColumn],
       },
+      { consequence: INCOMPLETE_EDGES },
       options,
     )
-    refuseIfCapped(rows.length, synapses.table, INCOMPLETE_EDGES)
 
     /*
      * Counted with a joined key rather than a nested map: a neuron id is decimal digits by
@@ -1081,7 +1081,8 @@ export class CaveSource implements DataSource {
     /*
      * `minWeight` is applied by the *server*, which is the only place it is worth anything: it is
      * the one filter that cuts the download, against a query whose only other backstop is
-     * `refuseIfCapped` at half a million rows. The same `atLeast` clause the connection view uses.
+     * `refuseIfCapped` — which refuses at whatever the *server* says this query holds, not at a
+     * number of ours. The same `atLeast` clause the connection view uses.
      * It reads the table's confidence column, so a source whose spec names none simply cannot
      * honour it — and says nothing, because the node's default of 1 excludes nothing anyway.
      */
@@ -1091,7 +1092,7 @@ export class CaveSource implements DataSource {
     const perSide = await Promise.all(
       sides.map(async (side) => {
         const column = side === 'pre' ? synapses.preColumn : synapses.postColumn
-        const rows = await queryTable(
+        const rows = await queryTableChecked(
           server,
           spec.datastack,
           version,
@@ -1104,9 +1105,9 @@ export class CaveSource implements DataSource {
             columns,
             resolution: NANOMETRES,
           },
+          { of: `${synapses.table} (${side})`, consequence: INCOMPLETE_INDEX },
           req.signal ? { signal: req.signal } : {},
         )
-        refuseIfCapped(rows.length, `${synapses.table} (${side})`, INCOMPLETE_INDEX)
         return [side, rows] as const
       }),
     )
@@ -1465,20 +1466,65 @@ function synapsePoints(
   }
 }
 
+/**
+ * Which of a datastack's tables Coda reads, appended to the publisher's own blurb.
+ *
+ * **A CAVE datastack does not describe its own roles** — `spec.ts` says why at length — so the
+ * four bindings are Coda's editorial decision, taken in a source file the user cannot see. Every
+ * other backend's roles are self-evident from the data; here, "why are there no cell types on
+ * BANC?" had no answer anywhere in the app, and the honest one is "because no annotation table is
+ * configured for it".
+ *
+ * **Marked as Coda's, because the paragraph above it is not.** The Description card exists to
+ * carry the *publisher's* text, and a reader has no other way to tell where the quotation stops.
+ *
+ * **An unbound role is a line, not an omission.** That is the whole point: a missing annotation
+ * table is exactly the thing somebody is looking for an explanation of, and a list that silently
+ * skipped it would answer the easy question and not the one being asked.
+ *
+ * Base markdown only — `**` and backticks. `parseMarkdown`'s extended kinds are opt-in and this
+ * text renders through the same path as a blurb from whatever deployment a Custom node points at.
+ */
+function codaReads(spec: DatastackSpec, info: DatastackInfo): string {
+  const rows = [
+    `- Neurons — ${spec.neurons ? `\`${spec.neurons.table}\`` : 'no table; an annotation source wired to the dataset is the neuron list'}`,
+    `- Annotations — ${spec.annotations ? `\`${spec.annotations.table}\`` : 'none configured; wire an annotation source for cell types'}`,
+  ]
+  // The same precedence `synapsesFor` applies, said in the same order: the spec wins, then the
+  // datastack's own declaration — which is what makes 7 of the 13 work with no configuration.
+  const synapses = spec.synapses?.table ?? info.synapse_table ?? undefined
+  rows.push(
+    `- Connectivity — ${
+      spec.connections
+        ? `\`${spec.connections.view}\` (a view, aggregated server-side)`
+        : synapses
+          ? `counted from \`${synapses}\`, since this datastack publishes no roll-up view`
+          : 'unavailable: no roll-up view and no synapse table'
+    }`,
+    `- Synapses — ${synapses ? `\`${synapses}\`` : 'none published'}`,
+  )
+  return `**Coda reads this datastack as:**\n\n${rows.join('\n')}`
+}
+
 function datasetInfoFor(
   spec: DatastackSpec,
   version: number,
+  info: DatastackInfo,
   timestamp?: string,
   expires?: string,
-  viewerSite?: string,
 ): DatasetInfo {
   const dated = timestamp ? ` materialized ${timestamp.slice(0, 10)}` : ''
   const ends = expires ? `, expires ${expires.slice(0, 10)}` : ''
+  const viewerSite = info.viewer_site
   return {
     id: datasetIdFor(spec.datastack, version),
     label: `${spec.label} ${version}`,
-    description: `${spec.description}\n\nMaterialization ${version}${dated}${ends}.`,
-    species: 'Drosophila melanogaster',
+    description:
+      `${spec.description}\n\nMaterialization ${version}${dated}${ends}.` +
+      `\n\n${codaReads(spec, info)}`,
+    // Absent where the spec names none, which a hand-named datastack cannot. Optional on
+    // `DatasetInfo` for exactly that, so the card leaves the row off rather than guessing.
+    ...(spec.species ? { species: spec.species } : {}),
     // No neuropil regions: FlyWire's are annotations on synapses rather than a published region
     // set, so every ROI-shaped control correctly finds nothing to offer.
     rois: [],

@@ -396,9 +396,16 @@ FlyWire that is 139,255 rows over six queries.
 specific piece of `src/data/cave` or `src/data/annotations`. Two
 rules came across that produce a plausible wrong table rather than an error, and both are
 transcribed rather than reinvented: the annotation table is read **one kind at a time** (the whole
-of `hierarchical_neuron_annotations` is over CAVE's 500,000-row cap, which the server applies by
-*truncating*), and a chained source **wins a collision falling back to the earlier one where it
-has no value** — a coalesce rather than a replace.
+of `hierarchical_neuron_annotations` is over FlyWire's deployment's row cap, which the server
+applies by *truncating*), and a chained source **wins a collision falling back to the earlier one
+where it has no value** — a coalesce rather than a replace.
+
+**`coda_cave_table` merges a reference table and `coda_cave_neurons` does not**, which is the same
+split the app draws: the neuron path joins through the datastack spec's neuron table, a fact the
+metadata does not hold, while the table path joins through whatever `reference_table` names —
+which is exactly what `merge_reference` reads. The reservation `coda_cave_neurons` records about
+not having verified that call is discharged for the table path: it is run against BANC's
+`codex_annotations` and produces the same 158,250 × 33 frame the app does.
 
 **The discovery pair carries three things that were read off caveclient 8.2.1 by *running* it,
 not by reading the annotations.** `get_views` is annotated `-> list[str]` and returns a **dict**

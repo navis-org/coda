@@ -266,12 +266,54 @@ eighteen-digit id in `filter_in_dict`** and answers identically to an unquoted o
 out as text and come back as text, and no number is ever formed on either side. Had it not, the
 request body would have needed the mirror image of the same rewrite.
 
-### The 500,000-row cap, and why counting is the only tell
+### The row cap is a per-deployment number, and counting is the only tell
 
-The materialization engine truncates a result at 500,000 rows and says so in a `warning`
-header — which its `Access-Control-Expose-Headers` does **not** list, so a browser cannot read
-it. Truncation is therefore detected by counting, and refused rather than returned: a short
-index is not a visible failure, it is a dataset that silently lacks neurons.
+The materialization engine truncates a result and says so in a `warning` header — which its
+`Access-Control-Expose-Headers` does **not** list, so a browser cannot read it. Truncation is
+therefore detected by counting, and refused rather than returned: a short index is not a visible
+failure, it is a dataset that silently lacks neurons.
+
+**What it counts *against* is the part that was wrong for a year.** The number is
+`QUERY_LIMIT_SIZE`, the engine's own config, defaulting to 200,000 and set per deployment — not
+a property of CAVE. Measured the same day with the same request shape:
+
+```text
+deployment              table                              rows back    warning header
+prod.flywire-daf.com    hierarchical_neuron_annotations      500,000    201 - "Limited query to 500000 rows
+cave.fanc-fly.com       codex_annotations                  1,994,371    (none)
+```
+
+So `CAVE_MAX_ROWS = 500_000` describes FlyWire's deployment and nothing else, and comparing row
+counts against it did both halves of the wrong thing. It was written `rows >= CAVE_MAX_ROWS`,
+which refused BANC's **complete** two-million-row `codex_annotations` for being *larger* than a
+cap that server does not apply — reporting it to the user as CAVE having truncated the table. And
+even spelled `===`, as this file and `limits.md` both described it, it waves through a genuinely
+truncated read on any deployment configured below 500,000.
+
+**The honest test is the server's own `COUNT` of the same query.** `countTable` posts the read's
+filters to the single-table query endpoint under `?count=true`, and `refuseIfCapped` refuses when
+fewer rows came back than the count. `queryTableCounted` issues the two **concurrently**, so the
+check costs no wall clock: on every call site the count is the faster by an order of magnitude.
+A count that fails is not a read that fails — it degrades to `undefined` and the old
+exactly-the-cap tell, which is no worse than what it replaced.
+
+**Only the filters go into a count body.** Columns and resolutions describe a shape a count does
+not have, and a `limit` would make the count agree with a deliberately short read by
+construction.
+
+**Cheap only where the query is**, which is why nothing counts a view and every call site is
+either filtered or reading a table the browser was going to download anyway. Measured:
+
+```text
+count query                                                   time
+synapses_nt_v1 filtered to one root id                        0.6 s
+codex_annotations, whole table (1,994,371 rows)               0.7 s
+synapses_nt_v1, unfiltered (~130M rows)                     > 180 s   (times out)
+valid_connection_v2 — an aggregating view                   > 300 s   (times out)
+```
+
+That last pair is the same finding `tables.ts` records for `limit` not pushing down into an
+aggregating view, arrived at from the other direction.
 
 **`hierarchical_neuron_annotations` is over the cap**, which is why the index reads it **one
 `classification_system` at a time** — five queries of 17k to 139k rows instead of one that comes
@@ -295,11 +337,15 @@ version-independent and counts the table as it stands. Probed against v783:
 table                            materialize   annotation   what a query yields
 nuclei_v1                            143,140      143,140
 proofread_neurons                    127,978      139,540    139,255 distinct root ids
-hierarchical_neuron_annotations      377,699      512,957    over the 500,000-row cap
+hierarchical_neuron_annotations      377,699      512,957    500,000 — truncated
 ```
 
-So the annotation count *is* the one that predicts truncation, and the tell above was not "this
-endpoint counts something else" but "this is not the endpoint that answers that question".
+So the tell above was not "this endpoint counts something else" but "this is not the endpoint
+that answers that question" — and *neither* of these two is either. A `count=true` query is a
+third number, and the only one that predicts truncation: 512,957 and 139,255 for the two rows
+above. That is what `refuseIfCapped` checks against, and reaching for the cheap precomputed
+`materializedCount` instead would undercount every table and wave a truncated read straight
+through.
 caveclient spells the difference as two methods on two sub-clients — `materialize.
 get_annotation_count` and `annotation.get_annotation_count` — which is the clearest statement of
 it anyone has written down. Neither is wrong; showing one of them without saying which it is, is.
@@ -316,11 +362,69 @@ annotation tables with no privileged one — `flywire_fafb_public` publishes six
 schema types (`representative_point`, `cell_type_reference`) describe the shape of a row, not
 the role of the table.
 
+### A reference table has no root id in it anywhere
+
+`cell_type_reference` is the second table shape, and the difference is not cosmetic: such a table
+annotates *another table* rather than the segmentation. Its rows carry `target_id` into the
+target's `id`, and the root id lives over there. BANC's `codex_annotations` references
+`cell_representative_point`; FlyWire's `hierarchical_neuron_annotations` references
+`proofread_neurons`.
+
+Reading one without the join is not merely incomplete — it is a **500**, because `select_columns`
+is validated against the table's own model:
+
+```text
+POST .../table/codex_annotations/query   {"select_columns": ["pt_root_id", "cell_type"]}
+  →  500  pt_root_id not in model or models for codex_annotations
+```
+
+So a reference read goes to the **join** endpoint, which is the same v3 path with no table name
+in it and `tables` in the body. `CaveReference` on a `CaveQuery` is what switches it, and the
+endpoint differs in three ways that are each a silent wrong answer rather than an error:
+
+1. It takes `select_column_map` and **only** the map, where the single-table endpoint takes
+   `select_columns` and only the list — each rejects the other outright. And naming one side of
+   the map **drops the other side's columns entirely** rather than defaulting them, so a caller
+   that cannot name its own columns has to ask for the whole join instead. That is why a wide
+   read of a reference table samples the table's own column set with a `limit: 1` query first;
+   without it, `id_ref`, `created_ref` and `pt_position_x` are offered to somebody as annotations.
+2. `suffix_map` decides what collides, and a name only one side has arrives **bare** —
+   `pt_root_id`, not `pt_root_id_ref` — which is what lets the same shaper read the row either
+   way.
+3. **`count=true` is not honoured on it**: it answers rows. `countTable` therefore counts the
+   *base* table, which is exact because the join is many-to-one on a foreign key the annotation
+   service maintains. Checked rather than assumed — all five BANC kinds probed returned join rows
+   equal to the base count to the row, and `live.test.ts` is what would notice if that changed.
+
+`caveclient` does the same thing under the name `merge_reference`, reading `reference_table` off
+the metadata and switching to the join. That is why a table Coda refused answers fine in Python,
+and the discrepancy is worth recognising: it is not a permissions or version difference.
+
+`CaveSource` still writes its own join for the built-in path, and that is not duplication — but
+not for the reason it first looks. The two do **not** join different tables: `flywire_fafb_public`
+is the only spec with an `annotations` block, and there its `neurons.table` and
+`hierarchical_neuron_annotations`' `reference_table` are the same table, `proofread_neurons`. What
+keeps them apart is cost. `buildIndex` has already read the neuron rows for the population list,
+so its `rootById` join is a Map over rows it is holding, where routing it through `CaveReference`
+would buy a server-side join on each per-kind query to learn what is already in hand.
+
+### A datastack still does not describe itself
+
 So `spec.ts` holds one entry per datastack, static for the reason `datasetFamilies.ts` is
 static, and it is a deliberately faithful port of the idea `connecto` arrived at in Python for
 the same problem. **A datastack with no entry is not offered** — the info service lists thirteen
 and most would fail on the first Run, and a dataset that appears in the picker and then fails is
 worse than one that is absent.
+
+**And the four bindings are shown to the user**, appended to the publisher's blurb on the
+Description card as "Coda reads this datastack as:" — because a decision taken in this file is
+otherwise visible nowhere in the app, and "why are there no cell types on BANC?" had no answer.
+An unbound role gets a line saying so rather than being left out. See
+[datasets.md](datasets.md#attribution-the-description-companion).
+
+**`species` is on the spec too**, and used to be `'Drosophila melanogaster'` hardcoded in
+`datasetInfoFor` — which was true while FlyWire was the only entry and made Dataset Summary
+describe `minnie65_public`'s mouse visual cortex as a fly.
 
 **Connectivity prefers that view and falls back to counting synapses**, which is `connecto`'s
 shape and arrived at for its reason. `valid_connection_v2` is the server having done the
@@ -339,8 +443,8 @@ in 1.1 s and 111 kB and collapse to 508 partners.
 Two things about the synapse path were established live rather than assumed. **`select_columns`
 sends more than it is asked for** — naming a `*_pt_root_id` returns the whole bound point, so the
 supervoxel id rides along and the transfer is about twice what two columns suggest. And
-**`refuseIfCapped` is the real bound**: a hub neuron or a large seed set can reach the 500,000-row
-truncation, where the view path is one row per pair and cannot.
+**`refuseIfCapped` is the real bound**: a hub neuron or a large seed set can reach whatever the
+deployment truncates at, where the view path is one row per pair and cannot.
 
 **Which synapse table is three answers in order, and the order matters.** A configured
 `spec.synapses` wins, because it can name a curated table and the column that scores it —

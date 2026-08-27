@@ -116,6 +116,20 @@ export interface DatastackSpec {
   label: string
   description: string
   /**
+   * What was imaged, for `DatasetInfo.species` and the one line of Dataset Summary that shows it.
+   *
+   * Per datastack rather than a constant, because it was a constant — `'Drosophila melanogaster'`
+   * hardcoded in `datasetInfoFor` back when FlyWire was the only entry. Adding `minnie65_public`
+   * made the card describe a mouse visual cortex volume as a fly, which is the shape of error a
+   * hardcoded field always eventually takes: silent, confident, and only wrong for the entries
+   * added after it.
+   *
+   * Optional, and absent means *unknown* rather than unspecified — a hand-named datastack has
+   * nobody to ask, and `DatasetInfo.species` is optional precisely so a card can leave the row
+   * off instead of guessing.
+   */
+  species?: string
+  /**
    * The table listing which neurons exist, if the datastack publishes one.
    *
    * **Optional, and its absence is a real configuration rather than a gap.** Not every datastack
@@ -152,6 +166,7 @@ export interface DatastackSpec {
 export const DATASTACK_SPECS: readonly DatastackSpec[] = [
   {
     datastack: 'flywire_fafb_public',
+    species: 'Drosophila melanogaster',
     label: 'FlyWire FAFB (public)',
     description:
       'The public FlyWire segmentation of a whole adult female fly brain (FAFB), with the ' +
@@ -179,6 +194,37 @@ export const DATASTACK_SPECS: readonly DatastackSpec[] = [
       postColumn: 'post_pt_root_id',
       positionColumn: 'pre_pt_position',
       scoreColumn: 'cleft_score',
+    },
+  },
+  {
+    datastack: 'brain_and_nerve_cord_public',
+    species: 'Drosophila melanogaster',
+    label: 'BANC (public)',
+    description:
+      'The BANC (pronounced "bank") is the Brain And Nerve Cord, a GridTape transmission ' +
+      'electron microscopy dataset of a female adult Drosophila melanogaster’s entire ' +
+      'central nervous system. Visit https://banc.community for more information.',
+    neurons: { table: 'backbone_proofread', idColumn: 'pt_root_id' },
+    synapses: {
+      table: 'synapses_v3',
+      preColumn: 'pre_pt_root_id',
+      postColumn: 'post_pt_root_id',
+      positionColumn: 'ctr_pt_position',
+    },
+  },
+  {
+    datastack: 'minnie65_public',
+    species: 'Mus musculus',
+    label: 'MICrONS Minnie65 (public)',
+    description:
+      'The public MICrONS Minnie65 segmentation of a mouse visual cortex volume.\n' +
+      'This is the second alignment of the IARPA "minnie65" dataset, completed in the spring of 2020 that used the seamless approach.',
+    neurons: { table: 'proofreading_status_and_strategy', idColumn: 'pt_root_id' },
+    synapses: {
+      table: 'synapses_pni_2',
+      preColumn: 'pre_pt_root_id',
+      postColumn: 'post_pt_root_id',
+      positionColumn: 'ctr_pt_position',
     },
   },
 ]

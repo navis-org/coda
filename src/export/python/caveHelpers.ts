@@ -177,15 +177,18 @@ registerHelper({
  *
  * **The annotation table is read one kind at a time.** FlyWire's
  * `hierarchical_neuron_annotations` is long — one row per (neuron, kind, value) — and the whole
- * table is over CAVE's 500,000-row result cap, which the server applies by **truncating** rather
+ * table is over FlyWire's deployment's result cap, which the server applies by **truncating** rather
  * than failing. Filtered by kind the largest is 139,255. `get_unique_string_values` is what makes
  * the split free: it is a 52 kB call that names the kinds without reading the table.
  *
- * **The join back is written out rather than left to `merge_reference`.** caveclient will merge a
- * reference table with its target for you, and that is very likely the tidier call — but it was
- * not verified against a live datastack here, and a silently different frame is exactly the class
- * of thing this exporter refuses to guess at. `merge_reference=False` asks for the raw table, and
- * the merge below is the join Coda performs itself.
+ * **The join back is written out rather than left to `merge_reference`**, where its sibling
+ * `coda_cave_table` uses the call. Not a disagreement: this one already has the neuron frame in
+ * hand — it read it for the population list — so merging on it is a pandas join over rows it is
+ * holding, where `merge_reference` would buy a *server-side* join on each of the per-kind
+ * queries to learn what is already there. `CaveSource.buildIndex` splits the same way for the
+ * same reason. (Note the two do not join different tables: `flywire_fafb_public` is the only spec
+ * with an `annotations` block, and there `proofread_neurons` is both the spec's neuron table and
+ * `hierarchical_neuron_annotations`' `reference_table`.)
  */
 registerHelper({
   name: 'coda_cave_neurons',
@@ -245,6 +248,22 @@ registerHelper({
  * *input* shape, so folding them is the operation rather than a dedupe on top of it — while a
  * wide table keyed by a point genuinely carries two rows where a segment holds two nuclei, and
  * that is a fact about somebody's data worth seeing on a Table node.
+ *
+ * **This one *does* use `merge_reference`, where `coda_cave_neurons` above does not**, and the
+ * two are not in tension. That one joins through the datastack spec's neuron table, which is a
+ * fact the spec holds and the metadata does not. This one joins through whatever
+ * `reference_table` names, which is the same thing `merge_reference` reads — so writing the
+ * merge out by hand here would be reimplementing the call rather than avoiding a guess. The
+ * reservation the helper above records is discharged: it is verified against a live datastack
+ * now, on BANC's `codex_annotations`, a `cell_type_reference` into `cell_representative_point`
+ * that answers a 500 for `pt_root_id` without the join.
+ *
+ * Two details the join forces, both of which produce a plausible wrong frame rather than an
+ * error. `select_columns` has to become the table-keyed **map** and name *both* sides — naming
+ * one drops the other's columns — which is why a wide read with no `columns` samples the table's
+ * own set with `limit=1` first. And the join sends `pt_supervoxel_id` along with any root id, so
+ * every branch narrows to what it asked for; without that the per-kind outer merge collides on
+ * it and pandas suffixes `_x`/`_y` across every kind.
  */
 registerHelper({
   name: 'coda_cave_table',
@@ -260,6 +279,18 @@ registerHelper({
     '    value_column=None,',
     '):',
     '    """A CAVE annotation table as a Coda neuron table."""',
+    '    # A reference table carries `target_id` and no root id anywhere in it, so asking this',
+    '    # table for one is a 500: the root id lives on the table it references, and `id_column`',
+    "    # names a column over there. `merge_reference` is caveclient's name for that join.",
+    "    reference = client.materialize.get_table_metadata(table).get('reference_table') or None",
+    '',
+    '    def select(own):',
+    '        # The join takes the table-keyed map and needs *both* sides named; it rejects a',
+    '        # plain list, and a single-table query rejects the map.',
+    '        if reference:',
+    '            return {table: list(own), reference: [id_column]}',
+    '        return [id_column] + list(own)',
+    '',
     '    if pivot_on:',
     '        kinds = client.materialize.get_unique_string_values(table).get(pivot_on, [])',
     '        wide = None',
@@ -267,20 +298,31 @@ registerHelper({
     '            rows = client.materialize.query_table(',
     '                table,',
     '                filter_equal_dict={pivot_on: kind},',
-    '                select_columns=[id_column, value_column],',
-    '                merge_reference=False,',
+    '                select_columns=select([value_column]),',
+    '                merge_reference=bool(reference),',
     '            )',
     "            rows = rows.drop_duplicates(subset=[id_column], keep='first')",
-    '            rows = rows.rename(columns={value_column: kind})',
+    '            # Narrowed before the merge: the join sends `pt_supervoxel_id` along with any',
+    '            # root id, and merging on the id alone would collide on it once per kind.',
+    '            rows = rows.rename(columns={value_column: kind})[[id_column, kind]]',
     "            wide = rows if wide is None else wide.merge(rows, on=id_column, how='outer')",
     '        out = wide if wide is not None else pd.DataFrame({id_column: []})',
     '    else:',
-    '        select = [id_column] + list(columns) if columns else None',
+    '        own = list(columns) if columns else None',
+    '        if reference and not own:',
+    '            # "Everything but the id" cannot stay implicit across a join, since the map has',
+    '            # to name both sides. One row is all it takes to read the column set.',
+    '            sample = client.materialize.query_table(',
+    '                table, limit=1, merge_reference=False',
+    '            )',
+    '            own = [c for c in sample.columns if c != id_column]',
     '        out = client.materialize.query_table(',
-    '            table, select_columns=select, merge_reference=False',
+    '            table,',
+    '            select_columns=select(own) if own else None,',
+    '            merge_reference=bool(reference),',
     '        )',
-    '        if columns:',
-    '            out = out[[id_column] + [c for c in columns if c in out.columns]]',
+    '        if own:',
+    '            out = out[[id_column] + [c for c in own if c in out.columns]]',
     '    return coda_annotation_columns(out, id_column)',
   ],
 })
@@ -522,7 +564,9 @@ registerHelper({
  * `client.materialize.get_annotation_count` counts what this materialization froze. Against
  * `flywire_fafb_public` v783, `proofread_neurons` is **139,540** live and **127,978** in v783,
  * and `hierarchical_neuron_annotations` is 512,957 against 377,699. The live one is the one that
- * predicts truncation at the 500,000-row cap. Printing one of them without saying which is what
+ * is closest to what a query returns, but **neither is it**: a `count=true` query answers 512,957
+ * and 139,255 respectively, which is the number `refuseIfCapped` actually checks against. This
+ * card shows the two the card is about. Printing one of them without saying which is what
  * `docs/backends.md` records as having cost a debugging round trip.
  *
  * **`split_positions=True` is what makes this agree with Coda.** caveclient's default folds a

@@ -25,8 +25,7 @@ import type { CodaType } from '../../core/types'
 import type { TableValue, Value } from '../../core/values'
 import { resetCache } from '../../data/cache'
 import { resetCredentials, setToken } from '../../data/cave/credentials'
-import { resetDatastackRecords } from '../../data/cave/datastack'
-import { resetCaveTables, tableListFor } from '../../data/cave/tables'
+import { resetCaveState, tableListFor } from '../../data/cave/tables'
 import { installCaveFetch } from '../../test/caveStubs'
 import '../index'
 
@@ -74,8 +73,7 @@ function issues(type: string, params: ParamValues, dataset?: CodaType): string[]
 
 beforeEach(() => {
   resetCache()
-  resetDatastackRecords()
-  resetCaveTables()
+  resetCaveState()
   resetCredentials()
   setToken('token')
 })

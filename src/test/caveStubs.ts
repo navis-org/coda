@@ -39,10 +39,16 @@ export interface CaveStubOptions {
   counts?: readonly [number, number]
 }
 
-/** Every URL the stub was asked for, in order, with any JSON body that was posted. */
+/**
+ * Every URL the stub was asked for, in order, with any JSON body that was posted.
+ *
+ * The body is typed as a record rather than `unknown` because every CAVE POST body is a JSON
+ * object, and a suite asserting *which* request was built — a `select_columns` list against a
+ * `select_column_map`, a filtered count against an unfiltered one — has to index it.
+ */
 export interface CaveCall {
   url: string
-  body?: unknown
+  body?: Record<string, unknown>
 }
 
 export function installCaveFetch(options: CaveStubOptions = {}): CaveCall[] {
@@ -51,7 +57,9 @@ export function installCaveFetch(options: CaveStubOptions = {}): CaveCall[] {
 
   vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
     const text = String(url)
-    const body = init?.body ? JSON.parse(String(init.body)) : undefined
+    const body = init?.body
+      ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+      : undefined
     calls.push({ url: text, ...(body ? { body } : {}) })
     const answer = (payload: string) =>
       Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(payload) } as Response)

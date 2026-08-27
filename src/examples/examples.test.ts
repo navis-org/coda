@@ -283,6 +283,88 @@ describe('starters', () => {
 })
 
 /**
+ * BANC opts out too, and differently — see `bancStarter` in `starters.ts`.
+ *
+ * Same problem as FlyWire's, much smaller answer: a CAVE datastack keeps its cell typing in a
+ * table, so the generic four nodes open on a list of root ids. BANC's labels are already *in* the
+ * datastack, so one CAVE table node is the whole chain — which is why this starter is composed
+ * from `genericStarter` rather than written out. These tests are what says the composition still
+ * produces the generic half.
+ */
+describe('the BANC starter', () => {
+  const spec = { nodeType: 'dataset.banc', label: 'BANC public', sourceId: 'cave' }
+
+  it('builds clean, and the reference edge is not a cycle', () => {
+    const graph = buildStarter(spec)
+    const issues = Object.entries(inferGraph(graph).nodes).flatMap(([nodeId, node]) =>
+      node.issues.map((i) => `${nodeId}: ${i.severity}: ${i.message}`),
+    )
+    // Pinned empty, unlike FlyWire's: nothing here waits on a fetch to know its columns, because
+    // the CAVE table's kinds come from `unique_string_values` rather than from a run.
+    expect(issues).toEqual([])
+    expect(inferGraph(graph).ok).toBe(true)
+
+    /*
+     * Two edges between one pair in opposite directions, which at node granularity looks like a
+     * cycle and is not: the CAVE table reads the datastack's *identity*, which is a function of
+     * the dataset node's params alone. `topoSort` sees only the dataflow half.
+     */
+    expect(topoSort(graph).cyclic).toEqual([])
+  })
+
+  it('feeds the dataset its labels from the datastack’s own table', () => {
+    const graph = buildStarter(spec)
+    const into = (target: string, handle: string) =>
+      graph.edges.find((e) => e.target === target && e.targetHandle === handle)
+
+    expect(into('dataset', 'annotations')?.source).toBe('annotations')
+    expect(into('annotations', 'dataset')?.source).toBe('dataset')
+
+    /*
+     * `codex_annotations` is long-format — one row per (neuron, kind, value) — so `pivotOn` is
+     * the whole configuration: the distinct values of `classification_system` become the columns,
+     * and `cell_type` arrives renamed to `type`, which is the name Explore's chips, the
+     * connectivity tables and Profile's roll-ups all address by literal.
+     */
+    const table = graph.nodes.find((n) => n.id === 'annotations')!
+    expect(table.params.table).toBe('codex_annotations')
+    expect(table.params.pivotOn).toBe('classification_system')
+    expect(table.params.valueColumn).toBe('cell_type')
+    // Left at its default even though on a reference table it names a column of the *referenced*
+    // table: same field, same default, and overriding it would suggest it had to differ.
+    expect(table.params.idColumn).toBe('pt_root_id')
+  })
+
+  it('keeps the generic half it composes from', () => {
+    // The point of composing rather than copying. Everything downstream of the dataset is the
+    // generic starter's, and a copy would only ever *happen* to still agree with it.
+    const banc = buildStarter(spec)
+    const generic = buildStarter({ ...spec, nodeType: 'dataset.malecns', sourceId: 'neuprint' })
+    /*
+     * Between the four nodes the generic shape names, and only those. The Description companion
+     * is excluded because `addNodeWithCompanion` mints its id, so two builds of one starter do
+     * not agree on it — which is a fact about companions rather than about this comparison.
+     */
+    const GENERIC = new Set(['dataset', 'explore', 'picked', 'ngl'])
+    const shape = (graph: ReturnType<typeof buildStarter>) =>
+      graph.edges
+        .filter((e) => GENERIC.has(e.source) && GENERIC.has(e.target))
+        .map((e) => `${e.source}.${e.sourceHandle}→${e.target}.${e.targetHandle}`)
+        .sort()
+    expect(shape(banc)).toEqual(shape(generic))
+  })
+
+  it('opens with nothing browsed to and nothing ticked', () => {
+    // `page` and `selection` are written by the Explore *widget*, so a starter carrying either
+    // ships whoever exported the graph's browsing position. The attached graph this was built
+    // from carried `page: 15`.
+    const explore = buildStarter(spec).nodes.find((n) => n.id === 'explore')!
+    expect(explore.params.page).toBe(0)
+    expect(explore.params.selection).toEqual([])
+  })
+})
+
+/**
  * FlyWire FAFB opts out of the generic shape — see `BESPOKE` in `starters.ts`.
  *
  * Held to the same bar as the rest, and to one more: a CAVE datastack takes its cell typing from

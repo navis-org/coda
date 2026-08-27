@@ -5,12 +5,26 @@
  * this is a table inside the datastack itself — `nuclei_v1`, `neuron_information_v2`, or a
  * lab's own. It reuses `cave/api.ts` wholesale, so there is no transport here at all.
  *
- * **It reads a table that carries a root id directly**, wide or long, and that is where the line
- * falls. FlyWire's `hierarchical_neuron_annotations` does *not*: it is a `cell_type_reference`
- * keyed by `target_id` into `proofread_neurons`, so reading it means a second query and a join
- * that only the datastack's own spec knows how to write. That stays in `CaveSource` as the
- * built-in, which is what a dataset uses when nothing is wired — and keeping it there is what
- * lets this provider be about *tables* rather than about FlyWire.
+ * **It reads a table that carries a root id, and one that has to be joined to find one.** The
+ * second kind is a CAVE *reference* table — `cell_type_reference`, keyed by `target_id` into
+ * another table's `id`, with no root id of its own anywhere in it. BANC's `codex_annotations`
+ * references `cell_representative_point`; FlyWire's `hierarchical_neuron_annotations` references
+ * `proofread_neurons`. This used to be the line the provider drew, and it drew it in the worst
+ * available place: the read did not decline, it asked the server for `pt_root_id` and got back
+ * `CAVE returned 500: pt_root_id not in model or models for codex_annotations`, which names a
+ * column the user typed and no reason it should be wrong.
+ *
+ * So the join is here now, and it is one request rather than two: the table's own metadata says
+ * which table it references, and `CaveReference` turns the read into a join query. Nothing about
+ * it is FlyWire-specific, which is what keeps this provider about *tables*.
+ *
+ * `CaveSource` still writes its own join for the built-in path, and **not** because it joins
+ * different tables. It does not: `flywire_fafb_public` is the only spec with an `annotations`
+ * block, and there its `neurons.table` and `hierarchical_neuron_annotations`' `reference_table`
+ * are the same table, `proofread_neurons`. The real reason is that `buildIndex` has already read
+ * the neuron rows — it needs them for the population list — so its `rootById` join is a Map over
+ * rows it is holding, where `CaveReference` would buy a *server-side* join on each of the five
+ * per-kind queries to learn what is already in hand.
  *
  * **Long form pivots, wide form does not.** A CAVE annotation table is often one row per
  * (neuron, kind, value) rather than one row per neuron — the shape `classification_system` /
@@ -25,9 +39,10 @@ import { ID_COLUMN_NAME } from '../../core/ids'
 import type { ColumnData, TableValue } from '../../core/values'
 import { makeTable } from '../../core/values'
 import { caveDType } from '../cave/json'
-import { refuseIfCapped } from '../cave/client'
-import type { CaveRow } from '../cave/client'
-import { queryTable, uniqueStringValues } from '../cave/api'
+import type { CaveRequestOptions, CaveRow } from '../cave/client'
+import type { CaveReference } from '../cave/api'
+import { queryTableChecked, uniqueStringValues } from '../cave/api'
+import { referenceTableFor, tableColumnsFor } from '../cave/tables'
 import { caveServerFor } from '../cave/datastack'
 import { splitDatasetId } from '../cave/spec'
 import {
@@ -48,7 +63,14 @@ export interface CaveTableConfig extends Record<string, string> {
   /** `datastack:materialization`, the same id a Dataset node publishes. */
   dataset: string
   table: string
-  /** Column holding the root id. `pt_root_id` on every CAVE table Coda has seen. */
+  /**
+   * Column holding the root id. `pt_root_id` on every CAVE table Coda has seen.
+   *
+   * On a **reference** table it names a column of the *referenced* table, because that is the
+   * only place a root id exists — the annotation table itself carries `target_id` and nothing
+   * else that identifies a neuron. Nobody has to know that: it is the same field, holding the
+   * same default, and the join is what makes it true.
+   */
   idColumn: string
   /**
    * Column naming the *kind* of annotation, for a long-form table. Empty means wide.
@@ -149,34 +171,47 @@ class CaveTableProvider implements AnnotationProvider {
       )
     }
     const server = await caveServerFor(parsed.datastack)
+    const { datastack, version } = parsed
     const signal = options.signal ? { signal: options.signal } : {}
 
     if (config.pivotOn) {
       options.onProgress?.(0.1, 'reading annotation kinds')
-      const values = await uniqueStringValues(server, parsed.datastack, config.table, signal)
+      /*
+       * Concurrent, because neither answers the other: the kinds come off this table's own
+       * `pivotOn` column either way, and whether there is a reference table changes only which
+       * columns the per-kind queries ask for. Serialised, it put a full round trip in front of
+       * every long-form read — including every FlyWire one, which has no reference at all.
+       */
+      const [reference, values] = await Promise.all([
+        referenceFor(datastack, version, config, signal),
+        uniqueStringValues(server, datastack, config.table, signal),
+      ])
       const kinds = [...(values[config.pivotOn] ?? [])].sort()
       discovery.set(kindKey(config), kinds)
+      const withId = idColumns(config, reference)
 
       /*
        * One query per kind, which is `CaveSource.loadAnnotations`' finding applied here: a whole
-       * annotation table is routinely over CAVE's 500,000-row cap, and filtered by kind each
-       * query is comfortably under. It costs no extra round trip, because the kinds had to be
-       * discovered anyway.
+       * annotation table can be over a deployment's row cap, and filtered by kind each query is
+       * comfortably under. It costs no extra round trip, because the kinds had to be discovered
+       * anyway. Measured on BANC's `codex_annotations`: 1,994,371 rows across 32 kinds, the
+       * largest of them 158,265.
        */
       const perKind = await Promise.all(
         kinds.map(async (kind, i) => {
-          const rows = await queryTable(
+          const rows = await queryTableChecked(
             server,
-            parsed.datastack,
-            parsed.version,
+            datastack,
+            version,
             {
               table: config.table,
               filters: { equal: { [config.pivotOn]: kind } },
-              columns: [config.idColumn, config.valueColumn],
+              columns: withId([config.valueColumn]),
+              ...(reference ? { reference } : {}),
             },
+            { of: `${config.table} (${kind})`, consequence: INCOMPLETE },
             signal,
           )
-          refuseIfCapped(rows.length, `${config.table} (${kind})`, INCOMPLETE)
           options.onProgress?.(0.2 + (0.7 * (i + 1)) / Math.max(1, kinds.length), kind)
           return [kind, rows] as const
         }),
@@ -185,21 +220,89 @@ class CaveTableProvider implements AnnotationProvider {
     }
 
     options.onProgress?.(0.2, 'reading annotations')
-    const named = namedColumns(config.columns, config.idColumn)
-    const rows = await queryTable(
+    // Serial here and not above, and the reason is the one asymmetry between the two branches:
+    // a wide read cannot know which columns to name until it knows whether it is joining.
+    const reference = await referenceFor(datastack, version, config, signal)
+    const named = await wideColumns(datastack, version, config, Boolean(reference), signal)
+    const rows = await queryTableChecked(
       server,
-      parsed.datastack,
-      parsed.version,
+      datastack,
+      version,
       {
         table: config.table,
-        ...(named.length > 0 ? { columns: [config.idColumn, ...named] } : {}),
+        ...(named.length > 0 ? { columns: idColumns(config, reference)(named) } : {}),
+        ...(reference ? { reference } : {}),
       },
+      { consequence: INCOMPLETE },
       signal,
     )
-    refuseIfCapped(rows.length, config.table, INCOMPLETE)
     options.onProgress?.(1, `${rows.length} rows`)
     return wideRows(rows, config, named)
   }
+}
+
+/**
+ * Prepend the id column, unless the join is supplying it.
+ *
+ * The one rule both branches need and each used to spell for itself: on a reference table the id
+ * comes off the *referenced* table, so naming it here would ask this table for a column it has
+ * not got — which is the 500 this whole path exists to avoid.
+ */
+function idColumns(
+  config: CaveTableConfig,
+  reference: CaveReference | undefined,
+): (own: readonly string[]) => string[] {
+  return (own) => (reference ? [...own] : [config.idColumn, ...own])
+}
+
+/**
+ * The other half of a reference table, or undefined for a table that carries its own root id.
+ *
+ * Through `tables.ts`, which is the module that owns "what one CAVE table says about itself" and
+ * memoises it per (datastack, version, table) — so this is free after the first read and shared
+ * with the CAVE Table Info card, which fetches the identical document. Reading `reference_table`
+ * off `tableMetadata` here instead gave that one field two independent readers normalising a
+ * blank, a `null` and an omission each in their own way.
+ *
+ * Asked unconditionally rather than only after a 500, because "did that fail because it is a
+ * reference table" is not a question an error message answers reliably.
+ */
+async function referenceFor(
+  datastack: string,
+  version: number,
+  config: CaveTableConfig,
+  options: CaveRequestOptions,
+): Promise<CaveReference | undefined> {
+  const table = await referenceTableFor(datastack, version, config.table, options)
+  if (!table) return undefined
+  // Only the id: everything else the referenced table holds is its own bookkeeping and geometry,
+  // which is not an annotation about anything.
+  return { table, columns: [config.idColumn] }
+}
+
+/**
+ * Which columns a wide read asks for.
+ *
+ * Empty means "everything but the id" and normally stays empty — a single-table query with no
+ * `select_columns` answers every column, and `wideRows` reads the set off row zero.
+ *
+ * A **reference** table cannot leave it empty, and that is the join endpoint's rule rather than
+ * a choice: `select_column_map` has to name both sides or neither, and neither means the whole
+ * join comes back — the target's `id_ref`, `created_ref`, `pt_position_x` and the rest, offered
+ * to somebody as annotations. So the table's own column set is sampled first, with the one
+ * `limit: 1` query `tables.ts` already caches for exactly this, and named explicitly.
+ */
+async function wideColumns(
+  datastack: string,
+  version: number,
+  config: CaveTableConfig,
+  joining: boolean,
+  options: CaveRequestOptions,
+): Promise<string[]> {
+  const named = namedColumns(config.columns, config.idColumn)
+  if (named.length > 0 || !joining) return named
+  const sampled = await tableColumnsFor(datastack, version, config.table, 'table', options)
+  return sampled.map((c) => c.name).filter((name) => name !== config.idColumn)
 }
 
 /** Long form to one row per neuron, a column per kind. */

@@ -39,9 +39,10 @@
  * ## Two row counts, and both are true
  *
  * `api.ts` has the measured table. The short version: the materialization engine counts the
- * frozen snapshot and the annotation service counts the table as it stands, they disagree by up
- * to a third, and the *annotation* one is the one that predicts truncation at `CAVE_MAX_ROWS`.
- * Showing one without saying which it is turned into a debugging round trip once already.
+ * frozen snapshot and the annotation service counts the table as it stands, and they disagree by
+ * up to a third. Showing one without saying which it is turned into a debugging round trip once
+ * already. Neither predicts truncation, which is a *third* count — `countTable`'s — and is not on
+ * this card because it is a fact about one query rather than about the table.
  */
 
 import { reportSourceLearned } from '../source'
@@ -51,6 +52,7 @@ import {
   listTables,
   listViews,
   materializedCount,
+  optionalCount,
   queryTable,
   queryView,
   tableMetadata,
@@ -59,7 +61,7 @@ import type { CaveRequestOptions, CaveRow } from './client'
 import type { DType } from '../../core/types'
 import { caveDType } from './json'
 import { getServer } from './credentials'
-import { caveServerFor, datastackRecord } from './datastack'
+import { caveServerFor, datastackRecord, resetDatastackRecords } from './datastack'
 
 /**
  * Which of CAVE's two kinds of queryable object this is.
@@ -166,6 +168,7 @@ const factsKnown = new Map<string, CaveTableFacts>()
 const factsAsked = new Set<string>()
 
 const columnsLoading = new Map<string, Promise<CaveColumnSample[]>>()
+const referencesLoading = new Map<string, Promise<string | undefined>>()
 
 /**
  * Drop everything learned. **A test seam, and only that today.**
@@ -186,6 +189,19 @@ export function resetCaveTables(): void {
   factsKnown.clear()
   factsAsked.clear()
   columnsLoading.clear()
+  referencesLoading.clear()
+}
+
+/**
+ * Every CAVE memo, dropped together.
+ *
+ * The fan-out `resetCaveTables` names above, as far as a test teardown needs it. Four suites had
+ * hand-copied the same two calls into their own `beforeEach`, so every new memo meant editing
+ * four blocks and the file that missed one got cross-test bleed reading as a routing bug.
+ */
+export function resetCaveState(): void {
+  resetCaveTables()
+  resetDatastackRecords()
 }
 
 /**
@@ -388,34 +404,11 @@ async function loadFacts(
   const [metadata, rows, materializedRows] = await Promise.all([
     tableMetadata(server, datastack, version, name, options),
     alignedVolume
-      ? optional(annotationCount(server, alignedVolume, name, options))
+      ? optionalCount(annotationCount(server, alignedVolume, name, options))
       : Promise.resolve(undefined),
-    optional(materializedCount(server, datastack, version, name, options)),
+    optionalCount(materializedCount(server, datastack, version, name, options)),
   ])
   return tableFacts(name, metadata, rows, materializedRows)
-}
-
-/**
- * A count that failed is an absent count, not a failed read.
- *
- * The counts are the supplementary half of this card — the metadata and the columns are what it
- * is for — so a table the annotation service happens not to know about should leave one row off
- * the card rather than taking the whole node down. A 401 is unaffected: `client.ts` reports it on
- * the auth channel before this ever sees it, and the Connections panel opens itself.
- *
- * An `AbortError` is re-thrown, because swallowing it would answer a run the user cancelled.
- */
-async function optional(count: Promise<number>): Promise<number | undefined> {
-  try {
-    const value = await count
-    // Both endpoints answer a bare integer, so anything else is a service saying something
-    // this does not understand — an object with a `message` in it, most likely. Absent beats
-    // putting it on the card as a row count.
-    return typeof value === 'number' && Number.isFinite(value) ? value : undefined
-  } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') throw error
-    return undefined
-  }
 }
 
 function tableFacts(
@@ -524,6 +517,50 @@ export function peekTableFacts(
  * server and this one is issued from a node people will click repeatedly.
  */
 const SAMPLE_ROWS = 1
+
+/**
+ * The table this one references, or undefined for a table that stands on its own.
+ *
+ * `reference_table` off the same metadata document `tableFactsFor` reads, memoised the same way
+ * and normalised through the same `text()` — because the alternative was two readers of one
+ * field deciding independently what a blank, a `null` and an omission each mean. It is a
+ * separate call rather than `tableFactsFor` because that one also issues the listing and both
+ * row counts, and a read needs none of those.
+ *
+ * A materialization is *frozen*, so this answer can never change for a key: the first read pays
+ * for it and the CAVE Table Info card, which fetches the identical document for the identical
+ * table, gets it for nothing.
+ */
+export function referenceTableFor(
+  datastack: string,
+  version: number,
+  name: string,
+  options: CaveRequestOptions = {},
+): Promise<string | undefined> {
+  const key = `${keyFor(datastack, version)}|${name}`
+  const known = factsKnown.get(`${keyFor(datastack, version)}|table|${name}`)
+  if (known) return Promise.resolve(known.referenceTable)
+  let pending = referencesLoading.get(key)
+  if (!pending) {
+    pending = loadReferenceTable(datastack, version, name, options).catch((error: unknown) => {
+      referencesLoading.delete(key)
+      throw error
+    })
+    referencesLoading.set(key, pending)
+  }
+  return pending
+}
+
+async function loadReferenceTable(
+  datastack: string,
+  version: number,
+  name: string,
+  options: CaveRequestOptions,
+): Promise<string | undefined> {
+  const server = await caveServerFor(datastack, options)
+  const metadata = await tableMetadata(server, datastack, version, name, options)
+  return text(metadata.reference_table)
+}
 
 /**
  * One sampled row, read as a column listing.

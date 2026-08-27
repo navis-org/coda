@@ -380,7 +380,7 @@ describe('the New menu', () => {
 
   it('keeps the datasets people start from and drops the specialist volumes', () => {
     const titles = itemTitles(openNew())
-    for (const kept of ['MaleCNS', 'Hemibrain', 'MANC', 'FlyWire FAFB']) {
+    for (const kept of ['MaleCNS', 'Hemibrain', 'MANC', 'FlyWire FAFB public']) {
       expect(titles).toContain(kept)
     }
     for (const dropped of ['Optic Lobe', 'FIB-19', 'Mushroom Body']) {

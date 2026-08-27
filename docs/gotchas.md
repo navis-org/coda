@@ -215,3 +215,30 @@ verbatim.
   which needs `ImageData` — a global jsdom only defines when the optional `canvas` package is
   installed.
 - **`erasableSyntaxOnly` is on**, so no TS parameter properties (`constructor(private x)`).
+
+- **CAVE's row cap is a per-deployment number, and a reference table has no root id.** Two
+  failures on the same table, and each read as a fact about the data.
+
+  The first: `refuseIfCapped` compared row counts against `CAVE_MAX_ROWS = 500_000` and did it
+  as `rows >= CAVE_MAX_ROWS`. That constant is really `QUERY_LIMIT_SIZE`, the materialization
+  engine's own config — default 200,000, set per deployment. Measured the same day with the
+  same request shape: `prod.flywire-daf.com` truncated `hierarchical_neuron_annotations` at
+  exactly 500,000 with `warning: 201 - "Limited query to 500000 rows`, while `cave.fanc-fly.com`
+  answered all **1,994,371** rows of BANC's `codex_annotations` with no warning at all. So a
+  complete answer was refused for being *larger* than a cap that server does not apply, and the
+  refusal said CAVE had truncated it. Even spelled `===` — which is how `limits.md` described
+  it — it waves through a genuinely truncated read on any deployment configured below 500,000.
+  The tell has to come from the server: `countTable` posts the read's filters under
+  `?count=true`, `queryTableCounted` runs the two concurrently so the check costs no wall clock,
+  and `refuseIfCapped` refuses only when fewer rows arrived than the count. Note the recognition
+  problem — the same query in `caveclient` returns two million rows and says nothing, which
+  reads as a permissions or version difference and is neither.
+
+  The second: `codex_annotations` is a `cell_type_reference` into `cell_representative_point`,
+  and a reference table carries `target_id` and no root id anywhere in it. Asking for one is a
+  **500** — `pt_root_id not in model or models for codex_annotations` — because `select_columns`
+  is validated against the table's own model. The join endpoint is the answer, and it takes
+  `select_column_map` and only that; naming one side drops the other side's columns rather than
+  defaulting them, `suffix_map` leaves an uncontested name bare (`pt_root_id`, not
+  `pt_root_id_ref`), and `count=true` on it answers *rows* rather than a count, so the count has
+  to go to the base table. `caveclient` calls the same thing `merge_reference`.

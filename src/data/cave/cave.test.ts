@@ -22,12 +22,11 @@ import type { DataSource } from '../source'
 import { resetCache } from '../cache'
 import { resetIndexLoads } from '../neuronIndex'
 import { CaveSource } from './CaveSource'
-import { CAVE_MAX_ROWS } from './client'
-import { resetDatastackRecords } from './datastack'
+import { CAVE_MAX_ROWS, refuseIfCapped } from './client'
 import {
   peekTableFacts,
   peekTableList,
-  resetCaveTables,
+  resetCaveState,
   tableColumnsFor,
   tableFactsFor,
   tableListFor,
@@ -59,27 +58,89 @@ interface Captured {
 }
 
 /**
+ * The captured requests that asked for rows, dropping the counts that shadow each of them.
+ *
+ * Every truncation-checked read now issues two requests to one table — the query and the
+ * server's own `COUNT` of it, concurrently — so a filter on the path alone counts each read
+ * twice. Which half a test means is never ambiguous; saying so is what keeps `toHaveLength`
+ * about the thing it was written about.
+ */
+const rowQueries = (captured: readonly Captured[], path: string): Captured[] =>
+  captured.filter((c) => c.url.includes(path) && !c.url.includes('count=true'))
+
+const countQueries = (captured: readonly Captured[], path: string): Captured[] =>
+  captured.filter((c) => c.url.includes(path) && c.url.includes('count=true'))
+
+/** A version listing in the shape `versions.json` has, for a datastack with no fixture. */
+const materializations = (datastack: string, versions: number[]) =>
+  JSON.stringify(
+    versions.map((version, i) => ({
+      version,
+      valid: true,
+      datastack,
+      status: 'AVAILABLE',
+      time_stamp: `202${4 + i}-01-0${i + 1}T00:00:00.000000`,
+      expires_on: '2121-11-10T07:10:01.417779',
+    })),
+  )
+
+/**
  * A fetch that answers from the fixtures and records what was asked for.
  *
  * Matched on the *path*, because half of what this suite is checking is that the right endpoint
  * was called — `tables` living on a v2 path inside the v3 API, a view query going to `/views/`
  * rather than `/table/` — and a stub that answered everything would hide exactly that.
+ *
+ * **A `count=true` query is answered by counting the answer**, rather than by a fixture of its
+ * own. That is what the real endpoint does — the same SQL under a `COUNT` — and it is the only
+ * way the two can never disagree here: a hand-written count fixture beside a rows fixture is a
+ * pair that drifts, and drifting *in the direction of agreement* is precisely the bug
+ * `refuseIfCapped` exists to catch. So every override and every fixture below describes rows,
+ * and the count follows from it.
  */
-function installFetch(overrides: Record<string, string> = {}): Captured[] {
+function installFetch(overrides: Record<string, string | number> = {}): Captured[] {
   const captured: Captured[] = []
   vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
     const body = init?.body ? JSON.parse(String(init.body)) : undefined
     captured.push({ url, ...(body ? { body } : {}) })
-    const answer = (text: string) =>
+    const rowsAnswer = (text: string) =>
       Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(text) } as Response)
+    const answer = (text: string) => {
+      if (!url.includes('count=true')) return rowsAnswer(text)
+      const rows = JSON.parse(text) as unknown[]
+      return rowsAnswer(JSON.stringify([{ count: rows.length }]))
+    }
 
-    for (const [fragment, text] of Object.entries(overrides)) {
-      if (url.includes(fragment)) return answer(text)
+    /*
+     * A **number** is a count and answers only the count request; a string is rows, and its count
+     * is derived by counting them. Making the two disagree is the whole of what truncation *is*,
+     * and one map can express it because the value's type says which half it is — where two maps
+     * had to be consulted in the right order, both requests carrying the same path.
+     *
+     * The `continue` is the load-bearing half: a count override whose fragment also matches the
+     * *rows* request must fall through to the fixture below, or the read gets a one-row answer
+     * that is the count object, and the refusal reports 1 row where the fixture has four.
+     */
+    for (const [fragment, value] of Object.entries(overrides)) {
+      if (!url.includes(fragment)) continue
+      if (typeof value !== 'number') return answer(value)
+      if (url.includes('count=true')) return rowsAnswer(JSON.stringify([{ count: value }]))
     }
     if (url.includes('/info/api/v2/datastacks')) return answer(fixture('datastacks.json'))
     if (url.includes('/info/api/v2/datastack/full/'))
       return answer(fixture('datastack-flywire.json'))
-    if (url.includes('/materialize/api/v3/datastack/flywire_fafb_public/metadata'))
+    if (url.endsWith('/table/nuclei_v1/metadata'))
+      return answer(fixture('table-metadata-nuclei.json'))
+    /*
+     * Materializations, per datastack. One fixture would answer FlyWire's 630 and 783 for every
+     * datastack, and the listing test is precisely about a dataset id per materialization *of
+     * that datastack* — so the other two are inline, at the numbers their servers really report.
+     */
+    if (url.includes('/datastack/brain_and_nerve_cord_public/metadata'))
+      return answer(materializations('brain_and_nerve_cord_public', [888, 626]))
+    if (url.includes('/datastack/minnie65_public/metadata'))
+      return answer(materializations('minnie65_public', [1822, 1718]))
+    if (url.includes('/materialize/api/v3/datastack/') && url.includes('/metadata'))
       return answer(fixture('versions.json'))
     /*
      * The discovery endpoints, matched with `endsWith` rather than `includes` — a *view query*
@@ -139,11 +200,9 @@ beforeEach(() => {
   resetCredentials()
   resetCache()
   resetIndexLoads()
-  // The datastack record is memoised at module level now that the annotation providers share
-  // it, so it outlives a test file without this.
-  resetDatastackRecords()
-  // The table listings and per-table facts are memoised at module level for the same reason.
-  resetCaveTables()
+  // Every CAVE memo — the datastack record, the table listings, the per-table facts — is module
+  // level now that the annotation providers share them, so all of it outlives a test file.
+  resetCaveState()
   // Custom CAVE registers a spec from a node's params; it is module state like the rest.
   resetRuntimeSpecs()
   setToken('test-token')
@@ -219,10 +278,67 @@ describe('datasets and versions', () => {
     expect(datasets.map((d) => d.id)).toEqual([
       'flywire_fafb_public:783',
       'flywire_fafb_public:630',
+      'brain_and_nerve_cord_public:888',
+      'brain_and_nerve_cord_public:626',
+      'minnie65_public:1822',
+      'minnie65_public:1718',
     ])
     expect(datasets[0]!.version).toBe('783')
     expect(datasets[0]!.description).toMatch(/Materialization 783 materialized 2023-09-30/)
     expect(datasets[0]!.description).toMatch(/expires 2121-11-10/)
+  })
+
+  it('says which of the datastack’s tables it reads, marked as Coda’s own', async () => {
+    installFetch()
+    const [flywire] = await new CaveSource().listDatasets()
+
+    /*
+     * A CAVE datastack does not describe its own roles — `spec.ts` is where the four bindings are
+     * decided, and until this landed they were visible nowhere in the app. The publisher's blurb
+     * comes first and is left exactly as published; this is appended and says whose it is,
+     * because a reader has no other way to tell where the quotation stops.
+     */
+    expect(flywire!.description).toMatch(/\*\*Coda reads this datastack as:\*\*/)
+    expect(flywire!.description).toContain('- Neurons — `proofread_neurons`')
+    expect(flywire!.description).toContain('- Annotations — `hierarchical_neuron_annotations`')
+    expect(flywire!.description).toContain('- Synapses — `synapses_nt_v1`')
+    // Named as a view, because that is why this datastack answers connectivity without counting.
+    expect(flywire!.description).toMatch(/- Connectivity — `valid_connection_v2` \(a view/)
+    // The blurb still leads, and nothing was inserted into it.
+    expect(flywire!.description?.startsWith('The public FlyWire segmentation')).toBe(true)
+  })
+
+  it('spells an unbound role out rather than leaving the line off', async () => {
+    installFetch()
+    const datasets = await new CaveSource().listDatasets()
+    const banc = datasets.find((d) => d.id.startsWith('brain_and_nerve_cord_public'))!
+
+    /*
+     * The whole reason the list exists. "Why are there no cell types on BANC?" had no answer
+     * anywhere in the app, and a list that silently skipped the role nobody configured would
+     * answer the easy question and not the one being asked.
+     */
+    expect(banc.description).toContain(
+      '- Annotations — none configured; wire an annotation source for cell types',
+    )
+    // And the synapse fallback named, since it is why connectivity here is slower than FlyWire's.
+    expect(banc.description).toMatch(/- Connectivity — counted from `synapses_v3`/)
+  })
+
+  it('takes the species from the spec, which is why a mouse is not a fly', async () => {
+    installFetch()
+    const datasets = await new CaveSource().listDatasets()
+
+    /*
+     * `species` was `'Drosophila melanogaster'` hardcoded in `datasetInfoFor`, from when FlyWire
+     * was the only entry — so adding `minnie65_public` had Dataset Summary describe a mouse
+     * visual cortex volume as a fly. The shape a hardcoded field's error always takes: silent,
+     * confident, and only wrong for the entries added after it.
+     */
+    const of = (prefix: string) => datasets.find((d) => d.id.startsWith(prefix))!.species
+    expect(of('flywire_fafb_public')).toBe('Drosophila melanogaster')
+    expect(of('brain_and_nerve_cord_public')).toBe('Drosophila melanogaster')
+    expect(of('minnie65_public')).toBe('Mus musculus')
   })
 
   it('asks the datastack’s own server for its versions, not the global one', async () => {
@@ -234,7 +350,11 @@ describe('datasets and versions', () => {
     expect(captured.map((c) => c.url)).toEqual([
       'https://global.daf-apis.com/info/api/v2/datastacks',
       'https://global.daf-apis.com/info/api/v2/datastack/full/flywire_fafb_public',
+      'https://global.daf-apis.com/info/api/v2/datastack/full/brain_and_nerve_cord_public',
+      'https://global.daf-apis.com/info/api/v2/datastack/full/minnie65_public',
       'https://prod.flywire-daf.com/materialize/api/v3/datastack/flywire_fafb_public/metadata',
+      'https://prod.flywire-daf.com/materialize/api/v3/datastack/brain_and_nerve_cord_public/metadata',
+      'https://prod.flywire-daf.com/materialize/api/v3/datastack/minnie65_public/metadata',
     ])
   })
 
@@ -285,6 +405,45 @@ describe('the neuron schema', () => {
 
 // ---------------------------------------------------------------------------
 
+describe('what counts as a truncated CAVE answer', () => {
+  const check = (rows: number, total: number | undefined) =>
+    refuseIfCapped(rows, total, 'codex_annotations', 'these annotations would be incomplete')
+
+  it('refuses a result short of the count the server gives for the same query', () => {
+    expect(() => check(500_000, 512_957)).toThrow(
+      /CAVE returned 500,000 of "codex_annotations"'s 512,957 rows/,
+    )
+    // The consequence is the caller's, and it is the half a reader acts on.
+    expect(() => check(500_000, 512_957)).toThrow(/these annotations would be incomplete/)
+  })
+
+  it('accepts a whole answer bigger than any one deployment’s cap', () => {
+    /*
+     * The bug this replaced. `CAVE_MAX_ROWS` is `prod.flywire-daf.com`'s configured
+     * `QUERY_LIMIT_SIZE` and nothing more — `cave.fanc-fly.com` answered all **1,994,371** rows
+     * of BANC's `codex_annotations` in one reply, with no warning header — and refusing at `>=`
+     * threw away a complete answer while telling the user it had been cut short. A result
+     * *larger* than a cap is positive proof that cap did not apply.
+     */
+    expect(() => check(1_994_371, 1_994_371)).not.toThrow()
+  })
+
+  it('accepts a short answer the server agrees is short', () => {
+    expect(() => check(4, 4)).not.toThrow()
+  })
+
+  it('falls back to exactly the cap where no count could be had', () => {
+    // One extra request against a shared production server is not allowed to break a read that
+    // already has its answer, so a failed count degrades to the old, weaker tell.
+    expect(() => check(CAVE_MAX_ROWS, undefined)).toThrow(/truncated "codex_annotations" at/)
+    expect(() => check(CAVE_MAX_ROWS - 1, undefined)).not.toThrow()
+    // And still not `>=`, even here: over the cap is not the cap.
+    expect(() => check(CAVE_MAX_ROWS + 1, undefined)).not.toThrow()
+  })
+})
+
+// ---------------------------------------------------------------------------
+
 describe('the neuron index', () => {
   it('pivots the long annotation table into one row per neuron', async () => {
     installFetch()
@@ -306,7 +465,7 @@ describe('the neuron index', () => {
     const captured = installFetch()
     await new CaveSource().neuronIndex({ datasetId: DATASET })
 
-    const neurons = captured.find((c) => c.url.includes('/table/proofread_neurons/query'))!
+    const neurons = rowQueries(captured, '/table/proofread_neurons/query')[0]!
     // A *list*: this endpoint rejects the table-keyed map outright, and a join accepts it while
     // silently taking the first column of that name from whichever table has one.
     expect(neurons.body).toEqual({ select_columns: ['id', 'pt_root_id'] })
@@ -316,9 +475,7 @@ describe('the neuron index', () => {
      * One annotation request per kind, which is what keeps each under CAVE's 500,000-row cap —
      * the whole table is over it, live, however much the row-count endpoint says otherwise.
      */
-    const annotations = captured.filter((c) =>
-      c.url.includes('/table/hierarchical_neuron_annotations/query'),
-    )
+    const annotations = rowQueries(captured, '/table/hierarchical_neuron_annotations/query')
     expect(annotations).toHaveLength(5)
     expect(annotations[0]!.body).toEqual({
       filter_equal_dict: {
@@ -326,20 +483,48 @@ describe('the neuron index', () => {
       },
       select_columns: ['target_id', 'cell_type'],
     })
+
+    /*
+     * And one count beside each, carrying **the same filter and nothing else**. That is the
+     * whole of what makes the count a test rather than a second opinion: a count of the unfiltered
+     * table would be five times the rows every time, and `refuseIfCapped` would refuse every
+     * kind. Columns and limits are left off because they describe a shape a count does not have.
+     */
+    const counts = countQueries(captured, '/table/hierarchical_neuron_annotations/query')
+    expect(counts).toHaveLength(5)
+    expect(counts[0]!.body).toEqual({
+      filter_equal_dict: {
+        hierarchical_neuron_annotations: { classification_system: 'cell_class' },
+      },
+    })
   })
 
   it('refuses rather than handing back a silently truncated index', async () => {
-    const capped = JSON.stringify(
-      Array.from({ length: CAVE_MAX_ROWS }, (_, i) => ({ id: i, pt_root_id: String(i) })),
-    )
-    installFetch({ '/table/proofread_neurons/query': capped })
+    // Four rows in the fixture, and a server that says the table holds 512,957. The server says
+    // *that* in a `warning` header its CORS policy does not expose, so asking it to count is the
+    // only tell a browser has. A short index is not a visible failure — it is a dataset that
+    // quietly lacks neurons.
+    installFetch({ '/table/proofread_neurons/query': 512_957 })
 
-    // The server says so in a `warning` header its CORS policy does not expose, so counting is
-    // the only tell a browser has. A short index is not a visible failure — it is a dataset
-    // that quietly lacks neurons.
     await expect(new CaveSource().neuronIndex({ datasetId: DATASET })).rejects.toThrow(
-      /truncated "proofread_neurons" at 500,000 rows/,
+      /CAVE returned 4 of "proofread_neurons"'s 512,957 rows/,
     )
+  })
+
+  it('counts what it asked for, not what the table holds', async () => {
+    const captured = installFetch()
+    await new CaveSource().neuronIndex({ datasetId: DATASET })
+
+    /*
+     * The count goes to the **single-table** endpoint even where the read is filtered, and it
+     * carries the read's filters and nothing else. Both halves matter: a count of the whole
+     * table would exceed any filtered read and refuse it, and the *join* endpoint answers rows
+     * to `count=true` rather than a count, so a reference read could not be checked there at all.
+     */
+    const counts = countQueries(captured, '/table/proofread_neurons/query')
+    expect(counts).toHaveLength(1)
+    expect(counts[0]!.url).toContain('/version/783/table/proofread_neurons/query')
+    expect(counts[0]!.body).toEqual({})
   })
 
   it('keeps one row per root id where a table lists a segment twice', async () => {
@@ -624,7 +809,7 @@ describe('synapses', () => {
       datasetId: DATASET,
       neuronIds: ['720575940628857210'],
     })
-    const queries = captured.filter((c) => c.url.includes('/table/synapses_nt_v1/query'))
+    const queries = rowQueries(captured, '/table/synapses_nt_v1/query')
     expect(queries).toHaveLength(2)
     // An `IN` on both columns of one query is an AND, which is the synapses a neuron makes onto
     // itself rather than the synapses it makes at all.
@@ -1059,8 +1244,8 @@ describe('what it declines', () => {
   it('names the datastack when a dataset id has no wiring', async () => {
     installFetch()
     await expect(
-      new CaveSource().neuronIndex({ datasetId: 'minnie65_public:1300' }),
-    ).rejects.toThrow(/no wiring for the CAVE datastack "minnie65_public"/)
+      new CaveSource().neuronIndex({ datasetId: 'wclee_aedes_brain:1300' }),
+    ).rejects.toThrow(/no wiring for the CAVE datastack "wclee_aedes_brain"/)
   })
 })
 

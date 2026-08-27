@@ -348,7 +348,7 @@ const CAVE_FAMILIES: DatasetFamily[] = [
     sourceId: 'cave',
     backend: 'cave',
     family: 'flywire_fafb_public',
-    label: 'FlyWire FAFB',
+    label: 'FlyWire FAFB public',
     description:
       'Whole adult female fly brain (optic lobes + central brain).',
     guide:
@@ -359,6 +359,30 @@ const CAVE_FAMILIES: DatasetFamily[] = [
      * pinned to the materialization the node resolved — where R's would be `fafbseg`, which wraps
      * FlyWire specifically rather than CAVE generally and has no emitter here yet.
      */
+    notebook: { python: 'caveclient' },
+  },
+  {
+    key: 'banc',
+    sourceId: 'cave',
+    backend: 'cave',
+    family: 'brain_and_nerve_cord_public',
+    label: 'BANC public',
+    description: 'Adult male fly brain and ventral nerve cord.',
+    guide:
+      'The public BANC segmentation read through CAVE. It exposes the full brain-and-nerve-cord volume, and the neuron table is the public cell list published alongside the stack.',
+    glyph: 'cns',
+    notebook: { python: 'caveclient' },
+  },
+  {
+    key: 'minnie65',
+    sourceId: 'cave',
+    backend: 'cave',
+    family: 'minnie65_public',
+    label: 'MICrONS Minnie65 public',
+    description: 'A public mouse visual cortex volume from the MICrONS collaboration.',
+    guide:
+      'The public MICrONS Minnie65 segmentation read through CAVE. Version is a materialization number, and the neuron table is the stack’s published cell list.',
+    glyph: 'brain',
     notebook: { python: 'caveclient' },
   },
 ]

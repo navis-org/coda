@@ -29,9 +29,12 @@
  * Built programmatically from each node's own defaults, exactly like the examples, so a starter
  * cannot drift out of sync with a node's param set.
  *
- * **One family opts out of all of that** — see `BESPOKE` at the foot of the file. A datastack
- * whose cell typing does not live in the connectome needs the chain that fetches it, and no
- * arrangement of the generic shape can express that.
+ * **Two families opt out of all of that** — see `BESPOKE` at the foot of the file, and note the
+ * two do it differently. A CAVE datastack keeps its cell typing in a table rather than on the
+ * neuron, so the generic four nodes open on a list of root ids: FlyWire needs a graph of its own
+ * because its labels are a published file that has to be fetched and repaired first, while BANC's
+ * are already in the datastack and its starter is the generic shape *plus one node*, composed
+ * rather than copied.
  */
 
 import type { CodaGraph, GraphNode } from '../core/graph'
@@ -332,6 +335,94 @@ function flywireStarter(spec: StarterSpec): CodaGraph {
   )
 }
 
+// ---------------------------------------------------------------------------
+// BANC
+// ---------------------------------------------------------------------------
+
+/**
+ * BANC, opening with its Codex annotations wired in.
+ *
+ * The same problem FlyWire's starter solves and a much smaller answer, which is why this one is
+ * **`genericStarter` plus a chain** rather than a graph of its own: a CAVE datastack keeps its
+ * cell typing in a table, so the generic four nodes open on a list of eighteen-digit root ids.
+ * Everything downstream of the dataset is unchanged, so composing says that where a copy of the
+ * generic body would merely happen to agree with it.
+ *
+ *   CAVE table (codex_annotations) ─▸ Dataset ▸ Annotations
+ *
+ * One node, where FlyWire needs six, and the difference is where the labels live rather than a
+ * difference in ambition. FlyWire's are a published TSV that has to be fetched, coalesced and
+ * root-id-repaired before it can be joined; BANC's are already *in* the datastack, so the CAVE
+ * table node reads them directly and the chain is the node itself.
+ *
+ * **Why this is a starter and not a spec entry.** `DatastackSpec.annotations` is how FlyWire's
+ * built-in labels are configured, and it cannot express this one: that spec joins through the
+ * spec's own `neurons.table`, and `codex_annotations` is a reference table into
+ * `cell_representative_point` — not BANC's `backbone_proofread`. So the wiring is on the canvas,
+ * where it is also visible, and the Description card says the same thing in words ("Annotations —
+ * none configured").
+ *
+ * **`Pivot on` is the whole configuration.** `codex_annotations` is long-format — one row per
+ * (neuron, `classification_system`, `cell_type`) — so the distinct values of
+ * `classification_system` become the columns. Measured: 1,994,371 rows across 32 kinds folding to
+ * 158,250 neurons, read as one query per kind because a single query for the lot is over some
+ * deployments' row cap. `cell_type` arrives renamed to `type`, which is the column Explore's
+ * chips, the connectivity tables and Profile's roll-ups all address by literal name.
+ *
+ * `idColumn` is left at its default `pt_root_id` deliberately, even though on a reference table
+ * that names a column of the *referenced* table. It is the same field holding the same default,
+ * and overriding it here would suggest it needed to be different.
+ */
+function bancStarter(spec: StarterSpec): CodaGraph {
+  let graph = genericStarter(spec)
+  graph = {
+    ...graph,
+    meta: {
+      ...graph.meta,
+      description: `${spec.label} with the Codex annotations wired in as its labels. Search in the Explore Dataset node, tick neurons, then Run.`,
+    },
+  }
+
+  // A column in front of the generic grid, which starts at `COLUMNS[0]`. The note sits under the
+  // node it is about rather than beside it: there is no second row here to form a margin against.
+  const CHAIN_X = -240
+  const extra = [
+    node(
+      'annotations',
+      'annotation.caveTable',
+      { x: CHAIN_X, y: 90 },
+      {
+        table: 'codex_annotations',
+        pivotOn: 'classification_system',
+        valueColumn: 'cell_type',
+      },
+    ),
+    noteNode({
+      id: 'annotationsNote',
+      x: CHAIN_X,
+      y: 310,
+      width: 260,
+      height: 150,
+      text: `
+      The BANC's [Codex](https://banc.community) annotations live in a CAVE table rather than in the connectome, so they are wired in by hand.
+
+      \`codex_annotations\` is long-format — one row per (neuron, kind, value) — which **Pivot on** folds into a column per kind.`,
+    }),
+  ]
+  for (const one of extra) graph = addNodeWithCompanion(graph, one)
+
+  const links: Link[] = [
+    // A *reference*, so this pair is not a cycle: the CAVE table reads the datastack's identity
+    // out of the dataset it is about to feed. See `PortDef.reference`.
+    ['dataset', 'dataset', 'annotations', 'dataset'],
+    ['annotations', 'annotations', 'dataset', 'annotations'],
+  ]
+  for (const [source, sourceHandle, target, targetHandle] of links) {
+    graph = addEdge(graph, { source, sourceHandle, target, targetHandle })
+  }
+  return graph
+}
+
 /**
  * Families whose starter is not the generic shape.
  *
@@ -341,6 +432,7 @@ function flywireStarter(spec: StarterSpec): CodaGraph {
  */
 const BESPOKE: Record<string, (spec: StarterSpec) => CodaGraph> = {
   'dataset.flywire': flywireStarter,
+  'dataset.banc': bancStarter,
 }
 
 export function buildStarter(spec: StarterSpec): CodaGraph {

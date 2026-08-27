@@ -194,10 +194,16 @@ Left alone deliberately, so a sweep like this one does not come back for them:
   since keeping every Nth node counts hops and means the same thing in either unit), a self-skip
   asked of a rectangular matrix (`matchOps.checkSkipSelf` — fastcore's `skip_self` is the
   diagonal, which a rectangle has none of), a non-square or cross-population matrix into clustering,
-  wrong coordinate spaces, an id that would lose precision (invariant 8), and CAVE's neuron index
-  refusing when a query comes back at exactly `CAVE_MAX_ROWS` — the server says it truncated in a
-  `warning` header its CORS policy does not expose, so counting is the only tell a browser has,
-  and a short index is not a visible failure but a dataset that quietly lacks neurons. Each of
+  wrong coordinate spaces, an id that would lose precision (invariant 8), and CAVE's reads
+  refusing when a query comes back **short of the count the server gives for the same query** —
+  the server says it truncated in a `warning` header its CORS policy does not expose, so counting
+  is the only tell a browser has, and a short index is not a visible failure but a dataset that
+  quietly lacks neurons. Note what that used to be and why it was wrong: `rows >= CAVE_MAX_ROWS`,
+  a constant that is really one deployment's `QUERY_LIMIT_SIZE`. It refused BANC's *complete*
+  1,994,371-row `codex_annotations` for exceeding a cap that server does not apply — a refusal
+  claiming truncation of a whole answer, which is the worst shape a correctness check can take.
+  A guard rail derived from a constant somebody else configures is not a correctness check;
+  `countTable` asks. Each of
   these produces a _confident wrong answer_ rather than a slow one, which is the whole
   distinction this file is built on.
 

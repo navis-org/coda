@@ -391,7 +391,7 @@ export function ExploreBody({
           <span className="explore__spinner" aria-hidden="true" />
           Loading this dataset&rsquo;s neurons{state.note ? ` — ${state.note}` : '…'}
           <span className="explore__hint">
-            Downloaded once, then cached. male-CNS is ~7&nbsp;MB and takes a few seconds.
+            Downloaded once, then cached. Shouldn't be more than a few seconds.
           </span>
         </div>
       )}

@@ -116,6 +116,13 @@ symptom to recognise — which usually points nowhere near the cause.
   panning is d3-zoom's *native* listener below React's root and `stopPropagation` cannot reach it.
   Membership is a list of node ids and the box is derived — `parentId` would re-base every child's
   `position`, which five subsystems read absolutely. See [docs/canvas.md](docs/canvas.md).
+- **CAVE's row cap is a per-deployment number, and a reference table has no root id.**
+  `CAVE_MAX_ROWS` is one server's `QUERY_LIMIT_SIZE`, not a property of CAVE — FlyWire truncates
+  at exactly 500,000, BANC returned all 1,994,371 rows of `codex_annotations` — so truncation is
+  tested against the server's own `COUNT` of the same query (`countTable`), never against the
+  constant, and never with `>=`. And a `cell_type_reference` table carries `target_id` and no
+  root id at all: reading one means the *join* endpoint, which takes `select_column_map` and only
+  that, and does not honour `count=true`. Both failures read as facts about the data.
 - **Module init order.** `graphStore.ts` imports `../nodes` for its side effect. Without
   it, ordering in `main.tsx` becomes load-bearing and silently drops every node.
   The same trap one level in: a Node-side script needs `registerBuiltinSources()` as well, or

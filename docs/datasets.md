@@ -247,12 +247,36 @@ family table would be a second copy that goes stale the day a dataset adds a cit
 be simply absent for `Custom neuPrint`, which can point at a deployment this build has never
 heard of.
 
-**The card shows the blurb and nothing else.** No dataset id, no version, no neuron counts: it
-sits directly under the node that feeds it, so every one of those would repeat something an inch
-away, and the card is narrow. The three _absences_ are said apart, though — "publishes no
-description" is a fact about the dataset, while "has not listed its datasets yet" is a state the
-card is passing through, and one message for both makes a card that is about to fill itself look
-like one that never will.
+**The card shows the blurb, and for CAVE one thing more.** No dataset id, no version, no neuron
+counts: it sits directly under the node that feeds it, so every one of those would repeat
+something an inch away, and the card is narrow. The three _absences_ are said apart, though —
+"publishes no description" is a fact about the dataset, while "has not listed its datasets yet" is
+a state the card is passing through, and one message for both makes a card that is about to fill
+itself look like one that never will.
+
+**The exception is CAVE, and it is an exception because CAVE is the backend whose configuration is
+Coda's.** A datastack does not describe its own roles — `spec.ts` decides which table is the
+neurons, which is the cell types, which the synapses — so those four bindings are an editorial
+decision taken in a source file the user cannot see. Every other backend's roles are self-evident
+from the data. Here they were visible nowhere in the app at all, and the question that exposed it
+has no other answer: *why are there no cell types on BANC?* Because no annotation table is
+configured for it.
+
+So `CaveSource.codaReads` appends a short list — neurons, annotations, connectivity, synapses —
+under a **Coda reads this datastack as:** heading. Three properties, each deliberate:
+
+- **It is marked as Coda's**, because the paragraph above it is not. The card exists to carry the
+  publisher's words and a reader has no other way to tell where the quotation stops.
+- **An unbound role is a line, not an omission.** "Annotations — none configured; wire an
+  annotation source for cell types" is the entire point; a list that silently skipped the role
+  nobody configured would answer the easy question and not the one being asked.
+- **It says which mechanism, not just which table.** `valid_connection_v2` is named as a view
+  aggregated server-side, where a datastack without one reads "counted from `synapses_v3`" — which
+  is why connectivity there is slower, following the same precedence `synapsesFor` applies.
+
+Base markdown only, `**` and backticks. This text renders through the same path as a blurb from
+whatever deployment a Custom node points at, and `parseMarkdown`'s extended kinds are opt-in for
+the reason [gotchas.md](gotchas.md) records.
 
 **`companion` is on the `NodeDefinition`, and `addNodeWithCompanion` is the only way in.** See
 `core/companion.ts`. Three properties, each of which would be worse than having no card at all if
@@ -360,7 +384,34 @@ Two sources answering two different questions about one neuron: structured field
 free-form community text along the bottom.
 
 `BESPOKE` in that file is the dispatch — keyed by node type, since that is what a `StarterSpec`
-carries. One entry today, and it is a table rather than an `if` so the second cannot become one.
+carries, and a table rather than an `if` so the second could not become one. There are two.
+
+**BANC is the second, and it opts out differently: `genericStarter` plus one node.** Same problem —
+a CAVE datastack keeps its cell typing in a table, so the generic four open on root ids — and a
+much smaller answer, because BANC's labels are already *in* the datastack where FlyWire's are a
+published file that has to be fetched, coalesced and root-id-repaired first. So the whole chain is
+one CAVE table node reading `codex_annotations`, wired to the dataset's `Annotations` socket and
+back as a reference:
+
+```text
+CAVE table (codex_annotations) ─▸ Dataset ▸ Annotations
+```
+
+It is **composed** rather than written out — `bancStarter` calls `genericStarter` and adds to what
+it returns — because everything downstream of the dataset genuinely is the generic shape, and a
+copy of it would only ever *happen* to still agree. `examples.test.ts` compares the two edge sets
+to keep that true.
+
+**`Pivot on` is the whole configuration.** `codex_annotations` is long-format — one row per
+(neuron, `classification_system`, `cell_type`) — so the distinct values of the kind column become
+the columns: 1,994,371 rows across 32 kinds folding to 158,250 neurons. `cell_type` arrives
+renamed to `type`, which is the name addressed by literal downstream.
+
+**Why a starter and not a `DatastackSpec.annotations` entry.** That spec joins through the
+datastack's own `neurons.table`, and `codex_annotations` is a reference table into
+`cell_representative_point` — not BANC's `backbone_proofread`. It cannot be expressed there, which
+is also why the Description card on a plain BANC dataset says "Annotations — none configured". The
+starter is where the wiring lives, and the canvas is where it is visible.
 
 Each step answers a question somebody would otherwise have to discover, and every one is pinned
 by `examples.test.ts`:

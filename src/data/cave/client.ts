@@ -15,11 +15,12 @@
  *     `response.json()` is `JSON.parse` with extra steps, and that rounds every root id. See
  *     `json.ts`.
  *  2. **A capped query cannot announce itself to a browser.** The materialize API caps a result
- *     at 500,000 rows and says so in a `warning` header — but its
+ *     at a per-deployment row count and says so in a `warning` header — but its
  *     `Access-Control-Expose-Headers` lists only `WWW-Authenticate` and `column_names`, so that
- *     header is unreadable from a page. Truncation is therefore detected by *counting*:
- *     `CAVE_MAX_ROWS` rows back means the answer is probably not the whole answer. Callers that
- *     could plausibly reach it have to say so rather than hand back a quietly short table.
+ *     header is unreadable from a page. Truncation is therefore detected by *counting*, against
+ *     the server's own `COUNT` of the same query (`api.ts`'s `countTable`) rather than against a
+ *     constant — see `refuseIfCapped` for what the constant got wrong. Callers that could
+ *     plausibly reach it have to say so rather than hand back a quietly short table.
  */
 
 import { errorMessage } from '../../core/errors'
@@ -37,28 +38,56 @@ export class CaveError extends Error {
 }
 
 /**
- * The materialization engine's hard result cap, and the reason anything counts rows.
+ * The result cap **one** deployment applies. A fallback, not a fact about CAVE.
  *
- * Not configurable and not ours: the server applies it and reports it in a header a browser
- * cannot read. Confirmed live — an unfiltered join on `flywire_fafb_public` v783 returned
- * exactly 500,000 rows with `warning: 201 - "Limited query to 500000 rows`.
+ * It reads as a constant and it is not: `QUERY_LIMIT_SIZE` is the materialization engine's own
+ * config, defaulting to 200,000, and each deployment sets it. Measured, same day, same request
+ * shape — `prod.flywire-daf.com` truncated `hierarchical_neuron_annotations` at exactly 500,000
+ * with `warning: 201 - "Limited query to 500000 rows`, while `cave.fanc-fly.com` answered all
+ * **1,994,371** rows of BANC's `codex_annotations` with no warning at all.
+ *
+ * So it survives only as the tell of last resort, for when the count `refuseIfCapped` wants
+ * could not be had. Nothing should read it as "how many rows CAVE returns".
  */
 export const CAVE_MAX_ROWS = 500_000
 
 /**
- * A result the size of the server's cap is not a result.
+ * A result short of what the server says the query holds is a truncated result.
  *
- * The engine truncates at `CAVE_MAX_ROWS` and says so in a `warning` header its CORS policy does
- * not expose (see above), so a browser can only count. A short table is not a visible failure —
- * it is a dataset that silently lacks neurons or labels, and every query against it comes back
- * quietly wrong rather than broken.
+ * The engine truncates silently as far as a browser is concerned: it says so in a `warning`
+ * header whose `Access-Control-Expose-Headers` lists only `WWW-Authenticate` and `column_names`
+ * (see above). And a short table is not a visible failure — it is a dataset that quietly lacks
+ * neurons or labels, and every query against it comes back confidently wrong rather than broken.
+ * So something has to notice, and the only thing a page can see is how many rows arrived.
+ *
+ * **`total` is what makes that a test rather than a guess**, and it is the server's own `COUNT`
+ * of the same query — see `countTable`. Comparing against `CAVE_MAX_ROWS` instead did both
+ * halves of the wrong thing: it refused BANC's complete 1,994,371-row `codex_annotations` for
+ * being *larger* than a cap that deployment does not apply, and it would wave through a
+ * genuinely truncated read on any deployment configured below 500,000.
+ *
+ * Undefined `total` is the fallback, and it is deliberately the old, weaker rule: **exactly**
+ * the cap, which is what a truncated FlyWire read looks like. Not `>=`. A result larger than the
+ * cap is positive proof the cap did not apply.
  *
  * The caller supplies the *consequence* because that is the whole of what differs between them,
  * and it is the half a reader acts on: "the neuron index would be incomplete" sends somebody to a
  * different datastack, "these annotations would be incomplete" to a narrower table.
  */
-export function refuseIfCapped(rows: number, table: string, consequence: string): void {
-  if (rows < CAVE_MAX_ROWS) return
+export function refuseIfCapped(
+  rows: number,
+  total: number | undefined,
+  table: string,
+  consequence: string,
+): void {
+  if (total !== undefined) {
+    if (rows >= total) return
+    throw new CaveError(
+      `CAVE returned ${rows.toLocaleString()} of "${table}"'s ${total.toLocaleString()} rows — ` +
+        `its server caps a single query — so ${consequence}.`,
+    )
+  }
+  if (rows !== CAVE_MAX_ROWS) return
   throw new CaveError(
     `CAVE truncated "${table}" at ${CAVE_MAX_ROWS.toLocaleString()} rows, so ${consequence}.`,
   )

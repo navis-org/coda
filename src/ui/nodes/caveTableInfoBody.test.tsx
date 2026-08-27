@@ -22,8 +22,7 @@ import type { InferContext } from '../../core/node'
 import { T } from '../../core/types'
 import type { CodaType } from '../../core/types'
 import { resetCredentials, setToken } from '../../data/cave/credentials'
-import { resetDatastackRecords } from '../../data/cave/datastack'
-import { resetCaveTables, tableFactsFor, tableListFor } from '../../data/cave/tables'
+import { resetCaveState, tableFactsFor, tableListFor } from '../../data/cave/tables'
 import { installCaveFetch } from '../../test/caveStubs'
 import { installJsdomStubs } from '../../test/jsdomStubs'
 import { CaveTableInfoBody } from './CaveTableInfoBody'
@@ -56,8 +55,7 @@ function draw(
 
 beforeEach(() => {
   installJsdomStubs({ width: 1000, height: 700 })
-  resetDatastackRecords()
-  resetCaveTables()
+  resetCaveState()
   resetCredentials()
   setToken('token')
 })
