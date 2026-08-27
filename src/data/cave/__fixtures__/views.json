@@ -1,0 +1,32 @@
+{
+ "valid_connection_v2": {
+  "voxel_resolution_x": 1.0,
+  "live_compatible": false,
+  "notice_text": null,
+  "voxel_resolution_y": 1.0,
+  "id": 2,
+  "voxel_resolution_z": 1.0,
+  "datastack_name": "flywire_fafb_production",
+  "description": "This is a summary table of synaptic connections (all synapses between two root_ids).  It joins the synapses_nt_v1 table with the valid_synapses_nt_v2 table to filter out synapses, then it groups it by the post_pt_root_id and the pre_pt_root_id, and returns the number of rows as n_syn, as well as the average value for the various neurotransmitter columns, connection_score, and cleft_score and the average value of valid_nt, interpreting false=0, true=1.  It also returns the standard deviations of those same columns with the '_std' removed.  All individual synapse information is removed, you can query the synapse table for those specific root_id combinations to get more detailed information. "
+ },
+ "nt_summary_view": {
+  "voxel_resolution_x": 1.0,
+  "live_compatible": false,
+  "notice_text": null,
+  "voxel_resolution_y": 1.0,
+  "id": 3,
+  "voxel_resolution_z": 1.0,
+  "datastack_name": "flywire_fafb_production",
+  "description": "This is a view designed to let you query the likely neurotranmitter type of a root id.  It groups the valid_synapses_nt_v2_view view to group by pre_pt_root_id and returns the average and standard deviation of most of the columns. "
+ },
+ "proofread_neurons_view": {
+  "voxel_resolution_x": 1.0,
+  "live_compatible": true,
+  "notice_text": null,
+  "voxel_resolution_y": 1.0,
+  "id": 5,
+  "voxel_resolution_z": 1.0,
+  "datastack_name": "flywire_fafb_production",
+  "description": "Merge of proofread_neurons table with its segmentation table"
+ }
+}

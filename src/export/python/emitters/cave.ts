@@ -446,3 +446,81 @@ for (const [type, host] of [
 ] as const) {
   registerEmitter(type, (ctx) => seaTableCell(ctx, host))
 }
+
+// ---------------------------------------------------------------------------
+// The two discovery nodes
+// ---------------------------------------------------------------------------
+
+/**
+ * `List CAVE tables` and `CAVE table info`, which map onto caveclient about as directly as
+ * anything in this file.
+ *
+ * Both take the datastack the same way the nodes do — a **reference** Dataset input that names a
+ * datastack without consuming it, or the `datastack` param when nothing is wired — so `clientFor`
+ * above is the whole of that logic and these two do not restate it. The wire wins, which is the
+ * precedence every CAVE emitter here applies.
+ *
+ * The work is in the helpers rather than inline, because in both cases it is more than one call
+ * and the interesting part is *which* calls: two listing endpoints for the first, and for the
+ * second a metadata read, two counts that disagree, and a one-row query whose `split_positions`
+ * argument is what makes the answer the same one the app gives. See `caveHelpers.ts`.
+ */
+function discoveryClient(ctx: EmitContext): { expr: string; setup: string[] } | undefined {
+  // One local name, unlike `clientFor`'s caller above — `Update root IDs` needs `_repair_at`
+  // because it may pin a *different* materialization than the dataset it hangs off.
+  const local = '_cave'
+  if (ctx.inputType('dataset')) return clientFor(ctx, 'dataset', local)
+  const parsed = splitDatasetId(String(ctx.params.datastack ?? '').trim())
+  if (!parsed) return undefined
+  ctx.require('caveclient', 'CAVEclient')
+  return {
+    expr: local,
+    setup: [`${local} = CAVEclient(${pyStr(parsed.datastack)}, version=${parsed.version})`],
+  }
+}
+
+/** The sentence both of these say when neither the wire nor the field named a datastack. */
+const NO_DATASTACK =
+  'This node has no datastack and materialization — neither from the Dataset wired to it nor ' +
+  'from its own field. Name one as `flywire_fafb_public:783`, or pin a materialization on the ' +
+  'Dataset node, and export again.'
+
+registerEmitter(
+  'cave.tables',
+  (ctx) => {
+    const resolved = discoveryClient(ctx)
+    if (!resolved) return ctx.todo(NO_DATASTACK)
+    ctx.helper('coda_cave_tables')
+    /*
+     * `include_views` is passed rather than defaulted, so the cell states the node's setting even
+     * where it matches the helper's default. A reader comparing the notebook against the canvas
+     * should not have to know which way the default went.
+     */
+    const includeViews = Boolean(ctx.params.includeViews)
+    return [
+      ...resolved.setup,
+      `${ctx.output('out')} = coda_cave_tables(${resolved.expr}, include_views=${includeViews ? 'True' : 'False'})`,
+    ]
+  },
+  { backends: [...CAVE_ONLY] },
+)
+
+registerEmitter(
+  'cave.tableInfo',
+  (ctx) => {
+    const table = String(ctx.params.table ?? '').trim()
+    if (!table) return ctx.todo('This CAVE table info node names no table or view.')
+    const resolved = discoveryClient(ctx)
+    if (!resolved) return ctx.todo(NO_DATASTACK)
+    ctx.helper('coda_cave_table_info')
+    return [
+      ...ctx.note(
+        'The card in Coda shows this table’s description and row counts; here they are ' +
+          'printed, and the column listing is what the cell binds.',
+      ),
+      ...resolved.setup,
+      `${ctx.output('columns')} = coda_cave_table_info(${resolved.expr}, ${pyStr(table)})`,
+    ]
+  },
+  { backends: [...CAVE_ONLY] },
+)

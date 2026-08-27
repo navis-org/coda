@@ -24,6 +24,14 @@ import { resetIndexLoads } from '../neuronIndex'
 import { CaveSource } from './CaveSource'
 import { CAVE_MAX_ROWS } from './client'
 import { resetDatastackRecords } from './datastack'
+import {
+  peekTableFacts,
+  peekTableList,
+  resetCaveTables,
+  tableColumnsFor,
+  tableFactsFor,
+  tableListFor,
+} from './tables'
 import { registerDatastackSpec, resetRuntimeSpecs } from './spec'
 import { caveScene } from './scene'
 import { readL2Skeletons } from './l2'
@@ -40,6 +48,8 @@ import {
 const fixture = (name: string) => readFileSync(join(__dirname, '__fixtures__', name), 'utf8')
 
 const DATASET = 'flywire_fafb_public:783'
+const DATASTACK = 'flywire_fafb_public'
+const VERSION = 783
 /** The query args every table and view request carries; see `api.ts`. */
 const QUERY_ARGS = 'return_pyarrow=false&arrow_format=false&split_positions=false'
 
@@ -71,6 +81,32 @@ function installFetch(overrides: Record<string, string> = {}): Captured[] {
       return answer(fixture('datastack-flywire.json'))
     if (url.includes('/materialize/api/v3/datastack/flywire_fafb_public/metadata'))
       return answer(fixture('versions.json'))
+    /*
+     * The discovery endpoints, matched with `endsWith` rather than `includes` — a *view query*
+     * is `/version/783/views/valid_connection_v2/query`, so `includes('/views')` would answer the
+     * listing fixture to a query and the query fixture would never be reached. The tables listing
+     * is checked on the **v2** path deliberately: that is half of what these tests assert.
+     */
+    if (url.endsWith('/materialize/api/v2/datastack/flywire_fafb_public/version/783/tables'))
+      return answer(fixture('tables.json'))
+    if (url.endsWith('/materialize/api/v3/datastack/flywire_fafb_public/version/783/views'))
+      return answer(fixture('views.json'))
+    if (url.endsWith('/table/nuclei_v1/metadata'))
+      return answer(fixture('table-metadata-nuclei.json'))
+    // A second table, for the counts case alone — `proofread_neurons` is the one whose two
+    // counts genuinely disagree, and only its metadata's existence matters here.
+    if (url.endsWith('/table/proofread_neurons/metadata'))
+      return answer('{"table_name":"proofread_neurons","schema_type":"proofreading_status"}')
+    // Both counts, and they are deliberately the two *different* numbers the real services
+    // report for `proofread_neurons`; `nuclei_v1`'s happen to agree, which is why the mismatch
+    // is fixtured on the table that has one.
+    if (url.endsWith('/annotation/api/v2/aligned_volume/fafb_seung_alignment_v0/table/proofread_neurons/count'))
+      return answer('139540')
+    if (url.endsWith('/version/783/table/proofread_neurons/count')) return answer('127978')
+    if (url.endsWith('/annotation/api/v2/aligned_volume/fafb_seung_alignment_v0/table/nuclei_v1/count'))
+      return answer('143140')
+    if (url.endsWith('/version/783/table/nuclei_v1/count')) return answer('143140')
+    if (url.includes('/table/nuclei_v1/query')) return answer(fixture('table-sample-nuclei.txt'))
     if (url.includes('/unique_string_values')) return answer(fixture('unique-strings.json'))
     if (url.includes('/table/proofread_neurons/query')) return answer(fixture('neurons.txt'))
     if (url.includes('/table/hierarchical_neuron_annotations/query')) {
@@ -106,6 +142,8 @@ beforeEach(() => {
   // The datastack record is memoised at module level now that the annotation providers share
   // it, so it outlives a test file without this.
   resetDatastackRecords()
+  // The table listings and per-table facts are memoised at module level for the same reason.
+  resetCaveTables()
   // Custom CAVE registers a spec from a node's params; it is module state like the rest.
   resetRuntimeSpecs()
   setToken('test-token')
@@ -1303,5 +1341,191 @@ describe('building a skeleton from the L2 graph', () => {
     await readL2Skeletons(SOURCE, ['1', '2', '3'], {})
     expect(captured.filter((c) => c.url.includes('/lvl2_graph'))).toHaveLength(3)
     expect(captured.filter((c) => c.url.includes('/attributes'))).toHaveLength(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Discovery: what a datastack holds, and what one table of it is
+// ---------------------------------------------------------------------------
+
+/**
+ * The reads behind `List CAVE tables` and `CAVE table info`.
+ *
+ * Two of these assertions are about a *route* rather than a result, and they are the ones the
+ * fixture stub is shaped for: the tables listing sits on a **v2** path inside the v3 API, and a
+ * view is answered from the listing rather than from a metadata endpoint that does not exist.
+ * Both were established live (see `tables.ts`) and neither is in any published contract.
+ */
+describe('CAVE discovery', () => {
+  const path = (calls: Captured[]) => calls.map((c) => c.url)
+
+  it('lists tables off the v2 path and views off the v3 one, tables first and sorted', async () => {
+    const captured = installFetch()
+    const entries = await tableListFor(DATASTACK, VERSION)
+    expect(entries).toEqual([
+      { name: 'fly_synapses_neuropil_v6', kind: 'table' },
+      { name: 'hierarchical_neuron_annotations', kind: 'table' },
+      { name: 'neuron_information_v2', kind: 'table' },
+      { name: 'nuclei_v1', kind: 'table' },
+      { name: 'proofread_neurons', kind: 'table' },
+      { name: 'synapses_nt_v1', kind: 'table' },
+      { name: 'nt_summary_view', kind: 'view' },
+      { name: 'proofread_neurons_view', kind: 'view' },
+      { name: 'valid_connection_v2', kind: 'view' },
+    ])
+    expect(path(captured)).toContain(
+      'https://prod.flywire-daf.com/materialize/api/v2/datastack/flywire_fafb_public/version/783/tables',
+    )
+    expect(path(captured)).toContain(
+      'https://prod.flywire-daf.com/materialize/api/v3/datastack/flywire_fafb_public/version/783/views',
+    )
+  })
+
+  it('asks for no views when the node’s toggle is off', async () => {
+    const captured = installFetch()
+    const entries = await tableListFor(DATASTACK, VERSION, {}, false)
+    expect(entries.every((e) => e.kind === 'table')).toBe(true)
+    expect(path(captured).some((u) => u.endsWith('/views'))).toBe(false)
+  })
+
+  it('memoises the listing, so two nodes on one datastack cost one pair of requests', async () => {
+    const captured = installFetch()
+    await Promise.all([tableListFor(DATASTACK, VERSION), tableListFor(DATASTACK, VERSION)])
+    await tableListFor(DATASTACK, VERSION)
+    expect(path(captured).filter((u) => u.endsWith('/tables'))).toHaveLength(1)
+    expect(path(captured).filter((u) => u.endsWith('/views'))).toHaveLength(1)
+  })
+
+  /*
+   * The peek's contract, which is `peekMaterializations`': `undefined` means "not yet", not
+   * "none". Read from a card that renders on every graph mutation, so the second half — one
+   * fetch however many times it is asked — is what stops a request per keystroke.
+   */
+  it('peeks undefined and starts exactly one fetch, however many times it is asked', async () => {
+    const captured = installFetch()
+    expect(peekTableList(DATASTACK, VERSION)).toBeUndefined()
+    expect(peekTableList(DATASTACK, VERSION)).toBeUndefined()
+    expect(peekTableList(DATASTACK, VERSION)).toBeUndefined()
+    await tableListFor(DATASTACK, VERSION)
+    expect(peekTableList(DATASTACK, VERSION)).toHaveLength(9)
+    expect(path(captured).filter((u) => u.endsWith('/tables'))).toHaveLength(1)
+  })
+
+  it('reads a table’s facts, and keeps the two row counts apart', async () => {
+    installFetch()
+    const facts = await tableFactsFor(DATASTACK, VERSION, 'proofread_neurons')
+    // The measured disagreement, fixtured: the annotation service counts the table as it
+    // stands, the materialization engine counts what v783 froze.
+    expect(facts.rows).toBe(139540)
+    expect(facts.materializedRows).toBe(127978)
+  })
+
+  it('trims a description, drops a null notice, and leaves a 1:1 resolution off', async () => {
+    installFetch()
+    const facts = await tableFactsFor(DATASTACK, VERSION, 'nuclei_v1')
+    expect(facts.kind).toBe('table')
+    expect(facts.schemaType).toBe('nucleus_detection')
+    expect(facts.description?.startsWith('FlyWire nucleus description')).toBe(true)
+    // `notice_text` is null on every table probed; a card rendering "null" would be reporting
+    // the encoding rather than the absence.
+    expect(facts.notice).toBeUndefined()
+    expect(facts.referenceTable).toBeUndefined()
+    // Every FlyWire table stores positions in nanometres already, so the row says nothing.
+    expect(facts.voxelResolution).toBeUndefined()
+    expect(facts.readPermission).toBe('PUBLIC')
+  })
+
+  /*
+   * A view has no metadata endpoint and no count — `/table/{v}/metadata` 404s and
+   * `/table/{v}/count` answers a **500** wrapping a 404 — so its description has to come from the
+   * listing. What this asserts is the absence: neither request is issued.
+   */
+  it('describes a view from the listing, asking no metadata endpoint and no count', async () => {
+    const captured = installFetch()
+    const facts = await tableFactsFor(DATASTACK, VERSION, 'valid_connection_v2')
+    expect(facts.kind).toBe('view')
+    expect(facts.description?.startsWith('This is a summary table')).toBe(true)
+    expect(facts.rows).toBeUndefined()
+    expect(facts.materializedRows).toBeUndefined()
+    expect(path(captured).some((u) => u.includes('valid_connection_v2/metadata'))).toBe(false)
+    expect(path(captured).some((u) => u.includes('valid_connection_v2/count'))).toBe(false)
+  })
+
+  it('names every table in the datastack when the one asked for is not in it', async () => {
+    installFetch()
+    await expect(tableFactsFor(DATASTACK, VERSION, 'nuclei_v2')).rejects.toThrow(
+      /not a table or view.*Available: fly_synapses_neuropil_v6/s,
+    )
+  })
+
+  /*
+   * A count is the supplementary half of the card — the metadata and the columns are what it is
+   * for — so a service that declines one should leave a row off rather than taking the node down.
+   */
+  it('leaves a count off rather than failing when the service declines it', async () => {
+    installFetch()
+    // The overrides answer 200, and what has to be exercised here is a *refusal* — so the one
+    // endpoint is layered over the stub rather than routed through it.
+    const inner = globalThis.fetch
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) =>
+      String(url).includes('/annotation/api/v2/aligned_volume/')
+        ? Promise.resolve({
+            ok: false,
+            status: 404,
+            text: () => Promise.resolve('{"message":"no such table"}'),
+          } as Response)
+        : inner(url, init),
+    )
+    const facts = await tableFactsFor(DATASTACK, VERSION, 'nuclei_v1')
+    expect(facts.rows).toBeUndefined()
+    expect(facts.materializedRows).toBe(143140)
+    expect(facts.schemaType).toBe('nucleus_detection')
+  })
+
+  it('gates the facts peek on the listing, so a half-typed name requests nothing', async () => {
+    const captured = installFetch()
+    // The listing has not landed, so nothing about a name can be decided yet.
+    expect(peekTableFacts(DATASTACK, VERSION, 'nucl')).toBeUndefined()
+    await tableListFor(DATASTACK, VERSION)
+    const before = captured.length
+    // Now it has, and `nucl` is not in it — so still nothing, and still no request.
+    expect(peekTableFacts(DATASTACK, VERSION, 'nucl')).toBeUndefined()
+    expect(captured).toHaveLength(before)
+    // A real name does start one.
+    expect(peekTableFacts(DATASTACK, VERSION, 'nuclei_v1')).toBeUndefined()
+    await tableFactsFor(DATASTACK, VERSION, 'nuclei_v1')
+    expect(peekTableFacts(DATASTACK, VERSION, 'nuclei_v1')?.schemaType).toBe('nucleus_detection')
+  })
+
+  /*
+   * Invariant 8 at this seam. `pt_root_id` is eighteen digits and `pt_supervoxel_id` seventeen —
+   * both beyond a float64 — so `json.ts` quotes them before the parser sees them, and the column
+   * listing reports `str` because that *is* what any consumer of this table gets.
+   */
+  it('samples one row for the columns, keeping a wide id exact and as text', async () => {
+    const captured = installFetch()
+    const columns = await tableColumnsFor(DATASTACK, VERSION, 'nuclei_v1', 'table')
+    const by = new Map(columns.map((c) => [c.name, c]))
+
+    expect(captured.at(-1)?.body).toMatchObject({ limit: 1 })
+    expect(by.get('pt_root_id')).toEqual({
+      name: 'pt_root_id',
+      dtype: 'str',
+      example: '720575940626838909',
+    })
+    expect(by.get('pt_supervoxel_id')?.example).toBe('82827379285852979')
+    expect(by.get('volume')?.dtype).toBe('f64')
+    expect(by.get('pt_position_x')?.dtype).toBe('i64')
+    // `valid` arrives as the string "t", not a JSON boolean — so `bool` would be a claim the
+    // wire does not support.
+    expect(by.get('valid')).toEqual({ name: 'valid', dtype: 'str', example: 't' })
+    // The documented hole: one row says nothing about a column whose one value is null, and a
+    // blank dtype is an admission where `str` would be a guess.
+    expect(by.get('superceded_id')).toEqual({ name: 'superceded_id', example: '' })
+  })
+
+  it('reads no columns off an empty result rather than inventing them', async () => {
+    installFetch({ '/table/nuclei_v1/query': '[]' })
+    expect(await tableColumnsFor(DATASTACK, VERSION, 'nuclei_v1', 'table')).toEqual([])
   })
 })

@@ -20,6 +20,12 @@
  *    list while silently taking the wrong column. See `CaveQuery.columns`.
  *  - **`desired_resolution` is where geometry gets its units**, and it is why nothing on this
  *    source scales coordinates the way `neuprint/units.ts` does.
+ *  - **`table/{t}/metadata` is the mirror image: v3 where `tables` is v2**, and the two answer
+ *    *different names*. v2 reports `table_name: "nuclei_v1__fly_v31"` — the materialized table —
+ *    where v3 reports `nuclei_v1`, which is the name `tables` listed and the name a query takes.
+ *    A card built from the v2 spelling shows somebody a name they cannot type back in.
+ *  - **A table has two row counts and they disagree**, which is why `tableCounts` returns both.
+ *    See `annotationCount` below.
  *  - **`arrow_format=false` is what makes any of this possible.** It returns
  *    `application/json`, so there is no Arrow dependency and nothing new in the main chunk.
  *    The cost is `json.ts`.
@@ -61,8 +67,12 @@ export interface DatastackInfo {
    *
    * `caveclient`'s `info.image_source()` reads it from exactly here. Every datastack probed
    * publishes it as an already-prefixed `precomputed://gs://…`.
+   *
+   * `name` is read for a different reason and by exactly one caller: the **annotation** service
+   * is addressed by aligned volume rather than by datastack, so `annotationCount` cannot be
+   * called without this document first. See `tableCounts` in `tables.ts`.
    */
-  aligned_volume?: { image_source?: string }
+  aligned_volume?: { image_source?: string; name?: string }
   /** Which neuroglancer deployment this datastack is meant to be opened in. */
   viewer_site?: string
   /** Nanometres per voxel, as the viewer should show them. See `scene.ts`. */
@@ -189,6 +199,18 @@ export interface CaveQuery {
    * it needs its own builder rather than a flag on this one.
    */
   columns?: string[]
+  /**
+   * Cap the number of rows the server returns.
+   *
+   * The one thing here that is *not* about correctness: a query with no `limit` is a whole-table
+   * download, and `CAVE table info` wants a single row to read the materialized column set off.
+   * Verified against v783 rather than assumed — the v3 query endpoint accepts it on the same
+   * body as everything else, which `caveclient.query_table(..., limit=1)` also relies on.
+   *
+   * It does **not** interact with `CAVE_MAX_ROWS`: a limit below the cap means the answer is
+   * short because it was asked to be, so a caller passing one must not also `refuseIfCapped`.
+   */
+  limit?: number
 }
 
 /**
@@ -213,6 +235,7 @@ function runQuery(
     {
       ...filterBody(name, query.filters),
       ...(query.columns ? { select_columns: query.columns } : {}),
+      ...(query.limit !== undefined ? { limit: query.limit } : {}),
       ...(query.resolution ? { desired_resolution: [...query.resolution] } : {}),
     },
     options,
@@ -237,4 +260,158 @@ export function queryView(
   options?: CaveRequestOptions,
 ): Promise<CaveRow[]> {
   return runQuery(server, datastack, version, 'views', query.view, query, options)
+}
+
+// ---------------------------------------------------------------------------
+// What a datastack holds, and what one table of it is
+// ---------------------------------------------------------------------------
+
+/**
+ * The annotation tables in one materialization, by name.
+ *
+ * `caveclient.CAVEclient.materialize.get_tables`. **A v2 path inside the v3 API** — the header
+ * above says why, and the v3 spelling 404s, checked again against v783 rather than inherited.
+ *
+ * Views are *not* in here; they are a separate endpoint (`listViews`) and a separate kind of
+ * thing. `flywire_fafb_public` lists six tables and ten views, and the one Connectivity Graph
+ * prefers — `valid_connection_v2` — is a view, so a listing that showed only this would omit the
+ * most useful object in the datastack.
+ */
+export function listTables(
+  server: string,
+  datastack: string,
+  version: number,
+  options?: CaveRequestOptions,
+): Promise<string[]> {
+  return caveGet<string[]>(
+    `${server}/materialize/api/v2/datastack/${enc(datastack)}/version/${version}/tables`,
+    options,
+  )
+}
+
+/** One view's metadata, as the listing publishes it. A view carries no `schema_type`. */
+export interface ViewInfo {
+  description?: string | null
+  notice_text?: string | null
+  live_compatible?: boolean
+  datastack_name?: string
+  voxel_resolution_x?: number
+  voxel_resolution_y?: number
+  voxel_resolution_z?: number
+}
+
+/**
+ * Every view in one materialization, keyed by name — the whole listing in one request.
+ *
+ * Unlike `listTables` this answers a *map*, so a view's description is in hand from the listing
+ * and needs no per-view call. That asymmetry is the server's, not ours.
+ */
+export function listViews(
+  server: string,
+  datastack: string,
+  version: number,
+  options?: CaveRequestOptions,
+): Promise<Record<string, ViewInfo>> {
+  return caveGet<Record<string, ViewInfo>>(
+    `${server}/materialize/api/v3/datastack/${enc(datastack)}/version/${version}/views`,
+    options,
+  )
+}
+
+/**
+ * One annotation table's metadata record.
+ *
+ * `caveclient.CAVEclient.materialize.get_table_metadata`. Every field is optional because a
+ * *reference* table genuinely omits several: `hierarchical_neuron_annotations` has no
+ * `pcg_table_name`, no `segmentation_source` and no `flat_segmentation_source`, where
+ * `nuclei_v1` has all three. Read off v783, both shapes.
+ */
+export interface TableMetadata {
+  table_name?: string
+  schema_type?: string
+  description?: string | null
+  /** A warning the table's publisher attached to it. Rare, and the reason it is surfaced. */
+  notice_text?: string | null
+  /** The table this one annotates, for a reference table. `target_id` joins back to its `id`. */
+  reference_table?: string | null
+  aligned_volume?: string
+  valid?: boolean
+  created?: string
+  last_modified?: string
+  read_permission?: string
+  write_permission?: string
+  voxel_resolution_x?: number
+  voxel_resolution_y?: number
+  voxel_resolution_z?: number
+  flat_segmentation_source?: string | null
+  pcg_table_name?: string | null
+}
+
+export function tableMetadata(
+  server: string,
+  datastack: string,
+  version: number,
+  table: string,
+  options?: CaveRequestOptions,
+): Promise<TableMetadata> {
+  return caveGet<TableMetadata>(
+    `${server}/materialize/api/v3/datastack/${enc(datastack)}/version/${version}/table/${enc(table)}/metadata`,
+    options,
+  )
+}
+
+/**
+ * How many rows this materialization holds for a table. **Not how many the table has.**
+ *
+ * This is the count `docs/backends.md` records as pointing the wrong way, and the reason is now
+ * measured rather than guessed at: it is the *materialized* count, and the annotation service
+ * keeps its own. Against v783 —
+ *
+ * ```text
+ * table                            materialize   annotation   what a query yields
+ * nuclei_v1                            143,140      143,140
+ * proofread_neurons                    127,978      139,540    139,255 distinct root ids
+ * hierarchical_neuron_annotations      377,699      512,957    over the 500,000-row cap
+ * ```
+ *
+ * So the *annotation* count is the one that predicts whether a query will be truncated, and this
+ * one is the one that describes the frozen snapshot being queried. Neither is wrong; showing
+ * only one of them is, which is why `tableCounts` reports both side by side and labels which is
+ * which.
+ */
+export function materializedCount(
+  server: string,
+  datastack: string,
+  version: number,
+  table: string,
+  options?: CaveRequestOptions,
+): Promise<number> {
+  return caveGet<number>(
+    `${server}/materialize/api/v3/datastack/${enc(datastack)}/version/${version}/table/${enc(table)}/count`,
+    options,
+  )
+}
+
+/**
+ * How many annotations the table holds, live — `caveclient.CAVEclient.annotation.
+ * get_annotation_count`.
+ *
+ * The **annotation** service rather than the materialization engine, which is why it is addressed
+ * by aligned volume and carries no version: it counts the table as it stands now, across every
+ * materialization. See `materializedCount` for the measured gap between the two.
+ *
+ * It answers `201` rather than `200` on success. That is the service's own quirk and needs no
+ * handling here — `client.ts` gates on `response.ok`, which covers the whole 2xx range — but it
+ * is worth knowing before somebody tightens that check.
+ */
+export function annotationCount(
+  server: string,
+  alignedVolume: string,
+  table: string,
+  options?: CaveRequestOptions,
+): Promise<number> {
+  return caveGet<number>(
+    `${server}/annotation/api/v2/aligned_volume/${enc(alignedVolume)}/table/${enc(table)}/count`,
+    options,
+  )
 }

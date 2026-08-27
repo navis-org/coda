@@ -468,3 +468,148 @@ registerHelper({
     '    return out',
   ],
 })
+
+/**
+ * The listing behind `List CAVE tables`.
+ *
+ * **Two endpoints, because CAVE has two kinds of object**, and `get_tables` alone would omit the
+ * most useful thing in most datastacks — FlyWire aggregates its connectivity into
+ * `valid_connection_v2`, which is a view and appears in no table listing.
+ *
+ * One caveclient quirk, read off 8.2.1 by running it rather than from the annotation:
+ * `MaterializationClient.get_views` is annotated `-> list[str]` and actually returns a **dict**
+ * keyed by view name. `sorted()` reads the keys either way, which is why this is a note rather
+ * than a workaround, but a caller writing `views[0]` would get a `KeyError` from a signature that
+ * promised an index.
+ *
+ * Sorted, tables first, for the reason `tableListFor` sorts in `data/cave/tables.ts`: the server
+ * returns tables in query-planner order and views as an object, so nothing about either order is
+ * a promise, and a notebook re-run should produce the frame it produced last time.
+ */
+registerHelper({
+  name: 'coda_cave_tables',
+  requires: [['pandas']],
+  source: [
+    'def coda_cave_tables(client, include_views=True):',
+    '    """Every annotation table in a materialization, and optionally its views.',
+    '',
+    '    Two endpoints rather than one. `get_tables` answers the annotation tables;',
+    '    `get_views` answers the saved queries, which is where a datastack\'s aggregations',
+    '    live — FlyWire\'s connectivity is `valid_connection_v2`, a view, and no table',
+    '    holds it.',
+    '    """',
+    '    rows = [',
+    "        {'table': name, 'kind': 'table'}",
+    '        for name in sorted(client.materialize.get_tables())',
+    '    ]',
+    '    if include_views:',
+    '        # caveclient 8.2.1 annotates get_views as list[str] and returns a dict keyed by',
+    '        # name. sorted() reads the keys either way.',
+    '        rows += [',
+    "            {'table': name, 'kind': 'view'}",
+    '            for name in sorted(client.materialize.get_views())',
+    '        ]',
+    "    return pd.DataFrame(rows, columns=['table', 'kind'])",
+  ],
+})
+
+/**
+ * The four reads behind `CAVE table info`, and the two of them that surprise people.
+ *
+ * **A table has two row counts and they disagree.** caveclient spells them as two methods on two
+ * sub-clients, which is the clearest statement of the difference anyone has written down:
+ * `client.annotation.get_annotation_count` counts the table as it stands, and
+ * `client.materialize.get_annotation_count` counts what this materialization froze. Against
+ * `flywire_fafb_public` v783, `proofread_neurons` is **139,540** live and **127,978** in v783,
+ * and `hierarchical_neuron_annotations` is 512,957 against 377,699. The live one is the one that
+ * predicts truncation at the 500,000-row cap. Printing one of them without saying which is what
+ * `docs/backends.md` records as having cost a debugging round trip.
+ *
+ * **`split_positions=True` is what makes this agree with Coda.** caveclient's default folds a
+ * bound point back into one object column (`pt_position` holding an array), where Coda's raw
+ * query args ask for the split form and get `pt_position_x`, `pt_position_y`, `pt_position_z`.
+ * Both were run against `nuclei_v1`: the split form is the same sixteen columns in the same order
+ * the app lists, and the default is ten. Since this node exists to say what the columns *are*,
+ * the two must not answer differently.
+ *
+ * The `type` column reports the **pandas** dtype rather than Coda's four-name vocabulary, and
+ * that is deliberate rather than an oversight. `pt_root_id` is `Int64` here and `str` in Coda,
+ * and both are true of their own runtime: pandas holds an eighteen-digit id exactly where a
+ * float64 cannot, which is why the app carries it as text (invariant 8). A notebook claiming
+ * Coda's answer would be describing a frame the reader does not have.
+ */
+registerHelper({
+  name: 'coda_cave_table_info',
+  requires: [['pandas']],
+  source: [
+    'def coda_cave_table_info(client, table):',
+    '    """What one table or view of a datastack is. Prints its facts, returns its columns.',
+    '',
+    '    Four reads: the listing (so a mistyped name can name the alternatives), the',
+    '    metadata record, the two row counts, and one real row to read the materialized',
+    '    column set off.',
+    '    """',
+    '    views = client.materialize.get_views()',
+    '    tables = client.materialize.get_tables()',
+    '    if table in views:',
+    "        kind = 'view'",
+    '    elif table in tables:',
+    "        kind = 'table'",
+    '    else:',
+    '        raise ValueError(',
+    '            f\'"{table}" is not a table or view in this datastack. \'',
+    "            f'Available: {\", \".join(sorted(tables) + sorted(views))}'",
+    '        )',
+    '',
+    "    if kind == 'table':",
+    '        meta = client.materialize.get_table_metadata(table)',
+    "        print(f'{table}  ({meta.get(\"schema_type\", \"?\")})')",
+    '        # Two counts, both true, and they disagree by up to a third. The annotation',
+    '        # service counts the table as it stands; the materialization engine counts what',
+    '        # this snapshot froze. The live one is what predicts a truncated query.',
+    '        live = client.annotation.get_annotation_count(table)',
+    '        frozen = client.materialize.get_annotation_count(table)',
+    "        print(f'  rows: {live:,} live, {frozen:,} in v{client.materialize.version}')",
+    "        if meta.get('reference_table'):",
+    '            print(f\'  annotates: {meta["reference_table"]}\')',
+    '        # The publisher went out of its way to attach this; every table probed has none.',
+    "        if meta.get('notice_text'):",
+    '            print(f\'  NOTICE: {meta["notice_text"]}\')',
+    '    else:',
+    '        meta = client.materialize.get_view_metadata(table)',
+    "        print(f'{table}  (view)')",
+    '        print(',
+    "            '  note: CAVE does not push a row limit into a view, so an aggregating one'",
+    "            ' builds its whole result before handing back the single row read below.'",
+    '        )',
+    "    if meta.get('description'):",
+    '        print()',
+    "        print(meta['description'].strip())",
+    '',
+    '    # split_positions=True is what makes these the columns Coda lists: caveclient folds a',
+    '    # bound point back into one object column by default, where the app asks for x/y/z.',
+    "    query = client.materialize.query_view if kind == 'view' else client.materialize.query_table",
+    '    sample = query(table, limit=1, split_positions=True)',
+    '',
+    '    def example(name):',
+    '        if sample.empty:',
+    "            return ''",
+    '        value = sample[name].iloc[0]',
+    '        try:',
+    '            if pd.isna(value):',
+    "                return ''",
+    '        except (TypeError, ValueError):',
+    '            # An array-valued cell, which pd.isna answers elementwise for.',
+    '            pass',
+    '        return str(value)',
+    '',
+    '    return pd.DataFrame(',
+    '        {',
+    "            'column': list(sample.columns),",
+    "            'type': [str(dtype) for dtype in sample.dtypes],",
+    "            'example': [example(name) for name in sample.columns],",
+    '        },',
+    "        columns=['column', 'type', 'example'],",
+    '    )',
+  ],
+})

@@ -11,6 +11,7 @@ export { datasetNodes, customNeuPrintNode, customCaveNode, customCatmaidNode } f
 export { caveTableNode, flyTableNode, googleSheetNode, seaTableNode } from './annotation'
 export { datasetDescriptionNode } from './dataset/description'
 export { ngSourceNode } from './dataset/ngsource'
+export { caveTablesNode, caveTableInfoNode } from './dataset/caveTables'
 export { datasetNode } from './query/dataset'
 export { exploreNode } from './query/explore'
 export { findNeuronsNode } from './query/findNeurons'

@@ -102,6 +102,8 @@ sentence whatever anybody set.
 | `paths`                        | `MAX_PATH_STEPS`, 5,000,000     | That the ranking is "the strongest found" rather than "the strongest". Always degraded rather than refused; the warning is new, and the budget is 10× what it was.                |
 | `explore` select-all           | 25,000 neurons                  | That every id lands in every downstream cache key. Was a disabled button at 10,000.                                                                                               |
 | `uploads`                      | 50 MB                           | That the parse will take a moment. Was the refusal; the refusal moved to 200 MB.                                                                                                  |
+| `caveTables` view sample       | (no threshold — a kind)         | Not a size at all: a *view* is being sampled, and CAVE does not push a row limit into an aggregating one. Measured against v783, `proofread_neurons_view` answered a one-row query in 0.77 s while `valid_connection_v2` and `nt_summary_view` had not after 45. The rail cannot be a number because nothing on the card can see which kind of view it is, so it names the wait and says Cancel is there. Time is never a refusal. |
+| `caveTables` empty sample      | 0 rows                          | That CAVE publishes a column set only inside a result, so a table with no rows describes itself as having no columns. Fires after the fact rather than before, because it is an admission about the answer rather than a warning about the wait. |
 
 ### Per-source thresholds
 

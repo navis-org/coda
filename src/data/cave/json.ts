@@ -31,6 +31,8 @@
  * network. Worth knowing before anyone puts this on a hot path.
  */
 
+import type { DType } from '../../core/types'
+
 /**
  * A complete string literal, **or** an integer literal in value position.
  *
@@ -70,4 +72,26 @@ export function quoteWideIntegers(text: string): string {
  */
 export function parseCaveJson<T>(text: string): T {
   return JSON.parse(quoteWideIntegers(text)) as T
+}
+
+/**
+ * A parsed CAVE value's Coda dtype, or `undefined` for a null.
+ *
+ * Here, beside `quoteWideIntegers`, because this mapping is that function's other half and only
+ * makes sense next to it: a root id arrives as a **string** and so types as `str`, not because
+ * CAVE calls it text but because a float64 cannot hold eighteen digits and `parseCaveJson` quoted
+ * it before the parser ever saw it (invariant 8). Two readers of the same rows were deciding this
+ * independently — `sampleColumns` in `tables.ts` and `dtypesOf` in `annotations/caveTable.ts` —
+ * so a change to what gets quoted would have had to be found in both, and the CAVE table info
+ * card could have listed a column as `str` while the annotation table typed the same column of
+ * the same table as `i64`.
+ *
+ * What is deliberately *not* shared is the all-null policy, because the two genuinely differ:
+ * a column listing leaves it blank as an admission, an annotation table widens it to `str`.
+ */
+export function caveDType(value: string | number | boolean | null | undefined): DType | undefined {
+  if (typeof value === 'boolean') return 'bool'
+  if (typeof value === 'number') return Number.isInteger(value) ? 'i64' : 'f64'
+  if (typeof value === 'string') return 'str'
+  return undefined
 }

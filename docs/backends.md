@@ -285,6 +285,28 @@ yield over 500,000 rows and 139,255 distinct root ids. Whatever it counts, it is
 query returns — which is also why `DatasetInfo.neuronCount` is filled in from the index after the
 fact rather than asked for at listing time.
 
+**That was half the picture, and the other half turned up while writing `CAVE table info`: there
+are two count endpoints and the one above is the wrong one to ask.** The materialization engine's
+`materialize/api/v3/…/version/{v}/table/{t}/count` counts the frozen snapshot; the *annotation*
+service keeps its own at `annotation/api/v2/aligned_volume/{av}/table/{t}/count`, and that one is
+version-independent and counts the table as it stands. Probed against v783:
+
+```text
+table                            materialize   annotation   what a query yields
+nuclei_v1                            143,140      143,140
+proofread_neurons                    127,978      139,540    139,255 distinct root ids
+hierarchical_neuron_annotations      377,699      512,957    over the 500,000-row cap
+```
+
+So the annotation count *is* the one that predicts truncation, and the tell above was not "this
+endpoint counts something else" but "this is not the endpoint that answers that question".
+caveclient spells the difference as two methods on two sub-clients — `materialize.
+get_annotation_count` and `annotation.get_annotation_count` — which is the clearest statement of
+it anyone has written down. Neither is wrong; showing one of them without saying which it is, is.
+`tables.ts` reports both side by side and the card labels them, and the notebook exporter does the
+same. Note this changes nothing about `neuronCount`: the annotation count is still not the count
+of *neurons*, since `proofread_neurons` has 139,540 rows and 139,255 distinct root ids.
+
 ### A datastack does not describe itself
 
 neuPrint's graph has a `:Neuron` label with properties on it. A CAVE datastack is a bag of
@@ -352,6 +374,39 @@ Read off live responses and cross-checked against `caveclient` 8.0.1's own endpo
 - **`unique_string_values` is the cheap half of discovery**: 52 kB and about a second, against
   tens of megabytes for the annotations. That is what lets discovery run from inference
   (invariant 2) while the index waits until something actually asks for neurons.
+- **`table/{t}/metadata` is v3 where `tables` is v2, and the two answer different names.** v2
+  reports `table_name: "nuclei_v1__fly_v31"` — the materialized table — where v3 reports
+  `nuclei_v1`, which is the name `tables` listed and the name a query takes. A card built from
+  the v2 spelling shows somebody a name they cannot type back in.
+- **`limit` works on the query endpoint, and does not push down into an aggregating view.** A
+  one-row query against `proofread_neurons_view` answered in **0.77 s**; the same against
+  `nt_summary_view` and `valid_connection_v2` had not answered after **45 s**. Those two are
+  `GROUP BY` roll-ups, so the server builds the whole result and then takes one row off it —
+  the same fact as "CAVE has no `GROUP BY` for us", seen from the other side.
+- **A view has no metadata endpoint and no count.** `/table/{v}/metadata` 404s,
+  `/table/{v}/count` answers a **500** wrapping a 404, and `/views/{v}/count` is not a route.
+  The `views` listing is a *map* rather than a list of names, so a view's description arrives
+  with the listing and costs nothing extra — which is the asymmetry `tables.ts` is built around.
+
+### Discovery: what is in a datastack
+
+`tables.ts`, and the two nodes over it — `List CAVE tables` and `CAVE table info`. It exists
+because of the section above: a datastack does not describe itself, and until these the only way
+to find out which table was the cell typing was to already know. `CAVE table`'s field has
+`nuclei_v1` as its placeholder and answers a 404 at Run for anything else.
+
+Two things in it are decisions rather than plumbing.
+
+**The facts and the column sample are two memos, not one record.** The card peeks the facts —
+metadata and the two counts, never a query — so an edit-time look at a view cannot start a request
+that runs for minutes at a shared production server. Only `evaluate` samples columns, where there
+is a `ctx.signal` to cancel with and a `ctx.warn` naming the wait before it starts. A rail warns
+and does not refuse ([limits.md](limits.md)), and time is never a refusal.
+
+**The facts peek is gated on the listing already knowing the name.** Without that gate, typing
+`nuclei_v1` a character at a time would fire a metadata read and two counts for `n`, `nu`, `nuc`
+and so on — nine sets of 404s for one table anybody wanted. The listing is one or two small
+requests per datastack and everything else hangs off it.
 
 ### What it costs, and what it declines
 

@@ -1480,3 +1480,70 @@ on screen.
 **The miss is only reported with a Dataset wired.** Unwired the node hands back exactly the ids it
 was given, so every id matches by construction and a `0 not found` line would be a fact about
 nothing.
+
+
+## List CAVE tables and CAVE table info
+
+`cave.tables` and `cave.tableInfo`, both under `Add ▸ Dataset`. They answer the question a CAVE
+datastack does not answer about itself — *what is in here* — and the reason that question needs a
+node is written up in [backends.md](backends.md#a-datastack-does-not-describe-itself). Before
+them, the only way to learn that `hierarchical_neuron_annotations` was FlyWire's cell typing was
+to already know: `CAVE table` has a text field with `nuclei_v1` as its placeholder, and anything
+else got a 404 at Run.
+
+The fetching is `data/cave/tables.ts` and is documented there and in
+[backends.md](backends.md#discovery-what-is-in-a-datastack). What follows is what the *nodes*
+decided.
+
+### Two nodes, not one, and where the datastack comes from
+
+Both arguments are stated where they are enforced rather than restated here — the module header of
+[`src/nodes/dataset/caveTables.ts`](../src/nodes/dataset/caveTables.ts) for the split, and
+[`src/nodes/lib/caveParams.ts`](../src/nodes/lib/caveParams.ts) for the reference port, the
+wire-beats-field rule and the three refusals it shares with `CAVE table`. Restating them cost a
+contradiction the day it was written: this file said a listing was "one or two requests" while the
+module said "one".
+
+### `kind` does not move with the Include views toggle
+
+`List CAVE tables` publishes `table` and `kind`, and `kind` is there whether or not views are
+included — reading `table` on every row when they are not. That is the whole argument for having
+it: a schema that gained and lost a column when a checkbox moved would take every column picker
+and every Filter downstream with it. A column saying something dull beats a column that was not
+there.
+
+**Views default on**, and the reason is FlyWire: `valid_connection_v2` is the pre-aggregated edge
+list the entire CAVE connectivity path is built around, and it appears in no table listing at all.
+A node faithful to `caveclient.get_tables` alone would omit the most useful object in the
+datastack. Turning the toggle off is exactly `get_tables`, which is why it exists.
+
+**Sorted, tables before views.** Not cosmetic: a node's result is cached by provenance
+(invariant 4), so `evaluate` has to be deterministic for fixed params — and CAVE returns the
+tables in query-planner order and the views as a JSON object, neither of which is a promise.
+
+### The info goes on the card, the columns go on the wire
+
+`CAVE table info` has one output socket carrying one row per column — name, dtype, and an example
+value from the sampled row — and puts everything else on a custom body. Everything else is
+*scalar*: a schema type, two row counts, a description. A property/value table would be a table
+whose rows have nothing to do with each other, and the one thing worth reading at length is prose,
+which does not survive being a cell.
+
+The card fills from `peekTableFacts` without a Run, the way the Description card fills from
+`peekDataset` — and it is `expandable` for the same reason and the same source of prose: FlyWire's
+`nuclei_v1` publishes six paragraphs of provenance and a request for acknowledgement.
+
+**The card shows two row counts and labels which is which.** They disagree by up to a third and
+each answers a different question; [backends.md](backends.md#the-500000-row-cap-and-why-counting-is-the-only-tell)
+has the measured table and the round trip that showing one of them cost.
+
+**The `type` column is a Coda `DType`** — `i64`, `f64`, `str`, `bool` — because those four are
+already what the Upload card's column listing and the Table viewer's summary show. It is **blank**
+where the one sampled row was null, which is a real hole (`superceded_id` on `nuclei_v1` is
+exactly it) left as an admission rather than papered over with a guessed `str`.
+
+And `pt_root_id` reports `str`, which is invariant 8 surfacing rather than a bug: an
+eighteen-digit root id *is* text by the time anything in Coda can see it, and a listing claiming
+`i64` would advertise a type no consumer will get. The notebook exporter's counterpart reports the
+**pandas** dtype (`Int64` there) for the same reason from the other side — both are true of their
+own runtime, and a notebook claiming Coda's answer would describe a frame the reader does not have.

@@ -357,14 +357,33 @@ FlyWire that is 139,255 rows over six queries.
 
 #### The helpers, and the one that ran before it was believed
 
-`coda_cave_neurons`, `coda_cave_table`, `coda_seatable`, `coda_join_annotations`,
-`coda_update_root_ids`, `coda_int64` — each mirroring a specific piece of `src/data/cave` or
-`src/data/annotations`. Two
+`coda_cave_neurons`, `coda_cave_table`, `coda_cave_tables`, `coda_cave_table_info`,
+`coda_seatable`, `coda_join_annotations`, `coda_update_root_ids`, `coda_int64` — each mirroring a
+specific piece of `src/data/cave` or `src/data/annotations`. Two
 rules came across that produce a plausible wrong table rather than an error, and both are
 transcribed rather than reinvented: the annotation table is read **one kind at a time** (the whole
 of `hierarchical_neuron_annotations` is over CAVE's 500,000-row cap, which the server applies by
 *truncating*), and a chained source **wins a collision falling back to the earlier one where it
 has no value** — a coalesce rather than a replace.
+
+**The discovery pair carries three things that were read off caveclient 8.2.1 by *running* it,
+not by reading the annotations.** `get_views` is annotated `-> list[str]` and returns a **dict**
+keyed by view name, so anything that indexed it would raise a `KeyError` from a signature that
+promised otherwise; `sorted()` reads the keys either way, which is why this is a note in the
+helper rather than a workaround. `query_table(..., split_positions=True)` is what makes the column
+listing agree with Coda's — caveclient's default folds a bound point back into one object column
+(`pt_position` holding an array) where the app's raw query args ask for `pt_position_x/y/z`, and
+the two answer ten columns and sixteen against the same table. And the **two row counts** are two
+methods on two sub-clients — `materialize.get_annotation_count` and
+`annotation.get_annotation_count` — which is the clearest statement anyone has written of a
+difference [backends.md](backends.md) records as having cost a debugging round trip; the notebook
+prints both, labelled, as the card does.
+
+The `type` column there reports the **pandas** dtype rather than Coda's four-name vocabulary, and
+that is deliberate. `pt_root_id` is `Int64` in the notebook and `str` in the app, and both are
+true of their own runtime — pandas holds an eighteen-digit id exactly where a float64 cannot,
+which is why the app carries it as text (invariant 8). A notebook claiming Coda's answer would be
+describing a frame the reader does not have.
 
 **`merge_reference=False` is passed explicitly and the join is written out.** caveclient will
 merge a reference table with its target for you and that is very likely the tidier call; it was

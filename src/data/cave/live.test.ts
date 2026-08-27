@@ -33,6 +33,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { CaveSource } from './CaveSource'
 import { resetCredentials, setToken } from './credentials'
 import { datastackRecord, l2SourceFor, materializationsFor } from './datastack'
+import {
+  resetCaveTables,
+  tableColumnsFor,
+  tableFactsFor,
+  tableListFor,
+} from './tables'
 import { caveScene } from './scene'
 import { segmentationLayerIndex } from '../neuroglancer/scene'
 import { registerDatastackSpec } from './spec'
@@ -334,4 +340,118 @@ describe.skipIf(!TOKEN)('CAVE, live — L2 skeletons', () => {
     // first three, so a lower bound of ten is well clear of the noise.
     expect(Math.max(...skeletons.items.map((i) => i.parents.length))).toBeGreaterThan(10)
   }, 180_000)
+})
+
+/**
+ * Discovery, against the real services.
+ *
+ * Every fact in `tables.ts` is a live one that nobody publishes a contract for — that the tables
+ * listing sits on a v2 path inside the v3 API and answers different *names* than the v2 metadata
+ * endpoint does, that a view has neither a metadata endpoint nor a count, and that the annotation
+ * service and the materialization engine each keep their own row count and the two disagree. The
+ * fixture suite proves the plumbing and can see none of that.
+ *
+ * The one thing deliberately **not** exercised here is a column sample of an aggregating view.
+ * `valid_connection_v2` and `nt_summary_view` both failed to answer a one-row query in 45
+ * seconds, which is the finding rather than a flake — a test asserting it would either hang or
+ * assert that the world has not improved. `proofread_neurons_view` is the plain view that
+ * answered in 0.77 s, and it is what stands in.
+ */
+describe.skipIf(!TOKEN)('CAVE, live — discovery', () => {
+  const DATASTACK = 'flywire_fafb_public'
+  const VERSION = 783
+
+  it('lists both kinds of object, and the view Connectivity Graph prefers is only in one', async () => {
+    resetCaveTables()
+    const entries = await tableListFor(DATASTACK, VERSION)
+    const names = (kind: string) => entries.filter((e) => e.kind === kind).map((e) => e.name)
+
+    expect(names('table')).toContain('proofread_neurons')
+    expect(names('table')).toContain('hierarchical_neuron_annotations')
+    /*
+     * The reason `includeViews` defaults on. `valid_connection_v2` is the pre-aggregated edge
+     * list the whole CAVE connectivity path is built around, and it appears in no table listing —
+     * so a node faithful to `get_tables` alone would omit the most useful object in the datastack.
+     */
+    expect(names('view')).toContain('valid_connection_v2')
+    expect(names('table')).not.toContain('valid_connection_v2')
+    // Tables first, each half sorted, so the same Run twice is the same table twice — the
+    // server returns tables in query-planner order and views as an object, so neither is a
+    // promise and neither may be relied on.
+    expect(entries.map((e) => e.kind)).toEqual([
+      ...names('table').map(() => 'table'),
+      ...names('view').map(() => 'view'),
+    ])
+    expect(names('table')).toEqual([...names('table')].sort())
+    expect(names('view')).toEqual([...names('view')].sort())
+  }, 60_000)
+
+  /**
+   * The count that `docs/backends.md` recorded as pointing the wrong way, with the reason.
+   *
+   * Both are real and they measure different things: the annotation service counts the table as
+   * it stands, the materialization engine counts what this snapshot froze. Asserted as an
+   * inequality rather than as two numbers, so a re-materialization does not fail the suite —
+   * what is being pinned is that they are *two* answers, which is the thing a card showing one
+   * of them silently gets wrong.
+   */
+  it('reports two row counts for one table, and they are not the same number', async () => {
+    resetCaveTables()
+    const facts = await tableFactsFor(DATASTACK, VERSION, 'proofread_neurons')
+    expect(facts.kind).toBe('table')
+    expect(facts.rows).toBeGreaterThan(0)
+    expect(facts.materializedRows).toBeGreaterThan(0)
+    expect(facts.rows).not.toBe(facts.materializedRows)
+  }, 60_000)
+
+  /*
+   * The v3 metadata endpoint answers the name a query takes; the v2 one answers the materialized
+   * name (`nuclei_v1__fly_v31`). A card built from the v2 spelling shows somebody a name they
+   * cannot type back in, which is why `tableMetadata` is the one v3 call beside a v2 listing.
+   */
+  it('describes a table under the name the listing gave it, not the materialized one', async () => {
+    resetCaveTables()
+    const facts = await tableFactsFor(DATASTACK, VERSION, 'nuclei_v1')
+    expect(facts.name).toBe('nuclei_v1')
+    expect(facts.schemaType).toBe('nucleus_detection')
+    expect(facts.description).toMatch(/nucleus/i)
+  }, 60_000)
+
+  it('describes a view from the listing, since it has neither a metadata record nor a count', async () => {
+    resetCaveTables()
+    const facts = await tableFactsFor(DATASTACK, VERSION, 'valid_connection_v2')
+    expect(facts.kind).toBe('view')
+    expect(facts.description).toMatch(/synaptic connections/i)
+    expect(facts.rows).toBeUndefined()
+    expect(facts.materializedRows).toBeUndefined()
+  }, 60_000)
+
+  /**
+   * The column sample, and the half of it that cannot be got any other way.
+   *
+   * A table's registered schema describes a row *before* materialization — `pt` as a bound
+   * spatial point — where a query answers with `pt_position_x/y/z`, `pt_supervoxel_id` and
+   * `pt_root_id`. And `pt_root_id` is eighteen digits, so this is also invariant 8 end to end:
+   * the digits reaching the listing are the digits on the wire.
+   */
+  it('reads the materialized column set off one row, with a wide id exact and as text', async () => {
+    resetCaveTables()
+    const columns = await tableColumnsFor(DATASTACK, VERSION, 'nuclei_v1', 'table')
+    const by = new Map(columns.map((c) => [c.name, c]))
+
+    expect([...by.keys()]).toEqual(
+      expect.arrayContaining(['pt_position_x', 'pt_position_y', 'pt_position_z', 'pt_root_id']),
+    )
+    // Not the pre-materialization shape.
+    expect(by.has('pt')).toBe(false)
+    const root = by.get('pt_root_id')
+    expect(root?.dtype).toBe('str')
+    expect(root?.example).toMatch(/^\d{18}$/)
+  }, 60_000)
+
+  it('samples a plain view in the time an aggregating one will not', async () => {
+    resetCaveTables()
+    const columns = await tableColumnsFor(DATASTACK, VERSION, 'proofread_neurons_view', 'view')
+    expect(columns.map((c) => c.name)).toContain('pt_root_id')
+  }, 60_000)
 })

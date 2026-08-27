@@ -22,6 +22,7 @@ import type { Value } from '../../core/values'
 import type { InferContext, ParamValue } from '../../core/node'
 import { DATASET_FAMILIES } from '../../nodes/lib/datasetFamilies'
 import { ExploreBody } from '../explore/ExploreBody'
+import { CaveTableInfoBody } from './CaveTableInfoBody'
 import { DatasetBody } from './DatasetBody'
 import { DescriptionBody } from './DescriptionBody'
 import { DownloadBody } from './DownloadBody'
@@ -139,6 +140,14 @@ export const NODE_BODIES: Record<string, NodeBodyEntry> = {
     width: DATASET_CARD_WIDTH,
     expandable: true,
   },
+  /*
+   * Wide enough for the two counts and their labels to share one line, since the whole point of
+   * showing both is that they can be compared at a glance. `expandable` for `dataset.description`'s
+   * reason and the same source of prose: FlyWire's `nuclei_v1` publishes six paragraphs of
+   * provenance, which fits no card worth putting on a canvas, and the overlay is where a table's
+   * caveats are actually read. The permissions and modified rows appear only there.
+   */
+  'cave.tableInfo': { Component: CaveTableInfoBody, width: 300, expandable: true },
   /*
    * A caption, not a widget — so no `expandable`. There is nothing here that benefits from
    * room, and an expand button on a query node would sit exactly where a viewer's does; the

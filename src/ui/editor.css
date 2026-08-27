@@ -4740,23 +4740,125 @@ a.viewer-actions__btn {
  * citation would push the rest of the graph off screen. The overlay is the uncapped read, which
  * is why this body is `expandable`.
  */
-.description-body {
+/*
+ * The Description card and the CAVE table info card are the same kind of surface — a publisher's
+ * prose with the card's own chrome above it — so the shell is declared once. The 260px cap and
+ * the overlay's padding were written out twice; retuning one silently left the other behind.
+ */
+.description-body,
+.cave-info {
   padding: 2px 8px 8px;
   min-width: 0;
   max-height: 260px;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
-.overlay .description-body {
+.overlay .description-body,
+.overlay .cave-info {
   max-height: none;
   padding: 4px 2px;
 }
-.description-body__empty {
+.description-body__empty,
+.cave-info__empty {
   margin: 0;
   font-size: 11px;
   line-height: 1.5;
   color: var(--text-muted);
 }
+
+/* ---------------------------------------------------------------------------
+ * CAVE table info
+ *
+ * Sits directly under the Description card's rules because it is the same kind of surface: a
+ * publisher's prose with a few facts above it. What differs is that the facts here are worth
+ * scanning as a block, so they are a definition list rather than a sentence.
+ * ------------------------------------------------------------------------ */
+
+.cave-info {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+/*
+ * The identity line: name, kind, schema type. It wraps rather than clipping, because a CAVE table
+ * name and its schema type are both long and both are things somebody has to type back in — an
+ * ellipsis on either turns the card into a place to hover rather than a place to read.
+ */
+.cave-info__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 3px 6px;
+  min-width: 0;
+}
+.cave-info__name {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+.cave-info__kind,
+.cave-info__schema {
+  font-size: 9.5px;
+  letter-spacing: 0.02em;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--surface-3);
+  color: var(--text-muted);
+}
+/* One word, and it should not be the thing that wraps the line. */
+.cave-info__kind {
+  white-space: nowrap;
+}
+/* A schema type is long and is something somebody types back in, so it wraps rather than clips. */
+.cave-info__schema {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+/*
+ * The publisher's own warning. `notice_text` is null on every table probed, so a table that sets
+ * one went out of its way to; it takes the warning colour rather than a row in the list below,
+ * where the description would bury it.
+ */
+.cave-info__notice {
+  margin: 0;
+  padding: 4px 6px;
+  border-radius: 3px;
+  font-size: 10.5px;
+  line-height: 1.45;
+  background: var(--surface-3);
+  /* `--status-warn` is the per-mode prose warning colour — 5.41:1 light, 9.78:1 dark. */
+  color: var(--status-warn);
+}
+
+.cave-info__rows {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  margin: 0;
+  min-width: 0;
+}
+.cave-info__row {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+}
+.cave-info__row dt {
+  font-size: 9.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.cave-info__row dd {
+  margin: 0;
+  font-size: 10.5px;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
 
 /* --------------------------------------------------------------------------
  * Markdown

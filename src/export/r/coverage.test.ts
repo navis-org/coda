@@ -25,6 +25,14 @@ const NO_EMITTER: Record<string, string> = {
     'A CAVE datastack named by hand, so it has the same reason as `dataset.flywire`: this ' +
     'document is built on neuprintr and there is no fafbseg/CAVE emitter yet.',
   'cave.updateRootIds': 'A CAVE chunkedgraph repair \u2014 see the Python note.',
+  'cave.tables':
+    'A listing of a CAVE datastack\u2019s annotation tables. The Python notebook emits this ' +
+    'through caveclient; R has no CAVE client of its own \u2014 fafbseg reaches one through ' +
+    'reticulate, which would put a Python dependency in the middle of an R document to answer a ' +
+    'question this one cannot use, since every node downstream of it is a TODO here anyway.',
+  'cave.tableInfo':
+    'What one CAVE table is \u2014 see cave.tables. The same four caveclient calls, blocked on ' +
+    'the same absent client.',
   'dataset.ngsource':
     'A neuroglancer datasource. `fafbseg::read_cloudvolume_meshes` is the R counterpart of the ' +
     'cloudvolume route named in the Python note, and it is blocked on the same thing rather ' +

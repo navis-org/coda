@@ -24,6 +24,7 @@ import { column, tableSchema } from '../../core/types'
 import { ID_COLUMN_NAME } from '../../core/ids'
 import type { ColumnData, TableValue } from '../../core/values'
 import { makeTable } from '../../core/values'
+import { caveDType } from '../cave/json'
 import { refuseIfCapped } from '../cave/client'
 import type { CaveRow } from '../cave/client'
 import { queryTable, uniqueStringValues } from '../cave/api'
@@ -320,16 +321,9 @@ function dtypesOf(rows: readonly CaveRow[], columns: readonly string[]): Map<str
       const name = pending[i]!
       const value = row[name]
       if (value === null || value === undefined) continue
-      dtypes.set(
-        name,
-        typeof value === 'number'
-          ? Number.isInteger(value)
-            ? 'i64'
-            : 'f64'
-          : typeof value === 'boolean'
-            ? 'bool'
-            : 'str',
-      )
+      // `caveDType` never answers undefined for a non-null, which the `continue` above has
+      // already excluded — so the `?? 'str'` is unreachable and exists only to satisfy the type.
+      dtypes.set(name, caveDType(value) ?? 'str')
       pending[i] = pending[pending.length - 1]!
       pending.pop()
     }

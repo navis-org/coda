@@ -979,6 +979,22 @@ export function caveGraph(): CodaGraph {
       row: 2,
       params: { datastack: 'wclee_aedes_brain', version: '117', neuronTable: 'nuclei' },
     },
+    /*
+     * The two discovery nodes, and they are here as a *pair* because between them they cover the
+     * two ways a CAVE node learns its datastack — the branch `discoveryClient` exists for.
+     * `tables` takes it from the Dataset wired to it, whose cell the walk has already bound, so
+     * the golden records `<dataset>.client`; `info` takes it from its own field, so the golden
+     * records a second `CAVEclient(...)` being constructed. One of them alone would record half
+     * the emitter.
+     */
+    { id: 'tables', type: 'cave.tables', col: 5, row: 3, params: { includeViews: true } },
+    {
+      id: 'info',
+      type: 'cave.tableInfo',
+      col: 6,
+      row: 3,
+      params: { datastack: 'flywire_fafb_public:783', table: 'nuclei_v1' },
+    },
   ]
   for (const spec of nodes) g = place(g, spec)
 
@@ -996,6 +1012,7 @@ export function caveGraph(): CodaGraph {
     ['ds', 'dataset', 'find', 'dataset'],
     ['ds', 'dataset', 'summary', 'dataset'],
     ['ds', 'dataset', 'explore', 'dataset'],
+    ['ds', 'dataset', 'tables', 'dataset'],
   ]
   for (const [from, out, to, into] of edges) g = wire(g, from, out, to, into)
   return g
