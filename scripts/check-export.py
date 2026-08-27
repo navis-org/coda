@@ -57,20 +57,26 @@ def syntax_problems(cells: list[tuple[int, str]]) -> list[str]:
     return problems
 
 
+def add_arg_names(args: ast.arguments, bound: set[str]) -> None:
+    for a in [*args.args, *args.posonlyargs, *args.kwonlyargs]:
+        bound.add(a.arg)
+    for a in (args.vararg, args.kwarg):
+        if a:
+            bound.add(a.arg)
+
+
 def collect_bindings(tree: ast.AST, bound: set[str]) -> None:
     """Every name this tree binds, however it binds it."""
     for node in ast.walk(tree):
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
             bound.add(node.id)
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             bound.add(node.name)
-            args = getattr(node, "args", None)
-            if args is not None:
-                for a in [*args.args, *args.posonlyargs, *args.kwonlyargs]:
-                    bound.add(a.arg)
-                for a in (args.vararg, args.kwarg):
-                    if a:
-                        bound.add(a.arg)
+            add_arg_names(node.args, bound)
+        elif isinstance(node, ast.ClassDef):
+            bound.add(node.name)
+        elif isinstance(node, ast.Lambda):
+            add_arg_names(node.args, bound)
         elif isinstance(node, (ast.Import, ast.ImportFrom)):
             for alias in node.names:
                 bound.add((alias.asname or alias.name).split(".")[0])

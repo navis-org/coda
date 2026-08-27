@@ -9,13 +9,25 @@
 # dependency manifest and fails outright when it can find none. Naming it here also
 # keeps the versions the checker resolved against in the repository rather than in a
 # workflow step.
+# The generated notebooks import these packages at runtime, and the strict checker resolves
+# those module names against the environment. Keeping the full set here is what makes CI's
+# `scripts/check-export.py --strict` meaningful instead of a false positive on a half-installed stack.
 neuprint-python
 git+https://github.com/navis-org/navis@master
+# Fly templates published for the export fixtures.
+flybrains
+# The scientific stack used by the generated notebooks.
+matplotlib
+networkx
+numpy
+pandas
+scipy
+seaborn
+navis-fastcore
 # The CAVE half. `caveclient` is what a FlyWire notebook is built on, and `pandas` is named
 # explicitly because `probe-py-helpers.py` *runs* the generated helpers rather than only
 # resolving their names — the one check here that executes anything.
 caveclient
-pandas
 # SeaTable, for the annotation sources. The distribution is `sea-serpent` and the module
 # `seaserpent`, which is the mismatch `MODULES` exists to record.
 sea-serpent
