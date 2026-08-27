@@ -1,9 +1,11 @@
 import { useRef } from 'react'
 
+import { groupsTouching } from '../../core/groups'
 import { getNodeDef, isAnnotation } from '../../core/registry'
 import { hasHelp } from '../../help/registry'
 import { useGraphStore } from '../../store/graphStore'
 import { LOCKED_HINT } from '../lockCopy'
+import { shortcutKeys } from '../shortcuts'
 import { useDismissOnOutside } from '../useDismiss'
 
 export interface NodeContextMenuProps {
@@ -24,6 +26,8 @@ export function NodeContextMenu({ screenPosition, nodeId, onClose }: NodeContext
   // The selection is what bulk actions apply to; a right-click on an unselected node
   // acts on that node alone.
   const targets = store.selection.includes(nodeId) ? store.selection : [nodeId]
+  /** The frames this menu's cards sit in — what Ungroup would take apart. */
+  const touched = groupsTouching(store.graph, targets)
 
   /*
    * Half this menu is about evaluation — run it, drop its cache, mute it, collapse it — and none
@@ -112,8 +116,42 @@ export function NodeContextMenu({ screenPosition, nodeId, onClose }: NodeContext
         disabled={store.locked || store.selection.length === 0}
         title={store.locked ? LOCKED_HINT : undefined}
       >
-        Duplicate <kbd>⌘D</kbd>
+        Duplicate <kbd>{shortcutKeys('duplicate')}</kbd>
       </button>
+      {/*
+       * Grouping acts on `targets` for the reason mute and delete do — a right-click on an
+       * unselected card is about that card, and on a selected one about the whole selection.
+       * The frame that results is decoration, so this row sits with Duplicate rather than with
+       * the run half of the menu, and it is refused by the lock like every other structural edit.
+       */}
+      <button
+        type="button"
+        className="context-menu__item"
+        onClick={act(() => {
+          store.setSelection(targets)
+          store.groupSelection()
+        })}
+        disabled={store.locked}
+        title={
+          store.locked
+            ? LOCKED_HINT
+            : 'Draw one frame around these cards; dragging it moves all of them'
+        }
+      >
+        Group Selection <kbd>{shortcutKeys('group')}</kbd>
+      </button>
+      {touched.length > 0 && (
+        <button
+          type="button"
+          className="context-menu__item"
+          onClick={act(() => store.ungroup(touched.map((g) => g.id)))}
+          disabled={store.locked}
+          title={store.locked ? LOCKED_HINT : 'The frame goes; the cards stay where they are'}
+        >
+          {touched.length > 1 ? `Ungroup ${touched.length} groups` : 'Ungroup'}{' '}
+          <kbd>{shortcutKeys('ungroup')}</kbd>
+        </button>
+      )}
       {/* Named "What this node does" rather than "Help", because a menu item called Help in an
           app with three published guides is ambiguous about which of them it opens. */}
       {def && hasHelp(def.type) && (

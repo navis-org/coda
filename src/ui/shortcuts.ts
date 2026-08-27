@@ -177,6 +177,18 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
         label: 'Delete the selection',
       },
       {
+        id: 'group',
+        chords: [{ mod: true, key: 'G' }],
+        label: 'Frame the selection as a group',
+        hint: 'One box around the cards; dragging it moves all of them',
+      },
+      {
+        id: 'ungroup',
+        chords: [{ mod: true, shift: true, key: 'G' }],
+        label: 'Ungroup',
+        hint: 'The frame goes; the cards stay where they are',
+      },
+      {
         id: 'mute',
         chords: [{ key: 'M' }],
         label: 'Mute or unmute the selection',

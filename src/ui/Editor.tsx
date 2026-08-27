@@ -42,6 +42,7 @@ import type { NodeSize } from '../layout/elkGraph'
 import { getNodeDef, isAnnotation } from '../core/registry'
 import type { CodaType } from '../core/types'
 import { referenceEdgeIds } from '../core/graph'
+import { groupsTouching } from '../core/groups'
 import { spliceCandidate } from '../core/splice'
 import { useGraphStore } from '../store/graphStore'
 import { edgeUnderRect } from './spliceHit'
@@ -49,12 +50,14 @@ import type { CodaNodeData } from './nodes/CodaNodeView'
 import { CodaNodeView } from './nodes/CodaNodeView'
 import { NoteCard } from './nodes/NoteCard'
 import { CodaEdge } from './CodaEdge'
+import { GroupLayer } from './GroupLayer'
 import { CommandPalette } from './panels/CommandPalette'
 import { LayoutControls } from './panels/LayoutControls'
 import { LockControl } from './panels/LockControl'
 import { ViewControls } from './panels/ViewControls'
 import { EdgeContextMenu } from './panels/EdgeContextMenu'
 import { NodeBrowser } from './panels/NodeBrowser'
+import { GroupContextMenu } from './panels/GroupContextMenu'
 import { NodeContextMenu } from './panels/NodeContextMenu'
 import type { PaletteItem } from './panels/paletteItems'
 import { buildCommandItems, buildNodeItems } from './panels/paletteItems'
@@ -235,6 +238,19 @@ function EditorCanvas() {
     screenPosition: { x: number; y: number }
     edgeId: string
   } | null>(null)
+  const [groupMenu, setGroupMenu] = useState<{
+    screenPosition: { x: number; y: number }
+    groupId: string
+  } | null>(null)
+  /*
+   * Which group frame's title is being typed, held here rather than inside the frame itself.
+   *
+   * The frame draws inside React Flow's transformed viewport and the menu cannot — a
+   * `position: fixed` descendant of a transformed element is captured by the transform, the same
+   * containing-block trap the edge-set panel records. So the menu's Rename has to reach *into*
+   * the layer, and this is the seam it crosses.
+   */
+  const [editingGroup, setEditingGroup] = useState<string | undefined>(undefined)
 
   // --- derive React Flow's arrays -----------------------------------------
 
@@ -580,6 +596,7 @@ function EditorCanvas() {
     (screenPosition: { x: number; y: number }, initialQuery = '') => {
       setContextMenu(null)
       setEdgeMenu(null)
+      setGroupMenu(null)
       setMenu({
         seq: ++menuSeq.current,
         screenPosition,
@@ -598,6 +615,7 @@ function EditorCanvas() {
       setMenu(null)
       setContextMenu(null)
       setEdgeMenu(null)
+      setGroupMenu(null)
       setBrowserAt(screenToFlowPosition(screenPosition))
     },
     [screenToFlowPosition, refuseIfLocked],
@@ -802,6 +820,7 @@ function EditorCanvas() {
         setMenu(null)
         setContextMenu(null)
         setEdgeMenu(null)
+        setGroupMenu(null)
         return
       }
       // Space opens the full palette. React Flow's default binds it to pan-activation,
@@ -833,6 +852,24 @@ function EditorCanvas() {
         if (refuseIfLocked()) return
         if (event.shiftKey) useGraphStore.getState().redo()
         else useGraphStore.getState().undo()
+        return
+      }
+      /*
+       * ⌘G frames the selection, ⇧⌘G takes the frames it touches apart.
+       *
+       * `preventDefault` first, unconditionally: ⌘G is the browser's find-again, and a canvas
+       * that grouped *and* jumped the page to the last search hit would be two things happening
+       * at once with only one of them asked for.
+       */
+      if (mod && event.key.toLowerCase() === 'g') {
+        event.preventDefault()
+        if (refuseIfLocked()) return
+        const store = useGraphStore.getState()
+        if (event.shiftKey) {
+          store.ungroup(groupsTouching(store.graph, selected).map((group) => group.id))
+        } else {
+          store.groupSelection()
+        }
         return
       }
       if (mod && event.key.toLowerCase() === 'd') {
@@ -973,6 +1010,7 @@ function EditorCanvas() {
           event.preventDefault()
           setMenu(null)
           setContextMenu(null)
+          setGroupMenu(null)
           setEdgeMenu({
             screenPosition: { x: event.clientX, y: event.clientY },
             edgeId: edge.id,
@@ -982,6 +1020,7 @@ function EditorCanvas() {
           event.preventDefault()
           setMenu(null)
           setEdgeMenu(null)
+          setGroupMenu(null)
           setContextMenu({
             screenPosition: { x: event.clientX, y: event.clientY },
             nodeId: node.id,
@@ -1013,6 +1052,7 @@ function EditorCanvas() {
           setMenu(null)
           setContextMenu(null)
           setEdgeMenu(null)
+          setGroupMenu(null)
         }}
         /*
          * The tour's spotlight is placed in viewport pixels, and this canvas moves by CSS
@@ -1060,6 +1100,23 @@ function EditorCanvas() {
         fitView
         fitViewOptions={FIT_VIEW_OPTIONS}
       >
+        {/*
+         * Inside `<ReactFlow>` because `ViewportPortal` finds its container through the flow's
+         * store, and *before* the background only for reading order — the layer places itself by
+         * portal, so its position in this list decides nothing. See `GroupLayer` for the three
+         * viewport properties that do.
+         */}
+        <GroupLayer
+          measured={measuredSizes}
+          editingId={editingGroup}
+          onEditingChange={setEditingGroup}
+          onContextMenu={(groupId, screenPosition) => {
+            setMenu(null)
+            setContextMenu(null)
+            setEdgeMenu(null)
+            setGroupMenu({ groupId, screenPosition })
+          }}
+        />
         <Background
           variant={BackgroundVariant.Dots}
           gap={22}
@@ -1163,6 +1220,15 @@ function EditorCanvas() {
           screenPosition={contextMenu.screenPosition}
           nodeId={contextMenu.nodeId}
           onClose={() => setContextMenu(null)}
+        />
+      )}
+
+      {groupMenu && (
+        <GroupContextMenu
+          screenPosition={groupMenu.screenPosition}
+          groupId={groupMenu.groupId}
+          onRename={() => setEditingGroup(groupMenu.groupId)}
+          onClose={() => setGroupMenu(null)}
         />
       )}
 

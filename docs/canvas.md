@@ -402,6 +402,92 @@ What has **not** been looked at is a route under a non-default algorithm: `mrtre
 edge, `force`/`stress` bend none and `radial` returns no `sections` at all, all of which read as
 "no route" and are covered headlessly.
 
+## Groups
+
+One box around a set of cards, with an optional title above its top-left corner. Made from the
+node menu, the frame's own menu, the command palette or ⌘G; taken apart with ⇧⌘G. The document
+side is `GraphGroup` in `core/graph.ts` and the edits are `core/groups.ts`; the frame is drawn by
+`ui/GroupLayer.tsx` and configured from `ui/panels/GroupContextMenu.tsx`.
+
+**Membership is a list of node ids, and the box is derived from it.** Both halves of that were
+choices, and both had an obvious alternative that is worse here:
+
+- **Not React Flow's own group node.** Its `parentId` makes a child's `position` *relative to the
+  parent*, and this document's positions are absolute everywhere — the exporters, the ELK pass,
+  the splice hit test, `layout/place.ts`, every saved file. A frame is decoration; it has no
+  business re-basing the meaning of a field five subsystems already read.
+- **Not a stored rectangle.** Six things move a frame's contents — a card dragged, resized,
+  collapsed, folded, added by an assistant plan, re-placed by an arrange — and a stored box would
+  need every one of them to remember. `layout/groupBounds.ts` computes it instead, from the same
+  `resolveSize` the layout uses, so a frame cannot go stale. It costs one pass over the members
+  per render.
+
+**A node belongs to at most one group and groups do not nest.** So "which box owns this card" has
+an answer, which is what a future *collapse a group into one box* would need and what an
+overlapping model could not give it. Grouping a card that is already framed **moves** it rather
+than refusing — a refusal would have to be explained on a menu row, and "regroup these four" is
+what somebody pressing ⌘G on four cards means. A frame emptied by that move is dropped; a frame
+of one is legitimate, so the floor is one member, not two.
+
+**Four ways a membership list can quietly stop describing the canvas**, which is what
+`store/groups.test.ts` is mostly about: a member deleted, a card claimed by two frames, a file
+naming nodes this build dropped as unknown types, and a duplicate copying half a frame. The first
+is answered by `pruneGroups` inside `removeNodes` — not beside each caller, because deletion
+arrives by four routes (the menu, the palette, React Flow's Delete key, an assistant plan) and a
+membership naming a node nobody can see is invisible until the frame is dragged and moves fewer
+cards than it drew around. The third is `validGroups` in `deserializeGraph`, silently, for the
+reason that file is lenient everywhere else.
+
+**The colour is stored as a name, never as a CSS value**, and that is a safety property as well
+as a theming one: a `.coda.json` arrives from a gist, from the Zoo or from a mailed file, and the
+frame's colour is spent straight into an inline `style`. `GROUP_COLORS` is the list; `theme.css`
+and `editor.css` decide what each name looks like in each mode. The default grey is
+`--group-line: #7d7b76` — the same value and the same measurement as `--note-border`, which was
+chosen over `--text-muted` because that one is 2.99:1 on the *light canvas*, i.e. below the 3:1
+non-text floor exactly where a frame lives. The title's ink is `--text-secondary` whatever colour
+the frame is: the chip hues are validated as chips (a swatch with text on top), and the grey
+clears the line floor while missing the 4.5:1 text one.
+
+**Three properties of React Flow's viewport are load-bearing in the layer, and all three are
+inherited rather than asked for.** `ViewportPortal` is the viewport's *last* child, so at the
+default depth a frame paints over every card — `z-index: -1` puts it under the cards and the
+wires, and the viewport is itself a stacking context, so the negative depth cannot escape and
+land behind the canvas. `.react-flow__viewport` is `pointer-events: none` with the cards
+switching it back on, and the frame does the same for exactly two things: an SVG rect with
+`pointer-events: stroke` and an invisible band `GROUP_GRAB` wide over the outline, and the title.
+**The interior stays click-through** — panning, box-select and clicking a card inside a frame all
+behave as they do on bare canvas, which is why a bordered `<div>` would not do: it can take the
+whole rectangle or none of it. And panning is d3-zoom's, bound to `.react-flow__pane` with a
+*native* listener below React's root, so `stopPropagation` on a synthetic event cannot reach it —
+the `nopan` class is what d3's own filter reads, and it is the only thing that stops the canvas
+sliding out from under a frame being dragged.
+
+The drag writes through `moveNodes`, the same action a card drag uses: one call per pointer move
+with `commit: false`, one committing call at the end. That is what makes ⌘Z put the whole gesture
+back rather than its last frame, what makes a drag switch auto-layout off, and what makes a
+locked canvas refuse it — the guard is already in the action, and the layer only adds the notice
+that says so. Deltas are applied to the positions captured at `pointerdown` rather than stacked
+frame on frame, so a dropped move cannot make the group drift.
+
+**An arrange does not know about frames.** ELK is handed the nodes and the wires, and nothing
+tells it that six of them belong together — so auto-layout can place a group's cards apart, and
+the frame, being derived, simply grows to contain wherever they landed. That is the honest
+behaviour rather than a bug to work around at the frame's end: ELK Layered does support
+hierarchy, and teaching `layout/elkGraph.ts` to emit a child graph per group is the fix if this
+starts to matter. Nothing about the frame needs to change for it.
+
+**The lock**: creating and removing a frame are refused (a frame decides what one drag moves,
+which is graph structure the way a card's position is); naming and colouring one are not, like
+`renameNode` and `setParam`. `store/lock.test.ts` classifies all four.
+
+**The pointer half is not tested and cannot be**, same standing as the wire gestures below:
+jsdom performs no layout and dispatches no real pointer sequences. What needs a real browser is
+the outline being grabbable at a distance from the line, the interior still panning and
+box-selecting, a frame dragged at a zoom other than 1.0 moving its cards by the right amount, the
+frame painting *behind* the cards, and the title staying legible over the dot grid. **Those
+checks have not been run against this implementation yet.** `ui/panels/groupMenu.test.tsx` covers
+the DOM the frame draws, the menu, the keys and the palette rows.
+
 ## Canvas interaction
 
 Set explicitly on `<ReactFlow>` in `Editor.tsx`, and each one matters:

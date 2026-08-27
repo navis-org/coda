@@ -109,6 +109,13 @@ symptom to recognise — which usually points nowhere near the cause.
   from Ctrl. Four surfaces read it — the dialog, the palette badges, the status bar, the start
   page — and when each typed its own glyph, all four told Windows to press a key it does not
   have. `Editor.tsx` still owns the *bindings*; adding one means adding an entry here too.
+- **A group frame is not a React Flow node, and three viewport properties keep it honest.** It is
+  drawn into `ViewportPortal` at `z-index: -1` (last child, so it would otherwise paint over every
+  card), takes the pointer only on an SVG rect with `pointer-events: stroke` (the interior must
+  stay click-through, or the canvas inside a frame stops panning), and wears `nopan`, because
+  panning is d3-zoom's *native* listener below React's root and `stopPropagation` cannot reach it.
+  Membership is a list of node ids and the box is derived — `parentId` would re-base every child's
+  `position`, which five subsystems read absolutely. See [docs/canvas.md](docs/canvas.md).
 - **Module init order.** `graphStore.ts` imports `../nodes` for its side effect. Without
   it, ordering in `main.tsx` becomes load-bearing and silently drops every node.
   The same trap one level in: a Node-side script needs `registerBuiltinSources()` as well, or

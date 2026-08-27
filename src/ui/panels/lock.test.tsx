@@ -139,6 +139,7 @@ describe('the palette', () => {
     for (const id of [
       'cmd:undo',
       'cmd:duplicate',
+      'cmd:group',
       'cmd:delete',
       'cmd:browse-nodes',
       'cmd:fit',

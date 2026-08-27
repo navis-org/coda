@@ -48,10 +48,69 @@ export interface GraphEdge {
   targetHandle: string
 }
 
+/**
+ * The colours a group frame may be drawn in, by name.
+ *
+ * **A name and not a CSS colour**, and that is a safety property as well as a theming one. A
+ * `.coda.json` arrives from a gist, from the Zoo, from a mailed file — and the frame's colour is
+ * spent straight into an inline `style`, where an arbitrary string is a CSS injection with a
+ * `--var` and a `url()` in it. A name off this list resolves to a token in `theme.css` at render
+ * time, so the document carries a choice rather than a value, and the two themes each get the
+ * hue that was validated for them (`ui/colors.ts`).
+ */
+export const GROUP_COLORS = [
+  'grey',
+  'blue',
+  'orange',
+  'green',
+  'pink',
+  'violet',
+] as const
+export type GroupColor = (typeof GROUP_COLORS)[number]
+
+/**
+ * A frame drawn around a set of cards, and the set itself.
+ *
+ * Membership is a **list of node ids**, not a parent link on the node and not a rectangle. Both
+ * alternatives were available and both are worse here:
+ *
+ *  - React Flow's own `parentId` makes a child's `position` relative to its parent, which would
+ *    change the meaning of a field every saved file, the layout engine, the splice hit test and
+ *    the exporters already read absolutely. Groups are decoration; they have no business
+ *    re-basing the document's coordinates.
+ *  - A stored rectangle would need somebody to keep it in step with the cards inside it. The box
+ *    is *derived* instead (`layout/groupBounds.ts`), so a card that moves, is resized, collapses
+ *    or folds its params drags the frame with it and nothing can go stale.
+ *
+ * **A node belongs to at most one group and groups do not nest.** So "which box owns this card"
+ * always has an answer — which is what the collapse-a-group feature will need, and what an
+ * overlapping model could not give it. `createGroup` enforces it by moving a node out of its old
+ * group rather than refusing.
+ */
+export interface GraphGroup {
+  id: string
+  /** Members, by node id. Never empty — an emptied group is dropped, see `pruneGroups`. */
+  nodeIds: string[]
+  /** Drawn above the frame's top-left corner. Absent means an unnamed frame. */
+  title?: string
+  /** Absent means the default grey. See `GROUP_COLORS`. */
+  color?: GroupColor
+  /** A tint inside the frame rather than outline-only. Off by default. */
+  filled?: boolean
+  /** A dashed outline rather than a solid one. Off by default. */
+  dashed?: boolean
+}
+
 export interface CodaGraph {
   version: number
   nodes: GraphNode[]
   edges: GraphEdge[]
+  /**
+   * Frames drawn around sets of cards. Absent on every graph nobody has grouped anything in,
+   * which is why it is optional rather than an empty array — an old file must round trip
+   * byte-identically through a load and a save.
+   */
+  groups?: GraphGroup[]
   /** Restored on load so a saved graph reopens where you left it. */
   viewport?: { x: number; y: number; zoom: number }
   meta?: {
@@ -436,11 +495,45 @@ export function setNodeParam(
 
 export function removeNodes(graph: CodaGraph, ids: readonly string[]): CodaGraph {
   const dead = new Set(ids)
-  return {
+  return pruneGroups({
     ...graph,
     nodes: graph.nodes.filter((n) => !dead.has(n.id)),
     edges: graph.edges.filter((e) => !dead.has(e.source) && !dead.has(e.target)),
+  })
+}
+
+/**
+ * Drop group members that are not in the graph, and groups that are left with none.
+ *
+ * Here rather than in the store, and called from `removeNodes` rather than beside each caller,
+ * because deletion arrives by four routes — the menu, the palette, React Flow's Delete key and
+ * an assistant plan — and a membership list naming a node nobody can see is invisible until the
+ * frame is dragged and moves fewer cards than it drew around.
+ *
+ * Returns the graph **unchanged by identity** when nothing needed pruning, which is what lets
+ * the store's `commit` skip an undo step for a delete that touched no group.
+ */
+export function pruneGroups(graph: CodaGraph): CodaGraph {
+  if (!graph.groups?.length) return graph
+  const alive = new Set(graph.nodes.map((n) => n.id))
+  let changed = false
+  const groups: GraphGroup[] = []
+  for (const group of graph.groups) {
+    const nodeIds = group.nodeIds.filter((id) => alive.has(id))
+    if (nodeIds.length === group.nodeIds.length) {
+      groups.push(group)
+      continue
+    }
+    changed = true
+    if (nodeIds.length > 0) groups.push({ ...group, nodeIds })
   }
+  if (!changed) return graph
+  const next = { ...graph }
+  // Deleted rather than set to `undefined`: a graph nobody has grouped anything in must not
+  // grow a key, so that a file round trips through a load and a save byte-identically.
+  if (groups.length) next.groups = groups
+  else delete next.groups
+  return next
 }
 
 /**
@@ -619,14 +712,59 @@ export function deserializeGraph(json: string): LoadResult {
     })
   }
 
+  const groups = validGroups(obj.groups, alive)
+
   return {
     graph: {
       version: GRAPH_FORMAT_VERSION,
       nodes,
       edges,
+      ...(groups.length ? { groups } : {}),
       ...(obj.viewport ? { viewport: obj.viewport } : {}),
       ...(validMeta(obj.meta) ? { meta: validMeta(obj.meta) } : {}),
     },
     warnings,
   }
+}
+
+/**
+ * Stored group frames, with anything malformed dropped.
+ *
+ * The same lenient-but-checked pass `validSize` and `validMeta` give the rest of the file, and
+ * for the same three reasons here. A member id whose node was dropped as an unknown type would
+ * make a frame that draws around fewer cards than it moves. A colour is a *name* off
+ * `GROUP_COLORS` and an unknown one falls back to the default rather than reaching a stylesheet
+ * — see the note there. And a group with no members left is not a frame, it is a rectangle of
+ * nothing, so it goes.
+ *
+ * Silent rather than warned about, unlike a dropped node: the document still means what it said,
+ * minus decoration, and a warning per stale membership on a file somebody was sent would bury
+ * the warnings that are about their data.
+ */
+function validGroups(raw: unknown, alive: ReadonlySet<string>): GraphGroup[] {
+  if (!Array.isArray(raw)) return []
+  const groups: GraphGroup[] = []
+  const claimed = new Set<string>()
+  for (const g of raw) {
+    if (!g || typeof g !== 'object') continue
+    const { id, nodeIds, title, color, filled, dashed } = g as Record<string, unknown>
+    if (typeof id !== 'string' || !Array.isArray(nodeIds)) continue
+    // A node in two groups cannot be drawn honestly by either — first one wins, as
+    // `createGroup` would have done.
+    const members = nodeIds.filter(
+      (n): n is string => typeof n === 'string' && alive.has(n) && !claimed.has(n),
+    )
+    if (members.length === 0) continue
+    for (const n of members) claimed.add(n)
+    const named = GROUP_COLORS.find((c) => c === color)
+    groups.push({
+      id,
+      nodeIds: members,
+      ...(typeof title === 'string' && title ? { title } : {}),
+      ...(named ? { color: named } : {}),
+      ...(filled === true ? { filled: true } : {}),
+      ...(dashed === true ? { dashed: true } : {}),
+    })
+  }
+  return groups
 }

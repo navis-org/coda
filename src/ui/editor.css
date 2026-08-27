@@ -7641,3 +7641,193 @@ details[open] > summary.tile__label {
   color: var(--status-warn, var(--text-secondary));
   cursor: help;
 }
+
+/* --- group frames ------------------------------------------------------- */
+
+/*
+ * The layer sits inside React Flow's `ViewportPortal`, which is the viewport's *last* child —
+ * so without a depth of its own a frame would paint over every card. `-1` puts it under the
+ * cards and under the wires, and it cannot escape the viewport's own stacking context (which has
+ * `z-index: 2` and a transform), so it stays above the canvas and its dots.
+ *
+ * `pointer-events` is off here and switched back on for exactly two things: the invisible band
+ * over the outline, and the title. Everything inside the frame stays click-through, which is
+ * what keeps panning, box-select and clicking a card behaving as they do on bare canvas.
+ */
+.group-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+
+.group-frame {
+  position: absolute;
+  top: 0;
+  left: 0;
+  /* The default. `data-color` swaps it for a chip hue; the document stores the name only. */
+  --group-color: var(--group-line);
+}
+
+.group-frame[data-color='blue'] {
+  --group-color: var(--chip-1);
+}
+.group-frame[data-color='orange'] {
+  --group-color: var(--chip-2);
+}
+.group-frame[data-color='green'] {
+  --group-color: var(--chip-3);
+}
+.group-frame[data-color='pink'] {
+  --group-color: var(--chip-5);
+}
+.group-frame[data-color='violet'] {
+  --group-color: var(--chip-7);
+}
+
+.group-frame__svg {
+  display: block;
+  overflow: visible;
+}
+
+/* Outline only by default — a fill is opt-in, and never more than a tint. */
+.group-frame__fill {
+  fill: none;
+}
+.group-frame[data-filled] .group-frame__fill {
+  fill: color-mix(in srgb, var(--group-color) 12%, transparent);
+}
+
+.group-frame__line {
+  fill: none;
+  stroke: var(--group-color);
+  stroke-width: 1.5;
+  opacity: 0.85;
+}
+.group-frame[data-dashed] .group-frame__line {
+  stroke-dasharray: 7 5;
+}
+/*
+ * Selected means every card inside it is selected — the state a drag leaves behind. Thicker and
+ * at full strength rather than recoloured: the frame's colour is what tells two groups apart,
+ * and borrowing the accent for selection would take that away exactly when there are two.
+ */
+.group-frame[data-selected] .group-frame__line {
+  stroke-width: 2.5;
+  opacity: 1;
+}
+
+/*
+ * The grab band: transparent, `GROUP_GRAB` wide, centred on the same path as the outline.
+ * `pointer-events: stroke` is the whole reason this is SVG — a bordered `<div>` can only take
+ * the entire rectangle or none of it, and taking the entire rectangle is what would make the
+ * canvas inside a frame stop panning.
+ */
+.group-frame__grab {
+  fill: none;
+  stroke: transparent;
+  pointer-events: stroke;
+  cursor: grab;
+}
+.group-frame__grab:active {
+  cursor: grabbing;
+}
+.group-layer[data-locked] .group-frame__grab,
+.group-layer[data-locked] .group-frame__title {
+  cursor: default;
+}
+
+/*
+ * The title sits *outside* the box, above its top-left corner — inside it would read as a label
+ * on whichever card happens to be up there. `--group-grab` comes from the component, so the one
+ * constant that decides the geometry is not spelled twice.
+ */
+.group-frame__title-row {
+  position: absolute;
+  left: calc(var(--group-grab) / 2);
+  bottom: calc(100% - var(--group-grab) / 2 + 3px);
+  max-width: 100%;
+  pointer-events: none;
+}
+
+.group-frame__title,
+.group-frame__title-input {
+  pointer-events: auto;
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1.4;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  /*
+   * Ink is `--text-secondary` whatever colour the frame is, and that is deliberate: the chip
+   * hues are validated as *chips* — a swatch with text on top of it — and the default grey is
+   * 3.5:1 on the light canvas, which clears the line floor and misses the 4.5:1 text one. The
+   * frame carries the colour; the title carries the words.
+   */
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--canvas) 78%, transparent);
+  border: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-frame__title {
+  cursor: grab;
+}
+.group-frame__title:active {
+  cursor: grabbing;
+}
+
+.group-frame__title-input {
+  background: var(--surface-2);
+  border: 1px solid var(--group-color);
+  min-width: 120px;
+  outline: none;
+}
+
+/*
+ * The colour row in the group menu. A swatch is the one control here whose value is its own
+ * label, so six of them fit on one line where six named rows would not.
+ */
+.context-menu__swatches {
+  display: flex;
+  gap: 6px;
+  padding: 5px 10px 7px;
+}
+
+.context-menu__swatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1.5px solid var(--swatch-color);
+  background: color-mix(in srgb, var(--swatch-color) 22%, transparent);
+  cursor: pointer;
+  padding: 0;
+}
+.context-menu__swatch[data-color='grey'] {
+  --swatch-color: var(--group-line);
+}
+.context-menu__swatch[data-color='blue'] {
+  --swatch-color: var(--chip-1);
+}
+.context-menu__swatch[data-color='orange'] {
+  --swatch-color: var(--chip-2);
+}
+.context-menu__swatch[data-color='green'] {
+  --swatch-color: var(--chip-3);
+}
+.context-menu__swatch[data-color='pink'] {
+  --swatch-color: var(--chip-5);
+}
+.context-menu__swatch[data-color='violet'] {
+  --swatch-color: var(--chip-7);
+}
+/* The chosen one wears a ring rather than a tick: a 16px circle has no room for a glyph. */
+.context-menu__swatch[data-current] {
+  background: var(--swatch-color);
+  box-shadow: 0 0 0 2px var(--surface-1), 0 0 0 3.5px var(--swatch-color);
+}

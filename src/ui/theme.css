@@ -149,6 +149,19 @@
   --note-border: #7d7b76;
 
   /*
+   * A group frame's default outline, and the same grey for the same measured reason as
+   * `--note-border` above: an achromatic line drawn on the *canvas* in both themes, where
+   * `--text-muted` is 2.99:1 on the light one and so fails exactly where this lives. #7d7b76
+   * clears the 3:1 non-text floor on all four surfaces it can meet (3.52:1 on the light canvas,
+   * 4.43:1 on the dark).
+   *
+   * One value for both modes, like the note's border: the frame is a line on the canvas, not a
+   * surface that has to track it. The other five choices are chip hues, mapped in `editor.css` —
+   * a document stores the *name* and never a colour, see `GROUP_COLORS`.
+   */
+  --group-line: #7d7b76;
+
+  /*
    * How strongly the start page's backdrop image reads.
    *
    * Per-mode because it has to be: one image serves both themes (a JPEG cannot adapt), and a

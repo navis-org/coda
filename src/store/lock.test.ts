@@ -113,6 +113,30 @@ describe('a locked canvas', () => {
     expect(graph().edges.length).toBe(edges)
   })
 
+  /*
+   * A group frame is decoration, but the *frame* is graph structure the way a card's position
+   * is: it decides what one drag moves. So creating and removing one is refused, while naming
+   * and colouring one — which move nothing — are not, and that split is the whole judgement.
+   */
+  it('refuses to group or ungroup, and still renames and restyles a frame', () => {
+    useGraphStore.setState({ locked: false })
+    store().setSelection(['src', 'view'])
+    const groupId = store().groupSelection()
+    expect(groupId).toBeDefined()
+    useGraphStore.setState({ locked: true })
+
+    expect(store().groupSelection()).toBeUndefined()
+    store().ungroup([groupId!])
+    expect(graph().groups?.length).toBe(1)
+
+    store().renameGroup(groupId!, 'Sensory')
+    store().styleGroup(groupId!, { color: 'blue', filled: true })
+    const group = graph().groups?.[0]
+    expect(group?.title).toBe('Sensory')
+    expect(group?.color).toBe('blue')
+    expect(group?.filled).toBe(true)
+  })
+
   it('refuses an assistant plan, and answers with a reason rather than in silence', () => {
     const result = store().applyAssistantPlan({
       ...emptyPlan(),
@@ -185,6 +209,8 @@ describe('every store action is on one side of the lock', () => {
     'moveNodes',
     'resizeNodes',
     'duplicateSelection',
+    'groupSelection',
+    'ungroup',
     'deleteNodes',
     'deleteEdges',
     'connect',
@@ -237,6 +263,10 @@ describe('every store action is on one side of the lock', () => {
     'toggleDisabled',
     'toggleCollapsed',
     'toggleParamRows',
+    // A frame's title and its colour are `renameNode` and `setParam`'s kind of edit: nothing
+    // moves and nothing is restructured, and the lock is about geometry and structure.
+    'renameGroup',
+    'styleGroup',
     'canConnect',
     'setSelection',
     'runAll',

@@ -9,6 +9,7 @@
 
 import type { CodaType } from '../../core/types'
 import { isAssignable } from '../../core/types'
+import { groupsTouching } from '../../core/groups'
 import { isAnnotation, nodeDefsByCategory } from '../../core/registry'
 import type { GraphState } from '../../store/graphStore'
 import { pickGraphFile } from '../../store/persistence'
@@ -248,6 +249,28 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
       ...(locked ? { hint: LOCKED_HINT } : {}),
       disabled: locked || selection.length === 0,
       perform: () => store.duplicateSelection(),
+    },
+    {
+      id: 'cmd:group',
+      label: 'Group Selection',
+      action: 'Edit',
+      hint: 'One frame around the selected cards; dragging it moves all of them',
+      shortcut: shortcutKeys('group'),
+      ...(locked ? { hint: LOCKED_HINT } : {}),
+      disabled: locked || selection.length === 0,
+      perform: () => store.groupSelection(),
+    },
+    {
+      id: 'cmd:ungroup',
+      label: 'Ungroup Selection',
+      action: 'Edit',
+      hint: 'The frame goes; the cards stay where they are',
+      shortcut: shortcutKeys('ungroup'),
+      ...(locked ? { hint: LOCKED_HINT } : {}),
+      // Disabled with nothing framed rather than hidden, so the row is somewhere to *learn*
+      // that frames exist — the same reason the node rows stay visible while locked.
+      disabled: locked || groupsTouching(store.graph, selection).length === 0,
+      perform: () => store.ungroup(groupsTouching(store.graph, selection).map((g) => g.id)),
     },
     {
       id: 'cmd:mute',

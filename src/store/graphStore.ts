@@ -13,7 +13,7 @@
 
 import { create } from 'zustand'
 
-import type { CodaGraph, GraphEdge, GraphNode } from '../core/graph'
+import type { CodaGraph, GraphEdge, GraphGroup, GraphNode } from '../core/graph'
 import type { ApplyResult } from '../assistant/apply'
 import { applyPlan } from '../assistant/apply'
 import type { AssistantPlan } from '../assistant/planShape'
@@ -28,6 +28,7 @@ import {
   setNodeParam,
   updateNode,
 } from '../core/graph'
+import { cloneGroups, createGroup, removeGroups, updateGroup } from '../core/groups'
 import { autoWireDataset } from '../core/autowire'
 import { addNodeWithCompanion } from '../core/companion'
 import type { InferenceResult } from '../core/inference'
@@ -393,6 +394,32 @@ export interface GraphState {
   toggleCollapsed(nodeIds: string[]): void
   toggleParamRows(nodeIds: string[]): void
   duplicateSelection(): void
+  /**
+   * Draw a frame around the selected cards, and return its id.
+   *
+   * A *canvas* edit rather than a document one in every sense that matters here: it changes no
+   * param, no wire and nothing any node computes, which is why it never re-runs anything — and
+   * why the lock refuses it, since a frame is graph structure the way a card's position is.
+   *
+   * Grouping cards that were already framed moves them out of the old frame; a frame left with
+   * no members goes. See `core/groups.ts` for that rule and why it is not a refusal.
+   *
+   * Returns `undefined` when there was nothing to frame — an empty selection, or a locked
+   * canvas — for the reason `addNode` answers a locked canvas with an empty id: the caller has
+   * to have something to check that is not "did the graph change".
+   */
+  groupSelection(): string | undefined
+  /** Remove these frames. The cards stay where they are — a frame owns nothing. */
+  ungroup(groupIds: string[]): void
+  /** Retitle one frame. Coalesced like `renameNode`, so typing a title is one undo step. */
+  renameGroup(groupId: string, title: string): void
+  /**
+   * Restyle one frame: its colour, its fill, its dashes.
+   *
+   * Live under the lock, like `setParam` and `renameNode`: nothing moves and nothing is
+   * restructured. A locked canvas is about geometry and structure, not about how things look.
+   */
+  styleGroup(groupId: string, patch: Omit<Partial<GraphGroup>, 'id' | 'nodeIds'>): void
   deleteNodes(nodeIds: string[]): void
   deleteEdges(edgeIds: string[]): void
   connect(edge: Omit<GraphEdge, 'id'>): boolean
@@ -1237,12 +1264,50 @@ export const useGraphStore = create<GraphState>((set, get) => {
           target: idMap.get(e.target)!,
         }))
 
+      /*
+       * A frame is copied only when the *whole* of it was duplicated — the rule the edge copy
+       * above already follows, for the same reason: a frame around three of six cards is a
+       * claim about a set nobody selected. See `cloneGroups`.
+       */
+      const groupClones = cloneGroups(graph, idMap)
+
       commit((g) => ({
         ...g,
         nodes: [...g.nodes, ...clones],
         edges: [...g.edges, ...cloneEdges],
+        ...(groupClones.length ? { groups: [...(g.groups ?? []), ...groupClones] } : {}),
       }))
       set({ selection: clones.map((n) => n.id) })
+    },
+
+    groupSelection: () => {
+      if (frozen()) return undefined
+      const { graph, selection } = get()
+      if (selection.length === 0) return undefined
+      const next = createGroup(graph, selection)
+      if (next === graph) return undefined
+      const group = next.groups?.[next.groups.length - 1]
+      // A frame changes nothing any node computes, so no cache is touched and nothing re-runs.
+      commit(() => next, { autoRun: false })
+      return group?.id
+    },
+
+    ungroup: (groupIds) => {
+      if (frozen() || groupIds.length === 0) return
+      commit((g) => removeGroups(g, groupIds), { autoRun: false })
+    },
+
+    renameGroup: (groupId, title) => {
+      commit((g) => updateGroup(g, groupId, { title }), {
+        // The same coalescing `renameNode` gets, and for the same reason: a title typed a
+        // character at a time is one edit, not eleven undo steps.
+        tag: `group-title:${groupId}`,
+        autoRun: false,
+      })
+    },
+
+    styleGroup: (groupId, patch) => {
+      commit((g) => updateGroup(g, groupId, patch), { autoRun: false })
     },
 
     deleteNodes: (nodeIds) => {
