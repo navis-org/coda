@@ -51,6 +51,7 @@ import { CodaNodeView } from './nodes/CodaNodeView'
 import { NoteCard } from './nodes/NoteCard'
 import { CodaEdge } from './CodaEdge'
 import { GroupLayer } from './GroupLayer'
+import { LoopLayer } from './LoopLayer'
 import { CommandPalette } from './panels/CommandPalette'
 import { LayoutControls } from './panels/LayoutControls'
 import { LockControl } from './panels/LockControl'
@@ -74,6 +75,7 @@ import { appElement, toggleFullscreen } from './fullscreen'
 import { typeColorVar } from './socketStyle'
 import { useArrange } from './useArrange'
 import { useDownloads } from './useDownloads'
+import { useForEach } from './useForEach'
 
 /**
  * Minimap size.
@@ -184,6 +186,7 @@ function EditorCanvas() {
   // body, and a Download node that stopped writing when somebody tidied it away would be a bug
   // nobody could reproduce on purpose.
   useDownloads()
+  useForEach()
   const wrapperRef = useRef<HTMLDivElement>(null)
   const pointerRef = useRef({ x: 0, y: 0 })
   const draggingRef = useRef(false)
@@ -1117,6 +1120,11 @@ function EditorCanvas() {
             setGroupMenu({ groupId, screenPosition })
           }}
         />
+        {/*
+         * After `GroupLayer` for reading order only, as above. It takes no pointer at all, so
+         * none of the three viewport hazards that layer documents apply to it beyond the depth.
+         */}
+        <LoopLayer measured={measuredSizes} />
         <Background
           variant={BackgroundVariant.Dots}
           gap={22}

@@ -20,14 +20,8 @@ import { useEffect, useRef } from 'react'
 import { errorMessage } from '../core/errors'
 import type { CodaGraph, GraphNode } from '../core/graph'
 import type { Value } from '../core/values'
-import {
-  downloadDataUrl,
-  downloadFiles,
-  downloadPng,
-  downloadSvg,
-  exportBaseName,
-} from './export'
-import type { ExportFormat } from './exportValue'
+import { dataUrlToBlob, downloadFiles, exportBaseName, serializeSvg, svgToPngBlob } from './export'
+import type { ExportFile, ExportFormat } from './exportValue'
 import { planExport } from './exportValue'
 import { useGraphStore } from '../store/graphStore'
 import { exportSourceFor } from './viewers/exportRegistry'
@@ -65,20 +59,25 @@ export interface DownloadOutcome {
 }
 
 /**
- * Perform one Download node's download.
+ * What a Download node's value amounts to, as named byte blobs.
  *
- * Exported and synchronous-ish so the card's button and the run driver share it exactly — two
- * routes to the same file that disagreed about the name or the format would be worse than one
- * route.
+ * **The whole of "what a Download node produces", in one place.** It was two: this dispatch and a
+ * near-copy in the loop's driver that differed only in where the bytes landed — and the two had
+ * already parted company, with the copy dropping `planExport`'s truncation report entirely, so a
+ * loop silently wrote the first fifty of a set and said nothing. Everything here is about the
+ * *value*; nothing here writes a file, which is what lets the button and a folder sink share it.
+ *
+ * Async because a PNG from a vector viewer is rasterised through a canvas. The alternative was a
+ * sentinel — an `SVGSVGElement` smuggled through `ExportFile.parts` under a fake mime — which put
+ * an undeclared invalid state into a type three other modules read.
  */
-export async function runDownload(
+export async function planDownload(
   node: GraphNode,
   value: Value | undefined,
   graph: CodaGraph,
-  now: Date = new Date(),
-): Promise<DownloadOutcome> {
+  base: string,
+): Promise<{ files: ExportFile[]; error?: string }> {
   const format = String(node.params.format ?? 'auto') as ExportFormat
-  const base = downloadBaseName(node, graph.meta?.name, now)
 
   if (format === 'svg' || format === 'png') {
     /*
@@ -92,53 +91,41 @@ export async function runDownload(
     // A WebGL viewer has no vector form, so PNG reads its drawing buffer back instead. SVG
     // still refuses for that node, and the message below says why in the same words.
     if (format === 'png' && !source?.svg && source?.png) {
-      try {
-        const dataUrl = source.png()
-        if (!dataUrl) throw new Error('Scene is not rendered yet')
-        downloadDataUrl(dataUrl, `${base}.png`)
-        return { written: [`${base}.png`] }
-      } catch (error) {
-        return { written: [], error: errorMessage(error) }
-      }
+      const dataUrl = source.png()
+      if (!dataUrl) return { files: [], error: 'Scene is not rendered yet' }
+      return { files: [{ name: `${base}.png`, parts: [dataUrlToBlob(dataUrl)], mime: PNG_MIME }] }
     }
 
     const svg = source?.svg?.()
     if (!svg) {
       return {
-        written: [],
+        files: [],
         error: sourceId
           ? `No chart is drawn for the node feeding this one. ${format.toUpperCase()} reads a rendered viewer, so that card has to be on screen and not collapsed.`
           : 'Nothing is connected, so there is no chart to write.',
       }
     }
-    try {
-      if (format === 'svg') {
-        downloadSvg(svg, `${base}.svg`)
-        return { written: [`${base}.svg`] }
+    if (format === 'svg') {
+      return {
+        files: [{ name: `${base}.svg`, parts: [serializeSvg(svg)], mime: SVG_MIME }],
       }
-      await downloadPng(svg, `${base}.png`)
-      return { written: [`${base}.png`] }
-    } catch (error) {
-      return { written: [], error: errorMessage(error) }
+    }
+    return {
+      files: [{ name: `${base}.png`, parts: [await svgToPngBlob(svg)], mime: PNG_MIME }],
     }
   }
 
-  if (value === undefined) return { written: [], error: 'Nothing is connected.' }
+  if (value === undefined) return { files: [], error: 'Nothing is connected.' }
 
   const plan = planExport(value, format, base)
   if (plan.files.length === 0) {
     return {
-      written: [],
+      files: [],
       error: `${value.kind} cannot be written as ${format.toUpperCase()}. Use auto, or JSON.`,
     }
   }
-  try {
-    downloadFiles(plan.files)
-  } catch (error) {
-    return { written: [], error: errorMessage(error) }
-  }
   return {
-    written: plan.files.map((f) => f.name),
+    files: plan.files,
     ...(plan.truncated
       ? {
           // Not an error — the files were written. But a set silently shorter than the data is
@@ -146,6 +133,36 @@ export async function runDownload(
           error: `Wrote the first ${plan.truncated.kept} of ${plan.truncated.total}; a browser stops honouring downloads past about that many.`,
         }
       : {}),
+  }
+}
+
+const PNG_MIME = 'image/png'
+const SVG_MIME = 'image/svg+xml;charset=utf-8'
+
+/**
+ * Perform one Download node's download.
+ *
+ * Exported and shared with the card's button so the two routes to a file cannot disagree about
+ * the name or the format. Since `planDownload` took over the dispatch, this is the thin half:
+ * decide the name, and hand the bytes to the browser.
+ */
+export async function runDownload(
+  node: GraphNode,
+  value: Value | undefined,
+  graph: CodaGraph,
+  now: Date = new Date(),
+): Promise<DownloadOutcome> {
+  const base = downloadBaseName(node, graph.meta?.name, now)
+  try {
+    const plan = await planDownload(node, value, graph, base)
+    if (plan.files.length === 0) return { written: [], error: plan.error }
+    downloadFiles(plan.files)
+    return {
+      written: plan.files.map((f) => f.name),
+      ...(plan.error ? { error: plan.error } : {}),
+    }
+  } catch (error) {
+    return { written: [], error: errorMessage(error) }
   }
 }
 
@@ -172,8 +189,19 @@ export function useDownloads(): void {
 
     const { graph, nodeInputs, setNotice } = useGraphStore.getState()
     const executed = new Set(lastRun.executed)
+    /*
+     * A Download **inside a loop** has already written its files, one per element, through
+     * `onIteration` — see `useForEach.ts`. It is in `executed` all the same, because that is a
+     * set of node ids and cannot count passes, so writing it again here would add a stray
+     * four-hundred-and-first file holding the last element and nothing to explain it.
+     */
+    const inLoop = new Set(lastRun.loopNodes)
     const nodes = graph.nodes.filter(
-      (n) => n.type === DOWNLOAD_TYPE && executed.has(n.id) && n.params.onRun !== false,
+      (n) =>
+        n.type === DOWNLOAD_TYPE &&
+        executed.has(n.id) &&
+        !inLoop.has(n.id) &&
+        n.params.onRun !== false,
     )
     if (nodes.length === 0) return
 

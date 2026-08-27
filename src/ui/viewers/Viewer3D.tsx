@@ -83,6 +83,15 @@ export interface Viewer3DProps {
   pointSize: number
   volumeOpacity: number
   background: BackgroundChoice
+  /**
+   * Re-frame the camera whenever the scene's extent changes, rather than framing once.
+   *
+   * The deliberate opt-out of `CameraRig`'s central rule — see the note there, and the param's
+   * own on `out.viewer3d`. It exists for the `For Each` case: a loop putting four hundred
+   * different neurons through one viewer frames on the first and draws the other 399 under its
+   * camera, which is right for a comparable set and wrong when the elements are far apart.
+   */
+  refit?: boolean
   selection: string[]
   onSelectionChange?: (ids: string[]) => void
   /**
@@ -169,6 +178,7 @@ export function Viewer3D(props: Viewer3DProps) {
     points,
     volumes,
     background,
+    refit = false,
     selection,
     onSelectionChange,
     onParamChange,
@@ -491,7 +501,12 @@ export function Viewer3D(props: Viewer3DProps) {
             keys={['', '', '']}
           />
           <PickRadius size={framing.size} />
-          <CameraRig framing={framing} resetAt={resetAt} {...(viewerId ? { viewerId } : {})} />
+          <CameraRig
+            framing={framing}
+            resetAt={resetAt}
+            refit={refit}
+            {...(viewerId ? { viewerId } : {})}
+          />
           <Compass ink={ink} compact={compact} />
           <CaptureBridge target={captureRef} />
         </Canvas>
@@ -1243,10 +1258,13 @@ function PointCloud({
 function CameraRig({
   framing,
   resetAt,
+  refit,
   viewerId,
 }: {
   framing: Framing
   resetAt: number
+  /** See `Viewer3DProps.refit`: the switch that turns the three rules above into four. */
+  refit: boolean
   viewerId?: string
 }) {
   const camera = useThree((state) => state.camera)
@@ -1295,9 +1313,22 @@ function CameraRig({
       frame()
       return
     }
+    /*
+     * The fourth thing that moves the camera, and the only one that is opt-in: `Frame each`.
+     *
+     * Everything the rule above protects still holds while it is off, which is the default. On,
+     * an extent change re-frames — which is what a `For Each` stepping through neurons in
+     * different parts of the volume needs, and what anybody turning a scene by hand does not.
+     * Guarded on a real extent for the same reason as the first framing: a pass whose element
+     * produced nothing must not throw the camera at a placeholder box.
+     */
+    if (refit && framing.size > 1) {
+      frame()
+      return
+    }
     clip()
     invalidate()
-  }, [framing, frame, clip, invalidate])
+  }, [framing, frame, clip, invalidate, refit])
 
   useEffect(() => {
     if (resetAt === 0) return

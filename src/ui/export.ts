@@ -301,19 +301,31 @@ export function serializeSvg(svg: SVGSVGElement): string {
  * buffer, which is why the caller hands over a string rather than a canvas.
  */
 export function downloadDataUrl(dataUrl: string, filename: string): void {
+  triggerDownload(dataUrlToBlob(dataUrl), filename)
+}
+
+/**
+ * The bytes of a `data:` URL, with the mime it declares.
+ *
+ * Split out of `downloadDataUrl` for `svgToPngBlob`'s reason and by the same route: a loop
+ * writing one picture per element needs the bytes to hand to a folder or an archive, and going
+ * through the anchor is the four-hundred-downloads failure `fileSink.ts` exists to avoid. One
+ * decoder, two callers — the second copy had already dropped the non-base64 branch and hardcoded
+ * `image/png`, so the loop and the button could disagree about the file they wrote.
+ */
+export function dataUrlToBlob(dataUrl: string): Blob {
   const comma = dataUrl.indexOf(',')
   if (comma < 0) throw new Error('Not a data URL')
   const header = dataUrl.slice(0, comma)
   const body = dataUrl.slice(comma + 1)
   const mime = header.slice(5).split(';')[0] || 'application/octet-stream'
   if (!header.includes(';base64')) {
-    triggerDownload(new Blob([decodeURIComponent(body)], { type: mime }), filename)
-    return
+    return new Blob([decodeURIComponent(body)], { type: mime })
   }
   const binary = atob(body)
   const bytes = new Uint8Array(binary.length)
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-  triggerDownload(new Blob([bytes], { type: mime }), filename)
+  return new Blob([bytes], { type: mime })
 }
 
 export function downloadSvg(svg: SVGSVGElement, filename: string): void {
@@ -323,13 +335,15 @@ export function downloadSvg(svg: SVGSVGElement, filename: string): void {
 
 /**
  * Rasterise the SVG through an offscreen canvas. `scale` 2 gives a retina-quality PNG.
- * Rejects rather than downloading a blank file if the image fails to decode.
+ * Rejects rather than returning a blank image if the SVG fails to decode.
+ *
+ * Split out of `downloadPng` when a loop needed the *bytes* rather than a download: a `For Each`
+ * writing one picture per element hands them to a folder or an archive, and going through the
+ * anchor would be the four-hundred-downloads failure `fileSink.ts` exists to avoid. One
+ * rasteriser, two callers — a second copy is how the loop's images and the button's images start
+ * differing in scale, which nothing would catch until two figures were side by side.
  */
-export async function downloadPng(
-  svg: SVGSVGElement,
-  filename: string,
-  scale = 2,
-): Promise<void> {
+export async function svgToPngBlob(svg: SVGSVGElement, scale = 2): Promise<Blob> {
   const source = serializeSvg(svg)
   const width = Number(svg.getAttribute('width')) || svg.clientWidth || 800
   const height = Number(svg.getAttribute('height')) || svg.clientHeight || 400
@@ -351,10 +365,18 @@ export async function downloadPng(
       canvas.toBlob(resolve, 'image/png'),
     )
     if (!pngBlob) throw new Error('Canvas produced no PNG data')
-    triggerDownload(pngBlob, filename)
+    return pngBlob
   } finally {
     URL.revokeObjectURL(url)
   }
+}
+
+export async function downloadPng(
+  svg: SVGSVGElement,
+  filename: string,
+  scale = 2,
+): Promise<void> {
+  triggerDownload(await svgToPngBlob(svg, scale), filename)
 }
 
 function loadImage(url: string): Promise<HTMLImageElement> {

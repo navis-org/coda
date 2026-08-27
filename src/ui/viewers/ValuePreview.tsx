@@ -252,6 +252,7 @@ function ValuePreviewInner({
         // other — the same prop the network viewer takes for its layout and camera.
         viewerId={node.id}
         background={String(node.params.background ?? 'theme') as BackgroundChoice}
+        refit={node.params.refit === true}
         // Read defensively rather than cast: these three are written by the legend, so a graph
         // saved before it existed has no key for them at all.
         // Through the reader beside `readColorSpec`, because `colorParams({ legend })` is what

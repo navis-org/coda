@@ -24,8 +24,9 @@
  * same reason as `filterNetwork` recomputing its degrees.
  */
 
+import { ID_COLUMN_NAME, idText } from '../../core/ids'
 import type { CodaType } from '../../core/types'
-import type { MeshesValue, SkeletonsValue, TableValue, Value } from '../../core/values'
+import type { CellValue, MeshesValue, SkeletonsValue, TableValue, Value } from '../../core/values'
 import { EMPTY_BOUNDS, boundsOf, getRow, isTableValue, selectRows } from '../../core/values'
 
 /** The value kinds `Select One` can step through. */
@@ -90,8 +91,122 @@ export function emptyElement(v: IterableValue): IterableValue {
  * answer moved.
  */
 export function elementAt(v: IterableValue, index: number): IterableValue {
-  const i = Math.floor(index)
-  return sliceElements(v, i >= 0 && i < elementCount(v) ? [i] : [])
+  return elementsFrom(v, index, 1)
+}
+
+/**
+ * A run of elements starting at `start`, as a collection.
+ *
+ * `elementAt` widened, and the widening is what a **batched** loop is: one pass carrying twenty
+ * neurons rather than one. That matters because every backend already fetches concurrently —
+ * `mapWithConcurrency`, six in flight on neuPrint, eight on CATMAID — and asking for a single
+ * neuron per pass is what reduces that to one. A batch hands the whole run down at once and gets
+ * the concurrency back, while still holding only a batch rather than the whole collection.
+ *
+ * Clamped rather than padded at the end: the last batch of 412 elements taken twenty at a time
+ * is twelve, not twenty with eight empties, and nothing downstream should have to tell the
+ * difference between a short batch and a full one.
+ */
+export function elementsFrom(v: IterableValue, start: number, size: number): IterableValue {
+  const total = elementCount(v)
+  const from = Math.max(0, Math.floor(start))
+  const to = Math.min(total, from + Math.max(0, Math.floor(size)))
+  const indices: number[] = []
+  for (let i = from; i < to; i++) indices.push(i)
+  return sliceElements(v, indices)
+}
+
+/**
+ * The table whose rows line up with this collection's elements, one for one.
+ *
+ * A table is its own; a geometry collection's is its attribute table, which `SkeletonsValue`
+ * documents as one row per item *in the same order*. That contract is what lets one set of
+ * indices address both halves, and it is the only reason grouping works on geometry at all —
+ * "every mesh whose `type` is LC4" is a question asked of the attributes and answered in items.
+ */
+function keyTable(v: IterableValue): TableValue {
+  return isTableValue(v) ? v : v.attributes
+}
+
+/** What the elements with no value in the grouping column are called. */
+export const UNGROUPED = '(none)'
+
+/**
+ * One cell's group name.
+ *
+ * A named function rather than the expression twice, because `groupKeys` and `groupOf` have to
+ * agree exactly: the first names a group and the second is asked to find it, so a normalisation
+ * that differed by a character would produce a pass named `LC4` that selects nothing.
+ */
+function groupKeyOf(raw: CellValue | undefined): string {
+  return raw === null || raw === undefined || raw === '' ? UNGROUPED : String(raw)
+}
+
+/**
+ * Which rows fall in which group, built once per (collection, column) and held weakly.
+ *
+ * **The memo is what makes group mode linear rather than quadratic.** A loop over 400 groups
+ * asks `groupKeys` once per pass to name the pass and `groupOf` once per pass to select it, and
+ * both were full scans of the key column with a `String` allocation per row — so a 165k-row
+ * neuron table cost about 66 million string conversions and 400 discarded Sets, on the main
+ * thread, during the loop whose progress bar somebody is watching. Built once it is one scan.
+ *
+ * Keyed on the value's identity, which is sound for the same reason `geometryCache` can hand
+ * back the array it holds: table columns are immutable by convention here — nodes always build
+ * new arrays — so a `TableValue` that is the same object has the same rows in it. Weak, so an
+ * index costs nothing once the collection it describes is no longer referenced.
+ */
+const groupIndexes = new WeakMap<TableValue, Map<string, Map<string, number[]>>>()
+
+function groupIndex(v: IterableValue, column: string): Map<string, number[]> {
+  const table = keyTable(v)
+  let byColumn = groupIndexes.get(table)
+  if (!byColumn) {
+    byColumn = new Map()
+    groupIndexes.set(table, byColumn)
+  }
+  const held = byColumn.get(column)
+  if (held) return held
+
+  const index = new Map<string, number[]>()
+  const data = table.data[column]
+  if (data) {
+    for (let i = 0; i < table.length; i++) {
+      const key = groupKeyOf(data[i])
+      const rows = index.get(key)
+      if (rows) rows.push(i)
+      else index.set(key, [i])
+    }
+  }
+  byColumn.set(column, index)
+  return index
+}
+
+/**
+ * The distinct values of a column, in first-appearance order.
+ *
+ * First-appearance rather than sorted, because the order a loop visits its groups in should be
+ * the order the data is in — an upstream Sort is how somebody says they want it otherwise, and
+ * a hidden sort here would quietly override it. `Map` iterates in insertion order, which is what
+ * makes the index above answer this without a second pass. Nulls and empties collapse into one
+ * group named by `UNGROUPED`, since "the neurons with no type" is a group somebody means rather
+ * than an error, and leaving each null its own group would make one group per row.
+ */
+export function groupKeys(v: IterableValue, column: string): string[] {
+  return [...groupIndex(v, column).keys()]
+}
+
+/**
+ * Every element sharing one value of a column, as a collection of the same kind.
+ *
+ * The group half of `elementAt`, and it keeps that function's rule: a key that is not in the
+ * collection yields the *empty* collection rather than the nearest one. An upstream edit that
+ * removed a cell type has not moved the group, it has removed it, and answering with a
+ * different type's neurons under the same name is the silent wrong answer `Select One`'s own
+ * out-of-range note argues against.
+ */
+export function groupOf(v: IterableValue, column: string, key: string): IterableValue {
+  return sliceElements(v, groupIndex(v, column).get(key) ?? [])
 }
 
 function sliceElements(v: IterableValue, indices: number[]): IterableValue {
@@ -162,6 +277,36 @@ export function elementLabel(v: IterableValue, index: number): string {
   const id = v.items[i]?.id ?? ''
   const name = labelFromRow(v.attributes, i, ['neuronId'])
   return name && name !== id ? `${name} ${id}`.trim() : id
+}
+
+/**
+ * The most *identifying* short name for one element — an id where there is one.
+ *
+ * `elementLabel`'s sibling, and the split is deliberate rather than a duplication. That one
+ * answers "what should this card say it is showing", where a cell type is the useful answer:
+ * somebody browsing a result wants to read `LC11`. This answers "what should this pass be
+ * *called*", and there the useful answer is the one that differs between passes — a loop over
+ * six LC11s labelled `LC11` six times names a progress line that never changes and six files
+ * that are told apart only by their ordinal.
+ *
+ * Probed on the mock optic lobe: `LC.*` limit 6 returns six neurons of one type, so
+ * `elementLabel` said `LC11` for every pass. The id is what a folder of SWCs has to carry.
+ *
+ * Falls back to `elementLabel` when there is no id, because an uploaded CSV of clusters has no
+ * `neuronId` and a name is better than a number.
+ */
+export function elementIdentity(v: IterableValue, index: number): string {
+  const i = Math.floor(index)
+  if (i < 0 || i >= elementCount(v)) return ''
+
+  // The geometry's own id first, not the attribute table's, on `elementLabel`'s reasoning: the
+  // two are index-aligned here and only the attribute table can be re-ordered upstream.
+  if (!isTableValue(v)) return v.items[i]?.id || elementLabel(v, i)
+
+  // `idText`, never `String(...)`: an id crosses into the UI as text and a float64 round trip
+  // renames an 18-digit root id to a different neuron (invariant 8). It answers null for a cell
+  // that is not one, which is the same "nothing to name this by" the fallback already handles.
+  return idText(v.data[ID_COLUMN_NAME]?.[i]) ?? elementLabel(v, i)
 }
 
 function labelFromRow(table: TableValue, index: number, skip: string[] = []): string {

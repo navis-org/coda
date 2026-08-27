@@ -46,6 +46,16 @@ const NO_EMITTER: Record<string, string> = {
     'a CloudVolume would sit above a Meshes cell that is itself a TODO for this backend. One ' +
     'emitter is worth writing when the pair is.',
   'note.text': 'An annotation. It becomes a markdown cell, which the walk does directly.',
+  'flow.forEach':
+    'A loop, and the one refusal here that is about the *shape* of the output rather than about ' +
+    'a backend. Every other node becomes one cell; a loop has to put the cells of its region ' +
+    'inside itself, indented, which is a change to how the walk assembles a notebook rather ' +
+    'than an emitter that could be written beside the others. A `for` loop is the most natural ' +
+    'thing in Python there is, so this is worth doing \u2014 it is simply not a cell.',
+  'flow.collect':
+    'The exit of a `flow.forEach`, so it shares that reason exactly: it is the line that ' +
+    'appends to a list *after* the loop body, which only means anything once the walk can emit ' +
+    'a loop at all.',
   'dataset.mock.opticlobe':
     'Synthetic, so a graph holding one is refused before the walk starts. An emitter here ' +
     'would be unreachable code claiming the case is handled.',

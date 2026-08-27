@@ -33,6 +33,7 @@ import { PathsBody } from './PathsBody'
 import { FindNeuronsBody } from './FindNeuronsBody'
 import { RenameBody } from './RenameBody'
 import { SelectOneBody } from './SelectOneBody'
+import { ForEachBody } from './ForEachBody'
 import { UploadBody } from './UploadBody'
 
 export interface NodeBodyProps {
@@ -169,6 +170,9 @@ export const NODE_BODIES: Record<string, NodeBodyEntry> = {
    * what is worth looking at full size is whatever the Item port is wired to.
    */
   'core.selectOne': { Component: SelectOneBody, width: 300 },
+  // Wider than Select One's: this card carries a progress bar with an element's name in it, and
+  // a neuron name wrapping mid-loop is a card that changes height on every pass.
+  'flow.forEach': { Component: ForEachBody, width: 320 },
   /*
    * The only card here whose configuration is a list somebody grows, so it is the only one that
    * could not have been a param band. Wide enough for a column picker, an arrow and a name

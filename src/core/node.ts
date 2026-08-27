@@ -497,6 +497,71 @@ export interface EvalContext<P extends ParamValues = ParamValues> {
    * honest state for a node that did not fetch.
    */
   reportFetched(at: number): void
+  /**
+   * Which pass of a `For Each` this is, when the node sits inside a loop's region.
+   *
+   * Absent everywhere else, and that absence is the common case — a graph with no loop in it
+   * never builds one of these. Present, it is the same object for every node of one pass, so a
+   * node can name the element it is working on without re-deriving it from a wire.
+   *
+   * The loop node itself reads `index` to decide *which* element to emit, which is the whole
+   * mechanism: the index is session state the scheduler folds into the provenance key, so
+   * advancing it re-keys every node downstream and invariant 4 re-runs the region for free.
+   * It is deliberately not a param — four hundred iterations would otherwise be four hundred
+   * undo steps, four hundred autosaves, and an `index: 399` in whatever file you shared.
+   */
+  iteration?: LoopIteration
+  /**
+   * What a `loop: 'end'` node returned on the previous pass, absent on the first.
+   *
+   * This is what makes a Collect a **fold** — `(accumulated, input) => accumulated'` — rather
+   * than a node the scheduler has to special-case. The stacking itself stays in `src/nodes`,
+   * where `stackTables` and `stackGeometry` already live; `src/core` importing those would
+   * invert the layering for the sake of one call.
+   *
+   * Only ever set on a node whose definition says `loop: 'end'`, and only while a loop is
+   * running it. Outside a loop such a node is an ordinary pass-through of one value.
+   *
+   * `Readonly` end to end — the scheduler's accumulator map carries the same annotation — because
+   * what is handed over is the *same object* that went into the previous pass's cache entry. A
+   * fold that wrote through would be editing a stored result in place.
+   */
+  accumulated?: Readonly<Record<string, Value>>
+}
+
+/**
+ * One pass of a loop, as every node in the region sees it.
+ *
+ * `label` is the element's own name rather than its number — `720575940624...` or `LC4` — because
+ * the two places it is read are a progress line somebody is watching and a filename somebody has
+ * to find afterwards, and neither is served by "item 273". Empty when the collection has nothing
+ * to name an element by, which the callers handle by falling back to the index.
+ */
+export interface LoopIteration {
+  /** 0-based. */
+  index: number
+  /** Total passes this loop will make. */
+  count: number
+  /** Short human name for this element. May be empty. */
+  label: string
+  /**
+   * How many elements this pass carries — 1 unless the loop is batched or grouped.
+   *
+   * Read by the two places that have to treat a batch differently from an element: the progress
+   * line, which says `+19` rather than pretending the pass is one neuron, and the filename stem,
+   * which drops the pass's own label because the exporter already names each file by its item.
+   * Without it a batch of twenty SWCs came out as twenty files all prefixed with the *first*
+   * neuron's id.
+   */
+  size: number
+}
+
+/** What a `loop: 'begin'` node's input amounts to: how many passes, and what to call each one. */
+export interface LoopPlan {
+  count: number
+  label(index: number): string
+  /** How many elements pass `index` carries. See `LoopIteration.size`. */
+  size(index: number): number
 }
 
 export interface NodeDefinition<P extends ParamValues = ParamValues> {
@@ -578,6 +643,35 @@ export interface NodeDefinition<P extends ParamValues = ParamValues> {
    * dataflow and its own card on the canvas, not a separate storage model.
    */
   annotation?: boolean
+  /**
+   * This node begins or ends a loop over its input, rather than computing once.
+   *
+   * Declared here rather than matched on the node *type* for `annotation`'s reason: the
+   * scheduler, the graph walk that derives a loop's region and the canvas frame that draws it
+   * all have to agree on what a loop is, and three copies of `node.type === 'flow.forEach'` is
+   * how they stop agreeing — and how a second loop node could never be added.
+   *
+   * `'begin'` also requires `loopPlan`. The pair is what the scheduler needs and neither half
+   * is useful alone: a begin with no plan cannot say how many passes to make, and a plan on a
+   * node that does not declare itself a loop is never asked for.
+   *
+   * `'end'` marks a loop's **exit**. The region a loop re-runs is everything reachable from the
+   * begin node that is not *past* an exit — the exit itself is in, because it folds once per
+   * pass; everything after it is out, because it reads the finished accumulation.
+   */
+  loop?: 'begin' | 'end'
+  /**
+   * What iterating this input means, asked once before the first pass. Must not throw.
+   *
+   * Here rather than in the scheduler because "how many elements has this got" is a question
+   * about *values* — a table's rows, a collection's items, a column's distinct values — and
+   * `src/core` has no vocabulary for any of them. The closure it returns holds the input, so
+   * naming element 273 costs no second lookup.
+   *
+   * A count of 0 is legitimate and means the region does not run at all: an upstream filter
+   * that matched nothing is a real answer, not an error.
+   */
+  loopPlan?(ctx: EvalContext<P>): LoopPlan
   /**
    * Keep the type working but out of the add-node surfaces.
    *

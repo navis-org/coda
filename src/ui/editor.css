@@ -6698,6 +6698,108 @@ details[open] > summary.tile__label {
 }
 
 /* ---------------------------------------------------------------------------
+ * Loop frames
+ *
+ * `.group-layer`'s sibling and deliberately not a copy of it: a group frame is grabbable and
+ * this one is not, so it declares `pointer-events: none` outright rather than switching the
+ * viewport's default back on for a stroke. See `LoopLayer.tsx` for why that is the whole
+ * difference — membership comes from the wires, so there is no handle to offer.
+ * ------------------------------------------------------------------------- */
+
+.loop-layer {
+  position: absolute;
+  inset: 0;
+  /* Under the cards and the wires, where a background belongs. The viewport is its own stacking
+   * context, so this cannot escape behind the canvas — the note in `GroupLayer` has the detail. */
+  z-index: -1;
+  pointer-events: none;
+}
+.loop-frame {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border: 1.5px dashed var(--border-strong);
+  border-radius: 10px;
+  pointer-events: none;
+}
+/*
+ * Inside the top edge rather than above it, so a loop at the top of a group cannot push its
+ * label through the group's own title. Small and secondary: this is a fact about the graph, not
+ * something to read first.
+ */
+.loop-frame__label {
+  position: absolute;
+  top: 3px;
+  left: 8px;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------------------
+ * For Each card
+ *
+ * Shares `.list-body` and `.step-body__*` with Select One, which is the right way round: the two
+ * are the manual and automatic halves of one gesture, and a second set of declarations is how
+ * they would come to look like unrelated nodes. What is new here is the progress bar, because
+ * the hairline ring every running card wears says "working" and this one has to say "273 of 412".
+ * ------------------------------------------------------------------------- */
+
+.loop-body__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+/* Tabular, for `.step-body__position`'s reason: the count sits beside a button and must not
+ * jitter sideways while a loop counts up past a digit boundary. */
+.loop-body__count {
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  flex: none;
+}
+/*
+ * The bar and its caption are one box, with the text *over* the fill rather than beside it. A
+ * caption in its own row would make the card change height the moment a loop started, which on a
+ * canvas moves everything below it; and the note is the longer half, so putting them side by side
+ * would leave the bar a stub.
+ */
+.loop-body__progress {
+  position: relative;
+  height: 16px;
+  border-radius: 3px;
+  overflow: hidden;
+  /* The recessed-well token, which is exactly what a progress track is and is already themed
+   * for both surfaces — see `theme.css`. */
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+}
+.loop-body__bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--accent-soft);
+  /* Only the width animates, and only briefly: a pass can land four times a second, and a slow
+   * ease would leave the bar permanently behind the number written over it. */
+  transition: width 120ms linear;
+}
+.loop-body__note {
+  position: relative;
+  display: block;
+  padding: 0 6px;
+  line-height: 16px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------------------------------------------------------------------------
  * Rename Columns card
  *
  * Shares `.list-body` with the paste-target cards and the pager — the padding and the foot

@@ -15,6 +15,7 @@
  */
 
 import type { CodaGraph, GraphGroup } from '../core/graph'
+import { loopsIn } from '../core/graph'
 import type { MeasuredSizes } from './elkGraph'
 import { resolveSize } from './elkGraph'
 
@@ -98,3 +99,62 @@ export function groupBoxes(
   }
   return boxes
 }
+
+/**
+ * The box around each `For Each` loop's region — what re-runs, drawn so it can be seen.
+ *
+ * `groupBox` unchanged, handed a pseudo-group, and that reuse is the point: a loop's frame and a
+ * group's frame are the same rectangle around the same kind of set, and computing them two ways
+ * is how they would come to disagree about a collapsed card or an unmeasured one. What differs
+ * is only *which* nodes and how far out the line sits.
+ *
+ * **Derived per render, never stored**, for `groupBox`'s reason and one more: a loop's membership
+ * is a fact about the *wires*, so it changes the moment somebody draws or cuts one. A stored
+ * rectangle would be wrong before the pointer was up.
+ *
+ * A loop of one node draws nothing. The region always contains its own begin node, so a `For
+ * Each` with nothing wired after it would otherwise wear a frame around itself — which reads as
+ * a loop that is somehow running, rather than as one nobody has finished wiring.
+ */
+export function loopBoxes(
+  graph: CodaGraph,
+  measured?: MeasuredSizes,
+  padding = LOOP_PADDING,
+): LoopBox[] {
+  const loops = loopsIn(graph)
+  if (loops.length === 0) return []
+  const nodes = new Map(graph.nodes.map((n) => [n.id, n]))
+  const boxes: LoopBox[] = []
+  for (const { beginId, region } of loops) {
+    if (region.size < 2) continue
+    const box = groupBox(
+      { id: beginId, nodeIds: [...region] },
+      nodes,
+      (id) => {
+        const node = nodes.get(id)
+        return node ? resolveSize(node, measured) : undefined
+      },
+      padding,
+    )
+    // The region rides along because `loopsIn` has already walked it. Without it the caller has
+    // to call `loopRegion` again per box — a second edge index per frame memo, and a second
+    // place that must keep agreeing on the "stop at `loop: 'end'`" rule.
+    if (box) boxes.push({ ...box, region })
+  }
+  return boxes
+}
+
+/** A loop's frame, and the nodes it is drawn around. */
+export interface LoopBox extends GroupBox {
+  region: Set<string>
+}
+
+/**
+ * How far a loop frame sits outside its cards, in flow units.
+ *
+ * Half `GROUP_PADDING`, deliberately: a loop inside a group is an ordinary arrangement — "these
+ * six cards are the download step, and four of them are the loop" — and two frames at the same
+ * offset would draw one line on top of the other, which reads as one frame with a doubled
+ * stroke. Inside rather than outside because a loop is always a subset of whatever contains it.
+ */
+export const LOOP_PADDING = 12

@@ -7,7 +7,7 @@
  */
 
 import type { ParamValues } from './node'
-import { getNodeDef, typesWithReferenceInputs } from './registry'
+import { getNodeDef, typesWithLoops, typesWithReferenceInputs } from './registry'
 
 export const GRAPH_FORMAT_VERSION = 1
 
@@ -247,6 +247,70 @@ export function descendants(graph: CodaGraph, nodeId: string): Set<string> {
 /** Transitive upstream closure, excluding the node itself. */
 export function ancestors(graph: CodaGraph, nodeId: string): Set<string> {
   return closure(neighbourIndex(graph.edges, 'target'), nodeId)
+}
+
+/**
+ * Whether this graph could contain a loop at all — `mayHaveReferences`' twin.
+ *
+ * Asked before `loopRegion` or `loopsIn` walk anything, so a graph with no `For Each` in it pays
+ * a `Set` lookup per node and allocates nothing. The scheduler asks once per run and the canvas
+ * once per frame memo.
+ */
+export function mayHaveLoops(nodes: readonly GraphNode[]): boolean {
+  const types = typesWithLoops()
+  return types.size > 0 && nodes.some((n) => types.has(n.type))
+}
+
+/**
+ * The nodes a loop re-runs — everything reachable from its begin node that is not *past* an exit.
+ *
+ * The walk stops **at** a `loop: 'end'` node rather than before it, and that asymmetry is the
+ * whole definition. An exit folds once per pass, so it is inside; everything after it reads the
+ * finished accumulation, so it is outside. Stopping *before* the exit would leave the fold
+ * running once on the last element, and stopping after it would re-run the whole tail of the
+ * graph per element.
+ *
+ * Walking forward from the begin node rather than intersecting `descendants(begin)` with
+ * `ancestors(exit)` is what makes a fan-out correct: a node reachable by a path that never
+ * touches an exit is in the region even when *another* path to it goes through one, and the set
+ * intersection quietly drops it.
+ *
+ * Includes the begin node itself, because it re-runs too — emitting a different element is what
+ * a pass *is*.
+ */
+export function loopRegion(graph: CodaGraph, beginId: string): Set<string> {
+  const index = neighbourIndex(graph.edges, 'source')
+  const types = nodesById(graph)
+  const out = new Set<string>([beginId])
+  const stack = [beginId]
+  while (stack.length) {
+    const id = stack.pop()!
+    for (const next of index.get(id) ?? []) {
+      if (out.has(next)) continue
+      out.add(next)
+      const type = types.get(next)?.type
+      if (type === undefined || getNodeDef(type)?.loop !== 'end') stack.push(next)
+    }
+  }
+  return out
+}
+
+/**
+ * Every loop in the graph, outermost first, as `beginId → region`.
+ *
+ * Ordered by region size descending so a nested loop is always listed after the loop containing
+ * it. The scheduler relies on that: it claims region nodes for the outermost loop it finds, and
+ * an inner loop then runs *inside* each of the outer one's passes rather than being hoisted out
+ * of it — which would be the same nodes re-run in the wrong order with nothing saying so.
+ */
+export function loopsIn(graph: CodaGraph): Array<{ beginId: string; region: Set<string> }> {
+  // No `mayHaveLoops` guard: the filter below is already a single pass that allocates an empty
+  // array on a loop-free graph, so the memo would only walk the nodes a second time. It earns
+  // its keep where the walk it guards is the expensive part — `resolveScope`.
+  const loops = graph.nodes
+    .filter((n) => getNodeDef(n.type)?.loop === 'begin')
+    .map((n) => ({ beginId: n.id, region: loopRegion(graph, n.id) }))
+  return loops.sort((a, b) => b.region.size - a.region.size)
 }
 
 /**

@@ -269,6 +269,33 @@ export const viewer3dNode = registerNode({
       help: 'Diameter of a synapse dot, in nanometres — so it scales with the scene rather than staying a fixed number of pixels.',
     },
     {
+      /*
+       * Re-frame the camera whenever the scene's extent changes, instead of framing once.
+       *
+       * **Off by default, and the default is the considered position.** `CameraRig`'s own note
+       * records the rule this opts out of: a camera that re-frames on a bounds change was thrown
+       * away by every upstream re-run and by expanding the card to the overlay, which is the bug
+       * that rule exists to fix. Nothing about that has changed.
+       *
+       * What has changed is that a `For Each` can now put four hundred different neurons through
+       * one viewer, one at a time, capturing each. Under the fixed camera every image after the
+       * first is framed on the *first* neuron — which is exactly right for a contact sheet meant
+       * to be compared at one scale, and useless when the elements sit far apart in the volume.
+       * Neither answer is right for both, so it is a switch rather than a new rule.
+       *
+       * Presentational: it decides where the camera goes, and `evaluate` returns the selection
+       * table whatever it says.
+       */
+      group: 'scene',
+      id: 'refit',
+      kind: 'boolean',
+      label: 'Frame each',
+      default: false,
+      presentational: true,
+      advanced: true,
+      help: 'Re-frame the camera whenever what is on screen changes. Off keeps one camera, which is what you want for a set of images meant to be compared — and on is what you want when a For Each steps through neurons that are nowhere near each other.',
+    },
+    {
       group: 'scene',
       id: 'background',
       kind: 'enum',

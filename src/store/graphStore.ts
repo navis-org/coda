@@ -38,7 +38,7 @@ import { spliceCandidate, spliceGraph } from '../core/splice'
 import type { ParamValue } from '../core/node'
 import { defaultParams } from '../core/node'
 import { getNodeDef, isAnnotation, requireNodeDef } from '../core/registry'
-import type { NodeRunInfo, RunSummary } from '../core/scheduler'
+import type { IterationInfo, NodeRunInfo, RunSummary } from '../core/scheduler'
 import { Scheduler } from '../core/scheduler'
 import type { TableSchema } from '../core/types'
 import type { Value } from '../core/values'
@@ -529,20 +529,58 @@ function liveNodes(graph: CodaGraph, ids: readonly string[]): Set<string> {
   )
 }
 
+/**
+ * What to do after each pass of a `For Each` — installed by the UI, absent in a headless run.
+ *
+ * A slot rather than a direct call, because the arrow only goes one way: the UI reads the store,
+ * and a store importing `ui/useForEach` to write a file would invert that for every consumer,
+ * headless tests and the export scripts included. Same shape as `registerExportSource`, and the
+ * same reason — the thing being registered is a live browser capability that only exists while
+ * an editor is mounted.
+ *
+ * Absent is a legitimate state and means the loop still runs: it iterates, the region executes,
+ * a Collect accumulates. Only the files are not written, which is the half that needs a browser.
+ */
+let iterationHandler: ((info: IterationInfo) => Promise<void>) | undefined
+
+export function setIterationHandler(
+  handler: ((info: IterationInfo) => Promise<void>) | undefined,
+): void {
+  iterationHandler = handler
+}
+
 let autoRunTimer: ReturnType<typeof setTimeout> | undefined
 let autosaveTimer: ReturnType<typeof setTimeout> | undefined
 /** Identifies the newest run, so a superseded one cannot clear `busy` out from under it. */
 let runToken = 0
 
 export const useGraphStore = create<GraphState>((set, get) => {
+  /**
+   * Whether a loop is mid-flight, which only `onStateChange` asks.
+   *
+   * A plain closure variable rather than store state on invariant 7's terms: it changes
+   * thousands of times per loop and nothing renders from it, so putting it in the store would
+   * make every card re-render for a fact no card shows.
+   */
+  let looping = false
+
   const scheduler = new Scheduler({
     resolveSource: (id) => requireSource(id),
     onPreview: () => set((s) => ({ previewVersion: s.previewVersion + 1 })),
     onStateChange: () =>
       set((s) => {
-        // A finished run can reveal the shape of a node nothing could infer statically
-        // (Raw Cypher). Re-infer only when that shape actually changed — this fires on
-        // every node state transition, and inference walks the whole graph.
+        /*
+         * A finished run can reveal the shape of a node nothing could infer statically
+         * (Raw Cypher). Re-infer only when that shape actually changed — this fires on
+         * every node state transition, and inference walks the whole graph.
+         *
+         * Skipped outright while a loop is running, and that is a measured saving rather than
+         * a tidy-up: a four-hundred-element loop over a ten-node region fires this eight
+         * thousand times, and no pass of a loop can change an *observed schema* — the region is
+         * the same nodes producing the same shape with different rows in it. Left in, the walk
+         * cost more than the work.
+         */
+        if (looping) return { runVersion: s.runVersion + 1 }
         const next = observedSchemas(s.graph)
         if (sameObserved(next)) return { runVersion: s.runVersion + 1 }
         lastObserved = next
@@ -551,6 +589,19 @@ export const useGraphStore = create<GraphState>((set, get) => {
           inference: inferGraph(s.graph, { observedSchemas: next }),
         }
       }),
+    /*
+     * One pass of a `For Each` has finished. See `ui/useForEach.ts` for why this cannot be done
+     * after the run instead — in short, `executed` is a set of node ids and a picture only
+     * exists while it is on screen.
+     *
+     * The store is the right place for the wiring and the wrong place for the work: it holds the
+     * graph and the values, and `runIteration` holds everything about files and canvases, which
+     * `src/store` has no business knowing.
+     */
+    onIteration: async (info) => {
+      looping = true
+      await iterationHandler?.(info)
+    },
   })
 
   /**
@@ -628,7 +679,12 @@ export const useGraphStore = create<GraphState>((set, get) => {
       const full = get().autoRun
       autoRunTimer = setTimeout(
         () => {
-          if (get().autoRun) void runFull()
+          /*
+           * `automatic`, so a `For Each` still defers. Auto-run means "re-run the full pass for
+           * me", which is right for an ordinary expensive node and wrong for a loop: four
+           * hundred queries and four hundred files, 700ms after a keystroke. See `RunOptions`.
+           */
+          if (get().autoRun) void runFull(undefined, { automatic: true })
           else void scheduler.run(get().graph, { mode: 'auto' })
         },
         full ? AUTO_FULL_RUN_DELAY_MS : AUTO_RUN_DELAY_MS,
@@ -647,7 +703,10 @@ export const useGraphStore = create<GraphState>((set, get) => {
    * `busy: true` — clearing it there would leave the UI idle with a run still going, no Cancel
    * button and an enabled Run. Only the newest run touches the shared state.
    */
-  async function runFull(targets?: string[]): Promise<RunSummary> {
+  async function runFull(
+    targets?: string[],
+    options: { automatic?: boolean } = {},
+  ): Promise<RunSummary> {
     if (autoRunTimer) clearTimeout(autoRunTimer)
     const token = ++runToken
     set({ busy: true })
@@ -655,6 +714,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
       const summary = await scheduler.run(get().graph, {
         mode: 'full',
         ...(targets ? { targets } : {}),
+        ...(options.automatic ? { automatic: true } : {}),
       })
       if (token === runToken) {
         set({
@@ -667,6 +727,16 @@ export const useGraphStore = create<GraphState>((set, get) => {
       return summary
     } finally {
       if (token === runToken) set({ busy: false })
+      /*
+       * Cleared here rather than at the end of the loop, because a run may hold several loops
+       * and what the flag suppresses is worth suppressing across all of them. The one skipped
+       * re-inference is taken now: a Raw Cypher inside a region really can have revealed a shape,
+       * and the loop deliberately did not look.
+       */
+      if (looping) {
+        looping = false
+        afterSourceLearned()
+      }
     }
   }
 

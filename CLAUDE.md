@@ -146,6 +146,21 @@ symptom to recognise — which usually points nowhere near the cause.
   — BANC, 40 sharded and 21 not — which read from the mesh root 404 one at a time, so the neuron
   arrives whole minus every piece anyone has edited. `fragmentUrl` matches on `.shard:`.
   See [docs/backends.md](docs/backends.md).
+- **A loop is one number in a hash, and the region is derived from the wires.** `For Each` has no
+  sub-graph: `Scheduler.loopIndex` is session state folded into the begin node's provenance key, so
+  advancing it re-keys every descendant and invariant 4 re-runs the region — a pass is
+  indistinguishable from an upstream edit. Three consequences that each read as something else. The
+  loop executes at the position of the **last** node of its region, not at its begin node, or a body
+  that also reads a branch from beside the loop runs before that branch has been reached. A settled
+  loop does **not** re-run on the next Run — `out.download`'s contract, which is why the index is
+  left at `count - 1` rather than reset, and why nothing downstream needs a loop-invariant key;
+  but freshness describes a *pass*, so a **cancelled** loop's region is entirely fresh and
+  `loopDone` is what stops it settling with half its elements unprocessed. A `Collect` is the one
+  node a cache hit must never answer for mid-pass, its other input being the previous pass.
+  And `RunSummary.executed` is a *set of node ids*, so it cannot say a Download ran four hundred
+  times: per-pass files and pictures come through the awaited `SchedulerHost.onIteration`, and
+  `loopNodes` is what stops `useDownloads` adding a stray four-hundred-and-first file. See
+  [docs/loops.md](docs/loops.md).
 - **Module init order.** `graphStore.ts` imports `../nodes` for its side effect. Without
   it, ordering in `main.tsx` becomes load-bearing and silently drops every node.
   The same trap one level in: a Node-side script needs `registerBuiltinSources()` as well, or
@@ -212,6 +227,9 @@ file, pulling all 620 kB back into every session and undoing the split.
   edges. Read when adding `dataCache` or a `reference` port.
 - [docs/canvas.md](docs/canvas.md) — React Flow settings, ELK layout, edge routing,
   collapse/fold/resize, splice-onto-wire, rewiring links, fit-on-load.
+- [docs/loops.md](docs/loops.md) — `For Each` and `Collect`: the region, why a loop is not a
+  subgraph, the `onIteration` seam, and the two routes a loop's files take. Read before touching
+  `runLoop` or the file sink.
 - [docs/viewers.md](docs/viewers.md) — every `out.*` widget, the shared export path,
   encodings, tooltips, table filtering, number formatting, the styling sidebar.
 - [docs/widgets.md](docs/widgets.md) — Explore Dataset, Neuron Profile, Dataset Summary,

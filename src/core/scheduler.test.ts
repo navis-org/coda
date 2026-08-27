@@ -561,3 +561,512 @@ describe('what a node warns about', () => {
     expect(scheduler.warning('filter')).toBeUndefined()
   })
 })
+
+/**
+ * Loops.
+ *
+ * The properties that matter are the ones whose failure does not look like a failure: a region
+ * that runs the wrong number of times, a Collect that quietly holds only the last pass, a key
+ * that never settles so the loop appears to hang, and an index that leaks into the document.
+ */
+describe('For Each', () => {
+  /** Records every value it was handed, so a test can assert what the region actually saw. */
+  function recorder(type: string, options: { failOn?: number } = {}) {
+    const seen: string[] = []
+    registerNode({
+      type,
+      label: type,
+      category: 'utility',
+      cost: 'cheap',
+      inputs: [{ id: 'in', label: 'In', type: T.any() }],
+      outputs: [{ id: 'out', label: 'Out', type: T.any() }],
+      inferOutputs: (ctx) => ({ out: ctx.inputs.in ?? T.any() }),
+      evaluate: (ctx) => {
+        const value = ctx.input('in')
+        const ids = isTableValue(value)
+          ? (value.data['id'] ?? []).map((c) => String(c)).join('+')
+          : ''
+        if (options.failOn !== undefined && ctx.iteration?.index === options.failOn) {
+          throw new Error('this element is bad')
+        }
+        seen.push(ids)
+        return { out: value! }
+      },
+    })
+    return seen
+  }
+
+  const SCHEMA = tableSchema(column('id', 'str'), column('type', 'str'))
+
+  const rowCount2 = (v: Value | undefined) => (isTableValue(v) ? v.length : -1)
+
+  /** A table of `n` rows, `id` = "1".."n", `type` alternating A/B. */
+  function rows(n: number) {
+    return tableFromRows(
+      SCHEMA,
+      Array.from({ length: n }, (_, i) => ({ id: String(i + 1), type: i % 2 ? 'B' : 'A' })),
+    )
+  }
+
+  function source(type: string, n: number) {
+    registerNode({
+      type,
+      label: type,
+      category: 'utility',
+      cost: 'cheap',
+      inputs: [],
+      outputs: [{ id: 'out', label: 'Out', type: T.table(SCHEMA) }],
+      inferOutputs: () => ({ out: T.table(SCHEMA) }),
+      evaluate: () => ({ out: rows(n) }),
+    })
+  }
+
+  /** `src -> forEach -> body [-> collect]`, with `body` recording what each pass saw. */
+  function loopGraph(
+    srcType: string,
+    bodyType: string,
+    options: { collect?: boolean; params?: Record<string, unknown> } = {},
+  ): CodaGraph {
+    let g = emptyGraph('loop-test')
+    g = addNode(g, { id: 'src', type: srcType, position: { x: 0, y: 0 }, params: {} })
+    g = addNode(g, node('loop', 'flow.forEach', options.params ?? {}))
+    g = addNode(g, { id: 'body', type: bodyType, position: { x: 0, y: 0 }, params: {} })
+    g = addEdge(g, { source: 'src', sourceHandle: 'out', target: 'loop', targetHandle: 'in' })
+    g = addEdge(g, { source: 'loop', sourceHandle: 'item', target: 'body', targetHandle: 'in' })
+    if (options.collect) {
+      g = addNode(g, node('sink', 'flow.collect'))
+      g = addEdge(g, { source: 'body', sourceHandle: 'out', target: 'sink', targetHandle: 'in' })
+    }
+    return g
+  }
+
+  it('runs the region once per element, in order', async () => {
+    source('test.loop.src3', 3)
+    const seen = recorder('test.loop.body3')
+    const summary = await makeScheduler().run(loopGraph('test.loop.src3', 'test.loop.body3'), {
+      mode: 'full',
+    })
+    expect(seen).toEqual(['1', '2', '3'])
+    expect(summary.iterations).toBe(3)
+    // A set of ids, so the body appears once however many times it ran — which is exactly why
+    // `loopNodes` has to exist for anything acting on a finished run.
+    expect(summary.executed.filter((id) => id === 'body')).toHaveLength(1)
+    expect(summary.loopNodes).toContain('body')
+  })
+
+  it('runs once per group when grouping by a column', async () => {
+    source('test.loop.srcG', 4)
+    const seen = recorder('test.loop.bodyG')
+    await makeScheduler().run(
+      loopGraph('test.loop.srcG', 'test.loop.bodyG', {
+        params: { mode: 'group', groupBy: 'type' },
+      }),
+      { mode: 'full' },
+    )
+    // Two passes, not four: rows 1 and 3 are type A, rows 2 and 4 are type B.
+    expect(seen).toEqual(['1+3', '2+4'])
+  })
+
+  it('stops after First N without touching the rest', async () => {
+    source('test.loop.srcLimit', 10)
+    const seen = recorder('test.loop.bodyN')
+    await makeScheduler().run(
+      loopGraph('test.loop.srcLimit', 'test.loop.bodyN', { params: { limit: 2 } }),
+      { mode: 'full' },
+    )
+    expect(seen).toEqual(['1', '2'])
+  })
+
+  /**
+   * A batched loop, end to end: fewer passes, each carrying several elements, and a `Collect`
+   * that still ends up holding every one of them.
+   *
+   * This is the loop's answer to parallelism. Threads are the wrong tool — the work is
+   * I/O-bound and the main thread is idle during a fetch — but a pass carrying twenty elements
+   * hands twenty ids to a backend that already fetches six at a time, where a pass carrying one
+   * hands it one.
+   */
+  it('carries several elements per pass when batched, and collects them all', async () => {
+    source('test.loop.srcB', 5)
+    const seen = recorder('test.loop.bodyB')
+    const scheduler = makeScheduler()
+    const g = loopGraph('test.loop.srcB', 'test.loop.bodyB', {
+      collect: true,
+      params: { batch: 2 },
+    })
+    const summary = await scheduler.run(g, { mode: 'full' })
+
+    // Three passes over five elements, the last one short.
+    expect(seen).toEqual(['1+2', '3+4', '5'])
+    expect(summary.iterations).toBe(3)
+    const collected = scheduler.output('sink', 'out')
+    expect(isTableValue(collected) ? collected.data['id'] : []).toEqual(['1', '2', '3', '4', '5'])
+  })
+
+  it('tells the host how many elements a pass carried', async () => {
+    source('test.loop.srcBS', 5)
+    recorder('test.loop.bodyBS')
+    const heard: number[] = []
+    const scheduler = new Scheduler({
+      resolveSource: () => source as never,
+      onIteration: (info) => {
+        heard.push(info.size)
+      },
+    })
+    await scheduler.run(
+      loopGraph('test.loop.srcBS', 'test.loop.bodyBS', { params: { batch: 2 } }),
+      { mode: 'full' },
+    )
+    // The short last pass reports its real size, which is what stops a filename claiming twenty.
+    expect(heard).toEqual([2, 2, 1])
+  })
+
+  it('collects every pass rather than the last one', async () => {
+    source('test.loop.srcC', 3)
+    recorder('test.loop.bodyC')
+    const scheduler = makeScheduler()
+    await scheduler.run(loopGraph('test.loop.srcC', 'test.loop.bodyC', { collect: true }), {
+      mode: 'full',
+    })
+    const collected = scheduler.output('sink', 'out')
+    expect(isTableValue(collected) ? collected.length : -1).toBe(3)
+    expect(isTableValue(collected) ? collected.data['id'] : []).toEqual(['1', '2', '3'])
+  })
+
+  /**
+   * The failure that reads as a hang rather than as a wrong answer.
+   *
+   * Every node in the region is re-keyed by each pass, Collect included. If the index it settles
+   * on and the index `refreshStates` computes afterwards disagree, the loop finishes and the
+   * graph immediately reports itself stale — so Run does the whole thing again, for ever.
+   */
+  it('settles: a second Run over an unchanged graph iterates nothing', async () => {
+    source('test.loop.srcS', 3)
+    const seen = recorder('test.loop.bodyS')
+    const scheduler = makeScheduler()
+    const g = loopGraph('test.loop.srcS', 'test.loop.bodyS', { collect: true })
+    await scheduler.run(g, { mode: 'full' })
+    scheduler.refreshStates(g)
+    expect(scheduler.info('loop').state).toBe('ok')
+    expect(scheduler.info('sink').state).toBe('ok')
+
+    seen.length = 0
+    const again = await scheduler.run(g, { mode: 'full' })
+    expect(seen).toEqual([])
+    expect(again.iterations).toBe(0)
+  })
+
+  it('leaves the document untouched — the index is session state, not a param', async () => {
+    source('test.loop.srcD', 4)
+    recorder('test.loop.bodyD')
+    const g = loopGraph('test.loop.srcD', 'test.loop.bodyD')
+    const before = JSON.stringify(g)
+    await makeScheduler().run(g, { mode: 'full' })
+    expect(JSON.stringify(g)).toBe(before)
+  })
+
+  it('carries on past a failing element and says how many failed', async () => {
+    source('test.loop.srcF', 4)
+    const seen = recorder('test.loop.bodyF', { failOn: 1 })
+    const scheduler = makeScheduler()
+    await scheduler.run(loopGraph('test.loop.srcF', 'test.loop.bodyF'), { mode: 'full' })
+    // Three of four still ran: abandoning them is the refusal docs/limits.md argues against.
+    expect(seen).toEqual(['1', '3', '4'])
+    expect(scheduler.warning('loop')).toMatch(/1 of 4 failed/)
+  })
+
+  it('is deferred whole by the auto pass, so no keystroke fires a loop', async () => {
+    source('test.loop.srcA', 3)
+    const seen = recorder('test.loop.bodyA')
+    const summary = await makeScheduler().run(loopGraph('test.loop.srcA', 'test.loop.bodyA'), {
+      mode: 'auto',
+    })
+    expect(seen).toEqual([])
+    expect(summary.deferred).toContain('loop')
+  })
+
+  /**
+   * A loop stopped part way must not be mistaken for one that finished.
+   *
+   * Freshness describes a *pass*: cancel at element two and every region entry answers the key
+   * for the pass that completed, with `loopIndex` sitting at 1. Without a record of *finishing*,
+   * the next Run settles the loop untouched and elements three and four are silently never
+   * processed — a green graph that skipped half its work.
+   */
+  it('re-runs from the start after a cancel, rather than settling', async () => {
+    source('test.loop.srcX', 4)
+    const seen: string[] = []
+    const scheduler = makeScheduler()
+    let stopAt: number | undefined = 1
+    registerNode({
+      type: 'test.loop.bodyX',
+      label: 'bodyX',
+      category: 'utility',
+      cost: 'cheap',
+      inputs: [{ id: 'in', label: 'In', type: T.any() }],
+      outputs: [{ id: 'out', label: 'Out', type: T.any() }],
+      inferOutputs: (ctx) => ({ out: ctx.inputs.in ?? T.any() }),
+      evaluate: (ctx) => {
+        const value = ctx.input('in')
+        seen.push(isTableValue(value) ? String(value.data['id']?.[0]) : '?')
+        // Cancel from inside the second pass, which is what a person pressing Cancel does.
+        if (ctx.iteration?.index === stopAt) scheduler.cancel()
+        return { out: value! }
+      },
+    })
+
+    const g = loopGraph('test.loop.srcX', 'test.loop.bodyX')
+    const first = await scheduler.run(g, { mode: 'full' })
+    expect(seen).toEqual(['1', '2'])
+    // Two elements were reached; only the first completed a pass, since the second was cancelled
+    // inside the body and its result was dropped.
+    expect(first.iterations).toBe(1)
+    scheduler.refreshStates(g)
+
+    stopAt = undefined
+    seen.length = 0
+    const again = await scheduler.run(g, { mode: 'full' })
+    /*
+     * Four passes, from the beginning — not "carry on from two" and not "nothing to do", which
+     * is what a settled loop would have answered. `iterations` rather than `seen` is the measure:
+     * element 1 legitimately answers from cache the second time round, so it is a pass that the
+     * body did not have to execute.
+     */
+    expect(again.iterations).toBe(4)
+    expect(seen).toEqual(['2', '3', '4'])
+  })
+
+  /**
+   * A `Collect`'s other input is the previous pass's result, which is not in its key and cannot
+   * be — so a cache hit must not answer for it mid-pass.
+   *
+   * The way in is any loop re-run over ground it has covered: cancel at element two, press Run,
+   * and pass two hits the entry pass two left behind. It gets skipped, the accumulator is never
+   * fed, and the total restarts — the loop finishes holding only its own tail, every node `ok`.
+   */
+  it('never answers a loop exit from cache mid-pass, so the fold cannot restart', async () => {
+    source('test.loop.srcY', 3)
+    const scheduler = makeScheduler()
+    let cancelAt: number | undefined = 1
+    registerNode({
+      type: 'test.loop.bodyY',
+      label: 'bodyY',
+      category: 'utility',
+      cost: 'cheap',
+      inputs: [{ id: 'in', label: 'In', type: T.any() }],
+      outputs: [{ id: 'out', label: 'Out', type: T.any() }],
+      inferOutputs: (ctx) => ({ out: ctx.inputs.in ?? T.any() }),
+      evaluate: (ctx) => {
+        if (ctx.iteration?.index === cancelAt) scheduler.cancel()
+        return { out: ctx.input('in')! }
+      },
+    })
+
+    const g = loopGraph('test.loop.srcY', 'test.loop.bodyY', { collect: true })
+    await scheduler.run(g, { mode: 'full' })
+    cancelAt = undefined
+    scheduler.refreshStates(g)
+    await scheduler.run(g, { mode: 'full' })
+
+    const collected = scheduler.output('sink', 'out')
+    // Every element, in order. The bug produced ['2', '3'] — element 1 gone, nothing amiss.
+    expect(isTableValue(collected) ? collected.data['id'] : []).toEqual(['1', '2', '3'])
+  })
+
+  /**
+   * A loop inside a loop.
+   *
+   * `runLoop` used to dispatch its region through `executeNode`, which cannot start a loop — so
+   * an inner `For Each` ran once per outer pass and read the *outer* loop's index as its own.
+   * Both walks now go through `runNodes`, which is the only place that knows the ordering rule.
+   */
+  it('runs a loop inside a loop, every inner element against every outer one', async () => {
+    source('test.loop.srcNest', 2)
+    // Turns one row into three, so the inner loop has something of its own to iterate and the
+    // cross product is visible rather than degenerate.
+    registerNode({
+      type: 'test.loop.fan',
+      label: 'fan',
+      category: 'utility',
+      cost: 'cheap',
+      inputs: [{ id: 'in', label: 'In', type: T.any() }],
+      outputs: [{ id: 'out', label: 'Out', type: T.table(SCHEMA) }],
+      inferOutputs: () => ({ out: T.table(SCHEMA) }),
+      evaluate: (ctx) => {
+        const value = ctx.input('in')
+        const stem = isTableValue(value) ? String(value.data['id']?.[0] ?? '?') : '?'
+        return {
+          out: tableFromRows(
+            SCHEMA,
+            [0, 1, 2].map((i) => ({ id: `${stem}-${i}`, type: 'A' })),
+          ),
+        }
+      },
+    })
+    const seen = recorder('test.loop.bodyNest')
+
+    let g = emptyGraph('nested')
+    g = addNode(g, { id: 'src', type: 'test.loop.srcNest', position: { x: 0, y: 0 }, params: {} })
+    g = addNode(g, node('outer', 'flow.forEach'))
+    g = addNode(g, { id: 'fan', type: 'test.loop.fan', position: { x: 0, y: 0 }, params: {} })
+    g = addNode(g, node('inner', 'flow.forEach'))
+    g = addNode(g, { id: 'body', type: 'test.loop.bodyNest', position: { x: 0, y: 0 }, params: {} })
+    g = addEdge(g, { source: 'src', sourceHandle: 'out', target: 'outer', targetHandle: 'in' })
+    g = addEdge(g, { source: 'outer', sourceHandle: 'item', target: 'fan', targetHandle: 'in' })
+    g = addEdge(g, { source: 'fan', sourceHandle: 'out', target: 'inner', targetHandle: 'in' })
+    g = addEdge(g, { source: 'inner', sourceHandle: 'item', target: 'body', targetHandle: 'in' })
+
+    const summary = await makeScheduler().run(g, { mode: 'full' })
+    /*
+     * Two outer elements, three inner each. The bug ran the inner loop exactly once per outer
+     * pass — `runLoop` dispatched its region through `executeNode`, which cannot start a loop —
+     * so the body saw two elements and the inner `For Each` read the outer's index as its own.
+     */
+    expect(seen).toEqual(['1-0', '1-1', '1-2', '2-0', '2-1', '2-2'])
+    // Two outer passes plus three inner passes per outer pass.
+    expect(summary.iterations).toBe(8)
+  })
+
+  /**
+   * Auto-run schedules `runFull`, so `mode` is `'full'` and the `cost: 'expensive'` deferral
+   * never fired — any upstream edit re-iterated the whole loop 700ms later, which is exactly
+   * what marking `For Each` expensive is documented to prevent.
+   */
+  it('defers a loop on an automatic run, whatever the mode says', async () => {
+    source('test.loop.srcAuto', 3)
+    const seen = recorder('test.loop.bodyAuto')
+    const summary = await makeScheduler().run(
+      loopGraph('test.loop.srcAuto', 'test.loop.bodyAuto'),
+      { mode: 'full', automatic: true },
+    )
+    expect(seen).toEqual([])
+    expect(summary.deferred).toContain('loop')
+  })
+
+  /** The failure report is a fact about the loop, so it survives the begin node's own throw. */
+  it('still says how many elements failed when the loop node itself throws last', async () => {
+    source('test.loop.srcW', 2)
+    recorder('test.loop.bodyW', { failOn: 0 })
+    const scheduler = makeScheduler()
+    const g = loopGraph('test.loop.srcW', 'test.loop.bodyW')
+    await scheduler.run(g, { mode: 'full' })
+    // The begin node survives here; what is pinned is that the count is reported at all.
+    expect(scheduler.warning('loop')).toMatch(/1 of 2 failed/)
+  })
+
+  it('tells the host about every pass, with the element named', async () => {
+    source('test.loop.srcH', 3)
+    recorder('test.loop.bodyH')
+    const heard: string[] = []
+    const scheduler = new Scheduler({
+      resolveSource: () => source as never,
+      onIteration: (info) => {
+        heard.push(`${info.index}/${info.count}:${info.label}`)
+      },
+    })
+    await scheduler.run(loopGraph('test.loop.srcH', 'test.loop.bodyH'), { mode: 'full' })
+    // Labelled by the element's own name — what a progress line and a filename both need.
+    expect(heard).toEqual(['0/3:A', '1/3:B', '2/3:A'])
+  })
+
+  /**
+   * A loop runs at the position of the **last** node of its region, not at its begin node.
+   *
+   * With a body that also takes an input from *beside* the loop, triggering at the begin node
+   * runs that body before the branch feeding it has been reached — so it sees nothing, or sees
+   * a stale value, on every pass. Only shows up on graphs where the body reads something other
+   * than the element, which is most real ones.
+   */
+  it('waits for a branch that joins the region from outside it', async () => {
+    source('test.loop.srcJ', 2)
+    source('test.loop.sideJ', 1)
+    const seen: string[] = []
+    registerNode({
+      type: 'test.loop.joinJ',
+      label: 'join',
+      category: 'utility',
+      cost: 'cheap',
+      inputs: [
+        { id: 'item', label: 'Item', type: T.any() },
+        { id: 'side', label: 'Side', type: T.any() },
+      ],
+      outputs: [{ id: 'out', label: 'Out', type: T.any() }],
+      inferOutputs: () => ({ out: T.table(SCHEMA) }),
+      evaluate: (ctx) => {
+        const item = ctx.input('item')
+        const side = ctx.input('side')
+        if (!isTableValue(side) || side.length !== 1) throw new Error('side branch was not ready')
+        seen.push(isTableValue(item) ? String(item.data['id']?.[0]) : '?')
+        return { out: item! }
+      },
+    })
+
+    let g = emptyGraph('join-test')
+    g = addNode(g, { id: 'src', type: 'test.loop.srcJ', position: { x: 0, y: 0 }, params: {} })
+    g = addNode(g, node('loop', 'flow.forEach'))
+    g = addNode(g, { id: 'join', type: 'test.loop.joinJ', position: { x: 0, y: 0 }, params: {} })
+    // Added *after* the join, so the naive topological position of the loop's begin node comes
+    // before this branch has run.
+    g = addNode(g, { id: 'side', type: 'test.loop.sideJ', position: { x: 0, y: 0 }, params: {} })
+    g = addEdge(g, { source: 'src', sourceHandle: 'out', target: 'loop', targetHandle: 'in' })
+    g = addEdge(g, { source: 'loop', sourceHandle: 'item', target: 'join', targetHandle: 'item' })
+    g = addEdge(g, { source: 'side', sourceHandle: 'out', target: 'join', targetHandle: 'side' })
+
+    await makeScheduler().run(g, { mode: 'full' })
+    expect(seen).toEqual(['1', '2'])
+  })
+
+  /**
+   * An empty collection runs the region **once, on nothing** — not zero times.
+   *
+   * The tempting reading is "no passes, so nothing to do", and it is what left every node in the
+   * region holding the *previous* run's results under an `ok` badge: the port went on carrying
+   * last time's element with nothing saying the collection was now empty. So the region computes
+   * honestly on an empty input, and `onIteration` — the side effects — does not fire, because no
+   * element was iterated.
+   */
+  it('runs the region once on an empty collection, and writes nothing', async () => {
+    source('test.loop.src0', 0)
+    const seen = recorder('test.loop.body0')
+    const heard: number[] = []
+    const scheduler = new Scheduler({
+      resolveSource: () => source as never,
+      onIteration: (info) => {
+        heard.push(info.index)
+      },
+    })
+    await scheduler.run(loopGraph('test.loop.src0', 'test.loop.body0'), { mode: 'full' })
+    // One pass over nothing, so the recorder saw an empty id list rather than nothing at all.
+    expect(seen).toEqual([''])
+    expect(heard).toEqual([])
+    expect(scheduler.info('loop').state).toBe('ok')
+  })
+
+  /**
+   * The stale half of the same bug, stated directly: a loop that had elements and now has none
+   * must not leave the old ones on its port.
+   */
+  it('does not leave the last run’s element on the port when the input empties', async () => {
+    let rowCount = 2
+    registerNode({
+      type: 'test.loop.shrinking',
+      label: 'shrinking',
+      category: 'utility',
+      cost: 'cheap',
+      inputs: [],
+      outputs: [{ id: 'out', label: 'Out', type: T.table(SCHEMA) }],
+      inferOutputs: () => ({ out: T.table(SCHEMA) }),
+      evaluate: () => ({ out: rows(rowCount) }),
+    })
+    recorder('test.loop.bodyShrink')
+    const scheduler = makeScheduler()
+    const g = loopGraph('test.loop.shrinking', 'test.loop.bodyShrink')
+    await scheduler.run(g, { mode: 'full' })
+    expect(rowCount2(scheduler.output('loop', 'item'))).toBe(1)
+
+    rowCount = 0
+    scheduler.invalidateNode(g, 'src')
+    await scheduler.run(g, { mode: 'full' })
+    expect(rowCount2(scheduler.output('loop', 'item'))).toBe(0)
+  })
+})

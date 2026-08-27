@@ -69,6 +69,17 @@ const NO_EMITTER: Record<string, string> = {
     'emitting neuPrint code against a dataset neuPrint has never heard of would produce a ' +
     'document that runs and answers nothing.',
   'note.text': 'An annotation. It becomes a markdown block, which the walk does directly.',
+  'flow.forEach':
+    'A loop, and the one refusal here that is about the *shape* of the output rather than about ' +
+    'a backend. Every other node becomes one cell; a loop has to put the cells of its region ' +
+    'inside itself, which is a change to how the walk assembles a document rather than an ' +
+    'emitter that could be written beside the others. It is also the most ' +
+    'straightforward thing in R there is \u2014 a `for` over a list of ids, or a `purrr::map` ' +
+    '\u2014 so this is worth doing; it is simply not a chunk.',
+  'flow.collect':
+    'The exit of a `flow.forEach`, so it shares that reason exactly: it is the line that ' +
+    'appends to a list *after* the loop body, which only means anything once the walk can emit ' +
+    'a loop at all.',
   'dataset.mock.opticlobe':
     'Synthetic, so a graph holding one is refused before the walk starts. An emitter here ' +
     'would be unreachable code claiming the case is handled.',

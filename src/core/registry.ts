@@ -11,8 +11,25 @@ export function registerNode<P extends ParamValues>(def: NodeDefinition<P>): Nod
   if (definitions.has(def.type)) {
     throw new Error(`Duplicate node type "${def.type}"`)
   }
+  /*
+   * The `loop: 'begin'` / `loopPlan` pairing, enforced rather than documented.
+   *
+   * Without it a node declaring one half fails *silently and asymmetrically*: the scheduler
+   * falls through to running it once, while `loopsIn` still derives a region for it and the
+   * canvas still draws a frame captioned "for each" around nodes that will run exactly once. A
+   * loop node that quietly is not one, with the canvas asserting that it is. Thrown at
+   * registration for the duplicate-type reason — this is a fact about the node pack, so it
+   * should fail the moment the pack is imported rather than the first time somebody runs.
+   */
+  if ((def.loop === 'begin') !== (def.loopPlan !== undefined)) {
+    throw new Error(
+      `"${def.type}" declares ${def.loop === 'begin' ? '`loop: \'begin\'` without `loopPlan`' : '`loopPlan` without `loop: \'begin\'`'}. ` +
+        'A loop needs both: the flag is what derives its region, the plan is what says how many passes to make.',
+    )
+  }
   definitions.set(def.type, def as unknown as NodeDefinition)
   referenceTypes = undefined
+  loopTypes = undefined
   return def
 }
 
@@ -38,6 +55,27 @@ export function typesWithReferenceInputs(): Set<string> {
       .map((def) => def.type),
   )
   return referenceTypes
+}
+
+/** Memo for `typesWithLoops`, dropped whenever the registry gains a type. */
+let loopTypes: Set<string> | undefined
+
+/**
+ * The node types that begin or end a loop — see `NodeDefinition.loop`.
+ *
+ * `typesWithReferenceInputs`' twin, and for the same measured reason: the scheduler asks "could
+ * this graph contain a loop at all?" once per run and the canvas asks it once per edge memo, and
+ * on the overwhelming majority of graphs the answer is no. A `Set` lookup per node beats deriving
+ * a region, and the loop machinery below it then allocates nothing.
+ *
+ * Cleared by `registerNode` rather than assumed fixed, because tests register types long after
+ * this module is imported — the bug `typesWithReferenceInputs` already had to be pinned against.
+ */
+export function typesWithLoops(): Set<string> {
+  loopTypes ??= new Set(
+    [...definitions.values()].filter((def) => def.loop !== undefined).map((def) => def.type),
+  )
+  return loopTypes
 }
 
 export function getNodeDef(type: string): NodeDefinition | undefined {
