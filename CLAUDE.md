@@ -310,6 +310,12 @@ file, pulling all 620 kB back into every session and undoing the split.
 - [docs/backends.md](docs/backends.md) — neuPrint, CAVE, CATMAID, precomputed. Read the
   relevant one before touching anything under `src/data`. `precomputedToHttp` is deliberately
   narrower than the source parser beside it and the reason is a measured one; don't widen it.
+- [docs/comparative.md](docs/comparative.md) — comparative connectomics. The cell-type
+  correspondence graph (cocoa's `GraphMapper`), type-level edge comparison, and neuron-level
+  co-clustering. **No comparative node is built yet**; the variadic-ports prerequisite is, and so
+  is the mapper's pure core (`nodes/lib/typeMapping.ts`). Read before adding any node that puts
+  two connectomes in one table — the qualified-id decision is recorded there, and why chaining a
+  two-input mapper is a different computation rather than the same one twice.
 - [docs/annotations.md](docs/annotations.md) — labels that do not come from the
   connectome: the Annotations socket, SeaTable, Google Sheets, root-id drift.
 - [docs/export.md](docs/export.md) — the notebook and R Markdown exporters, the refusal
