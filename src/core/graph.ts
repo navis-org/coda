@@ -6,7 +6,8 @@
  * file is the document; the UI owns nothing that a reload should lose.
  */
 
-import type { ParamValues } from './node'
+import type { ParamValues, ResolvedPort } from './node'
+import { hasPortGroups, allInputPorts, inputPorts, outputPorts } from './ports'
 import { getNodeDef, typesWithLoops, typesWithReferenceInputs } from './registry'
 
 export const GRAPH_FORMAT_VERSION = 1
@@ -336,9 +337,13 @@ function mayHaveReferences(nodes: readonly GraphNode[]): boolean {
  */
 function isReferencePort(nodeType: string | undefined, portId: string): boolean {
   if (!nodeType) return false
-  return (getNodeDef(nodeType)?.inputs ?? []).some(
-    (p) => p.id === portId && p.reference === true,
-  )
+  const def = getNodeDef(nodeType)
+  /*
+   * Every arity, not this node's — there is no node here, only a type and a port id. A group
+   * expanded at `max` covers every id the type could ever carry, so an id that is not in there
+   * cannot be a reference at any count. See `core/ports.ts`.
+   */
+  return !!def && allInputPorts(def).some((p) => p.id === portId && p.reference === true)
 }
 
 /**
@@ -537,11 +542,39 @@ export function updateNode(
   id: string,
   patch: Partial<Omit<GraphNode, 'id'>>,
 ): CodaGraph {
-  return {
-    ...graph,
-    nodes: graph.nodes.map((n) => (n.id === id ? { ...n, ...patch } : n)),
-  }
+  const nodes = graph.nodes.map((n) => (n.id === id ? { ...n, ...patch } : n))
+  /*
+   * The prune lives here rather than on `setNodeParam` because this is the *generic* node patch
+   * and `setNodeParam` is one caller of it. The assistant writes params straight through
+   * `updateNode` (`assistant/apply.ts`), so a plan that lowered a variadic node's count would
+   * otherwise leave edges on ports that are no longer drawn — see `pruneDanglingEdges`.
+   */
+  return pruneDanglingEdges({ ...graph, nodes }, id)
 }
+
+/**
+ * A node's resolved ports, looked up and expanded in one step.
+ *
+ * Every caller that holds a `GraphNode` needs the same three lines — find the definition, guard
+ * the unregistered case, pass `node.params` — and the migration to variadic ports wrote them out
+ * at a dozen sites. Three of those also hand-rolled the `side === 'output' ? … : …` branch on
+ * top. An unregistered type answers with no ports, which is what every one of those sites did
+ * with its `?? []`.
+ *
+ * Here rather than in `core/ports.ts` because that module must not value-import the registry:
+ * `registry.ts` already imports it, and the cycle would be real. `graph.ts` imports both
+ * already.
+ */
+export function nodePorts(
+  node: GraphNode,
+  side: 'input' | 'output',
+): readonly ResolvedPort[] {
+  const def = getNodeDef(node.type)
+  if (!def) return NO_PORTS
+  return side === 'output' ? outputPorts(def, node.params) : inputPorts(def, node.params)
+}
+
+const NO_PORTS: readonly ResolvedPort[] = []
 
 export function setNodeParam(
   graph: CodaGraph,
@@ -549,12 +582,42 @@ export function setNodeParam(
   paramId: string,
   value: ParamValues[string],
 ): CodaGraph {
-  return {
-    ...graph,
-    nodes: graph.nodes.map((n) =>
-      n.id === id ? { ...n, params: { ...n.params, [paramId]: value } } : n,
-    ),
-  }
+  const node = graph.nodes.find((n) => n.id === id)
+  if (!node) return graph
+  return updateNode(graph, id, { params: { ...node.params, [paramId]: value } })
+}
+
+/**
+ * Drop edges landing on ports `node` no longer has.
+ *
+ * A param can change a node's *port set* — see `PortGroupDef` — so lowering a comparison node's
+ * dataset count from three to two leaves an edge pointing at `dataset3`, which is a socket that
+ * is no longer drawn. Nothing downstream would report it: `inferGraph` and the scheduler both
+ * walk the node's ports and look edges *up* by port key, so an edge on an id nobody asks about
+ * is simply never read. It would sit in the file, survive a save/load round trip, and reappear
+ * as a wire the moment the count went back up — carrying whatever it was wired to before.
+ *
+ * Here rather than in the store so the pruning is part of the same graph transform as the param
+ * change, which is what makes the two undo as one step. `pruneGroups` is the precedent: a
+ * mutation is responsible for the derived structure it invalidates.
+ *
+ * Returns the graph itself when there is nothing to do, which is every node without groups —
+ * so `setNodeParam` pays one registry lookup and one boolean for the overwhelming majority.
+ */
+function pruneDanglingEdges(graph: CodaGraph, nodeId: string): CodaGraph {
+  const node = graph.nodes.find((n) => n.id === nodeId)
+  if (!node) return graph
+  const def = getNodeDef(node.type)
+  if (!def || !hasPortGroups(def)) return graph
+
+  const ins = new Set(inputPorts(def, node.params).map((p) => p.id))
+  const outs = new Set(outputPorts(def, node.params).map((p) => p.id))
+  const kept = graph.edges.filter(
+    (e) =>
+      (e.target !== nodeId || ins.has(e.targetHandle)) &&
+      (e.source !== nodeId || outs.has(e.sourceHandle)),
+  )
+  return kept.length === graph.edges.length ? graph : { ...graph, edges: kept }
 }
 
 export function removeNodes(graph: CodaGraph, ids: readonly string[]): CodaGraph {
@@ -713,6 +776,45 @@ export interface LoadResult {
  * with a warning rather than failing the whole load, so a file made with a newer node
  * pack still opens.
  */
+/**
+ * One end of a stored edge resolved against the ports the node actually has.
+ *
+ * Returns the port id to use, or undefined when the edge names a socket that is not there. A
+ * stored handle that matches is kept as-is; a **missing** one falls back to the node's sole port
+ * where it has exactly one, and only then to the historical default — a file old enough to omit
+ * handles predates any node with two ports on a side, so "the only port" is what it meant.
+ */
+function healHandle(
+  ports: readonly { id: string }[],
+  stored: string | undefined,
+  legacy: string,
+): string | undefined {
+  if (typeof stored === 'string') return ports.some((p) => p.id === stored) ? stored : undefined
+  if (ports.length === 1) return ports[0]!.id
+  return ports.some((p) => p.id === legacy) ? legacy : undefined
+}
+
+/**
+ * Why an edge could not be attached to a port, in words a user can act on.
+ *
+ * Two different failures reach the same branch and they read as one if the stored handle is
+ * simply interpolated: a handle naming a port that is not there, and **no handle recorded at
+ * all** on a node with no single port to heal to. The second printed `no output "undefined"`,
+ * which describes nothing and is surfaced verbatim by the Zoo's graph validator.
+ */
+function droppedHandle(
+  side: 'output' | 'input',
+  nodeType: string,
+  nodeId: string,
+  stored: string | undefined,
+  ports: readonly { id: string }[],
+): string {
+  const where = `Dropped edge ${side === 'output' ? 'from' : 'into'} ${nodeType} (${nodeId})`
+  if (typeof stored === 'string') return `${where}: no ${side} "${stored}"`
+  const has = ports.length === 0 ? `it has no ${side}s` : `it has ${ports.length}`
+  return `${where}: the file records no ${side} port, and ${has}`
+}
+
 export function deserializeGraph(json: string): LoadResult {
   const warnings: string[] = []
   let raw: unknown
@@ -759,24 +861,53 @@ export function deserializeGraph(json: string): LoadResult {
     })
   }
 
-  const alive = new Set(nodes.map((n) => n.id))
+  const alive = new Map(nodes.map((n) => [n.id, n]))
   const edges: GraphEdge[] = []
   for (const e of obj.edges) {
     if (!e || typeof e.source !== 'string' || typeof e.target !== 'string') continue
-    if (!alive.has(e.source) || !alive.has(e.target)) {
+    const from = alive.get(e.source)
+    const to = alive.get(e.target)
+    if (!from || !to) {
       warnings.push(`Dropped edge ${e.source} → ${e.target} (endpoint missing)`)
+      continue
+    }
+    /*
+     * Both handles are resolved against the node's *actual* ports rather than trusted.
+     *
+     * A port set can be a function of the node's params (`PortGroupDef`), so a file written by a
+     * build whose `max` was higher — or edited by hand — can name a socket this node does not
+     * have. Such an edge is invisible and inert: every walk looks edges up *by* port key, so
+     * nothing ever asks for it, and it would sit in the document being re-saved forever and
+     * reappear as a live wire if the count later rose. Dropping it with a warning is the same
+     * call the missing-endpoint branch above already makes.
+     *
+     * The `?? 'out'` / `?? 'in'` fallbacks were load-bearing for old files that omitted the
+     * handle, and were also wrong for every node whose single port is called something else. A
+     * node with exactly one port on that side now heals to *that* port, which is what those
+     * defaults were reaching for.
+     */
+    const outs = outputPorts(getNodeDef(from.type)!, from.params)
+    const ins = inputPorts(getNodeDef(to.type)!, to.params)
+    const sourceHandle = healHandle(outs, e.sourceHandle, 'out')
+    const targetHandle = healHandle(ins, e.targetHandle, 'in')
+    if (!sourceHandle) {
+      warnings.push(droppedHandle('output', from.type, e.source, e.sourceHandle, outs))
+      continue
+    }
+    if (!targetHandle) {
+      warnings.push(droppedHandle('input', to.type, e.target, e.targetHandle, ins))
       continue
     }
     edges.push({
       id: typeof e.id === 'string' ? e.id : newId('e'),
       source: e.source,
-      sourceHandle: e.sourceHandle ?? 'out',
+      sourceHandle,
       target: e.target,
-      targetHandle: e.targetHandle ?? 'in',
+      targetHandle,
     })
   }
 
-  const groups = validGroups(obj.groups, alive)
+  const groups = validGroups(obj.groups, new Set(alive.keys()))
 
   return {
     graph: {

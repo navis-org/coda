@@ -16,6 +16,7 @@ import { getNodeDef } from '../../core/registry'
 import { useGraphStore } from '../../store/graphStore'
 import { LOCKED_HINT } from '../lockCopy'
 import { useDismissOnOutside } from '../useDismiss'
+import { nodePorts } from '../../core/graph'
 
 export interface EdgeContextMenuProps {
   screenPosition: { x: number; y: number }
@@ -32,8 +33,7 @@ function endpointLabel(
 ): { node: string; port: string } {
   const node = graph.nodes.find((n) => n.id === nodeId)
   const def = node ? getNodeDef(node.type) : undefined
-  const ports = (side === 'output' ? def?.outputs : def?.inputs) ?? []
-  const port = ports.find((p) => p.id === portId)
+  const port = node ? nodePorts(node, side).find((p) => p.id === portId) : undefined
   return {
     node: node?.title ?? def?.label ?? node?.type ?? nodeId,
     port: port?.label ?? portId,

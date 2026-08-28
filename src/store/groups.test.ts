@@ -67,7 +67,7 @@ function threeNodes() {
   return {
     ...g,
     edges: [
-      { id: 'e1', source: 'a', sourceHandle: 'table', target: 'b', targetHandle: 'table' },
+      { id: 'e1', source: 'a', sourceHandle: 'out', target: 'b', targetHandle: 'in' },
     ],
   }
 }

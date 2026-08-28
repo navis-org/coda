@@ -13,6 +13,7 @@ import { inferGraph } from '../../core/inference'
 import type { NodeDefinition, ParamValues } from '../../core/node'
 import { defaultParams, makeInferContext } from '../../core/node'
 import { getNodeDef, isAnnotation } from '../../core/registry'
+import { inputPorts, outputPorts } from '../../core/ports'
 import { backendName } from '../../nodes/lib/datasetFamilies'
 import { backendOf } from '../../data/source'
 import type { CodaType } from '../../core/types'
@@ -83,8 +84,13 @@ function assignNames(order: string[], nodes: Map<string, GraphNode>): Map<string
  * and the readable case. A node with several outputs suffixes the port — `paths_network`,
  * `paths_layout` — because `paths[0]`, `paths[1]` says nothing about which is which.
  */
-function outputName(base: string, def: NodeDefinition, portId: string): string {
-  const outputs = def.outputs ?? []
+function outputName(
+  base: string,
+  def: NodeDefinition,
+  params: ParamValues,
+  portId: string,
+): string {
+  const outputs = outputPorts(def, params)
   if (outputs.length <= 1) return base
   return `${base}_${pyIdent(portId, 'out')}`
 }
@@ -103,10 +109,11 @@ function outputName(base: string, def: NodeDefinition, portId: string): string {
  */
 function unsupportedBackend(
   def: NodeDefinition,
+  params: ParamValues,
   inputTypes: Readonly<Record<string, CodaType | undefined>>,
 ): string | undefined {
   const supported = emitterBackends(def.type)
-  for (const port of def.inputs ?? []) {
+  for (const port of inputPorts(def, params)) {
     if (port.type.kind !== 'dataset') continue
     const resolved = inputTypes[port.id]
     const sourceId = resolved?.kind === 'dataset' ? resolved.sourceId : undefined
@@ -219,7 +226,7 @@ export function exportNotebook(graph: CodaGraph, options: ExportOptions = {}): E
         }
         return variable
       },
-      output: (portId) => outputName(varName, def, portId),
+      output: (portId) => outputName(varName, def, node.params, portId),
       inputType: (portId): CodaType | undefined => inputTypes[portId],
       // Delegated rather than rebuilt: `makeInferContext` already composes exactly these three
       // out of `resolveColumn`/`resolveColumns`, and invariant 5 turns on infer, eval and the
@@ -257,7 +264,7 @@ export function exportNotebook(graph: CodaGraph, options: ExportOptions = {}): E
      */
     const unwired: string[] = []
     const blockedBy: string[] = []
-    for (const port of def.inputs ?? []) {
+    for (const port of inputPorts(def, node.params)) {
       const edge = inbound.get(portKey(nodeId, port.id))
       if (!edge) {
         if (port.required !== false) unwired.push(port.label ?? port.id)
@@ -275,7 +282,7 @@ export function exportNotebook(graph: CodaGraph, options: ExportOptions = {}): E
       blockedBy.push(nodeLabel(nodes.get(edge.source)))
     }
 
-    const foreign = unsupportedBackend(def, inputTypes)
+    const foreign = unsupportedBackend(def, node.params, inputTypes)
 
     let body: string[]
     let blockedHere = false
@@ -328,8 +335,8 @@ export function exportNotebook(graph: CodaGraph, options: ExportOptions = {}): E
     }
 
     if (!emittedTodo && body.length > 0) {
-      for (const port of def.outputs ?? []) {
-        bound.set(portKey(nodeId, port.id), outputName(varName, def, port.id))
+      for (const port of outputPorts(def, node.params)) {
+        bound.set(portKey(nodeId, port.id), outputName(varName, def, node.params, port.id))
       }
     }
 

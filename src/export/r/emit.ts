@@ -20,6 +20,7 @@ import { inferGraph } from '../../core/inference'
 import type { NodeDefinition, ParamValues } from '../../core/node'
 import { defaultParams, makeInferContext } from '../../core/node'
 import { getNodeDef, isAnnotation } from '../../core/registry'
+import { inputPorts, outputPorts } from '../../core/ports'
 import type { CodaType } from '../../core/types'
 import type { ExportRefusal, TodoStep } from '../canExport'
 import { canExportNotebook, nodeLabel } from '../canExport'
@@ -87,8 +88,13 @@ function assignNames(order: string[], nodes: Map<string, GraphNode>): Map<string
  * and the readable case. A node with several outputs suffixes the port — `paths_network`,
  * `paths_layout` — because `paths[0]`, `paths[1]` says nothing about which is which.
  */
-function outputName(base: string, def: NodeDefinition, portId: string): string {
-  const outputs = def.outputs ?? []
+function outputName(
+  base: string,
+  def: NodeDefinition,
+  params: ParamValues,
+  portId: string,
+): string {
+  const outputs = outputPorts(def, params)
   if (outputs.length <= 1) return base
   return `${base}_${rIdent(portId, 'out')}`
 }
@@ -199,7 +205,7 @@ export function exportRmd(graph: CodaGraph, options: ExportOptions = {}): Export
         }
         return variable
       },
-      output: (portId) => outputName(varName, def, portId),
+      output: (portId) => outputName(varName, def, node.params, portId),
       inputType: (portId): CodaType | undefined => inputTypes[portId],
       // Delegated rather than rebuilt: `makeInferContext` already composes exactly these three
       // out of `resolveColumn`/`resolveColumns`, and invariant 5 turns on infer, eval and the
@@ -237,7 +243,7 @@ export function exportRmd(graph: CodaGraph, options: ExportOptions = {}): Export
      */
     const unwired: string[] = []
     const blockedBy: string[] = []
-    for (const port of def.inputs ?? []) {
+    for (const port of inputPorts(def, node.params)) {
       const edge = inbound.get(portKey(nodeId, port.id))
       if (!edge) {
         if (port.required !== false) unwired.push(port.label ?? port.id)
@@ -292,8 +298,8 @@ export function exportRmd(graph: CodaGraph, options: ExportOptions = {}): Export
     }
 
     if (!emittedTodo && body.length > 0) {
-      for (const port of def.outputs ?? []) {
-        bound.set(portKey(nodeId, port.id), outputName(varName, def, port.id))
+      for (const port of outputPorts(def, node.params)) {
+        bound.set(portKey(nodeId, port.id), outputName(varName, def, node.params, port.id))
       }
     }
 

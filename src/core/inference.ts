@@ -12,6 +12,7 @@ import { inboundIndex, nodesById, portKey, topoSort, wouldCreateCycle } from './
 import type { InferContext, NodeDefinition } from './node'
 import { makeInferContext, validateColumnParams } from './node'
 import { getNodeDef } from './registry'
+import { findInputPort, inputPorts, outputPorts } from './ports'
 import type { CodaType, TableSchema } from './types'
 import { isAssignable, typeLabel } from './types'
 
@@ -73,7 +74,7 @@ function outputTypesFor(
   ctx: InferContext,
 ): { outputs: Record<string, CodaType>; error?: string } {
   const outputs: Record<string, CodaType> = {}
-  for (const port of def.outputs ?? []) outputs[port.id] = port.type
+  for (const port of outputPorts(def, ctx.params)) outputs[port.id] = port.type
   if (!def.inferOutputs) return { outputs }
   try {
     for (const [portId, type] of Object.entries(def.inferOutputs(ctx))) {
@@ -125,7 +126,7 @@ export function inferGraph(graph: CodaGraph, options: InferOptions = {}): Infere
 
     // 1. Resolve input types from upstream outputs.
     const inputs: Record<string, CodaType | undefined> = {}
-    for (const port of def.inputs ?? []) {
+    for (const port of inputPorts(def, node.params)) {
       const edge = inbound.get(portKey(nodeId, port.id))
       if (!edge) {
         inputs[port.id] = undefined
@@ -247,7 +248,7 @@ export function checkConnection(
   if (!sourceNode || !targetNode) return { ok: false, reason: 'Missing node' }
 
   const targetDef = getNodeDef(targetNode.type)
-  const inPort = (targetDef?.inputs ?? []).find((p) => p.id === to.portId)
+  const inPort = targetDef ? findInputPort(targetDef, targetNode.params, to.portId) : undefined
   if (!inPort) return { ok: false, reason: 'Unknown input port' }
 
   const sourceType = nodeTypes(inference, from.nodeId).outputs[from.portId]

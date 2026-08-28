@@ -25,6 +25,7 @@ import { registerSource } from '../../data/source'
 import type { DataSource } from '../../data/source'
 
 import '../index'
+import { defaultInputPorts } from '../../core/ports'
 
 const DATASET = 'optic-lobe-mini'
 
@@ -79,7 +80,7 @@ describe('out.rois', () => {
   it('takes a Dataset and nothing else', () => {
     // The whole premise. A Skeletons or Meshes input would make this the context for a result
     // rather than an atlas, which is a different node.
-    const inputs = requireNodeDef('out.rois').inputs ?? []
+    const inputs = defaultInputPorts(requireNodeDef('out.rois'))
     expect(inputs.map((i) => i.id)).toEqual(['dataset'])
   })
 

@@ -27,6 +27,8 @@ function ctx(input: Value | undefined, accumulated?: Record<string, Value>): Eva
     inputKey: () => undefined,
     column: () => undefined,
     columns: () => [],
+    inputPorts: () => [],
+    outputPorts: () => [],
     resolveSource: () => {
       throw new Error('not needed')
     },

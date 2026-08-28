@@ -21,6 +21,7 @@ import { MockSource } from '../../data/mock/MockSource'
 import type { DataSource } from '../../data/source'
 import { describeSchema } from '../lib/describeOps'
 import '../index'
+import { defaultOutputPorts } from '../../core/ports'
 
 const source: DataSource = new MockSource({ latencyMs: 0 })
 
@@ -52,7 +53,7 @@ function pipeline(): CodaGraph {
 describe('out.describe — types', () => {
   /* A link dragged off the node starts at the pass-through, as it does on `out.table`. */
   it('keeps Table as the first output', () => {
-    expect(requireNodeDef('out.describe').outputs?.map((p) => p.id)).toEqual(['out', 'summary'])
+    expect(defaultOutputPorts(requireNodeDef('out.describe')).map((p) => p.id)).toEqual(['out', 'summary'])
   })
 
   it('passes neurons-ness along the tap and never along the summary', () => {

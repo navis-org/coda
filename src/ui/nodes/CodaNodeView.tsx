@@ -43,6 +43,8 @@ import { nodeBody } from './nodeBodies'
 import { nodeIssues } from './nodeIssues'
 import { NodeRunRing } from './NodeRunRing'
 import { ResultDownload } from './ResultDownload'
+import { firstOutputPort, inputPorts, outputPorts } from '../../core/ports'
+import { nodePorts } from '../../core/graph'
 
 export interface CodaNodeData {
   [key: string]: unknown
@@ -151,7 +153,8 @@ function CodaNodeViewImpl({
   })
   const outputValue = useGraphStore((s) => {
     void s.runVersion
-    const port = (getNodeDef(node.type)?.outputs ?? [])[0]
+    const def = getNodeDef(node.type)
+    const port = def ? firstOutputPort(def, node.params) : undefined
     return port ? s.nodeOutput(id, port.id) : undefined
   })
   /*
@@ -280,8 +283,8 @@ function CodaNodeViewImpl({
     )
   }
 
-  const inputs = def.inputs ?? []
-  const outputs = def.outputs ?? []
+  const inputs = inputPorts(def, node.params)
+  const outputs = outputPorts(def, node.params)
   /*
    * The dataset this card *is*, if it is one — read off the inferred output type rather than off
    * the node's params, so a version dropdown and the cache line can never name different
@@ -819,8 +822,7 @@ function draggedPortType(
   }
   const graph = useGraphStore.getState().graph
   const node = graph.nodes.find((n) => n.id === origin.nodeId)
-  const def = node ? getNodeDef(node.type) : undefined
-  return (def?.inputs ?? []).find((p) => p.id === origin.portId)?.type
+  return node ? nodePorts(node, 'input').find((p) => p.id === origin.portId)?.type : undefined
 }
 
 export const CodaNodeView = memo(CodaNodeViewImpl)

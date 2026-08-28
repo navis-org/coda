@@ -17,7 +17,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { addEdge, addNode, emptyGraph } from '../../core/graph'
 import type { CodaGraph, GraphNode } from '../../core/graph'
 import { inferGraph } from '../../core/inference'
-import { defaultParams } from '../../core/node'
+import { defaultParams, makeInferContext } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
 import { Scheduler } from '../../core/scheduler'
 import { column, tableSchema } from '../../core/types'
@@ -230,15 +230,12 @@ describe('neuron.nblast — types and params', () => {
   })
 
   it('warns when resampling is off, since scores then follow the tracing', () => {
+    const nblast = requireNodeDef('neuron.nblast')
+    // `makeInferContext` rather than a hand-rolled literal, so a new member on `InferContext`
+    // is one edit rather than ten — the rule `nblastMatches.test.ts` already records.
     const issues =
-      requireNodeDef('neuron.nblast').validate?.({
-        params: { resample: 0 },
-        inputs: {},
-        schema: () => undefined,
-        attributes: () => undefined,
-        column: () => undefined,
-        columns: () => [],
-      }) ?? []
+      nblast.validate?.(makeInferContext(nblast, { ...defaultParams(nblast), resample: 0 }, {})) ??
+      []
     expect(issues.join(' ')).toMatch(/traced/)
   })
 })

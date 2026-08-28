@@ -84,6 +84,7 @@ import {
 // graph, so the node pack must be registered first. Declaring the dependency here rather
 // than relying on import order in main.tsx keeps that from silently breaking.
 import '../nodes'
+import { nodePorts } from '../core/graph'
 
 // Registered once, at module load. See `data/builtins.ts` for the set and the ordering.
 registerBuiltinSources()
@@ -1574,9 +1575,8 @@ export const useGraphStore = create<GraphState>((set, get) => {
     nodeInputs: (nodeId) => {
       const graph = get().graph
       const node = graph.nodes.find((n) => n.id === nodeId)
-      const def = node ? getNodeDef(node.type) : undefined
       const out: Record<string, Value | undefined> = {}
-      for (const port of def?.inputs ?? []) {
+      for (const port of node ? nodePorts(node, 'input') : []) {
         const edge = edgeInto(graph, nodeId, port.id)
         out[port.id] = edge ? scheduler.output(edge.source, edge.sourceHandle) : undefined
       }

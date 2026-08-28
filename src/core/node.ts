@@ -17,6 +17,7 @@ import type { DataSource } from '../data/source'
 import type { CompanionSpec } from './companion'
 import type { AttributePart, CodaType, DType, TableSchema } from './types'
 import { attributeSchema, columnsOfType, schemaOf } from './types'
+import { inputPorts, outputPorts } from './ports'
 import type { Value } from './values'
 
 /**
@@ -72,6 +73,70 @@ export interface PortDef {
    * because this node never reads them.
    */
   reference?: boolean
+}
+
+/**
+ * A run of ports repeated N times, where N is the value of one of the node's params.
+ *
+ * Ports are variadic; **params are not**. That asymmetry is deliberate and is the whole reason
+ * this stayed small. A node needing a setting per repeat declares it to `max` as ordinary params
+ * and hides the surplus with `visibleIf` — hidden params are excluded from the provenance key
+ * (invariant 4), so a picker sitting past the current count cannot stale a run. Making params
+ * variadic as well would have meant a second, parallel expansion in `normalizeParams`, the
+ * inspector and every column resolver.
+ *
+ * **Declarative rather than a `(params) => PortDef[]` callback**, and that is not a style
+ * preference. Two questions are asked about ports with no node and therefore no params in hand:
+ * `typesWithReferenceInputs` scans the whole registry once to decide whether a graph can contain
+ * a reference edge at all, and `isReferencePort` answers about a port id during a link drag. A
+ * callback is opaque to both — the first would have to invent params for every registered type,
+ * and the second would have to guess which arity produces the id it was handed. A spec can be
+ * expanded at `max` instead, which covers every id that could ever exist, and that is what
+ * `allInputPorts` is for.
+ *
+ * Ids are the template id with a **1-based** index appended: `dataset` becomes `dataset1`,
+ * `dataset2`. 1-based because the index is user-facing — it is in the port's label and in the
+ * inspector — and "Dataset 0" reads as a bug. Registration checks that no two ports can collide
+ * at `max`, which also catches the subtle case of a template id that itself ends in a digit.
+ */
+export interface PortGroupDef {
+  /**
+   * The `int` param whose value is the number of repeats. Also the discriminator: a slot with
+   * `repeat` is a group, one without is a plain port.
+   *
+   * A param rather than a count derived from which ports happen to be wired, because a port set
+   * that is a function of the edges is not saved anywhere, cannot be undone, and would not reach
+   * the provenance key. As a param it is all three for free.
+   *
+   * **The param also carries the range.** It must declare `min` and `max`, and `registerNode`
+   * refuses a group whose param does not — so the spinner the user turns and the expansion in
+   * `core/ports.ts` read one pair of numbers rather than two written independently. `min` is at
+   * least 1: a group that can vanish entirely is a port that should have been `required: false`.
+   */
+  repeat: string
+  /**
+   * The ports repeated per index, in order.
+   *
+   * A list rather than a single port so a group can repeat a *tuple* — `Compare Connectivity`
+   * takes an edge list and a labels table per dataset, and wants them adjacent on the card
+   * (`edges1, labels1, edges2, labels2`) rather than in two runs of one.
+   */
+  ports: readonly PortDef[]
+}
+
+/** One entry in a node's `inputs`/`outputs`: either a port or a run of them. */
+export type PortSlot = PortDef | PortGroupDef
+
+/**
+ * A port after groups have been expanded — what every consumer actually iterates.
+ *
+ * Carries where it came from, because two callers need it and would otherwise re-derive it by
+ * parsing the id: the card groups a run's rows visually, and `autoWireDataset` fills at most one
+ * port per group rather than pointing every Dataset input of a comparison node at the same
+ * dataset.
+ */
+export interface ResolvedPort extends PortDef {
+  group?: { repeat: string; index: number }
 }
 
 // ---------------------------------------------------------------------------
@@ -386,6 +451,18 @@ export interface InferContext<P extends ParamValues = ParamValues> {
    * this is empty until you press Run and empty again after a reload.
    */
   observed?: TableSchema | undefined
+  /**
+   * This node's own ports, with any groups already expanded at these params.
+   *
+   * For a variadic node, whose `inferOutputs` has to return a type per repeated output and
+   * whose `evaluate` has to return a value per repeated output. Without it every such node
+   * rebuilds the ids by concatenating a template and an index — a second spelling of the rule
+   * in `core/ports.ts`, once per node, each free to disagree about whether the index is
+   * 0-based. `ResolvedPort.group` says which repeat a port is, so the body indexes its own
+   * per-repeat params off the port rather than the other way round.
+   */
+  inputPorts(): readonly ResolvedPort[]
+  outputPorts(): readonly ResolvedPort[]
 }
 
 export interface EvalContext<P extends ParamValues = ParamValues> {
@@ -406,6 +483,18 @@ export interface EvalContext<P extends ParamValues = ParamValues> {
    * with the value on that port.
    */
   inputKey(portId: string): string | undefined
+  /**
+   * This node's own ports, with any groups already expanded at these params.
+   *
+   * For a variadic node, whose `inferOutputs` has to return a type per repeated output and
+   * whose `evaluate` has to return a value per repeated output. Without it every such node
+   * rebuilds the ids by concatenating a template and an index — a second spelling of the rule
+   * in `core/ports.ts`, once per node, each free to disagree about whether the index is
+   * 0-based. `ResolvedPort.group` says which repeat a port is, so the body indexes its own
+   * per-repeat params off the port rather than the other way round.
+   */
+  inputPorts(): readonly ResolvedPort[]
+  outputPorts(): readonly ResolvedPort[]
   /** Same resolution as `InferContext.column`, so infer and eval never disagree. */
   column(paramId: string): string | undefined
   columns(paramId: string): string[]
@@ -625,8 +714,14 @@ export interface NodeDefinition<P extends ParamValues = ParamValues> {
    * ordinary deletable node afterwards. See `core/companion.ts`.
    */
   companion?: CompanionSpec
-  inputs?: readonly PortDef[]
-  outputs?: readonly PortDef[]
+  /**
+   * Input ports, in card order. An entry may be a `PortGroupDef`, which expands to a run of
+   * ports sized by one of this node's params — see `PortGroupDef`. Read them through
+   * `inputPorts(def, params)` in `core/ports.ts`, never by iterating this directly.
+   */
+  inputs?: readonly PortSlot[]
+  /** Output ports. Groups expand exactly as on `inputs`; read through `outputPorts`. */
+  outputs?: readonly PortSlot[]
   params?: readonly ParamDef[]
   /**
    * This node annotates the canvas rather than computing on it.
@@ -1112,6 +1207,8 @@ export function makeInferContext<P extends ParamValues = ParamValues>(
     observed,
     schema: (portId) => schemaOf(inputs[portId]),
     attributes: (portId, part) => attributeSchema(inputs[portId], part),
+    inputPorts: () => inputPorts(def, params),
+    outputPorts: () => outputPorts(def, params),
     column: (paramId) => {
       const p = findParam(def, paramId)
       return p && p.kind === 'column' ? resolveColumn(p, params, inputs) : undefined

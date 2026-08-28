@@ -28,6 +28,7 @@ import { runElk, runLayout } from './engine'
 import { DEFAULT_LAYOUT_OPTIONS } from './options'
 import type { XY } from './place'
 import { anchorDelta, dodgeDelta, routeKey, translateRoutes } from './place'
+import { defaultInputPorts, defaultOutputPorts } from '../core/ports'
 
 beforeAll(() => {
   registerSource(new MockSource({ latencyMs: 0 }))
@@ -216,8 +217,8 @@ describe('pinned ports', () => {
       graph.nodes.map((n) => {
         const def = requireNodeDef(n.type)
         const offsets = new Map<string, XY>()
-        for (const port of def.inputs ?? []) offsets.set(port.id, { x: 0, y: 48 })
-        for (const port of def.outputs ?? []) offsets.set(port.id, { x: size.width, y: 48 })
+        for (const port of defaultInputPorts(def)) offsets.set(port.id, { x: 0, y: 48 })
+        for (const port of defaultOutputPorts(def)) offsets.set(port.id, { x: size.width, y: 48 })
         return [n.id, offsets]
       }),
     )
@@ -239,7 +240,7 @@ describe('pinned ports', () => {
   it('declines to pin a card whose sockets were only partly measured', async () => {
     const graph = skipping()
     const def = requireNodeDef('core.filter')
-    const first = (def.inputs ?? [])[0]!
+    const first = defaultInputPorts(def)[0]!
     // One socket measured out of several. Taken literally, `FIXED_POS` puts every unmeasured
     // port at (0,0) — the card's top-left, on whichever side — and routes confidently into it.
     const ports: MeasuredPorts = new Map([['filter', new Map([[first.id, { x: 0, y: 48 }]])]])
@@ -265,8 +266,8 @@ describe('pinned ports', () => {
       graph.nodes.map((n) => {
         const def = requireNodeDef(n.type)
         const offsets = new Map<string, XY>()
-        for (const port of def.inputs ?? []) offsets.set(port.id, { x: 0, y: 48 })
-        for (const port of def.outputs ?? []) offsets.set(port.id, { x: 232, y: 48 })
+        for (const port of defaultInputPorts(def)) offsets.set(port.id, { x: 0, y: 48 })
+        for (const port of defaultOutputPorts(def)) offsets.set(port.id, { x: 232, y: 48 })
         return [n.id, offsets]
       }),
     )

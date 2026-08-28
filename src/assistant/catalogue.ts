@@ -57,6 +57,7 @@ import { GRAPH_FORMAT_VERSION } from '../core/graph'
 import { inferGraph, nodeTypes } from '../core/inference'
 import { defaultParams } from '../core/node'
 import { nodeDefsByCategory } from '../core/registry'
+import { defaultInputPorts, defaultOutputPorts } from '../core/ports'
 import type { AttributePart, CodaType } from '../core/types'
 import { attributeSchema, columnNames, typeLabel } from '../core/types'
 import { plannableParams } from './planShape'
@@ -174,8 +175,10 @@ function renderNode(def: NodeDefinition, detail: CatalogueDetail): string {
   lines.push(`## ${def.type} — ${def.label} (${def.category}, ${def.cost})`)
   if (def.description) lines.push(def.description)
 
-  const inputs = def.inputs ?? []
-  const outputs = def.outputs ?? []
+  // No params: the catalogue describes a node *type*, so a variadic node is listed at the
+  // arity a fresh one opens at. The assistant sets the count param like any other.
+  const inputs = defaultInputPorts(def)
+  const outputs = defaultOutputPorts(def)
   const list = (ports: readonly PortDef[], side: 'in' | 'out') =>
     ports.length ? ports.map((p) => renderPort(p, side)).join('  ') : 'none'
   lines.push(`inputs:  ${list(inputs, 'in')}`)

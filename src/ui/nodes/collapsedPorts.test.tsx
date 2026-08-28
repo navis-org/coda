@@ -27,6 +27,7 @@ import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import { useGraphStore } from '../../store/graphStore'
 import { clearStorage, installJsdomStubs } from '../../test/jsdomStubs'
+import { defaultInputPorts, defaultOutputPorts } from '../../core/ports'
 
 beforeAll(() => {
   installJsdomStubs({ width: 420, height: 300 })
@@ -67,7 +68,7 @@ describe('the sockets survive the collapse', () => {
     const skeletons = nodeIdOfType('neuron.skeletons')
     const wrapper = await wrapperFor(skeletons)
     const def = requireNodeDef('neuron.skeletons')
-    const expected = (def.inputs ?? []).length + (def.outputs ?? []).length
+    const expected = defaultInputPorts(def).length + defaultOutputPorts(def).length
     expect(wrapper.querySelectorAll('.react-flow__handle')).toHaveLength(expected)
 
     collapse(skeletons)
@@ -93,7 +94,7 @@ describe('the sockets survive the collapse', () => {
     )
     expect(new Set(ids).size).toBe(ids.length)
     expect(ids).toEqual(
-      expect.arrayContaining(requireNodeDef('out.viewer3d').inputs!.map((p) => p.id)),
+      expect.arrayContaining(defaultInputPorts(requireNodeDef('out.viewer3d')).map((p) => p.id)),
     )
   })
 
@@ -130,7 +131,7 @@ describe('the fold puts them there too', () => {
     expect(cardIn(wrapper).dataset.collapsed).toBeUndefined()
     const def = requireNodeDef('neuron.findNeurons')
     expect(wrapper.querySelectorAll('.react-flow__handle')).toHaveLength(
-      (def.inputs ?? []).length + (def.outputs ?? []).length,
+      defaultInputPorts(def).length + defaultOutputPorts(def).length,
     )
   })
 

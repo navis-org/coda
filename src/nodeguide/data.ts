@@ -24,8 +24,9 @@
 
 import '../nodes'
 import { EXAMPLES } from '../examples'
-import type { NodeCategory, NodeDefinition, ParamDef } from '../core/node'
+import type { NodeCategory, NodeDefinition, ParamDef, ResolvedPort } from '../core/node'
 import { listableNodeDefs } from '../core/registry'
+import { defaultInputPorts, defaultOutputPorts } from '../core/ports'
 /*
  * Shared with the help figures, which print a parameter's value in the same awkward cases —
  * `resolved live`, `first compatible`, an enum's option label. There was one copy here; a second
@@ -106,7 +107,7 @@ function paramsOf(def: NodeDefinition): GuideParam[] {
     }))
 }
 
-function portsOf(ports: readonly NonNullable<NodeDefinition['inputs']>[number][]): GuidePort[] {
+function portsOf(ports: readonly ResolvedPort[]): GuidePort[] {
   return ports.map((p) => ({
     id: p.id,
     label: p.label ?? p.id,
@@ -146,8 +147,10 @@ export function guideData(): GuideData {
       category: def.category,
       cost: def.cost,
       annotation: def.annotation === true,
-      inputs: portsOf(def.inputs ?? []),
-      outputs: portsOf(def.outputs ?? []),
+      // The node guide describes a *type*, so a variadic node is shown at the arity a fresh
+      // one opens at — the same reading the palette and the browser take.
+      inputs: portsOf(defaultInputPorts(def)),
+      outputs: portsOf(defaultOutputPorts(def)),
       params: paramsOf(def),
       examples: def.annotation ? [] : (usedIn.get(def.type) ?? []),
     }))

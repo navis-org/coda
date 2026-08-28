@@ -37,7 +37,7 @@ function chain() {
   }))
   graph.edges = [
     { id: 'e0', source: 'n0', sourceHandle: 'dataset', target: 'n1', targetHandle: 'dataset' },
-    { id: 'e1', source: 'n1', sourceHandle: 'out', target: 'n2', targetHandle: 'in' },
+    { id: 'e1', source: 'n1', sourceHandle: 'neurons', target: 'n2', targetHandle: 'in' },
   ]
   return graph
 }

@@ -20,6 +20,7 @@ import '../../nodes'
 import './exporter'
 import { getEmitter } from './registry'
 import type { EmitContext } from './types'
+import { allInputPorts, allOutputPorts } from '../../core/ports'
 
 describe('emitter port ids', () => {
   it('names only ports the definition declares', () => {
@@ -29,8 +30,10 @@ describe('emitter port ids', () => {
       const emit = getEmitter(def.type)
       if (!emit) continue
 
-      const inputs = new Set((def.inputs ?? []).map((p) => p.id))
-      const outputs = new Set((def.outputs ?? []).map((p) => p.id))
+      // At `max`: an emitter naming a port that only exists at a higher arity is still
+      // naming a real port, and this check is about typos rather than about one node's count.
+      const inputs = new Set(allInputPorts(def).map((p) => p.id))
+      const outputs = new Set(allOutputPorts(def).map((p) => p.id))
       const askedIn: string[] = []
       const askedOut: string[] = []
 

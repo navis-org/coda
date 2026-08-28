@@ -439,6 +439,8 @@ function evalContext(def: NodeDefinition, params: ParamValues, edges: TableValue
       const p = findParam(def, paramId)
       return p && p.kind === 'column' ? resolveColumn(p, params, types) : undefined
     },
+    inputPorts: () => [],
+    outputPorts: () => [],
     columns: (paramId) => {
       const p = findParam(def, paramId)
       return p && p.kind === 'columns' ? resolveColumns(p, params, types) : []

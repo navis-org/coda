@@ -20,6 +20,7 @@ import { exportNotebook } from './exporter'
 import { caveGraph, everythingGraph } from '../fixture'
 import { getEmitter } from './registry'
 import { serializeNotebook } from './notebook'
+import { inputPorts, outputPorts } from '../../core/ports'
 
 const GOLDEN = new URL('./__fixtures__/everything.ipynb', import.meta.url).pathname
 const CAVE_GOLDEN = new URL('./__fixtures__/cave.ipynb', import.meta.url).pathname
@@ -52,8 +53,8 @@ describe('the fixture itself', () => {
       for (const edge of graph.edges) {
         const source = byId.get(edge.source)
         const target = byId.get(edge.target)
-        const outputs = (source ? requireNodeDef(source.type).outputs : []) ?? []
-        const inputs = (target ? requireNodeDef(target.type).inputs : []) ?? []
+        const outputs = source ? outputPorts(requireNodeDef(source.type), source.params) : []
+        const inputs = target ? inputPorts(requireNodeDef(target.type), target.params) : []
         if (!outputs.some((p) => p.id === edge.sourceHandle)) {
           bad.push(`${edge.source} has no output "${edge.sourceHandle}"`)
         }

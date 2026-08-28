@@ -125,6 +125,8 @@ function run(table: TableValue, params: Record<string, unknown> = {}) {
           '',
       ),
     columns: () => [],
+    inputPorts: () => [],
+    outputPorts: () => [],
     resolveSource: () => {
       throw new Error('no source')
     },

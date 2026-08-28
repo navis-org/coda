@@ -35,10 +35,12 @@
 import type { CodaGraph, GraphNode } from './graph'
 import { addEdge, edgeInto } from './graph'
 import { getNodeDef } from './registry'
+import { inputPorts, outputPorts } from './ports'
 
 /** The output port publishing a Dataset, if this node has one. */
 function datasetOutput(node: GraphNode): string | undefined {
-  const outputs = getNodeDef(node.type)?.outputs ?? []
+  const def = getNodeDef(node.type)
+  const outputs = def ? outputPorts(def, node.params) : []
   return outputs.find((port) => port.type.kind === 'dataset')?.id
 }
 
@@ -50,10 +52,28 @@ function datasetOutput(node: GraphNode): string | undefined {
  * here unconditionally.
  */
 export function autoWireDataset(graph: CodaGraph, node: GraphNode): CodaGraph {
-  const open = (getNodeDef(node.type)?.inputs ?? []).filter(
+  const def = getNodeDef(node.type)
+  const open = (def ? inputPorts(def, node.params) : []).filter(
     (port) => port.type.kind === 'dataset' && !edgeInto(graph, node.id, port.id),
   )
   if (open.length === 0) return graph
+  /*
+   * At most one port per repeated group. A comparison node's Dataset inputs are a
+   * `PortGroupDef` (`dataset1`, `dataset2`, …), and filling every one of them from the graph's
+   * single dataset node would wire a node built to compare two connectomes to the same
+   * connectome twice — a graph that runs, produces an answer, and means nothing. Filling the
+   * first is the useful half of the guess; the rest is a question only the user can answer.
+   *
+   * Static ports are untouched: a node with two differently-purposed Dataset inputs declared by
+   * hand is saying they are different things, and both still get fed.
+   */
+  const seenGroups = new Set<string>()
+  const targets = open.filter((port) => {
+    if (!port.group) return true
+    if (seenGroups.has(port.group.repeat)) return false
+    seenGroups.add(port.group.repeat)
+    return true
+  })
 
   let found: { nodeId: string; portId: string } | undefined
   for (const candidate of graph.nodes) {
@@ -67,7 +87,7 @@ export function autoWireDataset(graph: CodaGraph, node: GraphNode): CodaGraph {
   if (!found) return graph
 
   const from = found
-  return open.reduce(
+  return targets.reduce(
     (g, port) =>
       addEdge(g, {
         source: from.nodeId,

@@ -22,6 +22,7 @@ import { isMeshesValue, isSkeletonsValue, isTableValue } from '../../core/values
 import { MockSource } from '../../data/mock/MockSource'
 import type { DataSource } from '../../data/source'
 import '../index'
+import { defaultInputPorts } from '../../core/ports'
 
 const source: DataSource = new MockSource({ latencyMs: 0 })
 
@@ -114,7 +115,7 @@ describe('core.selectOne — types', () => {
 
   it('takes an any port, because the type system cannot say "a collection"', () => {
     const def = requireNodeDef('core.selectOne')
-    expect(def.inputs?.find((p) => p.id === 'in')?.type.kind).toBe('any')
+    expect(defaultInputPorts(def).find((p) => p.id === 'in')?.type.kind).toBe('any')
   })
 })
 

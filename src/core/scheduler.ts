@@ -37,6 +37,7 @@ import type {
 } from './node'
 import { findParam, resolveColumn, resolveColumns } from './node'
 import { getNodeDef } from './registry'
+import { inputPorts, outputPorts } from './ports'
 import type { CodaType } from './types'
 import type { Value } from './values'
 import { datasetIdentity } from './values'
@@ -374,7 +375,7 @@ export class Scheduler {
       }
       // Not fresh. Blocked if any required input cannot be supplied.
       const def = getNodeDef(node.type)
-      const upstreamReady = (def?.inputs ?? []).every((port) => {
+      const upstreamReady = (def ? inputPorts(def, node.params) : []).every((port) => {
         if (port.required === false) return true
         const edge = inbound.get(portKey(nodeId, port.id))
         return edge ? fresh.has(edge.source) : false
@@ -901,7 +902,7 @@ export class Scheduler {
     const inputs: Record<string, Value | undefined> = {}
     const inputKeys: Record<string, string> = {}
     let blocked = false
-    for (const port of def.inputs ?? []) {
+    for (const port of inputPorts(def, this.nodeOf(pass, nodeId).params)) {
       const edge = pass.inbound.get(portKey(nodeId, port.id))
       if (!edge) {
         if (port.required !== false) blocked = true
@@ -1122,7 +1123,7 @@ export class Scheduler {
       const def = getNodeDef(node.type)
       const inputTypes = inference.nodes[nodeId]?.inputs ?? {}
       const upstream: Array<[string, string | null]> = []
-      for (const port of def?.inputs ?? []) {
+      for (const port of def ? inputPorts(def, node.params) : []) {
         const edge = inbound.get(portKey(nodeId, port.id))
         /*
          * A reference contributes the *type* it resolved to rather than the upstream node's key,
@@ -1244,6 +1245,8 @@ export class Scheduler {
       },
       input: (portId) => gathered.inputs[portId],
       inputKey: (portId) => gathered.inputKeys[portId],
+      inputPorts: () => inputPorts(def, params),
+      outputPorts: () => outputPorts(def, params),
       column: (paramId) => {
         const p = findParam(def, paramId)
         return p && p.kind === 'column' ? resolveColumn(p, params, types) : undefined

@@ -22,6 +22,7 @@ import { isTableValue } from '../../core/values'
 import { MockSource } from '../../data/mock/MockSource'
 import type { DataSource } from '../../data/source'
 import '../index'
+import { defaultInputPorts } from '../../core/ports'
 
 const source: DataSource = new MockSource({ latencyMs: 0 })
 
@@ -83,7 +84,7 @@ describe('out.scatter — types', () => {
   })
 
   it('accepts a plain Table, since numeric columns are a validation question', () => {
-    expect(requireNodeDef('out.scatter').inputs?.[0]?.type.kind).toBe('table')
+    expect(defaultInputPorts(requireNodeDef('out.scatter'))[0]?.type.kind).toBe('table')
   })
 
   it('opens on two different axes rather than plotting a column against itself', () => {

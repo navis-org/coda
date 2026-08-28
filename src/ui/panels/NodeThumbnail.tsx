@@ -23,6 +23,7 @@ import { BACKENDS, backendForNodeType } from '../../nodes/lib/datasetFamilies'
 import { nodeTintVar, socketStyle } from '../socketStyle'
 import type { SocketShape } from '../socketStyle'
 import { plural } from '../format'
+import { defaultInputPorts, defaultOutputPorts } from '../../core/ports'
 
 const WIDTH = 78
 const HEIGHT = 52
@@ -35,8 +36,9 @@ export interface NodeThumbnailProps {
 }
 
 export function NodeThumbnail({ def }: NodeThumbnailProps) {
-  const inputs = (def.inputs ?? []).slice(0, MAX_DOTS)
-  const outputs = (def.outputs ?? []).slice(0, MAX_DOTS)
+  // A type, not an instance: the arity a fresh node opens at. See `core/ports.ts`.
+  const inputs = defaultInputPorts(def).slice(0, MAX_DOTS)
+  const outputs = defaultOutputPorts(def).slice(0, MAX_DOTS)
   /*
    * A dataset tile is tinted by *backend*, matching its card. Falls through to the category
    * token for everything else, and for a backend nobody has styled yet. The fallback argument

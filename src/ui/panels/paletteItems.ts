@@ -22,6 +22,7 @@ import { LOCKED_HINT } from '../lockCopy'
 import { EXAMPLES } from '../../examples'
 import { plural } from '../format'
 import { shortcutKeys } from '../shortcuts'
+import { defaultInputPorts, defaultOutputPorts } from '../../core/ports'
 
 /**
  * Actions double as the palette's filter prefixes: typing `Add:` narrows the list to node
@@ -110,14 +111,14 @@ export function buildNodeItems(
          */
         const ports =
           filter.from === 'source'
-            ? (def.inputs ?? []).filter((p) => isAssignable(filter.type, p.type))
-            : (def.outputs ?? []).filter(
+            ? defaultInputPorts(def).filter((p) => isAssignable(filter.type, p.type))
+            : defaultOutputPorts(def).filter(
                 (p) => p.type.kind !== 'any' && isAssignable(p.type, filter.type),
               )
         portId = ports[0]?.id
         if (!portId) continue
       } else {
-        portId = (def.outputs ?? [])[0]?.id ?? ''
+        portId = defaultOutputPorts(def)[0]?.id ?? ''
       }
 
       items.push({

@@ -20,6 +20,7 @@ import { nodeIssues } from '../nodes/nodeIssues'
 import { ParamField } from '../params/ParamField'
 import { familyColorVar, socketStyle } from '../socketStyle'
 import { ValuePreview } from '../viewers/ValuePreview'
+import { firstOutputPort, inputPorts, outputPorts } from '../../core/ports'
 
 export function Inspector() {
   const open = useGraphStore((s) => s.panels.inspector)
@@ -44,7 +45,8 @@ export function Inspector() {
   const outputValue = useGraphStore((s) => {
     void s.runVersion
     if (!node) return undefined
-    const port = (getNodeDef(node.type)?.outputs ?? [])[0]
+    const def = getNodeDef(node.type)
+    const port = def ? firstOutputPort(def, node.params) : undefined
     return port ? s.nodeOutput(node.id, port.id) : undefined
   })
   // What the run said about the result that is here — a guard rail passed, a draw sampled. A
@@ -185,7 +187,7 @@ export function Inspector() {
           <div className="inspector__section">
             <div className="inspector__section-title">Ports</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-              {(def.inputs ?? []).map((port) => {
+              {inputPorts(def, node.params).map((port) => {
                 const resolved = types?.inputs[port.id]
                 return (
                   <div
@@ -203,7 +205,7 @@ export function Inspector() {
                   </div>
                 )
               })}
-              {(def.outputs ?? []).map((port) => {
+              {outputPorts(def, node.params).map((port) => {
                 const resolved = types?.outputs[port.id] ?? port.type
                 return (
                   <div

@@ -17,6 +17,7 @@ import { column, schemaOf, tableSchema } from '../../core/types'
 import type { TableValue } from '../../core/values'
 import { getColumn, tableFromRows } from '../../core/values'
 import '../index'
+import { defaultInputPorts, defaultOutputPorts } from '../../core/ports'
 
 const BOTH = ['cluster.selectedToNeurons', 'cluster.clustersToNeurons']
 
@@ -71,7 +72,7 @@ describe.each(BOTH)('%s', (type) => {
   })
 
   it('declares a neurons output, which is what a 3D socket demands', () => {
-    expect(requireNodeDef(type).outputs?.[0]?.type.kind).toBe('neurons')
+    expect(defaultOutputPorts(requireNodeDef(type))[0]?.type.kind).toBe('neurons')
   })
 
   it('says at edit time that unwired Neurons means the labels must be ids', () => {
@@ -103,8 +104,8 @@ describe.each(BOTH)('%s', (type) => {
 describe('what the two differ about', () => {
   it('is the socket name and the warning, not the behaviour', () => {
     const [a, b] = BOTH.map((t) => requireNodeDef(t))
-    expect(a!.inputs?.[0]?.label).toBe('Selected')
-    expect(b!.inputs?.[0]?.label).toBe('Clusters')
+    expect(defaultInputPorts(a!)[0]?.label).toBe('Selected')
+    expect(defaultInputPorts(b!)[0]?.label).toBe('Clusters')
     // Same params, in the same order: one implementation under two names.
     expect(a!.params?.map((p) => p.id)).toEqual(b!.params?.map((p) => p.id))
   })

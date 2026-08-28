@@ -28,6 +28,7 @@ import { resetCredentials, setToken } from '../../data/cave/credentials'
 import { resetCaveState, tableListFor } from '../../data/cave/tables'
 import { installCaveFetch } from '../../test/caveStubs'
 import '../index'
+import { makeInferContext } from '../../core/node'
 
 const DATASET = 'flywire_fafb_public:783'
 
@@ -44,6 +45,8 @@ function run(
     inputKey: () => undefined,
     column: () => '',
     columns: () => [],
+    inputPorts: () => [],
+    outputPorts: () => [],
     resolveSource: () => {
       throw new Error('no source')
     },
@@ -59,15 +62,7 @@ function run(
 function issues(type: string, params: ParamValues, dataset?: CodaType): string[] {
   const def = requireNodeDef(type)
   return (
-    def.validate?.({
-      params,
-      inputs: { dataset },
-      outputs: {},
-      schema: () => undefined,
-      column: () => '',
-      columns: () => [],
-      observed: undefined,
-    } as never) ?? []
+    def.validate?.(makeInferContext(def, params, { dataset })) ?? []
   )
 }
 
@@ -130,15 +125,9 @@ describe('List CAVE tables', () => {
   it('infers what it evaluates, before anything has run', async () => {
     installCaveFetch()
     const def = requireNodeDef('cave.tables')
-    const inferred = def.inferOutputs?.({
-      params: { datastack: DATASET, includeViews: true },
-      inputs: {},
-      outputs: {},
-      schema: () => undefined,
-      column: () => '',
-      columns: () => [],
-      observed: undefined,
-    } as never)
+    const inferred = def.inferOutputs?.(
+      makeInferContext(def, { datastack: DATASET, includeViews: true }, {}),
+    )
     const out = (await run('cave.tables', { datastack: DATASET, includeViews: true }))
       .out as TableValue
     expect(inferred?.out).toEqual(T.table(out.schema))

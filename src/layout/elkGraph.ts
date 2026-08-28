@@ -11,6 +11,7 @@ import type { ElkNode } from 'elkjs/lib/elk-api'
 
 import type { CodaGraph, GraphEdge, GraphNode } from '../core/graph'
 import { getNodeDef, isAnnotation } from '../core/registry'
+import { inputPorts, outputPorts } from '../core/ports'
 import type { LayoutOptions } from './options'
 import { elkNodeOptions, elkOptionsFor } from './options'
 import type { XY } from './place'
@@ -125,8 +126,8 @@ export function toElkGraph(
 
   const children: ElkNode[] = nodes.map((node) => {
     const def = getNodeDef(node.type)
-    const inputs = def?.inputs ?? []
-    const outputs = def?.outputs ?? []
+    const inputs = def ? inputPorts(def, node.params) : []
+    const outputs = def ? outputPorts(def, node.params) : []
     const index = portIndices(inputs.length, outputs.length)
     const size = resolveSize(node, measured)
     const offsets = ports?.get(node.id)

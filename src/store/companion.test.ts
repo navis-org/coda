@@ -22,6 +22,7 @@ import { buildStarter } from '../examples/starters'
 import '../nodes'
 import { clearStorage } from '../test/jsdomStubs'
 import { useGraphStore } from './graphStore'
+import { defaultInputPorts, defaultOutputPorts } from '../core/ports'
 
 const HEMIBRAIN: DatasetInfo = {
   id: 'hemibrain:v1.2.1',
@@ -158,8 +159,8 @@ describe('starter graphs', () => {
 describe('the Description node itself', () => {
   it('is a dead end, so nobody wires a pipeline through the credits', () => {
     const def = requireNodeDef('dataset.description')
-    expect(def.outputs ?? []).toHaveLength(0)
-    expect((def.inputs ?? []).map((p) => p.id)).toEqual(['dataset'])
+    expect(defaultOutputPorts(def)).toHaveLength(0)
+    expect(defaultInputPorts(def).map((p) => p.id)).toEqual(['dataset'])
   })
 
   it('is offered on its own, so deleting one is not final', () => {

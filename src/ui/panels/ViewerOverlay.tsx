@@ -33,6 +33,7 @@ import { ParamField } from '../params/ParamField'
 import { ParamRows } from '../params/ParamRows'
 import { groupParams, paramsForPanel } from '../params/paramGroups'
 import { ValuePreview } from '../viewers/ValuePreview'
+import { firstOutputPort } from '../../core/ports'
 
 export function ViewerOverlay() {
   const nodeId = useGraphStore((s) => s.expandedNodeId)
@@ -60,7 +61,8 @@ export function ViewerOverlay() {
     void s.runVersion
     if (!nodeId) return undefined
     const node = s.graph.nodes.find((n) => n.id === nodeId)
-    const port = node ? (getNodeDef(node.type)?.outputs ?? [])[0] : undefined
+    const vdef = node ? getNodeDef(node.type) : undefined
+    const port = vdef && node ? firstOutputPort(vdef, node.params) : undefined
     return port ? s.nodeOutput(nodeId, port.id) : undefined
   })
 

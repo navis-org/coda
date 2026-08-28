@@ -23,6 +23,7 @@ import { describeGraph, repairPrompt, requestPlan } from './converse'
 import type { AssistantPlan } from './planShape'
 import { parsePlan, planJsonSchema } from './plan'
 import { emptyPlan, isEmptyPlan, plannableParams } from './planShape'
+import { defaultInputPorts, defaultOutputPorts } from '../core/ports'
 
 function plan(patch: Partial<AssistantPlan>): AssistantPlan {
   return { ...emptyPlan(), summary: 'a test edit', ...patch }
@@ -670,7 +671,7 @@ describe('the catalogue', () => {
   it('marks optional inputs, so an unwired one does not read as a mistake', () => {
     // `out.neuroglancer`'s Neurons port is optional: a dataset alone is a valid scene.
     const def = getNodeDef('out.neuroglancer')!
-    expect(def.inputs?.find((p) => p.id === 'neurons')?.required).toBe(false)
+    expect(defaultInputPorts(def).find((p) => p.id === 'neurons')?.required).toBe(false)
     expect(catalogueText()).toContain('neurons? (Neurons')
   })
 
@@ -1005,12 +1006,12 @@ describe('the whole registry, against the applier', () => {
     // A smoke test over the type system rather than an exhaustive one: every table producer
     // should reach `out.table`.
     const producers = listableNodeDefs().filter((d) =>
-      (d.outputs ?? []).some((p) => p.type.kind === 'table'),
+      defaultOutputPorts(d).some((p) => p.type.kind === 'table'),
     )
     expect(producers.length).toBeGreaterThan(5)
 
     for (const def of producers) {
-      const port = (def.outputs ?? []).find((p) => p.type.kind === 'table')!
+      const port = defaultOutputPorts(def).find((p) => p.type.kind === 'table')!
       const result = applyPlan(
         emptyGraph(),
         plan({

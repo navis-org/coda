@@ -4,6 +4,8 @@
  */
 
 import type { NodeCategory, NodeDefinition, ParamValues } from './node'
+import { findParam } from './node'
+import { allInputPorts, allOutputPorts, isPortGroup } from './ports'
 
 const definitions = new Map<string, NodeDefinition>()
 
@@ -27,10 +29,93 @@ export function registerNode<P extends ParamValues>(def: NodeDefinition<P>): Nod
         'A loop needs both: the flag is what derives its region, the plan is what says how many passes to make.',
     )
   }
+  checkPortGroups(def as unknown as NodeDefinition)
   definitions.set(def.type, def as unknown as NodeDefinition)
   referenceTypes = undefined
   loopTypes = undefined
   return def
+}
+
+/**
+ * Structural checks on a definition's port groups, thrown at registration.
+ *
+ * For the reason the `loop`/`loopPlan` pairing above is checked here: every one of these fails
+ * *silently* at runtime and produces a node that looks wired. A `repeat` naming a param that
+ * does not exist resolves to the group's `min` forever, so the count field the author added is
+ * simply inert. A default outside `[min, max]` means a fresh node opens at a different arity
+ * than the number shown in its own param field. And two ports that collide at some arity give
+ * one card two sockets with one id, where `inbound` keeps whichever edge it saw first and the
+ * other silently carries nothing.
+ *
+ * Expanded at `max` rather than at the default, because a collision that only appears at arity
+ * five is still a collision, and it would otherwise ship and be found by a user.
+ */
+function checkPortGroups(def: NodeDefinition): void {
+  for (const side of ['inputs', 'outputs'] as const) {
+    const slots = def[side]
+    if (!slots) continue
+    for (const slot of slots) {
+      if (!isPortGroup(slot)) continue
+      const where = `"${def.type}" port group "${slot.repeat}" (${side})`
+      if (slot.ports.length === 0) throw new Error(`${where} repeats no ports.`)
+      const param = findParam(def, slot.repeat)
+      if (!param) {
+        throw new Error(
+          `${where} names no param. The repeat count must be a real \`int\` param, or it is not saved, not undoable and not in the provenance key.`,
+        )
+      }
+      if (param.kind !== 'int') {
+        throw new Error(`${where} names a "${param.kind}" param; the repeat count must be \`int\`.`)
+      }
+      /*
+       * Both of these silently break invariant 4. `normalizeParams` drops presentational params
+       * and params hidden by `visibleIf` from the provenance key — correctly, for colour scales
+       * and switched-off branches. A *repeat* count excluded from that key means changing a
+       * node's arity does not re-key it: the scheduler finds the cached entry fresh and serves a
+       * result that is missing the outputs the new ports were added for, with nothing stale on
+       * the canvas to say so. The port set is the one thing a param can change that the cache
+       * cannot see any other way.
+       */
+      if (param.presentational) {
+        throw new Error(
+          `${where} names a presentational param. A repeat count changes what \`evaluate\` returns — it is excluded from the provenance key, so a changed arity would serve a stale result (invariant 4).`,
+        )
+      }
+      if (param.visibleIf) {
+        throw new Error(
+          `${where} names a param with \`visibleIf\`. A hidden param is excluded from the provenance key, so hiding the count would freeze the arity a cached result was computed at (invariant 4).`,
+        )
+      }
+      /*
+       * The range lives on the param and nowhere else, so the inspector's spinner and the
+       * expansion in `core/ports.ts` cannot disagree about how far a group goes. Undeclared, the
+       * spinner would run to infinity while `allInputPorts` expanded to one.
+       */
+      if (typeof param.min !== 'number' || typeof param.max !== 'number') {
+        throw new Error(`${where} names a param with no \`min\`/\`max\`; that pair is the group's arity.`)
+      }
+      if (param.min < 1) {
+        throw new Error(`${where} has min ${param.min}; a group repeats at least once.`)
+      }
+      if (param.max < param.min) {
+        throw new Error(`${where} has max ${param.max} below min ${param.min}.`)
+      }
+      if (param.default < param.min || param.default > param.max) {
+        throw new Error(
+          `${where} has default ${param.default} outside [${param.min}, ${param.max}], so a fresh node would not open at the arity its own field reports.`,
+        )
+      }
+    }
+    const seen = new Set<string>()
+    for (const port of side === 'inputs' ? allInputPorts(def) : allOutputPorts(def)) {
+      if (seen.has(port.id)) {
+        throw new Error(
+          `"${def.type}" has two ${side} called "${port.id}" at some arity. Port ids must be unique when every group is expanded at its max.`,
+        )
+      }
+      seen.add(port.id)
+    }
+  }
 }
 
 /** Memo for `typesWithReferenceInputs`, dropped whenever the registry gains a type. */
@@ -51,7 +136,7 @@ let referenceTypes: Set<string> | undefined
 export function typesWithReferenceInputs(): Set<string> {
   referenceTypes ??= new Set(
     [...definitions.values()]
-      .filter((def) => (def.inputs ?? []).some((port) => port.reference === true))
+      .filter((def) => allInputPorts(def).some((port) => port.reference === true))
       .map((def) => def.type),
   )
   return referenceTypes

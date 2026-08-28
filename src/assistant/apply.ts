@@ -23,7 +23,7 @@
 
 import { addNodeWithCompanion } from '../core/companion'
 import type { CodaGraph, GraphNode } from '../core/graph'
-import { addEdge, edgeInto, newId, removeEdges, removeNodes, updateNode } from '../core/graph'
+import { addEdge, edgeInto, newId, nodePorts, removeEdges, removeNodes, updateNode } from '../core/graph'
 import type { IssueSeverity } from '../core/inference'
 import { checkConnection, inferGraph, nodeTypes } from '../core/inference'
 import type { NodeDefinition, ParamDef, ParamValue, ParamValues } from '../core/node'
@@ -541,7 +541,7 @@ function resolvePort(
   const found = lookup(graph, resolve, ref.node, where)
   if (typeof found === 'string') return found
 
-  const ports = (side === 'input' ? found.def.inputs : found.def.outputs) ?? []
+  const ports = nodePorts(found.node, side)
   if (!ports.some((p) => p.id === ref.port)) {
     const names = ports.map((p) => p.id)
     return (

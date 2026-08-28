@@ -241,6 +241,99 @@ ordinary pass re-runs it either way. Only an expensive node's param distinguishe
 And a `typePattern` matching nothing makes Connectivity error ("No neuronIds…") and blocks
 everything downstream, so a test that waits for zero stale nodes will hang on it.
 
+## Variadic ports — a port set sized by a param
+
+Most nodes declare a fixed list of ports. A few cannot: `Match Cell Types` maps cell types
+across N connectomes, and **chaining two-input mappers is not the same computation** — with
+FlyWire left and right, `AOTU008a` and `AOTU008b` stay distinct; add the hemibrain and they must
+collapse into `AOTU008`. A node that let you chain would offer a plausible wrong answer with
+nothing on screen to say so. See [comparative.md](comparative.md).
+
+So `NodeDefinition.inputs` and `.outputs` are lists of **slots**, and a slot is either a
+`PortDef` or a `PortGroupDef` — a run of ports repeated as many times as one of the node's
+params says. `core/ports.ts` is the one expansion; nothing iterates `def.inputs` directly.
+
+**The count is a param, not a function of the wires.** A port set derived from which sockets
+happen to be connected is not saved anywhere, cannot be undone, and never reaches the provenance
+key. As an ordinary `int` param it is all three for free, it renders as a number field with no
+new widget, and invariant 4 keeps a run keyed by it. **The param also carries the range** — a
+group has no `min`/`max` of its own, so the spinner the user turns and the expansion cannot read
+two independently written pairs of numbers.
+
+**`params` is required on the first resolver, and the type-level reading has its own name.** An
+optional argument is how the first two rows of the table below quietly become one call: a caller
+holding a node omits `node.params`, type-checks, runs, and is wrong only above the default arity
+— which is to say, wrong exactly where the feature exists. That is not hypothetical; `help/figures.ts`
+types its params as `Record<string, string>`, which is assignable to `ParamValues`, so it would
+have drawn default-arity sockets while looking arity-aware.
+
+**Ports are variadic; params are not.** A node wanting a setting per repeat declares them to
+`max` and hides the surplus with `visibleIf` — hidden params are excluded from the provenance
+key, so a picker sitting past the current count cannot stale a run. Making params variadic too
+would have meant a second, parallel expansion in `normalizeParams`, the inspector and every
+column resolver, for no case that needs it.
+
+**Declarative, not a `(params) => PortDef[]` callback**, and that is the load-bearing choice.
+Two questions are asked about ports with no node and therefore no params in hand:
+`typesWithReferenceInputs` scans the whole registry to decide whether a graph can contain a
+reference edge at all, and `isReferencePort` answers about a port id mid link-drag. A callback is
+opaque to both. A spec can be expanded at `max` instead, which covers every id that could ever
+exist — hence three named resolvers rather than one with an optional argument:
+
+| | for | resolves counts from |
+| --- | --- | --- |
+| `inputPorts(def, params)` | inference, scheduler, card, inspector, exporters | the node's own params |
+| `defaultInputPorts(def)` | palette, node browser, thumbnail, node guide, help figures | the param's declared default — a *fresh* node's shape |
+| `allInputPorts(def)` | `isReferencePort`, `typesWithReferenceInputs`, the emitter port audit | `max` — every id the type could ever have |
+
+A definition with no groups gets its **own array back**, allocating nothing: `inferGraph` walks
+every node twice per keystroke and `wouldCreateCycle` runs once per pointer move of a link drag.
+A definition is frozen once `registerNode` returns, so "has this any groups?", "what is every
+port at max?" and each group's range are memoised in a `WeakMap` keyed by the definition — no
+invalidation needed, the same reasoning as `typesWithReferenceInputs` one layer up.
+
+**Two places an arity that shrinks leaves an edge pointing at nothing**, and neither reports
+itself. Every walk looks edges up *by* port key, so an edge on an id nobody asks about is never
+read — it sits in the document, survives a save/load round trip, and reappears as a live wire
+carrying its old source the moment the count goes back up.
+
+- Writing params at all: the prune hangs off **`updateNode`**, the generic node patch, not off
+  `setNodeParam` — which is one caller of it. The assistant writes params straight through
+  `updateNode`, so hanging it on the specialised setter would have left an assistant plan that
+  lowers a count with edges on ports that are no longer drawn. Same graph transform as the patch,
+  so the two undo as one step; `pruneGroups` is the precedent — a mutation owns the derived
+  structure it invalidates.
+- Loading a file: `deserializeGraph` now resolves **both** handles of every edge against the
+  node's actual ports and drops what does not exist, with a warning naming the node. This
+  caught two long-standing fixtures wiring handles that were never real (`sourceHandle: 'table'`
+  on a node publishing `out`, `'out'` on one publishing `neurons`) — edges that had been inert
+  since they were written. The `?? 'out'` / `?? 'in'` fallbacks for files old enough to omit a
+  handle now heal to the node's *sole* port instead, which is what those defaults were reaching
+  for and were wrong about for any node whose one port is named otherwise.
+
+**`ctx.inputPorts()` / `ctx.outputPorts()`** on both the infer and eval contexts, so a variadic
+node's body never rebuilds ids by concatenating a template and an index. That would be a second
+spelling of the expansion rule, once per node, each free to disagree about whether the index is
+0-based. `ResolvedPort.group` carries `{ repeat, index }`, so a body reads its per-repeat params
+off the port rather than the other way round.
+
+**Registration refuses** a `repeat` naming no param, a non-`int` one, one declaring no
+`min`/`max`, a default outside that range, a `min` below 1, a group repeating no ports, and any
+two ports that collide **at max**. It also refuses a repeat param that is `presentational` or
+carries a `visibleIf`: `normalizeParams` drops both from the provenance key — correctly, for
+colour scales and switched-off branches — and a *count* excluded from that key means changing a
+node's arity does not re-key it, so the scheduler serves a cached result missing the outputs the
+new ports were added for. The port set is the one thing a param can change that the cache cannot
+otherwise see — checked there rather
+than at the default, because a collision that only appears at arity five is still a collision
+and would otherwise ship. All five fail silently at runtime otherwise; the `loop`/`loopPlan`
+pairing beside it is refused for the same reason.
+
+**`autoWireDataset` fills at most one port per group.** Pointing every Dataset input of a
+comparison node at the graph's single dataset node wires it to compare a connectome with itself
+— a graph that runs, produces an answer, and means nothing.
+
+
 ## Reference edges — a port that names a node
 
 `PortDef.reference` marks an **input that names a node rather than consuming its output**. It

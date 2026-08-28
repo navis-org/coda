@@ -21,6 +21,7 @@ import { isTableValue } from '../../core/values'
 import { MockSource } from '../../data/mock/MockSource'
 import type { DataSource } from '../../data/source'
 import '../index'
+import { defaultInputPorts } from '../../core/ports'
 
 const source: DataSource = new MockSource({ latencyMs: 0 })
 
@@ -90,7 +91,7 @@ describe('out.profile — types', () => {
 
   it('accepts a plain Table, since neuronId is a validation question and not a type one', () => {
     const def = requireNodeDef('out.profile')
-    expect(def.inputs?.find((p) => p.id === 'neurons')?.type.kind).toBe('table')
+    expect(defaultInputPorts(def).find((p) => p.id === 'neurons')?.type.kind).toBe('table')
   })
 })
 

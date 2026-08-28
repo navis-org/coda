@@ -37,6 +37,7 @@ import { runLayout } from './engine'
 import { NETWORK_NODE_SIZE, layoutNetwork } from './network'
 import { DEFAULT_LAYOUT_OPTIONS, coerceLayoutOptions, elkOptionsFor } from './options'
 import { DODGE_GAP, anchorTo, boundsOf, dodge, noteRects, structureKey } from './place'
+import { defaultInputPorts, defaultOutputPorts } from '../core/ports'
 
 beforeAll(() => {
   registerSource(new MockSource({ latencyMs: 0 }))
@@ -189,9 +190,9 @@ describe('toElkGraph', () => {
     const sides = Object.fromEntries(
       (filter?.ports ?? []).map((p) => [p.id, p.layoutOptions?.['elk.port.side']]),
     )
-    for (const port of def.inputs ?? [])
+    for (const port of defaultInputPorts(def))
       expect(sides[elkPortId('filter', port.id)]).toBe('WEST')
-    for (const port of def.outputs ?? [])
+    for (const port of defaultOutputPorts(def))
       expect(sides[elkPortId('filter', port.id)]).toBe('EAST')
   })
 
@@ -456,7 +457,7 @@ describe('runLayout, against ELK itself', () => {
      * against the wires arriving at them — nothing throws, and the layout merely crosses more.
      */
     const withTwoInputs = requireNodeDef('out.neuroglancer')
-    expect((withTwoInputs.inputs ?? []).length).toBeGreaterThanOrEqual(2)
+    expect(defaultInputPorts(withTwoInputs).length).toBeGreaterThanOrEqual(2)
 
     const nodes = [node('ngl', 'out.neuroglancer')]
     const elk = toElkGraph(nodes, [], DEFAULT_LAYOUT_OPTIONS)
@@ -465,7 +466,7 @@ describe('runLayout, against ELK itself', () => {
 
     const ports = laid.children?.[0]?.ports ?? []
     const yOf = (portId: string) => ports.find((p) => p.id === elkPortId('ngl', portId))?.y ?? 0
-    const declared = (withTwoInputs.inputs ?? []).map((p) => yOf(p.id))
+    const declared = defaultInputPorts(withTwoInputs).map((p) => yOf(p.id))
     for (let i = 1; i < declared.length; i++) {
       expect(declared[i]!).toBeGreaterThan(declared[i - 1]!)
     }

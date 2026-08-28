@@ -22,6 +22,7 @@ import { MockSource } from '../../data/mock/MockSource'
 import type { DataSource } from '../../data/source'
 import { encodeClauses } from '../lib/tableFilter'
 import '../index'
+import { defaultOutputPorts } from '../../core/ports'
 
 const source: DataSource = new MockSource({ latencyMs: 0 })
 
@@ -85,7 +86,7 @@ describe('out.table — types', () => {
    */
   it('keeps Table as the first output', () => {
     const def = requireNodeDef('out.table')
-    expect(def.outputs?.map((p) => p.id)).toEqual(['out', 'filtered'])
+    expect(defaultOutputPorts(def).map((p) => p.id)).toEqual(['out', 'filtered'])
   })
 })
 

@@ -21,6 +21,7 @@ import { useListNav } from '../useListNav'
 import { fuzzyRank } from './fuzzy'
 import { NodeThumbnail } from './NodeThumbnail'
 import { Highlight } from './Highlight'
+import { defaultInputPorts, defaultOutputPorts } from '../../core/ports'
 
 export interface NodeBrowserProps {
   onPick: (nodeType: string) => void
@@ -208,8 +209,8 @@ export function NodeBrowser({ onPick, onClose }: NodeBrowserProps) {
 
 /** "Dataset + Neurons → Table" — the node's port signature, in type names. */
 function signatureOf(def: NodeDefinition): string {
-  const inputs = (def.inputs ?? []).map((p) => shortType(p.type))
-  const outputs = (def.outputs ?? []).map((p) => shortType(p.type))
+  const inputs = defaultInputPorts(def).map((p) => shortType(p.type))
+  const outputs = defaultOutputPorts(def).map((p) => shortType(p.type))
   const left = inputs.length ? inputs.join(' + ') : '—'
   const right = outputs.length ? outputs.join(' + ') : '—'
   return `${left} → ${right}`

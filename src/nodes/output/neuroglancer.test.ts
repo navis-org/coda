@@ -10,7 +10,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 
 import { addEdge, addNode, emptyGraph } from '../../core/graph'
 import type { EvalContext, NodeDefinition, ParamValues } from '../../core/node'
-import { defaultParams, findParam, resolveColumn } from '../../core/node'
+import { defaultParams, findParam, makeInferContext, resolveColumn } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
 import { Scheduler } from '../../core/scheduler'
 import type { CodaType } from '../../core/types'
@@ -121,6 +121,8 @@ function evalContext(
       return p && p.kind === 'column' ? resolveColumn(p, params, types) : undefined
     },
     columns: () => [],
+    inputPorts: () => [],
+    outputPorts: () => [],
     resolveSource: () => source,
     signal: new AbortController().signal,
     progress: () => {},
@@ -357,14 +359,11 @@ describe('guard rails', () => {
 
   it('warns at edit time rather than waiting for a run', () => {
     const issues =
-      def().validate?.({
-        params: {},
-        inputs: { dataset: T.dataset('sceneless', 'whatever:v1') },
-        schema: () => undefined,
-        attributes: () => undefined,
-        column: () => undefined,
-        columns: () => [],
-      }) ?? []
+      def().validate?.(
+        makeInferContext(def(), defaultParams(def()), {
+          dataset: T.dataset('sceneless', 'whatever:v1'),
+        }),
+      ) ?? []
     expect(issues.join(' ')).toMatch(/publishes no neuroglancer scene/)
   })
 })

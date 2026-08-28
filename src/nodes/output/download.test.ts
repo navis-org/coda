@@ -28,6 +28,7 @@ import { MockSource } from '../../data/mock/MockSource'
 import { mockDatasetIds } from '../../data/mock/generate'
 import { registerSource, requireSource } from '../../data/source'
 import '../index'
+import { defaultInputPorts } from '../../core/ports'
 
 const DATASET = mockDatasetIds()[0]!
 
@@ -86,7 +87,7 @@ describe('out.download — the tap', () => {
 
   it('accepts anything, because it does not care what it is carrying', () => {
     const def = requireNodeDef('out.download')
-    expect(def.inputs?.[0]?.type.kind).toBe('any')
+    expect(defaultInputPorts(def)[0]?.type.kind).toBe('any')
     // A Network is not a Table, and this is the only node in the tree that takes both.
     let g = emptyGraph('any')
     g = addNode(g, node('ds', 'neuron.dataset', { dataset: DATASET }))

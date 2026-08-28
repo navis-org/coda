@@ -41,7 +41,7 @@ import type { CodaGraph, GraphNode } from '../core/graph'
 import type { NodeSize } from '../layout/elkGraph'
 import { getNodeDef, isAnnotation } from '../core/registry'
 import type { CodaType } from '../core/types'
-import { referenceEdgeIds } from '../core/graph'
+import { nodePorts, referenceEdgeIds } from '../core/graph'
 import { groupsTouching } from '../core/groups'
 import { spliceCandidate } from '../core/splice'
 import { useGraphStore } from '../store/graphStore'
@@ -1294,9 +1294,8 @@ function portTypeOf(
     if (resolved) return resolved
   }
   const node = graph.nodes.find((n) => n.id === nodeId)
-  const def = node ? getNodeDef(node.type) : undefined
-  const ports = side === 'output' ? def?.outputs : def?.inputs
-  return (ports ?? []).find((p) => p.id === portId)?.type
+  if (!node) return undefined
+  return nodePorts(node, side).find((p) => p.id === portId)?.type
 }
 
 export function Editor() {

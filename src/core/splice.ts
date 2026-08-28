@@ -20,6 +20,7 @@ import { addEdge, referenceEdgeIds, removeEdges } from './graph'
 import type { InferenceResult } from './inference'
 import { checkConnection, inferGraph } from './inference'
 import { getNodeDef, isAnnotation } from './registry'
+import { inputPorts, outputPorts } from './ports'
 
 export interface SplicePorts {
   /** Port on the dragged node the upstream link lands on. */
@@ -63,8 +64,8 @@ export function spliceCandidate(
 
   const def = getNodeDef(node.type)
   if (!def) return undefined
-  const inputs = def.inputs ?? []
-  const outputs = def.outputs ?? []
+  const inputs = inputPorts(def, node.params)
+  const outputs = outputPorts(def, node.params)
   if (inputs.length === 0 || outputs.length === 0) return undefined
 
   for (const input of inputs) {

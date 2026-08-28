@@ -13,7 +13,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { defaultParams } from '../../core/node'
+import { defaultParams, makeInferContext } from '../../core/node'
 import type { EvalContext, LoopIteration } from '../../core/node'
 import { registerNode, requireNodeDef } from '../../core/registry'
 import { T, column, tableSchema } from '../../core/types'
@@ -53,6 +53,8 @@ function ctx(
     // one, so passing the param through is the same answer by a shorter route.
     column: (id) => String(merged[id] ?? '') || undefined,
     columns: () => [],
+    inputPorts: () => [],
+    outputPorts: () => [],
     resolveSource: () => {
       throw new Error('not needed')
     },
@@ -216,14 +218,9 @@ describe('For Each, group by group', () => {
 
 describe('For Each, wiring', () => {
   it('passes its input type straight through, so pickers below it stay filled', () => {
-    const inferred = def.inferOutputs!({
-      params: defaultParams(def),
-      inputs: { in: { kind: 'neurons', schema: SCHEMA } },
-      schema: () => SCHEMA,
-      attributes: () => undefined,
-      column: () => undefined,
-      columns: () => [],
-    } as never)
+    const inferred = def.inferOutputs!(
+      makeInferContext(def, defaultParams(def), { in: { kind: 'neurons', schema: SCHEMA } }),
+    )
     expect(inferred['item']).toEqual({ kind: 'neurons', schema: SCHEMA })
   })
 

@@ -36,6 +36,7 @@
 
 import type { NodeCategory, NodeDefinition, ParamDef, PortDef } from '../core/node'
 import { getNodeDef } from '../core/registry'
+import { defaultInputPorts, defaultOutputPorts } from '../core/ports'
 import { isAssignable, typeLabel } from '../core/types'
 import { backendForNodeType } from '../nodes/lib/datasetFamilies'
 import { socketStyle } from '../ui/socketStyle'
@@ -440,8 +441,8 @@ function makeCard(
     category: def.category,
     ...(backend ? { backend: backend.id } : {}),
     annotation: def.annotation === true,
-    inputs: portsOf(def.inputs ?? []),
-    outputs: portsOf(def.outputs ?? []),
+    inputs: portsOf(defaultInputPorts(def)),
+    outputs: portsOf(defaultOutputPorts(def)),
     params,
     more: all.length - shown.length + Math.max(0, shown.length - MAX_PARAM_ROWS),
     focus: ctx.options.focusType === def.type || false,
@@ -495,8 +496,13 @@ function resolveWires(
       continue
     }
 
-    const outputs = fromDef.outputs ?? []
-    const inputs = toDef.inputs ?? []
+    /*
+     * At the arity a fresh node opens at. A figure names node *types* and the wires between
+     * them; nothing in the DSL says how many repeats a variadic node has, and a diagram of a
+     * comparison node at its default two datasets is what a reader wants anyway.
+     */
+    const outputs = defaultOutputPorts(fromDef)
+    const inputs = defaultInputPorts(toDef)
     const out = line.fromPort ? outputs.find((p) => p.id === line.fromPort) : outputs[0]
     if (!out) {
       problems.push(`"${fromDef.type}" has no output "${line.fromPort ?? '(first)'}"`)
