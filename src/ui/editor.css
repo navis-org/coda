@@ -2774,6 +2774,11 @@ select.field {
   backdrop-filter: blur(2px);
 }
 
+/*
+ * `max-width` here is the *dialog* default — the sources panel, the shortcuts table and the
+ * rest each override it with the width their content wants. The viewer overlay is the one
+ * consumer that wants no cap at all; see `.viewer-panel`.
+ */
 .overlay__panel {
   display: flex;
   flex-direction: column;
@@ -2797,6 +2802,26 @@ select.field {
   border: none;
   border-radius: 0;
   background: var(--surface-1);
+}
+
+/*
+ * The viewer overlay fills the backdrop in both axes, and puts a cap back per node.
+ *
+ * It took the 1500px dialog cap above for a long time, which on a 1440p-and-up display reads as
+ * a panel that fills the height and then stops a third of the way across — the height says
+ * "this is the full-size read" and the width contradicts it. A chart, a scene or a heatmap is
+ * the content here, so every pixel is worth something (the same reasoning `.help-panel` records
+ * for going the other way: a *document* has an optimal measure and gets worse past it). This is
+ * also what browser-fullscreen already did, so ⛶ is now about dropping the chrome rather than a
+ * second, wider layout.
+ *
+ * But *which* nodes want the room is a property of the node, and one stylesheet rule cannot ask:
+ * a Profile's tile grid answers a wider panel with more, narrower tiles rather than bigger ones.
+ * So the cap comes back as an inline `max-width` from `expandedWidth()`, which is where the
+ * per-type list and its reasoning live.
+ */
+.viewer-panel {
+  max-width: none;
 }
 
 .overlay__header {

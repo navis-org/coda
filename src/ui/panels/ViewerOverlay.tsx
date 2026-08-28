@@ -27,6 +27,7 @@ import { useGraphStore } from '../../store/graphStore'
 import { exportBaseName } from '../export'
 import { formatDuration } from '../format'
 import { exitFullscreen, toggleFullscreen, useIsFullscreen } from '../fullscreen'
+import { expandedWidth } from './expandedWidth'
 import { nodeBody } from '../nodes/nodeBodies'
 import { ParamField } from '../params/ParamField'
 import { ParamRows } from '../params/ParamRows'
@@ -111,6 +112,14 @@ export function ViewerOverlay() {
   // exists — a different node, or a tab whose params are all hidden — harmless.
   const activeTab = tabs.find((t) => t.id === tabId) ?? tabs[0]
   const baseName = exportBaseName(graph.meta?.name, node.title ?? def.label)
+  /*
+   * A number CSS cannot know, so it goes on the element: the panel is one component drawing
+   * every expandable node, and what it is drawing is the only thing that decides whether a
+   * wider screen should make it wider. `.viewer-panel` uncaps it; this puts the cap back for
+   * the surfaces that are worse for the room. Dropped entirely in fullscreen — a cap there
+   * would letterbox the panel that was asked for precisely to lose the chrome.
+   */
+  const width = expandedWidth(node.type)
 
   const onToggleFullscreen = () => {
     const panel = panelRef.current
@@ -124,7 +133,8 @@ export function ViewerOverlay() {
     <div className="overlay" role="presentation" onPointerDown={close}>
       <div
         ref={panelRef}
-        className="overlay__panel"
+        className="overlay__panel viewer-panel"
+        style={width === 'full' || isFullscreen ? undefined : { maxWidth: width }}
         role="dialog"
         aria-modal="true"
         aria-label={`${node.title ?? def.label} output`}

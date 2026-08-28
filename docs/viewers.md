@@ -40,6 +40,25 @@ without export or expand.
   sibling of its plot box — passing the wrong one is off by that element's own offset, which on
   a card looks like a styling choice rather than a bug.
 
+- **The panel's width is a property of the node it is drawing** (`expandedWidth()`), where its
+  height never is. It inherited `.overlay__panel`'s 1500px dialog cap, which on a 1440p-and-up
+  display fills the height and then stops about a third of the way across — the height claims a
+  full-size read and the width contradicts it. So `.viewer-panel` uncaps it and the table puts a
+  cap back per type, defaulting to full: a scene, a heatmap or a table *is* the content and
+  wants the pixels, which is the inverse of `.help-panel`, narrower because a document has an
+  optimal measure.
+
+  The two things that go wrong past a width are worth separating, because only the first is
+  surprising. **A tile grid gains columns rather than size** — `.tiles` is
+  `repeat(auto-fit, minmax(190px, 1fr))`, so Profile and Dataset Summary answer a 5K panel with
+  twenty-six tiles the width of their own axis labels. **Prose and lists have a measure** —
+  `.overlay .markdown` holds a blurb to 70ch, and the empty half of an uncapped panel reads as
+  content that failed to load. Six types are capped for one of those two reasons; everything
+  else is full.
+
+  It is an inline `max-width` rather than a rule per type, because one component draws every
+  expandable node and CSS has no way to ask which. Dropped in browser-fullscreen: a cap there
+  would letterbox the panel somebody asked for precisely to lose the chrome.
 - **Fullscreen** uses the real Fullscreen API on the overlay panel. `.overlay__panel:fullscreen`
   resets the backdrop padding and rounding, because in fullscreen the panel _is_ the root
   element and would otherwise render as a floating card with bars around it.

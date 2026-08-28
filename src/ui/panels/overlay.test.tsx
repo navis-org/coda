@@ -24,6 +24,7 @@ import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import '../../nodes'
 import { useGraphStore } from '../../store/graphStore'
+import { MEASURED_WIDTH, expandedWidth } from './expandedWidth'
 import {
   clearStorage,
   installDownloadCapture,
@@ -179,7 +180,9 @@ describe('ViewerOverlay', () => {
       fireEvent.click(within(dialog).getByLabelText('Download CSV data'))
       expect(capture.downloads).toHaveLength(1)
       // Filename combines the graph name and the node label.
-      expect(capture.downloads[0]!.filename).toBe('fetch-and-group-connectivity-by-type_table.csv')
+      expect(capture.downloads[0]!.filename).toBe(
+        'fetch-and-group-connectivity-by-type_table.csv',
+      )
     } finally {
       capture.restore()
     }
@@ -365,5 +368,40 @@ describe('opening the overlay', () => {
     })
 
     expect(useGraphStore.getState().expandedNodeId).toBe('view')
+  })
+})
+
+/**
+ * Which nodes get the screen.
+ *
+ * jsdom performs no layout, so what is checkable here is the declaration: whether the panel
+ * carries a `max-width` at all, and what the table says. The widths themselves have to be
+ * looked at in a browser.
+ */
+describe('expanded width', () => {
+  it('leaves a viewer uncapped', async () => {
+    const dialog = await openOverlay('partners', 'view')
+    expect(dialog.style.maxWidth).toBe('')
+    expect(expandedWidth('out.viewer3d')).toBe('full')
+  })
+
+  it('caps a tile grid and a prose body', () => {
+    // `.tiles` answers a wider panel with more columns, not bigger ones.
+    expect(expandedWidth('out.profile')).toBe(MEASURED_WIDTH)
+    expect(expandedWidth('out.datasetSummary')).toBe(MEASURED_WIDTH)
+    // A 70ch measure in an uncapped panel is mostly empty panel.
+    expect(expandedWidth('dataset.description')).toBe(MEASURED_WIDTH)
+  })
+
+  it('puts the cap on the panel', async () => {
+    render(<App />)
+    await waitFor(() => expect(screen.getByText('Find Neurons')).toBeTruthy())
+    let id = ''
+    act(() => {
+      id = useGraphStore.getState().addNode('out.profile', { x: 0, y: 0 })
+    })
+    act(() => useGraphStore.getState().expandNode(id))
+    const dialog = await waitFor(() => screen.getByRole('dialog', { name: /output/ }))
+    expect(dialog.style.maxWidth).toBe(`${MEASURED_WIDTH}px`)
   })
 })
