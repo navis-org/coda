@@ -970,6 +970,14 @@ export function caveGraph(): CodaGraph {
 
   const nodes: Spec[] = [
     { id: 'ds', type: 'dataset.flywire', col: 4, params: { version: '783' } },
+    /*
+     * The other two published datastacks, wired to nothing. They share `dataset.flywire`'s
+     * generated emitter and reach no branch of it that FlyWire does not, so this is coverage
+     * rather than a second assertion — but the coverage is the point: a family added to the
+     * table with no fixture node is a dataset the exporter has never been run against.
+     */
+    { id: 'banc', type: 'dataset.banc', col: 4, row: 4, params: { version: '888' } },
+    { id: 'minnie', type: 'dataset.minnie65', col: 4, row: 5, params: { version: '1822' } },
     // Both SeaTable registrations, since they share an emitter and differ in the host it
     // defaults to — a fixture reaching one records half the code.
     {

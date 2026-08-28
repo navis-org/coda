@@ -68,6 +68,12 @@ const NO_EMITTER: Record<string, string> = {
     'src/data/cave. Until that is written it degrades to a TODO, which is the honest outcome: ' +
     'emitting neuPrint code against a dataset neuPrint has never heard of would produce a ' +
     'document that runs and answers nothing.',
+  'dataset.banc':
+    'A second CAVE datastack \u2014 see `dataset.flywire`. Which datastack a node names changes ' +
+    'nothing about the translation: neuprintr cannot read any of them.',
+  'dataset.minnie65':
+    'A third CAVE datastack \u2014 see `dataset.flywire`. Mouse cortex rather than a fly brain, ' +
+    'which is not the obstacle: the obstacle is that this document is built on neuprintr.',
   'note.text': 'An annotation. It becomes a markdown block, which the walk does directly.',
   'flow.forEach':
     'A loop, and the one refusal here that is about the *shape* of the output rather than about ' +
