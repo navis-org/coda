@@ -25,7 +25,7 @@ import { HistogramViewer } from './HistogramViewer'
 import { PieViewer } from './PieViewer'
 import { HeatmapViewer } from './HeatmapViewer'
 import { LazyNetworkViewer, LazyViewer3D } from './LazyViewers'
-import type { BackgroundChoice } from './viewer3dScene'
+import type { BackgroundChoice, SkeletonWidthMode } from './viewer3dScene'
 import { NeuroglancerViewer } from './NeuroglancerViewer'
 import { chosenViewerKind } from '../../nodes/output/neuroglancer'
 import { DatasetSummaryViewer } from './DatasetSummaryViewer'
@@ -243,6 +243,17 @@ function ValuePreviewInner({
         pointColor={readColorSpec('point', node.params, ctx.column)}
         volumeColor={readColorSpec('volume', node.params, ctx.column)}
         skeletonWidth={Number(node.params.skeletonWidth ?? 1)}
+        skeletonWidthMode={skeletonWidthMode(node.params.skeletonWidthMode)}
+        skeletonRadiusWidth={Number(node.params.skeletonRadiusWidth ?? 4)}
+        skeletonWorldWidth={Number(node.params.skeletonWorldWidth ?? 1)}
+        lightIntensity={Number(node.params.lightIntensity ?? 1)}
+        // Defaults to false, so a graph saved before this param existed opens with the
+        // scene unpickable — which is the new default rather than a migration.
+        selectByClick={node.params.selectByClick === true}
+        // `Number` rather than a cast, and it covers the alpha graphs that stored this as a
+        // boolean before it became a strength: `true` is 1 and `false` is 0, which is exactly
+        // what those two meant.
+        ambientOcclusion={Number(node.params.ambientOcclusion ?? 1)}
         // Every fallback here has to equal the node's declared default: a graph saved before a
         // param existed has no key for it, and this is the value it then gets.
         meshOpacity={Number(node.params.meshOpacity ?? 1)}
@@ -705,6 +716,10 @@ function roiColorMode(value: unknown): RoiColorMode {
 
 function roiLabelMode(value: unknown): RoiLabelMode {
   return value === 'all' || value === 'off' ? value : 'auto'
+}
+
+function skeletonWidthMode(value: unknown): SkeletonWidthMode {
+  return value === 'radius' || value === 'world' ? value : 'uniform'
 }
 
 function roiHemisphere(value: unknown): 'both' | 'left' | 'right' {

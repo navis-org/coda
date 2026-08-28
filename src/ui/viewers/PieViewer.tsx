@@ -5,6 +5,7 @@ import type { TableValue } from '../../core/values'
 import { CHART_INK, chartSurface, currentMode, inkOn, seriesColor } from '../colors'
 import { exportBaseName as makeBaseName, tableToCsvParts } from '../export'
 import { formatCompact, formatNumber, plural } from '../format'
+import { ClearSelection } from './LegendKeys'
 import type { PieSlice } from './pieLayout'
 import { arcPath, pieSlices, polar, tallyCategories } from './pieLayout'
 import { isAdditive, useMarkSelection } from './useMarkSelection'
@@ -316,14 +317,10 @@ export function PieViewer({
           {dropped > 0 ? ` · ${dropped} unplottable` : ''}
         </span>
         {marks.size > 0 && (
-          <button
-            type="button"
-            className="legend__label nodrag"
-            title="Clear the selection"
-            onClick={marks.clear}
-          >
-            {plural(marks.size, 'category', 'categories')} selected ⨯
-          </button>
+          <ClearSelection
+            label={`${plural(marks.size, 'category', 'categories')} selected`}
+            onClear={marks.clear}
+          />
         )}
         <ViewerActions
           baseName={baseName ?? makeBaseName(undefined, 'pie-chart')}

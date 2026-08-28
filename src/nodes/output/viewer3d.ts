@@ -14,7 +14,7 @@
  * reason either socket knows about.
  */
 
-import type { InferContext, ParamDef } from '../../core/node'
+import type { InferContext, ParamDef, ParamValues } from '../../core/node'
 import { registerNode } from '../../core/registry'
 import type { TableSchema } from '../../core/types'
 import { T, attributeSchema, column, tableSchema } from '../../core/types'
@@ -47,6 +47,51 @@ function showParam(id: string, label: string, group: string, help: string): Para
     advanced: true,
     group,
     help,
+  }
+}
+
+/**
+ * Spelled out rather than imported from `viewer3dScene.ts`, which is the viewer's `SkeletonWidthMode`
+ * — `src/nodes` has no business reaching into `src/ui`, and `viewer3d.test.ts` pins the two lists
+ * against each other through the param's own options.
+ */
+type WidthMode = 'uniform' | 'radius' | 'world'
+
+/**
+ * The stored width mode, defaulting the way a graph saved before the mode existed needs.
+ *
+ * One reading of the param, used by the three `visibleIf`s and by `ValuePreview`'s coercion —
+ * it was written out four times, and the `'uniform'` in it has to stay in step with
+ * `skeletonWidthMode`'s own `default`. It also removes a small divergence: written inline, a
+ * nonsense stored value showed *no* width control at all while the viewer drew it as uniform.
+ */
+function widthModeOf(params: ParamValues): WidthMode {
+  const mode = String(params.skeletonWidthMode ?? 'uniform')
+  return mode === 'radius' || mode === 'world' ? mode : 'uniform'
+}
+
+/**
+ * One of the three `Line width` values, which differ only in their range and their prose.
+ *
+ * They cannot be one *param* — the docs and the tests both record why: "3 pixels everywhere",
+ * "3 pixels at the thickest" and "3× the recorded radius" are different numbers and cannot
+ * share a default, so a mode that reinterpreted a stored width would reopen a saved graph
+ * looking different. But everything around the number is identical, including the rule that
+ * exactly one of them is visible, and that rule is the part worth writing once.
+ */
+function widthParam(
+  mode: WidthMode,
+  spec: { id: string; default: number; min: number; max: number; step: number; help: string },
+): ParamDef {
+  return {
+    group: 'skeletons',
+    kind: 'number',
+    label: 'Line width',
+    presentational: true,
+    advanced: true,
+    visibleIf: (params) => widthModeOf(params) === mode,
+    composite: { key: 'skeletonLineWidth', role: 'value' },
+    ...spec,
   }
 }
 
@@ -148,19 +193,78 @@ export const viewer3dNode = registerNode({
       advanced: true,
       legend: true,
     }),
+    /*
+     * Line width is one property with two ways of being driven, so it is one composite row —
+     * the same shape a colour has, and for the same reason: a mode plus whichever value that
+     * mode takes, never both at once. The alternative was a width setting that silently means
+     * two different things, since "3 pixels everywhere" and "3 pixels at the thickest" are not
+     * the same number and cannot share a default.
+     */
     {
       group: 'skeletons',
-      id: 'skeletonWidth',
-      kind: 'number',
+      id: 'skeletonWidthMode',
+      kind: 'enum',
       label: 'Line width',
+      default: 'uniform',
+      options: [
+        { value: 'uniform', label: 'one width' },
+        { value: 'radius', label: 'by radius' },
+        { value: 'world', label: 'to scale' },
+      ],
+      presentational: true,
+      advanced: true,
+      composite: { key: 'skeletonLineWidth', role: 'primary', label: 'Line width' },
+      help:
+        'By radius and To scale both draw each neurite at the calibre it was traced or ' +
+        'segmented at, which is what makes a primary neurite read as one. They differ in the ' +
+        'unit: by radius is in pixels and looks the same at every zoom, to scale is in ' +
+        'nanometres and thickens as you zoom in. Sources that publish no radii fall back to ' +
+        'one width.',
+    },
+    widthParam('uniform', {
+      id: 'skeletonWidth',
       default: 1,
       min: 1,
       max: 8,
       step: 0.5,
-      presentational: true,
-      advanced: true,
       help: 'Above 1 the skeletons are drawn as camera-facing quads instead of hairlines, which costs more per segment.',
-    },
+    }),
+    widthParam('radius', {
+      /*
+       * Expressed as the width of the *thickest* neurites rather than of the median, because
+       * that is the end of the distribution somebody can see. Its default is 4 where the
+       * uniform width's is 1, and the two are separate params precisely so that can be true:
+       * at a scale of 1 every node below the reference clamps to the one-pixel floor and the
+       * taper this mode exists for is not visible at all.
+       */
+      id: 'skeletonRadiusWidth',
+      default: 4,
+      min: 1,
+      max: 16,
+      step: 0.5,
+      help:
+        'How wide the thickest neurites are drawn, in pixels. Everything thinner is drawn in ' +
+        'proportion, down to a one-pixel floor — so this sets the top of the range rather ' +
+        'than a width every node gets.',
+    }),
+    widthParam('world', {
+      /*
+       * A multiplier, where both other modes take a width — because in this mode the width is
+       * already decided, by the source. There is no p95 to calibrate against and nothing to
+       * clamp: 1 is the arbour at its published calibre, and anything else is a deliberate
+       * exaggeration of it. Defaulting to 1 rather than to something flattering is the whole
+       * point of offering the mode.
+       */
+      id: 'skeletonWorldWidth',
+      default: 1,
+      min: 0.25,
+      max: 8,
+      step: 0.25,
+      help:
+        'Multiplies the recorded radius. At 1 a 200 nm neurite is drawn 200 nm across, so the ' +
+        'picture is to scale and a neurite thickens as you zoom into it. Nodes whose source ' +
+        'recorded no radius stay a hairline rather than disappearing.',
+    }),
     showParam(
       'showMeshes',
       'Show meshes',
@@ -294,6 +398,127 @@ export const viewer3dNode = registerNode({
       presentational: true,
       advanced: true,
       help: 'Re-frame the camera whenever what is on screen changes. Off keeps one camera, which is what you want for a set of images meant to be compared — and on is what you want when a For Each steps through neurons that are nowhere near each other.',
+    },
+    {
+      /*
+       * Overall scene lighting, as one multiplier over both lights.
+       *
+       * It exists because of a debt rather than as a preference control: `<Canvas flat>` had to
+       * drop ACES tone mapping so ambient occlusion would stop moving the background, and the
+       * curve's shoulder had been carrying the midtones a rough dielectric spends its range in.
+       * The default pair was raised 50% to pay that back; this is the slider for the rest.
+       *
+       * One number and not two, because the *ratio* between the fill and the key is what
+       * decides how much shape a surface shows and it was chosen once, against the palette.
+       * See `sceneLights`.
+       *
+       * Presentational: it changes how a surface is lit, not what the `Selected` table says.
+       */
+      group: 'scene',
+      id: 'lightIntensity',
+      kind: 'number',
+      label: 'Light intensity',
+      default: 1,
+      /*
+       * Floored at 0.25 rather than at 0, which is the difference from the occlusion slider
+       * above: 0 there is a well-defined "no darkening" and 0 here is a black canvas — a
+       * setting that looks exactly like a viewer that failed to load, reachable by dragging a
+       * handle to its end.
+       *
+       * The top is where the ceiling starts to matter. `NoToneMapping` clips at 1.0 where a
+       * curve would roll off, so light past the point a channel saturates does not brighten a
+       * surface — it desaturates it toward white and walks it out of the validated palette.
+       * Measured on four opaque optic-lobe meshes, as the share of surface pixels with a
+       * saturated channel: **0% everywhere up to 1.4** (the brightest channel reaches 252 of
+       * 255 there, so it is close), then 1.7% at 1.5, 12.9% at 1.75 and 23.1% at 2.
+       *
+       * The range still runs to 2 — a limit warns, it does not refuse, and a blown highlight is
+       * a look somebody may want — but a quarter of the surface is a real cost and the help
+       * says so. Note the headroom is a property of *this* scene's albedos: a paler palette
+       * saturates sooner, so 1.4 is where these meshes stop being safe rather than a constant.
+       *
+       * Worth carrying: mean luminance only goes 105 to 135 across 1 → 2, because the
+       * framebuffer is sRGB-encoded and the renderer works in linear light. Doubling the light
+       * is about 28% more pixel, which is why the top of this slider buys less than it looks
+       * like it should and costs more.
+       */
+      min: 0.25,
+      max: 2,
+      step: 0.05,
+      slider: true,
+      presentational: true,
+      advanced: true,
+      help: 'Brightness of the scene lighting, over both the fill and the key light together. 1 is the calibrated default. Past about 1.4 the brightest surfaces start to clip — at 2 roughly a quarter of the visible surface is white rather than its own colour, which is a look rather than more light.',
+    },
+    {
+      /*
+       * Screen-space ambient occlusion over the opaque surfaces in the scene.
+       *
+       * Full strength by default, and what licenses that is `wantsAmbientOcclusion` rather
+       * than the pass being free: it is only *mounted* where there is something for it to
+       * occlude, and a strength of 0 does not mount it either.
+       * `GTAOPass` hides every line and point before rendering its normal buffer — three's own
+       * comment says so — so a skeleton scene, which is most of them, would otherwise pay four
+       * passes and three render targets to multiply the image by 1. A scene that does mount one
+       * was measured at 60fps either way: 21 meshes, 2× device scale, ANGLE Metal on an M3 Max.
+       *
+       * Presentational: it changes the shading and not the `Selected` table.
+       */
+      group: 'scene',
+      id: 'ambientOcclusion',
+      kind: 'number',
+      label: 'Ambient occlusion',
+      default: 1,
+      min: 0,
+      max: 2,
+      step: 0.05,
+      /*
+       * A slider rather than a field, on `NumberParam.slider`'s own rule: it is a proportion
+       * somebody sets by feel and watches the result of, like an opacity, not a limit or a
+       * budget. It is also `GTAOPass.blendIntensity` unchanged — `mix(vec3(1.), ao, intensity)`
+       * — so 0 really is "no darkening" rather than a small amount of it, which is what lets
+       * the number carry the off state instead of a second control.
+       *
+       * The range runs past 1 to 2, which octarine's `intensity` does not. 1 is where a fully
+       * occluded pixel goes black; past it the mix extrapolates — `2*ao - 1` at the top — so
+       * anything less than half occluded crushes to black too — measured at 9% of the surface
+       * pixels on the mock arbours, against near zero at 1. That is a real look and not a bug,
+       * and it is well defined: the blend is multiply, so a negative result clamps at the
+       * framebuffer rather than producing NaN (three selects the linear branch of the sRGB
+       * transfer with a `bvec`, which is a select and not a lerp, so the `pow` of a negative
+       * never reaches the output).
+       */
+      slider: true,
+      presentational: true,
+      advanced: true,
+      help: 'How strongly creases, cavities and the places surfaces meet are darkened — 0 turns the effect off entirely, and the pass is not run at all. Only opaque meshes and volumes can cast it; a scene of skeletons alone has no surface to occlude.',
+    },
+    {
+      /*
+       * Whether a click in the scene selects, and it is **off by default**.
+       *
+       * The reversal is deliberate. Picking is the one gesture here that writes a param taking
+       * part in the provenance key, so a stray click while turning a scene is not a cosmetic
+       * accident — it marks everything downstream stale and re-runs it. A trackball has no
+       * click-free way to say "I was only looking", `DRAG_SLOP` catches a drag but not a click
+       * that merely landed on a neurite, and the cost of the false positive is far higher than
+       * the cost of switching this on when selecting is what you came to do.
+       *
+       * It gates the *scene*, not the legend: a legend label is an unambiguous request to
+       * select something named, where a click into a tangle of arbours is a guess about which
+       * of them was under the cursor. Turning this off leaves the deliberate route working.
+       *
+       * Presentational, like everything else here. It decides whether a gesture can write
+       * `selection`; it does not change what `evaluate` returns for the selection there is.
+       */
+      group: 'scene',
+      id: 'selectByClick',
+      kind: 'boolean',
+      label: 'Select by clicking',
+      default: false,
+      presentational: true,
+      advanced: true,
+      help: 'Let a click in the scene select the neuron under it. Off by default, because a selection is a real output — a stray click while turning the view re-runs everything downstream of this node. Legend labels select either way.',
     },
     {
       group: 'scene',

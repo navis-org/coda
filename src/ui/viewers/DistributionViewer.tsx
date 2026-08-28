@@ -5,6 +5,7 @@ import type { TableValue } from '../../core/values'
 import { CHART_INK, MAX_BAR_THICKNESS, chartSurface, currentMode, seriesColor } from '../colors'
 import { exportBaseName as makeBaseName, tableToCsvParts } from '../export'
 import { formatCompact, formatNumber, labelGutter, plural, truncateLabel } from '../format'
+import { ClearSelection } from './LegendKeys'
 import type { GroupDistribution, WhiskerRule } from './boxStats'
 import { MAX_GROUPS_DEFAULT, groupValues, summarise, swarmOffsets } from './boxStats'
 import { isAdditive, useMarkSelection } from './useMarkSelection'
@@ -440,14 +441,7 @@ export function DistributionViewer({
           {showSwarm && thinnedSwarm(groups) ? ' · swarm thinned' : ''}
         </span>
         {marks.size > 0 && (
-          <button
-            type="button"
-            className="legend__label nodrag"
-            title="Clear the selection"
-            onClick={marks.clear}
-          >
-            {plural(marks.size, 'group')} selected ⨯
-          </button>
+          <ClearSelection label={`${plural(marks.size, 'group')} selected`} onClear={marks.clear} />
         )}
         <ViewerActions
           baseName={baseName ?? makeBaseName(undefined, 'distribution')}

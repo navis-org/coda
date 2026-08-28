@@ -7,7 +7,7 @@
 Browser-based, node editor for querying and analyzing connectomic data.
 
 > [!TIP]
-> **Alpha.** The core functionality is there, including support for (almost) all major connectome datasets. We're still adding features, improving the UI, and fixing bugs. Please report any issues you encounter!
+> **Alpha.** The core functionality is there, including support for (almost) all major connectome datasets. We're still adding features, improving the UI, and fixing bugs. Bug reports and feature requests are very welcome!
 
 **Highlights**
 - node-based editor for building analysis/exploration pipelines
@@ -36,6 +36,12 @@ Proper tutorials are coming soon but in the meantime, here are some quick instru
 - `Space` for the command palette
 - "Run" button or `⇧R` to run all stale nodes
 - `I` to show/hide the inspector
+
+## Why not just use neuPrint, Codex or CATMAID directly?
+
+Codex and neuPrint are great for initial exploration of the datasets but if you want to do more than just look at a few neurons, you quickly hit a wall and have to start writing code. CATMAID (the oldest of these tools) has actually a lot of analysis tools, but hasn't made the transition to modern (segmentation + meshes) connectomics.
+
+Coda is designed to fill the gap between exploration-only and full-on coding. Because we don't play favourites, you can combine data from multiple sources in one workflow. And if you do want to write code, Coda can help you get started by generate Python or R code from your workflow.
 
 ## Development
 
@@ -74,18 +80,13 @@ src/
 
 `src/core` and `src/data` must stay headless — a lint rule blocks imports of React,
 zustand, the store and the UI from those directories. The point is that the engine stays
-unit-testable without a DOM, and reusable later by a non-React consumer (a CLI runner, or a
-Python-side executor consuming the same graph JSON).
+unit-testable without a DOM, and reusable later by a non-React consumer (a CLI runner, or a Python-side executor consuming the same graph JSON).
 
 ### Known limitations / bugs
 
 - **Muting blocks downstream** rather than passing input through Blender-style.
-- **No virtualisation.** One DOM node per graph node, and table viewers cap rendered rows.
-  Fine for tens of nodes; a 1000-node graph would need work. Explore Dataset pages rather than
-  scrolling a long list for the same reason.
-- **A non-default neuPrint deployment needs CORS or the dev server.** It is tried directly
-  first; failing that, `pnpm dev` and `pnpm preview` proxy `/np/<deployment>/…` (https to
-  public hosts only), and a static build has nothing serving that path.
+- **No virtualisation.** One DOM node per graph node, and table viewers cap rendered rows. Fine for tens of nodes; a 1000-node graph would need work. Explore Dataset pages rather than scrolling a long list for the same reason.
+- **A non-default neuPrint deployment needs CORS or the dev server.** It is tried directly first; failing that, `pnpm dev` and `pnpm preview` proxy `/np/<deployment>/…` (https to public hosts only), and a static build has nothing serving that path.
 - Not all nodes are currently able to emit Python or R code. The codegen is a work in progress.
 
 ## Licence

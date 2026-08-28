@@ -89,9 +89,18 @@ Scroll zooms.
 
 **The camera is framed once and then left alone.** It centres itself the first time the scene has anything in it, and after that nothing moves it on its own — not an upstream node re-running, not expanding the card to full size and closing it again. A framing is something you arrange, and the two of those used to throw it away. **Reset view** (`⟲` in the caption) is the way back: it frames the whole scene again, and it is the only thing that does.
 
-## Clicking picks neurons, and the pick is an output
+## Picking neurons, and the pick is an output
 
-Click a skeleton and it selects; click it again and it deselects. Selected neurons keep their colour while everything else dims to grey, and the selection leaves the node through `Selected` as an ordinary neuron table — so "the three I liked the look of" becomes the input to a connectivity query, another fetch, or a second scene.
+Selected neurons keep their colour while everything else dims to grey, and the selection leaves the node through `Selected` as an ordinary neuron table — so "the three I liked the look of" becomes the input to a connectivity query, another fetch, or a second scene.
+
+**Clicking in the scene is off until you switch it on.** `Select by clicking`, on the **Scene** tab, is what turns it on; after that a click on a skeleton selects it and a second click lets it go.
+
+> [!NOTE] Why that is off by default
+> The selection is the one thing on this node that is *not* just how the picture looks — it takes part in the provenance key, so changing it marks everything downstream stale and re-runs it. A trackball has no way to say "I was only looking", and a click that happens to land on a neurite while you are turning the scene would silently re-run a query. Switch it on when picking is what you came to do.
+
+**Legend labels select either way.** A label names what it selects, so it is never the accident the toggle exists to prevent — clicking `LC4` in the strip picks every LC4 whatever the toggle says.
+
+**The count in the caption is the way out.** `3 selected ⨯` clears the whole selection in one click, and it is only there when there is one to clear.
 
 Selection is saved with the workflow and takes part in the provenance key. Changing it marks what is downstream of it stale, because it genuinely changed what this node emits.
 
@@ -114,9 +123,26 @@ out.viewer3d: meshOpacity, pointSize, background
 
 **Point size is in nanometres**, not pixels, so synapses keep their size relative to the neuron as you zoom. On a whole-brain scene the default is a speck; raise it until the cloud reads.
 
+**`Light intensity`** scales the scene's lighting. 1 is the default the palette was checked against; below it surfaces get moodier, above it they get brighter — up to a point. Past about 1.4 the brightest surfaces start to **clip**: the renderer has no highlight roll-off, so light beyond what a channel can hold washes a surface toward white instead of brightening it. At the top of the slider roughly a quarter of the visible surface is white rather than its own colour, which is a look you might want and is not more light.
+
+**Ambient occlusion** darkens creases, cavities and the places where surfaces meet, which is what makes a mesh read as a solid object rather than as a flat silhouette. It is a strength rather than a switch: **0 turns it off**, and at 100% a fully occluded pixel goes black. Above 100% the effect widens rather than deepens — the darkest places are already black, so what the extra buys is pulling the half-shadowed places down with them. Useful for a figure that needs the depth to read at a glance; heavy-handed on a surface that already has a lot of contact in it.
+
+> [!NOTE] It only does something where there are surfaces
+> Only meshes and volumes can cast occlusion — a line has no surface to occlude, so a scene of skeletons alone is unaffected and the effect is not computed there at all. Translucent surfaces are left out too: a neuropil shell at 12% is context, and letting it darken the arbour you can see through it looks like dirt on the picture rather than like shading.
+
 **Background** pins the canvas regardless of the app's theme, which is the setting a figure wants. `black` is its own option and not the same as `dark`: the dark theme's surface is a very dark grey, and a figure usually wants the real thing.
 
-**`Line width` above 1 changes how the skeletons are built.** At 1 they are hairlines — one pixel wide whatever any setting says, because that is the only width WebGL draws. Above it each segment becomes a camera-facing quad, which is a real width and costs about four times the vertex data. Worth it for a figure, and worth leaving alone for a scene you are exploring.
+**`Line width` has three modes.** `one width` draws every neurite the same. `by radius` and `to scale` both draw each one at the calibre it was traced or segmented at — so a primary neurite reads as one and the twigs at the edge of an arbour read as twigs. The radius is data your source already published: CATMAID's annotated radii, CAVE's level-2 chunk sizes, neuPrint's SWC column.
+
+Under `by radius` the number is the width of the **thickest** neurites, not a width every node gets. Everything thinner is drawn in proportion, down to a one-pixel floor — so raising it stretches the range rather than thickening the whole picture. A source that publishes no radii falls back to one width on its own.
+
+`to scale` is the same radii in the scene's own units instead of in pixels: a 200 nm neurite is drawn 200 nm across, and thickens as you zoom into it. Nothing is rescaled, so the number here is a **multiplier** — 1 is the arbour exactly as the source recorded it, which is the one setting you could measure a neurite off. Nodes with no recorded radius stay a hairline rather than disappearing.
+
+> [!NOTE] Which of the two radius modes you want
+> It depends on what the picture is of. `by radius` keeps the arbour looking the same at every zoom level, which suits a figure about branching pattern. `to scale` is the honest one for calibre — but zoom out far enough and thin neurites all reach the hairline floor together, so a whole-brain view shows you less than `by radius` would.
+
+> [!NOTE] Why anything above 1 costs more
+> At 1 the skeletons are hairlines — one pixel wide whatever any setting says, because that is the only width WebGL draws. Above it, and in either radius mode at any width, each segment becomes a camera-facing quad: a real width, at about four times the vertex data. Worth it for a figure, and worth leaving alone for a scene you are exploring.
 
 ## Getting a picture out
 

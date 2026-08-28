@@ -887,6 +887,355 @@ resize, or the shader has no idea how wide a pixel is; and a hit arrives as `fac
 segment, where the hairline path reports a vertex. `raycaster.params.Line2.threshold` is its own
 key too, in pixels rather than nanometres — `PickRadius` sets both.
 
+### `by radius`: the width the data already carried
+
+**`SkeletonGeometry.radii` was filled by every backend and drawn by none of them.** CATMAID's
+annotated radii, CAVE's L2 `max_dt_nm`, neuPrint's SWC radius column — all three have been
+arriving since skeletons did, and the viewer read `positions` and `parents` and stopped. So this
+is not a new capability so much as the last step of one that was already paid for.
+
+**three's `LineMaterial` takes one `linewidth` uniform**, so the fat path drew a constant-calibre
+wire, which is the one thing a neuron is not. `flexLineMaterial.ts` rewrites the site in three's
+own `line` vertex shader where that uniform is read, and adds `instanceWidthStart` /
+`instanceWidthEnd` beside the `instanceColor*` pair the layout is copied from. Patching rather
+than writing a shader is the whole point: the camera-facing quad, the endcaps, the clip-space
+trim near the camera plane and the round-cap anti-aliasing are all hard and all already there,
+and a replacement would inherit none of the fixes upstream makes to any of them.
+
+pygfx has the identical limitation — `LineMaterial.thickness` is one number — and octarine's
+`shaders/lines.py` solves it with the same three-line patch against `line.wgsl`. Two renderers,
+two graphics APIs, one diff.
+
+**Two width spaces, five patched sites.** The stock shader reads `linewidth` in three places and
+which of them matter depends on `worldUnits`. In **screen space** there is one site,
+`offset *= linewidth` in the vertex shader; the anti-aliasing runs in normalised `vUv` space that
+the quad's own extent already scales, so a per-vertex width needs no varying and no fragment
+change at all. In **world units** there are two, and they have to agree: `hw` in the vertex
+shader extrudes the box, and `len / linewidth` in the fragment shader carves the tube out of it.
+Patching only the first widens the box and leaves the silhouette where it was — a mode that draws
+nothing extra; patching only the second carves a tube wider than its own box and clips it flat.
+The other two sites are the shared width attributes and the varyings that carry the world width
+across the stage boundary. Both spaces live in one shader source under three's own `WORLD_UNITS`
+define, so `worldUnits` stays a runtime flag rather than a second material class.
+
+**The endcaps come out right for free**, and this is why the patched sites are the ones they are.
+In both spaces the width is applied *after* the endcap extension, so scaling by the vertex's own
+width gives each end of a segment the cap of the node it sits on: a segment between two calibres
+is a trapezoid in screen space and a cone in world units. That is what makes a taper continuous
+across a node rather than stepping at every join — confirmed by eye at width 12 on the bundled
+morphology example, which is the only way it could be confirmed.
+
+**`flexLineVertexShader` and `flexLineFragmentShader` throw when an anchor moves, and a test runs
+both.** This is the failure
+mode of any shader patch: a `three` bump renames a variable, the patch matches nothing, the
+material compiles, and every skeleton draws at the uniform width with no error anywhere.
+`ShaderLib` is plain text and needs no GL context, so `flexLineMaterial.test.ts` is the one part
+of the fat-line path jsdom can cover — and it is the part most likely to break silently. A throw
+rather than octarine's warn-and-fall-back, and `pcf.py` records the distinction: a silent
+fallback is right for an always-on tweak whose stock behaviour is still correct, and wrong for a
+mode somebody selected by name.
+
+**The scale is expressed at the thick end, and the reference is the p95 rather than the maximum.**
+Radii here are derived, not measured — CATMAID's are annotated where anybody bothered, CAVE's are
+a distance transform over voxels — and both produce a tail. Scaling against the maximum lets one
+bad node decide how wide every other node is drawn, so a single runaway radius flattens the whole
+arbour onto the floor and the mode reads as not working. `referenceRadius` takes the p95 by
+nearest rank and `MAX_LINE_WIDTH` catches the tail beyond it.
+
+**`MIN_LINE_WIDTH` is 1 and is not a style choice.** Below a pixel a line is not reliably drawn,
+and every source here has nodes this catches: CATMAID stores −1 for "unset" and `CatmaidSource`
+clamps it to 0, and a CAVE L2 chunk too small to have a `max_dt_nm` is 0 as well. Without the
+floor the twigs leave the picture and it reads as a fetch that returned only trunks.
+
+**A source with no radii at all gets `undefined`, not a buffer of floors**, and the caller falls
+back to the uniform path. The two are not the same picture: a uniform 1px hairline is what the
+thin path already draws cheaply, where a *fat* line of width 1 everywhere is that same picture at
+four times the vertex data — the fat path's whole cost for none of its benefit. Which material is
+built turns on the buffer rather than on the mode for the same reason, since a patched shader
+reading an attribute that is not there draws every line at zero width, i.e. nothing.
+
+**Two width params, exclusive by `visibleIf`, presented as one composite row** — the shape a
+colour already uses for its column picker and its swatch. They cannot be one param because they
+are not the same number: `Line width` under `uniform` is the width every node gets and starts at
+1, and under `radius` it is the width of the *thickest* node and starts at 4. At a scale of 1
+everything below the reference clamps to the floor and there is no visible taper at all, so a
+single stored width would open a saved graph looking like the mode had done nothing. `to scale`
+is a third, and it is the one that is a *multiplier* rather than a width — see below.
+
+### `to scale`: the same radii, in nanometres
+
+`by radius` is in pixels: radii are rescaled so the p95 node lands on the width you set, and the
+arbour looks the same at every zoom level. `to scale` is in the scene's own units, so a 200 nm
+neurite is drawn 200 nm across and thickens as you zoom into it. Nothing is normalised and
+nothing is clamped — this is the calibre as published, and the only one of the three you could
+measure a neurite off. pygfx spells the distinction `thickness_space`, and it is the mode
+octarine defaults skeletons to.
+
+**The two modes are the same buffer with a different unit**, which is why
+`skeletonSegmentWorldWidths` is six lines beside `skeletonSegmentWidths`' rescale-and-clamp:
+there is nothing to normalise against because the number already has a unit. Both ask
+`referenceRadius` the same "has this source got radii at all" question, so they fall back to the
+uniform path on exactly the same skeletons rather than one of them drawing an invisible scene.
+
+**The pixel floor moved into the shader, and had to.** `MIN_LINE_WIDTH`'s counterpart cannot be a
+number of nanometres: a floor in world units is a floor at one zoom level and invisible or
+enormous at every other. So `MIN_WORLD_PIXELS` is applied per vertex where the projection is
+known — `2.0 / ( projectionMatrix[1][1] * resolution.y )` scaled by `abs( clip.w )`, which is the
+view depth under a perspective projection and exactly 1 under an orthographic one, so one
+expression covers both cameras. pygfx has the same floor at `1.415 / l2p`; three has none, which
+makes this the one part of the world-units path that is an addition rather than a substitution.
+The floored widths go into the varyings rather than the raw attributes, because the fragment
+shader must carve the tube at the width the box was built at.
+
+**three's view ray is `1e5` units long, and this scene is measured in nanometres.** The one real
+bug in the port, and it presents as the feature not existing. `vec3 rayEnd = normalize(
+worldPos.xyz ) * 1e5` is a generous ray in a scene measured in metres and exactly 100 µm in one
+measured in nanometres; past that the ray stops short of the neuron, `closestLineToLine` clamps
+its parameter to `[0, 1]`, the closest point on the ray becomes the ray's own end, `norm` is
+enormous and **every fragment discards**. The skeleton vanishes whole, in a single zoom step,
+with nothing in the frame to say why. Measured on the optic-lobe mock, one neuron, ink against
+on-screen extent: `to scale` went blank between 73 px and 60 px while `one width` and `by radius`
+drew on down to 32 px. Scaling the ray to the segment's own view-space distance removes the
+assumption rather than moving it, and is better conditioned besides — the stock ray overshoots a
+nanometre scene by nine orders of magnitude before the dot products.
+
+**The measurement that shows the mode is doing what it claims** is ink against extent as the
+camera pulls back, since a screen-space width and a world-space one differ in the *exponent*
+rather than in any single frame. Fitting `ink ∝ extent^p` over one neuron, eleven zoom steps from
+251 px of extent to 32 px:
+
+| mode | p over the first three steps | p over the whole sweep |
+| --- | --- | --- |
+| `one width` | 1.01 | 1.04 |
+| `by radius` | 0.98 | 1.02 |
+| `to scale` | 1.57 | 1.28 |
+
+Both screen-space modes are exactly linear — only the length shrinks. `to scale` starts near the
+quadratic case, both dimensions shrinking, and falls back toward linear as more and more of the
+arbour reaches the pixel floor. The floor is visible in the data rather than only asserted.
+
+**What world units do not buy: skeletons in the AO pass.** The obvious expectation, and it is
+wrong for three reasons that are each enough on their own. The geometry is still a camera-facing
+box; the tube is *discarded* out of it in the fragment shader, so only the fragment stage knows
+its shape; and the vertex shader deliberately overwrites depth with the depth of the segment's
+nearer endpoint (`clip.z = clipPose.z * clip.w`) so consecutive segments overlap without
+z-fighting — leaving the depth buffer holding a staircase of flat discs rather than a surface.
+And `GTAOPass` replaces every material with `MeshNormalMaterial` for its normal pass, so the line
+shader does not run there at all. Skeletons in AO need real swept geometry; octarine's
+`shaders/tubes.py` is what that costs, and its own header records four attempts at making a swept
+arbour look right.
+
+### The lights, and the debt `flat` left on them
+
+The scene is an `ambientLight` and one `directionalLight`, and both were raised 50% —
+`0.85 / 0.6` to `1.275 / 0.9` — with a `Light intensity` slider over the pair.
+
+**The reason is a debt rather than a preference.** `<Canvas flat>` had to drop ACES tone mapping
+so ambient occlusion would stop moving the background (below), and the curve's shoulder had been
+carrying exactly the midtones a rough dielectric spends its range in. The same mesh pixel went
+`#71a430` to `#61962d` at the time and it was recorded as a trade; the surfaces read muted from
+then on. Raising the lights pays it back on the geometry rather than putting a curve back over
+the background.
+
+**One slider and not two**, because the *ratio* between fill and key is what decides how much
+shape a surface shows and it was chosen once against the palette. `sceneLights` is the scaling,
+and it falls back to the calibrated pair on a non-finite or negative value rather than to
+darkness — it reads a stored param, and a graph that reopens black looks like a viewer that
+failed to load rather than like a setting.
+
+**50% more light is 17% more pixel**, and that is the sRGB curve rather than a mistake. The
+renderer works in linear light and the framebuffer is encoded, so 1.5× radiance is
+1.5^(1/2.2) ≈ 1.20× in the values a screenshot reads; 1.17 came back. Across the whole slider,
+1 → 2 moves mean luminance only 105 → 135. Anyone asking why the numbers move less than the
+setting has found this.
+
+**`NoToneMapping` clips where a curve would roll off**, which is what makes the top of the slider
+a real edge. Light past the point a channel saturates does not brighten a surface — it
+desaturates it toward white and walks it out of the validated palette. Measured on four opaque
+optic-lobe meshes, share of surface pixels with a saturated channel:
+
+| slider | 0.25–1.4 | 1.5 | 1.75 | 2 |
+| --- | --- | --- | --- | --- |
+| saturated | 0% | 1.7% | 12.9% | 23.1% |
+| mean luminance | 63.1 → 119.8 | 122.9 | 129.7 | 134.6 |
+
+The range keeps its top — a limit warns, it does not refuse, and a blown highlight is a look
+somebody may want — and the help carries the number. Note the headroom is a property of *this*
+scene's albedos rather than a constant: a paler palette saturates sooner.
+
+**Mask the compass before measuring any of this.** It is unlit UI drawn over the canvas, near
+white, and identical at every setting — it supplied every "clipped" pixel in the first pass here
+and made two different light levels look like they had the same ceiling.
+
+### Ambient occlusion, and four things a composer changes underneath it
+
+**`GTAOPass`, not `SSAOPass`** — same effect, better estimator, and both ship in three. Ported
+from octarine, which has to hand-write the pass because pygfx has none; what carried over is not
+the estimator but the two findings around it.
+
+**It is mounted only where there is something to occlude.** three's own comment in
+`GTAOPass.render` is "honor only meshes, points and lines do not contribute to AO", and lines and
+points are hidden before the normal buffer is rendered. A skeleton scene is entirely lines, so
+the pass would run over an empty g-buffer and blend a uniform white result — four passes and
+three render targets to multiply the image by 1. octarine records the same finding from the other
+side, recommending `edl` for lines. `wantsAmbientOcclusion` is that decision, and it is what
+makes a default of **full strength** honest rather than a default nobody measured: the common
+scene never constructs a composer at all.
+
+**A fat line is a `Mesh`, and three's own list does not catch it.** `_overrideVisibility` tests
+`isPoints || isLine || isLine2`, and `LineSegments2` — the class every skeleton above a width of
+1 uses — matches none of the three: it extends `Mesh` and carries `isLineSegments2`, while
+`isLine2` belongs to `Line2`, a *different* subclass this viewer does not use. So a fat skeleton
+reached the normal pass, where `MeshNormalMaterial` ran over `LineSegmentsGeometry`'s instanced
+template quad with none of the line shader that positions it, writing a two-unit box at the model
+origin into the normal and depth buffers on every AO frame. Subpixel in a scene 10⁵ nm across,
+which is why nobody saw it, and not subpixel at all the moment somebody views one small neuron.
+`hidesFromGtao` is the predicate and `ambientOcclusion.test.ts` asserts the flags directly,
+because this is a claim about three's classes rather than about ours. Note the type system agrees
+with the finding and still could not have caught it: `@types/three` does not declare `isLine` on
+`LineSegments2` either, but three's test is untyped property access on an `Object3D`.
+
+**Every world-unit uniform is rescaled, and there are two of them.** `GTAOPass` defaults to
+`radius: 0.25` — a quarter of a nanometre here, an occlusion search that never leaves the pixel
+it started in — so the radius is 4% of the scene's extent, which is octarine's number. That much
+was the obvious half. The other is `thickness`, three's default `1`, which `GTAOShader` uses as
+`if (abs(viewDelta.z) < thickness)` to decline occlusion from a thin object it can see past: at
+one nanometre against a 555 nm radius, **every sample was rejected** and the pass blended a
+uniform white for a fortnight of screenshots that looked almost right. `aoThicknessFor` keeps
+three's own 4:1 ratio between them. Measured as the share of the frame carrying any occlusion at
+radius 555: 0.1% at thickness 1 and 50, 0.2% at 200, 0.7% at 555, 6.3% at 2,200, 11.2% at 10,000.
+
+The general form is worth keeping: a screen-space effect ported into a scene measured in
+nanometres needs *every* world-unit uniform moved, because a library's defaults are a set that
+agree with each other. Rescaling one is not a partial fix, it is a different kind of broken —
+and it fails the way three's 1-world-unit raycast threshold did for picking: renders, does
+nothing, looks like the control is off.
+
+**A translucent surface must not cast occlusion**, and the stock pass has no notion of that.
+`_renderOverride` sets `scene.overrideMaterial`, which replaces an object's material outright and
+its `transparent` flag with it — so a neuropil shell at 0.12 writes normals and depth as though
+solid, and the arbour inside it is occluded by a surface it is plainly visible through. It reads
+as dirt on the render. `SurfaceGtaoPass` extends the visibility override, which also catches
+*dimming* for free: `surfaceStyle` turns a dimmed mesh translucent, so selecting one neuron drops
+the other twenty out of the g-buffer on the same rule.
+
+**One number, not a toggle plus a strength.** `GTAOPass`'s blend is
+`mix(vec3(1.), ao, blendIntensity)`, so 0 already means "no darkening" exactly — a checkbox
+beside the slider would have been a second spelling of `strength === 0`, and two controls that
+can disagree end up showing a scene with no occlusion in it and a box insisting the effect is on.
+`wantsAmbientOcclusion` reads `strength > 0`, written that way round so a `NaN` from a malformed
+saved param is off rather than full. It is `NumberParam.slider` because it is a proportion set by
+feel and watched, which is that flag's own rule.
+
+**The range runs to 2, which octarine's `intensity` does not**, and what happens past 1 is worth
+stating because it is not "more of the same". 1 is where a *fully* occluded pixel reaches black,
+so beyond it the effect **widens rather than deepens** — the mix extrapolates to `2*ao - 1` and
+pulls the mid-occluded range down as well. Measured as mean darkening over the surface pixels:
+**5.2% at 0.5, 13.1% at 1, 22.7% at 1.5, 29.7% at 2**, with the share of surface pixels reaching
+black going 0 → 37 → 1,908 → 4,469 out of 48,122. So the crush is small up to 1 and real above
+it — 9% of the surface at the top of the slider — which is the trade that range buys. It is safe
+rather than merely tolerated: the blend is multiply, so an extrapolated negative clamps at the
+framebuffer, and three selects the linear branch of the sRGB transfer with a `bvec` — a select,
+not a lerp — so the `pow` of a negative never reaches the output as NaN.
+
+**A mean that will not move is a broken effect until proven otherwise.** The first version of
+this measured 91.6 against 91.8 over the same region — nothing — and the explanation written down
+at the time was that these arbours are thin convex tubes with few crevices, so the effect must be
+local and an aggregate the wrong instrument. That was wrong, and it was wrong in the most
+expensive direction: a plausible story about *why the number is small* that stopped the
+investigation one step short of `thickness`. What settled it was rendering
+`GTAOPass.OUTPUT.Denoise` — the occlusion buffer alone, which is what octarine's `debug=True`
+exists for. An almost entirely white frame with a few scattered specks is not a subtle effect; it
+is an estimator finding nothing. **Look at the effect's own buffer before explaining its
+magnitude.**
+
+**The pass has to come out of the memo, not out of a ref written inside it.** The first version
+did `passRef.current = ao` in the `useMemo` body and `passRef.current = null` in an effect
+cleanup, which is a mismatch: a cleanup runs on every unmount, where a `useMemo` is free to hand
+back its cached value without re-running the body. React 19's double-invoked effects are enough —
+mount, clean up, mount again — and the second mount reused the composer, so the ref stayed null
+for the rest of the component's life. The symptom is worth recognising because it is not "the
+control does nothing": the *first* change applied and every later one silently did not.
+
+**Cost, measured rather than assumed:** 21 meshes at 2× device scale, ANGLE Metal on an M3 Max,
+a sustained trackball drag — 59.9 fps with the pass and 59.9 without, reproduced either side of
+the toggle. Note the first attempt at this measured 14.5 fps against 5.9 and was worthless:
+headless Chrome falls back to SwiftShader unless it is asked for a GPU, and a software rasteriser
+penalises full-screen passes in a way no GPU does. `--use-angle=metal --enable-gpu`, and check
+`UNMASKED_RENDERER_WEBGL` before believing a number.
+
+#### The background broke twice, in two different ways
+
+Both were invisible to every test and both changed the picture the moment AO was switched on.
+
+**`RenderPass` sets the clear colour before it binds the target.** A renderer's clear colour is
+converted to the colour space of whatever target is bound *at the moment it is set*, so the
+surface was converted for the screen, written into the composer's linear buffer, and encoded a
+second time by `OutputPass`. Measured: `#1a1a19` came out `#585855` — a dark canvas turning
+mid-grey, with the geometry on top of it unchanged, because only the clear took the extra
+conversion. The fix is `scene.background`, which is painted inside `renderer.render` after the
+target is bound and is therefore converted against the buffer it lands in. One mechanism, both
+paths — and `CaptureBridge` now drops the background *and* the clear alpha for a transparent
+export, since dropping only the alpha would leave the background painted opaque over it.
+
+**Tone mapping is per-material in the ordinary path and per-image through a composer.** React
+Three Fiber defaults a canvas to `ACESFilmicToneMapping`; a scene background is a clear rather
+than a material, so it never receives the curve directly, and receives it once through
+`OutputPass`. Measured on `#1a1a19`: unchanged without the composer, `#080808` with it. Short of
+pre-compensating there is no way to keep a curve on the geometry and off the background in a
+composited path, so the canvas is `flat` — `NoToneMapping` — and the two paths agree, re-measured
+at `#1a1a19` either way. **This changes how surfaces look and that is the trade, not a side
+effect**: the same mesh pixel went from `#71a430` to `#61962d`. Reverting it means finding another
+answer for the background, not just putting the curve back.
+
+#### Two more seams a composer moves
+
+**`EffectComposer.setSize` takes CSS pixels and applies its own `_pixelRatio`** — `addPass` sizes
+each pass as `_width * _pixelRatio`. Handing it `getDrawingBufferSize` applies the ratio twice, so
+on any retina display the targets are quadruple-area and the AO is sampled at the wrong scale;
+it reads as a soft, misaligned effect rather than as an error. `setPixelRatio` is the seam, and it
+re-runs `setSize` itself.
+
+**PNG export renders its own frame and has to render it through the chain.** `CaptureBridge` takes
+a ref that `AmbientOcclusion` fills while mounted, read at call time rather than captured — a
+scene can gain and lose its composer while the bridge stays mounted, and a callback closed over a
+disposed chain would export through it. The export also raises the pixel ratio for one frame, so
+the composer is re-sized to match before that render and `RenderTarget.setSize` no-ops the rest of
+the time.
+
+### Picking is opt-in, and clearing is the count
+
+**`Select by clicking` is off by default, and that is a reversal worth stating.** Every other
+param on this node is presentational; `selection` is the one that is not. It takes part in the
+provenance key, so a click marks everything downstream stale and re-runs it — which makes a
+*stray* click a re-run of somebody's query rather than a cosmetic slip. `DRAG_SLOP` already
+catches the gesture that turns the scene and then releases over a neurite, but nothing catches a
+click that simply lands on one, and on a trackball there is no click-free way to say "I was only
+looking". The asymmetry decides the default: switching the toggle on costs one click, and the
+false positive costs a re-run.
+
+**It gates the draw sites, not `onSelectionChange`.** Clearing the callback would have been one
+line and would have taken the legend's label-select with it — and a label is the one route into a
+selection that is unambiguous about what it names, which is exactly the property the toggle is
+protecting. So the skeleton object carries no `onClick` at all when picking is off, which also
+means it leaves React Three Fiber's interaction set and stops being raycast: "not pickable" in the
+sense that costs nothing, rather than a handler that declines.
+
+**Only skeletons were ever pickable.** Meshes, points and volumes carry no click handler — the
+selection is of neurons and resolves against skeletons then meshes, but no mesh draw site ever
+reported a hit. The toggle therefore gates exactly one handler, and the wording on the param says
+"a click in the scene" rather than naming a socket.
+
+**Clearing is the count itself, not a control beside it** — `3 selected ⨯`, the same affordance
+the histogram, distribution and pie viewers already put in this row, down to the class and the
+glyph. The count leaves the caption's joined text when the button is showing rather than being
+restated in both places, and stays in the text for a read-only surface with no
+`onSelectionChange` to offer. Shown only when there is a selection, for the reason the legend's
+`show all` is: a permanent control for an empty state is a button that does nothing most of the
+time. It matters more here than on the three chart viewers — with clicking off by default, a
+selection made and then regretted would otherwise be undoable only through the inspector's
+`Selected` row, which is a list of ids three panels away from the picture.
+
 **Transparent PNG is a property of the clear, not of the scene.** The context has an alpha
 channel all along; the background is opaque only because the clear alpha is 1. The cut-out drops
 it to 0 for the length of one render. It is offered only by the read-back path, and that is not

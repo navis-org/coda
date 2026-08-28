@@ -29,6 +29,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { RefObject } from 'react'
 import * as THREE from 'three'
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js'
+import { FlexLineMaterial, setLineWidths } from './flexLineMaterial'
+import { AmbientOcclusion } from './ambientOcclusion'
 import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js'
 import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js'
 
@@ -42,11 +44,17 @@ import type { ResolvedColor } from '../encoding'
 import { resolveColor } from '../encoding'
 import { exportBaseName as makeBaseName, tableToCsvParts } from '../export'
 import type { LegendControls } from './LegendKeys'
-import { ChannelToggle, ColorKey } from './LegendKeys'
+import { ChannelToggle, ClearSelection, ColorKey } from './LegendKeys'
 import type { ExportSource } from './ViewerActions'
 import { ViewerActions } from './ViewerActions'
-import type { BackgroundChoice, Framing, SkeletonSegments } from './viewer3dScene'
+import type {
+  BackgroundChoice,
+  Framing,
+  SkeletonSegments,
+  SkeletonWidthMode,
+} from './viewer3dScene'
 import {
+  aoRadiusFor,
   buildPoints,
   buildSkeletonSegments,
   compassLayout,
@@ -56,14 +64,17 @@ import {
   labelIndex,
   neuronAtSegment,
   neuronAtVertex,
+  sceneLights,
   sceneMode,
   sceneSurface,
   skeletonSegmentColors,
+  skeletonWidthPlan,
   surfaceStyle,
   toggleHiddenLabel,
   toggleLabelSelection,
   toggleSelection,
   visibilityFor,
+  wantsAmbientOcclusion,
 } from './viewer3dScene'
 import { useStable } from './useStable'
 import { rememberCamera, recallCamera, forgetCamera } from './cameraMemo'
@@ -79,6 +90,22 @@ export interface Viewer3DProps {
   pointColor: ColorSpec
   volumeColor: ColorSpec
   skeletonWidth: number
+  /**
+   * Where a skeleton's line width comes from, and in which space: one number, the radius in
+   * pixels, or the radius in nanometres.
+   *
+   * The two radius modes are the reason `SkeletonGeometry.radii` exists at all — every backend
+   * has been filling it since skeletons were added and nothing drew it. See
+   * `skeletonSegmentWidths` and `skeletonSegmentWorldWidths` for the two mappings, and for what
+   * they both do on a source that publishes no radii.
+   */
+  skeletonWidthMode: SkeletonWidthMode
+  /** The width the thickest neurites are drawn at, in pixels, under `radius`. */
+  skeletonRadiusWidth: number
+  /** A multiplier on the published radius under `world`. 1 is the calibre as recorded. */
+  skeletonWorldWidth: number
+  /** Scales both scene lights together. 1 is the calibrated pair; see `sceneLights`. */
+  lightIntensity: number
   meshOpacity: number
   pointSize: number
   volumeOpacity: number
@@ -93,6 +120,26 @@ export interface Viewer3DProps {
    */
   refit?: boolean
   selection: string[]
+  /**
+   * Whether a click in the scene picks the neuron under it.
+   *
+   * Gates the draw sites rather than `onSelectionChange`, and the difference is the legend:
+   * clearing the callback would take the labels' select with it, which is the one route into a
+   * selection that is unambiguous about what it names. Off means the skeleton object carries no
+   * `onClick` at all, so it leaves React Three Fiber's interaction set and stops being raycast —
+   * "not pickable" in the sense that costs nothing, rather than a handler that declines.
+   */
+  selectByClick: boolean
+  /**
+   * How strongly screen-space ambient occlusion darkens the opaque surfaces. 0 is off, 1 is
+   * where a fully occluded pixel goes black, and the param's slider runs on to 2.
+   *
+   * A request rather than an instruction: `wantsAmbientOcclusion` decides whether the composer
+   * is actually mounted, because the pass cannot see lines or points at all and a skeleton
+   * scene would pay four passes and three render targets to multiply the image by 1. A strength
+   * of 0 is the off state and does not mount it either.
+   */
+  ambientOcclusion: number
   onSelectionChange?: (ids: string[]) => void
   /**
    * Legend keys hidden per channel, by the param prefix that stores them.
@@ -168,7 +215,6 @@ const CHANNELS = [
 
 /** The predicate a switched-off channel gets, in place of whatever its legend decided. */
 const NEVER = () => false
-
 type ChannelKey = (typeof CHANNELS)[number]['key']
 
 export function Viewer3D(props: Viewer3DProps) {
@@ -179,6 +225,10 @@ export function Viewer3D(props: Viewer3DProps) {
     volumes,
     background,
     refit = false,
+    meshOpacity,
+    volumeOpacity,
+    ambientOcclusion,
+    lightIntensity,
     selection,
     onSelectionChange,
     onParamChange,
@@ -204,6 +254,7 @@ export function Viewer3D(props: Viewer3DProps) {
   // the canvas. The compass labels are the only thing that reads it, and they would be black
   // on black without.
   const ink = CHART_INK[sceneMode(background, mode)].primary
+  const lights = sceneLights(lightIntensity)
 
   /*
    * Memoised **by value**, which is the rule CLAUDE.md states and this viewer was breaking.
@@ -336,6 +387,28 @@ export function Viewer3D(props: Viewer3DProps) {
    */
   const captureRef = useRef<((transparent: boolean) => string | null) | null>(null)
 
+  /**
+   * The composer's render, while there is one, so the export goes through the same chain.
+   *
+   * Null whenever ambient occlusion is not mounted, which is most scenes — and `CaptureBridge`
+   * reads that as "render the ordinary way" rather than as a failure.
+   */
+  const renderFrameRef = useRef<(() => void) | null>(null)
+
+  /*
+   * Whether the composer is mounted at all. Counted from the *sockets* rather than from the
+   * per-key legend, because this is a mount decision and not a correctness one: hiding the
+   * last mesh through the legend leaves an AO pass running over nothing for as long as it
+   * stays hidden, which costs a pass and changes no pixel.
+   */
+  const aoActive = wantsAmbientOcclusion({
+    strength: ambientOcclusion,
+    meshes: shown.meshes ? (meshes?.items.length ?? 0) : 0,
+    meshOpacity,
+    volumes: shown.volumes ? (volumes?.items.length ?? 0) : 0,
+    volumeOpacity,
+  })
+
   const exportSource: ExportSource = useMemo(() => {
     const attributes =
       skeletons?.attributes ?? meshes?.attributes ?? points?.attributes ?? volumes?.attributes
@@ -464,11 +537,56 @@ export function Viewer3D(props: Viewer3DProps) {
 
   return (
     <div className="viewer">
-      <div className="viewer3d-canvas nowheel">
-        <Canvas frameloop="demand" camera={cameraProps}>
+      {/*
+       * Right-drag pans the camera, and the same gesture is React Flow's "open this node's
+       * menu" — so on an unexpanded card every pan left the context menu sitting over the
+       * scene it had just moved.
+       *
+       * `preventDefault` is not the missing half: `TrackballControls` already calls it, which
+       * is why the *browser's* menu never appeared. What it does not call is `stopPropagation`,
+       * and Coda's menu is a React handler at the root rather than a native one on the canvas —
+       * so the event sailed past the controls and reached `onNodeContextMenu` anyway. Stopping
+       * it here is what the controls cannot do for us.
+       *
+       * Both halves, and `preventDefault` is not redundant: the controls skip theirs when
+       * `enabled` is false, and a disabled camera should not start showing a browser menu.
+       *
+       * The cost is that right-click over the scene no longer opens the node's menu at all —
+       * there is no way to tell a click from the start of a drag, since `contextmenu` fires on
+       * mousedown. The card's header and its ☰ button still do.
+       */}
+      <div
+        className="viewer3d-canvas nowheel"
+        onContextMenu={(event) => {
+          event.preventDefault()
+          event.stopPropagation()
+        }}
+      >
+        {/*
+         * `flat` is `NoToneMapping`, and it is a correctness setting here rather than a look.
+         *
+         * React Three Fiber defaults a canvas to `ACESFilmicToneMapping` — a film response
+         * curve for scenes with lights that blow out, which this one has nothing of: an ambient
+         * and a key light over flat-shaded neurons, and no highlight to roll off.
+         *
+         * What forced the setting is that the curve makes ambient occlusion change the picture
+         * where it is doing nothing. Tone mapping in the ordinary path is applied *per
+         * material*, so a scene background — a clear, not a material — never receives it; through
+         * a composer it is applied once at the end, to the whole image, background included.
+         * Measured on the dark surface `#1a1a19`: unchanged without the composer, `#080808`
+         * with it, so switching AO on visibly darkened the canvas behind a scene it had not
+         * touched. Short of pre-compensating for the curve there is no way to keep it on the
+         * geometry and off the background in a composited path, so the curve goes and the two
+         * paths agree — re-measured at `#1a1a19` either way.
+         *
+         * It does change how surfaces look, which is the trade and not a side effect: the same
+         * mesh pixel went from `#71a430` to `#61962d` without the curve. Reverting this means
+         * finding another answer for the background, not just putting the curve back.
+         */}
+        <Canvas flat frameloop="demand" camera={cameraProps}>
           <SceneSurface color={surface} />
-          <ambientLight intensity={0.85} />
-          <directionalLight position={[1, 1, 1]} intensity={0.6} />
+          <ambientLight intensity={lights.ambient} />
+          <directionalLight position={[1, 1, 1]} intensity={lights.key} />
           <PointerGestures>
             <SceneContents
               {...props}
@@ -508,7 +626,14 @@ export function Viewer3D(props: Viewer3DProps) {
             {...(viewerId ? { viewerId } : {})}
           />
           <Compass ink={ink} compact={compact} />
-          <CaptureBridge target={captureRef} />
+          {aoActive && (
+            <AmbientOcclusion
+              radius={aoRadiusFor(framing.size)}
+              intensity={ambientOcclusion}
+              renderFrame={renderFrameRef}
+            />
+          )}
+          <CaptureBridge target={captureRef} renderFrame={renderFrameRef} />
         </Canvas>
       </div>
 
@@ -584,12 +709,35 @@ export function Viewer3D(props: Viewer3DProps) {
             meshes ? plural(meshes.items.length, 'mesh') : '',
             points ? plural(points.attributes.length, 'point') : '',
             volumes ? plural(volumes.items.length, 'volume') : '',
-            selection.length > 0 ? `${selection.length} selected` : '',
+            /*
+             * The selected count moves out of this text and into the button below whenever
+             * clearing is possible, rather than being restated in both places. It stays here
+             * for a viewer with no `onSelectionChange` — a read-only surface still has to be
+             * able to say the picture is showing a selection.
+             */
+            selection.length > 0 && !onSelectionChange ? `${selection.length} selected` : '',
             hiddenTotal > 0 ? `${hiddenTotal} hidden` : '',
           ]
             .filter(Boolean)
             .join(' · ')}
         </span>
+        {/*
+         * The way out of a selection, and it is the count itself rather than a control beside
+         * it — the same affordance the histogram, distribution and pie viewers already put in
+         * this row, down to the class and the glyph. Shown only when there is a selection, for
+         * the reason the legend's `show all` is: a permanent control for an empty state is a
+         * button that does nothing most of the time.
+         *
+         * It matters more here than on those three. `Select by clicking` is off by default, so
+         * a selection made and then regretted could otherwise only be undone through the
+         * inspector's `Selected` row — a list of ids, three panels away from the picture.
+         */}
+        {selection.length > 0 && onSelectionChange && (
+          <ClearSelection
+            label={`${selection.length} selected`}
+            onClear={() => onSelectionChange([])}
+          />
+        )}
         {detail && !compact && (
           <span className="viewer__note" title={detail.title}>
             {detail.label}
@@ -635,12 +783,33 @@ export function Viewer3D(props: Viewer3DProps) {
  */
 function SceneSurface({ color }: { color: string }) {
   const gl = useThree((state) => state.gl)
+  const scene = useThree((state) => state.scene)
   const invalidate = useThree((state) => state.invalidate)
 
   useEffect(() => {
+    /*
+     * `scene.background` rather than `gl.setClearColor`, and the difference only shows once
+     * something renders to a texture.
+     *
+     * A renderer's clear colour is converted to the colour space of whatever target is bound
+     * *at the moment it is set*. `RenderPass` sets it before binding the composer's buffer, so
+     * under ambient occlusion the surface was converted for the screen, written into a linear
+     * target, and then encoded a second time by `OutputPass`. Measured: `#1a1a19` came out
+     * `#585855` — a dark canvas turning mid-grey the moment AO was switched on, with the
+     * geometry on top of it unchanged, because only the clear took the extra conversion.
+     *
+     * A scene background is painted inside `renderer.render`, after the target is bound, so it
+     * is converted against the buffer it actually lands in. One mechanism, both paths.
+     */
+    scene.background = new THREE.Color(color)
+    /*
+     * The clear colour is still set, and is not redundant: it is what shows through wherever
+     * the background is *not* painted — which is exactly the transparent export, where
+     * `CaptureBridge` drops the background for one render and the clear alpha with it.
+     */
     gl.setClearColor(color, 1)
     invalidate()
-  }, [gl, color, invalidate])
+  }, [gl, scene, color, invalidate])
 
   return null
 }
@@ -807,8 +976,18 @@ function Compass({ ink, compact }: { ink: string; compact: boolean }) {
  */
 function CaptureBridge({
   target,
+  renderFrame,
 }: {
   target: RefObject<((transparent: boolean) => string | null) | null>
+  /**
+   * The composer's render when one is mounted, and null the rest of the time.
+   *
+   * Read at call time rather than captured, because a scene can gain and lose its composer —
+   * turning ambient occlusion on, or dropping the last opaque mesh — while this bridge stays
+   * mounted throughout. A callback closed over the ref's *value* would export through a chain
+   * that had since been disposed.
+   */
+  renderFrame: RefObject<(() => void) | null>
 }) {
   const gl = useThree((state) => state.gl)
   const scene = useThree((state) => state.scene)
@@ -828,18 +1007,37 @@ function CaptureBridge({
       const clear = new THREE.Color()
       gl.getClearColor(clear)
       const clearAlpha = gl.getClearAlpha()
+      const background = scene.background
       try {
         if (wanted !== ratio) gl.setPixelRatio(wanted)
-        if (transparent) gl.setClearColor(clear, 0)
-        gl.render(scene, camera)
+        /*
+         * Both halves, because the surface is painted twice over: `SceneSurface` sets a scene
+         * background *and* a clear colour, and a cut-out needs neither. Dropping only the clear
+         * alpha would leave the background painted opaque over it and export a picture with no
+         * transparency in it at all — which is what a screenshot already is.
+         */
+        if (transparent) {
+          scene.background = null
+          gl.setClearColor(clear, 0)
+        }
+        /*
+         * Through the composer when there is one, or a figure exported from a scene with
+         * ambient occlusion on comes out without it — the one difference between what is on
+         * screen and what lands in the file being the effect somebody switched on.
+         */
+        if (renderFrame.current) renderFrame.current()
+        else gl.render(scene, camera)
         return gl.domElement.toDataURL('image/png')
       } finally {
         if (wanted !== ratio) gl.setPixelRatio(ratio)
-        if (transparent) gl.setClearColor(clear, clearAlpha)
+        if (transparent) {
+          scene.background = background
+          gl.setClearColor(clear, clearAlpha)
+        }
         invalidate()
       }
     },
-    [gl, scene, camera, invalidate],
+    [gl, scene, camera, invalidate, renderFrame],
   )
 
   useEffect(() => {
@@ -858,6 +1056,10 @@ function SceneContents({
   points,
   volumes,
   skeletonWidth,
+  skeletonWidthMode,
+  skeletonRadiusWidth,
+  skeletonWorldWidth,
+  selectByClick,
   meshOpacity,
   pointSize,
   volumeOpacity,
@@ -891,6 +1093,10 @@ function SceneContents({
           visible={visible.skeletons}
           selected={selected}
           width={skeletonWidth}
+          widthMode={skeletonWidthMode}
+          radiusWidth={skeletonRadiusWidth}
+          worldWidth={skeletonWorldWidth}
+          pickable={selectByClick}
           {...(onSelectionChange ? { onSelectionChange } : {})}
           selection={selection}
         />
@@ -1000,6 +1206,10 @@ function SkeletonLines({
   visible,
   selected,
   width,
+  widthMode,
+  radiusWidth,
+  worldWidth,
+  pickable,
   selection,
   onSelectionChange,
 }: {
@@ -1008,6 +1218,10 @@ function SkeletonLines({
   visible: (itemIndex: number) => boolean
   selected: Set<string>
   width: number
+  widthMode: SkeletonWidthMode
+  radiusWidth: number
+  worldWidth: number
+  pickable: boolean
   selection: string[]
   onSelectionChange?: (ids: string[]) => void
 }) {
@@ -1029,6 +1243,21 @@ function SkeletonLines({
     [built, skeletons, colorAt, selected],
   )
 
+  /**
+   * The mode resolved into what the renderer needs, in the module a test can reach.
+   *
+   * A memo because it allocates a width per endpoint, not because the arithmetic is expensive.
+   */
+  const plan = useMemo(
+    () =>
+      skeletonWidthPlan(built, widthMode, {
+        uniform: width,
+        radius: radiusWidth,
+        world: worldWidth,
+      }),
+    [built, widthMode, width, radiusWidth, worldWidth],
+  )
+
   /*
    * A drag is not a click, and the DOM disagrees.
    *
@@ -1044,13 +1273,25 @@ function SkeletonLines({
     onSelectionChange(toggleSelection(selection, neuronId))
   }
 
-  if (width > 1) {
+  /*
+   * `undefined` rather than a conditional spread: R3F's `applyProps` deletes a handler it is
+   * given `undefined` for, so `eventCount` still falls to zero and the object still leaves the
+   * interaction set — which is the whole promise of `Select by clicking`.
+   */
+  if (plan.fat) {
     return (
       <FatSkeletonLines
         built={built}
         colors={colors}
-        width={width}
-        onPick={(event) => pick(neuronAtSegment(built, skeletons, event.faceIndex ?? undefined), event)}
+        width={plan.uniform}
+        widths={plan.widths}
+        worldUnits={plan.worldUnits}
+        onPick={
+          pickable
+            ? (event) =>
+                pick(neuronAtSegment(built, skeletons, event.faceIndex ?? undefined), event)
+            : undefined
+        }
       />
     )
   }
@@ -1058,7 +1299,9 @@ function SkeletonLines({
     <ThinSkeletonLines
       built={built}
       colors={colors}
-      onPick={(event) => pick(neuronAtVertex(built, skeletons, event.index), event)}
+      onPick={
+        pickable ? (event) => pick(neuronAtVertex(built, skeletons, event.index), event) : undefined
+      }
     />
   )
 }
@@ -1077,7 +1320,8 @@ function ThinSkeletonLines({
 }: {
   built: SkeletonSegments
   colors: Float32Array
-  onPick: (event: ThreeEvent<MouseEvent>) => void
+  /** Absent when `Select by clicking` is off, which takes the object out of the raycast. */
+  onPick?: ((event: ThreeEvent<MouseEvent>) => void) | undefined
 }) {
   const invalidate = useThree((state) => state.invalidate)
 
@@ -1122,36 +1366,96 @@ function FatSkeletonLines({
   built,
   colors,
   width,
+  widths,
+  worldUnits,
   onPick,
 }: {
   built: SkeletonSegments
   colors: Float32Array
   width: number
-  onPick: (event: ThreeEvent<MouseEvent>) => void
+  /**
+   * A width per endpoint, or `undefined` for one width across the scene.
+   *
+   * Which of the two materials is built turns on this rather than on the mode, so a `radius`
+   * scene whose source published no radii lands on the stock material instead of on a patched
+   * shader reading an attribute that is not there — which draws every line at zero width.
+   */
+  widths: Float32Array | undefined
+  /**
+   * Whether `width` and `widths` are in nanometres rather than in CSS pixels.
+   *
+   * A `define` on the material, so flipping it recompiles the program — which is why it is in
+   * the memo's dependencies below rather than assigned in an effect beside `resolution`.
+   */
+  worldUnits: boolean
+  /** Absent when `Select by clicking` is off, which takes the object out of the raycast. */
+  onPick?: ((event: ThreeEvent<MouseEvent>) => void) | undefined
 }) {
   const invalidate = useThree((state) => state.invalidate)
   const size = useThree((state) => state.size)
 
-  const object = useMemo(() => {
-    const geometry = new LineSegmentsGeometry()
-    geometry.setPositions(built.positions)
-    geometry.setColors(colors)
-    const material = new LineMaterial({ vertexColors: true, linewidth: width })
-    return new LineSegments2(geometry, material)
-  }, [built, colors, width])
+  /*
+   * The *presence* of a width buffer picks the material; its contents do not. Keeping that a
+   * boolean is what stops a scrub — which mints a fresh `Float32Array` per pointermove —
+   * recompiling a shader sixty times a second.
+   */
+  const hasWidths = widths !== undefined
+
+  /*
+   * Three memos and not one, because a width is *scrubbed*.
+   *
+   * `NumberField` drags — every pointermove past the slop is an `onChange` — so anything in a
+   * memo keyed on a width is rebuilt sixty times a second while the hand moves. Positions are
+   * the expensive half: `setPositions` runs `computeBoundingBox` *and* `computeBoundingSphere`
+   * over the whole soup, and disposing the geometry re-uploads a megabyte of positions and
+   * colours next frame. None of that depends on how wide the lines are.
+   *
+   * So the split follows what actually changes together: positions and colours rebuild the
+   * geometry, `worldUnits` is a shader `define` and so rebuilds the material, and the two
+   * widths are neither — a buffer swap and a uniform write, both below.
+   */
+  const geometry = useMemo(() => {
+    const made = new LineSegmentsGeometry()
+    made.setPositions(built.positions)
+    made.setColors(colors)
+    return made
+  }, [built, colors])
+
+  const material = useMemo(
+    () =>
+      hasWidths
+        ? new FlexLineMaterial({ vertexColors: true, worldUnits })
+        : new LineMaterial({ vertexColors: true, worldUnits }),
+    [hasWidths, worldUnits],
+  )
+
+  const object = useMemo(() => new LineSegments2(geometry, material), [geometry, material])
+
+  /*
+   * Widths in an effect rather than in the geometry memo, and no frame is drawn in between:
+   * `frameloop="demand"` means nothing renders until something calls `invalidate`, and effects
+   * run on commit, before the frame this schedules. Under a continuous frameloop this would be
+   * one frame of zero-width lines on mount.
+   */
+  useEffect(() => {
+    if (!widths) return
+    setLineWidths(geometry, widths)
+    invalidate()
+  }, [geometry, widths, invalidate])
+
+  /** A plain uniform, so a scrub is a number write rather than a new program. */
+  useEffect(() => {
+    material.linewidth = width
+    invalidate()
+  }, [material, width, invalidate])
 
   useEffect(() => {
-    object.material.resolution.set(size.width, size.height)
+    material.resolution.set(size.width, size.height)
     invalidate()
-  }, [object, size, invalidate])
+  }, [material, size, invalidate])
 
-  useEffect(
-    () => () => {
-      object.geometry.dispose()
-      object.material.dispose()
-    },
-    [object],
-  )
+  useEffect(() => () => geometry.dispose(), [geometry])
+  useEffect(() => () => material.dispose(), [material])
 
   return <primitive object={object} onClick={onPick} />
 }

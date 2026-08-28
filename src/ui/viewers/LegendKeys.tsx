@@ -75,6 +75,33 @@ export interface LegendControls {
  * case is not an edge case — a constant colour produces no legend at all, which is what
  * neuropil shells ship with, so it is the only switch those ever get.
  */
+/**
+ * The "N selected ⨯" button that clears a viewer's selection, in the caption row.
+ *
+ * Four viewers had grown their own copy — histogram, distribution, pie, and then the 3D view —
+ * identical down to the class, the `title` and the glyph, which is the point at which a fifth
+ * would have quietly picked a different one. `ExploreBody` already did: `explore__link` and `✕`.
+ *
+ * `label` rather than a count, because what is selected differs — bins, slices, neurons — and
+ * the chart viewers already have `plural` for it. Rendering nothing for an empty selection is
+ * part of the contract: the caption row is a flex row of optional spans, and an empty button
+ * would still take its gap.
+ */
+export function ClearSelection({ label, onClear }: { label: string; onClear: () => void }) {
+  if (!label) return null
+  return (
+    <button
+      type="button"
+      className="legend__label nodrag"
+      title="Clear the selection"
+      aria-label="Clear selection"
+      onClick={onClear}
+    >
+      {label} ⨯
+    </button>
+  )
+}
+
 export function ChannelToggle({
   name,
   hidden,

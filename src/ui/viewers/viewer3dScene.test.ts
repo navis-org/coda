@@ -15,21 +15,30 @@ import type { Bounds3, MeshesValue, PointsValue, SkeletonsValue } from '../../co
 import { makeTable } from '../../core/values'
 import { CHART_INK, chartSurface } from '../colors'
 import {
-  DIMMED_HEX,
-  DIMMED_RGB,
+  AMBIENT_INTENSITY,
+  buildPoints,
   buildSkeletonSegments,
   compassLayout,
   detailNote,
+  DIMMED_HEX,
+  DIMMED_RGB,
   framingFor,
-  buildPoints,
   hiddenCount,
   idsForLabel,
+  KEY_INTENSITY,
   labelIndex,
+  MAX_LINE_WIDTH,
+  MIN_LINE_WIDTH,
   neuronAtSegment,
   neuronAtVertex,
+  referenceRadius,
+  sceneLights,
   sceneMode,
   sceneSurface,
   skeletonSegmentColors,
+  skeletonSegmentWidths,
+  skeletonSegmentWorldWidths,
+  skeletonWidthPlan,
   surfaceStyle,
   toggleHiddenLabel,
   toggleLabelSelection,
@@ -97,6 +106,252 @@ describe('buildSkeletonSegments', () => {
       ],
     }
     expect(buildSkeletonSegments(empty).segments).toBe(0)
+  })
+})
+
+/**
+ * A chain of `radii.length` points, each parented to the one before it.
+ *
+ * Written as a helper because every width case is about the *distribution* of radii and about
+ * nothing else — a fixture that also varied the branching would make it unclear which of the
+ * two a failure was about.
+ */
+function chain(radii: number[]): SkeletonsValue {
+  const positions = new Float32Array(radii.length * 3)
+  const parents = new Int32Array(radii.length)
+  for (let i = 0; i < radii.length; i++) {
+    positions[i * 3] = i
+    parents[i] = i - 1
+  }
+  return {
+    kind: 'skeletons',
+    items: [{ id: '1', positions, radii: new Float32Array(radii), parents }],
+    attributes: makeTable(SCHEMA, { neuronId: [1] }),
+    bounds: BOUNDS,
+  }
+}
+
+describe('line widths from radii', () => {
+  describe('buildSkeletonSegments', () => {
+    it('carries the radius of each endpoint, in the order it writes the endpoints', () => {
+      // Child then parent, matching `positions` — the two buffers are read by one shader and
+      // an order that disagreed would taper every segment backwards.
+      const built = buildSkeletonSegments(chain([1, 2, 3]))
+      expect([...built.segmentRadii]).toEqual([2, 1, 3, 2])
+    })
+  })
+
+  describe('referenceRadius', () => {
+    it('takes the p95, so one fat node cannot flatten everything else to the floor', () => {
+      /*
+       * The failure this is about: scaling against the *maximum* lets a single bad radius —
+       * a soma, a mis-traced node, a CAVE chunk whose `max_dt_nm` ran away — decide how wide
+       * every other node is drawn. Nineteen endpoints at 1 and one at 100; the reference has
+       * to be 1, or the arbour draws at 1/100th of the setting and the mode looks broken.
+       */
+      const built = buildSkeletonSegments(chain([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 100]))
+      expect(referenceRadius(built)).toBe(1)
+    })
+
+    it('is 0 when nothing has a positive radius, which is a real source and not an error', () => {
+      // CATMAID stores −1 for "unset" and the source clamps it to 0; a CAVE L2 chunk too
+      // small to have a `max_dt_nm` is 0 as well.
+      expect(referenceRadius(buildSkeletonSegments(chain([0, 0, 0])))).toBe(0)
+    })
+
+    it('sorts numerically, not as text', () => {
+      // `Float32Array.sort` does; a plain `Array.sort` would put 100 before 9 and pick the
+      // p95 out of a differently-ordered list.
+      const built = buildSkeletonSegments(chain([9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 100]))
+      expect(referenceRadius(built)).toBe(9)
+    })
+
+    it('sees only what is drawn, so hiding the thick neuron rescales the rest', () => {
+      const thin = chain([1, 1, 1])
+      const two: SkeletonsValue = {
+        ...thin,
+        items: [...thin.items, { ...chain([50, 50, 50]).items[0]!, id: '2' }],
+        attributes: makeTable(SCHEMA, { neuronId: [1, 2] }),
+      }
+      expect(referenceRadius(buildSkeletonSegments(two))).toBe(50)
+      expect(referenceRadius(buildSkeletonSegments(two, (i) => i === 0))).toBe(1)
+    })
+  })
+
+  describe('skeletonSegmentWidths', () => {
+    it('draws the reference node at the setting, and the rest in proportion', () => {
+      const built = buildSkeletonSegments(chain([1, 2]))
+      // One segment, endpoints [2, 1]; the p95 of two values is the larger, so 2 is the
+      // reference and lands on the scale exactly.
+      expect([...skeletonSegmentWidths(built, 4)!]).toEqual([4, 2])
+    })
+
+    it('floors a zero radius rather than drawing nothing there', () => {
+      /*
+       * Below a pixel a line is not reliably drawn at all, so an unset radius would take the
+       * twigs off the picture entirely — which reads as a fetch that returned only trunks
+       * rather than as a width setting.
+       */
+      const widths = skeletonSegmentWidths(buildSkeletonSegments(chain([0, 2])), 4)!
+      expect([...widths]).toEqual([4, MIN_LINE_WIDTH])
+    })
+
+    it('ceilings the tail beyond the reference', () => {
+      const built = buildSkeletonSegments(chain([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 100]))
+      const widths = skeletonSegmentWidths(built, 4)!
+      // 4 × 100 / 1 is 400 pixels of quad across a card that is 600 wide.
+      expect(Math.max(...widths)).toBe(MAX_LINE_WIDTH)
+      expect(Math.min(...widths)).toBe(4)
+    })
+
+    it('declines rather than returning a buffer of floors when there are no radii', () => {
+      /*
+       * The caller reads `undefined` as "use the uniform path". A buffer of 1s would draw the
+       * same picture as a hairline at four times the vertex data — the fat path's whole cost
+       * for none of its benefit.
+       */
+      expect(skeletonSegmentWidths(buildSkeletonSegments(chain([0, 0, 0])), 4)).toBeUndefined()
+    })
+  })
+
+  describe('skeletonSegmentWorldWidths', () => {
+    it('is the diameter, in the scene’s own units, with nothing rescaled', () => {
+      const built = buildSkeletonSegments(chain([1, 2]))
+      // The same fixture the pixel mode maps onto [4, 2] against its p95. Here 2 and 1 are
+      // radii in nanometres and come out as diameters, untouched by any reference.
+      expect([...skeletonSegmentWorldWidths(built, 1)!]).toEqual([4, 2])
+    })
+
+    it('multiplies rather than targeting a width', () => {
+      expect([...skeletonSegmentWorldWidths(buildSkeletonSegments(chain([1, 2])), 3)!]).toEqual([
+        12, 6,
+      ])
+    })
+
+    it('does not ceiling the tail, because a wide neurite really is wide', () => {
+      /*
+       * The opposite decision from the pixel mode's `MAX_LINE_WIDTH`, and it follows from what
+       * the number means: 200 px of quad is a rendering problem, where 100 nm across a scene
+       * measured in nanometres is the soma. Clamping it would draw a lie to scale.
+       */
+      const built = buildSkeletonSegments(chain([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 100]))
+      expect(Math.max(...skeletonSegmentWorldWidths(built, 1)!)).toBe(200)
+    })
+
+    it('leaves an unmeasured node at zero for the shader’s pixel floor to catch', () => {
+      /*
+       * Deliberately not `MIN_LINE_WIDTH`'s counterpart: a floor in nanometres is a floor at
+       * one zoom level and nothing at any other. `MIN_WORLD_PIXELS` applies it per vertex in
+       * the shader, where the projection is known.
+       */
+      expect([...skeletonSegmentWorldWidths(buildSkeletonSegments(chain([0, 2])), 1)!]).toEqual([
+        4, 0,
+      ])
+    })
+
+    it('never returns a negative width, because CATMAID writes −1 for unmeasured', () => {
+      // A negative diameter extrudes the box inside out, which draws as a hole rather than as
+      // a thin line.
+      const built = buildSkeletonSegments(chain([-1, 2]))
+      expect(Math.min(...skeletonSegmentWorldWidths(built, 1)!)).toBe(0)
+    })
+
+    it('declines on the same skeletons the pixel mode declines on', () => {
+      // Both ask `referenceRadius`, so the two modes fall back to the uniform path together
+      // rather than one of them drawing an invisible scene.
+      expect(
+        skeletonSegmentWorldWidths(buildSkeletonSegments(chain([0, 0, 0])), 1),
+      ).toBeUndefined()
+    })
+  })
+
+  describe('skeletonWidthPlan', () => {
+    const scales = { uniform: 1, radius: 4, world: 2 }
+
+    it('gives each mode its own scale, in its own space', () => {
+      const built = buildSkeletonSegments(chain([1, 2]))
+      expect(skeletonWidthPlan(built, 'uniform', scales)).toMatchObject({
+        widths: undefined,
+        uniform: 1,
+        worldUnits: false,
+        fat: false,
+      })
+      expect(skeletonWidthPlan(built, 'radius', scales)).toMatchObject({
+        uniform: 4,
+        worldUnits: false,
+        fat: true,
+      })
+      // The p95 diameter, not the multiplier: `LineSegments2.raycast` measures its pick
+      // corridor from this, so a 2 handed to a world-units material would make a scene 10^5 nm
+      // across pickable only within two nanometres.
+      expect(skeletonWidthPlan(built, 'world', scales)).toMatchObject({
+        uniform: 8,
+        worldUnits: true,
+        fat: true,
+      })
+    })
+
+    it('never reports world units without the buffer that makes them safe', () => {
+      /*
+       * The invariant the whole function exists for. Falling back to the stock `LineMaterial`
+       * leaves three's unpatched fragment shader in place, whose view ray is 100 µm long in a
+       * scene measured in nanometres — so a world-units material without our patch draws the
+       * arbour and then loses it whole on zoom-out. Deriving the flag from the buffer rather
+       * than from the mode is what makes that unreachable.
+       */
+      const none = buildSkeletonSegments(chain([0, 0, 0]))
+      const plan = skeletonWidthPlan(none, 'world', scales)
+      expect(plan.widths).toBeUndefined()
+      expect(plan.worldUnits).toBe(false)
+      // And it lands on the uniform width, in pixels, rather than on the world multiplier.
+      expect(plan.uniform).toBe(scales.uniform)
+      for (const mode of ['uniform', 'radius', 'world'] as const) {
+        const p = skeletonWidthPlan(none, mode, scales)
+        expect(p.worldUnits && p.widths === undefined, mode).toBe(false)
+      }
+    })
+
+    it('keeps a width of 1 on the hairline path, and any taper off it', () => {
+      // A fat line of width 1 everywhere is the hairline picture at four times the vertex data.
+      const none = buildSkeletonSegments(chain([0, 0, 0]))
+      expect(skeletonWidthPlan(none, 'uniform', scales).fat).toBe(false)
+      expect(skeletonWidthPlan(none, 'uniform', { ...scales, uniform: 2 }).fat).toBe(true)
+      expect(skeletonWidthPlan(buildSkeletonSegments(chain([1, 2])), 'radius', scales).fat).toBe(
+        true,
+      )
+    })
+  })
+})
+
+describe('sceneLights', () => {
+  it('scales both lights by one number, keeping the ratio', () => {
+    // The ratio is the look — how much shape a surface shows — and it was chosen once against
+    // the palette. A slider that could change it would be a second, harder decision.
+    const one = sceneLights(1)
+    expect(one).toEqual({ ambient: AMBIENT_INTENSITY, key: KEY_INTENSITY })
+    const half = sceneLights(0.5)
+    expect(half.ambient / half.key).toBeCloseTo(one.ambient / one.key, 10)
+    expect(half.ambient).toBeCloseTo(AMBIENT_INTENSITY / 2, 10)
+  })
+
+  it('falls back to the calibrated pair rather than to darkness', () => {
+    /*
+     * This reads a stored param, so the bad inputs are a graph saved by an older build and a
+     * hand-edited share link — and the failure to avoid is a canvas that opens black, which
+     * looks like a viewer that did not load rather than like a setting.
+     */
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, -1]) {
+      expect(sceneLights(bad), String(bad)).toEqual({
+        ambient: AMBIENT_INTENSITY,
+        key: KEY_INTENSITY,
+      })
+    }
+  })
+
+  it('lets a deliberate zero be zero', () => {
+    // 0 is not in the slider's range, but it is a legitimate number to ask for and it is not
+    // the same case as `NaN`: nothing is being recovered from.
+    expect(sceneLights(0)).toEqual({ ambient: 0, key: 0 })
   })
 })
 

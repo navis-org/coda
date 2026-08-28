@@ -186,6 +186,168 @@ describe('the rest of the surface', () => {
     expect(width.min).toBe(1)
   })
 
+  it('starts on one width, so a saved graph draws what it drew before', () => {
+    const mode = param('skeletonWidthMode')
+    if (mode.kind !== 'enum' || typeof mode.options === 'function') {
+      throw new Error('expected static options')
+    }
+    expect(mode.default).toBe('uniform')
+    expect(mode.options.map((o) => o.value)).toEqual(['uniform', 'radius', 'world'])
+  })
+
+  it('shows one width control at a time, and they are one row', () => {
+    /*
+     * Two stored params made exclusive by `visibleIf` — the shape a colour already uses for
+     * its column picker and its swatch. They cannot share one param because they are not the
+     * same number: "3 pixels everywhere" and "3 pixels at the thickest" have different
+     * defaults, and a mode that silently reinterprets a stored width is how a graph reopens
+     * looking different.
+     */
+    const shown: Record<string, string> = {
+      uniform: 'skeletonWidth',
+      radius: 'skeletonRadiusWidth',
+      world: 'skeletonWorldWidth',
+    }
+    for (const [mode, visible] of Object.entries(shown)) {
+      for (const id of Object.values(shown)) {
+        expect(param(id).visibleIf?.({ skeletonWidthMode: mode }), `${id} under ${mode}`).toBe(
+          id === visible,
+        )
+      }
+    }
+
+    // A graph saved before the mode existed has no key for it, and must land on `uniform`.
+    expect(param('skeletonWidth').visibleIf?.({})).toBe(true)
+    expect(param('skeletonRadiusWidth').visibleIf?.({})).toBe(false)
+    expect(param('skeletonWorldWidth').visibleIf?.({})).toBe(false)
+
+    for (const id of ['skeletonWidthMode', ...Object.values(shown)]) {
+      expect(param(id).composite?.key, id).toBe('skeletonLineWidth')
+    }
+  })
+
+  it('opens to scale at the calibre the source published, not a flattering one', () => {
+    /*
+     * The one width param that is a *multiplier* rather than a width, and it defaults to 1
+     * because the mode's whole claim is that the picture is to scale. Anything else would put
+     * a factor between the data and the figure by default — and this is the mode somebody
+     * would measure a neurite off.
+     */
+    const width = param('skeletonWorldWidth')
+    if (width.kind !== 'number') throw new Error('expected a number')
+    expect(width.default).toBe(1)
+    expect(width.min).toBeGreaterThan(0)
+  })
+
+  it('opens by radius wide enough to show a taper', () => {
+    /*
+     * The reason this is its own param rather than the uniform width reused. `Line width` is
+     * the width of the *thickest* neurites here, and everything thinner is proportional down
+     * to a one-pixel floor — so at the uniform default of 1 every node would clamp to the
+     * floor and the mode would look like it had done nothing.
+     */
+    const width = param('skeletonRadiusWidth')
+    if (width.kind !== 'number') throw new Error('expected a number')
+    expect(width.default).toBe(4)
+    expect(width.min).toBe(1)
+  })
+
+  it('keeps both width params presentational, like everything else on this node', () => {
+    // Width changes the picture and not the `Selected` table, so it must not stale anything
+    // downstream — the same rule the colour encodings and the show switches follow.
+    for (const id of [
+      'skeletonWidthMode',
+      'skeletonWidth',
+      'skeletonRadiusWidth',
+      'skeletonWorldWidth',
+    ]) {
+      expect(param(id).presentational, id).toBe(true)
+      expect(param(id).group, id).toBe('skeletons')
+    }
+  })
+
+  it('opens the lights at the calibrated pair, and never at black', () => {
+    /*
+     * Floored above 0, which is the difference from the occlusion slider beside it: 0 there is
+     * a well-defined "no darkening", and 0 here is a black canvas reachable by dragging a
+     * handle to its end — a setting indistinguishable from a viewer that failed to load.
+     */
+    const light = param('lightIntensity')
+    if (light.kind !== 'number') throw new Error('expected a number')
+    expect(light.default).toBe(1)
+    expect(light.min).toBeGreaterThan(0)
+    expect(light.slider).toBe(true)
+    // Presentational, like every other setting on this node: it changes how a surface is lit,
+    // not what the `Selected` table says.
+    expect(light.presentational).toBe(true)
+    expect(light.group).toBe('scene')
+  })
+
+  it('warns about the clipping ceiling rather than refusing to reach it', () => {
+    /*
+     * `NoToneMapping` clips at 1.0 where a curve would roll off, so the top of this range
+     * genuinely costs something — measured at 23.1% of surface pixels saturated at 2, against
+     * 0% anywhere up to 1.4. A limit warns and does not refuse, so the range keeps its top and
+     * the help carries the number.
+     */
+    const light = param('lightIntensity')
+    if (light.kind !== 'number') throw new Error('expected a number')
+    expect(light.max).toBe(2)
+    expect(light.help).toMatch(/clip/i)
+  })
+
+  it('shades surfaces by default, which costs nothing on a scene with none', () => {
+    /*
+     * On by default, and what licenses that is `wantsAmbientOcclusion` rather than the pass
+     * being cheap: a skeleton scene never mounts a composer at all, because `GTAOPass` hides
+     * lines and points before it renders its normal buffer. Measured on an M3 Max with 21
+     * meshes at 2× device scale, a scene that *does* mount one holds 60fps either way.
+     */
+    const ao = param('ambientOcclusion')
+    if (ao.kind !== 'number') throw new Error('expected a number')
+    expect(ao.default).toBe(1)
+    expect(ao.presentational).toBe(true)
+    expect(ao.group).toBe('scene')
+  })
+
+  it('carries the off state in the strength rather than in a second control', () => {
+    /*
+     * One number, not a toggle plus a slider. `GTAOPass`'s blend is `mix(vec3(1.), ao,
+     * intensity)`, so 0 already means "no darkening" exactly — a checkbox beside it would be a
+     * second spelling of `strength === 0`, and two controls that can disagree end up showing a
+     * scene with no occlusion in it and a box insisting the effect is on.
+     */
+    const ao = param('ambientOcclusion')
+    if (ao.kind !== 'number') throw new Error('expected a number')
+    expect(ao.min).toBe(0)
+    /*
+     * Runs to 2, which octarine's `intensity` does not. 1 is where a *fully* occluded pixel
+     * reaches black, so past it the effect widens rather than deepens — it pulls the
+     * mid-occluded range down too. Safe rather than merely tolerated: the blend is multiply, so
+     * an extrapolated negative clamps at the framebuffer, and three selects the linear branch
+     * of the sRGB transfer with a `bvec` — a select, not a lerp — so the `pow` of a negative
+     * never reaches the output as NaN.
+     */
+    expect(ao.max).toBe(2)
+    // A proportion set by feel, which is what `NumberParam.slider` is for.
+    expect(ao.slider).toBe(true)
+  })
+
+  it('does not pick on a click until somebody asks it to', () => {
+    /*
+     * Off by default, and the default is the point. Picking writes `selection`, which is the
+     * one param on this node that is *not* presentational — a stray click while turning the
+     * scene marks everything downstream stale and re-runs it. The toggle itself is
+     * presentational: it decides whether a gesture can write that param, not what the param
+     * means once written.
+     */
+    const pick = param('selectByClick')
+    expect(pick.kind).toBe('boolean')
+    expect(pick.default).toBe(false)
+    expect(pick.presentational).toBe(true)
+    expect(pick.group).toBe('scene')
+  })
+
   it('can switch off each socket whole, which the legend cannot always do', () => {
     /*
      * A peer of the legend's per-key eye, not a duplicate. Keys exist only where an encoding

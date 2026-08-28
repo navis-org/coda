@@ -161,6 +161,72 @@ symptom to recognise — which usually points nowhere near the cause.
   times: per-pass files and pictures come through the awaited `SchedulerHost.onIteration`, and
   `loopNodes` is what stops `useDownloads` adding a stray four-hundred-and-first file. See
   [docs/loops.md](docs/loops.md).
+- **A shader patch that stops matching is silent, and a neuron's width was in the data all along.**
+  `SkeletonGeometry.radii` is filled by all three skeleton backends and was drawn by none of them,
+  because three's `LineMaterial` takes one `linewidth` uniform. `flexLineMaterial.ts` rewrites the
+  one site in three's own `line` vertex shader that reads it — the same three-line diff octarine's
+  `shaders/lines.py` makes against pygfx's `line.wgsl`, one graphics API over. Patching beats
+  replacing: the quad, the endcaps, the near-plane trim and the cap AA are all inherited, and the
+  cap comes out per-node for free because the width is applied *after* the endcap extension. The
+  trap is the upgrade: rename a variable in `ShaderLib` and the patch matches nothing, the material
+  still compiles, and every skeleton silently draws at the uniform width. So it throws rather than
+  falling back, and `flexLineMaterial.test.ts` runs the patch — `ShaderLib` is plain text, which
+  makes this the one piece of the fat-line path jsdom can reach. Scaling is against the **p95**
+  radius, never the maximum, or one runaway node flattens the arbour onto the 1px floor; and that
+  floor is required, because CATMAID's unset radius and a small CAVE L2 chunk are both 0 and would
+  otherwise take the twigs off the picture. See [docs/viewers.md](docs/viewers.md).
+- **A width in world units is two more patch sites that must agree, and three's ray is 1e5 units
+  long.** `to scale` draws the same radii in nanometres rather than pixels — pygfx's
+  `thickness_space`, the mode octarine defaults skeletons to. The vertex shader extrudes the box
+  and the *fragment* shader carves the tube out of it, so patching one without the other is either
+  a wider box with an unchanged silhouette or a tube clipped flat by its own box. Two consequences
+  that each look like something else. `vec3 rayEnd = normalize( worldPos.xyz ) * 1e5` is generous
+  in a scene measured in metres and exactly 100 µm in one measured in nanometres — past that the
+  ray stops short, `closestLineToLine` clamps, and **every fragment discards**: the arbour vanishes
+  whole in one zoom step (measured: blank between 73 px and 60 px of on-screen extent, where the
+  screen-space modes drew down to 32 px). And the pixel floor cannot be a number of nanometres, so
+  `MIN_WORLD_PIXELS` is applied per vertex in the shader where the projection is known —
+  `abs( clip.w )` is the view depth under perspective and 1 under orthographic, which is the whole
+  difference between the two cameras. What it does **not** buy is skeletons in the AO pass: the
+  geometry is a camera-facing box, the tube is a fragment `discard`, and the vertex shader
+  overwrites depth with the endpoint's (`clip.z = clipPose.z * clip.w`) so segments overlap
+  neatly. Real tubes are a different feature; octarine's `shaders/tubes.py` is what that costs. A
+  screen-space width and a world one differ in an *exponent*, not in any one frame, so the check
+  is ink against extent across a zoom sweep: p = 1.0 for both pixel modes, 1.6 for `to scale`.
+  See [docs/viewers.md](docs/viewers.md).
+- **A post-processing pass moves the background out from under the scene, twice.** Ambient
+  occlusion means an `EffectComposer`, and a composer renders into a texture — which broke the
+  canvas colour in two ways that no test could see and that only appear once the toggle is on.
+  `RenderPass` sets the clear colour *before* it binds the target, so the surface was converted
+  for the screen and then encoded again by `OutputPass` (`#1a1a19` → `#585855`); `scene.background`
+  is painted inside `renderer.render` and is the fix. And tone mapping is per-*material* in the
+  ordinary path but per-*image* through a composer, so R3F's default ACES curve reached the
+  background only under AO (`#1a1a19` → `#080808`) — hence `<Canvas flat>`, which also changes how
+  surfaces look and is a trade rather than a freebie. Two more seams the composer owns:
+  `setSize` takes **CSS pixels** and applies its own pixel ratio (`getDrawingBufferSize` applies it
+  twice and quietly quarters the AO resolution on retina), and the PNG export renders its own
+  frame, so it has to render through the chain or a figure comes out without the effect that is on
+  screen. The pass itself is only *mounted* where there is something to occlude: every line and
+  point is hidden before its normal pass, so a skeleton scene — most of them — would pay four
+  passes to multiply the image by 1. Only two of the three classes are three's job, though:
+  `_overrideVisibility` tests `isPoints || isLine || isLine2`, and a **fat** line is a `Mesh`
+  carrying `isLineSegments2` — so it reached the normal pass with `MeshNormalMaterial` swapped in
+  and drew a two-unit box at the model origin into the g-buffer, subpixel at 10⁵ nm and not
+  subpixel on one small neuron. `hidesFromGtao` is the missing third. **Both** its world-unit uniforms are rescaled: `radius` to 4%
+  of the scene extent, never the 0.25 default, *and* `thickness`, whose default of 1 is a
+  one-nanometre depth cutoff that rejected every sample the estimator took and blended a uniform
+  white — a library's world-unit defaults are a set that agree with each other, so rescaling one
+  is a different kind of broken, not a partial fix. When an effect's magnitude looks too small,
+  render its own buffer (`GTAOPass.OUTPUT.Denoise`, octarine's `debug=True`) before writing down
+  a reason the number is small; a plausible story about thin convex geometry is what stopped that
+  investigation one step short. Measure on a real GPU: headless Chrome falls back to
+  SwiftShader and reported this pass as 2.5× frame time where hardware shows none. Its strength
+  is one slider where 0 is off, not a toggle plus a strength — the blend is `mix(1, ao, k)`, so a
+  checkbox would be a second spelling of `k === 0` and the two can disagree. And **a `useMemo` may
+  be reused across a remount while an effect cleanup always runs**: writing the pass into a ref
+  inside the memo and nulling it in the cleanup meant the *first* strength change applied and
+  every later one silently did not. Return the object from the memo instead.
+  See [docs/viewers.md](docs/viewers.md).
 - **Module init order.** `graphStore.ts` imports `../nodes` for its side effect. Without
   it, ordering in `main.tsx` becomes load-bearing and silently drops every node.
   The same trap one level in: a Node-side script needs `registerBuiltinSources()` as well, or

@@ -12,6 +12,7 @@ import {
 } from '../colors'
 import { exportBaseName as makeBaseName, tableToCsvParts } from '../export'
 import { formatCompact, formatNumber, labelStep, niceTicks, plural } from '../format'
+import { ClearSelection } from './LegendKeys'
 import type { HistogramBar, Normalize } from './histogramBins'
 import { binScan, normalizeLabel, scanValues } from './histogramBins'
 import { isAdditive, useMarkSelection } from './useMarkSelection'
@@ -347,14 +348,7 @@ export function HistogramViewer({
           {dropped > 0 ? ` · ${dropped} unplottable` : ''}
         </span>
         {marks.size > 0 && (
-          <button
-            type="button"
-            className="legend__label nodrag"
-            title="Clear the selection"
-            onClick={marks.clear}
-          >
-            {plural(marks.size, 'bin')} selected ⨯
-          </button>
+          <ClearSelection label={`${plural(marks.size, 'bin')} selected`} onClear={marks.clear} />
         )}
         <ViewerActions
           baseName={baseName ?? makeBaseName(undefined, 'histogram')}
