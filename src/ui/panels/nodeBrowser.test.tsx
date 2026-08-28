@@ -166,6 +166,7 @@ describe('NodeBrowser filtering', () => {
       'Box Plot',
       'Dataset Summary',
       'Dendrogram',
+      'Describe Table',
       'Heatmap',
       'Histogram',
       'Network Viewer',
@@ -176,7 +177,7 @@ describe('NodeBrowser filtering', () => {
       'Scatter Plot',
       'Table',
     ])
-    expect(screen.getByText('14 nodes')).toBeTruthy()
+    expect(screen.getByText('15 nodes')).toBeTruthy()
   })
 
   it('fuzzy-searches across every category, best match first', () => {

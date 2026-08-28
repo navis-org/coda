@@ -41,6 +41,7 @@ import type { Normalize } from './histogramBins'
 import type { LayoutName } from './networkLayout'
 import type { FilterClause } from '../../nodes/lib/tableFilter'
 import { decodeClauses, encodeClauses } from '../../nodes/lib/tableFilter'
+import { describeTable } from '../../nodes/lib/describeOps'
 import { TableSummary } from './TableSummary'
 import { TableViewer } from './TableViewer'
 
@@ -593,9 +594,22 @@ function ValuePreviewInner({
           }
         : {}
     if (summary) return <TableSummary table={value} />
+    /*
+     * Describe Table draws its *second* port, not the value on its first.
+     *
+     * Its pass-through is the input unchanged, so drawing `value` would make it a second Table
+     * node with a different name. The summary is what the node is for — and it is rebuilt here
+     * rather than plumbed through because `ValuePreview` is handed one output value, the
+     * primary port's, which for a tap is deliberately the one that carries the input on.
+     *
+     * That is not a second pass over the data: `describeTable` is memoised on the table object,
+     * and this is the very object `evaluate` was given. It also hands back the same result on
+     * every render, which is what keeps the viewer's page from resetting under it.
+     */
+    const drawn = node.type === 'out.describe' ? describeTable(value) : value
     return (
       <TableViewer
-        table={value}
+        table={drawn}
         pageSize={Number.isFinite(pageSize) && pageSize > 0 ? pageSize : 100}
         {...filtering}
         {...shared}

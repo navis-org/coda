@@ -221,5 +221,55 @@ wide <- data.frame(id = c("a", "b", "c"), f1 = c(1, 2, 0), f2 = c(2, 4, 0), f3 =
 check("similarity: the wide layout answers what the long one does",
       isTRUE(all.equal(coda_similarity_wide(wide, "id", c("f1", "f2", "f3")), cosine)))
 
+# ---- coda_describe ----------------------------------------------------------
+#
+# The helper whose obvious substitute is `summary(df)`, which is the reason to run it: the two
+# look alike in a rendered document and answer different questions, so a transcription drifting
+# towards base R's semantics would still print something perfectly plausible. Checked against
+# the numbers `describeOps.test.ts` pins one language over.
+
+described <- coda_describe(data.frame(
+  neuronId = c(1, 2, 3, 4, 5),
+  type = c("LC4", "LC4", "", "LC6", NA),
+  weight = c(0, 10, 20, 30, NA),
+  flagged = c(TRUE, FALSE, FALSE, TRUE, TRUE),
+  stringsAsFactors = FALSE
+))
+rownames(described) <- described$column
+
+check("describe: one row per column, in order",
+      identical(coda_describe(data.frame(a = 1, b = 2))$column, c("a", "b")))
+check("describe: an empty string is missing, not a value",
+      described["type", "non_nulls"] == 3L && described["type", "nulls"] == 2L &&
+        described["type", "unique"] == 2L,
+      paste(described["type", ], collapse = " "))
+check("describe: FALSE is a real answer",
+      described["flagged", "non_nulls"] == 5L && described["flagged", "unique"] == 2L,
+      paste(described["flagged", ], collapse = " "))
+check("describe: the five-number spread, type 7",
+      isTRUE(all.equal(unlist(described["weight", c("min", "q1", "median", "q3", "max", "mean")],
+                              use.names = FALSE), c(0, 7.5, 15, 22.5, 30, 15))),
+      paste(described["weight", ], collapse = " "))
+check("describe: zero is present and not counted as non-zero",
+      described["weight", "non_zero"] == 3, described["weight", "non_zero"])
+# `is.numeric` is already FALSE for a logical column, so this is the branch that costs nothing
+# in R and everything in pandas — pinned on both sides so the two documents cannot part company.
+check("describe: a logical column is counted, never measured",
+      all(is.na(unlist(described["flagged", c("non_zero", "min", "max", "mean")]))),
+      paste(described["flagged", ], collapse = " "))
+check("describe: the id column is counted, never measured",
+      described["neuronId", "unique"] == 5L &&
+        all(is.na(unlist(described["neuronId", c("non_zero", "min", "max", "mean")]))),
+      paste(described["neuronId", ], collapse = " "))
+# The reason this is a helper at all: `summary()` is a different answer under the same name.
+check("describe: and it is not what summary() says",
+      is.data.frame(described) && "unique" %in% names(described),
+      paste(names(described), collapse = " "))
+check("describe: a frame with no columns keeps the summary's shape",
+      identical(names(coda_describe(data.frame()))[1:4],
+                c("column", "dtype", "non_nulls", "nulls")) &&
+        nrow(coda_describe(data.frame())) == 0L,
+      paste(names(coda_describe(data.frame())), collapse = " "))
+
 cat("\n", if (fails > 0L) paste(fails, "failed") else "all passed", "\n", sep = "")
 quit(status = if (fails > 0L) 1L else 0L)

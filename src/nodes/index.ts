@@ -63,6 +63,7 @@ export { linkageNode } from './analysis/linkage'
 export { cutTreeNode } from './analysis/cutTree'
 
 export { tableViewNode } from './output/table'
+export { describeNode } from './output/describe'
 export { heatmapNode } from './output/heatmap'
 export { dendrogramNode } from './output/dendrogram'
 export { barChartNode } from './output/barChart'

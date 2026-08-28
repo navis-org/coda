@@ -69,6 +69,32 @@ registerEmitter('out.table', (ctx) => {
 })
 
 // ---------------------------------------------------------------------------
+// Describe Table — the other viewer with nothing to draw
+// ---------------------------------------------------------------------------
+
+/**
+ * A tap plus a frame *about* the frame.
+ *
+ * The one place a reader might expect `df.describe()` and must not get it. That method skips
+ * every non-numeric column unless asked otherwise, counts an empty string as a value, reports
+ * a standard deviation this node does not and omits the non-zero count it does — so a notebook
+ * using it would answer a different question under the same heading. `coda_describe` mirrors
+ * `src/nodes/lib/describeOps.ts` line for line instead.
+ */
+registerEmitter('out.describe', (ctx) => {
+  const src = ctx.wired('in')
+  const out = ctx.output('out')
+  const summary = ctx.output('summary')
+
+  ctx.require('pandas')
+  ctx.helper('coda_describe')
+
+  // A bare name on the last line is how a notebook displays a frame — and it is the summary
+  // rather than the pass-through, because the summary is what this node is for.
+  return [`${out} = ${src}`, `${summary} = coda_describe(${out})`, summary]
+})
+
+// ---------------------------------------------------------------------------
 // Bar chart
 // ---------------------------------------------------------------------------
 

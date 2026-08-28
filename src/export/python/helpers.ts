@@ -433,3 +433,83 @@ registerHelper({
     '    return _coda_similarity(sparse.csr_matrix(dense), labels, metric, output)',
   ],
 })
+
+/**
+ * Coda's Describe Table, column by column.
+ *
+ * A helper rather than a one-liner because the one-liner is wrong. `df.describe()` looks like
+ * exactly this node and answers a different question: it drops every non-numeric column unless
+ * asked otherwise, has no notion of an empty string being an absence, reports a standard
+ * deviation this node does not, and omits the non-zero count it does. A notebook that quietly
+ * substituted it would still run, still print a table of numbers under the node's own name, and
+ * disagree with the canvas on the two columns anybody exported it to check.
+ *
+ * Mirrors `src/nodes/lib/describeOps.ts`, including the two rules that are decisions rather than
+ * arithmetic: absence is null *or* a string that is empty once trimmed, and the id column is
+ * counted and never measured.
+ *
+ * The one thing that is deliberately *not* mirrored is `dtype`, which reports pandas' own name
+ * (`int64`, `object`) rather than Coda's (`i64`, `str`). The column says what the frame in front
+ * of the reader actually holds, which is the more useful of the two answers in a notebook.
+ */
+registerHelper({
+  name: 'coda_describe',
+  requires: [['pandas'], ['numpy']],
+  source: [
+    'CODA_DESCRIBE_COLUMNS = [',
+    "    'column', 'dtype', 'non_nulls', 'nulls', 'non_zero', 'unique',",
+    "    'min', 'q1', 'median', 'q3', 'max', 'mean',",
+    ']',
+    '',
+    '',
+    'def coda_describe(df):',
+    '    """One row per column: what is filled in, how varied it is, and how it is spread.',
+    '',
+    '    Not `df.describe()` -- see the note in Coda\'s exporter. Non-numeric columns get the',
+    '    counts and nothing else, and so does `neuronId`: a mean neuron id names no neuron.',
+    '    """',
+    '    rows = []',
+    '    for name in df.columns:',
+    '        s = df[name]',
+    '        # Coda\'s absence rule: null, or a string that is empty once trimmed. `False` stays',
+    '        # a real answer, which is why this tests the text rather than truthiness.',
+    '        label = s.astype(str).str.strip()',
+    "        present = s.notna() & (label != '')",
+    '        # `is_numeric_dtype` is True for a boolean column, so the flags are excluded here',
+    '        # rather than surprising somebody with a mean of 0.4 under a column of True/False.',
+    '        numeric = (pd.api.types.is_numeric_dtype(s)',
+    '                   and not pd.api.types.is_bool_dtype(s))',
+    "        measured = numeric and name != 'neuronId'",
+    '        row = dict.fromkeys(CODA_DESCRIBE_COLUMNS)',
+    '        row.update(',
+    '            column=name,',
+    '            dtype=str(s.dtype),',
+    '            non_nulls=int(present.sum()),',
+    '            nulls=int((~present).sum()),',
+    '            # Distinct values as printed, which is the count a Group By downstream agrees',
+    '            # with.',
+    '            unique=int(label[present].nunique()),',
+    '        )',
+    '        if measured:',
+    "            v = pd.to_numeric(s[present], errors='coerce')",
+    '            # A NaN or an infinity arrived, so it is present and distinct above -- but it',
+    '            # takes no part in the spread, where it would drag a quartile with it.',
+    '            v = v[np.isfinite(v)]',
+    '            row[\'non_zero\'] = int((v != 0).sum())',
+    '            if len(v):',
+    '                row.update(',
+    '                    min=float(v.min()),',
+    '                    # pandas interpolates linearly by default, which is the type-7',
+    '                    # definition `quantileSorted` implements.',
+    '                    q1=float(v.quantile(0.25)),',
+    '                    median=float(v.quantile(0.5)),',
+    '                    q3=float(v.quantile(0.75)),',
+    '                    max=float(v.max()),',
+    '                    mean=float(v.mean()),',
+    '                )',
+    '        rows.append(row)',
+    '    # `columns=` explicitly, so an empty frame still comes back with the summary\'s shape',
+    '    # rather than with no columns at all.',
+    '    return pd.DataFrame(rows, columns=CODA_DESCRIBE_COLUMNS)',
+  ],
+})

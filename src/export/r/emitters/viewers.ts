@@ -63,6 +63,25 @@ registerEmitter('out.table', (ctx) => {
   return [...lines, predicates.length > 0 ? filtered : out]
 })
 
+/**
+ * A tap plus a frame *about* the frame.
+ *
+ * `summary(df)` is what a reader might expect here and is not what this is: it returns
+ * formatted text rather than data, and it has no distinct count and no non-zero count.
+ * `coda_describe` mirrors `src/nodes/lib/describeOps.ts` instead — see the helper.
+ */
+registerEmitter('out.describe', (ctx) => {
+  const src = ctx.wired('in')
+  const out = ctx.output('out')
+  const summary = ctx.output('summary')
+
+  ctx.helper('coda_describe')
+
+  // A bare name on the last line prints the frame, and it is the summary rather than the
+  // pass-through, because the summary is what this node is for.
+  return [`${out} <- ${src}`, `${summary} <- coda_describe(${out})`, summary]
+})
+
 registerEmitter('out.barChart', (ctx) => {
   const src = ctx.wired('in')
   ctx.library('ggplot2')

@@ -500,3 +500,79 @@ registerHelper({
     '}',
   ],
 })
+
+/**
+ * Coda's Describe Table, column by column.
+ *
+ * The counterpart of `coda_describe` in `python/helpers.ts`, and it exists for the same reason:
+ * the obvious substitute answers a different question. `summary(df)` returns a character matrix
+ * of formatted text rather than a frame anybody can sort or join, applies the six-number
+ * summary only to numeric columns and reports the quartiles it does compute without a non-zero
+ * count or a distinct count at all — so the document would print something that looks like the
+ * card and cannot be compared with it.
+ *
+ * Base R throughout, so this costs the document no package. `stats::quantile`'s default is
+ * type 7, which is the definition `quantileSorted` implements — stated explicitly here rather
+ * than relied on, because it is the sort of default that a reader has no reason to check.
+ *
+ * `dtype` reports R's class (`integer`, `character`) rather than Coda's (`i64`, `str`), the
+ * same call the Python helper makes: the column says what the frame in front of the reader
+ * holds.
+ */
+registerHelper({
+  name: 'coda_describe',
+  source: [
+    'coda_describe <- function(df) {',
+    '  # The zero-row template is rbound in ahead of the rows, which fixes the column order and',
+    '  # the types -- and answers a frame with no columns at all, where `do.call(rbind, list())`',
+    '  # would otherwise return NULL.',
+    '  template <- data.frame(',
+    '    column = character(), dtype = character(), non_nulls = integer(), nulls = integer(),',
+    '    non_zero = numeric(), unique = integer(), min = numeric(), q1 = numeric(),',
+    '    median = numeric(), q3 = numeric(), max = numeric(), mean = numeric(),',
+    '    stringsAsFactors = FALSE',
+    '  )',
+    '',
+    '  one <- function(name) {',
+    '    v <- df[[name]]',
+    "    # Coda's absence rule: NA, or a string that is empty once trimmed. FALSE stays a real",
+    '    # answer, which is why this tests the text rather than truthiness.',
+    '    label <- trimws(as.character(v))',
+    '    present <- !is.na(v) & !is.na(label) & nzchar(label)',
+    '    # `is.numeric` is FALSE for a logical column, which is what we want: a mean of 0.4',
+    '    # under a column of TRUE/FALSE is not a summary anybody asked for. An id is excluded',
+    '    # for the other reason -- a mean neuron id names no neuron.',
+    '    measured <- is.numeric(v) && !identical(name, "neuronId")',
+    '',
+    '    row <- template[1, ]',
+    '    row$column <- name',
+    '    row$dtype <- class(v)[1]',
+    '    row$non_nulls <- as.integer(sum(present))',
+    '    row$nulls <- as.integer(sum(!present))',
+    '    # Distinct values as printed, which is the count a group-and-count downstream agrees',
+    '    # with.',
+    '    row$unique <- as.integer(length(unique(label[present])))',
+    '',
+    '    if (measured) {',
+    '      x <- as.numeric(v[present])',
+    '      # An NA or an infinity arrived, so it is present and distinct above -- but it takes',
+    '      # no part in the spread, where it would drag a quantile with it.',
+    '      x <- x[is.finite(x)]',
+    '      row$non_zero <- sum(x != 0)',
+    '      if (length(x)) {',
+    '        q <- stats::quantile(x, c(0.25, 0.5, 0.75), type = 7, names = FALSE)',
+    '        row$min <- min(x)',
+    '        row$q1 <- q[1]',
+    '        row$median <- q[2]',
+    '        row$q3 <- q[3]',
+    '        row$max <- max(x)',
+    '        row$mean <- mean(x)',
+    '      }',
+    '    }',
+    '    row',
+    '  }',
+    '',
+    '  do.call(rbind, c(list(template), lapply(names(df), one)))',
+    '}',
+  ],
+})

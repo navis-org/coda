@@ -671,6 +671,12 @@ export function everythingGraph(): CodaGraph {
         ],
       },
     },
+    /*
+     * Describe Table, on `group` rather than on the pivot: its own emitter needs no schema,
+     * but a summary of a table whose columns are only *observed* would be a summary of
+     * nothing anybody can read back against the canvas.
+     */
+    { id: 'describe', type: 'out.describe', col: 12, row: 3 },
     { id: 'heat', type: 'out.heatmap', col: 12, row: 1, params: { showValues: false } },
     {
       id: 'bar',
@@ -906,6 +912,7 @@ export function everythingGraph(): CodaGraph {
     ['find', 'neurons', 'dist', 'in'],
     ['find', 'neurons', 'dist2', 'in'],
     ['group', 'out', 'tableFilt', 'in'],
+    ['group', 'out', 'describe', 'in'],
     ['group', 'out', 'net', 'edges'],
     ['net', 'network', 'netview', 'in'],
     ['syn', 'points', 'synblast', 'query'],

@@ -306,6 +306,33 @@ cosine, Euclidean, presence Jaccard and correlation, and `stats::dist` plus `cor
 the comparison worth making rather than against numbers typed into the script, since the claim
 these helpers make is that a sparse route reaches the same answer as the dense one.
 
+### `coda_describe`, and the two functions it must not be
+
+Describe Table (`out.describe`) emits a tap plus a summary frame, and the whole of the risk is
+that both languages ship a built-in that looks exactly like it. `df.describe()` drops every
+non-numeric column unless asked otherwise, has no notion of an empty string being an absence,
+reports a standard deviation this node does not and omits the non-zero count it does;
+`summary(df)` returns a formatted **character matrix** rather than a frame anybody can sort or
+join, and has neither a distinct count nor a non-zero one. Either substitution produces a
+document that still runs, still prints a table of numbers under the node's own name, and
+disagrees with the canvas on the columns somebody exported it to check. So both exporters carry
+a generated helper mirroring `nodes/lib/describeOps.ts` instead.
+
+Three things in it are decisions rather than arithmetic, and each is pinned in **both** probes
+against the numbers `describeOps.test.ts` pins one language over: absence is null *or* a string
+that is empty once trimmed (`false` is a real answer), a boolean column is counted and never
+measured, and so is `neuronId`. The boolean case is the one that costs nothing in R and
+everything in pandas — `is.numeric` is already FALSE for a logical vector, where
+`pd.api.types.is_numeric_dtype` is **True** for a boolean column and would hand somebody a mean
+of 0.4 under a column of True/False. That asymmetry is exactly the shape of thing two
+transcriptions part company over, which is why it is checked on both sides rather than on the
+one that needed the branch.
+
+`dtype` is the one column deliberately *not* mirrored: it reports pandas' or R's own name
+(`int64`, `character`) rather than Coda's (`i64`, `str`), the same call the CAVE table listing
+makes below and for the same reason — the column says what the frame in front of the reader
+actually holds.
+
 ### The CAVE half of the notebook exporter
 
 `src/export/python/emitters/cave.ts` and `caveHelpers.ts`. A FlyWire graph now exports as a

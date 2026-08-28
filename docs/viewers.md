@@ -366,6 +366,53 @@ and after), the numeric, regex and invalid cases all behave, and the card shows 
 own width with the toggle disabled while filtering. What is _not_ covered anywhere is the light
 theme, and a table wide enough to scroll the filter row sideways.
 
+### Describe Table: a table about the table
+
+`out.describe` is a tap like every other viewer here, and its second port is the one thing about
+it that is not. `out.table`'s `Filtered` and `out.network`'s subset are both *the input, less
+some of it*; `Summary` is a different table entirely — one row per **column** of the input,
+carrying `non_nulls`, `nulls`, `non_zero`, `unique` and, for numeric columns,
+`min`/`q1`/`median`/`q3`/`max`/`mean`. It is a port rather than only a drawing because "which of my columns are half
+empty" is a question with an answer worth keeping: it sorts, joins and exports like any other
+table.
+
+Three things about it are decisions rather than arithmetic, and `nodes/lib/describeOps.ts` is
+where each is written down.
+
+**`describeSchema()` takes no arguments.** Every other `*Schema` in the pack is a function of
+the input's schema; this one is a constant, because the summary's shape is decided by the
+statistics and not by the data. So the `Summary` port is fully typed before anything has run and
+before anything is wired, and a picker downstream fills the moment the link is drawn — the
+opposite end of the range from Pivot, whose columns are named by its data and which needs
+`observesOutputSchema` to say anything at all.
+
+**Only numeric columns get numbers, and the id column is not one of them.** A lexicographic
+minimum in a column of minima reads exactly like a numeric one and nothing on the row says which
+kind it is, so a `str` or `bool` column reports its counts and leaves the rest null. `neuronId`
+is `i64` on most sources and is still not a quantity: a mean neuron id identifies nothing, and
+`CellValue` is a float64 (invariant 8), so on an 18-digit id the arithmetic would not even be
+over the ids. Counts survive that, because they compare cells rather than adding them — which is
+the same distinction [`isIdentifierColumn`](#an-identifier-is-not-a-quantity) draws one layer up
+in the formatter.
+
+**Absence is `valueLabel`'s, shared with the Dataset Summary rather than restated.** An empty or
+whitespace-only string is nothing recorded and `false` is a real answer; neuPrint publishes
+`null` and `''` for the same missing annotation depending on the property, so two copies of that
+rule would let one node report a column as complete while the summary beside it reports the same
+column as a third empty.
+
+Two seams that are easy to get wrong from either end. **The card draws the second port, not the
+first.** `ValuePreview` is handed one output value — the primary port's, which on a tap is
+deliberately the pass-through — so the default table branch would render a second Table node
+under a different name. `describeTable` is called there instead and is memoised on the table
+*object*, so it is the same result `evaluate` already built: without that memo a `cheap` node
+sorts every numeric column twice per edit, and the viewer would be handed a fresh frame on every
+render and reset its page under whoever is reading it. And **the exporters must not reach for
+the obvious substitute.** `df.describe()` and `summary(df)` both look like this node and answer
+a different question — no distinct count, no non-zero count, an extra standard deviation, no
+notion of an empty string being an absence, and in R a character matrix rather than a frame — so
+both exporters carry a `coda_describe` helper mirroring the TypeScript instead.
+
 ## Grouped params — the styling sidebar
 
 `ParamBase.group` and `ParamBase.composite` plus `NodeDefinition.paramGroups` turn a node's

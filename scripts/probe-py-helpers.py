@@ -613,6 +613,57 @@ check("similarity: the wide layout answers what the long one does",
       near(sns_["coda_similarity_wide"](wide, "id", ["f1", "f2", "f3"]).to_numpy(),
            sns_["coda_similarity_long"](long, "obs", "feat", value="w").to_numpy()))
 
+# ---- coda_describe ----------------------------------------------------------
+#
+# The helper whose obvious substitute is `df.describe()`, which is why it is worth running: the
+# two produce tables of the same shape and answer different questions, and a transcription that
+# had quietly drifted towards pandas' semantics would still print a perfectly reasonable frame.
+# What is checked here is only the parts that are *decisions* — the absence rule, which columns
+# are measured, the id column — against the numbers `describeOps.test.ts` pins one language over.
+
+dns = load_cell(FIXTURES / "everything.ipynb", "def coda_describe(", {"pd": pd, "np": np})
+
+described = dns["coda_describe"](pd.DataFrame({
+    "neuronId": [1, 2, 3, 4, 5],
+    "type": ["LC4", "LC4", "", "LC6", None],
+    "weight": [0.0, 10.0, 20.0, 30.0, np.nan],
+    "flagged": [True, False, False, True, True],
+}))
+described = described.set_index("column")
+
+check("describe: one row per column, in order",
+      list(dns["coda_describe"](pd.DataFrame({"a": [1], "b": [2]}))["column"]) == ["a", "b"])
+check("describe: an empty string is missing, not a value",
+      (described.loc["type", "non_nulls"], described.loc["type", "nulls"],
+       described.loc["type", "unique"]) == (3, 2, 2),
+      str(described.loc["type"].to_dict()))
+check("describe: false is a real answer",
+      (described.loc["flagged", "non_nulls"], described.loc["flagged", "unique"]) == (5, 2),
+      str(described.loc["flagged"].to_dict()))
+check("describe: the five-number spread, type 7",
+      [described.loc["weight", k] for k in ("min", "q1", "median", "q3", "max", "mean")]
+      == [0.0, 7.5, 15.0, 22.5, 30.0, 15.0],
+      str(described.loc["weight"].to_dict()))
+check("describe: zero is present and not counted as non-zero",
+      described.loc["weight", "non_zero"] == 3, str(described.loc["weight", "non_zero"]))
+# A boolean column is `is_numeric_dtype` in pandas and is not a quantity here, exactly as it is
+# not one on the canvas — the branch most likely to be lost in transcription.
+check("describe: a boolean column is counted, never measured",
+      described.loc["flagged", ["non_zero", "min", "max", "mean"]].isna().all(),
+      str(described.loc["flagged"].to_dict()))
+check("describe: the id column is counted, never measured",
+      described.loc["neuronId", "unique"] == 5
+      and described.loc["neuronId", ["non_zero", "min", "max", "mean"]].isna().all(),
+      str(described.loc["neuronId"].to_dict()))
+# The reason this is a helper at all: `describe()` is a different answer under the same name.
+check("describe: and it is not what df.describe() says",
+      "std" not in described.columns and "non_zero" in described.columns,
+      str(list(described.columns)))
+empty = dns["coda_describe"](pd.DataFrame())
+check("describe: an empty frame keeps the summary's shape",
+      list(empty.columns)[:4] == ["column", "dtype", "non_nulls", "nulls"] and len(empty) == 0,
+      str(list(empty.columns)))
+
 print()
 print(f'{len(fails)} failed' if fails else 'all passed')
 sys.exit(1 if fails else 0)
