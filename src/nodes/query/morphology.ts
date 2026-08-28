@@ -109,7 +109,7 @@ export const skeletonsNode = registerNode({
      * so a message naming the backend was telling a FlyWire-production user something false
      * about a datastack that can perfectly well answer.
      */
-    if (ctx.inputs.dataset && !sourceSupports(ctx, 'skeletons')) {
+    if (ctx.inputs.dataset && !sourceSupports(ctx.inputs.dataset, 'skeletons')) {
       return ['This dataset has no skeletons']
     }
     return []
@@ -200,7 +200,7 @@ export const meshesNode = registerNode({
   }),
 
   validate: (ctx) => {
-    if (ctx.inputs.dataset && !sourceSupports(ctx, 'meshes')) {
+    if (ctx.inputs.dataset && !sourceSupports(ctx.inputs.dataset, 'meshes')) {
       return ['This data source has no meshes']
     }
     return []
@@ -281,7 +281,7 @@ export const synapsesNode = registerNode({
   }),
 
   validate: (ctx) => {
-    if (ctx.inputs.dataset && !sourceSupports(ctx, 'synapses')) {
+    if (ctx.inputs.dataset && !sourceSupports(ctx.inputs.dataset, 'synapses')) {
       return ['This data source has no synapse locations']
     }
     return []

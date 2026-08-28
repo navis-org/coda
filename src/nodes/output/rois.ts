@@ -235,7 +235,7 @@ export const roisNode = registerNode({
    * neuPrint serves publish none at all, so this is the common case rather than the odd one.
    */
   validate: (ctx) => {
-    if (!sourceSupports(ctx, 'roiMeshes')) {
+    if (!sourceSupports(ctx.inputs.dataset, 'roiMeshes')) {
       const label = sourceLabel(ctx.inputs.dataset) ?? 'This source'
       return [`${label} does not publish region meshes`]
     }

@@ -649,6 +649,46 @@ not forty onto forty; `roiInfo` nests, so regions are filtered to `fetch_primary
 summing or the totals roughly double; and a null type sorts **last** on a tie, matching
 `collate`, which `na_position="last"` reproduces.
 
+### Idea, not built: a fourth option is to ship the *result* beside the notebook
+
+Recorded because it keeps coming up and there is currently nothing between "emit it" and "emit a
+TODO". A third option exists: **write the node's result to a CSV, bundle it with the notebook, and
+emit a `pd.read_csv` / `read.csv` cell that reads it.**
+
+The case that prompted it is `compare.matchTypes`. Its faithful Python route is `cocoa`, which is
+a fourth dependency this exporter deliberately does not have, and whose `GraphMapper` takes cocoa
+`DataSet` objects rather than the neuprint-python clients the dataset cells above it emit — so the
+emitter is refused and everything downstream of the mapper becomes a TODO too. A bundled
+`match_cell_types_labels.csv` would cut that off at one cell: the correspondence is *data*, it is
+a few thousand rows, and every downstream cell would then run for real.
+
+What it costs is a change to the contract, and it has to be said out loud rather than assumed.
+Today's promise is that the notebook **recomputes** what the canvas computed, from the sources
+up. A notebook that reads a bundled CSV reproduces the analysis *downstream* of that step and
+takes the step itself on trust — still useful, often the useful part, but a weaker claim, and one
+that goes stale the moment the underlying dataset is re-released. Any cell that does this must say
+so in a `NOTE`, in the same voice as the existing gaps.
+
+Three things it would need, none of them large, none of them started:
+
+- **A container.** The export is one `.ipynb` (or `.Rmd`) download; bundling means a zip.
+  `ui/zip.ts` already writes one for the loop file sink, so this is a wiring job rather than a new
+  capability.
+- **A rule for when it is allowed.** Not "whenever an emitter is missing" — that would quietly
+  turn the whole exporter into a data dump. The honest line is probably: only where the result is
+  *small, tabular and stable*, and only where the alternative is a TODO. A mapping is all three; a
+  connectivity fetch is none of them.
+- **A size ceiling**, because a notebook is a thing people mail to each other.
+
+`Upload Table` is the precedent and it points the other way, which is why it is worth naming here:
+it emits `pd.read_csv("<filename>")` for a file the *user* already has, accepting that the
+notebook depends on something beside it. This would be the same dependency with the file written
+by the export rather than by the user — the smaller step of the two, since nothing has to be found
+again.
+
+Applies to more than the mapper: any tier-3 node whose computation has no library twin is a
+candidate. Nothing here is scheduled.
+
 ### Known gaps, all of them stated in the notebook
 
 - **`Paths` with `Collapse types` on has no equivalent, and this one is not laziness.** Coda

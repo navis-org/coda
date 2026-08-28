@@ -44,12 +44,19 @@ export function sourceFromType(type: CodaType | undefined): DataSource | undefin
  * warning. Written out four times before this, once per node that needed it, and the fourth
  * had drifted into name-checking `sourceId === 'mock'`: correct only until a second source
  * cannot run Cypher, and its message named neuPrint by hand.
+ *
+ * **Takes the type, not the context**, like every other reader in this file. It used to take
+ * `(ctx, capability)` and dig `ctx.inputs.dataset` out itself, which made it the one helper here
+ * that knew what a Dataset socket is *called* — and a variadic node's sockets are called
+ * `dataset1`, `dataset2`, …. Adding a port-id argument answered that and left the node
+ * reconstructing `` `dataset${i}` `` to pass in, which is the concatenation
+ * [core.md](../../../docs/core.md) forbids a variadic body from doing. With a type, the caller
+ * already holds a resolved port and the question never arises.
  */
 export function sourceSupports(
-  ctx: { inputs: Record<string, CodaType | undefined> },
+  type: CodaType | undefined,
   capability: keyof SourceCapabilities,
 ): boolean {
-  const type = ctx.inputs['dataset']
   const source = sourceFromType(type)
   const datasetId = datasetRef(type)?.datasetId
   // `paths` is the one capability an attached edge set can *add*, so it has its own resolver —

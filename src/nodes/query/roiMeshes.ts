@@ -93,7 +93,7 @@ export const roiMeshesNode = registerNode({
 
   validate: (ctx) => {
     const issues: string[] = []
-    if (ctx.inputs.dataset && !sourceSupports(ctx, 'roiMeshes')) {
+    if (ctx.inputs.dataset && !sourceSupports(ctx.inputs.dataset, 'roiMeshes')) {
       issues.push('This dataset publishes no region meshes')
     }
 

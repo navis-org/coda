@@ -58,7 +58,7 @@ export const roiCompletenessNode = registerNode({
   inferOutputs: () => ({ completeness: T.table(ROI_COMPLETENESS_SCHEMA) }),
 
   validate: (ctx) => {
-    if (!sourceSupports(ctx, 'roiSummary')) {
+    if (!sourceSupports(ctx.inputs.dataset, 'roiSummary')) {
       const label = sourceLabel(ctx.inputs.dataset) ?? 'This source'
       return [`${label} does not publish a per-region completeness summary`]
     }

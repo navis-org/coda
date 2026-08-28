@@ -249,7 +249,7 @@ export const neuroglancerNode = registerNode({
 
   validate: (ctx) => {
     const issues: string[] = []
-    if (ctx.inputs.dataset && !sourceSupports(ctx, 'viewerScene')) {
+    if (ctx.inputs.dataset && !sourceSupports(ctx.inputs.dataset, 'viewerScene')) {
       issues.push('This data source publishes no neuroglancer scene')
     }
     return issues

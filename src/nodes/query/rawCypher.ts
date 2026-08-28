@@ -53,7 +53,7 @@ export const rawCypherNode = registerNode({
   validate: (ctx) => {
     const query = String(ctx.params.query ?? '').trim()
     if (!query) return ['Query is empty']
-    if (!sourceSupports(ctx, 'rawQuery')) {
+    if (!sourceSupports(ctx.inputs.dataset, 'rawQuery')) {
       const label = sourceLabel(ctx.inputs.dataset) ?? 'This source'
       return [`${label} has no query engine — connect a neuPrint dataset.`]
     }

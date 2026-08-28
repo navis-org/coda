@@ -164,7 +164,7 @@ export const pathsNode = registerNode({
      * whose API has no server-side aggregation — goes from refusing outright to traceable, and a
      * refusal has to be right before anything runs.
      */
-    if (ctx.inputs.dataset && !sourceSupports(ctx, 'paths')) {
+    if (ctx.inputs.dataset && !sourceSupports(ctx.inputs.dataset, 'paths')) {
       return [`${sourceLabel(ctx.inputs.dataset) ?? 'This data source'} cannot trace paths`]
     }
     const hops = Number(ctx.params.maxHops ?? 3)

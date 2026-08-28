@@ -252,7 +252,7 @@ export const exploreNode = registerNode({
       schemasFromType(ctx.inputs.dataset).neurons,
       parseSearch(String(ctx.params.query ?? '')),
     )
-    if (!sourceSupports(ctx, 'neuronIndex')) {
+    if (!sourceSupports(ctx.inputs.dataset, 'neuronIndex')) {
       const label = sourceLabel(ctx.inputs.dataset) ?? 'This source'
       issues.push(`${label} cannot list a whole dataset — use Find Neurons instead`)
     }

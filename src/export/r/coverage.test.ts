@@ -14,6 +14,13 @@ import './exporter'
 import { getEmitter, registeredEmitterTypes } from './registry'
 
 const NO_EMITTER: Record<string, string> = {
+  'compare.matchTypes':
+    'The cross-dataset cell-type mapper. There is no R counterpart at all \u2014 `cocoa` is a ' +
+    'Python package and nothing in the natverse builds a label graph across connectomes \u2014 ' +
+    'so unlike most entries here this is not an emitter nobody has written, it is one nobody ' +
+    'could. That makes it the clearest case for bundling the mapping as a CSV beside the ' +
+    'document rather than emitting it at all (docs/export.md). Python declines it too, for a ' +
+    'different reason; see the note there.',
   'dataset.catmaid.fafb':
     'A CATMAID project rather than a neuPrint dataset. The natverse has `catmaid` (rcatmaid), ' +
     'which is the R counterpart of pymaid and would map as cleanly, but no emitter has been ' +

@@ -40,7 +40,7 @@ export const roiCountsNode = registerNode({
    * dataset from complaining about one.
    */
   validate: (ctx) => {
-    if (!sourceSupports(ctx, 'roiCounts')) {
+    if (!sourceSupports(ctx.inputs.dataset, 'roiCounts')) {
       const label = sourceLabel(ctx.inputs.dataset) ?? 'This source'
       return [`${label} does not publish per-region synapse counts`]
     }

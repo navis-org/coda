@@ -91,10 +91,10 @@ describe('the type', () => {
     // goes from refusing outright to being traceable. Asserted through `sourceSupports`, which
     // is what the Paths node's `validate` calls — it did not, until this pass, so the flag had
     // no reader outside this test and the assertion was about nothing.
-    expect(sourceSupports({ inputs: { dataset: bare } }, 'paths')).toBe(
+    expect(sourceSupports(bare, 'paths')).toBe(
       new MockSource({ latencyMs: 0 }).capabilities.paths,
     )
-    expect(sourceSupports({ inputs: { dataset: attached } }, 'paths')).toBe(true)
+    expect(sourceSupports(attached, 'paths')).toBe(true)
   })
 })
 

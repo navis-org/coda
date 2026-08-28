@@ -25,6 +25,19 @@ import { getEmitter, registeredEmitterTypes } from './registry'
  * of a long list is that the exporter is unfinished.
  */
 const NO_EMITTER: Record<string, string> = {
+  'compare.matchTypes':
+    'The cross-dataset cell-type mapper. `cocoa` is the faithful route and is the package this ' +
+    'node was ported from, but it is a *fourth* dependency \u2014 this exporter is built on ' +
+    'neuprint-python, pandas and navis and nothing else \u2014 and, more to the point, ' +
+    '`cocoa.GraphMapper` takes cocoa `DataSet` objects and calls `compile_label_graph` on ' +
+    'them. The dataset cells above it emit neuprint-python clients, so the mapper cell would ' +
+    'sit on top of inputs of the wrong kind. Same reason as `dataset.ngsource`: one emitter is ' +
+    'worth writing when the pair is. The split proposals also differ (networkx\u2019s ' +
+    '`greedy_modularity_communities` against ours), which would be a `NOTE` rather than a ' +
+    'refusal on its own \u2014 the contract is a faithful starting point, not a bit-identical ' +
+    'reproduction. A mapping is small and tabular, so this is the strongest candidate for ' +
+    'bundling the result as a CSV beside the notebook instead of emitting the computation; see ' +
+    'docs/export.md.',
   'dataset.catmaid.fafb':
     'A CATMAID project rather than a neuPrint dataset. The route in is pymaid, which is a ' +
     'faithful one \u2014 `pymaid.CatmaidInstance` plus `get_neuron`/`get_partners` maps cleanly ' +

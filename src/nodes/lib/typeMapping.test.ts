@@ -19,8 +19,19 @@
 
 import { describe, expect, it } from 'vitest'
 
+import { column, tableSchema } from '../../core/types'
+import { tableFromRows } from '../../core/values'
 import type { MapperDataset, TypeMapping } from './typeMapping'
-import { COMPONENT_NODE_CAP, matchCellTypes } from './typeMapping'
+import {
+  COMPONENT_NODE_CAP,
+  MAPPER_LABELS_SCHEMA,
+  MAPPER_REPORT_SCHEMA,
+  mapperDatasetFrom,
+  mapperLabelsTable,
+  mapperReportTable,
+  matchCellTypes,
+  synonymsFrom,
+} from './typeMapping'
 
 /** `{ id: labels }`, which is what an annotation table reduces to once the columns are picked. */
 function dataset(rows: Record<string, string[]>): MapperDataset {
@@ -454,5 +465,146 @@ describe('the guard rail', () => {
     // Every neuron matched, all under the one label the generic bridge produced.
     expect(mapping.unmatched).toEqual([0, 0])
     expect(mapping.report).toHaveLength(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+
+/**
+ * The two seams where a table crosses into the mapper, and the two where the result crosses out.
+ *
+ * These have a node on top of them (`nodes/analysis/matchTypes.test.ts`), which is where the
+ * ports and the fetching are tested. What is here is what that node cannot see: the per-cell
+ * rules about which values count, and the exact column layout of what comes back — the halves
+ * invariant 3 pairs, tested against each other rather than through a run.
+ */
+describe('reading a table into the mapper', () => {
+  const NEURONS = tableFromRows(
+    tableSchema(
+      column('neuronId', 'str'),
+      column('type', 'str'),
+      column('flywireType', 'str'),
+      column('size', 'i64'),
+    ),
+    [
+      { neuronId: '720575940643300974', type: 'AOTU008a', flywireType: 'AOTU008', size: 12 },
+      { neuronId: '861237679', type: 'AOTU008', flywireType: '', size: 4 },
+    ],
+  )
+
+  it('takes every named column as a label and ignores the rest', () => {
+    expect(mapperDatasetFrom(NEURONS, ['type', 'flywireType'])).toEqual([
+      { id: '720575940643300974', labels: ['AOTU008a', 'AOTU008'] },
+      // The blank is an absence, not a label: an empty shared label would pool every unlabelled
+      // neuron in both brains into one enormous correspondence.
+      { id: '861237679', labels: ['AOTU008'] },
+    ])
+  })
+
+  it('keeps a neuron that has no labels at all, so the unmatched count is honest', () => {
+    // The second row's `flywireType` is blank, so it comes through carrying nothing.
+    const kept = mapperDatasetFrom(NEURONS, ['flywireType'])
+    expect(kept).toEqual([
+      { id: '720575940643300974', labels: ['AOTU008'] },
+      { id: '861237679', labels: [] },
+    ])
+    // Dropping it here would quietly shrink the denominator and make a mapping that covered a
+    // tenth of a brain report as though it covered all of it.
+    expect(matchCellTypes([kept, kept]).unmatched).toEqual([1, 1])
+  })
+
+  it('reads a number column as text rather than refusing it', () => {
+    // A type column is usually `str`, but a numeric group id is a real label — cocoa's
+    // `mcns_group_` case — and refusing it would silently drop the grouping it encodes.
+    expect(mapperDatasetFrom(NEURONS, ['size'])[0]!.labels).toEqual(['12'])
+  })
+
+  /*
+   * Invariant 8 at the one seam that can enforce it. A source that publishes its id column as
+   * `i64` has *already* rounded an eighteen-digit root id by the time this reads it —
+   * `Number('720575940643300974')` is `720575940643300975`, a neuron that may well exist — so
+   * the honest answer is to drop the row rather than to map somebody else's cell under it. A
+   * narrower id in the same column is exact and comes through.
+   */
+  it('drops a wide id that arrived as a number rather than mapping a rounded one', () => {
+    const numeric = tableFromRows(
+      tableSchema(column('neuronId', 'i64'), column('type', 'str')),
+      [
+        // Written as a conversion rather than a literal because the literal is one the
+        // linter refuses — which is the whole point being tested.
+        { neuronId: Number('720575940643300974'), type: 'AOTU008a' },
+        { neuronId: 861237679, type: 'AOTU008' },
+      ],
+    )
+    expect(mapperDatasetFrom(numeric, ['type'])).toEqual([
+      { id: '861237679', labels: ['AOTU008'] },
+    ])
+  })
+
+  it('answers nothing for a column that is not there', () => {
+    expect(mapperDatasetFrom(NEURONS, ['nope'])[0]).toEqual({
+      id: '720575940643300974',
+      labels: [],
+    })
+    expect(mapperDatasetFrom(NEURONS, ['type'], 'missingIdColumn')).toEqual([])
+  })
+})
+
+describe('reading the synonyms table', () => {
+  const PAIRS = tableFromRows(tableSchema(column('a', 'str'), column('b', 'str')), [
+    { a: 'LC4', b: 'Lobula columnar 4' },
+    { a: 'LC6', b: '' },
+  ])
+
+  it('takes the pairs the caller named, dropping a row missing either half', () => {
+    expect(synonymsFrom(PAIRS, 'a', 'b')).toEqual([
+      { label: 'LC4', synonym: 'Lobula columnar 4' },
+    ])
+  })
+
+  /*
+   * Nothing wired, and no columns chosen, are both legitimate states rather than errors — the
+   * node's Synonyms port is optional and both its pickers are too.
+   */
+  it.each([
+    ['nothing wired', undefined, 'a', 'b'],
+    ['no first column', PAIRS, undefined, 'b'],
+    ['no second column', PAIRS, 'a', undefined],
+    ['a column that is not there', PAIRS, 'a', 'nope'],
+  ])('answers no synonyms for %s', (_case, table, first, second) => {
+    expect(synonymsFrom(table, first, second)).toEqual([])
+  })
+})
+
+describe('writing the mapping back out', () => {
+  const MAPPING = matchCellTypes([
+    dataset({ a1: ['LC4'], a2: ['LC4'], a3: ['LC4'] }),
+    dataset({ b1: ['LC4'] }),
+  ])
+
+  it('emits one labels row per matched neuron, keyed by the id column', () => {
+    const table = mapperLabelsTable(MAPPING.labels[0]!)
+    expect(table.schema).toEqual(MAPPER_LABELS_SCHEMA)
+    expect(table.length).toBe(3)
+    // Text, exactly — the column is `str` and the values came in as text (invariant 8).
+    expect(table.data['neuronId']).toEqual(['a1', 'a2', 'a3'])
+    expect(table.data['label']).toEqual(['LC4', 'LC4', 'LC4'])
+  })
+
+  /*
+   * Long form, one row per (label, dataset). That is what keeps the schema constant while the
+   * *number* of datasets is not — a count column per dataset would make this the one table whose
+   * columns the node's port declaration and its `evaluate` derived separately.
+   */
+  it('emits the report long, naming each dataset on its own row', () => {
+    const table = mapperReportTable(MAPPING.report, ['flywire', 'hemibrain'])
+    expect(table.schema).toEqual(MAPPER_REPORT_SCHEMA)
+    expect(table.length).toBe(2)
+    expect(table.data['label']).toEqual(['LC4', 'LC4'])
+    expect(table.data['dataset']).toEqual(['flywire', 'hemibrain'])
+    expect(table.data['nNeurons']).toEqual([3, 1])
+    // A flag about the *label*, so it repeats down that label's rows — the trade long form
+    // makes, and what turns "show me every suspicious label" into one filter.
+    expect(table.data['suspicious']).toEqual([true, true])
   })
 })

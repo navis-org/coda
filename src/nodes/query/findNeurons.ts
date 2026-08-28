@@ -77,7 +77,7 @@ export const findNeuronsNode = registerNode({
       options: (ctx) => {
         // Gated on whether the source can *answer* a region filter, not on whether it happens to
         // publish a region list. CATMAID publishes eighty and can answer none of them.
-        if (!sourceSupports(ctx, 'roiFilter')) return [ANY_OPTION]
+        if (!sourceSupports(ctx.inputs.dataset, 'roiFilter')) return [ANY_OPTION]
         const info = datasetInfoFromType(ctx.inputs.dataset)
         return [ANY_OPTION, ...(info?.rois ?? []).map((r) => ({ value: r, label: r }))]
       },
@@ -167,7 +167,7 @@ export const findNeuronsNode = registerNode({
       rowsFromParams(ctx.params),
     ).problems.map((problem) => problem.message)
 
-    if (ctx.params.roi && !sourceSupports(ctx, 'roiFilter')) {
+    if (ctx.params.roi && !sourceSupports(ctx.inputs.dataset, 'roiFilter')) {
       const label = sourceLabel(ctx.inputs.dataset) ?? 'This source'
       issues.push(`${label} cannot filter neurons by region — clear "In ROI" to search this dataset`)
     }

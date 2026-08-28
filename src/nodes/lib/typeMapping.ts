@@ -62,13 +62,29 @@
  * of the logic that is hard to get right is reachable from a plain unit test.
  */
 
-import { compareIds } from '../../core/ids'
+import { ID_COLUMN_NAME, compareIds, idText } from '../../core/ids'
 import type { NeuronId } from '../../core/ids'
 import { SILENT, warnOverThreshold } from '../../core/limits'
 import type { Warner } from '../../core/limits'
+import { column, tableSchema } from '../../core/types'
+import type { CellValue, ColumnData, TableValue, Value } from '../../core/values'
+import { isTableValue, makeTable, tableFromRows } from '../../core/values'
 
 /** How the shared label for a matched group is spelled. cocoa's `labels`, minus `random`. */
 export type LabelMode = 'first' | 'all' | 'id'
+
+/**
+ * The same three, as a picker's options — here rather than in the node, which is where every
+ * other option list in `nodes/lib` sits relative to its union (`PARTNER_BY_OPTIONS` under
+ * `PartnerBy`, `SIMILARITY_METRIC_OPTIONS` under `SimilarityMetric`). Typed against `LabelMode`,
+ * so adding a fourth mode to the union fails to compile against the picker that offers three
+ * instead of silently offering three.
+ */
+export const LABEL_MODE_OPTIONS: ReadonlyArray<{ value: LabelMode; label: string }> = [
+  { value: 'first', label: 'Shortest name' },
+  { value: 'all', label: 'Every name, joined' },
+  { value: 'id', label: 'Lowest neuron id' },
+]
 
 /** One neuron and every type label it carries, across all the columns the caller chose. */
 export interface MapperNeuron {
@@ -167,6 +183,17 @@ export const DEFAULT_NO_SPLIT_PREFIXES: readonly string[] = ['(', 'CB.']
  * spellings of one number is how the report comes to disagree with its own documentation.
  */
 export const SUSPICIOUS_COUNT_RATIO = 0.5
+
+/**
+ * How much of a dataset may match nothing before the node says so.
+ *
+ * Named for `SUSPICIOUS_COUNT_RATIO`'s reason and *because* of it: the two are unrelated rules
+ * that happen to share a number, in one feature, so a reader who greps `0.5` here finds two and
+ * cannot tell which one the report column uses. This one governs an attribution rather than a
+ * column — a mapping covering a tenth of a brain produces a perfectly ordinary pair of tables,
+ * and everything built on it then silently describes that tenth.
+ */
+export const UNMATCHED_WARN_FRACTION = 0.5
 
 /**
  * The size past which a connected component is left whole rather than trimmed and split.
@@ -878,4 +905,156 @@ export function matchCellTypes(
     report: buildReport(labels),
     unmatched: datasets.map((neurons, d) => neurons.length - labels[d]!.size),
   }
+}
+
+// ---------------------------------------------------------------------------
+// The two halves the node reads
+
+/**
+ * One dataset's annotation table, reduced to what `matchCellTypes` takes.
+ *
+ * Here rather than in the node, and that is [invariant 8](../../../docs/invariants.md)'s doing:
+ * this is the one place an id crosses out of a `TableValue` and into the mapper, `idText` is the
+ * rule for doing it, and CLAUDE.md records the UI and glue layers as where that keeps being
+ * re-broken with a `String(...)` or a `Number(...)`. Beside the algorithm it has a unit test; in
+ * a node's `evaluate` it would have none.
+ *
+ * **A neuron with no usable label is kept, not dropped.** It cannot match, but it is still a
+ * neuron in the dataset, and `TypeMapping.unmatched` is a count of what did not match — dropping
+ * it here would quietly shrink the denominator and make a mapping that covered a tenth of a
+ * brain report as if it covered all of it.
+ */
+export function mapperDatasetFrom(
+  table: TableValue,
+  typeColumns: readonly string[],
+  idColumn: string = ID_COLUMN_NAME,
+): MapperDataset {
+  const ids = table.data[idColumn]
+  if (!ids) return []
+  const columns = typeColumns
+    .map((name) => table.data[name])
+    .filter((data): data is ColumnData => !!data)
+
+  const neurons: MapperNeuron[] = []
+  for (let row = 0; row < table.length; row++) {
+    // `idText`, never `String(...)`: an 18-digit root id read off an `i64` column is already a
+    // float64, and this is the seam that has to notice rather than the one that rounds.
+    const id = idText(ids[row])
+    if (!id) continue
+    const labels: string[] = []
+    for (const data of columns) {
+      const label = labelText(data[row])
+      if (label) labels.push(label)
+    }
+    neurons.push({ id, labels })
+  }
+  return neurons
+}
+
+/**
+ * The hand-curated half of the correspondence, off the node's optional Synonyms port.
+ *
+ * cocoa's `add_synonym`, and the route by which somebody's own judgement enters a mapping that
+ * is otherwise derived: `LC4` and `Lobula columnar 4` are the same cells and share no text, so
+ * nothing in the data will ever join them. Nothing wired, or no columns chosen, means no
+ * synonyms — a legitimate state rather than a missing input.
+ *
+ * Beside `mapperDatasetFrom` because it is the same job on the other table: these two are the
+ * only places a `TableValue` crosses into the mapper, and the rule about which cells count is a
+ * fact about what the mapper accepts rather than about one node. It is also the one of the pair
+ * that looks harmless — it touches no ids — which makes it the one most likely to be
+ * re-implemented by the next caller if it lives somewhere private.
+ */
+export function synonymsFrom(
+  value: Value | undefined,
+  labelColumn: string | undefined,
+  otherColumn: string | undefined,
+): LabelSynonym[] {
+  if (!isTableValue(value) || !labelColumn || !otherColumn) return []
+  const labels = value.data[labelColumn]
+  const others = value.data[otherColumn]
+  if (!labels || !others) return []
+
+  const synonyms: LabelSynonym[] = []
+  for (let row = 0; row < value.length; row++) {
+    const label = labelText(labels[row])
+    const synonym = labelText(others[row])
+    if (label && synonym) synonyms.push({ label, synonym })
+  }
+  return synonyms
+}
+
+/**
+ * One cell as a label, or `''` where it is not one.
+ *
+ * Both adapters above ask the same question — null, undefined and the empty string are all
+ * "this row has no label here" — and wrote the same three-way test either side of the banner.
+ * A blank is an absence rather than a label, which matters: an empty shared label would pool
+ * every unlabelled neuron in both brains into one enormous correspondence.
+ */
+function labelText(cell: CellValue | undefined): string {
+  return cell === null || cell === undefined ? '' : String(cell)
+}
+
+/** One dataset's share of the mapping: its own bare ids against the shared label. */
+export const MAPPER_LABELS_SCHEMA = tableSchema(
+  column(ID_COLUMN_NAME, 'str'),
+  column('label', 'str'),
+)
+
+/**
+ * Built columnar rather than through `tableFromRows`, whose own doc says it is for small and
+ * mock data and not for hot paths — this is one row per *neuron*, so a whole-brain mapping hands
+ * it 140,000 row objects to transpose straight back into two columns. Measured at 140k: 11.6 ms
+ * through the row builder, 1.4 ms this way.
+ */
+export function mapperLabelsTable(labels: ReadonlyMap<NeuronId, string>): TableValue {
+  const ids: CellValue[] = new Array(labels.size)
+  const names: CellValue[] = new Array(labels.size)
+  let row = 0
+  for (const [neuronId, label] of labels) {
+    ids[row] = neuronId
+    names[row] = label
+    row++
+  }
+  return makeTable(MAPPER_LABELS_SCHEMA, { [ID_COLUMN_NAME]: ids, label: names })
+}
+
+/**
+ * The report, **long**: one row per (label, dataset) rather than a count column per dataset.
+ *
+ * A column per dataset would make this the one output whose *schema* depends on the node's
+ * arity, which is the shape [invariant 3](../../../docs/invariants.md) exists for — the columns
+ * `inferOutputs` promises and the columns `evaluate` builds would be two derivations of one
+ * thing, agreeing until somebody changes a name. Long form makes it a constant.
+ *
+ * It is also the more useful table. Coda's grouping, filtering and charts all read long form,
+ * `Partner Vectors` already emits it, and `Compare Connectivity`'s `counts` port is specified
+ * the same way — so a reader who has seen one has seen them all. The cost is that `suspicious`
+ * repeats down a label's rows, which is a fact about the label rather than about the row; that
+ * is the honest trade and it is what makes "show me every suspicious label" one filter.
+ */
+export const MAPPER_REPORT_SCHEMA = tableSchema(
+  column('label', 'str'),
+  column('dataset', 'str'),
+  column('nNeurons', 'i64'),
+  column('suspicious', 'bool'),
+)
+
+export function mapperReportTable(
+  report: readonly LabelCount[],
+  datasetNames: readonly string[],
+): TableValue {
+  const rows: Array<Record<string, CellValue>> = []
+  for (const entry of report) {
+    entry.counts.forEach((nNeurons, d) => {
+      rows.push({
+        label: entry.label,
+        dataset: datasetNames[d]!,
+        nNeurons,
+        suspicious: entry.suspicious,
+      })
+    })
+  }
+  return tableFromRows(MAPPER_REPORT_SCHEMA, rows)
 }

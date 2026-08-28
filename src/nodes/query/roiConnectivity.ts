@@ -79,7 +79,7 @@ export const roiConnectivityNode = registerNode({
   }),
 
   validate: (ctx) => {
-    if (!sourceSupports(ctx, 'roiSummary')) {
+    if (!sourceSupports(ctx.inputs.dataset, 'roiSummary')) {
       const label = sourceLabel(ctx.inputs.dataset) ?? 'This source'
       return [`${label} does not publish a region connectivity summary`]
     }
