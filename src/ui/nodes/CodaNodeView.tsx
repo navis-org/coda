@@ -35,6 +35,7 @@ import { useGraphStore } from '../../store/graphStore'
 import { exportBaseName } from '../export'
 import { formatDuration } from '../format'
 import { ParamField } from '../params/ParamField'
+import { bucketParams } from '../params/paramGroups'
 import { socketStyle } from '../socketStyle'
 import { ValuePreview } from '../viewers/ValuePreview'
 import { CacheAge } from './CacheAge'
@@ -272,6 +273,27 @@ function CodaNodeViewImpl({
     [hidden, node.params],
   )
 
+  /*
+   * The param band in tabs, for a card whose band would otherwise grow without limit.
+   *
+   * `compare.connectivity` is the case: four params per dataset behind an arity param, so four
+   * datasets is sixteen rows and the card is taller than the graph around it. Tabs make the
+   * height constant in the arity instead of linear in it.
+   *
+   * Up here with the other hooks rather than beside the band it feeds, because it is one — the
+   * `!def` return below is an early return, and a hook after one is a hook that does not run on
+   * every render. `def &&` stands in for the guard that would otherwise be structural.
+   *
+   * The bucketing is `bucketParams`, shared with the styling panel: the card takes the buckets
+   * rather than the panel's rows because it has no composite row to draw and its own field
+   * markup, but which tab a param is in is one answer in one place.
+   */
+  const buckets = useMemo(
+    () => (def ? bucketParams(def, node.params, (p) => !p.advanced) : []),
+    [def, node.params],
+  )
+  const [tabId, setTabId] = useState<string | undefined>(undefined)
+
   if (!def || !ctx) {
     return (
       <div className="coda-node" data-state="error">
@@ -305,11 +327,15 @@ function CodaNodeViewImpl({
    * as fields *as well* would put a raw "Search" text box under the search bar that writes it.
    */
   const body = nodeBody(node.type)
-  const visibleParams = body
-    ? []
-    : (def.params ?? []).filter(
-        (p) => !p.advanced && (!p.visibleIf || p.visibleIf(node.params)),
-      )
+  /*
+   * Flattened out of the buckets rather than filtered a second time. `bucketParams` invents
+   * nothing and drops nothing — a param the definition did not place lands in a trailing "Other"
+   * — so the flattening is exactly the band a flat card draws, and a node with no declared
+   * groups gets one bucket holding everything in declaration order. The alternative was this
+   * predicate written twice in one file, once here and once inside the memo, with the file then
+   * choosing between the two results.
+   */
+  const visibleParams = body ? [] : buckets.flatMap((bucket) => bucket.params)
 
   /*
    * Not while the overlay is showing this same node.
@@ -383,6 +409,22 @@ function CodaNodeViewImpl({
   const foldable = !node.collapsed && (visibleParams.length > 0 || rowCount > 0)
   const folded = foldable && node.paramsCollapsed === true
   const showParams = !node.collapsed && !folded && visibleParams.length > 0
+
+  /*
+   * **Only past two tabs.** One tab is a strip that offers no choice, above rows it was already
+   * showing — pure chrome. That single rule is also what keeps this from reaching cards nobody
+   * asked it to: `out.viewer3d` draws no generic rows at all and `out.network` draws one, in one
+   * group, so neither grows a strip. `out.scatter` does, and there the shorter band goes to the
+   * plot, which is the same trade the fold above is for.
+   */
+  const tabbed = buckets.length > 1
+  /*
+   * Resolved against the live buckets rather than trusted, because a tab can *leave*: turning
+   * `datasetCount` down from 4 to 2 takes `Dataset 3` and `Dataset 4` with it, and a card
+   * holding a dead id would draw a strip with nothing selected and no rows under it.
+   */
+  const tab = buckets.find((b) => b.id === tabId) ?? buckets[0]
+  const bandParams = tabbed && tab ? tab.params : visibleParams
   /*
    * The hint rides at the end of the band but is not gated on it: the cards that need it most
    * are the ones drawing *no* rows at all — Skeletons has a single param and it is advanced, so
@@ -650,8 +692,32 @@ function CodaNodeViewImpl({
 
         {(showParams || showHidden) && (
           <div className="coda-node__params">
+            {showParams && tabbed && (
+              /*
+               * `nodrag` because a click on the canvas is a node drag by default, and `nowheel`
+               * is deliberately absent: the strip does not scroll, so the canvas keeps the wheel.
+               */
+              <div className="coda-node__tabs nodrag" role="tablist">
+                {buckets.map((bucket) => (
+                  <button
+                    type="button"
+                    key={bucket.id}
+                    role="tab"
+                    className="coda-node__tab"
+                    aria-selected={bucket.id === tab?.id}
+                    title={`${bucket.label} — ${bucket.params.length} setting${bucket.params.length === 1 ? '' : 's'}`}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setTabId(bucket.id)
+                    }}
+                  >
+                    {bucket.label}
+                  </button>
+                ))}
+              </div>
+            )}
             {showParams &&
-              visibleParams.map((param) => (
+              bandParams.map((param) => (
                 <div
                   key={param.id}
                   className={`param${param.kind === 'boolean' || param.kind === 'columns' ? ' param--wide' : ''}`}

@@ -44,6 +44,7 @@ import type { CellValue, ColumnData, TableValue } from '../../core/values'
 import { getColumn, makeTable } from '../../core/values'
 import { ID_COLUMN_NAME, idText } from '../../core/ids'
 import type { NeuronId } from '../../core/ids'
+import { labelsByNeuron } from './typeMapping'
 
 /**
  * One dataset's contribution: its edges already relabelled, plus what it *could* have said.
@@ -119,34 +120,6 @@ function pairKey(pre: string, post: string): string {
  * refuse, and this one refuses nothing.
  */
 export const EDGE_TOTAL_RATIO_WARN = 3
-
-/**
- * `neuronId` → label, as `relabelTable` would resolve it.
- *
- * Reads through `idText`, so a labels table whose ids arrived as `i64` is treated exactly as the
- * rest of the codebase treats one — [invariant 8](../../../docs/invariants.md): a wide CAVE root
- * id read as a number is a *different* id, and `idText` drops it rather than mapping a rounded
- * one onto the wrong neuron.
- */
-export function labelsByNeuron(
-  table: TableValue,
-  idColumn = ID_COLUMN_NAME,
-  labelColumn = 'label',
-): Map<NeuronId, string> {
-  const ids = getColumn(table, idColumn)
-  const labels = getColumn(table, labelColumn)
-  const out = new Map<NeuronId, string>()
-  for (let row = 0; row < table.length; row++) {
-    const id = idText(ids[row] ?? null)
-    if (!id) continue
-    const label = labels[row]
-    if (label === null || label === undefined || label === '') continue
-    // First wins, `firstByKey`'s rule: a mapping that disagrees with itself is not grounds to
-    // pick the later answer.
-    if (!out.has(id)) out.set(id, String(label))
-  }
-  return out
-}
 
 export interface EdgeColumns {
   pre: string

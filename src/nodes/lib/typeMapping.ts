@@ -11,8 +11,8 @@
  *
  * The answer, ported from cocoa's `GraphMapper`, is a graph. Neurons and labels are both nodes;
  * `neuron → label` edges come from the declared type columns, and `label ↔ label` edges from
- * compound splitting and from hand-written synonyms. **Labels are shared between datasets by
- * their text**, and that is the only place the two brains touch. Then:
+ * compound splitting. **Labels are shared between datasets by their text**, and that is the only
+ * place the two brains touch. Then:
  *
  * 1. drop every connected component that does not hold neurons from *all* the datasets;
  * 2. inside each survivor keep only the nodes lying on a shortest neuron-to-neuron path that
@@ -62,13 +62,14 @@
  * of the logic that is hard to get right is reachable from a plain unit test.
  */
 
-import { ID_COLUMN_NAME, compareIds, idText } from '../../core/ids'
+import { ID_COLUMN_NAME, compareIds, idText, qualifyId } from '../../core/ids'
 import type { NeuronId } from '../../core/ids'
 import { SILENT, warnOverThreshold } from '../../core/limits'
+import { collectLabels } from './labelLookup'
 import type { Warner } from '../../core/limits'
 import { column, tableSchema } from '../../core/types'
-import type { CellValue, ColumnData, TableValue, Value } from '../../core/values'
-import { isTableValue, makeTable, tableFromRows } from '../../core/values'
+import type { CellValue, ColumnData, NetworkValue, TableValue, Value } from '../../core/values'
+import { getColumn, isTableValue, makeTable, tableFromRows } from '../../core/values'
 
 /** How the shared label for a matched group is spelled. cocoa's `labels`, minus `random`. */
 export type LabelMode = 'first' | 'all' | 'id'
@@ -102,15 +103,6 @@ export interface MapperNeuron {
  */
 export type MapperDataset = readonly MapperNeuron[]
 
-/**
- * A hand-written `label ↔ label` edge — cocoa's `add_synonym`, and the route by which a
- * hand-curated correspondence enters an otherwise derived mapping.
- */
-export interface LabelSynonym {
-  label: string
-  synonym: string
-}
-
 export interface MapperOptions {
   /** Labels to delete outright before anything else — cocoa's `add_bad_labels`. */
   badLabels?: readonly string[]
@@ -131,7 +123,14 @@ export interface MapperOptions {
   labelMode?: LabelMode
   /** Allow a correspondence whose path runs through another *neuron*. Default false. */
   allowIndirect?: boolean
-  synonyms?: readonly LabelSynonym[]
+  /**
+   * Labels allowed to survive with no counterpart in the other datasets — see `passThrough`.
+   *
+   * A sex-specific cell type is the case: `pMP2` exists in the maleCNS and in no female brain,
+   * and step 1 drops it for exactly the reason it drops a naming artifact. Nothing in the data
+   * distinguishes the two, so this is the user saying which is which.
+   */
+  keepLabels?: readonly string[]
   /**
    * Told when a component was too large to trim and split.
    *
@@ -148,13 +147,92 @@ export interface LabelCount {
   /** Index-aligned with the datasets passed in. */
   counts: readonly number[]
   /**
+   * The matcher produced this label — it is a correspondence — rather than only `passThrough`.
+   *
+   * The one thing that keeps the labels table readable. A pass-through label sits in the same
+   * name space as a matched one and is indistinguishable there by construction, which is the
+   * trap `matchCellTypes`' own docstring refuses to walk into for raw type names. This column is
+   * the refusal kept: the labels table stays a flat `neuronId → label`, and the answer to "was
+   * anything actually matched here" lives in the report, next to the counts that show it.
+   *
+   * **A claim about the label, not about every neuron under it.** The two can come apart: a
+   * neuron whose only label was trimmed off as dangling is left unlabelled while that same label
+   * matches elsewhere, and `passThrough` then writes it on. `matched` stays true, which is the
+   * right answer — the label *is* a correspondence — but it does not certify each row.
+   */
+  matched: boolean
+  /**
    * Two datasets' counts for this label differ by more than `SUSPICIOUS_COUNT_RATIO`.
    *
    * cocoa's `label_suspicious`, and it is the most useful column in the report: 4 neurons in one
    * brain against 40 in another is a mapping error rather than a finding, and the only place it
    * shows up is here. A mapping shipped without this is a mapping that gets trusted.
+   *
+   * **Never set on a pass-through.** The flag asks whether a *correspondence* looks wrong, and
+   * a pass-through never claimed to be one — there is nothing for its counts to be lopsided
+   * against. It is also the difference between a useful column and an unreadable one: a label
+   * dropped at step 1 has zero neurons in some dataset, so its ratio is 0 and it would be
+   * flagged, which for the common case means the whole pass-through list lights up at once.
+   *
+   * That is the common case and not a definition — the guard is doing real work either way. A
+   * label can also be dropped *after* step 1, when splitting leaves a piece that no longer
+   * reaches every dataset, and pass one of those through and its counts are nonzero everywhere.
+   * Worth stating because "zero somewhere by definition" reads like a reason to delete the
+   * `matched &&`.
    */
   suspicious: boolean
+}
+
+/**
+ * One node of the label graph, as something outside this module may look at it.
+ *
+ * The graph *is* the algorithm — neurons and labels as nodes, `neuron → label` edges from the
+ * type columns and `label ↔ label` edges from compound splitting — so a drawing of it is the
+ * only way to see why two types corresponded and why two others did not. That is what the
+ * node's `Network` port carries.
+ *
+ * **Neuron nodes are groups, and always were.** `buildGraph` puts every neuron sharing an
+ * identical label set into one node weighted by how many that is, which is cocoa's
+ * `collapse_neuron_nodes` done at construction rather than afterwards. There is deliberately no
+ * expanded mode: one node per neuron is 140,000 per dataset, which is not a drawing.
+ *
+ * Indices, not names — `mapperNetwork` attaches the dataset names, the same split `report` and
+ * `mapperReportTable` use and for the same reason: the algorithm never learns what its inputs
+ * are called.
+ */
+export interface MapperGraphNode {
+  kind: 'label' | 'neurons'
+  /** The label's text, or the group's first neuron id. */
+  name: string
+  /** Index into the datasets passed in, or `-1` for a label. */
+  dataset: number
+  /**
+   * How many neurons this node stands for: the group's size, or for a label the neurons
+   * *directly* carrying it — a compound's parts count against the compound, not against them.
+   */
+  nNeurons: number
+  /**
+   * The shared label the matcher named this node into, or `''` where it named none.
+   *
+   * **The matcher's answer, so a pass-through is absent from it**, and that is right rather than
+   * a gap: `passThrough` deliberately does not touch the graph ([comparative.md](../../../docs/comparative.md)),
+   * so a label that only survived because somebody listed it did not match *here*. The report's
+   * `matched` column is where that shows.
+   */
+  label: string
+}
+
+/** One edge, by index into `MapperGraphView.nodes`. Undirected, recorded once. */
+export interface MapperGraphEdge {
+  source: number
+  target: number
+  /** Neurons behind the edge: the group's size, or how many carry a split compound. */
+  weight: number
+}
+
+export interface MapperGraphView {
+  nodes: readonly MapperGraphNode[]
+  edges: readonly MapperGraphEdge[]
 }
 
 export interface TypeMapping {
@@ -163,6 +241,8 @@ export interface TypeMapping {
   report: readonly LabelCount[]
   /** Per dataset, how many neurons came out with no shared label at all. */
   unmatched: readonly number[]
+  /** The label graph the answer was read off. See `MapperGraphNode`. */
+  graph: MapperGraphView
 }
 
 /**
@@ -247,18 +327,25 @@ interface Settings {
   noSplitPrefixes: readonly string[]
   labelMode: LabelMode
   allowIndirect: boolean
-  synonyms: readonly LabelSynonym[]
+  keep: Set<string>
   warn: Warner
 }
 
 function settingsFrom(options: MapperOptions): Settings {
+  const bad = new Set((options.badLabels ?? []).map((l) => l.trim()).filter(Boolean))
   return {
-    bad: new Set((options.badLabels ?? []).map((l) => l.trim()).filter(Boolean)),
+    bad,
     separator: options.compoundSeparator || ',',
     noSplitPrefixes: options.noSplitPrefixes ?? DEFAULT_NO_SPLIT_PREFIXES,
     labelMode: options.labelMode ?? 'first',
     allowIndirect: options.allowIndirect ?? false,
-    synonyms: options.synonyms ?? [],
+    // `badLabels` beats `keepLabels` — delete-this and keep-this are contradictory instructions
+    // and the destructive reading is the safe one. Resolved here, once, rather than re-tested
+    // wherever `keep` is read: a rule enforced at every use site is a rule the third use site
+    // forgets.
+    keep: new Set(
+      (options.keepLabels ?? []).map((l) => l.trim()).filter((l) => l && !bad.has(l)),
+    ),
     warn: options.warn ?? SILENT,
   }
 }
@@ -289,6 +376,25 @@ function splittable(text: string, s: Settings): string[] | undefined {
   const parts = text.split(s.separator).map((p) => p.trim())
   if (parts.some((p) => p.length <= 1)) return undefined
   return parts
+}
+
+/**
+ * Every text the label graph makes a node for, given one raw label off a neuron.
+ *
+ * **The compound itself is one of them.** `buildGraph` links a neuron to `builder.label(text)`
+ * for the whole string and *then* links that node to each part, so `pMP2,pMP3` and `pMP2` are
+ * both labels the mapper knows. Anything asking "is this label in a set" has to ask about both,
+ * and `splittable(text, s) ?? [text]` — which reads as if it did — silently drops the compound
+ * the moment it splits. That mattered: a pass-through table built the obvious way, by filtering
+ * a dataset's own type column, holds `pMP2,pMP3` verbatim.
+ *
+ * Deliberately *not* pushed into `buildGraph`, whose two links are in different loops for a
+ * measured reason (the compound's edge weight is a count accumulated across every dataset before
+ * any edge exists). This is the read side of the same fact.
+ */
+function labelTexts(text: string, s: Settings): string[] {
+  const parts = splittable(text, s)
+  return parts ? [text, ...parts] : [text]
 }
 
 class GraphBuilder {
@@ -386,18 +492,6 @@ function buildGraph(datasets: readonly MapperDataset[], s: Settings): Graph {
       if (!part || s.bad.has(part)) continue
       builder.link(builder.label(text), builder.label(part), count)
     }
-  }
-
-  /*
-   * Weight 0, as in cocoa: a synonym is an assertion about correspondence, not evidence about
-   * how many neurons carry a label. Weighting it would let one hand-written edge out-vote the
-   * data in the modularity split, which is the opposite of what somebody adding one wants.
-   */
-  for (const { label, synonym } of s.synonyms) {
-    const a = label.trim()
-    const b = synonym.trim()
-    if (!a || !b || a === b || s.bad.has(a) || s.bad.has(b)) continue
-    builder.link(builder.label(a), builder.label(b), 0)
   }
 
   return builder.build()
@@ -590,6 +684,14 @@ function greedyBipartition(graph: Graph, nodes: readonly number[]): number[][] {
   const tag = nodes.map((_, i) => i)
   let total = 0
 
+  /*
+   * No `total === 0` guard, and that is a property of the weights rather than an omission: a
+   * `neuron → label` edge weighs the group's neuron count and a compound's parts weigh how many
+   * neurons carry it, so every weight is at least 1 and an entry in `between` implies
+   * `total > 0`. The gains below would be `0/0` otherwise. There *was* such a guard, for the
+   * one edge that weighed nothing — a hand-written synonym — and that port is gone; anything
+   * reintroducing a zero-weight edge has to put it back.
+   */
   for (let i = 0; i < nodes.length; i++) {
     for (const [other, weight] of graph.adjacency[nodes[i]!]!) {
       const j = at.get(other)
@@ -599,9 +701,6 @@ function greedyBipartition(graph: Graph, nodes: readonly number[]): number[][] {
       if (j !== i) between[i]!.set(j, weight)
     }
   }
-  // Every edge inside the set has weight zero (all of them hand-written synonyms), so modularity
-  // has nothing to maximise. Singletons, which the caller's checks then reject.
-  if (total === 0) return members
 
   let count = nodes.length
   while (count > 2) {
@@ -795,7 +894,10 @@ function chooseLabel(texts: readonly string[], s: Settings): string {
  * ([invariant 8](../../../docs/invariants.md)), and "lowest" among rounded ids is a different
  * neuron's.
  */
-function resolveIdLabels(labels: Map<NeuronId, string>[]): void {
+function resolveIdLabels(
+  labels: Map<NeuronId, string>[],
+  named: Map<number, string>,
+): void {
   const duplicated = new Set<NeuronId>()
   const seen = new Set<NeuronId>()
   const groups = new Map<string, NeuronId[]>()
@@ -825,16 +927,103 @@ function resolveIdLabels(labels: Map<NeuronId, string>[]): void {
       if (name) perDataset.set(id, name)
     }
   }
+  // The graph view's label nodes take the same renaming, and take it *here* rather than by the
+  // caller re-applying a returned map: under `id` mode these names are the placeholders being
+  // replaced, so a view left behind would say `#3` where every other output says a neuron id.
+  for (const [node, name] of named) {
+    const renamedTo = renamed.get(name)
+    if (renamedTo) named.set(node, renamedTo)
+  }
 }
 
 /**
- * Per-label neuron counts per dataset, and the flag that makes them worth reading.
+ * Labels the user named as surviving without a counterpart, written in after the matching.
  *
- * The flag is a question about the smallest count against the largest, which is the same answer
- * every pair would give and one pass rather than d². Sorted by label so the table is stable
- * across runs.
+ * A sex-specific type is the case this exists for: `pMP2` is in the maleCNS and in no female
+ * brain, so its component holds one dataset, step 1 drops it, and its neurons come out with no
+ * label at all. That is the right default — a label present in one brain only is not evidence of
+ * a correspondence, and it is what step 1 is *for* — but it is wrong whenever the user already
+ * knows the type is genuinely unique to that dataset.
+ *
+ * **A separate pass rather than a relaxed `coversAll`, and that is the whole design.** The
+ * coverage test is asked in four places (twice in `partitionComponents`, once per split group,
+ * once at naming), and each is load-bearing: an exemption threaded through them would let one
+ * exempt label carry a whole component of *unexempt* ones past every gate, which is the
+ * silent-wrong-answer version of this feature. Here it cannot: matching runs untouched, and this
+ * only fills in neurons it left empty.
+ *
+ * Four rules follow from where it sits:
+ *
+ * - **A derived label wins.** Only a neuron the matcher left unlabelled is touched, because an
+ *   actual correspondence is better evidence than a list.
+ * - **The label is its own text, whatever `labelMode` says.** Nothing was merged, so there is no
+ *   group to name; `id` mode in particular would replace the one thing the user asked to see
+ *   with `#7`. Hence *after* `resolveIdLabels`, which renames every label it is given.
+ * - **Matching by text groups the datasets that do have it, for free.** A female-specific type
+ *   in both the hemibrain and FlyWire but not the maleCNS is dropped by step 1 for want of the
+ *   third dataset; passed through, both sides get the same string and therefore correspond.
+ * - **`badLabels` still wins.** Deleting a label outright and keeping it are contradictory
+ *   instructions and the destructive reading is the safe one.
+ *
+ * Compounds go through `labelTexts`, so listing either `pMP2` or the whole `pMP2,pMP3` catches a
+ * neuron typed with both, and `chooseLabel` settles the case where more than one listed label
+ * matches one neuron.
+ *
+ * **Do not port `buildGraph`'s compound-lookup cache down here — it is measurably slower.**
+ * Measured on 2 × 140,000 neurons against `matchCellTypes`' own ~700 ms: this pass is 13 ms in
+ * the realistic shape and 39 ms in its worst case, where nothing matched at all and every neuron
+ * runs the inner loop. Adding a memo Map over the split takes that worst case from 34 ms (with
+ * the per-label array hoisted) to 35.4 ms, because the hot path here is the label that is *not*
+ * a compound, where `splittable` returns on its first line — cheaper than the `Map.get` that
+ * would replace it. `buildGraph` caches for a different reason: it is accumulating a count
+ * across every dataset, not testing membership.
  */
-function buildReport(labels: readonly ReadonlyMap<NeuronId, string>[]): LabelCount[] {
+function passThrough(
+  datasets: readonly MapperDataset[],
+  labels: Map<NeuronId, string>[],
+  s: Settings,
+): void {
+  if (!s.keep.size) return
+  for (let d = 0; d < datasets.length; d++) {
+    const perDataset = labels[d]!
+    for (const neuron of datasets[d]!) {
+      if (perDataset.has(neuron.id)) continue
+      const matches: string[] = []
+      for (const raw of neuron.labels) {
+        const text = raw.trim()
+        if (!text || s.bad.has(text)) continue
+        // No dedupe and no empty guard: `s.keep` is a set and a compound never equals one of its
+        // own parts, so `matches` cannot repeat, and `chooseLabel([])` is already `''`.
+        for (const candidate of labelTexts(text, s)) {
+          if (s.keep.has(candidate)) matches.push(candidate)
+        }
+      }
+      const name = chooseLabel(matches, s)
+      if (name) perDataset.set(neuron.id, name)
+    }
+  }
+}
+
+/**
+ * Per-label neuron counts per dataset, and the two flags that make them worth reading.
+ *
+ * `suspicious` is a question about the smallest count against the largest, which is the same
+ * answer every pair would give and one pass rather than d². Sorted by label so the table is
+ * stable across runs.
+ *
+ * `derived` is the set of labels the *matcher* produced, collected before `passThrough` ran — a
+ * label absent from it reached the table without a correspondence behind it.
+ *
+ * A snapshot of the matcher's output rather than a record of what `passThrough` wrote, and the
+ * two are not complements. A label can be both: matched for most of its neurons and written onto
+ * one the trimming left behind. Asking what `passThrough` wrote would call that label unmatched,
+ * which is worse — the correspondence is real. Asking what the matcher produced calls it
+ * matched, which is what `LabelCount.matched` documents itself as meaning.
+ */
+function buildReport(
+  labels: readonly ReadonlyMap<NeuronId, string>[],
+  derived: ReadonlySet<string>,
+): LabelCount[] {
   const counts = new Map<string, number[]>()
   labels.forEach((perDataset, d) => {
     for (const label of perDataset.values()) {
@@ -851,22 +1040,93 @@ function buildReport(labels: readonly ReadonlyMap<NeuronId, string>[]): LabelCou
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
     .map(([label, row]) => {
       const high = Math.max(...row)
+      const matched = derived.has(label)
       return {
         label,
         counts: row,
-        suspicious: high > 0 && Math.min(...row) / high < SUSPICIOUS_COUNT_RATIO,
+        matched,
+        suspicious: matched && high > 0 && Math.min(...row) / high < SUSPICIOUS_COUNT_RATIO,
       }
     })
+}
+
+/**
+ * The label graph as plain arrays, with what the matcher decided about each node written on.
+ *
+ * Built here rather than in the node because it is a reading of `Graph`, which is private and
+ * should stay so — `mapperDatasetFrom`'s argument in the other direction. Node ids are indices
+ * into `graph.nodes` and the caller turns them into strings, since what makes a *stable* id is a
+ * question about the table, not about the walk.
+ *
+ * `nNeurons` on a label is its neuron degree — the neurons directly carrying it — which is what
+ * makes a size encoding read properly on both kinds at once. It is not the size of the
+ * correspondence it ended up in; that is the report's job and it would be a different number.
+ */
+function graphView(
+  graph: Graph,
+  labels: readonly ReadonlyMap<NeuronId, string>[],
+  named: ReadonlyMap<number, string>,
+): MapperGraphView {
+  const nodes: MapperGraphNode[] = graph.nodes.map((node, i) => {
+    const neurons = node.dataset !== LABEL_NODE
+    return {
+      kind: neurons ? ('neurons' as const) : ('label' as const),
+      // A group's neurons all carry the same label set, so the first id names it as well as any
+      // and better than an index — it is a thing you can search the labels table for.
+      name: neurons ? (node.ids[0] ?? '') : node.text,
+      dataset: node.dataset,
+      nNeurons: neurons ? node.ids.length : labelNeurons(graph, i),
+      label: (neurons ? labels[node.dataset]?.get(node.ids[0]!) : named.get(i)) ?? '',
+    }
+  })
+
+  const edges: MapperGraphEdge[] = []
+  for (let a = 0; a < graph.nodes.length; a++) {
+    for (const [b, weight] of graph.adjacency[a]!) {
+      // Once per pair: the adjacency records both directions and the value is undirected.
+      if (b <= a) continue
+      edges.push({ source: a, target: b, weight })
+    }
+  }
+  return { nodes, edges }
+}
+
+/**
+ * The neurons directly carrying a label — its neuron-side edge weight.
+ *
+ * Read off the adjacency rather than accumulated while walking the edges, which is what this was
+ * and what made the object literal above state a `0` it did not mean. The two are the same
+ * number by construction: `buildGraph` gives a `neuron → label` edge the group's `ids.length`.
+ * Asking directly also stops the answer depending on the edge loop's `b <= a` skip, which is
+ * there to record each pair once and had quietly become load-bearing for this as well.
+ */
+function labelNeurons(graph: Graph, node: number): number {
+  let total = 0
+  for (const [other, weight] of graph.adjacency[node]!) {
+    if (isNeuron(graph, other)) total += weight
+  }
+  return total
 }
 
 /**
  * The mapping, and the report that says whether to believe it.
  *
  * Pure and synchronous. Every neuron landing in a component that reaches all the datasets gets a
- * shared label; every other neuron gets nothing, which is the honest answer and is counted in
- * `unmatched` rather than filled in with its own type name — a raw type name in a shared label
- * space is indistinguishable from a matched one, which is the trap `Relabel`'s `unmatched: null`
- * default guards from the other side.
+ * shared label; every other neuron gets nothing, which is the honest answer rather than its own
+ * type name filled in — a raw type name in a shared label space is indistinguishable from a
+ * matched one, which is the trap `Relabel`'s `unmatched: null` default guards from the other
+ * side.
+ *
+ * `keepLabels` is the one exemption, and it is granted by the user rather than derived; see
+ * `passThrough`. It does not weaken the sentence above, because the report's `matched` column
+ * says which labels came that way — the distinction is kept, it just moved to where there is
+ * room for it.
+ *
+ * **`unmatched` counts neurons with no label at all**, so a passed-through neuron is not in it.
+ * One definition, and the useful one: a female-specific type passed through is genuinely
+ * corresponding between the two female brains that have it, and calling that unmatched would
+ * make the node's own warning wrong. What "matched with nothing on the other side" costs is a
+ * report row reading `nNeurons 0`, which is more informative than a number.
  */
 export function matchCellTypes(
   datasets: readonly MapperDataset[],
@@ -875,10 +1135,19 @@ export function matchCellTypes(
   const s = settingsFrom(options)
   const labels: Map<NeuronId, string>[] = datasets.map(() => new Map())
 
+  /*
+   * Built unconditionally, unlike the matching below. One dataset has no correspondence to
+   * establish, but it still *has* a label graph, and that is the thing the `Network` port is
+   * for: wiring one dataset and looking at how its compounds split is a legitimate use, and a
+   * port that went empty at an arity nobody thinks to test is the other kind of surprise.
+   */
+  const graph = buildGraph(datasets, s)
+  /** Which label node the matcher named into which component — the graph view's `label`. */
+  const named = new Map<number, string>()
+
   // Fewer than two datasets is not an error and not a special case: there is no correspondence
   // to establish, so nothing is matched and every neuron is counted as unmatched below.
   if (datasets.length > 1) {
-    const graph = buildGraph(datasets, s)
     let placeholder = 0
 
     for (const partition of partitionComponents(graph, datasets.length, s)) {
@@ -891,24 +1160,41 @@ export function matchCellTypes(
         if (!name) continue
         for (const node of component) {
           const { dataset, ids } = graph.nodes[node]!
-          if (dataset === LABEL_NODE) continue
+          if (dataset === LABEL_NODE) {
+            named.set(node, name)
+            continue
+          }
           for (const id of ids) labels[dataset]!.set(id, name)
         }
       }
     }
 
-    if (s.labelMode === 'id') resolveIdLabels(labels)
+    if (s.labelMode === 'id') resolveIdLabels(labels, named)
   }
+
+  // Collected before the pass-through writes into the same maps: this is the record of what the
+  // *matcher* produced, and it is the whole basis of the report's `matched` column.
+  const derived = new Set<string>()
+  for (const perDataset of labels) for (const name of perDataset.values()) derived.add(name)
+
+  // Outside the `length > 1` branch on purpose. One dataset has no correspondence to establish,
+  // but a user who listed labels to keep still means them, and the alternative is a node whose
+  // pass-through silently stops working at an arity nobody thinks to test.
+  passThrough(datasets, labels, s)
 
   return {
     labels,
-    report: buildReport(labels),
+    report: buildReport(labels, derived),
     unmatched: datasets.map((neurons, d) => neurons.length - labels[d]!.size),
+    // After `passThrough`, so a neuron group's `label` is the one its neurons actually carry.
+    // The label *nodes* still show only what the matcher named, which is the honest reading —
+    // see `MapperGraphNode.label`.
+    graph: graphView(graph, labels, named),
   }
 }
 
 // ---------------------------------------------------------------------------
-// The two halves the node reads
+// What the node reads
 
 /**
  * One dataset's annotation table, reduced to what `matchCellTypes` takes.
@@ -952,45 +1238,30 @@ export function mapperDatasetFrom(
 }
 
 /**
- * The hand-curated half of the correspondence, off the node's optional Synonyms port.
+ * The labels to pass through, read off the node's optional port.
  *
- * cocoa's `add_synonym`, and the route by which somebody's own judgement enters a mapping that
- * is otherwise derived: `LC4` and `Lobula columnar 4` are the same cells and share no text, so
- * nothing in the data will ever join them. Nothing wired, or no columns chosen, means no
- * synonyms — a legitimate state rather than a missing input.
+ * A thin seam over `collectLabels`, which already owns "an optional wired table and an optional
+ * column picker, read as trimmed, blank-free, deduplicated labels" — the same shape
+ * `neuron.idsFromLabel` reads and the same one `labelLookup.test.ts` pins. Written out here it
+ * was a fourth copy of a cell rule three callers already disagree about slightly.
  *
- * Beside `mapperDatasetFrom` because it is the same job on the other table: these two are the
- * only places a `TableValue` crosses into the mapper, and the rule about which cells count is a
- * fact about what the mapper accepts rather than about one node. It is also the one of the pair
- * that looks harmless — it touches no ids — which makes it the one most likely to be
- * re-implemented by the next caller if it lives somewhere private.
+ * Kept as its own export rather than calling `collectLabels` from the node, because *which
+ * `TableValue` shapes the mapper accepts* is a fact about the mapper: this and
+ * `mapperDatasetFrom` are the two places a table crosses into it, and a caller reaching past
+ * them is the thing that goes wrong. `typed: undefined` because the pass-through list arrives
+ * only by wire — a typed twin of `badLabels` was considered and declined.
  */
-export function synonymsFrom(
-  value: Value | undefined,
-  labelColumn: string | undefined,
-  otherColumn: string | undefined,
-): LabelSynonym[] {
-  if (!isTableValue(value) || !labelColumn || !otherColumn) return []
-  const labels = value.data[labelColumn]
-  const others = value.data[otherColumn]
-  if (!labels || !others) return []
-
-  const synonyms: LabelSynonym[] = []
-  for (let row = 0; row < value.length; row++) {
-    const label = labelText(labels[row])
-    const synonym = labelText(others[row])
-    if (label && synonym) synonyms.push({ label, synonym })
-  }
-  return synonyms
+export function keepLabelsFrom(value: Value | undefined, labelColumn: string | undefined): string[] {
+  if (!isTableValue(value)) return []
+  return collectLabels({ typed: undefined, table: value, column: labelColumn })
 }
 
 /**
  * One cell as a label, or `''` where it is not one.
  *
- * Both adapters above ask the same question — null, undefined and the empty string are all
- * "this row has no label here" — and wrote the same three-way test either side of the banner.
- * A blank is an absence rather than a label, which matters: an empty shared label would pool
- * every unlabelled neuron in both brains into one enormous correspondence.
+ * Null, undefined and the empty string are all "this row has no label here". A blank is an
+ * absence rather than a label, which matters: an empty shared label would pool every unlabelled
+ * neuron in both brains into one enormous correspondence.
  */
 function labelText(cell: CellValue | undefined): string {
   return cell === null || cell === undefined ? '' : String(cell)
@@ -1021,6 +1292,47 @@ export function mapperLabelsTable(labels: ReadonlyMap<NeuronId, string>): TableV
 }
 
 /**
+ * A `Labels` table read back as `neuronId` → label.
+ *
+ * The reader beside the writer. `mapperLabelsTable` above defines this shape and
+ * `MAPPER_LABELS_SCHEMA` names its two columns, so the function that takes one apart belongs
+ * here rather than in whichever consumer needed it first — `edgeComparison.ts` and
+ * `partnerVectors.ts` both do, and two readers of one format is how the format acquires two
+ * definitions.
+ *
+ * The columns are arguments rather than the constants, because the port that carries this takes
+ * any table: a hand-built mapping from `Upload Table` is a legitimate input and will not have
+ * used our names.
+ *
+ * Reads through `idText`, so a table whose ids arrived as `i64` is treated exactly as the rest
+ * of the codebase treats one — [invariant 8](../../../docs/invariants.md): a wide CAVE root id
+ * read as a number is a *different* id, and `idText` drops it rather than attaching a label to
+ * whichever neuron owns the rounded value.
+ *
+ * A blank label is **no label**, not a label named blank — the same call `combineTable` makes
+ * about an empty cell, and the one that decides whether a neuron joins the shared space at all.
+ */
+export function labelsByNeuron(
+  table: TableValue,
+  idColumn = ID_COLUMN_NAME,
+  labelColumn = 'label',
+): Map<NeuronId, string> {
+  const ids = getColumn(table, idColumn)
+  const labels = getColumn(table, labelColumn)
+  const out = new Map<NeuronId, string>()
+  for (let row = 0; row < table.length; row++) {
+    const id = idText(ids[row] ?? null)
+    if (!id) continue
+    const label = labels[row]
+    if (label === null || label === undefined || label === '') continue
+    // First wins, `firstByKey`'s rule: a mapping that disagrees with itself is not grounds to
+    // pick the later answer.
+    if (!out.has(id)) out.set(id, String(label))
+  }
+  return out
+}
+
+/**
  * The report, **long**: one row per (label, dataset) rather than a count column per dataset.
  *
  * A column per dataset would make this the one output whose *schema* depends on the node's
@@ -1038,8 +1350,89 @@ export const MAPPER_REPORT_SCHEMA = tableSchema(
   column('label', 'str'),
   column('dataset', 'str'),
   column('nNeurons', 'i64'),
+  column('matched', 'bool'),
   column('suspicious', 'bool'),
 )
+
+/**
+ * The two halves of the `Network` port's schema.
+ *
+ * Constants, like the labels and report schemas and for the same reason: nothing here depends on
+ * the arity or on the data, so `inferOutputs` has nothing to derive and a column picker
+ * downstream is answerable before anything has run.
+ */
+export const MAPPER_GRAPH_NODE_SCHEMA = tableSchema(
+  column('id', 'str'),
+  column('name', 'str'),
+  column('kind', 'str'),
+  column('dataset', 'str'),
+  column('nNeurons', 'i64'),
+  column('label', 'str'),
+  column('matched', 'bool'),
+)
+
+export const MAPPER_GRAPH_EDGE_SCHEMA = tableSchema(
+  column('source', 'str'),
+  column('target', 'str'),
+  column('weight', 'i64'),
+  column('kind', 'str'),
+)
+
+/**
+ * The label graph as a `NetworkValue`, ready for the Network Viewer.
+ *
+ * Beside `mapperReportTable` and the same shape of function: index-keyed algorithm output in,
+ * dataset names attached, a table out.
+ *
+ * **Node ids are prefixed by kind, and that is not decoration.** A label is a string somebody
+ * typed into an annotation table, so a label called `flywire:720575940623374218` is possible;
+ * unprefixed it would be the same id as the neuron group it names, and `net.build`'s own rule —
+ * one row per id — would silently merge two nodes into one. `label/` and `neurons/` cannot
+ * collide with each other, labels cannot collide among themselves (`GraphBuilder` keys them by
+ * text), and a group cannot collide with another because its first neuron belongs to it alone.
+ * The qualified form is [decision 1](../../../docs/comparative.md)'s, which is what makes the
+ * dataset part of a group's id honest rather than a second convention.
+ *
+ * **Undirected**, because the graph is: `adjacency` records every edge both ways and
+ * `greedyBipartition` reads it as one weight per pair. Drawing it with arrowheads would assert
+ * a direction the algorithm does not have.
+ */
+export function mapperNetwork(
+  view: MapperGraphView,
+  datasetNames: readonly string[],
+): NetworkValue {
+  const idOf = (node: MapperGraphNode): string =>
+    node.kind === 'label'
+      ? `label/${node.name}`
+      : `neurons/${qualifyId(datasetNames[node.dataset] ?? String(node.dataset), node.name)}`
+
+  const ids = view.nodes.map(idOf)
+  const nodes = makeTable(MAPPER_GRAPH_NODE_SCHEMA, {
+    id: ids,
+    name: view.nodes.map((n) => n.name),
+    kind: view.nodes.map((n) => n.kind),
+    dataset: view.nodes.map((n) => (n.kind === 'label' ? '' : (datasetNames[n.dataset] ?? ''))),
+    nNeurons: view.nodes.map((n) => n.nNeurons),
+    label: view.nodes.map((n) => n.label),
+    matched: view.nodes.map((n) => n.label !== ''),
+  })
+
+  const edges = makeTable(MAPPER_GRAPH_EDGE_SCHEMA, {
+    source: view.edges.map((e) => ids[e.source]!),
+    target: view.edges.map((e) => ids[e.target]!),
+    weight: view.edges.map((e) => e.weight),
+    // Derived rather than stored: an edge joining two labels is a compound and its parts, and
+    // anything else is a neuron group carrying a label. Two kinds, and which one is a fact about
+    // the endpoints — recording it on the edge would be a second place for it to be wrong.
+    kind: view.edges.map((e) =>
+      view.nodes[e.source]!.kind === 'label' && view.nodes[e.target]!.kind === 'label'
+        ? 'compound'
+        : 'membership',
+    ),
+  })
+
+  return { kind: 'network', directed: false, nodes, edges }
+}
 
 export function mapperReportTable(
   report: readonly LabelCount[],
@@ -1052,6 +1445,7 @@ export function mapperReportTable(
         label: entry.label,
         dataset: datasetNames[d]!,
         nNeurons,
+        matched: entry.matched,
         suspicious: entry.suspicious,
       })
     })

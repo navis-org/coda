@@ -716,6 +716,52 @@
 }
 
 /*
+ * The tab strip above a banded card's params — `compare.connectivity`'s per-dataset settings.
+ *
+ * `flex-wrap` rather than a scroller: four short labels fit a 300px card on one line, and a
+ * fifth wrapping to a second line is a card two pixels taller, where a horizontal scroller is a
+ * control the user has to find before they can reach a tab. Nothing here is sized in a way that
+ * depends on the label, so a longer group name wraps instead of clipping.
+ *
+ * `margin-bottom` and not `gap`: the band's own `gap: 4px` already separates the strip from the
+ * first row, and doubling it reads as a section break where this is a header.
+ */
+.coda-node__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-bottom: 2px;
+}
+
+.coda-node__tab {
+  padding: 1px 7px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.coda-node__tab:hover {
+  color: var(--text-secondary);
+  background: var(--surface-hover);
+}
+
+/*
+ * The selected tab carries a border as well as ink, not ink alone. A card is drawn over a
+ * canvas the user picks the background of, and a strip distinguished only by brightness stops
+ * reading as a strip the moment the surrounding contrast changes.
+ */
+.coda-node__tab[aria-selected='true'] {
+  border-color: var(--border);
+  background: var(--surface-3);
+  color: var(--text-primary);
+}
+
+/*
  * "… 2 more (1 changed)" — the inspector-only params, at the end of the band.
  *
  * `align-self: flex-end` inside the band's column flex, so it sits under the *fields* rather

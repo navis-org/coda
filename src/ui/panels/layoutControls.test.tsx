@@ -548,7 +548,7 @@ describe('routes in the real editor', () => {
     expect(routed).toBeGreaterThan(0)
     const before = pathsById()
 
-    const target = useGraphStore.getState().graph.nodes.find((n) => n.type === 'core.filter')
+    const target = useGraphStore.getState().graph.nodes.find((n) => n.type === 'core.filterTable')
     // Asserted rather than guarded: an `if (target)` around the rest would let this test go
     // quietly vacuous the day the example is rewritten, while still reporting a pass.
     expect(target).toBeDefined()

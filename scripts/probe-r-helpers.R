@@ -256,6 +256,30 @@ check("counts: a neuron at both ends is counted once",
       cnt2$nNeurons[cnt2$label == "LC4" & cnt2$dataset == "A"] == 1,
       cnt2$nNeurons[cnt2$label == "LC4" & cnt2$dataset == "A"])
 
+# ---- coda_qualify_ids -------------------------------------------------------
+#
+# The same three rules one language over. R turns an NA into the string "NA" through `paste0`,
+# which is the null trap by another name, so the mask is explicit there too.
+qf <- data.frame(neuronId = c("720575940623374218", NA, "a:b"),
+                 type = c("LC4", "LC6", "X"), stringsAsFactors = FALSE)
+tagged <- coda_qualify_ids(qf, "neuronId", direction = "add", prefix = "flywire")
+check("qualify: tags an id with its dataset",
+      tagged$neuronId[1] == "flywire:720575940623374218", tagged$neuronId[1])
+check("qualify: a null stays null rather than becoming \"flywire:NA\"",
+      is.na(tagged$neuronId[2]), tagged$neuronId[2])
+check("qualify: the result is not digits, so a query builder refuses it",
+      !grepl("^[0-9]+$", tagged$neuronId[1]), tagged$neuronId[1])
+
+back <- coda_qualify_ids(tagged, "neuronId", direction = "remove", into = "dataset")
+check("qualify: round-trips", back$neuronId[1] == "720575940623374218", back$neuronId[1])
+check("qualify: keeps the dataset in its own column", back$dataset[1] == "flywire", back$dataset[1])
+check("qualify: and leaves it empty where there was no prefix", is.na(back$dataset[2]), back$dataset[2])
+
+inner <- coda_qualify_ids(qf, "neuronId", direction = "remove")
+check("qualify: splits on the first separator only", inner$neuronId[3] == "b", inner$neuronId[3])
+check("qualify: an unqualified id passes through unchanged",
+      inner$neuronId[1] == "720575940623374218", inner$neuronId[1])
+
 # ---- coda_relabel -----------------------------------------------------------
 #
 # `dplyr::recode` and a named vector are the obvious spellings and are a different operation
@@ -302,6 +326,49 @@ bdf <- data.frame(flag = c(TRUE, FALSE), stringsAsFactors = FALSE)
 bmap <- data.frame(from = c("true", "false"), to = c("yes", "no"), stringsAsFactors = FALSE)
 rbool <- coda_relabel(bdf, "flag", bmap, "from", "to")
 check("relabel: a boolean matches its JavaScript text", identical(rbool$flag, c("yes", "no")), paste(rbool$flag))
+
+# The shared label space, and what it costs each neuron — the same arithmetic the TypeScript
+# tests and the Python probe assert against the same fixture, which is what makes a drift
+# between the three visible as a disagreement rather than as three plausible answers.
+pv_labels <- data.frame(neuronId = c("10", "12", "20"),
+                        label = c("shared:X", "shared:X", "shared:Y"),
+                        stringsAsFactors = FALSE)
+mapped <- coda_partner_vectors(edges, neurons = queries, labels = pv_labels)
+check("vectors: two partners mapping onto one label pool into one feature",
+      isTRUE(all.equal(vector_for(mapped, 1),
+                       c("out:shared:X" = 4, "in:shared:Y" = 7))),
+      paste(names(vector_for(mapped, 1)), collapse = ", "))
+check("vectors: an unmapped partner is dropped, not renamed",
+      !("out:B" %in% names(vector_for(mapped, 1))),
+      paste(names(vector_for(mapped, 1)), collapse = ", "))
+by_id_mapped <- coda_partner_vectors(edges, neurons = queries, labels = pv_labels,
+                                     partner_by = "id")
+check("vectors: a mapping overrides partner_by",
+      isTRUE(all.equal(vector_for(by_id_mapped, 1), vector_for(mapped, 1))),
+      paste(names(vector_for(by_id_mapped, 1)), collapse = ", "))
+
+cn_frac <- function(frame, neuron) {
+  rows <- frame[as.character(frame$neuronId) == as.character(neuron), ]
+  if (nrow(rows) == 0) NA_real_ else rows$cnFrac[1]
+}
+
+# Neuron 1 keeps 3 + 1 + 7 of 17; neuron 2 keeps 5 of 15.
+check("cnFrac: the share of a neuron that survived the restriction",
+      abs(cn_frac(mapped, 1) - 11 / 17) < 1e-12, cn_frac(mapped, 1))
+check("cnFrac: and it differs per neuron, which is the whole point",
+      abs(cn_frac(mapped, 2) - 5 / 15) < 1e-12, cn_frac(mapped, 2))
+check("cnFrac: is 1 where nothing was dropped", cn_frac(pv, 1) == 1, cn_frac(pv, 1))
+dropped_pv <- coda_partner_vectors(edges, neurons = queries, untyped = "drop")
+check("cnFrac: counts what untyped='drop' removes too",
+      abs(cn_frac(dropped_pv, 1) - 15 / 17) < 1e-12, cn_frac(dropped_pv, 1))
+frac_mapped <- coda_partner_vectors(edges, neurons = queries, labels = pv_labels,
+                                    weighting = "fraction")
+check("cnFrac: survives the fraction weighting unchanged",
+      abs(cn_frac(frac_mapped, 1) - 11 / 17) < 1e-12, cn_frac(frac_mapped, 1))
+check("cnFrac: rides on every row of a neuron",
+      max(tapply(mapped$cnFrac, as.character(mapped$neuronId),
+                 function(x) length(unique(x)))) == 1, "")
+
 
 # ---- coda_similarity --------------------------------------------------------
 #

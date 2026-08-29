@@ -299,6 +299,18 @@ export function everythingGraph(): CodaGraph {
       row: 6,
       params: { mode: 'height', height: 0.6 },
     },
+    /*
+     * The mixed-dataset mode, which has no single-call equivalent in either language and emits a
+     * TODO. In the fixture so the refusal is *recorded* — before this it fell through to a count
+     * cut and both goldens showed a plausible, wrong analysis.
+     */
+    {
+      id: 'cutMixed',
+      type: 'cluster.cut',
+      col: 5,
+      row: 7,
+      params: { mode: 'mixed', maxShare: 0.75 },
+    },
     // A selection set, since that is the branch whose emitted frame is not simply empty.
     /*
      * The two label-to-neuron nodes, one on each branch of their shared emitter: `sel` has no
@@ -327,7 +339,7 @@ export function everythingGraph(): CodaGraph {
 
     {
       id: 'filter',
-      type: 'core.filter',
+      type: 'core.filterTable',
       col: 3,
       params: { column: 'weight', op: 'ge', value: '10' },
     },
@@ -475,6 +487,25 @@ export function everythingGraph(): CodaGraph {
         minWeight: 2,
       },
     },
+    /*
+     * Both directions, because they are two branches of one helper and a fixture on `add` alone
+     * records `remove` as absent rather than as untested. The second also names a dataset column,
+     * which is the third branch.
+     */
+    {
+      id: 'qualify',
+      type: 'core.qualifyIds',
+      col: 4,
+      row: 2,
+      params: { column: 'neuronId', direction: 'add', prefix: 'flywire' },
+    },
+    {
+      id: 'unqualify',
+      type: 'core.qualifyIds',
+      col: 5,
+      row: 2,
+      params: { column: 'neuronId', direction: 'remove', into: 'dataset' },
+    },
     {
       id: 'stack',
       type: 'core.stack',
@@ -510,6 +541,23 @@ export function everythingGraph(): CodaGraph {
       col: 8,
       row: 3,
       params: { partnerBy: 'id', weight: 'weight', weighting: 'fraction' },
+    },
+    /*
+     * A third, wired to Labels — the arm that replaces `partner_by`/`untyped` with a mapping and
+     * emits three different arguments. The two above cover the other branch twice over and
+     * neither reaches this one, so renaming `labelId` would have passed CI in both languages.
+     */
+    {
+      id: 'pvecLabels',
+      type: 'neuron.partnerVectors',
+      col: 8,
+      row: 4,
+      params: {
+        weight: 'weight',
+        weighting: 'raw',
+        labelId: 'neuronId',
+        labelName: 'label',
+      },
     },
     {
       id: 'simil',
@@ -711,6 +759,41 @@ export function everythingGraph(): CodaGraph {
       },
     },
 
+    /*
+     * A subgraph around a selection. `hops` rather than `component` because it is the mode with
+     * something to get wrong — the hop count and the walk direction both reach the emitted call,
+     * where `component` is one library function with no arguments from the card.
+     */
+    {
+      id: 'netfilter',
+      type: 'net.filter',
+      col: 8,
+      row: 2,
+      params: {
+        column: 'weightOut',
+        op: 'ge',
+        value: '20',
+        expand: 'hops',
+        hops: 2,
+        direction: 'downstream',
+      },
+    },
+
+    /*
+     * The regex arm of the same node, and it earns its cells: `matches` is the one operator
+     * carrying a note — JavaScript semantics against Python `re` and against POSIX ERE — and no
+     * fixture used it, in either language, for either Filter node. That gap is what let the R
+     * `net.filter` silently drop the caveat its Python twin printed. A golden per language now
+     * fails if either stops saying it.
+     */
+    {
+      id: 'netregex',
+      type: 'net.filter',
+      col: 8,
+      row: 3,
+      params: { column: 'id', op: 'matches', value: '^LC[0-9]+$', expand: 'component' },
+    },
+
     { id: 'table', type: 'out.table', col: 12 },
     /*
      * A second Table, filtered, for the same reason there are two Select One nodes: the first
@@ -883,7 +966,7 @@ export function everythingGraph(): CodaGraph {
     },
     {
       id: 'muted',
-      type: 'core.filter',
+      type: 'core.filterTable',
       col: 9,
       row: 2,
       params: { column: 'weight', op: 'gt', value: '1' },
@@ -971,6 +1054,12 @@ export function everythingGraph(): CodaGraph {
     ['combine', 'out', 'compare', 'labels1'],
     ['conn2', 'connections', 'compare', 'edges2'],
     ['combine', 'out', 'compare', 'labels2'],
+    ['find', 'neurons', 'qualify', 'in'],
+    ['qualify', 'out', 'unqualify', 'in'],
+    ['conn', 'connections', 'pvecLabels', 'in'],
+    ['find', 'neurons', 'pvecLabels', 'neurons'],
+    ['combine', 'out', 'pvecLabels', 'labels'],
+    ['linkage', 'tree', 'cutMixed', 'in'],
     ['stack', 'out', 'pivot', 'in'],
     ['pivot', 'matrix', 'norm', 'in'],
     ['norm', 'out', 'heat', 'in'],
@@ -986,6 +1075,8 @@ export function everythingGraph(): CodaGraph {
     ['group', 'out', 'describe', 'in'],
     ['group', 'out', 'net', 'edges'],
     ['net', 'network', 'netview', 'in'],
+    ['net', 'network', 'netfilter', 'in'],
+    ['net', 'network', 'netregex', 'in'],
     ['syn', 'points', 'synblast', 'query'],
     ['skel', 'skeletons', 'cleanskel', 'in'],
     ['skel', 'skeletons', 'cleanskeldown', 'in'],
@@ -1087,7 +1178,7 @@ export function caveGraph(): CodaGraph {
         valueColumn: 'cell_type',
       },
     },
-    { id: 'filter', type: 'core.filter', col: 2, params: { column: 'type', op: 'notEmpty' } },
+    { id: 'filter', type: 'core.filterTable', col: 2, params: { column: 'type', op: 'notEmpty' } },
     {
       id: 'repair',
       type: 'cave.updateRootIds',

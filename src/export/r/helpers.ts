@@ -7,6 +7,7 @@
  * document still runs and still answers.
  */
 
+import { QUALIFIED_SEPARATOR } from '../../core/ids'
 import { JOIN_SEPARATOR } from '../../core/values'
 import { registerHelper } from './registry'
 
@@ -297,6 +298,43 @@ registerHelper({
 })
 
 /**
+ * Coda's Qualify Ids, both directions. See the Python helper for the three rules the obvious
+ * spelling gets wrong; R gets one of them free — `paste0` with an `NA` gives `"NA"`, which is
+ * the same trap by another name, so the mask is explicit here too.
+ *
+ * `sub()` with a non-greedy-equivalent pattern rather than `strsplit`: it replaces only the
+ * first separator, which is the rule, and it leaves a value with no separator untouched — which
+ * is the other rule, for free.
+ *
+ * The separator is spliced from `QUALIFIED_SEPARATOR` rather than typed, `coda_join`'s idiom
+ * with `JOIN_SEPARATOR`: `src/core/ids.ts` exists so the rule has one home, and a literal here
+ * would stay on `:` when that constant changes, with every golden still green.
+ */
+registerHelper({
+  name: 'coda_qualify_ids',
+  source: [
+    "#' Tag an id column with its dataset, or take that tag off again.",
+    'coda_qualify_ids <- function(df, column, direction = "add", prefix = "", into = NULL) {',
+    '  ids <- df[[column]]',
+    '  text <- as.character(ids)',
+    '  if (direction == "add") {',
+    '    # A null stays null: tagging one invents a neuron that does not exist.',
+    '    df[[column]] <- if (nzchar(prefix)) ifelse(is.na(ids), NA_character_,',
+    `                                               paste0(prefix, ${JSON.stringify(QUALIFIED_SEPARATOR)}, text)) else text`,
+    '    return(df)',
+    '  }',
+    '  # `sub` replaces the first match only, and leaves a value with no separator untouched.',
+    `  df[[column]] <- ifelse(is.na(ids), NA_character_, sub(${JSON.stringify('^[^' + QUALIFIED_SEPARATOR + ']*' + QUALIFIED_SEPARATOR)}, "", text))`,
+    '  if (!is.null(into) && nzchar(into)) {',
+    `    had <- !is.na(ids) & grepl(${JSON.stringify(QUALIFIED_SEPARATOR)}, text, fixed = TRUE)`,
+    `    df[[into]] <- ifelse(had, sub(${JSON.stringify(QUALIFIED_SEPARATOR + '.*$')}, "", text), NA_character_)`,
+    '  }',
+    '  df',
+    '}',
+  ],
+})
+
+/**
  * Coda's `join` aggregation, in R.
  *
  * `paste(x, collapse = "; ")` is the obvious spelling and keeps an `NA` — as the literal two
@@ -446,14 +484,25 @@ registerHelper({
  */
 registerHelper({
   name: 'coda_partner_vectors',
+  needs: ['coda_match_keys'],
   source: [
     "#' A pre/post edge list as one long feature vector per query neuron.",
     'coda_partner_vectors <- function(edges, neurons = NULL, partner_by = "type",',
     '                                 untyped = "id", weight = "weight",',
-    '                                 weighting = "raw") {',
+    '                                 weighting = "raw", labels = NULL,',
+    '                                 label_id = "neuronId", label_name = "label") {',
     '  df <- edges',
     '  df[["coda_weight_"]] <- suppressWarnings(as.numeric(df[[weight]]))',
     '  df <- df[!is.na(df[["coda_weight_"]]) & df[["coda_weight_"]] != 0, , drop = FALSE]',
+    '',
+    '  lookup <- NULL',
+    '  if (!is.null(labels)) {',
+    '    lk <- coda_match_keys(labels[[label_id]])',
+    '    lv <- as.character(labels[[label_name]])',
+    '    # First occurrence wins, and a blank label is no label.',
+    '    keep <- !duplicated(lk) & !is.na(lk) & !is.na(lv) & nzchar(lv)',
+    '    lookup <- stats::setNames(lv[keep], lk[keep])',
+    '  }',
     '',
     '  if (!is.null(neurons)) {',
     '    queries <- as.character(neurons$neuronId)',
@@ -480,12 +529,24 @@ registerHelper({
     '  }',
     '',
     '  parts <- list()',
+    '  seen <- list()',
     '  for (side in sides) {',
     '    frame <- side[[1]]',
     '    if (nrow(frame) == 0) next',
     '    direction <- side[[2]]; query_col <- side[[3]]',
     '    id_col <- side[[4]]; type_col <- side[[5]]',
-    '    if (partner_by == "type") {',
+    '    # Every gram attributable to a neuron, before anything is dropped. cnFracs denominator,',
+    '    # countable only here: a dropped connection leaves nothing behind to count it against.',
+    '    seen[[length(seen) + 1L]] <- data.frame(',
+    '      neuronId = as.character(frame[[query_col]]),',
+    '      w = frame[["coda_weight_"]], stringsAsFactors = FALSE)',
+    '    if (!is.null(lookup)) {',
+    '      # The mapping replaces partner_by and untyped: a partner outside the shared label',
+    '      # space can only exist in one dataset, so it is dropped rather than falling back.',
+    '      mapped <- unname(lookup[coda_match_keys(frame[[id_col]])])',
+    '      frame <- frame[!is.na(mapped), , drop = FALSE]',
+    '      label <- mapped[!is.na(mapped)]',
+    '    } else if (partner_by == "type") {',
     '      if (!type_col %in% names(frame)) {',
     '        stop(sprintf("Grouping partners by cell type needs a \\"%s\\" column.", type_col))',
     '      }',
@@ -500,6 +561,9 @@ registerHelper({
     '    } else {',
     '      label <- as.character(frame[[id_col]])',
     '    }',
+    '    # After the branch, not inside one: `untyped == "drop"` can empty the frame too, which',
+    '    # is where the Python this mirrors puts the same guard.',
+    '    if (nrow(frame) == 0) next',
     '    parts[[length(parts) + 1L]] <- data.frame(',
     '      neuronId = frame[[query_col]],',
     '      direction = direction,',
@@ -511,7 +575,8 @@ registerHelper({
     '  if (length(parts) == 0) {',
     '    return(data.frame(neuronId = character(0), direction = character(0),',
     '                      partner = character(0), feature = character(0),',
-    '                      weight = numeric(0), stringsAsFactors = FALSE))',
+    '                      weight = numeric(0), cnFrac = numeric(0),',
+    '                      stringsAsFactors = FALSE))',
     '  }',
     '  long <- do.call(rbind, parts)',
     '  long$feature <- paste0(long$direction, ":", long$partner)',
@@ -523,13 +588,20 @@ registerHelper({
     '  summed <- rowsum(long$weight, key, reorder = FALSE)',
     '  long <- long[match(rownames(summed), key), , drop = FALSE]',
     '  long$weight <- as.vector(summed)',
+    '  # cnFrac against the pre-restriction totals, and *before* the fraction weighting below',
+    '  # rescales the weights -- after it, this would be a fraction of a fraction.',
+    '  before <- do.call(rbind, seen)',
+    '  before <- rowsum(before$w, before$neuronId, reorder = FALSE)',
+    '  kept <- rowsum(long$weight, as.character(long$neuronId), reorder = FALSE)',
+    '  frac <- as.vector(kept) / as.vector(before)[match(rownames(kept), rownames(before))]',
+    '  long$cnFrac <- pmin(1, frac[match(as.character(long$neuronId), rownames(kept))])',
     '  if (weighting == "fraction") {',
     '    side <- paste0(long$neuronId, "\\r", long$direction)',
     '    totals <- rowsum(long$weight, side, reorder = FALSE)',
     '    denom <- as.vector(totals)[match(side, rownames(totals))]',
     '    long$weight <- ifelse(denom == 0, 0, long$weight / denom)',
     '  }',
-    '  long[, c("neuronId", "direction", "partner", "feature", "weight")]',
+    '  long[, c("neuronId", "direction", "partner", "feature", "weight", "cnFrac")]',
     '}',
   ],
 })

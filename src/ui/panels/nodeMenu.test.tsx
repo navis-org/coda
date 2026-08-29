@@ -44,7 +44,7 @@ function menuOn(type: string): void {
 
 describe('the node menu’s two caches', () => {
   it('says Results, not "cache", for the layer it actually drops', () => {
-    menuOn('core.filter')
+    menuOn('core.filterTable')
     expect(screen.getByText('Invalidate Results')).toBeTruthy()
     // The old wording. It was on every node and claimed a re-fetch none of them performed.
     expect(screen.queryByText('Invalidate cache')).toBeNull()
@@ -61,7 +61,7 @@ describe('the node menu’s two caches', () => {
      * button appears, and `evaluate` honours `ctx.refresh`. A button on a Filter would promise a
      * re-fetch there is no fetch behind — the same false claim in the other direction.
      */
-    menuOn('core.filter')
+    menuOn('core.filterTable')
     expect(screen.queryByText('Clear Cache')).toBeNull()
   })
 })

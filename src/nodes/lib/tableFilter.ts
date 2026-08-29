@@ -46,7 +46,7 @@
  *
  * The header *sort* shares `sortedRowIndices` with the Sort node on a stated rule: null
  * placement and collation must not differ between what a node does and what a column-header
- * click does. The header *filter* deliberately does not share with `core.filter`, because it
+ * click does. The header *filter* deliberately does not share with `core.filterTable`, because it
  * borrows Explore's grammar instead — and the two land on different answers for the same
  * question. Measured, not surmised:
  *
@@ -54,10 +54,10 @@
  *   `pre == 0`, null  Filter node keeps the null row (`Number(null)` is 0); a cell keeps none.
  *
  * Neither is wrong on its own — Explore's rules are the ones documented for a search box, and
- * `makePredicate`'s are the ones `core.filter` has always had — but a graph can hold both an
+ * `makePredicate`'s are the ones `core.filterTable` has always had — but a graph can hold both an
  * inch apart, so the disagreement is recorded here rather than left to be discovered. Folding
  * one onto the other is a real decision about which semantics wins, and it changes what every
- * saved `core.filter` returns; it is not a tidy-up.
+ * saved `core.filterTable` returns; it is not a tidy-up.
  */
 
 import type { DType, TableSchema } from '../../core/types'

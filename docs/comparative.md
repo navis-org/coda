@@ -316,8 +316,8 @@ therefore the ones that can drift between `inferOutputs` and `evaluate`.
 
 | | |
 | --- | --- |
-| **inputs** | `dataset1..N` (`T.dataset()`, variadic); `extra` (`T.table()`, optional) — extra `label↔label` edges, cocoa's `add_synonym`, and the route for a hand-curated correspondence |
-| **outputs** | `labels1..N` (`T.table()`), each keyed by *that dataset's own bare* `neuronId`; `report` (`T.table()`) |
+| **inputs** | `dataset1..N` (`T.dataset()`, variadic); `keep` (`T.table()`, optional) — labels allowed to survive with no counterpart |
+| **outputs** | `labels1..N` (`T.table()`), each keyed by *that dataset's own bare* `neuronId`; `report` (`T.table()`); `network` (`T.network()`) — the label graph itself |
 | **params** | `datasetCount`; per-dataset `typeColumns` (multi-column picker over that dataset's neuron schema); `badLabels`; `compoundSeparator` (default `,`); `labelMode` (`first` \| `all` \| `id`); `allowIndirect` |
 
 **Bare ids on the labels ports, not qualified ones** — decision 1 says qualify only where two
@@ -330,8 +330,9 @@ adds when L2b is built.
 is deliberately **not** carried over — a UUID per run is non-deterministic, and
 [invariant 4](invariants.md) requires `evaluate` to be deterministic or to declare a nonce.
 
-The **`report` port is not optional garnish.** It carries per-label neuron counts per dataset
-and cocoa's `suspicious` flag (`min/max < 0.5` between any two datasets' counts for a label).
+The **`report` port is not optional garnish.** It carries per-label neuron counts per dataset,
+a `matched` flag, and cocoa's `suspicious` flag (`min/max < 0.5` between any two datasets' counts
+for a label).
 In practice this is where the biology gets checked — a label with 4 neurons in one brain and 40
 in another is a mapping error, not a finding — and a mapping shipped without a way to see that
 is a mapping that will be trusted when it should not be.
@@ -339,20 +340,100 @@ is a mapping that will be trusted when it should not be.
 `inferOutputs` returns the static labels schema (`neuronId`, `label`) and must not fetch —
 [invariant 2](invariants.md). It has nothing to fetch: the schema does not depend on the data.
 
-#### Four things settled in the building that the spec above did not say
+#### Seven things settled in the building that the spec above did not say
 
-**The report is emitted long** — `label | dataset | nNeurons | suspicious`, one row per label per
-dataset — rather than a count column per dataset. A column per dataset would make the report the
+**The report is emitted long** — `label | dataset | nNeurons | matched | suspicious`, one row per
+label per dataset — rather than a count column per dataset. A column per dataset would make the report the
 one output whose *schema* depends on the node's arity, which is exactly the shape
 [invariant 3](invariants.md) exists for: `inferOutputs` and `evaluate` would derive the same
 column names twice and agree until somebody renamed one. Long form makes it a constant, and it is
 already how `Compare Connectivity`'s `counts` port is specified below.
 
-**Both synonym column pickers are `optional`.** Required, each would fall back to the *first
-compatible column* of the wired table — the same column for both — so every row would assert that
-a label is a synonym of itself, and the port would silently do nothing. Optional makes empty a
-decision; a *wired* table with nothing chosen is the one reading of empty nobody intends, so
-`validate` says so.
+**The mapping is derived and only derived — the `Synonyms` port was built and then removed.**
+It carried hand-written `label ↔ label` edges (cocoa's `add_synonym`) at weight 0, on the
+reasoning that an assertion about correspondence is not evidence about how many neurons carry a
+label. It went because *it is never used in practice*, cocoa included — a socket, two `optional`
+column pickers, a `validate` branch for the wired-but-unpointed-at case and a zero-weight edge
+class in the graph, all for a route nobody takes. What that costs is real and is the thing to
+weigh before reinstating it: `LC4` and `Lobula columnar 4` are the same cells under two naming
+conventions, share no text, and nothing in the data will ever join them, so **this node has no
+way to be told**. The answer is a downstream `Relabel`, where the assertion is a visible table
+row rather than a setting on an expensive node.
+
+Two consequences worth knowing. Every edge weight is now at least 1 — a `neuron → label` edge
+weighs the group's neuron count, a compound's parts weigh how many neurons carry it — so
+`greedyBipartition`'s `total === 0` guard is gone with it; anything reintroducing a zero-weight
+edge has to put that guard back or the modularity gains become `0/0`. And a stored graph wired
+into the old port loses that edge on load, which is the intended loss: `normalizeParams` reads
+only declared params, so the two orphaned picker values fall out of the provenance key without
+a migration.
+
+**A sex-specific type is indistinguishable from a naming artifact, so the user says which.** Step
+1 drops every component that does not reach all the datasets, and a male-only `pMP2` looks exactly
+like a label one connectome invented: neurons in one brain, none in another. That default is right
+— a label present in one brain only is not evidence of a correspondence, which is what step 1 is
+*for* — and wrong whenever somebody already knows the type is genuinely unique. Hence the `keep`
+port: a table, a column of type names, and those labels survive.
+
+Four things about how it is built, in rough order of how badly each alternative would have gone.
+
+**It is a separate pass, not a relaxed `coversAll`.** The coverage test is asked in four places —
+twice in `partitionComponents`, once per split group in `splitCheckRecursive`, once at naming — and
+each is load-bearing. An exemption threaded through them lets one exempt label carry a whole
+component of *unexempt* ones past every gate, which is the silent-wrong-answer version of this
+feature. `passThrough` instead runs after matching and only fills in neurons the matcher left
+empty, so nothing about the correspondence changes.
+
+**The report gained a `matched` column, and that is the price of admission.** A passed-through
+label sits in the same name space as a matched one and is indistinguishable there by construction
+— the exact trap `matchCellTypes`' docstring refuses to walk into for raw type names. The labels
+table stays a flat `neuronId → label`; the answer to "was anything actually matched here" moved to
+the report, beside the counts that show it. `suspicious` is now **never** set on a pass-through,
+which is not leniency: an unmatched label has zero neurons in at least one dataset by definition,
+so the ratio is 0 for all of them and the flag would fire on the entire pass-through list at once.
+
+**Matching by text re-joins the datasets that do have it, for free.** A female-specific type in
+both the hemibrain and FlyWire but not the maleCNS is dropped by step 1 for want of the third
+dataset. Passed through, both sides get the same string and therefore correspond. Nothing arranges
+this; it falls out of labels being shared by their text, which is the same property the whole
+algorithm rests on.
+
+**Three smaller rules, each the safe reading of a contradiction.** A derived label wins, because a
+correspondence is better evidence than a list — so listing a type that does match is a no-op rather
+than an override, which matters when the list is somebody's whole annotation wired in unchecked.
+`badLabels` wins over `keepLabels`, because delete-this and keep-this are contradictory and the
+destructive reading is the safe one. And the label keeps its own text whatever `labelMode` says,
+including `id` mode: nothing was merged, so there is no group to name, and `#7` would replace the
+one thing the user asked to see. That last one is why `passThrough` runs *after* `resolveIdLabels`,
+which renames every label it is handed.
+
+`unmatched` counts neurons with no label at all, so a passed-through neuron is not in it — one
+definition, and the useful one, since the female-specific case above is a genuine correspondence.
+What "matched with nothing on the other side" costs is a report row reading `nNeurons 0`.
+
+**The graph is on a port, because the graph *is* the algorithm.** Neurons and labels as nodes,
+`neuron → label` edges from the type columns and `label ↔ label` edges from compound splitting —
+so a drawing of it is the only way to see why two types corresponded and why two others did not.
+`network` carries it, `T.network()`, straight into the Network Viewer.
+
+**There is no expanded mode, and the reason is that there was never a collapsed one.** cocoa
+collapses neuron nodes as a post-step; `buildGraph` does it at construction — `builder.neurons(d,
+ids)` puts every neuron sharing an identical label set into one node weighted by how many that
+is, which is the number `collapse_neuron_nodes` gets by summing its edge list. So the collapsed
+form is what exists and the *expanded* one would have to be reconstructed, at 140,000 nodes per
+dataset. That is not a drawing, and a mode whose only honest use is a selection that the
+downstream filter has not made yet is a mode that exists to be regretted.
+
+Three smaller things. **Every component is on the port, including the ones step 1 dropped**,
+because "why did these two not correspond?" is only answerable from a dropped one — which is most
+of what an inspection port is for; `GRAPH_NODE_WARN` says the size out loud rather than letting a
+viewer discover it. **Node ids are prefixed by kind** (`label/LC4`, `neurons/maleCNS:m1`): a label
+is a string somebody typed into an annotation table, so one called `flywire:720575940623374218` is
+possible, and unprefixed it would be the same id as the neuron group it names — `net.build`'s own
+one-row-per-id rule would then merge two nodes with nothing to say so. And a node's `label` column
+is **the matcher's** answer, so a pass-through is absent from it; that is right rather than a gap,
+since `passThrough` deliberately does not touch the graph, and the report's `matched` column is
+where it shows.
 
 **The capability refusal happens before any fetch.** Every dataset is resolved and checked, then
 all of them download concurrently. Four multi-megabyte indices followed by a refusal is the same
@@ -525,27 +606,56 @@ two would fire almost always.
    only ground is another node's absence rots invisibly the moment that node gets the bundled CSV
    [export.md](export.md) records.
 
-## What L2b still needs
+## L2b — **built**
 
-When co-clustering is built, on top of the above:
+All five, on top of the pipeline that already existed
+(`Partner Vectors → Stack → Similarity → Linkage → Cut Tree`).
 
-1. **Qualified observation ids** — a `Qualify Ids` node, or a `prefix` param on `Stack Tables`.
-2. **A mapping-aware feature axis** — `Relabel` on the `feature` column of Partner Vectors'
-   output. Note the features are prefixed `out:` / `in:`, so `Relabel` either needs to see
-   through the prefix or Partner Vectors needs to relabel before prefixing. The latter is
-   right: add an optional `Labels` input to Partner Vectors.
-3. **`cn_frac_`** — the fraction of each neuron's synapses surviving the label restriction.
-   cocoa reports mean and worst-case and offers `cn_frac_threshold`. Without it a neuron
-   represented by 5% of its connectivity clusters as noise and nothing says so. It belongs as a
-   column on Partner Vectors' output plus a `ctx.warn` on the worst case.
-4. **Homogeneity-aware cutting** — cocoa's `extract_homogeneous_clusters`: cut the dendrogram so
-   each cluster draws from all datasets in sensible proportion. A mode on `Cut Tree` reading a
-   dataset column, not a new node.
-5. **A stated ceiling.** `SIMILARITY_WORK_WARN` is 500M pair-features; a 30k × 30k float32
-   matrix is 3.6 GB and is not a browser artefact. cocoa clusters tens of thousands of neurons;
-   Coda will do low thousands. That is a real limit on what this feature is *for* — "compare
-   these 300 neurons across two brains", not "co-cluster two connectomes" — and it should be
-   said in the node's guide rather than discovered at the crash floor.
+1. **Qualified observation ids** — `Qualify Ids` (`core.qualifyIds`), both directions in one
+   node, over `qualifyId`/`unqualifyId`/`qualifiedDataset` in [ids.ts](../src/core/ids.ts). It
+   went to a node rather than a `prefix` param on `Stack Tables` because it is a real
+   transformation somebody should see on the canvas, and because decision 1 requires a
+   *pair* — a `prefix` on Stack has no natural home for the inverse. `isNeuronId` rejecting the
+   result is asserted in the tests, since that property is the entire reason this form beat a
+   composite key.
+2. **A mapping-aware feature axis** — an optional `Labels` input on Partner Vectors, relabelling
+   *before* the `out:`/`in:` prefix as the design said. It supersedes `Partners by` and `Untyped
+   partners` rather than combining with them, and an unmapped partner is dropped: a feature
+   outside the shared space can only exist in one dataset, so it cannot make two neurons alike
+   or unalike. `validate` says so on the card, because `visibleIf` sees params and not which
+   ports are wired.
+3. **`cnFrac`** — a column on Partner Vectors' output plus a `ctx.warn` naming the **worst**
+   neuron rather than a mean, since a mean over a thousand neurons hides exactly the neuron this
+   is about. Emitted unconditionally (1 where nothing was dropped) so the schema does not change
+   shape with whether an optional port is wired, and computed before the `fraction` weighting
+   rescales the weights — after it, it would be a fraction of a fraction. It counts what
+   `Untyped partners ▸ drop` removes too, which is the same subtraction by another route.
+4. **Homogeneity-aware cutting** — a third mode on `Cut Tree`, reading each neuron's dataset off
+   its qualified id, so it needs no second input. **It is not a port**: cocoa's
+   `extract_homogeneous_clusters` was the reference for the goal, its source was not in hand,
+   and `cutHomogeneous`' docstring says so and spells out the criterion instead. The criterion is
+   *deepest* mixed clusters, not the first — the first draft descended only until a cluster was
+   mixed, which emits the **root** almost every time, because a tree over two connectomes is
+   mixed at the top by construction. That returns one cluster containing everything and looks
+   like a working node; a test caught it.
+5. **A stated ceiling** — in `Similarity Matrix`' guide, where the square matrix actually is:
+   "low thousands… compare these three hundred neurons across two brains, not co-cluster two
+   connectomes".
+
+**Four of the five export.** `coda_qualify_ids` in both languages, and `coda_partner_vectors`
+extended with `labels`/`cnFrac` in both — the Python and R probes assert the *same* arithmetic the
+TypeScript tests do against the same fixture, which is what makes a drift between the three show
+up as a disagreement rather than as three plausible answers.
+
+**The mixed-dataset cut does not**, and emits a TODO. `cut_tree`/`cutree` both cut across the tree
+at one level; this mode walks the merge matrix, which is a helper in each language rather than an
+argument. Worth knowing how it was found: it originally *fell through* to the count branch and
+emitted `cut_tree(n_clusters=4)` — a notebook that runs, returns four clusters, and is a different
+analysis, with `4` being a default the user never saw because the control is hidden in this mode.
+Both goldens now carry the refusal, which is what stops that recurring.
+
+**Still open**, and deliberately: `sides_rel` (decision 7's v2), which is a change to the feature
+axis and so lands in Partner Vectors beside items 2 and 3.
 
 ## Where the tests go
 

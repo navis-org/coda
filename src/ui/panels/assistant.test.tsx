@@ -62,7 +62,7 @@ const BAD_WIRE = JSON.stringify({
   summary: 'A pipeline that does not fit.',
   add: [
     { ref: 'ds', type: 'dataset.mock.opticlobe', params: [], title: '' },
-    { ref: 'filter', type: 'core.filter', params: [], title: '' },
+    { ref: 'filter', type: 'core.filterTable', params: [], title: '' },
   ],
   remove: [],
   setParams: [],
@@ -203,7 +203,7 @@ describe('asking for a change', () => {
     expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeNull()
 
     act(() => {
-      useGraphStore.getState().addNode('core.filter', { x: 0, y: 0 })
+      useGraphStore.getState().addNode('core.filterTable', { x: 0, y: 0 })
     })
 
     expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull()

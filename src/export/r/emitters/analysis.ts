@@ -9,6 +9,7 @@ import { LANDMARK_AXES, landmarkParamId } from '../../../nodes/transform/landmar
 import { matchParamsFrom } from '../../../nodes/lib/matchOps'
 import { effectiveOutput, isLongLayout } from '../../../nodes/lib/similarityOps'
 import type { SimilarityMetric, SimilarityOutput } from '../../../nodes/lib/similarityOps'
+import { ID_COLUMN_NAME } from '../../../core/ids'
 import { portIdAt } from '../../../core/ports'
 import { compareParamsFrom } from '../../../nodes/lib/edgeComparison'
 import { repeatParamId } from '../../../nodes/lib/repeatParams'
@@ -19,6 +20,8 @@ import { neuronIds, selectionIds } from './common'
 import { populationFromType } from '../../../nodes/lib/populationParams'
 import { populationCypher } from '../../../data/neuprint/cypher'
 import { schemasFromType } from '../../../nodes/lib/datasetParam'
+import { rFilterPredicate } from './table'
+import { findColumn, isNumericDType } from '../../../core/types'
 
 // ---------------------------------------------------------------------------
 // Build Network
@@ -53,6 +56,90 @@ registerEmitter('net.build', (ctx) => {
     ...(nodes ? [`  vertices = ${nodes}`] : []),
     `)`,
   )
+  return lines
+})
+
+// ---------------------------------------------------------------------------
+// Filter Network
+// ---------------------------------------------------------------------------
+
+/**
+ * A subgraph around a selection, in igraph.
+ *
+ * The seed half goes through `rFilterPredicate`, the same function `Filter Table` emits with, so
+ * the two nodes sharing a name share an operator table here as well as on the canvas. It runs
+ * against `as_data_frame(g, "vertices")` rather than against the graph, because that is where
+ * the columns are and where a dplyr predicate is written to run.
+ *
+ * `ego` and `components` are igraph's own, so the walk is theirs rather than a transcription of
+ * ours. Two things this does *not* emit, both deliberate: Coda recomputes `degreeIn` and friends
+ * on a subgraph so a size encoding describes the picture, where igraph asks `degree()` on demand
+ * and is right by construction; and `mode` on `ego` covers the direction, so there is no reverse
+ * graph to build.
+ */
+registerEmitter('net.filter', (ctx) => {
+  const src = ctx.wired('in')
+  const out = ctx.output('out')
+  const name = ctx.column('column')
+  const seedFrame = ctx.input('seed')
+  const seedColumn = ctx.column('seedColumn')
+  const hasSeedTable = !!seedFrame && !!seedColumn
+  if (!name && !hasSeedTable) return ctx.todo('Nothing selects any nodes on this Filter Network.')
+
+  ctx.library('igraph')
+  ctx.library('dplyr')
+
+  const lines: string[] = []
+  const seeds: string[] = []
+
+  if (name) {
+    const op = String(ctx.params.op ?? 'contains')
+    const raw = String(ctx.params.value ?? '')
+    // `ctx.attributes`, not `ctx.schema`: `schemaOf` has no branch for a network, and this is
+    // the accessor `InferContext` carries for exactly that.
+    const dtype = findColumn(ctx.attributes('in', 'nodes'), name)?.dtype
+    const built = rFilterPredicate(name, op, raw, isNumericDType(dtype ?? 'str'))
+    if (built.predicate === undefined) return ctx.todo(built.reason)
+    lines.push(
+      // The notes travel in the value, so the caveat this used to drop is now dropped only by
+      // deliberately not destructuring it.
+      ...built.notes.flatMap((note) => ctx.note(note)),
+      // `name` is igraph's own vertex-id column, whatever the attribute frame calls the rest.
+      `attrs <- as_data_frame(${src}, what = "vertices")`,
+      `seed <- attrs |> filter(${built.predicate}) |> pull(name)`,
+    )
+    seeds.push('seed')
+  }
+
+  if (hasSeedTable) {
+    lines.push(`wired <- as.character(na.omit(${seedFrame}[["${seedColumn}"]]))`)
+    seeds.push('wired')
+  }
+
+  // Unioned, never one overriding the other — both are things somebody asked for.
+  lines.push(`keep <- unique(c(${seeds.join(', ')}))`)
+  lines.push(`keep <- keep[keep %in% V(${src})$name]`)
+
+  const expand = String(ctx.params.expand ?? 'component')
+  if (expand === 'component') {
+    lines.push(
+      // Undirected on purpose: a component that respected arrows would be a *reachable set*,
+      // which is a different answer wearing the same name. `components()` defaults to "weak"
+      // on a directed graph, which is that undirected reading.
+      `parts <- components(${src})$membership`,
+      `keep <- names(parts)[parts %in% parts[keep]]`,
+    )
+  } else if (expand === 'hops') {
+    const hops = Math.max(1, Math.floor(Number(ctx.params.hops ?? 1)))
+    const direction = String(ctx.params.direction ?? 'any')
+    const mode = direction === 'downstream' ? 'out' : direction === 'upstream' ? 'in' : 'all'
+    lines.push(
+      `near <- ego(${src}, order = ${hops}, nodes = keep, mode = "${mode}")`,
+      `keep <- unique(c(keep, unlist(lapply(near, function(v) V(${src})$name[v]))))`,
+    )
+  }
+
+  lines.push(`${out} <- induced_subgraph(${src}, keep)`)
   return lines
 })
 
@@ -595,8 +682,25 @@ registerEmitter('cluster.cut', (ctx) => {
   ctx.library('dplyr')
   const clusters = ctx.output('clusters')
   const tree = ctx.output('tree')
-  const byHeight = String(ctx.params.mode ?? 'count') === 'height'
-
+  const mode = String(ctx.params.mode ?? 'count')
+  /*
+   * The mixed-dataset mode has no counterpart here. `cut_tree`/`cutree` both cut across the
+   * tree at one level; this mode descends to the deepest clusters drawing from every dataset,
+   * which is a walk over the merge matrix rather than a cut. Emitting a count cut instead —
+   * which is what falling through to the branch below did — produces a notebook that *runs*,
+   * returns four clusters, and is a different analysis from the canvas, with `4` being a
+   * default the user never saw because the control is hidden in this mode.
+   *
+   * `docs/export.md`'s policy: two things are refused, every other gap emits a TODO. Writing
+   * the walk in both languages is the fix if somebody wants it; a silent wrong answer is not.
+   */
+  if (mode === 'mixed') {
+    return ctx.todo(
+      'This Cut Tree groups by which datasets each cluster draws from, which has no ' +
+        'single-call equivalent here.',
+    )
+  }
+  const byHeight = mode === 'height'
   const cut = byHeight
     ? `cutree(${src}, h = ${Number(ctx.params.height ?? 0.5)})`
     : `cutree(${src}, k = ${Number(ctx.params.count ?? 4)})`
@@ -1039,16 +1143,33 @@ registerEmitter('neuron.partnerVectors', (ctx) => {
 
   ctx.helper('coda_partner_vectors')
   const neurons = ctx.input('neurons')
+  const labels = ctx.input('labels')
   const partnerBy = String(ctx.params.partnerBy ?? 'type')
+
+  /*
+   * A wired mapping supersedes both grouping params, so they are left out of the call rather
+   * than emitted beside it — a chunk reading `partner_by = "type", labels = …` invites the
+   * reading that the two combine, which is the one thing they do not do. Same rule the params
+   * hidden by `visibleIf` already follow above.
+   */
+  const grouping = labels
+    ? [
+        `  labels = ${labels},`,
+        `  label_id = ${rStr(ctx.column('labelId') ?? ID_COLUMN_NAME)},`,
+        `  label_name = ${rStr(ctx.column('labelName') ?? 'label')},`,
+      ]
+    : [
+        `  partner_by = ${rStr(partnerBy)},`,
+        ...(partnerBy === 'type'
+          ? [`  untyped = ${rStr(String(ctx.params.untyped ?? 'id'))},`]
+          : []),
+      ]
 
   return [
     `${ctx.output('out')} <- coda_partner_vectors(`,
     `  ${src},`,
     ...(neurons ? [`  neurons = ${neurons},`] : []),
-    `  partner_by = ${rStr(partnerBy)},`,
-    ...(partnerBy === 'type'
-      ? [`  untyped = ${rStr(String(ctx.params.untyped ?? 'id'))},`]
-      : []),
+    ...grouping,
     `  weight = ${rStr(weight)},`,
     `  weighting = ${rStr(String(ctx.params.weighting ?? 'raw'))}`,
     `)`,

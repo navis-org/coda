@@ -17,6 +17,7 @@ import {
 import { decodeRenames } from '../../../nodes/lib/renames'
 import { rCol, rStr, rValue, rVector } from '../r'
 import { STACK_LABELS } from '../../../nodes/transform/stackNeurons'
+import { qualifyTarget } from '../../../nodes/table/qualifyIds'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
 
@@ -47,72 +48,84 @@ function dtypeOf(ctx: EmitContext, portId: string, name: string | undefined) {
 // Filter
 // ---------------------------------------------------------------------------
 
-registerEmitter('core.filter', (ctx) => {
+/**
+ * A Coda filter operator as a `dplyr::filter` predicate on a bare column name.
+ *
+ * `pyFilterMask`'s twin, in every respect including the return shape — see its docstring for why
+ * the notes and the failure reason are carried in the value rather than through an out-param and
+ * a re-derivation. This side is where that bit: `net.filter` passed `[]` and dropped the
+ * POSIX-ERE caveat its Python twin prints, so one node's two exporters disagreed about whether a
+ * regex needed a warning.
+ */
+export type FilterPredicate =
+  | { predicate: string; notes: readonly string[] }
+  | { predicate?: undefined; reason: string }
+
+export function rFilterPredicate(
+  name: string,
+  op: string,
+  raw: string,
+  numeric: boolean,
+): FilterPredicate {
+  const c = col(name)
+  const ok = (predicate: string, notes: readonly string[] = []): FilterPredicate => ({
+    predicate,
+    notes,
+  })
+  switch (op) {
+    case 'isEmpty':
+      return ok(`is.na(${c}) | ${c} == ""`)
+    case 'notEmpty':
+      return ok(`!is.na(${c}) & ${c} != ""`)
+    case 'isTrue':
+      return ok(`${c} %in% TRUE`)
+    case 'isFalse':
+      return ok(`${c} %in% FALSE`)
+    case 'contains':
+      return ok(`grepl(${rStr(raw)}, ${c}, fixed = TRUE)`)
+    case 'notContains':
+      return ok(`!grepl(${rStr(raw)}, ${c}, fixed = TRUE)`)
+    case 'startsWith':
+      return ok(`startsWith(as.character(${c}), ${rStr(raw)})`)
+    case 'endsWith':
+      return ok(`endsWith(as.character(${c}), ${rStr(raw)})`)
+    case 'matches':
+      return ok(`grepl(${rStr(raw)}, ${c})`, [
+        'Coda matches this regex with JavaScript semantics; R uses POSIX ERE by default. ' +
+          'They agree on ordinary patterns — add perl = TRUE for lookaround.',
+      ])
+    default: {
+      const operator = R_COMPARISON[op]
+      if (!operator) return { reason: `Unknown filter operator "${op}".` }
+      if (numeric) {
+        const target = Number(raw)
+        if (!Number.isFinite(target)) return { reason: `"${raw}" is not a number.` }
+        return ok(`${c} ${operator} ${rValue(target)}`)
+      }
+      // Coda reads a null cell as the empty string, so `!= x` keeps the unlabelled rows. R's NA
+      // propagates through the comparison and `filter` drops it, which silently shrinks the
+      // result — `coalesce` is what reproduces Coda.
+      return ok(`coalesce(as.character(${c}), "") ${operator} ${rStr(raw)}`)
+    }
+  }
+}
+
+registerEmitter('core.filterTable', (ctx) => {
   const src = ctx.wired('in')
   const name = ctx.column('column')
-  if (!name) return ctx.todo('No column is chosen on this Filter.')
+  if (!name) return ctx.todo('No column is chosen on this Filter Table.')
 
   ctx.library('dplyr')
   const out = ctx.output('out')
   const op = String(ctx.params.op ?? 'ge')
   const raw = String(ctx.params.value ?? '')
   const numeric = isNumericDType(dtypeOf(ctx, 'in', name) ?? 'str')
-  const c = col(name)
-  const lines: string[] = []
-  let predicate: string
 
-  switch (op) {
-    case 'isEmpty':
-      predicate = `is.na(${c}) | ${c} == ""`
-      break
-    case 'notEmpty':
-      predicate = `!is.na(${c}) & ${c} != ""`
-      break
-    case 'isTrue':
-      predicate = `${c} %in% TRUE`
-      break
-    case 'isFalse':
-      predicate = `${c} %in% FALSE`
-      break
-    case 'contains':
-      predicate = `grepl(${rStr(raw)}, ${c}, fixed = TRUE)`
-      break
-    case 'notContains':
-      predicate = `!grepl(${rStr(raw)}, ${c}, fixed = TRUE)`
-      break
-    case 'startsWith':
-      predicate = `startsWith(as.character(${c}), ${rStr(raw)})`
-      break
-    case 'endsWith':
-      predicate = `endsWith(as.character(${c}), ${rStr(raw)})`
-      break
-    case 'matches':
-      predicate = `grepl(${rStr(raw)}, ${c})`
-      lines.push(
-        ...ctx.note(
-          'Coda matches this regex with JavaScript semantics; R uses POSIX ERE by default. ' +
-            'They agree on ordinary patterns — add perl = TRUE for lookaround.',
-        ),
-      )
-      break
-    default: {
-      const cmp = R_COMPARISON
-      const operator = cmp[op]
-      if (!operator) return ctx.todo(`Unknown filter operator "${op}".`)
-      if (numeric) {
-        const target = Number(raw)
-        if (!Number.isFinite(target)) return ctx.todo(`"${raw}" is not a number.`)
-        predicate = `${c} ${operator} ${rValue(target)}`
-      } else {
-        // Coda reads a null cell as the empty string, so `!= x` keeps the unlabelled rows.
-        // R's NA propagates through the comparison and `filter` drops it, which silently
-        // shrinks the result — `coalesce` is what reproduces Coda.
-        predicate = `coalesce(as.character(${c}), "") ${operator} ${rStr(raw)}`
-      }
-    }
-  }
+  const built = rFilterPredicate(name, op, raw, numeric)
+  if (built.predicate === undefined) return ctx.todo(built.reason)
 
-  lines.push(`${out} <- ${src} |> filter(${predicate})`)
+  const lines = built.notes.flatMap((note) => ctx.note(note))
+  lines.push(`${out} <- ${src} |> filter(${built.predicate})`)
   return lines
 })
 
@@ -634,4 +647,29 @@ registerEmitter('neuron.stack', (ctx) => {
     `${bottom}[, ${rStr(sourceColumn)}] <- ${rStr(bottomLabel)}`,
     `${out} <- c(${top}, ${bottom})`,
   ]
+})
+
+// ---------------------------------------------------------------------------
+// Qualify Ids
+// ---------------------------------------------------------------------------
+
+/** Tag an id column with its dataset, or strip it. Every rule is in `coda_qualify_ids`. */
+registerEmitter('core.qualifyIds', (ctx) => {
+  const src = ctx.wired('in')
+  const name = ctx.column('column')
+  if (!name) return ctx.todo('This Qualify Ids has no id column chosen.')
+
+  ctx.helper('coda_qualify_ids')
+  const direction = String(ctx.params.direction ?? 'add')
+  // Through the node's own rule, not the typed name: it suffixes a name the table already
+  // has where both languages would overwrite. `relabelTarget`'s reason, one node over.
+  const into = qualifyTarget(ctx.schema('in'), String(ctx.params.into ?? ''))
+  const args = [
+    src,
+    rStr(name),
+    `direction = ${rStr(direction)}`,
+    ...(direction === 'add' ? [`prefix = ${rStr(String(ctx.params.prefix ?? '').trim())}`] : []),
+    ...(direction === 'remove' && into ? [`into = ${rStr(into)}`] : []),
+  ]
+  return [`${ctx.output('out')} <- coda_qualify_ids(${args.join(', ')})`]
 })

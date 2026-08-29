@@ -300,10 +300,20 @@ coda_neurons <- function(df) {
 #' A pre/post edge list as one long feature vector per query neuron.
 coda_partner_vectors <- function(edges, neurons = NULL, partner_by = "type",
                                  untyped = "id", weight = "weight",
-                                 weighting = "raw") {
+                                 weighting = "raw", labels = NULL,
+                                 label_id = "neuronId", label_name = "label") {
   df <- edges
   df[["coda_weight_"]] <- suppressWarnings(as.numeric(df[[weight]]))
   df <- df[!is.na(df[["coda_weight_"]]) & df[["coda_weight_"]] != 0, , drop = FALSE]
+
+  lookup <- NULL
+  if (!is.null(labels)) {
+    lk <- coda_match_keys(labels[[label_id]])
+    lv <- as.character(labels[[label_name]])
+    # First occurrence wins, and a blank label is no label.
+    keep <- !duplicated(lk) & !is.na(lk) & !is.na(lv) & nzchar(lv)
+    lookup <- stats::setNames(lv[keep], lk[keep])
+  }
 
   if (!is.null(neurons)) {
     queries <- as.character(neurons$neuronId)
@@ -330,12 +340,24 @@ coda_partner_vectors <- function(edges, neurons = NULL, partner_by = "type",
   }
 
   parts <- list()
+  seen <- list()
   for (side in sides) {
     frame <- side[[1]]
     if (nrow(frame) == 0) next
     direction <- side[[2]]; query_col <- side[[3]]
     id_col <- side[[4]]; type_col <- side[[5]]
-    if (partner_by == "type") {
+    # Every gram attributable to a neuron, before anything is dropped. cnFracs denominator,
+    # countable only here: a dropped connection leaves nothing behind to count it against.
+    seen[[length(seen) + 1L]] <- data.frame(
+      neuronId = as.character(frame[[query_col]]),
+      w = frame[["coda_weight_"]], stringsAsFactors = FALSE)
+    if (!is.null(lookup)) {
+      # The mapping replaces partner_by and untyped: a partner outside the shared label
+      # space can only exist in one dataset, so it is dropped rather than falling back.
+      mapped <- unname(lookup[coda_match_keys(frame[[id_col]])])
+      frame <- frame[!is.na(mapped), , drop = FALSE]
+      label <- mapped[!is.na(mapped)]
+    } else if (partner_by == "type") {
       if (!type_col %in% names(frame)) {
         stop(sprintf("Grouping partners by cell type needs a \"%s\" column.", type_col))
       }
@@ -350,6 +372,9 @@ coda_partner_vectors <- function(edges, neurons = NULL, partner_by = "type",
     } else {
       label <- as.character(frame[[id_col]])
     }
+    # After the branch, not inside one: `untyped == "drop"` can empty the frame too, which
+    # is where the Python this mirrors puts the same guard.
+    if (nrow(frame) == 0) next
     parts[[length(parts) + 1L]] <- data.frame(
       neuronId = frame[[query_col]],
       direction = direction,
@@ -361,7 +386,8 @@ coda_partner_vectors <- function(edges, neurons = NULL, partner_by = "type",
   if (length(parts) == 0) {
     return(data.frame(neuronId = character(0), direction = character(0),
                       partner = character(0), feature = character(0),
-                      weight = numeric(0), stringsAsFactors = FALSE))
+                      weight = numeric(0), cnFrac = numeric(0),
+                      stringsAsFactors = FALSE))
   }
   long <- do.call(rbind, parts)
   long$feature <- paste0(long$direction, ":", long$partner)
@@ -373,13 +399,20 @@ coda_partner_vectors <- function(edges, neurons = NULL, partner_by = "type",
   summed <- rowsum(long$weight, key, reorder = FALSE)
   long <- long[match(rownames(summed), key), , drop = FALSE]
   long$weight <- as.vector(summed)
+  # cnFrac against the pre-restriction totals, and *before* the fraction weighting below
+  # rescales the weights -- after it, this would be a fraction of a fraction.
+  before <- do.call(rbind, seen)
+  before <- rowsum(before$w, before$neuronId, reorder = FALSE)
+  kept <- rowsum(long$weight, as.character(long$neuronId), reorder = FALSE)
+  frac <- as.vector(kept) / as.vector(before)[match(rownames(kept), rownames(before))]
+  long$cnFrac <- pmin(1, frac[match(as.character(long$neuronId), rownames(kept))])
   if (weighting == "fraction") {
     side <- paste0(long$neuronId, "\r", long$direction)
     totals <- rowsum(long$weight, side, reorder = FALSE)
     denom <- as.vector(totals)[match(side, rownames(totals))]
     long$weight <- ifelse(denom == 0, 0, long$weight / denom)
   }
-  long[, c("neuronId", "direction", "partner", "feature", "weight")]
+  long[, c("neuronId", "direction", "partner", "feature", "weight", "cnFrac")]
 }
 
 
@@ -443,6 +476,26 @@ coda_profile <- function(ids, min_weight = 1, top_n = 10, conn) {
     regions = roi,
     primary_rois = primary
   )
+}
+
+
+#' Tag an id column with its dataset, or take that tag off again.
+coda_qualify_ids <- function(df, column, direction = "add", prefix = "", into = NULL) {
+  ids <- df[[column]]
+  text <- as.character(ids)
+  if (direction == "add") {
+    # A null stays null: tagging one invents a neuron that does not exist.
+    df[[column]] <- if (nzchar(prefix)) ifelse(is.na(ids), NA_character_,
+                                               paste0(prefix, ":", text)) else text
+    return(df)
+  }
+  # `sub` replaces the first match only, and leaves a value with no separator untouched.
+  df[[column]] <- ifelse(is.na(ids), NA_character_, sub("^[^:]*:", "", text))
+  if (!is.null(into) && nzchar(into)) {
+    had <- !is.na(ids) & grepl(":", text, fixed = TRUE)
+    df[[into]] <- ifelse(had, sub(":.*$", "", text), NA_character_)
+  }
+  df
 }
 
 
@@ -1105,6 +1158,11 @@ neuron_profile_upstream_types
 # link is built here.
 ```
 
+```{r qualify-ids}
+# ── Qualify Ids ──
+qualify_ids <- coda_qualify_ids(find_neurons, "neuronId", direction = "add", prefix = "flywire")
+```
+
 ```{r histogram}
 # ── Histogram ──
 histogram_out <- find_neurons
@@ -1180,9 +1238,9 @@ paths_paths <- neuprint_get_paths(
 )
 ```
 
-```{r filter-df}
-# ── Filter ──
-filter_df <- connectivity |> filter(`weight` >= 10)
+```{r filter-table}
+# ── Filter Table ──
+filter_table <- connectivity |> filter(`weight` >= 10)
 ```
 
 ```{r partner-vectors}
@@ -1365,9 +1423,27 @@ compare_connectivity_comparison <- cmp_compare_connectivity_comparison$compariso
 compare_connectivity_counts <- cmp_compare_connectivity_comparison$counts
 ```
 
+```{r partner-vectors-3}
+# ── Partner Vectors ──
+partner_vectors_3 <- coda_partner_vectors(
+  connectivity,
+  neurons = find_neurons,
+  labels = combine_columns,
+  label_id = "neuronId",
+  label_name = "label",
+  weight = "weight",
+  weighting = "raw"
+)
+```
+
+```{r qualify-ids-2}
+# ── Qualify Ids ──
+qualify_ids_2 <- coda_qualify_ids(qualify_ids, "neuronId", direction = "remove", into = "dataset")
+```
+
 ```{r sort-df}
 # ── Sort ──
-sort_df <- filter_df |> arrange(desc(`weight`))
+sort_df <- filter_table |> arrange(desc(`weight`))
 sort_df <- sort_df |> head(500)
 ```
 
@@ -1474,31 +1550,13 @@ select_one_2 <- sort_df |> slice(4)
 
 ```{r cut-tree}
 # ── Cut Tree ──
-cl_ <- cutree(linkage_tree, k = 4)
-# NOTE: Coda numbers clusters left to right as the dendrogram draws them, so
-# the column reads against the picture. `cutree` numbers by observation
-# order; the grouping is the same either way, and this renumbers so the two
-# agree.
-cl_ <- match(cl_, unique(cl_[linkage_tree$order]))
-
-cut_tree_clusters <- tibble(
-  label = linkage_tree$labels,
-  cluster = cl_,
-  order = match(seq_along(linkage_tree$labels), linkage_tree$order) - 1L,
-) |>
-  group_by(cluster) |>
-  mutate(size = n()) |>
-  ungroup()
-
-cut_tree_tree <- linkage_tree
-cut_tree_tree_clusters <- cl_
+# TODO: This Cut Tree groups by which datasets each cluster draws from,
+# which has no single-call equivalent here.
 ```
 
 ```{r cut-tree-2}
 # ── Cut Tree ──
-# NOTE: Cutting at a height gives however many groups fall out below it,
-# which may be one if the height is above the top of the tree.
-cl_ <- cutree(linkage_tree, h = 0.6)
+cl_ <- cutree(linkage_tree, k = 4)
 # NOTE: Coda numbers clusters left to right as the dendrogram draws them, so
 # the column reads against the picture. `cutree` numbers by observation
 # order; the grouping is the same either way, and this renumbers so the two
@@ -1518,6 +1576,30 @@ cut_tree_2_tree <- linkage_tree
 cut_tree_2_tree_clusters <- cl_
 ```
 
+```{r cut-tree-3}
+# ── Cut Tree ──
+# NOTE: Cutting at a height gives however many groups fall out below it,
+# which may be one if the height is above the top of the tree.
+cl_ <- cutree(linkage_tree, h = 0.6)
+# NOTE: Coda numbers clusters left to right as the dendrogram draws them, so
+# the column reads against the picture. `cutree` numbers by observation
+# order; the grouping is the same either way, and this renumbers so the two
+# agree.
+cl_ <- match(cl_, unique(cl_[linkage_tree$order]))
+
+cut_tree_3_clusters <- tibble(
+  label = linkage_tree$labels,
+  cluster = cl_,
+  order = match(seq_along(linkage_tree$labels), linkage_tree$order) - 1L,
+) |>
+  group_by(cluster) |>
+  mutate(size = n()) |>
+  ungroup()
+
+cut_tree_3_tree <- linkage_tree
+cut_tree_3_tree_clusters <- cl_
+```
+
 ```{r deduplicate}
 # ── Deduplicate ──
 deduplicate <- sample_df[!duplicated(sample_df[c("preType", "postType")], fromLast = TRUE), ]
@@ -1525,8 +1607,8 @@ deduplicate <- sample_df[!duplicated(sample_df[c("preType", "postType")], fromLa
 
 ```{r dendrogram}
 # ── Dendrogram ──
-dendrogram_out <- cut_tree_tree
-dendrogram_out_clusters <- cut_tree_tree_clusters
+dendrogram_out <- cut_tree_2_tree
+dendrogram_out_clusters <- cut_tree_2_tree_clusters
 
 plot(
   as.dendrogram(dendrogram_out),
@@ -1553,7 +1635,7 @@ dendrogram_selected <- tibble(
 clusters_to_neurons <- find_neurons |>
   mutate(key_ = as.character(`type`)) |>
   inner_join(
-    cut_tree_clusters |>
+    cut_tree_2_clusters |>
       mutate(key_ = as.character(`label`)) |>
       distinct(key_, .keep_all = TRUE) |>
       select(-`label`),
@@ -1717,6 +1799,31 @@ network_viewer_out <- delete_vertices(network_viewer_out, V(network_viewer_out)[
 # plot(network_viewer_out, layout = layout_with_fr(network_viewer_out), vertex.size = 4, vertex.label = NA)
 # plot(network_viewer_out, layout = layout_with_kk(network_viewer_out))
 # plot(network_viewer_out, layout = layout_as_tree(network_viewer_out))
+```
+
+```{r filter-network}
+# ── Filter Network ──
+attrs <- as_data_frame(build_network, what = "vertices")
+seed <- attrs |> filter(`weightOut` >= 20) |> pull(name)
+keep <- unique(c(seed))
+keep <- keep[keep %in% V(build_network)$name]
+near <- ego(build_network, order = 2, nodes = keep, mode = "out")
+keep <- unique(c(keep, unlist(lapply(near, function(v) V(build_network)$name[v]))))
+filter_network <- induced_subgraph(build_network, keep)
+```
+
+```{r filter-network-2}
+# ── Filter Network ──
+# NOTE: Coda matches this regex with JavaScript semantics; R uses POSIX ERE
+# by default. They agree on ordinary patterns — add perl = TRUE for
+# lookaround.
+attrs <- as_data_frame(build_network, what = "vertices")
+seed <- attrs |> filter(grepl("^LC[0-9]+$", `id`)) |> pull(name)
+keep <- unique(c(seed))
+keep <- keep[keep %in% V(build_network)$name]
+parts <- components(build_network)$membership
+keep <- names(parts)[parts %in% parts[keep]]
+filter_network_2 <- induced_subgraph(build_network, keep)
 ```
 
 ```{r stack-tables}

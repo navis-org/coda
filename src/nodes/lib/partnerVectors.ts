@@ -34,6 +34,33 @@
  * upstream is switched from `outputs` to `both`. `direction` and `partner` ride along as their
  * own columns, so the composite can still be filtered on either half.
  *
+ * ## A shared label space, and what it costs each neuron
+ *
+ * Two neurons in two connectomes are alike for touching *the same thing*, and `LC4` in one brain
+ * is only the same thing as `LC4` in another because a mapping says so. So an optional `Labels`
+ * map — `Match Cell Types`' output — replaces the partner's own type with the shared label.
+ *
+ * **It has to happen here rather than in a `Relabel` downstream**, and the reason is one line of
+ * this file: the feature is `out:` + the partner, built after the partner is decided. A Relabel
+ * on the finished `feature` column would have to see through that prefix, which means either
+ * teaching a general table node about this node's composite or splitting and rejoining it. The
+ * label is a fact about the *partner*, so it belongs where the partner is named.
+ *
+ * A partner the mapping does not cover is **dropped**, because a feature outside the shared
+ * space cannot make two datasets alike or unalike — it can only exist in one of them. That is
+ * cocoa's restriction, and it is also why the next section exists.
+ *
+ * ## `cnFrac`: how much of each neuron survived the restriction
+ *
+ * cocoa's `cn_frac_`, and it is not a diagnostic nicety. Dropping partners leaves every vector
+ * shorter, but it does not leave them *equally* shorter: a neuron whose partners are mostly
+ * unmapped ends up represented by a few percent of its connectivity, and clusters as noise with
+ * nothing on screen to say why. So each row carries the fraction of that neuron's weight that
+ * survived, and the worst case is warned about.
+ *
+ * It is emitted always, not only under a wired mapping, because `Untyped partners ▸ drop` is the
+ * same subtraction by another route. Nothing dropped is `1`.
+ *
  * ## Untyped partners
  *
  * The em-dash trap, met properly. `labelOf` pools every absent value into one label, which is
@@ -106,6 +133,18 @@ const IN = 'in'
 const PARTNER_COLUMN = 'partner'
 const FEATURE_COLUMN = 'feature'
 const WEIGHT_COLUMN = 'weight'
+const CN_FRAC_COLUMN = 'cnFrac'
+
+/**
+ * Below this share of a neuron's connectivity surviving, say so.
+ *
+ * A judgement rather than a measurement, and the same one `UNMATCHED_WARN_FRACTION` makes one
+ * node over: past half, the vector describes the minority of a neuron that happened to be
+ * mappable, and every distance computed from it is about that minority. The two constants are
+ * deliberately not shared — they happen to agree on a number and answer different questions, and
+ * a single constant would tie a future adjustment of one to the other.
+ */
+export const CN_FRAC_WARN = 0.5
 
 export interface PartnerVectorSpec {
   partnerBy: PartnerBy
@@ -121,6 +160,15 @@ export interface PartnerVectorSpec {
    * with no ids in it, and it correctly produces nothing.
    */
   queries?: ReadonlySet<string>
+  /**
+   * A partner id → shared label map, from `Match Cell Types`.
+   *
+   * Wired, it *replaces* `partnerBy` and `untyped`: the label is what names the partner, and a
+   * partner the map does not cover is dropped rather than falling back to a type or an id —
+   * either of which would be a feature only one dataset can have. Undefined leaves the existing
+   * two rules exactly as they were.
+   */
+  labels?: ReadonlyMap<string, string>
 }
 
 // ---------------------------------------------------------------------------
@@ -152,6 +200,9 @@ export function partnerVectorSchema(
     column(PARTNER_COLUMN, 'str'),
     column(FEATURE_COLUMN, 'str'),
     column(WEIGHT_COLUMN, 'f64', unit),
+    // Unconditional, so the schema does not change shape with whether an optional port is wired
+    // — which would make every downstream picker empty on a graph reopened without it.
+    column(CN_FRAC_COLUMN, 'f64'),
   )
 }
 
@@ -198,6 +249,11 @@ export function partnerVectorIssues(
  * Which map an entry is in *is* its direction; the key is the partner; the composite is built
  * once per output row, where it is actually needed.
  */
+/** A neuron nothing was attributable to has kept all of nothing, which is 1 rather than 0/0. */
+function cnFracOf(vector: Vector): number {
+  return vector.seenTotal === 0 ? 1 : (vector.outTotal + vector.inTotal) / vector.seenTotal
+}
+
 interface Vector {
   /** The id cell exactly as the edge list held it — never re-parsed. Invariant 8. */
   cell: CellValue
@@ -205,11 +261,26 @@ interface Vector {
   in: Map<string, number>
   outTotal: number
   inTotal: number
+  /**
+   * Every gram of weight attributable to this neuron, before anything was dropped.
+   *
+   * Accumulated *before* the partner is resolved, which is the only place it can be: once a
+   * connection has been dropped for want of a label there is nothing left to count it against.
+   * `cnFrac` is `outTotal + inTotal` over this.
+   */
+  seenTotal: number
 }
 
-/** The two orientations of an edge, and the five columns each row of the output carries. */
+/**
+ * The two orientations of an edge, and how wide a row of the output is.
+ *
+ * The column count is **derived**, not written down. It was a literal `5` and `cnFrac` made it a
+ * six-column table without anyone noticing, which quietly shrank the crash-floor estimate below
+ * by a sixth — a guard rail that under-counts is worse than none, because it reports a number
+ * somebody trusts. A seventh column cannot repeat it.
+ */
 const SIDES = 2
-const OUTPUT_COLUMNS = 5
+const OUTPUT_COLUMNS = partnerVectorSchema(undefined, { weighting: 'raw' }).columns.length
 
 /** One orientation of an edge list: which column is the query, and which describes the partner. */
 interface Side {
@@ -285,7 +356,13 @@ export function partnerVectorTable(
   ]
 
   const vectors = new Map<string, Vector>()
-  const counts = { untypedById: 0, untypedDropped: 0, pastFirstHop: 0, unusable: 0 }
+  const counts = {
+    untypedById: 0,
+    untypedDropped: 0,
+    pastFirstHop: 0,
+    unusable: 0,
+    unlabelled: 0,
+  }
 
   /**
    * What names this partner, or null if nothing usable does.
@@ -295,6 +372,21 @@ export function partnerVectorTable(
    * are counted separately and reported as different sentences.
    */
   const partnerLabel = (side: Side, i: number): string | null | undefined => {
+    /*
+     * The mapping first and last. A partner it does not cover is dropped rather than falling
+     * back to a type or an id — either would be a feature only one dataset can have, which is
+     * noise in a cross-dataset comparison and indistinguishable from signal once it is a column.
+     */
+    if (spec.labels) {
+      const id = idText(side.partnerIds[i])
+      if (id === null) return null
+      const mapped = spec.labels.get(id)
+      if (mapped === undefined) {
+        counts.unlabelled++
+        return undefined
+      }
+      return mapped
+    }
     if (!byType) return idText(side.partnerIds[i])
     const cell = side.partnerTypes?.[i]
     const typed = cell === null || cell === undefined ? '' : String(cell).trim()
@@ -308,6 +400,25 @@ export function partnerVectorTable(
   }
 
   const add = (side: Side, i: number, queryKey: string, w: number): void => {
+    /*
+     * The vector exists before the partner is resolved, so `seenTotal` can count a connection
+     * that is about to be dropped — which is the whole of `cnFrac`. It also means a neuron whose
+     * every partner was dropped still appears in the totals, and correctly reports 0.
+     */
+    let vector = vectors.get(queryKey)
+    if (!vector) {
+      vector = {
+        cell: side.queryIds[i]!,
+        out: new Map(),
+        in: new Map(),
+        outTotal: 0,
+        inTotal: 0,
+        seenTotal: 0,
+      }
+      vectors.set(queryKey, vector)
+    }
+    vector.seenTotal += w
+
     const partner = partnerLabel(side, i)
     // `undefined` is a partner deliberately dropped and already counted; `null` is an id that
     // is not one. Two different sentences come out of them, so they are two different answers.
@@ -315,11 +426,6 @@ export function partnerVectorTable(
     if (partner === null) {
       counts.unusable++
       return
-    }
-    let vector = vectors.get(queryKey)
-    if (!vector) {
-      vector = { cell: side.queryIds[i]!, out: new Map(), in: new Map(), outTotal: 0, inTotal: 0 }
-      vectors.set(queryKey, vector)
     }
     if (side.direction === OUT) {
       vector.out.set(partner, (vector.out.get(partner) ?? 0) + w)
@@ -350,7 +456,7 @@ export function partnerVectorTable(
     }
   }
 
-  const { untypedById, untypedDropped, pastFirstHop, unusable } = counts
+  const { untypedById, untypedDropped, pastFirstHop, unusable, unlabelled } = counts
   if (pastFirstHop > 0) {
     ctx.warn(
       `${pastFirstHop.toLocaleString()} edges are past the first hop and were left out. The ` +
@@ -379,6 +485,37 @@ export function partnerVectorTable(
         `skipped.`,
     )
   }
+  if (unlabelled > 0) {
+    ctx.warn(
+      `${unlabelled.toLocaleString()} connections are to partners the mapping does not cover ` +
+        `and were dropped. A partner outside the shared label space can only exist in one ` +
+        `dataset, so it cannot make two neurons alike — read cnFrac to see how much of each ` +
+        `neuron is left.`,
+    )
+  }
+
+  /*
+   * The worst case rather than the mean, and named. A mean over a thousand neurons hides exactly
+   * the neuron this is about: the one represented by a few percent of itself, which will still
+   * land in a cluster and still be read as a result.
+   *
+   * Through `cnFracOf` rather than the formula, so the neuron the warning names and the number
+   * the column carries cannot come to disagree — including the 0/0 rule, which is the half a
+   * second copy would get wrong.
+   */
+  let worst: { key: string; frac: number } | undefined
+  for (const [key, vector] of vectors) {
+    const frac = cnFracOf(vector)
+    if (!worst || frac < worst.frac) worst = { key, frac }
+  }
+  if (worst && worst.frac < CN_FRAC_WARN) {
+    ctx.warn(
+      `Neuron ${worst.key} kept only ${(worst.frac * 100).toFixed(0)}% of its connectivity ` +
+        `(cnFrac ${worst.frac.toFixed(2)}); the rest went to partners outside the features ` +
+        `being compared. A vector built from a minority of a neuron describes that minority — ` +
+        `filter on cnFrac before clustering if this matters.`,
+    )
+  }
 
   const fraction = spec.weighting === 'fraction'
   const ids: ColumnData = []
@@ -386,7 +523,9 @@ export function partnerVectorTable(
   const partners: ColumnData = []
   const features: ColumnData = []
   const weights: ColumnData = []
+  const fractions: ColumnData = []
   for (const vector of vectors.values()) {
+    const cnFrac = cnFracOf(vector)
     for (const [direction, entries, total] of [
       [OUT, vector.out, vector.outTotal],
       [IN, vector.in, vector.inTotal],
@@ -398,6 +537,9 @@ export function partnerVectorTable(
         // The composite, built once per output row rather than once per edge on the way in.
         features.push(`${direction}:${partner}`)
         weights.push(fraction ? (total === 0 ? 0 : w / total) : w)
+        // Per neuron, repeated down its rows — the trade long form makes, and what turns "drop
+        // the badly-covered neurons" into one Filter.
+        fractions.push(cnFrac)
       }
     }
   }
@@ -413,6 +555,7 @@ export function partnerVectorTable(
       [PARTNER_COLUMN]: partners,
       [FEATURE_COLUMN]: features,
       [WEIGHT_COLUMN]: weights,
+      [CN_FRAC_COLUMN]: fractions,
     },
   )
 }

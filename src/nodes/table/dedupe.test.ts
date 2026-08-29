@@ -137,7 +137,7 @@ describe('the node', () => {
   const def = requireNodeDef('core.dedupe')
 
   it('publishes the schema and the kind it was given', () => {
-    // `core.filter`'s rule: every column survives with the values it had, so a picker downstream
+    // `core.filterTable`'s rule: every column survives with the values it had, so a picker downstream
     // is unchanged — and neurons-ness comes through, which is what lets this stand between an
     // annotation source and a Dataset.
     const neurons = T.neurons(tableSchema(column('neuronId', 'str'), column('side', 'str')))

@@ -9,10 +9,12 @@
 
 import { describe, expect, it } from 'vitest'
 
+import { qualifiedDataset } from '../../core/ids'
 import { column, tableSchema } from '../../core/types'
 import type { LinkageValue } from '../../core/values'
 import { getColumn, makeLinkage, makeMatrix } from '../../core/values'
 import {
+  cutHomogeneous,
   LINKAGE_METHODS,
   LINKAGE_OBSERVATIONS_WARN,
   MAX_LINKAGE_OBSERVATIONS,
@@ -353,5 +355,81 @@ describe('checkLinkageDistances', () => {
         'one_minus',
       ),
     ).toThrow(/no usable values/)
+  })
+})
+
+describe('cutting so every group draws from both datasets', () => {
+  /**
+   * A tree over six neurons, three per dataset, built by hand so the merge order is the fact
+   * under test rather than an artefact of a distance metric.
+   *
+   * Merges: (a1,b1) then (a2,b2) — two mixed pairs — then (a3,a4), a pair from one dataset
+   * only, then the three groups joined. A count cut of 3 returns exactly those three groups
+   * including the lopsided one; this mode has to split it.
+   */
+  const mixed = (): LinkageValue =>
+    makeLinkage(
+      new Float64Array([
+        0, 3, 0.1, 2, // a1 + b1
+        1, 4, 0.2, 2, // a2 + b2
+        2, 5, 0.3, 2, // a3 + a4  ← both from A
+        6, 7, 0.8, 4,
+        9, 8, 0.9, 6,
+      ]),
+      ['A:1', 'A:2', 'A:3', 'B:1', 'B:2', 'A:4'],
+      new Int32Array([0, 3, 1, 4, 2, 5]),
+    )
+
+  // `qualifiedDataset`, which is what the node passes — and it answers *undefined* for an
+  // unqualified id, so the "nothing was qualified" case below is the real one rather than a
+  // helper that happens to split on a colon that is not there.
+  const dataset = qualifiedDataset
+
+  it('splits a group that is all one dataset, where a count cut would keep it', () => {
+    const { clusters, singletons } = cutHomogeneous(mixed(), dataset, 0.8)
+    const groupOf = (i: number) => clusters[i]!
+    // The two mixed pairs survive whole.
+    expect(groupOf(0)).toBe(groupOf(3))
+    expect(groupOf(1)).toBe(groupOf(4))
+    // A:3 and A:4 were joined by the tree and are separated here, because together they are
+    // 100% one dataset — the group a count cut hands back and calls a correspondence.
+    expect(groupOf(2)).not.toBe(groupOf(5))
+    expect(singletons).toBe(2)
+  })
+
+  it('reports how many datasets it actually saw, so an unqualified tree is knowable', () => {
+    const plain = makeLinkage(
+      new Float64Array([0, 1, 0.1, 2]),
+      ['1', '2'],
+      new Int32Array([0, 1]),
+    )
+    // No qualified ids: one dataset, and every neuron ends up alone rather than silently in
+    // one group. The count is what lets the node say so.
+    const { datasets, clusters } = cutHomogeneous(plain, dataset, 0.8)
+    expect(datasets).toBe(1)
+    expect(new Set(clusters).size).toBe(2)
+  })
+
+  it('lets a lopsided group through once the share allows it', () => {
+    // Both datasets present and the largest holds 2/3 — kept at 0.8, split at 0.6.
+    const skewed = makeLinkage(
+      new Float64Array([
+        0, 1, 0.1, 2,
+        3, 2, 0.5, 3,
+      ]),
+      ['A:1', 'A:2', 'B:1'],
+      new Int32Array([0, 1, 2]),
+    )
+    expect(new Set(cutHomogeneous(skewed, dataset, 0.8).clusters).size).toBe(1)
+    expect(new Set(cutHomogeneous(skewed, dataset, 0.6).clusters).size).toBeGreaterThan(1)
+  })
+
+  it('numbers groups in leaf order, whichever mode produced them', () => {
+    // `assign`'s convention, so the cluster column reads against the dendrogram either way.
+    const { clusters } = cutHomogeneous(mixed(), dataset, 0.8)
+    const order = mixed().order
+    const seen: number[] = []
+    for (const leaf of order) if (!seen.includes(clusters[leaf]!)) seen.push(clusters[leaf]!)
+    expect(seen).toEqual([...seen].sort((a, b) => a - b))
   })
 })

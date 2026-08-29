@@ -678,7 +678,7 @@ export interface LoopPlan {
 }
 
 export interface NodeDefinition<P extends ParamValues = ParamValues> {
-  /** Stable id, namespaced: "core.filter", "neuron.findNeurons". Persisted in files. */
+  /** Stable id, namespaced: "core.filterTable", "neuron.findNeurons". Persisted in files. */
   type: string
   label: string
   category: NodeCategory

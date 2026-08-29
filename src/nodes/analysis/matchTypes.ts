@@ -25,6 +25,20 @@
  * multi-megabyte download from a shared server; on the cheap pass this would fire one per
  * keystroke in the ignore-labels box.
  *
+ * **Every correspondence is derived; the one thing a user may assert is that a type has none.**
+ * There *was* a way to assert a correspondence — a `Synonyms` port carrying cocoa's
+ * `add_synonym` edges — and it went because nobody used it, cocoa's own users included. So `LC4`
+ * and `Lobula columnar 4`, the same cells under two naming conventions sharing no text, stay
+ * apart, and forcing the pair is a downstream `Relabel` where the claim is a visible table row.
+ *
+ * The `Pass Through` port is the opposite assertion and is kept for a reason the `Synonyms` port
+ * never had: a *sex-specific* type is real, common, and indistinguishable in the data from a
+ * naming artifact — both are a label with neurons in one brain and none in another, which is
+ * precisely what step 1 drops. Only the user knows which is which. It does not weaken the
+ * matching, because it is a separate pass over what the matcher left empty rather than an
+ * exemption threaded through the coverage tests; see `passThrough`, and the report's `matched`
+ * column for how the two stay told apart. See [comparative.md](../../../docs/comparative.md).
+ *
  * The per-dataset type-column pickers are `types1..typesN` hidden past the current count with
  * `visibleIf`, which is the pattern `core/ports.ts` documents: ports are variadic, params are
  * not, and a hidden param is outside the provenance key so a picker past the arity cannot stale
@@ -40,6 +54,7 @@ import {
   sourceLabel,
   sourceSupports,
 } from '../lib/datasetParam'
+import { warnOverThreshold } from '../../core/limits'
 import { narrowPopulation } from '../../data/neuronFilter'
 import { parseTypedLabels } from '../lib/labelLookup'
 import { repeatParamId, repeatParams } from '../lib/repeatParams'
@@ -47,10 +62,13 @@ import type { LabelMode, MapperDataset } from '../lib/typeMapping'
 import {
   DEFAULT_NO_SPLIT_PREFIXES,
   LABEL_MODE_OPTIONS,
+  MAPPER_GRAPH_EDGE_SCHEMA,
+  MAPPER_GRAPH_NODE_SCHEMA,
   MAPPER_LABELS_SCHEMA,
   MAPPER_REPORT_SCHEMA,
   UNMATCHED_WARN_FRACTION,
-  synonymsFrom,
+  keepLabelsFrom,
+  mapperNetwork,
   mapperDatasetFrom,
   mapperLabelsTable,
   mapperReportTable,
@@ -67,6 +85,20 @@ import {
  * the number should follow a real use rather than lead it.
  */
 const MAX_DATASETS = 4
+
+/**
+ * How many nodes may reach the `Network` port before the card says something.
+ *
+ * A statement about the *drawing*, not about the mapping, which is why it sits on the node
+ * rather than beside `COMPONENT_NODE_CAP` in the mapper: the graph is correct at any size and
+ * nothing downstream of the labels ports is affected. Two whole-brain annotation tables build a
+ * few thousand label nodes and a few thousand neuron groups — cocoa's collapse is done at
+ * construction, so this is already the small form — and a force layout is unreadable well
+ * before it is slow. Chosen for legibility rather than measured, and it warns rather than
+ * refusing ([limits.md](../../../docs/limits.md)): `Filter Network` is the answer, and a user
+ * who wants the whole thing on screen is allowed to have it.
+ */
+const GRAPH_NODE_WARN = 2_000
 
 /**
  * The arity, declared once and handed to both the param list and `repeatParams`.
@@ -120,7 +152,7 @@ export const matchTypesNode = registerNode({
   category: 'analysis',
   description: 'Work out which cell types correspond between two or more connectomes.',
   guide:
-    'Builds the correspondence that every cross-brain comparison needs: which cell types in one connectome are the same cells as which in another, given that type names are revised per dataset and not backported. Emits one labels table per dataset — that dataset’s own neuron ids against a shared label — plus a report, which is the part to actually read: a label with four neurons in one brain and forty in another is a mapping error rather than a finding, and the report is the only place that shows. Wire every dataset you mean to compare into one node rather than chaining two, because the answer genuinely depends on how many are in it: two subtypes stay distinct across two hemispheres that both name them and collapse the moment a third dataset knows only the coarse name.',
+    'Builds the correspondence that every cross-brain comparison needs: which cell types in one connectome are the same cells as which in another, given that type names are revised per dataset and not backported. Emits one labels table per dataset — that dataset’s own neuron ids against a shared label — plus a report, which is the part to actually read: a label with four neurons in one brain and forty in another is a mapping error rather than a finding, and the report is the only place that shows. A type present in one brain and genuinely absent from the other — anything sex-specific — is dropped by default, because nothing in the data tells it apart from a naming artifact; wire a table of those type names into Pass Through to keep them, and the report’s “matched” column marks what came through that way. Wire every dataset you mean to compare into one node rather than chaining two, because the answer genuinely depends on how many are in it: two subtypes stay distinct across two hemispheres that both name them and collapse the moment a third dataset knows only the coarse name.',
   cost: 'expensive',
   dataCache: true,
 
@@ -130,8 +162,8 @@ export const matchTypesNode = registerNode({
       ports: [{ id: 'dataset', label: 'Dataset {n}', type: T.dataset() }],
     },
     {
-      id: 'extra',
-      label: 'Synonyms',
+      id: 'keep',
+      label: 'Pass Through',
       type: T.table(),
       required: false,
     },
@@ -142,6 +174,11 @@ export const matchTypesNode = registerNode({
       ports: [{ id: 'labels', label: 'Labels {n}', type: T.table(MAPPER_LABELS_SCHEMA) }],
     },
     { id: 'report', label: 'Report', type: T.table(MAPPER_REPORT_SCHEMA) },
+    {
+      id: 'network',
+      label: 'Network',
+      type: T.network(MAPPER_GRAPH_NODE_SCHEMA, MAPPER_GRAPH_EDGE_SCHEMA),
+    },
   ],
 
   params: [
@@ -162,6 +199,26 @@ export const matchTypesNode = registerNode({
       help: 'Labels that are not cell types — “unknown”, “na”, a placeholder. Nothing in the data marks these, and left in they correspond like any other label and quietly assert that two neurons are the same cells. Commas or new lines.',
       default: '',
     },
+    {
+      id: 'keepColumn',
+      kind: 'column',
+      label: 'Pass-through labels',
+      from: 'keep',
+      help: 'On the Pass Through table: the column holding the type names to let through. One name per row; a name that never appears in any dataset simply does nothing.',
+      default: 'label',
+      /*
+       * Optional, so that an empty picker means "nothing passes through" and keeps meaning it.
+       * Required, it would fall back to the *first compatible column* of whatever is wired,
+       * which on a neuron table is `neuronId` — a column of ids read as type names, matching
+       * nothing, and the node then looks like it is ignoring the port.
+       */
+      optional: true,
+    },
+    /*
+     * Everything below is `advanced`. `Pass-through labels` is not, and the Inspector renders
+     * params in declaration order with no grouping of its own — declared after these it drew
+     * under "Allow indirect matches", which is where a control goes to not be found.
+     */
     {
       id: 'compoundSeparator',
       kind: 'string',
@@ -184,32 +241,6 @@ export const matchTypesNode = registerNode({
       label: 'Allow indirect matches',
       help: 'Let a correspondence run through another neuron — A shares a group label with B, and B has the type that matches. Off, because that is a claim about A that the data made about B.',
       default: false,
-      advanced: true,
-    },
-    {
-      id: 'synonymLabel',
-      kind: 'column',
-      label: 'Synonym: label',
-      from: 'extra',
-      help: 'On the Synonyms table: the column holding one name.',
-      default: 'label',
-      /*
-       * Optional, so that an empty picker means "no synonyms from this table" and stays that
-       * way. Required, both of these would fall back to the *first compatible column* of
-       * whatever is wired — which is the same column for both, so every row would assert that a
-       * label is a synonym of itself and the port would silently do nothing.
-       */
-      optional: true,
-      advanced: true,
-    },
-    {
-      id: 'synonymOther',
-      kind: 'column',
-      label: 'Synonym: other name',
-      from: 'extra',
-      help: 'On the Synonyms table: the column holding the name it is the same as. The two are joined as equals; the order does not matter.',
-      default: 'synonym',
-      optional: true,
       advanced: true,
     },
   ],
@@ -252,13 +283,13 @@ export const matchTypesNode = registerNode({
     }
 
     /*
-     * Only worth saying once something is wired. The pickers are optional, so empty is a
-     * decision everywhere else — but a *wired* Synonyms table with no columns chosen is a table
-     * somebody went to the trouble of building and that this node is ignoring, which is the one
-     * reading of "empty" that is never intended.
+     * Only worth saying once something is wired. The picker is optional, so empty is a decision
+     * everywhere else — but a *wired* table with no column chosen is a table somebody went to
+     * the trouble of building and that this node is ignoring, which is the one reading of
+     * "empty" nobody intends.
      */
-    if (ctx.inputs.extra && (!ctx.column('synonymLabel') || !ctx.column('synonymOther'))) {
-      issues.push('Synonyms: pick the two columns holding the names to treat as equivalent.')
+    if (ctx.inputs.keep && !ctx.column('keepColumn')) {
+      issues.push('Pass Through: pick the column holding the type names to let through.')
     }
     return issues
   },
@@ -318,11 +349,7 @@ export const matchTypesNode = registerNode({
       noSplitPrefixes: parseTypedLabels(ctx.params.noSplitPrefixes),
       labelMode: ctx.params.labelMode as LabelMode,
       allowIndirect: ctx.params.allowIndirect === true,
-      synonyms: synonymsFrom(
-        ctx.input('extra'),
-        ctx.column('synonymLabel'),
-        ctx.column('synonymOther'),
-      ),
+      keepLabels: keepLabelsFrom(ctx.input('keep'), ctx.column('keepColumn')),
       warn: ctx,
     })
 
@@ -341,15 +368,33 @@ export const matchTypesNode = registerNode({
       )
     })
 
+    /*
+     * The `Network` port carries every component, including the ones step 1 dropped, because
+     * "why did these two not correspond?" is only answerable from a dropped one — which is most
+     * of what an inspection port is for. That makes it the biggest thing this node emits and the
+     * one nothing else trims, so the size is said here rather than discovered when a viewer
+     * stops responding. A warning and not a refusal, `limits.md`'s rule: the graph is correct at
+     * any size and `Filter Network` is the answer.
+     */
+    if (mapping.graph.nodes.length > GRAPH_NODE_WARN) {
+      warnOverThreshold(ctx, {
+        count: mapping.graph.nodes.length,
+        threshold: GRAPH_NODE_WARN,
+        unit: 'nodes on the Network port',
+        control: 'what a node-link drawing stays readable at',
+        cost:
+          `The mapping itself is unaffected — this is only the inspection port. Put a Filter ` +
+          `Network between it and the viewer: pick one label and expand to its connected ` +
+          `component, which is the unit the algorithm actually decides on.`,
+      })
+    }
+
     return Object.fromEntries(
-      ctx
-        .outputPorts()
-        .map((port) => [
-          port.id,
-          port.group
-            ? mapperLabelsTable(mapping.labels[port.group.index - 1]!)
-            : mapperReportTable(mapping.report, names),
-        ]),
+      ctx.outputPorts().map((port) => {
+        if (port.group) return [port.id, mapperLabelsTable(mapping.labels[port.group.index - 1]!)]
+        if (port.id === 'network') return [port.id, mapperNetwork(mapping.graph, names)]
+        return [port.id, mapperReportTable(mapping.report, names)]
+      }),
     )
   },
 })

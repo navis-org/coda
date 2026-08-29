@@ -26,7 +26,7 @@ function sampleGraph(): CodaGraph {
   for (let i = 0; i < 6; i += 1) {
     graph.nodes.push({
       id: newId('n'),
-      type: 'core.filter',
+      type: 'core.filterTable',
       position: { x: i * 220, y: 40 },
       params: { column: 'weight', op: '>=', value: String(i) },
     })
@@ -98,7 +98,7 @@ describe('the packed form', () => {
     for (let i = 0; i < 20_000; i += 1) ids.push(String(100_000_000 + i * 7919))
     graph.nodes.push({
       id: 'n1',
-      type: 'core.filter',
+      type: 'core.filterTable',
       position: { x: 0, y: 0 },
       params: { column: 'neuronId', op: '>=', value: ids.join(',') },
     })

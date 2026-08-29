@@ -12,6 +12,7 @@
  * neuPrint notebook should carry none of it.
  */
 
+import { QUALIFIED_SEPARATOR } from '../../core/ids'
 import { JOIN_SEPARATOR } from '../../core/values'
 import { registerHelper } from './registry'
 
@@ -321,6 +322,50 @@ registerHelper({
 })
 
 /**
+ * Coda's Qualify Ids, both directions.
+ *
+ * `prefix + df[col].astype(str)` is the obvious spelling and gets all three of this node's rules
+ * wrong, each silently. A null becomes the string `"flywire:nan"` — an id for a neuron that does
+ * not exist, which then joins to nothing and looks like missing data. `str.split(':')` without
+ * `n=1` splits on *every* separator, so an id that contains one loses its tail. And stripping a
+ * prefix that was never there must leave the value alone rather than empty it, because a graph
+ * where the strip is one node too early is a graph that should still work.
+ *
+ * The `dataset` column is `None` rather than the whole value where there was no prefix, which is
+ * `qualifiedDataset` answering undefined — a column of ids masquerading as dataset names is the
+ * one output nobody could spot.
+ *
+ * The separator is spliced from `QUALIFIED_SEPARATOR`, `coda_join`'s idiom with `JOIN_SEPARATOR`
+ * and for its reason: `src/core/ids.ts` exists so the rule has one home, and a colon typed out
+ * here is a third spelling that stays on `:` when that constant changes, with every golden still
+ * green.
+ */
+registerHelper({
+  name: 'coda_qualify_ids',
+  requires: [['pandas']],
+  source: [
+    "def coda_qualify_ids(df, column, direction='add', prefix='', into=None):",
+    '    """Tag an id column with its dataset, or take that tag off again."""',
+    '    out = df.copy()',
+    '    ids = df[column]',
+    '    text = ids.astype(str)',
+    "    if direction == 'add':",
+    '        # A null stays null: tagging one invents a neuron that does not exist.',
+    `        out[column] = ((prefix + ${JSON.stringify(QUALIFIED_SEPARATOR)} + text) if prefix else text).where(ids.notna())`,
+    '        return out',
+    '    # `n=1`, so a separator inside the id keeps its tail. Without it "flywire:a:b" loses ":b".',
+    `    parts = text.str.split(${JSON.stringify(QUALIFIED_SEPARATOR)}, n=1)`,
+    '    out[column] = parts.str[-1].where(ids.notna())',
+    '    if into:',
+    '        # Only where there actually was a prefix — otherwise this column would be full of ids',
+    '        # wearing the name "dataset", which is the one wrong answer nobody would notice.',
+    `        had = text.str.contains(${JSON.stringify(QUALIFIED_SEPARATOR)}, regex=False)`,
+    '        out[into] = parts.str[0].where(ids.notna() & had)',
+    '    return out',
+  ],
+})
+
+/**
  * Coda's `join` aggregation.
  *
  * `', '.join(...)` is the obvious spelling and is a different rule four ways: it raises on a
@@ -411,19 +456,36 @@ registerHelper({
  *
  * Row order is not the canvas's — Coda emits a query's features together, this emits the
  * groupby's first-appearance order — and nothing downstream of it reads row order.
+ *
+ * **`labels` replaces `partner_by` and `untyped` where it is given**, and `cnFrac` says what
+ * that cost each neuron. Both mirror the TypeScript: a partner the mapping does not cover is
+ * dropped rather than falling back to a type or an id, because a feature outside the shared
+ * label space can only exist in one dataset — and a neuron left with a few percent of its
+ * connectivity clusters as noise unless something says so. `cnFrac` is computed **before**
+ * `weighting == 'fraction'` rescales the weights, or it would be a fraction of a fraction.
  */
 registerHelper({
   name: 'coda_partner_vectors',
   requires: [['pandas']],
+  needs: ['coda_match_keys'],
   source: [
     "def coda_partner_vectors(edges, neurons=None, partner_by='type', untyped='id',",
-    "                         weight='weight', weighting='raw'):",
+    "                         weight='weight', weighting='raw', labels=None,",
+    "                         label_id='neuronId', label_name='label'):",
     '    """A pre/post edge list as one long feature vector per query neuron."""',
     '    # One copy, not two: the coerced weight rides alongside rather than being written into',
-    '    # a duplicate of the caller\'s frame, which also leaves the input unmutated.',
+    "    # a duplicate of the caller's frame, which also leaves the input unmutated.",
     "    w = pd.to_numeric(edges[weight], errors='coerce')",
     '    keep = w.notna() & (w != 0)',
     '    df, w = edges[keep], w[keep]',
+    '',
+    '    lookup = None',
+    '    if labels is not None:',
+    "        # First occurrence wins, `coda_relabel`'s rule, where zip into a dict keeps the last.",
+    '        keys = coda_match_keys(labels[label_id])',
+    '        first = ~keys.duplicated()',
+    '        lookup = dict(zip(keys[first], labels[label_name][first]))',
+    "        lookup = {k: v for k, v in lookup.items() if pd.notna(v) and v != ''}",
     '',
     '    if neurons is not None:',
     "        queries = set(neurons['neuronId'].astype(str))",
@@ -441,14 +503,25 @@ registerHelper({
     "        sides = [(df[df['direction'].isin(['downstream', 'both'])], 'out', 'preId', 'postId', 'postType'),",
     "                 (df[df['direction'].isin(['upstream', 'both'])], 'in', 'postId', 'preId', 'preType')]",
     '',
-    "    columns = ['neuronId', 'direction', 'partner', 'feature', 'weight']",
+    "    columns = ['neuronId', 'direction', 'partner', 'feature', 'weight', 'cnFrac']",
     '    parts = []',
+    "    # Every gram attributable to a neuron, before anything is dropped. This is cnFrac's",
+    '    # denominator and it can only be counted here: a dropped connection leaves nothing behind.',
+    '    seen = []',
     '    for frame, direction, query_col, id_col, type_col in sides:',
     '        if frame.empty:',
     '            continue',
-    "        if partner_by == 'type':",
+    "        seen.append(pd.DataFrame({'neuronId': frame[query_col].to_numpy(),",
+    "                                  'w': w.loc[frame.index].to_numpy()}))",
+    '        if lookup is not None:',
+    '            # The mapping replaces partner_by and untyped: a partner outside the shared label',
+    '            # space can only exist in one dataset, so it is dropped rather than falling back to',
+    '            # a type or an id.',
+    '            mapped = coda_match_keys(frame[id_col]).map(lookup)',
+    '            frame, label = frame[mapped.notna()], mapped.dropna()',
+    "        elif partner_by == 'type':",
     '            if type_col not in frame.columns:',
-    "                raise ValueError('Grouping partners by cell type needs a \"%s\" column.' % type_col)",
+    '                raise ValueError(\'Grouping partners by cell type needs a "%s" column.\' % type_col)',
     "            typed = frame[type_col].astype('string').str.strip()",
     "            have = typed.notna() & (typed != '')",
     "            if untyped == 'drop':",
@@ -456,6 +529,8 @@ registerHelper({
     '            label = typed.where(have, frame[id_col].astype(str))',
     '        else:',
     '            label = frame[id_col].astype(str)',
+    '        if frame.empty:',
+    '            continue',
     '        parts.append(pd.DataFrame({',
     "            'neuronId': frame[query_col].to_numpy(),",
     "            'direction': direction,",
@@ -470,9 +545,16 @@ registerHelper({
     '    # Repeats of one neuron/partner pair are summed, exactly as a Pivot set to sum would.',
     "    long = (long.groupby(['neuronId', 'direction', 'partner', 'feature'],",
     "                         sort=False, dropna=False)['weight'].sum().reset_index())",
+    '    # cnFrac against the pre-restriction totals, keyed as text so an i64 and a str id column',
+    '    # meet — the same reason `coda_match_keys` exists.',
+    '    before = pd.concat(seen, ignore_index=True)',
+    "    before = before.groupby(before['neuronId'].astype(str), sort=False)['w'].sum()",
+    "    kept = long.groupby(long['neuronId'].astype(str), sort=False)['weight'].sum()",
+    '    frac = (kept / before).fillna(1.0).clip(upper=1.0)',
     "    if weighting == 'fraction':",
     "        totals = long.groupby(['neuronId', 'direction'], sort=False)['weight'].transform('sum')",
     "        long['weight'] = (long['weight'] / totals).fillna(0.0)",
+    "    long['cnFrac'] = long['neuronId'].astype(str).map(frac).fillna(1.0).to_numpy()",
     '    return long[columns]',
   ],
 })

@@ -40,7 +40,7 @@ function pipeline(): CodaGraph {
   let g = emptyGraph('scheduler-test')
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: 'optic-lobe-mini' }))
   g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC.*', status: 'Traced' }))
-  g = addNode(g, node('filter', 'core.filter', { column: 'size', op: 'ge', value: '0' }))
+  g = addNode(g, node('filter', 'core.filterTable', { column: 'size', op: 'ge', value: '0' }))
   g = addNode(g, node('view', 'out.table'))
   g = addEdge(g, {
     source: 'ds',
@@ -163,7 +163,7 @@ describe('hybrid evaluation', () => {
 
   it('does not execute a node with unconnected required inputs', async () => {
     let graph = emptyGraph()
-    graph = addNode(graph, node('filter', 'core.filter'))
+    graph = addNode(graph, node('filter', 'core.filterTable'))
     const summary = await scheduler.run(graph, { mode: 'full' })
     expect(summary.executed).toEqual([])
     expect(scheduler.info('filter').state).toBe('error')

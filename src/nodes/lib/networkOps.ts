@@ -1,5 +1,5 @@
 /**
- * Filtering a network down to what is worth drawing.
+ * Filtering a network down to what is worth drawing, and cutting a subgraph out of one.
  *
  * Headless, like the rest of `src/nodes/lib`, and deliberately a *data* operation rather
  * than a view one: the network viewer's filter params change what its `out` port carries, so
@@ -15,6 +15,15 @@
  * Ranking after the weight cut rather than before is the whole point of the order: "the ten
  * biggest players in the graph I am looking at" is the useful question, and ranking on links
  * that were about to be discarded answers a different one.
+ *
+ * ## The second half: a subgraph around a selection
+ *
+ * `expandSelection` + `induceSubnetwork` are `net.filter`'s, and a different question from the
+ * three knobs above — not "what is worth drawing" but "what is *near* this". Here rather than
+ * in the node because they share the part that is easy to get wrong: a subgraph that keeps a
+ * node's `degreeOut` from the whole graph is a size encoding and a tooltip asserting links that
+ * are not in the picture, which is what `recomputeRollups` exists to stop. One implementation
+ * of that, reached by both.
  */
 
 import type { TableSchema } from '../../core/types'
@@ -45,11 +54,73 @@ export const NO_FILTER: NetworkFilter = { minWeight: 0, topNodes: 0, hideIsolate
  * neurons: a node still claiming `degreeOut: 7` in a network where four of those links have
  * been cut is not merely stale, it is driving a size encoding and a tooltip that say
  * something untrue about the picture beside them.
+ *
+ * **These four names, and therefore only `BuildNetwork`'s graphs.** Two other producers derive a
+ * column the same way and are not covered: `mapperNetwork`'s `nNeurons` is a label node's neuron
+ * degree, and `pathsToNetwork`'s `paths`/`hop` are counted over the whole kept route set. Narrow
+ * either graph and those keep describing the graph it came from.
+ *
+ * Adding them to this list would not fix it, which is why the limit is documented rather than
+ * papered over: `nNeurons` is *derived* on a label node and *intrinsic* on a neuron group, so
+ * whether a column needs recomputing is a fact about its producer rather than about its name.
+ * Fixing it properly means `NetworkValue` carrying which of its columns are graph-derived, and
+ * it has no field for that today.
  */
 const ROLLUPS = ['degreeIn', 'degreeOut', 'weightIn', 'weightOut'] as const
 
 function hasColumn(schema: TableSchema, name: string): boolean {
   return schema.columns.some((c) => c.name === name)
+}
+
+/**
+ * A network's node ids as text, and its link ends.
+ *
+ * `String(cell ?? '')` rather than `idText`: these are *node* ids, which on a connectivity graph
+ * are neuron ids but on `Match Cell Types`' label graph are `label/LC4` — the id column of a
+ * `NetworkValue` is a join key, not the identity, which is the same reading `net.build` takes of
+ * whatever it is handed. Written once because both walks below need all three and got them by
+ * repeating the expression.
+ */
+function nodeIds(network: NetworkValue): string[] {
+  return getColumn(network.nodes, 'id').map((cell) => String(cell ?? ''))
+}
+
+function linkEnds(network: NetworkValue): { sources: string[]; targets: string[] } {
+  return {
+    sources: getColumn(network.edges, 'source').map((cell) => String(cell ?? '')),
+    targets: getColumn(network.edges, 'target').map((cell) => String(cell ?? '')),
+  }
+}
+
+/**
+ * The tables of a subgraph, given which rows of each survive.
+ *
+ * Both narrowings end here, and it is the roll-ups that make it worth one function rather than
+ * two similar tails: they describe the *graph*, so on a smaller one they are a different number,
+ * and a node still claiming its old `degreeOut` drives a size encoding that says something untrue
+ * about the picture beside it. Neither caller should be able to forget that independently.
+ */
+function subnetworkOf(
+  network: NetworkValue,
+  ids: readonly string[],
+  ends: { sources: readonly string[]; targets: readonly string[] },
+  weight: readonly number[],
+  nodeRows: number[],
+  edgeRows: number[],
+): NetworkValue {
+  return {
+    ...network,
+    nodes: recomputeRollups(
+      selectRows(network.nodes, nodeRows),
+      nodeRows.map((row) => ids[row]!),
+      edgeRows.map((i) => ({
+        source: ends.sources[i]!,
+        target: ends.targets[i]!,
+        weight: weight[i]!,
+      })),
+    ),
+    edges: selectRows(network.edges, edgeRows),
+  }
 }
 
 /** Weight column read defensively — a network need not come from `BuildNetwork`. */
@@ -72,9 +143,8 @@ export function filterNetwork(network: NetworkValue, filter: NetworkFilter): Fil
   const none = { network, dropped: { nodes: 0, links: 0 } }
   if (!isFiltering(filter)) return none
 
-  const ids = getColumn(network.nodes, 'id').map((cell) => String(cell ?? ''))
-  const sources = getColumn(network.edges, 'source').map((cell) => String(cell ?? ''))
-  const targets = getColumn(network.edges, 'target').map((cell) => String(cell ?? ''))
+  const ids = nodeIds(network)
+  const { sources, targets } = linkEnds(network)
   const weight = weights(network.edges)
 
   // --- 1. weight cut -------------------------------------------------------
@@ -119,18 +189,8 @@ export function filterNetwork(network: NetworkValue, filter: NetworkFilter): Fil
 
   if (nodeRows.length === ids.length && links.length === network.edges.length) return none
 
-  const nodes = recomputeRollups(
-    selectRows(network.nodes, nodeRows),
-    nodeRows.map((row) => ids[row]!),
-    links.map((i) => ({ source: sources[i]!, target: targets[i]!, weight: weight[i]! })),
-  )
-
   return {
-    network: {
-      ...network,
-      nodes,
-      edges: selectRows(network.edges, links),
-    },
+    network: subnetworkOf(network, ids, { sources, targets }, weight, nodeRows, links),
     dropped: {
       nodes: ids.length - nodeRows.length,
       links: network.edges.length - links.length,
@@ -168,4 +228,149 @@ function recomputeRollups(
     data[name] = order.map((id) => acc.get(id)?.[name] ?? 0)
   }
   return makeTable(nodes.schema, data, nodes.kind)
+}
+
+// ---------------------------------------------------------------------------
+// A subgraph around a selection
+
+/** How far past the seeds a selection reaches. */
+export type NetworkExpansion = 'none' | 'hops' | 'component'
+
+export const EXPANSION_OPTIONS: Array<{ value: NetworkExpansion; label: string }> = [
+  { value: 'none', label: 'Just the selection' },
+  { value: 'hops', label: 'Within N hops' },
+  { value: 'component', label: 'The whole connected component' },
+]
+
+/** Which way an edge may be walked while expanding. */
+export type WalkDirection = 'any' | 'downstream' | 'upstream'
+
+export const WALK_OPTIONS: Array<{ value: WalkDirection; label: string }> = [
+  { value: 'any', label: 'Either way along a link' },
+  { value: 'downstream', label: 'Following links forwards' },
+  { value: 'upstream', label: 'Following links backwards' },
+]
+
+export interface NetworkSelection {
+  /** The node ids to start from. */
+  seeds: ReadonlySet<string>
+  expand: NetworkExpansion
+  /** Hops, when expanding by them. */
+  hops: number
+  /**
+   * Which way to walk.
+   *
+   * Ignored in two cases, and both are decided here rather than by the caller. For `component`,
+   * because a connected component that respected arrows would be a *reachable set*, and calling
+   * one the other is the kind of wrong answer that looks right. And on an **undirected** network,
+   * where `source` and `target` are an arbitrary order — `Match Cell Types` emits one, and
+   * `adjacency` there records every edge both ways, so honouring `downstream` on it would walk
+   * half of each pair by construction order.
+   *
+   * The undirected rule cannot live on the node: `visibleIf` is handed `ParamValues` and cannot
+   * see what is wired. It has to be here, which is also where both emitters land for free —
+   * `nx.ego_graph` on an `nx.Graph` and `igraph::ego`'s `mode` on an undirected graph both
+   * ignore direction already, so a canvas that did not would disagree with its own notebook.
+   */
+  direction: WalkDirection
+}
+
+/**
+ * The seeds, grown outwards.
+ *
+ * Breadth-first over an adjacency built once, rather than repeated scans of the edge table:
+ * `hops` scans would be `hops × edges`, and `component` has no bound to scan to. Both modes are
+ * one walk over the same structure, which is also what keeps them agreeing about what a
+ * neighbour is.
+ *
+ * A seed naming a node the network does not have is dropped rather than raised — the selection
+ * usually comes from a filter or a wired table, and an id that has been filtered out upstream
+ * is an ordinary state, not a broken graph.
+ */
+export function expandSelection(
+  network: NetworkValue,
+  selection: NetworkSelection,
+): Set<string> {
+  const known = new Set(nodeIds(network))
+  const kept = new Set<string>()
+  for (const seed of selection.seeds) if (known.has(seed)) kept.add(seed)
+
+  const hops =
+    selection.expand === 'component'
+      ? Number.POSITIVE_INFINITY
+      : selection.expand === 'hops'
+        ? Math.max(0, Math.floor(selection.hops))
+        : 0
+  if (kept.size === 0 || hops === 0) return kept
+
+  // Both the `component` rule and the undirected one — see `NetworkSelection.direction`.
+  const both =
+    selection.direction === 'any' || selection.expand === 'component' || !network.directed
+  const forwards = both || selection.direction === 'downstream'
+  const backwards = both || selection.direction === 'upstream'
+
+  const near = new Map<string, string[]>()
+  const link = (from: string, to: string) => {
+    const held = near.get(from)
+    if (held) held.push(to)
+    else near.set(from, [to])
+  }
+  const { sources, targets } = linkEnds(network)
+  for (let i = 0; i < network.edges.length; i++) {
+    const from = sources[i]!
+    const to = targets[i]!
+    if (!known.has(from) || !known.has(to)) continue
+    if (forwards) link(from, to)
+    if (backwards) link(to, from)
+  }
+
+  let front = [...kept]
+  for (let hop = 0; hop < hops && front.length; hop++) {
+    const next: string[] = []
+    for (const id of front) {
+      for (const other of near.get(id) ?? []) {
+        if (kept.has(other)) continue
+        kept.add(other)
+        next.push(other)
+      }
+    }
+    front = next
+  }
+  return kept
+}
+
+/**
+ * The subgraph on a set of node ids: those nodes, and every link with **both** ends in it.
+ *
+ * Both ends rather than either, which is what makes it a subgraph rather than a fringe — a link
+ * to a node that is not drawn is an arrow into nothing. The roll-ups are recomputed for the
+ * reason `recomputeRollups` records: they describe the graph, and this is a different graph.
+ */
+export function induceSubnetwork(network: NetworkValue, keep: ReadonlySet<string>): NetworkValue {
+  const ids = nodeIds(network)
+  const nodeRows: number[] = []
+  ids.forEach((id, row) => {
+    if (keep.has(id)) nodeRows.push(row)
+  })
+
+  const ends = linkEnds(network)
+  const edgeRows: number[] = []
+  for (let i = 0; i < network.edges.length; i++) {
+    if (keep.has(ends.sources[i]!) && keep.has(ends.targets[i]!)) edgeRows.push(i)
+  }
+
+  /*
+   * Nothing dropped, nothing to rebuild — `filterNetwork`'s guard, and it matters more here.
+   * `net.filter` is `cheap`, so this runs per keystroke in the value box, and `expand` defaults
+   * to `component`: a connectivity graph is normally one giant component, so the *default* state
+   * of the node keeps every node and would otherwise rebuild an identical network. Measured on a
+   * 50,000-node, 1,000,000-edge graph: 278 ms rebuilt against 1.3 ms for the test.
+   *
+   * Same accepted caveat as its sibling: returning the input unchanged skips `recomputeRollups`,
+   * so roll-ups that arrived stale stay stale. Since nothing was dropped, recomputing would
+   * reproduce whatever was correct on arrival.
+   */
+  if (nodeRows.length === ids.length && edgeRows.length === network.edges.length) return network
+
+  return subnetworkOf(network, ids, ends, weights(network.edges), nodeRows, edgeRows)
 }

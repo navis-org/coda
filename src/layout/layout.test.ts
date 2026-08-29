@@ -64,7 +64,7 @@ function chain(): CodaGraph {
   let graph = emptyGraph('chain')
   graph = addNode(graph, node('ds', 'dataset.hemibrain', 0, 0))
   graph = addNode(graph, node('find', 'neuron.findNeurons', 300, 0))
-  graph = addNode(graph, node('filter', 'core.filter', 600, 0))
+  graph = addNode(graph, node('filter', 'core.filterTable', 600, 0))
   graph = addNode(graph, node('table', 'out.table', 900, 0))
   graph = addEdge(graph, {
     source: 'ds',
@@ -106,14 +106,14 @@ describe('resolveSize', () => {
     expect(resolveSize(node('p', 'out.profile'))).toEqual(
       requireNodeDef('out.profile').defaultSize,
     )
-    expect(resolveSize(node('f', 'core.filter'))).toEqual(FALLBACK_NODE_SIZE)
+    expect(resolveSize(node('f', 'core.filterTable'))).toEqual(FALLBACK_NODE_SIZE)
   })
 
   it('treats a zero measurement as no measurement', () => {
     // React Flow reports 0x0 for a card it has mounted but not yet measured. Taking that
     // literally arranges a tidy grid of points.
     const measured: MeasuredSizes = new Map([['f', { width: 0, height: 0 }]])
-    expect(resolveSize(node('f', 'core.filter'), measured)).toEqual(FALLBACK_NODE_SIZE)
+    expect(resolveSize(node('f', 'core.filterTable'), measured)).toEqual(FALLBACK_NODE_SIZE)
   })
 })
 
@@ -123,7 +123,7 @@ describe('resolveSize', () => {
 
 describe('arrangeable', () => {
   it('drops text notes and keeps everything else', () => {
-    const nodes = [node('a', 'core.filter'), node('n', 'note.text'), node('t', 'out.table')]
+    const nodes = [node('a', 'core.filterTable'), node('n', 'note.text'), node('t', 'out.table')]
     expect(arrangeable(nodes).map((n) => n.id)).toEqual(['a', 't'])
   })
 
@@ -184,7 +184,7 @@ describe('toElkGraph', () => {
     const graph = chain()
     const elk = toElkGraph(graph.nodes, graph.edges, DEFAULT_LAYOUT_OPTIONS)
     const filter = elk.children?.find((c) => c.id === 'filter')
-    const def = requireNodeDef('core.filter')
+    const def = requireNodeDef('core.filterTable')
 
     expect(filter?.layoutOptions?.['elk.portConstraints']).toBe('FIXED_ORDER')
     const sides = Object.fromEntries(
@@ -338,8 +338,8 @@ describe('boundsOf', () => {
   it('is undefined for nothing, and a union otherwise', () => {
     expect(boundsOf([])).toBeUndefined()
     const bounds = boundsOf([
-      node('a', 'core.filter', 0, 0, { size: { width: 100, height: 50 } }),
-      node('b', 'core.filter', 200, 100, { size: { width: 100, height: 50 } }),
+      node('a', 'core.filterTable', 0, 0, { size: { width: 100, height: 50 } }),
+      node('b', 'core.filterTable', 200, 100, { size: { width: 100, height: 50 } }),
     ])
     expect(bounds).toEqual({ x: 0, y: 0, width: 300, height: 150 })
   })

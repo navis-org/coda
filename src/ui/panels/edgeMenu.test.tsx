@@ -28,7 +28,7 @@ beforeAll(() => {
 function twoNodes() {
   const store = useGraphStore.getState()
   const find = store.addNode('neuron.findNeurons', { x: 0, y: 0 })
-  const filter = store.addNode('core.filter', { x: 200, y: 0 })
+  const filter = store.addNode('core.filterTable', { x: 200, y: 0 })
   store.connect({ source: find, sourceHandle: 'neurons', target: filter, targetHandle: 'in' })
   return { find, filter, link: useGraphStore.getState().graph.edges[0]! }
 }
@@ -49,7 +49,7 @@ describe('EdgeContextMenu', () => {
 
     // Node labels, so the menu reads as "this wire" rather than "some wire".
     expect(screen.getByText('Find Neurons')).toBeTruthy()
-    expect(screen.getByText('Filter')).toBeTruthy()
+    expect(screen.getByText('Filter Table')).toBeTruthy()
     // Port labels, which is what distinguishes two wires between the same pair of nodes.
     expect(screen.getByText('Neurons')).toBeTruthy()
   })

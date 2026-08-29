@@ -58,6 +58,7 @@ describe('emitter port ids', () => {
         },
         inputType: () => undefined,
         schema: () => undefined,
+        attributes: () => undefined,
         column: (paramId) => {
           const p = (def.params ?? []).find((q) => q.id === paramId)
           return p && p.kind === 'column' ? 'someColumn' : undefined

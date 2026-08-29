@@ -24,9 +24,9 @@ import {
   comparisonSchema,
   countsTable,
   labelledEdgesFrom,
-  labelsByNeuron,
   totalsRatio,
 } from './edgeComparison'
+import { labelsByNeuron } from './typeMapping'
 
 const EDGES = tableSchema(column('pre', 'str'), column('post', 'str'), column('weight', 'i64'))
 const LABELS = tableSchema(column('neuronId', 'str'), column('label', 'str'))
@@ -475,36 +475,6 @@ describe('the tables', () => {
     expect(empty.comparison.length).toBe(0)
     expect(empty.counts.length).toBe(0)
     expect(empty.comparison.schema.columns.map((c) => c.name)).toContain('weight_A')
-  })
-})
-
-describe('the labels table', () => {
-  it('drops a wide id that arrived as a number rather than mapping a rounded one', () => {
-    /*
-     * Invariant 8 at this seam. `720575940643300974` as an `i64` cell is a float64 holding
-     * `720575940643300992` — a different neuron — so `idText` refuses it. Mapping the rounded
-     * value would attach a label to whichever neuron happened to own it.
-     */
-    const wide = tableSchema(column('neuronId', 'i64'), column('label', 'str'))
-    const lossy = tableFromRows(wide, [
-      { neuronId: Number('720575940643300974'), label: 'LC4' },
-    ])
-    expect(labelsByNeuron(lossy).size).toBe(0)
-  })
-
-  it('keeps the first of a repeated id', () => {
-    expect(
-      labelsByNeuron(
-        labels([
-          ['1', 'first'],
-          ['1', 'second'],
-        ]),
-      ).get('1'),
-    ).toBe('first')
-  })
-
-  it('reads a blank label as no label rather than as a label named blank', () => {
-    expect(labelsByNeuron(labels([['1', '']])).size).toBe(0)
   })
 })
 

@@ -27,7 +27,7 @@ function chain() {
   const store = useGraphStore.getState()
   const ds = store.addNode('neuron.dataset', { x: 0, y: 0 })
   const find = store.addNode('neuron.findNeurons', { x: 200, y: 0 })
-  const filter = store.addNode('core.filter', { x: 400, y: 0 })
+  const filter = store.addNode('core.filterTable', { x: 400, y: 0 })
   const table = store.addNode('out.table', { x: 600, y: 0 })
   const table2 = store.addNode('out.table', { x: 600, y: 200 })
   store.connect({ source: ds, sourceHandle: 'dataset', target: find, targetHandle: 'dataset' })

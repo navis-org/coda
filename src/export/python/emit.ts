@@ -233,6 +233,7 @@ export function exportNotebook(graph: CodaGraph, options: ExportOptions = {}): E
       // provenance key resolving a column the same way. A second copy here is a fourth way for
       // them to disagree.
       schema: (portId) => inferCtx.schema(portId),
+      attributes: (portId, part) => inferCtx.attributes(portId, part),
       column: (paramId) => inferCtx.column(paramId),
       columns: (paramId) => inferCtx.columns(paramId),
       require,

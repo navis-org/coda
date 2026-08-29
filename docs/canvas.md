@@ -665,6 +665,30 @@ reads fine — arguably better — but the two states genuinely differ, and anyo
 the other should know why. `collapsedPorts.test.tsx` still pins only the DOM and the
 declarations, since jsdom performs no layout.
 
+**A band sized by an arity param goes into tabs** (`NodeDefinition.paramGroups`, a param's
+`group`). The fold below answers "this card is configured, get the rows out of the way"; this
+answers a different question — a band that is *linear in a number the user sets*.
+`compare.connectivity` is four settings per dataset, so four datasets is sixteen rows on a card
+that has to sit beside the graph it is part of.
+
+The bucketing is `bucketParams` in [paramGroups.ts](../src/ui/params/paramGroups.ts), shared with
+the styling panel, which takes the same buckets and collapses composites into rows on top of them.
+The card wants the buckets raw — it has no composite row to draw and has its own field markup —
+but *which tab a param is in* is one answer in one place, because two implementations of it
+disagree the moment one learns about a new kind of group.
+
+Three things decided in the building. **A strip appears only past two tabs**, which is what keeps
+this off cards nobody asked for: `out.viewer3d` draws no generic rows and `out.network` draws one
+in one group, so neither grows one, while `out.scatter` does and there the shorter band goes to
+the plot — the fold's own trade. **The shared tab is declared first**, because the first tab is
+what a fresh card opens on and `datasetCount` is in it: behind `Dataset 3` the control that
+creates the other tabs would be hidden by a tab it creates. **The selection is an id resolved
+against the live buckets, not an index**, since turning the arity down takes tabs with it and a
+card holding a dead id draws a strip with nothing selected and no rows under it. The per-dataset
+group ids come from `repeatGroups`, beside the param and port suffixes in `repeatParams.ts`, for
+that module's usual reason — a param naming a tab its node spells differently lands in the
+trailing "Other" with nothing on screen to explain it.
+
 **Param rows fold away** (`GraphNode.paramsCollapsed`, the `☰` in the card header). A card is
 configured once and then read for the rest of the session, so the rows that set it up go on
 spending its height on a decision already made — five of them on a bar chart, above the chart.
@@ -808,7 +832,7 @@ always one just added.
 
 **The downstream link is judged against a graph with the upstream one already applied**, which is
 the decision the whole thing turns on. A node's output type routinely depends on its input:
-`core.filter` isolated publishes `T.table()` and only becomes `neurons` once something
+`core.filterTable` isolated publishes `T.table()` and only becomes `neurons` once something
 neurons-shaped reaches it — so checking both links against the *current* inference refuses a
 Filter dropped on `Find Neurons → Skeletons`, which is the most obvious thing anybody would try.
 One re-inference, then the first compatible output; a node whose *second* input would have worked

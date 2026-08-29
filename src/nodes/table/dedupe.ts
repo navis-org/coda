@@ -52,7 +52,7 @@ export const dedupeNode = registerNode({
   ],
 
   /*
-   * Schema and kind straight through, `core.filter`'s rule and for its reason: a subset of the
+   * Schema and kind straight through, `core.filterTable`'s rule and for its reason: a subset of the
    * rows of a neuron table is still a neuron table, and every column keeps the values it had.
    */
   inferOutputs: (ctx) => {

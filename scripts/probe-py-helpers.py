@@ -381,6 +381,30 @@ _, cnt2 = cns['coda_compare_connectivity']([
 lc4 = cnt2[(cnt2['label'] == 'LC4') & (cnt2['dataset'] == 'A')].iloc[0]
 check('counts: a neuron at both ends is counted once', int(lc4['nNeurons']) == 1, str(lc4.to_dict()))
 
+# ---- coda_qualify_ids, the two edges of a qualified id -----------------------
+#
+# Three rules, each of which the obvious spelling gets wrong silently: a null must stay null
+# (`prefix + astype(str)` writes "flywire:nan", an id for a neuron that does not exist), the
+# split is on the *first* separator only, and stripping a prefix that was never there must leave
+# the value alone.
+qf = pd.DataFrame({'neuronId': ['720575940623374218', None, 'a:b'], 'type': ['LC4', 'LC6', 'X']})
+tagged = cns['coda_qualify_ids'](qf, 'neuronId', direction='add', prefix='flywire')
+check('qualify: tags an id with its dataset', tagged['neuronId'].iloc[0] == 'flywire:720575940623374218', str(tagged['neuronId'].iloc[0]))
+check('qualify: a null stays null rather than becoming "flywire:nan"', pd.isna(tagged['neuronId'].iloc[1]), repr(tagged['neuronId'].iloc[1]))
+# The property the whole design rests on: the result is not a neuron id any more.
+check('qualify: the result is not digits, so a query builder refuses it', not str(tagged['neuronId'].iloc[0]).isdigit(), str(tagged['neuronId'].iloc[0]))
+
+back = cns['coda_qualify_ids'](tagged, 'neuronId', direction='remove', into='dataset')
+check('qualify: round-trips', back['neuronId'].iloc[0] == '720575940623374218', str(back['neuronId'].iloc[0]))
+check('qualify: keeps the dataset in its own column', back['dataset'].iloc[0] == 'flywire', str(back['dataset'].iloc[0]))
+check('qualify: and leaves it empty where there was no prefix', pd.isna(back['dataset'].iloc[1]), repr(back['dataset'].iloc[1]))
+
+# An id that itself contains a separator keeps its tail — `n=1`, not a bare split.
+inner = cns['coda_qualify_ids'](qf, 'neuronId', direction='remove')
+check('qualify: splits on the first separator only', inner['neuronId'].iloc[2] == 'b', str(inner['neuronId'].iloc[2]))
+# Stripping a prefix that was never there leaves the value alone.
+check('qualify: an unqualified id passes through unchanged', inner['neuronId'].iloc[0] == '720575940623374218', str(inner['neuronId'].iloc[0]))
+
 # ---- coda_relabel, one column through a mapping table ------------------------
 #
 # Read out of the same cell. The obvious spelling — `.map(dict(zip(k, v)))` — is a different
@@ -660,6 +684,49 @@ frac = vector(pvns["coda_partner_vectors"](edges, neurons=queries, weighting="fr
 # halves of its vector count for something.
 check("vectors: fractions are per direction", abs(frac["out:X"] - 0.4) < 1e-12, str(frac))
 check("vectors: a lone feature in a direction is all of it", frac["in:Y"] == 1.0, str(frac))
+
+# The shared label space, and what it costs each neuron. The numbers here are the *same* ones
+# `nodes/lib/partnerVectors.test.ts` asserts against the same fixture, which is the strongest
+# form this pairing takes: a drift shows up as two languages disagreeing about one arithmetic.
+pv_labels = pd.DataFrame({
+    "neuronId": ["10", "12", "20"],
+    "label": ["shared:X", "shared:X", "shared:Y"],
+})
+mapped = pvns["coda_partner_vectors"](edges, neurons=queries, labels=pv_labels)
+check("vectors: two partners mapping onto one label pool into one feature",
+      vector(mapped, 1) == {"out:shared:X": 4, "in:shared:Y": 7}, str(vector(mapped, 1)))
+# Partner 11 (untyped) and partner 2 (typed B) are outside the mapping and are gone, rather than
+# falling back to a type or an id — either would be a feature only one dataset can have.
+check("vectors: an unmapped partner is dropped, not renamed",
+      "out:B" not in vector(mapped, 1), str(vector(mapped, 1)))
+# The mapping supersedes partner_by rather than combining with it.
+by_id_mapped = pvns["coda_partner_vectors"](edges, neurons=queries, labels=pv_labels,
+                                            partner_by="id")
+check("vectors: a mapping overrides partner_by",
+      vector(by_id_mapped, 1) == vector(mapped, 1), str(vector(by_id_mapped, 1)))
+
+
+def cn_frac(frame, neuron):
+    rows = frame[frame["neuronId"] == neuron]
+    return None if rows.empty else float(rows["cnFrac"].iloc[0])
+
+
+# Neuron 1 keeps 3 + 1 + 7 of 17; neuron 2 keeps 5 of 15.
+check("cnFrac: the share of a neuron that survived the restriction",
+      abs(cn_frac(mapped, 1) - 11 / 17) < 1e-12, str(cn_frac(mapped, 1)))
+check("cnFrac: and it differs per neuron, which is the whole point",
+      abs(cn_frac(mapped, 2) - 5 / 15) < 1e-12, str(cn_frac(mapped, 2)))
+check("cnFrac: is 1 where nothing was dropped", cn_frac(pv, 1) == 1.0, str(cn_frac(pv, 1)))
+check("cnFrac: counts what untyped='drop' removes too",
+      abs(cn_frac(dropped, 1) - 15 / 17) < 1e-12, str(cn_frac(dropped, 1)))
+# Computed before `fraction` rescales the weights, or it would be a fraction of a fraction.
+frac_mapped = pvns["coda_partner_vectors"](edges, neurons=queries, labels=pv_labels,
+                                           weighting="fraction")
+check("cnFrac: survives the fraction weighting unchanged",
+      abs(cn_frac(frac_mapped, 1) - 11 / 17) < 1e-12, str(cn_frac(frac_mapped, 1)))
+check("cnFrac: rides on every row of a neuron",
+      mapped.groupby("neuronId")["cnFrac"].nunique().max() == 1,
+      str(mapped.groupby("neuronId")["cnFrac"].nunique().to_dict()))
 
 # ---- coda_similarity --------------------------------------------------------
 #

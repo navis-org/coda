@@ -252,9 +252,19 @@ in a CLAUDE.md *imports* the file, pulling all 1.2 MB back into every session.
   relevant one before touching anything under `src/data`. `precomputedToHttp` is deliberately
   narrower than the source parser beside it, for a measured reason; don't widen it.
 - [docs/comparative.md](docs/comparative.md) — comparative connectomics: the cell-type
-  correspondence graph, type-level edge comparison, neuron-level co-clustering (the one piece
-  still unbuilt). Read before adding any node that puts two connectomes in one table — the
-  qualified-id decision is recorded there.
+  correspondence graph, type-level edge comparison, neuron-level co-clustering — all built.
+  Read before adding any node that puts two connectomes in one table: the qualified-id decision
+  is recorded there, and so is the one thing that is **not** a port — `Cut Tree`'s mixed-dataset
+  mode implements cocoa's stated goal rather than transcribing
+  `extract_homogeneous_clusters`, and its criterion is written out for whoever compares them.
+  Two rules about `Match Cell Types` that a reasonable change would break: **every
+  correspondence is derived** (the `Synonyms` port was built and removed — a hand-written
+  `A ↔ B` belongs in a downstream `Relabel`), and the one user assertion that *is* allowed —
+  `Pass Through`, for a sex-specific type — is a **separate pass over what the matcher left
+  empty**, never a relaxed `coversAll`. That test is asked in four places and each is
+  load-bearing; exempting a component there lets one named label carry a whole component of
+  unnamed ones past every gate. The report's `matched` column is what keeps a pass-through
+  telling itself apart from a correspondence.
 - [docs/annotations.md](docs/annotations.md) — labels that do not come from the connectome:
   the Annotations socket, SeaTable, Google Sheets, root-id drift.
 - [docs/export.md](docs/export.md) — the notebook and R Markdown exporters, the refusal

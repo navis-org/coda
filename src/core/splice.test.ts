@@ -89,13 +89,13 @@ const candidate = (g: CodaGraph, edgeId: string, nodeId = 'loose') =>
 describe('what can be spliced', () => {
   it('takes a node whose output only becomes compatible once its input is wired', () => {
     /*
-     * The case the whole design turns on. `core.filter` isolated publishes `T.table()`, and a
+     * The case the whole design turns on. `core.filterTable` isolated publishes `T.table()`, and a
      * Skeletons input wants `T.neurons()` — so judging both links against the *current*
      * inference refuses a Filter dropped on `Find Neurons → Skeletons`, which is about the most
      * obvious thing anybody would try. Applying the upstream link first is what makes the filter
      * publish `neurons`, which is what it will actually publish.
      */
-    const { graph, edgeId } = chain('core.filter')
+    const { graph, edgeId } = chain('core.filterTable')
     expect(candidate(graph, edgeId)).toEqual({ inPort: 'in', outPort: 'out' })
   })
 
@@ -111,7 +111,7 @@ describe('what can be spliced', () => {
      * one would silently rewire a graph nobody asked to rewire — where a node with no links has
      * nothing to lose and is nearly always one just added.
      */
-    const { graph, edgeId } = chain('core.filter')
+    const { graph, edgeId } = chain('core.filterTable')
     const wired = addEdge(addNode(graph, node('sink', 'out.table')), {
       source: 'loose',
       sourceHandle: 'out',
@@ -176,7 +176,7 @@ describe('what can be spliced', () => {
 
 describe('the rewire', () => {
   it('replaces one link with two through the node', () => {
-    const { graph, edgeId } = chain('core.filter')
+    const { graph, edgeId } = chain('core.filterTable')
     const ports = candidate(graph, edgeId)!
     const after = spliceGraph(
       graph,
@@ -207,7 +207,7 @@ describe('the rewire', () => {
      * new link elsewhere would leave both, and the node would hang off the source with the
      * original wire still running past it — a graph that looks almost right.
      */
-    const { graph, edgeId } = chain('core.filter')
+    const { graph, edgeId } = chain('core.filterTable')
     const edge = graph.edges.find((e) => e.id === edgeId)!
     const after = spliceGraph(graph, 'loose', edge, { inPort: 'in', outPort: 'out' })
     const inbound = after.edges.filter(
@@ -218,7 +218,7 @@ describe('the rewire', () => {
   })
 
   it('leaves the graph inference-clean, with the type carried through', () => {
-    const { graph, edgeId } = chain('core.filter')
+    const { graph, edgeId } = chain('core.filterTable')
     const edge = graph.edges.find((e) => e.id === edgeId)!
     const after = spliceGraph(graph, 'loose', edge, candidate(graph, edgeId)!)
     const inferred = inferGraph(after)

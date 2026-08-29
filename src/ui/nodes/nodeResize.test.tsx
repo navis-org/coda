@@ -75,7 +75,7 @@ describe('resize handles', () => {
     // A drag handle on a Filter would promise a control that does nothing: its height is
     // whatever its fields need.
     render(<App />)
-    const filter = nodeIdOfType('core.filter')
+    const filter = nodeIdOfType('core.filterTable')
     select(filter)
 
     const card = await cardFor(filter)

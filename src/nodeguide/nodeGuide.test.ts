@@ -98,7 +98,7 @@ describe('settings', () => {
   /* Filter's operator list is a function of the incoming column's dtype, so there is no answer
      without a graph. Saying so beats printing whatever the first option happens to be. */
   it('admits when an enum has no static option list', () => {
-    const op = byType.get('core.filter')!.params.find((p) => p.id === 'op')!
+    const op = byType.get('core.filterTable')!.params.find((p) => p.id === 'op')!
     expect(op.value).toBe('resolved live')
   })
 
@@ -115,7 +115,7 @@ describe('settings', () => {
 
 describe('the examples cross-reference', () => {
   it('names the examples a node actually appears in', () => {
-    const filter = byType.get('core.filter')!
+    const filter = byType.get('core.filterTable')!
     expect(filter.examples.length).toBeGreaterThan(0)
     for (const name of filter.examples) expect(DATA.examples).toContain(name)
   })

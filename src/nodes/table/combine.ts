@@ -90,7 +90,7 @@ export const combineColumnsNode = registerNode({
   ],
 
   /*
-   * Kind straight through, `core.filter`'s rule: adding a column to a neuron table leaves a
+   * Kind straight through, `core.filterTable`'s rule: adding a column to a neuron table leaves a
    * neuron table, and the id is untouched unless somebody deliberately names it as the result —
    * in which case the column still exists and still holds ids.
    */

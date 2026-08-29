@@ -32,6 +32,8 @@ import {
 } from '../lib/partnerVectors'
 import type { PartnerBy, UntypedPolicy, VectorWeighting } from '../lib/partnerVectors'
 import { idColumn } from '../lib/tableOps'
+import { labelsByNeuron } from '../lib/typeMapping'
+import { ID_COLUMN_NAME } from '../../core/ids'
 
 export const partnerVectorsNode = registerNode({
   type: 'neuron.partnerVectors',
@@ -46,7 +48,10 @@ export const partnerVectorsNode = registerNode({
     'that projects to it. It aggregates as it goes, so no Group By and no Pivot in between — ' +
     'the long table already is the feature matrix, and the wide one would be mostly zeroes. ' +
     'The surprise is untyped partners: they fall back to their own ids rather than pooling ' +
-    'into one bucket, because a shared "untyped" feature makes strangers look similar.',
+    'into one bucket, because a shared "untyped" feature makes strangers look similar. Wire ' +
+    'Labels from Match Cell Types to compare across brains: partners are then named by their ' +
+    'shared label and anything unmapped is dropped, so read cnFrac — it says how much of each ' +
+    'neuron survived that.',
   cost: 'cheap',
 
   inputs: [
@@ -57,6 +62,14 @@ export const partnerVectorsNode = registerNode({
      * answers the same question for the first hop only — see the lib header.
      */
     { id: 'neurons', label: 'Neurons', type: T.neurons(), required: false },
+    /*
+     * `Match Cell Types`' output. Optional, and wiring it changes what a *feature* is: the
+     * partner's shared label rather than its own type or id, with anything unmapped dropped.
+     * See the lib header for why the relabelling lives inside this node and not in a `Relabel`
+     * downstream — the feature is `out:` + the partner, so a general table node would have to
+     * see through this node's composite.
+     */
+    { id: 'labels', label: 'Labels', type: T.table(), required: false },
   ],
   outputs: [{ id: 'out', label: 'Vectors', type: T.table() }],
 
@@ -95,6 +108,30 @@ export const partnerVectorsNode = registerNode({
       options: WEIGHTING_OPTIONS,
       help: 'Fractions are per direction, so a neuron with far more input than output still has both halves of its vector count. Worth knowing that Cosine already ignores overall magnitude — this changes the balance between the two directions, not the scale.',
     },
+    /*
+     * Two pickers rather than one per role on a repeated port: there is exactly one Labels table
+     * here, and its shape is `Match Cell Types`' two columns. They are `advanced` because the
+     * defaults are that node's own names — somebody wiring its output never touches these, and
+     * somebody wiring a hand-built mapping is already off the beaten path.
+     */
+    {
+      id: 'labelId',
+      kind: 'column',
+      label: 'Labels: neuron id',
+      from: 'labels',
+      default: ID_COLUMN_NAME,
+      help: 'On the Labels table: the partner id column. Match Cell Types publishes neuronId.',
+      advanced: true,
+    },
+    {
+      id: 'labelName',
+      kind: 'column',
+      label: 'Labels: label',
+      from: 'labels',
+      default: 'label',
+      help: 'On the Labels table: the shared label each id maps to.',
+      advanced: true,
+    },
   ],
 
   inferOutputs: (ctx) => ({
@@ -106,12 +143,27 @@ export const partnerVectorsNode = registerNode({
     ),
   }),
 
-  validate: (ctx) =>
-    partnerVectorIssues(
+  validate: (ctx) => {
+    const issues = partnerVectorIssues(
       ctx.schema('in'),
       String(ctx.params.partnerBy ?? 'type') as PartnerBy,
       Boolean(ctx.inputs.neurons),
-    ),
+    )
+    /*
+     * Not a refusal: the mapping is a legitimate override and the node does the right thing. But
+     * `Partners by` and `Untyped partners` are still sitting there reading as if they applied,
+     * and a control that silently stops mattering is worse than one that is missing — the same
+     * call `visibleIf` makes elsewhere, which cannot be used here because it sees params and not
+     * which ports are wired.
+     */
+    if (ctx.inputs.labels) {
+      issues.push(
+        'Labels is wired, so partners are named by their shared label — Partners by and ' +
+          'Untyped partners do not apply, and a partner the mapping does not cover is dropped.',
+      )
+    }
+    return issues
+  },
 
   evaluate: (ctx) => {
     const table = ctx.input('in')
@@ -127,6 +179,13 @@ export const partnerVectorsNode = registerNode({
     const neurons = ctx.input('neurons')
     const queries = isTableValue(neurons) ? new Set(idColumn(neurons)) : undefined
 
+    // `labelsByNeuron` rather than a second reader of the same two columns — it lives beside
+    // `mapperLabelsTable`, which writes them.
+    const labelTable = ctx.input('labels')
+    const labels = isTableValue(labelTable)
+      ? labelsByNeuron(labelTable, ctx.column('labelId'), ctx.column('labelName'))
+      : undefined
+
     return {
       out: partnerVectorTable(
         table,
@@ -136,6 +195,7 @@ export const partnerVectorsNode = registerNode({
           weightColumn: weight,
           weighting: String(ctx.params.weighting ?? 'raw') as VectorWeighting,
           ...(queries ? { queries } : {}),
+          ...(labels ? { labels } : {}),
         },
         ctx,
       ),

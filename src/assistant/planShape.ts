@@ -44,7 +44,7 @@ export interface PlannedNode {
    * afterwards, since `f1` says more than `n4k_x82p`.
    */
   ref: string
-  /** Registered, listable node type, e.g. `core.filter`. */
+  /** Registered, listable node type, e.g. `core.filterTable`. */
   type: string
   /**
    * Overrides on top of the definition's defaults. Everything unset stays default.

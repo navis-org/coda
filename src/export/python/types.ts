@@ -14,7 +14,7 @@
 
 import type { GraphNode } from '../../core/graph'
 import type { NodeDefinition, ParamValues } from '../../core/node'
-import type { CodaType, TableSchema } from '../../core/types'
+import type { AttributePart, CodaType, TableSchema } from '../../core/types'
 
 // ---------------------------------------------------------------------------
 // Cells
@@ -203,6 +203,16 @@ export interface EmitContext<P extends ParamValues = ParamValues> {
   inputType(portId: string): CodaType | undefined
   /** Table schema on an input port, when it carries one. */
   schema(portId: string): TableSchema | undefined
+  /**
+   * Attribute schema for a type that carries one but is not a table — a Network's nodes or
+   * edges, Skeletons, Points.
+   *
+   * Forwarded from `InferContext` beside `schema` rather than left to each emitter, which is the
+   * rule `emit.ts` states where it delegates: `schemaOf` has no branch for a network, so an
+   * emitter reaching one otherwise writes `attributeSchema(ctx.inputType(port), 'nodes')` by
+   * hand, and the next one writes it again slightly differently.
+   */
+  attributes(portId: string, part?: AttributePart): TableSchema | undefined
 
   /**
    * A column param, resolved exactly as `evaluate` resolves it.

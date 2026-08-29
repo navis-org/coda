@@ -303,7 +303,7 @@ describe('buildNodeItems', () => {
     // Normalize and Heatmap take a Matrix; Filter does not.
     expect(types).toContain('core.normalize')
     expect(types).toContain('out.heatmap')
-    expect(types).not.toContain('core.filter')
+    expect(types).not.toContain('core.filterTable')
     expect(byId(items, 'node:core.normalize').portId).toBe('in')
   })
 
@@ -319,7 +319,7 @@ describe('buildNodeItems', () => {
 
   it('accepts Neurons where a Table is wanted, since Neurons is a subtype', () => {
     const items = buildNodeItems({ type: T.neurons(), from: 'source' })
-    expect(items.map((i) => i.nodeType)).toContain('core.filter')
+    expect(items.map((i) => i.nodeType)).toContain('core.filterTable')
   })
 })
 
@@ -576,8 +576,8 @@ describe('breadcrumbs on the real item list', () => {
   }
 
   it('reads as the requested format for a node', () => {
-    expect(rowFor('Filter')).toBe(
-      'Add ▶ Transform ▶ Filter ▶ Keep rows matching a condition on one column.',
+    expect(rowFor('Filter Table')).toBe(
+      'Add ▶ Transform ▶ Filter Table ▶ Keep rows matching a condition on one column.',
     )
   })
 

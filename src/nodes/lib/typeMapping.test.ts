@@ -23,6 +23,7 @@ import { column, tableSchema } from '../../core/types'
 import { tableFromRows } from '../../core/values'
 import type { MapperDataset, TypeMapping } from './typeMapping'
 import {
+  labelsByNeuron,
   COMPONENT_NODE_CAP,
   MAPPER_LABELS_SCHEMA,
   MAPPER_REPORT_SCHEMA,
@@ -30,7 +31,8 @@ import {
   mapperLabelsTable,
   mapperReportTable,
   matchCellTypes,
-  synonymsFrom,
+  keepLabelsFrom,
+  mapperNetwork,
 } from './typeMapping'
 
 /** `{ id: labels }`, which is what an annotation table reduces to once the columns are picked. */
@@ -293,27 +295,16 @@ describe('compound labels', () => {
 
 // ---------------------------------------------------------------------------
 
-describe('hand-written correspondence', () => {
+describe('a correspondence the data does not support', () => {
   /*
-   * The `extra` port's whole purpose. `LC4` and `Lobula columnar 4` are the same cells under two
-   * naming conventions and share no text, so nothing in the data will ever join them.
+   * The mapping is **derived and only derived** — the hand-written `label ↔ label` route
+   * (cocoa's `add_synonym`, once this node's `Synonyms` port) is gone, so two names for the same
+   * cells that share no text stay apart. Kept as a test because it is the one behaviour somebody
+   * will read as a bug: forcing the pair is a downstream `Relabel`, not a setting on here.
    */
-  it('joins two labels nothing in the data relates', () => {
+  it('leaves two labels nothing in the data relates unmatched', () => {
     const rows = [dataset({ a1: ['LC4'] }), dataset({ b1: ['Lobula columnar 4'] })]
     expect(groups(matchCellTypes(rows))).toEqual([])
-    expect(
-      groups(
-        matchCellTypes(rows, { synonyms: [{ label: 'LC4', synonym: 'Lobula columnar 4' }] }),
-      ),
-    ).toEqual([['0:a1', '1:b1']])
-  })
-
-  it('ignores a synonym naming a label that was declared bad', () => {
-    const mapping = matchCellTypes([dataset({ a1: ['LC4'] }), dataset({ b1: ['junk'] })], {
-      badLabels: ['junk'],
-      synonyms: [{ label: 'LC4', synonym: 'junk' }],
-    })
-    expect(groups(mapping)).toEqual([])
   })
 })
 
@@ -383,6 +374,13 @@ describe('what the shared label is called', () => {
 
 // ---------------------------------------------------------------------------
 
+/**
+ * A male-only type against a female brain, which is what the pass-through port is for. `pMP2`'s
+ * component holds one dataset, so step 1 drops it — the same treatment a naming artifact gets,
+ * because nothing in the data tells the two apart. `LC4` is the control that matches either way.
+ */
+const SEXED = [dataset({ m1: ['pMP2'], m2: ['LC4'] }), dataset({ f1: ['LC4'] })]
+
 describe('the report', () => {
   it('counts each label per dataset, in a stable order', () => {
     const mapping = matchCellTypes([
@@ -390,8 +388,8 @@ describe('the report', () => {
       dataset({ b1: ['LC4'], b2: ['LC4'], b3: ['LC6'] }),
     ])
     expect(mapping.report).toEqual([
-      { label: 'LC4', counts: [2, 2], suspicious: false },
-      { label: 'LC6', counts: [1, 1], suspicious: false },
+      { label: 'LC4', counts: [2, 2], matched: true, suspicious: false },
+      { label: 'LC6', counts: [1, 1], matched: true, suspicious: false },
     ])
   })
 
@@ -405,7 +403,134 @@ describe('the report', () => {
       dataset({ a1: ['LC4'] }),
       dataset({ b1: ['LC4'], b2: ['LC4'], b3: ['LC4'] }),
     ])
-    expect(mapping.report).toEqual([{ label: 'LC4', counts: [1, 3], suspicious: true }])
+    expect(mapping.report).toEqual([
+      { label: 'LC4', counts: [1, 3], matched: true, suspicious: true },
+    ])
+  })
+
+  /*
+   * The flag is off for a pass-through and that is not leniency: an unmatched label has zero
+   * neurons in at least one dataset *by definition*, so the ratio is 0 for every one of them.
+   * Left on, "show me every suspicious label" returns the entire pass-through list — noise
+   * exactly where somebody is reading.
+   */
+  it('does not flag a pass-through as suspicious, and says it was not matched', () => {
+    const mapping = matchCellTypes(SEXED, { keepLabels: ['pMP2'] })
+    expect(mapping.report).toEqual([
+      { label: 'LC4', counts: [1, 1], matched: true, suspicious: false },
+      { label: 'pMP2', counts: [1, 0], matched: false, suspicious: false },
+    ])
+  })
+})
+
+// ---------------------------------------------------------------------------
+
+describe('labels passed through without a counterpart', () => {
+  it('drops a one-sided type by default', () => {
+    const mapping = matchCellTypes(SEXED)
+    expect(labelsOf(mapping, 0)).toEqual({ m2: 'LC4' })
+    expect(mapping.unmatched).toEqual([1, 0])
+  })
+
+  it('keeps it when named, under its own name', () => {
+    const mapping = matchCellTypes(SEXED, { keepLabels: ['pMP2'] })
+    expect(labelsOf(mapping, 0)).toEqual({ m1: 'pMP2', m2: 'LC4' })
+    expect(labelsOf(mapping, 1)).toEqual({ f1: 'LC4' })
+    // It has a label, so it is not unmatched. The report's zero count is where the one-sidedness
+    // shows, which says more than a number would.
+    expect(mapping.unmatched).toEqual([0, 0])
+  })
+
+  /*
+   * The property that makes this useful with three datasets: a female-specific type is in the
+   * hemibrain *and* FlyWire but not the maleCNS, so step 1 drops it for want of the third — and
+   * passing it through gives both female brains the same string, which is a correspondence.
+   * Nothing arranges that; matching by text does it for free.
+   */
+  it('re-joins the datasets that do have it, matching by text', () => {
+    const mapping = matchCellTypes(
+      [
+        dataset({ h1: ['pC1'], h2: ['LC4'] }),
+        dataset({ w1: ['pC1'], w2: ['LC4'] }),
+        dataset({ m1: ['LC4'] }),
+      ],
+      { keepLabels: ['pC1'] },
+    )
+    expect(groups(mapping)).toEqual([
+      ['0:h1', '1:w1'],
+      ['0:h2', '1:w2', '2:m1'],
+    ])
+  })
+
+  it('splits a compound, so listing one part catches a neuron typed with two', () => {
+    const mapping = matchCellTypes(
+      [dataset({ m1: ['pMP2,pMP3'] }), dataset({ f1: ['LC4'] })],
+      { keepLabels: ['pMP2'] },
+    )
+    expect(labelsOf(mapping, 0)).toEqual({ m1: 'pMP2' })
+  })
+
+  /*
+   * The other half, and the one that matters more in practice: `buildGraph` makes a label node
+   * for the whole compound *and* for each part, so `pMP2,pMP3` is a label in the mapper's space
+   * too. A pass-through table is built the obvious way — filter a dataset's own type column —
+   * which holds that string verbatim. Testing only the parts dropped it silently.
+   */
+  it('takes the whole compound when that is what was listed', () => {
+    const mapping = matchCellTypes(
+      [dataset({ m1: ['pMP2,pMP3'] }), dataset({ f1: ['LC4'] })],
+      { keepLabels: ['pMP2,pMP3'] },
+    )
+    expect(labelsOf(mapping, 0)).toEqual({ m1: 'pMP2,pMP3' })
+  })
+
+  /* Both listed: the shorter, non-compound name wins, which is `chooseLabel`'s ordering. */
+  it('prefers the part over the compound when both are listed', () => {
+    const mapping = matchCellTypes(
+      [dataset({ m1: ['pMP2,pMP3'] }), dataset({ f1: ['LC4'] })],
+      { keepLabels: ['pMP2,pMP3', 'pMP2'] },
+    )
+    expect(labelsOf(mapping, 0)).toEqual({ m1: 'pMP2' })
+  })
+
+  /*
+   * A derived label is better evidence than a list, so the matcher's answer stands. Listing a
+   * type that *does* match is a no-op rather than an override — which matters because the list
+   * is usually somebody's whole sex-specific annotation, wired in without checking each name.
+   */
+  it('leaves a matched neuron alone', () => {
+    const mapping = matchCellTypes([dataset({ a1: ['LC4'] }), dataset({ b1: ['LC4'] })], {
+      keepLabels: ['LC4'],
+    })
+    expect(mapping.report).toEqual([
+      { label: 'LC4', counts: [1, 1], matched: true, suspicious: false },
+    ])
+  })
+
+  /** Contradictory instructions, and the destructive reading is the safe one. */
+  it('lets `badLabels` win over a label named in both', () => {
+    const mapping = matchCellTypes([dataset({ m1: ['junk'] }), dataset({ f1: ['LC4'] })], {
+      badLabels: ['junk'],
+      keepLabels: ['junk'],
+    })
+    expect(labelsOf(mapping, 0)).toEqual({})
+  })
+
+  /*
+   * `id` mode names each matched *group* by a neuron id, which a pass-through is not part of —
+   * and replacing `pMP2` with `#0` would hide the one thing the user asked to see. It also has
+   * to survive `resolveIdLabels`, which renames every label it is handed.
+   */
+  it('keeps its own name under `id` mode', () => {
+    const mapping = matchCellTypes(
+      [dataset({ m1: ['pMP2'], m2: ['LC4'] }), dataset({ f1: ['LC4'] })],
+      { keepLabels: ['pMP2'], labelMode: 'id' },
+    )
+    expect(labelsOf(mapping, 0)).toEqual({ m1: 'pMP2', m2: 'f1' })
+  })
+
+  it('does nothing for a name no dataset uses', () => {
+    expect(labelsOf(matchCellTypes(SEXED, { keepLabels: ['nope'] }), 0)).toEqual({ m2: 'LC4' })
   })
 })
 
@@ -430,7 +555,12 @@ describe('the properties the node depends on', () => {
   })
 
   it('answers nothing for no datasets, and does not throw', () => {
-    expect(matchCellTypes([])).toEqual({ labels: [], report: [], unmatched: [] })
+    expect(matchCellTypes([])).toEqual({
+      labels: [],
+      report: [],
+      unmatched: [],
+      graph: { nodes: [], edges: [] },
+    })
   })
 })
 
@@ -550,29 +680,26 @@ describe('reading a table into the mapper', () => {
   })
 })
 
-describe('reading the synonyms table', () => {
-  const PAIRS = tableFromRows(tableSchema(column('a', 'str'), column('b', 'str')), [
-    { a: 'LC4', b: 'Lobula columnar 4' },
-    { a: 'LC6', b: '' },
+describe('reading the pass-through table', () => {
+  const NAMES = tableFromRows(tableSchema(column('type', 'str'), column('note', 'str')), [
+    { type: 'pMP2', note: 'male' },
+    { type: ' pMP2 ', note: 'male, again' },
+    { type: '', note: 'no name' },
+    { type: 'pC1', note: 'female' },
   ])
 
-  it('takes the pairs the caller named, dropping a row missing either half', () => {
-    expect(synonymsFrom(PAIRS, 'a', 'b')).toEqual([
-      { label: 'LC4', synonym: 'Lobula columnar 4' },
-    ])
+  // Trimmed, blank-free and deduplicated, so `matchCellTypes` gets a list rather than a column.
+  it('takes the named column as a set of labels', () => {
+    expect(keepLabelsFrom(NAMES, 'type')).toEqual(['pMP2', 'pC1'])
   })
 
-  /*
-   * Nothing wired, and no columns chosen, are both legitimate states rather than errors — the
-   * node's Synonyms port is optional and both its pickers are too.
-   */
+  /* Nothing wired and no column chosen are both legitimate — and the common — states. */
   it.each([
-    ['nothing wired', undefined, 'a', 'b'],
-    ['no first column', PAIRS, undefined, 'b'],
-    ['no second column', PAIRS, 'a', undefined],
-    ['a column that is not there', PAIRS, 'a', 'nope'],
-  ])('answers no synonyms for %s', (_case, table, first, second) => {
-    expect(synonymsFrom(table, first, second)).toEqual([])
+    ['nothing wired', undefined, 'type'],
+    ['no column chosen', NAMES, undefined],
+    ['a column that is not there', NAMES, 'nope'],
+  ])('answers nothing for %s', (_case, table, chosen) => {
+    expect(keepLabelsFrom(table, chosen)).toEqual([])
   })
 })
 
@@ -603,8 +730,165 @@ describe('writing the mapping back out', () => {
     expect(table.data['label']).toEqual(['LC4', 'LC4'])
     expect(table.data['dataset']).toEqual(['flywire', 'hemibrain'])
     expect(table.data['nNeurons']).toEqual([3, 1])
-    // A flag about the *label*, so it repeats down that label's rows — the trade long form
-    // makes, and what turns "show me every suspicious label" into one filter.
+    // Both flags are about the *label*, so they repeat down that label's rows — the trade long
+    // form makes, and what turns "show me every suspicious label" into one filter.
+    expect(table.data['matched']).toEqual([true, true])
     expect(table.data['suspicious']).toEqual([true, true])
+  })
+})
+
+describe('reading a labels table back', () => {
+  /** The shape `mapperLabelsTable` writes, through its own constant so a rename reaches here. */
+  const labels = (pairs: Array<[string, string]>) =>
+    tableFromRows(
+      MAPPER_LABELS_SCHEMA,
+      pairs.map(([neuronId, label]) => ({ neuronId, label })),
+    )
+
+  it('drops a wide id that arrived as a number rather than mapping a rounded one', () => {
+    /*
+     * Invariant 8 at this seam. `720575940643300974` as an `i64` cell is a float64 holding
+     * `720575940643300992` — a different neuron — so `idText` refuses it. Mapping the rounded
+     * value would attach a label to whichever neuron happened to own it.
+     */
+    const wide = tableSchema(column('neuronId', 'i64'), column('label', 'str'))
+    const lossy = tableFromRows(wide, [
+      { neuronId: Number('720575940643300974'), label: 'LC4' },
+    ])
+    expect(labelsByNeuron(lossy).size).toBe(0)
+  })
+
+  it('keeps the first of a repeated id', () => {
+    expect(
+      labelsByNeuron(
+        labels([
+          ['1', 'first'],
+          ['1', 'second'],
+        ]),
+      ).get('1'),
+    ).toBe('first')
+  })
+
+  it('reads a blank label as no label rather than as a label named blank', () => {
+    expect(labelsByNeuron(labels([['1', '']])).size).toBe(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+
+/**
+ * The label graph on its way to the Network Viewer.
+ *
+ * The graph *is* the algorithm, so a drawing of it is the only way to see why two types
+ * corresponded and why two others did not — which means what has to be pinned is not that it
+ * has some shape but that its shape is the one the walk actually used.
+ */
+describe('the graph the answer was read off', () => {
+  /** `LC4` matched both ways; `pMP2` is male-only, so its component holds one dataset. */
+  const MAPPING = matchCellTypes([
+    dataset({ m1: ['LC4'], m2: ['LC4'], m3: ['pMP2'] }),
+    dataset({ f1: ['LC4'] }),
+  ])
+
+  it('carries a node per label and per neuron group, not per neuron', () => {
+    const { nodes } = MAPPING.graph
+    // `m1` and `m2` share a label set, so they are one node weighing 2 — cocoa's
+    // `collapse_neuron_nodes`, done at construction. Four groups would mean it stopped.
+    expect(nodes.filter((n) => n.kind === 'neurons').map((n) => n.nNeurons).sort()).toEqual([
+      1, 1, 2,
+    ])
+    expect(nodes.filter((n) => n.kind === 'label').map((n) => n.name).sort()).toEqual([
+      'LC4',
+      'pMP2',
+    ])
+  })
+
+  it("gives a label node the neurons that carry it, so one size encoding reads on both kinds", () => {
+    const lc4 = MAPPING.graph.nodes.find((n) => n.name === 'LC4')
+    expect(lc4?.nNeurons).toBe(3)
+  })
+
+  /*
+   * The whole point of the port: every component, including the one step 1 dropped. `pMP2` is
+   * there and is marked as having matched nothing, which is the answer to "why did this not come
+   * through" — and it is only answerable because the dropped components are kept.
+   */
+  it('keeps the components that did not match, and says they did not', () => {
+    const named = Object.fromEntries(MAPPING.graph.nodes.map((n) => [n.name, n.label]))
+    expect(named['LC4']).toBe('LC4')
+    expect(named['pMP2']).toBe('')
+  })
+
+  it('records an undirected edge once, weighted by the neurons behind it', () => {
+    const { nodes, edges } = MAPPING.graph
+    // Sorted ends, because the pair is undirected and which index came first is an artifact of
+    // construction order rather than something a drawing should depend on.
+    const drawn = edges
+      .map((e) => [nodes[e.source]!.name, nodes[e.target]!.name].sort().join('-') + `:${e.weight}`)
+      .sort()
+    // `m1` names the group holding m1 and m2, so its edge to LC4 weighs 2 — the group's size,
+    // which is the number `collapse_neuron_nodes` gets by summing. Once per pair, not twice.
+    expect(drawn).toEqual(['LC4-f1:1', 'LC4-m1:2', 'm3-pMP2:1'])
+  })
+
+  /*
+   * A label is a string somebody typed into an annotation table, so one called
+   * `flywire:720575940623374218` is possible. Unprefixed it would be the same id as the neuron
+   * group it names, and `net.build`'s own rule — one row per id — would merge two nodes silently.
+   */
+  it('prefixes node ids by kind, so a label cannot collide with a neuron group', () => {
+    const net = mapperNetwork(MAPPING.graph, ['maleCNS', 'hemibrain'])
+    const ids = (net.nodes.data['id'] as unknown[]).map(String)
+    expect(new Set(ids).size).toBe(ids.length)
+    expect(ids).toContain('label/LC4')
+    expect(ids).toContain('neurons/maleCNS:m1')
+    // The dataset column names the brain; the id qualifies it, decision 1's grammar.
+    expect(net.nodes.data['dataset']).toContain('hemibrain')
+  })
+
+  /*
+   * Undirected, because the graph is: `adjacency` records every edge both ways and the split
+   * reads one weight per pair. Arrowheads would assert a direction the algorithm does not have.
+   */
+  it('is undirected, and every link names nodes that are in it', () => {
+    const net = mapperNetwork(MAPPING.graph, ['a', 'b'])
+    expect(net.directed).toBe(false)
+    const ids = new Set((net.nodes.data['id'] as unknown[]).map(String))
+    for (const end of ['source', 'target']) {
+      for (const cell of net.edges.data[end] as unknown[]) expect(ids.has(String(cell))).toBe(true)
+    }
+    expect(net.edges.data['kind']).toEqual(['membership', 'membership', 'membership'])
+  })
+
+  it('marks a compound edge as one', () => {
+    const compound = matchCellTypes([
+      dataset({ m1: ['PS008,PS009'] }),
+      dataset({ f1: ['PS008'] }),
+    ])
+    const net = mapperNetwork(compound.graph, ['a', 'b'])
+    expect(net.edges.data['kind']).toContain('compound')
+  })
+
+  /*
+   * One dataset has no correspondence to establish, but it still has a label graph — and a port
+   * that went empty at an arity nobody thinks to test is the other kind of surprise.
+   */
+  it('is built even with one dataset, where nothing can match', () => {
+    const alone = matchCellTypes([dataset({ m1: ['LC4'] })])
+    expect(alone.graph.nodes).toHaveLength(2)
+    expect(alone.graph.nodes.every((n) => n.label === '')).toBe(true)
+  })
+
+  /*
+   * `id` mode names each matched group by a neuron id, and the graph has to follow: a view built
+   * before `resolveIdLabels` would say `#0` where every other output says an id.
+   */
+  it('follows the id-mode rename', () => {
+    const byId = matchCellTypes([dataset({ m1: ['LC4'] }), dataset({ f1: ['LC4'] })], {
+      labelMode: 'id',
+    })
+    const lc4 = byId.graph.nodes.find((n) => n.name === 'LC4')
+    expect(lc4?.label).toBe('f1')
+    expect(lc4?.label.startsWith('#')).toBe(false)
   })
 })

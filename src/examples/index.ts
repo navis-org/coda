@@ -133,7 +133,7 @@ const partners: ExampleGraph = {
         },
         {
           id: 'filter',
-          type: 'core.filter',
+          type: 'core.filterTable',
           col: 3,
           params: { column: 'weight', op: 'ge', value: '10' },
         },

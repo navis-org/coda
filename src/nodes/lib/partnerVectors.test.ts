@@ -267,3 +267,124 @@ describe('what it says about an input it cannot use', () => {
     expect(partnerVectorIssues(noDirection, 'id', true)).toEqual([])
   })
 })
+
+/** One neuron's `cnFrac`, which is per neuron and repeated down its rows. */
+function coverage(table: TableValue, neuron: CellValue): number | undefined {
+  const ids = getColumn(table, 'neuronId')
+  const fracs = getColumn(table, 'cnFrac')
+  for (let i = 0; i < table.length; i++) {
+    if (ids[i] === neuron) return Number(fracs[i])
+  }
+  return undefined
+}
+
+describe('a shared label space', () => {
+  /*
+   * The mapping covers neuron 10 and 12 but not 11, 2 or 30 — so neuron 1's downstream partners
+   * are partly outside it. Deliberately maps two *different* partners onto one label, which is
+   * the whole point of a cross-dataset mapping and the case a per-partner check would miss.
+   */
+  const LABELS = new Map([
+    ['10', 'shared:X'],
+    ['12', 'shared:X'],
+    ['20', 'shared:Y'],
+  ])
+
+  it('names partners by the shared label, pooling two that map onto one', () => {
+    // 10 and 12 are separate partners with separate types; under the mapping they are one
+    // feature carrying both weights (3 + 1).
+    expect(vector(vectors({ labels: LABELS }), 1)).toEqual({
+      'out:shared:X': 4,
+      'in:shared:Y': 7,
+    })
+  })
+
+  it('overrides Partners by rather than combining with it', () => {
+    // `partnerBy: 'id'` would normally make every partner its own feature. The mapping wins,
+    // because a feature outside the shared space cannot make two datasets alike either way.
+    expect(vector(vectors({ labels: LABELS, partnerBy: 'id' }), 1)).toEqual({
+      'out:shared:X': 4,
+      'in:shared:Y': 7,
+    })
+  })
+
+  it('drops a partner the mapping does not cover rather than falling back to its type', () => {
+    const table = vectors({ labels: LABELS })
+    // Partner 11 is typed `null` and partner 2 is typed `B`; neither is in the mapping, and
+    // neither appears. Under no mapping, both would be features.
+    expect(Object.keys(vector(table, 1))).not.toContain('out:B')
+    expect(Object.keys(vector(table, 1)).some((f) => f.includes('11'))).toBe(false)
+  })
+
+  it('says how many connections it dropped for want of a label', () => {
+    const messages: string[] = []
+    vectors({ labels: LABELS }, { warn: (m) => messages.push(m) })
+    expect(messages.join(' ')).toMatch(/mapping does not cover/)
+  })
+
+  it('leaves the two existing rules exactly as they were when nothing is wired', () => {
+    // The mapping is an override, not a new default: no map means the type/id rules stand.
+    expect(vector(vectors(), 1)).toEqual(vector(vectors({}), 1))
+    expect(Object.keys(vector(vectors(), 1))).toContain('out:X')
+  })
+})
+
+describe('cnFrac', () => {
+  const LABELS = new Map([
+    ['10', 'shared:X'],
+    ['12', 'shared:X'],
+    ['20', 'shared:Y'],
+  ])
+
+  it('is the share of a neuron’s weight that survived the restriction', () => {
+    /*
+     * Neuron 1's attributable weight is 3 + 1 + 2 (downstream) + 7 (upstream, from 20) + 4
+     * (the `both` edge to neuron 2) = 17. Under the mapping it keeps 3 + 1 + 7 = 11, losing
+     * partner 11 (2) and partner 2 (4).
+     */
+    expect(coverage(vectors({ labels: LABELS }), 1)).toBeCloseTo(11 / 17, 6)
+  })
+
+  it('is 1 where nothing was dropped', () => {
+    // The default rules keep every partner, so every neuron is fully represented.
+    expect(coverage(vectors(), 1)).toBe(1)
+  })
+
+  it('counts what `Untyped partners ▸ drop` removes too, not only a mapping', () => {
+    // Partner 11 is untyped; dropping it is the same subtraction by another route, and cnFrac
+    // is the one number that says so.
+    const dropped = coverage(vectors({ untyped: 'drop' }), 1)
+    expect(dropped).toBeLessThan(1)
+    expect(dropped).toBeCloseTo(15 / 17, 6)
+  })
+
+  it('warns about the worst neuron by name rather than a mean', () => {
+    /*
+     * A mean over a thousand neurons hides the neuron this is about. Neuron 2 keeps only its
+     * edge to partner 10 (5) out of 5 + 4 = 9 — under the floor, so it is named.
+     */
+    const messages: string[] = []
+    vectors({ labels: LABELS }, { warn: (m) => messages.push(m) })
+    // Both warnings mention cnFrac — one points at it, this one *is* it.
+    const warning = messages.find((m) => m.includes('kept only'))
+    expect(warning).toMatch(/Neuron 2 kept only 33%/)
+  })
+
+  it('stays quiet where every neuron is well covered', () => {
+    const messages: string[] = []
+    vectors({}, { warn: (m) => messages.push(m) })
+    expect(messages.filter((m) => m.includes('kept only'))).toEqual([])
+  })
+
+  it('rides on every row of a neuron, so one Filter drops the badly covered ones', () => {
+    const table = vectors({ labels: LABELS })
+    const ids = getColumn(table, 'neuronId')
+    const fracs = getColumn(table, 'cnFrac')
+    const seen = new Map<unknown, Set<unknown>>()
+    for (let i = 0; i < table.length; i++) {
+      if (!seen.has(ids[i])) seen.set(ids[i], new Set())
+      seen.get(ids[i])!.add(fracs[i])
+    }
+    for (const values of seen.values()) expect(values.size).toBe(1)
+  })
+})

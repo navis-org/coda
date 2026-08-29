@@ -270,7 +270,7 @@ in a Filter node (case-sensitive) and 1 in a header cell; `pre == 0` against a n
 null row in a Filter node (`Number(null)` is 0) and none in a cell. Neither is wrong on its own,
 but a graph can hold both an inch apart, so `tableFilter.ts` and `filterTable` each name the
 other. Folding one onto the other is a decision about which semantics wins and changes what
-every saved `core.filter` returns — not a tidy-up.
+every saved `core.filterTable` returns — not a tidy-up.
 
 **Nothing in it ever throws.** A half-typed cell, a regex that does not compile, a column an
 upstream edit removed — none of those may block the graph, because `out.table` is a tap and a

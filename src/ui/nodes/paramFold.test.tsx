@@ -256,7 +256,7 @@ describe('which cards the affordance reaches', () => {
         'out.network',
         'out.table',
         // ...and rows that are the whole card, which is the case that was added after.
-        'core.filter',
+        'core.filterTable',
         'core.groupBy',
         'neuron.connectivity',
       ]),

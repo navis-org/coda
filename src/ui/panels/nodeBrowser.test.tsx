@@ -132,7 +132,7 @@ describe('NodeBrowser layout', () => {
   it('shows each node port signature and category', () => {
     const { container } = open()
     const filterRow = [...container.querySelectorAll('.node-row')].find(
-      (r) => r.querySelector('.node-row__name')?.textContent === 'Filter',
+      (r) => r.querySelector('.node-row__name')?.textContent === 'Filter Table',
     )!
     expect(filterRow.querySelector('.node-row__signature')?.textContent).toBe('Table → Table')
     expect(filterRow.querySelector('.node-row__category')?.textContent).toContain('Transform')
@@ -322,7 +322,7 @@ describe('NodeThumbnail', () => {
   })
 
   it('tints the header by category', () => {
-    const { container } = render(<NodeThumbnail def={requireNodeDef('core.filter')} />)
+    const { container } = render(<NodeThumbnail def={requireNodeDef('core.filterTable')} />)
     expect(container.querySelector('path[fill="var(--cat-transform)"]')).toBeTruthy()
   })
 

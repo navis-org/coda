@@ -40,7 +40,14 @@
  * not exist.
  */
 
-import type { ColumnParam, ColumnsParam, NumberParam, ParamDef, ParamValues } from '../../core/node'
+import type {
+  ColumnParam,
+  ColumnsParam,
+  NumberParam,
+  ParamDef,
+  ParamGroup,
+  ParamValues,
+} from '../../core/node'
 import type { CodaType, TableSchema } from '../../core/types'
 import { portIdAt } from '../../core/ports'
 
@@ -56,12 +63,54 @@ export function repeatParamId(base: string, index: number): string {
   return portIdAt(base, index)
 }
 
+/**
+ * `2` → `repeat2`. The one statement of a repeated *tab*'s id.
+ *
+ * Private, and reached through `slot.group` and `repeatGroups` — the two places that need it —
+ * for `repeatParamId`'s reason one function up: a param naming a tab the node's `paramGroups`
+ * spells differently is a control that vanishes into "Other" with nothing on screen to say why.
+ */
+function repeatGroupId(index: number): string {
+  return `repeat${index}`
+}
+
+/**
+ * A tab per index, for a node whose param band would otherwise grow with the arity.
+ *
+ * `compare.connectivity` is four params per dataset, so four datasets is sixteen rows on a card
+ * that has to sit next to the graph. Handing these to `paramGroups` and `slot.group` to each
+ * param puts each dataset behind one tab; the card draws a strip past two of them and the height
+ * stops depending on the arity. Every tab is declared up to `max` and the ones past the current
+ * count simply hold no visible params, which is the state `bucketParams` drops.
+ *
+ * `label` takes the index rather than being a template, because "Dataset 2" and "Brain 2" are
+ * both reasonable and neither is this module's to choose.
+ */
+export function repeatGroups(
+  count: NumberParam,
+  label: (index: number) => string,
+): ParamGroup[] {
+  const max = typeof count.max === 'number' ? count.max : (count.default ?? 1)
+  return Array.from({ length: max }, (_, i) => ({
+    id: repeatGroupId(i + 1),
+    label: label(i + 1),
+  }))
+}
+
 /** One index of a repeated group, as the builder sees it. */
 export interface RepeatSlot {
   /** 1-based, matching `ResolvedPort['group'].index` and the label a socket draws. */
   index: number
   /** The param id at this index: `pre` → `pre2`. */
   id: (base: string) => string
+  /**
+   * The tab id at this index, matching what `repeatGroups` declared.
+   *
+   * Rarely needed: `repeatParams` writes it onto every param it builds, the same way it writes
+   * the `visibleIf` and resolves `fromPort`. Here for the param that wants a *different* tab
+   * from its siblings, which is the only case a builder has to say anything.
+   */
+  group: string
 }
 
 /**
@@ -111,13 +160,25 @@ export function repeatParams(options: RepeatParamsOptions): ParamDef[] {
   const fresh = count.default ?? count.min ?? 1
   return Array.from({ length: max }, (_, i) => {
     const index = i + 1
-    const slot: RepeatSlot = { index, id: (base) => repeatParamId(base, index) }
+    const slot: RepeatSlot = {
+      index,
+      id: (base) => repeatParamId(base, index),
+      group: repeatGroupId(index),
+    }
     return build(slot).map((param) => {
       const visibleIf = (values: ParamValues) => Number(values[count.id] ?? fresh) >= index
-      if (param.fromPort === undefined) return { ...param, visibleIf } as ParamDef
+      // The tab defaults to this index's, *before* the spread so an explicit `group` still wins.
+      // Written here rather than by each builder for `portIdAt`'s reason one field over: a param
+      // naming a tab its node spells differently does not fail, it lands in the trailing "Other"
+      // with nothing on screen to explain it. Harmless on a node that declares no `paramGroups` —
+      // `bucketParams` ignores a group id that was never declared.
+      if (param.fromPort === undefined) {
+        return { group: slot.group, ...param, visibleIf } as ParamDef
+      }
       const { fromPort, schemaOf, ...rest } = param
       const portId = portIdAt(fromPort, index)
       return {
+        group: slot.group,
         ...rest,
         from: portId,
         ...(schemaOf ? { schemaFrom: (inputs: Readonly<Record<string, CodaType | undefined>>) => schemaOf(inputs[portId]) } : {}),

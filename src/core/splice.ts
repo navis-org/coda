@@ -34,7 +34,7 @@ export interface SplicePorts {
  *
  * **The second half is checked against a graph with the first half already in it**, which is the
  * only reason this works on the wiring people actually try. A node's output type routinely
- * depends on its input: `core.filter` isolated publishes `T.table()` and only becomes `neurons`
+ * depends on its input: `core.filterTable` isolated publishes `T.table()` and only becomes `neurons`
  * once something neurons-shaped is wired to it — so checking both links against the *current*
  * inference would refuse a Filter dropped on `Find Neurons → Skeletons`, which is the obvious
  * case and works perfectly once connected.

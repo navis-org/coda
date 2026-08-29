@@ -227,6 +227,9 @@ describe('the params, at edit time', () => {
       'partner',
       'feature',
       'weight',
+      // Unconditional, so the schema does not change shape with whether the Labels port is
+      // wired — see `partnerVectorSchema`.
+      'cnFrac',
     ])
   })
 })

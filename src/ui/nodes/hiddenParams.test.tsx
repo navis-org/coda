@@ -275,8 +275,8 @@ describe('the hint on the card', () => {
     // Every node in this example has an advanced param, which is itself the finding behind the
     // rule: a marker for their mere existence would be on every card here. Filter has none.
     render(<App />)
-    act(() => useGraphStore.getState().addNode('core.filter', { x: 0, y: 400 }))
-    const card = await cardFor(nodeIdOfType('core.filter'))
+    act(() => useGraphStore.getState().addNode('core.filterTable', { x: 0, y: 400 }))
+    const card = await cardFor(nodeIdOfType('core.filterTable'))
     expect(card.querySelectorAll('.coda-node__params .param').length).toBeGreaterThan(0)
     expect(hintOf(card)).toBeNull()
   })

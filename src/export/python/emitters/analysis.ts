@@ -15,6 +15,7 @@ import { meshCleanParamsFrom, skeletonCleanParamsFrom } from '../../../nodes/lib
 import { NM_PER_UM } from '../../../nodes/lib/nblastOps'
 import { effectiveOutput, isLongLayout } from '../../../nodes/lib/similarityOps'
 import type { SimilarityMetric, SimilarityOutput } from '../../../nodes/lib/similarityOps'
+import { ID_COLUMN_NAME } from '../../../core/ids'
 import { portIdAt } from '../../../core/ports'
 import { compareParamsFrom } from '../../../nodes/lib/edgeComparison'
 import { repeatParamId } from '../../../nodes/lib/repeatParams'
@@ -22,6 +23,8 @@ import { resolveDatasetNames } from '../../../nodes/analysis/compareConnectivity
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
 import { pySelection, selectionIds } from './common'
+import { pyFilterMask } from './table'
+import { findColumn, isNumericDType } from '../../../core/types'
 import { COMMON_SPACE, nerveCordIn } from '../../../data/transforms/spaces'
 
 // ---------------------------------------------------------------------------
@@ -77,6 +80,100 @@ registerEmitter('net.build', (ctx) => {
     )
   }
 
+  return lines
+})
+
+// ---------------------------------------------------------------------------
+// Filter Network
+// ---------------------------------------------------------------------------
+
+/**
+ * A subgraph around a selection, in networkx.
+ *
+ * The seed half goes through `pyFilterMask`, the same function `Filter Table` emits with, so the
+ * two nodes that share a name share an operator table here as well as on the canvas. It runs
+ * against a frame built from the node attributes rather than against the graph, because that is
+ * where the columns are and because pandas is where the mask expression is written to run.
+ *
+ * `ego_graph` and `node_connected_component` are networkx's own, so the walk is theirs rather
+ * than a transcription of ours — the two agree on what a hop is. The one place Coda does
+ * something networkx would not is the roll-ups: `degreeIn` and friends are recomputed on a Coda
+ * subgraph so a size encoding describes the picture. A networkx graph carries no such columns —
+ * `G.degree()` is asked on demand and is therefore right by construction — so there is nothing
+ * to emit for it, which is a difference worth *not* writing code for.
+ */
+registerEmitter('net.filter', (ctx) => {
+  const src = ctx.wired('in')
+  const out = ctx.output('out')
+  const name = ctx.column('column')
+  const seedFrame = ctx.input('seed')
+  const seedColumn = ctx.column('seedColumn')
+  const hasSeedTable = !!seedFrame && !!seedColumn
+  if (!name && !hasSeedTable) return ctx.todo('Nothing selects any nodes on this Filter Network.')
+
+  ctx.require('networkx')
+  ctx.require('pandas')
+
+  const lines: string[] = []
+  const seeds: string[] = []
+
+  if (name) {
+    const op = String(ctx.params.op ?? 'contains')
+    const raw = String(ctx.params.value ?? '')
+    // `ctx.attributes`, not `ctx.schema`: `schemaOf` has no branch for a network, and this is
+    // the accessor `InferContext` carries for exactly that — forwarded onto `EmitContext` rather
+    // than reached around, or every network emitter after this writes it again.
+    const dtype = findColumn(ctx.attributes('in', 'nodes'), name)?.dtype
+    const built = pyFilterMask('_attrs', name, op, raw, isNumericDType(dtype ?? 'str'))
+    if (built.mask === undefined) return ctx.todo(built.reason)
+    lines.push(
+      ...built.notes.flatMap((note) => ctx.note(note)),
+      // `orient='index'`, so the frame's index is the node id — which is what the mask selects
+      // and therefore what comes back out as the seed set.
+      `_attrs = pd.DataFrame.from_dict(dict(${src}.nodes(data=True)), orient='index')`,
+      `_seed = set(_attrs.index[${built.mask}])`,
+    )
+    seeds.push('_seed')
+  }
+
+  if (hasSeedTable) {
+    lines.push(`_wired = set(${seedFrame}[${pyStr(seedColumn!)}].dropna().astype(str))`)
+    seeds.push('_wired')
+  }
+
+  // Unioned, never one overriding the other — both are things somebody asked for.
+  lines.push(`_keep = ${seeds.join(' | ')}`)
+
+  const expand = String(ctx.params.expand ?? 'component')
+  if (expand === 'component') {
+    lines.push(
+      // Undirected on purpose: a connected component that respected arrows would be a
+      // *reachable set*, which is a different answer wearing the same name.
+      `_undirected = ${src}.to_undirected(as_view=True)`,
+      `for _n in list(_keep):`,
+      `    _keep |= nx.node_connected_component(_undirected, _n)`,
+    )
+  } else if (expand === 'hops') {
+    const hops = Math.max(1, Math.floor(Number(ctx.params.hops ?? 1)))
+    const direction = String(ctx.params.direction ?? 'any')
+    if (direction === 'upstream') {
+      lines.push(`_walk = ${src}.reverse(copy=False) if ${src}.is_directed() else ${src}`)
+    } else {
+      lines.push(`_walk = ${src}`)
+    }
+    lines.push(
+      `for _n in list(_keep):`,
+      `    _keep |= set(`,
+      `        nx.ego_graph(`,
+      `            _walk, _n, radius=${hops}, undirected=${direction === 'any' ? 'True' : 'False'}`,
+      `        ).nodes`,
+      `    )`,
+    )
+  }
+
+  // `.copy()` rather than the view `subgraph` returns: a view keeps the whole graph alive and
+  // refuses mutation, and everything downstream here treats its input as an ordinary graph.
+  lines.push(`${out} = ${src}.subgraph(_keep).copy()`)
   return lines
 })
 
@@ -466,8 +563,25 @@ registerEmitter('cluster.cut', (ctx) => {
   const clustersOut = ctx.output('clusters')
   const tree = ctx.output('tree')
   const out = companions(tree)
-  const byHeight = String(ctx.params.mode ?? 'count') === 'height'
-
+  const mode = String(ctx.params.mode ?? 'count')
+  /*
+   * The mixed-dataset mode has no counterpart here. `cut_tree`/`cutree` both cut across the
+   * tree at one level; this mode descends to the deepest clusters drawing from every dataset,
+   * which is a walk over the merge matrix rather than a cut. Emitting a count cut instead —
+   * which is what falling through to the branch below did — produces a notebook that *runs*,
+   * returns four clusters, and is a different analysis from the canvas, with `4` being a
+   * default the user never saw because the control is hidden in this mode.
+   *
+   * `docs/export.md`'s policy: two things are refused, every other gap emits a TODO. Writing
+   * the walk in both languages is the fix if somebody wants it; a silent wrong answer is not.
+   */
+  if (mode === 'mixed') {
+    return ctx.todo(
+      'This Cut Tree groups by which datasets each cluster draws from, which has no ' +
+        'single-call equivalent here.',
+    )
+  }
+  const byHeight = mode === 'height'
   ctx.require('scipyCluster', byHeight ? 'fcluster' : 'cut_tree')
   const cut = byHeight
     ? `fcluster(${src}, t=${Number(ctx.params.height ?? 0.5)}, criterion='distance')`
@@ -1274,14 +1388,32 @@ registerEmitter('neuron.partnerVectors', (ctx) => {
 
   ctx.helper('coda_partner_vectors')
   const neurons = ctx.input('neurons')
+  const labels = ctx.input('labels')
   const partnerBy = String(ctx.params.partnerBy ?? 'type')
+
+  /*
+   * A wired mapping supersedes both grouping params, so they are left out of the call rather
+   * than emitted beside it — a cell reading `partner_by='type', labels=…` invites the reading
+   * that the two combine, which is the one thing they do not do.
+   */
+  const grouping = labels
+    ? [
+        `    labels=${labels},`,
+        `    label_id=${pyStr(ctx.column('labelId') ?? ID_COLUMN_NAME)},`,
+        `    label_name=${pyStr(ctx.column('labelName') ?? 'label')},`,
+      ]
+    : [
+        `    partner_by=${pyStr(partnerBy)},`,
+        ...(partnerBy === 'type'
+          ? [`    untyped=${pyStr(String(ctx.params.untyped ?? 'id'))},`]
+          : []),
+      ]
 
   return [
     `${ctx.output('out')} = coda_partner_vectors(`,
     `    ${src},`,
     ...(neurons ? [`    neurons=${neurons},`] : []),
-    `    partner_by=${pyStr(partnerBy)},`,
-    ...(partnerBy === 'type' ? [`    untyped=${pyStr(String(ctx.params.untyped ?? 'id'))},`] : []),
+    ...grouping,
     `    weight=${pyStr(weight)},`,
     `    weighting=${pyStr(String(ctx.params.weighting ?? 'raw'))},`,
     `)`,

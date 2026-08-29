@@ -29,6 +29,7 @@ import type { AggFn } from '../../../nodes/lib/tableOps'
 import { findColumn, isNumericDType } from '../../../core/types'
 import { pyList, pyStr, pyValue } from '../py'
 import { STACK_LABELS } from '../../../nodes/transform/stackNeurons'
+import { qualifyTarget } from '../../../nodes/table/qualifyIds'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
 
@@ -61,72 +62,88 @@ function dtypeOf(ctx: EmitContext, portId: string, name: string | undefined) {
 // Filter
 // ---------------------------------------------------------------------------
 
-registerEmitter('core.filter', (ctx) => {
+/**
+ * A Coda filter operator as a pandas boolean mask over `frame[column]`.
+ *
+ * Here rather than inline in the emitter below because `net.filter` asks the same question of a
+ * network's node attributes and offers the same operator list — `opsForDType` is one table on
+ * the canvas, and two spellings of it in the exporters is how `!=` comes to keep null rows in a
+ * notebook and drop them in an R Markdown.
+ *
+ * **Everything a caller must say is in the return value**, which is why it is a union rather
+ * than a string plus a mutable out-param. The first shape of this returned `string | undefined`
+ * and took a `notes` array: `net.filter` then passed `[]` and silently dropped the regex caveat
+ * `core.filterTable` prints, and flattened two failure reasons into whichever message it
+ * happened to pick. Both are the divergence this extraction exists to prevent, arriving with
+ * the first second caller — so dropping a note is now a deliberate destructuring omission and
+ * the reason is carried rather than re-derived.
+ */
+export type FilterMask =
+  | { mask: string; notes: readonly string[] }
+  | { mask?: undefined; reason: string }
+
+export function pyFilterMask(
+  frame: string,
+  name: string,
+  op: string,
+  raw: string,
+  numeric: boolean,
+): FilterMask {
+  const c = col(frame, name)
+  const ok = (mask: string, notes: readonly string[] = []): FilterMask => ({ mask, notes })
+  switch (op) {
+    case 'isEmpty':
+      return ok(`${c}.isna() | (${c} == '')`)
+    case 'notEmpty':
+      return ok(`${c}.notna() & (${c} != '')`)
+    case 'isTrue':
+      return ok(`${c}.astype('boolean').fillna(False)`)
+    case 'isFalse':
+      return ok(`~${c}.astype('boolean').fillna(True)`)
+    case 'contains':
+      return ok(`${c}.fillna('').astype(str).str.contains(${pyStr(raw)}, regex=False)`)
+    case 'notContains':
+      return ok(`~${c}.fillna('').astype(str).str.contains(${pyStr(raw)}, regex=False)`)
+    case 'startsWith':
+      return ok(`${c}.fillna('').astype(str).str.startswith(${pyStr(raw)})`)
+    case 'endsWith':
+      return ok(`${c}.fillna('').astype(str).str.endswith(${pyStr(raw)})`)
+    case 'matches':
+      return ok(`${c}.fillna('').astype(str).str.contains(${pyStr(raw)}, regex=True)`, [
+        'Coda matches this regex with JavaScript semantics and pandas uses Python `re`. ' +
+          'The two agree on ordinary patterns and differ on lookbehind and named groups.',
+      ])
+    default: {
+      const operator = PY_COMPARISON[op]
+      if (!operator) return { reason: `Unknown filter operator "${op}".` }
+      if (numeric) {
+        const target = Number(raw)
+        if (!Number.isFinite(target)) return { reason: `"${raw}" is not a number.` }
+        return ok(`${c} ${operator} ${pyValue(target)}`)
+      }
+      // A text comparison in Coda reads a null cell as the empty string, so `!= x` keeps the
+      // unlabelled rows. pandas would drop them, which silently shrinks the result.
+      return ok(`${c}.fillna('').astype(str) ${operator} ${pyStr(raw)}`)
+    }
+  }
+}
+
+registerEmitter('core.filterTable', (ctx) => {
   const src = ctx.wired('in')
   const name = ctx.column('column')
-  if (!name) return ctx.todo('No column is chosen on this Filter.')
+  if (!name) return ctx.todo('No column is chosen on this Filter Table.')
 
   ctx.require('pandas')
   const out = ctx.output('out')
   const op = String(ctx.params.op ?? 'ge')
   const raw = String(ctx.params.value ?? '')
   const numeric = isNumericDType(dtypeOf(ctx, 'in', name) ?? 'str')
-  const c = col(src, name)
 
-  const lines: string[] = []
-  let mask: string
+  const built = pyFilterMask(src, name, op, raw, numeric)
+  if (built.mask === undefined) return ctx.todo(built.reason)
 
-  switch (op) {
-    case 'isEmpty':
-      mask = `${c}.isna() | (${c} == '')`
-      break
-    case 'notEmpty':
-      mask = `${c}.notna() & (${c} != '')`
-      break
-    case 'isTrue':
-      mask = `${c}.astype('boolean').fillna(False)`
-      break
-    case 'isFalse':
-      mask = `~${c}.astype('boolean').fillna(True)`
-      break
-    case 'contains':
-      mask = `${c}.fillna('').astype(str).str.contains(${pyStr(raw)}, regex=False)`
-      break
-    case 'notContains':
-      mask = `~${c}.fillna('').astype(str).str.contains(${pyStr(raw)}, regex=False)`
-      break
-    case 'startsWith':
-      mask = `${c}.fillna('').astype(str).str.startswith(${pyStr(raw)})`
-      break
-    case 'endsWith':
-      mask = `${c}.fillna('').astype(str).str.endswith(${pyStr(raw)})`
-      break
-    case 'matches':
-      mask = `${c}.fillna('').astype(str).str.contains(${pyStr(raw)}, regex=True)`
-      lines.push(
-        ...ctx.note(
-          'Coda matches this regex with JavaScript semantics and pandas uses Python `re`. ' +
-            'The two agree on ordinary patterns and differ on lookbehind and named groups.',
-        ),
-      )
-      break
-    default: {
-      const cmp = PY_COMPARISON
-      const operator = cmp[op]
-      if (!operator) return ctx.todo(`Unknown filter operator "${op}".`)
-      if (numeric) {
-        const target = Number(raw)
-        if (!Number.isFinite(target)) return ctx.todo(`"${raw}" is not a number.`)
-        mask = `${c} ${operator} ${pyValue(target)}`
-      } else {
-        // A text comparison in Coda reads a null cell as the empty string, so `!= x` keeps
-        // the unlabelled rows. pandas would drop them, which silently shrinks the result.
-        mask = `${c}.fillna('').astype(str) ${operator} ${pyStr(raw)}`
-      }
-    }
-  }
-
-  lines.push(`${out} = ${src}[${mask}]`)
+  const lines = built.notes.flatMap((note) => ctx.note(note))
+  lines.push(`${out} = ${src}[${built.mask}]`)
   return lines
 })
 
@@ -685,4 +702,30 @@ registerEmitter('neuron.stack', (ctx) => {
     `    _n.${sourceColumn} = ${pyStr(bottomLabel)}`,
     `${out} = navis.NeuronList([*${top}, *${bottom}])`,
   ]
+})
+
+// ---------------------------------------------------------------------------
+// Qualify Ids
+// ---------------------------------------------------------------------------
+
+/** Tag an id column with its dataset, or strip it. Every rule is in `coda_qualify_ids`. */
+registerEmitter('core.qualifyIds', (ctx) => {
+  const src = ctx.wired('in')
+  const name = ctx.column('column')
+  if (!name) return ctx.todo('This Qualify Ids has no id column chosen.')
+
+  ctx.require('pandas')
+  ctx.helper('coda_qualify_ids')
+  const direction = String(ctx.params.direction ?? 'add')
+  // Through the node's own rule, not the typed name: it suffixes a name the table already
+  // has where both languages would overwrite. `relabelTarget`'s reason, one node over.
+  const into = qualifyTarget(ctx.schema('in'), String(ctx.params.into ?? ''))
+  const args = [
+    src,
+    pyStr(name),
+    `direction=${pyStr(direction)}`,
+    ...(direction === 'add' ? [`prefix=${pyStr(String(ctx.params.prefix ?? '').trim())}`] : []),
+    ...(direction === 'remove' && into ? [`into=${pyStr(into)}`] : []),
+  ]
+  return [`${ctx.output('out')} = coda_qualify_ids(${args.join(', ')})`]
 })

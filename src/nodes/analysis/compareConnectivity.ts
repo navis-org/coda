@@ -37,7 +37,7 @@ import {
 } from '../lib/edgeComparison'
 import { ID_COLUMN_NAME } from '../../core/ids'
 import { portIdAt } from '../../core/ports'
-import { repeatParamId, repeatParams } from '../lib/repeatParams'
+import { repeatGroups, repeatParamId, repeatParams } from '../lib/repeatParams'
 
 /**
  * How many connectomes one comparison may span.
@@ -169,11 +169,32 @@ export const compareConnectivityNode = registerNode({
     { id: 'counts', label: 'Counts', type: T.table(COUNTS_SCHEMA) },
   ],
 
+  /*
+   * The card in tabs, because this is the node whose param band grows with its arity: four
+   * settings per dataset means sixteen rows at four datasets, on a card that has to sit next to
+   * the graph it is part of. One tab per dataset makes the height constant instead.
+   *
+   * `Settings` **first**, and that is load-bearing rather than tidy: the first tab is the one a
+   * fresh card opens on, and `Datasets` — the control that brings the other tabs into existence
+   * — is in it. Behind `Dataset 3` it would be a control you need in order to reach the tab
+   * hiding it.
+   *
+   * The per-dataset ids come from `repeatGroups`; `repeatParams` puts each built param in the
+   * matching tab itself, so nothing above has to name one. That pairing is the point — a param
+   * naming a tab its node spells differently lands in the trailing "Other" with nothing on
+   * screen to explain it.
+   */
+  paramGroups: [
+    { id: 'shared', label: 'Settings' },
+    ...repeatGroups(datasetCountParam, (index) => `Dataset ${index}`),
+  ],
+
   params: [
-    datasetCountParam,
+    { ...datasetCountParam, group: 'shared' },
     ...perDatasetParams,
     {
       id: 'minWeight',
+      group: 'shared',
       kind: 'int',
       label: 'Min weight',
       help: 'Drop a type pair no dataset reaches. Per row rather than per dataset on purpose: a pair that is 1 here and 40 there is the asymmetry you set a threshold hoping to see past, not the noise you meant to trim.',

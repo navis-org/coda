@@ -69,7 +69,7 @@ function skipping(): CodaGraph {
   let graph = emptyGraph()
   for (const [id, type] of [
     ['find', 'neuron.findNeurons'],
-    ['filter', 'core.filter'],
+    ['filter', 'core.filterTable'],
     ['sort', 'core.sort'],
     ['join', 'core.join'],
   ] as const) {
@@ -239,7 +239,7 @@ describe('pinned ports', () => {
 
   it('declines to pin a card whose sockets were only partly measured', async () => {
     const graph = skipping()
-    const def = requireNodeDef('core.filter')
+    const def = requireNodeDef('core.filterTable')
     const first = defaultInputPorts(def)[0]!
     // One socket measured out of several. Taken literally, `FIXED_POS` puts every unmeasured
     // port at (0,0) — the card's top-left, on whichever side — and routes confidently into it.

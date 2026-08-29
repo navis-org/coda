@@ -16,7 +16,7 @@
  * silently-wrong answers this node used to give unreachable rather than merely caught.
  *
  * The operator list follows the chosen field's dtype, so picking `size` gives `≥` and picking
- * `type` gives `contains` and `is one of`. Same idea as `core.filter`'s operator dropdown, and
+ * `type` gives `contains` and `is one of`. Same idea as `core.filterTable`'s operator dropdown, and
  * deliberately the same words.
  *
  * ## Unknown is not missing, decided in one place

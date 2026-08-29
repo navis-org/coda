@@ -236,6 +236,58 @@ answer the same question and differ only in where the features are written down;
 would put "which metric" in two places. A zero reads as absent there, which matters only to
 Jaccard (presence) — every other metric already treats a zero as contributing nothing.
 
+## Filter Network, and why "Filter" became "Filter Table"
+
+`net.filter` cuts a subgraph out of a network: pick some nodes, keep what is near them. That is
+**not** what `out.network`'s own knobs do, and the difference is the point. `minWeight` / top-N /
+hide-isolated rank globally and answer "what is worth drawing in this graph"; they would discard
+the very node you asked about if it happened to be small. This answers "what is *near* this",
+which is the question you have when you are reading a graph rather than surveying one.
+
+Built for `Match Cell Types`' `Network` port ([comparative.md](comparative.md)), where the label
+graph is thousands of nodes and the unit worth looking at is one **connected component** — that
+being what the matcher decides on, so a component is the answer to both "why did these correspond?"
+and "why did those not?". It takes any network, so it works the same on `net.build`'s output.
+
+**Two ways to name the seeds and they union**, `collectLabels`' shape and its reasoning: a filter
+row is what you reach for while looking at the picture, an optional `Seed` table is what you have
+when the selection came from somewhere else, and a node that ignored one the moment the other
+arrived looks broken in the way that takes longest to notice. The filter row goes through
+`filterTable` — `Filter Table`'s own evaluate — so the two nodes sharing a name agree on what `>=`
+means because it is one function. In the exporters that is `pyFilterMask` and `rFilterPredicate`,
+extracted for exactly this and shared by both emitters in each language.
+
+Three decisions inside the walk, all in [networkOps.ts](../src/nodes/lib/networkOps.ts):
+
+- **`direction` is ignored twice over, and `expandSelection` decides both.** For a component,
+  because one that respected arrows would be a *reachable set* — a different answer wearing the
+  same name; the control is also hidden for that mode, so it leaves the provenance key
+  (invariant 4). And on an **undirected** network, where `source` and `target` are an arbitrary
+  order: `Match Cell Types` emits one, so honouring `downstream` there would walk half of each
+  pair by construction order. That half cannot live on the param — `visibleIf` is handed
+  `ParamValues` and cannot see what is wired — and putting it in the walk is also what makes the
+  canvas agree with its own notebooks, since `nx.ego_graph` on an `nx.Graph` and `igraph::ego`'s
+  `mode` on an undirected graph both ignore direction already.
+- **An induced link needs *both* ends kept**, not either. A link to a node that is not drawn is
+  an arrow into nothing — the difference between a subgraph and a fringe.
+- **The degree roll-ups are recomputed.** They describe the graph, and this is a different graph;
+  a node still claiming its old `degreeOut` is driving a size encoding that says something untrue
+  about the picture beside it. `induceSubnetwork` and `filterNetwork` share `subnetworkOf`, which
+  is where that happens, so neither can forget it independently.
+
+  **It covers `net.build`'s four columns and no others**, and that is a real limit rather than an
+  oversight to tidy: `ROLLUPS` is a list of names, while `mapperNetwork`'s `nNeurons` is *derived*
+  on a label node and *intrinsic* on a neuron group, and `pathsToNetwork`'s `paths`/`hop` count
+  over the whole route set. Which columns are graph-derived is a fact about the producer, and
+  `NetworkValue` has no field carrying it — so narrow a mapper graph and its label nodes keep the
+  neuron counts of the groups you removed.
+
+**The rename.** `core.filter` → `core.filterTable`, label "Filter" → "Filter Table". Two nodes
+called Filter on one canvas, one taking a table and one a network, is a palette entry you have to
+hover to tell apart. The type id moved with the label, which broke every stored graph naming it —
+acceptable only because Coda is pre-release with one user, and the last time it will be: a rename
+after this needs a load-time alias kept forever.
+
 ## Deduplicate
 
 `core.dedupe`, `Add ▸ Transform ▸ Deduplicate`. `pandas.drop_duplicates`: name the columns to

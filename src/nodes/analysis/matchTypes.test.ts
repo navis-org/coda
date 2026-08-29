@@ -82,8 +82,13 @@ function node(id: string, type: string, params: Record<string, unknown> = {}): G
   }
 }
 
-/** One mock dataset into both sockets, which is the whole graph this node needs. */
-function pipeline(params: Record<string, unknown> = {}): CodaGraph {
+/**
+ * One mock dataset into both sockets, which is the whole graph this node needs.
+ *
+ * `keep` names a node to wire into the Pass Through socket, or nothing to leave it empty — the
+ * default, and the shape every test but one wants.
+ */
+function pipeline(params: Record<string, unknown> = {}, keep?: GraphNode): CodaGraph {
   let g = emptyGraph('match-types-test')
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: DATASET }))
   g = addNode(
@@ -98,6 +103,21 @@ function pipeline(params: Record<string, unknown> = {}): CodaGraph {
       targetHandle: handle,
     })
   }
+  if (keep) {
+    g = addNode(g, keep)
+    g = addEdge(g, {
+      source: 'ds',
+      sourceHandle: 'dataset',
+      target: keep.id,
+      targetHandle: 'dataset',
+    })
+    g = addEdge(g, {
+      source: keep.id,
+      sourceHandle: 'neurons',
+      target: 'match',
+      targetHandle: 'keep',
+    })
+  }
   return g
 }
 
@@ -105,8 +125,13 @@ function pipeline(params: Record<string, unknown> = {}): CodaGraph {
 
 describe('the sockets', () => {
   it('opens with one Dataset and one Labels port per dataset, numbered from 1', () => {
-    expect(defaultInputPorts(def).map((p) => p.id)).toEqual(['dataset1', 'dataset2', 'extra'])
-    expect(defaultOutputPorts(def).map((p) => p.id)).toEqual(['labels1', 'labels2', 'report'])
+    expect(defaultInputPorts(def).map((p) => p.id)).toEqual(['dataset1', 'dataset2', 'keep'])
+    expect(defaultOutputPorts(def).map((p) => p.id)).toEqual([
+      'labels1',
+      'labels2',
+      'report',
+      'network',
+    ])
     // The index is substituted into the label rather than appended, so the card reads properly.
     expect(defaultInputPorts(def).map((p) => p.label)).toContain('Dataset 2')
   })
@@ -118,7 +143,7 @@ describe('the sockets', () => {
       'dataset2',
       'dataset3',
       'dataset4',
-      'extra',
+      'keep',
     ])
     expect(outputPorts(def, params).map((p) => p.id)).toEqual([
       'labels1',
@@ -126,15 +151,23 @@ describe('the sockets', () => {
       'labels3',
       'labels4',
       'report',
+      'network',
     ])
   })
 
   /*
-   * The Synonyms port is how a hand-curated correspondence gets in, and a node that refused to
-   * run without one would be demanding a table most graphs have no reason to build.
+   * Every numbered socket is a Dataset, and that is decision 4 as a port list: the mapper reads
+   * each dataset's whole annotation table rather than the rows somebody wired in, so a *table*
+   * on the matching path would give a different answer depending on the surrounding graph.
+   * `Pass Through` is not on that path — it names labels, fetches nothing, and asserts an
+   * absence — which is why it is the one table here and why it is optional.
    */
-  it('does not require the Synonyms port', () => {
-    expect(defaultInputPorts(def).find((p) => p.id === 'extra')?.required).toBe(false)
+  it('takes datasets, and one optional table that is not one of them', () => {
+    const ports = inputPorts(def, { ...defaultParams(def), datasetCount: 4 })
+    expect(ports.filter((p) => p.type.kind === 'dataset')).toHaveLength(4)
+    const keep = ports.find((p) => p.id === 'keep')
+    expect(keep?.type.kind).toBe('table')
+    expect(keep?.required).toBe(false)
   })
 
   /*
@@ -161,7 +194,7 @@ describe('what it says it will emit', () => {
 
   it('types every port before anything has run, at whatever arity', () => {
     const three = published({ datasetCount: 3 })
-    expect(Object.keys(three)).toEqual(['labels1', 'labels2', 'labels3', 'report'])
+    expect(Object.keys(three)).toEqual(['labels1', 'labels2', 'labels3', 'report', 'network'])
     for (const id of ['labels1', 'labels2', 'labels3']) {
       expect(three[id]).toEqual(
         T.table(tableSchema(column('neuronId', 'str'), column('label', 'str'))),
@@ -185,6 +218,7 @@ describe('what it says it will emit', () => {
           column('label', 'str'),
           column('dataset', 'str'),
           column('nNeurons', 'i64'),
+          column('matched', 'bool'),
           column('suspicious', 'bool'),
         ),
       ),
@@ -218,8 +252,6 @@ describe('what it refuses on the card', () => {
     ).toEqual(['Dataset 2: pick at least one column holding cell types.'])
   })
 
-  // Also the "empty Synonyms socket" case: nothing wired means no synonyms, which is a state
-  // rather than a problem.
   it('says nothing once both are picked', () => {
     expect(
       issues({ types1: ['type'], types2: ['type'] }, { dataset1: mock, dataset2: mock }),
@@ -227,22 +259,22 @@ describe('what it refuses on the card', () => {
   })
 
   /*
-   * Both pickers are optional, so empty means "no synonyms" — which is the right reading of an
-   * empty *socket* and the wrong reading of a wired table nobody has pointed the node at. The
-   * alternative was required pickers, and those would both fall back to the first column of the
-   * wired table: every row would then say a label is a synonym of itself, silently.
+   * The picker is optional, so empty means "nothing passes through" — the right reading of an
+   * empty *socket* and the wrong reading of a wired table nobody has pointed the node at. A
+   * required picker would fall back to the first compatible column, which on a neuron table is
+   * `neuronId`: a column of ids read as type names, matching nothing, silently.
    */
-  it('says so when a Synonyms table is wired but no columns are chosen', () => {
-    const extra = T.table(tableSchema(column('from', 'str'), column('to', 'str')))
+  it('says so when a Pass Through table is wired but no column is chosen', () => {
+    const keep = T.table(tableSchema(column('type', 'str')))
     const found = issues(
       { types1: ['type'], types2: ['type'] },
-      { dataset1: mock, dataset2: mock, extra },
+      { dataset1: mock, dataset2: mock, keep },
     )
-    expect(found.join(' ')).toMatch(/Synonyms: pick the two columns/)
+    expect(found.join(' ')).toMatch(/Pass Through: pick the column/)
 
     const chosen = issues(
-      { types1: ['type'], types2: ['type'], synonymLabel: 'from', synonymOther: 'to' },
-      { dataset1: mock, dataset2: mock, extra },
+      { types1: ['type'], types2: ['type'], keepColumn: 'type' },
+      { dataset1: mock, dataset2: mock, keep },
     )
     expect(chosen).toEqual([])
   })
@@ -251,10 +283,10 @@ describe('what it refuses on the card', () => {
 // ---------------------------------------------------------------------------
 
 describe('through a real Scheduler, on the mock connectome', () => {
-  async function run(params: Record<string, unknown> = {}) {
+  async function run(params: Record<string, unknown> = {}, keep?: GraphNode) {
     resetCache()
     const sched = new Scheduler({ resolveSource: (id) => requireSource(id) })
-    const summary = await sched.run(pipeline(params), { mode: 'full' })
+    const summary = await sched.run(pipeline(params, keep), { mode: 'full' })
     expect(summary.failed).toEqual([])
     return (id: string) => sched.output('match', id) as TableValue
   }
@@ -306,6 +338,42 @@ describe('through a real Scheduler, on the mock connectome', () => {
    * different question with a different answer, and the point of resolving through `ctx.columns`
    * is that the same resolution feeds the run and the provenance key (invariant 5).
    */
+
+  /*
+   * The port end to end, on the one configuration of the mock where it can be seen: matching
+   * `type` against `instance` corresponds *nothing* — the two columns share no text — so every
+   * neuron comes out unlabelled and the report is empty. That is the shape a sex-specific type
+   * has, in miniature.
+   */
+  describe('the Pass Through port', () => {
+    const names = () => node('keep', 'neuron.findNeurons', {})
+    const CROSSED = { types1: ['type'], types2: ['instance'] }
+
+    it('changes nothing while no column is chosen', async () => {
+      const bare = await run(CROSSED)
+      const wired = await run(CROSSED, names())
+      expect(bare('report').length).toBe(0)
+      // Wired and unpointed-at is the state `validate` complains about, and it has to be inert
+      // rather than guess a column: the first compatible one here is `neuronId`.
+      expect(wired('report').length).toBe(0)
+    })
+
+    it('lets the named labels through, marked as not matched', async () => {
+      const out = await run({ ...CROSSED, keepColumn: 'type' }, names())
+      const report = out('report')
+      expect(report.length).toBeGreaterThan(0)
+      // Every one of them: nothing was matched in this graph, so nothing can be marked matched.
+      expect(report.data['matched']!.every((v) => v === false)).toBe(true)
+      expect(report.data['suspicious']!.every((v) => v === false)).toBe(true)
+
+      // The labels reach the table under their own names — `type` values, which is what was
+      // wired in, rather than the `instance` values the other side matched on.
+      const labels = new Set(out('labels1').data['label']!.map(String))
+      expect(labels).toContain('AOTU008')
+      expect(out('labels1').length).toBeGreaterThan(0)
+    })
+  })
+
   it('matches on the columns that were picked', async () => {
     const byInstance = await run({ types1: ['instance'], types2: ['instance'] })
     expect(byInstance('report').length).not.toBe(defaults('report').length)

@@ -9,7 +9,7 @@
 
 import type { GraphNode } from '../../core/graph'
 import type { NodeDefinition, ParamValues } from '../../core/node'
-import type { CodaType, TableSchema } from '../../core/types'
+import type { AttributePart, CodaType, TableSchema } from '../../core/types'
 
 export interface MarkdownCell {
   kind: 'markdown'
@@ -92,6 +92,12 @@ export interface EmitContext<P extends ParamValues = ParamValues> {
 
   inputType(portId: string): CodaType | undefined
   schema(portId: string): TableSchema | undefined
+  /**
+   * Attribute schema for a type that carries one but is not a table — a Network's nodes or
+   * edges, Skeletons, Points. Forwarded from `InferContext` beside `schema` for the reason
+   * `emit.ts` gives where it delegates: `schemaOf` has no branch for a network.
+   */
+  attributes(portId: string, part?: AttributePart): TableSchema | undefined
   /** Resolved exactly as `evaluate` resolves it — invariant 5. */
   column(paramId: string): string | undefined
   columns(paramId: string): string[]

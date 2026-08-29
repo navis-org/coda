@@ -336,7 +336,7 @@ describe('annotation nodes — what a chain returns', () => {
       g,
       node('cave', 'annotation.caveTable', { datastack: 'test_stack:1', table: 'nuclei' }),
     )
-    g = addNode(g, node('keep', 'core.filter', { column: 'type', op: 'eq', value: 'LC6' }))
+    g = addNode(g, node('keep', 'core.filterTable', { column: 'type', op: 'eq', value: 'LC6' }))
     g = addNode(g, node('fly', 'annotation.flyTable', { base: 'main', table: 'info' }))
     g = addEdge(g, {
       source: 'cave',
@@ -547,7 +547,7 @@ describe('annotation nodes — what a chain returns', () => {
         g,
         node('cave', 'annotation.caveTable', { datastack: 'test_stack:1', table: 'nuclei' }),
       )
-      g = addNode(g, node('keep', 'core.filter', { column: 'type', op: 'eq', value }))
+      g = addNode(g, node('keep', 'core.filterTable', { column: 'type', op: 'eq', value }))
       g = addEdge(g, {
         source: 'cave',
         sourceHandle: 'annotations',

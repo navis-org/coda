@@ -352,7 +352,7 @@ describe('opening a link somebody sent', () => {
     const shared = emptyGraph('Their sweep')
     shared.nodes.push({
       id: 'x1',
-      type: 'core.filter',
+      type: 'core.filterTable',
       position: { x: 0, y: 0 },
       params: {},
     })
@@ -371,7 +371,7 @@ describe('opening a link somebody sent', () => {
 
   it('opens without asking when there is nothing to lose', async () => {
     const shared = emptyGraph('Their sweep')
-    shared.nodes.push({ id: 'x1', type: 'core.filter', position: { x: 0, y: 0 }, params: {} })
+    shared.nodes.push({ id: 'x1', type: 'core.filterTable', position: { x: 0, y: 0 }, params: {} })
     act(() => useGraphStore.getState().newGraph())
     window.history.replaceState(null, '', `/#!${encodeURIComponent(JSON.stringify(shared))}`)
 

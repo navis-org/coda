@@ -14,7 +14,7 @@ export const GRAPH_FORMAT_VERSION = 1
 
 export interface GraphNode {
   id: string
-  /** Registered node type, e.g. "core.filter". */
+  /** Registered node type, e.g. "core.filterTable". */
   type: string
   position: { x: number; y: number }
   params: ParamValues

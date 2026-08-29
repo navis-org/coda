@@ -170,3 +170,65 @@ export function numericIds(ids: readonly NeuronId[]): number[] {
   }
   return out
 }
+
+// ---------------------------------------------------------------------------
+// Qualified ids: the one place two datasets meet in one column
+// ---------------------------------------------------------------------------
+
+/**
+ * The separator between a dataset and an id in a qualified id.
+ *
+ * A colon, because the resulting string is *not a neuron id* and has to be obviously so at a
+ * glance and to `isNeuronId` alike. See `qualifyId`.
+ */
+export const QUALIFIED_SEPARATOR = ':'
+
+/**
+ * `flywire` + `720575940623374218` → `flywire:720575940623374218`.
+ *
+ * The form co-clustering needs, and the alternative it was chosen over is a second `dataset`
+ * column forming a composite key. The composite is more honest and sorts properly; it was
+ * declined because **every join, dedupe and group-by in this codebase keys on one column**, so
+ * a forgotten `dataset` column silently merges two different neurons — invariant 8's failure
+ * mode exactly one level up, and invariant 8 exists because that class of bug is silent.
+ *
+ * What the qualified form buys is that **`isNeuronId` rejects it**. A qualified id is not
+ * digits, so every query builder that splices one — `neuprint/cypher.ts`, the precomputed
+ * reader's `BigInt` — refuses it loudly rather than fetching the wrong neuron. That inverts the
+ * failure from silent to noisy, which is the whole reason invariant 8 is written the way it is.
+ * Keep `isNeuronId` strict: that strictness is now load-bearing for two features.
+ *
+ * What it costs: `compareIds` is no longer numeric order on a qualified column, and there must
+ * be a qualify/unqualify pair at the two edges. Both are explicit and neither is silent.
+ *
+ * **Mint one only where two datasets meet in one table.** A qualified id in a single-dataset
+ * branch is a neuron that can no longer be looked up — L2a never mints one, and nothing should
+ * qualify "just in case".
+ */
+export function qualifyId(dataset: string, id: string): string {
+  return `${dataset}${QUALIFIED_SEPARATOR}${id}`
+}
+
+/**
+ * The dataset half of a qualified id, or undefined where there is not one.
+ *
+ * Splits on the **first** separator, so a dataset name cannot contain one but an id could in
+ * principle — which is the safe way round, since the dataset is ours to name and the id is the
+ * backend's to hand us.
+ */
+export function qualifiedDataset(value: string): string | undefined {
+  const cut = value.indexOf(QUALIFIED_SEPARATOR)
+  return cut > 0 ? value.slice(0, cut) : undefined
+}
+
+/**
+ * The id half, or the value unchanged where it carries no dataset.
+ *
+ * Unchanged rather than undefined, because this is the *unqualify* edge and a column that was
+ * never qualified passing through it untouched is the honest answer — the alternative empties a
+ * column of perfectly good ids on a graph where somebody wired the node one step too early.
+ */
+export function unqualifyId(value: string): string {
+  const cut = value.indexOf(QUALIFIED_SEPARATOR)
+  return cut > 0 ? value.slice(cut + QUALIFIED_SEPARATOR.length) : value
+}

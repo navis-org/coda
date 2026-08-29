@@ -13,7 +13,7 @@ import { defaultParams } from '../../core/node'
 import { listableNodeDefs, requireNodeDef } from '../../core/registry'
 import '../../nodes'
 import type { CompositeRow, ParamRow } from './paramGroups'
-import { UNGROUPED_TAB, facetLabel, groupParams, paramsForPanel } from './paramGroups'
+import { UNGROUPED_TAB, bucketParams, facetLabel, groupParams, paramsForPanel } from './paramGroups'
 
 const def = requireNodeDef('out.network')
 const base = defaultParams(def)
@@ -267,4 +267,66 @@ describe('the panel admission rule, over every grouped node', () => {
       }
     })
   }
+})
+
+// ---------------------------------------------------------------------------
+
+/**
+ * The card's half of the same bucketing.
+ *
+ * `compare.connectivity` is why the card tabs at all: four settings per dataset behind an arity
+ * param, so its band is linear in something the user sets. These pin the two things that make
+ * the arrangement work rather than merely exist — that the arity control is in the tab a fresh
+ * card opens on, and that turning the arity down takes the tabs with it.
+ */
+describe('bucketParams over compare.connectivity, the card filter', () => {
+  const compare = requireNodeDef('compare.connectivity')
+  const card = (p: ParamDef) => !p.advanced
+  const at = (datasetCount: number) =>
+    bucketParams(compare, { ...defaultParams(compare), datasetCount }, card)
+
+  it('opens with a Settings tab and one per dataset', () => {
+    expect(at(2).map((b) => b.label)).toEqual(['Settings', 'Dataset 1', 'Dataset 2'])
+    expect(at(4).map((b) => b.label)).toEqual([
+      'Settings',
+      'Dataset 1',
+      'Dataset 2',
+      'Dataset 3',
+      'Dataset 4',
+    ])
+  })
+
+  /*
+   * The first bucket is the one the card selects by default, and `datasetCount` is what brings
+   * the other tabs into existence — behind `Dataset 3` it would be a control you need in order
+   * to reach the tab hiding it.
+   */
+  it('keeps the arity control in the first tab', () => {
+    expect(at(4)[0]!.params.map((p) => p.id)).toEqual(['datasetCount', 'minWeight'])
+  })
+
+  it('drops a dataset tab when the arity comes back down', () => {
+    expect(at(4)).toHaveLength(5)
+    expect(at(2)).toHaveLength(3)
+    // Nothing is stranded: every visible card param is in exactly one tab.
+    const shown = at(2).flatMap((b) => b.params.map((p) => p.id))
+    const params = { ...defaultParams(compare), datasetCount: 2 }
+    const flat = (compare.params ?? [])
+      .filter((p) => card(p) && (!p.visibleIf || p.visibleIf(params)))
+      .map((p) => p.id)
+    expect([...shown].sort()).toEqual([...flat].sort())
+    expect(new Set(shown).size).toBe(shown.length)
+  })
+
+  /*
+   * The rule that keeps the strip off cards nobody asked for: the card draws one only past two
+   * tabs. `out.viewer3d` has no generic rows at all and `out.network` has one, in one group.
+   */
+  it.each([
+    ['out.viewer3d', 0],
+    ['out.network', 1],
+  ])('leaves %s alone, at %i bucket(s)', (type, expected) => {
+    const def = requireNodeDef(type)
+    expect(bucketParams(def, defaultParams(def), card)).toHaveLength(expected)
+  })
 })

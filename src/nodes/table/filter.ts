@@ -10,10 +10,16 @@ import { filterTable, opNeedsValue, opsForDType } from '../lib/tableOps'
  *
  * The operator list is dtype-aware: pick a numeric column and you get >/≥/<, pick a
  * string column and you get contains/matches. That's the payoff of schema propagation.
+ *
+ * **"Filter Table", not "Filter"**, since `net.filter` arrived: two nodes called Filter on one
+ * canvas, one taking a table and one a network, is a palette entry you have to hover to tell
+ * apart. The type id moved with the label — `core.filter` → `core.filterTable` — which broke
+ * every stored graph naming it, and was the right trade only because Coda is pre-release with
+ * one user. A rename after that is a load-time alias kept forever.
  */
 export const filterNode = registerNode({
-  type: 'core.filter',
-  label: 'Filter',
+  type: 'core.filterTable',
+  label: 'Filter Table',
   category: 'transform',
   description: 'Keep rows matching a condition on one column.',
   guide:

@@ -27,7 +27,7 @@ function chain(): CodaGraph {
   let g = emptyGraph('test')
   g = addNode(g, node('ds', 'neuron.dataset'))
   g = addNode(g, node('find', 'neuron.findNeurons'))
-  g = addNode(g, node('filter', 'core.filter'))
+  g = addNode(g, node('filter', 'core.filterTable'))
   g = addNode(g, node('view', 'out.table'))
   g = addEdge(g, {
     source: 'ds',
@@ -224,7 +224,7 @@ describe('reconnectEdge', () => {
   it('evicts whatever occupied the destination port, leaving one edge per id', () => {
     let g = chain()
     g = addNode(g, node('find2', 'neuron.findNeurons'))
-    g = addNode(g, node('filter2', 'core.filter'))
+    g = addNode(g, node('filter2', 'core.filterTable'))
     g = addEdge(g, {
       source: 'find2',
       sourceHandle: 'neurons',

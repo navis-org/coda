@@ -341,10 +341,29 @@ function assign(linkage: LinkageValue, kept: number): Int32Array {
     parent[find(linkage.merges[i * 4 + 1]!)] = n + i
   }
 
+  return numberInLeafOrder(linkage, find)
+}
+
+/**
+ * Number the groups 1..k in leaf order, given whatever decides which group a leaf is in.
+ *
+ * **Clusters are numbered in leaf order**, so cluster 1 is the leftmost group on the dendrogram
+ * and adjacent numbers are adjacent groups. That is a divergence from SciPy and a deliberate one
+ * — its two cut functions do not agree with *each other* on numbering, so there was never a
+ * convention to match, only a partition, which does match exactly.
+ *
+ * Here rather than inside `assign` because all three cut modes must share it: a convention that
+ * the docstring calls deliberate is exactly the kind that must have one implementation, and
+ * `cutHomogeneous` had copied these nine lines.
+ */
+function numberInLeafOrder(
+  linkage: LinkageValue,
+  rootOf: (leaf: number) => number,
+): Int32Array {
   const numbers = new Map<number, number>()
-  const out = new Int32Array(n)
+  const out = new Int32Array(linkage.labels.length)
   for (const leaf of linkage.order) {
-    const root = find(leaf)
+    const root = rootOf(leaf)
     let number = numbers.get(root)
     if (number === undefined) {
       number = numbers.size + 1
@@ -385,4 +404,152 @@ export function linkageMaxHeight(linkage: LinkageValue): number {
   let max = 0
   for (let i = 0; i < linkage.merges.length; i += 4) max = Math.max(max, linkage.merges[i + 2]!)
   return max
+}
+
+/**
+ * Cut so that each group draws from more than one dataset — cocoa's `extract_homogeneous_clusters`.
+ *
+ * **Not a port.** cocoa's function is the reference for the *goal*; its source was not in hand
+ * when this was written, so what follows is the stated goal implemented directly rather than a
+ * transcription, and the criterion is spelled out here so a later reader can compare rather than
+ * assume. If they turn out to disagree, this is the one to change.
+ *
+ * ## What it is for
+ *
+ * A count cut asks "give me twenty groups" and a height cut asks "cut at this distance"; both
+ * are blind to *which brain* each neuron came from, so both cheerfully return a group that is
+ * forty FlyWire neurons and nothing else. That group is not a correspondence — it is the
+ * clustering telling you it found forty similar neurons in one dataset, which was never the
+ * question. This cuts by the property the question is actually about.
+ *
+ * ## The criterion
+ *
+ * A cluster is **mixed** when every dataset is present in it and no dataset holds more than
+ * `maxShare` of it. What the walk looks for is the *deepest* mixed clusters, not the first:
+ *
+ * ```
+ * split(node):
+ *   leaf                        -> emit it
+ *   either child is mixed       -> split both, there are tighter groups below
+ *   node is mixed               -> emit it, splitting further would break it
+ *   otherwise                   -> split both, and let the parts fall where they may
+ * ```
+ *
+ * **The middle line is the whole algorithm**, and getting it wrong is not subtle: descending
+ * only until a cluster is mixed emits the *root* almost every time, because a tree over two
+ * connectomes is mixed at the top by construction. That returns one cluster containing
+ * everything and looks like a working node. The first draft here did exactly that and a test
+ * caught it.
+ *
+ * The last line is what handles a branch that is all one dataset: it cannot be emitted whole, so
+ * it decomposes until its leaves fall out as singletons — the honest answer for a neuron with no
+ * counterpart, and what makes the singleton count worth reading rather than a defect to tune
+ * away.
+ *
+ * `maxShare` is a share of the cluster, not of the dataset, because that is the number somebody
+ * can reason about at the card: `0.8` means "no group may be more than four-fifths one brain".
+ * The alternative — a deviation from the expected proportion — needs the dataset sizes to be
+ * comparable to mean anything, and two connectomes proofread to different depths are exactly the
+ * case where they are not.
+ *
+ * Clusters are numbered in **leaf order**, `assign`'s convention, so the numbering reads against
+ * the dendrogram whichever mode produced it.
+ */
+export function cutHomogeneous(
+  linkage: LinkageValue,
+  datasetOf: (label: string) => string | undefined,
+  maxShare: number,
+): { clusters: Int32Array; datasets: number; singletons: number } {
+  const n = linkage.labels.length
+  const merges = linkageMergeCount(linkage)
+
+  // Per node, how many observations of each dataset it holds. Built bottom-up over the merge
+  // rows, which are in ascending order by construction, so a child is always already counted.
+  const names: string[] = []
+  const indexOf = new Map<string, number>()
+  const leafDataset = new Int32Array(n)
+  for (let i = 0; i < n; i++) {
+    const name = datasetOf(linkage.labels[i]!) ?? ''
+    let at = indexOf.get(name)
+    if (at === undefined) {
+      at = names.length
+      names.push(name)
+      indexOf.set(name, at)
+    }
+    leafDataset[i] = at
+  }
+  const width = names.length
+  const counts = new Int32Array((2 * n - 1) * width)
+  for (let i = 0; i < n; i++) counts[i * width + leafDataset[i]!] = 1
+  for (let i = 0; i < merges; i++) {
+    const node = n + i
+    // Unrolled rather than iterating a two-element literal: this runs on a slider drag, and the
+    // per-merge array was measured at 0.17 ms of the walk's 1.34 ms on an 11,585-leaf tree.
+    const left = linkage.merges[i * 4]!
+    const right = linkage.merges[i * 4 + 1]!
+    for (let d = 0; d < width; d++) {
+      counts[node * width + d]! += counts[left * width + d]! + counts[right * width + d]!
+    }
+  }
+
+  const homogeneous = (node: number): boolean => {
+    let total = 0
+    let largest = 0
+    for (let d = 0; d < width; d++) {
+      const c = counts[node * width + d]!
+      // Every dataset present — a group missing one is not a correspondence between them.
+      if (c === 0) return false
+      total += c
+      if (c > largest) largest = c
+    }
+    return largest <= total * maxShare
+  }
+
+  // Iterative rather than recursive: a degenerate tree over eleven thousand leaves is eleven
+  // thousand deep, and this is `cheap` — it runs on a slider drag.
+  const roots: number[] = []
+  const stack: number[] = merges > 0 ? [n + merges - 1] : n > 0 ? [0] : []
+  while (stack.length > 0) {
+    const node = stack.pop()!
+    if (node < n) {
+      roots.push(node)
+      continue
+    }
+    const i = node - n
+    const left = linkage.merges[i * 4]!
+    const right = linkage.merges[i * 4 + 1]!
+    // A mixed child means there are tighter mixed groups below, so this node is not the answer
+    // even when it is itself mixed. Without this line the root is emitted and the whole tree
+    // comes back as one cluster.
+    if (homogeneous(left) || homogeneous(right)) {
+      stack.push(left, right)
+      continue
+    }
+    if (homogeneous(node)) {
+      roots.push(node)
+      continue
+    }
+    stack.push(left, right)
+  }
+
+  // Which kept root each observation belongs to. No sentinel: the kept roots partition the
+  // leaves by construction — a node is either emitted or has its children pushed, never both —
+  // so every leaf is written exactly once.
+  const owner = new Int32Array(n)
+  for (const root of roots) {
+    const walk: number[] = [root]
+    while (walk.length > 0) {
+      const node = walk.pop()!
+      if (node < n) {
+        owner[node] = root
+        continue
+      }
+      const i = node - n
+      walk.push(linkage.merges[i * 4]!, linkage.merges[i * 4 + 1]!)
+    }
+  }
+  const clusters = numberInLeafOrder(linkage, (leaf) => owner[leaf]!)
+
+  const singletons = roots.filter((root) => root < n).length
+  return { clusters, datasets: width, singletons }
 }

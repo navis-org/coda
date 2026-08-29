@@ -34,7 +34,7 @@ function setup() {
   useGraphStore
     .getState()
     .connect({ source: find, sourceHandle: 'neurons', target: table, targetHandle: 'in' })
-  const loose = useGraphStore.getState().addNode('core.filter', { x: 0, y: 300 })
+  const loose = useGraphStore.getState().addNode('core.filterTable', { x: 0, y: 300 })
   const edgeId = useGraphStore.getState().graph.edges.find((e) => e.target === table)!.id
   return { find, table, loose, edgeId }
 }

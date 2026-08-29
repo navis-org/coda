@@ -37,8 +37,12 @@ import { isTableValue, tableFromRows } from './values'
 const SCHEMA = tableSchema(column('x', 'i64'))
 
 /**
- * The shape the mapper will have: N dataset inputs and a labels output per input, both sized by
- * one `int` param. Registered at collection because `registerNode` refuses a duplicate type.
+ * A variadic group beside a fixed port: N dataset inputs and a labels output per input, both
+ * sized by one `int` param, plus an unrelated optional socket that must keep its place at the
+ * end of the expansion. That is still `Match Cell Types`' shape — its trailing optional table is
+ * `Pass Through` now rather than the removed `Synonyms`, which is exactly why the fixture is
+ * spelled here rather than importing the real node. Registered at collection because
+ * `registerNode` refuses a duplicate type.
  */
 registerNode({
   type: 'test.ports.match',

@@ -168,7 +168,7 @@ describe('refusing a plan', () => {
     const message = refusal({
       add: [
         { ref: 'ds', type: 'dataset.mock.opticlobe' },
-        { ref: 'filter', type: 'core.filter' },
+        { ref: 'filter', type: 'core.filterTable' },
       ],
       connect: [{ from: { node: 'ds', port: 'dataset' }, to: { node: 'filter', port: 'in' } }],
     })
@@ -181,8 +181,8 @@ describe('refusing a plan', () => {
   it('refuses a port the node does not have, and lists the ones it does', () => {
     const message = refusal({
       add: [
-        { ref: 'a', type: 'core.filter' },
-        { ref: 'b', type: 'core.filter' },
+        { ref: 'a', type: 'core.filterTable' },
+        { ref: 'b', type: 'core.filterTable' },
       ],
       connect: [{ from: { node: 'a', port: 'out' }, to: { node: 'b', port: 'input' } }],
     })
@@ -194,8 +194,8 @@ describe('refusing a plan', () => {
   it('refuses a cycle', () => {
     const message = refusal({
       add: [
-        { ref: 'a', type: 'core.filter' },
-        { ref: 'b', type: 'core.filter' },
+        { ref: 'a', type: 'core.filterTable' },
+        { ref: 'b', type: 'core.filterTable' },
       ],
       connect: [
         { from: { node: 'a', port: 'out' }, to: { node: 'b', port: 'in' } },
@@ -311,7 +311,7 @@ describe('refusing a plan', () => {
   it('refuses a ref that collides with an id already on the canvas', () => {
     const { graph } = seeded()
     const taken = graph.nodes[0]!.id
-    const message = refusal({ add: [{ ref: taken, type: 'core.filter' }] }, graph)
+    const message = refusal({ add: [{ ref: taken, type: 'core.filterTable' }] }, graph)
 
     expect(message).toContain('already the id of a node')
   })
@@ -319,7 +319,7 @@ describe('refusing a plan', () => {
   it('refuses a ref used twice', () => {
     const message = refusal({
       add: [
-        { ref: 'f', type: 'core.filter' },
+        { ref: 'f', type: 'core.filterTable' },
         { ref: 'f', type: 'core.sort' },
       ],
     })
@@ -356,7 +356,7 @@ describe('refusing a plan', () => {
         plan({
           add: [
             { ref: 'bad', type: 'core.nope' },
-            { ref: 'f', type: 'core.filter' },
+            { ref: 'f', type: 'core.filterTable' },
           ],
           connect: [
             { from: { node: 'bad', port: 'out' }, to: { node: 'f', port: 'in' } },
@@ -549,7 +549,7 @@ describe('what is left for the user', () => {
 
 describe('the plan format', () => {
   it('reads a plan out of a reply, and fills in the arrays a model left out', () => {
-    const parsed = parsedPlan('{"summary":"hi","add":[{"ref":"a","type":"core.filter"}]}')
+    const parsed = parsedPlan('{"summary":"hi","add":[{"ref":"a","type":"core.filterTable"}]}')
     expect(parsed.add).toHaveLength(1)
     expect(parsed.remove).toEqual([])
     expect(parsed.connect).toEqual([])
@@ -641,7 +641,7 @@ describe('the plan format', () => {
 
   it('refuses a param set twice, rather than silently keeping one of them', () => {
     const parsed = parsePlan(
-      '{"summary":"x","add":[{"ref":"f","type":"core.filter",' +
+      '{"summary":"x","add":[{"ref":"f","type":"core.filterTable",' +
         '"params":[{"param":"value","value":"a"},{"param":"value","value":"b"}]}]}',
     )
     expect(parsed.ok).toBe(false)
@@ -932,7 +932,7 @@ describe('the loop, end to end', () => {
       }>
     }
     // The graph changes every turn; if it were in the system prompt nothing would ever cache.
-    expect(body.system[0]!.text).toContain('## core.filter —')
+    expect(body.system[0]!.text).toContain('## core.filterTable —')
     expect(body.system[0]!.text).not.toContain(graph.nodes[0]!.id)
     expect(body.system[0]!.cache_control).toEqual({ type: 'ephemeral', ttl: '1h' })
 

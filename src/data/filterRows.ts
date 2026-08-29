@@ -55,7 +55,7 @@ import { anchoredPattern, escapeRegex, resolveColumn } from './terms'
 /**
  * What a row can ask.
  *
- * **Labelled** to match `core.filter`'s `FilterOp` — "contains", "does not contain", "matches
+ * **Labelled** to match `core.filterTable`'s `FilterOp` — "contains", "does not contain", "matches
  * regex", "≥" — so the app reads as one operator vocabulary rather than two that differ by a
  * word. The *identifiers* deliberately do not match (`is` here against `eq` there), and neither
  * does the type: an operator added there for a table filter would otherwise appear in this
@@ -125,7 +125,7 @@ const TEXT_OPS: Array<{ value: RowOp; label: string }> = [
 ]
 
 /*
- * Symbols rather than words for the numeric set, which is `core.filter`'s choice and worth
+ * Symbols rather than words for the numeric set, which is `core.filterTable`'s choice and worth
  * copying: `size ≥ 100000` reads as the comparison it is, where "size is greater than or equal
  * to" spends half a narrow card on saying so.
  *

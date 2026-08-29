@@ -79,7 +79,7 @@ describe('the ? on a node card', () => {
     act(() => {
       store.closeStartPage()
       documented = store.addNode('neuron.nblast', { x: 0, y: 0 })
-      plain = store.addNode('core.filter', { x: 0, y: 220 })
+      plain = store.addNode('core.filterTable', { x: 0, y: 220 })
     })
     render(<App />)
 
@@ -186,7 +186,7 @@ describe('the help overlay', () => {
   it('says so rather than blanking, for a node with no document', async () => {
     render(<App />)
     act(() => {
-      useGraphStore.getState().openHelp('core.filter')
+      useGraphStore.getState().openHelp('core.filterTable')
     })
     const dialog = await screen.findByRole('dialog', { name: /help/i })
     await waitFor(() =>

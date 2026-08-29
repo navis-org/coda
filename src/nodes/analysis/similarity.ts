@@ -55,7 +55,9 @@ export const similarityNode = registerNode({
     'first, which is what makes it scale: a thousand neurons against their partners is a ' +
     'million connections and a hundred and fifty million empty cells, and only the connections ' +
     'are ever touched. It says on the output whether the cells are similarities or distances, ' +
-    'so Linkage downstream needs nothing set.',
+    'so Linkage downstream needs nothing set. The matrix itself is the ceiling: it is square in ' +
+    'the number of observations, so low thousands is the scale this works at — “compare these ' +
+    'three hundred neurons across two brains”, not “co-cluster two connectomes”.',
   cost: 'expensive',
 
   inputs: [{ id: 'in', label: 'Features', type: T.table() }],
