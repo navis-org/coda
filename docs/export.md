@@ -238,6 +238,37 @@ is also where the `lod` argument the `Detail` param maps onto lives.
 every emitting type — and compares. Regenerate with `pnpm export:golden` and **read the diff**;
 that is the whole point of the format.
 
+**A dataset-level setting is checked per emitter rather than through the fixture.** The
+**population checkboxes** live on the dataset node and every query cell below one has to say so —
+in four spellings across the two languages:
+
+| Where | How |
+| --- | --- |
+| Python, a lone `traced` | `NeuronCriteria(status=['Traced'])`, which narrows at the server |
+| Python, anything else | a pandas mask on the result (`pyPopulationMask`) |
+| R, both search emitters | a dplyr `filter()` after `neuprint_search` |
+| R, Explore | a `WHERE` inside the Cypher that chunk writes by hand |
+
+The Python split is forced rather than chosen: `NeuronCriteria` ANDs its keyword arguments and has
+no null test, so it can express exactly one of these. Pushing half an OR into the criteria and
+masking the rest would AND the two halves and quietly return fewer neurons than the canvas. The
+mask costs a larger response, and a `ctx.note` says so. R's Explore chunk goes through
+`populationCypher` — the same function `findNeuronsCypher` uses — because it is the one emitter in
+either language writing raw Cypher and therefore the only one that *can* share it.
+
+One of them forgetting produces a document that runs cleanly and returns a *different set of
+neurons* from the canvas it came from: 186,061 rows against a fraction of them on hemibrain, which
+reads as a fact about the dataset rather than as a gap in the translation. The fixture cannot
+cover it, because `fixture.ts` writes params verbatim rather than over `defaultParams`, so its
+dataset nodes carry the params absent — which is off, see
+[datasets.md](datasets.md#absent-and-why-it-is-not-the-default). That is worth knowing rather than
+working around: it is also what makes the unchanged goldens a proof that a graph saved before
+these params existed still exports exactly as it did. So both `export.test.ts` files build a
+two-node graph per query type instead, and the mask path is parse-checked by generating a notebook
+with the filters on and running `scripts/check-export.py` over it. The precedence — an explicit
+status row removes the `traced` disjunct, or the two AND into zero rows — is written out four
+times, once per spelling, and pinned in both suites for the same reason.
+
 **An emitter addresses its ports by string, and that is the registry's real cost.** `ports.test.ts`
 runs every emitter against a context that records what it asks for and answers everything, then
 checks the ids against the definition. It was written after `out.profile` was found reading an

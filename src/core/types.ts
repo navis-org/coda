@@ -13,6 +13,24 @@
 /** Column storage/semantic types. Deliberately close to Arrow so payloads can migrate. */
 export type DType = 'i64' | 'f64' | 'str' | 'bool'
 
+/**
+ * One way of saying "a neuron somebody knows something about", and they are **OR-ed**.
+ *
+ * The counter-intuitive half, and the reason it is a list rather than three booleans on the
+ * value: ticking a second one lets *more* rows through, not fewer. `traced` and `typed` together
+ * mean proofread **or** named, which is the union somebody auditing a dataset for real neurons
+ * is asking for — where ANDing them would answer "proofread and named", a set neither box says.
+ * Every reader has to apply them the same way, so the list travels and each consumer joins it.
+ *
+ * Deliberately a vocabulary rather than column names. Which column answers `typed` is a fact
+ * about the dataset in hand — hemibrain has `type`, male-CNS also has `flywireType` — so the
+ * *intent* crosses the seam and each end resolves it against the schema it holds. Column names
+ * on the value would mean the Explore card and the Cypher compiler could disagree about what a
+ * type column is, which is a different set of neurons with nothing to say so. `typeColumns` and
+ * `SUPERCLASS_COLUMN` in `data/neuronFilter.ts` are the one resolution.
+ */
+export type PopulationFilter = 'traced' | 'typed' | 'superclass'
+
 export interface ColumnSchema {
   name: string
   dtype: DType
@@ -57,6 +75,16 @@ export type CodaType =
        * anything runs.
        */
       edges?: true
+      /**
+       * Which neurons this dataset means, when it means fewer than all of them. OR-ed.
+       *
+       * On the *type* as well as the value for `edges`' reason and one more. Three surfaces read
+       * it before anything runs: the Explore card, which loads its index independently of any
+       * Run; both export emitters, which have only the graph; and the dataset node's own
+       * `validate`. Absent means every neuron the backend labels as one — for neuPrint that is
+       * every `:Neuron`, which on hemibrain is 186,061 rather than the annotated subset.
+       */
+      population?: readonly PopulationFilter[]
     }
   /** Columnar table. */
   | { kind: 'table'; schema?: TableSchema }
@@ -138,12 +166,16 @@ export const T = {
     datasetId?: string,
     annotations?: TableSchema,
     edges?: boolean,
+    population?: readonly PopulationFilter[],
   ): CodaType => ({
     kind: 'dataset',
     ...(sourceId ? { sourceId } : {}),
     ...(datasetId ? { datasetId } : {}),
     ...(annotations ? { annotations } : {}),
     ...(edges ? { edges: true as const } : {}),
+    // Empty is absent, not an empty list: a type is compared by identity in places, and "no
+    // filters" and "a list of none" are the same dataset said two ways.
+    ...(population?.length ? { population } : {}),
   }),
   table: (schema?: TableSchema): CodaType =>
     schema ? { kind: 'table', schema } : { kind: 'table' },
@@ -264,11 +296,17 @@ export function attributeSchema(
 /** Narrow a type to a dataset refinement, for nodes that need source metadata. */
 export function datasetRef(
   t: CodaType | undefined,
-): { sourceId?: string; datasetId?: string } | undefined {
+):
+  | { sourceId?: string; datasetId?: string; population?: readonly PopulationFilter[] }
+  | undefined {
   return t?.kind === 'dataset'
     ? {
         ...(t.sourceId ? { sourceId: t.sourceId } : {}),
         ...(t.datasetId ? { datasetId: t.datasetId } : {}),
+        // Unlike `annotations`, which needs a table somebody's Run paid for, this is decided
+        // entirely by checkboxes — so a reader holding only the type knows it, and
+        // `datasetIdentity` can hand a `reference` port the same answer an ordinary wire gets.
+        ...(t.population?.length ? { population: t.population } : {}),
       }
     : undefined
 }

@@ -156,7 +156,12 @@ helper was swallowing every failure — it now rethrows when all items fail.
 
 **Guard rails were considered and declined.** `Find Neurons` still defaults to `limit: 0`
 (everything), and raw Cypher is sent as typed. That is a deliberate call: these queries hit
-a shared production Neo4j, so an unbounded `MATCH (n:Neuron)` on male-cns is a real hazard.
+a shared production Neo4j, so an unbounded `MATCH (n:Neuron)` on male-cns is a real hazard. A
+neuPrint `:Neuron` is any body above a synapse threshold or carrying a name, not a proofread one —
+hemibrain has 186,061 of them — which is what the **population checkboxes** on the dataset node
+narrow. `populationCypher` compiles them to one parenthesised `OR` group ANDed onto the rest of
+the `WHERE`, and an explicit `status` filter row removes the `traced` disjunct from it. See
+[datasets.md](datasets.md#the-population-checkboxes-and-the-default-that-was-removed-once-already).
 Leave the decision where it is rather than re-litigating it.
 
 **The token** lives in `localStorage` via `credentials.ts`, never in a saved graph. A 401

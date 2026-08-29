@@ -550,3 +550,121 @@ describe('Custom CATMAID', () => {
     expect(value.label).toBe('L1 larva')
   })
 })
+
+/**
+ * The population checkboxes.
+ *
+ * Each fails as a wrong *count* rather than as an error — which is the whole reason the
+ * request-level `Traced` default this replaces was taken out. The gate matters as much as the
+ * flags: the controls only make sense where the columns exist, and a checkbox on a CAVE
+ * datastack would be the old failure with a new spelling.
+ */
+describe('the population checkboxes', () => {
+  const paramIds = (type: string) => (requireNodeDef(type).params ?? []).map((p) => p.id)
+  const POPULATION = ['tracedOnly', 'typedOnly', 'superclassOnly']
+
+  it('are offered by the neuPrint families and by nobody else', () => {
+    for (const id of POPULATION) {
+      expect(paramIds('dataset.hemibrain')).toContain(id)
+      expect(paramIds('dataset.neuprint')).toContain(id)
+      // CAVE spells the same ideas `super_class` and `cell_type`; the mock is not a connectome
+      // anybody proofreads; CATMAID has no segmentation at all.
+      expect(paramIds('dataset.cave')).not.toContain(id)
+      expect(paramIds('dataset.catmaid')).not.toContain(id)
+      expect(paramIds('dataset.mock.opticlobe')).not.toContain(id)
+    }
+  })
+
+  it('are inspector-only, and none is presentational or hidden', () => {
+    for (const id of POPULATION) {
+      const param = (requireNodeDef('dataset.hemibrain').params ?? []).find((p) => p.id === id)
+      // `advanced` moves the control to the inspector; the card reports the *effect* in one line
+      // instead — see `populationSummary`.
+      expect(param?.advanced).toBe(true)
+      // Not `internal`: these are somebody's settings, so the card's `… N more` hint counts them.
+      expect(param?.internal).toBeUndefined()
+      /*
+       * Never `presentational` and never `visibleIf`-hidden. Each decides which neurons every
+       * query below returns, so all three belong in the provenance key (invariant 4) — a hidden
+       * param is dropped from it, and one that still reached `evaluate` would let a stale result
+       * survive an edit.
+       */
+      expect(param?.presentational).toBeUndefined()
+      expect(param?.visibleIf).toBeUndefined()
+      // Absent is off even where the declared default is on — see `populationFrom`.
+      expect(param?.absentMeans).toBe(false)
+    }
+  })
+
+  /*
+   * The per-family defaults, which are a judgement about the dataset rather than the backend:
+   * hemibrain is thoroughly typed, where male-CNS classifies what it has looked at by superclass
+   * and hemibrain publishes no such column at all.
+   */
+  it('start ticked per family, not per backend', () => {
+    const started = (type: string) =>
+      Object.entries(defaultParams(requireNodeDef(type)))
+        .filter(([id, value]) => POPULATION.includes(id) && value === true)
+        .map(([id]) => id)
+
+    expect(started('dataset.hemibrain')).toEqual(['typedOnly'])
+    expect(started('dataset.malecns')).toEqual(['superclassOnly'])
+    // A family that has not made the judgement, and the custom node which is pointed at nothing.
+    expect(started('dataset.manc')).toEqual([])
+    expect(started('dataset.neuprint')).toEqual([])
+  })
+
+  it('reach the inferred type, so surfaces that never run can read them', () => {
+    const def = requireNodeDef('dataset.hemibrain')
+    const on = def.inferOutputs!(ctxFor('dataset.hemibrain', { tracedOnly: true }))
+    const off = def.inferOutputs!(ctxFor('dataset.hemibrain', { tracedOnly: false, typedOnly: false }))
+    expect(datasetRef(on['dataset'])?.population).toEqual(['traced', 'typed'])
+    expect(datasetRef(off['dataset'])?.population).toBeUndefined()
+  })
+
+  /*
+   * The back-compatibility rule, and the one worth a test of its own: `defaultParams` writes the
+   * default into a node when it is *created* and never runs over a loaded graph, so a node saved
+   * before these existed holds no key for them — and it queried every `:Neuron` when it was
+   * built. Reading absent as the declared default would change what a published graph returns,
+   * and its provenance key with it, on nothing more than opening the file.
+   */
+  it('read an absent param as off, so a saved graph keeps its neuron set', () => {
+    const def = requireNodeDef('dataset.hemibrain')
+    const saved = makeInferContext(def, { version: '' }, {})
+    expect(datasetRef(def.inferOutputs!(saved)['dataset'])?.population).toBeUndefined()
+    // While a node created today arrives with this family's judgement on.
+    expect(defaultParams(def).typedOnly).toBe(true)
+  })
+
+  /*
+   * A warning rather than a refusal: the filter is dropped before the query is built, so the run
+   * returns *more* rows rather than none. What that leaves is a ticked box doing nothing, and
+   * saying so is the whole fix.
+   */
+  it('warn when the dataset publishes no column for one of them', async () => {
+    /*
+     * Through the custom node, because a *family* node stays quiet until the dataset listing has
+     * arrived — "that is the connection panel's story to tell, not a per-node error on every
+     * dataset node in the graph" — and this source has no token.
+     *
+     * And **after discovery has settled**, which is the other half of the same rule one layer
+     * down: until it does, `discoveredNeuronSchema` answers undefined and the warning stays
+     * quiet, because a schema that has not arrived is not a schema without `superclass` in it.
+     * Discovery here fails on every request and still lands, leaving the canonical columns —
+     * which carry `status` and `type` and no `superclass`.
+     */
+    const def = requireNodeDef('dataset.neuprint')
+    const at = (params: ParamValues) =>
+      def.validate!(ctxFor('dataset.neuprint', { dataset: 'hemibrain:v1.2.1', ...params }))
+
+    // Quiet before it lands, which is a fact worth pinning rather than a step to get past.
+    expect(at({ superclassOnly: true })).toEqual([])
+    await (requireSource('neuprint') as NeuPrintSource).discover('hemibrain:v1.2.1')
+
+    expect(at({ superclassOnly: true }).join(' ')).toContain('Superclass only')
+    // Warned about, but not refused: the filter is dropped and the run returns more rows.
+    expect(at({ superclassOnly: true }).join(' ')).toContain('every neuron the server has')
+    expect(at({ typedOnly: true, tracedOnly: true })).toEqual([])
+  })
+})

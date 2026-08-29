@@ -530,7 +530,15 @@ export class NeuPrintSource implements DataSource {
     // against a schema expecting more.
     await this.discover(req.datasetId, req.signal)
     throwIfAborted(req.signal)
-    const cypher = findNeuronsCypher(req, this.extras(req.datasetId))
+    // The schema as well as the extras, and off the same discovery: `extras` says what the
+    // `RETURN` list carries, and the schema says which of those columns answer `typed`. Handing
+    // over only the first left every population filter resolving to nothing and silently
+    // dropped, which is a query that returns too many rows and looks right.
+    const cypher = findNeuronsCypher(
+      req,
+      this.extras(req.datasetId),
+      this.neuronSchema(req.datasetId),
+    )
     const response = await runCypher(cypher, req.datasetId, this.options(req.signal))
     return tableFromCypher(response, this.neuronSchema(req.datasetId), 'neurons')
   }

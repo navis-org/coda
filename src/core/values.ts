@@ -7,7 +7,7 @@
  * Nodes must treat columns as immutable — always build new arrays.
  */
 
-import type { CodaType, TableSchema } from './types'
+import type { CodaType, PopulationFilter, TableSchema } from './types'
 import { datasetRef } from './types'
 
 export type CellValue = number | string | boolean | null
@@ -80,7 +80,23 @@ export interface DatasetValue {
    * would answer a different question under a green node.
    */
   readonly edges?: DatasetEdges
+  /**
+   * Which neurons this dataset means, when it means fewer than all of them.
+   *
+   * Carried on the value for `annotations`' reason: a source is handed a dataset and has to
+   * know, and the alternative is every query node threading an extra argument through the seam.
+   * What it is *not* is a filter every consumer applies. `neuronSetRequest` is the one
+   * projection that passes it on, and it reaches exactly the queries that answer "which neurons
+   * does this dataset have" — never a lookup by id, which would silently drop ids somebody
+   * pasted, and never the far end of a `ConnectsTo`, which would under-report synapse weight.
+   *
+   * Empty or absent means every neuron the backend labels as one, which is what the neuron index
+   * always carries: the index is downloaded whole and narrowed on load, so a dataset read two
+   * ways shares a single cached table rather than paying for two.
+   */
+  readonly population?: readonly PopulationFilter[]
 }
+
 
 /**
  * An attached edge set, by identity.
@@ -140,6 +156,9 @@ export function datasetIdentity(type: CodaType | undefined): DatasetValue | unde
     sourceId: ref.sourceId,
     datasetId: ref.datasetId,
     label: ref.datasetId,
+    // Carried, where `annotations` cannot be: these are checkboxes rather than a fetched table,
+    // so a reference reader gets the same neuron set an ordinary wire would deliver.
+    ...(ref.population?.length ? { population: ref.population } : {}),
   }
 }
 

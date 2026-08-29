@@ -7,7 +7,7 @@
  * refinement back out.
  */
 
-import type { CodaType } from '../../core/types'
+import type { CodaType, PopulationFilter } from '../../core/types'
 import { datasetRef } from '../../core/types'
 import type { DatasetValue, Value } from '../../core/values'
 import { isDatasetValue } from '../../core/values'
@@ -223,5 +223,41 @@ export function connectivityRequest(dataset: DatasetValue): EdgeAnswerableReques
   return {
     ...datasetRequest(dataset),
     ...(dataset.edges ? { edges: dataset.edges } : {}),
+  }
+}
+
+/**
+ * The same again, for the queries that answer **which neurons this dataset has**.
+ *
+ * Separate from `datasetRequest` for `connectivityRequest`'s reason turned around: `population`
+ * is honoured by a source, but not by every call that names a dataset, and object spread does no
+ * excess-property checking — so folding it into the general projection would apply it to seven
+ * requests silently rather than to the two that mean it.
+ *
+ * Which two, and why the others are excluded, is the substance here:
+ *
+ *  - **`Input IDs`** looks up ids somebody pasted. Narrowing that to Traced deletes the rows they
+ *    named, and reports the deletion as neurons the dataset does not have.
+ *  - **The three morphology fetches** are keyed by id as well, one step further downstream.
+ *  - **Connectivity, Paths, Adjacency** go through `connectivityRequest`, and their far end is
+ *    matched as a bare node on purpose: a partner may be a `Segment` below the neuron threshold,
+ *    and excluding those under-reports total synapse weight. See `connectivityCypher`.
+ *  - **The neuron index** is never filtered on the wire at all. It is downloaded and cached
+ *    whole, and `narrowPopulation` narrows it on load — so Explore, Match Cell Types and a
+ *    Dataset Summary share one 26 MB table instead of one per reading of the same dataset.
+ *
+ * **A pure projection, like the other two.** It does not drop a filter the dataset cannot answer
+ * — the *source* does that, against its own discovered schema, which is the authoritative copy.
+ * Resolving here as well meant the same question answered twice against two schemas, with the
+ * later one winning; the node-side peek is a synchronous fallback that can be a discovery behind.
+ * `populationIssues` is what tells somebody a ticked box is not applying, and it reads the
+ * discovered schema rather than this.
+ */
+export function neuronSetRequest(
+  dataset: DatasetValue,
+): DatasetRequest & { population?: readonly PopulationFilter[] } {
+  return {
+    ...datasetRequest(dataset),
+    ...(dataset.population?.length ? { population: dataset.population } : {}),
   }
 }

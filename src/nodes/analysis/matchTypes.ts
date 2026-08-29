@@ -40,6 +40,7 @@ import {
   sourceLabel,
   sourceSupports,
 } from '../lib/datasetParam'
+import { narrowPopulation } from '../../data/neuronFilter'
 import { parseTypedLabels } from '../lib/labelLookup'
 import { repeatParamId, repeatParams } from '../lib/repeatParams'
 import type { LabelMode, MapperDataset } from '../lib/typeMapping'
@@ -302,7 +303,11 @@ export const matchTypesNode = registerNode({
           },
           signal: ctx.signal,
         })
-        return mapperDatasetFrom(index, columns)
+        // Each side's own population, applied per dataset: the two inputs are independent
+        // dataset nodes and one may be narrowed while the other is not. On the rows in hand
+        // rather than in the request, for `explore.ts`' reason — one cached index per dataset,
+        // however many readings of it a graph holds.
+        return mapperDatasetFrom(narrowPopulation(index, dataset.population), columns)
       }),
     )
 

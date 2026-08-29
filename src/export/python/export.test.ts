@@ -14,10 +14,11 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 import { addNode, emptyGraph } from '../../core/graph'
+import type { ParamValues } from '../../core/node'
 import { allNodeDefs, requireNodeDef } from '../../core/registry'
 import '../../nodes'
 import { exportNotebook } from './exporter'
-import { caveGraph, everythingGraph } from '../fixture'
+import { caveGraph, everythingGraph, twoNodeGraph } from '../fixture'
 import { getEmitter } from './registry'
 import { serializeNotebook } from './notebook'
 import { inputPorts, outputPorts } from '../../core/ports'
@@ -202,5 +203,91 @@ describe('notebook export', () => {
     const cells = result.notebook.cells as Array<{ source: string[] }>
     const text = cells.map((c) => c.source.join('')).join('\n')
     expect(text).not.toMatch(/^\s*paths\b/m)
+  })
+})
+
+/*
+ * The population is a property of the *dataset* node, and every query cell below it has to say so.
+ *
+ * The failure this catches is the one an export can make that nothing else can: a notebook that
+ * runs cleanly and returns a different set of neurons from the canvas it came from. On hemibrain
+ * that is 186,061 rows against a fraction of them, which reads as a fact about the dataset rather
+ * than as a gap in the translation — so it is checked per emitter rather than once.
+ */
+describe('the population filters', () => {
+  const graphWith = (params: ParamValues, query: string, queryParams: ParamValues = {}) =>
+    twoNodeGraph('dataset.hemibrain', params, query, queryParams)
+
+  const NONE = { tracedOnly: false, typedOnly: false, superclassOnly: false }
+
+  const QUERIES: [string, ParamValues][] = [
+    ['neuron.findNeurons', { typePattern: 'LC.*' }],
+    ['neuron.idsFromLabel', { labels: ['LC4'], status: '' }],
+    ['neuron.explore', {}],
+  ]
+
+  /*
+   * A lone `traced` is the one filter `NeuronCriteria` can express, and it is worth pushing: it
+   * narrows at the server, so the cell downloads the traced subset rather than every row.
+   * `IDs from Label` carries its own `Status` param, so the off case has to clear it — what is
+   * under test is the *dataset's* contribution, not that node's.
+   */
+  it.each(QUERIES.slice(0, 2))('pushes a lone traced into the %s criteria', (type, params) => {
+    const on = exportFixture(graphWith({ ...NONE, tracedOnly: true }, type, params))
+    expect(on).toMatch(/status=\[?'Traced'\]?/)
+    expect(exportFixture(graphWith(NONE, type, params))).not.toContain("'Traced'")
+  })
+
+  /*
+   * Explore is the exception, and deliberately: its `All` port *is* the whole index, so the
+   * frame this narrows is the one the node itself holds and the mask is the node's own
+   * `narrowPopulation` written in pandas. Pushing here would work for a lone `traced` and would
+   * then need the mask anyway for every other combination.
+   */
+  it('masks rather than pushes on Explore, whose All port is the index itself', () => {
+    const source = exportFixture(graphWith({ ...NONE, tracedOnly: true }, 'neuron.explore', {}))
+    expect(source).toContain("== 'Traced'")
+    expect(source).not.toContain('status=')
+    expect(exportFixture(graphWith(NONE, 'neuron.explore', {}))).not.toContain("'Traced'")
+  })
+
+  /*
+   * Everything else is a mask on the result, and that is forced rather than chosen.
+   * `NeuronCriteria` ANDs its keyword arguments and has no null test at all, so it can say
+   * neither "type is not empty" nor an OR — and pushing half an OR into the criteria while
+   * masking the rest would AND the two halves and quietly return fewer neurons than the canvas.
+   */
+  it.each(QUERIES)('masks a filter NeuronCriteria cannot express, in %s', (type, params) => {
+    const source = exportFixture(graphWith({ ...NONE, typedOnly: true }, type, params))
+    expect(source).toContain(".notna() & (")
+    expect(source).toContain("['type']")
+    // An empty string is absent, the same rule the `notEmpty` operator applies — so a checkbox
+    // and the equivalent filter row cannot answer two different sets.
+    expect(source).toContain("!= ''")
+  })
+
+  it('ORs the disjuncts, each parenthesised so precedence cannot decide it', () => {
+    const source = exportFixture(
+      graphWith({ ...NONE, tracedOnly: true, typedOnly: true }, 'neuron.explore', {}),
+    )
+    expect(source).toContain("| (")
+    // A lone traced would have gone into the criteria; with a second filter it must not.
+    expect(source).not.toContain('status=')
+  })
+
+  /*
+   * The precedence, as on the canvas: a status row is the more specific statement and removes
+   * the `traced` disjunct. Emitting both would compile `status=['Assign', 'Traced']`, which is
+   * an empty result for a value nobody chose.
+   */
+  it('lets an explicit status row win rather than emitting both', () => {
+    const source = exportFixture(
+      graphWith({ ...NONE, tracedOnly: true }, 'neuron.findNeurons', {
+        typePattern: 'LC.*',
+        status: 'Assign',
+      }),
+    )
+    expect(source).toContain("status=['Assign']")
+    expect(source).not.toContain("'Traced'")
   })
 })

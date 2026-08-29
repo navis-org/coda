@@ -20,6 +20,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { idText } from '../../core/ids'
 import { datasetRef } from '../../core/types'
 import { isDatasetValue } from '../../core/values'
+import { narrowPopulation } from '../../data/neuronFilter'
 import { SELECT_ALL_WARN, excludedFromSearch } from '../../nodes/query/explore'
 import {
   completeSearch,
@@ -137,7 +138,25 @@ export function ExploreBody({
     return () => clearTimeout(timer)
   }, [text, applied, committed, setParam])
 
-  const table = state.status === 'ready' ? state.table : undefined
+  /*
+   * The dataset's population checkboxes, read off the **type** rather than the value.
+   *
+   * This card loads independently of any Run — that is its whole point — so the value is absent
+   * until somebody presses it, and reading the filters there would list every `:Neuron` on a
+   * fresh session and the narrowed set afterwards. The same widget answering differently before
+   * and after a run is the disagreement the live-widget split exists to avoid.
+   *
+   * Narrowed here rather than in the shared entry: the entry is keyed by dataset and chain and
+   * is shared by every card on them, so two Explore nodes reading one dataset two ways must not
+   * be able to hand each other a narrowed table. One download, one cached copy, two views — and
+   * `narrowPopulation`'s own cache is what keeps the *narrowed* copy shared with the node, so
+   * both search the one 24 MB haystack `searchIndexFor` builds per table identity.
+   */
+  const loaded = state.status === 'ready' ? state.table : undefined
+  // No `useMemo`: `narrowPopulation` caches per (index, population) itself, so this is a Map
+  // lookup after the first call and hands back the *same object* every render — which a memo
+  // here could not do anyway, since inference rebuilds the type and with it the filter array.
+  const table = loaded ? narrowPopulation(loaded, datasetRef(type)?.population) : undefined
 
   // Through `ctx.columns`, never `ctx.params.chips`: that is what filters the stored list
   // against the schema actually arriving, so a graph repointed at another dataset drops the

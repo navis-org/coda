@@ -12,6 +12,7 @@ import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-libra
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { App } from '../../App'
+import { deserializeGraph } from '../../core/graph'
 import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import '../../nodes'
@@ -155,5 +156,90 @@ describe('dataset node body', () => {
       n.querySelector('.coda-node__title')?.textContent?.includes('Table'),
     )
     expect(table?.querySelector('.dataset-body')).toBeFalsy()
+  })
+})
+
+/**
+ * What the card says about the population, and what it deliberately does not draw.
+ *
+ * The checkboxes are `advanced`, so they live in the inspector; the card carries one line naming
+ * the filters that are being *applied*. Three things fail silently here. A card that drew nothing
+ * would hide the one fact a dataset node exists to state — which neurons everything downstream is
+ * about. A line naming a ticked-but-dropped filter would be a false claim about those neurons. And
+ * a line built off `param.default` rather than the stored value would report a filter on a graph
+ * saved before these params existed, which asked for every `:Neuron`.
+ */
+describe('the population summary', () => {
+  /** A stored hemibrain graph, through the same reader a file or a share link goes through. */
+  function hemibrainGraph(params: Record<string, unknown>) {
+    return deserializeGraph(
+      JSON.stringify({
+        version: 1,
+        nodes: [{ id: 'ds', type: 'dataset.hemibrain', position: { x: 40, y: 40 }, params }],
+        edges: [],
+      }),
+    ).graph
+  }
+
+  async function open(params: Record<string, unknown>): Promise<HTMLElement> {
+    render(<App />)
+    act(() => {
+      useGraphStore.getState().loadGraph(hemibrainGraph({ version: 'v1.2.1', ...params }))
+    })
+    return waitFor(datasetCard)
+  }
+
+  function line(card: HTMLElement): string | undefined {
+    return card.querySelector('.dataset-body__population')?.textContent ?? undefined
+  }
+
+  it('draws no checkbox on the card — they are inspector-only', async () => {
+    const card = await open({ typedOnly: true })
+    for (const label of ['Traced only', 'Typed only', 'Superclass only']) {
+      expect(within(card).queryByLabelText(label)).toBeNull()
+    }
+  })
+
+  it('names the filters being applied', async () => {
+    expect(line(await open({ typedOnly: true }))).toBe('Using Typed only')
+  })
+
+  it('names several, so a reader can see the whole population at a glance', async () => {
+    expect(line(await open({ tracedOnly: true, typedOnly: true }))).toBe(
+      'Using Traced only · Typed only',
+    )
+  })
+
+  it('says nothing at all when nothing is narrowing', async () => {
+    expect(line(await open({ typedOnly: false }))).toBeUndefined()
+  })
+
+  /*
+   * What is applied, not what is ticked. hemibrain publishes no `superclass`, so the filter is
+   * dropped before the query is built and a card reporting it would be claiming neurons the run
+   * does not return. The node's own warning is that box's honest channel.
+   */
+  it('omits a ticked filter the dataset cannot answer', async () => {
+    await open({ superclassOnly: true })
+    // Reported until discovery says otherwise — a schema that has not arrived is not a schema
+    // without `superclass` in it — and dropped once it lands.
+    await waitFor(() => expect(line(datasetCard())).toBeUndefined())
+    // The warning naming that box is the node's job rather than the card's, and is pinned in
+    // `nodes/dataset/dataset.test.ts`: a *family* node stays quiet until the dataset listing has
+    // arrived, and this source has no token.
+  })
+
+  /*
+   * The half that only breaks on somebody else's file. `deserializeGraph` writes `absentMeans`
+   * in, so by the time the card sees the node the third state is gone — without it the line would
+   * report `Typed only`, whose declared default on this family is *on*, for a graph that asked
+   * for every neuron.
+   */
+  it('reports nothing for a graph saved before the params existed', async () => {
+    render(<App />)
+    act(() => {
+      useGraphStore.getState().loadGraph(hemibrainGraph({ version: '', refresh: 0 }))
+    })
+    expect(line(await waitFor(datasetCard))).toBeUndefined()
   })
 })

@@ -17,6 +17,7 @@ import {
   validateSearch,
 } from '../lib/neuronSearch'
 import { rowsWithIds } from '../lib/tableOps'
+import { narrowPopulation } from '../../data/neuronFilter'
 
 /**
  * Browse and search a whole dataset.
@@ -42,7 +43,12 @@ import { rowsWithIds } from '../lib/tableOps'
  * joins and charts without a second query against a shared production Neo4j. It is the *same*
  * value the loader returned rather than a copy, which columns being immutable makes safe.
  * Neither `query` nor `limit` touches it: a port called All that quietly returned the first
- * hundred rows of a search would be the worst of both.
+ * hundred rows of a search would be the worst of both. The dataset's own **population
+ * checkboxes** do, and that is not the same kind of narrowing: `query` and `limit` are this
+ * node's controls, where those decide what the dataset *is* for every node below it. A port
+ * called All that carried neurons the card beside it never listed would be reporting a different
+ * dataset from the one the graph says it is about. Applied to the rows in hand rather than to the
+ * request — the index is cached whole, so one dataset read two ways shares a single table.
  *
  * Expensive, like every node that can touch the network: the widget's list updates on every
  * keystroke from its own copy of the index, but *downstream* results wait for Run. Pagination
@@ -284,21 +290,38 @@ export const exploreNode = registerNode({
       signal: ctx.signal,
     })
 
+    /*
+     * The dataset's population checkboxes, applied **here** rather than in the request.
+     *
+     * `neuronIndex` is deliberately unfiltered on the wire: it caches one 26 MB table per
+     * dataset, and asking the server for a narrowed copy would key a second one beside it for
+     * the same dataset read two ways. Narrowing the rows already in hand costs a scan of a few
+     * columns and returns the input untouched when no box is ticked — see `narrowPopulation`.
+     */
+    const population = narrowPopulation(index, dataset.population)
+
     ctx.progress(0.8, 'searching')
     const parsed = parseSearch(String(ctx.params.query ?? ''))
     // Through `ctx.column`, never `ctx.params` — invariant 5, and it is what keeps the column
     // excluded here the same one the provenance key was taken over.
     const excluded = excludedFromSearch(ctx.params, ctx.column('tagColumn'))
-    const { rows } = runSearch(index, searchIndexFor(index, excluded ? [excluded] : []), parsed)
+    const { rows } = runSearch(
+      population,
+      searchIndexFor(population, excluded ? [excluded] : []),
+      parsed,
+    )
     const limit = Number(ctx.params.limit ?? 0)
     const capped = limit > 0 ? rows.slice(0, limit) : rows
 
     return {
-      hits: selectRows(index, capped),
-      selected: rowsWithIds(index, ctx.params.selection),
-      // The index itself, not a copy: nodes treat columns as immutable, and copying 165k rows
-      // of twenty columns to hand back what we were just given is pure waste.
-      all: index,
+      hits: selectRows(population, capped),
+      selected: rowsWithIds(population, ctx.params.selection),
+      // The population itself, not a copy: nodes treat columns as immutable, and copying 165k
+      // rows of twenty columns to hand back what we were just given is pure waste. `All` is the
+      // dataset as this node means it, so it narrows with the other two — a port called `All`
+      // that carried untraced fragments the card never listed would be reporting a different
+      // dataset from the one beside it.
+      all: population,
     }
   },
 })

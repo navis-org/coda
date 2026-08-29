@@ -48,6 +48,13 @@ import {
   annotationsFrom,
 } from '../lib/annotationParams'
 import { EDGE_SET_PARAMS, edgeSetIssues, edgesFrom, hasEdgeSet } from '../lib/edgeParams'
+import {
+  populationFrom,
+  populationIssues,
+  populationParams,
+  populationValue,
+  discoveredNeuronSchema,
+} from '../lib/populationParams'
 import { refreshParam } from '../../core/node'
 
 /** The `refresh` nonce every dataset node carries. See `refreshParam`. */
@@ -114,6 +121,9 @@ function buildDatasetNode(family: DatasetFamily) {
       REFRESH_PARAM,
       // Only the backends expected to want one — see `DatasetBackend.edgeSets`.
       ...(BACKENDS[family.backend]?.edgeSets === false ? [] : EDGE_SET_PARAMS),
+      // Only the backends publishing the columns they compile against — see
+      // `DatasetBackend.population`. The *defaults* are the family's, not the backend's.
+      ...(BACKENDS[family.backend]?.population ? populationParams(family.population) : []),
     ],
 
     inferOutputs: (ctx) => ({
@@ -124,12 +134,18 @@ function buildDatasetNode(family: DatasetFamily) {
         // On the type as well as the value: it is what makes `sourceSupports('paths')` true on a
         // backend with no server-side aggregation, and a refusal has to be right before Run.
         hasEdgeSet(ctx.params),
+        // Likewise, and for a surface that never waits for a Run at all: the Explore card loads
+        // its index off the type, and both export emitters have only the graph to read.
+        populationFrom(ctx.params),
       ),
     }),
 
     validate: (ctx) => {
       const source = getSource(family.sourceId)
       if (!source) return [`Data source "${family.sourceId}" is not registered`]
+      // Once: `resolveDatasetId` runs `versionsFor`, which peeks the listing and sorts it, and
+      // `validate` runs on every graph mutation for every dataset node on the canvas.
+      const datasetId = resolveDatasetId(family, ctx.params.version)
       const versions = versionsFor(family)
       // Empty means the listing has not arrived (or failed); that is the connection panel's
       // story to tell, not a per-node error on every dataset node in the graph.
@@ -143,7 +159,8 @@ function buildDatasetNode(family: DatasetFamily) {
       return [
         ...annotationIssues(ctx.inputs.annotations),
         ...edgeSetIssues(ctx.params),
-        ...rootDriftIssues(resolveDatasetId(family, ctx.params.version)),
+        ...populationIssues(discoveredNeuronSchema(source, datasetId), ctx.params, datasetId),
+        ...rootDriftIssues(datasetId),
       ]
     },
 
@@ -165,6 +182,7 @@ function buildDatasetNode(family: DatasetFamily) {
         label: info.label,
         ...annotationsFrom(ctx.input('annotations'), ctx.inputKey('annotations')),
         ...edgesFrom(ctx.params),
+        ...populationValue(ctx.params),
       }
       watchRootDrift(value)
       return { dataset: value }
@@ -549,6 +567,9 @@ export const customNeuPrintNode = registerNode({
     },
     REFRESH_PARAM,
     ...EDGE_SET_PARAMS,
+    // No family table behind the custom node, so no per-dataset defaults: it arrives pointed at
+    // nothing, and a default population would be a judgement about a dataset nobody has named.
+    ...populationParams(),
   ],
 
   inferOutputs: (ctx) => {
@@ -563,6 +584,7 @@ export const customNeuPrintNode = registerNode({
         datasetId || undefined,
         undefined,
         hasEdgeSet(ctx.params),
+        populationFrom(ctx.params),
       ),
     }
   },
@@ -576,7 +598,10 @@ export const customNeuPrintNode = registerNode({
     if (available && !available.some((d) => d.id === datasetId)) {
       return [`No dataset "${datasetId}" on ${serverLabel(source.server)}`]
     }
-    return edgeSetIssues(ctx.params)
+    return [
+      ...edgeSetIssues(ctx.params),
+      ...populationIssues(discoveredNeuronSchema(source, datasetId), ctx.params, datasetId),
+    ]
   },
 
   evaluate: async (ctx) => {
@@ -599,6 +624,7 @@ export const customNeuPrintNode = registerNode({
       datasetId: info.id,
       label: info.label,
       ...edgesFrom(ctx.params),
+      ...populationValue(ctx.params),
     }
     return { dataset: value }
   },

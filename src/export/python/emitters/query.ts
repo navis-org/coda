@@ -28,7 +28,18 @@ import type { EmitContext } from '../types'
 /** What "neuPrint" means unless a node says otherwise. */
 const DEFAULT_DEPLOYMENT = 'https://neuprint.janelia.org'
 import { neuprintProperty } from '../../../data/neuprint/schema'
-import { caveLabels, codaNeurons, codaSynapses, isCaveDataset, neuronIds } from './common'
+import {
+  caveLabels,
+  codaNeurons,
+  codaSynapses,
+  isCaveDataset,
+  neuronIds,
+  pyMaskFrame,
+  pyPopulationMask,
+} from './common'
+import { populationFromType } from '../../../nodes/lib/populationParams'
+import { withoutStatedStatus } from '../../../data/neuronFilter'
+import { TRACED_STATUS } from '../../../data/neuronFilter'
 
 // ---------------------------------------------------------------------------
 // Dataset
@@ -151,14 +162,7 @@ function maskLines(
   terms: readonly FieldTerm[],
   schema: TableSchema | undefined,
 ): string[] {
-  if (terms.length === 0) return []
-  const masks = filterMasks(frame, terms, schema)
-  if (masks.length === 1) return [`${frame} = ${frame}[${masks[0]}]`]
-  return [
-    `${frame} = ${frame}[`,
-    ...masks.map((mask, i) => `    ${i === 0 ? '' : '& '}${mask}`),
-    ']',
-  ]
+  return terms.length === 0 ? [] : pyMaskFrame(frame, filterMasks(frame, terms, schema), '&')
 }
 
 /**
@@ -243,7 +247,27 @@ registerEmitter(
 
     const criteria: string[] = []
     for (const [field, term] of pushed) criteria.push(`${field}=${pyStr(term.value)}`)
+    /*
+     * The dataset's population, which takes one of two routes and never both.
+     *
+     * A lone `traced` is a `NeuronCriteria` keyword, and that is worth having: it narrows at the
+     * server, so the cell downloads the traced subset rather than all 186,061 rows of hemibrain.
+     * Anything else has to be a mask on the result — `NeuronCriteria` ANDs its arguments and has
+     * no null test, so it can say neither "type is not empty" nor an OR. Pushing part of an OR
+     * into the criteria and masking the rest would AND the two halves and quietly return fewer
+     * neurons than the canvas.
+     *
+     * `statuses` — this node's own `status` rows — removes the `traced` disjunct, which is
+     * `findNeuronsCypher`' precedence restated rather than re-derived. Two copies of a
+     * precedence rule is how a notebook comes to select a set the canvas does not.
+     */
+    const population = withoutStatedStatus(
+      populationFromType(ctx.inputType('dataset')),
+      statuses.length > 0,
+    )
+    const pushable = population.length === 1 && population[0] === 'traced'
     if (statuses.length > 0) criteria.push(`status=${pyList(statuses)}`)
+    else if (pushable) criteria.push(`status=${pyList([TRACED_STATUS])}`)
     if (roi) criteria.push(`rois=${pyList([roi])}`)
     // `regex='guess'` is NeuronCriteria's default and it guesses from the string's shape. A Coda
     // `matches` row is always a regex — anchored, since that is what Neo4j's `=~` does — so
@@ -274,6 +298,17 @@ registerEmitter(
             'them to the result instead. Same rows, one larger response.',
         ),
         ...maskLines(out, rest, schema),
+      )
+    }
+    if (!pushable && population.length > 0) {
+      lines.push(
+        ...ctx.note(
+          'The Dataset node narrows this graph to a population NeuronCriteria cannot express — ' +
+            'it ANDs its arguments and has no "is not empty" test, where these combine with OR. ' +
+            'The same neurons therefore arrive as a filter on the result, which means a larger ' +
+            'response than the canvas asks the server for.',
+        ),
+        ...pyPopulationMask(out, population, schema),
       )
     }
     if (limit > 0) lines.push(`${out} = ${out}.head(${limit})`)
@@ -417,8 +452,17 @@ registerEmitter('neuron.idsFromLabel', (ctx) => {
    */
   const property = neuprintProperty(field)
   const kw = property === 'class' ? 'class_' : property
+  const schema = schemasFromType(ctx.inputType('dataset')).neurons
+  const population = withoutStatedStatus(
+    populationFromType(ctx.inputType('dataset')),
+    Boolean(status),
+  )
+  const pushable = population.length === 1 && population[0] === 'traced'
   const criteria = [`${kw}=_labels`]
+  // Same two routes as Find Neurons above, and the same precedence: this node's own `Status`
+  // removes the `traced` disjunct rather than ANDing with it.
   if (status) criteria.push(`status=${pyStr(status)}`)
+  else if (pushable) criteria.push(`status=${pyStr(TRACED_STATUS)}`)
   if (regex) criteria.push('regex=True')
   criteria.push(`client=${c}`)
 
@@ -438,6 +482,15 @@ registerEmitter('neuron.idsFromLabel', (ctx) => {
     `)`,
     codaNeurons(ctx, out),
   )
+  if (!pushable && population.length > 0) {
+    lines.push(
+      ...ctx.note(
+        'The Dataset node narrows this graph to a population NeuronCriteria cannot express, so ' +
+          'the same neurons arrive as a filter on the result instead.',
+      ),
+      ...pyPopulationMask(out, population, schema),
+    )
+  }
   return lines
 })
 

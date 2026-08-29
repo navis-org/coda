@@ -1,6 +1,9 @@
 /** Expressions more than one R emitter needs. */
 
 import type { EmitContext } from '../types'
+import type { PopulationFilter, TableSchema } from '../../../core/types'
+import { TRACED_STATUS, populationColumns } from '../../../data/neuronFilter'
+import { rStr } from '../r'
 
 /**
  * The neuron ids a Neurons input stands for.
@@ -32,4 +35,32 @@ export function selectionIds(ctx: EmitContext, paramId = 'selection'): number[] 
 export function selectionLabels(ctx: EmitContext, paramId = 'selection'): string[] {
   const raw = ctx.params[paramId]
   return Array.isArray(raw) ? raw.map((label) => String(label)) : []
+}
+
+/**
+ * The population as one dplyr predicate, or empty.
+ *
+ * `|` between the disjuncts, and each parenthesised in full — R's `&` binds tighter than `|`, so
+ * the unbracketed form happens to group correctly and stops doing so the first time somebody
+ * edits a clause. Nobody re-derives operator precedence before trusting a row count.
+ *
+ * `!is.na(x) & x != ""` rather than `nzchar`, which errors on `NA` in older R and returns `NA`
+ * in newer — and an `NA` inside `filter()` drops the row silently, which is the right answer
+ * here by luck rather than by rule.
+ */
+export function rPopulationPredicate(
+  filters: readonly PopulationFilter[],
+  schema: TableSchema | undefined,
+): string {
+  const parts: string[] = []
+  for (const filter of filters) {
+    for (const name of populationColumns(filter, schema)) {
+      parts.push(
+        filter === 'traced'
+          ? `(${name} == ${rStr(TRACED_STATUS)})`
+          : `(!is.na(${name}) & ${name} != "")`,
+      )
+    }
+  }
+  return parts.join(' | ')
 }

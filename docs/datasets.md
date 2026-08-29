@@ -73,6 +73,149 @@ state a dataset node sits in until something asks it for neurons. See
 [core.md](core.md#the-dataset-card-asks-the-cache-instead-because-it-fetched-none-of-it) for why
 that one has to peek at the cache rather than report what it fetched.
 
+### The population checkboxes, and the default that was removed once already
+
+A neuPrint dataset node carries three: **Traced only**, **Typed only**, **Superclass only**. Each
+says the dataset means fewer neurons than the server labels as one — which matters because
+neuPrint gives the `:Neuron` label to any body above a synapse threshold or carrying a name, so
+hemibrain is **186,061** rows and most of that is untraced fragments.
+
+| Filter | Column | Test |
+| --- | --- | --- |
+| `traced` | `status` | `= 'Traced'` |
+| `typed` | every column whose name **ends** in `type` | non-empty |
+| `superclass` | `superclass` | non-empty |
+
+**They are OR-ed.** Ticking a second box lets *more* rows through, not fewer: `traced` plus
+`typed` means proofread **or** named, which is the union somebody auditing a dataset for real
+neurons is asking for. ANDing them would answer "proofread and named", a set neither box states.
+The `PopulationFilter` type is where that decision is recorded, and every reader joins the list
+the same way — `populationCypher` at the server, `populationRows` on a table already in memory,
+`pyPopulationMask` and `rPopulationPredicate` in an exported document.
+
+**`typed` matches a suffix, not a substring**, and that decides whether the filter works at all.
+Every column that *assigns* a type is named for what assigns it — `type`, `flywireType`,
+`hemibrainType`, `mancType` — while the columns that merely *describe* one carry the word in the
+middle. male-CNS publishes per-cell-type neurotransmitter predictions, and a column like
+`celltypePredictedNt` is populated for very nearly every neuron; folded into the OR, one of those
+makes Typed only pass every row. That is the worst failure available here — the control is on, the
+card says so, and the count does not move.
+
+**Defaults are per family, not per backend** (`DatasetFamily.population`). Hemibrain arrives with
+`typed`, male-CNS with `superclass`; every other family arrives with none, and so does
+`Custom neuPrint`, which is pointed at nothing when it is added. The useful starting population is
+a judgement about the dataset — hemibrain is thoroughly typed and publishes no `superclass` at
+all — and the table is only a *default*, written in at node creation and read back off the params
+from then on, so it can change without touching a graph anybody saved.
+
+#### Why this is safe where the old `Traced` default was not
+
+`FindNeuronsRequest` used to carry a `statuses` field defaulting to `Traced`, drawn as a **Status**
+box on Find Neurons. It was removed because it reached backends with no `status` column —
+filtering a CAVE datastack on a field it does not publish, and returning nothing at all for a
+value nobody chose. Four things keep this version out of that:
+
+- **Gated on the backend.** `DatasetBackend.population` is set on neuPrint and nowhere else, so
+  the boxes do not exist on a CAVE or CATMAID card. CAVE spells the same ideas `super_class` and
+  `cell_type`; CATMAID has no segmentation to proofread.
+- **Dropped again per dataset.** `resolvePopulation` removes any filter whose columns this
+  dataset does not publish, so the query returns too *many* rows rather than none — the direction
+  somebody can see — and `populationIssues` warns on the node. When every filter is dropped the
+  warning says so explicitly, because with an OR that means the whole clause vanishes and the
+  entire dataset comes through under two ticked boxes.
+- **Asked once per dataset,** not once per query. Restating it on every Find Neurons below is how
+  two of them come to disagree.
+- **An explicit `status` row wins.** `findNeuronsCypher` drops the `traced` disjunct when any
+  filter row names `status`, and all four emitter spellings repeat the rule. ANDing them instead
+  turns `status is Assign` under a traced dataset into zero rows. Note it removes only that
+  disjunct: with `typed` also on, the rest of the group stands and the row simply ANDs.
+
+#### A schema that has not arrived is not a schema without these columns
+
+`schemasFor` is a synchronous peek that also *starts* the fetch (invariant 2), and until it lands
+it hands back the source's own fallback — the canonical columns, which carry `status` and `type`
+and no `superclass`. Read as the dataset's schema that says male-CNS publishes no superclass,
+which is false and stops being false a moment later: a box greys itself and a warning appears,
+both for a fact nobody has looked up yet.
+
+`discoveredNeuronSchema` draws the distinction by comparing the answer to `source.schemas` **by
+identity** — the contents are legitimately identical for a dataset that publishes only the
+canonical columns, so a contents comparison would call its real schema unknown forever. Undefined
+is the safe answer at both call sites: the card leaves every box enabled and `populationIssues`
+says nothing. It is also why the card does **not** memoise that lookup — `source` and `datasetId`
+are stable across the pass discovery finishes on, so a memo keyed on them would hold the
+pre-discovery answer for the life of the node.
+
+#### Absent, and why it is not the default
+
+**Absent is off, whatever the default is.** Those describe different nodes rather than
+conflicting. `defaultParams` writes a default in when a node is *created* and never runs over
+`deserializeGraph`, so a graph saved before these params existed holds no key for them — and it
+queried every `:Neuron` when it was built. Reading absent as the declared default would change
+what somebody else's published graph returns, and its provenance key with it, on nothing more
+than opening the file.
+
+That leaves absent as a *third state*, and it cannot be allowed to reach a card. The convention
+for a default-`true` boolean is `params.x !== false` — which is also what `ParamField` does,
+falling back to `param.default` when the value is not a boolean — so widget and `evaluate`
+normally agree. These read `=== true` instead, and the two spellings differ on exactly one input:
+absence. Left alone, an old saved hemibrain graph would draw a **ticked Typed only over a query
+that filters nothing**. `ParamBase.absentMeans` is the fix and `deserializeGraph` applies it,
+writing the `false` in as the document is read; a node built by `addNode` always has the key, so
+nothing else is touched. It is deliberately not a general backfill of declared defaults — that
+would reach saved files and miss every starter graph, fixture and hand-built test node, which is
+the trap `findNeuronsRows.ts` describes.
+
+#### Where the controls are drawn, and what the card reports
+
+The three checkboxes are `advanced`, so they live in the **inspector**. The card carries one line
+instead:
+
+```
+Using Traced only · Typed only
+```
+
+That is a deliberate reversal of where this started. Three checkboxes was most of a 268px card's
+vertical space spent on controls nobody touches twice, where what a reader of somebody else's
+graph needs is the one fact they decide — which neurons everything downstream is about. Being
+`advanced` also puts them in the card's own `… N more (N changed)` hint, which is the standard way
+a node says it has settings elsewhere and which already names them in its tooltip.
+
+**The line reports what is *applied*, not what is ticked** (`populationSummary`). A box ticked for
+a column this dataset does not publish is dropped before the query is built, so naming it here
+would be a false claim about the neurons downstream. That box's honest channel is
+`populationIssues`, which names it on the node and says the run returns more rows than it looks
+like: the card says what is happening, the warning says what is not. With nothing narrowing there
+is no line at all — an empty one saying nothing is happening is noise on a card that has four
+other things to say.
+
+`DatasetBody` places that line itself, and it has to: a node with a body of its own gets an empty
+`visibleParams`, so `CodaNodeView` draws no generic param rows and anything the body does not
+place is on no card at all. That is the same fact that used to mean the checkboxes had to be
+placed by hand; being `advanced` now states the intent rather than relying on the body's silence.
+
+#### Which queries they reach
+
+`neuronSetRequest`, which exists as a projection separate from `datasetRequest` precisely so the
+answer is a list somebody wrote down rather than whatever object spread happened to carry:
+
+| Reached | Not reached | Why not |
+| --- | --- | --- |
+| Find Neurons, IDs from Label | Input IDs | Narrowing a paste of ids deletes the rows somebody named |
+| Explore, Match Cell Types (locally) | Skeletons, Meshes, Synapses | Keyed by id, one step further downstream |
+| | Connectivity, Paths, Adjacency | The far end of a `ConnectsTo` is matched as a bare node on purpose: a partner may be a `Segment` below the neuron threshold, and excluding those under-reports total synapse weight |
+| | Dataset Summary | It describes the dataset, and carries its own `Status` control |
+
+**The neuron index is never narrowed on the wire.** It is downloaded and cached whole and
+`narrowPopulation` narrows it on load, so a dataset read two ways shares a single 26 MB table
+instead of keying two. That narrowing is itself memoised per (index, population), and for a
+sharper reason than saving the scan: `searchIndexFor` memoises Explore's ~24 MB haystack in a
+`WeakMap` keyed by table **identity**, so a fresh `TableValue` per call would have the node
+rebuild that haystack on every Run and the card build a second one beside it for the same rows. That keeps Explore's promise intact at the seam — the index still *is* the
+whole dataset — and it is why the Explore card reads the filters off the dataset **type** rather
+than the value: the card loads before any Run, and a value-side read would list 186,061 rows on a
+fresh session and a fraction of that after the button.
+
 ### One escape hatch per backend, and where somebody starts
 
 **`Custom neuPrint`, `Custom CAVE` and `Custom CATMAID` are one kind of thing**, and

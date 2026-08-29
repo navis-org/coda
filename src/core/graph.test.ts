@@ -255,6 +255,45 @@ describe('serialisation', () => {
     expect(graph.nodes[1]!.params).toEqual(original.nodes[1]!.params)
   })
 
+  /*
+   * `absentMeans`, which exists for one situation and fails only on somebody else's file: a param
+   * added to a node type that already existed, where absent and the default are different
+   * answers. `ParamField` renders an absent param as its default, so without this a graph saved
+   * before `Traced only` existed would draw a ticked box over a query that filters nothing.
+   */
+  describe('a param added after the document was written', () => {
+    const stored = (params: Record<string, unknown>) =>
+      deserializeGraph(
+        JSON.stringify({
+          version: 1,
+          nodes: [{ id: 'a', type: 'dataset.hemibrain', position: { x: 0, y: 0 }, params }],
+          edges: [],
+        }),
+      ).graph.nodes[0]!.params
+
+    it('records what a document with no key for it meant', () => {
+      // Off, even for `typedOnly`, whose declared default on this family is *on*: the graph was
+      // written by a build with no such control and asked for every neuron.
+      expect(stored({ version: '' })).toMatchObject({
+        tracedOnly: false,
+        typedOnly: false,
+        superclassOnly: false,
+      })
+    })
+
+    it('leaves a stored value alone, either way', () => {
+      expect(stored({ typedOnly: true }).typedOnly).toBe(true)
+      expect(stored({ typedOnly: false }).typedOnly).toBe(false)
+    })
+
+    // Not a general backfill of declared defaults: `version` and `refresh` have no `absentMeans`,
+    // and filling them would reach saved files while missing every starter graph and fixture that
+    // builds a node by hand — two populations behaving differently. See `storedParams`.
+    it('fills in nothing else', () => {
+      expect(Object.keys(stored({}))).toEqual(['tracedOnly', 'typedOnly', 'superclassOnly'])
+    })
+  })
+
   it('drops unknown node types with a warning rather than failing', () => {
     const json = JSON.stringify({
       version: 1,

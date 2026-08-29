@@ -18,6 +18,14 @@ male-CNS v1.0: 165,122 Traced neurons of 176,422 total, × 20 properties = 26 MB
 gzipped, ~5 s**; it parses in ~85 ms and substring-scans in ~6 ms. Local search is not merely
 viable, it is faster than a round trip could ever be. hemibrain is 186,061 rows in ~3.8 s.
 
+**The dataset's population checkboxes narrow the list, never the download.** The cached table is
+always every `:Neuron`; `narrowPopulation` filters the rows on load, so one dataset read two ways
+shares a single 26 MB entry rather than keying two. The card reads them off the dataset **type**,
+not the value — it loads before any Run, and a value-side read would show 186,061 rows on a fresh
+session and a fraction of that once somebody pressed the button. They are OR-ed, so a second
+ticked box lists *more* neurons rather than fewer. See
+[datasets.md](datasets.md#the-population-checkboxes-and-the-default-that-was-removed-once-already).
+
 **Cached in IndexedDB, not `localStorage`** — 26 MB is five times the whole localStorage budget.
 `data/cache.ts` degrades to an in-memory Map wherever IndexedDB is missing (node, private mode),
 because a failure to _remember_ must never look like a failure to compute. The cache fingerprint

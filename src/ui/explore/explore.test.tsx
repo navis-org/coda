@@ -30,6 +30,7 @@ import { availableColumns, makeInferContext } from '../../core/node'
 import type { ParamValue, ParamValues } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
 import type { TableSchema } from '../../core/types'
+import type { PopulationFilter } from '../../core/types'
 import { T } from '../../core/types'
 import { MockSource } from '../../data/mock/MockSource'
 import type { Value } from '../../core/values'
@@ -113,6 +114,8 @@ function setup(
   inputValues?: Record<string, Value | undefined>,
   /** The chain's schema on the dataset *type* — present the moment the wire is drawn. */
   chainSchema?: TableSchema,
+  /** The dataset node's population checkboxes, which this card reads off the type. See below. */
+  population?: PopulationFilter[],
 ) {
   const def = requireNodeDef('neuron.explore')
   const params: ParamValues = { ...defaults(def.params), ...initial }
@@ -126,7 +129,7 @@ function setup(
     const [current, setCurrent] = useState(params)
     external = (paramId, value) => setCurrent((held) => ({ ...held, [paramId]: value }))
     const ctx = makeInferContext(def, current, {
-      dataset: T.dataset(sourceId, DATASET, chainSchema),
+      dataset: T.dataset(sourceId, DATASET, chainSchema, false, population),
     })
     return (
       <ExploreBody
@@ -858,5 +861,72 @@ describe('Explore in the editor', () => {
     await waitFor(() =>
       expect(dialog.querySelectorAll('.explore-row').length).toBeGreaterThan(0),
     )
+  })
+})
+
+/**
+ * The population checkboxes, read off the dataset **type**.
+ *
+ * The card is the surface this matters most on and the one where it is easiest to get wrong. It
+ * loads independently of any Run — that is its whole point — so the filters have to come from
+ * the type; taken from the value they would be absent on a fresh session and present after a
+ * Run, and the card would list 186,061 neurons before somebody pressed the button and a fraction
+ * of that afterwards.
+ *
+ * The narrowing is applied to the *shared* index rather than to the fetch. Two Explore cards on
+ * one dataset share a single cached table by design, so a card that filtered at the source would
+ * hand its own narrowed copy to the other one.
+ */
+describe('the population checkboxes', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  function total(): number {
+    const text = screen.getByText(/[\d,]+ neurons/).textContent ?? ''
+    return Number(/([\d,]+) neurons/.exec(text)?.[1]?.replace(/,/g, ''))
+  }
+
+  async function countWith(population?: PopulationFilter[]): Promise<number> {
+    setup({}, 'mock', undefined, undefined, population)
+    await ready()
+    const n = total()
+    cleanup()
+    return n
+  }
+
+  it('lists fewer neurons than the same dataset unfiltered', async () => {
+    const whole = await countWith()
+    const traced = await countWith(['traced'])
+    expect(traced).toBeGreaterThan(0)
+    expect(traced).toBeLessThan(whole)
+  })
+
+  /*
+   * The counter-intuitive half, on the surface where somebody actually sees it: a second box
+   * lets *more* rows through. If the card ever ANDed them this is the assertion that fails.
+   */
+  it('unions the filters rather than intersecting them', async () => {
+    const whole = await countWith()
+    const traced = await countWith(['traced'])
+    const both = await countWith(['traced', 'typed'])
+
+    expect(traced).toBeLessThan(whole)
+    /*
+     * Every neuron in the mock connectome carries a type, so `traced OR typed` is the whole
+     * dataset — where `traced AND typed` would be the traced subset. That gap is the assertion:
+     * an AND here would read `both === traced`, and the two numbers are far apart.
+     */
+    expect(both).toBe(whole)
+  })
+
+  it('shows only proofread rows under Traced only', async () => {
+    setup({ chips: ['status'] }, 'mock', undefined, undefined, ['traced'])
+    await ready()
+    expect(rows().length).toBeGreaterThan(0)
+    for (const row of rows()) expect(row.textContent).not.toMatch(/Anchor|Assign/)
   })
 })

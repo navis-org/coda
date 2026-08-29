@@ -16,6 +16,9 @@ import { resolveDatasetNames } from '../../../nodes/analysis/compareConnectivity
 import { registerEmitter, registerHelper } from '../registry'
 import type { EmitContext } from '../types'
 import { neuronIds, selectionIds } from './common'
+import { populationFromType } from '../../../nodes/lib/populationParams'
+import { populationCypher } from '../../../data/neuprint/cypher'
+import { schemasFromType } from '../../../nodes/lib/datasetParam'
 
 // ---------------------------------------------------------------------------
 // Build Network
@@ -112,6 +115,19 @@ registerEmitter('neuron.explore', (ctx) => {
   const query = String(ctx.params.query ?? '').trim()
   const limit = Number(ctx.params.limit ?? 0)
   const selection = selectionIds(ctx)
+  /*
+   * The dataset's population, in the `WHERE` of the Cypher this chunk writes by hand.
+   *
+   * Through `populationCypher` — the same function `findNeuronsCypher` uses — rather than
+   * assembled here. Two hand-written spellings of one OR group is how a knitted document comes
+   * to select a different set from the canvas it was exported from, and this is the one emitter
+   * in either language writing raw Cypher, so it is the only one that *can* share it.
+   */
+  const clause = populationCypher(
+    populationFromType(ctx.inputType('dataset')),
+    schemasFromType(ctx.inputType('dataset')).neurons,
+  )
+  const where = clause ? ` WHERE ${clause}` : ''
 
   const lines: string[] = [
     ...ctx.note(
@@ -122,7 +138,10 @@ registerEmitter('neuron.explore', (ctx) => {
     // Aliased, because neuprint_fetch_custom names its columns after the RETURN expressions
     // — without `AS` the column is literally called `n.bodyId`, which nothing downstream finds.
     // The alias is also the id-column seam: neuPrint's property is `bodyId`, Coda's is `neuronId`.
-    `  "MATCH (n:Neuron) RETURN n.bodyId AS neuronId, n.type AS type, n.instance AS instance,`,
+    // The `WHERE` is the dataset's population, pushed into the query rather than filtered
+    // afterwards: the node has one cached index to narrow locally, a chunk has none, and the
+    // smaller response is the whole difference on a dataset with 186,061 of these.
+    `  "MATCH (n:Neuron)${where} RETURN n.bodyId AS neuronId, n.type AS type, n.instance AS instance,`,
     `   n.status AS status, n.pre AS pre, n.post AS post",`,
     `  conn = ${conn}`,
     `)`,

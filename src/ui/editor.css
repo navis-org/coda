@@ -4689,6 +4689,16 @@ a.viewer-actions__btn {
   min-width: 0;
 }
 
+/* One line saying which population filters are being applied; the checkboxes themselves are
+   inspector-only. Wraps rather than truncating — the whole point is naming them, and two of the
+   three labels already fill a 268px card. */
+.dataset-body__population {
+  margin-top: 2px;
+  font-size: 10px;
+  line-height: 1.35;
+  color: var(--text-muted);
+}
+
 .dataset-body__foot {
   display: flex;
   align-items: baseline;

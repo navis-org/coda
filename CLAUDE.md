@@ -227,6 +227,40 @@ symptom to recognise — which usually points nowhere near the cause.
   inside the memo and nulling it in the cleanup meant the *first* strength change applied and
   every later one silently did not. Return the object from the memo instead.
   See [docs/viewers.md](docs/viewers.md).
+- **A param added to a node type that already exists has three states, and a card can only draw
+  two.** `defaultParams` writes a default in at *creation* and never runs over `deserializeGraph`,
+  so a stored node without the key was written by a build that had no such control — which is not
+  the same as the default. Usually harmless: a default-`true` boolean is read `params.x !== false`
+  and `ParamField` falls back to `param.default` the same way, so the widget and `evaluate` agree.
+  It stops being harmless the moment absence means something *else* — the population checkboxes
+  are off on a graph saved before they existed, because that graph asked for every `:Neuron` —
+  and then the box draws ticked over a query that filters nothing. `ParamBase.absentMeans` records the third state
+  and `deserializeGraph` writes it in on load; it is deliberately not a general backfill of
+  declared defaults, which would reach saved files and miss every starter graph, fixture and
+  hand-built test node. The other half of the same trap: **a node with a body of its own draws no
+  generic param rows**, so a control its body does not place is on no card at all, and `compact`
+  is always true for an on-canvas card — gating on `!compact` means "inspector only". Which is a
+  legitimate thing to want, and then `advanced` is how to *say* it: the population checkboxes are
+  inspector-only by declaration and the card reports their effect in one line instead, because
+  three checkboxes is most of a 268px card spent on controls nobody touches twice.
+  See [docs/datasets.md](docs/datasets.md).
+- **A dataset-level filter is not a filter row, the row wins, and the filters OR.** The
+  **population checkboxes** on a neuPrint dataset node — Traced / Typed / Superclass only —
+  narrow every question about *which neurons this dataset has*. They are **OR-ed**, so a second
+  ticked box lets more rows through, not fewer; `PopulationFilter` records why. `typed` matches
+  columns whose name **ends** in `type` (`flywireType`, `hemibrainType`) and not ones merely
+  describing one (`celltypePredictedNt` is populated everywhere and would make the filter pass
+  every row). `findNeuronsCypher` drops the `traced` disjunct when a filter row names `status`,
+  and all four emitter spellings repeat that — ANDing them turns `status is Assign` under a
+  traced dataset into zero rows, which is the failure that got the old request-level `Traced`
+  default removed. Defaults are per **family**, not per backend. Which queries they reach is
+  `neuronSetRequest`, kept separate from `datasetRequest` so the answer is a list somebody wrote
+  down: never a lookup by id, which would delete ids somebody pasted, and never the far end of a
+  `ConnectsTo`, which would under-report weight. The neuron index is never narrowed on the wire —
+  cached whole, narrowed on load, so one dataset read two ways shares one 26 MB table. And **a
+  schema that has not arrived is not a schema without these columns**: `schemasFor` answers with
+  the source's fallback until discovery lands, so `discoveredNeuronSchema` compares it by
+  identity before any box greys itself or any warning fires. See [docs/datasets.md](docs/datasets.md).
 - **Module init order.** `graphStore.ts` imports `../nodes` for its side effect. Without
   it, ordering in `main.tsx` becomes load-bearing and silently drops every node.
   The same trap one level in: a Node-side script needs `registerBuiltinSources()` as well, or

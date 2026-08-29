@@ -18,6 +18,7 @@
  * class of silent load-order bug.
  */
 
+import type { PopulationFilter } from '../../core/types'
 import type { DatasetInfo } from '../../data/source'
 /*
  * `backendOf` used to live here and now lives beside the source registry that mints these ids,
@@ -77,6 +78,20 @@ export interface DatasetBackend {
    * to reverse.
    */
   edgeSets?: boolean
+  /**
+   * Whether its dataset nodes offer the **population** checkboxes. Absent means no.
+   *
+   * Structural, like `acceptsAnnotations` and unlike `edgeSets`: the controls compile against
+   * `status`, `superclass` and the `*type` columns, which are neuPrint's vocabulary. A CAVE
+   * datastack spells the same ideas `super_class` and `cell_type` and gets its proofreading
+   * state from a column its spec may or may not name; CATMAID has no segmentation to proofread
+   * at all. Offering the boxes there would be the old `Traced` default again — filtering on
+   * fields the dataset does not have, and answering nothing for a value nobody chose.
+   *
+   * Off by default so a backend added later has to say yes deliberately rather than inherit
+   * filters nobody chose for it.
+   */
+  population?: boolean
 }
 
 /**
@@ -97,6 +112,7 @@ export const BACKENDS: Record<string, DatasetBackend> = {
   neuprint: {
     id: 'neuprint',
     label: 'neuPrint',
+    population: true,
   },
   cave: {
     id: 'cave',
@@ -178,6 +194,21 @@ export interface DatasetFamily {
    * Description companion: that card exists to carry the credit and the citation a published
    * connectome asks for, and there is nobody to cite for a connectome Coda made up on load.
    */
+  /**
+   * Which population checkboxes a *newly added* node of this family arrives with ticked.
+   *
+   * A per-family default because the useful starting population is a fact about the dataset
+   * rather than about the backend: hemibrain is thoroughly typed, so `typed` is the cut that
+   * separates its named neurons from the untraced fragments that make up most of its 186,061
+   * `:Neuron`s; male-CNS classifies everything it has looked at by `superclass`, which hemibrain
+   * does not publish at all. A family naming none gets every box off, which is the honest
+   * default for a dataset nobody has made this judgement about.
+   *
+   * Only a **default**. It is written into a node when the node is created and read back off the
+   * params from then on, so this table can change without touching a graph anybody saved — and
+   * `absentMeans` is what keeps that true for a graph saved before the boxes existed.
+   */
+  population?: readonly PopulationFilter[]
   synthetic?: boolean
   /**
    * Whether this family is offered as a *starting point*. Absent means yes.
@@ -247,6 +278,7 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     backend: 'neuprint',
     notebook: NEUPRINT_NOTEBOOK,
     family: 'male-cns',
+    population: ['superclass'],
     label: 'MaleCNS',
     description:
       'Whole central nervous system of an adult male fly — brain and ventral nerve cord.',
@@ -260,6 +292,7 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     backend: 'neuprint',
     notebook: NEUPRINT_NOTEBOOK,
     family: 'hemibrain',
+    population: ['typed'],
     label: 'Hemibrain',
     description: 'Approximately half a central brain of an adult female fly.',
     guide:

@@ -1,5 +1,5 @@
 import { registerNode } from '../../core/registry'
-import { datasetRequest } from '../lib/datasetParam'
+import { neuronSetRequest } from '../lib/datasetParam'
 import { T } from '../../core/types'
 import { isTableValue } from '../../core/values'
 import { resolveRows } from '../../data/filterRows'
@@ -180,7 +180,11 @@ export const findNeuronsNode = registerNode({
 
     ctx.progress(0.1, 'querying')
     const neurons = await source.findNeurons({
-      ...datasetRequest(dataset),
+      // `neuronSetRequest`, not `datasetRequest`: this is one of the two queries the dataset's
+      // own population checkboxes narrow. A `status` row written here still removes the `traced`
+      // disjunct — the row is the more specific of the two statements, and `findNeuronsCypher`
+      // is where that precedence is decided rather than here.
+      ...neuronSetRequest(dataset),
       rows: rowsFromParams(ctx.params),
       roi: String(ctx.params.roi ?? '') || undefined,
       limit: Number(ctx.params.limit ?? 0) || undefined,

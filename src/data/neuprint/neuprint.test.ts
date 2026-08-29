@@ -12,7 +12,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { NUMERIC_DTYPES } from '../../core/types'
+import { NUMERIC_DTYPES, column, tableSchema } from '../../core/types'
 import { cableLength, getColumn } from '../../core/values'
 import type { FilterRow } from '../filterRows'
 
@@ -408,6 +408,141 @@ describe('query building', () => {
         rows: [{ field: 'status', op: 'is', values: ['Traced'] }],
       })
       expect(query).toContain("n.`status` = 'Traced' AND n.bodyId IN [7]")
+    })
+  })
+
+  /*
+   * The dataset's population filters: one OR group, and one precedence rule.
+   *
+   * Everything here fails as a plausible neuron table holding the wrong set of neurons. Two are
+   * worse than the rest. An AND where the group should OR silently answers a narrower question
+   * than either box asks; and an unparenthesised OR spliced into a chain of ANDs binds looser
+   * than all of them and returns most of the dataset under a green node.
+   */
+  describe('the population filters', () => {
+    const SCHEMA = tableSchema(
+      column('neuronId', 'i64'),
+      column('type', 'str'),
+      column('status', 'str'),
+      column('superclass', 'str'),
+      column('flywireType', 'str'),
+      // Ends in neither, so neither filter may touch it — see `typeColumns`.
+      column('celltypePredictedNt', 'str'),
+    )
+
+    it('compiles traced to an exact status comparison', () => {
+      const query = findNeuronsCypher({ datasetId: 'x', population: ['traced'] }, [], SCHEMA)
+      expect(query).toContain("n.`status` = 'Traced'")
+    })
+
+    // The `notEmpty` operator's own spelling, so a checkbox and the equivalent filter row cannot
+    // answer two different sets.
+    it('compiles superclass to a non-empty test, not merely a null test', () => {
+      const query = findNeuronsCypher({ datasetId: 'x', population: ['superclass'] }, [], SCHEMA)
+      expect(query).toContain("(n.`superclass` IS NOT NULL AND n.`superclass` <> '')")
+    })
+
+    /*
+     * Every type column, ORed. A neuron named only in FlyWire's nomenclature is a typed neuron —
+     * that is the whole reason the filter is not simply `type IS NOT NULL`.
+     */
+    it('spreads typed across every type column and skips the ones merely describing a type', () => {
+      const query = findNeuronsCypher({ datasetId: 'x', population: ['typed'] }, [], SCHEMA)
+      expect(query).toContain('n.`type` IS NOT NULL')
+      expect(query).toContain('n.`flywireType` IS NOT NULL')
+      // Populated for very nearly every neuron; folded in, "Typed only" would pass every row.
+      expect(query).not.toContain('celltypePredictedNt')
+    })
+
+    it('ORs the filters with each other and ANDs the group onto the rest', () => {
+      const query = findNeuronsCypher(
+        {
+          datasetId: 'x',
+          population: ['traced', 'superclass'],
+          labels: { field: 'type', values: ['LC4'] },
+        },
+        [],
+        SCHEMA,
+      )
+      expect(query).toContain(
+        "n.`type` IN ['LC4'] AND (n.`status` = 'Traced' OR " +
+          "(n.`superclass` IS NOT NULL AND n.`superclass` <> ''))",
+      )
+    })
+
+    /*
+     * The parentheses are the test. Without them the trailing OR binds looser than every AND
+     * before it, so `type IN [...] AND status = 'Traced' OR superclass IS NOT NULL` returns every
+     * neuron with a superclass whatever its type — most of the dataset, under a green node.
+     */
+    it('parenthesises the group even where the clause is the only one', () => {
+      const query = findNeuronsCypher(
+        { datasetId: 'x', population: ['traced', 'typed'] },
+        [],
+        SCHEMA,
+      )
+      expect(query).toMatch(/WHERE \(.* OR .*\)\n/)
+    })
+
+    it('drops a filter the dataset publishes no column for', () => {
+      const noSuper = tableSchema(column('neuronId', 'i64'), column('status', 'str'))
+      const query = findNeuronsCypher(
+        { datasetId: 'x', population: ['traced', 'superclass'] },
+        [],
+        noSuper,
+      )
+      expect(query).toContain("n.`status` = 'Traced'")
+      expect(query).not.toContain('superclass')
+      // One disjunct left, so no group and no parentheses to bind wrongly.
+      expect(query).not.toContain(' OR ')
+    })
+
+    it('adds nothing at all when every filter is dropped', () => {
+      const bare = tableSchema(column('neuronId', 'i64'))
+      expect(
+        findNeuronsCypher({ datasetId: 'x', population: ['superclass'] }, [], bare),
+      ).not.toContain('WHERE')
+      // And with no schema to resolve against, which is a source that has not discovered yet.
+      expect(findNeuronsCypher({ datasetId: 'x', population: ['traced'] })).not.toContain('WHERE')
+    })
+
+    /*
+     * The precedence, and note it removes *only* the traced disjunct. ANDing them instead turns
+     * `status is Assign` under a traced dataset into zero rows for a value nobody chose, which is
+     * the failure that got the old request-level `Traced` default removed.
+     */
+    it('drops the traced disjunct against an explicit status row, keeping the others', () => {
+      const query = findNeuronsCypher(
+        {
+          datasetId: 'x',
+          population: ['traced', 'typed'],
+          rows: [{ field: 'status', op: 'is', values: ['Assign'] }],
+        },
+        [],
+        SCHEMA,
+      )
+      expect(query).toContain("n.`status` = 'Assign'")
+      expect(query).not.toContain("'Traced'")
+      expect(query).toContain('n.`type` IS NOT NULL')
+    })
+
+    it('drops it whatever the operator on that row', () => {
+      const query = findNeuronsCypher(
+        {
+          datasetId: 'x',
+          population: ['traced'],
+          rows: [{ field: 'status', op: 'notEmpty', values: [] }],
+        },
+        [],
+        SCHEMA,
+      )
+      expect(query).not.toContain("'Traced'")
+    })
+
+    // Against the WHERE, not the whole query: `n.status` and `n.type` are among the standard
+    // seven columns, so both are in the RETURN of every query this builder writes.
+    it('adds nothing when no filter is asked for', () => {
+      expect(findNeuronsCypher({ datasetId: 'x' }, [], SCHEMA)).not.toContain('WHERE')
     })
   })
 

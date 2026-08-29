@@ -17,7 +17,7 @@
  *    Honest about the fact that the answer may not have arrived yet.
  */
 
-import type { TableSchema } from '../core/types'
+import type { PopulationFilter, TableSchema } from '../core/types'
 import { column, tableSchema } from '../core/types'
 import type {
   DatasetAnnotations,
@@ -170,6 +170,27 @@ export interface FindNeuronsRequest {
    * read it.
    */
   roi?: string
+  /**
+   * Which neurons the dataset means — the checkboxes on the dataset node, **OR-ed**.
+   *
+   * **Not rows, and the reason is only partly `roi`'s.** A region cannot be a row because it is
+   * not a column; these could all be spelled as rows by whoever builds the request. Two things
+   * stop them. The question is asked at the *dataset* rather than at the query — a few
+   * checkboxes standing for every query below them — and lowering them to rows at each of those
+   * call sites is the same clause written several times, which is how two of them come to
+   * disagree. And `rows` are **ANDed**, where these are ORed among themselves: `traced` plus
+   * `typed` means proofread *or* named, which no list of ANDed rows can say.
+   *
+   * A filter naming a column the dataset does not publish is dropped rather than compiled — see
+   * `resolvePopulation`. That errs towards too many rows rather than none, which is the
+   * direction somebody can see, and the dataset node warns about it at edit time.
+   *
+   * An explicit `status` row **removes the `traced` disjunct** — see `findNeuronsCypher`. The row
+   * is the more specific statement of the two, and a dataset-level default that could contradict
+   * it into zero rows is the failure that got the old `Traced` default removed from this
+   * interface in the first place.
+   */
+  population?: readonly PopulationFilter[]
   limit?: number
   signal?: AbortSignal
 }
@@ -494,6 +515,13 @@ export interface DataSource {
    * stay synchronous for the same reason `schemas` is: inference runs on every graph
    * mutation and cannot await. A source that is still learning should return its default
    * and start discovery in the background rather than block.
+   *
+   * **Still learning means returning `this.schemas` itself**, not a copy of it. That object
+   * identity is the only signal a caller has that the answer is a fallback rather than this
+   * dataset's own shape, and `discoveredNeuronSchema` reads it: the contents are legitimately
+   * identical for a dataset publishing only the canonical columns, so nothing else can tell the
+   * two apart. A source returning a fresh equivalent object would make every such caller believe
+   * discovery had landed — silently, and forever.
    */
   schemasFor?(datasetId: string): SourceSchemas
 

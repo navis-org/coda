@@ -19,6 +19,7 @@ import { getNodeDef } from '../../core/registry'
 import { formatNumber } from '../format'
 import { useGraphStore } from '../../store/graphStore'
 import { edgeSetLabel, hasEdgeSet } from '../../nodes/lib/edgeParams'
+import { discoveredNeuronSchema, populationSummary } from '../../nodes/lib/populationParams'
 import { ParamField } from '../params/ParamField'
 import type { NodeBodyProps } from './nodeBodies'
 import { DatasetPreview } from './DatasetPreview'
@@ -34,6 +35,23 @@ export function DatasetBody({ node, ctx, compact, setParam }: NodeBodyProps) {
   const datasetId = ref?.datasetId
   const source = ref?.sourceId ? getSource(ref.sourceId) : undefined
   const info = datasetId && source ? source.peekDataset(datasetId) : undefined
+  /*
+   * The dataset's *own* schema, undefined while that has not arrived — see
+   * `discoveredNeuronSchema`. A box greyed against a fallback schema is a control disabling
+   * itself for a fact nobody has looked up yet, and re-enabling a moment later.
+   *
+   * A peek during render, which also *starts* discovery where it has not run: the shape
+   * `FindNeuronsBody` already uses to fill its field list, and what invariant 2's
+   * `reportSourceLearned` exists to finish — the card re-renders when the real schema lands.
+   *
+   * **Not memoised**, and the deps are why. `source` and `datasetId` are both stable across the
+   * pass that discovery finishes on, so a memo keyed on them holds the pre-discovery answer for
+   * the life of the node: every box stays enabled forever, which is the failure this whole
+   * distinction exists to avoid. `FindNeuronsBody` gets away with a memo only because its key is
+   * the dataset *type*, which inference rebuilds. A Map lookup and an identity compare is not
+   * worth a cache that can be wrong.
+   */
+  const neuronSchema = source ? discoveredNeuronSchema(source, datasetId) : undefined
 
   const versionParam = def ? findParam(def, 'version') : undefined
   const serverParam = def ? findParam(def, 'server') : undefined
@@ -46,6 +64,17 @@ export function DatasetBody({ node, ctx, compact, setParam }: NodeBodyProps) {
     : known.length === 0
       ? 'no versions listed yet'
       : undefined
+
+  /*
+   * The filters this node is actually applying, by label.
+   *
+   * Resolved against the dataset's *own* neuron schema, inside `populationSummary` rather than
+   * here: it shares one rule with the node's warning, so the card cannot name a filter the node
+   * is reporting as inapplicable. An unknown schema counts as applicable — a schema that has not
+   * arrived is not a schema without these columns in it — so the line reports what is ticked
+   * until discovery says otherwise.
+   */
+  const population = populationSummary(node.params, neuronSchema)
 
   /*
    * The button is the indicator, and that is not a convenience.
@@ -90,6 +119,33 @@ export function DatasetBody({ node, ctx, compact, setParam }: NodeBodyProps) {
               />
             </label>
           ) : null,
+        )}
+        {/*
+         * What the population checkboxes are *doing*, in one line — the boxes themselves are
+         * `advanced` and live in the inspector.
+         *
+         * They were on the card and it was the wrong trade. Three checkboxes is most of a 268px
+         * card's vertical space spent on controls nobody touches twice, where what a reader of
+         * somebody else's graph actually needs is the one fact they decide: which neurons this
+         * dataset means. A dataset card's whole job is to say what everything downstream is
+         * about, and "Using Typed only" says it in a line.
+         *
+         * **What is applied, not what is ticked** — see `populationSummary`. A box ticked for a
+         * column this dataset does not publish is dropped before the query is built, so
+         * reporting it here would be a false claim about the neurons downstream. That box's
+         * honest channel is the node's own warning, which names it and says the run returns more
+         * rows than it looks like.
+         *
+         * Absent when nothing is narrowing, which is the ordinary case: an empty line saying
+         * nothing is happening is noise on a card that has four other things to say.
+         */}
+        {population.length > 0 && (
+          <div
+            className="dataset-body__population"
+            title={`This dataset is narrowed to neurons matching ${population.join(' or ')}. Combined with OR — see the inspector.`}
+          >
+            Using {population.join(' · ')}
+          </div>
         )}
       </div>
 

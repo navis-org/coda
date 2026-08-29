@@ -10,7 +10,16 @@
 
 import { pyStr } from '../py'
 import { registerEmitter, registerHelper } from '../registry'
-import { caveLabels, codaNeurons, isCaveDataset, pySelection, selectionIds } from './common'
+import {
+  caveLabels,
+  codaNeurons,
+  isCaveDataset,
+  pyPopulationMask,
+  pySelection,
+  selectionIds,
+} from './common'
+import { schemasFromType } from '../../../nodes/lib/datasetParam'
+import { populationFromType } from '../../../nodes/lib/populationParams'
 
 /**
  * Explore, on either backend.
@@ -34,6 +43,17 @@ registerEmitter(
     const hits = ctx.output('hits')
     const selected = ctx.output('selected')
 
+    /*
+     * The dataset's population, always as a mask here and never as criteria.
+     *
+     * Find Neurons pushes a lone `traced` into `NeuronCriteria` because that narrows at the
+     * server; this cell cannot, and should not want to. `All` *is* the whole index — the node
+     * downloads it once and narrows the rows in hand — so the frame this masks is the one the
+     * node holds, and the mask is the node's own `narrowPopulation` written in pandas.
+     */
+    // No `cave` branch: only neuPrint dataset nodes declare the params, so a CAVE dataset type
+    // carries no population and this resolves to nothing — see `DatasetBackend.population`.
+    const population = populationFromType(ctx.inputType('dataset'))
     const query = String(ctx.params.query ?? '').trim()
     const limit = Number(ctx.params.limit ?? 0)
     const selection = selectionIds(ctx)
@@ -55,10 +75,18 @@ registerEmitter(
             'Explore Dataset downloads the whole neuron table once and searches it locally. On male-CNS ' +
               'that is around 165,000 rows; expect this cell to take a few seconds.',
           ),
+          /*
+           * Pushed into the criteria rather than masked afterwards, though the node filters the
+           * rows locally. The node has no choice — it reads one cached index that several cards
+           * share, so narrowing it on the wire would key a second copy — and a notebook has no
+           * such cache, so the same set costs a smaller download here.
+           */
           `${all}, _ = fetch_neurons(NeuronCriteria(client=${c}), client=${c})`,
           codaNeurons(ctx, all),
         ]
     if (!cave) ctx.require('neuprint', 'NeuronCriteria', 'fetch_neurons')
+    // No length guard: `pyPopulationMask` answers an empty population with no lines.
+    lines.push(...pyPopulationMask(all, population, schemasFromType(ctx.inputType('dataset')).neurons))
 
     if (query) {
       ctx.helper('coda_search')

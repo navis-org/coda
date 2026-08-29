@@ -22,6 +22,14 @@ import type {
   SynapseRequest,
 } from '../source'
 import { isNeuronId } from '../../core/ids'
+import type { PopulationFilter, TableSchema } from '../../core/types'
+import {
+  STATUS_COLUMN,
+  TRACED_STATUS,
+  populationColumns,
+  resolvePopulation,
+  withoutStatedStatus,
+} from '../neuronFilter'
 import type { FilterRow } from '../filterRows'
 import { anchoredPattern, escapeRegex } from '../terms'
 import { CORE_NEURON_COLUMNS, neuprintProperty } from './schema'
@@ -193,8 +201,24 @@ function rowClause(row: FilterRow): string {
     case 'isEmpty':
       return `(${prop} IS NULL OR ${prop} = '')`
     case 'notEmpty':
-      return `(${prop} IS NOT NULL AND ${prop} <> '')`
+      return notEmptyClause(prop)
   }
+}
+
+/**
+ * "This property carries a value somebody entered", as one clause.
+ *
+ * Named because two callers have to spell it identically: the `notEmpty` operator, and the
+ * dataset-level `typed`/`superclass` filters, which are deliberately *not* routed through
+ * `rowClause` — see `populationCypher`. Not routing them through the operator switch is the
+ * decision; writing the clause out twice was not part of it, and a checkbox and the equivalent
+ * filter row answering two different sets is exactly the kind of disagreement nothing catches.
+ *
+ * `IS NOT NULL` *and* `<> ''`: neuPrint stores an unset annotation both ways depending on the
+ * dataset, and a null test alone lets the empty ones through.
+ */
+function notEmptyClause(prop: string): string {
+  return `(${prop} IS NOT NULL AND ${prop} <> '')`
 }
 
 /**
@@ -227,9 +251,70 @@ function numberLiteral(value: string): string {
   return Number.isFinite(number) ? String(number) : escapeString(value)
 }
 
+/**
+ * The dataset's population checkboxes as one parenthesised `WHERE` fragment, or nothing.
+ *
+ * Three decisions, each of which fails as a wrong count rather than as an error.
+ *
+ * **The disjuncts are OR-ed and the group is ANDed onto everything else.** `traced` plus `typed`
+ * means proofread *or* named — see `PopulationFilter` — so ANDing them here would answer a
+ * question neither box asks, and dropping the parentheses would let the OR swallow the query
+ * rows beside it and return most of the dataset.
+ *
+ * **`typed` spreads across every type column** the dataset has, which is what makes a neuron
+ * carrying only a `flywireType` a typed neuron. `resolvePopulation` has already dropped any
+ * filter this dataset cannot answer, so an empty group here means "no narrowing", never "no
+ * rows".
+ *
+ * **An explicit `status` row removes the `traced` disjunct**, through `withoutStatedStatus` —
+ * which is where that precedence is stated, because both exporters have to make the same call
+ * and a second copy of the rule is a second chance to AND instead.
+ *
+ * Emitted directly rather than through `rowClause`, because these are not rows: none of them
+ * carries a case fold or a negation, and routing them through the operator switch would make a
+ * dataset-level checkbox depend on `FilterRow`'s defaults.
+ *
+ * Exported because the R exporter's Explore chunk writes its own `MATCH (n:Neuron) … RETURN` by
+ * hand and needs the identical fragment. Two hand-written spellings of one OR group is how a
+ * knitted document comes to select a different set from the canvas it was exported from.
+ */
+export function populationCypher(
+  population: readonly PopulationFilter[] | undefined,
+  schema: TableSchema | undefined,
+  statedFields: readonly string[] = [],
+): string {
+  const filters = withoutStatedStatus(
+    resolvePopulation(population, schema),
+    statedFields.includes(STATUS_COLUMN),
+  )
+
+  const parts: string[] = []
+  for (const filter of filters) {
+    for (const name of populationColumns(filter, schema)) {
+      const prop = `n.${escapeIdentifier(neuprintProperty(name))}`
+      parts.push(
+        filter === 'traced'
+          ? `${prop} = ${escapeString(TRACED_STATUS)}`
+          : notEmptyClause(prop),
+      )
+    }
+  }
+  if (parts.length === 0) return ''
+  // Parenthesised past one disjunct: the group is ANDed onto the rows beside it, and a bare
+  // `a OR b` spliced into a chain of `AND`s binds looser than every one of them.
+  return parts.length === 1 ? parts[0]! : `(${parts.join(' OR ')})`
+}
+
+/**
+ * `schema` is the dataset's **own** neuron schema, and only the population clause reads it: which
+ * columns answer `typed` is a per-dataset fact, and `extraProperties` beside it is the same fact
+ * in the shape the `RETURN` list needs. Optional so the many call sites that pass no population
+ * stay as they were; absent, every population filter resolves to nothing and is dropped.
+ */
 export function findNeuronsCypher(
   req: FindNeuronsRequest,
   extraProperties: string[] = [],
+  schema?: TableSchema,
 ): string {
   const where: string[] = []
   for (const row of req.rows ?? []) where.push(rowClause(row))
@@ -250,6 +335,12 @@ export function findNeuronsCypher(
   // `IS NOT NULL` rather than `exists(...)`: the latter was removed for properties in
   // Neo4j 5, and neuPrint's servers are not all on the same major version.
   if (req.roi) where.push(`n.${escapeIdentifier(req.roi)} IS NOT NULL`)
+  const population = populationCypher(
+    req.population,
+    schema,
+    (req.rows ?? []).map((row) => row.field),
+  )
+  if (population) where.push(population)
 
   const columns = [...NEURON_COLUMNS, ...extraProperties.map((p) => `n.${escapeIdentifier(p)}`)]
   return [

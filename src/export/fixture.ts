@@ -23,6 +23,8 @@
 import type { CodaGraph, GraphEdge, GraphNode } from '../core/graph'
 import { addEdge, addNode, emptyGraph } from '../core/graph'
 import type { ParamValues } from '../core/node'
+import { defaultParams } from '../core/node'
+import { requireNodeDef } from '../core/registry'
 
 interface Spec {
   id: string
@@ -1155,4 +1157,43 @@ export function caveGraph(): CodaGraph {
   ]
   for (const [from, out, to, into] of edges) g = wire(g, from, out, to, into)
   return g
+}
+
+/**
+ * A dataset node wired to one query node, both built over their declared defaults.
+ *
+ * The counterpart of `everythingGraph` for a setting that lives on the **dataset** and shows up
+ * in every query cell below it. The everything graph cannot test one: `spec.params` above writes
+ * params verbatim rather than over `defaultParams`, so its dataset nodes carry the population
+ * checkboxes absent — which is off, and is what makes the unchanged goldens a proof that a graph
+ * saved before those params existed still exports exactly as it did.
+ *
+ * Here rather than copied into both `export.test.ts` files, which is where it started: the two
+ * were character-identical, and a graph builder that drifts between the languages is how their
+ * two suites come to be checking different things while both stay green.
+ */
+export function twoNodeGraph(
+  datasetType: string,
+  datasetParams: ParamValues,
+  queryType: string,
+  queryParams: ParamValues = {},
+): CodaGraph {
+  let g = emptyGraph('two-node')
+  for (const [id, type, params] of [
+    ['ds', datasetType, datasetParams],
+    ['q', queryType, queryParams],
+  ] as const) {
+    g = addNode(g, {
+      id,
+      type,
+      position: { x: 0, y: 0 },
+      params: { ...defaultParams(requireNodeDef(type)), ...params } as ParamValues,
+    })
+  }
+  return addEdge(g, {
+    source: 'ds',
+    sourceHandle: 'dataset',
+    target: 'q',
+    targetHandle: 'dataset',
+  })
 }

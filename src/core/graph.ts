@@ -815,6 +815,34 @@ function droppedHandle(
   return `${where}: the file records no ${side} port, and ${has}`
 }
 
+/**
+ * A stored node's params, with any `absentMeans` filled in.
+ *
+ * The one place "this document predates that control" is turned into a value. It is deliberately
+ * **not** a general backfill of declared defaults: `findNeuronsRows.ts` records why a load-time
+ * migration is the wrong tool for the ordinary case — `addNode` and `defaultParams` never come
+ * through here, so it would reach saved files and miss every starter graph, fixture and test that
+ * builds a node by hand, leaving two populations that behave differently.
+ *
+ * What it is for is the narrow case where absent and the default are *different answers*. Then
+ * absence is not a value waiting to be filled in, it is a fact about when the document was
+ * written, and something has to record it before the graph reaches a card — because `ParamField`
+ * renders an absent param as its default and would otherwise draw a control that disagrees with
+ * the query beneath it. See `ParamBase.absentMeans`.
+ *
+ * Lenient like everything else here: an unknown type has already been dropped by the time this
+ * runs, and a param the definition no longer declares survives untouched.
+ */
+function storedParams(raw: unknown, type: string): ParamValues {
+  const params = { ...((raw && typeof raw === 'object' ? raw : {}) as ParamValues) }
+  for (const param of getNodeDef(type)?.params ?? []) {
+    if (param.absentMeans !== undefined && !(param.id in params)) {
+      params[param.id] = param.absentMeans
+    }
+  }
+  return params
+}
+
 export function deserializeGraph(json: string): LoadResult {
   const warnings: string[] = []
   let raw: unknown
@@ -852,7 +880,7 @@ export function deserializeGraph(json: string): LoadResult {
         x: Number(n.position?.x) || 0,
         y: Number(n.position?.y) || 0,
       },
-      params: (n.params && typeof n.params === 'object' ? n.params : {}) as ParamValues,
+      params: storedParams(n.params, n.type),
       ...(n.title ? { title: n.title } : {}),
       ...(n.collapsed ? { collapsed: true } : {}),
       ...(n.paramsCollapsed ? { paramsCollapsed: true } : {}),

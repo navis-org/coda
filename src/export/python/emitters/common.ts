@@ -6,8 +6,10 @@
  * about which column that is.
  */
 
+import type { PopulationFilter, TableSchema } from '../../../core/types'
 import { datasetRef } from '../../../core/types'
-import { pyLongIntList } from '../py'
+import { TRACED_STATUS, populationColumns } from '../../../data/neuronFilter'
+import { pyLongIntList, pyStr } from '../py'
 import type { EmitContext } from '../types'
 
 /**
@@ -109,4 +111,54 @@ export function isCaveDataset(ctx: EmitContext, portId = 'dataset'): boolean {
  */
 export function caveLabels(dataset: string): string {
   return `${dataset}.labels`
+}
+
+/**
+ * The population as a pandas mask over a fetched frame, or no lines at all.
+ *
+ * **A mask rather than criteria, and that is forced.** `NeuronCriteria` ANDs its keyword
+ * arguments and has no null test at all, so it can express exactly one of these — a lone
+ * `traced`, which `emitFindNeurons` pushes instead of coming here. Everything else is either a
+ * non-empty test it cannot say or an OR it would turn into an AND, which is a smaller set of
+ * neurons under a cell that looks right.
+ *
+ * `.notna() & != ''` rather than `.astype(bool)`: the two disagree on the string `'0'`, and Coda
+ * counts a value somebody entered as present whatever it says.
+ */
+export function pyPopulationMask(
+  frame: string,
+  filters: readonly PopulationFilter[],
+  schema: TableSchema | undefined,
+): string[] {
+  const parts: string[] = []
+  for (const filter of filters) {
+    for (const name of populationColumns(filter, schema)) {
+      const col = `${frame}[${pyStr(name)}]`
+      parts.push(
+        filter === 'traced'
+          ? `(${col} == ${pyStr(TRACED_STATUS)})`
+          : `(${col}.notna() & (${col} != ''))`,
+      )
+    }
+  }
+  return pyMaskFrame(frame, parts, '|')
+}
+
+/**
+ * `frame = frame[…]` over a list of masks, on one line or wrapped.
+ *
+ * Shared with `maskLines`, which does the same for a node's own filter rows and differs only in
+ * joining with `&`. Each mask is already parenthesised by its builder and stays that way here:
+ * Python binds `&` tighter than `|`, so the unbracketed form happens to group correctly today
+ * and stops doing so the first time somebody edits a clause — and in a notebook nobody
+ * re-derives operator precedence before trusting a row count.
+ */
+export function pyMaskFrame(frame: string, masks: readonly string[], join: '&' | '|'): string[] {
+  if (masks.length === 0) return []
+  if (masks.length === 1) return [`${frame} = ${frame}[${masks[0]}]`]
+  return [
+    `${frame} = ${frame}[`,
+    ...masks.map((mask, i) => `    ${i === 0 ? '' : `${join} `}${mask}`),
+    ']',
+  ]
 }

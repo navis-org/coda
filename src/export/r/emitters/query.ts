@@ -29,7 +29,9 @@ import { schemasFromType } from '../../../nodes/lib/datasetParam'
 import { filterPredicates } from './tableFilters'
 import type { EmitContext } from '../types'
 import { neuprintProperty } from '../../../data/neuprint/schema'
-import { neuronIds } from './common'
+import { neuronIds, rPopulationPredicate } from './common'
+import { STATUS_COLUMN, withoutStatedStatus } from '../../../data/neuronFilter'
+import { populationFromType } from '../../../nodes/lib/populationParams'
 
 /** What "neuPrint" means unless a node says otherwise. */
 const DEFAULT_DEPLOYMENT = 'https://neuprint.janelia.org'
@@ -220,6 +222,26 @@ registerEmitter('neuron.findNeurons', (ctx) => {
       `${out} <- ${out} |> filter(${filterPredicates(rest, schema).join(', ')})`,
     )
   }
+  /*
+   * The dataset's population, as one `filter()` on the returned metadata.
+   *
+   * A `filter()` rather than a search argument because `neuprint_search` narrows on one field
+   * and that field is already spent on the type or instance pattern above — and because the
+   * disjuncts are ORed, which no combination of its arguments could say.
+   *
+   * A `status` row on this node removes the `traced` disjunct: `findNeuronsCypher`' precedence,
+   * third copy. It removes only that one, so a dataset also asking for `typed` keeps the rest of
+   * the group and the row simply ANDs with it, exactly as the canvas does.
+   */
+  const population = withoutStatedStatus(
+    populationFromType(ctx.inputType('dataset')),
+    rest.some((t) => t.field === STATUS_COLUMN),
+  )
+  const predicate = rPopulationPredicate(population, schema)
+  if (predicate) {
+    ctx.library('dplyr')
+    lines.push(`${out} <- ${out} |> filter(${predicate})`)
+  }
   if (limit > 0) {
     ctx.library('dplyr')
     lines.push(`${out} <- ${out} |> head(${limit})`)
@@ -322,10 +344,20 @@ registerEmitter('neuron.idsFromLabel', (ctx) => {
     `) |> coda_neurons()`,
   )
 
+  // This node's own `Status` first, then the dataset's population — the same precedence as Find
+  // Neurons above, and it removes only the `traced` disjunct rather than the whole group.
   const status = String(ctx.params.status ?? '')
   if (status) {
     ctx.library('dplyr')
     lines.push(`${out} <- ${out} |> filter(status == ${rStr(status)})`)
+  }
+  const predicate = rPopulationPredicate(
+    withoutStatedStatus(populationFromType(ctx.inputType('dataset')), Boolean(status)),
+    schemasFromType(ctx.inputType('dataset')).neurons,
+  )
+  if (predicate) {
+    ctx.library('dplyr')
+    lines.push(`${out} <- ${out} |> filter(${predicate})`)
   }
   if (ctx.params.ignoreCase === true) {
     lines.push(

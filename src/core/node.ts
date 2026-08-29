@@ -193,6 +193,24 @@ interface ParamBase {
   group?: string
   /** Marks this param as one facet of a composite visual property. See `CompositeRef`. */
   composite?: CompositeRef
+  /**
+   * What a **stored** node that has no key for this param meant, when that is not the default.
+   *
+   * For a param added to a node type that already existed, "absent" is a third state, and it is
+   * not the same as the default: `defaultParams` writes the default in when a node is *created*
+   * and never runs over `deserializeGraph`, so a document without the key was written by a build
+   * where the control did not exist — and it meant whatever the node did before it was added.
+   *
+   * Left unset, absent is read as the default, which is right for the ordinary case: the reader
+   * spells it `params.normalize !== false` and `ParamField` falls back the same way, so the card
+   * and `evaluate` agree. Set, `deserializeGraph` writes this value in as the document is read,
+   * which is what keeps them agreeing when the two answers differ. Without it the widget shows
+   * the default while a reader spelling absence as off returns something else — a checkbox that
+   * lies about the query under it, on somebody else's saved graph.
+   *
+   * Only meaningful on a stored document. A node built by `addNode` always has the key.
+   */
+  absentMeans?: ParamValue
 }
 
 /**

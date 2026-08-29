@@ -222,6 +222,109 @@ verbatim.
   the prefix is part of the path *to* the shard file and the byte range is what makes a name a
   shard read.
 
+- **A param added to a node type that already exists has three states, and a card can only draw
+  two.** The population checkboxes arrived on the neuPrint dataset nodes, each defaulting `true`
+  on the family it suits — hemibrain gets `Typed only`, male-CNS `Superclass only` — which is what
+  `defaultParams` writes into a node when it is *created*. It never runs over `deserializeGraph`
+  — the rule `nodes/lib/findNeuronsRows.ts` records — so a graph saved before the controls existed
+  holds no key for them at all, and that graph asked for every `:Neuron`. Reading absence as the
+  declared default would change what somebody else's published graph returns, and its provenance
+  key with it, on nothing more than opening the file; so `populationFrom` reads `=== true`.
+
+  That is where the trap springs. The convention for a default-`true` boolean is
+  `params.x !== false` — `nblast.ts` spells it exactly that way — and `ParamField` agrees, falling
+  back to `param.default` whenever the stored value is not a boolean. The two spellings differ on
+  exactly one input, which is absence, and the symptom is a **ticked "Typed only" box over a
+  query that filters nothing**, on a file the person opening it did not write. Nothing throws, the
+  node is green, and the row count is the only tell.
+
+  `ParamBase.absentMeans` is the fix: it records what a stored document with no key for a param
+  meant, and `storedParams` in `deserializeGraph` writes it in as the file is read, so absence
+  cannot reach a card. It is deliberately **not** a general backfill of declared defaults — that
+  reaches saved files and misses every starter graph, fixture and hand-built test node, leaving
+  two populations that behave differently, which is the whole reason the legacy Find Neurons
+  params were never migrated either.
+
+  The other half of the same incident: the checkbox did not appear at all the first time. A node
+  with a body of its own gets an **empty `visibleParams`**, so `CodaNodeView` draws no generic
+  param rows and a control the body does not place is on no card anywhere — it worked perfectly
+  from the inspector, which is what made it easy to miss. And `compact` is passed as `true`
+  unconditionally for an on-canvas card, so gating on `!compact` — which is how `DatasetBody`
+  keeps the server name inspector-only — is a second spelling of not placing it.
+
+  The three boxes then went *back* to the inspector, which is the part worth keeping: they are
+  `advanced` now, and the card reports their effect as one line (`populationSummary`) rather than
+  drawing them. Three checkboxes was most of a 268px card's vertical space spent on controls
+  nobody touches twice, where a reader of somebody else's graph needs the one fact they decide.
+  The line reports what is **applied** rather than what is ticked — naming a filter this dataset
+  drops would be a false claim about the neurons downstream, and that box's honest channel is the
+  node warning. `advanced` is also what earns the standard `… N more (N changed)` hint, which
+  names them in its tooltip; relying on the body's silence would have left the card claiming the
+  node had no settings at all.
+
+- **A dataset-level filter is not a filter row, the row wins, and the filters OR.**
+  `FindNeuronsRequest` used to carry a `statuses` field defaulting to `Traced`, drawn as a
+  **Status** box on Find Neurons, and it was removed because it reached backends with no `status`
+  column: a CAVE datastack filtered on a field it does not publish returns nothing at all, for a
+  value nobody chose. The **population checkboxes** ask the same question one level up and stay
+  out of that by being gated on the backend (`DatasetBackend.population`), dropped again per
+  dataset where the columns are missing (`resolvePopulation`, which warns rather than refusing —
+  too many rows can be seen, none cannot), and by yielding to any explicit `status` row.
+
+  **They are OR-ed**, which is the counter-intuitive half and the one worth stating twice: a
+  second ticked box lets *more* rows through. `traced` plus `typed` means proofread **or** named,
+  which is the union somebody auditing a dataset for real neurons is asking for. Every reader
+  joins the list the same way, and there are five of them — the Cypher compiler, the in-memory
+  filter, and three emitter spellings.
+
+  The precedence has to be written out at each of those: ANDing instead compiles `status is
+  Assign` under a traced dataset into `n.status = 'Assign' AND n.status = 'Traced'`. Zero rows, no
+  error, and it reads as a fact about the dataset. It removes only the `traced` disjunct, so a
+  dataset also asking for `typed` keeps the rest of the group.
+
+  **`typed` matches a suffix, not a substring.** Every column that *assigns* a type is named for
+  what assigns it — `type`, `flywireType`, `hemibrainType` — while the columns that merely
+  *describe* one carry the word in the middle. male-CNS publishes per-cell-type neurotransmitter
+  predictions, and `celltypePredictedNt` is populated for very nearly every neuron; folded into
+  the OR, it makes Typed only pass every row in the dataset while the card says the control is on.
+
+  **The group is parenthesised.** A bare `a OR b` spliced into a chain of `AND`s binds looser than
+  every one of them, so `type IN [...] AND status = 'Traced' OR superclass IS NOT NULL` returns
+  every neuron with a superclass whatever its type — most of the dataset, under a green node.
+  Python and R have the same trap with `&` and `|`, where the unbracketed form happens to group
+  correctly today and stops doing so the first time somebody edits a clause; nobody re-derives
+  operator precedence before trusting a row count in a notebook.
+
+  Which queries they reach is `neuronSetRequest`, kept separate from `datasetRequest` for the
+  reason `connectivityRequest` is: object spread does no excess-property checking, so folding it
+  into the general projection applies it to seven requests silently rather than to the two that
+  mean it. Never a lookup by id — narrowing a paste of ids deletes the rows somebody named, and
+  reports the deletion as neurons the dataset does not have. Never the far end of a `ConnectsTo`,
+  which `connectivityCypher` matches as a bare node on purpose, because a partner may be a
+  `Segment` below the neuron threshold and excluding those under-reports total synapse weight.
+
+  And the neuron index is never narrowed on the wire. It is downloaded and cached whole and
+  `narrowPopulation` filters it on load, so one dataset read two ways shares a single 26 MB entry
+  instead of keying two — which is also why the Explore card reads the filters off the dataset
+  **type** rather than the value: the card loads before any Run, and a value-side read would list
+  186,061 rows on a fresh session and a fraction of that once somebody pressed the button.
+
+- **A schema that has not arrived is not a schema without these columns in it.** The column
+  picker's rule, one layer up, and it bit twice in one change. `schemasFor` is a synchronous peek
+  that also *starts* the fetch (invariant 2), and until it lands it hands back the source's own
+  fallback — the canonical columns, which carry `status` and `type` and no `superclass`. Read as
+  the dataset's schema that says male-CNS publishes no superclass, so the Superclass only box
+  greys itself and the node warns, both for a fact nobody has looked up yet, and both reverse a
+  moment later. `discoveredNeuronSchema` compares the answer to `source.schemas` **by identity** —
+  the contents are legitimately identical for a dataset publishing only the canonical columns, and
+  a contents comparison would call its real schema unknown forever.
+
+  The second bite was the fix's own: wrapping that lookup in a `useMemo` keyed on
+  `[source, datasetId]`. Both are stable across the pass discovery finishes on, so the memo held
+  the pre-discovery answer for the life of the node and every box stayed enabled forever.
+  `FindNeuronsBody` gets away with a memo only because its key is the dataset *type*, which
+  inference rebuilds. A Map lookup and an identity compare is not worth a cache that can be wrong.
+
 - **Module init order.** `graphStore.ts` imports `../nodes` for its side effect, because it
   resolves node types the moment it loads the autosaved graph. Without that import,
   ordering in `main.tsx` becomes load-bearing and a bad order silently drops every node.

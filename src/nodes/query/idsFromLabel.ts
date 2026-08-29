@@ -1,5 +1,5 @@
 import { registerNode } from '../../core/registry'
-import { datasetRequest } from '../lib/datasetParam'
+import { neuronSetRequest } from '../lib/datasetParam'
 import { T, findColumn } from '../../core/types'
 import { isTableValue, tableFromRows } from '../../core/values'
 import {
@@ -194,7 +194,10 @@ export const idsFromLabelNode = registerNode({
         : undefined
 
     const neurons = await source.findNeurons({
-      ...datasetRequest(dataset),
+      // The dataset's own population reaches here too — and this node's `Status` param, when
+      // set, removes the `traced` disjunct rather than ANDing with it. Both halves are
+      // `findNeuronsCypher`'s decision; the `rows` above are what it looks at.
+      ...neuronSetRequest(dataset),
       labels: match,
       ...(rows ? { rows } : {}),
       signal: ctx.signal,
