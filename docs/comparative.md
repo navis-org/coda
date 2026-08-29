@@ -442,7 +442,8 @@ and `probe:r-helpers` execute the generated source out of the goldens, thirteen 
 
 ### `Compare Connectivity` — `compare.connectivity` — **built**
 
-`category: 'analysis'`, `cost: 'cheap'` — a relabel and a group-by over already-fetched edges.
+`nodes/analysis/compareConnectivity.ts` over `nodes/lib/edgeComparison.ts`. `category:
+'analysis'`, `cost: 'cheap'` — a relabel and a group-by over already-fetched edges.
 The expensive nodes are upstream, which is what makes re-asking the question free.
 
 | | |
