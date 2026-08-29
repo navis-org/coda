@@ -136,7 +136,13 @@ export type PortSlot = PortDef | PortGroupDef
  * dataset.
  */
 export interface ResolvedPort extends PortDef {
-  group?: { repeat: string; index: number }
+  /**
+   * Set on a port expanded out of a `PortGroupDef`. `base` is the template's own id — the thing
+   * `expandPort` suffixes — so a group repeating a *tuple* can say which of its ports this is
+   * without a `startsWith` test on the resolved id, which would also match a later port whose
+   * name happens to share the prefix.
+   */
+  group?: { repeat: string; index: number; base: string }
 }
 
 // ---------------------------------------------------------------------------

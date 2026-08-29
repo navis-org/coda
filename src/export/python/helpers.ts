@@ -221,6 +221,106 @@ registerHelper({
 })
 
 /**
+ * Coda's Compare Connectivity, and the per-label totals under it.
+ *
+ * The longest helper in this file, and it earns the length: every rule it carries is one that
+ * pandas would otherwise get *plausibly* wrong. Four of them.
+ *
+ * **A repeated key resolves to the first row**, `coda_relabel`'s rule and `Join`'s — where
+ * `dict(zip(...))` keeps the last.
+ *
+ * **The label pool is the mapping's, not the edges'.** `set(lookup.values())` rather than the
+ * labels that appear in the summed frame, and the whole absent-versus-unsampled distinction
+ * rests on it: a pool derived from the edges makes every absence unsampled by construction, and
+ * the `present_` columns would then all be true.
+ *
+ * **`0` and `None` are different answers.** `merge(how='outer')` fills a missing pair with NaN
+ * whatever the reason, so the obvious translation collapses "this brain has both types and no
+ * such connection" into "this brain was never asked" — which is the finding this node exists to
+ * surface, deleted. Written out per key instead.
+ *
+ * **`min_weight` drops a whole row, never a value.** Thresholding per dataset would suppress a
+ * number into a `0` that then means "below the threshold" as well as "really absent".
+ *
+ * `nNeurons` is a union over both ends rather than two `nunique` calls added together, which
+ * would count a neuron twice where it is both pre and post of something.
+ *
+ * Returns the two frames as a tuple, in the node's port order. `_coda_label_totals` is
+ * underscore-prefixed for `_coda_rng`'s reason: it is spec-private, and `registerHelper`
+ * de-duplicates on the *helper* name rather than on the function names inside a `source`, so an
+ * unprefixed one invites a later helper to land a second definition in the same cell.
+ */
+registerHelper({
+  name: 'coda_compare_connectivity',
+  requires: [['pandas']],
+  needs: ['coda_match_keys'],
+  source: [
+    'def _coda_label_totals(frame, name):',
+    '    """Per label: the neurons this edge list covered, and the weight out of and into it."""',
+    '    ends = pd.concat([',
+    "        frame[['preLabel', 'idPre']].rename(columns={'preLabel': 'label', 'idPre': 'id'}),",
+    "        frame[['postLabel', 'idPost']].rename(columns={'postLabel': 'label', 'idPost': 'id'}),",
+    '    ])',
+    '    per = pd.DataFrame({',
+    '        # A union over both ends: two nunique calls added together count a neuron twice.',
+    "        'nNeurons': ends.groupby('label', sort=False)['id'].nunique(),",
+    "        'outWeight': frame.groupby('preLabel', sort=False)['w'].sum(),",
+    "        'inWeight': frame.groupby('postLabel', sort=False)['w'].sum(),",
+    '    }).fillna(0)',
+    "    per.index.name = 'label'",
+    '    per = per.reset_index()',
+    "    per.insert(1, 'dataset', name)",
+    '    return per',
+    '',
+    '',
+    'def coda_compare_connectivity(datasets, min_weight=0):',
+    '    """Coda\'s Compare Connectivity: one type-to-type edge, counted in each dataset."""',
+    '    summed, pools, counts = {}, {}, []',
+    '    for d in datasets:',
+    "        name, labels, edges = d['name'], d['labels'], d['edges']",
+    "        keys = coda_match_keys(labels[d.get('id_column', 'neuronId')])",
+    "        # First occurrence wins — `coda_relabel`'s rule, where zip into a dict keeps the last.",
+    '        first = ~keys.duplicated()',
+    "        lookup = dict(zip(keys[first], labels[d.get('label_column', 'label')][first]))",
+    "        lookup = {k: v for k, v in lookup.items() if pd.notna(v) and v != ''}",
+    '        frame = pd.DataFrame({',
+    "            'idPre': coda_match_keys(edges[d['pre']]),",
+    "            'idPost': coda_match_keys(edges[d['post']]),",
+    "            'w': edges[d['weight']] if d.get('weight') else 1.0,",
+    '        })',
+    "        frame['preLabel'] = frame['idPre'].map(lookup)",
+    "        frame['postLabel'] = frame['idPost'].map(lookup)",
+    '        # An edge with an unlabelled end has no place in a label-level comparison.',
+    "        frame = frame.dropna(subset=['preLabel', 'postLabel'])",
+    "        summed[name] = frame.groupby(['preLabel', 'postLabel'], sort=False)['w'].sum().to_dict()",
+    "        # The mapping's labels, not the edges' — a pool taken from the edges would make every",
+    '        # absence unsampled and every `present_` column true.',
+    '        pools[name] = set(lookup.values())',
+    '        counts.append(_coda_label_totals(frame, name))',
+    '',
+    "    # First-appearance order, `coda_join`'s idiom: a set would not promise one.",
+    '    seen_keys = dict.fromkeys(k for group in summed.values() for k in group)',
+    '    # A row survives where *any* dataset reaches the threshold, so an asymmetry outlives it.',
+    '    keys = [k for k in seen_keys',
+    '            if any(k in g and g[k] >= min_weight for g in summed.values())]',
+    '',
+    "    out = pd.DataFrame(keys, columns=['preLabel', 'postLabel'])",
+    '    present = {name: [p in pools[name] and q in pools[name] for p, q in keys]',
+    '               for name in summed}',
+    '    for name, group in summed.items():',
+    '        # 0 where the dataset holds both labels and has no such edge — a real absence — and',
+    '        # None where it holds neither, because then nothing was asked.',
+    "        out['weight_' + name] = [group[k] if k in group else (0.0 if seen else None)",
+    '                                 for k, seen in zip(keys, present[name])]',
+    '    for name in summed:',
+    "        out['present_' + name] = present[name]",
+    '',
+    "    empty = ['label', 'dataset', 'nNeurons', 'outWeight', 'inWeight']",
+    '    return out, pd.concat(counts, ignore_index=True) if counts else pd.DataFrame(columns=empty)',
+  ],
+})
+
+/**
  * Coda's `join` aggregation.
  *
  * `', '.join(...)` is the obvious spelling and is a different rule four ways: it raises on a

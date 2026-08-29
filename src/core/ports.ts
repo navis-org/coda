@@ -139,13 +139,25 @@ function cacheOf(def: NodeDefinition): PortCache {
  * is a card nobody can wire correctly, and the one time that was the intent — a single-repeat
  * group — the index is 1 and reads fine.
  */
+/**
+ * A repeated port's id at one index: `edges` + 2 → `edges2`.
+ *
+ * Exported because the *params* that read these ports are suffixed by the same rule
+ * (`nodes/lib/repeatParams.ts`), and two conventions one directory apart would address ports
+ * that do not exist — visible only as a picker with an empty column list, which reads as a
+ * schema that has not arrived rather than as a bug.
+ */
+export function portIdAt(base: string, index: number): string {
+  return `${base}${index}`
+}
+
 function expandPort(template: PortDef, repeat: string, index: number): ResolvedPort {
   const base = template.label ?? template.id
   return {
     ...template,
-    id: `${template.id}${index}`,
+    id: portIdAt(template.id, index),
     label: base.includes('{n}') ? base.replaceAll('{n}', String(index)) : `${base} ${index}`,
-    group: { repeat, index },
+    group: { repeat, index, base: template.id },
   }
 }
 

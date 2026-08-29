@@ -375,7 +375,7 @@ emitting a `read_csv` against it. Recorded in [export.md](export.md); nothing is
 `matchTypes.ts` — declared to `MAX_DATASETS`, hidden past the count with `visibleIf`, the port id
 spelled once so `from` and `schemaFrom` cannot disagree. `Compare Connectivity` needs the same
 shape four times over (three pickers plus a name, over a *pair* group), so that is the moment to
-lift it into a `nodes/lib/repeatParams.ts` beside `limitParams.ts` — factored from two instances
+lift it into a `nodes/lib/repeatParams.ts` beside `limitParams.ts` — **built**, factored from two instances
 rather than guessed from one, which is the rule `limitParams.ts`'s own header states. Copying the
 loop instead is how the `from`/`schemaFrom` pairing comes apart, and a picker reading dataset 2's
 schema while resolving against dataset 3 shows an empty column list, which reads as a schema that
@@ -440,7 +440,7 @@ neither pairs a null with a null key. R's `match()` gets three of them right for
 only the text rule stated; pandas needs all four. Both are run rather than read — `probe:helpers`
 and `probe:r-helpers` execute the generated source out of the goldens, thirteen checks each.
 
-### `Compare Connectivity` — `compare.connectivity`
+### `Compare Connectivity` — `compare.connectivity` — **built**
 
 `category: 'analysis'`, `cost: 'cheap'` — a relabel and a group-by over already-fetched edges.
 The expensive nodes are upstream, which is what makes re-asking the question free.
@@ -466,8 +466,63 @@ needing no variadic ports here at all — and it was rejected because it forces 
 `Relabel` per dataset that decision 8 folds in. Revisit if variadic ports turn out worse than
 expected.
 
-`ctx.warn` when the datasets' totals over the shared label space differ by more than ~3×
-(decision 5). This number is a placeholder until somebody measures a real pair.
+`ctx.warn` when the datasets' totals over the shared label space differ by more than
+`EDGE_TOTAL_RATIO_WARN` (decision 5). **That number is 3 and it is conventional, not measured** —
+nobody has run the comparison that would set it, and the docstring says so rather than implying a
+finding. The reasoning for shipping it anyway: the warning's job is the *ratio it prints*, which
+is true whatever the threshold was, and the alternative of attributing on every run is a line
+people learn to skip. Three rather than two because real pairs differ by about that much for
+uninteresting reasons — hemibrain's volume truncates arbours FlyWire follows whole — so a floor of
+two would fire almost always.
+
+**Six things the build settled.**
+
+1. **`counts` is `label | dataset | nNeurons | outWeight | inWeight`**, not the single
+   `totalWeight` this record specified. One column cannot express two of the three normalisations
+   decision 5 names: input fraction needs the label's *incoming* total, and a column summed over
+   both ends double-counts every edge, which breaks global scaling too. Two columns cost nothing —
+   same rows, still a constant schema — and make all three a `Join` plus a `Combine Columns`,
+   which is what decision 5 promises. This is a departure from the design above, taken
+   deliberately.
+2. **`minWeight` drops a row only where *no* dataset reaches it.** Thresholding per dataset
+   suppresses a value into a `0` that then means "below the threshold" as well as "really
+   absent", and the column would need a third state to stay honest. As built, a pair carrying 1
+   in A and 40 in B survives its own threshold — which is the asymmetry somebody set one hoping
+   to see past, not the noise they meant to trim.
+3. **`comparison` is wide and `counts` is long, and that is the same trade made twice.** The
+   comparison's schema is *not* a constant — two columns per dataset, named after params — which
+   makes it the first node whose published schema is derived rather than declared, and invariant
+   3 has a real chance to fail. It is worth it because a comparison is read side by side. Nothing
+   in `counts` is, so that half gets the mapper's report treatment and stays constant.
+4. **Dataset names go through `uniqueName`.** Two datasets typed "A" would write one `weight_A`
+   key into `makeTable` and the second would win — a table with a column silently missing rather
+   than an error. `resolveDatasetNames` is exported for the emitters, `relabelTarget`'s reason.
+5. **The Labels id/label pickers are shared, not per dataset.** Every Labels table in one
+   comparison comes from the same `Match Cell Types` node, so they have the same two columns by
+   construction; four copies would be four chances to point one at a column the others lack, for
+   a case that cannot arise.
+6. **`repeatParams` enforces rather than documents.** Factored at the second consumer, as
+   recorded above — but two things it does are the point, and neither was in the plan. It takes
+   the arity **param object**, not a bare `max`: `registerNode` already refuses a group whose
+   repeat param lacks `min`/`max` because "the range lives on the param and nowhere else", and a
+   `max: MAX_DATASETS` argument would have put that copy back one directory over, where the drift
+   is silent in the worst direction (ports past the param range get no pickers at all). And the
+   builder names a *port base* rather than writing `from` and `schemaFrom` itself, so the two
+   cannot name different ports — a picker reading dataset 2's schema while resolving against
+   dataset 3 shows an empty column list, which reads as a schema that has not arrived. The first
+   draft only documented that rule; it now holds it.
+7. **`ResolvedPort.group` gained `base`.** This is the first group repeating a *tuple*, and the
+   first consumer immediately invented `port.id.startsWith('edges')` — a string-prefix test over
+   ids `core/ports.ts` says a body should never assemble, which would also match a later
+   `edgesExtra`. `expandPort` now carries the template's own id, so the filter is
+   `port.group.base === 'edges'`.
+8. **It exports, in both languages** — `coda_compare_connectivity`, fifteen probe checks each,
+   run against real pandas and real R out of the goldens. Emitting it is *unreachable* in the
+   common case, since `emit.ts` reports a node wired to an unemitted one as blocked and
+   `compare.matchTypes` has no emitter. Written anyway for two reasons: the Labels port takes any
+   table, so a hand-built mapping from `Upload Table` reaches this path today; and an excuse whose
+   only ground is another node's absence rots invisibly the moment that node gets the bundled CSV
+   [export.md](export.md) records.
 
 ## What L2b still needs
 

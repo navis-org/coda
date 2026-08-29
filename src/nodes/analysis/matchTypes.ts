@@ -33,7 +33,6 @@
 
 import { registerNode } from '../../core/registry'
 import { T } from '../../core/types'
-import type { CodaType } from '../../core/types'
 import {
   datasetRequest,
   requireDataset,
@@ -42,6 +41,7 @@ import {
   sourceSupports,
 } from '../lib/datasetParam'
 import { parseTypedLabels } from '../lib/labelLookup'
+import { repeatParamId, repeatParams } from '../lib/repeatParams'
 import type { LabelMode, MapperDataset } from '../lib/typeMapping'
 import {
   DEFAULT_NO_SPLIT_PREFIXES,
@@ -67,38 +67,50 @@ import {
  */
 const MAX_DATASETS = 4
 
-/** `types1`, `types2`, … — the per-dataset column picker paired with the port at that index. */
-function typesParamId(index: number): string {
-  return `types${index}`
-}
+/**
+ * The arity, declared once and handed to both the param list and `repeatParams`.
+ *
+ * `registerNode` reads the group's range off this object; so does the picker loop below. A bare
+ * `MAX_DATASETS` in the second place is the copy `registry.ts` removed from `PortGroupDef`.
+ */
+const datasetCountParam = {
+  id: 'datasetCount',
+  kind: 'int',
+  label: 'Datasets',
+  help: 'How many connectomes to map between. Two subtypes can stay distinct across two datasets and collapse when a third knows only the coarse label, so this is part of the question rather than a convenience.',
+  default: 2,
+  min: 2,
+  max: MAX_DATASETS,
+} as const
 
 /**
  * The per-dataset type-column pickers, declared to `MAX_DATASETS` and hidden past the count.
  *
- * Built in a loop rather than written out four times: the four differ only in their index, and
- * four hand-written copies is four places for `from:` and `schemaFrom:` to disagree about which
- * port they read.
+ * `repeatParams` supplies the id suffix, the port suffix and the `visibleIf` — see that module
+ * for what goes wrong without it. What is left here is the one picker itself, and the one rule
+ * this node has to keep: `from` and `schemaFrom` read `slot.port('dataset')`, the same call
+ * twice, because `from` says which port must be connected and `schemaFrom` says where the
+ * options come from — and a picker reading dataset 2's schema while resolving against dataset 3
+ * shows an empty column list, which reads as a schema that has not arrived rather than as a bug.
  */
-const typeColumnParams = Array.from({ length: MAX_DATASETS }, (_, i) => {
-  const index = i + 1
-  // Once, not twice: `from` says which port must be connected and `schemaFrom` says where the
-  // options come from, and a picker reading dataset 2's schema while resolving against dataset 3
-  // shows an empty column list — which reads as a schema that has not arrived, not as a bug.
-  const portId = `dataset${index}`
-  return {
-    id: typesParamId(index),
-    kind: 'columns' as const,
-    label: `Type columns ${index}`,
-    from: portId,
-    schemaFrom: (inputs: Readonly<Record<string, CodaType | undefined>>) =>
-      schemasFromType(inputs[portId]).neurons,
-    help: 'Every column naming a cell type, including the ones written in another dataset’s namespace — those cross-references are what the match is made of.',
-    default: [] as string[],
-    // Empty is refused by `validate` rather than by the picker, so the message can name which
-    // dataset is missing its columns instead of four identical "required" marks.
-    optional: true,
-    visibleIf: (params: Record<string, unknown>) => Number(params.datasetCount ?? 2) >= index,
-  }
+const typeColumnParams = repeatParams({
+  count: datasetCountParam,
+  build: (slot) => [
+    {
+      id: slot.id('types'),
+      kind: 'columns',
+      label: `Type columns ${slot.index}`,
+      // One base, from which `repeatParams` writes both `from` and `schemaFrom` — see that
+      // module for why the pair cannot be left to two hand-written strings.
+      fromPort: 'dataset',
+      schemaOf: (type) => schemasFromType(type).neurons,
+      help: 'Every column naming a cell type, including the ones written in another dataset’s namespace — those cross-references are what the match is made of.',
+      default: [] as string[],
+      // Empty is refused by `validate` rather than by the picker, so the message can name which
+      // dataset is missing its columns instead of four identical "required" marks.
+      optional: true,
+    },
+  ],
 })
 
 export const matchTypesNode = registerNode({
@@ -132,15 +144,7 @@ export const matchTypesNode = registerNode({
   ],
 
   params: [
-    {
-      id: 'datasetCount',
-      kind: 'int',
-      label: 'Datasets',
-      help: 'How many connectomes to map between. Two subtypes can stay distinct across two datasets and collapse when a third knows only the coarse label, so this is part of the question rather than a convenience.',
-      default: 2,
-      min: 2,
-      max: MAX_DATASETS,
-    },
+    datasetCountParam,
     ...typeColumnParams,
     {
       id: 'labelMode',
@@ -241,7 +245,7 @@ export const matchTypesNode = registerNode({
             `which is what matching types needs.`,
         )
       }
-      if (ctx.columns(typesParamId(index)).length === 0) {
+      if (ctx.columns(repeatParamId('types', index)).length === 0) {
         issues.push(`Dataset ${index}: pick at least one column holding cell types.`)
       }
     }
@@ -276,7 +280,7 @@ export const matchTypesNode = registerNode({
             `in — see the node's guide.`,
         )
       }
-      return { dataset, source, columns: ctx.columns(typesParamId(port.group!.index)) }
+      return { dataset, source, columns: ctx.columns(repeatParamId('types', port.group!.index)) }
     })
     const names = wanted.map(({ dataset }) => dataset.datasetId)
 

@@ -133,8 +133,13 @@ describe('expanding a port group', () => {
   })
 
   it('carries where each port came from, so a caller need not parse the id', () => {
+    /*
+     * `base` is the template's own id. It is what lets a group repeating a *tuple* say which of
+     * its ports this is — `port.group.base === 'edges'` — where the alternative is a
+     * `startsWith` on the resolved id, which also matches a later port sharing the prefix.
+     */
     const ports = inputPorts(match(), { count: 2 })
-    expect(ports[0]?.group).toEqual({ repeat: 'count', index: 1 })
+    expect(ports[0]?.group).toEqual({ repeat: 'count', index: 1, base: 'dataset' })
     expect(ports.at(-1)?.group).toBeUndefined()
   })
 

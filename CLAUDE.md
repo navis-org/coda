@@ -313,8 +313,9 @@ file, pulling all 620 kB back into every session and undoing the split.
 - [docs/comparative.md](docs/comparative.md) — comparative connectomics. The cell-type
   correspondence graph (cocoa's `GraphMapper`), type-level edge comparison, and neuron-level
   co-clustering. `Match Cell Types` is **built** (`nodes/analysis/matchTypes.ts` over
-  `nodes/lib/typeMapping.ts`) and so is `Relabel` (`nodes/table/relabel.ts` over
-  `tableOps.ts`); `Compare Connectivity` is not. Read before adding
+  `nodes/lib/typeMapping.ts`), `Relabel` (`nodes/table/relabel.ts` over `tableOps.ts`) and
+  `Compare Connectivity` (`nodes/analysis/compareConnectivity.ts` over
+  `nodes/lib/edgeComparison.ts`); only L2b co-clustering is left. Read before adding
   any node that puts two connectomes in one table — the qualified-id decision is recorded there,
   and why chaining a two-input mapper is a different computation rather than the same one twice.
 - [docs/annotations.md](docs/annotations.md) — labels that do not come from the

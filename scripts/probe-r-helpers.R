@@ -170,6 +170,92 @@ frac <- vector_for(coda_partner_vectors(edges, neurons = queries, weighting = "f
 check("vectors: fractions are per direction", isTRUE(all.equal(frac[["out:X"]], 0.4)))
 check("vectors: a lone feature in a direction is all of it", frac[["in:Y"]] == 1)
 
+# ---- coda_compare_connectivity ----------------------------------------------
+#
+# The rules checked here are the ones `merge(all = TRUE)` erases: a real zero against an unasked
+# question, a pool taken from the mapping rather than from the edges, and a threshold that drops
+# a row rather than a value. None is visible in the generated source.
+ce_a <- data.frame(preId = c("1", "7"), postId = c("3", "3"), weight = c(20, 4),
+                   stringsAsFactors = FALSE)
+ca_a <- data.frame(neuronId = c("1", "3", "7"), label = c("LC4", "DNp01", "LPLC1"),
+                   stringsAsFactors = FALSE)
+ce_b <- data.frame(preId = "11", postId = "13", weight = 6, stringsAsFactors = FALSE)
+ca_b <- data.frame(neuronId = c("11", "13"), label = c("LC4", "DNp01"),
+                   stringsAsFactors = FALSE)
+
+spec <- list(
+  list(name = "A", edges = ce_a, labels = ca_a, pre = "preId", post = "postId", weight = "weight"),
+  list(name = "B", edges = ce_b, labels = ca_b, pre = "preId", post = "postId", weight = "weight")
+)
+both <- coda_compare_connectivity(spec)
+cmp_ <- both$comparison
+cnt <- both$counts
+at <- function(df, pre) df[df$preLabel == pre, ][1, ]
+
+check("compare: the same connection side by side",
+      at(cmp_, "LC4")$weight_A == 20 && at(cmp_, "LC4")$weight_B == 6,
+      paste(at(cmp_, "LC4")$weight_A, at(cmp_, "LC4")$weight_B))
+check("compare: an unasked question is NA, not zero", is.na(at(cmp_, "LPLC1")$weight_B),
+      at(cmp_, "LPLC1")$weight_B)
+check("compare: and it says so in present", identical(at(cmp_, "LPLC1")$present_B, FALSE),
+      at(cmp_, "LPLC1")$present_B)
+check("compare: a dataset that could answer says present", identical(at(cmp_, "LC4")$present_B, TRUE),
+      at(cmp_, "LC4")$present_B)
+check("compare: the pool comes from the mapping, not the edges",
+      identical(at(cmp_, "LPLC1")$present_A, TRUE), at(cmp_, "LPLC1")$present_A)
+
+# A real absence: B holds both labels the other way round and has no LC4 to DNp01 edge.
+ca_c <- data.frame(neuronId = c("11", "13"), label = c("DNp01", "LC4"), stringsAsFactors = FALSE)
+cmp2 <- coda_compare_connectivity(list(
+  list(name = "A", edges = ce_a, labels = ca_a, pre = "preId", post = "postId", weight = "weight"),
+  list(name = "B", edges = ce_b, labels = ca_c, pre = "preId", post = "postId", weight = "weight")
+))$comparison
+zero <- cmp2[cmp2$preLabel == "LC4" & cmp2$postLabel == "DNp01", ][1, ]
+check("compare: a real absence is zero, not NA", zero$weight_B == 0, zero$weight_B)
+check("compare: a real absence is present", identical(zero$present_B, TRUE), zero$present_B)
+
+cmp3 <- coda_compare_connectivity(list(
+  list(name = "A", edges = ce_a, labels = ca_a, pre = "preId", post = "postId"),
+  list(name = "B", edges = ce_b, labels = ca_b, pre = "preId", post = "postId")
+))$comparison
+check("compare: no weight column counts one per row", at(cmp3, "LC4")$weight_A == 1,
+      at(cmp3, "LC4")$weight_A)
+
+dupes <- data.frame(neuronId = c("1", "1", "3"), label = c("LC4", "WRONG", "DNp01"),
+                    stringsAsFactors = FALSE)
+cmp4 <- coda_compare_connectivity(list(
+  list(name = "A", edges = ce_a, labels = dupes, pre = "preId", post = "postId", weight = "weight"),
+  list(name = "B", edges = ce_b, labels = ca_b, pre = "preId", post = "postId", weight = "weight")
+))$comparison
+check("compare: a repeated key resolves to the first row", !("WRONG" %in% cmp4$preLabel),
+      paste(cmp4$preLabel, collapse = ", "))
+
+cmp5 <- coda_compare_connectivity(spec, min_weight = 10)$comparison
+pairs5 <- paste(cmp5$preLabel, cmp5$postLabel)
+check("compare: min_weight keeps a pair any dataset reaches", "LC4 DNp01" %in% pairs5,
+      paste(pairs5, collapse = ", "))
+check("compare: min_weight drops a pair none reaches", !("LPLC1 DNp01" %in% pairs5),
+      paste(pairs5, collapse = ", "))
+
+cat_ <- function(label, ds) cnt[cnt$label == label & cnt$dataset == ds, ][1, ]
+check("counts: neurons are the ones the edges covered", cat_("DNp01", "A")$nNeurons == 1,
+      cat_("DNp01", "A")$nNeurons)
+check("counts: out and in are separate, so input fraction is expressible",
+      cat_("DNp01", "A")$outWeight == 0 && cat_("DNp01", "A")$inWeight == 24,
+      paste(cat_("DNp01", "A")$outWeight, cat_("DNp01", "A")$inWeight))
+check("counts: a dataset total is the sum of one column",
+      sum(cnt$outWeight[cnt$dataset == "A"]) == 24, sum(cnt$outWeight[cnt$dataset == "A"]))
+
+reciprocal <- data.frame(preId = c("1", "3"), postId = c("3", "1"), weight = c(5, 7),
+                         stringsAsFactors = FALSE)
+cnt2 <- coda_compare_connectivity(list(
+  list(name = "A", edges = reciprocal, labels = ca_a, pre = "preId", post = "postId", weight = "weight"),
+  list(name = "B", edges = ce_b, labels = ca_b, pre = "preId", post = "postId", weight = "weight")
+))$counts
+check("counts: a neuron at both ends is counted once",
+      cnt2$nNeurons[cnt2$label == "LC4" & cnt2$dataset == "A"] == 1,
+      cnt2$nNeurons[cnt2$label == "LC4" & cnt2$dataset == "A"])
+
 # ---- coda_relabel -----------------------------------------------------------
 #
 # `dplyr::recode` and a named vector are the obvious spellings and are a different operation

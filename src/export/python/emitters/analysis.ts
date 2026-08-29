@@ -15,6 +15,10 @@ import { meshCleanParamsFrom, skeletonCleanParamsFrom } from '../../../nodes/lib
 import { NM_PER_UM } from '../../../nodes/lib/nblastOps'
 import { effectiveOutput, isLongLayout } from '../../../nodes/lib/similarityOps'
 import type { SimilarityMetric, SimilarityOutput } from '../../../nodes/lib/similarityOps'
+import { portIdAt } from '../../../core/ports'
+import { compareParamsFrom } from '../../../nodes/lib/edgeComparison'
+import { repeatParamId } from '../../../nodes/lib/repeatParams'
+import { resolveDatasetNames } from '../../../nodes/analysis/compareConnectivity'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
 import { pySelection, selectionIds } from './common'
@@ -1331,5 +1335,60 @@ registerEmitter('core.similarity', (ctx) => {
     `    features=${pyStr(features!)},`,
     ...(value ? [`    value=${pyStr(value)},`] : []),
     ...tail,
+  ]
+})
+
+// ---------------------------------------------------------------------------
+// Compare Connectivity
+// ---------------------------------------------------------------------------
+
+/**
+ * Type-level edge comparison across datasets.
+ *
+ * The rules all live in `coda_compare_connectivity`, which is the same call this file's Relabel
+ * emitter makes one operation over and for the same reason: four of them are silent-wrong-answer
+ * rules, and inlining them per node would put four copies of each into a notebook with two
+ * comparisons in it.
+ *
+ * The dataset *names* come from `resolveDatasetNames`, the node's own function, rather than
+ * being re-read off the params here. They are the output's column names and they are
+ * deduplicated (invariant 3): two datasets typed "A" become `weight_A` and `weight_A_2`, and an
+ * emitter that re-derived that rule would name a column the canvas does not have.
+ *
+ * Blocked in practice today — the Labels sockets are normally fed by `compare.matchTypes`, which
+ * has no emitter, and `emit.ts` reports a node wired to an unemitted one as blocked before it
+ * reaches here. It is written anyway because the port takes any table: a hand-built mapping from
+ * `Upload Table` reaches this path now, and the bundled-CSV idea in `docs/export.md` would open
+ * the common one.
+ */
+registerEmitter('compare.connectivity', (ctx) => {
+  const spec = compareParamsFrom(ctx, resolveDatasetNames(ctx), repeatParamId)
+  const specs: string[] = []
+  for (const [i, columns] of spec.columns.entries()) {
+    const index = i + 1
+    if (!columns.pre || !columns.post) {
+      return ctx.todo(`Dataset ${index} of this Compare Connectivity has no pre or post column.`)
+    }
+    const entry = [
+      `'name': ${pyStr(spec.names[i]!)}`,
+      `'edges': ${ctx.wired(portIdAt('edges', index))}`,
+      `'labels': ${ctx.wired(portIdAt('labels', index))}`,
+      `'pre': ${pyStr(columns.pre)}`,
+      `'post': ${pyStr(columns.post)}`,
+      // Absent rather than empty: the helper reads a missing key as "count each row as one",
+      // which is what an unweighted edge list means.
+      ...(columns.weight ? [`'weight': ${pyStr(columns.weight)}`] : []),
+      `'id_column': ${pyStr(spec.idColumn)}`,
+      `'label_column': ${pyStr(spec.labelColumn)}`,
+    ]
+    specs.push(`    {${entry.join(', ')}},`)
+  }
+
+  ctx.require('pandas')
+  ctx.helper('coda_compare_connectivity')
+  return [
+    `${ctx.output('comparison')}, ${ctx.output('counts')} = coda_compare_connectivity([`,
+    ...specs,
+    `], min_weight=${spec.minWeight})`,
   ]
 })

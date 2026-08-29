@@ -9,6 +9,10 @@ import { LANDMARK_AXES, landmarkParamId } from '../../../nodes/transform/landmar
 import { matchParamsFrom } from '../../../nodes/lib/matchOps'
 import { effectiveOutput, isLongLayout } from '../../../nodes/lib/similarityOps'
 import type { SimilarityMetric, SimilarityOutput } from '../../../nodes/lib/similarityOps'
+import { portIdAt } from '../../../core/ports'
+import { compareParamsFrom } from '../../../nodes/lib/edgeComparison'
+import { repeatParamId } from '../../../nodes/lib/repeatParams'
+import { resolveDatasetNames } from '../../../nodes/analysis/compareConnectivity'
 import { registerEmitter, registerHelper } from '../registry'
 import type { EmitContext } from '../types'
 import { neuronIds, selectionIds } from './common'
@@ -1081,5 +1085,55 @@ registerEmitter('core.similarity', (ctx) => {
     `  features = ${rStr(features!)},`,
     ...(value ? [`  value = ${rStr(value)},`] : []),
     ...tail,
+  ]
+})
+
+// ---------------------------------------------------------------------------
+// Compare Connectivity
+// ---------------------------------------------------------------------------
+
+/**
+ * Type-level edge comparison across datasets. `coda_compare_connectivity` carries every rule —
+ * see the helper for which two base R gets right on its own and which two it does not.
+ *
+ * The dataset names come from `resolveDatasetNames`, the node's own function: they are the
+ * output's column names and they are deduplicated, so an emitter re-deriving that rule would
+ * name a column the canvas does not have.
+ *
+ * The helper returns a list, destructured here rather than inside it, so both output variables
+ * read as the node's two ports.
+ */
+registerEmitter('compare.connectivity', (ctx) => {
+  const spec = compareParamsFrom(ctx, resolveDatasetNames(ctx), repeatParamId)
+  const specs: string[] = []
+  for (const [i, columns] of spec.columns.entries()) {
+    const index = i + 1
+    if (!columns.pre || !columns.post) {
+      return ctx.todo(`Dataset ${index} of this Compare Connectivity has no pre or post column.`)
+    }
+    const entry = [
+      `name = ${rStr(spec.names[i]!)}`,
+      `edges = ${ctx.wired(portIdAt('edges', index))}`,
+      `labels = ${ctx.wired(portIdAt('labels', index))}`,
+      `pre = ${rStr(columns.pre)}`,
+      `post = ${rStr(columns.post)}`,
+      // Absent rather than empty: the helper reads a missing element as "one per row", which is
+      // what an unweighted edge list means.
+      ...(columns.weight ? [`weight = ${rStr(columns.weight)}`] : []),
+      `id_column = ${rStr(spec.idColumn)}`,
+      `label_column = ${rStr(spec.labelColumn)}`,
+    ]
+    specs.push(`  list(${entry.join(', ')})${index < spec.columns.length ? ',' : ''}`)
+  }
+
+  ctx.helper('coda_compare_connectivity')
+  // The house scratch-name idiom in this file, rather than a suffix on a user-visible output.
+  const cmp_ = `cmp_${ctx.output('comparison')}`
+  return [
+    `${cmp_} <- coda_compare_connectivity(list(`,
+    ...specs,
+    `), min_weight = ${spec.minWeight})`,
+    `${ctx.output('comparison')} <- ${cmp_}$comparison`,
+    `${ctx.output('counts')} <- ${cmp_}$counts`,
   ]
 })

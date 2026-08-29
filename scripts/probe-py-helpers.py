@@ -307,6 +307,80 @@ check('combine: source names the winner', src.iloc[0] == 'cell_type', str(src.il
 check('combine: source follows the blank rule', src.iloc[1] == 'hemibrain_type', str(src.iloc[1]))
 check('combine: no source where nothing won', pd.isna(src.iloc[3]), str(src.iloc[3]))
 
+# ---- coda_compare_connectivity, the L2a table --------------------------------
+#
+# Read out of the same cell. The rules checked here are the ones `merge(how="outer")` erases:
+# a real zero against an unasked question, a pool taken from the mapping rather than from the
+# edges, and a threshold that drops a row instead of a value. None of them is visible in the
+# generated source, and every one of them answers plausibly when wrong.
+ce_a = pd.DataFrame({'preId': ['1', '7'], 'postId': ['3', '3'], 'weight': [20, 4]})
+ca_a = pd.DataFrame({'neuronId': ['1', '3', '7'], 'label': ['LC4', 'DNp01', 'LPLC1']})
+ce_b = pd.DataFrame({'preId': ['11'], 'postId': ['13'], 'weight': [6]})
+ca_b = pd.DataFrame({'neuronId': ['11', '13'], 'label': ['LC4', 'DNp01']})
+
+spec = [
+    {'name': 'A', 'edges': ce_a, 'labels': ca_a, 'pre': 'preId', 'post': 'postId', 'weight': 'weight'},
+    {'name': 'B', 'edges': ce_b, 'labels': ca_b, 'pre': 'preId', 'post': 'postId', 'weight': 'weight'},
+]
+cmp_, cnt = cns['coda_compare_connectivity'](spec)
+row = lambda pre: cmp_[(cmp_['preLabel'] == pre)].iloc[0]
+
+check('compare: the same connection side by side', (row('LC4')['weight_A'], row('LC4')['weight_B']) == (20, 6), str(row('LC4').to_dict()))
+# B holds LPLC1 nowhere, so nothing was asked and a 0 would be a claim.
+check('compare: an unasked question is null, not zero', pd.isna(row('LPLC1')['weight_B']), str(row('LPLC1')['weight_B']))
+check('compare: and it says so in present', row('LPLC1')['present_B'] == False, str(row('LPLC1')['present_B']))
+check('compare: a dataset that could answer says present', row('LC4')['present_B'] == True, str(row('LC4')['present_B']))
+
+# A real absence: B knows both PLP001... it does not, so use a pair B *can* see and A cannot fill.
+ce_c = pd.DataFrame({'preId': ['11'], 'postId': ['13'], 'weight': [6]})
+ca_c = pd.DataFrame({'neuronId': ['11', '13'], 'label': ['DNp01', 'LC4']})
+cmp2, _ = cns['coda_compare_connectivity']([
+    {'name': 'A', 'edges': ce_a, 'labels': ca_a, 'pre': 'preId', 'post': 'postId', 'weight': 'weight'},
+    {'name': 'B', 'edges': ce_c, 'labels': ca_c, 'pre': 'preId', 'post': 'postId', 'weight': 'weight'},
+])
+zero = cmp2[(cmp2['preLabel'] == 'LC4') & (cmp2['postLabel'] == 'DNp01')].iloc[0]
+check('compare: a real absence is zero, not null', zero['weight_B'] == 0, str(zero['weight_B']))
+check('compare: a real absence is present', zero['present_B'] == True, str(zero['present_B']))
+
+# The pool is the mapping's: LPLC1 is in A's labels and touches nothing in the *other* direction.
+check('compare: the pool comes from the mapping, not the edges', row('LPLC1')['present_A'] == True, str(row('LPLC1')['present_A']))
+
+# One per row where no weight column is named.
+cmp3, _ = cns['coda_compare_connectivity']([
+    {'name': 'A', 'edges': ce_a, 'labels': ca_a, 'pre': 'preId', 'post': 'postId'},
+    {'name': 'B', 'edges': ce_b, 'labels': ca_b, 'pre': 'preId', 'post': 'postId'},
+])
+check('compare: no weight column counts one per row', cmp3[cmp3['preLabel'] == 'LC4'].iloc[0]['weight_A'] == 1, str(cmp3.iloc[0].to_dict()))
+
+# A repeated key resolves to the first row, where dict(zip(...)) keeps the last.
+dupes = pd.DataFrame({'neuronId': ['1', '1', '3'], 'label': ['LC4', 'WRONG', 'DNp01']})
+cmp4, _ = cns['coda_compare_connectivity']([
+    {'name': 'A', 'edges': ce_a, 'labels': dupes, 'pre': 'preId', 'post': 'postId', 'weight': 'weight'},
+    {'name': 'B', 'edges': ce_b, 'labels': ca_b, 'pre': 'preId', 'post': 'postId', 'weight': 'weight'},
+])
+check('compare: a repeated key resolves to the first row', 'WRONG' not in set(cmp4['preLabel']), str(sorted(set(cmp4['preLabel']))))
+
+# min_weight drops a row only where no dataset reaches it, so an asymmetry outlives its threshold.
+cmp5, _ = cns['coda_compare_connectivity'](spec, min_weight=10)
+kept = set(zip(cmp5['preLabel'], cmp5['postLabel']))
+check('compare: min_weight keeps a pair any dataset reaches', ('LC4', 'DNp01') in kept, str(kept))
+check('compare: min_weight drops a pair none reaches', ('LPLC1', 'DNp01') not in kept, str(kept))
+
+# counts: neurons this edge list covered, and the two directional totals.
+at = lambda label, ds: cnt[(cnt['label'] == label) & (cnt['dataset'] == ds)].iloc[0]
+check('counts: neurons are the ones the edges covered', int(at('DNp01', 'A')['nNeurons']) == 1, str(at('DNp01', 'A').to_dict()))
+check('counts: out and in are separate, so input fraction is expressible', (at('DNp01', 'A')['outWeight'], at('DNp01', 'A')['inWeight']) == (0, 24), str(at('DNp01', 'A').to_dict()))
+check('counts: a dataset total is the sum of one column, not half of a combined one', cnt[cnt['dataset'] == 'A']['outWeight'].sum() == 24, str(cnt[cnt['dataset'] == 'A']['outWeight'].sum()))
+
+# A neuron at both ends is one neuron, not two.
+both = pd.DataFrame({'preId': ['1', '3'], 'postId': ['3', '1'], 'weight': [5, 7]})
+_, cnt2 = cns['coda_compare_connectivity']([
+    {'name': 'A', 'edges': both, 'labels': ca_a, 'pre': 'preId', 'post': 'postId', 'weight': 'weight'},
+    {'name': 'B', 'edges': ce_b, 'labels': ca_b, 'pre': 'preId', 'post': 'postId', 'weight': 'weight'},
+])
+lc4 = cnt2[(cnt2['label'] == 'LC4') & (cnt2['dataset'] == 'A')].iloc[0]
+check('counts: a neuron at both ends is counted once', int(lc4['nNeurons']) == 1, str(lc4.to_dict()))
+
 # ---- coda_relabel, one column through a mapping table ------------------------
 #
 # Read out of the same cell. The obvious spelling — `.map(dict(zip(k, v)))` — is a different

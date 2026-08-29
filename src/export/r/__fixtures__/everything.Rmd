@@ -45,6 +45,89 @@ coda_combine <- function(df, columns, source = FALSE) {
 }
 
 
+#' A column as Coda's match keys — `rowKey`'s rule, one language over.
+coda_match_keys <- function(x) {
+  # A JS boolean prints lower case; everything else is as.character already.
+  if (is.logical(x)) return(ifelse(is.na(x), NA_character_, tolower(as.character(x))))
+  as.character(x)
+}
+
+
+#' Per label: the neurons this edge list covered, and the weight out of and into it.
+.coda_label_totals <- function(frame, name) {
+  ends_label <- c(frame$preLabel, frame$postLabel)
+  ends_id <- c(frame$idPre, frame$idPost)
+  labels <- unique(ends_label)
+  # Vectorised rather than a pass per label. `sum(frame$w[frame$preLabel == l])` inside a
+  # loop over labels is a full-length comparison each time, i.e. quadratic: measured at
+  # 116s for a million edges over ten thousand labels, against 1.35s for this.
+  # A union over both ends: two distinct-counts added together count a neuron twice.
+  uniq <- !duplicated(paste(ends_label, ends_id, sep = "\u0001"))
+  n <- tabulate(match(ends_label[uniq], labels), length(labels))
+  out <- tapply(frame$w, factor(frame$preLabel, levels = labels), sum)
+  into <- tapply(frame$w, factor(frame$postLabel, levels = labels), sum)
+  out[is.na(out)] <- 0; into[is.na(into)] <- 0
+  data.frame(label = labels, dataset = name, nNeurons = n,
+             outWeight = as.numeric(out), inWeight = as.numeric(into),
+             stringsAsFactors = FALSE, row.names = NULL)
+}
+
+#' Coda's Compare Connectivity: one type-to-type edge, counted in each dataset.
+coda_compare_connectivity <- function(datasets, min_weight = 0) {
+  summed <- list(); pools <- list(); counts <- list()
+  for (d in datasets) {
+    id_col <- if (is.null(d$id_column)) "neuronId" else d$id_column
+    lab_col <- if (is.null(d$label_column)) "label" else d$label_column
+    keys <- coda_match_keys(d$labels[[id_col]])
+    vals <- as.character(d$labels[[lab_col]])
+    # First occurrence wins, and a blank label is no label.
+    keep <- !duplicated(keys) & !is.na(keys) & !is.na(vals) & vals != ""
+    lookup <- stats::setNames(vals[keep], keys[keep])
+    idPre <- coda_match_keys(d$edges[[d$pre]])
+    idPost <- coda_match_keys(d$edges[[d$post]])
+    w <- if (is.null(d$weight)) rep(1, nrow(d$edges)) else as.numeric(d$edges[[d$weight]])
+    pre <- unname(lookup[idPre]); post <- unname(lookup[idPost])
+    # An edge with an unlabelled end has no place in a label-level comparison.
+    ok <- !is.na(pre) & !is.na(post)
+    frame <- data.frame(preLabel = pre[ok], postLabel = post[ok], idPre = idPre[ok],
+                        idPost = idPost[ok], w = w[ok], stringsAsFactors = FALSE)
+    key <- paste(frame$preLabel, frame$postLabel, sep = "\u0001")
+    summed[[d$name]] <- tapply(frame$w, key, sum)
+    # The mapping's labels, not the edges' — see the note above.
+    pools[[d$name]] <- unname(lookup)
+    counts[[d$name]] <- .coda_label_totals(frame, d$name)
+  }
+
+  # First-appearance order across the datasets.
+  keys <- unique(unlist(lapply(summed, names), use.names = FALSE))
+  # A row survives where *any* dataset reaches the threshold, so an asymmetry outlives it.
+  # One vectorised index per dataset, never one per key: `s[k]` on a named vector re-hashes
+  # the whole names vector, measured at 36s for 20,000 lookups into a million names.
+  reached <- logical(length(keys))
+  for (n in names(summed)) {
+    v <- unname(summed[[n]][keys])
+    reached <- reached | (!is.na(v) & v >= min_weight)
+  }
+  keys <- keys[reached]
+  parts <- strsplit(keys, "\u0001", fixed = TRUE)
+  out <- data.frame(preLabel = vapply(parts, `[`, character(1), 1),
+                    postLabel = vapply(parts, `[`, character(1), 2),
+                    stringsAsFactors = FALSE)
+  present <- lapply(names(summed), function(n)
+    out$preLabel %in% pools[[n]] & out$postLabel %in% pools[[n]])
+  names(present) <- names(summed)
+  for (n in names(summed)) {
+    got <- unname(summed[[n]][keys])
+    # 0 where the dataset holds both labels and has no such edge — a real absence — and NA
+    # where it holds neither, because then nothing was asked.
+    got[is.na(got) & present[[n]]] <- 0
+    out[[paste0("weight_", n)]] <- got
+  }
+  for (n in names(summed)) out[[paste0("present_", n)]] <- present[[n]]
+  list(comparison = out, counts = do.call(rbind, unname(counts)))
+}
+
+
 coda_describe <- function(df) {
   # The zero-row template is rbound in ahead of the rows, which fixes the column order and
   # the types -- and answers a frame with no columns at all, where `do.call(rbind, list())`
@@ -360,14 +443,6 @@ coda_profile <- function(ids, min_weight = 1, top_n = 10, conn) {
     regions = roi,
     primary_rois = primary
   )
-}
-
-
-#' A column as Coda's match keys — `rowKey`'s rule, one language over.
-coda_match_keys <- function(x) {
-  # A JS boolean prints lower case; everything else is as.character already.
-  if (is.logical(x)) return(ifelse(is.na(x), NA_character_, tolower(as.character(x))))
-  as.character(x)
 }
 
 
@@ -1278,6 +1353,16 @@ stack_neurons <- bind_rows(
 ```{r relabel}
 # ── Relabel ──
 relabel <- coda_relabel(find_neurons, "type", combine_columns, "type", "label", into = "shared", unmatched = "keep")
+```
+
+```{r compare-connectivity}
+# ── Compare Connectivity ──
+cmp_compare_connectivity_comparison <- coda_compare_connectivity(list(
+  list(name = "flywire", edges = connectivity, labels = combine_columns, pre = "preId", post = "postId", weight = "weight", id_column = "neuronId", label_column = "label"),
+  list(name = "hemibrain", edges = connectivity_2, labels = combine_columns, pre = "preId", post = "postId", id_column = "neuronId", label_column = "label")
+), min_weight = 2)
+compare_connectivity_comparison <- cmp_compare_connectivity_comparison$comparison
+compare_connectivity_counts <- cmp_compare_connectivity_comparison$counts
 ```
 
 ```{r sort-df}

@@ -445,6 +445,34 @@ export function everythingGraph(): CodaGraph {
         unmatched: 'drop',
       },
     },
+    /*
+     * A comparison over two synthetic "datasets", which is what the everything graph can offer:
+     * the Labels sockets take any table, so the coalesce output stands in for a mapping. That is
+     * not a workflow anybody would build — coverage is the job — but it is the only route by
+     * which `coda_compare_connectivity` reaches a golden, where the probes can actually run it.
+     */
+    {
+      id: 'compare',
+      type: 'compare.connectivity',
+      col: 7,
+      row: 1,
+      params: {
+        datasetCount: 2,
+        name1: 'flywire',
+        pre1: 'preId',
+        post1: 'postId',
+        weight1: 'weight',
+        name2: 'hemibrain',
+        pre2: 'preId',
+        post2: 'postId',
+        // Empty on purpose: the second dataset counts one per row, which is the branch that
+        // leaves `weight` out of the emitted spec entirely.
+        weight2: '',
+        idColumn: 'neuronId',
+        labelColumn: 'label',
+        minWeight: 2,
+      },
+    },
     {
       id: 'stack',
       type: 'core.stack',
@@ -937,6 +965,10 @@ export function everythingGraph(): CodaGraph {
     ['combine', 'out', 'relabel', 'map'],
     ['dedupe', 'out', 'relabelDrop', 'in'],
     ['combine', 'out', 'relabelDrop', 'map'],
+    ['conn', 'connections', 'compare', 'edges1'],
+    ['combine', 'out', 'compare', 'labels1'],
+    ['conn2', 'connections', 'compare', 'edges2'],
+    ['combine', 'out', 'compare', 'labels2'],
     ['stack', 'out', 'pivot', 'in'],
     ['pivot', 'matrix', 'norm', 'in'],
     ['norm', 'out', 'heat', 'in'],
