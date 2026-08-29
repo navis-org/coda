@@ -363,6 +363,33 @@ coda_profile <- function(ids, min_weight = 1, top_n = 10, conn) {
 }
 
 
+#' A column as Coda's match keys — `rowKey`'s rule, one language over.
+coda_match_keys <- function(x) {
+  # A JS boolean prints lower case; everything else is as.character already.
+  if (is.logical(x)) return(ifelse(is.na(x), NA_character_, tolower(as.character(x))))
+  as.character(x)
+}
+
+
+#' Rewrite `column` by looking each value up in `mapping`. Coda's Relabel node.
+coda_relabel <- function(df, column, mapping, key, value, into = NULL,
+                         unmatched = "null") {
+  # `match` takes the first of a repeated key and pairs NA with NA, both of which are
+  # Coda's rules; `miss` is what tells 'no match' from 'mapped to nothing'.
+  idx <- match(coda_match_keys(df[[column]]), coda_match_keys(mapping[[key]]))
+  miss <- is.na(idx)
+  values <- mapping[[value]][idx]
+  if (unmatched == "keep") {
+    values[miss] <- df[[column]][miss]
+  } else if (unmatched == "drop") {
+    df <- df[!miss, , drop = FALSE]
+    values <- values[!miss]
+  }
+  df[[if (is.null(into) || into == "") column else into]] <- values
+  df
+}
+
+
 .coda_u32 <- function(x) x %% 4294967296
 
 .coda_xor32 <- function(a, b) {
@@ -1248,6 +1275,11 @@ stack_neurons <- bind_rows(
 # implementation Coda ran.
 ```
 
+```{r relabel}
+# ── Relabel ──
+relabel <- coda_relabel(find_neurons, "type", combine_columns, "type", "label", into = "shared", unmatched = "keep")
+```
+
 ```{r sort-df}
 # ── Sort ──
 sort_df <- filter_df |> arrange(desc(`weight`))
@@ -1451,6 +1483,11 @@ clusters_to_neurons <- find_neurons |>
 group_by_df_2 <- deduplicate |>
   group_by(`preType`, `postType`) |>
   summarise(n = n(), `sum_weight` = sum(`weight`), .groups = "drop")
+```
+
+```{r relabel-2}
+# ── Relabel ──
+relabel_2 <- coda_relabel(deduplicate, "preType", combine_columns, "type", "label", into = "preType", unmatched = "drop")
 ```
 
 ```{r selected-to-neurons}

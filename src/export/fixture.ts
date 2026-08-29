@@ -412,6 +412,39 @@ export function everythingGraph(): CodaGraph {
       row: 2,
       params: { leftKey: 'preType', rightKey: 'postType', how: 'right', suffix: '_r' },
     },
+    /*
+     * Two Relabels, because the branches that differ are the *target column* and `unmatched`,
+     * and one node reaches one of each. The first appends under a name and puts the original
+     * back where the mapping said nothing; the second rewrites in place and drops those rows —
+     * so the golden carries both spellings of a helper call whose arguments are the whole
+     * operation. `null`, the default and the third mode, is what `probe-py-helpers.py` runs.
+     */
+    {
+      id: 'relabel',
+      type: 'core.relabel',
+      col: 5,
+      row: 1,
+      params: {
+        column: 'type',
+        keyColumn: 'type',
+        valueColumn: 'label',
+        into: 'shared',
+        unmatched: 'keep',
+      },
+    },
+    {
+      id: 'relabelDrop',
+      type: 'core.relabel',
+      col: 6,
+      row: 1,
+      params: {
+        column: 'preType',
+        keyColumn: 'type',
+        valueColumn: 'label',
+        into: '',
+        unmatched: 'drop',
+      },
+    },
     {
       id: 'stack',
       type: 'core.stack',
@@ -900,6 +933,10 @@ export function everythingGraph(): CodaGraph {
     ['conn2', 'connections', 'pvecId', 'in'],
     ['pvec', 'out', 'simil', 'in'],
     ['roi', 'counts', 'similWide', 'in'],
+    ['find', 'neurons', 'relabel', 'in'],
+    ['combine', 'out', 'relabel', 'map'],
+    ['dedupe', 'out', 'relabelDrop', 'in'],
+    ['combine', 'out', 'relabelDrop', 'map'],
     ['stack', 'out', 'pivot', 'in'],
     ['pivot', 'matrix', 'norm', 'in'],
     ['norm', 'out', 'heat', 'in'],

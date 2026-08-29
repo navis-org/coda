@@ -8,7 +8,12 @@
 
 import { isNumericDType } from '../../../core/types'
 import type { AggFn } from '../../../nodes/lib/tableOps'
-import { aggColumnName, combineLayout, renameMapping } from '../../../nodes/lib/tableOps'
+import {
+  aggColumnName,
+  combineLayout,
+  relabelTarget,
+  renameMapping,
+} from '../../../nodes/lib/tableOps'
 import { decodeRenames } from '../../../nodes/lib/renames'
 import { rCol, rStr, rValue, rVector } from '../r'
 import { STACK_LABELS } from '../../../nodes/transform/stackNeurons'
@@ -247,6 +252,38 @@ registerEmitter('core.combineColumns', (ctx) => {
     )
   }
   return lines
+})
+
+// ---------------------------------------------------------------------------
+// Relabel
+// ---------------------------------------------------------------------------
+
+/**
+ * One column rewritten through a mapping table. `coda_relabel` carries every rule — see the
+ * helper for which of them base R gets wrong, and `emitters/table.ts` in Python for the same
+ * call one language over.
+ *
+ * The target name is `relabelTarget`'s, not the helper's fallback: `df[[name]] <- ...`
+ * overwrites a column of that name where Coda suffixes.
+ */
+registerEmitter('core.relabel', (ctx) => {
+  const src = ctx.wired('in')
+  const map = ctx.wired('map')
+  const column = ctx.column('column')
+  const keyColumn = ctx.column('keyColumn')
+  const valueColumn = ctx.column('valueColumn')
+  if (!column || !keyColumn || !valueColumn) {
+    return ctx.todo('This Relabel has no column chosen on one side.')
+  }
+
+  ctx.helper('coda_relabel')
+  const out = ctx.output('out')
+  const unmatched = String(ctx.params.unmatched ?? 'null')
+  const target = relabelTarget(ctx.schema('in'), column, String(ctx.params.into ?? ''))
+  return [
+    `${out} <- coda_relabel(${src}, ${rStr(column)}, ${map}, ${rStr(keyColumn)}, ` +
+      `${rStr(valueColumn)}, into = ${rStr(target)}, unmatched = ${rStr(unmatched)})`,
+  ]
 })
 
 // ---------------------------------------------------------------------------

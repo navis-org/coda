@@ -17,6 +17,9 @@ import {
   groupByTable,
   joinSchema,
   joinTables,
+  relabelSchema,
+  relabelTable,
+  relabelTarget,
   renameMapping,
   renameSchema,
   renameTable,
@@ -1139,5 +1142,136 @@ describe('the join aggregation', () => {
     expect(AGG_OPTIONS.map((o) => o.value)).toContain('join')
     expect(NUMERIC_AGG_OPTIONS.map((o) => o.value)).not.toContain('join')
     expect(NUMERIC_AGG_OPTIONS.length).toBe(AGG_OPTIONS.length - 1)
+  })
+})
+
+describe('relabel', () => {
+  /** A connectivity-ish table whose `preType` is what a mapping rewrites. */
+  const EDGES = tableSchema(column('preType', 'str'), column('weight', 'i64', 'synapses'))
+  const edges = () =>
+    tableFromRows(EDGES, [
+      { preType: 'LC4', weight: 30 },
+      { preType: 'LPLC1', weight: 20 },
+      { preType: 'DNp01', weight: 10 },
+      { preType: null, weight: 5 },
+    ])
+
+  const MAP = tableSchema(column('from', 'str'), column('to', 'str'))
+  const mapping = () =>
+    tableFromRows(MAP, [
+      { from: 'LC4', to: 'LC4_LC6' },
+      { from: 'LPLC1', to: 'LPLC1' },
+    ])
+
+  const spec = (over: Partial<Parameters<typeof relabelTable>[2]> = {}) => ({
+    column: 'preType',
+    keyColumn: 'from',
+    valueColumn: 'to',
+    unmatched: 'null' as const,
+    ...over,
+  })
+
+  it('rewrites in place and leaves an unmatched value empty', () => {
+    const out = relabelTable(edges(), mapping(), spec())
+    expect(out.data.preType).toEqual(['LC4_LC6', 'LPLC1', null, null])
+    expect(out.length).toBe(4)
+    // Everything else rides along untouched, which is what makes this not a Select.
+    expect(out.data.weight).toEqual([30, 20, 10, 5])
+  })
+
+  it('keeps the original where asked, and widens the column when the two dtypes differ', () => {
+    const out = relabelTable(edges(), mapping(), spec({ unmatched: 'keep' }))
+    expect(out.data.preType).toEqual(['LC4_LC6', 'LPLC1', 'DNp01', null])
+
+    // The case that decides the dtype: numbers put back into a column of text.
+    const numeric = tableSchema(column('from', 'str'), column('cluster', 'i64'))
+    const numbers = tableFromRows(numeric, [{ from: 'LC4', cluster: 7 }])
+    const kept = relabelTable(edges(), numbers, spec({ valueColumn: 'cluster', unmatched: 'keep' }))
+    expectSchemaAgreement(relabelSchema(EDGES, numeric, spec({ valueColumn: 'cluster', unmatched: 'keep' })), kept)
+    expect(kept.schema.columns[0]!.dtype).toBe('str')
+    // …and where nothing is put back, the column simply *is* the mapping's values.
+    const nulled = relabelTable(edges(), numbers, spec({ valueColumn: 'cluster' }))
+    expect(nulled.schema.columns[0]!.dtype).toBe('i64')
+    expect(nulled.data.preType).toEqual([7, null, null, null])
+  })
+
+  it('drops the rows it could not map, every column together', () => {
+    const out = relabelTable(edges(), mapping(), spec({ unmatched: 'drop' }))
+    expect(out.data.preType).toEqual(['LC4_LC6', 'LPLC1'])
+    expect(out.data.weight).toEqual([30, 20])
+    expect(out.length).toBe(2)
+  })
+
+  it('appends when given a name, and suffixes rather than overwriting a column that exists', () => {
+    const out = relabelTable(edges(), mapping(), spec({ into: 'label' }))
+    expect(columnNames(out.schema)).toEqual(['preType', 'weight', 'label'])
+    expect(out.data.preType).toEqual(['LC4', 'LPLC1', 'DNp01', null])
+    expect(out.data.label).toEqual(['LC4_LC6', 'LPLC1', null, null])
+
+    // A name the table already has is the newcomer's problem, never the incumbent's.
+    const clash = relabelTable(edges(), mapping(), spec({ into: 'weight' }))
+    expect(columnNames(clash.schema)).toEqual(['preType', 'weight', 'weight_2'])
+    expect(clash.data.weight).toEqual([30, 20, 10, 5])
+
+    // Except the column's own name, which means what leaving the field empty means.
+    expect(relabelTarget(EDGES, 'preType', 'preType')).toBe('preType')
+    expect(columnNames(relabelTable(edges(), mapping(), spec({ into: 'preType' })).schema)).toEqual([
+      'preType',
+      'weight',
+    ])
+  })
+
+  it('uses a repeated key once and never multiplies rows', () => {
+    const repeated = tableFromRows(MAP, [
+      { from: 'LC4', to: 'first' },
+      { from: 'LC4', to: 'second' },
+    ])
+    const out = relabelTable(edges(), repeated, spec())
+    expect(out.length).toBe(4)
+    expect(out.data.preType?.[0]).toBe('first')
+  })
+
+  it('matches as text, so a number and its text are one key', () => {
+    // `rowKey`'s rule, and the reason a Relabel and a Join cannot disagree about a key.
+    const numeric = tableSchema(column('id', 'i64'), column('weight', 'i64'))
+    const table = tableFromRows(numeric, [{ id: 42, weight: 1 }])
+    const text = tableFromRows(MAP, [{ from: '42', to: 'answer' }])
+    const out = relabelTable(table, text, spec({ column: 'id' }))
+    expect(out.data.id).toEqual(['answer'])
+  })
+
+  it('treats a null as its own key rather than as a value that matches nothing', () => {
+    const withNull = tableFromRows(MAP, [{ from: null, to: 'untyped' }])
+    const out = relabelTable(edges(), withNull, spec())
+    expect(out.data.preType).toEqual([null, null, null, 'untyped'])
+  })
+
+  it('carries the unit only where every value came from the mapping', () => {
+    const measured = tableSchema(column('from', 'str'), column('length', 'f64', 'nm'))
+    const lengths = tableFromRows(measured, [{ from: 'LC4', length: 1200 }])
+    const mapped = relabelSchema(EDGES, measured, spec({ valueColumn: 'length' }))
+    expect(mapped!.columns[0]).toEqual(column('preType', 'f64', 'nm'))
+    // With `keep`, half the column is type names — nanometres would be a claim about those too.
+    const kept = relabelSchema(EDGES, measured, spec({ valueColumn: 'length', unmatched: 'keep' }))
+    expect(kept!.columns[0]).toEqual(column('preType', 'str'))
+    expectSchemaAgreement(mapped, relabelTable(edges(), lengths, spec({ valueColumn: 'length' })))
+  })
+
+  it('passes the schema through rather than blanking it while a picker is unresolved', () => {
+    // A schema that has not arrived is not a schema without these columns in it — the rule
+    // `resolveColumn` keeps, and blanking it here empties every picker downstream.
+    expect(relabelSchema(EDGES, undefined, spec())).toEqual(EDGES)
+    expect(relabelSchema(EDGES, MAP, spec({ column: '' }))).toEqual(EDGES)
+    expect(relabelSchema(undefined, MAP, spec())).toBeUndefined()
+  })
+
+  it('keeps a neuron table a neuron table', () => {
+    const neurons = tableFromRows(EDGES, [{ preType: 'LC4', weight: 1 }], 'neurons')
+    expect(relabelTable(neurons, mapping(), spec()).kind).toBe('neurons')
+  })
+
+  it('refuses a column it was told to use and cannot find', () => {
+    expect(() => relabelTable(edges(), mapping(), spec({ keyColumn: 'gone' }))).toThrow(/gone/)
+    expect(() => relabelTable(edges(), mapping(), spec({ column: 'gone' }))).toThrow(/gone/)
   })
 })

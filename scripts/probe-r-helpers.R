@@ -170,6 +170,53 @@ frac <- vector_for(coda_partner_vectors(edges, neurons = queries, weighting = "f
 check("vectors: fractions are per direction", isTRUE(all.equal(frac[["out:X"]], 0.4)))
 check("vectors: a lone feature in a direction is all of it", frac[["in:Y"]] == 1)
 
+# ---- coda_relabel -----------------------------------------------------------
+#
+# `dplyr::recode` and a named vector are the obvious spellings and are a different operation
+# three ways, each answering plausibly rather than erroring: a named vector keeps the *last* of a
+# repeated key, neither can tell "no match" from "mapped to nothing", and neither can carry an NA
+# name. `match()` gets all three right, which is exactly the claim worth executing.
+rdf <- data.frame(
+  preType = c("LC4", "DNp01", NA, "12"),
+  weight = c(30, 10, 5, 1),
+  stringsAsFactors = FALSE
+)
+mdf <- data.frame(
+  from = c("LC4", "LC4", NA, "12"),
+  to = c("LC4_LC6", "second", "untyped", "twelve"),
+  stringsAsFactors = FALSE
+)
+
+rnull <- coda_relabel(rdf, "preType", mdf, "from", "to")
+check("relabel: the default leaves an unmapped value empty", is.na(rnull$preType[2]), rnull$preType[2])
+check("relabel: a repeated key is used once, first winning", rnull$preType[1] == "LC4_LC6", rnull$preType[1])
+check("relabel: a null is its own key", rnull$preType[3] == "untyped", rnull$preType[3])
+check("relabel: rows are never multiplied", nrow(rnull) == 4L, nrow(rnull))
+check("relabel: other columns ride along", identical(rnull$weight, c(30, 10, 5, 1)), paste(rnull$weight))
+
+# A numeric column against a text key: Coda matches on the text of both.
+ndf <- data.frame(cluster = c(12, 99), stringsAsFactors = FALSE)
+rnum <- coda_relabel(ndf, "cluster", mdf, "from", "to")
+check("relabel: matched as text, so a number and its text are one key", rnum$cluster[1] == "twelve", rnum$cluster[1])
+
+rkeep <- coda_relabel(rdf, "preType", mdf, "from", "to", unmatched = "keep")
+check("relabel: keep puts the original back", rkeep$preType[2] == "DNp01", rkeep$preType[2])
+check("relabel: keep does not touch what matched", rkeep$preType[1] == "LC4_LC6", rkeep$preType[1])
+
+rdrop <- coda_relabel(rdf, "preType", mdf, "from", "to", unmatched = "drop")
+check("relabel: drop removes the unmatched row", nrow(rdrop) == 3L, nrow(rdrop))
+check("relabel: drop takes the whole row with it", identical(rdrop$weight, c(30, 5, 1)), paste(rdrop$weight))
+
+rinto <- coda_relabel(rdf, "preType", mdf, "from", "to", into = "label")
+check("relabel: a name appends rather than rewriting", identical(names(rinto), c("preType", "weight", "label")), paste(names(rinto)))
+check("relabel: the original column is left alone", rinto$preType[1] == "LC4", rinto$preType[1])
+
+# A JS boolean prints lower case, which is the one line `coda_match_keys` adds to as.character.
+bdf <- data.frame(flag = c(TRUE, FALSE), stringsAsFactors = FALSE)
+bmap <- data.frame(from = c("true", "false"), to = c("yes", "no"), stringsAsFactors = FALSE)
+rbool <- coda_relabel(bdf, "flag", bmap, "from", "to")
+check("relabel: a boolean matches its JavaScript text", identical(rbool$flag, c("yes", "no")), paste(rbool$flag))
+
 # ---- coda_similarity --------------------------------------------------------
 #
 # Checked against `stats::dist` on the dense form rather than against numbers typed in here:

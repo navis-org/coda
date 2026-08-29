@@ -17,6 +17,7 @@ import { formatBytes, refuseIfOverCrashFloor, warnOverThreshold } from '../../co
 import type { ColumnSchema, DType, TableSchema } from '../../core/types'
 import {
   column,
+  columnNames,
   findColumn,
   isNumericDType,
   pickColumns,
@@ -1528,6 +1529,194 @@ export function joinTables(left: TableValue, right: TableValue, spec: JoinSpec):
    * Neurons socket or did not.
    */
   return makeTable({ columns }, data, left.kind)
+}
+
+// ---------------------------------------------------------------------------
+// Relabel
+// ---------------------------------------------------------------------------
+
+/** What happens to a row whose value the mapping does not cover. */
+export type UnmatchedMode = 'null' | 'keep' | 'drop'
+
+export const UNMATCHED_OPTIONS: Array<{ value: UnmatchedMode; label: string }> = [
+  { value: 'null', label: 'leave empty' },
+  { value: 'keep', label: 'keep the original value' },
+  { value: 'drop', label: 'drop the row' },
+]
+
+export interface RelabelSpec {
+  /** The column of the table being rewritten. */
+  column: string
+  /** The mapping table's key column, matched against `column`. */
+  keyColumn: string
+  /** The mapping table's value column, the replacement. */
+  valueColumn: string
+  /** A new column to write into, or empty to rewrite `column` in place. */
+  into?: string
+  unmatched: UnmatchedMode
+}
+
+/**
+ * The column the mapped values land in: `spec.column` rewritten in place, or the typed `into`
+ * deduplicated against the table's own names.
+ *
+ * Exported for the exporters, `combineLayout`'s reason: pandas' `df[name] = ...` and R's
+ * `df[[name]] <- ...` both *overwrite* a column of that name, where this node suffixes — so an
+ * emitter reconstructing the rule would be a second copy of it, and the two would disagree
+ * exactly where somebody typed a name the table already has.
+ *
+ * Two arguments rather than a `RelabelSpec`, which is `keepsUnmatchedRight(how)`'s shape one op
+ * over and for its reason: an emitter has raw params, not a spec, so a spec-shaped parameter
+ * makes both of them fabricate three fields this cannot read and cast the result past the
+ * `UnmatchedMode` check — which is where a fourth mode would arrive unnoticed.
+ */
+export function relabelTarget(
+  schema: TableSchema | undefined,
+  column: string,
+  into: string | undefined,
+): string {
+  const name = into?.trim() ?? ''
+  // Typing the column's own name means in place, `combineTable`'s rule — "naming one of the
+  // columns you picked backfills it" — rather than the `column_2` that suffixing would give
+  // somebody who spelled out what the empty field already means.
+  if (!name || name === column) return column
+  // Any *other* existing name is suffixed rather than taking that column's place: overwriting a
+  // column somebody did not name in this node is not a thing to do quietly.
+  return uniqueName(new Set(columnNames(schema)), name)
+}
+
+interface RelabelLayout {
+  columns: ColumnSchema[]
+  /** The column the mapped values land in — `spec.column`, or the deduplicated `into`. */
+  target: string
+}
+
+/**
+ * The columns a relabel publishes, and where the new values go.
+ *
+ * One function behind both halves, `joinLayout`'s arrangement and for its reason: the dtype
+ * rule below is stated once rather than agreed on twice (invariant 3).
+ *
+ * The dtype is the *mapping's* value column, not the original's — relabelling a `str` type
+ * name through a map of cluster numbers gives a column of numbers, and saying otherwise
+ * empties every numeric picker downstream. `keep` is the exception, because it puts original
+ * values back into the same column: that pair is reconciled by `mergedDType`, the stack's
+ * rule, falling back to text exactly as `joinKeyDType` does. The unit rides along only where
+ * the column is made *entirely* of mapped values, since a half-mapped column measured in the
+ * map's unit is a claim about rows that never went through it.
+ */
+function relabelLayout(
+  schema: TableSchema,
+  mapSchema: TableSchema,
+  spec: RelabelSpec,
+): RelabelLayout | undefined {
+  const source = findColumn(schema, spec.column)
+  const value = findColumn(mapSchema, spec.valueColumn)
+  if (!source || !value) return undefined
+  const keeps = spec.unmatched === 'keep'
+  const dtype = keeps ? (mergedDType(source.dtype, value.dtype) ?? 'str') : value.dtype
+  const unit = keeps ? undefined : value.unit
+  const target = relabelTarget(schema, spec.column, spec.into)
+  if (target === source.name) {
+    return {
+      columns: schema.columns.map((c) =>
+        c.name === source.name ? column(c.name, dtype, unit) : c,
+      ),
+      target,
+    }
+  }
+  return { columns: [...schema.columns, column(target, dtype, unit)], target }
+}
+
+/**
+ * Relabelling publishes the input's columns with one rewritten, or one appended.
+ *
+ * Unresolved pickers pass the schema straight through rather than answering `undefined`: at
+ * edit time an unset picker is overwhelmingly a schema that has not arrived yet, and blanking
+ * the whole downstream column list on it is the failure `resolveColumn` exists to avoid.
+ */
+export function relabelSchema(
+  schema: TableSchema | undefined,
+  mapSchema: TableSchema | undefined,
+  spec: RelabelSpec,
+): TableSchema | undefined {
+  if (!schema) return undefined
+  if (!mapSchema) return schema
+  const layout = relabelLayout(schema, mapSchema, spec)
+  return layout ? { columns: layout.columns } : schema
+}
+
+/**
+ * Rewrite one column through a two-column mapping table.
+ *
+ * ## Matching is textual, and that is where a wide id has already been lost
+ *
+ * Keys go through `rowKey`, this file's one cell rule, so a Relabel and a Join cannot come to
+ * disagree about whether two nulls are the same key. The mapper's `Labels` output carries
+ * `neuronId` as `str` — [invariant 8](invariants.md) — while an edge list fetched as `i64`
+ * carries a *float64*, so an eighteen-digit CAVE root id has already become a different number
+ * before it reaches this function. Nothing here can undo that, and the node's `validate` says
+ * so rather than letting it read as a mapping with holes in it.
+ *
+ * ## Duplicate keys annotate; they never multiply
+ *
+ * First occurrence wins, `joinTables`' rule and for the same reason: a mapping table with a
+ * repeated key is a mapping that disagrees with itself, and multiplying rows over it is never
+ * what anybody meant by "relabel".
+ *
+ * ## `unmatched` is the whole design
+ *
+ * `null` is the default at the node, not `keep`. Keeping an unmapped value leaves raw type
+ * names sitting in a column of shared labels, where they look exactly like matched ones — the
+ * failure comparative connectomics exists to avoid. `keep` is right for a deliberately partial
+ * mapping, and `drop` is cocoa's `ignore_unlabeled=True`.
+ */
+export function relabelTable(table: TableValue, map: TableValue, spec: RelabelSpec): TableValue {
+  if (!findColumn(table.schema, spec.column)) {
+    throw new Error(`Column "${spec.column}" not found`)
+  }
+  if (!findColumn(map.schema, spec.keyColumn)) {
+    throw new Error(`Mapping key column "${spec.keyColumn}" not found`)
+  }
+  if (!findColumn(map.schema, spec.valueColumn)) {
+    throw new Error(`Mapping value column "${spec.valueColumn}" not found`)
+  }
+  const layout = relabelLayout(table.schema, map.schema, spec)!
+
+  // `firstByKey`, which is `joinTables`' index rather than a second statement of its rule: a
+  // disagreement between the two would be a different row *content* with nothing to raise.
+  const keyColumns = [getColumn(map, spec.keyColumn)]
+  const lookup = firstByKey(keyColumns, map.length)
+  const values = getColumn(map, spec.valueColumn)
+
+  // The one-element wrappers are hoisted rather than written at the call: `rowKey` takes 1..n
+  // columns here and in three other ops, so once it is polymorphic the literal is an allocation
+  // per row — 165,000 of them on a whole-brain index.
+  const sourceColumns = [getColumn(table, spec.column)]
+  const source = sourceColumns[0]!
+  const mapped: ColumnData = new Array(table.length)
+  // Only `drop` ever reads this, so only `drop` pays for it.
+  const kept: number[] | undefined = spec.unmatched === 'drop' ? [] : undefined
+  for (let row = 0; row < table.length; row++) {
+    // One hash of the key, not two: `firstByKey` stores a row index, and a row index is never
+    // `undefined` where the key is present.
+    const hit = lookup.get(rowKey(sourceColumns, row))
+    if (hit !== undefined) mapped[row] = values[hit] ?? null
+    else if (kept) continue
+    else mapped[row] = spec.unmatched === 'keep' ? (source[row] ?? null) : null
+    kept?.push(row)
+  }
+
+  // Untouched columns are handed over by reference — `renameTable`'s note: columns are immutable
+  // by contract, and a relabel over a 165,000-row index has no business copying the fifteen
+  // columns it did not touch. Where rows *were* dropped, `selectRows` is the gather every other
+  // row-dropping op in this file ends in, so this one is not a fifth hand-written copy of it.
+  const data: Record<string, ColumnData> = {}
+  for (const col of layout.columns) {
+    data[col.name] = col.name === layout.target ? mapped : table.data[col.name]!
+  }
+  const whole = makeTable({ columns: layout.columns }, data, table.kind)
+  return kept && kept.length !== table.length ? selectRows(whole, kept) : whole
 }
 
 // ---------------------------------------------------------------------------

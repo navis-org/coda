@@ -307,6 +307,43 @@ check('combine: source names the winner', src.iloc[0] == 'cell_type', str(src.il
 check('combine: source follows the blank rule', src.iloc[1] == 'hemibrain_type', str(src.iloc[1]))
 check('combine: no source where nothing won', pd.isna(src.iloc[3]), str(src.iloc[3]))
 
+# ---- coda_relabel, one column through a mapping table ------------------------
+#
+# Read out of the same cell. The obvious spelling — `.map(dict(zip(k, v)))` — is a different
+# operation four ways and every one of them answers plausibly rather than raising: a repeated key
+# resolves to the *last* value, "no match" is indistinguishable from "mapped to nothing", the
+# match is on pandas' dtypes rather than on text, and a null matches nothing at all. All four are
+# checked here, because none of them is visible in the generated source.
+rf = pd.DataFrame({'preType': ['LC4', 'DNp01', None, 12], 'weight': [30, 10, 5, 1]})
+mf = pd.DataFrame({'from': ['LC4', 'LC4', None, '12'], 'to': ['LC4_LC6', 'second', 'untyped', 'twelve']})
+
+null_ = cns['coda_relabel'](rf, 'preType', mf, 'from', 'to')
+check('relabel: the default leaves an unmapped value empty', pd.isna(null_['preType'].iloc[1]), str(null_['preType'].iloc[1]))
+check('relabel: a repeated key is used once, first winning', null_['preType'].iloc[0] == 'LC4_LC6', str(null_['preType'].iloc[0]))
+check('relabel: a null is its own key', null_['preType'].iloc[2] == 'untyped', str(null_['preType'].iloc[2]))
+# The int64/object seam: the frame holds 12 and the mapping holds "12". Coda matches as text.
+check('relabel: matched as text, so a number and its text are one key', null_['preType'].iloc[3] == 'twelve', str(null_['preType'].iloc[3]))
+check('relabel: rows are never multiplied', len(null_) == 4, str(len(null_)))
+check('relabel: other columns ride along', list(null_['weight']) == [30, 10, 5, 1], str(list(null_['weight'])))
+
+kept = cns['coda_relabel'](rf, 'preType', mf, 'from', 'to', unmatched='keep')
+check('relabel: keep puts the original back', kept['preType'].iloc[1] == 'DNp01', str(kept['preType'].iloc[1]))
+check('relabel: keep does not touch what matched', kept['preType'].iloc[0] == 'LC4_LC6', str(kept['preType'].iloc[0]))
+
+dropped = cns['coda_relabel'](rf, 'preType', mf, 'from', 'to', unmatched='drop')
+check('relabel: drop removes the unmatched row', len(dropped) == 3, str(len(dropped)))
+check('relabel: drop takes the whole row with it', list(dropped['weight']) == [30, 5, 1], str(list(dropped['weight'])))
+
+appended = cns['coda_relabel'](rf, 'preType', mf, 'from', 'to', into='label')
+check('relabel: a name appends rather than rewriting', list(appended.columns) == ['preType', 'weight', 'label'], str(list(appended.columns)))
+check('relabel: the original column is left alone', appended['preType'].iloc[0] == 'LC4', str(appended['preType'].iloc[0]))
+
+# A float column is what an i64 column with one null becomes, and `str(3.0)` is not `String(3)`.
+ff = pd.DataFrame({'cluster': [3.0, float('nan')]})
+fm = pd.DataFrame({'from': ['3'], 'to': ['three']})
+floats = cns['coda_relabel'](ff, 'cluster', fm, 'from', 'to')
+check('relabel: a whole float matches its integer text', floats['cluster'].iloc[0] == 'three', str(floats['cluster'].iloc[0]))
+
 # ---- coda_join, the `join` aggregation --------------------------------------
 #
 # Read out of the same cell. `', '.join(...)` is the obvious spelling and is a different rule

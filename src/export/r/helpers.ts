@@ -142,6 +142,63 @@ registerHelper({
 })
 
 /**
+ * Coda's Relabel node, in R.
+ *
+ * `dplyr::recode` and a named vector are the obvious spellings and are a different operation
+ * three ways, each producing a plausible wrong column rather than an error: a named vector keeps
+ * the **last** of a repeated key where Coda keeps the first, neither can tell "mapped to nothing"
+ * from "not in the mapping" — the distinction `unmatched` is entirely about — and a named vector
+ * cannot carry an `NA` name at all, where Coda pairs a null with a null key.
+ *
+ * `match()` gets all three right on its own, and gets the fourth for free: it returns the *first*
+ * index, `is.na(idx)` is exactly "not in the mapping", and it pairs `NA` with `NA`. The rule this
+ * *does* have to state is the text one — `coda_match_keys`, `rowKey` one language over. Only one
+ * line of it differs from `as.character`, and it is the case R prints in the other case from
+ * JavaScript: `TRUE` against `true`. The wide-id case has no fix here and needs none — R has no
+ * 64-bit integer, so an id that arrived as a numeric was already a different neuron (invariant 8),
+ * which is what the node warns about on the canvas.
+ *
+ * `keep` widens as R does: assigning a character into a numeric vector coerces the whole vector,
+ * which is the same widening `relabelLayout` publishes.
+ */
+registerHelper({
+  name: 'coda_match_keys',
+  source: [
+    "#' A column as Coda's match keys — `rowKey`'s rule, one language over.",
+    'coda_match_keys <- function(x) {',
+    '  # A JS boolean prints lower case; everything else is as.character already.',
+    '  if (is.logical(x)) return(ifelse(is.na(x), NA_character_, tolower(as.character(x))))',
+    '  as.character(x)',
+    '}',
+  ],
+})
+
+/** Coda's Relabel node. `coda_match_keys` above carries the match rule. */
+registerHelper({
+  name: 'coda_relabel',
+  needs: ['coda_match_keys'],
+  source: [
+    "#' Rewrite `column` by looking each value up in `mapping`. Coda's Relabel node.",
+    'coda_relabel <- function(df, column, mapping, key, value, into = NULL,',
+    '                         unmatched = "null") {',
+    '  # `match` takes the first of a repeated key and pairs NA with NA, both of which are',
+    "  # Coda's rules; `miss` is what tells 'no match' from 'mapped to nothing'.",
+    '  idx <- match(coda_match_keys(df[[column]]), coda_match_keys(mapping[[key]]))',
+    '  miss <- is.na(idx)',
+    '  values <- mapping[[value]][idx]',
+    '  if (unmatched == "keep") {',
+    '    values[miss] <- df[[column]][miss]',
+    '  } else if (unmatched == "drop") {',
+    '    df <- df[!miss, , drop = FALSE]',
+    '    values <- values[!miss]',
+    '  }',
+    '  df[[if (is.null(into) || into == "") column else into]] <- values',
+    '  df',
+    '}',
+  ],
+})
+
+/**
  * Coda's `join` aggregation, in R.
  *
  * `paste(x, collapse = "; ")` is the obvious spelling and keeps an `NA` — as the literal two

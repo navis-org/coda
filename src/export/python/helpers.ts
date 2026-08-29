@@ -149,6 +149,78 @@ registerHelper({
 })
 
 /**
+ * Coda's Relabel node, and the match rule under it.
+ *
+ * `df[column].map(dict(zip(mapping[key], mapping[value])))` is the obvious spelling and is a
+ * different operation four ways, each of which produces a plausible wrong column rather than an
+ * error. `zip` into a dict keeps the **last** value for a repeated key where Coda keeps the
+ * first. `.map` cannot tell "mapped to nothing" from "not in the mapping", which is exactly the
+ * distinction `unmatched` is about. It matches on the values as pandas typed them, where Coda
+ * matches on their text — so an `int64` key column and an `object` one silently agree on nothing.
+ * And a null in the relabelled column would match no key at all, where Coda pairs it with a null
+ * key.
+ *
+ * The last two are `coda_match_keys`, which is a helper of its own rather than two functions in
+ * one `source`: it is `rowKey`'s rule one language over — the rule Dedupe, Group By and Join all
+ * share in TypeScript — so the next helper that needs it should `needs` it rather than copy it.
+ * `registerHelper` de-duplicates on the *helper* name and not on the function names inside a
+ * `source`, so a second registration carrying its own copy would emit both definitions into one
+ * cell and let the later one win, silently.
+ */
+registerHelper({
+  name: 'coda_match_keys',
+  requires: [['pandas'], ['numpy']],
+  source: [
+    'def coda_match_keys(s):',
+    '    """A column as Coda\'s match keys — `rowKey`\'s rule, one language over."""',
+    '    def key(v):',
+    '        if pd.isna(v):',
+    "            return '\\x00'  # a null is its own key, never a value that matches nothing",
+    '        if isinstance(v, (bool, np.bool_)):',
+    "            return 'true' if v else 'false'",
+    '        if isinstance(v, float) and float(v).is_integer():',
+    '            return str(int(v))  # a JS number has no float/int distinction to print',
+    '        return str(v)',
+    '    return s.map(key)',
+  ],
+})
+
+/**
+ * Coda's Relabel node. `coda_match_keys` above carries the match rule.
+ *
+ * Two of that function's lines exist because a JS number is not a Python one: `String(3)` is
+ * `'3'` where a column pandas typed `float64` — which is what an `i64` column with one null
+ * becomes — prints `'3.0'`, and a JS boolean prints lower case. Its null sentinel is `rowKey`'s
+ * own `\x00`, written as an escape for that function's stated reason: a literal control
+ * character is invisible to every reader.
+ */
+registerHelper({
+  name: 'coda_relabel',
+  requires: [['pandas']],
+  needs: ['coda_match_keys'],
+  source: [
+    "def coda_relabel(df, column, mapping, key, value, into=None, unmatched='null'):",
+    '    """Rewrite `column` by looking each value up in `mapping`. Coda\'s Relabel node."""',
+    '    keys = coda_match_keys(mapping[key])',
+    '    # First occurrence wins, and rows are never multiplied — Coda\'s rule, and `Join`\'s.',
+    '    first = ~keys.duplicated()',
+    '    lookup = dict(zip(keys[first], mapping[value][first]))',
+    '    probe = coda_match_keys(df[column])',
+    '    hit = probe.isin(lookup.keys())',
+    '    values = probe.map(lookup)',
+    "    if unmatched == 'keep':",
+    '        values = values.where(hit, df[column])',
+    "    elif unmatched == 'drop':",
+    '        # Narrowed before the copy, not after: the mode meant to shrink the frame has no',
+    '        # business materialising the whole of it first.',
+    '        df, values = df[hit.values], values[hit.values]',
+    '    out = df.copy()',
+    '    out[into or column] = values',
+    '    return out',
+  ],
+})
+
+/**
  * Coda's `join` aggregation.
  *
  * `', '.join(...)` is the obvious spelling and is a different rule four ways: it raises on a

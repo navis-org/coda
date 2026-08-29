@@ -381,9 +381,13 @@ loop instead is how the `from`/`schemaFrom` pairing comes apart, and a picker re
 schema while resolving against dataset 3 shows an empty column list, which reads as a schema that
 has not arrived rather than as a bug.
 
-### `Relabel` — `core.relabel`
+### `Relabel` — `core.relabel` — **built**
 
 `category: 'transform'`, `cost: 'cheap'`. A table, a mapping table, one column rewritten.
+`nodes/table/relabel.ts` over `relabelSchema`/`relabelTable` in `nodes/lib/tableOps.ts`, which
+is where it went rather than into a module of its own: it is a key lookup into a second table,
+which is `joinTables`' shape, and the `*Schema`/`*Table` discipline this needs is that file's
+whole subject.
 
 | | |
 | --- | --- |
@@ -396,7 +400,45 @@ All column params resolve through `ctx.column()` — [invariant 5](invariants.md
 partial mapping; `null` marks it as not-corresponded, which is right when downstream must not
 confuse "unmapped" with "mapped to itself"; `drop` removes the row, which is cocoa's
 `ignore_unlabeled=True`. Defaulting to `keep` would silently mix raw type names into a shared
-label space, where they look exactly like successfully-matched labels. **Default to `null`.**
+label space, where they look exactly like successfully-matched labels. **Default to `null`**, and
+`relabel.test.ts` asserts that default rather than letting a later tidy-up read it as arbitrary.
+
+**Five things the build settled**, each of which is a way to be wrong that answers plausibly:
+
+1. **The mapping's value column decides the dtype, not the original's.** Relabelling a `str` type
+   name through a table of cluster numbers gives a column of *numbers* — say otherwise and every
+   numeric picker downstream is empty after a run, which is invariant 3's failure exactly.
+   `unmatched: 'keep'` is the one case that widens, because it puts originals back in beside the
+   mapped values; the pair goes through `mergedDType`, the stack's rule, falling back to text.
+   The unit rides along only where the column is made *entirely* of mapped values.
+2. **Matching is textual**, through `rowKey` rather than a second spelling of it — so a Relabel
+   and a Join cannot come to disagree about whether two null-keyed rows are the same row. It
+   follows that a null in the relabelled column pairs with a null key rather than matching
+   nothing, and that a number and its text are one key. What it does *not* fix is
+   [invariant 8](invariants.md): the mapper publishes `neuronId` as `str`, and a table carrying
+   ids as `i64` carries float64s in which a wide CAVE root id stopped being itself upstream. The
+   node's `validate` says so, because otherwise it reads as a mapping with holes in it.
+3. **A repeated key is used once, first winning** — `joinTables`' rule, and for its reason: a
+   mapping that disagrees with itself is not grounds to multiply rows.
+4. **The result name is `relabelTarget`'s**, exported for the emitters rather than reconstructed
+   by them: pandas' `df[name] = …` and R's `df[[name]] <- …` both *overwrite* a column of that
+   name where this node suffixes. Typing the relabelled column's *own* name is the exception and
+   means in place — `combineTable`'s rule, rather than the `type_2` that suffixing would hand
+   somebody who spelled out what the empty field already means.
+5. **It refuses at run time rather than passing the table through.** Unlike an `out.*` viewer —
+   invariant 5's corollary — a Relabel that relabels nothing is a wire that silently stopped
+   doing its job, so unset pickers throw. Reachable only before the schemas arrive, since
+   `resolveColumn` falls back to a first column once there is one to fall back to; the two
+   pickers' declared defaults (`neuronId`, `label`) are aimed at the mapper's `Labels` output for
+   that reason, or both would resolve to the same first column of a two-column table.
+
+**It exports, and that is the difference from `Match Cell Types`.** `coda_relabel` in both
+languages, because all four rules above are ones the obvious spelling gets wrong while still
+answering: `dict(zip(k, v))` keeps the **last** of a repeated key, `.map`/`recode` cannot tell "no
+match" from "mapped to nothing", both match on the library's dtypes rather than on text, and
+neither pairs a null with a null key. R's `match()` gets three of them right for free and needs
+only the text rule stated; pandas needs all four. Both are run rather than read — `probe:helpers`
+and `probe:r-helpers` execute the generated source out of the goldens, thirteen checks each.
 
 ### `Compare Connectivity` — `compare.connectivity`
 

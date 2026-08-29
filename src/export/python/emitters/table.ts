@@ -21,6 +21,7 @@ import {
   aggColumnName,
   combineLayout,
   keepsUnmatchedRight,
+  relabelTarget,
   renameMapping,
 } from '../../../nodes/lib/tableOps'
 import { decodeRenames } from '../../../nodes/lib/renames'
@@ -253,6 +254,44 @@ registerEmitter('core.combineColumns', (ctx) => {
     lines.push(`${out}[${pyStr(name)}] = coda_combine(${src}, ${pyList(columns)}, source=True)`)
   }
   return lines
+})
+
+// ---------------------------------------------------------------------------
+// Relabel
+// ---------------------------------------------------------------------------
+
+/**
+ * One column rewritten through a mapping table.
+ *
+ * Every rule of it is inside `coda_relabel` rather than spelled out here, which is the opposite
+ * of this file's usual standard and is deliberate: four of them are silent-wrong-answer rules —
+ * first key wins, text matching, a null as its own key, "no match" told apart from "mapped to
+ * nothing" — and inlining four `.where` clauses per Relabel node would put four copies of each
+ * into a notebook with several. `coda_combine`'s call, one operation over.
+ *
+ * The one thing left here is the target name, taken from `relabelTarget` rather than written as
+ * `into or column`: pandas would *overwrite* a column the typed name collides with, where Coda
+ * suffixes. The helper's own `into or column` is the fallback for somebody calling it by hand.
+ */
+registerEmitter('core.relabel', (ctx) => {
+  const src = ctx.wired('in')
+  const map = ctx.wired('map')
+  const column = ctx.column('column')
+  const keyColumn = ctx.column('keyColumn')
+  const valueColumn = ctx.column('valueColumn')
+  if (!column || !keyColumn || !valueColumn) {
+    return ctx.todo('This Relabel has no column chosen on one side.')
+  }
+
+  ctx.require('pandas')
+  ctx.helper('coda_relabel')
+  const out = ctx.output('out')
+  const unmatched = String(ctx.params.unmatched ?? 'null')
+  const target = relabelTarget(ctx.schema('in'), column, String(ctx.params.into ?? ''))
+  return [
+    `${out} = coda_relabel(${src}, ${pyStr(column)}, ${map}, ${pyStr(keyColumn)}, ` +
+      `${pyStr(valueColumn)}, into=${pyStr(target)}, unmatched=${pyStr(unmatched)})`,
+  ]
 })
 
 // ---------------------------------------------------------------------------

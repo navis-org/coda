@@ -907,6 +907,47 @@ column; the Python emitter never did, so any join whose keys were named differen
 notebook with an extra column the canvas did not have. It was invisible because the fixture's
 only Join used the same name on both sides — which is why the fixture now carries three.
 
+## Relabel: the third way to combine two tables
+
+`core.relabel`, `Add ▸ Transform ▸ Relabel`. `Join` widens a table with columns from another and
+`Stack Tables` lengthens one with rows from another; this rewrites **values** in one column,
+one lookup per row, and changes neither the row count nor the column count unless asked to.
+
+It exists for [comparative connectomics](comparative.md) — a cross-dataset cell-type mapping is a
+two-column table and applying one is exactly this — and `Compare Connectivity` will do the same
+thing *internally* rather than demanding one of these upstream per dataset. It ships as a node
+anyway because the co-clustering path has to relabel the feature axis of a Partner Vectors table,
+and a second private spelling of one operation is how two callers come to disagree about what a
+repeated key means.
+
+**`Unmatched` is the parameter to read, and its default is the design.** A value the mapping does
+not cover can be left empty, kept as it was, or have its row dropped, and the default is
+**empty**. Keeping it is the friendlier-looking choice and the wrong one: an unmapped `LC4`
+sitting in a column of cross-dataset labels is indistinguishable from one the mapper matched, and
+every count downstream is then a count of two different things. `drop` is cocoa's
+`ignore_unlabeled=True`.
+
+Four rules that the obvious spelling in either language gets wrong while still answering:
+
+- **The mapping's value column decides the dtype**, not the column being rewritten — relabelling
+  type names through a table of cluster numbers gives numbers. `keep` is the exception, since it
+  puts originals back in beside the mapped values; that pair widens through `mergedDType` exactly
+  as a stack does, and the unit only rides along where every value came from the mapping.
+- **A repeated key is used once, first winning.** Rows are never multiplied, which is `Join`'s
+  rule and for `Join`'s reason.
+- **Matching is textual**, through `rowKey` — the same cell rule `Join` and `Deduplicate` use, so
+  a number and its text are one key and a null is its own key rather than a value that matches
+  nothing. It does not rescue a wide neuron id that arrived as `i64`: that is a float64 and
+  stopped being itself before it got here ([invariant 8](invariants.md)), which the card warns
+  about because it otherwise reads as a mapping with holes in it.
+- **A `Result` name the table already carries is suffixed**, never overwritten — except the
+  relabelled column's own name, which means what leaving the field empty means.
+
+Both emitters call a generated `coda_relabel` rather than inlining any of that, which is the
+opposite of this area's usual standard and is why: four `.where` clauses per node, in a notebook
+with several Relabels, is four copies of each rule. `probe:helpers` and `probe:r-helpers` execute
+the generated source out of the goldens, so the rules are checked by running them.
+
 ## Stack Tables: the vertical Join
 
 `core.stack`, `Add ▸ Transform ▸ Stack Tables`. `Join` widens a table with columns from another;
