@@ -18,11 +18,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import type { ColorSpec, SizeSpec } from '../../nodes/lib/encodingParams'
+import type { ColorSpec, ShapeSpec, SizeSpec } from '../../nodes/lib/encodingParams'
+import { writeOverrides } from '../../nodes/lib/encodingParams'
 import { rowKeys } from '../../nodes/lib/rowIds'
 import type { TableValue } from '../../core/values'
 import { CHART_INK, chartSurface, currentMode } from '../colors'
-import { resolveColor, resolveSize } from '../encoding'
+import type { MarkerShape } from '../encoding'
+import { resolveColor, resolveShape, resolveSize } from '../encoding'
 import { exportBaseName as makeBaseName, tableToCsvParts } from '../export'
 import { formatCell, formatCompact, formatNumber, plural } from '../format'
 import { ColorKey, ShapeKey, SizeKey } from './LegendKeys'
@@ -35,7 +37,6 @@ import {
   cellNumber,
   equaliseAspect,
   rectPolygon,
-  resolveShape,
   rowsInPolygon,
   unprojectX,
   unprojectY,
@@ -56,7 +57,13 @@ export interface ScatterViewerProps {
   aspect: 'fit' | 'equal'
   color: ColorSpec
   size: SizeSpec
-  shapeColumn?: string
+  shape: ShapeSpec
+  /**
+   * Write a param back, which is how a legend pin survives a rerender.
+   *
+   * Only the shape key uses it — the colour key here is still inert, as it is on the network.
+   */
+  onParamChange?: ((paramId: string, value: string) => void) | undefined
   labelColumn?: string
   /** How a selected point is named downstream. Undefined means the row index. */
   idColumn?: string
@@ -110,7 +117,8 @@ export function ScatterViewer({
   aspect,
   color,
   size,
-  shapeColumn,
+  shape,
+  onParamChange,
   labelColumn,
   idColumn,
   opacity,
@@ -169,10 +177,8 @@ export function ScatterViewer({
     [table, stableColor, mode],
   )
   const sizes = useMemo(() => resolveSize(table, stableSize), [table, stableSize])
-  const shapes = useMemo(
-    () => resolveShape(shapeColumn ? table.data[shapeColumn] : undefined, shapeColumn),
-    [table, shapeColumn],
-  )
+  const stableShape = useStable(shape)
+  const shapes = useMemo(() => resolveShape(table, stableShape), [table, stableShape])
 
   // --- framing -----------------------------------------------------------
   /*
@@ -211,7 +217,7 @@ export function ScatterViewer({
       style: {
         colorAt: colors.at,
         radiusAt: sizes.at,
-        shapeAt: shapes ? shapes.shapeAt : () => 'circle',
+        shapeAt: shapes.at,
       },
     })
   }, [
@@ -431,8 +437,10 @@ export function ScatterViewer({
     if (legend?.kind === 'categorical') {
       for (const entry of legend.entries) items.push({ label: entry.label, color: entry.color })
     }
-    if (shapes) {
-      for (const entry of shapes.entries) items.push({ label: entry.label, shape: entry.shape })
+    if (shapes.legend) {
+      for (const entry of shapes.legend.entries) {
+        items.push({ label: entry.label, shape: entry.shape })
+      }
     }
     return items
   }, [colors.legend, shapes])
@@ -611,20 +619,37 @@ export function ScatterViewer({
               )}
             </div>
           )}
-          {shapeColumn && shapeColumn !== stableColor.column && (
+          {shapes.legend && shapes.legend.column !== stableColor.column && (
             <div className="chart-tooltip__row">
-              {shapeColumn}:{' '}
-              {formatCell(table.data[shapeColumn]?.[hoveredRow] ?? null, shapeColumn)}
+              {shapes.legend.column}:{' '}
+              {formatCell(
+                table.data[shapes.legend.column]?.[hoveredRow] ?? null,
+                shapes.legend.column,
+              )}
             </div>
           )}
         </div>
       )}
 
-      {(colors.legend || shapes || (!compact && sizes.domain)) && (
+      {(colors.legend || shapes.legend || (!compact && sizes.domain)) && (
         <div className="legend">
           <ColorKey colors={colors} />
           {!compact && <SizeKey channel={{ spec: stableSize, resolved: sizes }} name="size" />}
-          {shapes && <ShapeKey column={shapes.column} entries={shapes.entries} />}
+          {shapes.legend && (
+            <ShapeKey
+              column={shapes.legend.column}
+              entries={shapes.legend.entries}
+              {...(onParamChange && !compact
+                ? {
+                    onReshape: (label: string, mark: MarkerShape) =>
+                      onParamChange(
+                        'pointShapeOverrides',
+                        writeOverrides({ ...(stableShape.overrides ?? {}), [label]: mark }),
+                      ),
+                  }
+                : {})}
+            />
+          )}
         </div>
       )}
 

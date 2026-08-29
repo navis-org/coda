@@ -12,6 +12,11 @@
  */
 
 import { datasetRef } from '../../../core/types'
+import {
+  readColorSpec,
+  readShapeSpec,
+  readSizeSpec,
+} from '../../../nodes/lib/encodingParams'
 import { decodeClauses, resolveFilters, usesRegex } from '../../../nodes/lib/tableFilter'
 import { pyList, pyStr } from '../py'
 import { registerEmitter } from '../registry'
@@ -435,9 +440,23 @@ registerEmitter('out.scatter', (ctx) => {
     return [...lines, ...ctx.note('No x or y column is picked, so nothing is drawn.')]
   }
 
-  const hue = ctx.column('colorColumn')
-  const size = ctx.column('sizeColumn')
-  const shape = ctx.column('shapeBy')
+  /*
+   * Read through the spec readers rather than by naming param ids here.
+   *
+   * All three were spelled as literals — `colorColumn`, `sizeColumn`, `shapeBy` — and two of
+   * them had not matched the node's actual params for some time: `colorParams({ prefix:
+   * 'point' })` generates `pointColorBy`, so `hue=` had been silently absent from every
+   * exported scatter, and the fixture setting `colorColumn: 'type'` is what made the golden
+   * look right. A reader turns that class of drift into a type error.
+   *
+   * A channel only contributes an aesthetic when its mode actually uses a column: a constant
+   * colour is not a `hue=`.
+   */
+  const colorSpec = readColorSpec('point', ctx.params, ctx.column)
+  const hue = colorSpec.mode === 'constant' ? undefined : colorSpec.column
+  const size = readSizeSpec('point', ctx.params, ctx.column, { min: 3, max: 12 }).column
+  const shapeSpec = readShapeSpec('point', ctx.params, ctx.column)
+  const shape = shapeSpec.mode === 'categorical' ? shapeSpec.column : undefined
   const args = [
     `data=${out}`,
     `x=${pyStr(x)}`,

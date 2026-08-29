@@ -20,9 +20,16 @@
  * If you swap these values, re-run the validator — do not reason about ΔE.
  */
 
+import type { PaletteName } from '../nodes/lib/encodingParams'
+
 export type Mode = 'light' | 'dark'
 
-/** Categorical series, fixed order, never cycled. A 9th series folds into "Other". */
+/**
+ * Categorical series, fixed order.
+ *
+ * A 9th series folds into "Other" wherever the *mark* folds too — a bar, a slice, a histogram
+ * segment. Where every row keeps its own mark it cycles instead; see `cycleColor`.
+ */
 const CATEGORICAL: Record<Mode, string[]> = {
   light: [
     '#2a78d6',
@@ -48,6 +55,125 @@ const CATEGORICAL: Record<Mode, string[]> = {
 
 export const MAX_SERIES = 8
 export const OTHER_LABEL = 'Other'
+
+/**
+ * The categorical palettes an encoding can cycle through.
+ *
+ * Two rules govern this table, and both are about not doing by eye what somebody else has
+ * already done properly.
+ *
+ * **The values are published sets, transcribed.** `coda` is this app's own, validated with the
+ * `dataviz` validator against both surfaces — see the header above, and note it is the only one
+ * here that is. The other four are imported whole:
+ *
+ *  - `okabeIto` — Okabe & Ito's colour-universal-design set, in R's eight-colour spelling
+ *    (`palette.colors("Okabe-Ito")`), which substitutes grey `#999999` for the published black.
+ *    Black is unusable as a mark on the dark surface, and grey is what the reference
+ *    implementation already reaches for. This is the set to pick when the drawing has to survive
+ *    all three kinds of colour-blindness.
+ *  - `tableau10` — matplotlib's `tab10`, which is Tableau's classic ten.
+ *  - `paired` — ColorBrewer's qualitative `Paired`, twelve.
+ *  - `tab20` — matplotlib's `tab20`, twenty.
+ *
+ * **The order is ours, and only the order.** `resolveColor` ranks categories by frequency and
+ * hands the leading slots to the commonest values, so slot order carries meaning here in a way
+ * it does not in matplotlib. `tab20` and `paired` both ship interleaved dark/light pairs, which
+ * would put the two commonest categories in two shades of one hue; both are rotated so the
+ * saturated half comes first. Note what falls out of that for `tab20`: its saturated half *is*
+ * `tab10`, so the two palettes agree for the first ten categories and the second ten are tints.
+ *
+ * **Only `coda` is theme-tuned.** The imported four are one set for both surfaces, which is what
+ * they are; the pale members of `tab20` and `paired` are correspondingly weak on the light
+ * surface. That is the cost of the capacity, and the param's help says so.
+ */
+const PALETTES: Record<PaletteName, string[] | Record<Mode, string[]>> = {
+  coda: CATEGORICAL,
+  okabeIto: [
+    '#e69f00',
+    '#56b4e9',
+    '#009e73',
+    '#f0e442',
+    '#0072b2',
+    '#d55e00',
+    '#cc79a7',
+    '#999999',
+  ],
+  tableau10: [
+    '#1f77b4',
+    '#ff7f0e',
+    '#2ca02c',
+    '#d62728',
+    '#9467bd',
+    '#8c564b',
+    '#e377c2',
+    '#7f7f7f',
+    '#bcbd22',
+    '#17becf',
+  ],
+  paired: [
+    // The six saturated members first, then the six pale ones they were published paired with.
+    '#1f78b4',
+    '#33a02c',
+    '#e31a1c',
+    '#ff7f00',
+    '#6a3d9a',
+    '#b15928',
+    '#a6cee3',
+    '#b2df8a',
+    '#fb9a99',
+    '#fdbf6f',
+    '#cab2d6',
+    '#ffff99',
+  ],
+  tab20: [
+    // The ten saturated members — which are exactly `tab10` — then the ten tints.
+    '#1f77b4',
+    '#ff7f0e',
+    '#2ca02c',
+    '#d62728',
+    '#9467bd',
+    '#8c564b',
+    '#e377c2',
+    '#7f7f7f',
+    '#bcbd22',
+    '#17becf',
+    '#aec7e8',
+    '#ffbb78',
+    '#98df8a',
+    '#ff9896',
+    '#c5b0d5',
+    '#c49c94',
+    '#f7b6d2',
+    '#c7c7c7',
+    '#dbdb8d',
+    '#9edae5',
+  ],
+}
+
+/** The colours of one palette, in slot order. */
+export function paletteColors(name: PaletteName | undefined, mode: Mode): string[] {
+  const palette = PALETTES[name ?? 'coda'] ?? CATEGORICAL
+  return Array.isArray(palette) ? palette : palette[mode]
+}
+
+/**
+ * Colour for category `index`, **cycling** when there are more categories than colours.
+ *
+ * The counterpart to `seriesColor`, and the difference between them is not a preference — it is
+ * what the mark does with the tail. A bar, a slice or a histogram segment **folds** everything
+ * past the palette into one residual mark, so that mark needs one colour and an achromatic grey
+ * is the honest one. A node, a point or a neuron keeps its own mark whatever happens, so folding
+ * buys nothing and costs everything: fifty cell types past the eighth became one grey lump that
+ * said only "not one of the eight".
+ *
+ * The cost of cycling is real and is not hidden: two categories forty apart share a hue. The
+ * palette dropdown is the answer to that — `tab20` gives twenty before anything repeats — and a
+ * viewer whose colours have come round says so in its caption, the way the dendrogram always has.
+ */
+export function cycleColor(index: number, mode: Mode, palette?: PaletteName): string {
+  const colors = paletteColors(palette, mode)
+  return colors[((index % colors.length) + colors.length) % colors.length]!
+}
 
 /** Reserved for the "Other" bucket — deliberately achromatic so it reads as residual. */
 const OTHER_COLOR: Record<Mode, string> = { light: '#898781', dark: '#898781' }

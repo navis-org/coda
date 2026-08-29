@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest'
 import { column, tableSchema } from '../../core/types'
 import type { NetworkValue } from '../../core/values'
 import { tableFromRows } from '../../core/values'
+import { componentsOfEdges, connectedComponents } from '../../nodes/lib/networkOps'
+import type { Positioned } from './networkLayout'
 import {
   FORCE_SYNC_BELOW,
   forceSettings,
@@ -581,5 +583,202 @@ describe('a given layout', () => {
     const a = positions.get('a')
     const c = positions.get('c')
     expect(Number(a?.x)).toBeLessThan(Number(c?.x))
+  })
+})
+
+describe('prefuse', () => {
+  /** Two triangles and a lone pair — three components, nothing joining them. */
+  const fragmented = network(
+    ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'].map((id) => ({ id })),
+    [
+      ['a', 'b'],
+      ['b', 'c'],
+      ['c', 'a'],
+      ['d', 'e'],
+      ['e', 'f'],
+      ['f', 'd'],
+      ['g', 'h'],
+    ],
+  )
+
+  const spread = (positions: Map<string, Positioned>, ids: string[]) => {
+    let worst = 0
+    for (const a of ids) {
+      for (const b of ids) {
+        const p = positions.get(a)!
+        const q = positions.get(b)!
+        worst = Math.max(worst, Math.hypot(p.x - q.x, p.y - q.y))
+      }
+    }
+    return worst
+  }
+  /** k disjoint triangles — the real graph's shape in miniature, at a size that discriminates. */
+  const triangles = (k: number) =>
+    network(
+      Array.from({ length: k * 3 }, (_, i) => ({ id: `c${Math.floor(i / 3)}n${i % 3}` })),
+      Array.from({ length: k }, (_, c) => c).flatMap(
+        (c) =>
+          [
+            [`c${c}n0`, `c${c}n1`],
+            [`c${c}n1`, `c${c}n2`],
+            [`c${c}n2`, `c${c}n0`],
+          ] as Array<[string, string]>,
+      ),
+    )
+  const overlappingPairs = (positions: Map<string, Positioned>, k: number) => {
+    const boxes = Array.from({ length: k }, (_, c) => {
+      const at = [0, 1, 2].map((i) => positions.get(`c${c}n${i}`)!)
+      return {
+        x1: Math.min(...at.map((p) => p.x)),
+        x2: Math.max(...at.map((p) => p.x)),
+        y1: Math.min(...at.map((p) => p.y)),
+        y2: Math.max(...at.map((p) => p.y)),
+      }
+    })
+    let count = 0
+    for (let i = 0; i < k; i++) {
+      for (let j = i + 1; j < k; j++) {
+        const a = boxes[i]!
+        const b = boxes[j]!
+        if (a.x1 <= b.x2 && b.x1 <= a.x2 && a.y1 <= b.y2 && b.y1 <= a.y2) count++
+      }
+    }
+    return count
+  }
+
+  it('gives each component a box no other component reaches into', async () => {
+    /*
+     * The guarantee, and the reason the packing exists rather than more iterations. A force
+     * simulation offers nothing here: two components share no link, so nothing decides where
+     * one sits relative to the other and whatever separation appears is a by-product of the
+     * repulsion — which does not scale. On the real 36k-node graph the unpartitioned layout
+     * interleaves components almost completely (0.009 against 0.431 on `neighbourPurity`).
+     *
+     * **Forty triangles, because fewer does not discriminate.** Measured: at 3, 5, 8, 12 and
+     * 20 components the unpartitioned layout also separates them cleanly, and a test at those
+     * sizes passes with the whole feature disabled. Forty is where the repulsion first fails
+     * to keep them apart — seven overlapping pairs there, none with the partition on.
+     */
+    const positions = await computeLayout(triangles(40), { layout: 'prefuse' })
+    expect(overlappingPairs(positions, 40)).toBe(0)
+  })
+
+  it('does not promise that with the partition off', async () => {
+    // The other half of the tripwire above: this is the number the feature has to beat, and
+    // it is what the whole layout would silently degrade to if partitioning stopped happening.
+    const positions = await computeLayout(triangles(40), {
+      layout: 'prefuse',
+      partition: false,
+    })
+    expect(overlappingPairs(positions, 40)).toBeGreaterThan(0)
+  })
+
+  it('places every node exactly once and finitely', async () => {
+    const positions = await computeLayout(fragmented, { layout: 'prefuse' })
+    expect(positions.size).toBe(8)
+    for (const at of positions.values()) {
+      expect(Number.isFinite(at.x)).toBe(true)
+      expect(Number.isFinite(at.y)).toBe(true)
+    }
+  })
+
+  it('lands in the same place twice', async () => {
+    const once = await computeLayout(fragmented, { layout: 'prefuse' })
+    const twice = await computeLayout(fragmented, { layout: 'prefuse' })
+    expect([...twice]).toEqual([...once])
+  })
+
+  it('still draws a picture with the partition off, and makes no such promise', async () => {
+    // Offered so the comparison can be made rather than taken on trust. It must still be a
+    // picture — every node placed, none stacked — but the boxes are on their own.
+    const positions = await computeLayout(fragmented, {
+      layout: 'prefuse',
+      partition: false,
+    })
+    expect(positions.size).toBe(8)
+    expect(new Set([...positions.values()].map((p) => `${p.x},${p.y}`)).size).toBe(8)
+  })
+
+  it('gives an unlinked node a place of its own rather than the origin', async () => {
+    const isolates = network(['a', 'b', 'c'].map((id) => ({ id })), [])
+    const positions = await computeLayout(isolates, { layout: 'prefuse' })
+    expect(new Set([...positions.values()].map((p) => `${p.x},${p.y}`)).size).toBe(3)
+  })
+
+  it('honours the link length, which sets the scale of everything else', async () => {
+    const tight = await computeLayout(fragmented, {
+      layout: 'prefuse',
+      springLength: 10,
+      partition: false,
+    })
+    const loose = await computeLayout(fragmented, {
+      layout: 'prefuse',
+      springLength: 200,
+      partition: false,
+    })
+    // Normalised to a fixed box, so the comparison has to be a ratio *within* each picture:
+    // a longer rest length puts linked nodes further apart relative to the whole field.
+    const linked = (positions: Map<string, Positioned>) => {
+      const p = positions.get('a')!
+      const q = positions.get('b')!
+      return Math.hypot(p.x - q.x, p.y - q.y) / spread(positions, [...positions.keys()])
+    }
+    expect(linked(loose)).toBeGreaterThan(linked(tight))
+  })
+})
+
+describe('components, as the layout partitions by them', () => {
+  const labelsOf = (net: NetworkValue) => {
+    const topology = readTopology(net)
+    return componentsOfEdges(topology.ids.length, topology.edges)
+  }
+
+  it('agrees with the component the colour channel uses', () => {
+    /*
+     * The layout packs by component and the colour channel paints by component, and if the two
+     * ever disagreed a node would be drawn in one group's colour inside another group's box —
+     * with nothing on screen saying so.
+     *
+     * This used to be two separate walks and they *did* disagree: on a node table with a
+     * repeated id they returned `[2,1,1,3]` and `[1,1,2,3]`. They now share
+     * `componentsOfEdges`, so the agreement is by construction and this is the tripwire for
+     * anyone who splits them again.
+     */
+    const messy = network(
+      ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((id) => ({ id })),
+      [
+        ['a', 'b'],
+        ['b', 'c'],
+        ['c', 'd'],
+        ['e', 'f'],
+        ['g', 'g'],
+      ],
+    )
+    expect(labelsOf(messy)).toEqual(connectedComponents(messy))
+  })
+
+  it('numbers the largest component first', () => {
+    const lopsided = network(
+      ['a', 'b', 'c', 'd'].map((id) => ({ id })),
+      [
+        ['a', 'b'],
+        ['b', 'c'],
+      ],
+    )
+    expect(labelsOf(lopsided)).toEqual([1, 1, 1, 2])
+  })
+
+  it('ignores a self-loop, which joins nothing', () => {
+    const looped = network(['a', 'b'].map((id) => ({ id })), [['a', 'a']])
+    expect(labelsOf(looped)).toEqual([1, 2])
+  })
+
+  it('does not overflow the stack on a long chain', () => {
+    // 36,000 nodes in one path is the shape that turns a recursive walk into a crash, and the
+    // real graph this was built for has 36,000 nodes.
+    const ids = Array.from({ length: 20_000 }, (_, i) => `n${i}`)
+    const edges = ids.slice(1).map((id, i) => [ids[i]!, id] as [string, string])
+    const chain = network(ids.map((id) => ({ id })), edges)
+    expect(new Set(labelsOf(chain)).size).toBe(1)
   })
 })

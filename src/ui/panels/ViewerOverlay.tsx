@@ -85,10 +85,21 @@ export function ViewerOverlay() {
   useEffect(() => {
     if (!nodeId) return
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && document.fullscreenElement !== panelRef.current) {
-        event.stopPropagation()
-        close()
-      }
+      if (event.key !== 'Escape' || document.fullscreenElement === panelRef.current) return
+      /*
+       * A popover on top of a dialog owns Escape first.
+       *
+       * This listener is on the *capture* phase, so it beats every popover's own dismissal —
+       * which meant pressing Escape to shut the network viewer's context menu closed the whole
+       * overlay from under it. Standing aside while one is open lets the key reach the menu's
+       * own handler on the way back up; the next press finds no menu and closes this.
+       *
+       * By class rather than by a registry, because `.context-menu` is what all four of them
+       * are, and a dialog knowing which popovers exist is the coupling being avoided.
+       */
+      if (document.querySelector('.context-menu')) return
+      event.stopPropagation()
+      close()
     }
     window.addEventListener('keydown', onKeyDown, true)
     return () => window.removeEventListener('keydown', onKeyDown, true)

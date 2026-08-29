@@ -37,7 +37,7 @@ import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeome
 import type { ParamValue } from '../../core/node'
 import type { MeshesValue, PointsValue, SkeletonsValue } from '../../core/values'
 import type { ColorSpec } from '../../nodes/lib/encodingParams'
-import { writeColorOverrides } from '../../nodes/lib/encodingParams'
+import { writeOverrides } from '../../nodes/lib/encodingParams'
 import { CHART_INK, currentMode } from '../colors'
 import { plural } from '../format'
 import type { ResolvedColor } from '../encoding'
@@ -502,7 +502,7 @@ export function Viewer3D(props: Viewer3DProps) {
             onRecolor: (label, hex) =>
               onParamChange(
                 `${prefix}ColorOverrides`,
-                writeColorOverrides({ ...(specs[prefix].overrides ?? {}), [label]: hex }),
+                writeOverrides({ ...(specs[prefix].overrides ?? {}), [label]: hex }),
               ),
           }
         : {}),

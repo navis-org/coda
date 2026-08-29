@@ -12,10 +12,23 @@
  */
 
 import type { SizeSpec } from '../../nodes/lib/encodingParams'
-import type { ResolvedColor, ResolvedSize } from '../encoding'
+import type { MarkerShape, ResolvedColor, ResolvedSize } from '../encoding'
+import { ALL_SHAPES } from '../encoding'
 import { formatCompact } from '../format'
 import { markPath } from './scatterDraw'
-import type { MarkerShape } from './scatterPlot'
+
+/**
+ * The mark menu's options, built once.
+ *
+ * React elements are immutable, and this legend re-renders on every mousemove that moves a
+ * tooltip — rebuilding seven elements per key per frame is pure allocation.
+ */
+const SHAPE_CHOICES = ALL_SHAPES.map((shape) => (
+  <option key={shape} value={shape}>
+    {shape}
+  </option>
+))
+
 
 export interface SizeChannel {
   spec: SizeSpec
@@ -228,14 +241,18 @@ export function ColorKey({
         {/*
          * The keys this strip does not have room for.
          *
-         * Only `hash` ever sets it: `categorical` accounts for its remainder with the `Other`
-         * entry, so there is nothing left over to admit to. Twelve keys over twenty-one neurons
-         * with no note would read as a scene of twelve.
+         * Set by `hash` and, since it stopped folding its tail into `Other`, by `categorical`
+         * too — both now draw every value and cap only the *key*. Twelve keys over twenty-one
+         * neurons with no note would read as a scene of twelve.
          */}
         {(legend.unlisted ?? 0) > 0 && (
           <span
             className="legend__item legend__more"
-            title={`${legend.unlisted} more values, each drawn in a colour of its own`}
+            title={
+              legend.cycled
+                ? `${legend.unlisted} more values, drawn in the same colours coming round again`
+                : `${legend.unlisted} more values, each drawn in a colour of its own`
+            }
           >
             +{legend.unlisted} more
           </span>
@@ -300,21 +317,54 @@ export function SizeKey({ channel, name }: { channel: SizeChannel; name: string 
 export function ShapeKey({
   column,
   entries,
+  onReshape,
 }: {
   column: string
   entries: Array<{ label: string; shape: MarkerShape }>
+  /**
+   * Pin a key's mark. Omit and the key is inert, exactly as it was before overrides existed.
+   *
+   * The shape channel's answer to `onRecolor`, and a `<select>` rather than the colour
+   * channel's OS picker because the two channels differ in kind: what somebody overriding a
+   * *colour* wants is usually the one colour not in the palette, so the native picker is the
+   * only control that has it. There are six shapes and no seventh to reach for, so the whole
+   * vocabulary fits in a menu — and a menu can say `diamond` where a swatch can only show one.
+   */
+  onReshape?: (label: string, shape: MarkerShape) => void
 }) {
   return (
     <span className="legend__group">
       <span className="legend__title">{column}</span>
-      {entries.map((entry) => (
-        <span key={entry.label} className="legend__item">
+      {entries.map((entry) => {
+        const mark = (
           <svg className="legend__mark" width={10} height={10} viewBox="0 0 10 10" aria-hidden>
             <path d={markPath(entry.shape, 5, 5, 4)} fill="currentColor" />
           </svg>
-          {entry.label}
-        </span>
-      ))}
+        )
+        return (
+          <span key={entry.label} className="legend__item">
+            {onReshape ? (
+              // The mark stays drawn and the select sits transparently over it, the same trick
+              // `legend__swatch--input` uses: a native menu cannot render an SVG option.
+              <span className="legend__mark-pick">
+                {mark}
+                <select
+                  className="legend__mark-select nodrag"
+                  value={entry.shape}
+                  title={`Mark for ${entry.label}`}
+                  aria-label={`Mark for ${entry.label}`}
+                  onChange={(event) => onReshape(entry.label, event.target.value as MarkerShape)}
+                >
+                  {SHAPE_CHOICES}
+                </select>
+              </span>
+            ) : (
+              mark
+            )}
+            {entry.label}
+          </span>
+        )
+      })}
     </span>
   )
 }

@@ -15,7 +15,7 @@ import type { TableSchema } from '../../core/types'
 import { T, attributeSchema, column, tableSchema } from '../../core/types'
 import type { ColumnData } from '../../core/values'
 import { getColumn, isNetworkValue, makeTable } from '../../core/values'
-import { colorParams, sizeParams } from '../lib/encodingParams'
+import { colorParams, shapeParams, sizeParams } from '../lib/encodingParams'
 import { filterNetwork } from '../lib/networkOps'
 
 /**
@@ -105,7 +105,19 @@ export const networkViewNode = registerNode({
       id: 'layout',
       kind: 'enum',
       label: 'Layout',
-      default: 'forceatlas2',
+      /*
+       * Prefuse, not ForceAtlas2, and the reason is that the default has to be right for the
+       * graph somebody actually has rather than for the tidy one. A connectome subgraph is
+       * routinely in many disconnected pieces — a correspondence graph, a thresholded network,
+       * anything where most nodes have one or two links — and ForceAtlas2 cannot draw those at
+       * all: its gravity pulls every piece into one well and it gets *worse* the longer it
+       * runs. Measured in `prefusePositions`. On a graph that is genuinely one component the
+       * two are ordinary force layouts and the choice is a matter of taste.
+       *
+       * Changing a default only reaches *new* nodes: `defaultParams` writes the value in at
+       * creation, so every stored graph keeps the layout it was saved with.
+       */
+      default: 'prefuse',
       presentational: true,
       group: 'layout',
       // The algorithm's own knobs hang off it as extras: `visibleIf` already ensures only
@@ -113,6 +125,7 @@ export const networkViewNode = registerNode({
       composite: { key: 'layout', role: 'primary', label: 'Layout' },
       options: [
         { value: 'forceatlas2', label: 'force-directed' },
+        { value: 'prefuse', label: 'force-directed (prefuse)' },
         { value: 'circular', label: 'circular' },
         { value: 'layered', label: 'layered (feed-forward)' },
         { value: 'spectral', label: 'spectral' },
@@ -222,6 +235,38 @@ export const networkViewNode = registerNode({
       visibleIf: (params) => params.layout === 'grouped',
     },
     {
+      /*
+       * The control that makes the prefuse layout worth having.
+       *
+       * Not a detail and not really a tuning knob: on a fragmented graph it is the difference
+       * between a picture and a pile, and it beats the choice of force law by an order of
+       * magnitude. The table in `prefusePositions` is the measurement. Off is kept so the
+       * comparison can be made rather than taken on trust — and on a graph that is genuinely
+       * one component the two settings agree by construction.
+       */
+      id: 'partition',
+      kind: 'enum',
+      label: 'Components',
+      default: 'separate',
+      options: [
+        { value: 'separate', label: 'laid out separately' },
+        { value: 'together', label: 'all at once' },
+      ],
+      help:
+        'Disconnected pieces share no link, so no force decides where one sits relative to ' +
+        'another and they end up piled together. Laying each out on its own and packing the ' +
+        'results is what separates them.',
+      presentational: true,
+      // Inspector and styling panel, not the card — see the note above. It was briefly not
+      // `advanced`, on the grounds that partitioning is the whole point of this layout; making
+      // prefuse the *default* settled that better, because now the good behaviour is what you
+      // get without touching anything and the control is only here to turn it off.
+      advanced: true,
+      group: 'layout',
+      composite: { key: 'layout', role: 'extra', facet: 'components' },
+      visibleIf: (params) => params.layout === 'prefuse',
+    },
+    {
       id: 'iterations',
       kind: 'int',
       label: 'Iterations',
@@ -233,7 +278,31 @@ export const networkViewNode = registerNode({
       advanced: true,
       group: 'layout',
       composite: { key: 'layout', role: 'extra', facet: 'iterations' },
+      /*
+       * ForceAtlas2 only, and prefuse's absence here is a measurement rather than an oversight.
+       * This default is 220 because that is what ForceAtlas2 wants; prefuse anneals its own
+       * timestep to nothing, so past its Cytoscape default of 100 the extra passes do not
+       * refine the picture, they stretch the schedule. Measured on the 36k-node graph in
+       * `prefusePositions`: 100 passes score 0.431 in 536ms, **220 score 0.376 in 1,126ms** —
+       * twice the wait for a worse answer. A shared control whose shared default is wrong for
+       * one of its two owners is not a saving.
+       */
       visibleIf: (params) => params.layout === 'forceatlas2',
+    },
+    {
+      id: 'springLength',
+      kind: 'int',
+      label: 'Link length',
+      default: 50,
+      min: 5,
+      max: 500,
+      step: 5,
+      help: 'Rest length of a link. Everything else in the layout scales with it.',
+      presentational: true,
+      advanced: true,
+      group: 'layout',
+      composite: { key: 'layout', role: 'extra', facet: 'link length' },
+      visibleIf: (params) => params.layout === 'prefuse',
     },
     {
       id: 'xColumn',
@@ -265,6 +334,17 @@ export const networkViewNode = registerNode({
     ...colorParams({
       prefix: 'node',
       allowLiteral: true,
+      /*
+       * The first question anybody asks of an unfamiliar graph: is this one thing, or several?
+       * A drawing answers it badly — a force layout can pack two components into one blob and
+       * spread one across the canvas — and a colour answers it exactly. Derived from the links
+       * rather than read off a column, which is why it is a mode and not a picker.
+       */
+      allowComponent: true,
+      // A connectome routinely has more cell types on one screen than any validated palette
+      // has hues, so which palette is a real choice rather than a preference: it is how many
+      // types get a colour of their own before the ramp comes round.
+      palettes: true,
       from: 'in',
       part: 'nodes',
       label: 'Node colour',
@@ -283,6 +363,29 @@ export const networkViewNode = registerNode({
       defaultMin: 4,
       defaultMax: 18,
       advanced: true,
+    }),
+    /*
+     * Shape, beside colour rather than instead of it.
+     *
+     * The palette note in CLAUDE.md records that only three chromatic families clear the
+     * all-pairs colourblind gate on the dark surface, which is why a socket is colour *plus*
+     * shape *plus* a label. The same argument reaches a network: pointing `Shape by` and
+     * `Colour by` at one column is two channels saying one thing, and it is what makes a
+     * categorical network readable to a reader who cannot separate the hues — or in print.
+     *
+     * Six marks and no palette equivalent, because there is no second ordering of six shapes
+     * worth offering. Everything past the sixth commonest value folds into a dash rather than
+     * reusing a mark; `resolveShape` records why that differs from colour's cycling.
+     */
+    ...shapeParams({
+      prefix: 'node',
+      from: 'in',
+      part: 'nodes',
+      label: 'Node shape',
+      rowLabel: 'Shape',
+      group: 'node',
+      advanced: true,
+      legend: true,
     }),
     {
       id: 'nodeBorderWidth',
@@ -318,6 +421,17 @@ export const networkViewNode = registerNode({
       // `muted` is the ink links have always been drawn in, so the default is a no-op.
       defaultColor: 'muted',
       modes: ['categorical'],
+      /*
+       * A link taking the colour of the node at one of its ends, which is a picture of *flow*:
+       * with nodes coloured by type, colouring links by their source shows where each type's
+       * output goes without reading a single label. Note this is not the same as picking
+       * `source` in the categorical picker — that ranks the palette by link count and lands on
+       * colours that disagree with the nodes an inch away.
+       */
+      allowEndpoints: true,
+      // Its own, separate from the nodes': the two halves are styled apart everywhere else on
+      // this node, and a link categorised by ROI has nothing to do with a node's cell types.
+      palettes: true,
       advanced: true,
     }),
     {

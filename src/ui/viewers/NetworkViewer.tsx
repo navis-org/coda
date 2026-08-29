@@ -24,17 +24,28 @@ import type Sigma from 'sigma'
 
 import type { NetworkValue } from '../../core/values'
 import { getColumn } from '../../core/values'
-import type { ColorSpec, SizeSpec } from '../../nodes/lib/encodingParams'
+import type { ColorSpec, ShapeSpec, SizeSpec } from '../../nodes/lib/encodingParams'
+import { writeOverrides } from '../../nodes/lib/encodingParams'
 import type { Mode } from '../colors'
 import { CHART_INK, chartSurface, currentMode, withAlpha } from '../colors'
-import type { ResolvedColor, ResolvedSize } from '../encoding'
-import { resolveColor, resolveSize } from '../encoding'
-import { exportBaseName as makeBaseName, tableToCsvParts } from '../export'
+import type { MarkerShape, ResolvedColor, ResolvedShape, ResolvedSize } from '../encoding'
+import { resolveShape, resolveSize } from '../encoding'
+import {
+  COMPONENT_CHANNEL,
+  resolveNetworkEdgeColor,
+  resolveNetworkNodeColor,
+} from './networkColor'
+import { copyText, exportBaseName as makeBaseName, tableToCsvParts } from '../export'
 import { networkToGraphml } from '../exportValue'
 import { formatCell } from '../format'
 import { NetworkLegend } from './NetworkLegend'
 import type { SvgEdge, SvgNode } from './networkDraw'
 import { assignCurvatures, networkToSvg } from './networkDraw'
+import type { DragState } from './networkDrag'
+import { beginDrag, beyondSlop, dragPositions } from './networkDrag'
+import { NetworkContextMenu } from './NetworkContextMenu'
+import type { SelectScope } from './networkSelect'
+import { expandedSelection, orderByNode, seedsFor } from './networkSelect'
 import { recallLayout, rememberLayout } from './layoutMemo'
 import type {
   BarnesHut,
@@ -92,8 +103,21 @@ export interface NetworkViewerProps {
   /** `forceatlas2` only. */
   seed?: ForceSeed
   barnesHut?: BarnesHut
+  nodeShape: ShapeSpec
+  /**
+   * Write a param back, which is how a legend pin survives a rerender.
+   *
+   * Only the shape key uses it today. The colour key in this viewer is still inert — its
+   * overrides are reachable from the 3D viewer's legend and from the inspector, and giving
+   * this one a colour picker is a separate decision about a separate channel.
+   */
+  onParamChange?: ((paramId: string, value: string) => void) | undefined
   /** How much link weight pulls in the force layout. 0 ignores it, 1 is proportional. */
   weightInfluence?: number
+  /** `prefuse` only: lay each connected component out on its own and pack the results. */
+  partition?: boolean
+  /** `prefuse` only: rest length of a link, which sets the scale of the whole layout. */
+  springLength?: number
   /**
    * Stable identity for the layout cache — the graph node this viewer is showing.
    *
@@ -223,6 +247,15 @@ interface Tip extends TipContent, Placement {
   kind: 'node' | 'edge'
 }
 
+interface MenuState {
+  /** Client coordinates — the menu is `position: fixed`, unlike the tooltip. */
+  at: { x: number; y: number }
+  /** What the commands act on. Empty for the canvas itself, which anchors nothing. */
+  seeds: string[]
+  /** What was right-clicked, in words. */
+  caption: string
+}
+
 /**
  * Tooltip geometry, mirrored by `.network-tip` in the stylesheet.
  *
@@ -265,6 +298,7 @@ function neighbourLookup(graph: Graph): (id: string) => Iterable<string> {
 interface NetworkStyle {
   colors: ResolvedColor
   sizes: ResolvedSize
+  shapes: ResolvedShape
   borderWidth: number
   edgeColors: ResolvedColor
   edgeOpacity: number
@@ -348,11 +382,22 @@ function applyStyle(
         size: style.sizes.at(row) + style.borderWidth,
         borderColor: border,
         borderSize: style.borderWidth,
+        shape: style.shapes.at(row),
         label: style.nodeLabels?.[row] ?? '',
         forceLabel: forceNodeLabels,
       }
     },
-    { attributes: ['color', 'size', 'borderColor', 'borderSize', 'label', 'forceLabel'] },
+    {
+      attributes: [
+        'color',
+        'size',
+        'borderColor',
+        'borderSize',
+        'shape',
+        'label',
+        'forceLabel',
+      ],
+    },
   )
 
   const arrows = directed && style.arrows
@@ -405,9 +450,13 @@ export function NetworkViewer({
   seed,
   barnesHut,
   weightInfluence,
+  partition,
+  springLength,
   viewerId,
   nodeColor,
   nodeSize,
+  nodeShape,
+  onParamChange,
   nodeBorderWidth = 1,
   edgeColor,
   edgeSize,
@@ -441,8 +490,25 @@ export function NetworkViewer({
    */
   const [layingOut, setLayingOut] = useState(false)
   const [tip, setTip] = useState<Tip | null>(null)
+  /*
+   * The open context menu, or null.
+   *
+   * Its anchors and its caption are captured when it opens rather than derived on render: a
+   * menu is a snapshot of one gesture, and re-deriving "what did you right-click" from live
+   * state would have it change under the pointer.
+   */
+  const [menu, setMenu] = useState<MenuState | null>(null)
   /** Whether the force layout is still moving. Undefined for the static layouts. */
   const [settling, setSettling] = useState<boolean | undefined>(undefined)
+  /*
+   * Whether anything in this drawing was placed by hand.
+   *
+   * Only for the caption, and it earns its row: a dragged arrangement lasts as long as the
+   * session and no longer — it is not written to the document — so a graph that comes back
+   * laid out afresh would otherwise look like the drag was thrown away for no reason. Same
+   * standing as `labels thinned`: say what the picture is not promising.
+   */
+  const [movedByHand, setMovedByHand] = useState(false)
   const [query, setQuery] = useState('')
   /*
    * Bumped to re-run the layout from scratch. It sits in the structure effect's dependency
@@ -457,6 +523,7 @@ export function NetworkViewer({
   const stableGiven = useStablePositions(given)
   const stableNodeColor = useStable(nodeColor)
   const stableNodeSize = useStable(nodeSize)
+  const stableNodeShape = useStable(nodeShape)
   const stableEdgeColor = useStable(edgeColor)
   const stableEdgeSize = useStable(edgeSize)
   const stableSelection = useStable(selection)
@@ -492,23 +559,47 @@ export function NetworkViewer({
   onSelectionRef.current = onSelectionChange
   const onErrorRef = useRef(onError)
   onErrorRef.current = onError
+  /*
+   * Dragging is an expanded-view gesture: a 150px card preview is not where anyone arranges
+   * a figure, and its canvas shares a mouse button with the graph node it sits on.
+   *
+   * Through a ref rather than a dependency, because the structure effect's dependency list is
+   * the most expensive one in this component (see `networkRebuild.test.tsx`) and `compact`
+   * does not change for a given mount anyway.
+   */
+  const compactRef = useRef(compact)
+  compactRef.current = compact
 
   const nodeIds = useMemo(
     () => getColumn(network.nodes, 'id').map((cell) => String(cell ?? '')),
     [network.nodes],
   )
 
+  /*
+   * `resolveColor` through a network-aware wrapper, for the two modes a column cannot express:
+   * a node's connected component, and a link borrowing the colour of the node at one of its
+   * ends. Everything else — the palette, the slots, the legend — is still the shared one.
+   *
+   * Keyed on the whole `network` rather than on `network.nodes`, because the component mode
+   * reads the *links* to decide a node's colour.
+   */
   const colors = useMemo(
-    () => resolveColor(network.nodes, stableNodeColor, mode),
-    [network.nodes, stableNodeColor, mode],
+    () => resolveNetworkNodeColor(network, stableNodeColor, mode),
+    [network, stableNodeColor, mode],
   )
   const sizes = useMemo(
     () => resolveSize(network.nodes, stableNodeSize),
     [network.nodes, stableNodeSize],
   )
+  const shapes = useMemo(
+    () => resolveShape(network.nodes, stableNodeShape),
+    [network.nodes, stableNodeShape],
+  )
+  // Depends on the resolved node colours, not on their spec: a link borrows whatever its
+  // endpoint was actually painted, folded `Other` and hand-picked overrides included.
   const edgeColors = useMemo(
-    () => resolveColor(network.edges, stableEdgeColor, mode),
-    [network.edges, stableEdgeColor, mode],
+    () => resolveNetworkEdgeColor(network, stableEdgeColor, mode, colors),
+    [network, stableEdgeColor, mode, colors],
   )
   const edgeWidths = useMemo(
     () => resolveSize(network.edges, stableEdgeSize, { areaScaled: false }),
@@ -536,10 +627,23 @@ export function NetworkViewer({
   const nodeLabelsRef = useRef(nodeLabels)
   nodeLabelsRef.current = nodeLabels
 
-  // The columns a node tooltip reports: whatever the encodings named, then the roll-ups.
+  // The columns a node tooltip reports: whatever the encodings named, then the roll-ups. Shape
+  // is in the list for the same reason colour and size are — a network shaped by a column the
+  // tooltip never mentions makes the reader guess what the marks mean.
   const tipFields = useMemo(
-    () => tipColumns(network.nodes.schema, [stableNodeColor.column, stableNodeSize.column]),
-    [network.nodes.schema, stableNodeColor.column, stableNodeSize.column],
+    () =>
+      tipColumns(network.nodes.schema, [
+        stableNodeColor.column,
+        stableNodeSize.column,
+        stableNodeShape.mode === 'categorical' ? stableNodeShape.column : undefined,
+      ]),
+    [
+      network.nodes.schema,
+      stableNodeColor.column,
+      stableNodeSize.column,
+      stableNodeShape.mode,
+      stableNodeShape.column,
+    ],
   )
   const tipFieldsRef = useRef(tipFields)
   tipFieldsRef.current = tipFields
@@ -548,6 +652,7 @@ export function NetworkViewer({
     () => ({
       colors,
       sizes,
+      shapes,
       borderWidth: Math.max(0, nodeBorderWidth),
       edgeColors,
       edgeOpacity,
@@ -561,6 +666,7 @@ export function NetworkViewer({
     [
       colors,
       sizes,
+      shapes,
       nodeBorderWidth,
       edgeColors,
       edgeOpacity,
@@ -639,6 +745,31 @@ export function NetworkViewer({
     let cancelled = false
     let hoveredEdge: string | null = null
     let settleTimer: ReturnType<typeof setTimeout> | undefined
+    /** The drag in progress, or null. See the block that wires it up, below. */
+    let drag: DragState | null = null
+    /**
+     * Set on a drop that actually moved something, cleared on the next press.
+     *
+     * Sigma emits a `click` at the end of one of these drags — see the wiring below — so
+     * without this, dropping a node would toggle its selection every time.
+     */
+    let draggedAway = false
+    /*
+     * The browser's own menu, out of the way.
+     *
+     * On the container rather than in the three sigma handlers, because sigma routes a
+     * right-click to exactly one of `rightClickNode` / `rightClickEdge` / `rightClickStage` —
+     * and the edge arm is live only while `enableEdgeEvents` is, so a handler-by-handler
+     * suppression would have a hole in it that opens above eight thousand links. Bound here
+     * rather than inside `run` so the cleanup below can always match it.
+     *
+     * Compact keeps the browser menu: dragging and this menu are both expanded-view gestures,
+     * and taking away a menu without offering one leaves a dead right-click.
+     */
+    const suppressBrowserMenu = (native: MouseEvent) => {
+      if (!compactRef.current) native.preventDefault()
+    }
+    container.addEventListener('contextmenu', suppressBrowserMenu)
     setLayingOut(true)
 
     /*
@@ -658,9 +789,17 @@ export function NetworkViewer({
       seed,
       barnesHut,
       weightInfluence,
+      partition,
+      springLength,
       layoutNonce,
     ])
     const remembered = recallLayout(memoKey, nodeIds, signature)
+    /*
+     * Carried through the memo so the caption stays true across a rebuild: a restored layout
+     * that somebody arranged by hand is still a hand-made arrangement.
+     */
+    let handMoved = remembered?.moved === true
+    setMovedByHand(handMoved)
 
     const run = async () => {
       try {
@@ -669,14 +808,16 @@ export function NetworkViewer({
           { default: SigmaRenderer },
           rendering,
           curve,
-          nodeBorder,
+          shapeProgram,
           positions,
         ] = await Promise.all([
           import('graphology'),
           import('sigma'),
           import('sigma/rendering'),
           import('@sigma/edge-curve'),
-          import('@sigma/node-border'),
+          // Dynamic for the same reason sigma is: it extends `NodeProgram`, so importing it
+          // evaluates `sigma/rendering`, which touches WebGL globals jsdom has none of.
+          import('./nodeShapeProgram'),
           // A remembered layout skips the computation outright — including, for the force
           // layout, the settling that earned it.
           remembered?.positions ??
@@ -692,6 +833,8 @@ export function NetworkViewer({
               ...(seed ? { seed } : {}),
               ...(barnesHut ? { barnesHut } : {}),
               ...(weightInfluence === undefined ? {} : { weightInfluence }),
+              ...(partition === undefined ? {} : { partition }),
+              ...(springLength === undefined ? {} : { springLength }),
             }),
         ])
         if (cancelled) return
@@ -774,25 +917,21 @@ export function NetworkViewer({
             curvedArrow: curve.EdgeCurvedArrowProgram,
           },
           /*
-           * Bordered discs. Sigma ships no such program, and a border is what stops a node
-           * dissolving into the links crossing behind it.
+           * Bordered marks, one of six shapes each. Sigma ships neither: its only node program
+           * is an unbordered disc, and a border is what stops a node dissolving into the links
+           * crossing behind it. `@sigma/node-border` supplied the border and nothing else —
+           * its geometry is `length(v_diffVector)` at every setting — so `nodeShapeProgram.ts`
+           * now owns both.
            *
-           * `mode: 'pixels'` keeps the outline one screen pixel at every zoom, rather than
-           * growing with the camera. Note this deliberately passes no `drawLabel`/`drawHover`:
-           * sigma prefers a program's own drawers over the settings, so supplying them here
-           * would quietly discard the haloed labels and the selection ring.
+           * Registered under `circle`, which is sigma's *default node type* rather than a claim
+           * about the mark: every node reaches this program without carrying a `type`, and the
+           * shape it draws comes from the per-node `shape` attribute.
+           *
+           * It deliberately declares no `drawLabel`/`drawHover`: sigma prefers a program's own
+           * drawers over the settings, so supplying them here would quietly discard the haloed
+           * labels and the selection ring.
            */
-          nodeProgramClasses: {
-            circle: nodeBorder.createNodeBorderProgram({
-              borders: [
-                {
-                  color: { attribute: 'borderColor' },
-                  size: { attribute: 'borderSize', defaultValue: 0, mode: 'pixels' },
-                },
-                { color: { attribute: 'color' }, size: { fill: true } },
-              ],
-            }),
-          },
+          nodeProgramClasses: { circle: shapeProgram.NodeShapeProgram },
           /*
            * Everything outside the focused ego network *recedes*; nothing is erased.
            *
@@ -834,7 +973,178 @@ export function NetworkViewer({
           sigma.refresh()
         }
 
+        /*
+         * --- dragging nodes ---------------------------------------------------
+         *
+         * Sigma ships no node dragging; this is the whole of it. `networkDrag.ts` holds the
+         * arithmetic — which nodes a grab picks up, where they land — so that half is testable
+         * without a GPU. What is left here is event wiring, and four things about it fail
+         * silently:
+         *
+         *  - **The rescale box has to be pinned before the first move.** With `autoRescale`
+         *    on, sigma normalises positions against the node extent and recomputes it on every
+         *    refresh — so dragging one node outward rescales *every* node and the graph shrinks
+         *    away under the cursor. `setCustomBBox` freezes the box for the life of this
+         *    renderer, and ⤢ is what clears it: after a drag, "fit to view" has to mean "frame
+         *    everything again, including what I dragged out there".
+         *  - **`preventSigmaDefault` is what stops the camera panning under the drag**, because
+         *    the captor emits `mousemovebody` and only afterwards reads that flag.
+         *  - **…and it is also why sigma still emits a click at the end.** The captor's own
+         *    drag counter (`draggedEventsTolerance`, what normally suppresses a click after a
+         *    pan) is incremented *after* that same check, so it stays at zero for every drag
+         *    here. `draggedAway` is our own tolerance, and `DRAG_SLOP` is the hand-tremor
+         *    allowance that keeps a plain click a click.
+         *  - **The end of the drag comes from the captor's `mouseup`, not from
+         *    `upNode`/`upStage`**: the captor listens on the document, so releasing outside the
+         *    canvas ends the drag instead of leaving a node stuck to the pointer.
+         *
+         * Nothing is pinned against the force layout. A running supervisor keeps moving what
+         * you dropped — deliberately, since a graph big enough to still be settling is one
+         * where the physics is doing the arranging; freeze it (❙❙) first, or drag once it has
+         * stopped.
+         */
+        const positionOf = (id: string): Positioned | undefined =>
+          graph.hasNode(id)
+            ? {
+                x: Number(graph.getNodeAttribute(id, 'x')),
+                y: Number(graph.getNodeAttribute(id, 'y')),
+              }
+            : undefined
+
+        /**
+         * Write moved positions onto the graph.
+         *
+         * One node goes through `mergeNodeAttributes`, which graphology reports as a single
+         * node update and sigma answers with a partial refresh of that node alone. A
+         * multi-node drag goes through the bulk updater instead: one aggregate event and one
+         * full re-index, which is the cheaper trade only once several nodes moved at once.
+         */
+        const placeNodes = (moved: Map<string, Positioned>) => {
+          if (moved.size === 1) {
+            for (const [id, at] of moved) graph.mergeNodeAttributes(id, at)
+            return
+          }
+          graph.updateEachNodeAttributes(
+            (id, attrs) => {
+              const at = moved.get(id)
+              return at ? { ...attrs, x: at.x, y: at.y } : attrs
+            },
+            { attributes: ['x', 'y'] },
+          )
+        }
+
+        const announceMoved = () => {
+          if (handMoved) return
+          handMoved = true
+          setMovedByHand(true)
+        }
+
+        sigma.on('downNode', ({ node, event }) => {
+          draggedAway = false
+          if (compactRef.current) return
+          // Left button only. The captor emits `mousedown` for every button but pans on the
+          // left one alone, so without this a right-click would carry a node off with it.
+          const original: MouseEvent | TouchEvent = event.original
+          if ('button' in original && original.button !== 0) return
+          const started = beginDrag(node, selectionRef.current, positionOf, {
+            graph: sigma.viewportToGraph(event),
+            viewport: { x: event.x, y: event.y },
+          })
+          if (!started) return
+          drag = started
+          if (!sigma.getCustomBBox()) sigma.setCustomBBox(sigma.getBBox())
+          container.style.cursor = 'grabbing'
+        })
+        // A press on the stage is the other way a click can begin, and it has to clear the
+        // flag too — otherwise one drag would swallow the next click on empty canvas.
+        sigma.on('downStage', () => {
+          draggedAway = false
+        })
+
+        const endDrag = () => {
+          if (!drag) return
+          draggedAway = drag.moved
+          drag = null
+          container.style.cursor = hoveredNodeRef.current ? 'grab' : ''
+        }
+        sigma.getMouseCaptor().on('mouseup', endDrag)
+
+        /*
+         * --- the context menu ------------------------------------------------
+         *
+         * Sigma routes a right-click to exactly one of three events, so all three are taken:
+         * a node, a link (only while `enableEdgeEvents` is on), or the canvas. The browser's
+         * own menu is suppressed on the container — see `suppressBrowserMenu`.
+         *
+         * What each one anchors on is the whole decision. A node anchors on `seedsFor`, the
+         * same rule the drag uses and the same one `NodeContextMenu` uses on the canvas: a
+         * right-click inside the selection acts on the selection, one outside it on that node.
+         * A **link** anchors on both its ends, which is what makes right-clicking a wire mean
+         * something rather than being the hole in the coverage. The canvas anchors on nothing,
+         * and gets the whole-graph verbs instead.
+         */
+        const screenPoint = (event: {
+          x: number
+          y: number
+          original: MouseEvent | TouchEvent
+        }) => {
+          const original = event.original
+          if ('clientX' in original) return { x: original.clientX, y: original.clientY }
+          // A `contextmenu` is always a MouseEvent; this is the honest fallback rather than a
+          // cast, and it costs one layout read on a gesture that happens by hand.
+          const rect = container.getBoundingClientRect()
+          return { x: rect.left + event.x, y: rect.top + event.y }
+        }
+
+        /**
+         * Opening the menu dismisses the tooltip.
+         *
+         * They are summoned by the same pointer over the same mark, so without this the menu
+         * comes up on top of a tooltip describing the node it is already named after.
+         */
+        const openMenu = (state: MenuState) => {
+          setTip(null)
+          setMenu(state)
+        }
+
+        /** A node in words, by the tooltip's rule: the label is usually the id. */
+        const labelFor = (id: string) => {
+          const row = nodeIds.indexOf(id)
+          const label = row >= 0 ? nodeLabelsRef.current?.[row] : undefined
+          return label && label !== id ? `${label} · ${id}` : id
+        }
+
+        sigma.on('rightClickNode', ({ node, event }) => {
+          if (compactRef.current) return
+          const seeds = seedsFor(node, selectionRef.current)
+          openMenu({
+            at: screenPoint(event),
+            seeds,
+            caption: seeds.length > 1 ? `${seeds.length} nodes selected` : labelFor(node),
+          })
+        })
+        sigma.on('rightClickEdge', ({ edge, event }) => {
+          if (compactRef.current) return
+          const source = graph.source(edge)
+          const target = graph.target(edge)
+          openMenu({
+            at: screenPoint(event),
+            seeds: [source, target],
+            caption: `${source} ${network.directed ? '→' : '–'} ${target}`,
+          })
+        })
+        sigma.on('rightClickStage', ({ event }) => {
+          if (compactRef.current) return
+          openMenu({
+            at: screenPoint(event),
+            seeds: [],
+            caption: `${nodeIds.length.toLocaleString()} nodes`,
+          })
+        })
+
         sigma.on('clickNode', ({ node }) => {
+          // A drop is not a click — see `draggedAway`.
+          if (draggedAway) return
           const selected = selectionRef.current
           const next = selected.has(node)
             ? [...selected].filter((id) => id !== node)
@@ -842,6 +1152,9 @@ export function NetworkViewer({
           onSelectionRef.current?.(next)
         })
         sigma.on('clickStage', () => {
+          // Dragging a node out over empty canvas ends with a click on the stage, which would
+          // otherwise clear the selection you had just finished arranging.
+          if (draggedAway) return
           if (selectionRef.current.size > 0) onSelectionRef.current?.([])
         })
         // Hovering a node focuses its ego network and reports what colour and size are
@@ -850,6 +1163,9 @@ export function NetworkViewer({
         // momentary "show me this instead", and the selection returns on leave.
         sigma.on('enterNode', ({ node, event }) => {
           hoveredNodeRef.current = node
+          // The only affordance dragging gets. A node that can be picked up has to say so
+          // before it is picked up, and there is nowhere else on this canvas to say it.
+          if (!drag && !compactRef.current) container.style.cursor = 'grab'
           refocus([node])
           const row = Number(graph.getNodeAttribute(node, 'row'))
           if (!Number.isFinite(row)) return
@@ -862,6 +1178,9 @@ export function NetworkViewer({
         })
         sigma.on('leaveNode', () => {
           hoveredNodeRef.current = null
+          // Not while dragging: the pointer outruns the node it is carrying, and the cursor
+          // flickering between grab and default mid-gesture reads as having dropped it.
+          if (!drag) container.style.cursor = ''
           refocus(selectionRef.current)
           setTip((current) => (current?.kind === 'node' ? null : current))
         })
@@ -887,6 +1206,18 @@ export function NetworkViewer({
         // Sigma announces the mark once, on entry. Following the pointer from there is
         // what makes the tooltip read as belonging to the cursor rather than to a spot.
         sigma.on('moveBody', ({ event }) => {
+          if (drag) {
+            const viewport = { x: event.x, y: event.y }
+            if (drag.moved || beyondSlop(drag, viewport)) {
+              drag.moved = true
+              placeNodes(dragPositions(drag, sigma.viewportToGraph(viewport)))
+              announceMoved()
+            }
+            // Two different defaults, both wrong here: sigma's is to pan the camera, and the
+            // browser's is to start a text selection across the canvas.
+            event.preventSigmaDefault()
+            event.original.preventDefault()
+          }
           if (!hoveredEdge && !hoveredNodeRef.current) return
           setTip((current) =>
             current
@@ -958,6 +1289,7 @@ export function NetworkViewer({
     void run()
     return () => {
       cancelled = true
+      container.removeEventListener('contextmenu', suppressBrowserMenu)
       if (settleTimer) clearTimeout(settleTimer)
       const current = renderedRef.current
       if (current) {
@@ -972,6 +1304,8 @@ export function NetworkViewer({
           signature,
           positions,
           camera: current.sigma.getCamera().getState(),
+          // So the caption can still say so after a rebuild restores this.
+          moved: handMoved,
         })
         // Killed, not stopped: a stopped supervisor keeps its worker alive.
         current.supervisor?.kill()
@@ -981,6 +1315,7 @@ export function NetworkViewer({
       hoveredNodeRef.current = null
       focusRef.current = NO_FOCUS
       setTip(null)
+      setMenu(null)
     }
   }, [
     network,
@@ -996,6 +1331,8 @@ export function NetworkViewer({
     seed,
     barnesHut,
     weightInfluence,
+    partition,
+    springLength,
     memoKey,
     layoutNonce,
     tooBig,
@@ -1041,7 +1378,19 @@ export function NetworkViewer({
   }, [query, matches])
 
   const fitToView = useCallback(() => {
-    void renderedRef.current?.sigma.getCamera().animatedReset({ duration: 180 })
+    const rendered = renderedRef.current
+    if (!rendered) return
+    /*
+     * Unpin the rescale box a drag froze, or this frames the graph as it was *before* the
+     * drag and leaves whatever was dragged outside it off screen — the one gesture that can
+     * take a node beyond the box, answered by the one button whose job is to find everything.
+     * `refresh` is what re-reads it: `setCustomBBox` only schedules a render.
+     */
+    if (rendered.sigma.getCustomBBox()) {
+      rendered.sigma.setCustomBBox(null)
+      rendered.sigma.refresh()
+    }
+    void rendered.sigma.getCamera().animatedReset({ duration: 180 })
   }, [])
 
   const toggleSettling = useCallback(() => {
@@ -1216,8 +1565,56 @@ export function NetworkViewer({
         </div>
       )}
 
+      {menu && !compact && (
+        <NetworkContextMenu
+          at={menu.at}
+          seeds={menu.seeds}
+          caption={menu.caption}
+          directed={network.directed}
+          selected={stableSelection.length}
+          total={nodeIds.length}
+          /*
+           * Every command replaces the selection rather than adding to it — and since each
+           * result contains its own anchors, replacing is what makes running `Select connected`
+           * twice reach two hops out. Writing the selection is undoable like any other param.
+           */
+          onExpand={(scope: SelectScope) =>
+            onSelectionRef.current?.(expandedSelection(network, menu.seeds, scope))
+          }
+          onSelectAll={() => onSelectionRef.current?.(nodeIds)}
+          onClear={() => onSelectionRef.current?.([])}
+          onCopy={() => {
+            // Node order, not the order the anchors happen to be in: a list somebody pastes
+            // into a segmentation viewer should not depend on which node they clicked first.
+            const ids =
+              menu.seeds.length > 0 ? orderByNode(network, new Set(menu.seeds)) : nodeIds
+            void copyText(ids.join('\n')).catch((error) =>
+              onErrorRef.current?.(errorMessage(error)),
+            )
+          }}
+          onFit={fitToView}
+          onClose={() => setMenu(null)}
+        />
+      )}
+
       <NetworkLegend
         colors={colors}
+        /*
+         * Node keys are otherwise unnamed — nodes being the default subject of a node-link
+         * drawing — but a strip reading `1 2 3 4` with nothing saying what the numbers are is
+         * the one case where that economy costs more than it saves.
+         */
+        {...(stableNodeColor.mode === 'component' ? { colorName: COMPONENT_CHANNEL } : {})}
+        shapes={shapes}
+        {...(onParamChange
+          ? {
+              onReshape: (label: string, shape: MarkerShape) =>
+                onParamChange(
+                  'nodeShapeOverrides',
+                  writeOverrides({ ...(stableNodeShape.overrides ?? {}), [label]: shape }),
+                ),
+            }
+          : {})}
         edgeColors={edgeColors}
         nodeSize={{ spec: stableNodeSize, resolved: sizes }}
         edgeWidth={{ spec: stableEdgeSize, resolved: edgeWidths }}
@@ -1238,6 +1635,16 @@ export function NetworkViewer({
             {filteredNote} filtered
           </span>
         )}
+        {colors.legend?.kind === 'categorical' && colors.legend.cycled && !compact && (
+          // The legend cannot say this — two identical swatches read as a mistake rather than
+          // as a statement — so the caption does, exactly as the dendrogram's always has.
+          <span
+            className="viewer__note"
+            title="More categories than the palette has colours, so two of them share a hue. Pick a bigger palette on the Node tab — tab20 gives twenty before anything repeats."
+          >
+            colours repeat
+          </span>
+        )}
         {thinned && !compact && (
           <span className="viewer__note" title="Too many labels to draw them all — zoom in.">
             labels thinned
@@ -1252,6 +1659,14 @@ export function NetworkViewer({
             title="More nodes than the layout budget settles: the arrangement stops where it got to, so distance between nodes means less than usual. Re-layout to keep going, or group upstream."
           >
             layout unsettled
+          </span>
+        )}
+        {movedByHand && !compact && (
+          <span
+            className="viewer__note"
+            title="Nodes you dragged stay where you put them for this session — the card, the inspector and this view share them — but positions are not saved with the document, so reopening the file lays the graph out again. Re-layout (↻) discards them now."
+          >
+            moved by hand
           </span>
         )}
         {stableGiven && !compact && (
@@ -1314,6 +1729,9 @@ function buildSvg(
       radius: Math.max(1, sigma.scaleSize(display.size)),
       color: display.color,
       borderWidth: style.borderWidth,
+      // Read off the graph rather than re-resolved: whatever the renderer drew is what the
+      // export has to draw, which is the same rule the colours already follow.
+      shape: attrs.shape as MarkerShape | undefined,
       label: shownNodeLabels.has(id) ? (display.label ?? '') : '',
     })
   })

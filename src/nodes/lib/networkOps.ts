@@ -374,3 +374,100 @@ export function induceSubnetwork(network: NetworkValue, keep: ReadonlySet<string
 
   return subnetworkOf(network, ids, ends, weights(network.edges), nodeRows, edgeRows)
 }
+
+// ---------------------------------------------------------------------------
+// Components
+
+/**
+ * Which component each node belongs to, one number per node row, 1-based.
+ *
+ * **Undirected, like `expandSelection`'s `component`**, and for the same reason recorded on
+ * `NetworkSelection.direction`: a component that respected arrows would be a *reachable set*,
+ * and calling one the other is the kind of wrong answer that looks right. The two have to
+ * agree — a viewer colouring by component beside a menu selecting one is two statements about
+ * the same partition — so `networkOps.test.ts` asserts they do rather than trusting that two
+ * walks written for one rule stay one rule.
+ *
+ * **Numbered by size, largest first**, ties broken by the first node's row. Two reasons, and
+ * both are about the answer being the same twice: it reaches a categorical encoding, which
+ * ranks its slots by frequency, so numbering by size makes the legend read in palette order —
+ * and a connectome is usually one giant component with stragglers, where "1" meaning the giant
+ * one is the reading everybody already has.
+ *
+ * Self-loops and links naming a node the network does not have are skipped rather than raised;
+ * both are ordinary in a graph that has been filtered.
+ */
+/**
+ * Connected components over an index-level edge list, numbered largest-first.
+ *
+ * The shared core, because there are two callers with different inputs and **one ordering
+ * contract**: largest component first, ties broken by the earliest node in each. That contract
+ * is what makes "colour by component" and the prefuse layout's per-component packing agree
+ * about what a component is — and when it was written out twice, they disagreed, placing a
+ * node in one group's colour inside another group's box. Nothing on screen says so, which is
+ * why it is written once.
+ *
+ * Undirected: a component ignores arrows. Self-loops and edges naming an index the node set
+ * does not have are skipped rather than treated as a join.
+ */
+export function componentsOfEdges(
+  count: number,
+  edges: Iterable<readonly [number, number]>,
+): number[] {
+  const near: number[][] = Array.from({ length: count }, () => [])
+  for (const [from, to] of edges) {
+    if (from === to) continue
+    if (from < 0 || to < 0 || from >= count || to >= count) continue
+    near[from]!.push(to)
+    near[to]!.push(from)
+  }
+
+  // Breadth-first from every unvisited node. Iterative rather than recursive: a connectome
+  // component is routinely tens of thousands of nodes deep, which is a stack overflow.
+  const raw = new Array<number>(count).fill(-1)
+  const size: number[] = []
+  for (let start = 0; start < count; start++) {
+    if (raw[start] !== -1) continue
+    const id = size.length
+    raw[start] = id
+    let found = 0
+    const queue = [start]
+    for (let head = 0; head < queue.length; head++) {
+      found++
+      for (const other of near[queue[head]!]!) {
+        if (raw[other] !== -1) continue
+        raw[other] = id
+        queue.push(other)
+      }
+    }
+    size.push(found)
+  }
+
+  // Seeds are visited in increasing index order, so a component's id *is* its earliest node's
+  // rank — which makes the id itself the tie-break, and the separate `first` table that used
+  // to be built here redundant.
+  const ranked = [...size.keys()].sort((a, b) => size[b]! - size[a]! || a - b)
+  const rank = new Array<number>(size.length)
+  ranked.forEach((component, place) => {
+    rank[component] = place + 1
+  })
+  return raw.map((component) => rank[component]!)
+}
+
+export function connectedComponents(network: NetworkValue): number[] {
+  const ids = nodeIds(network)
+  const rowOf = new Map<string, number>()
+  ids.forEach((id, row) => {
+    if (!rowOf.has(id)) rowOf.set(id, row)
+  })
+
+  const { sources, targets } = linkEnds(network)
+  const edges: Array<readonly [number, number]> = []
+  for (let i = 0; i < network.edges.length; i++) {
+    const from = rowOf.get(sources[i]!)
+    const to = rowOf.get(targets[i]!)
+    if (from === undefined || to === undefined) continue
+    edges.push([from, to])
+  }
+  return componentsOfEdges(ids.length, edges)
+}

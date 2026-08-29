@@ -12,98 +12,15 @@
  * traces directly, because a `Path2D` per point is fifty thousand allocations per frame.
  */
 
+import type { MarkerShape } from '../encoding'
+import { markVertices } from './markGeometry'
 import { SVG_NS, element, round, svgRoot, textNode } from './svgElement'
-import type { MarkerShape, ScatterSpec } from './scatterPlot'
+import type { ScatterSpec } from './scatterPlot'
 import { inverse } from './scatterPlot'
 import { formatCompact } from '../format'
 
 /** Height of the legend strip appended below an exported plot. */
 const LEGEND_HEIGHT = 26
-
-/**
- * Half-side of a square with the same area as a circle of radius r.
- *
- * Marks of different shapes have to carry the same weight, or shape starts encoding
- * magnitude by accident — a square drawn at the circle's radius is 27% larger.
- */
-const SQUARE = Math.sqrt(Math.PI) / 2
-
-/** Arm half-width of the plus and cross, as a fraction of the radius. */
-const ARM = 0.38
-
-// ---------------------------------------------------------------------------
-// Marker geometry
-// ---------------------------------------------------------------------------
-
-/**
- * Vertices of a mark, centred on the origin and scaled to radius 1.
- *
- * Circle is absent on purpose: it has no vertices, and both back-ends draw it with their own
- * arc primitive rather than as a polygon approximation.
- */
-function markVertices(shape: MarkerShape): number[][] {
-  switch (shape) {
-    case 'square':
-      return [
-        [-SQUARE, -SQUARE],
-        [SQUARE, -SQUARE],
-        [SQUARE, SQUARE],
-        [-SQUARE, SQUARE],
-      ]
-    case 'triangle':
-      // Equilateral, point up, centroid at the origin.
-      return [
-        [0, -1.1],
-        [0.953, 0.55],
-        [-0.953, 0.55],
-      ]
-    case 'diamond':
-      return [
-        [0, -1.25],
-        [1.25, 0],
-        [0, 1.25],
-        [-1.25, 0],
-      ]
-    case 'plus':
-      return plusVertices(0)
-    case 'cross':
-      // The same outline turned an eighth, which is what makes the two readably different
-      // rather than two variations on a thin blob.
-      return plusVertices(Math.PI / 4)
-    case 'dash':
-      return [
-        [-1.15, -0.32],
-        [1.15, -0.32],
-        [1.15, 0.32],
-        [-1.15, 0.32],
-      ]
-    default:
-      return []
-  }
-}
-
-function plusVertices(rotation: number): number[][] {
-  const w = ARM
-  const a = 1.15
-  const base = [
-    [-w, -a],
-    [w, -a],
-    [w, -w],
-    [a, -w],
-    [a, w],
-    [w, w],
-    [w, a],
-    [-w, a],
-    [-w, w],
-    [-a, w],
-    [-a, -w],
-    [-w, -w],
-  ]
-  if (!rotation) return base
-  const cos = Math.cos(rotation)
-  const sin = Math.sin(rotation)
-  return base.map(([x, y]) => [x! * cos - y! * sin, x! * sin + y! * cos])
-}
 
 /** SVG path data for one mark. */
 export function markPath(shape: MarkerShape, x: number, y: number, r: number): string {

@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import type { NodeDefinition, ParamDef } from '../../core/node'
+import type { NodeDefinition, ParamDef, ParamValues } from '../../core/node'
 import { defaultParams } from '../../core/node'
 import { listableNodeDefs, requireNodeDef } from '../../core/registry'
 import '../../nodes'
@@ -82,6 +82,16 @@ describe('composite rows', () => {
     expect(colour.primary?.id).toBe('nodeColorMode')
     // Default mode is categorical, so the column picker is the visible value, not the swatch.
     expect(colour.value?.id).toBe('nodeColorBy')
+    // …and the palette hangs off the same row as an extra, because which colours and which
+    // column are one decision called "colour".
+    expect(colour.extras.map((p) => p.id)).toEqual(['nodePalette'])
+  })
+
+  it('drops the palette from the row for a mode that cycles nothing', () => {
+    const flat = groupParams(def, { ...base, nodeColorMode: 'constant' }, presentational)
+    const colour = composites(flat.find((t) => t.id === 'node')!.rows).find(
+      (r) => r.key === 'nodeColor',
+    )!
     expect(colour.extras).toHaveLength(0)
   })
 
@@ -102,7 +112,7 @@ describe('composite rows', () => {
   })
 
   it('reads a row label off the primary, not off whichever member came first', () => {
-    expect(rowLabels(node.rows)).toEqual(['Colour', 'Size', 'Border', 'Label'])
+    expect(rowLabels(node.rows)).toEqual(['Colour', 'Size', 'Shape', 'Border', 'Label'])
     expect(rowLabels(link.rows)).toEqual(['Colour', 'Width', 'Arrows', 'Label'])
   })
 
@@ -131,6 +141,94 @@ describe('composite rows', () => {
     const layout = composites(fromColumns.find((t) => t.id === 'layout')!.rows)[0]!
     expect(layout.extras.map((p) => p.id)).toEqual(['xColumn', 'yColumn'])
   })
+
+  it('offers the prefuse layout its own knobs, the component one first', () => {
+    /*
+     * `partition` leads because it is not a tuning detail — on a fragmented graph it is the
+     * difference between a picture and a pile, worth more than the choice of force law by an
+     * order of magnitude (the table is in `prefusePositions`).
+     *
+     * It is nonetheless `advanced`, like every param on this node but `layout`: the card draws
+     * one control and `network.test.ts` pins that. Burying it costs nothing now that prefuse is
+     * the default and its own default is `separate` — the control exists to turn the good
+     * behaviour *off*, which is inspector work.
+     */
+    const prefuse = groupParams(def, { ...base, layout: 'prefuse' }, presentational)
+    const layout = composites(prefuse.find((t) => t.id === 'layout')!.rows)[0]!
+    expect(layout.extras.map((p) => p.id)).toEqual(['partition', 'springLength'])
+  })
+
+  it('keeps ForceAtlas2’s knobs off the prefuse layout, which shares none of them', () => {
+    /*
+     * `seed`, `barnesHut` and `weightInfluence` are graphology's settings and mean nothing to
+     * prefuse. `iterations` is the interesting one: it *would* apply, and it is kept off
+     * anyway because its default of 220 is ForceAtlas2's. Prefuse anneals relative to the pass
+     * count, so 220 stretches the cooling curve rather than refining — measured at 0.376 in
+     * 1,126ms against 0.431 in 536ms for its own default of 100.
+     */
+    const prefuse = groupParams(def, { ...base, layout: 'prefuse' }, presentational)
+    const layout = composites(prefuse.find((t) => t.id === 'layout')!.rows)[0]!
+    const ids = layout.extras.map((p) => p.id)
+    expect(ids).not.toContain('seed')
+    expect(ids).not.toContain('barnesHut')
+    expect(ids).not.toContain('weightInfluence')
+    expect(ids).not.toContain('iterations')
+  })
+})
+
+describe('shape is the same control on both viewers that have it', () => {
+  /*
+   * The scatter's shape channel was a bare `shapeBy` column picker, written before the network
+   * needed one; both now come from `shapeParams`, so a reader who learns the control on one
+   * viewer knows it on the other. Pinned because the two are independent call sites and the
+   * only thing keeping them identical is that neither grew its own spelling.
+   */
+  const scatter = requireNodeDef('out.scatter')
+
+  const shapeRow = (definition: NodeDefinition, params: ParamValues) => {
+    const tabs = groupParams(definition, params, presentational)
+    const rows = tabs.flatMap((tab) => tab.rows)
+    return composites(rows).find((row) => row.primary?.id.endsWith('ShapeMode'))
+  }
+
+  it('offers the same modes on both', () => {
+    const network = def.params?.find((p) => p.id === 'nodeShapeMode')
+    const point = scatter.params?.find((p) => p.id === 'pointShapeMode')
+    expect(network?.kind).toBe('enum')
+    expect(point?.kind).toBe('enum')
+    const modes = (param: ParamDef | undefined) =>
+      param?.kind === 'enum' && Array.isArray(param.options)
+        ? param.options.map((option) => option.value)
+        : []
+    expect(modes(network)).toEqual(['constant', 'categorical'])
+    expect(modes(point)).toEqual(['constant', 'categorical'])
+  })
+
+  it('swaps the mark picker for a column picker under `by category`, on both', () => {
+    /*
+     * The `visibleIf` pair that lets one slot hold whichever control currently applies — the
+     * same arrangement `colorParams` uses, which is why they render alike. Asserted on `value`
+     * rather than `extras`: a composite's value members share one slot by design.
+     */
+    for (const [definition, prefix] of [
+      [def, 'node'],
+      [scatter, 'point'],
+    ] as const) {
+      const values = defaultParams(definition)
+      const constant = shapeRow(definition, { ...values, [`${prefix}ShapeMode`]: 'constant' })
+      expect(constant?.value?.id).toBe(`${prefix}Shape`)
+      const categorical = shapeRow(definition, {
+        ...values,
+        [`${prefix}ShapeMode`]: 'categorical',
+      })
+      expect(categorical?.value?.id).toBe(`${prefix}ShapeBy`)
+    }
+  })
+
+  it('generates the overrides companion the legend writes into, on both', () => {
+    expect(def.params?.some((p) => p.id === 'nodeShapeOverrides')).toBe(true)
+    expect(scatter.params?.some((p) => p.id === 'pointShapeOverrides')).toBe(true)
+  })
 })
 
 describe('link colour offers no sequential mode', () => {
@@ -143,7 +241,15 @@ describe('link colour offers no sequential mode', () => {
 
   it('offers a constant and a category, and nothing driven by magnitude', () => {
     const options = mode.kind === 'enum' && Array.isArray(mode.options) ? mode.options : []
-    expect(options.map((o) => o.value)).toEqual(['constant', 'categorical'])
+    // The two endpoint modes are identity, not magnitude: a link borrows the colour of the
+    // node at one of its ends, so it lands on a palette slot somebody already validated.
+    expect(options.map((o) => o.value)).toEqual([
+      'constant',
+      'categorical',
+      'sourceNode',
+      'targetNode',
+    ])
+    expect(options.map((o) => o.value)).not.toContain('sequential')
   })
 
   it('still offers it for nodes, which are area marks', () => {

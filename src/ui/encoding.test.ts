@@ -10,18 +10,31 @@
 import { describe, expect, it } from 'vitest'
 
 import { column, tableSchema } from '../core/types'
-import { tableFromRows } from '../core/values'
-import { CHART_INK, MAX_SERIES, OTHER_LABEL, foldByRank, seriesColor } from './colors'
+import { makeTable, tableFromRows } from '../core/values'
 import {
-  HASH_LEGEND_KEYS,
+  CHART_INK,
+  MAX_SERIES,
+  OTHER_LABEL,
+  cycleColor,
+  foldByRank,
+  paletteColors,
+  seriesColor,
+} from './colors'
+import {
+  LEGEND_KEYS,
+  MARKER_SHAPES,
+  MAX_SHAPES,
+  OTHER_SHAPE,
   clusterColor,
   hexToRgbFloat,
   literalColor,
   resolveColor,
+  resolveShape,
   resolveSize,
 } from './encoding'
 import { segmentColor } from './segmentColor'
-import { readColorOverrides } from '../nodes/lib/encodingParams'
+import type { ShapeSpec } from '../nodes/lib/encodingParams'
+import { readOverrides } from '../nodes/lib/encodingParams'
 
 const SCHEMA = tableSchema(column('id', 'str'), column('type', 'str'), column('weight', 'f64'))
 
@@ -98,17 +111,42 @@ describe('resolveColor', () => {
     )
     if (result.legend?.kind !== 'categorical') throw new Error('expected categorical')
 
-    expect(result.legend.truncated).toBe(true)
-    expect(result.legend.entries).toHaveLength(MAX_SERIES + 1)
-    expect(result.legend.entries.at(-1)?.label).toBe(OTHER_LABEL)
-    // Ranks 0-7 keep their slot; rank 8 onward is grey. A repeated hue would imply two
-    // categories are the same thing.
-    expect(result.at(rankOf(7))).toBe(seriesColor(7, 'dark'))
-    expect(result.at(rankOf(8))).toBe('#898781')
-    expect(result.at(rankOf(11))).toBe('#898781')
+    // Twelve categories, eight colours in the default palette: the ninth comes round to the
+    // first rather than folding into grey. A grey lump said only "not one of the eight", which
+    // on a connectome's cell types is most of the picture.
+    expect(result.legend.entries.map((e) => e.label)).not.toContain(OTHER_LABEL)
+    expect(result.at(rankOf(7))).toBe(cycleColor(7, 'dark'))
+    expect(result.at(rankOf(8))).toBe(cycleColor(0, 'dark'))
+    expect(result.at(rankOf(11))).toBe(cycleColor(3, 'dark'))
 
+    // The first pass round the ramp is still eight distinct hues, ranked so the commonest
+    // values get them.
     const used = result.legend.entries.slice(0, MAX_SERIES).map((e) => e.color)
     expect(new Set(used).size).toBe(MAX_SERIES)
+
+    // Twelve values, twelve keys — the cap is on the strip, not on the palette — and the
+    // caption's `colours repeat` note hangs off `cycled`.
+    expect(result.legend.entries).toHaveLength(LEGEND_KEYS)
+    expect(result.legend.truncated).toBe(false)
+    expect(result.legend.cycled).toBe(true)
+  })
+
+  it('cycles a chosen palette rather than the default one', () => {
+    const rows = Array.from({ length: 12 }, (_, i) => ({
+      id: `n${i}`,
+      type: `T${i}`,
+      weight: 12 - i,
+    }))
+    const result = resolveColor(
+      table(rows),
+      { mode: 'categorical', column: 'type', constant: '0', palette: 'tab20' },
+      'dark',
+    )
+    // Twenty hues, so twelve categories fit without repeating — which is the whole reason the
+    // dropdown exists.
+    const colors = new Set(rows.map((_, i) => result.at(i)))
+    expect(colors.size).toBe(12)
+    expect(result.legend?.kind === 'categorical' && result.legend.cycled).toBe(false)
   })
 
   it('maps a numeric column onto a single-hue ramp with a domain legend', () => {
@@ -177,15 +215,17 @@ describe('resolveColor — legend keys and overrides', () => {
     expect([0, 1, 2].map((i) => result.labelAt?.(i))).toEqual(['LC4', 'LC4', 'LC6'])
   })
 
-  it('answers with the key a folded row is *drawn* under, not with its own value', () => {
-    // Nine categories, so the ninth folds into Other — and hiding Other has to hide every row
-    // in it, which it cannot do if those rows answer with their own names.
+  it('answers with its own value past the palette, because nothing is folded any more', () => {
+    // Nine categories over eight colours. The ninth shares a hue with the first, but it is not
+    // *in* a bucket with it: hiding or selecting one must not take the other with it, which is
+    // exactly what an `Other` key used to do.
     const many = table(
       Array.from({ length: 9 }, (_, i) => ({ id: String(i), type: `T${i}`, weight: i })),
     )
     const result = resolveColor(many, { mode: 'categorical', column: 'type', constant: '0' }, 'dark')
     const labels = Array.from({ length: 9 }, (_, i) => result.labelAt?.(i))
-    expect(labels.filter((label) => label === OTHER_LABEL)).toHaveLength(1)
+    expect(labels).toEqual(Array.from({ length: 9 }, (_, i) => `T${i}`))
+    expect(labels).not.toContain(OTHER_LABEL)
   })
 
   it('has no keys to offer where there is no legend', () => {
@@ -246,17 +286,19 @@ describe('resolveColor — hash', () => {
     expect(resolveColor(data, spec, 'light').at(0)).toBe(resolveColor(data, spec, 'dark').at(0))
   })
 
-  it('keeps going past the ninth value where categorical folds into grey', () => {
+  it('hands out a colour per value where categorical only has a palette to cycle', () => {
+    // Still the difference between the two modes, and still the reason `hash` exists — but the
+    // categorical side is now eight hues coming round rather than eight plus one grey.
     const many = table(
       Array.from({ length: 20 }, (_, i) => ({ id: `n${i}`, type: `T${i}`, weight: i })),
     )
     const hashed = resolveColor(many, { mode: 'hash', column: 'id', constant: '0' }, 'dark')
-    const folded = resolveColor(many, { mode: 'categorical', column: 'id', constant: '0' }, 'dark')
+    const cycled = resolveColor(many, { mode: 'categorical', column: 'id', constant: '0' }, 'dark')
 
     const hashedColors = new Set(Array.from({ length: 20 }, (_, i) => hashed.at(i)))
-    const foldedColors = new Set(Array.from({ length: 20 }, (_, i) => folded.at(i)))
+    const cycledColors = new Set(Array.from({ length: 20 }, (_, i) => cycled.at(i)))
     expect(hashedColors.size).toBe(20)
-    expect(foldedColors.size).toBe(MAX_SERIES + 1)
+    expect(cycledColors.size).toBe(MAX_SERIES)
   })
 
   it('gives every distinct value its own key, which is what makes hiding work per neuron', () => {
@@ -271,7 +313,7 @@ describe('resolveColor — hash', () => {
      * slots, so the only ordering that carries information is the table's own.
      */
     const many = table(
-      Array.from({ length: HASH_LEGEND_KEYS + 5 }, (_, i) => ({
+      Array.from({ length: LEGEND_KEYS + 5 }, (_, i) => ({
         id: `n${i}`,
         type: 'T',
         weight: i,
@@ -279,7 +321,7 @@ describe('resolveColor — hash', () => {
     )
     const legend = resolveColor(many, spec, 'dark').legend
     if (legend?.kind !== 'categorical') throw new Error('expected categorical')
-    expect(legend.entries).toHaveLength(HASH_LEGEND_KEYS)
+    expect(legend.entries).toHaveLength(LEGEND_KEYS)
     expect(legend.entries[0]?.label).toBe('n0')
     expect(legend.truncated).toBe(true)
     // And no `Other`: the unlisted ones keep their own colours, so folding them under a grey
@@ -319,19 +361,19 @@ describe('resolveColor — hash', () => {
   })
 })
 
-describe('readColorOverrides', () => {
+describe('readOverrides', () => {
   it('reads the map the legend writes', () => {
-    expect(readColorOverrides('{"LC4":"#ff0000"}')).toEqual({ LC4: '#ff0000' })
+    expect(readOverrides('{"LC4":"#ff0000"}')).toEqual({ LC4: '#ff0000' })
   })
 
   it('treats anything unreadable as no overrides, since it lives in a saved file', () => {
     for (const value of ['', '   ', 'not json', '[1,2]', '"a string"', 'null', undefined, 42]) {
-      expect(readColorOverrides(value)).toEqual({})
+      expect(readOverrides(value)).toEqual({})
     }
   })
 
   it('drops non-string values but keeps the rest of the map', () => {
-    expect(readColorOverrides('{"a":"#fff","b":7}')).toEqual({ a: '#fff' })
+    expect(readOverrides('{"a":"#fff","b":7}')).toEqual({ a: '#fff' })
   })
 })
 
@@ -571,4 +613,151 @@ describe('foldByRank', () => {
     expect(fold.legend).toEqual([])
     expect(fold.folded).toBe(false)
   })
+})
+
+/**
+ * The palette table.
+ *
+ * Values are transcribed from published sets and the *order* is ours — see the note in
+ * `colors.ts`. What is worth pinning is the part a careless edit breaks silently: the sizes,
+ * which is what somebody chooses a palette by; that the saturated half of the two interleaved
+ * imports comes first, since `resolveColor` gives the leading slots to the commonest values;
+ * and that everything in every palette is a distinct, well-formed colour.
+ */
+describe('categorical palettes', () => {
+  const sizes = { coda: 8, okabeIto: 8, tableau10: 10, paired: 12, tab20: 20 } as const
+
+  it('is the size its label advertises', () => {
+    for (const [name, size] of Object.entries(sizes)) {
+      expect(paletteColors(name as keyof typeof sizes, 'dark')).toHaveLength(size)
+      expect(paletteColors(name as keyof typeof sizes, 'light')).toHaveLength(size)
+    }
+  })
+
+  it('holds distinct, well-formed colours throughout', () => {
+    for (const name of Object.keys(sizes) as Array<keyof typeof sizes>) {
+      for (const mode of ['light', 'dark'] as const) {
+        const colors = paletteColors(name, mode)
+        expect(colors.every((c) => /^#[0-9a-f]{6}$/.test(c))).toBe(true)
+        expect(new Set(colors).size).toBe(colors.length)
+      }
+    }
+  })
+
+  it('puts tab20’s saturated half first, which is tableau10 exactly', () => {
+    // Published interleaved, so the two commonest categories would otherwise land on two
+    // shades of one blue. Rotating it makes the two palettes agree for the first ten.
+    expect(paletteColors('tab20', 'dark').slice(0, 10)).toEqual(paletteColors('tableau10', 'dark'))
+  })
+
+  it('reads an unknown or missing name as the default rather than throwing', () => {
+    // A saved graph can name a palette a later build removed, and a graph saved before the
+    // dropdown existed names none at all.
+    expect(paletteColors(undefined, 'dark')).toEqual(paletteColors('coda', 'dark'))
+  })
+
+  it('cycles, and never lands outside the palette', () => {
+    const colors = paletteColors('coda', 'dark')
+    expect(cycleColor(0, 'dark')).toBe(colors[0])
+    expect(cycleColor(colors.length, 'dark')).toBe(colors[0])
+    expect(cycleColor(colors.length + 3, 'dark')).toBe(colors[3])
+  })
+
+  it('is theme-flipped only for coda, which is the only one validated on both surfaces', () => {
+    expect(paletteColors('coda', 'light')).not.toEqual(paletteColors('coda', 'dark'))
+    expect(paletteColors('okabeIto', 'light')).toEqual(paletteColors('okabeIto', 'dark'))
+  })
+})
+
+describe('resolveShape', () => {
+  const table = (values: Array<string | null>) =>
+    makeTable(tableSchema(column('kind', 'str')), { kind: values })
+
+  const spec = (extra: Partial<ShapeSpec> = {}): ShapeSpec => ({
+    mode: 'categorical',
+    column: 'kind',
+    constant: 'circle',
+    ...extra,
+  })
+
+  it('gives the commonest value the most distinguishable mark', () => {
+    // Same ranking as `resolveColor`, and for the same reason: whichever value dominates the
+    // picture should be the one the eye separates most easily.
+    const resolved = resolveShape(table(['a', 'b', 'b', 'b', 'a', 'c']), spec())
+    expect(resolved.at(1)).toBe(MARKER_SHAPES[0])
+    expect(resolved.at(0)).toBe(MARKER_SHAPES[1])
+    expect(resolved.at(5)).toBe(MARKER_SHAPES[2])
+  })
+
+  it('folds the tail into a dash rather than reusing a mark', () => {
+    /*
+     * The deliberate difference from colour, which cycles. Six shapes is the whole vocabulary,
+     * so a seventh category drawn as a second circle would say "these two are the same thing"
+     * with nothing able to correct it — where a repeated *hue* is survivable because there are
+     * twenty of them and the caption admits to the repeat.
+     */
+    const values = Array.from({ length: MAX_SHAPES + 3 }, (_, i) => `c${i}`)
+    const resolved = resolveShape(table(values), spec())
+    expect(resolved.legend?.entries.at(-1)).toEqual({ label: 'Other', shape: OTHER_SHAPE })
+    // Everything past the cap takes the fold, and none of the six is reused for it.
+    for (let row = MAX_SHAPES; row < values.length; row++) {
+      expect(resolved.at(row)).toBe(OTHER_SHAPE)
+    }
+    expect(MARKER_SHAPES).not.toContain(OTHER_SHAPE)
+  })
+
+  it('answers with the key a folded row is drawn under', () => {
+    // `labelAt` is what hide/solo reads, so a folded row has to name `Other` — hiding the fold
+    // has to hide all of them, exactly as it does for colour.
+    const values = Array.from({ length: MAX_SHAPES + 2 }, (_, i) => `c${i}`)
+    const resolved = resolveShape(table(values), spec())
+    expect(resolved.labelAt?.(0)).toBe('c0')
+    expect(resolved.labelAt?.(MAX_SHAPES + 1)).toBe('Other')
+  })
+
+  it('lets a pinned `Other` reach the nodes it folded, not just its key', () => {
+    /*
+     * The legend and the lookup used to be two answers: `entries` applied an override to the
+     * `Other` key while `at` looked a folded row up under its *own* label, so choosing a mark
+     * for `Other` changed the key and not one node. They are one table now.
+     */
+    const values = Array.from({ length: MAX_SHAPES + 2 }, (_, i) => `c${i}`)
+    const resolved = resolveShape(table(values), spec({ overrides: { Other: 'square' } }))
+    expect(resolved.legend?.entries.at(-1)?.shape).toBe('square')
+    expect(resolved.at(MAX_SHAPES + 1)).toBe('square')
+  })
+
+  it('lets an override win, for the mark and for its key', () => {
+    const resolved = resolveShape(table(['a', 'b', 'a']), spec({ overrides: { a: 'diamond' } }))
+    expect(resolved.at(0)).toBe('diamond')
+    const entry = resolved.legend?.entries.find((e) => e.label === 'a')
+    expect(entry?.shape).toBe('diamond')
+  })
+
+  it('ignores an override that is not a shape we can draw', () => {
+    // The value is a string in a saved file. `readOverrides` deliberately does not check it,
+    // so this is the only place that does.
+    const resolved = resolveShape(table(['a', 'b', 'a']), spec({ overrides: { a: 'blob' } }))
+    expect(resolved.at(0)).toBe(MARKER_SHAPES[0])
+  })
+
+  it('degrades to the constant when the column has one value', () => {
+    // Every node the same shape carries no information, and a one-entry legend claiming
+    // otherwise is worse than no legend.
+    const resolved = resolveShape(table(['a', 'a', 'a']), spec({ constant: 'square' }))
+    expect(resolved.at(0)).toBe('square')
+    expect(resolved.legend).toBeUndefined()
+  })
+
+  it('treats a null as a category of its own, as colour does', () => {
+    const resolved = resolveShape(table(['a', null, null, null]), spec())
+    expect(resolved.legend?.entries.map((e) => e.label)).toEqual(['—', 'a'])
+  })
+
+  it('falls back to the constant on a missing column or constant mode', () => {
+    expect(resolveShape(table(['a', 'b']), spec({ column: 'nope' })).at(0)).toBe('circle')
+    expect(resolveShape(table(['a', 'b']), spec({ mode: 'constant' })).legend).toBeUndefined()
+    expect(resolveShape(undefined, spec()).at(0)).toBe('circle')
+  })
+
 })

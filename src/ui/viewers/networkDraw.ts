@@ -17,7 +17,8 @@
 import { SVG_NS, element, round, svgRoot, textNode } from './svgElement'
 import type { NetworkValue } from '../../core/values'
 import { getColumn } from '../../core/values'
-import type { Legend } from '../encoding'
+import type { Legend, MarkerShape } from '../encoding'
+import { markPath } from './scatterDraw'
 import { formatNumber } from '../format'
 
 /**
@@ -147,6 +148,8 @@ export interface SvgNode {
   color: string
   /** Outline thickness in viewport pixels; the outline eats inward, as the shader's does. */
   borderWidth?: number | undefined
+  /** The mark to draw. Absent means a circle, which is what a network without shapes is. */
+  shape?: MarkerShape | undefined
   label?: string | undefined
 }
 
@@ -280,21 +283,23 @@ export function networkToSvg(spec: NetworkSvgSpec): SVGSVGElement {
   }
 
   for (const node of spec.nodes) {
-    // The outline is centred on a circle one half-width inside the node's radius, which is
-    // how it ends up eating inward exactly as `@sigma/node-border`'s shader does.
+    // The outline is centred one half-width inside the node's radius, which is how it ends up
+    // eating inward exactly as `nodeShapeProgram.ts`'s shader does.
     const width = node.borderWidth ?? 0
     const border: Record<string, string | number> =
       width > 0 && spec.nodeBorderColor
         ? { stroke: spec.nodeBorderColor, 'stroke-width': width }
         : {}
+    const radius = Math.max(0.5, node.radius - width / 2)
+    /*
+     * A circle keeps its own primitive rather than going through `markPath`, which would
+     * approximate it as a polygon. Everything else is the scatter's path — one definition of
+     * what a diamond is, so an exported network and an exported scatter cannot disagree.
+     */
     discs.append(
-      element('circle', {
-        cx: node.x,
-        cy: node.y,
-        r: Math.max(0.5, node.radius - width / 2),
-        fill: node.color,
-        ...border,
-      }),
+      node.shape && node.shape !== 'circle'
+        ? element('path', { d: markPath(node.shape, node.x, node.y, radius), fill: node.color, ...border })
+        : element('circle', { cx: node.x, cy: node.y, r: radius, fill: node.color, ...border }),
     )
     if (node.label) {
       nodeText.append(
@@ -329,8 +334,9 @@ function drawLegend(
   let x = 8
 
   if (legend.kind === 'categorical') {
+    let drawn = 0
     for (const entry of legend.entries) {
-      if (x > width - 40) break
+      if (x > width - 80) break
       group.append(
         element('rect', { x, y: y - 4, width: 8, height: 8, rx: 2, fill: entry.color }),
       )
@@ -339,7 +345,19 @@ function drawLegend(
       // No text metrics without layout, so advance by an estimate; 5.6px per character at
       // 10px is close enough for a strip that only has to avoid collisions.
       x += 12 + entry.label.length * 5.6 + 12
+      drawn += 1
     }
+    /*
+     * What did not fit, said out loud.
+     *
+     * Two different remainders end up here and the reader needs the same thing from both: the
+     * keys the *encoding* left unlisted, and the ones this strip ran out of width for. Until
+     * now the second was silent — the loop simply stopped — so an exported figure with nine
+     * types and room for four looked like a figure of four. The screen's `+N more` had no
+     * counterpart in the file that outlives it.
+     */
+    const missing = legend.entries.length - drawn + (legend.unlisted ?? 0)
+    if (missing > 0) group.append(textNode(`+${missing} more`, { x, y }))
     return group
   }
 

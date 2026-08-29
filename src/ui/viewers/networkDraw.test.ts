@@ -14,6 +14,7 @@ import { column, tableSchema } from '../../core/types'
 import type { NetworkValue } from '../../core/values'
 import { tableFromRows } from '../../core/values'
 import { serializeSvg } from '../export'
+import { markPath } from './scatterDraw'
 import type { NetworkSvgSpec, SvgEdge, SvgNode } from './networkDraw'
 import {
   RECIPROCAL_CURVATURE,
@@ -313,6 +314,50 @@ describe('networkToSvg carries the new channels', () => {
   it('omits the opacity attributes entirely for an opaque link', () => {
     const link = networkToSvg(spec()).querySelector('path')!
     expect(link.getAttribute('stroke-opacity')).toBeNull()
+  })
+})
+
+describe('networkToSvg draws the shape a node was rendered with', () => {
+  it('draws a circle as a circle, not as a polygon of one', () => {
+    // The one mark with its own SVG primitive. Going through `markPath` would approximate it,
+    // and a circle is both the default and the commonest node on screen.
+    const svg = networkToSvg(
+      spec({ nodes: [{ id: 'a', x: 20, y: 40, radius: 6, color: '#3987e5' }], edges: [] }),
+    )
+    expect(svg.querySelectorAll('circle').length).toBe(1)
+    expect(svg.querySelectorAll('path[fill="#3987e5"]').length).toBe(0)
+  })
+
+  it('draws every other mark through the scatter’s own path', () => {
+    // One definition of what a diamond is, so an exported network and an exported scatter
+    // cannot disagree about it.
+    const svg = networkToSvg(
+      spec({
+        nodes: [
+          { id: 'a', x: 20, y: 40, radius: 6, color: '#3987e5', shape: 'diamond' },
+          { id: 'b', x: 60, y: 40, radius: 6, color: '#e5a339', shape: 'cross' },
+        ],
+        edges: [],
+      }),
+    )
+    expect(svg.querySelectorAll('circle').length).toBe(0)
+    const paths = [...svg.querySelectorAll('path')].filter((p) =>
+      ['#3987e5', '#e5a339'].includes(p.getAttribute('fill') ?? ''),
+    )
+    expect(paths.length).toBe(2)
+    expect(paths[0]?.getAttribute('d')).toBe(markPath('diamond', 20, 40, 6))
+  })
+
+  it('keeps the outline eating inward, as the shader does', () => {
+    const svg = networkToSvg(
+      spec({
+        nodes: [{ id: 'a', x: 20, y: 40, radius: 6, color: '#3987e5', shape: 'square', borderWidth: 2 }],
+        edges: [],
+        nodeBorderColor: '#000',
+      }),
+    )
+    const path = [...svg.querySelectorAll('path')].find((p) => p.getAttribute('stroke') === '#000')
+    expect(path?.getAttribute('d')).toBe(markPath('square', 20, 40, 5))
   })
 })
 

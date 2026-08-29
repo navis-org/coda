@@ -18,42 +18,13 @@
  */
 
 import type { ColumnData } from '../../core/values'
+import type { MarkerShape } from '../encoding'
 
 // ---------------------------------------------------------------------------
 // Marks
 // ---------------------------------------------------------------------------
 
 export type ScaleKind = 'linear' | 'log'
-
-export type MarkerShape =
-  'circle' | 'square' | 'triangle' | 'diamond' | 'cross' | 'plus' | 'dash'
-
-/**
- * Shapes in assignment order, most distinguishable first.
- *
- * Six rather than eight, and deliberately fewer than the colour palette's slots: shape is a
- * coarser channel than hue at the sizes a point is drawn, and a seventh mark that reads as
- * "a slightly different blob" is worse than an honest fold.
- */
-export const MARKER_SHAPES: readonly MarkerShape[] = [
-  'circle',
-  'square',
-  'triangle',
-  'diamond',
-  'cross',
-  'plus',
-]
-
-export const MAX_SHAPES = MARKER_SHAPES.length
-
-/**
- * The shape everything past the cap takes.
- *
- * A dash, chosen because it shares no silhouette with any of the six — folding into `circle`
- * would make the residual bucket indistinguishable from the most common category, which is
- * the same mistake as cycling a categorical hue.
- */
-export const OTHER_SHAPE: MarkerShape = 'dash'
 
 /** Default ceiling on drawn points. See `sampleRows` for what happens above it. */
 export const DEFAULT_MAX_POINTS = 50_000
@@ -677,56 +648,4 @@ export function rectPolygon(x0: number, y0: number, x1: number, y1: number): num
   const top = Math.min(y0, y1)
   const bottom = Math.max(y0, y1)
   return [left, top, right, top, right, bottom, left, bottom]
-}
-
-// ---------------------------------------------------------------------------
-// Categorical shape assignment
-// ---------------------------------------------------------------------------
-
-export interface ShapeEncoding {
-  shapeAt(row: number): MarkerShape
-  /** Legend entries, in assignment order, with the fold last when there was one. */
-  entries: Array<{ label: string; shape: MarkerShape }>
-  column: string
-  truncated: boolean
-}
-
-/**
- * Shape by category, ranked by frequency exactly as `resolveColor` ranks hue.
- *
- * Same rule, same reason: the most common values take the most distinguishable marks, and
- * the tail folds into one residual bucket rather than reusing a mark and implying two
- * categories are the same thing.
- */
-export function resolveShape(
-  values: ColumnData | undefined,
-  column: string | undefined,
-): ShapeEncoding | undefined {
-  if (!values || !column) return undefined
-  const counts = new Map<string, number>()
-  for (const cell of values) {
-    const key = cell === null || cell === undefined ? '—' : String(cell)
-    counts.set(key, (counts.get(key) ?? 0) + 1)
-  }
-  if (counts.size <= 1) return undefined
-
-  const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-  const kept = ranked.slice(0, MAX_SHAPES).map(([key]) => key)
-  const slotOf = new Map(kept.map((key, index) => [key, index]))
-  const truncated = ranked.length > MAX_SHAPES
-
-  const entries = kept.map((label, index) => ({ label, shape: MARKER_SHAPES[index]! }))
-  if (truncated) entries.push({ label: 'Other', shape: OTHER_SHAPE })
-
-  return {
-    column,
-    truncated,
-    entries,
-    shapeAt: (row) => {
-      const cell = values[row]
-      const key = cell === null || cell === undefined ? '—' : String(cell)
-      const slot = slotOf.get(key)
-      return slot === undefined ? OTHER_SHAPE : MARKER_SHAPES[slot]!
-    },
-  }
 }

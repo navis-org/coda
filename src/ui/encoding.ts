@@ -12,9 +12,17 @@
 
 import type { CellValue, TableValue } from '../core/values'
 import { getColumn } from '../core/values'
-import type { ColorSpec, SizeSpec } from '../nodes/lib/encodingParams'
+import type { ColorSpec, ShapeSpec, SizeSpec } from '../nodes/lib/encodingParams'
 import type { Mode } from './colors'
-import { CHART_INK, MAX_SERIES, OTHER_LABEL, seriesColor, sequentialColor } from './colors'
+import {
+  CHART_INK,
+  MAX_SERIES,
+  OTHER_LABEL,
+  cycleColor,
+  paletteColors,
+  seriesColor,
+  sequentialColor,
+} from './colors'
 import { formatCompact } from './format'
 import { segmentColor } from './segmentColor'
 
@@ -42,6 +50,16 @@ export interface CategoricalLegend {
    * simplified` — nothing quietly leaves a picture, or its key, without saying it did.
    */
   unlisted?: number
+  /**
+   * True when there are more categories than the palette has colours, so at least two of them
+   * share a hue.
+   *
+   * A legend cannot show this — two identical swatches look like a mistake, not like a
+   * statement — so it is carried for the caption to admit, the way `out.dendrogram` has always
+   * said `colours repeat`. Same doctrine as `labels thinned`: nothing quietly stops being
+   * distinguishable without saying it did.
+   */
+  cycled?: boolean
 }
 
 export interface SequentialLegend {
@@ -53,6 +71,170 @@ export interface SequentialLegend {
 }
 
 export type Legend = CategoricalLegend | SequentialLegend | undefined
+
+// ---------------------------------------------------------------------------
+// Shape
+// ---------------------------------------------------------------------------
+
+/**
+ * Every mark that can be drawn, in the order the renderers number them.
+ *
+ * One list, and everything else here is derived from it: the union type, the six assignable
+ * marks, and the index the node program sends into a vertex buffer. A second spelling of the
+ * vocabulary is a second thing to keep in step, and the one that reaches a shader is the one
+ * that fails silently.
+ *
+ * **Append only** — the index is in a vertex buffer, and `SHAPE_OPTIONS` in
+ * `src/nodes/lib/encodingParams.ts` is built from this array.
+ */
+export const ALL_SHAPES = [
+  'circle',
+  'square',
+  'triangle',
+  'diamond',
+  'cross',
+  'plus',
+  'dash',
+] as const
+
+export type MarkerShape = (typeof ALL_SHAPES)[number]
+
+/**
+ * The shape everything past the cap takes.
+ *
+ * A dash, chosen because it shares no silhouette with any of the six — folding into `circle`
+ * would make the residual bucket indistinguishable from the most common category, which is the
+ * same mistake as reusing a categorical hue.
+ */
+export const OTHER_SHAPE: MarkerShape = 'dash'
+
+/**
+ * Shapes in assignment order, most distinguishable first.
+ *
+ * Six rather than the palette's eight-and-cycling, and that asymmetry is the point: shape is a
+ * coarser channel than hue at the size a node is drawn, and a seventh mark that reads as "a
+ * slightly different blob" is worse than an honest fold. `OTHER_SHAPE` is the one left out.
+ */
+export const MARKER_SHAPES: readonly MarkerShape[] = ALL_SHAPES.filter(
+  (shape) => shape !== OTHER_SHAPE,
+)
+
+export const MAX_SHAPES = MARKER_SHAPES.length
+
+/** Is this a shape we can draw? The guard on a hand-edited or stale override. */
+export function isMarkerShape(value: unknown): value is MarkerShape {
+  return ALL_SHAPES.includes(value as MarkerShape)
+}
+
+export interface ShapeLegend {
+  kind: 'shape'
+  column: string
+  /**
+   * In assignment order, with the fold last when there was one.
+   *
+   * No `truncated` flag beside it, unlike `CategoricalLegend`: the fold *is* an entry here, so
+   * the strip already admits to it and a boolean saying the same thing was written by this
+   * module and read by nobody.
+   */
+  entries: Array<{ label: string; shape: MarkerShape }>
+}
+
+export interface ResolvedShape {
+  at(rowIndex: number): MarkerShape
+  legend: ShapeLegend | undefined
+  /** Which legend key a row belongs to. Undefined where the encoding has no keys. */
+  labelAt?(rowIndex: number): string | undefined
+}
+
+/**
+ * Shape by category, ranked by frequency exactly as `resolveColor` ranks hue.
+ *
+ * The sibling of `resolveColor`, and beside it for the reason that module opens with: the
+ * legend and the thing it keys have to agree, and two places deciding what a row's mark is is
+ * how they stop agreeing. Same ranking, same `—` null key, same `Other` label, same
+ * override-wins rule — so hiding a key, soloing it or reading the caption means the same thing
+ * whichever channel it came from.
+ *
+ * **It folds where colour cycles**, and that is deliberate rather than an oversight. Cycling a
+ * hue is survivable — two categories a palette apart share a colour and the caption says so —
+ * because there are twenty of them and the eye reads position too. There are six shapes, and a
+ * seventh category drawn as a second circle would be a lie the caption could not undo. See
+ * `MARKER_SHAPES`.
+ */
+export function resolveShape(
+  attributes: TableValue | undefined,
+  spec: ShapeSpec,
+): ResolvedShape {
+  const flat = isMarkerShape(spec.constant) ? spec.constant : 'circle'
+  const fallback: ResolvedShape = { at: () => flat, legend: undefined }
+  if (spec.mode !== 'categorical' || !spec.column || !attributes) return fallback
+
+  let data
+  try {
+    data = getColumn(attributes, spec.column)
+  } catch {
+    return fallback
+  }
+
+  const cellKey = (rowIndex: number): string => {
+    const cell = data[rowIndex]
+    return cell === null || cell === undefined ? NULL_KEY : String(cell)
+  }
+
+  const counts = new Map<string, number>()
+  for (let row = 0; row < data.length; row++) {
+    const key = cellKey(row)
+    counts.set(key, (counts.get(key) ?? 0) + 1)
+  }
+
+  /*
+   * One category is not an encoding. Every node the same shape carries no information, and a
+   * one-entry legend claiming otherwise is worse than no legend — so this degrades to the
+   * constant, exactly as the scatter's shape channel always has.
+   */
+  if (counts.size <= 1) return fallback
+
+  const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+
+  /*
+   * The legend *is* the lookup table, which is what keeps a pinned mark honest.
+   *
+   * An earlier version built a separate map over every distinct value and let the legend apply
+   * overrides on its own. The two then disagreed about the fold: choosing a mark for the
+   * `Other` key changed the key and not one node, because a folded row looked itself up rather
+   * than looking up the key it is drawn under. Resolving each key once — including `Other` —
+   * and having `at` read the same table removes the second answer rather than syncing it.
+   *
+   * Bounded at seven entries however many distinct values there are, where the old map held
+   * one entry per value: a network shaped by a high-cardinality column kept a 36,000-entry map
+   * of the word "dash".
+   */
+  const listed = new Set(ranked.slice(0, MAX_SHAPES).map(([label]) => label))
+  const pick = (label: string, fallbackShape: MarkerShape): MarkerShape => {
+    const override = spec.overrides?.[label]
+    return isMarkerShape(override) ? override : fallbackShape
+  }
+
+  const entries = ranked
+    .slice(0, MAX_SHAPES)
+    .map(([label], index) => ({ label, shape: pick(label, MARKER_SHAPES[index]!) }))
+  if (ranked.length > MAX_SHAPES) {
+    entries.push({ label: OTHER_LABEL, shape: pick(OTHER_LABEL, OTHER_SHAPE) })
+  }
+  const byKey = new Map(entries.map((entry) => [entry.label, entry.shape]))
+
+  /** The key a row is drawn under: its own past nothing, `Other` once it has been folded. */
+  const keyOf = (rowIndex: number): string => {
+    const key = cellKey(rowIndex)
+    return listed.has(key) ? key : OTHER_LABEL
+  }
+
+  return {
+    at: (rowIndex) => byKey.get(keyOf(rowIndex)) ?? OTHER_SHAPE,
+    labelAt: keyOf,
+    legend: { kind: 'shape', column: spec.column, entries },
+  }
+}
 
 export interface ResolvedColor {
   /** Colour for a row of the attribute table. */
@@ -87,15 +269,19 @@ const MUTED = CHART_INK.dark.muted
 const NULL_KEY = '—'
 
 /**
- * How many keys a `hash` legend lists before it gives up and says "+ more".
+ * How many keys a legend lists before it gives up and says "+N more".
  *
- * Not `MAX_SERIES`: that eight is a *palette* limit — the number of hues that survived the
- * colourblind-safety gate — and this is a limit on how much strip a reader will tolerate. The
- * values here are often 18-digit root ids, so twelve is already a wide row; the rest are drawn
- * in their own colour regardless, and hiding one of them is what the eye toggles on the listed
- * keys cannot reach.
+ * Not a palette size: that is how many *hues* there are, and this is how much strip a reader
+ * will tolerate. The two used to be the same number by accident, because a categorical
+ * encoding could not produce more keys than it had slots; now that it cycles, they are
+ * independent and a twenty-colour palette can still list twelve.
+ *
+ * The values are often 18-digit root ids, so twelve is already a wide row. Everything past it
+ * is still *drawn* in its own colour — the cap is on the key, never on the picture — and the
+ * count is what says so.
  */
-export const HASH_LEGEND_KEYS = 12
+export const LEGEND_KEYS = 12
+
 
 /**
  * Read a cell as a number, or undefined when it is absent.
@@ -260,7 +446,7 @@ export function resolveColor(
     for (const key of unique) {
       colors.set(key, overrideOf(key) ?? (key === NULL_KEY ? MUTED : segmentColor(key)))
     }
-    const listed = [...unique].slice(0, HASH_LEGEND_KEYS)
+    const listed = [...unique].slice(0, LEGEND_KEYS)
 
     return {
       at: (rowIndex) => colors.get(cellKey(rowIndex)) ?? MUTED,
@@ -269,8 +455,8 @@ export function resolveColor(
         kind: 'categorical',
         column: spec.column,
         entries: listed.map((label) => ({ label, color: colors.get(label)! })),
-        truncated: unique.size > HASH_LEGEND_KEYS,
-        unlisted: Math.max(0, unique.size - HASH_LEGEND_KEYS),
+        truncated: unique.size > LEGEND_KEYS,
+        unlisted: Math.max(0, unique.size - LEGEND_KEYS),
       },
     }
   }
@@ -297,45 +483,62 @@ export function resolveColor(
     }
   }
 
-  // Categorical. Rank by frequency so the most common values get the leading (most
-  // distinguishable) slots, and everything past the cap folds into one achromatic bucket
-  // rather than cycling hues — a repeated hue would imply two categories are the same.
+  /*
+   * Categorical: rank by frequency, then **cycle** the palette.
+   *
+   * Ranking is what it always was — the commonest values get the leading, most distinguishable
+   * slots, ties broken on the label so a filter that changes nothing but row order cannot
+   * reshuffle the picture.
+   *
+   * What changed is the tail. This used to fold everything past the eighth slot into one
+   * achromatic `Other`, on the grounds that a repeated hue implies two categories are the same
+   * thing. That reasoning holds where the *mark* folds too — a bar, a slice, a histogram
+   * segment, all of which sum the tail into one shape that needs one colour, and `foldByRank`
+   * still governs those. It does not hold here: a node, a point or a neuron keeps its own mark
+   * whatever colour it is given, so folding bought nothing and cost everything — fifty cell
+   * types past the eighth became one grey lump that said only "not one of the eight".
+   *
+   * Cycling has a real cost and it is not hidden. Two categories a palette-length apart share a
+   * hue, and `cycled` is how a caption gets to say so. The palette dropdown is the other half of
+   * the answer: `tab20` gives twenty before anything comes round.
+   *
+   * `—` keeps its own key like any other value; a null is a category here, not an absence to be
+   * greyed. That is unchanged.
+   */
   const counts = new Map<string, number>()
   for (let row = 0; row < data.length; row++) {
     const key = cellKey(row)
     counts.set(key, (counts.get(key) ?? 0) + 1)
   }
   const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-  const kept = ranked.slice(0, MAX_SERIES).map(([key]) => key)
-  const slotOf = new Map(kept.map((key, index) => [key, index]))
-  const truncated = ranked.length > MAX_SERIES
-
-  const labelFor = (rowIndex: number): string => {
-    const key = cellKey(rowIndex)
-    return slotOf.has(key) ? key : OTHER_LABEL
-  }
 
   /*
-   * The nine possible answers, resolved once.
+   * One colour per distinct value, resolved once rather than per row.
    *
    * `overrideOf` runs `literalColor` — a `trim` and a regex — and the palette lookup is a table
    * read; both were happening per row, on a path shared by the scatter, network and 3D viewers
-   * and driven per *point* by `buildPoints`. The set is bounded by `MAX_SERIES` plus `Other`, so
-   * there is nothing to gain by deferring any of it.
+   * and driven per *point* by `buildPoints`. Unbounded now that nothing folds, so it is a Map
+   * over the distinct values rather than an array of nine, the same shape `hash` uses and for
+   * the same reason.
    */
-  const slotColors = kept.map((label, index) => overrideOf(label) ?? seriesColor(index, mode))
-  const otherColor = overrideOf(OTHER_LABEL) ?? MUTED
+  const colors = new Map<string, string>()
+  ranked.forEach(([label], index) => {
+    colors.set(label, overrideOf(label) ?? cycleColor(index, mode, spec.palette))
+  })
 
-  const entries = kept.map((label, index) => ({ label, color: slotColors[index]! }))
-  if (truncated) entries.push({ label: OTHER_LABEL, color: otherColor })
+  const listed = ranked.slice(0, LEGEND_KEYS).map(([label]) => label)
 
   return {
-    at: (rowIndex) => {
-      const slot = slotOf.get(cellKey(rowIndex))
-      return slot === undefined ? otherColor : slotColors[slot]!
+    at: (rowIndex) => colors.get(cellKey(rowIndex)) ?? MUTED,
+    labelAt: cellKey,
+    legend: {
+      kind: 'categorical',
+      column: spec.column,
+      entries: listed.map((label) => ({ label, color: colors.get(label)! })),
+      truncated: ranked.length > LEGEND_KEYS,
+      unlisted: Math.max(0, ranked.length - LEGEND_KEYS),
+      cycled: ranked.length > paletteColors(spec.palette, mode).length,
     },
-    labelAt: labelFor,
-    legend: { kind: 'categorical', column: spec.column, entries, truncated },
   }
 }
 

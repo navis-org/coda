@@ -1108,7 +1108,7 @@ synapses <- neuprint_get_synapses(find_neurons$neuronId, prepost = "PRE", conn =
 scatter_plot_out <- find_neurons
 scatter_plot_selected <- scatter_plot_out |> filter(`neuronId` %in% c(1001))
 
-ggplot(scatter_plot_out, aes(x = `pre`, y = `post`)) +
+ggplot(scatter_plot_out, aes(x = `pre`, y = `post`, colour = `type`, shape = `type`)) +
   geom_point(alpha = 0.8) +
   scale_x_log10() +
   scale_y_log10() +

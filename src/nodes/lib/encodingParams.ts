@@ -13,7 +13,8 @@
 
 import type { AttributePart, DType } from '../../core/types'
 import { NUMERIC_DTYPES } from '../../core/types'
-import type { CompositeRef, ParamDef } from '../../core/node'
+import type { CompositeRef, EnumOption, ParamDef } from '../../core/node'
+import { ALL_SHAPES } from '../../ui/encoding'
 
 /**
  * `default` assigns no colour at all and lets the renderer decide. Only offered where that
@@ -28,6 +29,46 @@ export type ColorMode =
   | 'literal'
   /** One colour per distinct value, derived from the value. See `ui/segmentColor.ts`. */
   | 'hash'
+  /**
+   * One colour per connected component of a network. Nodes only, and network-only — see
+   * `allowComponent`.
+   *
+   * A mode rather than a column, because the component is not *in* the data: it is derived
+   * from the link set, and a column picker can only offer what the schema already has.
+   */
+  | 'component'
+  /**
+   * A link takes the colour of the node at one of its ends. Links only — see `allowEndpoints`.
+   *
+   * The other network mode that no column can express, and this one is not even a derived
+   * column: what it resolves to is the *node* encoding's answer for a different table's row.
+   */
+  | 'sourceNode'
+  | 'targetNode'
+
+/**
+ * Which categorical palette an encoding cycles through.
+ *
+ * Names only — the hex values live in `ui/colors.ts`, because this half stays headless so
+ * `src/nodes` can declare params without pulling in the palette. Same split as
+ * `CONSTANT_COLOR_OPTIONS`, which names slots and knows no colours either.
+ */
+export type PaletteName = 'coda' | 'okabeIto' | 'tableau10' | 'paired' | 'tab20'
+
+/**
+ * The palettes, with their size in the label.
+ *
+ * The size *is* the reason to switch — it is how many categories get a colour of their own
+ * before the ramp comes round again — so it belongs in the words somebody reads while choosing,
+ * not in a help string underneath.
+ */
+export const PALETTE_OPTIONS: Array<{ value: PaletteName; label: string }> = [
+  { value: 'coda', label: 'Coda (8)' },
+  { value: 'okabeIto', label: 'Okabe–Ito (8, CVD-safe)' },
+  { value: 'tableau10', label: 'Tableau (10)' },
+  { value: 'paired', label: 'Paired (12)' },
+  { value: 'tab20', label: 'tab20 (20)' },
+]
 
 /** The eight validated categorical slots, by name, so a constant colour stays in-palette. */
 export const CONSTANT_COLOR_OPTIONS = [
@@ -53,8 +94,21 @@ export const CONSTANT_COLOR_OPTIONS = [
   { value: 'white', label: 'white' },
 ]
 
-/** Modes that map no column, so the column picker has nothing to offer. */
-const DATALESS_MODES = new Set<string>(['constant', 'default'])
+/**
+ * Modes that map no column, so the column picker has nothing to offer.
+ *
+ * The three network modes are here for a different reason from `constant` and `default`: they
+ * do map data, just not a *column* of the table being encoded. A component is derived from the
+ * link set and a link's endpoint colour comes from the node table, so in both cases a picker
+ * over this table's columns has nothing to say.
+ */
+const DATALESS_MODES = new Set<string>([
+  'constant',
+  'default',
+  'component',
+  'sourceNode',
+  'targetNode',
+])
 
 export interface ColorParamOptions {
   /** Param id prefix, e.g. "node" -> nodeColorMode / nodeColorBy / nodeColor. */
@@ -122,6 +176,40 @@ export interface ColorParamOptions {
    * whenever the colour carries meaning rather than identity.
    */
   allowHash?: boolean
+  /**
+   * Offer the `component` mode: a colour per connected component of the network.
+   *
+   * Network nodes only — nothing else being encoded in this app *has* components — and opt-in
+   * for the reason `allowHash` is: a mode that lands on one grey blob for every table in the
+   * app is a control that teaches people not to trust the picker.
+   *
+   * What it is for is the first question anybody asks of an unfamiliar graph: is this one
+   * thing, or several? A drawing answers that badly — a force layout can put two components in
+   * one blob and split one across the canvas — and a colour answers it exactly.
+   */
+  allowComponent?: boolean
+  /**
+   * Offer `sourceNode` / `targetNode`: a link takes the colour of the node at one of its ends.
+   *
+   * Links only. What it buys is a picture of *flow*: with nodes coloured by type, colouring
+   * links by their source shows where each type's output goes at a glance, which is the reading
+   * a categorical encoding over the `source` column cannot give — that one would rank the
+   * palette by link count and land on colours that disagree with the nodes an inch away.
+   *
+   * Note it deliberately produces **no legend**. The node colour's key already names every
+   * colour on screen, and a second strip repeating the same eight swatches under the word
+   * "links" is the stutter `NetworkLegend` exists to avoid.
+   */
+  allowEndpoints?: boolean
+  /**
+   * Offer a palette dropdown for the categorical modes.
+   *
+   * Opt-in because it is a control worth having only where a *lot* of categories turn up on
+   * one screen — a connectome's cell types — and where the marks are individual enough that
+   * cycling is readable. A chart with three series does not need somebody to choose between
+   * five palettes to hold three colours.
+   */
+  palettes?: boolean
   /**
    * Which data-driven modes to offer; defaults to both.
    *
@@ -210,6 +298,17 @@ export function colorParams(options: ColorParamOptions): ParamDef[] {
             ? { value: 'categorical', label: 'by category' }
             : { value: 'sequential', label: 'by value' },
         ),
+        // After the column-driven modes, because it is one of those in spirit — a category
+        // per node — over a column the data does not carry.
+        ...(options.allowComponent
+          ? [{ value: 'component', label: 'by connected component' }]
+          : []),
+        ...(options.allowEndpoints
+          ? [
+              { value: 'sourceNode', label: 'by upstream node' },
+              { value: 'targetNode', label: 'by downstream node' },
+            ]
+          : []),
         // Last: it is the specialist of the four, and only ever means anything when something
         // upstream has put colours in a column.
         ...(options.allowLiteral ? [{ value: 'literal', label: 'colours in a column' }] : []),
@@ -236,6 +335,41 @@ export function colorParams(options: ColorParamOptions): ParamDef[] {
       options: CONSTANT_COLOR_OPTIONS,
       visibleIf: (params) => (params[modeId] ?? defaultMode) === 'constant',
     },
+    ...(options.palettes
+      ? ([
+          {
+            ...base,
+            presentational: true,
+            /*
+             * A facet of the colour row, not a row of its own: which palette and which column
+             * are one decision called "colour", and the panel now says so.
+             */
+            composite: facet('extra', { facet: 'palette' }),
+            id: `${prefix}Palette`,
+            kind: 'enum',
+            label: `${label} palette`,
+            default: 'coda',
+            options: [...PALETTE_OPTIONS],
+            help:
+              'Which colours a category encoding cycles through. The number is how many ' +
+              'categories get a colour of their own before it comes round again — pick a ' +
+              'bigger one when the legend says colours repeat. Okabe–Ito is the set to use ' +
+              'when the figure has to survive colour-blindness; only Coda is tuned for both ' +
+              'the light and the dark background, so the pale members of Paired and tab20 are ' +
+              'weak on a light one.',
+            /*
+             * Only where a palette is what is being cycled. `constant` and `literal` name their
+             * own colours, `sequential` is a ramp rather than a set, `hash` derives a colour per
+             * value from the value itself, and a link taking its endpoint's colour is reading
+             * the *node* channel's palette rather than one of its own.
+             */
+            visibleIf: (params) => {
+              const current = String(params[modeId] ?? defaultMode)
+              return current === 'categorical' || current === 'component'
+            },
+          },
+        ] satisfies ParamDef[])
+      : []),
     ...(options.alpha
       ? ([
           {
@@ -306,17 +440,23 @@ export function colorParams(options: ColorParamOptions): ParamDef[] {
 }
 
 /**
- * Read a `<prefix>ColorOverrides` param into a map.
+ * Read a `<prefix>ColorOverrides` or `<prefix>ShapeOverrides` param into a map.
+ *
+ * One reader for both channels, because it is one encoding: a JSON object of legend key to
+ * chosen value. It was `readColorOverrides` while colour was the only channel that had
+ * overrides; a second copy spelled `readShapeOverrides` is how the two would acquire different
+ * tolerances for the same malformed string.
  *
  * Tolerant on purpose: the value is a string in a saved file, and a hand-edited or truncated
  * one is not a reason for a viewer to throw mid-render. Anything unreadable means "no
  * overrides", which is the state every graph written before this existed is already in.
  *
- * It does **not** check that the values are colours. That check belongs where the colour is
- * used — `resolveColor` already has `literalColor` and already has a rule for a cell that is
- * not a colour — and doing it in both places is how the two acquire different rules.
+ * It does **not** check that the values mean anything. That check belongs where the value is
+ * used — `resolveColor` has `literalColor` and `resolveShape` has `isMarkerShape`, each with a
+ * rule for a cell that is not one — and doing it in both places is how the two acquire
+ * different rules.
  */
-export function readColorOverrides(value: unknown): Record<string, string> {
+export function readOverrides(value: unknown): Record<string, string> {
   if (typeof value !== 'string' || value.trim() === '') return {}
   try {
     const parsed: unknown = JSON.parse(value)
@@ -332,7 +472,7 @@ export function readColorOverrides(value: unknown): Record<string, string> {
 }
 
 /**
- * The other half of `readColorOverrides`, so the encoding is written where it is read.
+ * The other half of `readOverrides`, so the encoding is written where it is read.
  *
  * It was a bare `JSON.stringify` in the 3D viewer's click handler — the decode half in
  * `src/nodes/lib` and the encode half in a React component, which is the split invariant 3
@@ -342,7 +482,7 @@ export function readColorOverrides(value: unknown): Record<string, string> {
  * An empty map writes the **empty string**, not `{}`: that is what the param's declared default
  * is, what `visibleIf` tests for, and what `readColorSpec` treats as "no overrides".
  */
-export function writeColorOverrides(overrides: Readonly<Record<string, string>>): string {
+export function writeOverrides(overrides: Readonly<Record<string, string>>): string {
   return Object.keys(overrides).length > 0 ? JSON.stringify(overrides) : ''
 }
 
@@ -362,6 +502,152 @@ export function writeColorOverrides(overrides: Readonly<Record<string, string>>)
 export function readHiddenKeys(prefix: string, params: Record<string, unknown>): string[] {
   const value = params[`${prefix}Hidden`]
   return Array.isArray(value) ? value.map(String).filter(Boolean) : []
+}
+
+/** The two things a shape channel can be told to do. Sequential has no meaning for a shape. */
+export type ShapeMode = 'constant' | 'categorical'
+
+export interface ShapeParamOptions {
+  /** Param id prefix, e.g. "node" -> nodeShapeMode / nodeShapeBy / nodeShape. */
+  prefix: string
+  from: string
+  part?: AttributePart
+  label: string
+  defaultMode?: ShapeMode
+  defaultShape?: string
+  defaultColumn?: string
+  advanced?: boolean
+  group?: string
+  rowLabel?: string
+  presentational?: boolean
+  /** Whether to generate the `<prefix>ShapeOverrides` companion the legend writes into. */
+  legend?: boolean
+}
+
+export interface ShapeSpec {
+  mode: ShapeMode
+  column: string | undefined
+  /** The shape every mark takes in `constant` mode, and the fallback everywhere else. */
+  constant: string
+  /** Per-key shapes chosen from the legend. Keyed by legend label, `Other` included. */
+  overrides?: Readonly<Record<string, string>>
+}
+
+/**
+ * The shapes a picker offers, in assignment order.
+ *
+ * Derived from `ALL_SHAPES` rather than transcribed. It was written out here on the grounds
+ * that `src/nodes` must not reach into `src/ui` — which is not a rule this repo holds:
+ * `eslint.config.js` scopes that boundary to `src/core`, `src/data`, `src/assistant`,
+ * `src/layout` and `src/pyodide`, and `output/neuroglancer.ts` and `output/dendrogram.ts`
+ * already import from `src/ui/encoding`. So the copy bought nothing and cost a hand-maintained
+ * second list plus a test to keep the two in step.
+ *
+ * The reverse import is type-only and erases, so this adds no runtime cycle.
+ */
+export const SHAPE_OPTIONS: EnumOption[] = ALL_SHAPES.map((value) => ({
+  value,
+  label: value,
+}))
+
+/**
+ * The shape channel's params: `<prefix>ShapeMode`, `<prefix>ShapeBy`, `<prefix>Shape`.
+ *
+ * Deliberately the same shape as `colorParams`, down to the composite facets, because the two
+ * are the same idea over a different visual variable and a panel that renders one should render
+ * the other without learning anything new. What it does *not* have is a palette: there is one
+ * set of six marks and no second ordering of them worth offering.
+ */
+export function shapeParams(options: ShapeParamOptions): ParamDef[] {
+  const { prefix, from, part, label, defaultMode = 'constant', defaultShape = 'circle' } = options
+  const modeId = `${prefix}ShapeMode`
+  const base = {
+    presentational: options.presentational !== false,
+    ...(options.advanced ? { advanced: true } : {}),
+    ...(options.group ? { group: options.group } : {}),
+  }
+  const facet = (role: CompositeRef['role'], extra?: Partial<CompositeRef>): CompositeRef => ({
+    key: `${prefix}Shape`,
+    role,
+    label: options.rowLabel ?? label,
+    ...extra,
+  })
+
+  return [
+    {
+      ...base,
+      composite: facet('primary'),
+      id: modeId,
+      kind: 'enum',
+      label,
+      default: defaultMode,
+      help:
+        'Shape is a coarser channel than colour: six marks, and everything past the sixth ' +
+        'commonest value folds into a dash rather than reusing one. Pointing shape and ' +
+        'colour at the same column is the usual reason to set it — two channels saying one ' +
+        'thing is what makes a picture readable without colour.',
+      options: [
+        { value: 'constant', label: 'single shape' },
+        { value: 'categorical', label: 'by category' },
+      ],
+    },
+    {
+      ...base,
+      composite: facet('value'),
+      id: `${prefix}ShapeBy`,
+      kind: 'column',
+      label: `${label} column`,
+      from,
+      ...(part ? { part } : {}),
+      default: options.defaultColumn ?? '',
+      visibleIf: (params) => String(params[modeId] ?? defaultMode) === 'categorical',
+    },
+    {
+      ...base,
+      composite: facet('value'),
+      id: `${prefix}Shape`,
+      kind: 'enum',
+      label: `${label} mark`,
+      default: defaultShape,
+      options: [...SHAPE_OPTIONS],
+      visibleIf: (params) => String(params[modeId] ?? defaultMode) !== 'categorical',
+    },
+    ...(options.legend
+      ? ([
+          {
+            ...base,
+            presentational: true,
+            advanced: true,
+            id: `${prefix}ShapeOverrides`,
+            kind: 'string',
+            label: `${label} — overrides`,
+            default: '',
+            help: 'Per-key shapes chosen from the legend marks, as JSON. Empty means the ranking decides.',
+            visibleIf: (params) => String(params[`${prefix}ShapeOverrides`] ?? '') !== '',
+          },
+        ] satisfies ParamDef[])
+      : []),
+  ]
+}
+
+/** Read a `<prefix>Shape*` group off a node's params. The sibling of `readColorSpec`. */
+export function readShapeSpec(
+  prefix: string,
+  params: Record<string, unknown>,
+  column: (id: string) => string | undefined,
+): ShapeSpec {
+  const overrides = readOverrides(params[`${prefix}ShapeOverrides`])
+  return {
+    mode:
+      String(params[`${prefix}ShapeMode`] ?? 'constant') === 'categorical'
+        ? 'categorical'
+        : 'constant',
+    // Resolved once and assigned unconditionally, as `readColorSpec` does: the resolver is not
+    // free, and a conditional spread here called it twice to decide whether to call it.
+    column: column(`${prefix}ShapeBy`),
+    constant: String(params[`${prefix}Shape`] ?? 'circle'),
+    ...(Object.keys(overrides).length > 0 ? { overrides } : {}),
+  }
 }
 
 export interface SizeParamOptions {
@@ -453,6 +739,13 @@ export interface ColorSpec {
    * have to agree, and one place decides.
    */
   overrides?: Readonly<Record<string, string>>
+  /**
+   * Which palette a categorical encoding cycles through. Undefined means `coda`.
+   *
+   * Part of the spec rather than a viewer argument for the reason `overrides` is: the legend
+   * and the marks it keys have to agree, and one place decides.
+   */
+  palette?: PaletteName
 }
 
 export interface SizeSpec {
@@ -467,11 +760,16 @@ export function readColorSpec(
   resolveColumn: (paramId: string) => string | undefined,
 ): ColorSpec {
   const mode = String(params[`${prefix}ColorMode`] ?? 'constant') as ColorMode
-  const overrides = readColorOverrides(params[`${prefix}ColorOverrides`])
+  const overrides = readOverrides(params[`${prefix}ColorOverrides`])
   return {
     mode,
     column: DATALESS_MODES.has(mode) ? undefined : resolveColumn(`${prefix}ColorBy`),
     constant: String(params[`${prefix}Color`] ?? '0'),
+    // Tolerant like the rest of this reader: a graph saved before the dropdown existed has no
+    // key at all, and `paletteColors` reads a missing or unknown name as `coda`.
+    ...(params[`${prefix}Palette`]
+      ? { palette: String(params[`${prefix}Palette`]) as PaletteName }
+      : {}),
     // Omitted when empty rather than carried as `{}`, because these specs are memoised *by
     // value* (`useStable`) and an always-present empty object is one more thing to serialise
     // on every render of every viewer that never had an override.

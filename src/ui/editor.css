@@ -8157,3 +8157,26 @@ details[open] > summary.tile__label {
   background: var(--swatch-color);
   box-shadow: 0 0 0 2px var(--surface-1), 0 0 0 3.5px var(--swatch-color);
 }
+
+/*
+ * A legend mark that can be re-picked.
+ *
+ * The drawn mark stays drawn and a transparent native menu sits over it — the same trick
+ * `legend__swatch--input` uses for colour, and for the same reason: a native control cannot
+ * render an SVG, and a custom popover would be a component to build, position and dismiss in
+ * order to offer six options.
+ */
+.legend__mark-pick {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+.legend__mark-select {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+  appearance: none;
+  border: none;
+  padding: 0;
+}

@@ -31,6 +31,14 @@ export interface LayoutMemo {
   signature: string
   positions: Map<string, Positioned>
   camera?: CameraState | undefined
+  /**
+   * Whether any of these positions were placed by hand.
+   *
+   * Carried so the viewer's caption can keep admitting it after a rebuild: a restored layout
+   * somebody arranged is still an arrangement, and the note saying it will not survive the
+   * *file* has to survive a remount.
+   */
+  moved?: boolean | undefined
 }
 
 /**

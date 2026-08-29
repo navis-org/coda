@@ -60,6 +60,7 @@ function draw(network: NetworkValue, extra: Partial<NetworkViewerProps> = {}) {
       iterations={10}
       nodeColor={{ mode: 'constant', column: undefined, constant: '0' }}
       nodeSize={{ column: undefined, min: 4, max: 18 }}
+      nodeShape={{ mode: 'constant', column: undefined, constant: 'circle' }}
       edgeColor={{ mode: 'constant', column: undefined, constant: 'muted' }}
       edgeSize={{ column: undefined, min: 0.5, max: 6 }}
       showLabels

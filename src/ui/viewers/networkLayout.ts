@@ -12,9 +12,18 @@ import type Graph from 'graphology'
 
 import type { CellValue, NetworkValue } from '../../core/values'
 import { getColumn } from '../../core/values'
+import { componentsOfEdges } from '../../nodes/lib/networkOps'
+import { groupByComponent, shelfPack } from './componentPack'
+import { PREFUSE_DEFAULTS, prefuseLayout, prefuseRun } from './prefuseForce'
 
 export type LayoutName =
-  'forceatlas2' | 'circular' | 'layered' | 'columns' | 'grouped' | 'spectral'
+  | 'forceatlas2'
+  | 'prefuse'
+  | 'circular'
+  | 'layered'
+  | 'columns'
+  | 'grouped'
+  | 'spectral'
 
 export type Orientation = 'lr' | 'tb'
 
@@ -52,6 +61,15 @@ export interface LayoutOptions {
   barnesHut?: BarnesHut
   /** `forceatlas2`: how much link weight pulls. 0 ignores it, 1 is proportional. */
   weightInfluence?: number
+  /**
+   * `prefuse`: lay each connected component out on its own and pack the results.
+   *
+   * On by default, because it is the whole reason this layout exists — see
+   * `prefusePositions`. Cytoscape spells the same choice as a "singlePartition" checkbox.
+   */
+  partition?: boolean
+  /** `prefuse`: rest length of a link, which sets the scale of everything else. */
+  springLength?: number
 }
 
 /**
@@ -295,6 +313,10 @@ export async function computeLayout(
 
   if (options.layout === 'spectral') {
     return normalise(spectralPositions(topology))
+  }
+
+  if (options.layout === 'prefuse') {
+    return normalise(await prefusePositions(topology, options))
   }
 
   if (options.layout === 'circular') {
@@ -752,5 +774,198 @@ function normalise(positions: Map<string, Positioned>): Map<string, Positioned> 
       y: (position.y - (minY + maxY) / 2) * scale,
     })
   }
+  return positions
+}
+
+/**
+ * Longest the prefuse layout may run before it lands on wherever it has reached.
+ *
+ * A flat wall-clock deadline rather than a per-node estimate: the partition makes the cost
+ * unpredictable from the node count alone — 36,000 nodes in twelve thousand pieces is half a
+ * second, and the same 36,000 in one piece is measured at 29 seconds — so the only honest
+ * bound is the clock. Measured on one connected component at 100 iterations: 500 nodes 200ms,
+ * 1,000 432ms, 2,000 992ms, 5,000 2914ms, 10,000 6481ms, 36,000 29024ms.
+ *
+ * Stopping early is a degraded picture, never a refusal. See
+ * [docs/limits.md](../../../docs/limits.md).
+ */
+const PREFUSE_BUDGET_MS = 8_000
+
+/** How often the layout hands the thread back, in milliseconds of work. */
+const PREFUSE_YIELD_MS = 60
+
+/**
+ * Above this many nodes, one component is run in *slices* rather than in one blocking call.
+ *
+ * The component loop's own yield cannot interrupt a single component, and an ordinary
+ * connectome is a single component — so without this the default layout freezes the tab for
+ * the whole run. Measured at the shipped 100 passes: 100 nodes 31ms, 200 **61ms**, 400 142ms,
+ * 600 236ms, 1,000 424ms, 2,000 965ms, 5,000 2,929ms.
+ *
+ * 200 is where a whole component costs one yield window, so below it slicing buys nothing —
+ * the component finishes inside the pause it would otherwise have taken. The same reasoning as
+ * `FORCE_SYNC_BELOW`, measured for this layout rather than inherited from ForceAtlas2's.
+ */
+const PREFUSE_SLICE_ABOVE = 200
+
+/**
+ * Gutter between packed components, as a multiple of the link length.
+ *
+ * Derived rather than constant: `springLength` is the scale everything else in this layout
+ * follows, and its own help says so. Pinning the gutter to the *default* 50 instead would mean
+ * that at the top of the slider components are ten times bigger and the gap is not — so the
+ * packing's one guarantee, that boxes read as separate, quietly stops holding at exactly the
+ * moment somebody touches the knob it refers to.
+ */
+const COMPONENT_GAP_RATIO = 2
+
+/**
+ * Prefuse's force layout, per connected component, packed.
+ *
+ * **The partitioning is the part that matters**, and it is worth saying why, because the
+ * obvious reading of this feature — "a better force law" — is measurably false. On the real
+ * 36k-node correspondence graph this was built for (11,936 components, largest 39 nodes),
+ * scored by how much of a node's on-screen neighbourhood belongs to its own component:
+ *
+ * | layout                              | time  | purity |
+ * | ----------------------------------- | ----- | ------ |
+ * | ForceAtlas2, ~25 iters (its budget) | 2.6s  | 0.047  |
+ * | ForceAtlas2, 1,000 iterations       | 115s  | 0.033  |
+ * | spectral                            | 0.2s  | 0.219  |
+ * | **prefuse, whole graph**            | 8s    | 0.009  |
+ * | **prefuse, per component**          | 0.6s  | 0.431  |
+ * | a naive grid packing, for reference | —     | 0.367  |
+ *
+ * Two things to read off it. ForceAtlas2 gets **worse** the longer it runs — it converges, and
+ * what it converges to is a uniform pile, because gravity draws every component to one well and
+ * no edge exists to push two of them apart. And prefuse on the whole graph is *worse than
+ * ForceAtlas2*: the force law on its own buys nothing at all. What buys everything is refusing
+ * to ask a force simulation a question it cannot answer — where should two unconnected things
+ * sit? — and answering it by packing instead. Cytoscape does the same thing, which is why its
+ * "Prefuse Force Directed" output looks like this and ours did not.
+ *
+ * Left unpartitioned the layout is still offered, because on a graph that really is connected
+ * the partition is a no-op and the comparison is worth being able to make.
+ */
+async function prefusePositions(
+  topology: NetworkTopology,
+  options: LayoutOptions,
+): Promise<Map<string, Positioned>> {
+  /*
+   * `iterations` is deliberately not read. It belongs to ForceAtlas2, whose default of 220 is
+   * tuned for a layout that keeps improving; prefuse's annealing schedule is defined *relative
+   * to the pass count*, so a larger number does not refine the picture, it stretches the
+   * cooling curve. Measured: 100 passes score 0.431 on the 36k-node graph in 536ms, 220 score
+   * 0.376 in 1,126ms. Cytoscape's 100 is the number its output was judged at, and it stands.
+   */
+  const settings = {
+    ...PREFUSE_DEFAULTS,
+    springLength: Math.max(1, options.springLength ?? PREFUSE_DEFAULTS.springLength),
+  }
+  const positions = new Map<string, Positioned>()
+  const deadline = Date.now() + PREFUSE_BUDGET_MS
+  const breathe = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+  /**
+   * Lay one node set out, handing the thread back if it is big enough to be worth it.
+   *
+   * Small components run straight through — the object and the clock reads would cost more
+   * than the pause they save. Above `PREFUSE_SLICE_ABOVE` the run is advanced a pass at a time
+   * against the clock, which is what keeps a single large component from freezing the tab.
+   */
+  const layOut = async (count: number, edges: Array<[number, number]>) => {
+    if (count <= PREFUSE_SLICE_ABOVE) return prefuseLayout(count, edges, settings)
+    const run = prefuseRun(count, edges, settings)
+    let checkpoint = Date.now()
+    while (!run.advance(1)) {
+      const now = Date.now()
+      if (now > deadline) break
+      if (now - checkpoint > PREFUSE_YIELD_MS) {
+        checkpoint = now
+        await breathe()
+      }
+    }
+    return run.positions
+  }
+
+  if (options.partition === false) {
+    await breathe()
+    const out = await layOut(topology.ids.length, topology.edges)
+    topology.ids.forEach((id, i) => positions.set(id, { x: out.x[i]!, y: out.y[i]! }))
+    return positions
+  }
+
+  const groups = groupByComponent(componentsOfEdges(topology.ids.length, topology.edges))
+
+  // Local index for every node, then every edge bucketed to its component in one pass. Asking
+  // each component to filter the whole edge list instead is O(components × edges), which on
+  // this graph is 295 million comparisons and took ten times longer than the layout itself.
+  const groupOf = new Int32Array(topology.ids.length)
+  const localOf = new Int32Array(topology.ids.length)
+  groups.forEach((members, g) => {
+    members.forEach((member, k) => {
+      groupOf[member] = g
+      localOf[member] = k
+    })
+  })
+  const buckets: Array<Array<[number, number]>> = groups.map(() => [])
+  for (const [a, b] of topology.edges) {
+    if (a === b) continue
+    buckets[groupOf[a]!]!.push([localOf[a]!, localOf[b]!])
+  }
+
+  const laid: Array<{ x: Float64Array; y: Float64Array }> = []
+  const boxes: Array<{ width: number; height: number }> = []
+  let checkpoint = Date.now()
+  /*
+   * Once the budget is gone the remaining components still have to be *placed* — they keep
+   * their seed and get packed like everything else, rather than vanishing — but there is no
+   * point spending passes on them. `halt` says so on the first ask.
+   */
+  let stopped = false
+  const halt = () => true
+  for (let g = 0; g < groups.length; g++) {
+    const members = groups[g]!
+    const out = stopped
+      ? prefuseLayout(members.length, buckets[g]!, settings, halt)
+      : await layOut(members.length, buckets[g]!)
+    // Shift each component's own origin to its top-left, so packing can treat it as a box.
+    let minX = Infinity
+    let minY = Infinity
+    let maxX = -Infinity
+    let maxY = -Infinity
+    for (let k = 0; k < members.length; k++) {
+      if (out.x[k]! < minX) minX = out.x[k]!
+      if (out.x[k]! > maxX) maxX = out.x[k]!
+      if (out.y[k]! < minY) minY = out.y[k]!
+      if (out.y[k]! > maxY) maxY = out.y[k]!
+    }
+    for (let k = 0; k < members.length; k++) {
+      out.x[k]! -= minX
+      out.y[k]! -= minY
+    }
+    laid.push(out)
+    boxes.push({ width: maxX - minX, height: maxY - minY })
+
+    // Hand the thread back between components too, or twelve thousand small ones add up to a
+    // freeze even though no single one of them does. The clock is read here rather than inside
+    // the simulation: asking once per *pass* is 1.2 million `Date.now()` calls on the graph
+    // this was built for, to police a budget that runs out between components anyway.
+    const now = Date.now()
+    if (now - checkpoint > PREFUSE_YIELD_MS) {
+      checkpoint = now
+      stopped = stopped || now > deadline
+      await breathe()
+    }
+  }
+
+  const packed = shelfPack(boxes, COMPONENT_GAP_RATIO * settings.springLength)
+  groups.forEach((members, g) => {
+    const out = laid[g]!
+    const spot = packed.at[g]!
+    members.forEach((member, k) => {
+      positions.set(topology.ids[member]!, { x: spot.x + out.x[k]!, y: spot.y + out.y[k]! })
+    })
+  })
   return positions
 }

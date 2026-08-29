@@ -17,9 +17,6 @@ importers:
       '@sigma/edge-curve':
         specifier: ^3.1.0
         version: 3.1.0(sigma@3.0.3(graphology-types@0.24.8))
-      '@sigma/node-border':
-        specifier: ^3.0.0
-        version: 3.0.0(sigma@3.0.3(graphology-types@0.24.8))
       '@xyflow/react':
         specifier: ^12.4.4
         version: 12.11.3(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -659,11 +656,6 @@ packages:
     resolution: {integrity: sha512-OFWkfAXEsm+X8l1K4K49cC0psB0gQ+gqxKA08HG5piNPdzrDZ5gG9Gza6htZ5AirOVwd/4/uq/gPpD5En+H+3Q==}
     peerDependencies:
       sigma: '>=3.0.0-beta.10'
-
-  '@sigma/node-border@3.0.0':
-    resolution: {integrity: sha512-mE3zUfjvJVuAMhSjiP/zdlkqe0OVTETxd04XHUwof01YqdzTk0OB4ACJIhWrwgsBXl7tTd9lPuKoroafLh8MtQ==}
-    peerDependencies:
-      sigma: '>=3.0.0-beta.17'
 
   '@testing-library/dom@10.4.1':
     resolution: {integrity: sha512-o4PXJQidqJl82ckFaXUeoAW+XysPLauYI43Abki5hABd853iMhitooc6znOnczgbTYmEP6U6/y1ZyKAIsvMKGg==}
@@ -2389,10 +2381,6 @@ snapshots:
     optional: true
 
   '@sigma/edge-curve@3.1.0(sigma@3.0.3(graphology-types@0.24.8))':
-    dependencies:
-      sigma: 3.0.3(graphology-types@0.24.8)
-
-  '@sigma/node-border@3.0.0(sigma@3.0.3(graphology-types@0.24.8))':
     dependencies:
       sigma: 3.0.3(graphology-types@0.24.8)
 

@@ -7,6 +7,11 @@
  * silently ignored is worse than a knob visibly not translated.
  */
 
+import {
+  readColorSpec,
+  readShapeSpec,
+  readSizeSpec,
+} from '../../../nodes/lib/encodingParams'
 import { decodeClauses, resolveFilters, usesRegex } from '../../../nodes/lib/tableFilter'
 import { rCol as col, rStr, rVector } from '../r'
 import { registerEmitter } from '../registry'
@@ -169,9 +174,14 @@ registerEmitter('out.scatter', (ctx) => {
     return [...lines, ...ctx.note('No x or y column is picked, so nothing is drawn.')]
   }
 
-  const hue = ctx.column('colorColumn')
-  const size = ctx.column('sizeColumn')
-  const shape = ctx.column('shapeBy')
+  // Read through the spec readers rather than by naming param ids — see the note in the
+  // Python emitter: two of these three had drifted off the node's actual param names and were
+  // silently emitting nothing.
+  const colorSpec = readColorSpec('point', ctx.params, ctx.column)
+  const hue = colorSpec.mode === 'constant' ? undefined : colorSpec.column
+  const size = readSizeSpec('point', ctx.params, ctx.column, { min: 3, max: 12 }).column
+  const shapeSpec = readShapeSpec('point', ctx.params, ctx.column)
+  const shape = shapeSpec.mode === 'categorical' ? shapeSpec.column : undefined
   const aes = [
     `x = ${col(x)}`,
     `y = ${col(y)}`,

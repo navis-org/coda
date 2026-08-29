@@ -839,7 +839,12 @@ export function everythingGraph(): CodaGraph {
       params: {
         x: 'pre',
         y: 'post',
-        colorColumn: 'type',
+        // Real param ids. This said `colorColumn: 'type'`, which no param on `out.scatter` is
+        // called — so the golden showed a seaborn call with no `hue=` and nothing said so.
+        pointColorMode: 'categorical',
+        pointColorBy: 'type',
+        pointShapeMode: 'categorical',
+        pointShapeBy: 'type',
         xLog: true,
         yLog: true,
         trend: 'linear',

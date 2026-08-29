@@ -115,6 +115,14 @@ The overlay's `close` and its Escape handler were both widened for the same reas
 to ask "is anything fullscreen?", which was only ever equivalent because nothing else could be.
 Closing a viewer has no business dropping the whole window out of fullscreen.
 
+**And that Escape handler stands aside for an open popover.** It is bound on the *capture*
+phase, which is what lets it beat the canvas's shortcuts — and which also meant it beat every
+popover's own dismissal: pressing Escape to shut the network viewer's context menu closed the
+whole overlay from under it. It now returns early while a `.context-menu` is in the document,
+so the key reaches that menu's own handler on the way back up and the *next* press closes the
+overlay. By class rather than by a registry, because `.context-menu` is what all four of them
+are, and a dialog knowing which popovers exist is the coupling being avoided.
+
 ### The manifest
 
 **`start_url` and `scope` are relative, and that is the one thing here that fails silently.**

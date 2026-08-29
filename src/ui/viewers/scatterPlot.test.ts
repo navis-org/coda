@@ -12,9 +12,6 @@ import { describe, expect, it } from 'vitest'
 import type { ColumnData } from '../../core/values'
 import {
   DEFAULT_MAX_POINTS,
-  MARKER_SHAPES,
-  MAX_SHAPES,
-  OTHER_SHAPE,
   axisTicks,
   buildHitIndex,
   buildScatter,
@@ -27,7 +24,6 @@ import {
   padDomain,
   pointInPolygon,
   rectPolygon,
-  resolveShape,
   rowsInPolygon,
   sampleRows,
   usableRows,
@@ -296,37 +292,6 @@ describe('hit testing', () => {
   })
 })
 
-describe('shape by category', () => {
-  it('ranks by frequency, exactly as the colour slots do', () => {
-    const values = ['b', 'a', 'a', 'a', 'b', 'b', 'b', 'c']
-    const shape = resolveShape(values, 'kind')!
-    expect(shape.entries[0]).toEqual({ label: 'b', shape: MARKER_SHAPES[0] })
-    expect(shape.entries[1]).toEqual({ label: 'a', shape: MARKER_SHAPES[1] })
-    expect(shape.shapeAt(0)).toBe(MARKER_SHAPES[0])
-  })
-
-  it('folds the tail into a residual mark rather than reusing one', () => {
-    // Reusing a mark would imply two categories are the same thing — the same reason the
-    // palette never cycles a ninth hue.
-    const values = Array.from({ length: MAX_SHAPES + 3 }, (_, i) => `c${i}`)
-    const shape = resolveShape(values, 'kind')!
-    expect(shape.truncated).toBe(true)
-    expect(shape.entries.at(-1)).toEqual({ label: 'Other', shape: OTHER_SHAPE })
-    expect(new Set(shape.entries.map((e) => e.shape)).size).toBe(shape.entries.length)
-  })
-
-  it('declines when there is nothing to distinguish', () => {
-    // One value means every mark would be the same shape, and a legend saying so is noise.
-    expect(resolveShape(['a', 'a', 'a'], 'kind')).toBeUndefined()
-    expect(resolveShape(undefined, 'kind')).toBeUndefined()
-    expect(resolveShape(['a', 'b'], undefined)).toBeUndefined()
-  })
-
-  it('gives a missing value a name rather than dropping the row', () => {
-    const shape = resolveShape(['a', null, 'a'], 'kind')!
-    expect(shape.entries.map((e) => e.label)).toContain('—')
-  })
-})
 
 describe('scales', () => {
   it('round-trips through the transform', () => {

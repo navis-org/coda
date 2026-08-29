@@ -24,7 +24,7 @@
 import { registerNode } from '../../core/registry'
 import { NUMERIC_DTYPES, T, columnsOfType, schemaOf } from '../../core/types'
 import { isTableValue } from '../../core/values'
-import { colorParams, sizeParams } from '../lib/encodingParams'
+import { colorParams, shapeParams, sizeParams } from '../lib/encodingParams'
 import { rowsWithKeys } from '../lib/rowIds'
 import { tapPorts } from '../lib/tapPorts'
 
@@ -143,21 +143,26 @@ export const scatterNode = registerNode({
       advanced: true,
       group: 'points',
     }),
-    {
-      id: 'shapeBy',
-      kind: 'column',
-      label: 'Shape',
-      help:
-        'seaborn’s style channel. Six marks plus a residual, ranked by frequency like the ' +
-        'colour slots — and the honest second channel when a category count is past what ' +
-        'hue alone can carry.',
+    /*
+     * seaborn's style channel, and the honest second channel once a category count is past
+     * what hue alone can carry.
+     *
+     * This was a bare `shapeBy` column picker until the network viewer needed the same thing:
+     * it is now the same factory as `Colour` and `Size`, so the three read alike and a shape
+     * can be pinned per key. **The param ids changed** — `shapeBy` became `pointShapeBy` —
+     * which resets the column on a scatter saved before this. Presentational, so nothing
+     * downstream restyles or recomputes; the cost is one picker, and the alternative was two
+     * spellings of one channel for as long as the node exists.
+     */
+    ...shapeParams({
+      prefix: 'point',
       from: 'in',
-      default: '',
-      optional: true,
-      presentational: true,
-      advanced: true,
+      label: 'Shape',
+      rowLabel: 'Shape',
       group: 'points',
-    },
+      advanced: true,
+      legend: true,
+    }),
     {
       id: 'opacity',
       kind: 'number',

@@ -529,6 +529,76 @@ achromatic Other fold, area-scaled sizes and null-as-grey are enforced in one pl
 `numeric()` exists because `Number(null)` is `0`, which silently painted missing data as the
 ramp's minimum.
 
+**Two colour modes are network-only, and neither can be a column.** A node's **connected
+component** is not in the attribute table — it is derived from the link set — and a link
+coloured **by its upstream node** does not resolve against the edge table at all: its answer is
+the *node* encoding's answer for a different table's row. A column picker can only offer what
+the schema already has, so both are modes, in the way `hash` is. `networkColor.ts` holds them,
+headless, and its whole job is to hand `resolveColor` something it can already answer — the
+palette, the eight slots, the achromatic `Other`, the null grey, the overrides and the legend
+all stay in one place.
+
+**Components are numbered by size and that makes two orderings agree by construction.**
+`connectedComponents` numbers largest-first; `resolveColor` ranks categorical slots by
+frequency. So the legend reads left to right in the same order as the sizes, and "1" means the
+giant component — which on a connectome is the reading everybody already has. It is
+**undirected**, like `expandSelection`'s `component` scope, and `networkOps.test.ts` asserts the
+two agree rather than trusting that two walks written for one rule stay one rule: a viewer
+colouring by component beside a menu selecting one are two statements about the same partition.
+
+**The component keys are the one node channel that gets a name.** Node groups are otherwise
+unnamed in the strip — nodes being the default subject of a node-link drawing — but `1 2 3 4`
+with nothing saying what the numbers are is where that economy costs more than it saves.
+
+**A link borrowing an endpoint's colour reads the resolved node channel, not its spec.**
+Whatever a node ended up painted — palette slot, folded `Other`, hand-picked override — is what
+its links take, by construction rather than by the rule being written down twice. And it
+deliberately produces **no legend**: the node key already names every colour on screen, and a
+second strip repeating those swatches under the word "links" is the stutter `NetworkLegend`
+exists to avoid. `labelAt` is still carried through, so a link stays addressable by the key its
+endpoint belongs to.
+
+Note what this is *not*: picking `source` in the categorical picker. That has always worked and
+answers a different question — it ranks the palette by link count and lands on colours that
+disagree with the nodes an inch away. The point of the mode is agreement.
+
+**Verified in a real browser**, since a colour is the thing no test can see: a weight filter
+fragmenting the example into eight components, each drawn in one colour and none shared; then
+nodes by category with links by upstream, every link the colour of the node it leaves, and by
+downstream, every link the colour of the node it enters — including the grey ones, where both
+endpoints had folded into `Other`.
+
+**Categorical colour cycles here; it folds in the charts.** `resolveColor` used to put
+everything past the eighth slot into an achromatic `Other`, on the grounds that a repeated hue
+claims two categories are the same thing. That reasoning holds exactly where the *mark* folds
+too — a bar, a slice, a histogram segment and a box all sum or drop the tail into one shape,
+which needs one colour, and `foldByRank` still governs them. It does not hold for a node, a
+point or a neuron, each of which keeps its own mark whatever colour it is handed: folding bought
+nothing and cost everything, since on a connectome the ninth cell type onwards is most of the
+picture and all of it was grey.
+
+**The cost of cycling is said out loud in two places**, because two categories a palette-length
+apart do share a hue. `+N more` on the legend once there are more keys than `LEGEND_KEYS` (12),
+and `colours repeat` in the caption off `CategoricalLegend.cycled` — the admission
+`out.dendrogram` has always made, now that the network can need it too. A legend cannot carry
+the second one itself: two identical swatches read as a mistake rather than as a statement.
+
+**The exported SVG legend admits its remainder too, and that is a fix rather than a feature.**
+`drawLegend` has always stopped when it ran out of width, silently — so a figure with nine
+types and room for four was a figure of four as far as the file was concerned. It now counts
+what it skipped *and* what the encoding left unlisted, and prints one `+N more`.
+
+**Five palettes, one dropdown per channel.** Node and link get their own, because the two halves
+of a network are styled apart everywhere else on this node and a link categorised by ROI has
+nothing to do with a node's cell types. The dropdown is hidden for every mode that cycles
+nothing — `constant` and `literal` name their own colours, `sequential` is a ramp, `hash` derives
+one per value, and a link taking its endpoint's colour is reading the *node* channel's palette
+rather than one of its own.
+
+The values are published sets transcribed whole and only `coda` is validated for this app; the
+**order** is ours, since `resolveColor` gives the leading slots to the commonest values. See the
+note in `colors.ts` for what that rotated and why, and CLAUDE.md for the rule.
+
 **Sequential colour is for area marks, not for hairlines — and that is measured.** Link
 colour offers `constant` and `categorical` only. The blue ramp's receding end is **1.46:1**
 against the dark surface: correct under a heatmap cell or a node disc, where a low value is
@@ -539,14 +609,15 @@ so it buys visibility with step separation and the validator fails it either way
 already has an honest channel in `Width`. `ColorParamOptions.modes` is how a caller declines a
 mode; if someone re-adds `sequential` for links, `paramGroups.test.ts` is the tripwire.
 
-**Node borders come from `@sigma/node-border`, and two things about it are load-bearing.**
-Sigma itself ships only `NodeCircleProgram` and `NodePointProgram`, and a border is what stops
-a node dissolving into the links crossing behind it. First, the outline eats _inward_ from the
-radius, so `applyStyle` adds the border width back onto the encoded size — without that a
-size-4 node loses 44% of its area to a 1px outline and the size legend stops telling the truth.
-Second, `createNodeBorderProgram` accepts `drawLabel`/`drawHover`, and sigma prefers a
-program's own drawers over the settings: passing them would silently discard the haloed labels
-and the selection ring. It is called with neither, and its defaults are `undefined`.
+**Node borders are ours, and two things about them are load-bearing.** Sigma itself ships only
+`NodeCircleProgram` and `NodePointProgram`, and a border is what stops a node dissolving into
+the links crossing behind it; `@sigma/node-border` supplied one until the shape channel needed
+a program of its own, and `nodeShapeProgram.ts` now draws both (see below — the dependency is
+gone). First, the outline eats _inward_ from the radius, so `applyStyle` adds the border width
+back onto the encoded size — without that a size-4 node loses 44% of its area to a 1px outline
+and the size legend stops telling the truth. Second, a node program's own `drawLabel`/`drawHover`
+take precedence over the settings, so declaring them would silently discard the haloed labels
+and the selection ring. Ours declares neither, deliberately.
 
 **Alpha rides in the colour, because sigma takes one colour per mark.** `withAlpha` folds a
 constant link opacity into `#rrggbbaa`, which sigma's `parseColor` reads. Two consequences
@@ -595,6 +666,211 @@ breaking it silently, so a graph goes stale with no visible cause, is exactly th
 note prevents. The caption carries the other half — `N nodes, M links filtered`, in the same
 idiom as `labels thinned`, because a graph that is simply smaller than its data with nothing
 saying why is the failure that note already exists to avoid.
+
+### Shape, the channel that survives without colour
+
+**Six marks, and the sixth is the last one.** `resolveShape` sits beside `resolveColor` in
+`src/ui/encoding.ts` and mirrors it exactly — same frequency ranking so the commonest value gets
+the most distinguishable mark, same `—` key for a null, same `Other` label, same override-wins
+rule — with one deliberate departure: **it folds where colour cycles.** Cycling a hue is
+survivable because there are twenty of them, the eye reads position too, and the caption admits
+to the repeat. There are six shapes; a seventh category drawn as a second circle is a claim that
+two categories are the same thing, and nothing downstream can undo it. So the tail folds onto
+`OTHER_SHAPE`, a **dash** — chosen because it shares no silhouette with any of the six, where
+folding onto `circle` would make the residual bucket indistinguishable from the commonest
+category.
+
+The point of having it at all is in CLAUDE.md's palette note: only three chromatic families clear
+the all-pairs colourblind gate on the dark surface, which is why a socket is colour *plus* shape
+*plus* a label. Pointing `Shape by` and `Colour by` at one column is two channels saying one
+thing, and it is what makes a categorical network readable to a reader who cannot separate the
+hues, or in print.
+
+**Sigma draws one shape and we replaced its program to get seven.** `@sigma/node-border` was
+supplying the outline, and its generated fragment shader is `length(v_diffVector)` at every
+setting — there is no per-node shape to be had from it. `nodeShapeProgram.ts` is that program
+rewritten: the circle test becomes a signed distance function chosen per node, and the border is
+written out rather than generated, because it was only ever an outline plus a fill. Ours rather
+than a patch, deliberately — the `flexLineMaterial.ts` precedent has to throw when a patch site
+stops matching, and that cost is worth paying where the library's shader does something
+irreplaceable. Here it does `length()`. The dependency is **removed**, not merely unused.
+
+Four things about it are load-bearing and none is visible in a test, because jsdom has no WebGL:
+
+- **Sigma blends premultiplied.** `gl_FragColor = vec4(paint.rgb, paint.a * inside)` leaks the
+  colour at full intensity wherever alpha is near zero, which paints the **whole vertex triangle**
+  in the border colour: a grey wedge behind every node, scaled with it. It reads as a geometry or
+  an antialiasing bug and is neither. `mix(transparent, paint, inside)` is the fix and is the
+  idiom every sigma program already uses.
+- **The vertex quad inscribes a circle of exactly `v_radius`**, and the marks do not fit inside
+  it: they are sized for equal *area*, so a square's corner sits at 1.25 (`SQUARE = √π/2`).
+  `MARK_EXTENT` — derived from the geometry, so a new mark cannot silently overflow it — grows
+  the quad while `v_radius` stays put. It is spent **per shape**: a circle needs no margin and is
+  the default mark, and paying the full margin for every node rasterises 1.8× the fragments an
+  unshaped network needs, where node fill is the dominant fragment cost.
+- **One definition of what a diamond is**, in `markGeometry.ts`. The marks are drawn by two
+  unrelated back-ends — polygons on a canvas and in SVG, signed distance functions in a shader —
+  and the constants used to be written out in both languages with a comment on each saying they
+  matched. That is the wrong thing to hold together with a comment: the failure is a network and
+  a scatter drawing one category at different weights, which turns shape into an accidental
+  magnitude channel. The GLSL is now **generated** from the same constants the polygons are, and
+  `markGeometry.ts` imports no sigma, so `markGeometry.test.ts` samples a grid and pins the two
+  against each other.
+- **The shader flips `p.y` on entry, and the triangle is why.** `markVertices` is screen-space
+  (y down, apex at negative y, pointing up); the shader runs in sigma's graph space, where y runs
+  up. The triangle is the only mark not symmetric about y, so without the flip it renders
+  point-down on the canvas while the legend and the SVG export draw it point-up — from the same
+  numbers. That is exactly the failure the shared constants were meant to prevent, arriving by a
+  route the constants could not close; a test covers it.
+- **The shape's number is `ALL_SHAPES`'s index**, not a table in the program. A second numbering
+  is a second thing to keep in step with the vocabulary, and this one crosses into a vertex
+  buffer where a mismatch draws the wrong mark in silence.
+
+**The module cannot be imported by a test at all**, not merely untested: `sigma/rendering` touches
+`WebGL2RenderingContext` at module scope, which jsdom does not define. It is loaded through the
+same dynamic `import()` as sigma itself, inside the viewer's effect. A static import took every
+test that renders a network down with it.
+
+**Overrides are pinned from the legend**, which is new surface for this viewer — its colour key is
+still inert, and its overrides remain reachable only from the 3D viewer's legend and the
+inspector. The mark stays drawn and a transparent `<select>` sits over it, the same trick
+`legend__swatch--input` uses for colour. A menu rather than colour's OS picker because the two
+channels differ in kind: someone overriding a colour usually wants the one colour *not* in the
+palette, so only the native picker has it; there are six shapes and no seventh to reach for, so
+the whole vocabulary fits in a menu — and a menu can say `diamond` where a swatch can only show
+one.
+
+### The prefuse layout, and why a fragmented graph is a different problem
+
+**It is the default**, ahead of ForceAtlas2, because a default has to be right for the graph
+somebody actually has. On a graph that is genuinely one component the two are both ordinary
+force layouts and the choice is taste; on a fragmented one ForceAtlas2 cannot draw a picture at
+all, and fragmented is the ordinary case for a correspondence graph, a thresholded network, or
+anything where most nodes have one or two links. Changing the default reaches only *new* nodes —
+`defaultParams` writes the value in at creation — so every stored graph keeps what it was saved
+with.
+
+**Making it the default is what forced the slicing.** The component loop's yield cannot interrupt
+a *single* component, and an ordinary connectome is one component, so the default layout would
+have frozen the tab for the whole run — exactly the failure that moved ForceAtlas2 into a worker.
+`prefuseRun` exists for that: the simulation is resumable, and above `PREFUSE_SLICE_ABOVE` (200
+nodes, the size at which one whole component costs one yield window) `prefusePositions` advances
+it a pass at a time against the clock. Measured longest main-thread block, which is what a frozen
+tab actually is: 500 nodes 64ms, 2,000 71ms, 5,000 93ms, 12,000 97ms — against un-sliced runs of
+234ms, 1.2s, 3.4s and 8s. It costs about 16% in wall-clock and buys a bounded hitch at any size.
+
+The annealing state is carried *on the run* rather than recomputed per slice, and that is
+load-bearing: `timestep *= (1 - i/total)` compounds, so a slice that restarted it would re-heat
+the simulation on every yield and drift further from the settled layout the more often the thread
+was handed back — while still producing something that looks like a picture. `prefuseForce.test.ts`
+pins slices against a straight-through run for exact equality.
+
+**A force simulation cannot draw a graph that is mostly not connected, and no amount of
+tuning fixes it.** This was built for a real 36,171-node graph — the correspondence graph a
+`Match Cell Types` node emits, neurons on one side and labels on the other — with 24,750
+links. Those numbers force the shape: 24,750 links cannot connect 36,171 nodes, so the graph
+is **11,936 separate pieces**, the largest of them 39 nodes and 11,767 of them ten nodes or
+fewer. There is no giant component at all. Median degree is 1.
+
+Scored by `neighbourPurity` — how much of a node's on-screen neighbourhood belongs to its own
+component, which is the only thing the picture has to get right when every component is a
+separate correspondence group:
+
+| layout                              | time  | purity |
+| ----------------------------------- | ----- | ------ |
+| ForceAtlas2, ~25 iters (its budget) | 2.6s  | 0.047  |
+| ForceAtlas2, 100 iterations         | 10s   | 0.038  |
+| ForceAtlas2, 1,000 iterations       | 115s  | 0.033  |
+| spectral                            | 0.2s  | 0.219  |
+| prefuse, whole graph (hits budget)  | 8s    | 0.009  |
+| **prefuse, per component**          | 0.6s  | **0.431** |
+| a naive grid packing, for reference | —     | 0.367  |
+
+Three findings, none of them the obvious one:
+
+- **ForceAtlas2 gets worse the longer it runs.** It is not slow to converge; it converges
+  fine, and what it converges to is a uniform pile. Its gravity draws every component into one
+  well and no edge exists to push two of them apart, so the equilibrium *is* the interleaving.
+  Reading "too slow" and reaching for more iterations makes the picture worse and costs 79
+  seconds to do it.
+- **The force law buys nothing.** Prefuse on the whole graph scores 0.009 — *below* the
+  ForceAtlas2 it was brought in to beat. Anyone who reads this feature as "a better force
+  simulation" has read it wrong.
+- **The partitioning is the entire win.** Lay each component out on its own and pack the
+  boxes, and the same simulation goes from 0.009 to 0.431 — past the naive grid packing that
+  was meant to be the reference — in half a second. This is what Cytoscape's "Prefuse Force
+  Directed Layout" actually does: its `AbstractPartitionLayoutTask` splits into components
+  before laying anything out, which is why its output looked so much better than ours on the
+  same file.
+
+So the layout is prefuse's force simulation (`prefuseForce.ts`) plus component packing
+(`componentPack.ts`), and the second is the part that matters. The `Components` param spells
+the choice — Cytoscape spells the same one as a "singlePartition" checkbox — and `all at once`
+is kept only so the comparison can be made rather than taken on trust.
+
+**Faithful to prefuse's constants, because they are what Cytoscape's output was judged
+against**: `NBodyForce(-1, -1, 0.9)`, `SpringForce(1e-4, 50)`, `DragForce(0.01)`, a
+Runge-Kutta integrator, speed limit 1, and the annealing schedule from
+`ForceDirectedLayout.run()` — `timestep *= (1 - i/iterations)` compounding from 1000 with a
+floor of 50. The node mass of 3 is Cytoscape's `defaultNodeMass` rather than prefuse's. Two
+places it deliberately departs, both because prefuse relies on something unavailable here:
+
+- **Seeding.** Prefuse's run-once mode drops every node on one point and lets a `Math.random()`
+  nudge in the spring force break the symmetry. Positions here are recomputed whenever anything
+  presentational changes, so a random layout would reshuffle the picture every time a colour was
+  picked — and an unlinked node, of which this graph has thousands, would never be nudged at
+  all. A phyllotactic spiral instead: deterministic, no two nodes coincident, and no ring
+  artefact for the repulsion to spend its budget undoing.
+- **Coincident points.** Prefuse subdivides its quadtree until two points separate, which two
+  points at the same location never do; it survives on float precision running out. Leaves hold
+  a *chain* here instead, which says the same thing without the cliff — points that cannot be
+  separated share a centre of mass, which is what the approximation would have done anyway.
+
+**The n-body sum is exact below 96 nodes and Barnes-Hut above it.** Not a deviation: at those
+sizes building the tree costs more than the pairs it saves, and a component of six nodes has no
+far field to lump together. It matters that the two agree, and `addRepulsion` is exported so a
+test can check that they do — **at theta 0 the quadtree walk reproduces the pairwise sum to
+1.7e-15**, which pins the quadrant arithmetic, the centre-of-mass roll-up and the leaf chains
+all at once. At prefuse's own theta of 0.9 the approximation is coarse (0.155 worst-case
+relative error, against 2.4e-5 at theta 0.1), so a tolerance there would hide a structural bug
+inside the approximation's own slack; the exact case does not.
+
+**Cost is bounded by a clock, not by the iteration count**, because the partition does not
+help a graph that really is one component. Measured on one connected component at 100
+iterations: 500 nodes 200ms, 1,000 432ms, 2,000 992ms, 5,000 2,914ms, 10,000 6,481ms, 36,000
+29,024ms. `PREFUSE_BUDGET_MS` cuts it at eight seconds, and what crosses into `prefuseForce.ts`
+is a **predicate** rather than a deadline — a clock is not arithmetic, and a predicate is what
+makes the budget testable with a counter instead of a stopwatch. The partitioned path also
+yields to the event loop every 60ms, or the "laying out…" note cannot paint and the whole wait
+reads as a freeze.
+
+**The pass count is fixed at Cytoscape's 100 and is deliberately not a control.** The annealing
+schedule is defined *relative* to the pass count — `timestep *= (1 - i/iterations)` — so a bigger
+number does not refine the picture, it stretches the cooling curve. Measured on the real graph: 25
+passes score 0.393 in 188ms, 100 score 0.431 in 536ms, **220 score 0.376 in 1,126ms**. The
+`Iterations` param defaults to 220 because that is what ForceAtlas2 wants, so sharing the control
+would have shipped prefuse at twice the wait for a worse answer. Sharing a control was cheap;
+sharing its default was not, and `visibleIf` keeps `iterations` to ForceAtlas2.
+
+**A packing must not overlap two boxes, and that is the only property the picture depends on.**
+`shelfPack` sorts by height descending and wraps at √area, which is not optimal — bin packing
+is NP-hard — and would look no different if it were, since 11,000 of the 12,000 boxes are
+near-identical small squares. What it must never do is overlap, because two overlapping
+components draw as one tangled component and that is indistinguishable, on screen, from a
+layout that merely came out badly.
+
+**`componentLabels` and `networkOps.connectedComponents` are two walks over one idea, and a
+test pins them together.** The first numbers the components the layout packs by and takes a
+`NetworkTopology`; the second numbers the ones the *colour* channel paints by and takes a
+`NetworkValue`. They can drift, and if they did, a node would be drawn in one group's colour
+inside another group's box, with nothing on screen saying so.
+
+**Beware a separation test that passes without the feature.** The obvious assertion — components
+end up far apart — passes on a small graph *with partitioning disabled*, because with a handful
+of tiny components the repulsion separates them anyway. Measured: at 3, 5, 8, 12 and 20
+components the unpartitioned layout also comes out clean. Forty is where it first fails (seven
+overlapping box pairs, none with the partition on), which is why `networkLayout.test.ts` uses
+forty triangles and not the three-component graph that would have been easier to read.
 
 **ForceAtlas2 runs in a web worker, and that changed `computeLayout`'s contract.** It used to
 return finished positions; for the force layout it now returns only a _seed circle_, and
@@ -650,6 +926,114 @@ import — so counting calls to it measures exactly how often the _structure_ ef
 is the only handle available without a browser on the most expensive regression this component
 has: anything slipping into that dependency list costs a full layout and throws away the user's
 framing. Write the test before touching the effect.
+
+**Nodes can be dragged, and sigma ships none of it.** `networkDrag.ts` holds the arithmetic —
+which nodes a grab picks up, where they land — for the reason `networkStyle.ts` exists: jsdom has
+no WebGL, so anything left inside the component is untestable by construction. The component keeps
+the event wiring, and five things about that wiring fail *silently*:
+
+- **The rescale box has to be pinned before the first move.** With `autoRescale` on, sigma
+  normalises positions against the node extent and recomputes it on every refresh — so dragging
+  one node outward rescales *every* node and the graph shrinks away under the cursor.
+  `setCustomBBox(getBBox())` on the grab freezes it for the life of the renderer.
+- **⤢ is what unpins it**, which is what makes "fit to view" still mean "frame everything,
+  including what I dragged out there". `setCustomBBox` alone only schedules a *render*; the
+  normalisation function is rebuilt in `refresh`, so both calls are needed.
+- **`preventSigmaDefault` is what stops the camera panning under the drag**: the mouse captor
+  emits `mousemovebody` and reads that flag only afterwards.
+- **…and it is also why sigma still emits a click at the end of one.** The captor's own
+  `draggedEventsTolerance` counter — what normally suppresses a click after a pan — is
+  incremented *after* that same check, so it stays at zero for every drag here and dropping a
+  node would toggle its selection. `draggedAway` is the tolerance we keep instead, cleared on the
+  next press; `DRAG_SLOP` (3 viewport px) is the hand-tremor allowance that keeps a click a click.
+  `clickStage` needs the same guard: releasing a dragged node over empty canvas ends in a click on
+  the stage, which would clear the selection you had just finished arranging.
+- **The end of a drag comes from the captor's `mouseup`, not from `upNode`/`upStage`.** The captor
+  listens on the document, so releasing outside the canvas ends the drag rather than leaving a
+  node stuck to the pointer.
+
+**A grab on a selected node moves the whole selection; a grab outside it moves one node and leaves
+the selection alone.** Cytoscape and Gephi both do this, and it is what makes arranging a figure
+practical. Positions are carried as one delta from the grab, never snapped onto the pointer — a
+snap would teleport the node under the cursor the instant the button went down, and would collapse
+a multi-node drag onto a point. One node goes through `mergeNodeAttributes`, which sigma answers
+with a partial refresh of that node; several go through the bulk updater, one aggregate event and
+one full re-index, which is the cheaper trade only once several nodes moved at once.
+
+**Nothing is pinned against the force layout, deliberately.** A running supervisor keeps moving
+what you dropped. Below `FORCE_SYNC_BELOW` there is no supervisor at all, so most graphs are
+already still by the time anyone can grab one; above it, a graph big enough to still be settling is
+one where the physics is doing the arranging, and ❙❙ is how you stop it. A `fixed` attribute would
+be the other design, and it is a bigger decision than a gesture — it turns dragging into a way of
+steering the layout.
+
+**A dragged arrangement lasts the session and no longer.** It rides the existing layout memo, which
+already snapshots positions off the graph on unmount, so this was nearly free — and `LayoutMemo`
+gained one field, `moved`, purely so the caption can keep admitting it after a rebuild. The caption
+is `moved by hand`, in the same idiom as `labels thinned`: positions are not written to the
+document, so a file that reopens laid out afresh would otherwise look like the drag was discarded
+for no reason. Re-layout (↻) discards them now, which is what a new signature means. Persisting to
+a param is a real option and a separate decision — it is two floats per node in every
+`.coda.json`, and it reopens the "positions are not provenance" question `layoutMemo.ts` records.
+
+**Dragging is `!compact`.** A 150px card preview is not where anyone arranges a figure, and its
+canvas shares a mouse button with the graph node it sits on. `compact` is read through a ref rather
+than a dependency, because the structure effect's dependency list is the thing
+`networkRebuild.test.tsx` guards.
+
+**Driven by hand in a real browser** — Chrome over CDP against the bundled `network` example,
+since none of the above can be reached by a test. What was checked, and each of them is a way this
+could have shipped doing nothing: a node follows the pointer while every other node stays exactly
+where it was (no rescale, no pan); the drop does not toggle the selection; a plain click still
+does; two selected nodes move rigidly together while an unselected one moves alone; a node dragged
+past the old extent stays outside it until ⤢ brings everything back into frame; closing and
+reopening the overlay restores both the arrangement and the note; ↻ discards both; the hover
+tooltip and the `grab` cursor still behave; and a right-drag carries nothing.
+
+**A right-click is a selection gesture, and the menu is `NodeContextMenu`'s.** Same
+`.context-menu` rows, same `useDismissOnOutside`, and above all the same rule about what a
+command applies to: a right-click *inside* the selection acts on the whole selection, one
+outside it acts on that mark alone. `seedsFor` is that rule written once — the drag reads it
+too, so a grab and a right-click cannot come to mean different things.
+
+**The walk is `net.filter`'s `expandSelection`, not a second one.** It already knows the two
+rules that are easy to get wrong and invisible when they are: a *component* that respected
+arrows would be a reachable set, and an undirected network's `source`/`target` are an arbitrary
+order, so honouring "downstream" on one would walk half of each pair by construction order —
+which is also why the two directed rows are hidden on an undirected network rather than
+offered three times over. A menu with its own BFS would have to rediscover both, and would
+disagree with the node wired downstream of it about what "the component" means.
+
+**What the menu adds is the ordering.** `expandSelection` answers with a Set; the answer goes
+into an `ids` param that lives in the saved file and takes part in the provenance key, so it is
+returned in **network node order**. An order that depended on which node was clicked first
+would re-key every downstream node for no change in what was selected.
+
+**Every scope replaces the selection, and every result contains its anchors** — so running
+`Select connected` again reaches one hop further. That is why there is no "within N hops"
+asking for a number: press it again. `Select connected component` needs no repeat.
+
+**Sigma routes a right-click to exactly one of three events**, and the edge arm is live only
+while `enableEdgeEvents` is — which is gated on link count. So suppressing the browser's own
+menu inside those handlers would have had a hole in it that opens above eight thousand links;
+it is one `contextmenu` listener on the container instead. The same routing is why a link gets
+a menu at all rather than falling through to the canvas: it anchors on **both its ends**, which
+is the reading that makes right-clicking a wire mean something.
+
+**Escape needed a concession from the overlay.** `ViewerOverlay`'s Escape handler is on the
+capture phase and beats every popover's own dismissal, so the first press closed the whole
+viewer from under the menu. It now stands aside while a `.context-menu` is open — see
+[docs/ui-shell.md](ui-shell.md).
+
+**Opening the menu dismisses the tooltip**, which is otherwise summoned by the same pointer
+over the same mark and comes up underneath a menu already named after that node.
+
+**Verified in a real browser**, like the drag: the menu opens on a node, a link and the canvas
+with the right rows on each; the browser's menu is cancelled (`defaultPrevented` read at the
+document); `Select connected` from LC4 takes its four targets, again takes nine, `Select
+upstream` from a sink takes its two sources, the component takes all thirteen; Escape closes
+the menu and then the overlay; an outside click dismisses; `Copy id` reaches the clipboard; and
+the compact card is untouched, where a right-click still gets the canvas's own node menu.
 
 **The action strip holds verbs; the styling panel holds settings.** Fit, re-layout, freeze and
 find have no value to store, so they cannot be params. Re-layout works by bumping a nonce in

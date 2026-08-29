@@ -81,6 +81,7 @@ function props(): ScatterViewerProps {
     aspect: 'fit',
     color: { mode: 'categorical', column: 'type', constant: '0' },
     size: { column: 'pre', min: 3, max: 12 },
+    shape: { mode: 'constant' as const, column: undefined, constant: 'circle' },
     idColumn: 'neuronId',
     opacity: 0.8,
     maxPoints: 50000,

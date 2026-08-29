@@ -17,7 +17,12 @@ import {
   isSkeletonsValue,
   isTableValue,
 } from '../../core/values'
-import { readColorSpec, readHiddenKeys, readSizeSpec } from '../../nodes/lib/encodingParams'
+import {
+  readColorSpec,
+  readHiddenKeys,
+  readShapeSpec,
+  readSizeSpec,
+} from '../../nodes/lib/encodingParams'
 import { BarChartViewer } from './BarChartViewer'
 import { DistributionViewer } from './DistributionViewer'
 import type { DistributionStyle } from './DistributionViewer'
@@ -315,7 +320,7 @@ function ValuePreviewInner({
         {...(isNetworkValue(source)
           ? { sourceCounts: { nodes: source.nodes.length, links: source.edges.length } }
           : {})}
-        layout={String(node.params.layout ?? 'forceatlas2') as LayoutName}
+        layout={String(node.params.layout ?? 'prefuse') as LayoutName}
         iterations={Number(node.params.iterations ?? 220)}
         xColumn={ctx.column('xColumn')}
         yColumn={ctx.column('yColumn')}
@@ -329,11 +334,17 @@ function ValuePreviewInner({
             : 'auto'
         }
         weightInfluence={Number(node.params.weightInfluence ?? 1)}
+        // `separate` is the default and the reason the layout is here; anything else is the
+        // explicit "all at once" comparison. See `prefusePositions`.
+        partition={node.params.partition !== 'together'}
+        springLength={Number(node.params.springLength ?? 50)}
         // Keyed to the graph node, so a layout settled in the overlay is still there when it
         // is reopened — and is shared with the card and the inspector.
         viewerId={node.id}
         nodeColor={readColorSpec('node', node.params, ctx.column)}
         nodeSize={readSizeSpec('node', node.params, ctx.column, { min: 4, max: 18 })}
+        nodeShape={readShapeSpec('node', node.params, ctx.column)}
+        {...(onParamChange ? { onParamChange } : {})}
         nodeBorderWidth={Number(node.params.nodeBorderWidth ?? 1)}
         edgeColor={readColorSpec('edge', node.params, ctx.column)}
         edgeSize={readSizeSpec('edge', node.params, ctx.column, { min: 0.5, max: 6 })}
@@ -435,7 +446,6 @@ function ValuePreviewInner({
     // "Not known yet" and "nothing to pick" are different states and want different words —
     // see `NoColumns`, which is where that distinction now lives for every chart here.
     if (!x || !y) return <NoColumns known={!!schemaOf(ctx.inputs.in)} what="two numeric columns" />
-    const shape = ctx.column('shapeBy')
     const label = ctx.column('labelBy')
     const id = ctx.column('idColumn')
     return (
@@ -448,7 +458,8 @@ function ValuePreviewInner({
         aspect={node.params.aspect === 'equal' ? 'equal' : 'fit'}
         color={readColorSpec('point', node.params, ctx.column)}
         size={readSizeSpec('point', node.params, ctx.column, { min: 3, max: 12 })}
-        {...(shape ? { shapeColumn: shape } : {})}
+        shape={readShapeSpec('point', node.params, ctx.column)}
+        {...(onParamChange ? { onParamChange } : {})}
         {...(label ? { labelColumn: label } : {})}
         {...(id ? { idColumn: id } : {})}
         opacity={Number(node.params.opacity ?? 0.8)}

@@ -12,8 +12,10 @@ import { describe, expect, it } from 'vitest'
 
 import { CHART_INK } from '../colors'
 import { markPath, scatterToSvg } from './scatterDraw'
-import type { MarkerShape, ScatterSpec } from './scatterPlot'
-import { MARKER_SHAPES, OTHER_SHAPE, buildScatter } from './scatterPlot'
+import type { MarkerShape } from '../encoding'
+import { MARKER_SHAPES, OTHER_SHAPE } from '../encoding'
+import type { ScatterSpec } from './scatterPlot'
+import { buildScatter } from './scatterPlot'
 
 const PLOT = { x: 40, y: 10, width: 240, height: 160 }
 const INK = CHART_INK.dark

@@ -65,6 +65,7 @@ function props(extra: Partial<NetworkViewerProps> = {}): NetworkViewerProps {
     iterations: 10,
     nodeColor: { mode: 'constant', column: undefined, constant: '0' },
     nodeSize: { column: undefined, min: 4, max: 18 },
+    nodeShape: { mode: 'constant', column: undefined, constant: 'circle' },
     edgeColor: { mode: 'constant', column: undefined, constant: 'muted' },
     edgeSize: { column: undefined, min: 0.5, max: 6 },
     showLabels: true,
@@ -89,9 +90,16 @@ describe('the structure effect', () => {
     expect(computeLayout).toHaveBeenCalledTimes(1)
   })
 
-  it('does not lay out again for sizes, labels, arrows, opacity or a border', () => {
+  it('does not lay out again for sizes, shapes, labels, arrows, opacity or a border', () => {
     const { rerender } = render(<NetworkViewer {...props()} />)
     rerender(<NetworkViewer {...props({ nodeSize: { column: 'w', min: 2, max: 30 } })} />)
+    // Shape is the newest channel and the one most likely to be wired into the wrong effect:
+    // it reaches a *node attribute*, which is what the structure effect writes.
+    rerender(
+      <NetworkViewer
+        {...props({ nodeShape: { mode: 'categorical', column: 'w', constant: 'circle' } })}
+      />,
+    )
     rerender(<NetworkViewer {...props({ showLabels: false })} />)
     rerender(<NetworkViewer {...props({ arrows: false })} />)
     rerender(<NetworkViewer {...props({ edgeOpacity: 0.4 })} />)

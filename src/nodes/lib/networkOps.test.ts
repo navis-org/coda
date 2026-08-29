@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest'
 import { column, tableSchema } from '../../core/types'
 import type { NetworkValue } from '../../core/values'
 import { getColumn, tableFromRows } from '../../core/values'
-import { NO_FILTER, filterNetwork, isFiltering } from './networkOps'
+import { NO_FILTER, connectedComponents, expandSelection, filterNetwork, isFiltering } from './networkOps'
 
 const NODE_SCHEMA = tableSchema(
   column('id', 'str'),
@@ -210,5 +210,89 @@ describe('a network with no weight column', () => {
 
   it('does not throw on a weight threshold it cannot measure', () => {
     expect(() => filterNetwork(unweighted, { ...NO_FILTER, minWeight: 2 })).not.toThrow()
+  })
+})
+
+describe('connectedComponents', () => {
+  /** `a → b → c`, a separate `d → e`, and an unattached `lone`: sizes 3, 2, 1. */
+  const split: NetworkValue = {
+    kind: 'network',
+    directed: true,
+    nodes: tableFromRows(tableSchema(column('id', 'str')), [
+      { id: 'a' },
+      { id: 'b' },
+      { id: 'c' },
+      { id: 'd' },
+      { id: 'e' },
+      { id: 'lone' },
+    ]),
+    edges: tableFromRows(tableSchema(column('source', 'str'), column('target', 'str')), [
+      { source: 'a', target: 'b' },
+      { source: 'b', target: 'c' },
+      { source: 'd', target: 'e' },
+    ]),
+  }
+
+  it('numbers by size, largest first', () => {
+    expect(connectedComponents(split)).toEqual([1, 1, 1, 2, 2, 3])
+  })
+
+  it('ignores direction, like the walk the menu selects with', () => {
+    // A component that respected arrows would be a reachable set: `c` reaches nothing.
+    const upstream = connectedComponents(split)
+    expect(upstream[2]).toBe(upstream[0])
+  })
+
+  it('agrees with expandSelection about what a component is', () => {
+    // Two walks written for one rule; this is what keeps them one rule. A viewer colouring by
+    // component beside a menu selecting one are two statements about the same partition.
+    const labels = connectedComponents(split)
+    const ids = getColumn(split.nodes, 'id').map(String)
+    for (const seed of ids) {
+      const walked = expandSelection(split, {
+        seeds: new Set([seed]),
+        expand: 'component',
+        hops: 0,
+        direction: 'any',
+      })
+      const mine = labels[ids.indexOf(seed)]
+      expect([...walked].sort()).toEqual(ids.filter((_, i) => labels[i] === mine).sort())
+    }
+  })
+
+  it('breaks a size tie on the first node’s row, so the answer is stable', () => {
+    const tied: NetworkValue = {
+      kind: 'network',
+      directed: true,
+      nodes: tableFromRows(tableSchema(column('id', 'str')), [
+        { id: 'x' },
+        { id: 'y' },
+        { id: 'z' },
+      ]),
+      edges: tableFromRows(tableSchema(column('source', 'str'), column('target', 'str')), []),
+    }
+    expect(connectedComponents(tied)).toEqual([1, 2, 3])
+  })
+
+  it('survives a self-loop and a link naming a node that is not there', () => {
+    const ragged: NetworkValue = {
+      ...split,
+      edges: tableFromRows(tableSchema(column('source', 'str'), column('target', 'str')), [
+        { source: 'a', target: 'a' },
+        { source: 'a', target: 'gone' },
+        { source: 'a', target: 'b' },
+      ]),
+    }
+    expect(connectedComponents(ragged)).toEqual([1, 1, 2, 3, 4, 5])
+  })
+
+  it('calls an empty network no components at all', () => {
+    const empty: NetworkValue = {
+      kind: 'network',
+      directed: true,
+      nodes: tableFromRows(tableSchema(column('id', 'str')), []),
+      edges: tableFromRows(tableSchema(column('source', 'str'), column('target', 'str')), []),
+    }
+    expect(connectedComponents(empty)).toEqual([])
   })
 })

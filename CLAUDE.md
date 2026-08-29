@@ -188,6 +188,80 @@ Area-specific — the rule, then the doc that holds why:
   `abs( clip.w )`, since a floor cannot be a number of nanometres); and three's
   `rayEnd … * 1e5` is exactly 100 µm in a nanometre scene, past which *every fragment discards*
   and the arbour vanishes whole in one zoom step. See [docs/viewers.md](docs/viewers.md).
+- **Shape folds where colour cycles, and that asymmetry is the design.** `resolveShape` sits
+  beside `resolveColor` in `src/ui/encoding.ts` and mirrors it — frequency ranking, `—` for a
+  null, `Other`, overrides win — except for the tail: six marks, and everything past the sixth
+  becomes a **dash**, which shares no silhouette with any of them. Cycling a hue is survivable
+  (twenty of them, and the caption admits the repeat); a seventh category drawn as a second
+  circle is a claim that two categories are the same thing. Sigma draws only discs, so
+  `nodeShapeProgram.ts` replaces `@sigma/node-border` outright — its shader is `length()` at
+  every setting — and three things there are silent when wrong: **sigma blends premultiplied**,
+  so `vec4(rgb, a)` paints the whole vertex triangle in the border colour (a grey wedge behind
+  every node, which reads as a geometry bug and is not one); the vertex quad inscribes
+  `v_radius` while the marks are sized for equal *area* and reach 1.25, so `MARK_EXTENT` buys the
+  headroom or corners get clipped — spent **per shape**, since a circle needs none and is the
+  default; and the shader **flips `p.y`**, because `markVertices` is screen-space and sigma's
+  graph y runs up, so the triangle — the only mark not symmetric about y — otherwise draws
+  point-down on canvas and point-up in the legend and the export. The proportions live in
+  `markGeometry.ts` and the **GLSL is generated from them**, not transcribed: a comment saying
+  two languages agree is not an invariant, and `markGeometry.test.ts` is. The program module is
+  **dynamically imported** because
+  `sigma/rendering` touches WebGL globals at module scope and a static import takes every
+  network test down with it. See [docs/viewers.md](docs/viewers.md).
+- **A force simulation cannot lay out a graph that is mostly not connected, and the force law is
+  not what fixes it.** Two components share no edge, so nothing in a simulation decides where one
+  sits relative to the other. ForceAtlas2 answers by accident — its gravity draws every component
+  into one well — and it gets **worse the longer it runs**: on a real 36k-node correspondence
+  graph (11,936 components, largest 39) it scored 0.047 on neighbour purity after 25 iterations
+  and 0.033 after a thousand, which took 115 seconds. Prefuse on the *whole* graph scores 0.009,
+  below the thing it was brought in to beat. What wins is refusing the question: lay each
+  component out alone and pack the boxes (`componentPack.ts`), which reaches 0.431 in half a
+  second — past the naive grid packing (0.367) that was supposed to be the reference. It is now
+  the **default** layout, which is what forced `prefuseRun`: the per-component yield cannot
+  interrupt a *single* component and an ordinary connectome is one, so the simulation is
+  resumable and sliced against the clock above 200 nodes — longest main-thread block 97ms at
+  12,000 nodes, against 8s un-sliced. The annealing state rides on the run because it compounds;
+  restarting it per slice re-heats the simulation and still draws something plausible. Cytoscape's "Prefuse Force Directed" does the same, which is
+  the whole reason its output looked better. So `prefuseForce.ts` is faithful to prefuse's
+  constants but the **`Components` param is the feature**; it departs from prefuse only where
+  prefuse relies on `Math.random()` (a layout recomputed on every presentational edit must not
+  wander) or on float precision running out (coincident points chain in a leaf instead of
+  subdividing forever). The n-body sum is exact below 96 nodes, and the tree is pinned by
+  reproducing the pairwise sum to 1.7e-15 at theta 0 — a tolerance at prefuse's own theta of 0.9
+  would hide a structural bug inside the approximation's slack. Two traps: a separation test
+  passes **without the feature** below about forty components, and `componentLabels` must keep
+  agreeing with `networkOps.connectedComponents` or a node is coloured for one group inside
+  another's box. See [docs/viewers.md](docs/viewers.md).
+- **Two network colour modes cannot be columns, and that is why they are modes.** A node's
+  connected component is derived from the link set; a link coloured by its upstream node resolves
+  against the *node* table. `networkColor.ts` hands both to `resolveColor` as something it can
+  already answer, so the palette rules stay in one place. Components are numbered largest-first
+  so that ordering agrees with `resolveColor`'s frequency ranking by construction, and they are
+  undirected — `networkOps.test.ts` asserts they agree with `expandSelection`'s component. An
+  endpoint-coloured link reads the *resolved* node channel (overrides included) and draws **no
+  legend**, because the node key already names every colour on screen.
+  See [docs/viewers.md](docs/viewers.md).
+- **The network's right-click menu borrows three things rather than writing them.** The rows and
+  dismissal are `NodeContextMenu`'s; the "acts on the selection if you clicked into it" rule is
+  `seedsFor`, shared with the drag; and the walk is `net.filter`'s `expandSelection`, which
+  already knows that a component ignores arrows and that an undirected network's `source`/`target`
+  are an arbitrary order. What is added is **node order** on the result, because it lands in an
+  `ids` param that reaches a provenance key. Sigma routes a right-click to exactly one of
+  node/edge/stage and the edge arm is gated on link count, so the browser's menu is cancelled on
+  the *container*, not in the handlers. And `ViewerOverlay`'s capture-phase Escape had to stand
+  aside for an open `.context-menu`, or the first press closes the viewer from under the menu.
+  See [docs/viewers.md](docs/viewers.md).
+- **Node dragging is five silent failures, not a mousemove handler.** Sigma ships none of it.
+  `autoRescale` renormalises against the node extent on every refresh, so a drag must
+  `setCustomBBox` first or the graph shrinks away under the cursor — and ⤢ must clear it again, in
+  a `refresh` rather than a `setCustomBBox` alone. `preventSigmaDefault` is what stops the camera
+  panning, and it is *also* why sigma still emits a click at the end (the captor's own drag counter
+  sits after that check), so `clickNode` **and** `clickStage` need a tolerance of our own. The drag
+  ends on the captor's `mouseup`, not `upNode`. A grab on a selected node moves the whole
+  selection; positions are a delta from the grab, never a snap. Arithmetic in `networkDrag.ts`,
+  headless; the gesture itself was driven in a real browser because nothing here is reachable from
+  jsdom. Session-scoped through `layoutMemo`, never the document.
+  See [docs/viewers.md](docs/viewers.md).
 - **A post-processing pass moves the background out from under the scene, twice.** An
   `EffectComposer` renders into a texture, so the canvas colour needs `scene.background` (not
   the clear colour, which `RenderPass` sets before binding the target) and `<Canvas flat>` (tone
@@ -216,6 +290,31 @@ normal-vision floor.
 `CHART_INK.grid` is for chrome only — under the 3:1 non-text floor, i.e. invisible by design.
 Anything carrying data (network links, and their arrowheads) takes `muted` instead, which is
 achromatic so it never competes with a categorical encoding.
+
+**Two functions, and which one you want is decided by the mark, not by taste.** `seriesColor`
+folds everything past the eighth slot onto the achromatic `Other`; `cycleColor` comes round to
+the first colour instead. The rule: **fold where the mark folds.** A bar, a slice, a histogram
+segment and a box all *sum or drop* the tail into one shape, so that shape needs one colour and
+grey is the honest one — `foldByRank` still governs them. A node, a point or a neuron keeps its
+own mark whatever colour it gets, so folding bought nothing there and cost everything: fifty cell
+types past the eighth became one grey lump meaning "not one of the eight". `resolveColor`'s
+categorical branch cycles, which is Network, Scatter and 3D.
+
+**Cycling's cost is real and is said out loud**, in the two places it can be: `+N more` on the
+legend once there are more keys than `LEGEND_KEYS` (12) — on screen *and* in the exported SVG,
+which used to run out of width in silence — and `colours repeat` in the caption, off
+`CategoricalLegend.cycled`, the same admission `out.dendrogram` has always made.
+
+**Five palettes, and only `coda` is validated here.** The other four are published sets
+transcribed whole — Okabe–Ito (in R's eight-colour spelling, grey for the unusable black),
+matplotlib's `tab10` and `tab20`, ColorBrewer's `Paired`. **The order is ours and only the
+order:** `resolveColor` hands the leading slots to the commonest values, so `tab20` and `Paired`
+are rotated to put their saturated halves first rather than the published dark/light
+interleaving, which would spend the two most important slots on two shades of one hue. A
+consequence worth knowing: `tab20`'s saturated half *is* `tab10`. The imported four are one set
+for both themes, so the pale members are weak on the light surface — that is the price of the
+capacity, and the param's help says so. Adding a sixth palette means transcribing a published
+one, not mixing hues.
 
 ## The rest, by area
 

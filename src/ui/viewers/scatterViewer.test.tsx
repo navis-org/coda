@@ -59,6 +59,7 @@ function draw(table: TableValue, props: Partial<Parameters<typeof ScatterViewer>
       aspect="fit"
       color={{ mode: 'constant', column: undefined, constant: '0' }}
       size={{ column: undefined, min: 3, max: 12 }}
+      shape={{ mode: 'constant', column: undefined, constant: 'circle' }}
       idColumn="neuronId"
       opacity={0.8}
       maxPoints={50000}
@@ -136,7 +137,7 @@ describe('the legend', () => {
   })
 
   it('keys the shape channel with the marks themselves', () => {
-    const { container } = draw(neurons(20), { shapeColumn: 'side' })
+    const { container } = draw(neurons(20), { shape: { mode: 'categorical' as const, column: 'side', constant: 'circle' } })
     expect(screen.getByText('side')).toBeTruthy()
     expect(container.querySelectorAll('svg.legend__mark').length).toBe(2)
   })
