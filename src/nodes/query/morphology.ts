@@ -15,6 +15,12 @@ import { requireDataset, schemasFromType, sourceSupports } from '../lib/datasetP
 import type { Warner } from '../../core/limits'
 import { warnOverThreshold } from '../../core/limits'
 import { warnAboveParam } from '../lib/limitParams'
+import {
+  SKELETON_SOURCE_PARAM,
+  skeletonSourceParam,
+  skeletonSourceProblem,
+} from '../lib/skeletonParams'
+import { asSkeletonRoute } from '../../data/skeletonRoutes'
 import { idColumn } from '../lib/tableOps'
 
 /**
@@ -72,7 +78,7 @@ export const skeletonsNode = registerNode({
   category: 'query',
   description: 'Fetch branching morphologies for the incoming neurons.',
   guide:
-    'Branching morphologies for the incoming neurons — the wire-frame shape of the cell, ready for the 3D View. Each skeleton arrives with an attribute row of its own, so colouring by cell type is a column picker rather than a special case in the viewer. Coordinates come out in nanometres, converted from the dataset’s voxels, so a skeleton and a mesh of the same neuron sit in the same space.',
+    'Branching morphologies for the incoming neurons — the wire-frame shape of the cell, ready for the 3D View. Each skeleton arrives with an attribute row of its own, so colouring by cell type is a column picker rather than a special case in the viewer. Coordinates come out in nanometres, converted from the dataset’s voxels, so a skeleton and a mesh of the same neuron sit in the same space.\n\nMany datasets have more than one place to get a skeleton from, and they are not the same product: male-CNS publishes a precomputed layer beside its segmentation as well as serving neuPrint’s traced SWC, and a FlyWire-style chunk-graph skeleton is a few hundred nodes where a traced one is thousands. **Source** is where you choose; leave it on Automatic for the best one this dataset has. Whichever answered is named on the card and in the 3D View’s caption, because cable length means something different down each route.',
   cost: 'expensive',
   inputs: [
     { id: 'dataset', label: 'Dataset', type: T.dataset() },
@@ -89,6 +95,14 @@ export const skeletonsNode = registerNode({
    */
   dataCache: true,
   params: [
+    /*
+     * Which route, and it is deliberately *not* `presentational`: it changes what `evaluate`
+     * returns — a chunk-graph skeleton and a traced one are different geometry with different
+     * cable lengths — so it belongs in the provenance key (invariant 4). Marking it
+     * presentational would leave a scene showing one route's skeletons under a card claiming the
+     * other.
+     */
+    skeletonSourceParam(),
     warnAboveParam({
       threshold: MAX_NEURONS,
       min: 1,
@@ -112,7 +126,13 @@ export const skeletonsNode = registerNode({
     if (ctx.inputs.dataset && !sourceSupports(ctx.inputs.dataset, 'skeletons')) {
       return ['This dataset has no skeletons']
     }
-    return []
+    // A pinned route this dataset cannot take. Reported rather than substituted — see
+    // `skeletonParams.ts`, and `GeometryRequest.skeletonSource` for the run-time half.
+    const pinned = skeletonSourceProblem(
+      ctx.inputs.dataset,
+      String(ctx.params[SKELETON_SOURCE_PARAM] ?? ''),
+    )
+    return pinned ? [pinned] : []
   },
 
   evaluate: async (ctx) => {
@@ -127,9 +147,15 @@ export const skeletonsNode = registerNode({
       'Each skeleton is a separate request, and a few thousand of them is minutes rather than seconds.',
     )
     ctx.progress(0.02, `${neuronIds.length} neurons`)
+    // Narrowed once, here: a document can name a route this build has never heard of, and
+    // reading that as "nobody chose" is the degradation every other unknown param value gets.
+    const skeletonSource = asSkeletonRoute(ctx.params[SKELETON_SOURCE_PARAM])
     const skeletons = await source.fetchSkeletons({
       ...datasetRequest(dataset),
       neuronIds,
+      // Empty means *nobody chose* rather than "the first one", which is what lets a source fall
+      // back when its preferred route turns out to answer for nothing. See the field's doc.
+      ...(skeletonSource ? { skeletonSource } : {}),
       onProgress: ctx.progress,
       // A cost only the backend knows: see `GeometryRequest.onWarn`.
       onWarn: ctx.warn,

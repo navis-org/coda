@@ -35,6 +35,7 @@ import {
   sceneLights,
   sceneMode,
   sceneSurface,
+  skeletonNote,
   skeletonSegmentColors,
   skeletonSegmentWidths,
   skeletonSegmentWorldWidths,
@@ -541,6 +542,37 @@ describe('background', () => {
     expect(sceneSurface('black', 'light')).toBe('#000000')
     expect(sceneSurface('black', 'light')).not.toBe(chartSurface('dark'))
     expect(sceneMode('black', 'light')).toBe('dark')
+  })
+})
+
+describe('skeletonNote', () => {
+  const base = {
+    kind: 'skeletons' as const,
+    items: [],
+    attributes: makeTable(SCHEMA, { neuronId: [] }),
+    bounds: BOUNDS,
+  }
+
+  it('names the route on the caption, with what it costs behind it', () => {
+    // A bigger difference than a mesh's level of detail: a chunk-graph skeleton is a few
+    // hundred nodes where a traced one is thousands, and only some routes carry radii — which
+    // is what the `to scale` line widths read.
+    const note = skeletonNote({
+      ...base,
+      provenance: { id: 'l2', label: 'level-2 chunk graph', detail: 'One node per chunk.' },
+    })
+    expect(note?.label).toBe('level-2 chunk graph')
+    expect(note?.title).toContain('One node per chunk.')
+  })
+
+  it('names the control that changes it', () => {
+    const note = skeletonNote({ ...base, provenance: { id: 'neuprint', label: 'neuPrint SWC' } })
+    expect(note?.title).toContain('Skeletons node')
+  })
+
+  it('is absent for a value that names no route', () => {
+    expect(skeletonNote(base)).toBeUndefined()
+    expect(skeletonNote(undefined)).toBeUndefined()
   })
 })
 

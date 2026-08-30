@@ -1365,6 +1365,57 @@ input is the point. `any` on an input means "I accept whatever you have", which 
 was given": a pass-through cannot _originate_ a Dataset, so offering it when dragging back from a
 Dataset socket answers the question with a node that needs the same question asked again behind it.
 
+## Skeletons: which copy, and saying which one answered
+
+A dataset does not have *a* skeleton source. It has however many its publishers happened to put
+somewhere, and they are different products rather than copies of one:
+
+- `male-cns:v1.0` serves neuPrint's traced SWC **and** publishes a precomputed layer beside its
+  segmentation. Same 1,688 nodes on body 45882, same nanometres — and only the SWC has radii.
+- `minnie65_public` has a chunkedgraph level-2 cache **and** a populated CAVE skeleton service.
+  7,167 vertices with radii against a few hundred chunk nodes, for the same neuron.
+- `flywire_fafb_public` v783 publishes a flat bucket where its own declared service is empty, and
+  it has no L2 cache at all — so the one route it has is the one nothing in CAVE's metadata
+  mentions.
+
+Until the `Source` control existed the node picked and said nothing, which mattered because
+**cable length means something different down each route**. Two things changed:
+
+- **`Source`, a dropdown built from `DataSource.skeletonSourcesFor`.** Its options are per
+  *dataset* and arrive from probes `inferOutputs` may not await (invariant 2), so the list grows
+  under you: a fresh session shows `Automatic`, and a moment later the same control offers three
+  entries because `reportSourceLearned` re-ran inference. That is `peekMaterializations`'
+  arrangement, and the alternative is a control that blocks the graph.
+- **`SkeletonsValue.provenance`**, which is the same fact after a run — on the card's footer
+  through `describeValue`, and in the 3D View's caption through `skeletonNote`.
+
+Three rules about it.
+
+**With one route the control still draws, reading `Automatic (neuPrint SWC)`.** That is the node
+saying where its geometry comes from, which is the half of this feature that every dataset gets.
+A blank "Automatic" is a provenance question mark on every graph anyone shares — the same reason
+the Custom CAVE version dropdown names the materialization its blank entry resolves to.
+
+**A pinned route the dataset does not have is reported, never substituted.** `validate` says so
+at edit time and `fetchSkeletons` throws at run time, and the option stays in the list so the
+card still shows what the graph says. Substituting is what a column picker refuses to do for the
+same reason: quietly answering with a chunk decomposition where a traced reconstruction was asked
+for changes every number downstream with nothing on screen to say so.
+
+**The param is in the provenance key.** Not `presentational`: the route changes what `evaluate`
+returns, so marking it presentational would leave one route's skeletons on screen under a card
+claiming the other (invariant 4).
+
+The routes themselves, what each costs and which backend has which, are in
+[backends.md](backends.md). The ids are shared across backends — `published` means the same thing
+on neuPrint, on CAVE and on a Neuroglancer Source node — which is what lets a pinned choice keep
+meaning something when a Dataset node is repointed.
+
+Both exporters carry a **note** rather than a refusal when the route is `published`: the cell
+fetches neuPrint's SWC, because the published copy's URL is resolved from the dataset's
+neuroglancer state at run time and the exporter has no network. What differs is said out loud —
+no radii, and its own coverage. Same line the Meshes node's `Detail` draws against navis' `lod`.
+
 ## Connectivity: hops and direction
 
 `Direction` offers `both`, and `Hops` traverses further than one synapse. Both changed what the

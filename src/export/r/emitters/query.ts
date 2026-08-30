@@ -32,6 +32,8 @@ import { neuprintProperty } from '../../../data/neuprint/schema'
 import { neuronIds, rPopulationPredicate } from './common'
 import { STATUS_COLUMN, withoutStatedStatus } from '../../../data/neuronFilter'
 import { populationFromType } from '../../../nodes/lib/populationParams'
+import { SKELETON_SOURCE_PARAM } from '../../../nodes/lib/skeletonParams'
+import { SKELETON_ROUTES } from '../../../data/skeletonRoutes'
 
 /** What "neuPrint" means unless a node says otherwise. */
 const DEFAULT_DEPLOYMENT = 'https://neuprint.janelia.org'
@@ -501,7 +503,20 @@ registerEmitter('neuron.skeletons', (ctx) => {
   const ids = limit > 0 ? `head(${neuronIds(neurons)}, ${limit})` : neuronIds(neurons)
   // Returns a nat neuronlist, which is what every downstream nat call wants — the same
   // relationship navis has to the Python side, since navis is nat's port.
-  return [`${ctx.output('skeletons')} <- neuprint_read_neurons(${ids}, conn = ${conn})`]
+  return [
+    // The same caveat the Python cell carries, and for the same reason: `neuprint_read_neurons`
+    // reads neuPrint's own SWC, where the node may be set to the precomputed layer published
+    // beside the segmentation — a different copy, with no radii and its own coverage.
+    ...(ctx.params[SKELETON_SOURCE_PARAM] === SKELETON_ROUTES.published
+      ? ctx.note(
+          'The Skeletons node is set to the published precomputed layer rather than neuPrint’s ' +
+            'own SWC. This cell reads the SWC: the published copy is a bucket named by the ' +
+            'dataset’s neuroglancer state, it carries no radii, and it covers only the bodies ' +
+            'that were exported into it.',
+        )
+      : []),
+    `${ctx.output('skeletons')} <- neuprint_read_neurons(${ids}, conn = ${conn})`,
+  ]
 })
 
 registerEmitter('neuron.meshes', (ctx) => {

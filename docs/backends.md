@@ -164,6 +164,32 @@ the `WHERE`, and an explicit `status` filter row removes the `traced` disjunct f
 [datasets.md](datasets.md#the-population-checkboxes-and-the-default-that-was-removed-once-already).
 Leave the decision where it is rather than re-litigating it.
 
+**Five of the twelve datasets publish a second set of skeletons, and it is the same
+reconstruction.** The segmentation volume's own `info` may name a `skeletons` directory, and
+`volumeSourceFromState` is what finds it — the *volume*, not the mesh answer, because those come
+apart: `optic-lobe:v1.1` keeps its meshes in a sibling directory of the volume, so following
+`meshSourceFromState` would look for an `info` one level too deep and conclude the dataset
+publishes none. What is there, probed across every dataset the deployment lists:
+
+| dataset | skeleton directory |
+| --- | --- |
+| `male-cns:v0.9`, `male-cns:v1.0` | `skeletons-malecns/skeletons-precomputed` |
+| `optic-lobe:v1.0.1` | `skeletons` — the male-CNS export; 5 of 20 sampled bodies present |
+| `optic-lobe:v1.1` | `skeletons-precomputed` |
+| `manc:v1.0` | `skeleton` |
+| hemibrain, `manc:v1.2.x`, banc, fib19, mushroombody | none |
+
+**The SWC leads because it carries radii and the bucket does not**, and the rest of the
+comparison is why the published one is offered at all. Measured on `male-cns:v1.0` body 45882:
+1,688 nodes down both routes, identical bounds in nanometres once the SWC's dataset voxels are
+scaled by 8 — and the published copy needs no token and is about half the bytes. male-CNS's
+directory declares no `vertex_attributes` at all, so every radius there is 0.
+
+The trap is coverage. A body missing from the directory is a 404, which `readSkeleton` turns into
+an absence rather than a failure — so `publishedSkeletons` warns with a count, or `optic-lobe`'s
+answer is a scene quietly three quarters short. See *Three routes to a skeleton* under CAVE for
+the seam both backends share.
+
 **The token** lives in `localStorage` via `credentials.ts`, never in a saved graph. A 401
 goes out on a separate channel (`reportAuthFailure`) rather than as an error message,
 because errors cross the scheduler as strings and matching on message text rots silently;
@@ -864,6 +890,29 @@ does is now the datastack that takes this route at all. `fragmentUrl` matches on
 than on the leading `~<layer>/` — the layer prefix is part of the path to the shard file, and the
 byte range is what makes a name a shard read.
 
+### Three routes to a skeleton, and which one answered is the user's to choose
+
+`GeometryRequest.skeletonSource` names one; `DataSource.skeletonSourcesFor` lists what a dataset
+has, best first, and is what the Skeletons node's `Source` dropdown is built from. The list and
+the preference `fetchSkeletons` applies with nothing chosen are **one statement**, because a
+dropdown whose "Automatic (published skeletons)" names a route the fetch would not take is worse
+than one that says nothing. `capabilitiesFor`'s `skeletons` is derived from the same list rather
+than asked separately, for the same reason: they are two halves of one fact and were one edit
+away from a node that refuses while its dropdown offers a route.
+
+CAVE's order is **published bucket → skeleton service → level-2 cache**, and no datastack has all
+three. A route the dataset does not have is an **error, never a substitution** — answering with a
+chunk decomposition because the published bucket is absent would silently change every cable
+length downstream, under a card still saying "published skeletons".
+
+**Two refusals, and they answer different questions.** `requireSkeletonRoute` in `source.ts` is
+the *vocabulary* half — this backend has never had an `l2` route — and every source calls it,
+because written per backend it was a rule three of the five sources simply did not implement: a
+node pinned to `published` and repointed at a CATMAID project got the tracing, labelled as the
+tracing. The per-**dataset** half stays with the source, since only a probe can answer it, and it
+names the thing that is missing (which materialization has no flat bucket, that this datastack
+declares no service).
+
 ### Skeletons come from the level-2 cache, and the capability is per dataset
 
 **A CAVE datastack's skeletons depend on its chunkedgraph, not on the backend**, so
@@ -959,23 +1008,57 @@ is not known until the node runs.
 hundred for a whole neuron, where a traced skeleton is thousands. It is the right shape for
 NBLAST, a 3D overview and cable length; it is not a morphometric reconstruction.
 
-#### The earlier finding, kept because it explains the shape
+### The skeleton service, which is a third route and answers for one datastack
 
-**The skeleton service is the one thing CAVE publishes that Coda still cannot use, and the
-blocker is the service rather than the format.** `skeleton_source` is a standard `neuroglancer_skeletons`
+`src/data/cave/skeletonService.ts`. `skeleton_source` is a standard `neuroglancer_skeletons`
 precomputed endpoint — its `/info` declares `radius` and `compartment`, which is exactly what
-`SkeletonGeometry` wants, and it is CORS-open. But it is a **cache that generates on demand**,
-and for `flywire_fafb_public` it is empty: 100 proofread root ids sampled from two places in the
-table, across skeleton versions 0 through 4, came back `exists: false` for every one, and a
-queued bulk generation had not landed after five minutes. So a fetch blocks on generation, per
-neuron, against a node whose ceiling is 500. `capabilities.skeletons` is false and says so on
-the flag; claiming it would make every Skeletons run hang instead of decline.
+`SkeletonGeometry` wants, and it is CORS-open with `Authorization` in the preflight's
+`Allow-Headers` on every deployment probed. So the format side is `precomputed/skeletons.ts`'s
+decoder unchanged; everything that is CAVE's is the layer around it.
 
-Two endpoint notes for whoever picks this up when the cache fills. `exists` answers as a **POST**
-(`{skeleton_version, root_ids}`) — the GET form 502s — and it is what makes the whole thing
-usable, because it turns "will this hang?" into a question you can ask first. And omitting the
-skeleton version from a fetch URL routes to a generate rather than 404ing, which is why the first
-probe here simply never returned.
+**Declaring a service and having one are different facts, and that gap is most of the module.**
+All three specced datastacks declare one. Asked whether they can answer, on the same afternoon:
+
+| datastack | cached |
+| --- | --- |
+| `minnie65_public` | 50 of 50 proofread root ids, at every skeleton version |
+| `flywire_fafb_public` | 0 of 5, at versions 0 through 4 |
+| `brain_and_nerve_cord_public` | 0 of 5, at versions 0 through 4 |
+
+That is the model rather than a coincidence: a generated skeleton exists because somebody asked
+for it, and MICrONS asked. Measured on `minnie65_public` root id `864691134884807418` — **7,167
+vertices, 186 kB, 1.45 s**, with a radius on each, where the level-2 route answers a few hundred
+nodes for the same neuron. So where both exist the service is the better reconstruction and is
+preferred; where the cache is empty the fetch has to notice and fall back.
+
+Four rules make that work, and three of them are silent when wrong.
+
+- **`existingSkeletons` is asked before anything is downloaded.** A GET for a root id the cache
+  has never seen routes to a *generation*, which was measured at 10–45 s for one neuron. A fetch
+  that skipped the check would present as a node that hangs, indistinguishable from a slow
+  network. `exists` answers as a **POST** (`{skeleton_version, root_ids}`) — the GET form 502s —
+  and it is one request for the whole set, about half a second at fifty ids. Its body is written
+  as *text*, because `JSON.stringify` of an eighteen-digit root id as a number is a different
+  neuron (invariant 8) — the same splice `is_latest_roots` performs.
+- **Nothing here ever asks the service to generate.** The endpoints exist. Queueing a build would
+  turn a Skeletons run into a wait of minutes with nothing to say so, and the honest answer is to
+  fetch what is there and warn about the rest.
+- **`automatic` takes the service only when it covers _every_ neuron asked for.** A partial answer
+  topped up from the chunk graph is a scene where cable length means two different things,
+  which is worse than the coarse answer taken whole. An explicit choice fetches what exists and
+  says how many it could not.
+- **A datastack whose service answered for nothing is remembered for the session** (`barren`), so
+  BANC does not pay a `exists` round trip on every run. Only `automatic` reads it; somebody who
+  picked the service explicitly is entitled to ask again, and a cache that has filled since is
+  exactly when that matters.
+
+Two more endpoint notes. The version is the **highest the deployment lists** rather than
+caveclient's constant 4: `/skeletoncache/api/versions` answers `[-1, 0, 1, 2, 3, 4]`, and `-1`
+means "latest", which is not a number to key a geometry cache on. And MICrONS spells its
+`skeleton_source` `precomputed://middleauth+https://…`, where Janelia does not — `middleauth+` is
+neuroglancer's way of saying "this needs a token", not part of the address, so
+`skeletonServiceUrl` strips both prefixes. A parser handling only one works against two of the
+three datastacks and produces a confidently wrong host for the third.
 
 **Synapses are the cheapest capability on this source and needed no new transport.** It is
 `queryTable` with a root-id filter — the same call connectivity makes — over `synapses_nt_v1`.

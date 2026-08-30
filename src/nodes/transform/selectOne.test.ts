@@ -243,6 +243,16 @@ describe('core.selectOne — evaluate', () => {
       expect(item.bounds.min[axis]!).toBeGreaterThanOrEqual(all.bounds.min[axis]!)
       expect(item.bounds.max[axis]!).toBeLessThanOrEqual(all.bounds.max[axis]!)
     }
+    /*
+     * The route is *not* a roll-up, and the pair of assertions is the point: bounds are re-measured
+     * because they describe the selection, while units, space and where the skeletons were fetched
+     * from describe where the coordinates came from — which taking one neuron out cannot change.
+     * Dropped, a single skeleton would stop being able to say where it came from halfway down a
+     * graph, on the card that shows one neuron at a time.
+     */
+    expect(item.provenance).toEqual(all.provenance)
+    expect(item.provenance?.id).toBe('synthetic')
+    expect(item.units).toBe(all.units)
   })
 
   it('takes one mesh and keeps the level of detail', async () => {

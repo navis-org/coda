@@ -57,7 +57,7 @@ interface VertexAttribute {
   num_components: number
 }
 
-interface RawSkeletonInfo {
+export interface RawSkeletonInfo {
   '@type'?: string
   transform?: number[]
   sharding?: ShardingSpec
@@ -101,13 +101,32 @@ export async function openSkeletonSource(
 ): Promise<SkeletonSource> {
   const base = url.replace(/\/+$/, '')
   const info = await fetchInfo<RawSkeletonInfo>(base, options)
-  if (info['@type'] !== 'neuroglancer_skeletons') {
+  const source = skeletonSourceFromInfo(base, info)
+  if (!source) {
     throw new Error(
       `${base} is ${info['@type'] ?? 'an info with no @type'}, not a skeleton source`,
     )
   }
+  return source
+}
+
+/**
+ * An `info` document as a `SkeletonSource`, or `undefined` where it does not describe one.
+ *
+ * Separate from the fetch because **the transport is not always this module's**: CAVE's skeleton
+ * service is a `neuroglancer_skeletons` endpoint behind a token, so `cave/skeletonService.ts`
+ * reads the same document through `caveGet` and shapes it with this. The decoder (`parseSkeleton`)
+ * was already shared; its *input contract* was not, so anything this learned to honour — sharding,
+ * a wider transform, a differently-typed attribute — applied to buckets and silently not to the
+ * service, and the symptom of that is skeletons in the wrong place rather than an error.
+ */
+export function skeletonSourceFromInfo(
+  base: string,
+  info: RawSkeletonInfo,
+): SkeletonSource | undefined {
+  if (info['@type'] !== 'neuroglancer_skeletons') return undefined
   return {
-    base,
+    base: base.replace(/\/+$/, ''),
     ...(info.sharding ? { sharding: info.sharding } : {}),
     ...(Array.isArray(info.transform) && info.transform.length >= 12
       ? { transform: info.transform }
@@ -242,6 +261,47 @@ export interface FetchSkeletonsResult {
   skeletons: SkeletonGeometry[]
   /** Segment ids the source had no skeleton for. */
   missing: string[]
+}
+
+/**
+ * A `GeometryRequest`'s pass-through halves as `FetchSkeletonsOptions`.
+ *
+ * Three sources read the same bucket format — neuPrint's published layer, CAVE's flat pyramid and
+ * a Neuroglancer Source node — and each had written out the same five conditional spreads, down
+ * to the `done / Math.max(1, total)` and the progress wording. Object spread does no
+ * excess-property checking, so a *new* pass-through field (the way `onPartial` was added) reaches
+ * whichever of the three got edited, and the two that did not simply stop streaming with nothing
+ * failing. `assemble` is the one genuinely per-source half: the value shape each builds.
+ *
+ * Typed against `GeometryRequest`'s fields structurally rather than importing it, because
+ * `source.ts` imports *this* module's `SkeletonSource` and the cycle would be for one type.
+ */
+export function skeletonFetchOptions(
+  req: {
+    signal?: AbortSignal | undefined
+    refresh?: boolean | undefined
+    onFetched?: ((at: number) => void) | undefined
+    onProgress?: ((fraction: number, note?: string) => void) | undefined
+  },
+  onPartial?: ((skeletons: SkeletonGeometry[]) => void) | undefined,
+): FetchSkeletonsOptions {
+  return {
+    ...(req.signal ? { signal: req.signal } : {}),
+    ...(req.refresh ? { refresh: true } : {}),
+    ...(req.onFetched ? { onFetched: req.onFetched } : {}),
+    ...(onPartial ? { onPartial } : {}),
+    /*
+     * The whole bar, where the mesh path gives its first fifth to a manifest sweep. There is no
+     * sweep here — one request per body, and the first arrival is drawable — which is also why
+     * this streams from the start rather than after a barrier.
+     */
+    ...(req.onProgress
+      ? {
+          onProgress: (done: number, total: number) =>
+            req.onProgress?.(done / Math.max(1, total), `${done}/${total} skeletons`),
+        }
+      : {}),
+  }
 }
 
 /**

@@ -29,6 +29,7 @@ import type {
   MeshGeometry,
   PointsValue,
   SkeletonGeometry,
+  SkeletonProvenance,
   SkeletonsValue,
   TableValue,
 } from '../../core/values'
@@ -61,7 +62,7 @@ import type {
   SourceSchemas,
   SynapseRequest,
 } from '../source'
-import { ROI_MESH_SCHEMA, reportSourceLearned, throwIfAborted } from '../source'
+import { ROI_MESH_SCHEMA, reportSourceLearned, requireSkeletonRoute, throwIfAborted } from '../source'
 import type { AnnotationListResponse, CatmaidProject, CompactSkeleton } from './api'
 import type { SkeletonSummary } from './api'
 import {
@@ -80,6 +81,7 @@ import {
 import type { CatmaidLabels } from './annotations'
 import { labelsForSkeleton, readVocabulary } from './annotations'
 import { CATMAID_SCHEMAS } from './schema'
+import { SKELETON_ROUTES, route } from '../skeletonRoutes'
 import { parseX3dMesh } from './x3d'
 
 /**
@@ -199,6 +201,14 @@ const EMPTY_LABELS: CatmaidLabels = {
   ontology: null,
   annotations: null,
 }
+
+/** The only way a CATMAID project's geometry arrives. See `skeletonSourcesFor`. */
+const CATMAID_ROUTE = route(
+  SKELETON_ROUTES.catmaid,
+  'The manually traced skeleton, from `compact-detail`. Node radii where a tracer set them, ' +
+    'nanometres already, and dense — a large descending neuron is 64,385 nodes and about a ' +
+    'megabyte, served uncompressed by somebody’s community server.',
+)
 
 export class CatmaidSource implements DataSource {
   readonly id: string
@@ -611,7 +621,24 @@ export class CatmaidSource implements DataSource {
   // Morphology
   // -------------------------------------------------------------------------
 
+  /**
+   * One route, and naming it is the whole of what this buys.
+   *
+   * CATMAID has no second place to get a skeleton from: the tracing *is* the dataset, and
+   * `compact-detail` is the only endpoint that serves it. It is implemented anyway so a card
+   * fed by a CATMAID project says where its geometry came from in the same words a neuPrint or
+   * CAVE one does — and so the Skeletons node's dropdown, which is built from this list, shows
+   * a single settled entry rather than an empty control that reads as broken.
+   */
+  skeletonSourcesFor(): readonly SkeletonProvenance[] {
+    return [CATMAID_ROUTE]
+  }
+
   async fetchSkeletons(req: GeometryRequest): Promise<SkeletonsValue> {
+    // One route, so the only thing to check is that nobody pinned another one. Shared rather
+    // than written here, because a refusal three sources have to remember is a refusal three
+    // sources can forget — see `requireSkeletonRoute`.
+    requireSkeletonRoute(this.label, req.skeletonSource, [CATMAID_ROUTE])
     const projectId = this.projectId(req.datasetId)
     const options = req.signal ? { signal: req.signal } : {}
     const ids = numericIds(req.neuronIds)
@@ -675,6 +702,7 @@ export class CatmaidSource implements DataSource {
         items,
         attributes: tableFromRows(this.schemas.morphology, rows),
         bounds: boundsOf(items.map((item) => item.positions)),
+        provenance: CATMAID_ROUTE,
         // Project coordinates are nanometres — see `POINTS_ARE_NM`. Declared rather than left
         // absent, because NBLAST refuses anything that is not `nm` and absent means unknown.
         ...this.frame(req.datasetId),

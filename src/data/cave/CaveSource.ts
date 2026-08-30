@@ -36,6 +36,7 @@ import type {
   MeshesValue,
   PointsValue,
   SkeletonGeometry,
+  SkeletonProvenance,
   SkeletonsValue,
   TableValue,
 } from '../../core/values'
@@ -55,7 +56,7 @@ import type {
   SynapseRequest,
   ViewerSceneRequest,
 } from '../source'
-import { reportSourceLearned } from '../source'
+import { reportSourceLearned, requireSkeletonRoute } from '../source'
 import type { NeuronIndexRequest } from '../neuronIndex'
 import type { Edge } from '../connectivity'
 import { matrixFromEdges, typesOf } from '../connectivity'
@@ -79,8 +80,21 @@ import {
   meshProgress,
 } from '../precomputed'
 import type { SkeletonSource } from '../precomputed/skeletons'
-import { fetchSkeletons as fetchFlatSkeletons, openSkeletonSource } from '../precomputed/skeletons'
+import {
+  fetchSkeletons as fetchFlatSkeletons,
+  openSkeletonSource,
+  skeletonFetchOptions,
+} from '../precomputed/skeletons'
 import { FLAT_SKELETON_MB, FLAT_SKELETON_WARN, peekFlat, probeFlat } from './flat'
+import type { SkeletonService } from './skeletonService'
+import {
+  existingSkeletons,
+  peekSkeletonService,
+  readServiceSkeletons,
+  serviceLooksEmpty,
+  skeletonServiceFor,
+} from './skeletonService'
+import { SKELETON_ROUTES, route } from '../skeletonRoutes'
 import type { CaveRequestOptions, CaveRow } from './client'
 import type { DatastackInfo } from './api'
 import { CaveError } from './client'
@@ -220,6 +234,61 @@ const INCOMPLETE_INDEX =
   'the neuron index would be incomplete. This datastack is too large to read in one request, ' +
   'and Coda cannot page it yet'
 
+/**
+ * The three routes, described where they can be read by everything that has to agree about them.
+ *
+ * The dropdown's option, the card footer through `SkeletonsValue.provenance` and the sentence a
+ * refusal prints are three surfaces that must not spell one route three ways. The `detail` is per
+ * source rather than shared with `skeletonRoutes.ts` because what a published bucket *costs*
+ * differs by backend: FlyWire's is skeletonised at mip 1 and is about seventy times an L2
+ * skeleton, which is worth saying here and is not true of neuPrint's.
+ */
+const FLAT_ROUTE = route(
+  SKELETON_ROUTES.published,
+  'The skeletons published beside this materialization, skeletonised from the segmentation ' +
+    'itself. Measured over ten FlyWire v783 neurons: 14,559 to 338,087 nodes and ~1.8 MB each, ' +
+    'with a radius on every one — roughly seventy times a chunk-graph skeleton. One request per ' +
+    'neuron, and the cost is memory rather than the wait.',
+)
+
+const SERVICE_ROUTE = route(
+  SKELETON_ROUTES.service,
+  'CAVE’s skeleton service: a real reconstruction with radii, ~7,000 vertices and about 1.5 s ' +
+    'per neuron. It generates on demand and caches, so it can only answer for root ids somebody ' +
+    'has already asked for — Coda fetches what is cached and says what is not.',
+)
+
+const L2_ROUTE = route(
+  SKELETON_ROUTES.l2,
+  'Built from the chunkedgraph’s level-2 cache: one node per chunk, so tens to a few hundred ' +
+    'nodes where a traced skeleton has thousands. Two requests per neuron, ~0.3 s each. The ' +
+    'right shape for NBLAST, cable length and a 3D overview; not a morphometric reconstruction.',
+)
+
+/**
+ * The refusal for a route CAVE *has* but this **dataset** does not.
+ *
+ * `requireSkeletonRoute` covers the other half — a route no CAVE datastack could ever serve —
+ * and the two are worth saying apart: this one names the materialization, because a flat bucket
+ * is keyed by it and 630 publishes meshes where 783 publishes skeletons. The `l2` route has no
+ * entry because it never reaches here: `l2Skeletons` refuses for itself, with the sentence that
+ * can also say meshes and synapses are unaffected.
+ */
+function noRoute(
+  spec: DatastackSpec,
+  id: typeof SKELETON_ROUTES.published | typeof SKELETON_ROUTES.service,
+  version: number,
+): CaveError {
+  const missing =
+    id === SKELETON_ROUTES.published
+      ? `${spec.label} publishes no flat skeleton bucket for materialization ${version}`
+      : `${spec.label} declares no skeleton service`
+  return new CaveError(
+    `${missing}, so the Skeletons node cannot take that route here. Set its Source back to ` +
+      `Automatic, which picks whichever route this dataset does have.`,
+  )
+}
+
 export class CaveSource implements DataSource {
   readonly id = 'cave'
   readonly label = 'CAVE'
@@ -314,26 +383,39 @@ export class CaveSource implements DataSource {
   /**
    * What this datastack can do, where it differs from the source.
    *
-   * Skeletons only, and only when a peek has landed — `undefined` while neither has, which
+   * Skeletons only, and only when a peek has landed — `undefined` while none has, which
    * `sourceSupports` reads as "same as the source", i.e. the safe `false`. `reportSourceLearned`
    * re-infers when an answer arrives, so the node stops refusing on its own.
    *
-   * **Two independent sources of a skeleton, and both are peeked whatever the other says.** The
-   * level-2 cache covers six of the thirteen datastacks the info service lists; a flat bucket
-   * covers the released materializations somebody flattened. `flywire_fafb_public` is exactly the
-   * case that makes asking both necessary — it has no L2 cache at all, so this answered a settled
-   * `false` and the Skeletons node refused, while `gs://flywire_v141_m783/skeletons_mip_1` sat
-   * there publishing them. `peekFlat` is called first so its read is *started* even in the branch
-   * where L2 has already answered.
+   * **Three independent sources of a skeleton, and all three are peeked whatever the others
+   * say.** The level-2 cache covers six of the thirteen datastacks the info service lists; a flat
+   * bucket covers the released materializations somebody flattened; a skeleton service is
+   * declared by all three specced datastacks and populated by one. `flywire_fafb_public` is the
+   * case that makes asking all of them necessary — it has no L2 cache at all, so this answered a
+   * settled `false` and the Skeletons node refused, while `gs://flywire_v141_m783/skeletons_mip_1`
+   * sat there publishing them. `skeletonSourcesFor` starts every peek before reading any of them.
    */
   capabilitiesFor(datasetId: string): Partial<SourceCapabilities> | undefined {
+    /*
+     * Derived from the route list rather than asked separately, which is invariant 3's shape one
+     * layer up: "can this dataset answer at all" and "which ways can it answer" are two halves of
+     * one fact, and when they were two readings of the same three peeks they were one edit away
+     * from a node that refuses while its dropdown offers a route.
+     *
+     * **With one short circuit, and it is about what this gets called from.** `capabilityOf`
+     * reaches here from about fifteen nodes' `validate` asking about `meshes`, `synapses`,
+     * `paths` — on every graph mutation, in graphs with no Skeletons node in them. A bucket that
+     * names skeletons settles this question on its own, so answering from `peekFlat` alone
+     * spares those graphs the chunkedgraph and skeleton-cache reads that the full list starts.
+     * It cannot disagree with the list either: a route list only ever grows, so "flat answered ⇒
+     * `skeletons: true`" stays true of every later state of it.
+     */
     const parsed = splitDatasetId(datasetId)
-    if (!parsed) return undefined
-    const spec = specFor(parsed.datastack)
-    const flat = spec ? peekFlat(spec, parsed.version) : undefined
-    if (flat?.skeletonUrl) return { skeletons: true }
-    const has = peekL2Cache(parsed.datastack)
-    return has === undefined ? undefined : { skeletons: has }
+    const spec = parsed ? specFor(parsed.datastack) : undefined
+    if (spec && parsed && peekFlat(spec, parsed.version)?.skeletonUrl) return { skeletons: true }
+
+    const routes = this.skeletonSourcesFor(datasetId)
+    return routes === undefined ? undefined : { skeletons: routes.length > 0 }
   }
 
   // -------------------------------------------------------------------------
@@ -1059,6 +1141,34 @@ export class CaveSource implements DataSource {
   }
 
   /**
+   * Geometry and its attribute row, built as one walk, for all three routes.
+   *
+   * The two halves of a `SkeletonsValue` are exactly what invariant 3 is about one layer down: a
+   * route that built its attribute table differently would colour the same neurons by a different
+   * rule, and cable length is read off that table. It was written out three times — twice as an
+   * identical closure and once inline — which is three chances for the next column to reach two
+   * of them. `NeuPrintSource.assembleSkeletons` is the same method for the same reason.
+   *
+   * A partial answer is the same walk over fewer items, which is why the streaming routes hand
+   * their `onPartial` straight to it.
+   */
+  private skeletonValue(
+    req: GeometryRequest,
+    items: readonly SkeletonGeometry[],
+    types: Map<string, string> | undefined,
+    provenance: SkeletonProvenance,
+  ): SkeletonsValue {
+    return {
+      kind: 'skeletons',
+      items: [...items],
+      attributes: this.morphologyTable(req, items, types),
+      bounds: boundsOf(items.map((item) => item.positions)),
+      provenance,
+      ...this.frame(req.datasetId),
+    }
+  }
+
+  /**
    * Skeletons, from whichever of the two routes this materialization has.
    *
    * **Published beats built, and they are not the same product.** A flat bucket's
@@ -1080,9 +1190,89 @@ export class CaveSource implements DataSource {
    */
   async fetchSkeletons(req: GeometryRequest): Promise<SkeletonsValue> {
     const { spec, version } = this.require(req.datasetId)
+    const options: CaveRequestOptions = req.signal ? { signal: req.signal } : {}
+
+    // The vocabulary half, shared with every other backend; the per-*dataset* refusals below
+    // are the half only a probe can answer, and they name the materialization.
+    requireSkeletonRoute(spec.label, req.skeletonSource, [FLAT_ROUTE, SERVICE_ROUTE, L2_ROUTE])
+
+    if (req.skeletonSource === SKELETON_ROUTES.published) {
+      const flat = await this.flatSkeletonDir(spec, version, req.signal)
+      if (!flat) throw noRoute(spec, SKELETON_ROUTES.published, version)
+      return this.flatSkeletons(req, spec, flat)
+    }
+    if (req.skeletonSource === SKELETON_ROUTES.service) {
+      const service = await skeletonServiceFor(spec.datastack, options)
+      if (!service) throw noRoute(spec, SKELETON_ROUTES.service, version)
+      return this.serviceSkeletons(req, spec, service)
+    }
+    if (req.skeletonSource === SKELETON_ROUTES.l2) return this.l2Skeletons(req, spec)
+
+    /*
+     * Automatic, in the order `skeletonSourcesFor` advertises — and the middle branch is the one
+     * that has to *check* rather than declare.
+     *
+     * A flat bucket answers for every id it holds and is one request per neuron, so it goes
+     * first with nothing asked. The service is the better reconstruction where it is populated
+     * (7,167 vertices with radii on minnie65 against a few hundred chunk nodes) and empty where
+     * it is not, and declaring one says nothing about which — so automatic asks `exists` and
+     * takes it **only when it covers every neuron**. A partial answer mixed with L2 skeletons is
+     * a scene where cable length means two things, which is worse than the coarse answer taken
+     * whole.
+     */
+    /*
+     * Awaited one at a time rather than started together, which is the opposite of what it looks
+     * like it wants. A datastack with no `flat` entry — BANC, minnie65 — costs `probeFlat`
+     * nothing at all, because `flatUrlFor` answers `undefined` with no request; and on a
+     * datastack that *does* have one the flat route wins, so a service resolution started
+     * alongside would be two requests nobody reads. The sequence only ever pays for the probes
+     * it needs.
+     */
     const flat = await this.flatSkeletonDir(spec, version, req.signal)
     if (flat) return this.flatSkeletons(req, spec, flat)
+
+    // Asked once per session and remembered: a datastack whose cache came back empty for a whole
+    // set is not worth a round trip on every Run. An explicit choice always asks.
+    const service = serviceLooksEmpty(spec.datastack)
+      ? undefined
+      : await skeletonServiceFor(spec.datastack, options).catch(() => undefined)
+    if (service) {
+      const held = await existingSkeletons(service, req.neuronIds, options).catch(
+        () => new Set<string>(),
+      )
+      if (held.size === req.neuronIds.length && held.size > 0) {
+        return this.serviceSkeletons(req, spec, service, held)
+      }
+    }
     return this.l2Skeletons(req, spec)
+  }
+
+  /**
+   * Which routes this dataset's skeletons can come from, best first.
+   *
+   * Three of them, and no datastack has all three: FlyWire public publishes a flat bucket and has
+   * no level-2 cache, BANC and minnie65 have a cache and no bucket, and all three declare a
+   * service of which only minnie65's answers. The preference is the same list `fetchSkeletons`
+   * walks with nothing chosen — written once, because a dropdown whose "Automatic" names a route
+   * the fetch would not take is worse than one that says nothing.
+   *
+   * `undefined` until at least one peek has landed, and every peek is *started* whatever the
+   * others say — `capabilitiesFor`'s rule, for the reason recorded there.
+   */
+  skeletonSourcesFor(datasetId: string): readonly SkeletonProvenance[] | undefined {
+    const parsed = splitDatasetId(datasetId)
+    if (!parsed) return undefined
+    const spec = specFor(parsed.datastack)
+    const flat = spec ? peekFlat(spec, parsed.version) : undefined
+    const service = peekSkeletonService(parsed.datastack)
+    const l2 = peekL2Cache(parsed.datastack)
+    if (service === undefined && l2 === undefined && !flat?.skeletonUrl) return undefined
+
+    const routes: SkeletonProvenance[] = []
+    if (flat?.skeletonUrl) routes.push(FLAT_ROUTE)
+    if (service) routes.push(SERVICE_ROUTE)
+    if (l2) routes.push(L2_ROUTE)
+    return routes
   }
 
   /**
@@ -1113,26 +1303,14 @@ export class CaveSource implements DataSource {
     // serves every graph in the tab, so per-request state on `this` is one run reading another's.
     let types: Map<string, string> | undefined
     const typesReady = this.morphologyTypes(req).then((t) => (types = t))
-    const assemble = (items: readonly SkeletonGeometry[]): SkeletonsValue => ({
-      kind: 'skeletons',
-      items: [...items],
-      attributes: this.morphologyTable(req, items, types),
-      bounds: boundsOf(items.map((item) => item.positions)),
-      ...this.frame(req.datasetId),
-    })
+    const assemble = (items: readonly SkeletonGeometry[]): SkeletonsValue =>
+      this.skeletonValue(req, items, types, FLAT_ROUTE)
 
-    const result = await fetchFlatSkeletons(source, req.neuronIds, {
-      ...(req.signal ? { signal: req.signal } : {}),
-      ...(req.refresh ? { refresh: true } : {}),
-      ...(req.onFetched ? { onFetched: req.onFetched } : {}),
-      ...(req.onPartial ? { onPartial: (items) => req.onPartial?.(assemble(items)) } : {}),
-      ...(req.onProgress
-        ? {
-            onProgress: (done: number, total: number) =>
-              req.onProgress?.(done / Math.max(1, total), `${done}/${total} skeletons`),
-          }
-        : {}),
-    })
+    const result = await fetchFlatSkeletons(
+      source,
+      req.neuronIds,
+      skeletonFetchOptions(req, req.onPartial && ((items) => req.onPartial?.(assemble(items)))),
+    )
     if (result.missing.length > 0) {
       req.onWarn?.(
         `${result.missing.length.toLocaleString()} of ` +
@@ -1143,6 +1321,75 @@ export class CaveSource implements DataSource {
     }
     await typesReady
     return assemble(result.skeletons)
+  }
+
+  /**
+   * The service route: one request per neuron, for the neurons the cache already holds.
+   *
+   * **`exists` is asked first, always, and that is the whole design.** A GET for a root id the
+   * cache has never seen routes to a *generation* rather than a 404 — 10–45 s for one neuron
+   * against 1.5 s for a cached one — so a fetch that skipped the check would present as a node
+   * that hangs. The check is one POST for the whole set, half a second at fifty ids, and the
+   * caller may hand in the answer it already has: `automatic` has to ask before it can choose,
+   * and asking twice would double the only fixed cost this route has.
+   *
+   * Missing neurons are reported rather than generated. See `skeletonService.ts` for why nothing
+   * here queues a build.
+   */
+  private async serviceSkeletons(
+    req: GeometryRequest,
+    spec: DatastackSpec,
+    service: SkeletonService,
+    known?: ReadonlySet<string>,
+  ): Promise<SkeletonsValue> {
+    const options: CaveRequestOptions = req.signal ? { signal: req.signal } : {}
+    req.onProgress?.(0.05, 'checking the skeleton cache')
+    const held = known ?? (await existingSkeletons(service, req.neuronIds, options))
+    const available = req.neuronIds.filter((id) => held.has(id))
+
+    if (available.length < req.neuronIds.length) {
+      const missing = req.neuronIds.length - available.length
+      req.onWarn?.(
+        `${missing.toLocaleString()} of ${req.neuronIds.length.toLocaleString()} neurons have no ` +
+          `skeleton in ${spec.label}'s skeleton cache, so they are not in this result. That ` +
+          `service builds a skeleton the first time somebody asks for one and Coda does not ` +
+          `queue that — a cold build is tens of seconds per neuron. Leave Source on Automatic ` +
+          `for a route that can answer for every neuron.`,
+      )
+    }
+
+    // Started alongside the download and read from a local, never an instance field: one source
+    // serves every graph in the tab. `flatSkeletons`' arrangement, for its reason.
+    let types: Map<string, string> | undefined
+    const typesReady = this.morphologyTypes(req).then((t) => (types = t))
+    const assemble = (items: readonly SkeletonGeometry[]): SkeletonsValue =>
+      this.skeletonValue(req, items, types, SERVICE_ROUTE)
+
+    /*
+     * Keyed by the version as well as the id: the service publishes several, and a skeleton
+     * fetched at version 3 is not the answer to a request for version 4. Nothing else about the
+     * request decides the geometry, so nothing else is in the key — `l2Skeletons`' reasoning.
+     */
+    let done = 0
+    const skeletons = await cachedGeometry<SkeletonGeometry>({
+      ids: available,
+      key: (id) => `cave:${this.id}:${spec.datastack}:sksvc${service.version}:${id}`,
+      bytes: (s) => byteLengthOf(s.positions, s.radii, s.parents),
+      refresh: req.refresh,
+      onFetched: req.onFetched,
+      readyBefore: typesReady,
+      ...(req.onPartial
+        ? { onPartial: (pairs) => req.onPartial?.(assemble(pairs.map(([, item]) => item))) }
+        : {}),
+      fetch: async (missing, deliver) => {
+        await readServiceSkeletons(service, missing, options, (id, skeleton) => {
+          req.onProgress?.(++done / missing.length, `${done}/${missing.length} skeletons`)
+          deliver(id, skeleton)
+        })
+      },
+    })
+    await typesReady
+    return assemble(skeletons.ordered.map(([, item]) => item))
   }
 
   /**
@@ -1212,15 +1459,14 @@ export class CaveSource implements DataSource {
         for (const item of read) deliver(item.id, item)
       },
     })
-    const items = skeletons.ordered.map(([, item]) => item)
-    return {
-      kind: 'skeletons',
-      items,
-      attributes: this.morphologyTable(req, items, await this.morphologyTypes(req)),
-      bounds: boundsOf(items.map((i) => i.positions)),
-      // The cache publishes `rep_coord_nm`, so no conversion happens anywhere.
-      ...this.frame(req.datasetId),
-    }
+    // The cache publishes `rep_coord_nm`, so no conversion happens anywhere — `frame` says nm
+    // and nothing scales.
+    return this.skeletonValue(
+      req,
+      skeletons.ordered.map(([, item]) => item),
+      await this.morphologyTypes(req),
+      L2_ROUTE,
+    )
   }
 
   /**

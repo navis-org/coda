@@ -14,6 +14,7 @@ import type {
   MeshesValue,
   PointsValue,
   SkeletonGeometry,
+  SkeletonProvenance,
   SkeletonsValue,
   TableValue,
 } from '../../core/values'
@@ -46,10 +47,12 @@ import {
   ROI_MESH_SCHEMA,
   ROI_CONNECTIVITY_SCHEMA,
   delay,
+  requireSkeletonRoute,
   throwIfAborted,
 } from '../source'
 import { loadCachedTable, neuronIndexKey } from '../neuronIndex'
 import { compileLabelMatch, preparedRows } from '../neuronFilter'
+import { SKELETON_ROUTES, route } from '../skeletonRoutes'
 import { fieldTermsMatch } from '../terms'
 import type { MockConnection, MockConnectome } from './generate'
 import { getConnectome, mockDatasetIds, mockDatasetMeta } from './generate'
@@ -64,6 +67,13 @@ export interface MockSourceOptions {
   /** Simulated round-trip latency in ms. Set to 0 in tests. */
   latencyMs?: number
 }
+
+/** Generated in the browser from a seeded connectome. See `skeletonSourcesFor`. */
+const SYNTHETIC_ROUTE = route(
+  SKELETON_ROUTES.synthetic,
+  'Generated in the browser from the mock connectome, so a graph can be built and run with no ' +
+    'network and no credentials. Shaped like a neuron; not one.',
+)
 
 export class MockSource implements DataSource {
   readonly id = 'mock'
@@ -553,7 +563,19 @@ export class MockSource implements DataSource {
 
   // --- morphology ----------------------------------------------------------
 
+  /**
+   * One route, and it says out loud that it is not real geometry.
+   *
+   * The mock generates its skeletons in the browser, so there is nothing to choose between — but
+   * a card that says only "5 skeletons" about them is a card that looks exactly like one drawn
+   * from a connectome. Naming the route is where that gets said.
+   */
+  skeletonSourcesFor(): readonly SkeletonProvenance[] {
+    return [SYNTHETIC_ROUTE]
+  }
+
   async fetchSkeletons(req: GeometryRequest): Promise<SkeletonsValue> {
+    requireSkeletonRoute(this.label, req.skeletonSource, [SYNTHETIC_ROUTE])
     await delay(this.latencyMs * 1.5, req.signal)
     const connectome = this.require(req.datasetId)
 
@@ -587,6 +609,7 @@ export class MockSource implements DataSource {
       items,
       attributes: tableFromRows(this.schemas.morphology, rows),
       bounds: boundsOf(items.map((s) => s.positions)),
+      provenance: SYNTHETIC_ROUTE,
       // Synthetic, but generated in nm-like units, so it says so rather than leaving a
       // consumer to guess — the brain is simply a small one. The space half comes back empty,
       // which is the honest answer: nobody registered a connectome Coda invented on load.

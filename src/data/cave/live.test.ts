@@ -16,11 +16,10 @@
  * Out of CI on purpose — it needs a credential and a network, the standing
  * `scripts/check-export.py` has when navis is absent. It reads only; nothing here writes.
  *
- * It also covers the morphology CAVE *does* publish. Skeletons are absent on purpose: the
- * service is a cache that generates on demand and is empty for this datastack — 100 proofread
- * root ids across skeleton versions 0 to 4 all answered `exists: false`, and a queued generation
- * had not landed after five minutes — so a test would either hang or assert that the world has
- * not improved.
+ * It also covers the morphology CAVE publishes, all three routes of it. The skeleton *service*
+ * is exercised against two datastacks on purpose: it is a cache that generates on demand, and
+ * FlyWire's is empty where MICrONS' is full, so the interesting assertion is the one about the
+ * fallback rather than the one about the download.
  *
  * It is pointed at materialization **783**, which is a stable public release rather than a
  * moving target: the server reports `expires_on: 2121-11-10`. That is most of why FlyWire
@@ -38,6 +37,7 @@ import { countTable, queryTable, queryTableChecked, tableMetadata } from './api'
 import { resetCaveTables, tableColumnsFor, tableFactsFor, tableListFor } from './tables'
 import { caveScene } from './scene'
 import { flatUrlFor, probeFlat } from './flat'
+import { existingSkeletons, serviceLooksEmpty, skeletonServiceFor } from './skeletonService'
 import { segmentationLayerIndex } from '../neuroglancer/scene'
 import { registerDatastackSpec, specFor } from './spec'
 import { ID_COLUMN_NAME } from '../../core/ids'
@@ -271,9 +271,16 @@ describe.skipIf(!TOKEN)('CAVE, live — a built neuroglancer scene', () => {
       const segmentation = layers.find((l) => l.type === 'segmentation')
       const image = layers.find((l) => l.type === 'image')
 
-      // Both layers present, and the segmentation authenticated — without the prefix it renders
-      // empty, which is the failure this whole thing exists to avoid.
-      expect(String(segmentation?.source)).toMatch(/^graphene:\/\/middleauth\+https:\/\//)
+      /*
+       * Both layers present, and the segmentation published **as-is** — no `middleauth+`.
+       *
+       * This asserted the prefix until the day `caveScene` stopped adding it, and asserted it
+       * for a while afterwards, because a live test is only run by somebody who chose to. The
+       * prefix is spelunker's and is added by `sceneUrl`/`scenePatchUrl`, which are the only
+       * places a scene meets the viewer it is about to open in — a seunglab-flavoured
+       * deployment refuses it, and `flywire_fafb_public` publishes exactly such a viewer.
+       */
+      expect(String(segmentation?.source)).toMatch(/^graphene:\/\/https:\/\//)
       expect(String(image?.source)).toMatch(/^precomputed:\/\//)
 
       // The neuron ids have somewhere to land.
@@ -346,6 +353,87 @@ describe.skipIf(!TOKEN)('CAVE, live — L2 skeletons', () => {
     // first three, so a lower bound of ten is well clear of the noise.
     expect(Math.max(...skeletons.items.map((i) => i.parents.length))).toBeGreaterThan(10)
   }, 180_000)
+})
+
+/**
+ * The skeleton service, and the gap between declaring one and having one.
+ *
+ * All three specced datastacks declare `skeleton_source`; one of them can answer. That is not a
+ * flake to be worked around but the model — a generated skeleton exists because somebody asked
+ * for it — and it is why `existingSkeletons` is asked before anything is downloaded: a GET for an
+ * id the cache has never seen routes to a *generation*, measured at 10–45 s per neuron against
+ * ~1.5 s for a cached one.
+ *
+ * The earlier version of this file said skeletons were "absent on purpose" here. They are not
+ * absent any more; what changed is that the question became answerable before the wait.
+ */
+describe.skipIf(!TOKEN)('CAVE, live — the skeleton service', () => {
+  it('is declared by FlyWire and holds nothing, which is what the fallback is for', async () => {
+    setToken(TOKEN!)
+    const service = await skeletonServiceFor('flywire_fafb_public')
+    expect(service).toBeTruthy()
+    // The highest version the deployment lists. `-1` means "latest" and is deliberately not
+    // picked: a cache key on a number whose meaning moves is not a key.
+    expect(service!.version).toBeGreaterThanOrEqual(0)
+
+    const ids = (
+      (await new CaveSource().findNeurons({ datasetId: 'flywire_fafb_public:783', limit: 5 }))
+        .data[ID_COLUMN_NAME] as string[]
+    ).slice(0, 5)
+    expect(await existingSkeletons(service!, ids)).toEqual(new Set())
+    // And having asked, `automatic` stops asking for the rest of the session.
+    expect(serviceLooksEmpty('flywire_fafb_public')).toBe(true)
+  }, 120_000)
+
+  it('answers for minnie65, with radii and a real reconstruction', async () => {
+    /*
+     * MICrONS is the datastack that makes this route worth having. Measured on root id
+     * 864691134884807418: 7,167 vertices, 186 kB, 1.45 s — against a few hundred nodes down the
+     * level-2 route, which minnie65 also has. That is why the service leads the preference list
+     * where both exist.
+     */
+    setToken(TOKEN!)
+    const service = await skeletonServiceFor('minnie65_public')
+    expect(service).toBeTruthy()
+
+    registerDatastackSpec({
+      datastack: 'minnie65_public',
+      label: 'MICrONS',
+      description: 'live',
+      neurons: { table: 'proofreading_status_and_strategy', idColumn: 'pt_root_id' },
+    })
+    const cave = new CaveSource()
+    const version = (await materializationsFor('minnie65_public'))[0]
+    const dataset = `minnie65_public:${version}`
+    const ids = (
+      (await cave.findNeurons({ datasetId: dataset, limit: 3 })).data[ID_COLUMN_NAME] as string[]
+    ).slice(0, 2)
+
+    // Every one of them, which is what `automatic` requires before it takes this route: a scene
+    // mixing a reconstruction with a chunk decomposition is one where cable length means two
+    // things.
+    expect((await existingSkeletons(service!, ids)).size).toBe(ids.length)
+
+    const skeletons = await cave.fetchSkeletons!({ datasetId: dataset, neuronIds: ids })
+    expect(skeletons.provenance?.id).toBe('service')
+    expect(skeletons.items).toHaveLength(ids.length)
+    expect(skeletons.units).toBe('nm')
+    for (const item of skeletons.items) {
+      // A real reconstruction rather than a chunk graph: thousands of nodes, and radii on them.
+      expect(item.parents.length).toBeGreaterThan(1000)
+      expect(item.radii.some((r) => r > 0)).toBe(true)
+      expect(item.positions.length).toBe(item.parents.length * 3)
+    }
+    /*
+     * And the route list agrees with what the fetch did, which is what the dropdown shows.
+     * The L2 peek is awaited first on purpose: the fetch above never asked it — it took the
+     * service and stopped — so a list read straight after would be missing an entry that is
+     * genuinely there. That is `capabilitiesFor`'s contract showing through, and it is why the
+     * dropdown grows rather than appearing complete.
+     */
+    expect(await l2SourceFor('minnie65_public')).toBeTruthy()
+    expect(cave.skeletonSourcesFor!(dataset)?.map((r) => r.id)).toEqual(['service', 'l2'])
+  }, 300_000)
 })
 
 /**

@@ -26,9 +26,11 @@ import type {
   MeshesValue,
   PointsValue,
   SkeletonGeometry,
+  SkeletonProvenance,
   SkeletonsValue,
   TableValue,
 } from '../core/values'
+import type { SkeletonRouteId } from './skeletonRoutes'
 import type { NgScene } from './neuroglancer/scene'
 import type { NeuronIndexRequest } from './neuronIndex'
 import type { FilterRow } from './filterRows'
@@ -354,6 +356,26 @@ export interface GeometryRequest {
    * until there is an answer.
    */
   onPartial?: (partial: SkeletonsValue | MeshesValue) => void
+  /**
+   * Which of the dataset's skeleton routes to take, or absent for the source's own preference.
+   *
+   * One of `SkeletonRouteId`, and the same string `DataSource.skeletonSourcesFor` offered — see
+   * `data/skeletonRoutes.ts`. Absent is not a synonym for the preferred one: it says *nobody
+   * chose*, which is what lets a source fall back when the route it would rather take turns out
+   * to answer for nothing (CAVE's skeleton service against a datastack whose cache is empty).
+   *
+   * **A route this dataset does not have is an error, never a substitution.** A Skeletons node
+   * pinned to `published` and then repointed at a dataset with no published skeletons must say
+   * so; quietly answering with the other route is the same failure a column picker makes when it
+   * substitutes a column, and here it would silently swap a traced reconstruction for a chunk
+   * decomposition in an NBLAST.
+   *
+   * Only read by `fetchSkeletons`. `fetchMeshes` has the same choice and it is simply **not
+   * exposed** — `CaveSource.fetchMeshes` already prefers a flat pyramid over graphene without
+   * asking anybody, which is the same decision made silently. One optional field read by one of
+   * the two fetches is cheaper than a second request type; the mesh half is a control away.
+   */
+  skeletonSource?: SkeletonRouteId
   signal?: AbortSignal
 }
 
@@ -613,6 +635,27 @@ export interface DataSource {
 
   /** Morphology. Optional: a source may expose connectivity without geometry. */
   fetchSkeletons?(req: GeometryRequest): Promise<SkeletonsValue>
+  /**
+   * The skeleton routes *this dataset* has, best first.
+   *
+   * **Synchronous, and `undefined` means "not known yet"** — `capabilitiesFor`'s contract, and
+   * for the same reason: this is read from `inferOutputs`/`validate` on every graph mutation, so
+   * an implementation may start a probe but must never await one (invariant 2). It must fire
+   * `reportSourceLearned` when the probe lands, or a dropdown offering one route keeps offering
+   * one route for the life of the session.
+   *
+   * An empty array is a different answer again: this dataset has no skeletons at all, which
+   * `capabilitiesFor` already says and which a caller here should not have to re-derive.
+   *
+   * **Order is the preference `fetchSkeletons` will apply with no `skeletonSource` set**, so the
+   * dropdown's "Automatic" can name what it will actually get. A source that keeps the two in
+   * different files is one edit away from a control that lies.
+   *
+   * Optional, and absent means "one route, unnamed" rather than "none" — every source that
+   * answers `fetchSkeletons` at all has at least one. Implementing it is what buys the node its
+   * dropdown; not implementing it costs only that.
+   */
+  skeletonSourcesFor?(datasetId: string): readonly SkeletonProvenance[] | undefined
   /**
    * What *this dataset* can do, where it differs from the source.
    *
@@ -899,6 +942,54 @@ export function capabilityOf(
   if (!source) return true
   const forDataset = datasetId ? source.capabilitiesFor?.(datasetId) : undefined
   return forDataset?.[capability] ?? source.capabilities[capability]
+}
+
+/**
+ * The skeleton routes a dataset has, read the way `capabilityOf` reads a capability.
+ *
+ * It merges nothing — unlike `capabilityOf`, which has a per-dataset override to fold in — so
+ * what it buys is the *seam*: `src/nodes` asks here rather than reaching into
+ * `source.skeletonSourcesFor`, which is the same rule capabilities follow and for the same
+ * reason, that a fact with three meanings should have one reader.
+ *
+ * Three answers and they are all different: `undefined` (a probe has not landed, or the source
+ * names no routes — offer nothing and say nothing), `[]` (this dataset has no skeletons —
+ * `capabilityOf(…, 'skeletons')` is the question to ask instead), and a list, best first.
+ */
+export function skeletonRoutesOf(
+  source: DataSource | undefined,
+  datasetId: string | undefined,
+): readonly SkeletonProvenance[] | undefined {
+  if (!source || !datasetId) return undefined
+  return source.skeletonSourcesFor?.(datasetId)
+}
+
+/**
+ * Refuse a route this source has never heard of, in one sentence written once.
+ *
+ * **Three of the five sources did not read `skeletonSource` at all**, which is the gap this
+ * closes: a Skeletons node pinned to `published` and repointed at a CATMAID project got the
+ * tracing, labelled as the tracing, with nothing anywhere saying the choice had been dropped —
+ * the exact silent swap `GeometryRequest.skeletonSource` forbids. Written per backend it was
+ * three sources' worth of a rule nobody was obliged to implement, and two wordings of it in the
+ * two that did.
+ *
+ * The **vocabulary** half only: whether this backend can ever serve that route. Whether *this
+ * dataset* has it stays with the source, because that is a live question about a bucket or a
+ * cache — `CaveSource.fetchSkeletons` still refuses a `published` route on a materialization
+ * nobody flattened, and says which materialization.
+ */
+export function requireSkeletonRoute(
+  label: string,
+  requested: SkeletonRouteId | undefined,
+  served: readonly SkeletonProvenance[],
+): void {
+  if (!requested || served.some((route) => route.id === requested)) return
+  throw new Error(
+    `${label} has no "${requested}" skeletons — it offers ` +
+      `${served.map((route) => route.label).join(', ')}. Set the Skeletons node's Source back ` +
+      `to Automatic, which picks whichever route this dataset does have.`,
+  )
 }
 
 /**

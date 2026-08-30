@@ -255,6 +255,32 @@ export interface SkeletonGeometry {
   readonly parents: Int32Array
 }
 
+/**
+ * Which of a dataset's skeleton routes a set of skeletons came from.
+ *
+ * **A skeleton is not one product, and which one you have changes what it can answer.** A
+ * neuPrint SWC, a precomputed layer published beside a segmentation, a CAVE skeleton-service
+ * reconstruction and a level-2 chunk decomposition are four different things about the same
+ * neuron — tens of nodes against tens of thousands, radii or none — and until this existed a
+ * scene said only "5 skeletons" about any of them. Cable length is the case that makes it
+ * load-bearing rather than cosmetic: the same neuron measures differently down each route, with
+ * nothing on screen to say a number came from a chunk graph.
+ *
+ * Carried on the value rather than derived from the dataset because the route is *chosen* — see
+ * the Skeletons node's `source` param — so a graph can hold two sets from one dataset, and the
+ * dataset id no longer answers which is which.
+ *
+ * `id` is the same string the node's param stores and `DataSource.skeletonSourcesFor` offers;
+ * see `data/skeletonRoutes.ts` for the list and why they are shared across backends.
+ */
+export interface SkeletonProvenance {
+  id: string
+  /** Short name, for a card footer and a viewer caption. */
+  label: string
+  /** One sentence: what this route is, and what it costs. For a tooltip and the dropdown. */
+  detail?: string
+}
+
 export interface SkeletonsValue {
   readonly kind: 'skeletons'
   readonly items: SkeletonGeometry[]
@@ -263,6 +289,8 @@ export interface SkeletonsValue {
   readonly bounds: Bounds3
   readonly units?: GeometryUnits
   readonly space?: TemplateSpaceId
+  /** Which route answered. Absent only from a value built by something with no route to name. */
+  readonly provenance?: SkeletonProvenance
 }
 
 export interface MeshGeometry {
@@ -834,6 +862,10 @@ export function describeValue(v: Value | undefined): string {
       return (
         `${v.items.length} skeleton${v.items.length === 1 ? '' : 's'} · ` +
         `${skeletonPointCount(v).toLocaleString()} pts · ` +
+        // Where they came from, which is the one thing about a skeleton set that a count cannot
+        // imply — see `SkeletonProvenance`. Ahead of the space and the units because those two
+        // are the same for every route a dataset has, and this is not.
+        `${v.provenance ? `${v.provenance.label} · ` : ''}` +
         `${spaceLabel(v.space)} · ${unitsLabel(v.units)}`
       )
     case 'meshes':

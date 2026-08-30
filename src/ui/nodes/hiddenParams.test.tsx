@@ -178,18 +178,26 @@ describe('the hint on the card', () => {
   })
 
   it('adds the changed clause when one carries a value somebody chose', async () => {
-    // The morphology example lowers Warn above on both geometry nodes.
+    // The morphology example lowers Warn above on both geometry nodes. "More" rather than
+    // "hidden" because Skeletons draws its `Source` dropdown, so there is something else there.
     render(<App />)
     const card = await cardFor(nodeIdOfType('neuron.skeletons'))
-    expect(hintOf(card)!.textContent).toBe('… 1 hidden (1 changed)')
+    expect(hintOf(card)!.textContent).toBe('… 1 more (1 changed)')
     expect(hintOf(card)!.getAttribute('title')).toContain('Warn above (changed)')
   })
 
   it('says "hidden" rather than "more" when there is nothing else on the card', async () => {
-    // "More" is a claim about something else being there. Skeletons' only param is advanced,
-    // so the card draws nothing at all and "1 more" would be more than what?
+    /*
+     * "More" is a claim about something else being there. Neuroglancer's params are every one of
+     * them inspector-only, so the card draws nothing at all and "3 more" would be more than what?
+     *
+     * It used to be Skeletons, which had exactly one param and it was advanced — until that node
+     * grew a `Source` dropdown, at which point this test was asserting something about the card
+     * *and* something about that node's param list, and only one of the two was the point.
+     */
     render(<App />)
-    const skeletons = await cardFor(nodeIdOfType('neuron.skeletons'))
+    act(() => useGraphStore.getState().addNode('out.neuroglancer', { x: 0, y: 600 }))
+    const skeletons = await cardFor(nodeIdOfType('out.neuroglancer'))
     expect(skeletons.querySelectorAll('.coda-node__params .param')).toHaveLength(0)
     expect(hintOf(skeletons)!.textContent).toContain('hidden')
 
@@ -221,10 +229,11 @@ describe('the hint on the card', () => {
   })
 
   it('renders on a card that draws no param rows at all', async () => {
-    // Skeletons' only param is advanced, so there is no band for the hint to sit at the end of
-    // — and this is the card that needs it most, since an empty body is all it otherwise says.
+    // Every Neuroglancer param is advanced, so there is no band for the hint to sit at the end
+    // of — and this is the card that needs it most, since an empty body is all it otherwise says.
     render(<App />)
-    const card = await cardFor(nodeIdOfType('neuron.skeletons'))
+    act(() => useGraphStore.getState().addNode('out.neuroglancer', { x: 0, y: 600 }))
+    const card = await cardFor(nodeIdOfType('out.neuroglancer'))
     expect(card.querySelectorAll('.coda-node__params .param')).toHaveLength(0)
     expect(hintOf(card)).not.toBeNull()
   })

@@ -506,11 +506,23 @@ export function stackGeometry(
 
   if (top.kind === 'skeletons' && bottom.kind === 'skeletons') {
     const items = [...top.items, ...bottom.items]
+    /*
+     * Kept only where both sides agree, which is the rule `detail` follows just below and for
+     * the same reason: two routes in one collection is no route. Stacking a traced
+     * reconstruction onto a chunk-graph one is a legitimate thing to want — that is what the
+     * node is for — but the result cannot be labelled as either, and a card naming one of them
+     * would be claiming something about half its contents.
+     *
+     * By **id**, not by identity: these come from two fetches and are equal objects at best.
+     */
+    const provenance =
+      top.provenance && top.provenance.id === bottom.provenance?.id ? top.provenance : undefined
     return {
       kind: 'skeletons',
       items,
       attributes,
       bounds: boundsOf(items.map((item) => item.positions)),
+      ...(provenance ? { provenance } : {}),
       ...frame,
     }
   }

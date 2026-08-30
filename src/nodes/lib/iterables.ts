@@ -223,12 +223,14 @@ function sliceElements(v: IterableValue, indices: number[]): IterableValue {
       items,
       attributes,
       bounds: items.length ? boundsOf(items.map((item) => item.positions)) : EMPTY_BOUNDS,
-      // Carried through for the same reason `detail` is, one branch below: units and template
-      // space are facts about where the coordinates came from, and taking one neuron out does
-      // not change either. Dropping them would leave a single skeleton claiming to be in units
-      // nobody knows, in a space nothing downstream could refuse to mirror.
+      // Carried through for the same reason `detail` is, one branch below: units, template space
+      // and the route the skeletons were fetched down are all facts about where the coordinates
+      // came from, and taking one neuron out does not change any of them. Dropping them would
+      // leave a single skeleton claiming to be in units nobody knows, in a space nothing
+      // downstream could refuse to mirror, from a source the card could no longer name.
       ...(v.units ? { units: v.units } : {}),
       ...(v.space ? { space: v.space } : {}),
+      ...(v.provenance ? { provenance: v.provenance } : {}),
     }
   }
 

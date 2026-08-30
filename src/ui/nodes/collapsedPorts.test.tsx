@@ -136,11 +136,17 @@ describe('the fold puts them there too', () => {
   })
 
   it('is offered on a card whose only rows are ports', async () => {
-    // Skeletons draws no param rows at all — every one of its params is advanced — so the
-    // sockets are the only thing a fold can reclaim there. Gating the button on params alone
-    // would leave exactly the cards with the most to gain without one.
+    /*
+     * Neuroglancer draws no param rows at all — every one of its params is advanced — so the
+     * sockets are the only thing a fold can reclaim there. Gating the button on params alone
+     * would leave exactly the cards with the most to gain without one.
+     *
+     * It used to be Skeletons, until that node grew a visible `Source` dropdown. Same shape of
+     * card; a different node type is now the one that has it.
+     */
     render(<App />)
-    const skeletons = nodeIdOfType('neuron.skeletons')
+    act(() => useGraphStore.getState().addNode('out.neuroglancer', { x: 0, y: 600 }))
+    const skeletons = nodeIdOfType('out.neuroglancer')
     const wrapper = await wrapperFor(skeletons)
     expect(cardIn(wrapper).querySelectorAll('.coda-node__params .param')).toHaveLength(0)
     const button = cardIn(wrapper).querySelector('.coda-node__fold') as HTMLButtonElement

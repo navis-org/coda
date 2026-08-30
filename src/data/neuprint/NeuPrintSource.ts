@@ -20,6 +20,7 @@ import type {
   MeshesValue,
   PointsValue,
   SkeletonGeometry,
+  SkeletonProvenance,
   SkeletonsValue,
   TableValue,
 } from '../../core/values'
@@ -58,6 +59,7 @@ import {
   ROI_CONNECTIVITY_SCHEMA,
   ROI_MESH_SCHEMA,
   reportSourceLearned,
+  requireSkeletonRoute,
   throwIfAborted,
 } from '../source'
 import { datasetSummaryKey, loadCachedTable, neuronIndexKey } from '../neuronIndex'
@@ -102,7 +104,15 @@ import {
   tableFromCypher,
 } from './decode'
 import type { NgScene } from '../neuroglancer/scene'
-import { fetchNgState, meshSourceFromState } from './nglayers'
+import { fetchNgState, meshSourceFromState, volumeSourceFromState } from './nglayers'
+import type { SkeletonSource } from '../precomputed/skeletons'
+import {
+  fetchSkeletons as fetchPublishedSkeletons,
+  openSkeletonSource,
+  skeletonFetchOptions,
+} from '../precomputed/skeletons'
+import { probePrecomputed } from '../precomputed/probe'
+import { SKELETON_ROUTES, route } from '../skeletonRoutes'
 import type { DiscoveredSchema } from './schema'
 import { discoverNeuronSchema, schemasFor } from './schema'
 import type { VoxelScale } from './units'
@@ -114,6 +124,29 @@ import {
   voxelScale,
 } from './units'
 import { mapWithConcurrency } from '../concurrency'
+
+/**
+ * The two skeleton routes, described once.
+ *
+ * Module constants rather than built where they are offered, because the same description has to
+ * reach three places that cannot see each other: the dropdown's option, the card footer through
+ * `SkeletonsValue.provenance`, and the sentence a refusal prints. Three spellings of one route
+ * read as three routes.
+ */
+const SWC_PROVENANCE = route(
+  SKELETON_ROUTES.neuprint,
+  'Traced skeleton from neuPrint, with a radius on every node. Coordinates are dataset voxels, ' +
+    'scaled to nanometres so a skeleton and a mesh of the same neuron line up. One request per ' +
+    'neuron, and it needs your neuPrint token.',
+)
+
+const PUBLISHED_ROUTE = route(
+  SKELETON_ROUTES.published,
+  'The precomputed skeleton layer published beside the segmentation. Measured on male-CNS it is ' +
+    'the same reconstruction as the SWC — the same nodes, already in nanometres — but carries no ' +
+    'radii, needs no token and is about half the bytes. Coverage is whatever was exported into ' +
+    'that directory, which is not always every body.',
+)
 
 /**
  * Skeletons are one HTTP request per body — neuPrint has no batch endpoint — and each is
@@ -186,6 +219,16 @@ interface DatasetState {
   /** Resolved once from the nglayers endpoint; null when the dataset publishes none. */
   meshSource?: MeshSource | null
   meshResolving?: Promise<MeshSource | null>
+  /**
+   * The skeleton directory the segmentation volume names, opened. Null when it names none.
+   *
+   * Separate from `meshSource` even though both come out of the same neuroglancer state, because
+   * they are resolved from different URLs — see `volumeSourceFromState`.
+   */
+  publishedSkeletons?: SkeletonSource | null
+  publishedResolving?: Promise<SkeletonSource | null>
+  /** Whether an edit-time peek has already started the two reads it could not answer from. */
+  skeletonsPeeked?: boolean
   /** The published neuroglancer state, from the same endpoint. Null when there is none. */
   scene?: NgScene | null
   sceneResolving?: Promise<NgScene | null>
@@ -765,9 +808,79 @@ export class NeuPrintSource implements DataSource {
   // Morphology
   // -------------------------------------------------------------------------
 
+  /**
+   * The two routes a neuPrint dataset's skeletons can come from, best first.
+   *
+   * **The SWC leads because it carries radii and the bucket does not.** They are otherwise the
+   * same reconstruction, which was measured rather than assumed: `male-cns:v1.0` body 45882 is
+   * 1,688 nodes down both routes, with identical bounds in nanometres once the SWC's voxels are
+   * scaled. What the published one is worth is the other two columns of that comparison — no
+   * token, and roughly half the bytes — which is why it is offered rather than ignored.
+   *
+   * `undefined` until both reads have landed, which is `capabilitiesFor`'s contract and is what
+   * keeps this legal to call from `inferOutputs` (invariant 2). Both are started here, once per
+   * dataset, and `reportSourceLearned` is what makes the dropdown grow a second entry when they
+   * arrive rather than at the next reload.
+   */
+  skeletonSourcesFor(datasetId: string): readonly SkeletonProvenance[] | undefined {
+    const state = this.stateFor(datasetId)
+    if (state.publishedSkeletons !== undefined) {
+      return state.publishedSkeletons ? [SWC_PROVENANCE, PUBLISHED_ROUTE] : [SWC_PROVENANCE]
+    }
+    if (!state.skeletonsPeeked) {
+      state.skeletonsPeeked = true
+      // Swallowed for `peekDatasets`' reason: a peek has no caller to report to, and whoever
+      // actually asks for geometry gets the failure.
+      void this.publishedSkeletonsFor(datasetId)
+        .then(() => reportSourceLearned(this.id))
+        .catch(() => undefined)
+    }
+    return undefined
+  }
+
+  /**
+   * The skeleton directory this dataset's segmentation volume names, opened once.
+   *
+   * Null for the eight of twelve datasets that name none — hemibrain and manc:v1.2.3 among them
+   * — and null again for a directory that cannot be opened, which is the same answer from a
+   * caller's point of view and a different one from `probePrecomputed`'s: `skeletonUrl` says the
+   * volume *named* one, and `skeletons` says it could be read. The fallback `openSkeletonSource`
+   * is `CaveSource.flatSkeletonDir`'s, for the reason recorded there — a probe swallows a
+   * transient failure and caches itself as a success, so keying the refusal on the opened copy
+   * reports "no skeletons here" for the rest of the session after one blip.
+   */
+  private async publishedSkeletonsFor(
+    datasetId: string,
+    signal?: AbortSignal,
+  ): Promise<SkeletonSource | null> {
+    const state = this.stateFor(datasetId)
+    if (state.publishedSkeletons !== undefined) return state.publishedSkeletons
+
+    state.publishedResolving ??= (async () => {
+      const published = await this.ngState(datasetId, signal)
+      const volume = published ? volumeSourceFromState(published, datasetId) : undefined
+      if (!volume) return null
+      const probe = await probePrecomputed(volume.url, signal ? { signal } : {})
+      if (!probe.ok || !probe.source.skeletonUrl) return null
+      return (
+        probe.source.skeletons ??
+        (await openSkeletonSource(probe.source.skeletonUrl, signal ? { signal } : {}).catch(
+          () => null,
+        ))
+      )
+    })()
+      .then((resolved) => {
+        state.publishedSkeletons = resolved
+        return resolved
+      })
+      .finally(() => {
+        state.publishedResolving = undefined
+      })
+    return state.publishedResolving
+  }
+
   async fetchSkeletons(req: GeometryRequest): Promise<SkeletonsValue> {
     await this.discover(req.datasetId, req.signal)
-    const scale = this.scaleFor(req.datasetId)
     const schema = schemasFor(emptyDiscovered()).morphology
     if (req.neuronIds.length === 0) {
       return {
@@ -778,6 +891,36 @@ export class NeuPrintSource implements DataSource {
         ...this.frame(req.datasetId),
       }
     }
+
+    /*
+     * The choice is resolved before either route runs, and an impossible one throws rather than
+     * falling through — `GeometryRequest.skeletonSource`'s rule. The default is the SWC, which
+     * is what `skeletonSourcesFor` promises by putting it first.
+     *
+     * Two refusals and they answer different questions: the shared one is about the *vocabulary*
+     * (this backend has never had an `l2` route), while the one below is about this **dataset**
+     * (eight of the twelve name no skeleton directory), which only a probe can answer.
+     */
+    requireSkeletonRoute(this.label, req.skeletonSource, [SWC_PROVENANCE, PUBLISHED_ROUTE])
+    if (req.skeletonSource === SKELETON_ROUTES.published) {
+      const source = await this.publishedSkeletonsFor(req.datasetId, req.signal)
+      if (!source) {
+        throw new Error(
+          `${req.datasetId} publishes no precomputed skeleton layer beside its segmentation, ` +
+            `so "published skeletons" is not available here. Leave the Skeletons node's Source ` +
+            `on Automatic for neuPrint's own.`,
+        )
+      }
+      return this.publishedSkeletons(req, source)
+    }
+    return this.swcSkeletons(req, schema)
+  }
+
+  /**
+   * neuPrint's own SWC: one request per body, a few at a time.
+   */
+  private async swcSkeletons(req: GeometryRequest, schema: TableSchema): Promise<SkeletonsValue> {
+    const scale = this.scaleFor(req.datasetId)
 
     /*
      * One request per body, a few at a time — for the bodies not already held.
@@ -799,23 +942,8 @@ export class NeuPrintSource implements DataSource {
     const assemble = (
       pairs: ReadonlyArray<[string, SkeletonGeometry]>,
       meta: Map<string, NeuronRow>,
-    ): SkeletonsValue => {
-      const data: Record<string, ColumnData> = {}
-      for (const col of schema.columns) data[col.name] = []
-      for (const [neuronId, item] of pairs) {
-        pushNeuronRow(data, neuronId, meta.get(neuronId))
-        data['points']!.push(item.parents.length)
-        data['cableLength']!.push(cableLength(item))
-      }
-      const items = pairs.map(([, item]) => item)
-      return {
-        kind: 'skeletons',
-        items,
-        attributes: makeTable(schema, data),
-        bounds: boundsOf(items.map((item) => item.positions)),
-        ...this.frame(req.datasetId),
-      }
-    }
+    ): SkeletonsValue =>
+      this.assembleSkeletons(req.datasetId, schema, pairs, meta, SWC_PROVENANCE)
 
     // Started here so it races the geometry rather than gating it; `readyBefore` is what holds
     // the first publish until it lands. `rows` is only how the partial reads what landed.
@@ -864,6 +992,93 @@ export class NeuPrintSource implements DataSource {
     // `ordered` is already in the *requested* order rather than the order the network answered,
     // so a partly-cached batch draws the same way a fresh one does. See `CachedGeometryResult`.
     return assemble(skeletons.ordered, rows)
+  }
+
+  /**
+   * The published route: the bucket's own skeleton directory, read by the precomputed reader.
+   *
+   * No token, one request per neuron, and no scaling — these are nanometres already, which was
+   * checked on both halves rather than assumed (`male-cns:v1.0` body 45882, x 393,632–447,776 nm
+   * against the SWC's voxels × 8). Applying `scaleFor` here would put every published skeleton
+   * eight times away from the mesh it should wrap, with nothing failing.
+   *
+   * **Coverage is per directory and is not always complete**, which is the one thing this route
+   * has to say out loud: `optic-lobe:v1.0.1` names the male-CNS export, and 15 of 20 traced
+   * bodies sampled from it are simply not in there. A neuron with no object is a 404 that
+   * `readSkeleton` turns into an absence, so without the warning the answer is a scene quietly
+   * missing three quarters of what was asked for.
+   */
+  private async publishedSkeletons(
+    req: GeometryRequest,
+    source: SkeletonSource,
+  ): Promise<SkeletonsValue> {
+    const schema = schemasFor(emptyDiscovered()).morphology
+    let rows: Map<string, NeuronRow> = new Map()
+    const attributesReady = this.fetchNeuronRows(req.datasetId, req.neuronIds, req.signal).then(
+      (r) => (rows = r),
+    )
+    const assemble = (items: readonly SkeletonGeometry[]): SkeletonsValue =>
+      this.assembleSkeletons(
+        req.datasetId,
+        schema,
+        items.map((item) => [item.id, item] as [string, SkeletonGeometry]),
+        rows,
+        PUBLISHED_ROUTE,
+      )
+
+    const [, result] = await Promise.all([
+      attributesReady,
+      fetchPublishedSkeletons(
+        source,
+        req.neuronIds,
+        skeletonFetchOptions(req, req.onPartial && ((items) => req.onPartial?.(assemble(items)))),
+      ),
+    ])
+
+    if (result.missing.length > 0) {
+      req.onWarn?.(
+        `${result.missing.length.toLocaleString()} of ` +
+          `${req.neuronIds.length.toLocaleString()} neurons have no skeleton in the published ` +
+          `layer, so they are not in this result. That directory is published beside the ` +
+          `segmentation and covers whatever was exported into it, which is not always every ` +
+          `body neuPrint knows about — set the Skeletons node's Source to neuPrint for the ` +
+          `traced ones.`,
+      )
+    }
+    return assemble(result.skeletons)
+  }
+
+  /**
+   * Geometry and its attribute row, built as one walk.
+   *
+   * A method rather than a closure per route, because the two halves of a `SkeletonsValue` are
+   * exactly what invariant 3 is about one layer down: a route that built its attribute table
+   * differently would colour the same neurons by a different rule. A partial answer is the same
+   * walk over fewer pairs, which is the other reason it is written once.
+   */
+  private assembleSkeletons(
+    datasetId: string,
+    schema: TableSchema,
+    pairs: ReadonlyArray<[string, SkeletonGeometry]>,
+    meta: Map<string, NeuronRow>,
+    provenance: SkeletonProvenance,
+  ): SkeletonsValue {
+    const data: Record<string, ColumnData> = {}
+    for (const col of schema.columns) data[col.name] = []
+    for (const [neuronId, item] of pairs) {
+      pushNeuronRow(data, neuronId, meta.get(neuronId))
+      data['points']!.push(item.parents.length)
+      data['cableLength']!.push(cableLength(item))
+    }
+    const items = pairs.map(([, item]) => item)
+    return {
+      kind: 'skeletons',
+      items,
+      attributes: makeTable(schema, data),
+      bounds: boundsOf(items.map((item) => item.positions)),
+      provenance,
+      ...this.frame(datasetId),
+    }
   }
 
   async fetchSynapses(req: SynapseRequest): Promise<PointsValue> {

@@ -129,10 +129,7 @@ export function meshSourceFromState(
   state: NgScene,
   datasetId: string,
 ): MeshSourceRef | undefined {
-  const layers = ((state as NgState).layers ?? []).filter((l) => l.type === 'segmentation')
-  const family = datasetId.split(':')[0] ?? datasetId
-  const named = layers.filter((l) => (l.name ?? '').startsWith(family))
-  const candidates = (named.length ? named : layers).flatMap(urls)
+  const candidates = segmentationCandidates(state, datasetId)
 
   const matching = (hints: string[]) =>
     candidates.find((url) => hints.some((hint) => url.toLowerCase().includes(hint)))
@@ -140,9 +137,7 @@ export function meshSourceFromState(
   const multires = matching(MULTIRES_HINTS)
   // The volume names its own preferred mesh subdirectory in its `info`, so following it is
   // how a dataset's own choice gets honoured — see the header for why that beats a hint.
-  const volume = candidates.find(
-    (url) => !/_propert(y|ies)\/?$/i.test(url) && meshCandidateUrl(url),
-  )
+  const volume = volumeCandidate(candidates)
   const hinted = matching(MESH_HINTS)
 
   for (const source of [multires, volume, hinted]) {
@@ -151,6 +146,43 @@ export function meshSourceFromState(
     if (url) return { url, source }
   }
   return undefined
+}
+
+/** Every source URL on the layers that could be this dataset's own segmentation, in state order. */
+function segmentationCandidates(state: NgScene, datasetId: string): string[] {
+  const layers = ((state as NgState).layers ?? []).filter((l) => l.type === 'segmentation')
+  const family = datasetId.split(':')[0] ?? datasetId
+  const named = layers.filter((l) => (l.name ?? '').startsWith(family))
+  return (named.length ? named : layers).flatMap(urls)
+}
+
+/** The first candidate that is neither a segment-property sidecar nor an unreadable scheme. */
+function volumeCandidate(candidates: readonly string[]): string | undefined {
+  return candidates.find((url) => !/_propert(y|ies)\/?$/i.test(url) && meshCandidateUrl(url))
+}
+
+/**
+ * The dataset's segmentation **volume**, which is a different question from where its meshes are.
+ *
+ * `meshSourceFromState` resolves as far as a mesh *directory*, and for optic-lobe:v1.1 that is
+ * `…/segmentation/multi-res-meshes` — a sibling of the volume, not the volume. Skeletons are
+ * named by the volume's own `info` (`male-cns:v1.0` says
+ * `skeletons: skeletons-malecns/skeletons-precomputed`), so following the mesh answer would look
+ * for an `info` one directory too deep and conclude the dataset publishes none. Four of the
+ * twelve neuPrint datasets publish one — male-CNS v0.9 and v1.0, optic-lobe v1.0.1 and v1.1, and
+ * manc:v1.0 — so getting this wrong is silent for the other eight.
+ *
+ * The same first-non-sidecar pick `meshSourceFromState` makes for its middle tier, shared rather
+ * than written twice: they are the same question, and the mesh path is where the rule was
+ * measured (see the header).
+ */
+export function volumeSourceFromState(
+  state: NgScene,
+  datasetId: string,
+): MeshSourceRef | undefined {
+  const source = volumeCandidate(segmentationCandidates(state, datasetId))
+  const url = source ? meshCandidateUrl(source) : undefined
+  return url && source ? { url, source } : undefined
 }
 
 /**

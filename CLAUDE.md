@@ -191,6 +191,26 @@ Area-specific — the rule, then the doc that holds why:
   manifest is not all shards: it mixes shard reads with plain objects under
   `mesh_metadata.unsharded_mesh_dir`, so the neuron arrives whole minus every piece anyone has
   edited. `fragmentUrl` matches on `.shard:`. See [docs/backends.md](docs/backends.md).
+- **A skeleton is not one product, and which route answered is a fact about the *value*.** A
+  dataset usually has more than one place to get one from — `male-cns:v1.0` serves neuPrint's SWC
+  and publishes a precomputed layer beside its segmentation (same 1,688 nodes on body 45882, same
+  nanometres, no radii); `minnie65_public` has a level-2 cache and a populated CAVE skeleton
+  service (7,167 vertices with radii against a few hundred chunk nodes). Cable length means
+  something different down each, so `SkeletonsValue.provenance` rides on the value and the
+  Skeletons node's `Source` is where you choose. Four rules, each load-bearing:
+  `DataSource.skeletonSourcesFor`'s **order is the preference `fetchSkeletons` applies**, so
+  "Automatic (published skeletons)" cannot name a route the fetch would not take — and
+  `capabilitiesFor` is derived from that same list, short-circuiting only where a flat bucket
+  already settles it, since it is asked about *every* capability on every graph mutation. **A
+  pinned route the dataset lacks is an error, never a substitution** — the vocabulary half of that
+  is `requireSkeletonRoute`, shared, because written per backend three of the five sources did not
+  implement it at all. CAVE's service **generates on demand**, so
+  `exists` is asked before any download (a cold GET is 10–45 s a neuron) and `automatic` takes it
+  only when it covers *every* neuron — a scene mixing a reconstruction with a chunk decomposition
+  is one where a number means two things. And neuPrint's published route resolves the
+  **volume**, not the mesh directory: `optic-lobe:v1.1` keeps its meshes in a sibling, so the mesh
+  answer looks one level too deep and concludes there are no skeletons.
+  See [docs/backends.md](docs/backends.md) and [docs/nodes.md](docs/nodes.md).
 - **CAVE's row cap is a per-deployment number, and a reference table has no root id.**
   `CAVE_MAX_ROWS` is one server's `QUERY_LIMIT_SIZE`, so truncation is tested against the
   server's own `COUNT` (`countTable`), never the constant and never with `>=`. A

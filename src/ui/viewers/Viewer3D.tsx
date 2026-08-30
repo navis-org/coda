@@ -67,6 +67,7 @@ import {
   sceneLights,
   sceneMode,
   sceneSurface,
+  skeletonNote,
   skeletonSegmentColors,
   skeletonWidthPlan,
   surfaceStyle,
@@ -451,6 +452,9 @@ export function Viewer3D(props: Viewer3DProps) {
   }
 
   const detail = detailNote(meshes)
+  // Where the skeletons came from, which is a bigger difference than a mesh's level of detail —
+  // see `skeletonNote`.
+  const provenance = skeletonNote(skeletons)
 
   /** The sockets with something on them — the question both the names and the switches ask. */
   const values = { skeletons, meshes, points, volumes }
@@ -737,6 +741,11 @@ export function Viewer3D(props: Viewer3DProps) {
             label={`${selection.length} selected`}
             onClear={() => onSelectionChange([])}
           />
+        )}
+        {provenance && !compact && (
+          <span className="viewer__note" title={provenance.title}>
+            {provenance.label}
+          </span>
         )}
         {detail && !compact && (
           <span className="viewer__note" title={detail.title}>

@@ -105,6 +105,36 @@ describe('stackGeometry', () => {
     expect(out.space).toBe('MANC')
     expect(out.units).toBe('nm')
   })
+
+  it('keeps the skeleton route only where both sides came down the same one', () => {
+    /*
+     * `MeshDetail`'s rule, on the field beside it: two routes in one collection is no route.
+     * Stacking a traced reconstruction onto a chunk-graph one is what this node is *for*, but
+     * the result cannot be labelled as either — a card naming one would be claiming something
+     * about half its contents, and cable length is not the same measurement down both.
+     *
+     * Compared by **id**: these come from two fetches and are equal objects at best.
+     */
+    const l2 = { id: 'l2', label: 'level-2 chunk graph' }
+    const routeOf = (top: SkeletonsValue, bottom: SkeletonsValue) => {
+      const out = stackGeometry(top, bottom)
+      if (out.kind !== 'skeletons') throw new Error('kind')
+      return out.provenance
+    }
+
+    expect(
+      routeOf(skeletons(['1'], { provenance: l2 }), skeletons(['2'], { provenance: { ...l2 } }))
+        ?.id,
+    ).toBe('l2')
+    expect(
+      routeOf(
+        skeletons(['1'], { provenance: l2 }),
+        skeletons(['2'], { provenance: { id: 'published', label: 'published skeletons' } }),
+      ),
+    ).toBeUndefined()
+    // And one side saying nothing is not agreement either.
+    expect(routeOf(skeletons(['1'], { provenance: l2 }), skeletons(['2']))).toBeUndefined()
+  })
 })
 
 describe('checkStackable', () => {

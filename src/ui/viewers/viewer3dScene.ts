@@ -912,6 +912,29 @@ export function compassLayout(
 // Caption
 
 /**
+ * Where a scene's skeletons came from, for the caption.
+ *
+ * `detailNote`'s sibling, and it exists for the same reason: a viewer that draws two very
+ * different products identically is one that looks like a broken renderer rather than a
+ * deliberate trade. The difference here is bigger than a level of detail — a chunk-graph
+ * skeleton is a few hundred nodes where a traced one is thousands, and only some routes carry
+ * radii, which is what `to scale` line widths read.
+ *
+ * Absent for a value with no `provenance`, which is every skeleton set built before the routes
+ * existed and anything a test hand-assembles.
+ */
+export function skeletonNote(
+  skeletons: SkeletonsValue | undefined,
+): { label: string; title: string } | undefined {
+  const provenance = skeletons?.provenance
+  if (!provenance) return undefined
+  return {
+    label: provenance.label,
+    title: `${provenance.detail ?? provenance.label} Change it with Source on the Skeletons node.`,
+  }
+}
+
+/**
  * What a mesh set's level of detail should say, or undefined when the source published none.
  *
  * Two ways a mesh set can be coarser than what the source holds, and they need different

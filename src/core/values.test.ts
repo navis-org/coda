@@ -39,6 +39,28 @@ function skeletons(
 }
 
 describe('describeValue — geometry', () => {
+  it('names the route the skeletons came from, ahead of the space and the units', () => {
+    /*
+     * The one thing about a skeleton set that a count cannot imply. A dataset often has more
+     * than one route — male-CNS publishes a precomputed layer as well as serving neuPrint's SWC
+     * — and they are different products: tens of nodes against tens of thousands, radii or
+     * none, and a different cable length for the same neuron. Space and units are the same
+     * whichever route answered, which is why this goes in front of them.
+     */
+    expect(
+      describeValue({
+        ...skeletons('nm', 'FLYWIRE'),
+        provenance: { id: 'l2', label: 'level-2 chunk graph' },
+      }),
+    ).toBe('1 skeleton · 2 pts · level-2 chunk graph · FLYWIRE · nm')
+  })
+
+  it('leaves the route out rather than guessing one', () => {
+    // Absent is a real state: a source that names no routes, and every value built before they
+    // existed. A footer that made one up would be the only place claiming to know.
+    expect(describeValue(skeletons('nm', 'FLYWIRE'))).not.toContain('·  ·')
+  })
+
   it('names the units even when they are the expected ones', () => {
     // Printed always, not only when wrong: a line that appears only on failure is a line
     // nobody learns to look at, and the reader has to be able to tell nm from voxels here.

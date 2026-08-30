@@ -249,6 +249,52 @@ export async function cavePostBinary(
   return new BigUint64Array(buffer)
 }
 
+/**
+ * A GET whose reply is bytes rather than JSON, or `undefined` where there is nothing there.
+ *
+ * The skeleton service is the one CAVE endpoint that answers a precomputed blob, and it answers
+ * it under the same token every other call here carries — so this exists rather than reaching for
+ * `precomputed/transport.ts`, which knows nothing about a token and would report a 401 as an
+ * unreadable bucket instead of opening the Connections panel. `cavePostBinary`'s reasoning, one
+ * verb over.
+ *
+ * **A 404 is an answer, not a failure.** A root id the cache has never been asked for is exactly
+ * that, and one missing body must not fail a batch of five hundred — the same rule
+ * `precomputed/skeletons.ts` states for a bucket.
+ */
+export async function caveGetBytes(
+  url: string,
+  options: CaveRequestOptions = {},
+): Promise<ArrayBuffer | undefined> {
+  const token = options.token ?? getToken()
+  if (!token) {
+    const message = 'No CAVE token. Add one in Connections — the branch icon in the toolbar.'
+    reportAuthFailure(message)
+    throw new CaveError(message, 401)
+  }
+  let response: Response
+  try {
+    response = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+      ...(options.signal ? { signal: options.signal } : {}),
+    })
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw error
+    throw new CaveError(
+      `Could not reach CAVE at ${new URL(url).origin}. It could not be read cross-origin, or ` +
+        `the host is down — a browser reports both the same way. (${errorMessage(error)})`,
+    )
+  }
+  if (response.status === 404) return undefined
+  if (response.status === 401 || response.status === 403) {
+    const message = `CAVE rejected the token (${response.status}).`
+    reportAuthFailure(message)
+    throw new CaveError(message, response.status)
+  }
+  if (!response.ok) throw new CaveError(`CAVE returned ${response.status}`, response.status)
+  return response.arrayBuffer()
+}
+
 export function cavePostRaw<T>(
   url: string,
   body: string,

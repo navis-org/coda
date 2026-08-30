@@ -38,6 +38,8 @@ import {
   pyPopulationMask,
 } from './common'
 import { populationFromType } from '../../../nodes/lib/populationParams'
+import { SKELETON_SOURCE_PARAM } from '../../../nodes/lib/skeletonParams'
+import { SKELETON_ROUTES } from '../../../data/skeletonRoutes'
 import { withoutStatedStatus } from '../../../data/neuronFilter'
 import { TRACED_STATUS } from '../../../data/neuronFilter'
 
@@ -598,6 +600,27 @@ registerEmitter('neuron.skeletons', (ctx) => {
   const ids = limit > 0 ? `${neurons}['neuronId'].head(${limit}).tolist()` : neuronIds(neurons)
 
   return [
+    /*
+     * A note rather than a refusal, and the line is where `Detail` on the Meshes node draws it:
+     * the cell below fetches real skeletons for the right neurons, and what differs is *which
+     * copy*. `neu.fetch_skeletons` reads neuPrint's own SWC, which is what the node does with
+     * Source on Automatic; the published layer is a precomputed directory whose URL is resolved
+     * from the dataset's neuroglancer state at run time, and this exporter has no network.
+     *
+     * Two things genuinely differ, so both are said: the published copy carries no radii
+     * (male-CNS declares no vertex attributes at all), and its coverage is whatever was exported
+     * into it — `optic-lobe:v1.0.1` answered 5 of 20 sampled bodies. A notebook silently a few
+     * neurons short is the failure this exporter minds most.
+     */
+    ...(ctx.params[SKELETON_SOURCE_PARAM] === SKELETON_ROUTES.published
+      ? ctx.note(
+          'The Skeletons node is set to the published precomputed layer rather than neuPrint’s ' +
+            'own SWC. This cell fetches the SWC: the published copy is a bucket whose URL comes ' +
+            'from the dataset’s neuroglancer state, and navis reads it with ' +
+            '`navis.read_precomputed`. It carries no radii, and it covers only the bodies that ' +
+            'were exported into it.',
+        )
+      : []),
     `${out} = neu.fetch_skeletons(`,
     `    ${ids},`,
     `    heal=True,`,

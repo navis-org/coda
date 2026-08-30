@@ -41,9 +41,9 @@ import { CaveError, caveGet, cavePost, refuseIfCapped } from './client'
 /**
  * A datastack's info record, as far as Coda reads it.
  *
- * Two fields, and deliberately not the rest: the record also carries `skeleton_source`,
- * `viewer_site` and the soma/synapse table names, which the skeleton and viewer-scene work will
- * want — declaring them now would be a shape nothing checks against a server nothing has asked.
+ * Only the fields something actually reads: the record also carries the soma table name and a
+ * few display hints, and declaring those would be a shape nothing checks against a server nothing
+ * has asked.
  */
 export interface DatastackInfo {
   /** Which server answers queries for this datastack. Not the global one. */
@@ -77,6 +77,18 @@ export interface DatastackInfo {
    * called without this document first. See `tableCounts` in `tables.ts`.
    */
   aligned_volume?: { image_source?: string; name?: string }
+  /**
+   * The datastack's skeleton service, as a `precomputed://` endpoint.
+   *
+   * Every datastack probed declares one — `flywire_fafb_public`, `brain_and_nerve_cord_public`
+   * and `minnie65_public` all do — and declaring one says nothing about whether it can answer:
+   * it is a cache that generates on demand, and two of those three are empty. See
+   * `skeletonService.ts`, which is where that difference is measured rather than assumed.
+   *
+   * MICrONS spells it `precomputed://middleauth+https://…`, which is neuroglancer's way of
+   * saying "this needs a CAVE token" and is not part of the URL.
+   */
+  skeleton_source?: string | null
   /** Which neuroglancer deployment this datastack is meant to be opened in. */
   viewer_site?: string
   /** Nanometres per voxel, as the viewer should show them. See `scene.ts`. */

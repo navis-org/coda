@@ -26,7 +26,7 @@ import {
   runCypher,
   tagQuery,
 } from './client'
-import { meshCandidateUrl, meshSourceFromState } from './nglayers'
+import { meshCandidateUrl, meshSourceFromState, volumeSourceFromState } from './nglayers'
 import { fetchRoiMeshSet, roiMeshPath } from './roiMeshes'
 import {
   IDENTITY_SCALE,
@@ -1360,6 +1360,32 @@ describe('mesh source resolution', () => {
     expect(meshSourceFromState(state, 'optic-lobe:v1.1')?.source).toContain('multi-res-meshes')
   })
 
+  it('resolves the volume for skeletons even where the meshes are in a sibling', () => {
+    /*
+     * The two questions come apart on optic-lobe:v1.1, and getting them confused is silent.
+     * Skeletons are named by the **volume's** own `info` (`skeletons: skeletons-precomputed`),
+     * while its meshes live in a sibling directory — so following the mesh answer would look for
+     * an `info` one level too deep and conclude the dataset publishes no skeletons. Five of the
+     * twelve neuPrint datasets publish one; the other seven would never notice.
+     */
+    const state = {
+      layers: [
+        {
+          type: 'segmentation',
+          name: 'optic-lobe:v1.1',
+          source: [
+            { url: 'precomputed://gs://flyem-optic-lobe/v1.1/segmentation' },
+            { url: 'precomputed://gs://flyem-optic-lobe/v1.1/segmentation/multi-res-meshes' },
+          ],
+        },
+      ],
+    }
+    expect(meshSourceFromState(state, 'optic-lobe:v1.1')?.source).toContain('multi-res-meshes')
+    expect(volumeSourceFromState(state, 'optic-lobe:v1.1')?.url).toBe(
+      'https://storage.googleapis.com/flyem-optic-lobe/v1.1/segmentation',
+    )
+  })
+
   it('ignores the segment-property sidecars that sit beside the segmentation', () => {
     // male-cns publishes eight of these; none of them is geometry.
     const state = {
@@ -1624,6 +1650,84 @@ describe('warming what inference reads', () => {
     source.peekDatasets()
     source.schemasFor('male-cns:v1.0')
     expect(urls).toEqual([])
+  })
+
+  it('a peek at the skeleton routes starts the two reads it cannot answer from', () => {
+    /*
+     * The routes are a fact about the *dataset* — five of the twelve neuPrint datasets publish a
+     * precomputed skeleton layer beside their segmentation and seven do not — and the answer
+     * takes two requests: the neuroglancer state, then the volume's `info`. This runs from
+     * `inferOutputs` and may not await either (invariant 2), so it starts them and answers
+     * `undefined`; `reportSourceLearned` is what makes the dropdown grow a second entry.
+     */
+    setToken('test-token')
+    const urls = countingFetch()
+    const source = new NeuPrintSource()
+    expect(source.skeletonSourcesFor!('male-cns:v1.0')).toBeUndefined()
+    expect(urls.some((u) => u.includes('/api/npexplorer/nglayers/male-cns:v1.0.json'))).toBe(true)
+  })
+
+  it('asks once however many times inference runs', () => {
+    // Inference runs on every graph mutation, and this one reaches a bucket rather than
+    // neuPrint. A request per pass would be a request per keystroke against a public GCS bucket.
+    setToken('test-token')
+    const urls = countingFetch()
+    const source = new NeuPrintSource()
+    for (let i = 0; i < 25; i++) source.skeletonSourcesFor!('male-cns:v1.0')
+    expect(urls.filter((u) => u.includes('/nglayers/'))).toHaveLength(1)
+  })
+
+  it('offers both routes once the bucket answers, with the SWC first', async () => {
+    /*
+     * male-CNS is the case: the same reconstruction down both routes — body 45882 is 1,688 nodes
+     * either way, with identical bounds in nanometres — but only the SWC carries radii, which is
+     * why it leads. What the published one is worth is no token and about half the bytes.
+     */
+    setToken('test-token')
+    globalThis.fetch = ((input: RequestInfo | URL) => {
+      const url = String(input)
+      const json = (doc: unknown) =>
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve(doc),
+          text: () => Promise.resolve(JSON.stringify(doc)),
+          arrayBuffer: () =>
+            Promise.resolve(new TextEncoder().encode(JSON.stringify(doc)).buffer as ArrayBuffer),
+        } as Response)
+      if (url.includes('/nglayers/'))
+        return json({
+          layers: [
+            {
+              type: 'segmentation',
+              name: 'male-cns:v1.0',
+              source: [{ url: 'precomputed://gs://flyem-male-cns/v1.0/segmentation' }],
+            },
+          ],
+        })
+      if (url.endsWith('/v1.0/segmentation/info'))
+        return json({
+          '@type': 'neuroglancer_multiscale_volume',
+          type: 'segmentation',
+          scales: [{ resolution: [8, 8, 8], size: [1, 1, 1] }],
+          skeletons: 'skeletons-malecns/skeletons-precomputed',
+        })
+      if (url.endsWith('/skeletons-precomputed/info'))
+        return json({ '@type': 'neuroglancer_skeletons' })
+      return Promise.resolve({ ok: false, status: 404, text: () => Promise.resolve('') } as Response)
+    }) as typeof fetch
+
+    const source = new NeuPrintSource()
+    // The peek starts the reads and cannot wait for them, so this test does — two chained
+    // requests, which is more than a microtask.
+    expect(source.skeletonSourcesFor!('male-cns:v1.0')).toBeUndefined()
+    for (let i = 0; i < 20 && !source.skeletonSourcesFor!('male-cns:v1.0'); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+    expect(source.skeletonSourcesFor!('male-cns:v1.0')?.map((r) => r.id)).toEqual([
+      'neuprint',
+      'published',
+    ])
   })
 
   it('hands back the canonical schema meanwhile, rather than nothing', () => {

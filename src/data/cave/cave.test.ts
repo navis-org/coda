@@ -37,7 +37,9 @@ import {
 import { registerDatastackSpec, resetRuntimeSpecs, specFor } from './spec'
 import { caveScene } from './scene'
 import { readL2Skeletons } from './l2'
+import { l2SourceFor } from './datastack'
 import { probeFlat } from './flat'
+import { skeletonServiceFor, skeletonServiceUrl } from './skeletonService'
 import { segmentationLayerIndex } from '../neuroglancer/scene'
 import { MESH_WARN_NEURONS, decimateGridFor, fragmentConcurrencyFor } from './meshes'
 import { quoteWideIntegers, parseCaveJson } from './json'
@@ -151,6 +153,16 @@ const CHAIN = JSON.stringify({
     ['3', '4'],
   ],
 })
+/**
+ * The L2 cache's table mapping with FlyWire's segmentation table in it.
+ *
+ * `caveclient.l2cache.has_cache()`'s rule is membership of this document, so the datastack whose
+ * fixture says `…/segmentation/1.0/flywire_public` needs `flywire_public` as a key. The real
+ * deployment does *not* list it — which is what makes the published bucket FlyWire's only
+ * skeleton — so this is a stand-in for the datastacks that do (BANC, minnie65, Aedes).
+ */
+const L2_MAPPING = JSON.stringify({ flywire_public: {} })
+
 const chunkAt = (n: number) => ({ rep_coord_nm: [n * 10, 0, 0], max_dt_nm: n })
 const COORDS = JSON.stringify({
   '1': chunkAt(1),
@@ -159,9 +171,44 @@ const COORDS = JSON.stringify({
   '4': chunkAt(4),
 })
 
+/**
+ * A precomputed skeleton, as bytes: two points and the edge between them.
+ *
+ * The service answers the same format a bucket does — `numVertices`, `numEdges`, the positions,
+ * the edges, then one contiguous array per declared vertex attribute — which is the whole reason
+ * `parseSkeleton` is shared rather than written twice. `precomputed/skeletons.test.ts` is where
+ * the format itself is pinned; this only has to be readable.
+ */
+function serviceSkeletonBytes(): ArrayBuffer {
+  const bytes = new ArrayBuffer(8 + 2 * 12 + 8 + 2 * 4 + 2 * 4)
+  const view = new DataView(bytes)
+  view.setUint32(0, 2, true)
+  view.setUint32(4, 1, true)
+  for (let i = 0; i < 2; i++) {
+    view.setFloat32(8 + i * 12, 100 * i, true)
+    view.setFloat32(8 + i * 12 + 4, 0, true)
+    view.setFloat32(8 + i * 12 + 8, 0, true)
+  }
+  view.setUint32(32, 0, true)
+  view.setUint32(36, 1, true)
+  // `radius` then `compartment`, in the order the service's own `info` declares them.
+  view.setFloat32(40, 7, true)
+  view.setFloat32(44, 9, true)
+  return bytes
+}
+
+const SERVICE_INFO = {
+  '@type': 'neuroglancer_skeletons',
+  transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0],
+  vertex_attributes: [
+    { id: 'radius', data_type: 'float32', num_components: 1 },
+    { id: 'compartment', data_type: 'float32', num_components: 1 },
+  ],
+}
+
 function installFetch(
   overrides: Record<string, string | number> = {},
-  options: { flat?: boolean } = {},
+  options: { flat?: boolean; service?: 'empty' | 'full' } = {},
 ): Captured[] {
   const captured: Captured[] = []
   vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
@@ -277,6 +324,32 @@ function installFetch(
      * unserved bucket 404s, `probeFlat` reports no flat source, and the fetch falls back — which
      * is the path every datastack without an entry takes for real.
      */
+    /*
+     * The skeleton service, off by default for `options.flat`'s reason: unserved, the versions
+     * read 404s and `skeletonServiceFor` answers "no service", which is the path a datastack
+     * whose deployment runs none takes for real.
+     *
+     * `exists` is what tells the two configurations apart. A declared service with an empty
+     * cache is not a hypothetical — `flywire_fafb_public` and BANC are both exactly that — so
+     * `'empty'` is a case the automatic route has to survive rather than an edge one.
+     */
+    if (options.service && url.includes('/skeletoncache/api/versions')) return answer('[-1,0,1,2,3,4]')
+    if (options.service && url.includes('/skeletoncache/') && url.endsWith('/info'))
+      return answer(JSON.stringify(SERVICE_INFO))
+    if (options.service && url.endsWith('/precomputed/skeleton/exists')) {
+      const ids = (String(init?.body ?? '').match(/\[(.*)\]/)?.[1] ?? '')
+        .split(',')
+        .filter(Boolean)
+      return answer(
+        JSON.stringify(Object.fromEntries(ids.map((id) => [id, options.service === 'full']))),
+      )
+    }
+    if (options.service && /\/precomputed\/skeleton\/\d+\/\d+$/.test(url))
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        arrayBuffer: () => Promise.resolve(serviceSkeletonBytes()),
+      } as Response)
     if (options.flat && FLAT_INFOS[url] !== undefined) return bytesAnswer(FLAT_INFOS[url])
     return Promise.resolve({
       ok: false,
@@ -1782,6 +1855,104 @@ describe('where a CAVE skeleton comes from', () => {
     expect(captured.map((c) => c.url)).toContain(
       'https://storage.googleapis.com/flywire_v141_m783/skeletons_mip_1/info',
     )
+  })
+
+  it('lists the routes a dataset has, best first, as the peeks land', async () => {
+    /*
+     * The list is what the Skeletons node's dropdown is built from, and its *order* is what
+     * "Automatic" names — so it has to be the same order `fetchSkeletons` walks. FlyWire public
+     * is the useful case: a flat bucket, a declared service whose cache is empty, and no L2
+     * cache at all.
+     */
+    installFetch({}, { flat: true, service: 'empty' })
+    const source = new CaveSource()
+
+    // Nothing has landed, so nothing is offered — `capabilitiesFor`'s contract, and the reason
+    // this is legal to call from `inferOutputs` (invariant 2).
+    expect(source.skeletonSourcesFor!(DATASET)).toBeUndefined()
+
+    await probeFlat(specFor(DATASTACK)!, VERSION)
+    await skeletonServiceFor(DATASTACK)
+    /*
+     * The service is offered even though its cache is empty, which is deliberate: whether it can
+     * answer is a question about *these* root ids and is asked at fetch time. Hiding it here
+     * would mean a build-time list of which deployments have generated anything, which goes stale
+     * in the direction of concealing a route that works.
+     */
+    expect(source.skeletonSourcesFor!(DATASET)?.map((r) => r.id)).toEqual(['published', 'service'])
+  })
+
+  it('reads a middleauth-prefixed service URL as an ordinary one', () => {
+    // MICrONS sets the prefix and Janelia does not; it is neuroglancer's way of saying "this
+    // needs a token", which every call to the service carries anyway.
+    expect(
+      skeletonServiceUrl(
+        'precomputed://middleauth+https://minnie.microns-daf.com/skeletoncache/api/v1/minnie65_public/precomputed/skeleton/',
+      ),
+    ).toBe('https://minnie.microns-daf.com/skeletoncache/api/v1/minnie65_public/precomputed/skeleton')
+    expect(skeletonServiceUrl(null)).toBeUndefined()
+    expect(skeletonServiceUrl('gs://a-bucket/skeletons')).toBeUndefined()
+  })
+
+  it('offers the service alongside the chunk graph, and prefers it', async () => {
+    // minnie65_public's shape: an L2 cache *and* a populated service. The service is the better
+    // reconstruction — ~7,000 vertices with radii against a few hundred chunk nodes — so it
+    // leads, and `capabilitiesFor` is derived from the same list rather than asked separately.
+    installFetch({ '/l2cache/api/v1/table_mapping': L2_MAPPING }, { service: 'full' })
+    const source = new CaveSource()
+    await l2SourceFor(DATASTACK)
+    await skeletonServiceFor(DATASTACK)
+    expect(source.skeletonSourcesFor!(DATASET)?.map((r) => r.id)).toEqual(['service', 'l2'])
+    expect(source.capabilitiesFor!(DATASET)).toEqual({ skeletons: true })
+  })
+
+  it('takes the service only when it covers every neuron, and asks before fetching', async () => {
+    /*
+     * A GET for a root id the cache has never seen routes to a *generation* — 10–45 s a neuron
+     * against 1.5 s cached — so `exists` is asked first, always. And a partial answer is not
+     * taken: a scene mixing a real reconstruction with a chunk decomposition is one where cable
+     * length silently means two things, which is worse than the coarse answer taken whole.
+     */
+    const full = installFetch({ '/l2cache/api/v1/table_mapping': L2_MAPPING }, { service: 'full' })
+    const answered = await new CaveSource().fetchSkeletons!({
+      datasetId: DATASET,
+      neuronIds: ['720575940628857210'],
+    })
+    expect(answered.provenance?.id).toBe('service')
+    expect(answered.items).toHaveLength(1)
+    expect(full.some((c) => c.url.endsWith('/precomputed/skeleton/exists'))).toBe(true)
+    expect(full.filter((c) => c.url.includes('/lvl2_graph'))).toEqual([])
+  })
+
+  it('falls back to the chunk graph when the declared service holds nothing', async () => {
+    // `flywire_fafb_public` and BANC both declare a service with an empty cache, so this is the
+    // ordinary case rather than an edge one — and it must not surface as an error.
+    const captured = installFetch(
+      { '/l2cache/api/v1/table_mapping': L2_MAPPING, '/lvl2_graph': CHAIN, '/attributes': COORDS },
+      { service: 'empty' },
+    )
+    const answered = await new CaveSource().fetchSkeletons!({
+      datasetId: DATASET,
+      neuronIds: ['720575940628857210'],
+    })
+    expect(answered.provenance?.id).toBe('l2')
+    expect(captured.some((c) => c.url.includes('/lvl2_graph'))).toBe(true)
+  })
+
+  it('refuses a pinned route the dataset does not have rather than substituting one', async () => {
+    /*
+     * The substitution is the failure being prevented: answering with the chunk graph because
+     * the published bucket is absent would silently change what every cable length downstream
+     * means, under a card that still said "published skeletons".
+     */
+    installFetch({ '/l2cache/api/v1/table_mapping': L2_MAPPING, '/lvl2_graph': CHAIN, '/attributes': COORDS })
+    await expect(
+      new CaveSource().fetchSkeletons!({
+        datasetId: DATASET,
+        neuronIds: ['720575940628857210'],
+        skeletonSource: 'published',
+      }),
+    ).rejects.toThrow(/publishes no flat skeleton bucket/)
   })
 
   it('says both routes were looked for when neither datastack has one', async () => {

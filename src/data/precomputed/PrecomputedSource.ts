@@ -47,6 +47,7 @@ import type {
   MeshDetail,
   MeshesValue,
   SkeletonGeometry,
+  SkeletonProvenance,
   SkeletonsValue,
   TableValue,
 } from '../../core/values'
@@ -65,7 +66,7 @@ import type {
   SourceCapabilities,
   SourceSchemas,
 } from '../source'
-import { ROI_MESH_SCHEMA } from '../source'
+import { ROI_MESH_SCHEMA, requireSkeletonRoute } from '../source'
 import { compileLabelMatch, preparedRows, refuseUnfilterableRoi } from '../neuronFilter'
 import { fieldTermsMatch } from '../terms'
 import { ID_COLUMN_NAME } from '../../core/ids'
@@ -74,11 +75,12 @@ import type { NgSourceRef } from '../neuroglancer/sourceUrl'
 import type { MeshResult, MeshSource } from './index'
 import { DEFAULT_TRIANGLE_BUDGET, fetchMeshes, meshProgress, openMeshDir } from './index'
 import type { SkeletonSource } from './skeletons'
-import { fetchSkeletons, openSkeletonSource } from './skeletons'
+import { fetchSkeletons, openSkeletonSource, skeletonFetchOptions } from './skeletons'
 import { idsForLabels, labelsOf, readSegmentProperties } from './segmentProperties'
 import { loadCachedTable, neuronIndexKey } from '../neuronIndex'
 import type { PrecomputedDescription } from './probe'
 import { peekPrecomputed, probePrecomputed } from './probe'
+import { SKELETON_ROUTES, route } from '../skeletonRoutes'
 
 /**
  * Where the size of a legacy fetch starts being worth a sentence.
@@ -164,6 +166,21 @@ export function datasourceLabel(location: string): string {
 export function precomputedSourceId(canonical: string): string {
   return `precomputed:${canonical}`
 }
+
+/**
+ * What this source's skeletons are, said once.
+ *
+ * A bucket's skeleton directory is exactly the thing every other backend calls its "published"
+ * route — the same `neuroglancer_skeletons` format, the same reader — so it carries the same id.
+ * That is what lets a Skeletons node pinned to `published` keep meaning something when its
+ * Dataset node is repointed from a Neuroglancer Source at male-CNS onto neuPrint's male-CNS.
+ */
+const PRECOMPUTED_ROUTE = route(
+  SKELETON_ROUTES.published,
+  'The `neuroglancer_skeletons` directory this source points at, or the one its volume names. ' +
+    'One request per segment. Radii only where the directory declares a float32 `radius` vertex ' +
+    'attribute, which many do not — male-CNS declares none, so every radius there is 0.',
+)
 
 export class PrecomputedSource implements DataSource {
   readonly id: string
@@ -375,6 +392,22 @@ export class PrecomputedSource implements DataSource {
   capabilitiesFor(): Partial<SourceCapabilities> | undefined {
     this.ensureProbe()
     return this.cache?.capabilities
+  }
+
+  /**
+   * One route, named: whatever this URL points at.
+   *
+   * A Neuroglancer Source node *is* a skeleton directory, or names one, so there is nothing here
+   * to choose between — but the Skeletons node builds its dropdown from this list, and a source
+   * that answers nothing leaves it saying "Automatic" about a route it cannot name. `undefined`
+   * until the probe settles, for the reason `capabilitiesFor` above returns `undefined` then:
+   * this runs from `inferOutputs`.
+   */
+  skeletonSourcesFor(): readonly SkeletonProvenance[] | undefined {
+    this.ensureProbe()
+    const capabilities = this.cache?.capabilities
+    if (!capabilities) return undefined
+    return capabilities.skeletons ? [PRECOMPUTED_ROUTE] : []
   }
 
   async listDatasets(signal?: AbortSignal): Promise<DatasetInfo[]> {
@@ -634,25 +667,18 @@ export class PrecomputedSource implements DataSource {
   }
 
   async fetchSkeletons(req: GeometryRequest): Promise<SkeletonsValue> {
+    requireSkeletonRoute(this.label, req.skeletonSource, [PRECOMPUTED_ROUTE])
     if (req.neuronIds.length === 0) return this.assembleSkeletons([])
 
     const source = await this.skeletonDir(req.signal)
-    const result = await fetchSkeletons(source, req.neuronIds, {
-      ...(req.signal ? { signal: req.signal } : {}),
-      ...(req.refresh ? { refresh: true } : {}),
-      ...(req.onFetched ? { onFetched: req.onFetched } : {}),
-      ...(req.onPartial
-        ? { onPartial: (skeletons) => req.onPartial?.(this.assembleSkeletons(skeletons)) }
-        : {}),
-      /*
-       * The whole bar, where the mesh path gives its first fifth to a manifest sweep. There is no
-       * sweep here — one request per body, and the first arrival is drawable — which is also why
-       * this streams from the start rather than after a barrier.
-       */
-      ...(req.onProgress
-        ? { onProgress: (done, total) => req.onProgress?.(done / Math.max(1, total), `${done}/${total} skeletons`) }
-        : {}),
-    })
+    const result = await fetchSkeletons(
+      source,
+      req.neuronIds,
+      skeletonFetchOptions(
+        req,
+        req.onPartial && ((skeletons) => req.onPartial?.(this.assembleSkeletons(skeletons))),
+      ),
+    )
     /*
      * Said rather than assembled and dropped. A segment with no skeleton is an ordinary answer —
      * not every segment is reconstructed — but a scene quietly holding fewer neurons than were
@@ -689,6 +715,7 @@ export class PrecomputedSource implements DataSource {
         cableLength: items.map((item) => cableLength(item)),
       }),
       bounds: boundsOf(items.map((item) => item.positions)),
+      provenance: PRECOMPUTED_ROUTE,
       ...this.frame(),
     }
   }
