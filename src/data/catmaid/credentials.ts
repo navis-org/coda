@@ -44,10 +44,18 @@ export const DEFAULT_CATMAID_SERVER = 'https://catmaid-fafb.virtualflybrain.org'
  *
  * Beside the constant above rather than derived from it, because that is the fact worth seeing
  * in one place: the two datasets Coda ships a CATMAID node for are two installations, and
- * `registry.ts` mints a separate `CatmaidSource` for each. They share a credential row —
- * `*.virtualflybrain.org` covers both, which is what host patterns are for — and share nothing
- * else. Both are project `1` on their own server, which is exactly why a project id is never
- * carried across instances.
+ * `registry.ts` mints a separate `CatmaidSource` for each. They share nothing — not project
+ * ids, not annotation ids, and **not a token**. Both are project `1` on their own server, which
+ * is exactly why a project id is never carried across instances.
+ *
+ * This comment used to say the two "share a credential row — `*.virtualflybrain.org` covers
+ * both, which is what host patterns are for". That is now advice that breaks things. A CATMAID
+ * token is per user *and* per instance, so a wildcard row carrying one instance's token sends it
+ * to all eight of VFB's, where seven answer `401 Invalid token` — and a token the user typed is
+ * never dropped, so those seven stop working rather than falling back to the published token
+ * they would otherwise use. One exact row per instance is the shape that works. The advice was
+ * harmless while none of these hosts worked without a credential anyway; publishing tokens is
+ * what made it wrong.
  *
  * Neither needs a credential to read. See `docs/catmaid_vfb.md`.
  */

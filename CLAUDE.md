@@ -140,6 +140,19 @@ Area-specific — the rule, then the doc that holds why:
   scrollbar. And **a shortcut's glyph is stored by meaning, not as text** — `src/ui/shortcuts.ts`
   is the one table, `formatChord` the only place that knows ⌘ from Ctrl, and four surfaces read
   it. `Editor.tsx` still owns the *bindings*. See [docs/ui-shell.md](docs/ui-shell.md).
+- **A published token is not a credential, and shipping one makes a rotation a new failure mode.**
+  Virtual Fly Brain publishes an `AnonymousUser` token per instance because CATMAID's query endpoints
+  are POST-only and a browser satisfies neither of Django's CSRF gates: it cannot set `Referer`, and it
+  can neither receive nor read a `SameSite=Lax` cookie from another origin, so the double-submit has
+  nothing to submit. `publicTokens.ts` is a committed snapshot refreshed from their manifest in the
+  background, and three of its rules exist because the obvious version fails silently. It **loses to a
+  user's own token**, or a real VFB account's data disappears with nothing on screen to say why. A
+  **401 drops it and retries** — `client.ts`'s loop stops at the first response it gets, so a rotated
+  token would fail where an anonymous `GET` used to work, which is worse than never having shipped one;
+  a token the *user* typed is never dropped, because that 401 really is about their credential. And the
+  manifest is fetched `cache: 'no-cache'`, because it is served `immutable` with a one-year max-age and
+  the refresh would otherwise run once per browser and then never again — presenting as the feature
+  working. See [docs/catmaid_vfb.md](docs/catmaid_vfb.md).
 - **A loop is one number in a hash, and the region is derived from the wires.** `For Each` has
   no sub-graph: `Scheduler.loopIndex` is folded into the begin node's provenance key, so
   advancing it re-keys every descendant and invariant 4 re-runs the region. Hence: the loop

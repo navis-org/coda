@@ -907,9 +907,11 @@ function CatmaidTab({ onSaved }: { onSaved: () => void }) {
 
       {rows.length === 0 ? (
         <p className="sources__hint">
-          No instances configured. Coda still reads{' '}
-          <code>{hostPattern(DEFAULT_CATMAID_SERVER)}</code> without one; add a row when an
-          instance asks for a credential.
+          No instances configured, and Virtual Fly Brain&rsquo;s servers need none: they publish
+          a read-only token per instance and Coda carries it, so{' '}
+          <code>{hostPattern(DEFAULT_CATMAID_SERVER)}</code> and the other seven work as they
+          are. Add a row for an instance that asks for a credential — or to use your own account
+          on one of theirs, which takes precedence over the published token.
         </p>
       ) : null}
 

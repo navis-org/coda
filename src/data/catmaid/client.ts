@@ -27,6 +27,7 @@ import type { RouteKind } from '../routeMemory'
 import { makeRouteMemory } from '../routeMemory'
 import type { CatmaidInstance } from './credentials'
 import { basicAuthHeader, credentialsFor, reportAuthFailure } from './credentials'
+import { MANIFEST_URL, publicTokenFor, startPublicTokenRefresh } from './publicTokens'
 
 /** Served by `vite.config.ts` under `pnpm dev`/`pnpm preview`, and by nothing in a static build. */
 const PROXY_PREFIX = '/cm'
@@ -106,6 +107,19 @@ function routesFor(
   return memory.prefer(origin, [{ url: `${origin}${suffix}`, kind: 'direct' as const }, proxy])
 }
 
+/**
+ * The same headers without CATMAID's token, for the retry above.
+ *
+ * A copy rather than a `delete`, because the original object is reused by the first pass's
+ * `RequestInit` and mutating it would edit a request that has already been described.
+ * `Authorization` stays: HTTP basic is the *web server's* credential and has nothing to do with
+ * the token or with CSRF, so an instance behind nginx auth still gets past nginx on the retry.
+ */
+function withoutToken(headers: Record<string, string>): Record<string, string> {
+  const { 'X-Authorization': _token, ...rest } = headers
+  return rest
+}
+
 export interface CatmaidRequestOptions {
   signal?: AbortSignal | undefined
   /** Override the configured credentials for this server. For tests and the panel's Test button. */
@@ -127,7 +141,25 @@ async function catmaidRequest<T>(
   options: CatmaidRequestOptions,
 ): Promise<T> {
   const credentials = options.credentials ?? credentialsFor(server)
-  const token = credentials?.token
+  /*
+   * A published anonymous token stands in **only where nothing was configured**, and the order
+   * is the point. Somebody holding a real VFB account has more than `can_browse`, and quietly
+   * sending the anonymous token in place of theirs would hide their own data with nothing on
+   * screen to say why. See `publicTokens.ts`.
+   */
+  const publicToken = credentials?.token ? undefined : publicTokenFor(server)
+  const token = credentials?.token ?? publicToken
+  /*
+   * Re-read VFB's manifest, once a session, and only from here.
+   *
+   * Here rather than at the app entry because *this* is the moment the request stops being
+   * speculative: a reader who never opens a CATMAID node should not have their browser announce
+   * itself to virtualflybrain.org, and a reader who does is already talking to that host. It is
+   * also what keeps it out of the unit suite — anything reaching this line has stubbed `fetch`
+   * already, or it would be on the network regardless. Nothing waits for it; it changes the
+   * *next* request and the next session, never this one.
+   */
+  if (publicToken) void startPublicTokenRefresh()
   const encoded = encodeParams(params)
   const origin = new URL(server).origin
 
@@ -143,32 +175,57 @@ async function catmaidRequest<T>(
   if (basic) headers.Authorization = basic
   if (post) headers['Content-Type'] = 'application/x-www-form-urlencoded'
 
-  const init: RequestInit = post
-    ? { method: 'POST', headers, body: encoded }
-    : { method: 'GET', headers }
-
   let response: Response | undefined
   let answered: RouteKind | undefined
   let lastError: unknown
-  for (const route of routesFor(server, path, post ? '' : encoded, post, Boolean(token))) {
-    try {
-      response = await fetch(route.url, {
-        ...init,
-        ...(options.signal ? { signal: options.signal } : {}),
-      })
-    } catch (error) {
-      // An AbortError is the scheduler cancelling. It must stay an AbortError, and must never be
-      // answered by issuing the request the cancellation was meant to stop.
-      if (error instanceof DOMException && error.name === 'AbortError') throw error
-      lastError = error
-      response = undefined
-      continue
+  /** Set only when the *published* token was refused, which changes what to tell the reader. */
+  let publicTokenRejected = false
+  /*
+   * Two passes at most, and the second one exists for exactly one failure: a **published** token
+   * that VFB has rotated out. It answers `401 Invalid token`, no reader can do anything about
+   * it, and the loop below otherwise stops at the first response it gets — so without this, the
+   * day a token changes is the day every instance carrying one fails harder than it did before
+   * the token existed. Dropping it re-derives the routes with `hasToken` false, which is the
+   * behaviour of the day before: a GET goes direct and anonymous and works everywhere, a POST
+   * goes to the relay and works under `pnpm dev`. A token the *user* configured is never
+   * dropped — that 401 is about their credential and saying so is the useful answer.
+   */
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const sendToken = attempt === 0
+    const attemptHeaders = sendToken ? headers : withoutToken(headers)
+    const init: RequestInit = post
+      ? { method: 'POST', headers: attemptHeaders, body: encoded }
+      : { method: 'GET', headers: attemptHeaders }
+
+    for (const route of routesFor(
+      server,
+      path,
+      post ? '' : encoded,
+      post,
+      Boolean(token) && sendToken,
+    )) {
+      try {
+        response = await fetch(route.url, {
+          ...init,
+          ...(options.signal ? { signal: options.signal } : {}),
+        })
+      } catch (error) {
+        // An AbortError is the scheduler cancelling. It must stay an AbortError, and must never
+        // be answered by issuing the request the cancellation was meant to stop.
+        if (error instanceof DOMException && error.name === 'AbortError') throw error
+        lastError = error
+        response = undefined
+        continue
+      }
+      answered = route.kind
+      // Only a 2xx is remembered: a 404 is what a static host answers for a relay path nobody
+      // serves, and pinning that would outlive the day this deployment gains what it needs.
+      if (response.ok) memory.remember(origin, route.kind)
+      break
     }
-    answered = route.kind
-    // Only a 2xx is remembered: a 404 is what a static host answers for a relay path nobody
-    // serves, and pinning that would outlive the day this deployment gains what it needs.
-    if (response.ok) memory.remember(origin, route.kind)
-    break
+
+    if (!(publicToken && sendToken && response?.status === 401)) break
+    publicTokenRejected = true
   }
 
   if (!response) {
@@ -181,11 +238,19 @@ async function catmaidRequest<T>(
   const text = await response.text()
 
   if (response.status === 401 || response.status === 403) {
-    const message = refusalMessage(text, origin, Boolean(token), post)
+    const message = publicTokenRejected
+      ? staleTokenMessage(origin)
+      : refusalMessage(text, origin, Boolean(token), post)
     reportAuthFailure(message)
     throw new CatmaidError(message, response.status)
   }
   if (!response.ok) {
+    // The relay's 404 below is the *published build's* shape of a rotated public token, and
+    // naming the relay there would send somebody to debug a dev server over somebody else's
+    // credential rotation.
+    if (publicTokenRejected) {
+      throw new CatmaidError(staleTokenMessage(origin), response.status)
+    }
     /*
      * A 404 from the *relay* means nothing is serving that path, not that CATMAID said 404 — and
      * this backend meets it far more often than its neighbours, because an anonymous POST has no
@@ -229,6 +294,22 @@ export function catmaidPost<T>(
   options: CatmaidRequestOptions = {},
 ): Promise<T> {
   return catmaidRequest<T>(server, path, params, true, options)
+}
+
+/**
+ * What to say when the *published* token was refused.
+ *
+ * Its own message because every other refusal here asks the reader to check something they
+ * control, and this one is the single case where nothing they do will help: the token Coda
+ * carries for this host is one VFB published and has since replaced. Reloading is a real fix,
+ * because the background refresh re-reads the manifest and persists what it finds.
+ */
+function staleTokenMessage(origin: string): string {
+  return (
+    `${origin} rejected the public token Coda carries for it, which usually means Virtual Fly ` +
+    `Brain has rotated it. Reloading picks up the current one from ${MANIFEST_URL}. If it keeps ` +
+    `failing, a token of your own in Connections takes precedence over the published one.`
+  )
 }
 
 /**

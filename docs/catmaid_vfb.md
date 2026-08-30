@@ -7,6 +7,13 @@ VFB's larval instance, `https://l1em.catmaid.virtualflybrain.org`, reports the *
 and was re-checked on 2026-08-27: anonymous `GET` 200, anonymous `POST` 403, no
 `content-encoding` on a 449 kB skeleton. Both asks below are one deployment's, not one host's.
 
+**Ask 1 was answered on 2026-08-29**, by the zero-code route below: VFB published an
+anonymous-user API token for every instance they host, at
+<https://virtualflybrain.org/data/EM/catmaid.json>. What Coda does with it is
+[the last section](#what-coda-does-now); the rest of this document is kept as written,
+because it is the evidence that the token is the *only* route and the argument is still
+live for every other CATMAID with anonymous browse enabled. Ask 2 is still open.
+
 Two asks, and they are independent: the first is what makes the instance reachable
 from a browser at all, the second is an eightfold saving on the single largest
 transfer Coda makes against it. The first is really an **upstream CATMAID** question
@@ -160,13 +167,74 @@ middleware describes, so both fit on one request.
 So if a public token is minted for the anonymous user, a reader pastes it into one row and the
 published build reaches the instance directly, with the relay below demoted to a fallback.
 
-### What Coda does meanwhile
+### One more gate, found while checking whether the handshake could be done in the page
 
-`routeMemory.ts`'s try-and-remember: a token where the user has one (direct, works in
-the published build), otherwise a same-origin `/cm/` dev proxy that performs the CSRF
-dance server-side. The proxy works under `pnpm dev` and **404s on a static deploy**,
-exactly as `/st/` does for FlyTable. So public FAFB is usable in development today and
-in the published build once either change above lands.
+Worth recording because it rules out the obvious "just do what curl does" fix, and because
+it is invisible from the server side. Asked for a preflight with `X-CSRFToken`, the server
+answers **204 with a static allow-list that does not contain it**:
+
+```
+Access-Control-Request-Headers: content-type,x-csrftoken
+→ access-control-allow-headers: DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,
+    If-Modified-Since,Cache-Control,Content-Type,X-Authorization,Authorization
+```
+
+The server never checks the requested headers, so it looks like a pass; the *browser*
+compares and refuses to send. Driven from a page, the whole handshake fails four separate
+ways, each with a different cause:
+
+| from a browser page | result |
+| --- | --- |
+| `GET /` with `credentials: 'include'` | **Failed to fetch** — `ACAO: *` is invalid with credentials |
+| read `Set-Cookie` off the response | **`null`** — a [forbidden response header name](https://developer.mozilla.org/en-US/docs/Glossary/Forbidden_response_header_name); visible headers are `cache-control, content-type` |
+| `document.cookie` | **`""`** — another origin's cookies are not readable |
+| `POST` + `X-CSRFToken` | **Failed to fetch** — preflight, per the allow-list above |
+| `POST` with `csrfmiddlewaretoken` as a *form field* | **403** `Referer checking failed` — dodges the preflight, dies at gate one |
+
+So there is no arrangement of headers that gets a page through, and in particular the
+double-submit has nothing to submit: the page can never learn the token's value. Server-side
+clients — `curl`, pymaid, GitHub Actions, Coda's own `/cm/` relay — pass trivially, which is
+why this reads as a non-problem from everywhere except a browser.
+
+### What Coda does now
+
+The published tokens are a committed table in `src/data/catmaid/publicTokens.ts`, refreshed
+from the manifest in the background. Two layers because each covers the other's failure: the
+snapshot answers synchronously, offline, and in a unit test, and it is what keeps this from
+being a network dependency; the refresh is what survives a rotation without a Coda release.
+
+Five things the implementation is careful about, three of which would fail silently:
+
+- **A published token loses to a user's own.** Somebody with a real VFB account has more than
+  `can_browse`, and substituting the anonymous token would hide their own data with nothing on
+  screen to say why. `client.ts` consults the table only where `credentialsFor` gave no token.
+- **A rotated token falls back rather than raising.** The request loop stops at the first
+  response it gets, so a `401 Invalid token` would otherwise be *worse* than never having
+  shipped a token — it would fail where an anonymous `GET` used to work. A second pass drops
+  the token and re-derives the routes, which is exactly the behaviour of the day before.
+  A token the *user* configured is never dropped: that 401 really is about their credential.
+- **The refresh starts from the request that uses a token**, not from the app entry. That is a
+  privacy decision as much as a plumbing one: a reader who never opens a CATMAID node should not
+  have their browser announce itself to virtualflybrain.org, and one who does is already talking
+  to that host. It also keeps the unit suite off the network — anything reaching that line has
+  stubbed `fetch` already.
+- **The manifest is fetched `cache: 'no-cache'`**, because it is served
+  `cache-control: max-age=31536000, immutable`. Left to the default the refresh would run once
+  per browser and then never again — the exact failure it exists to prevent, presenting as the
+  feature working.
+- **FAFB answers on two hostnames.** `DEFAULT_CATMAID_SERVER` is
+  `catmaid-fafb.virtualflybrain.org` and the manifest lists `fafb.catmaid.virtualflybrain.org`
+  — one deployment, identical `/projects/`, one token — but `catmaidSourceId` hands out the
+  bare `catmaid` id for that exact string, so the constant cannot move without re-keying every
+  saved graph. The alias is written down instead.
+
+The `/cm/` relay stays for what it was always for: a lab CATMAID that publishes no token, where
+a POST still has no other route under `pnpm dev`. It is no longer on the path for VFB.
+
+Measured on 2026-08-29: all eight instances answer `POST /{project}/skeleton/neuronnames` 200
+with their token and 403 `CSRF Failed` without it, from a page at a foreign origin; and
+`CATMAID_LIVE=1 pnpm vitest run src/data/catmaid/live.test.ts` passes 7/7 **with no token in
+the environment**, where two of those tests previously skipped.
 
 One implementation note for anyone writing such a proxy: **the CSRF cookie name is
 suffixed per instance** — `csrftoken_6666cd76f96956469e7be39d750cc7d9`, not

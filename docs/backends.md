@@ -1202,12 +1202,34 @@ never reaches `enforce_csrf` — which is why a bogus token is answered `Invalid
 on the other two backends: it does not unlock private data, it is the only way a page can ask a
 question whose answer is already public.
 
-**And on this instance a token is not obtainable** — `/accounts/register` is 404. So the usual
-answer (require one, like neuPrint and CAVE) would make the named target unusable, and the module
-falls back to a same-origin `/cm/` relay that performs the handshake server-side. That works under
-`pnpm dev` and 404s on a static deploy, exactly as `/st/` does for FlyTable.
-`docs/catmaid_vfb.md` is the write-up and the upstream ask — which is **CATMAID's** rather than
-VFB's, since every instance with anonymous browse has the same wall for the same reason.
+**A token used to be unobtainable on this instance** — `/accounts/register` is 404 — so the usual
+answer (require one, like neuPrint and CAVE) would have made the named target unusable, and the
+module fell back to a same-origin `/cm/` relay performing the handshake server-side. On
+2026-08-29 VFB published an anonymous-user token for each of their eight instances at
+`https://virtualflybrain.org/data/EM/catmaid.json`, which is the zero-code ask in
+`docs/catmaid_vfb.md` granted. `publicTokens.ts` carries them: a committed snapshot that answers
+synchronously and offline, refreshed from that manifest in the background so a rotation does not
+need a Coda release. The relay stays for what it was always for — a lab CATMAID that publishes
+no token — and is no longer on the path for VFB.
+
+**A published token is not a credential, and the difference is enforced in three places.** It
+authenticates as `AnonymousUser` with `can_browse` and nothing else, so it grants exactly the read
+access the server already gives everyone over `GET`; what it buys is the *verb*. So it **loses to
+a user's own token** (a real VFB account has more than `can_browse`, and substituting would hide
+their data silently); a **401 drops it and retries**, because the request loop stops at the first
+response and a rotated token would otherwise fail where an anonymous `GET` used to work — while a
+token the *user* typed is never dropped, since that 401 is genuinely about their credential; and
+the manifest is fetched **`cache: 'no-cache'`**, because it is served `immutable` with a one-year
+max-age and the refresh would otherwise run once per browser, forever.
+
+**One preflight finding worth keeping**, because it rules out doing the CSRF handshake in the
+page. The server answers a preflight `204` with a *static* allow-list that does not contain
+`X-CSRFToken`; it never inspects the requested headers, so it looks like a pass and the browser
+is what refuses. Beside that, `credentials: 'include'` is rejected outright (`ACAO: *` is invalid
+with credentials), `Set-Cookie` is a forbidden response header so the cookie cannot be read off
+the response, and `document.cookie` cannot see another origin's — the double-submit has nothing
+to submit. `X-Authorization` *is* in the allow-list, which is why the token needed no change at
+their end.
 
 **So the route is chosen rather than probed**, the deliberate departure from `neuprint/client.ts`
 and `seaTable.ts`. Those cannot tell a CORS refusal from a dead host, so they try and remember.

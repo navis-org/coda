@@ -8,12 +8,14 @@
  * endpoint shape changing, and it is out of CI for the reason the CAVE and FlyTable live tests
  * are — it is somebody's public server and the suite runs on every commit.
  *
- * **The token is what splits it in two, and the split is the finding rather than a limitation.**
- * Every `GET` this backend makes is answered anonymously — projects, skeletons, connector links,
- * neuropil volumes — so the morphology half runs with no credential at all. The label half does
- * not: `skeleton/annotationlist` is POST-only, and in a browser that needs a token or the dev
- * relay. Node has no such restriction, but the *client* is browser code and does not do the CSRF
- * handshake, so without a token these tests exercise exactly what a published build could reach.
+ * **This file used to be split in two by a token, and the fact that it no longer is is the
+ * point.** Every `GET` here is answered anonymously — projects, skeletons, connector links,
+ * neuropil volumes — but `skeleton/annotationlist` and `skeletons/connectivity` are POST-only,
+ * and an anonymous POST is refused by Django's CSRF. So the label half and the connectivity half
+ * used to skip unless somebody supplied a token that VFB had no way to issue. Since 2026-08-29
+ * they publish one per instance and `publicTokens.ts` carries it, so the whole file runs with no
+ * environment at all — and that is exactly the claim worth testing, because it is the claim a
+ * published build depends on. `CATMAID_TOKEN` still overrides, for checking a real account.
  * See `docs/catmaid_vfb.md`.
  */
 
@@ -28,7 +30,6 @@ const TOKEN = process.env.CATMAID_TOKEN
 const FAFB = '1'
 
 const live = LIVE ? describe : describe.skip
-const withToken = LIVE && TOKEN ? it : it.skip
 
 function source(): CatmaidSource {
   if (TOKEN) setInstances([{ server: DEFAULT_CATMAID_SERVER, token: TOKEN }])
@@ -126,7 +127,7 @@ live('CATMAID against the real FAFB instance', () => {
     expect(new Set(meshes.attributes.data.primary)).toEqual(new Set([true]))
   })
 
-  withToken('builds the whole-instance neuron index, with derived types', async () => {
+  it('builds the whole-instance neuron index, with derived types', async () => {
     const index = await source().neuronIndex({ datasetId: FAFB })
     expect(index.length).toBeGreaterThan(5000)
 
@@ -145,7 +146,7 @@ live('CATMAID against the real FAFB instance', () => {
     expect(String(instances[hashed])).toContain(String(types[hashed]))
   })
 
-  withToken('answers connectivity with summed confidence buckets', async () => {
+  it('answers connectivity with summed confidence buckets', async () => {
     const table = await source().fetchConnectivity({
       datasetId: FAFB,
       neuronIds: ['16'],
