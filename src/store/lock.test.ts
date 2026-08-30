@@ -229,6 +229,7 @@ describe('every store action is on one side of the lock', () => {
     'requestFeedback',
     'requestFitView',
     'setAutoRun',
+    'setNotifyRuns',
     'setAutoLayout',
     'toggleLocked',
     'setLayoutOptions',

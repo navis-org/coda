@@ -214,6 +214,103 @@ Two traps in that plumbing, both hit:
   behind them are megabytes. `meshProgressFraction` gives manifests the first fifth, so the
   bar does not reach the halfway mark in the first second and then appear to hang.
 
+## Telling somebody a run finished
+
+`ui/notify.ts` and the toolbar's bell. The mechanism is small; every interesting part of it is a
+constraint the browser imposes rather than a design choice, which is why it is written down.
+
+**Two channels, and only the second one asks for anything.** The tab's own title is rewritten —
+`✓ Run finished`, or `⚠ Run failed` — whenever a run past the floor lands on a tab nobody is
+watching. That costs no permission, works in every engine including an iPhone's Safari, and is
+invisible to anyone who *is* watching because it reverts the moment they come back. On top of it
+sits the real OS notification, which is opt-in.
+
+They are complementary rather than redundant, and the redundancy is what makes the feature work
+for the case it exists for: a desktop notification auto-dismisses in about twenty seconds unless
+the OS is set to keep alerts, so somebody away for an hour comes back to *no notification at
+all*. The title is still saying it. That is also the fallback for the three engines that will
+never show one — an iOS Safari tab that was not installed to the home screen, an Android Chrome
+that serves notifications only through a service worker (there is none here, and the constructor
+throws `Illegal constructor` outright rather than failing quietly), and a permission refused.
+
+**Permission can only be asked for from a user gesture**, so the opt-in *is* the prompt: the
+bell's click is the only place `requestNotifyPermission` is reachable from. Not on load, and in
+particular not when a run finishes — which is exactly when it would be most useful and least
+allowed. Same rule fullscreen records, for the same reason, and with the same consequence: the
+stored preference cannot simply be restored and acted on.
+
+**`denied` is terminal, and that is why the bell has three states rather than two.** Once
+refused, a page can never ask again — only the user can undo it in browser settings, and there
+is no event for their having done so. So the *stored* preference is not the truth about whether
+notifications will appear; `notifyState()` is, and the pressed state is the conjunction of the
+two. That conjunction is `bellState`, exported and tested rather than derived in the component:
+it is the rule the whole feature turns on, its interesting row (granted, preference off) is
+unreachable from jsdom in a render, and a second surface re-deriving it would get the
+`denied`/`unsupported` split wrong with nothing to say so. A toggle that latched on while the browser silently dropped every notification is the
+failure this whole feature would otherwise present as. The refused and unsupported states draw a
+struck-through bell, disabled, whose tooltip names who has to undo it **and** says the tab title
+still changes — a struck-through bell alone reads as "nothing will tell you anything", which is
+not true.
+
+**Granting permission shows one immediately, and that is a deliberate exception to everything
+above.** It was not there at first, and the cost of leaving it out was measured rather than
+guessed: notifications were reported as not working in both Chrome and Firefox, with the tab
+title changing correctly, and the cause was macOS **Do Not Disturb**. Under a Focus mode — and
+equally when the browser itself is not allowed to post in System Settings → Notifications —
+`new Notification()` constructs successfully and posts nothing. There is no API that reports
+this, and none that asks whether a notification was seen.
+
+So granting was the one step in the feature with no visible result. The next notification is a
+run past the floor away, on a tab you have since left, which means a chain broken anywhere at
+all presents as silence fifteen seconds later somewhere else — indistinguishable from the
+feature not existing. `showTestNotification` fires while the user is still looking, which is the
+only honest test available. It runs on **every** enable rather than only on the first grant,
+because a browser that already remembers the grant skips the permission branch entirely, and
+that is the path anybody re-testing this takes. Its own tag, so it neither replaces nor is
+replaced by a run's.
+
+**Away is two questions, not one.** `visibilityState` alone misses the case people actually hit:
+a second monitor. A Coda window fully covered by another — or simply sitting behind the editor
+you switched to — is still `visible` by the spec, and only `hasFocus()` says otherwise. The cost
+is that anything else taking focus counts as away, devtools most of all; that false positive is
+accepted, because it produces a notification you did not need against a missed one for everybody
+who works with two windows side by side.
+
+**A duration floor rather than a manual/automatic distinction.** What decides whether somebody
+switched away is how long the run took, not which button started it — auto-run makes the same
+wait. `NOTIFY_AFTER_MS` is 15s: above every cached re-run and every mock-dataset graph, the ones
+that finish while you are still typing, and below any real neuPrint or CAVE query.
+
+Three runs say nothing whatever the tab is doing, and each is a decision rather than a shortcut.
+A **cancelled** run is silent, because the user pressed Cancel and knows. A run that **touched no
+node** is silent even if it took a while — an auto pass over a graph of expensive nodes defers
+all of them and still reports a duration, so announcing it would be announcing that nothing
+happened. A **failure** is announced, and differently: coming back in an hour to find the run
+died in its first minute is the case this exists to prevent.
+
+Two smaller things that would each be wrong in the obvious version. The body carries
+`iterations` when there are any, because `executed` is a *set of node ids* and reads "6 nodes"
+for a loop that made four hundred passes — and a loop is what a run long enough to reach the
+floor usually is. And the duration is `formatDuration`, the same spelling the status bar uses,
+so the notification and the line you read when you get back agree about one number; `formatAge`
+would print a prettier `1m` for exactly these longer runs and would then disagree with the
+`95.4s` on screen.
+
+**The title we replaced is captured once.** Re-reading `document.title` on a second flash latches
+our own text in as the base, and the tab goes on saying "Run finished" for the rest of the
+session with nothing left to restore. It is module state rather than a ref, because the flash
+outlives the component that raised it: a viewer going fullscreen remounts half the tree, and a
+title that reverted because of *that* would revert while the user is still away — the one moment
+it exists for.
+
+`useRunNotify` is mounted from `EditorCanvas` beside `useDownloads` and `useForEach`, on their
+reasoning: a run finishing is a whole-app event and the tab it lands on may have no card expanded
+at all. It triggers on `lastRun` changing identity rather than on `busy` going false, which comes
+free with `runFull`'s token guard — a run *superseded* by a newer one never writes `lastRun`, and
+it is the newest run's completion that means the wait is over. The ref holding the last announced
+summary is **mount-seeded**, the same guard the store's request counters use, so a remount with a
+run already in the store does not announce it twice.
+
 ## The Examples menu
 
 Two kinds of thing, in this order: **Browse Workflows…** first, then a rule, then the four

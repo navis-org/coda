@@ -132,3 +132,28 @@ export function FilterIcon({ size }: { size?: number }) {
     </Icon>
   )
 }
+
+/**
+ * Notifications — a bell, optionally struck through.
+ *
+ * The clapper is a separate arc rather than part of the body, because at 15px a bell drawn as
+ * one closed outline reads as a rounded rectangle: the notch under the rim is what makes it a
+ * bell, and it is the first detail a single path loses. The shoulders are drawn with the same
+ * 2-unit stroke as everything else here, so it sits at the weight of the four beside it.
+ *
+ * `slashed` is a prop rather than a second exported glyph, and that is what keeps the two in
+ * step: the outline written twice means a tweak to the rim silently applies to one bell and
+ * leaves the other at the old shape, which nothing tests and nobody would look for. It draws
+ * the one state the toggle cannot leave — permission refused, or an engine that will never
+ * show a notification — where a plain bell greyed out would read as the app being busy rather
+ * than as the browser having taken the decision away. Corner to corner, so it survives 15px.
+ */
+export function BellIcon({ slashed = false }: { slashed?: boolean }) {
+  return (
+    <Icon>
+      <path d="M18 8.5a6 6 0 1 0-12 0c0 5-2 6.5-2 6.5h16s-2-1.5-2-6.5" />
+      <path d="M13.7 19a2 2 0 0 1-3.4 0" />
+      {slashed && <path d="M3.5 3.5 20.5 20.5" />}
+    </Icon>
+  )
+}

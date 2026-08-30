@@ -33,6 +33,7 @@ const TAB_KEY = 'coda.tab.v1'
 const THEME_KEY = 'coda.theme.v1'
 const PANELS_KEY = 'coda.panels.v1'
 const AUTORUN_KEY = 'coda.autorun.v1'
+const NOTIFY_KEY = 'coda.notify.v1'
 const START_PAGE_KEY = 'coda.startPage.v1'
 const LAYOUT_KEY = 'coda.layout.v1'
 /** When the feedback nudge was last shown or dismissed, so it can wait a week before the next. */
@@ -449,6 +450,34 @@ export function loadAutoRun(): boolean {
 export function saveAutoRun(enabled: boolean): void {
   try {
     localStorage.setItem(AUTORUN_KEY, String(enabled))
+  } catch {
+    /* ignore */
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Run notifications
+// ---------------------------------------------------------------------------
+
+/**
+ * The user's half of "notify me when a run finishes" — the browser's permission is the other
+ * half and outranks it, so this is not on its own an answer about whether anything will appear.
+ * `bellState` in `ui/notify.ts` combines the two, and records why it has to.
+ *
+ * Off by default because it cannot be anything else: permission is only askable from a user
+ * gesture. Remembered so that somebody who turned it on is not asked again next session.
+ */
+export function loadNotifyRuns(): boolean {
+  try {
+    return localStorage.getItem(NOTIFY_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
+
+export function saveNotifyRuns(enabled: boolean): void {
+  try {
+    localStorage.setItem(NOTIFY_KEY, String(enabled))
   } catch {
     /* ignore */
   }

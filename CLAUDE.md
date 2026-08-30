@@ -140,6 +140,17 @@ Area-specific — the rule, then the doc that holds why:
   scrollbar. And **a shortcut's glyph is stored by meaning, not as text** — `src/ui/shortcuts.ts`
   is the one table, `formatChord` the only place that knows ⌘ from Ctrl, and four surfaces read
   it. `Editor.tsx` still owns the *bindings*. See [docs/ui-shell.md](docs/ui-shell.md).
+- **A run notification is opt-in, but the tab title is not, and the fallback is the feature.**
+  `Notification.requestPermission()` is refused outside a user gesture, so the bell's *click* is
+  the prompt — there is nowhere else to ask. **`denied` is terminal**: a page can never ask twice
+  and hears nothing when the user relents, so the stored preference is not the truth and the
+  bell's pressed state is that preference **and** a live `notifyState()`. Three engines will never
+  show one anyway — an uninstalled iOS Safari tab, Android Chrome (service-worker only; the
+  constructor throws), and a refusal — which is why `flashTitle` runs unconditionally and captures
+  the title it replaced **once**, or the tab says "Run finished" for the rest of the session.
+  Away is `visibilityState` **or** `!hasFocus()`, because a covered window is still `visible`.
+  A floor, not a manual/automatic test: what says somebody left is how long the run took.
+  See [docs/ui-shell.md](docs/ui-shell.md).
 - **A published token is not a credential, and shipping one makes a rotation a new failure mode.**
   Virtual Fly Brain publishes an `AnonymousUser` token per instance because CATMAID's query endpoints
   are POST-only and a browser satisfies neither of Django's CSRF gates: it cannot set `Referer`, and it

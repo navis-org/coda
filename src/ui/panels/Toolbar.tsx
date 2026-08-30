@@ -5,7 +5,7 @@ import { canExportNotebook } from '../../export/canExport'
 import type { ExportLanguage } from '../../nodes/lib/datasetFamilies'
 import { CodaMark } from '../CodaMark'
 import { peekExportWarnings, requestExportWarnings, useExportWarnings } from '../exportWarnings'
-import { AssistantIcon, InspectorIcon, ShareIcon } from '../Icons'
+import { AssistantIcon, BellIcon, InspectorIcon, ShareIcon } from '../Icons'
 import { EXAMPLES } from '../../examples'
 import type { CustomDatasetNode } from '../../nodes/lib/datasetFamilies'
 import {
@@ -23,6 +23,14 @@ import { downloadGraph, downloadNotebook, downloadRmd } from '../export'
 import { formatAgo, plural } from '../format'
 import { LOCKED_HINT, lockedTitle } from '../lockCopy'
 import { appElement, toggleFullscreen, useIsFullscreen } from '../fullscreen'
+import type { NotifyState } from '../notify'
+import {
+  NOTIFY_AFTER_MS,
+  bellState,
+  notifyState,
+  requestNotifyPermission,
+  showTestNotification,
+} from '../notify'
 import { EdgeSetPanel } from './EdgeSetPanel'
 import { SourcesPanel } from './SourcesPanel'
 import type { TourAnchor } from '../tour/steps'
@@ -491,6 +499,8 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
         </button>
       )}
 
+      <NotifyToggle />
+
       {/*
        * Fullscreen keeps the toolbar and the status bar: what it reclaims is the browser's
        * ~90px of tabs and address bar, not the app's own chrome. Run, Auto-run and the stale
@@ -529,6 +539,100 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
         {theme === 'dark' ? '◐' : theme === 'light' ? '◑' : '◒'}
       </button>
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+
+/** The floor in the words the tooltips use. Derived from a constant, so not per render. */
+const NOTIFY_FLOOR_SECONDS = Math.round(NOTIFY_AFTER_MS / 1000)
+
+/**
+ * The bell: whether a run finishing on a tab nobody is watching raises a browser notification.
+ *
+ * Beside Run because that is what it is about. The mechanism, and why the tab's title is
+ * rewritten whether or not this is on, are in `ui/notify.ts` — including the two rules that
+ * shape this control and are not obvious from it: the click has to *be* the permission prompt,
+ * because `requestPermission` is refused outside a user gesture; and a refusal is permanent from
+ * this side, so `bellState` reads the browser's answer alongside the stored preference rather
+ * than trusting the preference alone.
+ *
+ * The permission is held in local state rather than read on each render because reading it is
+ * the only way to learn it: it moves when we ask, and the one other way it moves — the user
+ * relenting in browser settings — raises nothing anywhere.
+ */
+function NotifyToggle() {
+  const notifyRuns = useGraphStore((s) => s.notifyRuns)
+  const setNotifyRuns = useGraphStore((s) => s.setNotifyRuns)
+  const setNotice = useGraphStore((s) => s.setNotice)
+  const [permission, setPermission] = useState<NotifyState>(() => notifyState())
+
+  const { on, blocked } = bellState(notifyRuns, permission)
+
+  // Both blocked arms end the same way, and that sentence is the point of saying anything at
+  // all: a struck-through bell on its own reads as "nothing will tell you anything", which is
+  // not true — the tab title still changes.
+  const title = blocked
+    ? `${
+        permission === 'unsupported'
+          ? 'This browser will not show notifications for this page.'
+          : 'Notifications are blocked for this site — allow them in your browser settings.'
+      } The tab title still changes when a run finishes.`
+    : on
+      ? `Notifying you when a run over ${NOTIFY_FLOOR_SECONDS}s finishes while you are looking elsewhere. Click to stop.`
+      : `Notify me when a run over ${NOTIFY_FLOOR_SECONDS}s finishes while I am looking elsewhere`
+
+  return (
+    <button
+      type="button"
+      className="btn btn--ghost btn--icon"
+      aria-pressed={on}
+      disabled={blocked}
+      onClick={() => {
+        // Granted covers both directions: `on` implies granted, so this is the plain toggle and
+        // everything below it is the one-time ask.
+        if (permission === 'granted') {
+          setNotifyRuns(!on)
+          // Every time it is switched on, not only the first time permission was given — the
+          // ask below is skipped entirely once a browser remembers the grant, and that is the
+          // path somebody re-testing this takes.
+          if (!on) showTestNotification()
+          return
+        }
+        void requestNotifyPermission().then((next) => {
+          setPermission(next)
+          if (next === 'granted') {
+            setNotifyRuns(true)
+            // One now, while they are looking. Granting permission is otherwise the only step
+            // in this feature with no visible result, and the next notification is a long run
+            // away on a tab they have left — so a chain broken anywhere (a Focus mode, the
+            // browser not allowed to post at the OS level) presents as silence much later,
+            // which reads as the feature not working rather than as the machine refusing.
+            showTestNotification()
+            setNotice(
+              `Notifications on — runs over ${NOTIFY_FLOOR_SECONDS}s will say so while you are away`,
+            )
+          } else if (next === 'denied') {
+            setNotice('This browser blocked notifications for Coda')
+          } else {
+            /*
+             * Still `default`: the prompt was dismissed rather than answered, or the browser
+             * never showed it — Chrome's "quieter notification permissions" demotes it to an
+             * icon in the address bar, and Firefox can be set to suppress it outright. All
+             * three resolve here, and without this the click is a silent no-op, which reads as
+             * the button being broken. Asking again is allowed from `default`, so say so.
+             */
+            setNotice('Notifications were not allowed yet — click the bell again to ask')
+          }
+        })
+      }}
+      // Named for a screen reader, and named for what pressing it would *do* rather than for
+      // what it currently is — the same call every other toggle in this toolbar makes.
+      aria-label={on ? 'Turn off run notifications' : 'Notify me when a run finishes'}
+      title={title}
+    >
+      <BellIcon slashed={blocked} />
+    </button>
   )
 }
 

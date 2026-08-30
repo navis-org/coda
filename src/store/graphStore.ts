@@ -68,12 +68,14 @@ import type { PanelState, ThemePreference } from './persistence'
 import {
   applyTheme,
   loadAutoRun,
+  loadNotifyRuns,
   loadAutosave,
   loadLayoutPrefs,
   loadPanels,
   loadStartPageDismissed,
   loadTheme,
   saveAutoRun,
+  saveNotifyRuns,
   saveLayoutPrefs,
   savePanels,
   saveAutosave,
@@ -201,6 +203,13 @@ export interface GraphState {
    */
   autoRun: boolean
   setAutoRun(enabled: boolean): void
+  /**
+   * Whether a long run that finishes on a tab nobody is watching may raise a browser
+   * notification. The user's half of the decision only — read it through `bellState` rather
+   * than as "notifications will appear". See `ui/notify.ts`.
+   */
+  notifyRuns: boolean
+  setNotifyRuns(enabled: boolean): void
   /**
    * Re-arrange the canvas after every *structural* change — a node added or deleted, a wire
    * connected, a card collapsed or resized. Params are not structural, so typing never moves
@@ -902,6 +911,11 @@ export const useGraphStore = create<GraphState>((set, get) => {
       // a statement about the graph as it is now, and a stale graph that stays stale until you
       // touch something reads as the setting not working.
       if (enabled) afterGraphChange(get().graph)
+    },
+    notifyRuns: loadNotifyRuns(),
+    setNotifyRuns: (enabled) => {
+      saveNotifyRuns(enabled)
+      set({ notifyRuns: enabled })
     },
 
     autoLayout: layoutPrefs.auto,

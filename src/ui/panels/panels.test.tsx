@@ -76,17 +76,24 @@ function stubNodeOffsets(width = 232, height = 120): () => void {
 }
 
 /**
- * The four icon-only buttons in the toolbar's right-hand cluster.
+ * The five icon-only buttons in the toolbar.
  *
  * Taking a label off a button takes its accessible name with it unless something puts one back,
  * and nothing about the rendering says which happened — the icon draws either way. So this
  * asserts the name, that it comes from `aria-label` rather than from stray text, and that a
  * pointer gets a tooltip too. Assistant and Inspector additionally have to keep announcing
  * *state*, which they used to say in the glyph itself (`▐` against `▕`) and now say only
- * through `aria-pressed`.
+ * through `aria-pressed`. The bell is the fifth and sits beside Run rather than in the cluster,
+ * but it is the same kind of control and carries the same risk.
  */
 describe('the icon cluster', () => {
-  const NAMED = ['Share workflow', 'Connections', 'Assistant', 'Inspector']
+  const NAMED = [
+    'Share workflow',
+    'Connections',
+    'Assistant',
+    'Inspector',
+    'Notify me when a run finishes',
+  ]
 
   it('keeps every name, as an icon with no text', () => {
     render(<App />)
@@ -105,6 +112,24 @@ describe('the icon cluster', () => {
     expect(inspectorToggle().getAttribute('aria-pressed')).toBe('true')
     // And the tooltip names which way the next click goes, which the icon cannot.
     expect(inspectorToggle().getAttribute('title')).toMatch(/^Hide/)
+  })
+
+  it('offers the bell disabled, and says who took the decision away', () => {
+    /*
+     * jsdom has no `Notification`, which is the `unsupported` branch and stands in here for the
+     * two states a real browser reaches: an iOS Safari tab that was never installed, and a
+     * permission the user refused — which can never be asked for again from this side.
+     *
+     * Disabled *and* still present, because the alternative was hiding it: a control that is
+     * simply absent gives nobody a reason why the feature they were told about is missing. The
+     * tooltip has to carry that, and it also has to say the other channel still works, or the
+     * honest reading of a struck-through bell is that nothing will tell you anything.
+     */
+    render(<App />)
+    const bell = screen.getByRole('button', { name: 'Notify me when a run finishes' })
+    expect((bell as HTMLButtonElement).disabled).toBe(true)
+    expect(bell.getAttribute('aria-pressed')).toBe('false')
+    expect(bell.getAttribute('title')).toMatch(/tab title still changes/)
   })
 })
 

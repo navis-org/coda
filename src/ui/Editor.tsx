@@ -75,6 +75,7 @@ import { appElement, toggleFullscreen } from './fullscreen'
 import { typeColorVar } from './socketStyle'
 import { useArrange } from './useArrange'
 import { useDownloads } from './useDownloads'
+import { useRunNotify } from './notify'
 import { useForEach } from './useForEach'
 
 /**
@@ -187,6 +188,9 @@ function EditorCanvas() {
   // nobody could reproduce on purpose.
   useDownloads()
   useForEach()
+  // Same reasoning: a run finishing is a whole-app event, and the tab it lands on may have no
+  // card expanded at all.
+  useRunNotify()
   const wrapperRef = useRef<HTMLDivElement>(null)
   const pointerRef = useRef({ x: 0, y: 0 })
   const draggingRef = useRef(false)
