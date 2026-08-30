@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest'
 import { compareIds, idText, isNeuronId } from '../../core/ids'
 import { CRASH_FLOOR_CELLS, SILENT } from '../../core/limits'
 import { column, columnNames, tableSchema } from '../../core/types'
-import type { TableValue } from '../../core/values'
-import { makeMatrix, tableFromRows, JOIN_SEPARATOR } from '../../core/values'
+import type { ColumnData, TableValue } from '../../core/values'
+import { makeMatrix, makeTable, tableFromRows, JOIN_SEPARATOR } from '../../core/values'
 import {
   AGG_OPTIONS,
   NUMERIC_AGG_OPTIONS,
@@ -39,8 +39,12 @@ import {
   uploadIsNeurons,
   uploadShapeSchema,
   uploadShapeTable,
+  unpivotIssues,
+  unpivotSchema,
+  unpivotTable,
   sortTable,
 } from './tableOps'
+import type { UnpivotSpec } from './tableOps'
 
 const CONNECTIVITY = tableSchema(
   column('neuronId', 'i64'),
@@ -808,6 +812,216 @@ describe('pivot', () => {
     )
     expect(wide.length).toBe(0)
     expect(wide.schema.columns.map((c) => c.name)).toEqual(['neuronId'])
+  })
+})
+
+describe('unpivot', () => {
+  const WIDE = tableSchema(
+    column('neuronId', 'i64'),
+    column('type', 'str'),
+    column('DNp02', 'i64', 'synapses'),
+    column('PLP003', 'i64', 'synapses'),
+  )
+  const wide = () =>
+    tableFromRows(
+      WIDE,
+      [
+        { neuronId: 1, type: 'LC4', DNp02: 40, PLP003: 0 },
+        { neuronId: 2, type: 'LC6', DNp02: null, PLP003: 7 },
+      ],
+      'neurons',
+    )
+  const spec = (over: Partial<UnpivotSpec> = {}): UnpivotSpec => ({
+    columns: ['DNp02', 'PLP003'],
+    keep: [],
+    nameInto: 'name',
+    valueInto: 'value',
+    ...over,
+  })
+
+  it('folds the picked columns and agrees with its schema half', () => {
+    const declared = unpivotSchema(WIDE, spec())
+    const out = unpivotTable(wide(), spec(), SILENT)
+    expectSchemaAgreement(declared, out)
+    expect(columnNames(out.schema)).toEqual(['neuronId', 'type', 'name', 'value'])
+    // Row-major — `tidyr::pivot_longer`'s order, not `pandas.melt`'s: an input row's cells stay
+    // together, which is what makes the result checkable against the input at a glance.
+    expect(out.data.name).toEqual(['DNp02', 'PLP003', 'DNp02', 'PLP003'])
+    expect(out.data.value).toEqual([40, 0, null, 7])
+    expect(out.data.neuronId).toEqual([1, 1, 2, 2])
+  })
+
+  it('keeps everything not folded, and only what is asked for once Keep is set', () => {
+    // Empty Keep is "whatever is left", which is what somebody means by the id columns; an
+    // explicit list is in pick order, `selectTable`'s rule.
+    expect(columnNames(unpivotTable(wide(), spec({ keep: ['type'] }), SILENT).schema)).toEqual([
+      'type',
+      'name',
+      'value',
+    ])
+  })
+
+  it('carries the folded columns dtype and unit, and widens where they disagree', () => {
+    expect(unpivotSchema(WIDE, spec())!.columns[3]).toEqual({
+      name: 'value',
+      dtype: 'i64',
+      unit: 'synapses',
+    })
+    // The unit rides along only while every folded column agrees on it — `stackColumns`' rule,
+    // since a count folded together with a length has no single unit.
+    const mixed = tableSchema(column('n', 'i64', 'synapses'), column('len', 'f64', 'nm'))
+    // Both columns are folded, so nothing is kept and the two new ones are the whole schema.
+    expect(unpivotSchema(mixed, spec({ columns: ['n', 'len'] }))!.columns[1]).toEqual({
+      name: 'value',
+      dtype: 'f64',
+    })
+    // Text and a number cannot reconcile, so the value column keeps every value as text —
+    // `combinedDType`'s widening, the same call the coalesce makes.
+    const clash = tableSchema(column('n', 'i64'), column('label', 'str'))
+    expect(unpivotSchema(clash, spec({ columns: ['n', 'label'] }))!.columns[1]!.dtype).toBe('str')
+  })
+
+  it('stringifies into a text value column without inventing the word "null"', () => {
+    const clash = tableFromRows(tableSchema(column('n', 'i64'), column('label', 'str')), [
+      { n: 7, label: null },
+    ])
+    const out = unpivotTable(clash, spec({ columns: ['n', 'label'] }), SILENT)
+    // A fold emits a row for an absent cell where a coalesce skips past it, so this is the path
+    // `combineTable` does not have — and `String(null)` would read as a value everywhere down.
+    expect(out.data.value).toEqual(['7', null])
+  })
+
+  it('passes the table through when there is nothing to fold or nowhere to put it', () => {
+    for (const s of [
+      spec({ columns: [] }),
+      spec({ columns: ['gone'] }),
+      spec({ nameInto: ' ' }),
+      spec({ valueInto: '' }),
+    ]) {
+      const out = unpivotTable(wide(), s, SILENT)
+      expect(out.schema).toEqual(WIDE)
+      expect(unpivotSchema(WIDE, s)).toEqual(WIDE)
+    }
+  })
+
+  it('skips a folded column the schema no longer has', () => {
+    // `combineTable`'s rule: a name that is gone is one fewer thing to fold, not a question that
+    // can no longer be answered.
+    const out = unpivotTable(wide(), spec({ columns: ['gone', 'PLP003'] }), SILENT)
+    expect(out.data.name).toEqual(['PLP003', 'PLP003'])
+    expect(out.length).toBe(2)
+  })
+
+  it('folds a column named in both pickers rather than repeating it', () => {
+    const out = unpivotTable(wide(), spec({ keep: ['type', 'DNp02'] }), SILENT)
+    expect(columnNames(out.schema)).toEqual(['type', 'name', 'value'])
+    expect(unpivotIssues(WIDE, spec({ keep: ['type', 'DNp02'] }))).toEqual([
+      'DNp02 is both folded and kept — it will only appear as a value',
+    ])
+  })
+
+  it('yields a colliding output name rather than displacing a kept column', () => {
+    // The other half of `combineLayout`'s rule: these two are this node's own spelling of its
+    // output, the same standing as the stack's source column, so they suffix themselves.
+    const out = unpivotTable(wide(), spec({ nameInto: 'type', valueInto: 'neuronId' }), SILENT)
+    expect(columnNames(out.schema)).toEqual(['neuronId', 'type', 'type_2', 'neuronId_2'])
+    expect(out.data.type).toEqual(['LC4', 'LC4', 'LC6', 'LC6'])
+    expect(out.data.type_2).toEqual(['DNp02', 'PLP003', 'DNp02', 'PLP003'])
+  })
+
+  it('drops null and blank on request, and never a zero', () => {
+    const out = unpivotTable(wide(), spec({ dropEmpty: true }), SILENT)
+    // 0 stays: it is a value somebody may have measured, and a pivot writes it for an absent
+    // pair — deciding here that it is absence would quietly undo that.
+    expect(out.data.value).toEqual([40, 0, 7])
+    expect(out.data.neuronId).toEqual([1, 1, 2])
+  })
+
+  it('keeps the neurons kind only while the id column is kept', () => {
+    expect(unpivotTable(wide(), spec(), SILENT).kind).toBe('neurons')
+    // Folded away, the claim goes with it — `selectTable`'s rule.
+    expect(unpivotTable(wide(), spec({ keep: ['type'] }), SILENT).kind).toBe('table')
+    const plain = makeTable(wide().schema, { ...wide().data }, 'table')
+    expect(unpivotTable(plain, spec(), SILENT).kind).toBe('table')
+  })
+
+  it('round-trips a pivot that had one row per pair, zeros included', () => {
+    /*
+     * What the pair can and cannot promise. The pivot aggregated nothing here — one row per
+     * pair — so every input row comes back; the absent pair does not, it comes back as the
+     * explicit 0 `matrixToTable` wrote for it. That is the lossy half said out loud.
+     */
+    const long = tableFromRows(CONNECTIVITY, [
+      { neuronId: 1, partnerType: 'DNp02', weight: 30 },
+      { neuronId: 2, partnerType: 'PVLP002', weight: 15 },
+    ])
+    const back = unpivotTable(
+      matrixToTable(pivotTable(long, 'neuronId', 'partnerType', 'weight', 'sum', SILENT), 'id'),
+      spec({ columns: ['DNp02', 'PVLP002'], nameInto: 'partnerType', valueInto: 'weight' }),
+      SILENT,
+    )
+    expect(back.length).toBe(4)
+    expect(back.data.weight).toEqual([30, 0, 0, 15])
+  })
+
+  /**
+   * `rows` rows of `folded` foldable columns and `kept` others, built column-wise.
+   *
+   * The shapes these two ceilings are about are wide, not tall: what the floor answers to is
+   * `rows x folded x (kept + 2)`, so the input that reaches it is small enough to build in a
+   * unit test — which is the point, since the check has to happen before anything is allocated.
+   */
+  function widePlain(rows: number, folded: number, kept: number): TableValue {
+    const names = [
+      ...Array.from({ length: folded }, (_, i) => `c${i}`),
+      ...Array.from({ length: kept }, (_, i) => `k${i}`),
+    ]
+    const data: Record<string, ColumnData> = {}
+    for (const name of names) data[name] = new Array(rows).fill(1)
+    return makeTable(
+      tableSchema(...names.map((n) => column(n, 'i64'))),
+      data,
+    )
+  }
+
+  const foldedNames = (n: number) => Array.from({ length: n }, (_, i) => `c${i}`)
+
+  it('warns on a fold past the size a reshape is usually meant to have', () => {
+    // The same threshold from the other side, deliberately not a second constant: 100 rows
+    // folded over 800 columns, each carrying 30 kept ones, is 2.56 million cells.
+    const said: string[] = []
+    const out = unpivotTable(widePlain(100, 800, 30), spec({ columns: foldedNames(800) }), {
+      warn: (m) => said.push(m),
+    })
+    expect(out.length).toBe(80_000)
+    expect(100 * 800 * 32).toBeGreaterThan(PIVOT_CELLS_WARN)
+    expect(said.join(' ')).toContain('cells')
+    expect(said.join(' ')).toContain('Going ahead anyway')
+  })
+
+  it('refuses the fold that has no table on the other side of it, before allocating', () => {
+    /*
+     * The crash floor. 100 x 1,000 folded columns is 100,000 rows, and each carries 700 kept
+     * columns beside the two new ones — 70 million cells, from a table of 170,000. The floor is
+     * checked against that count rather than against an allocation that has already happened.
+     */
+    const table = widePlain(100, 1_000, 700)
+    expect(100 * 1_000 * 702).toBeGreaterThan(CRASH_FLOOR_CELLS)
+    expect(() => unpivotTable(table, spec({ columns: foldedNames(1_000) }), SILENT)).toThrow(
+      /would allocate/,
+    )
+  })
+
+  it('says what is unset without ever refusing', () => {
+    expect(unpivotIssues(WIDE, spec({ columns: [] }))).toEqual([
+      'No columns to fold — the table passes through unchanged',
+    ])
+    expect(unpivotIssues(WIDE, spec({ nameInto: '' }))[0]).toContain('need a name')
+    expect(unpivotIssues(WIDE, spec({ columns: ['neuronId', 'type', 'DNp02', 'PLP003'] }))).toEqual(
+      ['Nothing is kept, so the values cannot be traced back to their rows'],
+    )
+    // A schema that has not arrived is not a schema without these columns: nothing to say.
+    expect(unpivotIssues(undefined, spec())).toEqual([])
   })
 })
 

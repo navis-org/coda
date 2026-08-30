@@ -24,6 +24,8 @@ import {
   relabelTarget,
   renameMapping,
 } from '../../../nodes/lib/tableOps'
+import { unpivotPlan } from '../../../nodes/lib/tableOps'
+import { readUnpivotSpec } from '../../../nodes/table/unpivot'
 import { decodeRenames } from '../../../nodes/lib/renames'
 import type { AggFn } from '../../../nodes/lib/tableOps'
 import { findColumn, isNumericDType } from '../../../core/types'
@@ -589,6 +591,70 @@ registerEmitter('core.pivot', (ctx) => {
     `)`,
     `${table} = ${matrix}.reset_index()`,
   ]
+})
+
+// ---------------------------------------------------------------------------
+// Unpivot
+// ---------------------------------------------------------------------------
+
+registerEmitter('core.unpivot', (ctx) => {
+  const src = ctx.wired('in')
+  const out = ctx.output('out')
+  const spec = readUnpivotSpec(ctx)
+  const plan = unpivotPlan(ctx.schema('in'), spec)
+  const melted = plan?.melted ?? [...new Set(spec.columns)]
+  const nameCol = plan?.nameName ?? spec.nameInto.trim()
+  const valueCol = plan?.valueName ?? spec.valueInto.trim()
+  if (melted.length === 0 || !nameCol || !valueCol) {
+    // Not configured, and the node passes its input through in exactly that case.
+    return [`${out} = ${src}`]
+  }
+
+  ctx.require('pandas')
+
+  /*
+   * An unset Keep means "everything not folded", and the comprehension says that rather than
+   * naming today's answer — `melt` with no `id_vars` keeps *nothing*, which is the one place
+   * pandas' default and this node's disagree outright. An explicit Keep is listed, so a
+   * notebook shows the same columns the card does.
+   */
+  const idVars =
+    spec.keep.length > 0
+      ? pyList(plan?.kept ?? [...new Set(spec.keep)])
+      : `[c for c in ${src}.columns if c not in ${pyList(melted)}]`
+
+  const lines = [
+    // pandas emits one folded column's whole block before the next; Coda interleaves, keeping
+    // an input row's cells together. Same rows either way — sort if the order matters.
+    `${out} = ${src}.melt(`,
+    `    id_vars=${idVars},`,
+    `    value_vars=${pyList(melted)},`,
+    `    var_name=${pyStr(nameCol)},`,
+    `    value_name=${pyStr(valueCol)},`,
+    `)`,
+  ]
+
+  /*
+   * The widening the node's own `combinedDType` does, said in code because pandas will not do
+   * it: melting a count together with a label leaves an object column holding both, where Coda
+   * has already decided the honest common type is text.
+   */
+  const folded = melted.map((n) => findColumn(ctx.schema('in'), n)?.dtype)
+  if (plan?.dtype === 'str' && folded.some((d) => d && d !== 'str')) {
+    lines.push(
+      `# The folded columns do not share a type, so the value column is text — Coda's rule.`,
+      `${out}[${pyStr(valueCol)}] = ${col(out, valueCol)}.astype('string')`,
+    )
+  }
+
+  if (spec.dropEmpty) {
+    // `dropna` alone would leave the blanks: Coda counts null and the empty string as one
+    // absence. A zero is neither, and stays.
+    lines.push(
+      `${out} = ${out}[${col(out, valueCol)}.notna() & (${col(out, valueCol)} != ${pyStr('')})]`,
+    )
+  }
+  return lines
 })
 
 // ---------------------------------------------------------------------------

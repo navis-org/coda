@@ -114,6 +114,56 @@ came from because `joinTables` keys on `String(cell)`. And a column label collid
 row field's name is suffixed (`type`, `type_2`) rather than dropped, the same call
 `joinedColumns` makes.
 
+The other direction is `core.unpivot`, below — which is not this node run backwards, for the
+reason that section opens with.
+
+## Unpivot: the other direction, and what it cannot give back
+
+`core.unpivot` folds wide columns into a `name`/`value` pair — `tidyr::pivot_longer`,
+`pandas.melt`. It exists because tables arrive already pivoted: a published connectivity CSV
+with one column per partner type, a spreadsheet with one column per timepoint, the wide half of
+a Pivot in this graph. Everything else here reads a *long* table — `Group By`, `Filter Table`, a
+Scatter's two channels, every categorical colour — so a wide one is a dead end until it is
+folded.
+
+**It is not Pivot with the arrows reversed, and the asymmetry is the aggregation.** A pivot
+collapses several rows into each cell; unfolding that cell gives one row back, not the several.
+`unpivot(pivot(t))` round-trips only where the pivot had one row per pair to begin with — and
+even then the pairs that were *absent* come back as explicit zero rows, because `matrixToTable`
+wrote 0 where the matrix had none. `Drop empty` does not remove those, deliberately: 0 is a
+value somebody may have measured, and deciding here that it is really absence would silently
+undo the call the pivot already made. Filter the zeros downstream, where the decision is on the
+canvas.
+
+**Two pickers with deliberately opposite defaults.** Fold columns is explicit and empty means
+nothing is folded; Keep is derived and empty means everything that is not. That looks backwards
+next to `pivot_longer(cols = …)` until you count what each costs when it is wrong. Folding is
+what multiplies rows — the result is `rows x folded`, the "product of two independently-resolved
+pickers" shape the pivot ceilings were written for — so it is the half that has to be *said*.
+Keeping is lossless, so "whatever is left" is both the safe reading and what somebody means by
+"the id columns". One consequence worth knowing, which `core.select` shares: a Keep list whose
+only column has disappeared resolves to *empty*, and empty means everything again. The card says
+"Missing column(s)" through `validateColumnParams`, and a schema that has merely not **arrived**
+never reaches it — `resolveColumns` hands stored names straight through there.
+
+**The value column widens where the folded columns disagree**, through the same `combinedDType`
+the coalesce uses and for the same reason: a picker naming these columns *is* somebody saying
+they hold one fact. `stackColumns` refuses the identical clash because there nobody said it —
+two tables met under one column name by accident. The unit rides along only while every folded
+column agrees on it, `stackColumns`' rule again. And the two new columns **yield** a colliding
+name (`name`, `name_2`) where `combineLayout`'s result would take it and suffix the incumbent:
+these are this node's own spelling of its output, the same standing as the stack's source column.
+
+**Row-major**, so an input row's cells stay together — `tidyr`'s order rather than `pandas`',
+which emits one folded column's whole block before the next. Either is defensible; what decided
+it is that a Table beside the node is how somebody checks a reshape, and grouping by the input
+row keeps that a single glance. The pandas emitter says so in a comment rather than sorting,
+since the difference is order and not content.
+
+Unlike Pivot, **the schema is derived rather than observed**: every output column is named by a
+param or copied from the input, so a picker downstream fills before the first run. Pivot cannot
+do that because its wide columns *are* the data.
+
 ## Connectivity similarity: Partner Vectors and Similarity Matrix
 
 `neuron.partnerVectors` and `core.similarity`, both under `Add ▸ Analysis`. Together they take

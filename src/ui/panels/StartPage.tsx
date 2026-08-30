@@ -265,7 +265,7 @@ export function StartPage() {
           <div className="start__credits">
             <div className="start__links">
               <span>
-                Developed by{' '}
+                Developed by the{' '}
                 <a href={GROUP_URL} target="_blank" rel="noreferrer noopener">
                   Fly Connectomics Group
                 </a>{' '}

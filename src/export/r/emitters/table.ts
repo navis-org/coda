@@ -14,6 +14,8 @@ import {
   relabelTarget,
   renameMapping,
 } from '../../../nodes/lib/tableOps'
+import { unpivotPlan } from '../../../nodes/lib/tableOps'
+import { readUnpivotSpec } from '../../../nodes/table/unpivot'
 import { decodeRenames } from '../../../nodes/lib/renames'
 import { rCol, rStr, rValue, rVector } from '../r'
 import { STACK_LABELS } from '../../../nodes/transform/stackNeurons'
@@ -535,6 +537,64 @@ registerEmitter('core.pivot', (ctx) => {
     `${matrix} <- as.matrix(${table}[, -1])`,
     `rownames(${matrix}) <- ${table}[[1]]`,
   ]
+})
+
+registerEmitter('core.unpivot', (ctx) => {
+  const src = ctx.wired('in')
+  const out = ctx.output('out')
+  const spec = readUnpivotSpec(ctx)
+  const plan = unpivotPlan(ctx.schema('in'), spec)
+  const melted = plan?.melted ?? [...new Set(spec.columns)]
+  const nameCol = plan?.nameName ?? spec.nameInto.trim()
+  const valueCol = plan?.valueName ?? spec.valueInto.trim()
+  if (melted.length === 0 || !nameCol || !valueCol) {
+    // Not configured, and the node passes its input through in exactly that case.
+    return [`${out} <- ${src}`]
+  }
+
+  ctx.library('dplyr')
+  ctx.library('tidyr')
+
+  /*
+   * `pivot_longer` keeps every column it was not given, which is what an unset Keep means here
+   * too — so only an explicit Keep needs saying, as a `select` in front of the fold.
+   */
+  const kept = plan?.kept ?? [...new Set(spec.keep)]
+  const selection =
+    spec.keep.length > 0 ? [`  select(all_of(${rVector([...kept, ...melted])})) |>`] : []
+
+  /*
+   * The widening the node's own `combinedDType` does, said in code because `pivot_longer`
+   * refuses instead: folding a count together with a label is "Can't combine <double> and
+   * <character>", where Coda has already decided the honest common type is text.
+   */
+  const folded = melted.map((n) => ctx.schema('in')?.columns.find((c) => c.name === n)?.dtype)
+  const transform =
+    plan?.dtype === 'str' && folded.some((d) => d && d !== 'str')
+      ? [`    values_transform = list(${rStr(valueCol)} = as.character),`]
+      : []
+
+  const lines = [
+    // tidyr folds row by row, which is Coda's order exactly — unlike `pandas.melt`.
+    `${out} <- ${src} |>`,
+    ...selection,
+    `  pivot_longer(`,
+    `    cols = all_of(${rVector(melted)}),`,
+    `    names_to = ${rStr(nameCol)},`,
+    ...transform,
+    `    values_to = ${rStr(valueCol)}`,
+    `  )`,
+  ]
+
+  if (spec.dropEmpty) {
+    // `values_drop_na` alone would leave the blanks: Coda counts null and the empty string as
+    // one absence. A zero is neither, and stays.
+    lines.push(
+      `${out} <- ${out} |>`,
+      `  filter(!is.na(${col(valueCol)}), ${col(valueCol)} != ${rStr('')})`,
+    )
+  }
+  return lines
 })
 
 registerEmitter('core.normalize', (ctx) => {

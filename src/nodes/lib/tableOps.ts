@@ -1744,6 +1744,12 @@ export function relabelTable(table: TableValue, map: TableValue, spec: RelabelSp
  * column, not this check.
  */
 export const PIVOT_COLUMNS_WARN = 2_000
+/**
+ * Both directions answer to this one, rather than an `UNPIVOT_CELLS_WARN` beside it.
+ * `unpivotTable` asks the same question from the other side — how big a reshape of this table
+ * is one somebody meant — and a second constant holding the same number is how a threshold
+ * comes to drift from itself, which is what invariant 8 records about a second spelling.
+ */
 export const PIVOT_CELLS_WARN = 2_000_000
 
 /**
@@ -1957,6 +1963,252 @@ export function uniqueLabels(data: ColumnData): string[] {
     labels.push(label)
   }
   return labels.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+}
+
+// ---------------------------------------------------------------------------
+// Unpivot (wide -> long)
+// ---------------------------------------------------------------------------
+
+export interface UnpivotSpec {
+  /** The wide columns, folded away one output row each. Empty means there is nothing to do. */
+  columns: readonly string[]
+  /** Columns repeated on every row a fold produces. Empty means everything not folded. */
+  keep: readonly string[]
+  /** Name of the column holding *which* column a value came from. */
+  nameInto: string
+  /** Name of the column holding the value itself. */
+  valueInto: string
+  /** Skip a cell that is null or blank instead of emitting a row for it. */
+  dropEmpty?: boolean
+}
+
+export interface UnpivotPlan {
+  schema: TableSchema
+  /** The folded columns the table actually has, in pick order. */
+  melted: string[]
+  /** The repeated columns, in the order they appear in the result. */
+  kept: string[]
+  /** Final name of the name column, once a collision has been settled. */
+  nameName: string
+  /** Final name of the value column, likewise. */
+  valueName: string
+  /** What the value column holds — the folded columns' shared dtype, or `str`. */
+  dtype: DType
+  /** Whether the id column survived the fold, which is what a `neurons` kind claims. */
+  neurons: boolean
+}
+
+/**
+ * Everything both halves need, derived once — `combinePlan`'s shape and its reason.
+ *
+ * Undefined where there is nothing to do, which makes both entry points a one-line guard and
+ * makes an unconfigured node pass its input through rather than refuse.
+ *
+ * Three decisions live here, and each is the one a reasonable person would write differently:
+ *
+ * **The folded set is explicit and the kept set is derived**, which looks backwards next to
+ * `pivot_longer(cols = …)` until you count what each costs when it is wrong. Folding is what
+ * multiplies rows — the result is `rows x folded`, the "product of two independently-resolved
+ * pickers" shape `pivotTable` records a 9 GB incident about — so it is the half that has to be
+ * *said*, and an unset picker means nothing is folded rather than everything is. Keeping is
+ * free and lossless, so "whatever is left" is both the safe reading and the one somebody means
+ * by "the id columns".
+ *
+ * **The value column widens rather than refusing**, through the same `combinedDType` the
+ * coalesce uses and for the same reason: a picker naming these columns *is* somebody saying
+ * they hold one fact. `stackColumns` refuses the same clash because there nobody said it — two
+ * tables met under one column name by accident. The unit rides along only while every folded
+ * column agrees on it, which is `stackColumns`' rule: synapses folded together with a length in
+ * nanometres has no single unit, and carrying one would label the other's rows wrongly.
+ *
+ * **The two new columns yield a colliding name**, where `combineLayout`'s result would take it
+ * and suffix the incumbent. The difference is what the name is *about*: a coalesce result is
+ * the column somebody asked for, where `name` and `value` are this node's default spelling of
+ * its own output — the same standing as `stackColumns`' source column, which is also appended
+ * last and also yields.
+ */
+export function unpivotPlan(
+  schema: TableSchema | undefined,
+  spec: UnpivotSpec,
+): UnpivotPlan | undefined {
+  if (!schema) return undefined
+  const nameInto = spec.nameInto.trim()
+  const valueInto = spec.valueInto.trim()
+  if (!nameInto || !valueInto) return undefined
+
+  // Deduplicated: a column folded twice would emit its cell twice per row, which is a row
+  // multiplication nobody asked for rather than a picker meaning it.
+  const melted = [...new Set(spec.columns)].filter((name) => findColumn(schema, name))
+  if (melted.length === 0) return undefined
+
+  const folded = new Set(melted)
+  /*
+   * A column named in both pickers is folded, not kept. Keeping it too would repeat it beside
+   * the value it just became — legible only as an accident — and `unpivotIssues` says so on the
+   * card rather than leaving the resolution silent.
+   */
+  const kept = (
+    spec.keep.length > 0
+      ? [...new Set(spec.keep)].filter((n) => !folded.has(n) && findColumn(schema, n))
+      : schema.columns.map((c) => c.name).filter((n) => !folded.has(n))
+  ).slice()
+
+  const taken = new Set(kept)
+  const nameName = uniqueName(taken, nameInto)
+  const valueName = uniqueName(taken, valueInto)
+
+  const dtype = combinedDType(schema, melted)
+  const units = melted.map((n) => findColumn(schema, n)?.unit)
+  const unit = units.every((u) => u !== undefined && u === units[0]) ? units[0] : undefined
+
+  const columns: ColumnSchema[] = kept.map((n) => findColumn(schema, n)!)
+  columns.push(column(nameName, 'str'), column(valueName, dtype, unit))
+  return {
+    schema: { columns },
+    melted,
+    kept,
+    nameName,
+    valueName,
+    dtype,
+    neurons: kept.includes(ID_COLUMN_NAME),
+  }
+}
+
+export function unpivotSchema(
+  schema: TableSchema | undefined,
+  spec: UnpivotSpec,
+): TableSchema | undefined {
+  return unpivotPlan(schema, spec)?.schema ?? schema
+}
+
+/**
+ * Wide -> long: one row per input row per folded column.
+ *
+ * The inverse of `pivotTable`'s wide half, and the one that turns a matrix-shaped table — a
+ * published connectivity CSV, a wide pivot somebody was sent — back into the long form every
+ * other node here takes. `Group By`, `Filter Table`, a Scatter's two channels and every chart
+ * that colours by a category all want the value in *one* column with a label beside it.
+ *
+ * **Row-major**, so an input row's cells stay together: rows 1..k of the result are the first
+ * input row's folded columns in pick order, then the second input row's, and so on. That is
+ * `tidyr::pivot_longer`'s order rather than `pandas.melt`'s, which emits one folded column's
+ * whole block before the next. Either is defensible and the difference is only visible in an
+ * unsorted table — but a Table viewer beside this node is what somebody checks the reshape
+ * with, and grouping by the row keeps the comparison against the input a single glance.
+ *
+ * A folded column the schema no longer has is skipped rather than refused, `combineTable`'s
+ * rule: this is a fold over a set of columns, so a name that is gone is one fewer thing to fold
+ * rather than a question that can no longer be answered.
+ */
+export function unpivotTable(
+  table: TableValue,
+  spec: UnpivotSpec,
+  /** Where a shape worth a sentence goes. `SILENT` for a caller with nobody to tell. */
+  ctx: Warner,
+): TableValue {
+  const plan = unpivotPlan(table.schema, spec)
+  if (!plan) return table
+
+  const width = plan.melted.length
+  const sources = plan.melted.map((name) => getColumn(table, name))
+  const dropEmpty = spec.dropEmpty ?? false
+
+  /*
+   * Counted before anything is allocated, so the floor below is checked against the rows that
+   * will actually exist. With `dropEmpty` the count is a pass over cells the table already
+   * holds — no allocation — and a wide table that is mostly holes is exactly the case where the
+   * full product would refuse a result the user can have.
+   */
+  let outRows = table.length * width
+  if (dropEmpty) {
+    outRows = 0
+    for (const source of sources) {
+      for (let row = 0; row < table.length; row++) if (!absent(source[row] ?? null)) outRows++
+    }
+  }
+
+  const cells = outRows * plan.schema.columns.length
+  refuseIfOverCrashFloor(
+    `Unfolding ${width.toLocaleString()} columns over ${table.length.toLocaleString()} rows`,
+    cells * 8,
+  )
+  if (cells > PIVOT_CELLS_WARN) {
+    warnOverThreshold(ctx, {
+      count: cells,
+      threshold: PIVOT_CELLS_WARN,
+      unit: `cells (${outRows.toLocaleString()} rows x ${plan.schema.columns.length} columns)`,
+      control: 'the size a reshape is usually meant to have',
+      cost:
+        `Unfolding ${width.toLocaleString()} columns repeats every kept column ` +
+        `${width.toLocaleString()} times. Folding fewer columns, or filtering first, costs ` +
+        `proportionally less.`,
+    })
+  }
+
+  const keptIn = plan.kept.map((name) => getColumn(table, name))
+  const keptOut = plan.kept.map(() => new Array<CellValue>(outRows).fill(null))
+  const names: ColumnData = new Array<CellValue>(outRows).fill(null)
+  const values: ColumnData = new Array<CellValue>(outRows).fill(null)
+
+  let out = 0
+  for (let row = 0; row < table.length; row++) {
+    for (let j = 0; j < width; j++) {
+      const cell = sources[j]![row] ?? null
+      if (dropEmpty && absent(cell)) continue
+      for (let k = 0; k < keptIn.length; k++) keptOut[k]![out] = keptIn[k]![row] ?? null
+      names[out] = plan.melted[j]!
+      // Null stays null: `String(null)` is the four-letter word "null", which reads as a value
+      // everywhere downstream — `combineTable`'s trap, met here on the path it does not have,
+      // since a fold emits a row for an absent cell where a coalesce skips past it.
+      values[out] =
+        plan.dtype === 'str' && cell !== null && typeof cell !== 'string' ? String(cell) : cell
+      out++
+    }
+  }
+
+  const data: Record<string, ColumnData> = {}
+  plan.kept.forEach((name, k) => {
+    data[name] = keptOut[k]!
+  })
+  data[plan.nameName] = names
+  data[plan.valueName] = values
+
+  /*
+   * Neurons only while the id column is one of the kept ones — `selectTable`'s rule. The ids
+   * now repeat, once per folded column, and that is still a table *of* neurons: a `neurons`
+   * kind is a claim about what the ids are, not about how many times each appears. Fold the id
+   * column itself and the claim is gone with it.
+   */
+  return makeTable(plan.schema, data, plan.neurons && table.kind === 'neurons' ? 'neurons' : 'table')
+}
+
+/**
+ * What is worth saying on the card, in one place because three surfaces ask.
+ *
+ * Warnings, never refusals: this node passes its input through when it is not configured, so a
+ * half-set-up card has no business blocking everything downstream — invariant 5's corollary,
+ * and the call `combine.ts` makes one node over.
+ */
+export function unpivotIssues(schema: TableSchema | undefined, spec: UnpivotSpec): string[] {
+  const issues: string[] = []
+  if (!spec.nameInto.trim() || !spec.valueInto.trim()) {
+    issues.push('Both output columns need a name — the table passes through unchanged')
+  }
+  if (spec.columns.length === 0) {
+    issues.push('No columns to fold — the table passes through unchanged')
+    return issues
+  }
+  const plan = unpivotPlan(schema, spec)
+  if (!plan) return issues
+
+  const both = spec.keep.filter((n) => plan.melted.includes(n))
+  if (both.length > 0) {
+    issues.push(`${both.join(', ')} is both folded and kept — it will only appear as a value`)
+  }
+  if (plan.kept.length === 0) {
+    issues.push('Nothing is kept, so the values cannot be traced back to their rows')
+  }
+  return issues
 }
 
 // ---------------------------------------------------------------------------

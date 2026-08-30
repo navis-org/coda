@@ -1163,6 +1163,19 @@ neuron_profile_upstream_types
 qualify_ids <- coda_qualify_ids(find_neurons, "neuronId", direction = "add", prefix = "flywire")
 ```
 
+```{r unpivot}
+# ── Unpivot ──
+unpivot <- find_neurons |>
+  select(all_of(c("neuronId", "type", "pre", "post"))) |>
+  pivot_longer(
+    cols = all_of(c("pre", "post")),
+    names_to = "side",
+    values_to = "synapses"
+  )
+unpivot <- unpivot |>
+  filter(!is.na(`synapses`), `synapses` != "")
+```
+
 ```{r histogram}
 # ── Histogram ──
 histogram_out <- find_neurons
@@ -1868,6 +1881,16 @@ normalize[!is.finite(normalize)] <- 0
 table_df_2_out <- pivot_table_df
 table_df_2_filtered <- table_df_2_out
 table_df_2_out
+```
+
+```{r unpivot-2}
+# ── Unpivot ──
+unpivot_2 <- pivot_table_df |>
+  pivot_longer(
+    cols = all_of(c("DNp02", "PVLP002")),
+    names_to = "postType",
+    values_to = "weight"
+  )
 ```
 
 ```{r heatmap}

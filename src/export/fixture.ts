@@ -519,6 +519,38 @@ export function everythingGraph(): CodaGraph {
       params: { rows: 'preType', columns: 'postType', value: 'weight', agg: 'sum' },
     },
     { id: 'norm', type: 'core.normalize', col: 12, params: { mode: 'row' } },
+    /*
+     * Unpivot twice, because one instance reaches half of its emitter. Against a *known* schema
+     * it can name the kept columns and does; against the pivot's wide table — which publishes no
+     * schema until it has run — there is nothing to name, and the cell has to say "everything
+     * not folded" as a rule rather than as a list. The second is also the pair read backwards,
+     * which is the arrangement somebody will actually build.
+     */
+    {
+      id: 'unpivot',
+      type: 'core.unpivot',
+      col: 4,
+      row: 3,
+      params: {
+        columns: ['pre', 'post'],
+        keep: ['neuronId', 'type'],
+        nameInto: 'side',
+        valueInto: 'synapses',
+        dropEmpty: true,
+      },
+    },
+    {
+      id: 'unpivotWide',
+      type: 'core.unpivot',
+      col: 12,
+      row: 1,
+      params: {
+        columns: ['DNp02', 'PVLP002'],
+        keep: [],
+        nameInto: 'postType',
+        valueInto: 'weight',
+      },
+    },
 
     /*
      * The similarity pair, twice each, because both nodes have a branch a single instance
@@ -1069,6 +1101,8 @@ export function everythingGraph(): CodaGraph {
     ['pivot', 'matrix', 'norm', 'in'],
     ['norm', 'out', 'heat', 'in'],
     ['pivot', 'table', 'table', 'in'],
+    ['find', 'neurons', 'unpivot', 'in'],
+    ['pivot', 'table', 'unpivotWide', 'in'],
     ['table', 'out', 'dl', 'in'],
 
     ['group', 'out', 'bar', 'in'],
