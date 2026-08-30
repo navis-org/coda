@@ -339,10 +339,29 @@ Chrome in both themes: the panel is 260px with and without it.
 
 ## The `?` menu's submenus
 
-Four rows, two of which open a flyout: Welcome Dialog, `Guides ▸` (Basics, Learn to Build),
-Keyboard Shortcuts, `Documentation ▸` (Overview, Field Guide, Node Guide). Flat it was seven
-two-line rows, which is a wall you read rather than scan — in the one menu whose readers are by
-definition already lost.
+Six rows, two of which open a flyout: Welcome Dialog, `Guides ▸` (Basics, Learn to Build),
+`Documentation ▸` (Overview, Field Guide, Node Guide), Data & Privacy, Keyboard Shortcuts, Give
+Feedback. Flat it was nine two-line rows, which is a wall you read rather than scan — in the one
+menu whose readers are by definition already lost.
+
+**The order runs from "I am lost" to "I know what I want and need to check it"**: the way back to
+the start page, the two groups that teach, then the two cards a reader looks something up in —
+and last, once none of those was it, somewhere to say so. Give Feedback goes bottom rather than
+near the top for that reason: high up it is the loudest row in the menu offering to take a
+question the rows below it answer, and the reader who reaches it having passed all of them is
+exactly the one whose "this is missing" is worth having.
+
+**It replaced a rule that described the code accurately and organised the menu by the wrong
+thing.** That rule was: above `Documentation ▸`, rows that act on the canvas you are looking at;
+inside it, documents that open a tab. True of every row, and it bought a distinction about what a
+click costs that the submenu's own blurb already makes — at the price of splitting Data & Privacy
+and Keyboard Shortcuts, the two cards a reader looks *up* from, away from the documents they
+belong beside. Both are still dialogs, and still for `ShortcutsDialog`'s reason: their questions
+are asked *while* a graph is on screen. That is a fact about the surface, not about where the row
+goes.
+
+Data & Privacy sits before Keyboard Shortcuts because it is the one row carrying something a
+reader is obliged to act on, and a keymap is the more findable of the two without help.
 
 **`Dropdown` needs `flyouts` for this, and the reason is a CSS rule with no exceptions.**
 `.dropdown__panel` sets `overflow-y: auto` so the long menus (New, Open, Save, Examples) cap at
@@ -375,6 +394,37 @@ handling on `Submenu` is correct and goes live the moment that guard learns abou
 "Guides", "Guided Tour" stutters; in the flat command palette and the start page's link row a
 bare "Basics" says nothing. The shortening is a consequence of the nesting, so it belongs to the
 surface that nests.
+
+## Data & Privacy
+
+`PrivacyDialog.tsx`, opened by `privacyRequest` — the same counter-plus-mount-seeded-guard idiom
+as Share, Shortcuts and Feedback, because the `?` menu closes on pick and has nowhere to hold a
+dialog.
+
+**Two answers in one dialog, and the second is the loud one.** The privacy half is reassuring —
+work and credentials stay in this browser, analysis runs here — and reassurance does not need
+volume. The citation half is an *obligation the reader acquires without doing anything*: a picker
+that says "MaleCNS" gives no hint that behind it are years of somebody's reconstruction work,
+published asking for attribution. So it gets the callout treatment (`.privacy__cite`, tinted panel
+plus a rule down the leading edge) and goes second, where a short document is actually read.
+
+**It lists no papers, deliberately.** Any list here is a second copy of the publisher's own
+wording that drifts from it from the day it is written — and it would go stale *silently*, since a
+citation that is merely out of date still looks like a citation. The `Description` node already
+renders the publisher's own text and arrives wired to every dataset node, so the dialog points at
+it instead. Losing that pointer is what `privacy.test.tsx` guards; it is what makes the obligation
+actionable rather than a slogan.
+
+**The failure mode the test actually watches for is the overclaim.** "Nothing leaves your browser"
+is the sentence this dialog is one careless trim away from, and it is false — every dataset node
+fetches, and the assistant sends the graph to a third party. A privacy notice that is wrong in the
+*reassuring* direction is worse than none, because it is believed. Hence assertions that fetching
+and the assistant are both still disclosed, rather than a snapshot of the copy.
+
+**It repeats what `SourcesPanel`'s four `sources__privacy` notes say about credentials**, on
+purpose. Those are read by somebody already in Connections configuring a token; this is read by
+somebody who has never opened it. A reader who must find the other surface to learn whether their
+token is safe has already been failed.
 
 ## Keyboard shortcuts
 

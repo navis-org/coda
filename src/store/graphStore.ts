@@ -170,6 +170,15 @@ export interface GraphState {
   shortcutsRequest: number
   requestShortcuts(): void
   /**
+   * Asks for the Data & Privacy dialog.
+   *
+   * Same idiom again, and a dialog rather than a page for `ShortcutsDialog`'s reason: both
+   * questions it answers — where does my work live, and who do I have to cite — are asked
+   * *while* looking at a graph, and the three documents in the `?` menu all navigate away.
+   */
+  privacyRequest: number
+  requestPrivacy(): void
+  /**
    * Asks for the Feedback dialog, on whichever tab the caller means.
    *
    * A fifth counter, same idiom as `shareRequest` and `shortcutsRequest`: the `?` menu, the
@@ -898,6 +907,8 @@ export const useGraphStore = create<GraphState>((set, get) => {
     requestShare: () => set((s) => ({ shareRequest: s.shareRequest + 1 })),
     shortcutsRequest: 0,
     requestShortcuts: () => set((s) => ({ shortcutsRequest: s.shortcutsRequest + 1 })),
+    privacyRequest: 0,
+    requestPrivacy: () => set((s) => ({ privacyRequest: s.privacyRequest + 1 })),
     feedbackRequest: { seq: 0, category: 'general' },
     requestFeedback: (category = 'general') =>
       set((s) => ({ feedbackRequest: { seq: s.feedbackRequest.seq + 1, category } })),

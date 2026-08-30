@@ -109,9 +109,11 @@ the common lists, and a blocked beacon is simply a page view that does not happe
 
 ## Where the dashboard link appears
 
-Four places, so that no surface says something about the site without also saying this:
+Five places, so that no surface says something about the site without also saying this:
 
 - the start page credits row (`StartPage.tsx`, beside Overview / Docs / Node guide)
+- the `Data & Privacy` dialog under `?` (`PrivacyDialog.tsx`), which is the one surface that
+  says what *else* the app does with data — see [docs/ui-shell.md](ui-shell.md)
 - the colophon on `overview.html` and `tutorial.html`
 - the meta row on `nodes.html`
 - [README.md](../README.md)

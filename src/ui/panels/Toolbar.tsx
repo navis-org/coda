@@ -61,6 +61,7 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
   const openStartPage = useGraphStore((s) => s.openStartPage)
   const requestShare = useGraphStore((s) => s.requestShare)
   const requestShortcuts = useGraphStore((s) => s.requestShortcuts)
+  const requestPrivacy = useGraphStore((s) => s.requestPrivacy)
   const requestFeedback = useGraphStore((s) => s.requestFeedback)
   const undo = useGraphStore((s) => s.undo)
   const redo = useGraphStore((s) => s.redo)
@@ -194,11 +195,16 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
        * and both tours. A menu rather than a bare button because a lone "?" says nothing about
        * what it does until you press it.
        *
-       * **Five rows, two of which open a submenu.** Flat, it was seven — and seven two-line rows
-       * is a wall you read rather than scan, in the one menu whose whole job is to be scannable
-       * by somebody who is already lost. The two groupings are the two questions actually being
+       * **Six rows, two of which open a submenu.** Flat, it was nine — and nine two-line rows is
+       * a wall you read rather than scan, in the one menu whose whole job is to be scannable by
+       * somebody who is already lost. The two groupings are the two questions actually being
        * asked ("show me around" and "where is it written down"), and both are collapsed rather
        * than only the second, because a menu with one submenu in it reads as an afterthought.
+       *
+       * The rows run from "I am lost" to "I know what I want": the way back to the start page,
+       * then the two groups that teach, then the two cards a reader looks something up in — and
+       * last, once none of those was it, somewhere to say so. See the note above Data & Privacy
+       * for the rule this replaced.
        *
        * `flyouts` turns off the panel's own `overflow-y`, which would otherwise clip the
        * submenus — see the note on `Dropdown`.
@@ -207,9 +213,8 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
         {(close) => (
           <>
             {/*
-             * First, and alone above the two groups: it is the only row that is neither a
-             * walkthrough nor a document, and it is what somebody who dismissed it is here to
-             * find again.
+             * First, because it is the way back to the thing somebody ticked "Don't show again"
+             * on, and the row a reader who is merely lost wants before any of the others.
              */}
             <button
               type="button"
@@ -223,22 +228,9 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
               <span>Quick start plus a few useful links.</span>
             </button>
             {/*
-             * Second, and still above the two groups: bugs, feature ideas and hellos are not a
-             * walkthrough or a document either, and this is the row somebody with something to
-             * say is here for.
-             */}
-            <button
-              type="button"
-              className="dropdown__item"
-              onClick={() => {
-                requestFeedback('general')
-                close()
-              }}
-            >
-              <strong>Give Feedback</strong>
-              <span>Bug reports, feature requests, or just say hi.</span>
-            </button>
-            {/*
+             * The two "teach me" groups, adjacent and in the order somebody meets them: the
+             * tours happen on this canvas, the documents open a tab and go wider.
+             *
              * The tours take `short` rather than `label` — under a heading that already says
              * "Guides", "Guided Tour" stutters. See the note on `TOURS` for why the palette and
              * the start page keep the long name.
@@ -259,23 +251,7 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
                 </button>
               ))}
             </Submenu>
-            <button
-              type="button"
-              className="dropdown__item"
-              onClick={() => {
-                requestShortcuts()
-                close()
-              }}
-            >
-              <strong>Keyboard Shortcuts</strong>
-              <span>Every key and canvas gesture, on one card.</span>
-            </button>
             {/*
-             * What used to be a rule across the menu: above it, things that act on the editor you
-             * are looking at; below it, documents that navigate away. The submenu now says that
-             * in a word, and the blurb says what the click costs mid-graph — which is what the
-             * rule was standing in for and could never actually state.
-             *
              * Links rather than buttons, so they open in a new tab the ordinary way. Through
              * `BASE_URL`, since `base` is './' and an absolute path would resolve to the domain
              * root under a subpath deploy.
@@ -320,6 +296,62 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
                 <span>Catalogue of all nodes</span>
               </a>
             </Submenu>
+            {/*
+             * The two reference cards. Both are dialogs that stay over the canvas, and both are
+             * what somebody *returns* for rather than reads once — which is the whole ordering
+             * principle here: the menu runs from "I am lost" to "I know what I want and need to
+             * check it", and ends with the row for when none of it helped.
+             *
+             * This retired an earlier rule, which was that everything above `Documentation ▸`
+             * acted on the canvas and everything below it opened a tab. It described the code
+             * accurately and organised the menu by the wrong thing: it split the two cards a
+             * reader looks *up* from the documents they sit beside, to keep a distinction about
+             * what a click costs that the submenu's own blurb already makes.
+             *
+             * Data & Privacy before Keyboard Shortcuts: it is the one row here carrying
+             * something a reader is obliged to act on, and a keymap is the more findable of the
+             * two without help.
+             */}
+            <button
+              type="button"
+              className="dropdown__item"
+              onClick={() => {
+                requestPrivacy()
+                close()
+              }}
+            >
+              <strong>Data &amp; Privacy</strong>
+              <span>How your data is handled and how to cite the datasets.</span>
+            </button>
+            <button
+              type="button"
+              className="dropdown__item"
+              onClick={() => {
+                requestShortcuts()
+                close()
+              }}
+            >
+              <strong>Keyboard Shortcuts</strong>
+              <span>Every key and canvas gesture, on one card.</span>
+            </button>
+            {/*
+             * Last, and deliberately after everything it might have been an alternative to: the
+             * reader who still wants this has been past the tours, the documents and both cards,
+             * which is exactly the reader whose "this is missing" is worth having. Above the
+             * groups it competed with them — the loudest row in the menu offering to take a
+             * question that the row below it answers.
+             */}
+            <button
+              type="button"
+              className="dropdown__item"
+              onClick={() => {
+                requestFeedback('general')
+                close()
+              }}
+            >
+              <strong>Give Feedback</strong>
+              <span>Bug reports, feature requests, or just say hi.</span>
+            </button>
           </>
         )}
       </Dropdown>

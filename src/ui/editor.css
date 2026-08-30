@@ -4363,6 +4363,83 @@ a.viewer-actions__btn {
 }
 
 /*
+ * Data & Privacy. Narrower than the shortcuts card and single-column: this one is prose, and a
+ * measure much past ~60 characters is where a short notice stops being read as a short notice.
+ */
+.privacy {
+  max-width: 560px;
+  height: auto;
+  max-height: min(88vh, 720px);
+}
+
+.privacy__body {
+  padding: 12px 14px;
+}
+
+.privacy__group h3,
+.privacy__cite h3 {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.privacy__group dl {
+  margin: 0 0 14px;
+}
+
+/*
+ * Label above value rather than beside it. A two-column layout wants the term column wide
+ * enough for "Connectome data", which at this dialog's width leaves the definitions about
+ * thirty characters to wrap in.
+ */
+.privacy__row {
+  margin-bottom: 9px;
+}
+.privacy__row dt {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.privacy__row dd {
+  margin: 1px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+/*
+ * The citation half, marked out rather than merely last. Same tinted-panel treatment as
+ * `.sources__privacy`, plus a rule down the leading edge — this is the one part of the dialog a
+ * reader acquires an obligation from, and it has to survive being skimmed.
+ */
+.privacy__cite {
+  padding: 10px 12px;
+  border-radius: 6px;
+  border-left: 2px solid var(--accent);
+  background: var(--surface-2);
+}
+.privacy__cite p {
+  margin: 0 0 8px;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+.privacy__cite p:last-child {
+  margin-bottom: 0;
+}
+.privacy__cite strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.privacy__where {
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+/*
  * `columns` rather than a grid, so the groups flow into whichever column has room. A grid would
  * need the split chosen in advance, and the split goes lopsided the moment a group gains a row.
  * `break-inside: avoid` on the group is what keeps a heading from being orphaned at a column

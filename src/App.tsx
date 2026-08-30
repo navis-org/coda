@@ -9,6 +9,7 @@ import { FeedbackDialog } from './ui/panels/FeedbackDialog'
 import { FeedbackNudge } from './ui/panels/FeedbackNudge'
 import { Inspector } from './ui/panels/Inspector'
 import { ShareDialog } from './ui/panels/ShareDialog'
+import { PrivacyDialog } from './ui/panels/PrivacyDialog'
 import { ShortcutsDialog } from './ui/panels/ShortcutsDialog'
 import { SharedLinkGate } from './ui/panels/SharedLinkGate'
 import { StartPage } from './ui/panels/StartPage'
@@ -48,6 +49,7 @@ export function App() {
        * of the places somebody presses Escape and wonders what else the keyboard does.
        */}
       <ShortcutsDialog />
+      <PrivacyDialog />
       {/* Same idiom, opened from the `?` menu, the palette, the start page and the nudge below. */}
       <FeedbackDialog />
       {/* Last, and on top: it can be reopened over an expanded viewer. */}
