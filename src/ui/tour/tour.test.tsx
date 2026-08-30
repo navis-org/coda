@@ -29,11 +29,13 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { App } from '../../App'
 import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
+import { DEFAULT_ROW_SPAN } from '../../core/dashboard'
 import { requireNodeDef } from '../../core/registry'
 import { useGraphStore } from '../../store/graphStore'
 import { clearStorage, installJsdomStubs } from '../../test/jsdomStubs'
 import { EXAMPLES } from '../../examples'
 import { BUILD_SPEC, LEARN_TO_BUILD, PARAMS } from './build'
+import { BUILD_A_DASHBOARD, DASHBOARD_SPEC } from './dashboard'
 import { GUIDED_TOUR, TOUR_ANCHORS, byTour } from './steps'
 
 beforeAll(() => {
@@ -55,10 +57,23 @@ beforeEach(() => {
 
 afterEach(cleanup)
 
-/** Every step of both tours, so the shared assertions below cannot forget the second one. */
+/** Every step of every tour, so the shared assertions below cannot forget a new one. */
 const ALL = [
   ['Guided Tour', GUIDED_TOUR],
   ['Learn to Build', LEARN_TO_BUILD],
+  ['Build a Dashboard', BUILD_A_DASHBOARD],
+] as const
+
+/**
+ * The contract that stops a tour wedging, asserted for every tour that hands the reader a move.
+ *
+ * Pressing Next on a "your turn" step must leave the following step able to carry on, which it
+ * can only do by performing the action itself — so every interactive step needs a successor with
+ * a `before`, and a predicate that can see the action was done.
+ */
+const INTERACTIVE = [
+  ['Learn to Build', LEARN_TO_BUILD, 3],
+  ['Build a Dashboard', BUILD_A_DASHBOARD, 3],
 ] as const
 
 describe('the Guided Tour', () => {
@@ -101,17 +116,131 @@ describe('the Guided Tour', () => {
     }
   })
 
-  it.each(ALL)('%s starts centred and gives every stop a title and a stable id', (_name, steps) => {
-    // A tour whose first stop is already pointing somewhere begins by moving the screen under a
-    // reader who has not yet been told what is about to happen — and for "Learn to Build", the
-    // first stop is where they are told the canvas is about to be emptied.
-    expect(steps[0]?.anchor).toBeUndefined()
-    for (const step of steps) {
-      expect(step.title.length, `step "${step.id}" has no title`).toBeGreaterThan(0)
-      expect(step.body.length, `step "${step.id}" has no body`).toBeGreaterThan(0)
+  it.each(ALL)(
+    '%s starts centred and gives every stop a title and a stable id',
+    (_name, steps) => {
+      // A tour whose first stop is already pointing somewhere begins by moving the screen under a
+      // reader who has not yet been told what is about to happen — and for "Learn to Build", the
+      // first stop is where they are told the canvas is about to be emptied.
+      expect(steps[0]?.anchor).toBeUndefined()
+      for (const step of steps) {
+        expect(step.title.length, `step "${step.id}" has no title`).toBeGreaterThan(0)
+        expect(step.body.length, `step "${step.id}" has no body`).toBeGreaterThan(0)
+      }
+      // Stable ids, because a resume-where-I-left-off would key on them.
+      expect(new Set(steps.map((s) => s.id)).size).toBe(steps.length)
+    },
+  )
+})
+
+describe.each(INTERACTIVE)('%s', (_name, steps, atLeast) => {
+  it('hands the reader something to do, and can always be skipped past it', () => {
+    const interactive = steps.filter((step) => step.interactive)
+    expect(interactive.length).toBeGreaterThanOrEqual(atLeast)
+
+    for (const step of interactive) {
+      const next = steps[steps.indexOf(step) + 1]
+      expect(next?.before, `nothing recovers if "${step.id}" is skipped`).toBeTruthy()
+      expect(step.advanceWhen, `"${step.id}" asks for an action it cannot detect`).toBeTruthy()
     }
-    // Stable ids, because a resume-where-I-left-off would key on them.
-    expect(new Set(steps.map((s) => s.id)).size).toBe(steps.length)
+  })
+})
+
+/**
+ * "Build a Dashboard" ends somewhere the other two never go, so what it can break is different:
+ * a port id that no longer exists, and a *layout* that no longer produces the composition the
+ * copy describes.
+ */
+describe('Build a Dashboard', () => {
+  it('builds the graph and arranges it, with every step pointing at something', () => {
+    render(<App />)
+    act(() => {
+      DASHBOARD_SPEC.prepare?.()
+    })
+
+    for (const step of BUILD_A_DASHBOARD) {
+      act(() => step.before?.())
+      if (!step.anchor) continue
+      expect(step.anchor(), `step "${step.id}" has nothing to point at`).toBeTruthy()
+    }
+
+    const { graph } = useGraphStore.getState()
+    const idOf = (type: string) => graph.nodes.find((n) => n.type === type)?.id
+    const explore = idOf('neuron.explore')
+    const table = idOf('out.table')
+    const scene = idOf('out.neuroglancer')
+    expect(idOf('dataset.malecns'), 'the dataset node is gone').toBeTruthy()
+    expect(
+      explore && table && scene,
+      'a node type the tour names has been renamed',
+    ).toBeTruthy()
+
+    /*
+     * Both wires come off `selected`, which is the whole lesson — one widget chooses and the
+     * others follow. `connect` refuses silently when a port id is wrong, so this is asserted on
+     * the graph rather than on the step that called it.
+     */
+    const from = (target: string | undefined, port: string) =>
+      graph.edges.find((e) => e.target === target && e.targetHandle === port)
+    expect(from(table, 'in')?.sourceHandle, 'the table is not fed from Selected').toBe(
+      'selected',
+    )
+    expect(from(scene, 'neurons')?.sourceHandle, 'the scene is not fed from Selected').toBe(
+      'selected',
+    )
+    expect(from(scene, 'dataset')?.source, 'the scene has no dataset').toBeTruthy()
+  })
+
+  /**
+   * The composition the copy promises: Explore top left, the table under it, the scene down the
+   * whole right-hand side.
+   *
+   * Order *is* position on a dashboard, so this is checkable without layout — which is the only
+   * reason it can be tested at all in jsdom. Reorder `CELLS` and the prose stops describing what
+   * the reader gets, with nothing else failing.
+   */
+  it('arranges the three cells into the layout the copy describes', () => {
+    render(<App />)
+    act(() => {
+      DASHBOARD_SPEC.prepare?.()
+    })
+    for (const step of BUILD_A_DASHBOARD) act(() => step.before?.())
+
+    const state = useGraphStore.getState()
+    const { graph } = state
+    const type = (id: string) => graph.nodes.find((n) => n.id === id)?.type
+    const cells = graph.dashboard?.cells ?? []
+
+    expect(cells.map((c) => type(c.nodeId))).toEqual([
+      'neuron.explore',
+      'out.neuroglancer',
+      'out.table',
+    ])
+    expect(graph.dashboard?.columns).toBe(2)
+    /*
+     * Half, full, half — the scene is the one that runs the whole height. Read through
+     * `DEFAULT_ROW_SPAN` rather than off `c.h`, because a half-height cell stores its height as
+     * *absence*: that is the model's rule, and a test comparing the raw field would be asserting
+     * the storage rather than the layout.
+     */
+    expect(cells.map((c) => c.h ?? DEFAULT_ROW_SPAN)).toEqual([3, 6, 3])
+    // And the tour leaves the reader looking at it.
+    expect(state.dashboardOpen).toBe(true)
+  })
+
+  it('warns about the neuPrint token when there is none, before anything is built', () => {
+    render(<App />)
+    const preamble = DASHBOARD_SPEC.prepare?.() ?? ''
+    expect(preamble).toContain('neuPrint')
+    // It has to predict the panel opening, not merely mention where the token goes: the dataset
+    // node peeks on creation, so a 401 — and the panel — arrives at step 3 whatever the tour does.
+    expect(preamble).toContain('Connections panel will open')
+    // Said in `prepare`, which runs before the first step's body is shown — so a reader without
+    // credentials finds out while Escape still leaves their canvas untouched.
+    expect(
+      BUILD_A_DASHBOARD[0]?.before,
+      'the first step must not touch the graph',
+    ).toBeUndefined()
   })
 })
 
@@ -145,7 +274,10 @@ describe('Learn to Build', () => {
       'core.groupBy',
       'out.barChart',
     ]) {
-      expect(graph.nodes.some((n) => n.type === type), `${type} was never added`).toBe(true)
+      expect(
+        graph.nodes.some((n) => n.type === type),
+        `${type} was never added`,
+      ).toBe(true)
     }
 
     /*
@@ -155,7 +287,8 @@ describe('Learn to Build', () => {
      */
     const fed = new Set(graph.edges.map((edge) => edge.target))
     for (const node of graph.nodes) {
-      if (node.type === 'dataset.mock.opticlobe' || node.type === 'dataset.description') continue
+      if (node.type === 'dataset.mock.opticlobe' || node.type === 'dataset.description')
+        continue
       expect(fed.has(node.id), `${node.type} was left unwired`).toBe(true)
     }
     // Connectivity takes two inputs and the tour claims both get wired.
@@ -306,21 +439,5 @@ describe('Learn to Build', () => {
     // A guard on the guard: a renamed node type would make every lookup miss and the loop pass
     // by comparing nothing at all.
     expect(compared, 'nothing was actually compared').toBeGreaterThanOrEqual(3)
-  })
-
-  it('hands the reader something to do, and can always be skipped past it', () => {
-    const interactive = LEARN_TO_BUILD.filter((step) => step.interactive)
-    expect(interactive.length).toBeGreaterThanOrEqual(3)
-
-    /*
-     * The contract that stops the tour wedging: pressing Next on a "your turn" step must leave
-     * the following step able to carry on, which it can only do by performing the action itself.
-     * So every interactive step must be followed by one with a `before`.
-     */
-    for (const step of interactive) {
-      const next = LEARN_TO_BUILD[LEARN_TO_BUILD.indexOf(step) + 1]
-      expect(next?.before, `nothing recovers if "${step.id}" is skipped`).toBeTruthy()
-      expect(step.advanceWhen, `"${step.id}" asks for an action it cannot detect`).toBeTruthy()
-    }
   })
 })

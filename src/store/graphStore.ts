@@ -29,6 +29,14 @@ import {
   setNodeParam,
   updateNode,
 } from '../core/graph'
+import {
+  addCells,
+  moveCell,
+  removeCells,
+  setViewOpen,
+  setColumns as setDashboardTracks,
+  setSpan as setCellSpan,
+} from '../core/dashboard'
 import { cloneGroups, createGroup, removeGroups, updateGroup } from '../core/groups'
 import { autoWireDataset } from '../core/autowire'
 import { addNodeWithCompanion } from '../core/companion'
@@ -379,6 +387,51 @@ export interface GraphState {
    * column renders — without it the grip would announce 20% for a dock CSS is drawing at 25%.
    */
   setDockFraction(fraction: number, totalPx?: number): void
+  /**
+   * Whether the dashboard is up instead of the canvas.
+   *
+   * A **mode**, and the canvas is genuinely gone while it is on — `App.tsx` renders one or the
+   * other into the same grid area, so React Flow unmounts and every card's viewer with it. That
+   * is not a tidiness choice: a grid of live viewers next to a canvas of live previews is two
+   * WebGL contexts per node, which is the measurement `showPreview` already stands cards down
+   * for. Swapping the surfaces trades contexts rather than adding them, and it is why a cell
+   * needs no stand-down rule of its own.
+   *
+   * **Live state here, and a recorded fact in the document.** This is the truth while running;
+   * `DashboardLayout.open` is what the last save saw, and a graph saved from the dashboard opens
+   * back into it. So the two are kept in step in one direction only — every setter below writes
+   * the flag through, and `loadGraph` reads it back — rather than this being a selector over the
+   * graph, because a graph with no layout yet has nowhere to hold it and the mode still has to
+   * be togglable there.
+   *
+   * The write is `history: false`. Looking at the other view is a change to the document under
+   * this rule, but it is not an *edit*: an undo step for having pressed `D` would put a keypress
+   * between somebody and the thing they actually want to undo.
+   *
+   * The pin is dropped on the way in. The dock exists to keep one viewer up *while working on
+   * the graph beside it*, and there is no graph beside it here; leaving it would also be the one
+   * way a node could be live in a cell and in the dock at once.
+   */
+  dashboardOpen: boolean
+  /** Switch the view. Both entry points go through one function — see `setDashboard`. */
+  setDashboardOpen(open: boolean): void
+  toggleDashboard(): void
+  /**
+   * Put these nodes on the dashboard, in the order given, skipping any already there.
+   *
+   * **Live under the lock.** Everything else the lock refuses is canvas geometry or graph
+   * structure, and a dashboard is neither — it is the *other* view. Refusing it would also be
+   * backwards for the feature the lock was reaching for: freezing the canvas so it can be used
+   * as a dashboard is the want this replaces, so a locked canvas is exactly when somebody is
+   * assembling one.
+   */
+  addToDashboard(nodeIds: string[]): void
+  removeFromDashboard(nodeIds: string[]): void
+  /** Reorder: put this cell at `toIndex`, counted after it has been lifted out. */
+  moveDashboardCell(nodeId: string, toIndex: number): void
+  /** Resize one cell. Spans are clamped to the grid, never refused — see `clampSpan`. */
+  setDashboardSpan(nodeId: string, span: { w?: number; h?: number }): void
+  setDashboardColumns(columns: number): void
   /**
    * Node **type** whose help document is open, if any.
    *
@@ -866,6 +919,48 @@ export const useGraphStore = create<GraphState>((set, get) => {
     afterGraphChange(after, { autoRun: options.autoRun !== false })
   }
 
+  /**
+   * Switch the view, and record it on the document if there is a layout to record it on.
+   *
+   * One function for open, close and toggle. Three setters each spelled the pin-drop and the
+   * write-through for themselves, which is three chances for them to disagree — and two of them
+   * already did, spelling the same effect two ways.
+   *
+   * `history: false` on the write: pressing `D` changes the document under
+   * `DashboardLayout.open`'s rule, but it is not an *edit*, and an undo step for it would land
+   * between somebody and the change they meant to undo. The autosave still picks it up, which is
+   * what makes a reload come back to the same view.
+   *
+   * The pin goes with the canvas it was beside — see `dashboardOpen`. Note the overlay is *not*
+   * dropped: a cell's ⤢ opens it, and standing the cell down while it does is the rule a card
+   * already follows.
+   */
+  function setDashboard(open: boolean): void {
+    set({ dashboardOpen: open, ...(open ? { pinnedNodeId: undefined } : {}) })
+    commit((g) => setViewOpen(g, open), { history: false, autoRun: false })
+  }
+
+  /**
+   * Change a layout, and stamp the current view on it in the same commit.
+   *
+   * The composition is here rather than at each of the five call sites, which each had to
+   * remember it: a sixth mutator that forgot would still commit the layout and leave the flag
+   * stale until a save captured it — silent, and only visible as a graph opening in the wrong
+   * view days later.
+   *
+   * Composed *around* the mutation rather than applied after it, because adding the first cell is
+   * the moment a layout comes into existence, and two commits would leave a graph — briefly, but
+   * an autosave tick can land there — that has a dashboard and does not know it is being looked
+   * at. `autoRun: false` throughout: which cells exist and how big they are changes nothing any
+   * node computes.
+   */
+  function commitLayout(mutate: (graph: CodaGraph) => CodaGraph, tag?: string): void {
+    commit((g) => setViewOpen(mutate(g), get().dashboardOpen), {
+      autoRun: false,
+      ...(tag ? { tag } : {}),
+    })
+  }
+
   const initial = loadAutosave()
   /*
    * A fresh visit opens on the start page, so the canvas behind it starts empty. It used to
@@ -1089,7 +1184,34 @@ export const useGraphStore = create<GraphState>((set, get) => {
      * request with a covered panel. Closing the dock (`undefined`) touches nothing.
      */
     pinNode: (nodeId) =>
-      set(nodeId ? { pinnedNodeId: nodeId, expandedNodeId: undefined } : { pinnedNodeId: nodeId }),
+      set(
+        nodeId ? { pinnedNodeId: nodeId, expandedNodeId: undefined } : { pinnedNodeId: nodeId },
+      ),
+
+    dashboardOpen: initialGraph.dashboard?.open === true,
+    setDashboardOpen: setDashboard,
+    toggleDashboard: () => setDashboard(!get().dashboardOpen),
+
+    addToDashboard: (nodeIds) => {
+      if (nodeIds.length === 0) return
+      commitLayout((g) => addCells(g, nodeIds))
+    },
+
+    removeFromDashboard: (nodeIds) => {
+      if (nodeIds.length === 0) return
+      commitLayout((g) => removeCells(g, nodeIds))
+    },
+
+    moveDashboardCell: (nodeId, toIndex) => commitLayout((g) => moveCell(g, nodeId, toIndex)),
+
+    // Tagged, so a drag that crosses three track boundaries is one undo step rather than three —
+    // the coalescing `renameNode` and `renameGroup` already use. The columns slider takes one for
+    // the same reason: five steps of a drag are one decision.
+    setDashboardSpan: (nodeId, span) =>
+      commitLayout((g) => setCellSpan(g, nodeId, span), `cell-span:${nodeId}`),
+
+    setDashboardColumns: (columns) =>
+      commitLayout((g) => setDashboardTracks(g, columns), 'dash-columns'),
     dockFraction: loadDockFraction(),
     setDockFraction: (fraction, totalPx) => {
       const next = clampDockFraction(fraction, totalPx)
@@ -1136,6 +1258,8 @@ export const useGraphStore = create<GraphState>((set, get) => {
         lastRun: undefined,
         expandedNodeId: undefined,
         pinnedNodeId: undefined,
+        // Nothing to show in a grid, so the canvas whatever the last graph was seen through.
+        dashboardOpen: false,
       })
       scheduler.invalidateAll()
       afterGraphChange(graph, { autoRun: false })
@@ -1157,6 +1281,18 @@ export const useGraphStore = create<GraphState>((set, get) => {
         lastRun: undefined,
         expandedNodeId: undefined,
         pinnedNodeId: undefined,
+        /*
+         * The view the file was saved from — the one thing on this list that is *read* from the
+         * document rather than reset by it.
+         *
+         * A graph carrying no dashboard, or one saved from the canvas, opens on the canvas, so
+         * nothing that predates this feature changes. A graph whose author saved it while looking
+         * at the grid opens into the grid, which is the whole point of a dashboard being
+         * shareable: the link is the wall of results, not a canvas the recipient has to be told
+         * to press `D` on. See `DashboardLayout.open` for why this is a different promise from
+         * the lock's, which deliberately does not travel.
+         */
+        dashboardOpen: graph.dashboard?.open === true,
       })
       scheduler.invalidateAll()
       afterGraphChange(graph)
@@ -1492,7 +1628,9 @@ export const useGraphStore = create<GraphState>((set, get) => {
         ...(s.expandedNodeId && nodeIds.includes(s.expandedNodeId)
           ? { expandedNodeId: undefined }
           : {}),
-        ...(s.pinnedNodeId && nodeIds.includes(s.pinnedNodeId) ? { pinnedNodeId: undefined } : {}),
+        ...(s.pinnedNodeId && nodeIds.includes(s.pinnedNodeId)
+          ? { pinnedNodeId: undefined }
+          : {}),
       }))
     },
 

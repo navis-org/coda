@@ -224,6 +224,13 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
         short: 'pin',
       },
       {
+        id: 'dashboard',
+        chords: [{ key: 'D' }],
+        label: 'Dashboard, and back',
+        hint: 'The same graph as a grid of the nodes worth looking at — no canvas, no wires',
+        short: 'dashboard',
+      },
+      {
         id: 'fullscreen',
         chords: [{ key: 'F' }],
         label: 'Fullscreen',

@@ -18,6 +18,17 @@ raw / 0.46 kB gzipped**, its CSS is 25 kB (nearly all of it `theme.css`), and
 `dist/overview.html` must reference no `main-*` chunk. If it ever does, something reached into
 `src/ui` past the stylesheet.
 
+The **dashboard** section sits directly after the editor thesis, because it is the same claim
+turned round: having said the canvas is the document, it says you do not have to look at it. Its
+figure is the arrangement the "Build a Dashboard" tour ends on — Explore top left, the selection
+as a table below, Neuroglancer down the right at full height — so the page and the tour show one
+composition rather than two. The figure is hand-placed with `grid-template` rather than the app's
+auto-flow: it is a picture of a layout, and one that had to be reasoned about to draw would be the
+wrong kind of copy of the thing it illustrates. Its neuroglancer panel takes the same literal
+black the tutorial's does, and its viewBox is **landscape**, because the cell it fills is — a
+portrait one under `slice` crops the arbours off at the top, which reads as a mistake rather than
+as a close-up.
+
 **Its script is a scroll reveal and a theme read, and that is the whole of it.** The page has no
 camera and no pinned canvas — the field guide already owns that idiom, and repeating it here
 would make the front door the longest of the three to get through. Every figure is static markup

@@ -46,15 +46,10 @@
  */
 
 import { emptyGraph } from '../../core/graph'
-import { getNodeDef } from '../../core/registry'
-import { FALLBACK_NODE_SIZE } from '../../layout/elkGraph'
-import type { NodeSize } from '../../layout/elkGraph'
-import { boundsOf } from '../../layout/place'
 import { useGraphStore } from '../../store/graphStore'
-import { isViewer } from '../nodes/CodaNodeView'
-import { NODE_BODIES, WIDE_CARD_WIDTH } from '../nodes/nodeBodies'
+import { hasNode, makeBuilder, ranClean, runIfStale } from './builder'
 import type { TourSpec, TourStep } from './steps'
-import { byTour, cardOf, frameNodes } from './steps'
+import { byTour } from './steps'
 
 /**
  * The chain, in the order it gets built. Types are the `partners` example's, which is the same
@@ -93,230 +88,17 @@ export const PARAMS: Record<string, Record<string, unknown>> = {
   [CHART]: { category: 'postType', value: 'sum_weight' },
 }
 
-/** Clear space between one card's right edge and the next card's left. */
-const GAP = 90
-
 /**
- * Where each card goes, computed once from the cards rather than from a spacing constant.
+ * The tour's builder: what it has made, where each card goes, and the moves that make them.
  *
- * A fixed column pitch does not work here, because these cards are not one width: the default is
- * `FALLBACK_NODE_SIZE.width` but `NODE_BODIES` gives Find Neurons 360 for its filter rows and the
- * dataset card 248 for its preview. At a flat 340 the two widest overlapped their neighbours by
- * the end of the chain — which is the graph the reader is handed as the payoff, so it reading as
- * a pile is not a cosmetic problem. Seen in a browser before this existed.
+ * `makeBuilder` is shared with "Build a dashboard" — see `builder.ts` for why the state that used
+ * to live in this module is now scoped to the tour that owns it. `row` is the default layout and
+ * the one a pipeline wants: one row, left to right, each column as wide as the card in it.
  *
- * Width is resolved from every source that can decide it — the widest wins. `defaultSize` sizes
- * React Flow's wrapper, `NODE_BODIES.width` sizes the card, and a **viewer** declares neither yet
- * still reaches `WIDE_CARD_WIDTH` the moment it has a value to draw, because `showPreview` puts
- * `.coda-node--wide` on it. Missing that third source is what had the Table card, which declares
- * nothing at all and renders at 360, sitting 38px inside Group By. Measured in a browser.
- *
- * Reading the declarations rather than restating a pitch means a node that gets wider later moves
- * its neighbours along instead of growing into them.
+ * 1.0 rather than the Guided Tour's 1.2, because this graph *grows* and what somebody building a
+ * pipeline needs to see is the new card **and the wire that arrived with it**.
  */
-const SLOTS: ReadonlyMap<string, { x: number; y: number }> = (() => {
-  const slots = new Map<string, { x: number; y: number }>()
-  let x = 60
-  for (const type of CHAIN) {
-    slots.set(type, { x, y: 0 })
-    const def = getNodeDef(type)
-    const width = Math.max(
-      def?.defaultSize?.width ?? 0,
-      NODE_BODIES[type]?.width ?? 0,
-      def && isViewer(def) ? WIDE_CARD_WIDTH : 0,
-      FALLBACK_NODE_SIZE.width,
-    )
-    x += width + GAP
-  }
-  return slots
-})()
-
-function slot(type: string): { x: number; y: number } {
-  return SLOTS.get(type) ?? { x: 60, y: 0 }
-}
-
-/**
- * What has been built so far, node type to node id. Reset by `prepare`.
- *
- * Keyed by **type**, which is the same key `CHAIN`, `SLOTS` and `advanceWhen` already use — an
- * earlier version carried a second set of short names (`'ds'`, `'find'`, `'conn'`) alongside,
- * and a mapping that is total and injective onto the types buys nothing but a second spelling
- * for every node that nothing checks against the first.
- *
- * Module state, reset by `prepare`. The alternative was threading a context object through every
- * `before`, which is an extra parameter on a signature shared with the tour that needs none of
- * them. A tour is a singleton — `startTour` refuses a second one while the first is up — so
- * there is no second reader for this to be shared with.
- */
-const built = new Map<string, string>()
-
-/**
- * Make sure this node is on the canvas, in its column, and remembered — however it got there.
- *
- * One function rather than an add and an adopt, because the caller cannot usefully tell the two
- * apart: on a "your turn" step the reader may have added the node from the browser, the palette
- * or a double-click, and on the same step reached by Next nobody has added it at all. All three
- * want the same thing to be true afterwards.
- *
- * A node the *reader* added is moved into line, and that is not tidiness for its own sake: it
- * lands wherever the browser puts a node, which is not the column of a chain being built around
- * it, and left alone it ended up overlapping two later cards — so the graph handed over at the
- * end, the whole payoff, read as a mess they had made. `commit: false`, so the nudge does not
- * become an undo step of its own between the add and the wiring.
- */
-function ensure(type: string): string {
-  const store = useGraphStore.getState()
-  const { nodes } = store.graph
-
-  const remembered = built.get(type)
-  if (remembered && nodes.some((node) => node.id === remembered)) return remembered
-
-  const found = nodes.find((node) => node.type === type)
-  if (found) {
-    built.set(type, found.id)
-    store.moveNodes([{ id: found.id, position: slot(type) }], false)
-    return found.id
-  }
-
-  const id = store.addNode(type, slot(type))
-  built.set(type, id)
-  return id
-}
-
-/**
- * Wires one port to another.
- *
- * Called unconditionally, including for links the store's own auto-wire has already made. That
- * is safe rather than sloppy: `addEdge` evicts whatever occupies the destination input before
- * inserting, so re-making a link that exists replaces it with itself rather than doubling it.
- */
-function wire(from: string, fromPort: string, to: string, toPort: string): void {
-  const source = built.get(from)
-  const target = built.get(to)
-  if (!source || !target) return
-  useGraphStore
-    .getState()
-    .connect({ source, sourceHandle: fromPort, target, targetHandle: toPort })
-}
-
-/**
- * How close the camera gets to a card as it arrives.
- *
- * 1.0 rather than the Guided Tour's 1.2: this graph *grows*, and what somebody building a
- * pipeline needs to see is the new card **and the wire that arrived with it**, which means
- * keeping its upstream neighbour in frame. At 1.2 the neighbour is off the edge on a laptop.
- */
-const BUILD_ZOOM = 1.0
-
-/** Selects the built nodes a step is about and frames them. */
-function reveal(...types: string[]): void {
-  frameNodes(
-    types.map((type) => built.get(type)).filter((id): id is string => Boolean(id)),
-    BUILD_ZOOM,
-  )
-}
-
-/** The id the tour's own spanning element carries, so there is only ever one of them. */
-const SPAN_ID = 'coda-tour-span'
-
-/**
- * An invisible element covering several cards at once, for a step that highlights more than one.
- *
- * driver spotlights exactly one element, and the step that says *"notice the wire"* is about two
- * cards and what runs between them — a cut-out around either one alone contradicts the sentence.
- *
- * **It is placed inside React Flow's viewport, in world coordinates, and that is the whole
- * trick.** The viewport carries the pan and zoom as a CSS transform, so a child positioned in
- * world units is moved by the browser along with the cards, and `getBoundingClientRect` — which
- * is all driver ever asks — returns the right screen rectangle at every zoom with nothing
- * recomputing it. Positioning it in screen pixels instead would need re-measuring on every frame
- * of the camera animation the step starts.
- *
- * The rectangle itself is `boundsOf`, which is the module that owns this arithmetic; the sizes
- * handed to it are read off the DOM exactly as `useArrange`'s `measure` reads them, because
- * `offsetWidth` is pre-transform (world units, the distinction the field guide's `offsetParent`
- * note records) while a `getBoundingClientRect` here would be screen pixels.
- *
- * `pointer-events: none`, so it cannot intercept anything even though driver will mark it the
- * active element; and removed by the step's `after`, since it is scaffolding rather than part of
- * the graph.
- */
-function spanOf(...types: string[]): Element | null {
-  const viewport = document.querySelector('.react-flow__viewport')
-  if (!viewport) return null
-
-  const nodes = []
-  const measured = new Map<string, NodeSize>()
-  for (const type of types) {
-    const id = built.get(type)
-    const node = id ? useGraphStore.getState().graph.nodes.find((n) => n.id === id) : undefined
-    const card = id ? cardOf(id) : null
-    /*
-     * **All the cards, or none.** Skipping a card that has not been rendered yet looks like
-     * tolerance and is the opposite: the step that adds a node resolves its anchor in the same
-     * tick, so the new card is reliably absent — and returning a span around the *other* card
-     * hands driver a perfectly good element, which ends its `waitForElement` poll on the spot.
-     * The step then spotlights one card for a sentence about two, with nothing to recompute it,
-     * because `refresh` re-reads the stored element rather than re-resolving the anchor.
-     *
-     * Answering `null` keeps the poll alive; driver watches the document for mutations, and the
-     * card landing is one. Measured before this: the span came out `left: 60px; width: 248px`,
-     * exactly the dataset card, with Find Neurons sitting 338px to its right.
-     */
-    if (!node || !(card instanceof HTMLElement)) return null
-    nodes.push(node)
-    measured.set(node.id, { width: card.offsetWidth, height: card.offsetHeight })
-  }
-
-  const bounds = boundsOf(nodes, measured)
-  if (!bounds) return null
-
-  const span = document.getElementById(SPAN_ID) ?? document.createElement('div')
-  span.id = SPAN_ID
-  span.style.cssText = `position:absolute;pointer-events:none;left:${bounds.x}px;top:${bounds.y}px;width:${bounds.width}px;height:${bounds.height}px`
-  if (span.parentElement !== viewport) viewport.appendChild(span)
-  return span
-}
-
-/** Takes the spanning element back down. Paired with `spanOf` through a step's `after`. */
-function clearSpan(): void {
-  document.getElementById(SPAN_ID)?.remove()
-}
-
-/** The card for a built node, for a step that points at one. */
-function builtCard(type: string): Element | null {
-  return cardOf(built.get(type))
-}
-
-/** Applies this node's entry from {@link PARAMS}. */
-function setParams(type: string): void {
-  const id = built.get(type)
-  if (!id) return
-  for (const [param, value] of Object.entries(PARAMS[type] ?? {})) {
-    useGraphStore.getState().setParam(id, param, value as never)
-  }
-}
-
-/** Is there a node of this type on the canvas? The predicate the "your turn" steps wait on. */
-function hasNode(type: string): boolean {
-  return useGraphStore.getState().graph.nodes.some((node) => node.type === type)
-}
-
-/** Is anything waiting to be run? One definition, for the two steps and the one predicate. */
-function isStale(): boolean {
-  const store = useGraphStore.getState()
-  return store.graph.nodes.some((node) => store.needsRun(node.id))
-}
-
-/** Catches up a reader who pressed Next instead of Run. Idempotent, like every other `before`. */
-function runIfStale(): void {
-  if (isStale()) void useGraphStore.getState().runAll()
-}
-
-/** The `advanceWhen` both Run steps share: the reader pressed it and it finished. */
-function ranClean(): boolean {
-  return !useGraphStore.getState().busy && !isStale()
-}
+const b = makeBuilder(CHAIN, PARAMS, { zoom: 1.0 })
 
 export const LEARN_TO_BUILD: readonly TourStep[] = [
   {
@@ -351,18 +133,17 @@ export const LEARN_TO_BUILD: readonly TourStep[] = [
       'than a result. Swap it for Hemibrain, FlyWire or MANC later: every node downstream of it ' +
       'stays exactly the same, and then the answers mean something.',
     before: () => {
-      ensure(DATASET)
-      reveal(DATASET)
+      b.ensure(DATASET)
+      b.reveal(DATASET)
     },
-    anchor: () => builtCard(DATASET),
+    anchor: () => b.card(DATASET),
     side: 'right',
     align: 'start',
   },
   {
     id: 'open-browser',
     title: 'Your turn: open the node browser',
-    body:
-      'Press `+ Add` — or hit `Tab`. (If you would rather watch, Next does it for you.)',
+    body: 'Press `+ Add` — or hit `Tab`. (If you would rather watch, Next does it for you.)',
     anchor: () => byTour('add'),
     side: 'bottom',
     align: 'end',
@@ -376,7 +157,8 @@ export const LEARN_TO_BUILD: readonly TourStep[] = [
       'Type `find` and pick **Find Neurons**. It is the node that turns a search into a set of ' +
       'neurons — nearly every pipeline starts with one.',
     before: () => {
-      if (!document.querySelector('.node-browser')) useGraphStore.getState().requestNodeBrowser()
+      if (!document.querySelector('.node-browser'))
+        useGraphStore.getState().requestNodeBrowser()
     },
     anchor: () => document.querySelector('.node-browser'),
     side: 'left',
@@ -392,13 +174,13 @@ export const LEARN_TO_BUILD: readonly TourStep[] = [
       'exactly one dataset on the canvas — Coda does the obvious connection so you do not have ' +
       'to. Everything else you drag socket to socket.',
     before: () => {
-      ensure(FIND)
-      wire(DATASET, 'dataset', FIND, 'dataset')
-      reveal(DATASET, FIND)
+      b.ensure(FIND)
+      b.wire(DATASET, 'dataset', FIND, 'dataset')
+      b.reveal(DATASET, FIND)
     },
-    // Both cards and the wire between them, not one of the two — see `spanOf`.
-    anchor: () => spanOf(DATASET, FIND),
-    after: clearSpan,
+    // Both cards and the wire between them, not one of the two — see `Builder.span`.
+    anchor: () => b.span(DATASET, FIND),
+    after: () => b.clearSpan(),
     side: 'bottom',
     align: 'center',
   },
@@ -410,10 +192,10 @@ export const LEARN_TO_BUILD: readonly TourStep[] = [
       'regex, anchored the way neuPrint anchors it — `LC.*` matches LC4 and LC6 but *not* ' +
       'LPLC1. What fields are available depends on the dataset.',
     before: () => {
-      setParams(FIND)
-      reveal(FIND)
+      b.setParams(FIND)
+      b.reveal(FIND)
     },
-    anchor: () => builtCard(FIND),
+    anchor: () => b.card(FIND),
     side: 'right',
     align: 'start',
   },
@@ -424,13 +206,13 @@ export const LEARN_TO_BUILD: readonly TourStep[] = [
       'Connectivity takes those neurons and returns one row per connected pair, ' +
       'downstream by default. Look at its sockets: it takes *two* inputs, and both got wired.',
     before: () => {
-      ensure(CONNECTIVITY)
-      wire(DATASET, 'dataset', CONNECTIVITY, 'dataset')
-      wire(FIND, 'neurons', CONNECTIVITY, 'neurons')
-      setParams(CONNECTIVITY)
-      reveal(CONNECTIVITY)
+      b.ensure(CONNECTIVITY)
+      b.wire(DATASET, 'dataset', CONNECTIVITY, 'dataset')
+      b.wire(FIND, 'neurons', CONNECTIVITY, 'neurons')
+      b.setParams(CONNECTIVITY)
+      b.reveal(CONNECTIVITY)
     },
-    anchor: () => builtCard(CONNECTIVITY),
+    anchor: () => b.card(CONNECTIVITY),
     side: 'right',
     align: 'start',
   },
@@ -455,9 +237,9 @@ export const LEARN_TO_BUILD: readonly TourStep[] = [
       'can read as a list. The rest of the graph reduces it to something you can.',
     before: () => {
       runIfStale()
-      reveal(CONNECTIVITY)
+      b.reveal(CONNECTIVITY)
     },
-    anchor: () => builtCard(CONNECTIVITY),
+    anchor: () => b.card(CONNECTIVITY),
     side: 'right',
     align: 'start',
   },
@@ -470,11 +252,11 @@ export const LEARN_TO_BUILD: readonly TourStep[] = [
       'middle of the chain rather than ending it — which is how you check a step before the ' +
       'next one eats it.',
     before: () => {
-      ensure(TABLE)
-      wire(CONNECTIVITY, 'connections', TABLE, 'in')
-      reveal(TABLE)
+      b.ensure(TABLE)
+      b.wire(CONNECTIVITY, 'connections', TABLE, 'in')
+      b.reveal(TABLE)
     },
-    anchor: () => builtCard(TABLE),
+    anchor: () => b.card(TABLE),
     side: 'right',
     align: 'start',
   },
@@ -487,12 +269,12 @@ export const LEARN_TO_BUILD: readonly TourStep[] = [
       'Small nodes rather than one big one, so each can be read, re-ordered and re-run on its ' +
       'own — and the Table is still there showing you what went in.',
     before: () => {
-      ensure(GROUP)
-      wire(TABLE, 'out', GROUP, 'in')
-      setParams(GROUP)
-      reveal(GROUP)
+      b.ensure(GROUP)
+      b.wire(TABLE, 'out', GROUP, 'in')
+      b.setParams(GROUP)
+      b.reveal(GROUP)
     },
-    anchor: () => builtCard(GROUP),
+    anchor: () => b.card(GROUP),
     side: 'right',
     align: 'start',
   },
@@ -503,12 +285,12 @@ export const LEARN_TO_BUILD: readonly TourStep[] = [
       'A Bar Chart, plotting the summed weight against the partner type — the same numbers the ' +
       'Group By produced, in the shape you can read at a glance.',
     before: () => {
-      ensure(CHART)
-      wire(GROUP, 'out', CHART, 'in')
-      setParams(CHART)
-      reveal(CHART)
+      b.ensure(CHART)
+      b.wire(GROUP, 'out', CHART, 'in')
+      b.setParams(CHART)
+      b.reveal(CHART)
     },
-    anchor: () => builtCard(CHART),
+    anchor: () => b.card(CHART),
     side: 'left',
     align: 'start',
   },
@@ -563,8 +345,7 @@ export const BUILD_SPEC: TourSpec = {
    * because by the time the reader is reading it the emptying is one Next away.
    */
   prepare: () => {
-    built.clear()
-    clearSpan()
+    b.reset()
 
     const store = useGraphStore.getState()
     const notes: string[] = []

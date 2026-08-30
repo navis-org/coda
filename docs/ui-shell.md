@@ -6,6 +6,27 @@ start page.
 Moved verbatim out of `CLAUDE.md`.
 
 
+## Two shortcut listeners, split by what a key is about
+
+`shortcuts.ts` is the one *description* of every binding — that has not changed, and neither has
+the reason for it. What changed is that there are now two listeners, and which one owns a key is
+decided by what the key needs:
+
+- **`Editor.tsx`** — everything that needs the canvas, a selection or React Flow's own key
+  handling: mute, collapse, pin, group, duplicate, delete, fit, run, undo, the palette, the browser.
+- **`useAppShortcuts`** (`ui/appShortcuts.ts`, mounted by `App`) — `f` fullscreen, `i` inspector,
+  `/` assistant, `d` dashboard. The window and two panels `App` renders, plus which view is up.
+
+The split was forced by the dashboard, which replaces the canvas rather than covering it: `Editor`
+is not mounted while the grid is up, so a key bound there silently stops working in half the app.
+`F` doing nothing on the dashboard was the reported bug; `I` and `/` were the same bug nobody had
+tried yet. `D` had been written twice to work around it, which is the duplication `shortcuts.ts`
+exists to prevent.
+
+`TOUR_DECLINES` and the typing-target test live in `appShortcuts.ts` and are imported by
+`Editor.tsx`, rather than being copied — a key added to either listener is declined by name in one
+place, and the next field kind that has to be exempt is exempt in both.
+
 ## Collapsible panels
 
 The inspector and the minimap are both **closed by default** and remembered in `localStorage`

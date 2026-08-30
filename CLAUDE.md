@@ -175,6 +175,36 @@ Area-specific — the rule, then the doc that holds why:
   of the window, under a **px** floor — the two clamp different things — and *which* node is pinned
   is deliberately not stored, because a node id means nothing in the next graph.
   See [docs/ui-shell.md](docs/ui-shell.md).
+- **A dashboard cell is a reference to a node id, and the grid replaces the canvas rather than
+  covering it.** `D` swaps `Editor` for `DashboardView` in the same grid area, so React Flow
+  unmounts and every card's preview goes with it — a grid of live viewers *beside* a canvas of live
+  previews is two contexts per node, so the swap trades them rather than adding. Hence: **at most one cell per node, and only nodes that can be
+  drawn** — both enforced in `addCells` *and* `validDashboard`, because a hand-edited file is the
+  other way each arrives, and because written per surface the eligibility half was three spellings
+  with two live holes (`canHaveCell` is the one answer, `placeableIds`/`unplacedNodes` what the
+  surfaces read); **the dock does not render while the grid is up**, since it is a column that
+  survives the swap and is the one surface that could hold a node live beside a cell — dropping the
+  pin alone let a later pin put it back; and a cell stands down for the overlay exactly as a card
+  does. `ViewerSurface`'s `controls` prop names the property rather than the caller, and **density
+  is CSS's** — a frame wears `.viewer-surface` and a class of its own, so it restyles the inside
+  without the shared component knowing a caller by name. **Order is position** — no `x`/`y`, flow is not `dense`, so a gap is visible rather
+  than CSS reordering the list somebody just dragged. The **layout is in the document**, which
+  inverts the dock's rule on purpose: a node id means nothing in the next graph, which is why the
+  ids belong to *this* one. So is **which view it was saved from** — `DashboardLayout.open`, so a
+  graph saved from the grid opens into the grid; a different promise from the lock's deliberately,
+  since a dashboard takes nothing away and `← Canvas` is on screen. Three rules keep that invisible
+  to anyone not using it: written **only when true**, a mode toggle **cannot mint a layout**
+  (`setViewOpen` answers by identity with no dashboard), and it is **not an undo step**. The layout
+  mutators compose `setViewOpen` *around* their change so the first cell and the flag land in one
+  commit. And every dashboard action is **live under the lock** — freezing the canvas so it can be
+  used as a dashboard is the want this replaces. A cell is **a third, a half, two thirds or the whole** of the visible area
+  (`ROW_SPANS` over `ROW_TRACKS = 6`, snapped), and the row height is **measured, not `1fr` and not
+  `vh`** — `1fr` shortens every row as one grows, so the resize handle visibly does nothing, while
+  `vh` is the window rather than what is left after four bits of chrome, so every dashboard got a
+  scrollbar it had not earned with the bottom row's grip behind the status bar. `DashboardView`
+  observes the grid's content box and paints `--dash-row` straight onto the element, never into
+  state. Note **absence means a different number on each axis** — `w` 1, `h` half — because a row
+  track is not a natural unit. See [docs/dashboard.md](docs/dashboard.md).
 - **A published token is not a credential, and shipping one makes a rotation a new failure mode.**
   Virtual Fly Brain publishes an `AnonymousUser` token per instance because CATMAID's query endpoints
   are POST-only and a browser satisfies neither of Django's CSRF gates: it cannot set `Referer`, and it
@@ -462,6 +492,8 @@ in a CLAUDE.md *imports* the file, pulling all 1.2 MB back into every session.
   gates that keep it off every build but the deploy, and why the canvas is not instrumented.
 - [docs/ui-shell.md](docs/ui-shell.md) — panels, fullscreen and the manifest, the run
   indicator, the start page, keyboard shortcuts.
+- [docs/dashboard.md](docs/dashboard.md) — the grid view: the cell model, the mode that unmounts
+  the canvas, the two gestures and what was measured in a real browser.
 - [docs/pages.md](docs/pages.md) — overview, tutorial and node guide. Extra vite entries;
   each must stay out of the main chunk.
 - [docs/help.md](docs/help.md) — the `?` on a node: the in-app overlay, the documents in

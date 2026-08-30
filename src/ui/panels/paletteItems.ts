@@ -9,6 +9,7 @@
 
 import type { CodaType } from '../../core/types'
 import { isAssignable } from '../../core/types'
+import { placeableIds } from '../../core/dashboard'
 import { groupsTouching } from '../../core/groups'
 import { isAnnotation, nodeDefsByCategory } from '../../core/registry'
 import type { GraphState } from '../../store/graphStore'
@@ -186,6 +187,23 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
    */
   const unpins =
     store.pinnedNodeId !== undefined && (single === undefined || single === store.pinnedNodeId)
+  /*
+   * The dock is a column beside the canvas, and the dashboard has replaced the canvas — so the
+   * row would promise somewhere for the result to go that is not on screen. Off rather than
+   * hidden, for the reason every other `disabled` here is: a row that vanishes teaches nothing.
+   */
+  const noDock = store.dashboardOpen
+  /*
+   * The dashboard rows. `every` for the add/remove toggle, matching the context menu: with a
+   * mixed selection the useful act is to finish putting them all on.
+   *
+   * Which nodes may have a cell is `placeableIds`' to say — one `Map` pass rather than a
+   * `nodes.find` per selected id, which matters because this function is rebuilt on every store
+   * tick while the palette is open, including a `runVersion` bump per streaming mesh fragment.
+   */
+  const placeable = placeableIds(store.graph, selection)
+  const placedCells = new Set(store.graph.dashboard?.cells.map((c) => c.nodeId))
+  const allPlaced = placeable.length > 0 && placeable.every((id) => placedCells.has(id))
 
   const items: PaletteItem[] = [
     {
@@ -422,18 +440,54 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
        * still offers the unpin — it is the one thing wanted at that moment — and drops the badge.
        */
       label: unpins ? 'Unpin Docked Output' : 'Pin Selected Output to the Side',
-      hint: unpins
-        ? 'Give the canvas the whole window back'
-        : annotated
-          ? 'A text note has no result to dock'
-          : single
-            ? 'Dock it down the right of the canvas, where it stays while you work'
-            : 'Select a single node first',
-      disabled: !unpins && !computable,
+      hint: noDock
+        ? 'The dock sits beside the canvas — leave the dashboard first'
+        : unpins
+          ? 'Give the canvas the whole window back'
+          : annotated
+            ? 'A text note has no result to dock'
+            : single
+              ? 'Dock it down the right of the canvas, where it stays while you work'
+              : 'Select a single node first',
+      disabled: noDock || (!unpins && !computable),
       ...(single ? { shortcut: shortcutKeys('pin') } : {}),
       perform: () => {
         if (unpins) store.pinNode(undefined)
         else if (single) store.pinNode(single)
+      },
+    },
+    {
+      id: 'cmd:dashboard',
+      label: store.dashboardOpen ? 'Back to the Canvas' : 'Open the Dashboard',
+      action: 'View',
+      hint: store.dashboardOpen
+        ? 'The graph, the wires and the viewport again'
+        : 'The same graph as a grid of the nodes worth looking at — no canvas, no wires',
+      shortcut: shortcutKeys('dashboard'),
+      perform: () => store.toggleDashboard(),
+    },
+    {
+      /*
+       * Separate from the row above, because they are different acts: one changes which surface
+       * you are looking through, the other changes what is on it. Collapsing them into "open the
+       * dashboard *with* these" would make the first press of the command destructive for
+       * somebody who only wanted to look.
+       */
+      id: 'cmd:dashboard-add',
+      label: allPlaced ? 'Remove Selection from Dashboard' : 'Add Selection to Dashboard',
+      action: 'View',
+      hint:
+        placeable.length === 0
+          ? selection.length === 0
+            ? 'Select the nodes worth looking at first'
+            : 'A text note has no result to show in a cell'
+          : allPlaced
+            ? `Take ${plural(placeable.length, 'cell')} off the grid — the nodes stay`
+            : `Put ${plural(placeable.length, 'node')} on the grid view`,
+      disabled: placeable.length === 0,
+      perform: () => {
+        if (allPlaced) store.removeFromDashboard(placeable)
+        else store.addToDashboard(placeable)
       },
     },
     {

@@ -179,6 +179,31 @@ describe('a locked canvas', () => {
     expect(view?.collapsed).toBe(true)
   })
 
+  /*
+   * The dashboard is the *other view*, not a change to this one, so a lock over the canvas has
+   * no business over it. And the direction matters: freezing the canvas so it can be used as a
+   * dashboard is the want the grid replaces, which makes a locked canvas exactly the state
+   * somebody is in while assembling one.
+   */
+  it('still builds a dashboard — the grid is the other view, not a canvas edit', () => {
+    store().setDashboardOpen(true)
+    store().addToDashboard(['view', 'src'])
+    store().setDashboardColumns(3)
+    store().setDashboardSpan('view', { w: 2 })
+    store().moveDashboardCell('view', 1)
+    expect(store().dashboardOpen).toBe(true)
+    // `open: true` rides along because the grid was the view while the cells were placed — see
+    // `DashboardLayout.open`. That it lands in the *same* commit is what stops a save between
+    // the two from capturing a dashboard that does not know it is being looked at.
+    expect(graph().dashboard).toEqual({
+      columns: 3,
+      cells: [{ nodeId: 'src' }, { nodeId: 'view', w: 2 }],
+      open: true,
+    })
+    store().removeFromDashboard(['src'])
+    expect(graph().dashboard?.cells).toEqual([{ nodeId: 'view', w: 2 }])
+  })
+
   it('still selects, which is what the inspector and every viewer are reached through', () => {
     store().setSelection(['view'])
     expect(store().selection).toEqual(['view'])
@@ -252,6 +277,19 @@ describe('every store action is on one side of the lock', () => {
     // graph — and its width is a panel preference.
     'pinNode',
     'setDockFraction',
+    /*
+     * The dashboard, on both counts. Opening it is a view switch like the overlay; the five
+     * that *edit* a layout do write to the document, which is the one place this list holds
+     * something structural on the live side — and deliberately, because a dashboard is not the
+     * canvas the lock is about. See the case above.
+     */
+    'setDashboardOpen',
+    'toggleDashboard',
+    'addToDashboard',
+    'removeFromDashboard',
+    'moveDashboardCell',
+    'setDashboardSpan',
+    'setDashboardColumns',
     'openHelp',
     'setGraph',
     'setGraphName',

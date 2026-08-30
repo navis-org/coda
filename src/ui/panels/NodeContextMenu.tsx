@@ -1,5 +1,6 @@
 import { useRef } from 'react'
 
+import { isOnDashboard, placeableIds } from '../../core/dashboard'
 import { groupsTouching } from '../../core/groups'
 import { getNodeDef, isAnnotation } from '../../core/registry'
 import { hasHelp } from '../../help/registry'
@@ -37,6 +38,22 @@ export function NodeContextMenu({ screenPosition, nodeId, onClose }: NodeContext
    */
   const dataflow = !isAnnotation(node.type)
   const def = getNodeDef(node.type)
+  /*
+   * Which half of the dashboard row is live, and over what.
+   *
+   * `every`, not `some`: with a mixed selection the useful act is to finish putting them all on,
+   * and a row that removed the two already there would be reading the selection backwards. The
+   * same rule the mute and collapse rows above follow, where the *clicked* node decides the
+   * wording and the whole selection is what moves.
+   *
+   * Over `placeable` rather than `targets`, because the two differ: `dataflow` gates this row on
+   * the node that was *clicked*, so a note caught by a rubber band alongside a viewer used to
+   * reach `addToDashboard` and get a cell with nothing in it. `addCells` refuses it now either
+   * way — this is what stops the row counting it and promising otherwise.
+   */
+  const placeable = placeableIds(store.graph, targets)
+  const onDashboard =
+    placeable.length > 0 && placeable.every((id) => isOnDashboard(store.graph, id))
 
   const act = (fn: () => void) => () => {
     fn()
@@ -107,6 +124,29 @@ export function NodeContextMenu({ screenPosition, nodeId, onClose }: NodeContext
             onClick={act(() => store.toggleParamRows(targets))}
           >
             {node.paramsCollapsed ? 'Show parameters & ports' : 'Hide parameters & ports'}
+          </button>
+          {/*
+           * Not disabled by the lock, unlike every structural row below. A dashboard is the
+           * other *view* rather than a change to the canvas, and freezing the canvas so it can
+           * be used as one is exactly the moment somebody is assembling it — see
+           * `addToDashboard` in the store.
+           */}
+          <button
+            type="button"
+            className="context-menu__item"
+            title={
+              onDashboard
+                ? 'Take it off the grid. The node stays here.'
+                : 'Put it on the grid view — the nodes worth looking at, without the canvas (D)'
+            }
+            disabled={placeable.length === 0}
+            onClick={act(() =>
+              onDashboard
+                ? store.removeFromDashboard(placeable)
+                : store.addToDashboard(placeable),
+            )}
+          >
+            {onDashboard ? 'Remove from Dashboard' : 'Add to Dashboard'}
           </button>
         </>
       )}

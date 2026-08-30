@@ -49,6 +49,7 @@ export const TOUR_ANCHORS = [
   'autorun',
   'inspector',
   'inspector-panel',
+  'dashboard',
   'connections',
   'assistant',
   'share',
@@ -334,11 +335,24 @@ export const GUIDED_TOUR: readonly TourStep[] = [
       'A card shows the most important settings. The inspector shows everything. ' +
       'Press I to open/close the sidebar.',
     before: () => {
-      if (!useGraphStore.getState().panels.inspector) useGraphStore.getState().togglePanel('inspector')
+      if (!useGraphStore.getState().panels.inspector)
+        useGraphStore.getState().togglePanel('inspector')
     },
     anchor: () => byTour('inspector-panel') ?? byTour('inspector'),
     side: 'left',
     align: 'start',
+  },
+  {
+    id: 'dashboard',
+    title: 'The Dashboard is the graph without the canvas',
+    body:
+      'Press D — or this button — and the wires give way to a grid of only the nodes worth ' +
+      'watching. Each cell is a reference to a node rather than a copy, so Run updates them all ' +
+      'at once, and the layout is saved with the workflow. Build a pipeline here, hand somebody ' +
+      'a dashboard.',
+    anchor: () => byTour('dashboard'),
+    side: 'bottom',
+    align: 'end',
   },
   {
     id: 'connections',

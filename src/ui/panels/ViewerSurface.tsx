@@ -7,10 +7,17 @@
  * copies of that would drift on the next param kind that needs a special case in the rail —
  * `out.table`'s filter-row toggle is already one (see `variant="inspector"` below).
  *
- * What the two callers keep for themselves is the *frame*: the overlay owns a modal backdrop,
+ * What the three callers keep for themselves is the *frame*: the overlay owns a modal backdrop,
  * Escape, the per-node width cap and the Fullscreen API; the dock owns a grid column and a drag
- * grip. Neither is anything this component can have an opinion about, so the header's trailing
- * buttons arrive as `actions` rather than as a mode flag.
+ * grip; a dashboard cell owns its place in the grid and the two gestures that change it. None of
+ * that is anything this component can have an opinion about, so the header's trailing buttons
+ * arrive as `actions` rather than as a mode flag.
+ *
+ * The **one** thing the frame is allowed to say about the inside is which controls it has room
+ * for, and that is `controls`. It names the property rather than the caller, so a dock somebody
+ * has dragged to its 360px floor can ask for the same treatment without a `variant: 'dock-narrow'`
+ * being invented for it. Density is *not* on that list: a frame wears `.viewer-surface` and has a
+ * class of its own, so it can select its own header — see `.dash-cell__panel` in `editor.css`.
  *
  * The controls expose the node's *presentational* params only. Those are excluded from the
  * provenance key, so fiddling with a colour scale here re-renders instantly and never marks the
@@ -81,19 +88,53 @@ export function useViewerNode(nodeId: string | undefined): ViewerNode | undefine
 export function ViewerSurface({
   nodeId,
   actions,
+  leading,
+  controls = 'auto',
 }: {
   nodeId: string
-  /** Buttons for the right-hand end of the header — close, fullscreen, unpin. */
+  /** Buttons for the right-hand end of the header — close, fullscreen, unpin, remove. */
   actions?: ReactNode
+  /**
+   * The left-hand end of the header, before the title. Only the dashboard uses it, for its drag
+   * grip — which has to be *in* the header rather than floated over it, because the header is
+   * the one part of a cell that is reliably not an `<iframe>` or a WebGL canvas, and an
+   * absolutely-positioned grip over a neuroglancer embed is a grip the embed swallows the
+   * pointer for.
+   */
+  leading?: ReactNode
+  /**
+   * Which presentational controls this frame has room for, and who owns the disclosure.
+   *
+   * Three states, named after what is shown rather than after which caller is asking:
+   *
+   *  - `auto` — whatever the node declares. A node with `paramGroups` gets the tabbed styling
+   *    sidebar and the `Style` button that opens it (state in `panels.style`, one flag for the
+   *    one such surface that can be up at a time); everything else gets the flat rail. The
+   *    overlay and the dock.
+   *  - `rail` / `hidden` — the flat rail for **every** node, shown or not, with the *frame*
+   *    owning the disclosure. A dashboard cell may be a sixth of a window, where a 268px sidebar
+   *    is the panel plus a strip and *n* of them is a screen of controls with no view; and the
+   *    state has to be per cell, since a grid sharing `panels.style` would open every rail at
+   *    once. The full sidebar stays one ⤢ away.
+   *
+   * The rail is one component in all three, so a grouped node's presentational params are the
+   * same controls wherever they appear rather than a second spelling of them.
+   *
+   * This was two props — a `variant` naming the caller, plus a `railOpen` documented as ignored
+   * for two of the three callers, with `full` + open unreachable. One prop with three states is
+   * the same information without the corner that could not happen.
+   */
+  controls?: 'auto' | 'rail' | 'hidden'
 }) {
   const inference = useGraphStore((s) => s.inference)
   const setParam = useGraphStore((s) => s.setParam)
   const setNotice = useGraphStore((s) => s.setNotice)
   const nodeInputs = useGraphStore((s) => s.nodeInputs)
-  // Subscribed to, not read, for `CodaNodeView`'s reason: `nodeInputs(id)` is called during
+  // Subscribed to *and* read, for `CodaNodeView`'s reason: `nodeInputs(id)` is called during
   // render, so a scene streaming in behind a full-size viewer moves nothing this component
-  // selects. Without it the card fills in and the surface over it does not.
-  void useGraphStore((s) => s.previewVersion)
+  // selects. Without it the card fills in and the surface over it does not. It is also what
+  // tells the memo below that the inputs may have changed.
+  const previewVersion = useGraphStore((s) => s.previewVersion)
   // A primitive, not `s.panels` — that object is minted fresh on every toggle, so selecting
   // the whole thing would change identity on every unrelated tick. See invariant 7.
   const styleOpen = useGraphStore((s) => s.panels.style)
@@ -115,6 +156,23 @@ export function ViewerSurface({
     const port = def && node ? firstOutputPort(def, node.params) : undefined
     return port ? s.nodeOutput(nodeId, port.id) : undefined
   })
+  /*
+   * The values on this node's input ports, memoised.
+   *
+   * `nodeInputs` walks the node list and then the edge list once per input port, and mints a
+   * fresh object — so calling it in the body meant every viewer re-reconciled on every render
+   * even when nothing it draws had moved. That was affordable while at most one of these was
+   * mounted; the dashboard mounts one per cell, and `previewVersion` ticks per streaming mesh
+   * fragment. `found` stands in for the graph here: it is re-derived whenever `s.graph` changes.
+   */
+  const inputValues = useMemo(() => {
+    // Read, not just listed: `nodeInputs` closes over mutable scheduler state, so these two are
+    // the only things that say the answer may have moved — and a dep nothing in the body touches
+    // is a dep the next person deletes. The same `void` idiom the store selectors above use.
+    void found
+    void previewVersion
+    return nodeInputs(nodeId)
+  }, [nodeInputs, nodeId, found, previewVersion])
   const types = inference.nodes[nodeId]
   // Memoised, and every hook here runs before the guard below — a fresh `ctx` on each render
   // re-renders the body it is handed to, which for a 3D scene is the frame budget.
@@ -129,8 +187,14 @@ export function ViewerSurface({
   const railParams = (def.params ?? []).filter(
     (p) => p.presentational && (!p.visibleIf || p.visibleIf(node.params)),
   )
-  // Grouped nodes take the sidebar; everything else keeps the rail it has always had.
-  const tabs = def.paramGroups?.length ? groupParams(def, node.params, paramsForPanel(def)) : []
+  // Grouped nodes take the sidebar; everything else keeps the rail it has always had. Neither the
+  // sidebar nor the tab strip that opens it fits a frame that asked for the rail — see `controls`.
+  const tabs =
+    controls === 'auto' && def.paramGroups?.length
+      ? groupParams(def, node.params, paramsForPanel(def))
+      : []
+  const showRail =
+    railParams.length > 0 && (controls === 'auto' ? tabs.length === 0 : controls === 'rail')
   // Falling back to the first tab rather than storing a reset makes an id that no longer
   // exists — a different node, or a tab whose params are all hidden — harmless.
   const activeTab = tabs.find((t) => t.id === tabId) ?? tabs[0]
@@ -139,6 +203,7 @@ export function ViewerSurface({
   return (
     <>
       <div className="overlay__header">
+        {leading}
         <div className="overlay__title">
           <strong>{node.title ?? def.label}</strong>
           <span>
@@ -177,7 +242,7 @@ export function ViewerSurface({
         {actions}
       </div>
 
-      {tabs.length === 0 && railParams.length > 0 && (
+      {showRail && (
         <div className="overlay__rail">
           {railParams.map((param) => (
             <div key={param.id} className="overlay__rail-item">
@@ -214,7 +279,7 @@ export function ViewerSurface({
               node={node}
               ctx={ctx}
               compact={false}
-              inputValues={nodeInputs(node.id)}
+              inputValues={inputValues}
               setParam={(paramId, next) => setParam(node.id, paramId, next)}
               onError={setNotice}
             />
@@ -227,7 +292,7 @@ export function ViewerSurface({
               onError={setNotice}
               onSelectionChange={(ids) => setParam(node.id, 'selection', ids)}
               onParamChange={(paramId, next) => setParam(node.id, paramId, next)}
-              inputValues={nodeInputs(node.id)}
+              inputValues={inputValues}
             />
           )}
         </div>

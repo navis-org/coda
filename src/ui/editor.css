@@ -8307,3 +8307,259 @@ details[open] > summary.tile__label {
   border: none;
   padding: 0;
 }
+
+/* ---------------------------------------------------------------------------
+ * The dashboard
+ *
+ * A second view of the same graph, in the grid area the canvas would have had — `App.tsx`
+ * renders one or the other, never both, so nothing here has to sit over React Flow.
+ *
+ * The grid is `repeat(var(--dash-cols), minmax(0, 1fr))` across and `var(--dash-row)` down.
+ *
+ * **`--dash-row` is measured in JS, and both halves of that are deliberate.** It is not `1fr`:
+ * with `1fr` rows the grid always fits the window, so making a cell taller *shortens every row*
+ * and the cell ends the drag exactly the size it started — a resize handle that visibly does
+ * nothing. And it is not `vh` either, which is what it was first: `vh` is the window, not what is
+ * left after the toolbar, the dashboard's own bar, the status bar and this padding, so the tracks
+ * always came to a little more than their box and every dashboard had a scrollbar it had not
+ * earned — with the bottom row's resize corner behind the status bar. `DashboardView` observes
+ * the grid's content box and divides it by `ROW_TRACKS`; see `rowHeight`.
+ *
+ * `minmax(0, 1fr)` rather than `1fr` for the same reason `.app` uses it for the canvas column: a
+ * table or a scene reports a large intrinsic width, and a bare `1fr` lets it push the track wider
+ * than its share instead of scrolling inside it.
+ * ------------------------------------------------------------------------ */
+
+.dashboard {
+  grid-area: canvas;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--canvas);
+}
+
+.dashboard__bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--border);
+}
+.dashboard__title {
+  font-size: 13px;
+}
+.dashboard__count {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.dashboard__spacer {
+  flex: 1;
+}
+.dashboard__cols {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.dashboard__cols input {
+  width: 96px;
+}
+.dashboard__cols span {
+  font-variant-numeric: tabular-nums;
+  min-width: 1ch;
+}
+
+/*
+ * The add menu is a `.dropdown` — the wrapper's `position: relative` and the whole panel box
+ * (offset, z-index, surface, border, shadow, padding, scroll cap) come from there. What is left
+ * is the only thing that differs: it hangs off the *right*-hand edge, because its trigger sits at
+ * that end of the bar. A fourth hand-written copy of the panel block was the alternative, and
+ * `useDismiss.ts` already records where that leads — a fix reaching one popover at a time.
+ */
+.dashboard__addMenu {
+  right: 0;
+  left: auto;
+  min-width: 200px;
+}
+
+.dashboard__empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  padding: 24px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.dashboard__empty p {
+  margin: 0;
+  max-width: 46ch;
+  line-height: 1.6;
+}
+
+.dashboard__grid {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(var(--dash-cols, 2), minmax(0, 1fr));
+  /* The fallback is only ever painted for the frame before the observer fires. */
+  grid-auto-rows: var(--dash-row, 120px);
+  gap: 10px;
+  padding: 10px;
+  align-content: start;
+}
+
+.dash-cell {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+/* The cell being dragged fades rather than disappearing: a hole in the grid re-flows every cell
+   after it, so the layout somebody is aiming at would move while they aim at it. */
+.dash-cell[data-dragged] {
+  opacity: 0.4;
+}
+/* Where the drop would land. A bar on one edge, not a highlight on the cell — "before this one"
+   and "after this one" are the two answers, and a filled cell says neither. */
+.dash-cell[data-drop]::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--accent);
+  border-radius: 2px;
+  z-index: 6;
+  pointer-events: none;
+}
+.dash-cell[data-drop='before']::after {
+  left: -6px;
+}
+.dash-cell[data-drop='after']::after {
+  right: -6px;
+}
+
+.dash-cell__panel {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.dash-cell__standby {
+  margin: auto;
+  padding: 12px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/*
+ * The header and rail, tightened for a box that may be a sixth of a window.
+ *
+ * Selected off the cell's own frame class, not off a modifier the shared component hands back.
+ * `ViewerSurface` renders a fragment, so the frames wear `.viewer-surface` and carry a class of
+ * their own — which is exactly what lets a frame restyle the inside without the component knowing
+ * a caller by name. The same mechanism `.viewer-dock` uses three rules above.
+ *
+ * The buttons keep their hit area — they are the whole interaction contract of a cell — so what
+ * gives is the padding and the subtitle, which is the line that can afford to be small because it
+ * repeats what the value itself shows.
+ */
+.dash-cell__panel .overlay__header {
+  padding: 4px 6px;
+  gap: 4px;
+}
+.dash-cell__panel .overlay__title strong {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dash-cell__panel .overlay__title span {
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dash-cell__panel .overlay__header .btn {
+  padding: 2px 5px;
+}
+
+/*
+ * A cell's rail scrolls sideways rather than wrapping. Wrapping is right in an overlay, where
+ * the rail is one band across a wide panel; here a third row of controls is a third of the view
+ * gone, and the cell is exactly the surface where the view is the point.
+ */
+.dash-cell__panel .overlay__rail {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  gap: 4px 12px;
+  padding: 4px 8px;
+}
+
+.dash-cell__grip {
+  flex: none;
+  cursor: grab;
+  padding: 0 3px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1;
+  user-select: none;
+}
+.dash-cell__grip:active {
+  cursor: grabbing;
+}
+.dash-cell__grip:focus-visible {
+  outline: 1px solid var(--accent);
+  border-radius: 3px;
+}
+
+/*
+ * The drop layer, mounted only while a drag is running — see `DashboardCellView`. Above
+ * everything in the cell, because what it is there to cover is the `<iframe>`s and canvases that
+ * would otherwise swallow the drag events before any handler of ours saw them.
+ */
+.dash-cell__drop {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+}
+
+/*
+ * The resize grip: the bottom-right corner, 14px square, drawn as two short strokes so it reads
+ * as a corner rather than as a button. `touch-action: none` or a touch drag scrolls the grid
+ * underneath instead of resizing.
+ */
+.dash-cell__resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+  touch-action: none;
+  z-index: 4;
+  background:
+    linear-gradient(135deg, transparent 50%, var(--border-strong) 50%, var(--border-strong) 62%, transparent 62%),
+    linear-gradient(135deg, transparent 74%, var(--border-strong) 74%, var(--border-strong) 86%, transparent 86%);
+  border-bottom-right-radius: var(--radius);
+  opacity: 0.6;
+}
+.dash-cell__resize:hover {
+  opacity: 1;
+}

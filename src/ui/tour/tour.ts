@@ -47,6 +47,7 @@ import './tour.css'
 
 import { useGraphStore } from '../../store/graphStore'
 import { BUILD_SPEC } from './build'
+import { DASHBOARD_SPEC } from './dashboard'
 import type { TourSpec, TourStep } from './steps'
 import { GUIDED_SPEC } from './steps'
 import type { TourId } from './tourState'
@@ -115,7 +116,8 @@ function restore(held: Borrowed, selection: boolean): void {
   // never the same object as what is in the store by the time we get back here.
   const current = state.selection
   const same =
-    current.length === held.selection.length && current.every((id, i) => id === held.selection[i])
+    current.length === held.selection.length &&
+    current.every((id, i) => id === held.selection[i])
   if (!same) state.setSelection(held.selection)
 }
 
@@ -167,8 +169,11 @@ function markElement(element: Element, interactive: boolean): () => void {
  * hole in it — looks nothing like its cause.
  */
 function scrimColor(): string {
-  if (typeof CSS !== 'undefined' && CSS.supports?.('fill', 'var(--canvas)')) return 'var(--canvas)'
-  const resolved = getComputedStyle(document.documentElement).getPropertyValue('--canvas').trim()
+  if (typeof CSS !== 'undefined' && CSS.supports?.('fill', 'var(--canvas)'))
+    return 'var(--canvas)'
+  const resolved = getComputedStyle(document.documentElement)
+    .getPropertyValue('--canvas')
+    .trim()
   return resolved || '#000'
 }
 
@@ -361,6 +366,7 @@ async function drive(spec: TourSpec): Promise<void> {
 const SPECS: Record<TourId, TourSpec> = {
   guided: { ...GUIDED_SPEC, prepare: ensureGraph },
   build: BUILD_SPEC,
+  dashboard: DASHBOARD_SPEC,
 }
 
 export async function runTour(id: TourId): Promise<void> {

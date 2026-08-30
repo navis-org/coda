@@ -64,10 +64,10 @@ export function refreshTour(): void {
 }
 
 /** Which tour to run. */
-export type TourId = 'guided' | 'build'
+export type TourId = 'guided' | 'build' | 'dashboard'
 
 /**
- * The two tours as the menus offer them, so three surfaces cannot disagree about what they are
+ * The tours as the menus offer them, so three surfaces cannot disagree about what they are
  * called.
  *
  * The toolbar's `?` menu, the command palette and the start page each launch both tours, and
@@ -93,6 +93,12 @@ export const TOURS = [
     label: 'Learn to Build',
     short: 'Learn to Build',
     blurb: 'Build a working pipeline from scratch, a node at a time.',
+  },
+  {
+    id: 'dashboard',
+    label: 'Build a Dashboard',
+    short: 'Build a Dashboard',
+    blurb: 'Turn a small graph into a grid of live views. Uses MaleCNS on neuPrint.',
   },
 ] as const satisfies readonly {
   id: TourId

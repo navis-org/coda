@@ -35,6 +35,13 @@
       <circle cx="18" cy="6" r="2.5"/>
       <path d="M18 8.5a9.5 9.5 0 0 1-9.5 9.5"/>
     </g>
+    <!-- Dashboard: the grid itself, in the proportions the section's figure draws —
+         two cells down the left, one full-height on the right. -->
+    <g id="i-dashboard" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="2.5" y="3" width="8.5" height="7.5" rx="1.5"/>
+      <rect x="2.5" y="13.5" width="8.5" height="7.5" rx="1.5"/>
+      <rect x="14" y="3" width="7.5" height="18" rx="1.5"/>
+    </g>
     <g id="i-pointer" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
       <path d="M5.5 3.5 19 11l-6 1.9L11 19z"/>
       <path d="M13.6 13.6 20 20"/>
@@ -243,6 +250,101 @@
         </div>
       </div>
     </div>
+  </div>
+</section>
+
+<!-- ==========================================================================
+     Dashboards
+
+     Sits directly after the editor thesis because it is the same claim turned
+     round: having said the canvas is the document, this says you do not have to
+     look at it. The figure is the dashboard the "Build a dashboard" guide ends
+     up with, so the page and the tour show one arrangement.
+     ========================================================================== -->
+<section class="chapter">
+  <div class="shell">
+    <div class="chapter__head rise" style="max-width: 34rem">
+      <h2>
+        <span class="h2icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-dashboard"/></svg></span>
+        Build your own dashboard
+      </h2>
+      <p class="lede">
+        A pipeline is for building. A dashboard is for looking. Press <kbd>D</kbd> and the canvas
+        gives way to a grid of only the nodes worth watching &mdash; no wires, no viewport.
+      </p>
+      <p>
+        Pick any nodes off the graph and arrange them: drag to reorder, drag a corner to resize.
+        Each cell is a <b>reference</b> to a node, not a copy, so the graph stays the one source of
+        truth &mdash; press Run and every cell updates at once. Cells stay live, too: sort the
+        table, rotate the scene, tick a neuron in Explore and watch the others follow.
+      </p>
+      <p>
+        The layout is saved with the workflow, so a shared link can open straight into the
+        dashboard rather than the canvas behind it.
+      </p>
+    </div>
+
+    <div class="dash rise" data-delay="1">
+      <div class="surface__bar">
+        <strong>Dashboard</strong>
+        <span>&middot; 3 of 11 nodes</span>
+        <span class="spacer"></span>
+        <span>Columns 2</span>
+        <span class="dash__back">&larr; Canvas</span>
+      </div>
+      <div class="dash__grid">
+        <div class="dash__cell">
+          <div class="dash__head"><b>Explore Dataset</b><span>24,918 neurons</span></div>
+          <div class="dash__body">
+            <div class="dash__search">LC<span class="dash__caret"></span></div>
+            <div class="dash__rows">
+              <i data-on="true"></i><i data-on="true"></i><i></i><i data-on="true"></i><i></i><i></i>
+            </div>
+          </div>
+        </div>
+        <div class="dash__cell dash__cell--tall">
+          <div class="dash__head"><b>Neuroglancer</b><span>3 segments</span></div>
+          <div class="dash__body dash__body--em">
+<!-- Landscape, because the cell it fills is: a portrait viewBox under `slice`
+                 crops the arbours off at the top, which reads as a mistake rather than
+                 as a close-up. Three neurons, one per selected row above. -->
+            <svg viewBox="0 0 320 150" width="100%" height="100%" aria-hidden="true" preserveAspectRatio="xMidYMid slice">
+              <rect width="320" height="150" fill="#0b0b0b"/>
+              <g fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path stroke="#e8913c" d="M36 132 C78 122, 112 106, 140 84 C166 64, 196 52, 232 50"/>
+                <path stroke="#e8913c" d="M140 84 C158 96, 182 104, 210 104"/>
+                <path stroke="#e8913c" d="M140 84 C150 68, 152 48, 146 28"/>
+                <path stroke="#5bc8f5" d="M30 112 C74 100, 110 84, 138 62 C164 42, 198 32, 238 32"/>
+                <path stroke="#5bc8f5" d="M138 62 C154 74, 176 82, 202 84"/>
+                <path stroke="#8ce39a" d="M42 142 C86 136, 124 124, 152 106 C180 88, 214 78, 252 78"/>
+                <path stroke="#8ce39a" d="M152 106 C164 120, 184 130, 208 132"/>
+              </g>
+              <g>
+                <circle cx="232" cy="50" r="3" fill="#e8913c"/>
+                <circle cx="238" cy="32" r="3" fill="#5bc8f5"/>
+                <circle cx="252" cy="78" r="3" fill="#8ce39a"/>
+              </g>
+            </svg>
+          </div>
+        </div>
+        <div class="dash__cell">
+          <div class="dash__head"><b>Table</b><span>3 rows &times; 5 col</span></div>
+          <div class="dash__body">
+            <div class="dash__table">
+              <span>bodyId</span><span>type</span><span>side</span>
+              <span>10021</span><span>LC4</span><span>L</span>
+              <span>10847</span><span>LC6</span><span>R</span>
+              <span>11309</span><span>LC4</span><span>R</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="fig__cap" style="max-width: 34rem; margin-top: 0.9rem">
+      Explore top left, its selection as a table below, and the same neurons in
+      <b>Neuroglancer</b> down the right &mdash; the dashboard the <em>Build a dashboard</em>
+      guide ends on. Tick a neuron in Explore and the other two follow.
+    </p>
   </div>
 </section>
 

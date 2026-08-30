@@ -3,6 +3,8 @@ import { useEffect } from 'react'
 import { useGraphStore } from './store/graphStore'
 import { applyTheme } from './store/persistence'
 import { AssistantPanel } from './ui/panels/AssistantPanel'
+import { useAppShortcuts } from './ui/appShortcuts'
+import { DashboardView } from './ui/dashboard/DashboardView'
 import { Editor } from './ui/Editor'
 import { HelpOverlay } from './ui/help/HelpOverlay'
 import { FeedbackDialog } from './ui/panels/FeedbackDialog'
@@ -30,6 +32,19 @@ export function App() {
    */
   const docked = useGraphStore((s) => s.pinnedNodeId !== undefined)
   const dockFraction = useGraphStore((s) => s.dockFraction)
+  /*
+   * Which view occupies the canvas column. One or the other, never both — see `DashboardView`
+   * for why that is about WebGL contexts rather than about screen space. React Flow unmounts
+   * with `Editor`, taking every card's live preview with it.
+   */
+  const dashboardOpen = useGraphStore((s) => s.dashboardOpen)
+
+  /*
+   * Fullscreen, the inspector, the assistant and the dashboard toggle. Mounted here rather than
+   * in `Editor` because none of them is about the canvas — and `Editor` is not mounted at all
+   * while the dashboard is up, which is how `F` came to do nothing there.
+   */
+  useAppShortcuts()
 
   // Reflect the stored preference onto the document so the viewers sample the right mode
   // when they read `currentMode()`.
@@ -44,10 +59,20 @@ export function App() {
       style={{ '--dock-width': `${dockFraction * 100}%` } as React.CSSProperties}
     >
       <Toolbar onOpenPalette={requestPalette} onOpenBrowser={requestNodeBrowser} />
-      <Editor />
-      {/* Between the canvas and the inspector, and before it in the DOM so tab order runs
-          left to right across the shell. */}
-      <ViewerDock />
+      {dashboardOpen ? <DashboardView /> : <Editor />}
+      {/*
+       * Between the canvas and the inspector, and before it in the DOM so tab order runs left to
+       * right across the shell.
+       *
+       * Gone entirely while the dashboard is up, and structurally rather than by a check inside
+       * the cell. The dock exists to keep one viewer live *beside the graph you are working on*,
+       * and there is no graph beside it here — but the real reason is the exclusion: the dock is
+       * its own grid column, so it survives the view swap, and pinning after the grid opened
+       * would put one node live in a cell and in the dock at once. That is exactly the two
+       * contexts the store refuses for the overlay. `openDashboard` already dropped the pin on
+       * the way in; this is what stops it coming back.
+       */}
+      {!dashboardOpen && <ViewerDock />}
       <Inspector />
       <AssistantPanel />
       <StatusBar />

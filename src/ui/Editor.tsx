@@ -63,15 +63,13 @@ import { NodeContextMenu } from './panels/NodeContextMenu'
 import type { PaletteItem } from './panels/paletteItems'
 import { buildCommandItems, buildNodeItems } from './panels/paletteItems'
 import { requestExportWarnings, useExportWarnings } from './exportWarnings'
-import {
-  FIT_VIEW_OPTIONS,
-  useFitAll,
-  useFitSelected,
-  useFitSelectedRequests,
-} from './fitView'
+import { FIT_VIEW_OPTIONS, useFitAll, useFitSelected, useFitSelectedRequests } from './fitView'
 import { isTourActive, refreshTour } from './tour/tourState'
+// `f`, `i`, `/` and `d` are bound in `useAppShortcuts`, not here: they are about the window, a
+// panel and which view is up, and none of them needs the canvas. This handler keeps the keys that
+// do. Both listeners share the two guards below.
+import { TOUR_DECLINES, isTypingTarget } from './appShortcuts'
 import { LOCKED_NOTICE } from './lockCopy'
-import { appElement, toggleFullscreen } from './fullscreen'
 import { typeColorVar } from './socketStyle'
 import { useArrange } from './useArrange'
 import { useDownloads } from './useDownloads'
@@ -96,15 +94,6 @@ const MINIMAP_SIZE = { width: 180, height: 120 }
 const PAN_BUTTONS = [0, 1, 2]
 const MULTI_SELECT_KEYS = ['Meta', 'Control']
 const DELETE_KEYS = ['Delete', 'Backspace']
-
-/**
- * Unmodified keys the canvas declines while a tour is on screen — see the keydown handler.
- *
- * Fullscreen resizes the window, and the other three move the shell or the spotlit card sideways
- * without firing anything driver listens for, leaving the cut-out over where the thing used to
- * be. Everything else stays live, including the keys the tours themselves name.
- */
-const TOUR_DECLINES = new Set(['f', 'i', 'm', 'h', 'p', '/'])
 
 /*
  * Two card renderers, chosen per node by `isAnnotation`. A text note has no header, no sockets
@@ -790,17 +779,9 @@ function EditorCanvas() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null
-      // Never steal keys from a field the user is typing in.
-      if (
-        target &&
-        (target.tagName === 'INPUT' ||
-          target.tagName === 'TEXTAREA' ||
-          target.tagName === 'SELECT' ||
-          target.isContentEditable)
-      ) {
-        return
-      }
+      // Never steal keys from a field the user is typing in. Shared with `useAppShortcuts`, the
+      // other listener that has to make the same exemption — see `isTypingTarget`.
+      if (isTypingTarget(event.target)) return
 
       const mod = event.metaKey || event.ctrlKey
       /*
@@ -925,15 +906,6 @@ function EditorCanvas() {
         store.pinNode(store.pinnedNodeId === onlySelected ? undefined : onlySelected)
         return
       }
-      // Unqualified for the same reason as `i`, and more so: what fullscreen is about is the
-      // window, which has nothing to do with what happens to be selected. The browser's own
-      // F11 does the same thing — this is the half that is discoverable from inside the app,
-      // and it pairs with the toolbar's ⛶.
-      if (!mod && !event.shiftKey && event.key.toLowerCase() === 'f') {
-        event.preventDefault()
-        void toggleFullscreen(appElement())
-        return
-      }
       /*
        * The key at the top left of the keyboard — `§` on this machine's layout, `` ` `` on a US
        * one, `^` on a German one — so it is matched by **position** (`code`) as well as by what
@@ -954,23 +926,6 @@ function EditorCanvas() {
         if (selected.length) fitSelected()
         else fitAll()
         return
-      }
-      /*
-       * `/` rather than a letter, and unqualified. Every bare letter near the canvas is either
-       * taken (`f`, `i`, `m`, `h`) or one shift away from something else — `a` would sit beside
-       * `⇧A` for the node browser and mean something entirely different. `/` is the universal
-       * "start typing at something" and collides with nothing here.
-       */
-      if (!mod && event.key === '/') {
-        event.preventDefault()
-        useGraphStore.getState().togglePanel('assistant')
-        return
-      }
-      // Unqualified, unlike `m` and `h`: showing the inspector is worth doing with nothing
-      // selected, since that is exactly when you are about to select something.
-      if (!mod && !event.shiftKey && event.key.toLowerCase() === 'i') {
-        event.preventDefault()
-        useGraphStore.getState().togglePanel('inspector')
       }
     }
 

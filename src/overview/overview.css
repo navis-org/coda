@@ -1251,3 +1251,130 @@ code {
     transform: none;
   }
 }
+
+/* --------------------------------------------------------------------------
+ * The dashboard figure
+ *
+ * The grid the "Build a dashboard" guide ends on: two cells down the left, one
+ * full height on the right. Hand-placed with `grid-template`, not the app's
+ * auto-flow — this is a picture of a layout rather than the layout itself, and
+ * a figure that had to be reasoned about to draw would be the wrong kind of
+ * copy of the thing it illustrates.
+ * -------------------------------------------------------------------------- */
+
+.dash {
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface-1);
+  box-shadow: var(--shadow-panel);
+  overflow: hidden;
+}
+.dash__back {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 1px 7px;
+  color: var(--text-secondary);
+}
+.dash__grid {
+  display: grid;
+  /* Two columns, two rows; the right-hand cell spans both. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: 118px 118px;
+  gap: 8px;
+  padding: 8px;
+  background: var(--canvas);
+}
+.dash__cell {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2);
+}
+/* The one that runs the whole height, on the right. */
+.dash__cell--tall {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+.dash__head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+.dash__head b {
+  color: var(--text-primary);
+  font-weight: 650;
+}
+.dash__body {
+  flex: 1;
+  min-height: 0;
+  padding: 7px 8px;
+  overflow: hidden;
+}
+/* Neuroglancer renders on black whatever theme Coda is in — the same literal
+   the tutorial's neuroglancer figure takes, and for the same reason. */
+.dash__body--em {
+  padding: 0;
+  background: #0b0b0b;
+}
+
+.dash__search {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 3px 7px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-primary);
+  background: var(--surface-1);
+}
+.dash__caret {
+  width: 1px;
+  height: 12px;
+  margin-left: 1px;
+  background: var(--accent);
+}
+/* Result rows as bars: the figure is about the shape of a browser, and six
+   invented neuron names would be six things a reader stops to read. */
+.dash__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 7px;
+}
+.dash__rows i {
+  height: 7px;
+  border-radius: 3px;
+  background: var(--border);
+  width: 78%;
+}
+.dash__rows i:nth-child(even) {
+  width: 62%;
+}
+/* Ticked, so the table and the scene beside it have something to be *of*. */
+.dash__rows i[data-on] {
+  background: var(--socket-table);
+  opacity: 0.75;
+}
+
+.dash__table {
+  display: grid;
+  grid-template-columns: auto auto auto;
+  gap: 3px 12px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-secondary);
+  justify-content: start;
+}
+.dash__table span:nth-child(-n + 3) {
+  color: var(--text-muted);
+  font-weight: 650;
+}

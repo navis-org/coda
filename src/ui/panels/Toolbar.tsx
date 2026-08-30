@@ -78,6 +78,9 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
   // A primitive, not the panels object: the store is read through `useSyncExternalStore`, which
   // compares snapshots by identity, and `togglePanel` mints a fresh object each time.
   const inspectorOpen = useGraphStore((s) => s.panels.inspector)
+  // Primitives — invariant 7.
+  const dashboardOpen = useGraphStore((s) => s.dashboardOpen)
+  const toggleDashboard = useGraphStore((s) => s.toggleDashboard)
 
   const setNotice = useGraphStore((s) => s.setNotice)
   // Read off `document.fullscreenElement`, never off the click: Escape and F11 both leave
@@ -439,6 +442,28 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
         aria-label="Inspector"
       >
         <InspectorIcon />
+      </button>
+
+      {/*
+       * The dashboard toggle. Beside the inspector's rather than in a menu, because it is the
+       * same kind of control — which surface you are looking through — and because a mode with
+       * no visible way back is a mode people get stuck in. `aria-pressed` says which way the
+       * click goes; the dashboard's own bar carries a ← Canvas as well.
+       */}
+      <button
+        type="button"
+        className="btn btn--ghost"
+        data-tour="dashboard"
+        aria-pressed={dashboardOpen}
+        onClick={toggleDashboard}
+        title={
+          dashboardOpen
+            ? 'Back to the canvas (D)'
+            : 'Dashboard — the nodes worth looking at, on a grid (D)'
+        }
+        aria-label="Dashboard"
+      >
+        ▦
       </button>
 
       <button

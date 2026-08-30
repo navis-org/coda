@@ -6,6 +6,8 @@
  * file is the document; the UI owns nothing that a reload should lose.
  */
 
+import type { DashboardLayout } from './dashboard'
+import { pruneDashboard, validDashboard } from './dashboard'
 import type { ParamValues, ResolvedPort } from './node'
 import { hasPortGroups, allInputPorts, inputPorts, outputPorts } from './ports'
 import { getNodeDef, typesWithLoops, typesWithReferenceInputs } from './registry'
@@ -112,6 +114,20 @@ export interface CodaGraph {
    * byte-identically through a load and a save.
    */
   groups?: GraphGroup[]
+  /**
+   * The grid view of this graph: which nodes are worth looking at, and where they sit.
+   *
+   * In the document rather than beside it, and that is the one place this feature departs from
+   * the pinned dock — which deliberately does *not* store which node is pinned, because a node
+   * id means nothing in the next graph. The same argument inverts here: a dashboard is a set of
+   * ids that only mean something in *this* graph, which is exactly why it belongs to it. A
+   * dashboard is also the thing worth sending somebody, so it travels with the file, the share
+   * link and the Zoo entry.
+   *
+   * Absent on every graph nobody has put a node on, for `groups`' reason: an old file must round
+   * trip byte-identically. See `core/dashboard.ts` for what is allowed to be in one.
+   */
+  dashboard?: DashboardLayout
   /** Restored on load so a saved graph reopens where you left it. */
   viewport?: { x: number; y: number; zoom: number }
   meta?: {
@@ -622,11 +638,17 @@ function pruneDanglingEdges(graph: CodaGraph, nodeId: string): CodaGraph {
 
 export function removeNodes(graph: CodaGraph, ids: readonly string[]): CodaGraph {
   const dead = new Set(ids)
-  return pruneGroups({
-    ...graph,
-    nodes: graph.nodes.filter((n) => !dead.has(n.id)),
-    edges: graph.edges.filter((e) => !dead.has(e.source) && !dead.has(e.target)),
-  })
+  // Both prunes, and both keep identity when they change nothing — see `pruneGroups`. A cell
+  // naming a deleted node is the dashboard's version of a frame drawn around cards that are
+  // no longer there, and it is worse: the cell is a mount site, so it would draw a header for
+  // a node that cannot be found.
+  return pruneDashboard(
+    pruneGroups({
+      ...graph,
+      nodes: graph.nodes.filter((n) => !dead.has(n.id)),
+      edges: graph.edges.filter((e) => !dead.has(e.source) && !dead.has(e.target)),
+    }),
+  )
 }
 
 /**
@@ -936,6 +958,8 @@ export function deserializeGraph(json: string): LoadResult {
   }
 
   const groups = validGroups(obj.groups, new Set(alive.keys()))
+  // The whole map, not its keys: a cell's eligibility depends on the node's *type*.
+  const dashboard = validDashboard(obj.dashboard, alive)
 
   return {
     graph: {
@@ -943,6 +967,7 @@ export function deserializeGraph(json: string): LoadResult {
       nodes,
       edges,
       ...(groups.length ? { groups } : {}),
+      ...(dashboard ? { dashboard } : {}),
       ...(obj.viewport ? { viewport: obj.viewport } : {}),
       ...(validMeta(obj.meta) ? { meta: validMeta(obj.meta) } : {}),
     },
