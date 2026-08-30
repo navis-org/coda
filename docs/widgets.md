@@ -559,6 +559,44 @@ Traced subset `Find Neurons` and `IDs from Label` both default to. That is not a
 to tidy away — those narrow a population somebody asked about, this describes a dataset — but a
 dataset-wide count with no stated population is the number that ends up quoted in a paper.
 
+### Which fields get a chart, and what `Charts` means
+
+The automatic list is a priority order (`SUMMARY_ATTRIBUTES` in `nodes/lib/datasetStats.ts`):
+taxonomic ranks first because they are how anyone describes a population, then the two "which way
+does it point" fields, then transmitter, then the developmental and anatomical ones. Names a
+dataset does not publish are skipped, so hemibrain draws fewer charts rather than an empty one.
+Two rules narrow it further: numeric columns are excluded outright — a bar chart of "how many
+neurons have exactly 1,204 presynaptic sites" is one bar per neuron, which is a histogram's
+question — and fields that are one fact under two names spend **one slot between them**
+(`FAMILIES`), because a dataset publishing both `consensusNt` and `predictedNt` would otherwise
+push something that says more past the cap of `MAX_SUMMARY_ATTRIBUTES`.
+
+**The `Charts` picker had one reading and needed two.** A non-empty list replaced the automatic
+set outright, so wanting a ninth chart beside the eight on screen meant naming all nine — and
+which eight those are is a fact about *this dataset* that only the priority list can answer. So
+`Chosen charts` (`chartsMode`) says what the list is: `added to the automatic ones` or `the whole
+list`. Four things about it are load-bearing:
+
+- **Empty means "decide for me" in both modes.** That is what stops the modes being two different
+  empty states; `add` differs from `replace` only once a name is in the list, and it differs in one
+  direction. Neither mode can *remove* an automatic chart — replacing is the only way to get a
+  shorter list, which is why the two are worth telling apart rather than folding into one
+  "chosen wins" rule. The dropdown is hidden while the list is empty for exactly that reason.
+- **The additions carry none of the automatic list's rules.** No cap and no family deduplication:
+  a `somaSide` named by hand beside an automatic `side` is somebody asking for both spellings,
+  where the family rule is a tie-break for a list nobody chose. Trimming what somebody asked for
+  by name is how a control stops being believed — Explore Dataset's `chips` records the same call.
+- **A name the automatic list already picked stays where it put it**, rather than being drawn
+  twice or moved to the end. Naming something that was already there changes nothing, which is
+  the only honest answer.
+- **The default and the absent value differ, and that is `absentMeans`.** A stored graph with no
+  key for `chartsMode` was written before the control existed, so its list meant *the whole set*;
+  reading it as the new default would redraw somebody else's saved summary the moment they opened
+  it. New nodes default to `add`, because that is what the picker is nearly always reached for.
+  `populationParams` makes the identical call for the identical reason, and `ValuePreview` spells
+  absence the way `absentMeans` does rather than the way `default` does — belt to that document's
+  braces.
+
 ### Rings, bars and columns
 
 Three chart shapes, and which one a tile gets is a rule rather than a list of field names.

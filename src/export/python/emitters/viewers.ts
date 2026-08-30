@@ -707,13 +707,7 @@ registerEmitter('out.datasetSummary', (ctx) => {
     `# missing ones as a category; the card reports them apart instead.`,
   ]
 
-  /*
-   * The chosen list if there is one, else the same priority list `summaryAttributes` walks —
-   * transcribed rather than imported, because an emitter may not depend on a dataset's live
-   * schema and `.value_counts()` on a column pandas does not have raises. Guarded per column so
-   * a dataset lacking one prints nothing rather than stopping the cell.
-   */
-  const attributes = chosen.length > 0 ? chosen : SUMMARY_ATTRIBUTE_FALLBACK
+  const attributes = summaryChartList(chosen, ctx.params.chartsMode)
   lines.push(
     `for _col in ${pyList(attributes)}:`,
     `    if _col in ${neurons}.columns:`,
@@ -824,3 +818,26 @@ const SUMMARY_ATTRIBUTE_FALLBACK = [
   'hemilineage',
   'nerve',
 ]
+
+/**
+ * Which fields the cell counts: the chosen list, the fallback, or both.
+ *
+ * The chosen list if there is one, else the same priority list `summaryAttributes` walks —
+ * transcribed rather than imported, because an emitter may not depend on a dataset's live schema
+ * and `.value_counts()` on a column pandas does not have raises. Guarded per column in the
+ * emitted loop, so a dataset lacking one prints nothing rather than stopping the cell.
+ *
+ * `chartsMode` picks which of the two readings a chosen list gets, exactly as the card does, and
+ * **absence is spelled the way `absentMeans` spells it**: a graph stored before the control
+ * existed meant the whole list, and a notebook exported from it has to say what the card drew.
+ * What cannot be reproduced here is the family deduplication, which needs the live schema — it
+ * costs a duplicate `value_counts` in a notebook rather than a wrong number.
+ */
+function summaryChartList(chosen: readonly string[], mode: unknown): string[] {
+  if (chosen.length === 0) return SUMMARY_ATTRIBUTE_FALLBACK
+  if (mode !== 'add') return [...chosen]
+  return [
+    ...SUMMARY_ATTRIBUTE_FALLBACK,
+    ...chosen.filter((name) => !SUMMARY_ATTRIBUTE_FALLBACK.includes(name)),
+  ]
+}

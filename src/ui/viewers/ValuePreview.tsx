@@ -180,6 +180,10 @@ function ValuePreviewInner({
         datasetId={isDatasetValue(dataset) ? dataset.datasetId : undefined}
         status={String(node.params.status ?? '')}
         attributes={ctx.columns('attributes')}
+        // Absence spelled the way `absentMeans` spells it, never as the default: a stored node
+        // with no key predates the control and meant the whole list. `deserializeGraph` writes
+        // it in, so this is the belt to that document's braces.
+        chartsMode={node.params.chartsMode === 'add' ? 'add' : 'replace'}
         topTypes={Number(node.params.topTypes ?? 10)}
         measure={node.params.completenessMeasure === 'pre' ? 'pre' : 'post'}
         onMeasure={(measure) => onParamChange?.('completenessMeasure', measure)}

@@ -180,6 +180,7 @@ function show(props: Partial<Parameters<typeof DatasetSummaryViewer>[0]> = {}) {
       datasetId={DATASET}
       status=""
       attributes={[]}
+      chartsMode="replace"
       topTypes={20}
       measure="post"
       onMeasure={vi.fn()}
@@ -253,6 +254,23 @@ describe('tiles', () => {
     // `type` has thousands of values on a real dataset and gets its own top-N tile instead.
     expect(tile('type')).toBeUndefined()
     expect(tile('Top cell types')).toBeTruthy()
+  })
+
+  it('adds a named chart to the automatic ones, or replaces them, as the mode says', async () => {
+    /*
+     * The two readings of one list. `replace` is what the widget has always done and what a
+     * stored graph means; `add` is the case it made hard — one field the priority list does not
+     * carry (`type` here, which it excludes on purpose) wanted *beside* the ones it does, which
+     * used to mean naming all of them.
+     */
+    show({ attributes: ['type'], chartsMode: 'add' })
+    await waitFor(() => expect(tile('type')).toBeTruthy())
+    expect(tile('class')).toBeTruthy()
+
+    cleanup()
+    show({ attributes: ['type'], chartsMode: 'replace' })
+    await waitFor(() => expect(tile('type')).toBeTruthy())
+    expect(tile('class')).toBeUndefined()
   })
 
   it('leaves out a tile whose data does not exist, rather than dashing it', async () => {

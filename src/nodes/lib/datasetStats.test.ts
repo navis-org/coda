@@ -208,6 +208,61 @@ describe('summaryAttributes', () => {
     expect(summaryAttributes(schema, ['class', 'superclass'])).toEqual(['class'])
   })
 
+  describe('added to the automatic list rather than replacing it', () => {
+    const schema = tableSchema(
+      column('superclass', 'str'),
+      column('class', 'str'),
+      column('side', 'str'),
+      column('somaSide', 'str'),
+      column('vfbId', 'str'),
+      column('pre', 'i64'),
+    )
+
+    it('appends what was named after the charts nobody asked for', () => {
+      // The case the mode exists for: one field the priority list does not carry, wanted
+      // *beside* the ones it does — which used to mean naming all of them.
+      expect(summaryAttributes(schema, ['vfbId'], 'add')).toEqual([
+        'superclass',
+        'class',
+        'side',
+        'vfbId',
+      ])
+      expect(summaryAttributes(schema, ['vfbId'])).toEqual(['vfbId'])
+    })
+
+    it('carries none of the automatic list rules onto the additions', () => {
+      // `somaSide` is `side`'s family, which the automatic pass spends one slot on. Named by
+      // hand it is somebody asking for both spellings, and the family rule is a tie-break for a
+      // list nobody chose.
+      expect(summaryAttributes(schema, ['somaSide'], 'add')).toEqual([
+        'superclass',
+        'class',
+        'side',
+        'somaSide',
+      ])
+    })
+
+    it('keeps a name the automatic list already picked where it put it', () => {
+      // Once, and in priority order: drawing it twice, or moving it to the end, are both the
+      // list rearranging itself over a name that changed nothing.
+      expect(summaryAttributes(schema, ['class', 'vfbId', 'class'], 'add')).toEqual([
+        'superclass',
+        'class',
+        'side',
+        'vfbId',
+      ])
+    })
+
+    it('still drops a numeric column, and still decides for itself when nothing is named', () => {
+      // Empty means "decide for me" in both modes — which is what keeps them from being two
+      // different empty states — and `add` can only ever add.
+      expect(summaryAttributes(schema, ['pre'], 'add')).toEqual(
+        summaryAttributes(schema, [], 'add'),
+      )
+      expect(summaryAttributes(schema, [], 'add')).toEqual(summaryAttributes(schema))
+    })
+  })
+
   it('answers nothing for a schema nobody has yet', () => {
     expect(summaryAttributes(undefined)).toEqual([])
   })

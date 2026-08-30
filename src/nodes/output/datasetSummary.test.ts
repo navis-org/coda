@@ -14,7 +14,7 @@
 
 import { beforeEach, describe, expect, it } from 'vitest'
 
-import { addEdge, addNode, emptyGraph } from '../../core/graph'
+import { addEdge, addNode, deserializeGraph, emptyGraph } from '../../core/graph'
 import type { CodaGraph, GraphNode } from '../../core/graph'
 import { inferGraph } from '../../core/inference'
 import { defaultParams } from '../../core/node'
@@ -134,6 +134,52 @@ describe('out.datasetSummary', () => {
     const refresh = requireNodeDef('out.datasetSummary').params?.find((p) => p.id === 'refresh')
     expect(refresh?.internal).toBe(true)
     expect(refresh?.presentational).toBe(true)
+  })
+
+  it('reads a stored graph as the whole list, whatever new nodes default to', () => {
+    /*
+     * The three states of a param added to a node that already shipped. A document written
+     * before `chartsMode` existed held a `Charts` list that *was* the whole list, so absent and
+     * default are different answers — and `deserializeGraph` is what writes the absent one in.
+     * Without this, opening somebody's saved summary would silently draw eight more charts than
+     * it did when they saved it. `populationParams` makes the identical call.
+     */
+    const def = requireNodeDef('out.datasetSummary')
+    const mode = def.params?.find((p) => p.id === 'chartsMode')
+    expect(mode?.default).toBe('add')
+    expect(mode?.absentMeans).toBe('replace')
+
+    const loaded = deserializeGraph(
+      JSON.stringify({
+        version: 1,
+        nodes: [
+          {
+            id: 'sum',
+            type: 'out.datasetSummary',
+            position: { x: 0, y: 0 },
+            params: { attributes: ['class'] },
+          },
+        ],
+        edges: [],
+      }),
+    ).graph.nodes[0]!.params
+    expect(loaded.chartsMode).toBe('replace')
+    // And a value somebody stored is left alone, either way.
+    expect(loaded.attributes).toEqual(['class'])
+
+    // Presentational, like the list it qualifies: it decides what is drawn and nothing else.
+    expect(mode?.presentational).toBe(true)
+  })
+
+  it('hides the mode while there is no list for it to qualify', () => {
+    // Empty means "decide for me" in both modes, so the dropdown would be asking a question
+    // with no consequence — `visibleIf`'s ordinary job, and hidden params stay out of the key.
+    const mode = requireNodeDef('out.datasetSummary').params?.find((p) => p.id === 'chartsMode')
+    expect(mode?.visibleIf?.({ attributes: [] })).toBe(false)
+    expect(mode?.visibleIf?.({ attributes: ['class'] })).toBe(true)
+    // A stored node with no key for the list at all — absence is not an empty list, but it is
+    // certainly not a list either.
+    expect(mode?.visibleIf?.({})).toBe(false)
   })
 
   it('defaults to every neuron, as a summary must', () => {

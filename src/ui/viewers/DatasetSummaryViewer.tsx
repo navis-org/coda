@@ -34,7 +34,7 @@ import {
   statsFor,
   summaryAttributes,
 } from '../../nodes/lib/datasetStats'
-import type { AttributeCounts } from '../../nodes/lib/datasetStats'
+import type { AttributeCounts, SummaryChartsMode } from '../../nodes/lib/datasetStats'
 import { getSource } from '../../data/source'
 import { MAX_SERIES, currentMode, seriesColor } from '../colors'
 import type { Mode } from '../colors'
@@ -55,6 +55,8 @@ export interface DatasetSummaryViewerProps {
   status: string
   /** Chosen chart columns. Empty means "decide for me". */
   attributes: readonly string[]
+  /** Whether those replace the automatic charts or are drawn beside them. */
+  chartsMode: SummaryChartsMode
   topTypes: number
   /** Which half of a synapse the completeness chart reports. */
   measure: CompletenessMeasure
@@ -111,6 +113,7 @@ export function DatasetSummaryViewer({
   datasetId,
   status,
   attributes,
+  chartsMode,
   topTypes,
   measure,
   onMeasure,
@@ -156,8 +159,8 @@ export function DatasetSummaryViewer({
   )
 
   const charts = useMemo(
-    () => (table ? summaryAttributes(table.schema, attributes) : []),
-    [table, attributes],
+    () => (table ? summaryAttributes(table.schema, attributes, chartsMode) : []),
+    [table, attributes, chartsMode],
   )
 
   /*

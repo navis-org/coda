@@ -83,7 +83,9 @@ describe('the node', () => {
     // columns *are* the data. Asserted as the design, not as an implementation detail.
     expect(def.observesOutputSchema).toBeFalsy()
     const inferred = def.inferOutputs?.(
-      makeInferContext(def, { ...defaultParams(def), ...folded } as never, { in: T.table(WIDE) }),
+      makeInferContext(def, { ...defaultParams(def), ...folded } as never, {
+        in: T.table(WIDE),
+      }),
     )
     expect(columnNames(schemaOf(inferred?.out))).toEqual(['neuronId', 'name', 'value'])
   })

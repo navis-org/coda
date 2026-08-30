@@ -246,9 +246,10 @@ Moved verbatim out of `CLAUDE.md`.
 | `ui/useDownloads.test.tsx`               | the side effect: written on an executing run, not on an unchanged one, and the auto-run warning                                  |
 | `ui/panels/startPage.test.tsx`           | (also) the field-guide links, in the welcome bar and the Help menu, composed against `BASE_URL`                                  |
 | `nodes/lib/datasetStats.test.ts`         | the dataset roll-ups: null-vs-empty as one absence, absence counted apart, the residual fold, and one walk serving every cap        |
+| `nodes/lib/datasetStats.test.ts`         | (also) which fields get a chart: the priority order, one slot per fact, numeric columns out, a chosen list taken literally, and `add` appending without the cap, the family rule, or a second copy of a name |
 | `nodes/query/roiSummary.test.ts`         | the two ROI nodes: answering from a Dataset alone, a region kept when its summability is unknown, and the asymmetry between them   |
-| `nodes/output/datasetSummary.test.ts`    | that a chart setting stales nothing while `Status` does, and that it emits no ports at all                                        |
-| `ui/viewers/datasetSummary.test.tsx`     | the card: absent tiles vs dashed ones, why an empty one is empty, the caption naming its population, ring-vs-bars, and paging |
+| `nodes/output/datasetSummary.test.ts`    | that a chart setting stales nothing while `Status` does, that it emits no ports at all, and that a graph stored before `chartsMode` existed loads meaning the whole list |
+| `ui/viewers/datasetSummary.test.tsx`     | the card: absent tiles vs dashed ones, why an empty one is empty, the caption naming its population, ring-vs-bars, paging, and a named chart drawn beside the automatic ones or in place of them |
 | `ui/useNeuronIndex.test.tsx`             | one load across two widgets, a late mount with no spinner flash, and a reload reaching every subscriber                            |
 | `ui/raster.test.ts`                      | triangles and lines to masks, and masks to outlines: clipping, brightest-wins, a concavity kept, split blobs, the closed-ring simplify — and `drawSegment`'s three properties a quad-and-fill would not have: an unbroken diagonal, a sub-pixel segment that still marks its ends, and thickness read as a *diameter* so an even width does not collapse to one pixel |
 | `ui/viewers/roiProjection.test.ts`       | the three anatomical planes, an outline that keeps its notch, the explode proved non-uniform, the frame held at full, and mesh volume |

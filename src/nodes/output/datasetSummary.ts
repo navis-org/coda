@@ -85,6 +85,10 @@ export const datasetSummaryNode = registerNode({
        * `summaryAttributes` does from a priority list — the same idiom, and the same wording,
        * as Explore's `chips`. A list chosen here is taken literally and uncapped, because
        * trimming what somebody asked for by name is how a control stops being believed.
+       *
+       * What that list *is* — the whole set, or an addition to the automatic one — is
+       * `chartsMode` below, which exists because the answer used to be "the whole set" with no
+       * way to say otherwise.
        */
       id: 'attributes',
       kind: 'columns',
@@ -95,6 +99,39 @@ export const datasetSummaryNode = registerNode({
       schemaFrom: (inputs) => schemasFromType(inputs.dataset).neurons,
       help: 'Which fields get a chart. Leave empty to choose automatically.',
       default: [],
+      presentational: true,
+      advanced: true,
+    },
+    {
+      /*
+       * Whether the list above replaces the automatic charts or adds to them.
+       *
+       * **The default and the absent value differ, and that is the point of `absentMeans`.** A
+       * stored node with no key for this predates the control, so its list meant the whole set
+       * — reading it as today's default would silently redraw somebody else's saved graph the
+       * moment they opened it. `populationParams` makes the identical call for the identical
+       * reason; see `ParamBase.absentMeans`.
+       *
+       * New nodes default to `add` because that is what the picker is nearly always used for:
+       * one field the priority list does not carry, wanted *beside* the eight it does. Getting
+       * that by naming all nine meant first working out which eight this dataset produced,
+       * which is a question only `SUMMARY_ATTRIBUTES` can answer.
+       *
+       * Hidden while the list is empty, where the two modes are the same widget: empty means
+       * "decide for me" either way, so an inert dropdown would be asking a question with no
+       * consequence.
+       */
+      id: 'chartsMode',
+      kind: 'enum',
+      label: 'Chosen charts',
+      help: 'Whether the fields above are added to the automatic charts or are the whole list. Only the automatic set can be replaced — neither mode can drop a chart you did not ask for.',
+      default: 'add',
+      absentMeans: 'replace',
+      options: [
+        { value: 'add', label: 'added to the automatic ones' },
+        { value: 'replace', label: 'the whole list' },
+      ],
+      visibleIf: (params) => Array.isArray(params.attributes) && params.attributes.length > 0,
       presentational: true,
       advanced: true,
     },
