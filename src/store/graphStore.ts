@@ -67,7 +67,9 @@ import { EDGE_ROUTINGS } from '../layout/options'
 import type { PanelState, ThemePreference } from './persistence'
 import {
   applyTheme,
+  clampDockFraction,
   loadAutoRun,
+  loadDockFraction,
   loadNotifyRuns,
   loadAutosave,
   loadLayoutPrefs,
@@ -78,6 +80,7 @@ import {
   saveNotifyRuns,
   saveLayoutPrefs,
   savePanels,
+  saveDockFraction,
   saveAutosave,
   saveStartPageDismissed,
   watchTabIdentity,
@@ -342,6 +345,40 @@ export interface GraphState {
    */
   expandedNodeId: string | undefined
   expandNode(nodeId: string | undefined): void
+  /**
+   * Node whose output is docked down the right-hand side of the canvas, if any.
+   *
+   * The overlay's non-modal twin: same surface, drawn beside the graph instead of over it, so a
+   * neuroglancer scene or a 3D view can stay open while the wires under it are rewired.
+   *
+   * **Never the same node as `expandedNodeId`**, and that is not tidiness. A viewer's card
+   * already stands down while the overlay owns the node (`showPreview` in `CodaNodeView` —
+   * three WebGL contexts and 3 × 170 kB measured for one 21-neuron scene), and the dock is a
+   * *third* mount site for the same node. Both holding one id means two live instances of one
+   * neuroglancer embed, each an application fetching EM.
+   *
+   * Two *different* nodes is allowed, and the exclusion is written asymmetrically to say so —
+   * see the two setters. A pin is a workspace choice and outlives a glance at something else;
+   * an expansion is the glance.
+   *
+   * Not persisted — see the note on `DOCK_KEY` in `persistence.ts`. A node id means nothing in
+   * the next graph.
+   */
+  pinnedNodeId: string | undefined
+  pinNode(nodeId: string | undefined): void
+  /**
+   * The dock's share of the window, as a fraction. Persisted; the node id is not.
+   *
+   * A primitive on the store rather than local state in `ViewerDock`, because the grid column it
+   * sizes is on `.app` — two components, one number.
+   */
+  dockFraction: number
+  /**
+   * `totalPx` is the width the fraction will be resolved against. Passing it lets the pixel
+   * floor be part of the stored answer, so the number the store holds is the one the grid
+   * column renders — without it the grip would announce 20% for a dock CSS is drawing at 25%.
+   */
+  setDockFraction(fraction: number, totalPx?: number): void
   /**
    * Node **type** whose help document is open, if any.
    *
@@ -1032,7 +1069,33 @@ export const useGraphStore = create<GraphState>((set, get) => {
       set({ startPageDismissed: dismissed })
     },
     expandedNodeId: undefined,
-    expandNode: (nodeId) => set({ expandedNodeId: nodeId }),
+    /*
+     * Releases the pin only for the *same* node. Expanding something else is a transient look at
+     * a second result, and taking the dock down for it would mean a pinned neuroglancer scene
+     * lost its camera — the memo recovers that same-origin and cannot cross-origin — every time
+     * somebody opened a table for a moment. What the narrow test still forbids is the case that
+     * actually costs: one node mounted in two full-size surfaces at once.
+     */
+    expandNode: (nodeId) =>
+      set((s) =>
+        nodeId && s.pinnedNodeId === nodeId
+          ? { expandedNodeId: nodeId, pinnedNodeId: undefined }
+          : { expandedNodeId: nodeId },
+      ),
+    pinnedNodeId: undefined,
+    /*
+     * The other direction is unconditional, and the asymmetry is deliberate: pinning is a
+     * request to see something *beside the graph*, and leaving a modal over it would answer that
+     * request with a covered panel. Closing the dock (`undefined`) touches nothing.
+     */
+    pinNode: (nodeId) =>
+      set(nodeId ? { pinnedNodeId: nodeId, expandedNodeId: undefined } : { pinnedNodeId: nodeId }),
+    dockFraction: loadDockFraction(),
+    setDockFraction: (fraction, totalPx) => {
+      const next = clampDockFraction(fraction, totalPx)
+      saveDockFraction(next)
+      set({ dockFraction: next })
+    },
     helpType: undefined,
     openHelp: (type) => set({ helpType: type }),
 
@@ -1072,6 +1135,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
         notice: undefined,
         lastRun: undefined,
         expandedNodeId: undefined,
+        pinnedNodeId: undefined,
       })
       scheduler.invalidateAll()
       afterGraphChange(graph, { autoRun: false })
@@ -1092,6 +1156,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
         notice: warnings.length ? warnings.join(' · ') : undefined,
         lastRun: undefined,
         expandedNodeId: undefined,
+        pinnedNodeId: undefined,
       })
       scheduler.invalidateAll()
       afterGraphChange(graph)
@@ -1427,6 +1492,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
         ...(s.expandedNodeId && nodeIds.includes(s.expandedNodeId)
           ? { expandedNodeId: undefined }
           : {}),
+        ...(s.pinnedNodeId && nodeIds.includes(s.pinnedNodeId) ? { pinnedNodeId: undefined } : {}),
       }))
     },
 

@@ -217,6 +217,13 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
         hint: 'The key at the top left of the keyboard — ` on a US layout, ^ on a German one',
       },
       {
+        id: 'pin',
+        chords: [{ key: 'P' }],
+        label: 'Pin or unpin the selected result',
+        hint: 'Docked down the right of the canvas, where it stays while you work on the graph',
+        short: 'pin',
+      },
+      {
         id: 'fullscreen',
         chords: [{ key: 'F' }],
         label: 'Fullscreen',

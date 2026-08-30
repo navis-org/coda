@@ -179,6 +179,13 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
    * stopped a run would be a different feature. `GraphState.locked` has the full list.
    */
   const locked = store.locked
+  /*
+   * Which half of the pin toggle is live. `P` toggles against the *selected* node, so the row
+   * unpins when that node is the docked one — or, with no single selection, when the key would
+   * do nothing at all and the row is the only way to close the dock.
+   */
+  const unpins =
+    store.pinnedNodeId !== undefined && (single === undefined || single === store.pinnedNodeId)
 
   const items: PaletteItem[] = [
     {
@@ -401,6 +408,32 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
       disabled: !computable,
       perform: () => {
         if (single) store.expandNode(single)
+      },
+    },
+    {
+      id: 'cmd:pin',
+      action: 'View',
+      /*
+       * The row says what `P` would do *right now*, and carries the badge only when `P` would
+       * in fact do it — the rule `cmd:fit` below states at length, and for the same reason. The
+       * key toggles against the selected node, so with `view` docked and `table` selected it
+       * *moves* the dock; a row that read "Unpin" and badged `P` there would be advertising the
+       * opposite of what the key does. With no single selection the key is inert, so the row
+       * still offers the unpin — it is the one thing wanted at that moment — and drops the badge.
+       */
+      label: unpins ? 'Unpin Docked Output' : 'Pin Selected Output to the Side',
+      hint: unpins
+        ? 'Give the canvas the whole window back'
+        : annotated
+          ? 'A text note has no result to dock'
+          : single
+            ? 'Dock it down the right of the canvas, where it stays while you work'
+            : 'Select a single node first',
+      disabled: !unpins && !computable,
+      ...(single ? { shortcut: shortcutKeys('pin') } : {}),
+      perform: () => {
+        if (unpins) store.pinNode(undefined)
+        else if (single) store.pinNode(single)
       },
     },
     {

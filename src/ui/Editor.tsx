@@ -104,7 +104,7 @@ const DELETE_KEYS = ['Delete', 'Backspace']
  * without firing anything driver listens for, leaving the cut-out over where the thing used to
  * be. Everything else stays live, including the keys the tours themselves name.
  */
-const TOUR_DECLINES = new Set(['f', 'i', 'm', 'h', '/'])
+const TOUR_DECLINES = new Set(['f', 'i', 'm', 'h', 'p', '/'])
 
 /*
  * Two card renderers, chosen per node by `isAnnotation`. A text note has no header, no sockets
@@ -908,6 +908,21 @@ function EditorCanvas() {
       if (!mod && event.key.toLowerCase() === 'h' && selected.length > 0) {
         event.preventDefault()
         useGraphStore.getState().toggleCollapsed(selected)
+        return
+      }
+      /*
+       * Pin, and it toggles against *this* node rather than against "is anything pinned": with a
+       * second viewer selected the key should move the dock onto it, not close it. Unpinning is
+       * then pressing it again on the node that is showing — the same key, the same node.
+       *
+       * Requires a single selection, like `m` and `h` require any: the dock draws one node, and
+       * a key that quietly picked the first of four would be a coin toss.
+       */
+      const onlySelected = selected.length === 1 ? selected[0] : undefined
+      if (!mod && event.key.toLowerCase() === 'p' && onlySelected) {
+        event.preventDefault()
+        const store = useGraphStore.getState()
+        store.pinNode(store.pinnedNodeId === onlySelected ? undefined : onlySelected)
         return
       }
       // Unqualified for the same reason as `i`, and more so: what fullscreen is about is the

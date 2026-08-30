@@ -162,6 +162,16 @@ Area-specific — the rule, then the doc that holds why:
   Away is `visibilityState` **or** `!hasFocus()`, because a covered window is still `visible`.
   A floor, not a manual/automatic test: what says somebody left is how long the run took.
   See [docs/ui-shell.md](docs/ui-shell.md).
+- **A pinned viewer is a grid column, and one node is never live in two full-size surfaces.** `⇥`
+  docks a viewer down the right of `.app` beside the canvas rather than over it, so `showPreview`
+  stands the card down for `pinnedNodeId` exactly as it does for `expandedNodeId` — the same three
+  WebGL contexts. The store refuses one id in *both*; two different nodes it allows, so `expandNode`
+  releases the pin only for the same node while `pinNode` always closes the overlay. The canvas
+  column is **`minmax(0, 1fr)`**, because React Flow's pane reports the whole graph's extent as its
+  automatic minimum and a bare `1fr` pushes the dock off screen. The stored width is a **fraction**
+  of the window, under a **px** floor — the two clamp different things — and *which* node is pinned
+  is deliberately not stored, because a node id means nothing in the next graph.
+  See [docs/ui-shell.md](docs/ui-shell.md).
 - **A published token is not a credential, and shipping one makes a rotation a new failure mode.**
   Virtual Fly Brain publishes an `AnonymousUser` token per instance because CATMAID's query endpoints
   are POST-only and a browser satisfies neither of Django's CSRF gates: it cannot set `Referer`, and it

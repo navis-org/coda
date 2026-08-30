@@ -16,12 +16,20 @@ import { StartPage } from './ui/panels/StartPage'
 import { ZooGate } from './ui/panels/ZooGate'
 import { StatusBar } from './ui/panels/StatusBar'
 import { Toolbar } from './ui/panels/Toolbar'
+import { ViewerDock } from './ui/panels/ViewerDock'
 import { ViewerOverlay } from './ui/panels/ViewerOverlay'
 
 export function App() {
   const requestPalette = useGraphStore((s) => s.requestPalette)
   const requestNodeBrowser = useGraphStore((s) => s.requestNodeBrowser)
   const theme = useGraphStore((s) => s.theme)
+  /*
+   * The dock's column is declared on `.app`, so `.app` is what has to know about it. Both reads
+   * are primitives — invariant 7 — and `data-dock` is what switches the second column from
+   * `auto` (which a closed dock collapses to zero) to the stored share of the window.
+   */
+  const docked = useGraphStore((s) => s.pinnedNodeId !== undefined)
+  const dockFraction = useGraphStore((s) => s.dockFraction)
 
   // Reflect the stored preference onto the document so the viewers sample the right mode
   // when they read `currentMode()`.
@@ -30,9 +38,16 @@ export function App() {
   }, [theme])
 
   return (
-    <div className="app">
+    <div
+      className="app"
+      data-dock={docked ? 'open' : undefined}
+      style={{ '--dock-width': `${dockFraction * 100}%` } as React.CSSProperties}
+    >
       <Toolbar onOpenPalette={requestPalette} onOpenBrowser={requestNodeBrowser} />
       <Editor />
+      {/* Between the canvas and the inspector, and before it in the DOM so tab order runs
+          left to right across the shell. */}
+      <ViewerDock />
       <Inspector />
       <AssistantPanel />
       <StatusBar />

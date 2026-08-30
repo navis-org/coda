@@ -248,6 +248,10 @@ describe('every store action is on one side of the lock', () => {
     'closeZoo',
     'setStartPageDismissed',
     'expandNode',
+    // The dock is the same kind of thing as the overlay — looking at a result, not editing the
+    // graph — and its width is a panel preference.
+    'pinNode',
+    'setDockFraction',
     'openHelp',
     'setGraph',
     'setGraphName',

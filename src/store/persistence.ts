@@ -384,9 +384,16 @@ export interface PanelState {
    */
   assistant: boolean
   /**
-   * The expanded viewer's styling sidebar. Unlike the other two this defaults **open**: it
-   * lives inside a modal nobody opens by accident, and the controls are most of the reason
-   * to open it. The canvas argument above does not apply — there is no canvas in there.
+   * The full-size viewer's styling sidebar. Unlike the other two this defaults **open**: a
+   * full-size viewer is opened deliberately, and the controls are most of the reason to open
+   * one — the canvas argument above is about a panel that takes room before anybody has asked
+   * for anything, which this does not.
+   *
+   * **One boolean for both surfaces**, so toggling it in the dock also toggles it in the
+   * overlay. That is the intended reading — it is a preference about styling controls, not
+   * about a panel — but it is worth knowing before adding a third surface that would want its
+   * own answer. What the dock does need is `.viewer-surface .overlay__style`'s width cap: 268px
+   * is a fraction of an overlay and most of a dock somebody has dragged narrow.
    */
   style: boolean
 }
@@ -425,6 +432,73 @@ export function savePanels(panels: PanelState): void {
   } catch {
     /* ignore */
   }
+}
+
+/*
+ * How wide the pinned viewer dock is.
+ *
+ * **A fraction, not a pixel count**, and that is the only interesting decision here. The dock is
+ * a share of the window — "give the scene half the screen and keep the graph in the other half"
+ * is the whole request — so a stored 700px is right on the display it was set on and wrong on
+ * every other one, most sharply when the same person opens the app on a laptop after setting it
+ * on a desktop. A fraction survives that, survives a window resize, and needs no clamping pass
+ * against a viewport width nobody has measured yet at load time.
+ *
+ * It goes in its own key rather than into `PanelState`, which is a record of booleans that
+ * `togglePanel` indexes by `keyof` — a number in there would be togglable.
+ *
+ * **Which node is pinned is deliberately not stored anywhere.** It is a node id, and a node id
+ * outlives nothing: the next graph loaded has different ones, so a remembered pin would open the
+ * dock on a node that does not exist, or worse, on an unrelated node that happens to share the
+ * id. Session state in the store, and no further.
+ */
+const DOCK_KEY = 'coda.dock.v1'
+
+/**
+ * The bounds, and the two are about different things.
+ *
+ * `DOCK_MAX_FRACTION` protects the *canvas*: past 70% the graph is a strip. `DOCK_MIN_PX`
+ * protects the *dock*, and it is in pixels because a viewer plus its 268px styling sidebar does
+ * not get more possible on a smaller display — below 360px the panel is a legend and a
+ * scrollbar. `DOCK_MIN_FRACTION` is only the backstop for a window whose width nobody has
+ * measured yet (a value read back from storage before layout), which is why every caller that
+ * *has* a width passes it: a floor the store does not know about is a floor `aria-valuenow`
+ * lies about, announcing 20% for a dock the grid is rendering at 25%.
+ */
+export const DOCK_MIN_FRACTION = 0.2
+export const DOCK_MAX_FRACTION = 0.7
+export const DOCK_MIN_PX = 360
+
+/**
+ * Half the window.
+ *
+ * The literal shape of the request this was built for — a scene down one side, the graph down
+ * the other — and the only default that needs no explanation the first time somebody pins
+ * something. The grip is there for anyone who wants a different split.
+ */
+export const DEFAULT_DOCK_FRACTION = 0.5
+
+/**
+ * `totalPx` is the width the fraction will be resolved against, when the caller knows it. Given
+ * one, the pixel floor becomes part of the answer, so what is stored is what gets laid out.
+ */
+export function clampDockFraction(fraction: number, totalPx?: number): number {
+  if (!Number.isFinite(fraction)) return DEFAULT_DOCK_FRACTION
+  const floor =
+    totalPx && totalPx > 0
+      ? Math.min(DOCK_MAX_FRACTION, Math.max(DOCK_MIN_FRACTION, DOCK_MIN_PX / totalPx))
+      : DOCK_MIN_FRACTION
+  return Math.min(DOCK_MAX_FRACTION, Math.max(floor, fraction))
+}
+
+export function loadDockFraction(): number {
+  const raw = readLocal(DOCK_KEY)
+  return raw ? clampDockFraction(Number.parseFloat(raw)) : DEFAULT_DOCK_FRACTION
+}
+
+/** Clamped by `setDockFraction`, which is the only caller and the only place that can be. */
+export function saveDockFraction(fraction: number): void {
+  writeLocal(DOCK_KEY, String(fraction))
 }
 
 // ---------------------------------------------------------------------------

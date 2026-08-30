@@ -386,13 +386,36 @@ button {
    * a wide band, and a horizontal pipeline can spare height more easily than width.
    */
   grid-template-rows: auto 1fr auto auto;
-  grid-template-columns: 1fr auto;
+  /*
+   * Three columns, and the middle one is the pinned viewer dock. Closed it is `auto` around an
+   * element that is not rendered at all, which collapses it to nothing — the same "closed means
+   * not rendered, not zero-width" rule the inspector follows, and the reason no width has to be
+   * animated back to zero. Open, `data-dock` swaps in the stored share of the window.
+   *
+   * `minmax(0, 1fr)` rather than `1fr` for the canvas: a bare `1fr` is `minmax(auto, 1fr)`, whose
+   * automatic minimum is the content's — React Flow's pane reports the whole graph's extent, so
+   * a wide graph would refuse to let the canvas column shrink and push the dock off the screen.
+   */
+  grid-template-columns: minmax(0, 1fr) auto auto;
   grid-template-areas:
-    'toolbar toolbar'
-    'canvas inspector'
-    'assistant assistant'
-    'status status';
+    'toolbar toolbar toolbar'
+    'canvas dock inspector'
+    'assistant assistant assistant'
+    'status status status';
   height: 100%;
+}
+
+.app[data-dock='open'] {
+  /*
+   * A px floor under the fraction, because the two are floors against different things. The
+   * fraction's own clamp keeps the *canvas* usable and is a share of whatever window this is;
+   * this one keeps the *dock* usable, and that number is in pixels — a viewer plus the styling
+   * sidebar beside it does not get more possible on a smaller display. Below it the panel was a
+   * legend and a scrollbar. `minmax` with a max under its min resolves to the min, which is
+   * exactly the wanted behaviour on a narrow window; `min(…, 60%)` is what stops the floor from
+   * being wider than the share the canvas is entitled to on a genuinely small one.
+   */
+  grid-template-columns: minmax(0, 1fr) minmax(min(360px, 60%), var(--dock-width, 50%)) auto;
 }
 
 .toolbar {
@@ -463,6 +486,61 @@ button {
   position: relative;
   min-width: 0;
   min-height: 0;
+}
+
+/*
+ * The pinned viewer dock. Its *width* is the grid column above; what is here is the frame.
+ *
+ * `min-width: 0` on the panel for the canvas column's reason one level down: the surface inside
+ * holds tables and scenes that report a large intrinsic width, and a flex item's automatic
+ * minimum is that width, so without this a wide table stretches the dock past the column it was
+ * given instead of scrolling inside it.
+ */
+.viewer-dock {
+  grid-area: dock;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  background: var(--surface-1);
+  border-left: 1px solid var(--border);
+}
+
+/*
+ * The styling sidebar is `flex: none; width: 268px`, which is right in an overlay that is always
+ * most of the screen and wrong in a dock somebody has dragged narrow: at the floor it took the
+ * panel and left the viewer a strip. A share cap rather than a media query, so the split degrades
+ * continuously instead of snapping, and the sidebar keeps its 268px everywhere it fits.
+ */
+.viewer-surface .overlay__style {
+  max-width: 45%;
+}
+
+.viewer-dock__panel {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/*
+ * The resize grip: a 6px strip whose visible line is 1px, because a border you can only grab
+ * when the cursor is exactly on it is a border nobody discovers. It sits *inside* the dock and
+ * the dock carries the border, so the seam does not move when the grip lights up.
+ */
+.viewer-dock__grip {
+  flex: none;
+  width: 6px;
+  margin-left: -1px;
+  cursor: col-resize;
+  background: transparent;
+  touch-action: none;
+}
+.viewer-dock__grip:hover,
+.viewer-dock__grip:focus-visible {
+  background: var(--accent);
+  outline: none;
 }
 
 .inspector {

@@ -136,8 +136,14 @@ function CodaNodeViewImpl({
   const runNode = useGraphStore((s) => s.runNode)
   const cancelRun = useGraphStore((s) => s.cancelRun)
   const expandNode = useGraphStore((s) => s.expandNode)
-  /* A primitive, so the snapshot compares by identity — invariant 7. */
+  const pinNode = useGraphStore((s) => s.pinNode)
+  /*
+   * Primitives, so the snapshots compare by identity — invariant 7. `isPinned` is selected as
+   * the *comparison* rather than as the raw id, because that is all four readers want: every
+   * card would otherwise re-render whenever the pin moved between two other nodes.
+   */
   const expandedNodeId = useGraphStore((s) => s.expandedNodeId)
+  const isPinned = useGraphStore((s) => s.pinnedNodeId === id)
   const openHelp = useGraphStore((s) => s.openHelp)
   const needsRun = useGraphStore((s) => {
     void s.runVersion
@@ -338,7 +344,7 @@ function CodaNodeViewImpl({
   const visibleParams = body ? [] : buckets.flatMap((bucket) => bucket.params)
 
   /*
-   * Not while the overlay is showing this same node.
+   * Not while the overlay or the dock is showing this same node.
    *
    * A viewer is a *renderer*, not a picture: the network and 3D viewers each take a WebGL
    * context of their own and upload their own copy of the geometry to the GPU, so a node drawn
@@ -347,7 +353,12 @@ function CodaNodeViewImpl({
    * and the overlay all up. The overlay is modal and larger, so while it owns a node there is
    * nothing behind it worth paying for.
    *
-   * The cost of standing down is a remount when the overlay closes, which re-frames the card's
+   * The **dock** is the same argument with the modality removed: it is a third mount site for
+   * one node, drawn at half the window, and the card behind it is a thumbnail of the thing
+   * already on screen. That the store refuses to hold one node in both the dock and the overlay
+   * caps this at two possible surfaces rather than three; this caps the live ones at one.
+   *
+   * The cost of standing down is a remount when the surface closes, which re-frames the card's
    * camera. That is the right way round: somebody who has just been working full size is not
    * also curating the thumbnail behind it.
    */
@@ -355,6 +366,7 @@ function CodaNodeViewImpl({
     isViewer(def) &&
     !node.collapsed &&
     expandedNodeId !== id &&
+    !isPinned &&
     (outputValue !== undefined || SELF_DRAWING_NODE_TYPES.has(node.type))
 
   /*
@@ -369,6 +381,12 @@ function CodaNodeViewImpl({
    * back on release.
    */
   const resizable = isViewer(def) && !node.collapsed && draggable !== false
+  /*
+   * Whether this card offers the two full-size routes at all. One name for one question, so the
+   * expand and pin buttons cannot drift apart — a third surface would otherwise add a third copy
+   * of the same condition to the same header.
+   */
+  const canOpenFullSize = outputValue !== undefined || body?.expandable
   /**
    * True when React Flow's wrapper carries an explicit width for this card, so the card fills it
    * rather than taking `--node-width`.
@@ -553,25 +571,53 @@ function CodaNodeViewImpl({
               ▶
             </button>
           )}
-          {/* An expandable body offers this before the node has ever run — that is most of the
-            point of Explore, whose list is populated whether or not the ports carry anything. */}
-          {(outputValue !== undefined || body?.expandable) && (
-            <button
-              type="button"
-              className="coda-node__run nodrag"
-              title="Open this result full size"
-              aria-label="Expand output"
-              onClick={(e) => {
-                e.stopPropagation()
-                expandNode(id)
-              }}
-            >
-              ⤢
-            </button>
+          {/*
+           * The two ways to open this result full size. One condition, because they are the same
+           * question — an expandable body offers both before the node has ever run, which is most
+           * of the point of Explore, whose list is populated whether or not the ports carry
+           * anything.
+           *
+           * Two buttons rather than one, because they answer different moments: ⤢ is "let me look
+           * at this", ⇥ is "keep this beside me while I work", and a single control that did both
+           * would have to guess which. The pin's glyph is an arrow to a bar — the result, sent to
+           * the edge of the screen.
+           */}
+          {canOpenFullSize && (
+            <>
+              <button
+                type="button"
+                className="coda-node__run nodrag"
+                title="Open this result full size"
+                aria-label="Expand output"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  expandNode(id)
+                }}
+              >
+                ⤢
+              </button>
+              <button
+                type="button"
+                className="coda-node__run nodrag"
+                aria-pressed={isPinned}
+                title={
+                  isPinned
+                    ? 'Unpin from the side of the canvas'
+                    : 'Pin this result to the side of the canvas'
+                }
+                aria-label={isPinned ? 'Unpin output' : 'Pin output to the side'}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  pinNode(isPinned ? undefined : id)
+                }}
+              >
+                ⇥
+              </button>
+            </>
           )}
           {/*
            * `?` appears because a document exists for this node type and for no other reason —
-           * see `src/help/registry.ts`. So most cards never grow a fifth button, and the ones
+           * see `src/help/registry.ts`. So most cards never grow a sixth button, and the ones
            * that do are the ones where somebody was moved to write several pages.
            */}
           {hasHelp(node.type) && (

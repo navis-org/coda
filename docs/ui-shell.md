@@ -73,6 +73,83 @@ check when adding a fifth.
 dialog. It sat under `Save ▸` first; the menu entry is gone rather than duplicated, because two
 routes to one dialog is two places for the wording to drift.
 
+## Pinning a viewer beside the graph
+
+`⇥` on a viewer card, `P`, or the palette's *Pin Selected Output to the Side*. The result is
+`ViewerDock` — the same surface the expand overlay draws, in a column down the right of the shell
+instead of a modal over it, so the graph stays live and editable beside a scene that stays up.
+The ask it answers: a Neuroglancer node open at half the window while the wires feeding it are
+rewired one at a time.
+
+**It is a grid column, not a floating panel, and that is why it was cheap.** `.app` was already
+`'canvas inspector'` over `1fr auto`; the dock is a third area between them. The canvas column is
+genuinely narrower rather than partly covered, so React Flow re-measures on its own, the minimap
+keeps its corner, and nothing needed pushing out of the way. Two details in that column are
+load-bearing:
+
+- **`minmax(0, 1fr)` for the canvas, not `1fr`.** A bare `1fr` is `minmax(auto, 1fr)`, whose
+  automatic minimum is the *content's* — React Flow's pane reports the whole graph's extent, so a
+  wide graph refuses to let the column shrink and pushes the dock off the screen instead.
+- **A px floor under the fraction, and the store has to know about it.** The stored width is a
+  share of the window (see below), and that clamp is about keeping the *canvas* usable. Keeping
+  the *dock* usable is a number in pixels, because a viewer plus its 268px styling sidebar does
+  not get more possible on a smaller display; below 360px the panel was a legend and a scrollbar.
+  The CSS floor alone was not enough: with only `DOCK_MIN_FRACTION` in the store, dragging to the
+  floor on a 1600px window stored 0.2 while the column rendered 360px, so `aria-valuenow`
+  announced 20% for a dock that was 22.5%. `clampDockFraction` takes the width it will be
+  resolved against, so what is stored is what gets laid out — every caller that has one passes it.
+  The sidebar takes a 45% cap for the other half of this, so a narrow dock degrades into two
+  halves rather than into a sidebar with a strip beside it. Measured in Chrome at 1600×900: the
+  floor leaves 159px of sidebar and 195px of view.
+
+**The shared identity is a class, not a convention.** `ViewerSurface` renders a fragment, so
+"a full-size viewer surface" existed in TypeScript with no representative in the DOM — and every
+rule written with `.overlay` as an *ancestor* needed a hand-written `.viewer-dock` twin, failing
+silently when one was forgotten (the rule simply does not apply, and a dataset blurb renders at
+the wrong measure). Both frames wear `.viewer-surface` instead, and the three such rules key off
+that; a third surface joins by wearing it.
+
+**One node is never live in two full-size surfaces, and the exclusion is written asymmetrically.**
+The card already stands down while the overlay owns its node — three WebGL contexts and 3 × 170 kB
+measured for one 21-neuron scene — and the dock is a *third* mount site, so `showPreview` gained
+`pinnedNodeId !== id` too. What the store refuses is one id in both `pinnedNodeId` and
+`expandedNodeId`, which would be two live instances of one neuroglancer embed, each an application
+fetching EM. Two *different* nodes it allows, because a glance at a table has no business costing
+somebody the scene they pinned: `expandNode` releases the pin only for the same node, while
+`pinNode` always closes the overlay — leaving a modal over the thing somebody just asked to see
+beside the graph is not an answer to the request. Verified in Chrome: with the 3D viewer pinned
+there is exactly one `<canvas>` on the page, and it is in the dock.
+
+**No ⛶ and no ⤢ on the dock.** Both mean handing *this* node to the overlay, which is the one case
+the exclusion refuses — so the button somebody pressed to see it bigger would be the button that
+loses the pin when they close it again. The grip answers the same request without a remount, and a
+remount is what a neuroglancer embed pays for in a camera (`sceneMemo` recovers it same-origin and
+cannot cross-origin).
+
+**The width is a fraction; which node is pinned is not stored at all.** A stored 700px is right on
+the display it was set on and wrong on the next one, so `coda.dock.v1` holds a share of the window
+— which is also what a percentage in `grid-template-columns` resolves against, so what is stored is
+what gets laid out. The node id is deliberately session-only: ids mean nothing in the next
+document, and a remembered pin would open the dock on a node that does not exist. Three paths drop
+it — unpinning, deleting the node, loading a graph.
+
+**The grip measures from the dock's own right edge, not the window's.** The inspector may be open
+to the right of it, and 320px would otherwise be added silently to every width the drag computes.
+That edge does not move during the gesture, so it is read once at pointerdown. It carries
+`role="separator"` and arrow keys, because a resize handle only a drag can reach is one a keyboard
+cannot.
+
+**And the drag paints the column directly, committing to the store once on release.** Routing
+every pointer sample through `setDockFraction` was the obvious version and the expensive one: it
+writes `localStorage` synchronously, and the tick that follows re-renders the whole shell —
+`ViewerSurface` and the viewer inside it included, which is the one surface whose entire design
+goal is to stay up untouched. The width is a CSS custom property, so the gesture writes it where
+it is read and leaves React out. Measured over 25 pointer samples in Chrome: **zero** storage
+writes during the drag and one on release, against one per sample before.
+
+jsdom performs no layout, so `dock.test.tsx` covers the state machine and the number handed to the
+column, and the geometry above was driven in real Chrome over CDP.
+
 ## Fullscreen, and installing
 
 Two halves answering two different moments, and they compose rather than overlap: **⛶ / `F`**

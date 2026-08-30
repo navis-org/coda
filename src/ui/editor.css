@@ -465,7 +465,15 @@
   border-color: transparent;
   color: #fff;
 }
-.coda-node__fold[aria-pressed='true'] {
+/*
+ * Pressed, for the fold and for the pin — one rule rather than two copies of three values, which
+ * is what "the pin borrows the fold's style" has to mean if it is to stay true. Not the accent:
+ * an accent fill here would read as the *run* highlight two buttons along, which on this card
+ * means something is stale. Neither glyph changes with its state, so this and `aria-pressed` are
+ * what carry it.
+ */
+.coda-node__fold[aria-pressed='true'],
+.coda-node__run[aria-pressed='true'] {
   color: var(--text-secondary);
   border-color: var(--border-strong);
   background: var(--surface-3);
@@ -5020,8 +5028,17 @@ a.viewer-actions__btn {
   overflow-y: auto;
   overscroll-behavior: contain;
 }
-.overlay .description-body,
-.overlay .cave-info {
+/*
+ * `.viewer-surface`, not `.overlay`.
+ *
+ * `ViewerSurface` renders a fragment, so the identity "a full-size viewer surface" existed in TS
+ * and had no representative in the DOM — which meant every rule written with `.overlay` as an
+ * *ancestor* needed a hand-written `.viewer-dock` twin, and the failure of forgetting one is
+ * silent: the rule simply does not apply and a blurb renders at the wrong measure. The class is
+ * on both frames instead, so a third surface joins by wearing it.
+ */
+.viewer-surface .description-body,
+.viewer-surface .cave-info {
   max-height: none;
   padding: 4px 2px;
 }
@@ -5142,7 +5159,7 @@ a.viewer-actions__btn {
   color: var(--text-secondary);
   overflow-wrap: anywhere;
 }
-.overlay .markdown {
+.viewer-surface .markdown {
   font-size: 13px;
   line-height: 1.6;
   max-width: 70ch;

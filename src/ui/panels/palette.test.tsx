@@ -245,6 +245,34 @@ describe('buildCommandItems', () => {
     expect(byId(withNote, 'cmd:delete').disabled).toBe(false)
   })
 
+  /*
+   * The pin row and the `P` key describe one gesture, and the badge is the promise that they
+   * agree. `P` toggles against the *selected* node, so with one node docked and another selected
+   * it moves the dock — a row reading "Unpin" and badging `P` there would advertise the opposite.
+   * The same rule `cmd:fit` follows by moving its badge between two rows.
+   */
+  it('keeps the pin row saying what P would do, and badges it only when P would do it', () => {
+    act(() => useGraphStore.getState().pinNode(undefined))
+    act(() => useGraphStore.getState().setSelection(['view']))
+    expect(byId(commands(), 'cmd:pin').label).toMatch(/^Pin/)
+    expect(byId(commands(), 'cmd:pin').shortcut).toBeTruthy()
+
+    // Docked and still selected: the key unpins, so the row does too.
+    act(() => useGraphStore.getState().pinNode('view'))
+    expect(byId(commands(), 'cmd:pin').label).toMatch(/^Unpin/)
+
+    // Docked, a *different* node selected: the key moves the dock, so the row offers the move.
+    act(() => useGraphStore.getState().setSelection(['table']))
+    expect(byId(commands(), 'cmd:pin').label).toMatch(/^Pin/)
+    expect(byId(commands(), 'cmd:pin').disabled).toBe(false)
+
+    // Nothing selected: the key is inert, so the row keeps the unpin and drops the badge.
+    act(() => useGraphStore.getState().setSelection([]))
+    expect(byId(commands(), 'cmd:pin').label).toMatch(/^Unpin/)
+    expect(byId(commands(), 'cmd:pin').disabled).toBe(false)
+    expect(byId(commands(), 'cmd:pin').shortcut).toBeUndefined()
+  })
+
   it('disables Run All once nothing is stale', async () => {
     expect(byId(commands(), 'cmd:run-all').disabled).toBe(false)
     await act(async () => {
