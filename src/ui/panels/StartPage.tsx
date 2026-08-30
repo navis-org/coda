@@ -56,6 +56,15 @@ const NODE_GUIDE_URL = `${import.meta.env.BASE_URL}nodes.html`
  * reasoning as above.
  */
 const OVERVIEW_URL = `${import.meta.env.BASE_URL}overview.html`
+/**
+ * The visitor counter's own dashboard, public on purpose.
+ *
+ * Not a `BASE_URL` path — this one is genuinely somewhere else. The site counts page views with
+ * GoatCounter, which is the whole of what it collects, and the honest way to say so is to hand
+ * over the same view we have rather than describe it. See `docs/analytics.md`; the tag itself is
+ * injected at build time by `vite/goatcounter.ts` and only on the deployed site.
+ */
+const ANALYTICS_URL = 'https://coda-science.goatcounter.com/'
 
 export function StartPage() {
   const open = useGraphStore((s) => s.startPageOpen)
@@ -316,6 +325,10 @@ export function StartPage() {
                 ·{' '}
                 <a href={NODE_GUIDE_URL} target="_blank" rel="noreferrer noopener">
                   Node guide
+                </a>{' '}
+                ·{' '}
+                <a href={ANALYTICS_URL} target="_blank" rel="noreferrer noopener">
+                  Visitor stats
                 </a>
               </span>
             </div>

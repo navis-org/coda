@@ -43,7 +43,14 @@ jobs:
       - run: pnpm lint
       - run: pnpm test
       # `pnpm build` is `tsc -b && vite build`, so this covers typecheck too.
+      #
+      # `CODA_ANALYTICS` is what puts the GoatCounter tag into the four HTML entries, and this
+      # is the only place it is ever set — see vite/goatcounter.ts. A fork that builds this
+      # repository gets no tag, so its readers are not reported to a dashboard its operator
+      # does not own and our numbers stay about this deployment.
       - run: pnpm build
+        env:
+          CODA_ANALYTICS: '1'
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

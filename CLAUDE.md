@@ -111,6 +111,17 @@ Cross-cutting — these bite in code that is not obviously "about" the area:
   callouts, tables and images parse only under `{ extended: true }`. A dataset blurb arrives
   from whatever deployment a Custom node points at; an image in one is a tracking pixel, and
   a fence is a directive some renderer may act on. Only `src/help` opts in.
+- **The analytics path is a literal, and both gates matter.** GoatCounter's default path is
+  `location.pathname + location.search`; a Coda share link carries the whole workflow in the
+  *fragment*, so nothing leaks today — but that is a fact about sharing, not a promise, and one
+  query param would silently turn workflow content into analytics data. `vite/goatcounter.ts`
+  sends a literal per entry, derived from the filename so a fifth entry cannot arrive unlabelled.
+  The tag is `apply: 'build'` **and** gated on `CODA_ANALYTICS`, set only in `deploy.yml`: this
+  repo is public and permissively licensed, so without the second gate a fork's readers get
+  reported to a dashboard its operator never chose. There is deliberately **no event tracking** —
+  counting page loads and watching what somebody builds are different propositions, and the
+  second contradicts what `SourcesPanel` promises four times over.
+  See [docs/analytics.md](docs/analytics.md).
 - **A generated file that is committed must not carry a wall clock.** `ZooIndex.updatedAt` is
   the newest entry's commit date, not `Date.now()`, so `zoo-index --check` can byte-compare it.
 - **A buffer handed to `callPython` is detached the moment the call is posted**, so read
@@ -419,6 +430,8 @@ in a CLAUDE.md *imports* the file, pulling all 1.2 MB back into every session.
   browser shelf.
 - [docs/zoo.md](docs/zoo.md) — the Coda Zoo, and why its index is a committed file rather
   than an API listing. Read before changing `ZooIndex`.
+- [docs/analytics.md](docs/analytics.md) — the GoatCounter beacon: what it collects, the two
+  gates that keep it off every build but the deploy, and why the canvas is not instrumented.
 - [docs/ui-shell.md](docs/ui-shell.md) — panels, fullscreen and the manifest, the run
   indicator, the start page, keyboard shortcuts.
 - [docs/pages.md](docs/pages.md) — overview, tutorial and node guide. Extra vite entries;

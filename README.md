@@ -89,6 +89,22 @@ unit-testable without a DOM, and reusable later by a non-React consumer (a CLI r
 - **A non-default neuPrint deployment needs CORS or the dev server.** It is tried directly first; failing that, `pnpm dev` and `pnpm preview` proxy `/np/<deployment>/…` (https to public hosts only), and a static build has nothing serving that path.
 - Not all nodes are currently able to emit Python or R code. The codegen is a work in progress.
 
+## Analytics
+
+The published site counts page views with
+[GoatCounter](https://coda-science.goatcounter.com/), and **the dashboard is public** — that
+link is the whole of what is collected, viewable by anybody.
+
+No cookies, no `localStorage`, no tracker id, and no stored IP or full User-Agent: the beacon
+reports a page name, a referrer, and the coarse browser/OS/country/screen-width facts
+GoatCounter aggregates. There is deliberately **no event tracking** — nothing observes what you
+build on the canvas. To opt out entirely, run `localStorage.setItem('skipgc', 't')` in the
+console on any Coda page.
+
+The tag is injected at build time and only when `CODA_ANALYTICS` is set, which happens in this
+repository's deploy workflow and nowhere else — so a fork you build and host reports nothing to
+anybody. See [docs/analytics.md](docs/analytics.md).
+
 ## Licence
 
 MIT
