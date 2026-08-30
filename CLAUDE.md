@@ -64,7 +64,10 @@ full. **Read it before deciding a rule does not apply to your case.**
    shim is how a symbol acquires a second spelling. Each source converts at its own edge;
    each backend maps its own id column onto `neuronId` at its own seam. Geometry carries
    the id as plain `id`, as a draw/export key rather than the identity. The UI is where
-   this keeps being re-broken: never `Number(...)` an id.
+   this keeps being re-broken: never `Number(...)` an id. And the transport grammar is not the
+   only one: neuroglancer's `parseUint64` refuses a sign and a leading zero, which `isNeuronId`
+   allows, so a scene goes through `isSegmentId` (`data/neuroglancer/scene.ts`) instead — a
+   second predicate rather than a second spelling, because the two really do differ.
 
 ## Gotchas found the hard way
 
@@ -340,6 +343,21 @@ Area-specific — the rule, then the doc that holds why:
   cleanup always runs**, so return the pass from the memo rather than writing it into a ref.
   Render an effect's own buffer before explaining why it looks weak, and measure on a real GPU —
   headless Chrome falls back to SwiftShader. See [docs/viewers.md](docs/viewers.md).
+- **Restoring `layers` in the embedded neuroglancer is not safe under the pointer, and one bad id
+  is not one bad id.** A layer is constructed — subscribing to the hover machinery — a whole loop
+  before it is initialised, which is where `selectionState` is assigned, and neuroglancer never
+  disposes that subscription. So any layer that dies in between answers `undefined.generation` on
+  every mouse movement for the life of the document, which is the reported crash and why it
+  surfaces on `mouseout` rather than on the edit. Two ways in, both closed here: an update is
+  **held until `mouseleave`** on `.ng-frame` (replacements too, but never the opening navigation),
+  and every segment id goes through **`isSegmentId`** — `parseUint64`'s own
+  `^(?:0|[1-9][0-9]*)$`, narrower than `core/ids.ts`, since a miss deletes the layer rather than
+  the id. That filter is in **`buildScene`**, not in the node: `NeuroglancerProfileFrame` is the
+  other caller and passes whatever `idText` read off a profile row, which by design applies no
+  grammar. The node filters *again* only so it can count and `ctx.warn`. Third rule, and it is why none of this reproduces in production: **`proxiedViewer` says
+  a prefix is declared, not that anything serves it.** `/ng` is a path on *this* origin, so a
+  static deploy 404s instead of degrading — `sameOriginViewer` gates it on `import.meta.env.DEV`,
+  which makes the splice and `sceneMemo` dev-only. See [docs/viewers.md](docs/viewers.md).
 
 ## Chart colours
 

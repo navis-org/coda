@@ -128,6 +128,34 @@ describe('pointing a scene at segments', () => {
     expect(layersOf(scene)[2]!['segments']).toBeUndefined()
   })
 
+  /*
+   * The chokepoint test, and the reason the filter is here rather than in the node.
+   *
+   * An id `parseUint64` cannot read is not a dropped id — it throws out of the layer's own
+   * restore, so neuroglancer deletes the layer before it was initialised and leaves behind a
+   * hover subscription that throws for the life of the document. `out.neuroglancer` filters
+   * first so it can count and warn, but `NeuroglancerProfileFrame` is the other caller and it
+   * hands over whatever `idText` read off a profile row — which by design applies no grammar.
+   */
+  it('drops an id the viewer could not parse, whichever caller supplied it', () => {
+    const scene = buildScene(MANC, {
+      datasetId: 'manc:v1.2.3',
+      // A label from a relabelled table, a signed and a zero-padded id — both legal *transport*
+      // ids per `core/ids.ts` and neither a segment id — and a wide cell as `String` prints it.
+      segments: [10001, 'LC4', '-1', '007', '1e+21', 10002],
+    })
+    expect(layersOf(scene)[1]!['segments']).toEqual(['10001', '10002'])
+  })
+
+  it('drops a segmentColors key on the same rule, since the same parser reads it', () => {
+    const scene = buildScene(MANC, {
+      datasetId: 'manc:v1.2.3',
+      segments: [1],
+      segmentColors: { '1': '#3987e5', LC4: '#ff0000' },
+    })
+    expect(layersOf(scene)[1]!['segmentColors']).toEqual({ '1': '#3987e5' })
+  })
+
   it('clears the colours the dataset shipped instead of leaving a stray one behind', () => {
     // manc publishes `segmentColors: {33946: '#808080'}`. Merging would leave one neuron
     // grey for reasons nobody could trace back to a param.

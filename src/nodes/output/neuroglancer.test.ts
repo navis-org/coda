@@ -357,6 +357,51 @@ describe('guard rails', () => {
     )
   })
 
+  /**
+   * Ids the viewer cannot parse, which is the one bad value here that is not merely a bad value.
+   *
+   * `parseUint64` throws inside `SegmentationUserLayer.restoreState`, so neuroglancer deletes
+   * the layer *before* it finished initialising — and never disposes the hover subscription
+   * that layer registered while it was being constructed. From then on every mouse movement in
+   * the embed throws `can't access property "generation" of undefined`, for the life of the
+   * document and long after the scene that caused it has gone. So one unusable cell does not
+   * cost one neuron; it costs the viewer.
+   */
+  it('leaves out an id neuroglancer cannot read, and says how many', async () => {
+    const messy = tableFromRows(
+      tableSchema(column('neuronId', 'str'), column('type', 'str')),
+      [
+        { neuronId: '10001', type: 'A' },
+        // A label in the id column: what a mis-set Relabel or an upload leaves behind.
+        { neuronId: 'LC4', type: 'A' },
+        // Signed and zero-padded are both fine as *transport* ids — `core/ids.ts` allows them
+        // deliberately — and neither is a segment id. That gap is why `isSegmentId` exists.
+        { neuronId: '-1', type: 'A' },
+        { neuronId: '007', type: 'A' },
+        { neuronId: '  ', type: 'A' },
+        { neuronId: '10002', type: 'A' },
+      ],
+      'neurons',
+    )
+    const said: string[] = []
+    const { scene } = await sceneFrom({}, messy, stubSource(), said)
+
+    expect(layersOf(scene)[1]!['segments']).toEqual(['10001', '10002'])
+    expect(said.join(' ')).toMatch(/4 of 6 rows/)
+    expect(said.join(' ')).toMatch(/plain whole numbers only/)
+  })
+
+  it('refuses a wide id rather than printing a different neuron', async () => {
+    // Invariant 8, at the one seam that used to spell it `String(cell)`: a CAVE root id past
+    // `Number.MAX_SAFE_INTEGER` has already lost the digits that identified the neuron, and
+    // `String` prints `1e+21` — which is both a wrong id and one the viewer chokes on.
+    const wide = neurons([{ neuronId: 1e21, type: 'A' }])
+    const said: string[] = []
+    const { scene } = await sceneFrom({}, wide, stubSource(), said)
+    expect(layersOf(scene)[1]!['segments']).toEqual([])
+    expect(said.join(' ')).toMatch(/1 of 1 rows/)
+  })
+
   it('warns at edit time rather than waiting for a run', () => {
     const issues =
       def().validate?.(

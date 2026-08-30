@@ -51,9 +51,16 @@
  * Merges are debounced. Auto-run turns one upstream edit into a stream of scenes, and applying
  * each would have neuroglancer rebuilding its layers several times a second underneath whatever
  * the user is doing with the mouse.
+ *
+ * **And nothing is written while the pointer is inside the frame.** "Underneath whatever the
+ * user is doing with the mouse" turned out to be literal: restoring `layers` rebuilds every
+ * layer in two steps, and a layer that has been constructed but not yet initialised throws when
+ * the hover machinery asks it anything — which it does exactly while `mouseState.active`, i.e.
+ * while the pointer is over a render panel. So the update waits for `mouseleave`. See
+ * `pointerInside`.
  */
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import type { TableValue } from '../../core/values'
 import type { NgScene, ViewerKind } from '../../data/neuroglancer/scene'
@@ -156,6 +163,27 @@ function readLiveScene(frame: HTMLIFrameElement): NgScene | undefined {
   }
 }
 
+/**
+ * The same-origin path serving this deployment, **where this build is behind one**.
+ *
+ * `proxiedViewer` answers a question about the *configuration* — which origins have a prefix
+ * declared — and that is deliberately not the question asked here, which is whether anything
+ * is serving it. The `/ng` rule lives in `vite.config.ts`, so it exists under `pnpm dev` and
+ * nowhere else. Getting the two confused does not degrade to the cross-origin embed, which is
+ * what makes it worth a function: `/ng` is an *absolute path*, so the frame is pointed at this
+ * origin and 404s. Measured against the published site — `navis-org.github.io/ng/` and
+ * `/coda/ng/` both answer 404, and the first is where the deployed card sent its frame — so
+ * every dataset that does not name a viewer of its own showed a blank panel.
+ *
+ * `import.meta.env.DEV` rather than a flag of our own, and it costs the splice under
+ * `pnpm preview` even though that server does mount the rule. That is the right way round:
+ * preview serves the deploy artefact, and a preview that behaves better than the thing it
+ * previews is not one.
+ */
+function sameOriginViewer(viewerBase: string): string | undefined {
+  return import.meta.env.DEV ? proxiedViewer(viewerBase) : undefined
+}
+
 function safeScale(scale: number): number {
   return Number.isFinite(scale) && scale > 0 ? scale : 1
 }
@@ -194,6 +222,49 @@ export function NeuroglancerViewer({
    * the element is what forces a real load.
    */
   const [reloadCount, setReloadCount] = useState(0)
+  /** The element the pointer enters, which is the frame plus its own padding. */
+  const boxRef = useRef<HTMLDivElement>(null)
+  /**
+   * Whether the pointer is inside the embed, and the reason a navigation waits for it to leave.
+   *
+   * Restoring `layers` makes neuroglancer tear down and rebuild *every* layer, and it does that
+   * in two steps: a layer is constructed — at which point it has already subscribed to the
+   * hover machinery — and only then initialised, which is where `selectionState` is assigned.
+   * Anything that asks a layer about the mouse in between reads `generation` off `undefined`.
+   *
+   * `LayerSelectedValues.handleLayerChange` asks exactly when `mouseState.active` is true, and
+   * that is true when the pointer is over a render panel with a resolved pick. So the crash
+   * reported against this card — `can't access property "generation" of undefined` — is what a
+   * patch landing under the cursor does, and holding the patch until the pointer leaves is what
+   * removes the precondition. It cannot be fixed from here: neuroglancer never disposes the
+   * subscription, so one such failure poisons hover for the life of the document.
+   * See [docs/viewers.md](../../../docs/viewers.md).
+   *
+   * State rather than a ref, because the navigation effect has to *re-run* when it clears.
+   */
+  const [pointerInside, setPointerInside] = useState(false)
+  /** Whether a navigation is waiting on that, so the resume knows it is not a fresh one. */
+  const heldRef = useRef(false)
+
+  /*
+   * Native listeners rather than React's `onMouseEnter`/`onMouseLeave`, and the reason is the
+   * iframe. React synthesises enter/leave from delegated `mouseover`/`mouseout` at the root, and
+   * a pointer that has crossed into a foreign document produces neither — the events happen in
+   * the frame's own tree. The element's own `mouseenter`/`mouseleave` are dispatched by the
+   * browser against the *iframe box*, so they fire either way.
+   */
+  useEffect(() => {
+    const box = boxRef.current
+    if (!box) return
+    const enter = () => setPointerInside(true)
+    const leave = () => setPointerInside(false)
+    box.addEventListener('mouseenter', enter)
+    box.addEventListener('mouseleave', leave)
+    return () => {
+      box.removeEventListener('mouseenter', enter)
+      box.removeEventListener('mouseleave', leave)
+    }
+  }, [])
 
   useEffect(() => {
     const frame = frameRef.current
@@ -207,6 +278,20 @@ export function NeuroglancerViewer({
     // `viewerKind` is a pure function of the URL that is already being compared.
     if (appliedRef.current?.url === url && appliedRef.current.viewerType === viewerType) return
 
+    /*
+     * Nothing is written into a document somebody has the pointer in — see `pointerInside`.
+     *
+     * Only into a *loaded* one: an empty frame has no layers to tear down and no mouse state to
+     * ask, so the opening navigation is never held and a card under the cursor still fills in.
+     * The effect re-runs when the pointer leaves and picks this up from the top.
+     */
+    if (loadedRef.current && pointerInside) {
+      heldRef.current = true
+      return
+    }
+    const held = heldRef.current
+    heldRef.current = false
+
     const split = splitSceneUrl(url)
     if (!split) {
       // Not a shape this understands — a hand-edited viewer URL. Navigate and stop guessing.
@@ -218,7 +303,7 @@ export function NeuroglancerViewer({
     const identity = sceneIdentity(split.scene)
     // The frame goes to the proxied path where one exists; the *link* stays the absolute
     // public URL, so copying it still gives something that opens anywhere.
-    const frameBase = proxiedViewer(split.base) ?? split.base
+    const frameBase = sameOriginViewer(split.base) ?? split.base
     /*
      * Read off the *deployment*, not off `frameBase`: a proxy prefix is a path on this origin
      * and names no viewer, so asking about it would answer for the wrong one. Which flavour
@@ -286,7 +371,14 @@ export function NeuroglancerViewer({
       appliedRef.current = { url, base: split.base, identity, viewerType }
     }
 
-    if (!canMerge) {
+    /*
+     * A replacement is immediate — there is no live framing to protect and waiting would leave
+     * the card showing the wrong volume — *unless* it is resuming from a hold, where the delay
+     * is the point. The pointer has just crossed out of the frame and the frame's own
+     * `mouseleave` is what clears `mouseState.active`; going through the timer keeps our write
+     * behind it rather than racing it across two documents.
+     */
+    if (!canMerge && !held) {
       navigate()
       return
     }
@@ -295,7 +387,7 @@ export function NeuroglancerViewer({
     // `reloadCount` belongs here rather than only on the element: the effect's own guard
     // returns early for a URL already applied, so a remount with no reason to renavigate would
     // leave a blank frame.
-  }, [url, reloadCount, viewerType, datasetId, extraLayers, viewerId])
+  }, [url, reloadCount, viewerType, datasetId, extraLayers, viewerId, pointerInside])
 
   /*
    * Read the live state on the way out, so the next instance can resume it.
@@ -336,6 +428,19 @@ export function NeuroglancerViewer({
     }
   }, [viewerId])
 
+  /*
+   * Recomputed rather than carried on the value: same table, same spec, same palette, so it
+   * cannot disagree with the colours already baked into the URL.
+   *
+   * Memoised, and above the early return because a hook cannot be conditional. `pointerInside`
+   * renders this component twice per pointer crossing, and the table it reads is the *whole*
+   * input — measured at 17 ms per call over 50,000 rows under `hash` colouring, which is 34 ms
+   * of nothing on the way in and out of a card somebody is trying to look at. Free under the
+   * node's own default (`resolveColor` early-returns for `default`), which is why it went
+   * unnoticed. The deps are exactly what it reads, and neither changes on a hover.
+   */
+  const legend = useMemo(() => resolveColor(neurons, color, VIEWER_MODE).legend, [neurons, color])
+
   if (!url) {
     return (
       <div className="viewer">
@@ -344,9 +449,6 @@ export function NeuroglancerViewer({
     )
   }
 
-  // Recomputed rather than carried on the value: same table, same spec, same palette, so it
-  // cannot disagree with the colours already baked into the URL.
-  const legend = resolveColor(neurons, color, VIEWER_MODE).legend
   const count = neurons?.length ?? 0
   /*
    * Three different states, and telling them apart is the whole job of this line: nothing
@@ -369,6 +471,9 @@ export function NeuroglancerViewer({
   const reload = () => {
     appliedRef.current = undefined
     loadedRef.current = false
+    // And any hold, which is bookkeeping about a navigation that is now moot: left set, it
+    // would put the fresh document's opening navigation behind the merge timer.
+    heldRef.current = false
     // And the remembered state, which is the third thing a reload has to throw away: this is the
     // button somebody presses when the frame has gone wrong, so resuming into it is the one
     // outcome it must not have. Reload means the published scene.
@@ -379,6 +484,7 @@ export function NeuroglancerViewer({
   return (
     <div className="viewer">
       <div
+        ref={boxRef}
         className="ng-frame"
         // A stored file could carry anything; a zero or negative scale divides the frame's
         // size by it and produces an element with no size, or an infinite one.

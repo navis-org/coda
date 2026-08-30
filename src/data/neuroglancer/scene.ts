@@ -125,11 +125,23 @@ export function buildScene(published: NgScene | undefined, options: SceneOptions
   const base: NgScene = published ?? {}
   const layers = layerList(base)
   const target = segmentationLayerIndex(base, options.datasetId)
-  const segments = options.segments.map(String)
+  /*
+   * Filtered here rather than by each caller, because a caller that forgets does not lose an id
+   * — it loses the viewer. See `isSegmentId` for what an unparseable one costs, and note that
+   * `.map(String)` is itself one of the ways to make one: a wide `i64` cell prints `1e+21`.
+   *
+   * This is the chokepoint and there are two callers past it: `out.neuroglancer`, which filters
+   * first so that it can *count* and say so, and `NeuroglancerProfileFrame`, which hands over
+   * whatever `idText` read off a profile row — and `idText` applies no grammar by design, so a
+   * relabelled table's `LC4` arrives here. Silent at this layer on purpose: `buildScene` is pure
+   * and has no `ctx`, and only the node can explain a drop to somebody.
+   */
+  const segments = options.segments.map(String).filter(isSegmentId)
 
   const decorated = layers.map((layer, index) => {
     if (index !== target) return layer
-    const colors = options.segmentColors
+    // The same rule over the keys, which `parseUint64` parses exactly as it parses `segments`.
+    const colors = pickSegmentColors(options.segmentColors)
     return {
       ...layer,
       segments,
@@ -178,6 +190,15 @@ export function buildScene(published: NgScene | undefined, options: SceneOptions
   }
 
   return scene
+}
+
+/** `segmentColors` with any key the viewer could not parse dropped. Undefined stays undefined. */
+function pickSegmentColors(
+  colors: Readonly<Record<string, string>> | undefined,
+): Readonly<Record<string, string>> | undefined {
+  if (!colors) return undefined
+  const entries = Object.entries(colors).filter(([id]) => isSegmentId(id))
+  return entries.length === Object.keys(colors).length ? colors : Object.fromEntries(entries)
 }
 
 /**
@@ -483,6 +504,34 @@ const VIEWER_PROXIES: ReadonlyArray<{ origin: string; prefix: string }> = [
 export function proxiedViewer(viewerBase: string | undefined): string | undefined {
   const root = viewerRoot(viewerBase)
   return VIEWER_PROXIES.find((p) => p.origin === root)?.prefix
+}
+
+/**
+ * Whether a string is a segment id **neuroglancer** will take.
+ *
+ * Its own grammar rather than `core/ids.ts`'s, and narrower: `parseUint64` matches
+ * `^(?:0|[1-9][0-9]*)$`, so no sign and no leading zeros, where the transport grammar allows
+ * both because a source may legitimately hand one back. Here beside the scene builders because
+ * it is a fact about the scene format, and every scene this module produces has to satisfy it.
+ *
+ * It is worth a check rather than a hope because of what the failure costs. A segment id the
+ * viewer cannot parse is not a dropped id: it is an exception out of
+ * `SegmentationUserLayer.restoreState`, which deletes the layer *before* it was initialised —
+ * and neuroglancer never disposes the hover subscription that layer registered while it was
+ * being constructed. So one unparseable id leaves a listener that throws
+ * `can't access property "generation" of undefined` on every mouse movement for the life of
+ * the document, long after the scene that caused it is gone. `segmentColors` on a layer is
+ * parsed by the same function, so its keys are the same rule.
+ * See [docs/viewers.md](../../../docs/viewers.md).
+ *
+ * Exported because `out.neuroglancer` applies it a second time, before `buildScene` does, for
+ * the one thing this layer cannot do: **count** what it drops and say so. That is the division —
+ * `buildScene` guarantees the property, the node explains it.
+ */
+const SEGMENT_ID_GRAMMAR = /^(?:0|[1-9][0-9]*)$/
+
+export function isSegmentId(text: string): boolean {
+  return SEGMENT_ID_GRAMMAR.test(text)
 }
 
 /** Layer keys that carry a selection. Copied as a set, so a mode change cannot leave a stray. */

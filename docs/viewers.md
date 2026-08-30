@@ -2644,6 +2644,25 @@ merging, so a static deploy loses the preservation, not the viewer.
 Note the split: the **frame** goes to the proxied path, the **link** stays the absolute public
 URL. A copyable link that pointed at `/ng` on someone's dev server would be useless.
 
+**And "without the proxy" has to be asked of the build, not of the origin** — `sameOriginViewer`
+in `NeuroglancerViewer.tsx`, gating `proxiedViewer` on `import.meta.env.DEV`. `proxiedViewer`
+answers which origins have a prefix *declared*, which is a fact about `VIEWER_PROXIES`; whether
+anything is serving it is a fact about who is serving the page, and the two had been treated as
+one. The consequence is not the documented degrade, because `/ng` is an **absolute path**: a
+static deploy pointed its frame at `/ng/#!…` on its *own* origin and got a 404, rather than
+falling back to the public viewer. Measured against the published site —
+`navis-org.github.io/ng/` and `/coda/ng/` both answer 404, and the first is where the card sent
+its frame — so the deployed Neuroglancer node was a blank panel for every dataset that does not
+name a `viewerSite` of its own, which is most of them.
+
+`DEV` rather than a build-time flag of our own, and it costs the splice under `pnpm preview` even
+though that server *does* mount the rule (`preview: { proxy: … }`) — which is now dead weight
+there, since nothing in a preview build will ever request `/ng`; read the config first and it
+looks like a contradiction. That is the right way round:
+preview serves the deploy artefact, and a preview that behaves better than the thing it previews
+is not one. It also means the splice, `sceneMemo` and everything else same-origin are **dev-only
+behaviour** — worth knowing before concluding that a bug reported locally is what users see.
+
 **A remount is the other way the state dies, and none of the above touches it.** Expanding a
 Neuroglancer card reset the view, and closing the expansion reset it again — because the card
 stands down while the overlay owns the node (`showPreview` in `CodaNodeView`, and the reason is
@@ -2684,9 +2703,81 @@ navigation is immediate. Auto-run turns one upstream edit into a scene per keyst
 applying each had neuroglancer rebuilding its layers several times a second. Only the last of
 a burst is worth anything.
 
-Worth knowing for the next person who chases this: it did not reproduce in Chrome or in
-headless Firefox (no WebGL there, so the render paths that touch `generation` never run). The
-fix is reasoned from the error text, not from a repro.
+**Nothing is written into a frame the pointer is inside**, and that is the real answer to the
+`generation` error above — the `SCENE_PATCH_KEYS` change narrowed it and did not remove it,
+because `layers` alone is enough. Traced through neuroglancer's own source rather than reasoned
+from the message this time, and it is two bugs of theirs meeting:
+
+1. **A layer is built in two steps.** `TopLevelLayerListSpecification.restoreState` constructs
+   *every* layer first (`initializeLayerFromSpecNoRestoreState`, each followed by an
+   `addManagedLayer` that synchronously dispatches `layersChanged`) and only then initialises
+   them in a second loop. `SegmentationUserLayer`'s **constructor** calls
+   `segmentSelectionState.bindTo(manager.layerSelectedValues, this)`, subscribing to the hover
+   machinery — but `UserLayer.selectionState` is assigned in `initializationDone()`, which is in
+   the *second* loop. Anything that asks a layer about the mouse in between reads `generation`
+   off `undefined`. `LayerSelectedValues.handleLayerChange` asks precisely when
+   `mouseState.active`, and that is true when the pointer is over a render panel with a resolved
+   pick (`perspective_view/panel.ts`, `sliceview/panel.ts`).
+2. **The subscription is never disposed.** `segmentSelectionState` is a plain field on
+   `SegmentationUserLayerDisplayState`, which is not a `RefCounted` and is not registered on the
+   layer, and `UserLayer.disposed()` releases only data sources and render layers. So a layer
+   disposed *before* it was initialised — which is exactly what (1)'s throw causes, via
+   `restoreState`'s per-layer `catch` — leaves a listener behind that is still pointed at it.
+   From then on **every** `layerSelectedValues.changed` dispatch throws, for the life of the
+   document.
+
+Which is why the error people report arrives on `onMouseout` rather than on the edit: that is
+not the original failure, it is an echo of one, and only reloading the frame clears it. The
+first failure is swallowed by neuroglancer into an "Error creating layer …" banner.
+
+So the update waits for `mouseleave` on `.ng-frame` — `pointerInside`, held in state because the
+navigation effect has to re-run when it clears, with `heldRef` recording that a resume is not a
+fresh navigation. Three details are load-bearing. It gates **replacements too**, not only merges:
+`#!` resets and restores, which is the same teardown through the same code. It does **not** gate
+the opening navigation, since an empty frame has no layers to tear down and a card mounting under
+the cursor should still fill in. And a held replacement goes through `MERGE_DEBOUNCE_MS` rather
+than firing on the spot, because the pointer has just crossed out and the frame's *own*
+`mouseleave` is what clears `mouseState.active`; the timer keeps our write behind it instead of
+racing it across two documents.
+
+The listeners are `addEventListener('mouseenter'/'mouseleave')` on the wrapper rather than React's
+`onMouseEnter`/`onMouseLeave`, and the iframe is the reason: React synthesises enter/leave from
+delegated `mouseover`/`mouseout` at the root, and a pointer that has crossed into a foreign
+document produces neither — those events happen in the frame's tree. The element's own boundary
+events are dispatched against the iframe box, so they fire either way.
+
+**The other half is `isSegmentId`, and it is the same failure reached without touching the
+mouse.** Neuroglancer parses `segments` and the keys of `segmentColors` with `parseUint64`, whose
+grammar is `^(?:0|[1-9][0-9]*)$` — no sign, no leading zeros, no exponent, no whitespace, nothing
+non-numeric. A miss is not a skipped id: it throws out of `SegmentationUserLayer.restoreState`,
+`completeUserLayerInitialization` catches it and calls `deleteLayer`, and the layer is disposed
+before `initializationDone()` — landing straight in (2) above. One unusable cell costs the viewer,
+not one neuron.
+
+`out.neuroglancer` built its ids with `String(cell)`, which is two of those misses at once: a
+label in the id column (`LC4`, a blank, a decimal) goes through untouched, and a wide `i64` cell
+prints `1e+21`, which is invariant 8 exactly — a confident wrong id with nothing to say so. It is
+`idText` then `isSegmentId` now, counting what it drops and saying so through `ctx.warn`. Warned
+rather than thrown, per `docs/limits.md`: the scene is good without those rows, and the competing
+reading of a short scene is that the neurons have no meshes.
+
+**The filter itself is in `buildScene`, and the node's copy of it is the one that can explain
+itself.** That split is the whole altitude question here. Filtering only in the node closes one of
+two doors: `NeuroglancerProfileFrame` is the other `buildScene` caller and hands over whatever
+`idText` read off a profile row — no grammar, by that function's own design — into the *same*
+`NeuroglancerViewer`, so a profile over a relabelled table reaches the identical poisoned-hover
+failure. `buildScene` filters `segments` and the keys of `segmentColors`, which makes "a scene
+this module produces satisfies neuroglancer's grammar" a property of the module rather than a
+discipline each caller keeps. It is silent there, necessarily: it is pure and has no `ctx`. So the
+node filters first as well, for the one thing that layer can do — count the drops and say so. The
+ids are tested twice on the node path; that is a few hundred regex calls against a silent viewer
+death, and it was measured at +1.3 ms per 50,000 rows inside a function that already spends 1–17 ms
+in `resolveColor`.
+
+Worth knowing for the next person who chases this: it does not reproduce in Chrome or in headless
+Firefox (no WebGL there, so the render paths that set `mouseState.active` never run), and it
+cannot reproduce in a static deploy at all while the frame is pointed at a 404 — see the proxy
+gate above.
 
 A full navigation returns when `sceneIdentity` changes — everything outside the patch keys,
 i.e. a different dataset or viewer. Merging across those would keep a camera framed on the old

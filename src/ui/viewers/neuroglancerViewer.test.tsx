@@ -15,6 +15,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 
 import { column, tableSchema } from '../../core/types'
 import { tableFromRows } from '../../core/values'
+import type { NgScene } from '../../data/neuroglancer/scene'
 import { parseSceneUrl, sceneUrl } from '../../data/neuroglancer/scene'
 import { installJsdomStubs } from '../../test/jsdomStubs'
 import { NeuroglancerViewer } from './NeuroglancerViewer'
@@ -30,6 +31,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   vi.useRealTimers()
+  vi.unstubAllEnvs()
 })
 
 const NEURONS = tableFromRows(
@@ -82,6 +84,8 @@ function frame(container: HTMLElement): HTMLIFrameElement | null {
 const frameSrc = (container: HTMLElement): string => frame(container)?.getAttribute('src') ?? ''
 /** The scene the frame is pointed at, whichever host and whichever form the URL took. */
 const frameScene = (container: HTMLElement) => parseSceneUrl(frameSrc(container))
+/** The layer list of a scene, which nine assertions here read and none of them care is `unknown`. */
+const layersOf = (scene: NgScene) => scene['layers'] as Array<Record<string, unknown>>
 
 function scaleBox(container: HTMLElement): HTMLElement | null {
   return container.querySelector('.ng-frame')
@@ -173,7 +177,7 @@ describe('mounting', () => {
 
     const patch = parseSceneUrl(src)!
     // The new selection is applied...
-    const segmentation = (patch['layers'] as Array<Record<string, unknown>>)[1]!
+    const segmentation = layersOf(patch)[1]!
     expect(segmentation['segments']).toEqual(['1', '2'])
     // ...and the camera is not mentioned at all, so the live one survives the merge.
     expect(patch['position']).toBeUndefined()
@@ -192,7 +196,7 @@ describe('mounting', () => {
 
     const patch = parseSceneUrl(frame(container)?.getAttribute('src') ?? '')!
     expect((patch['layers'] as unknown[]).length).toBe(2)
-    expect((patch['layers'] as Array<Record<string, unknown>>)[0]!['name']).toBe('em')
+    expect(layersOf(patch)[0]!['name']).toBe('em')
   })
 
   it('replaces the scene outright when it points somewhere else', () => {
@@ -252,7 +256,7 @@ describe('mounting', () => {
 
     flushMerge()
     const patch = parseSceneUrl(frame(container)?.getAttribute('src') ?? '')!
-    const segmentation = (patch['layers'] as Array<Record<string, unknown>>)[1]!
+    const segmentation = layersOf(patch)[1]!
     expect(segmentation['segments']).toEqual(['1', '2', '3', '4'])
   })
 
@@ -301,7 +305,7 @@ describe('updating a viewer the user has edited', () => {
     flushMerge()
 
     const patch = parseSceneUrl(frame(container)?.getAttribute('src') ?? '')!
-    const layers = patch['layers'] as Array<Record<string, unknown>>
+    const layers = layersOf(patch)
     expect(layers.map((l) => l['name'])).toEqual(['em', 'hemibrain:v1.2.1', 'mine'])
     expect(layers[0]!['visible']).toBe(false)
     expect(layers[1]!['segments']).toEqual(['1', '2'])
@@ -322,7 +326,7 @@ describe('updating a viewer the user has edited', () => {
 
     const patch = parseSceneUrl(frame(container)?.getAttribute('src') ?? '')!
     // Our list, not theirs: `mine` is gone, which is the merge tier's documented cost.
-    expect((patch['layers'] as Array<Record<string, unknown>>).map((l) => l['name'])).toEqual([
+    expect(layersOf(patch).map((l) => l['name'])).toEqual([
       'em',
       'hemibrain:v1.2.1',
     ])
@@ -349,8 +353,142 @@ describe('updating a viewer the user has edited', () => {
     flushMerge()
 
     const patch = parseSceneUrl(frame(container)?.getAttribute('src') ?? '')!
-    const layers = patch['layers'] as Array<Record<string, unknown>>
+    const layers = layersOf(patch)
     expect(layers.map((l) => l['name'])).toEqual(['em', 'hemibrain:v1.2.1'])
+  })
+})
+
+describe('where the proxy is actually served', () => {
+  // Every test in here is about the deployed build; a third one added without this would
+  // silently run with the proxy on and pass for the wrong reason.
+  beforeEach(() => vi.stubEnv('DEV', false))
+
+  /*
+   * `proxiedViewer` answers which origins have a prefix *declared*; this asks whether anything
+   * is serving it, and they are not the same question. The `/ng` rule is in `vite.config.ts`,
+   * so it exists under `pnpm dev` and nowhere else — and because `/ng` is an absolute path, a
+   * build that takes it anyway does not fall back to the public viewer, it points the frame at
+   * a 404 on its own origin. Measured against the published site, where `/ng/` and `/coda/ng/`
+   * both answer 404: the deployed card showed a blank panel for every dataset that does not
+   * name a viewer of its own.
+   */
+  it('points the frame at the public viewer when no dev server is behind it', () => {
+    const { container } = render(
+      <NeuroglancerViewer url={URL_A} neurons={NEURONS} color={CATEGORICAL} />,
+    )
+    expect(frameSrc(container).startsWith('https://neuroglancer-demo.appspot.com/#!')).toBe(true)
+    // Still the same scene — this is about *which host*, not about what is shown.
+    expect(frameScene(container)).toEqual(parseSceneUrl(URL_A))
+  })
+
+  it('still merges there, since only the splice needed same-origin', () => {
+    // The documented degrade, and the thing that has to keep working without the proxy: no
+    // reading the live state, so no preserving their layer edits — but the camera still
+    // survives, because that is the merge form rather than the splice.
+    const { container, rerender } = render(
+      <NeuroglancerViewer url={URL_A} neurons={NEURONS} color={CATEGORICAL} datasetId={OWNED} />,
+    )
+    frameLoaded(container)
+    rerender(
+      <NeuroglancerViewer url={URL_B} neurons={NEURONS} color={CATEGORICAL} datasetId={OWNED} />,
+    )
+    flushMerge()
+
+    const src = frameSrc(container)
+    expect(src.startsWith('https://neuroglancer-demo.appspot.com/#!+')).toBe(true)
+    expect(parseSceneUrl(src)!['position']).toBeUndefined()
+  })
+})
+
+describe('holding an update back while the pointer is in the frame', () => {
+  /*
+   * The reported crash, and it is neuroglancer's rather than ours: restoring `layers` tears
+   * down and rebuilds every layer in two steps — constructed, then initialised — and a layer
+   * subscribes to the hover machinery in the first step while `selectionState` is only assigned
+   * in the second. `LayerSelectedValues.handleLayerChange` asks it anyway whenever
+   * `mouseState.active`, which is true exactly when the pointer is over a render panel, and the
+   * read is `undefined.generation`.
+   *
+   * It cannot be recovered from either: the subscription is never disposed, so the half-built
+   * layer keeps answering for the life of the document and every later mouse movement throws
+   * the same error. Hence a hold rather than a retry.
+   */
+  const enter = (container: HTMLElement) => fireEvent.mouseEnter(scaleBox(container)!)
+  const leave = (container: HTMLElement) => fireEvent.mouseLeave(scaleBox(container)!)
+  /** The state every hold starts from: a loaded frame with the pointer inside it. */
+  const hovered = () => {
+    const view = render(<NeuroglancerViewer url={URL_A} neurons={NEURONS} color={CATEGORICAL} />)
+    frameLoaded(view.container)
+    enter(view.container)
+    return view
+  }
+
+  it('sends nothing while the pointer is inside, and sends it when they leave', () => {
+    const { container, rerender } = hovered()
+
+    rerender(<NeuroglancerViewer url={URL_B} neurons={NEURONS} color={CATEGORICAL} />)
+    flushMerge()
+    // Still the opening scene: the patch is waiting, not lost.
+    expect(frameScene(container)).toEqual(parseSceneUrl(URL_A))
+
+    leave(container)
+    flushMerge()
+    const patch = parseSceneUrl(frameSrc(container))!
+    expect(layersOf(patch)[1]!['segments']).toEqual(['1', '2'])
+  })
+
+  it('carries only the last of a burst that arrived during the hold', () => {
+    // The hold and the debounce answer different halves of the same problem, so the one must
+    // not undo the other: a run finishing while somebody reads the scene should cost one
+    // rebuild when they look away, not one per scene that arrived meanwhile.
+    const { container, rerender } = hovered()
+
+    for (const segments of [['1', '2'], ['1', '2', '3']]) {
+      rerender(
+        <NeuroglancerViewer
+          url={sceneUrl(undefined, sceneWith(segments))}
+          neurons={NEURONS}
+          color={CATEGORICAL}
+        />,
+      )
+      flushMerge()
+    }
+    expect(frameScene(container)).toEqual(parseSceneUrl(URL_A))
+
+    leave(container)
+    flushMerge()
+    const patch = parseSceneUrl(frameSrc(container))!
+    expect(layersOf(patch)[1]!['segments']).toEqual([
+      '1',
+      '2',
+      '3',
+    ])
+  })
+
+  it('holds a replacement too, since that rebuilds the layers as well', () => {
+    // A full navigation is not exempt: `#!` resets and restores, which is the same teardown
+    // through the same code. It also loses its immediacy here on purpose — the pointer has just
+    // crossed out and the frame's own `mouseleave` is what clears `mouseState.active`, so going
+    // through the timer keeps our write behind it rather than racing it across two documents.
+    const { container, rerender } = hovered()
+
+    rerender(<NeuroglancerViewer url={URL_OTHER} neurons={NEURONS} color={CATEGORICAL} />)
+    expect(frameScene(container)).toEqual(parseSceneUrl(URL_A))
+
+    leave(container)
+    expect(frameScene(container)).toEqual(parseSceneUrl(URL_A))
+    flushMerge()
+    expect(frameScene(container)).toEqual(parseSceneUrl(URL_OTHER))
+  })
+
+  it('does not hold the opening navigation', () => {
+    // An empty frame has no layers to tear down and no mouse state to ask, so a card that
+    // mounts under the cursor still fills in rather than waiting for somebody to look away.
+    const { container } = render(
+      <NeuroglancerViewer url={URL_A} neurons={NEURONS} color={CATEGORICAL} />,
+    )
+    enter(container)
+    expect(frameScene(container)).toEqual(parseSceneUrl(URL_A))
   })
 })
 
@@ -392,7 +530,7 @@ describe('resuming across a remount', () => {
     const scene = frameScene(container)!
     // The camera, and the layer edits with it.
     expect(scene['position']).toEqual([900, 900, 900])
-    const layers = scene['layers'] as Array<Record<string, unknown>>
+    const layers = layersOf(scene)
     expect(layers.map((l) => l['name'])).toEqual(['em', 'hemibrain:v1.2.1', 'mine'])
     expect(layers[0]!['visible']).toBe(false)
     // And the selection the node is emitting *now*, spliced into it.

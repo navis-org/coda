@@ -37,15 +37,22 @@ declare module 'draco3d/draco_decoder_nodejs.js' {
 declare const __APP_VERSION__: string
 
 /**
- * The one `import.meta.env` field this project uses, for the same reason `*?url` is declared
- * above rather than pulling in `vite/client`.
+ * The two `import.meta.env` fields this project uses, declared for the same reason `*?url` is
+ * declared above rather than pulling in `vite/client`.
  *
  * `BASE_URL` matters because `base` is `'./'` so the build works from a subpath: an asset in
  * `public/` referenced as `/start/backdrop.svg` resolves to the domain root on GitHub Pages and
  * 404s. Prefixing with `BASE_URL` is the documented way to reference one.
+ *
+ * `DEV` is read in exactly one place — `sameOriginViewer` in `ui/viewers/NeuroglancerViewer.tsx`
+ * — and it is asking a question no other signal answers: whether a vite dev server is serving
+ * the `/ng` proxy this page's iframe would otherwise be pointed at. A static deploy is not
+ * behind that rule, and `/ng` is an absolute path, so the frame lands on a 404 of our own
+ * origin rather than falling back to the public viewer.
  */
 interface ImportMetaEnv {
   readonly BASE_URL: string
+  readonly DEV: boolean
 }
 
 /**

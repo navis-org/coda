@@ -31,6 +31,7 @@ import { warnOverThreshold } from '../../core/limits'
 import { warnAboveParam } from '../lib/limitParams'
 import { registerNode } from '../../core/registry'
 import type { ParamValues } from '../../core/node'
+import { idText } from '../../core/ids'
 import { T } from '../../core/types'
 import type { TableValue } from '../../core/values'
 import { isTableValue, str } from '../../core/values'
@@ -38,6 +39,7 @@ import type { NgLayerSet, NgLayout, ViewerKind } from '../../data/neuroglancer/s
 import {
   DEFAULT_NEUROGLANCER_URL,
   buildScene,
+  isSegmentId,
   sceneUrl,
   viewerBaseFor,
 } from '../../data/neuroglancer/scene'
@@ -347,13 +349,45 @@ function segmentColors(
 
   const segments: string[] = []
   const colors: Record<string, string> = {}
+  /** Rows that held something, but not something a segment id can be made of. */
+  let unreadable = 0
   for (let row = 0; row < neurons.length; row++) {
     const raw = ids[row]
     if (raw === null || raw === undefined) continue
-    const id = String(raw)
+    /*
+     * `idText` and then neuroglancer's own grammar, where this was `String(raw)`.
+     *
+     * Two failures, and the second is the expensive one. `String` on a wide `i64` cell prints
+     * `1e+21`, which is invariant 8 exactly: a confident wrong id with nothing to say so.
+     * `idText` refuses that instead of printing it. And a cell that is a *label* rather than an
+     * id — `LC4`, a blank, a decimal — reaches the scene as a segment, where the viewer does not
+     * skip it: `parseUint64` throws inside the layer's own restore, the layer is deleted before
+     * it finished initialising, and the hover subscription it had already registered is left
+     * behind throwing on every mouse movement for the rest of the session. One bad cell, and the
+     * embed is dead until the frame is reloaded. See `isSegmentId`.
+     */
+    const id = idText(raw)
+    if (id === null || !isSegmentId(id)) {
+      unreadable++
+      continue
+    }
     if (colors[id] !== undefined) continue
     segments.push(id)
     colors[id] = resolved.at(row)
+  }
+
+  /*
+   * Warned, not thrown — `docs/limits.md`'s rule, and it applies cleanly here: the scene is
+   * perfectly good without those rows, and refusing would claim there is no useful answer when
+   * most of the table is fine. What it must not do is stay quiet, because the alternative
+   * reading of a short scene is that the neurons are missing meshes.
+   */
+  if (unreadable > 0) {
+    ctx.warn(
+      `${unreadable} of ${neurons.length} rows have an id neuroglancer cannot use, so they ` +
+        `are left out of the scene. It takes plain whole numbers only, and one it cannot read ` +
+        `costs the whole layer rather than the one neuron.`,
+    )
   }
 
   /*
