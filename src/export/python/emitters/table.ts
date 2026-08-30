@@ -28,7 +28,12 @@ import { unpivotPlan } from '../../../nodes/lib/tableOps'
 import { readUnpivotSpec } from '../../../nodes/table/unpivot'
 import { decodeRenames } from '../../../nodes/lib/renames'
 import type { AggFn } from '../../../nodes/lib/tableOps'
+import type { CellValue } from '../../../core/values'
+import type { DType } from '../../../core/types'
 import { findColumn, isNumericDType } from '../../../core/types'
+import { decodeSetters, disabledEditNote, editPlan } from '../../../nodes/lib/tableEdits'
+import { usesRegex } from '../../../nodes/lib/tableFilter'
+import { filterMasks } from './tableFilters'
 import { pyList, pyStr, pyValue } from '../py'
 import { STACK_LABELS } from '../../../nodes/transform/stackNeurons'
 import { qualifyTarget } from '../../../nodes/table/qualifyIds'
@@ -794,4 +799,101 @@ registerEmitter('core.qualifyIds', (ctx) => {
     ...(direction === 'remove' && into ? [`into=${pyStr(into)}`] : []),
   ]
   return [`${ctx.output('out')} = coda_qualify_ids(${args.join(', ')})`]
+})
+
+// ---------------------------------------------------------------------------
+// Edit Table
+// ---------------------------------------------------------------------------
+
+/** A pandas dtype string for a Coda dtype, nullable throughout so a cleared cell stays `<NA>`. */
+const PY_DTYPE: Record<DType, string> = {
+  i64: 'Int64',
+  f64: 'Float64',
+  str: 'string',
+  bool: 'boolean',
+}
+
+/**
+ * One edited cell as a Python literal.
+ *
+ * `pyValue` for everything but the null, which is the only arm that differs: a missing cell has
+ * to be `pd.NA` and not `None`, or an assignment into a nullable column puts an object in it.
+ * Quoting and number formatting stay in `py.ts`, which is the module that owns them.
+ */
+function pyCell(cell: CellValue): string {
+  return cell === null ? 'pd.NA' : pyValue(cell)
+}
+
+/**
+ * `.loc[rows, column] = value`, which is the node written out — this is the one emitter whose
+ * generated line is the thing the node was modelled on rather than a translation of it.
+ *
+ * Two steps precede the assignments and neither is optional, because pandas would otherwise
+ * answer differently from Coda about the *dtype* rather than about the values:
+ *
+ *  - **A widened column is cast first.** Coda widens `pre` to text the moment a rule writes
+ *    something non-numeric into it; pandas 2 emits a `FutureWarning` and upcasts to `object`
+ *    for the same assignment, and pandas 3 raises. An explicit `astype` says which dtype the
+ *    frame ends up with, and it is the same one the port publishes. `"string"` and not `str`:
+ *    `astype(str)` turns a missing value into the four characters `"nan"`.
+ *  - **An added column is created with its dtype**, rather than assigned `pd.NA` and left as
+ *    `object`.
+ *
+ * A rule whose filter Coda could not resolve is skipped here too — same rule, same direction:
+ * a term dropped rather than refused widens what gets overwritten. The comment above each
+ * assignment carries the rule as it was typed, which is the only place the reader can see what
+ * a mask of five terms was meant to say.
+ */
+registerEmitter('core.editTable', (ctx) => {
+  const src = ctx.wired('in')
+  const out = ctx.output('out')
+  const plan = editPlan(ctx.schema('in'), decodeSetters(ctx.params.edits))
+
+  // An unconfigured Edit Table is a pass-through on the canvas, so it is one here.
+  if (plan.noop) return [`${out} = ${src}`]
+
+  ctx.require('pandas')
+  const lines = [`${out} = ${src}.copy()`]
+
+  for (const entry of plan.widened) {
+    lines.push(`${col(out, entry.column)} = ${col(out, entry.column)}.astype(${pyStr(PY_DTYPE[entry.to])})`)
+  }
+  for (const entry of plan.added) {
+    lines.push(
+      `${col(out, entry.column)} = pd.Series(pd.NA, index=${out}.index, dtype=${pyStr(PY_DTYPE[entry.dtype])})`,
+    )
+  }
+
+  for (const target of plan.active) {
+    // Against the *output* schema, which is what Coda matches against too: a column widened to
+    // text compares as text on both sides, and a column an earlier rule added exists on both.
+    const masks = filterMasks(out, target.terms, plan.schema)
+    if (target.setter.where.trim()) lines.push(`# where ${target.setter.where.trim()}`)
+    if (masks.length === 0) {
+      lines.push(`${out}.loc[:, ${pyStr(target.column)}] = ${pyCell(target.cell)}`)
+    } else if (masks.length === 1) {
+      lines.push(`${out}.loc[${masks[0]}, ${pyStr(target.column)}] = ${pyCell(target.cell)}`)
+    } else {
+      // Inside the subscript brackets, so the continuation needs no backslashes and a reader can
+      // comment one clause out without touching the others. `out.table`'s layout, same reason.
+      lines.push(
+        `${out}.loc[`,
+        ...masks.map((mask, i) => `    ${i === 0 ? ' ' : '&'} ${mask}`),
+        `, ${pyStr(target.column)}] = ${pyCell(target.cell)}`,
+      )
+    }
+  }
+
+  if (usesRegex(plan.active.flatMap((target) => target.terms))) {
+    lines.push(
+      ...ctx.note(
+        'Coda matches these regexes with JavaScript semantics and pandas uses Python `re`. ' +
+          'They agree on everything these rules use; named groups and lookbehind differ.',
+      ),
+    )
+  }
+  for (const target of plan.targets) {
+    if (target.problems.length > 0) lines.push(...ctx.note(disabledEditNote(target)))
+  }
+  return lines
 })

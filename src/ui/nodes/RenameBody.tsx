@@ -37,10 +37,18 @@ export function RenameBody({ node, ctx, setParam }: NodeBodyProps) {
 
   /*
    * Trailing rows that exist on screen and nowhere else. One to begin with on an unconfigured
-   * node, because a card whose whole content is an `+ Add` button says less about what this
-   * node does than a card showing the shape of one rename.
+   * node, because a card whose whole content is an `+ Add` button says less about what this node
+   * does than a card showing the shape of one rename.
+   *
+   * `undefined` until the first interaction, and **derived from the store until then** —
+   * deliberately, rather than seeded in `useState`. A card mounts before the graph it belongs to
+   * has loaded, so a seeded count is computed against whatever node was there a moment ago and
+   * then never revisited: load a graph whose Rename has no rows into a session that had one with
+   * three, and the card draws **nothing at all**. `FindNeuronsBody` records the same trap on the
+   * same kind of list, and `EditTableBody` is the third.
    */
-  const [blanks, setBlanks] = useState(() => (stored.length === 0 ? 1 : 0))
+  const [added, setAdded] = useState<number | undefined>(undefined)
+  const blanks = added ?? (stored.length === 0 ? 1 : 0)
   const rows = [...stored, ...Array.from({ length: blanks }, () => BLANK)]
 
   const connected = Boolean(ctx.inputs.in)
@@ -57,13 +65,15 @@ export function RenameBody({ node, ctx, setParam }: NodeBodyProps) {
       commit(stored.map((r, i) => (i === index ? { ...r, ...patch } : r)))
       return
     }
-    setBlanks((n) => Math.max(0, n - 1))
+    // Against the *derived* count rather than a functional update on the raw state, which would
+    // read `undefined` on the first edit of a freshly-loaded card.
+    setAdded(Math.max(0, blanks - 1))
     commit([...stored, { ...BLANK, ...patch }])
   }
 
   const remove = (index: number) => {
     if (index < stored.length) commit(stored.filter((_, i) => i !== index))
-    else setBlanks((n) => Math.max(0, n - 1))
+    else setAdded(Math.max(0, blanks - 1))
   }
 
   /*
@@ -135,7 +145,7 @@ export function RenameBody({ node, ctx, setParam }: NodeBodyProps) {
       <button
         type="button"
         className="rename-body__add"
-        onClick={() => setBlanks((n) => n + 1)}
+        onClick={() => setAdded(blanks + 1)}
         title="Add another rename"
       >
         + Add

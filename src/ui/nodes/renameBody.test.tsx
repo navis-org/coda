@@ -102,6 +102,24 @@ describe('Rename Columns card', () => {
     expect(stored()).toEqual([])
   })
 
+  it('still draws a row after a graph with no renames loads over one that had some', async () => {
+    /*
+     * The mount-order trap, which a seeded `useState` count cannot see: a card mounts before the
+     * graph it belongs to has loaded, so the count is computed against whichever node was there a
+     * moment ago and never revisited. Seeded, this drew a card with no rows at all — just an Add
+     * button. `EditTableBody` and `FindNeuronsBody` record the same trap.
+     */
+    const body = await open({ renames: ['["type","cell_type"]'] })
+    expect(rows(body)).toHaveLength(1)
+    act(() => {
+      useGraphStore.getState().loadGraph(graphWith({}, 'neurons'))
+    })
+    await waitFor(() => {
+      const fresh = document.querySelector('.rename-body__rows')!.closest('.list-body')!
+      expect(fresh.querySelectorAll('.rename-body__row')).toHaveLength(1)
+    })
+  })
+
   it('adds a row without writing one to the graph', async () => {
     /*
      * The reason a blank row is component state. `renames` is in the provenance key, so a row

@@ -1226,6 +1226,35 @@ ggplot(box_plot_2_data, aes(y = `pre`, x = `type`)) +
 # dependency.
 ```
 
+```{r edit-table}
+# ── Edit Table ──
+edit_table <- find_neurons |>
+  mutate("pre" := as.character(`pre`)) |>
+  mutate("group" := NA_character_) |>
+  # where type==LC4 status==Traced
+  mutate("type" := replace(
+    .data[["type"]],
+    (!is.na(.data[["type"]]) & tolower(as.character(.data[["type"]])) == "lc4") &
+    (!is.na(.data[["status"]]) & tolower(as.character(.data[["status"]])) == "traced"),
+    "LC4a"
+  )) |>
+  # where status==Traced
+  mutate("group" := replace(
+    .data[["group"]],
+    (!is.na(.data[["status"]]) & tolower(as.character(.data[["status"]])) == "traced"),
+    "reviewed"
+  )) |>
+  # where type~^LPLC[0-9]+$
+  mutate("pre" := replace(
+    .data[["pre"]],
+    !is.na(.data[["type"]]) & grepl("^LPLC[0-9]+$", as.character(.data[["type"]]), ignore.case = TRUE, perl = TRUE),
+    "unknown"
+  ))
+# NOTE: Coda matches these regexes with JavaScript semantics and R uses PCRE
+# via `grepl(perl = TRUE)`. They agree on everything these rules use; named
+# groups and lookbehind differ.
+```
+
 ```{r adjacency}
 # ── Adjacency ──
 adjacency <- neuprint_get_adjacency_matrix(

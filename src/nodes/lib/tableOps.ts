@@ -951,7 +951,7 @@ export interface DTypeConflict {
  * columns wearing one name, and merging them either way would be a decision this node has no
  * grounds to make.
  */
-function mergedDType(top: DType, bottom: DType): DType | undefined {
+export function mergedDType(top: DType, bottom: DType): DType | undefined {
   if (top === bottom) return top
   if (isNumericDType(top) && isNumericDType(bottom)) return 'f64'
   return undefined

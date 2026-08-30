@@ -759,6 +759,26 @@ export function everythingGraph(): CodaGraph {
       params: { renames: ['["root_id","neuronId"]', '["cell_type","type"]'] },
     },
     /*
+     * On the neuron branch rather than the URL one, because the schema has to be *known* for
+     * this node to record anything: two of its three emitted steps — the cast of a widened
+     * column and the creation of an added one — exist only where the incoming dtypes are. The
+     * three rules are the three shapes worth pinning: an ordinary overwrite, a column that did
+     * not exist, and a value that does not fit the column it is written into.
+     */
+    {
+      id: 'edit',
+      type: 'core.editTable',
+      col: 3,
+      row: 15,
+      params: {
+        edits: [
+          '{"w":"type==LC4 status==Traced","c":"type","v":"LC4a"}',
+          '{"w":"status==Traced","c":"group","v":"reviewed"}',
+          '{"w":"type~^LPLC[0-9]+$","c":"pre","v":"unknown"}',
+        ],
+      },
+    },
+    /*
      * The one annotation source that is not backend-specific, which is why it is here rather
      * than in `caveGraph`: it needs no client and no credential, so it emits in **both**
      * languages and a fixture that only reached it through the CAVE graph would leave R's
@@ -1141,6 +1161,7 @@ export function everythingGraph(): CodaGraph {
     ['roimesh', 'meshes', 'v3d', 'volumes'],
     ['stack', 'out', 'muted', 'in'],
     ['url', 'out', 'rename', 'in'],
+    ['find', 'neurons', 'edit', 'in'],
     ['upload', 'out', 'gsheet', 'annotations'],
   ]
   for (const [from, out, to, into] of edges) g = wire(g, from, out, to, into)

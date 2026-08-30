@@ -222,6 +222,7 @@ Moved verbatim out of `CLAUDE.md`.
 | `nodes/table/pivot.test.ts`              | the two outputs describing one pivot, and the wide schema arriving only by observation                                           |
 | `nodes/table/unpivot.test.ts`            | the fold's node contract: the schema derived rather than observed, the neurons claim dropped when the id column is folded, an unset picker warning rather than refusing, and Keep falling back to everything when its only column is gone |
 | `nodes/lib/tableFilter.test.ts`          | a header cell's grammar: a bare value following the column's dtype, the null rule, and every clause it drops rather than applies |
+| `nodes/lib/tableEdits.test.ts`           | Edit Table's op: schema/value agreement over an added column and a widened one, the direction every failure errs in — a bare term and an unknown filter column each switching their own rule off — `""` clearing a cell where a blank field does nothing, and rules seeing what the ones above them wrote |
 | `nodes/output/table.test.ts`             | the two ports: the tap kept whole, filtering staling the node while paging does not, and a bad clause refusing nothing           |
 | `nodes/table/sample.test.ts`             | the four sampling modes, a draw reproduced from its seed, and the seed costing nothing in the other three                        |
 | `nodes/table/combine.test.ts`            | the coalesce node: infer publishing what evaluate returns, an unset picker warning rather than refusing, and the chain into a Dataset |
@@ -263,5 +264,6 @@ Moved verbatim out of `CLAUDE.md`.
 | `nodes/transform/selectOne.test.ts`      | stepping free vs committing stale, an index past the end emitting nothing, and one skeleton re-measuring its bounds                |
 | `ui/nodes/selectOneBody.test.tsx`        | the pager card: not-run vs not-wired, the Live label counted once, and the gap between what is shown and what is emitted           |
 | `ui/nodes/renameBody.test.tsx`           | the rename card: Add drawing a row without writing one, a filled row stored as a JSON pair, and the picker never disabled where the schema has not arrived |
+| `ui/nodes/editTableBody.test.tsx`        | the Edit Table card: Add drawing a row without writing one, a filled rule stored as one JSON object, the column staying a text field with completions rather than a picker, and a rule that changes nothing marked on the field carrying the reason |
 | `nodeguide/nodeGuide.test.ts`            | the node guide's data: a paragraph per node, socket styles, internal-vs-advanced params, an enum's label, and the examples cross-reference |
 | `overview/overview.test.ts`              | the overview page against the registry: the node count it advertises as a floor, and every backend and real dataset family named on it |

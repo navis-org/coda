@@ -6937,6 +6937,39 @@ details[open] > summary.tile__label {
 }
 
 /* ---------------------------------------------------------------------------
+ * Edit Table card
+ *
+ * Rename's rows with one more field and one more separator. Shares `.list-body`, the ✕ and the
+ * Add button outright — an edit row is the same kind of object a rename row is, and a second
+ * copy of those declarations is how the two stop looking alike.
+ * ------------------------------------------------------------------------- */
+
+/*
+ * Five tracks: filter → column = value ✕. `minmax(0, …)` on all three fields rather than `1fr`,
+ * or a long column name sets its track's minimum to its own content width and pushes the ✕ off
+ * the card — the failure `.rename-body__row` records, on a row with two more controls. The
+ * filter track is the widest of the three on purpose: a column name and a literal are usually
+ * one word, where `type=LC4 side=left` is the shape of the commonest rule and truncating it
+ * hides which rows are being overwritten, which is the one thing on the row worth checking.
+ */
+.edit-body__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) auto minmax(0, 1fr) auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+/*
+ * A rule that changes nothing. Marked on the filter field, which is where every reason for it
+ * lives — an unresolvable filter switches its own rule off rather than matching more rows, so
+ * the field carrying the problem is the one to point at. Warning-toned rather than error-toned,
+ * because the node runs perfectly well: it is this row that does nothing.
+ */
+.edit-body__row--broken input:first-child {
+  border-color: var(--status-stale);
+}
+
+/* ---------------------------------------------------------------------------
  * Upload Table card
  * ------------------------------------------------------------------------- */
 

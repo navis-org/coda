@@ -836,6 +836,157 @@ and no console errors. The one thing it showed that the tests could not is that
 select carries its full value in a `title`, and the badge and the foot line both name the column
 anyway.
 
+## Edit Table: disagreeing with the data
+
+`core.editTable`, `Add ▸ Transform ▸ Edit Table`. One row per rule — `where … set column =
+value` — applied top to bottom. pandas' `.loc[rows, column] = value`, which is what it was
+modelled on and, in the notebook, what it emits.
+
+The node exists for the thing every annotation set eventually needs: a cell type somebody has
+since revised, a status that is wrong for the twelve neurons you have actually looked at, a
+grouping the dataset does not carry at all. Before it, each of those meant exporting a CSV,
+editing it somewhere else and importing it back — at which point the graph no longer records
+where the numbers came from, and re-running the analysis *without* the override is not a gesture
+anybody can perform. Here the override is a node: unwire it and the comparison is on screen.
+
+### An edit is a rule, not a cell reference
+
+The alternative design — click a cell in the Table viewer and type — was the other half of the
+TODO this closes, and it does not survive the first re-run. A Coda table is *derived*: fetched,
+filtered, joined, re-fetched tomorrow against a proofreading server that has moved on. "Row 412,
+column type" stops meaning anything the first time a filter upstream drops a row, and it fails
+**silently**, because row 412 still exists and still has a type.
+
+A rule survives all of that. It is also the half worth reading six months later: `where type==LC4
+set type = LC4a` says what was decided, where a list of edited cells says only that something
+was. Direct cell editing is still worth having as a way to *author* rules — click a cell, get a
+row prefilled with the id — but the storage has to be the rule either way.
+
+### The filter is Explore's grammar, borrowed whole
+
+`where` is parsed by `parseSearch`, so `type==LC4 status==Traced`, `pre>100`, `!status==Traced` and
+`type~^LPLC[0-9]+$` mean here exactly what they mean in the Explore search box and — through
+`leadingOperator` — in a Table viewer's column headers. `tableFilter.ts`'s reason applies
+unchanged: this app already had a filter language, and a second one is a second thing to learn
+and a second thing to get subtly different. Blank means every row, which is `.loc[:, c] = v`.
+
+### Everything errs towards editing *fewer* rows, which the Table viewer does not
+
+This is the one rule to keep, and it inverts `tableFilter.ts`'s. There a clause that cannot be
+applied is dropped and the table shows more rows than intended — acceptable for a tap. A dropped
+term **here** widens what gets overwritten, so a rule whose filter cannot be resolved is disabled
+outright and the reason is reported. Two cases look harmless and are not:
+
+- **A bare term is refused.** `LC4` on its own means "any column contains LC4", which is right
+  for finding something and wrong for overwriting it: `LC4` also appears in `instance`, in
+  `notes` and in somebody's `group`. It has to be written `type==LC4`.
+- **A filter naming a column the table lacks disables the rule**, where the same clause in the
+  Table viewer merely matches nothing. Not the same thing, and the difference is one keystroke:
+  `fieldTermsMatch` reads an unknown column as "did not match", so a *negated* term on one
+  matches **every row** — `!typ==LC4` would overwrite the whole table rather than most of it.
+
+Nothing refuses, though. Every failure is a warning and the table still passes through, which is
+invariant 5's corollary in a node that has a whole table on its output.
+
+### The schema is decided by `column` and `value`, never by `where`
+
+A rule naming a column the table does not have **creates** it, null outside the rows it matches —
+so this tags a set as readily as it corrects one. A value that does not fit the column's dtype
+**widens** the column (`i64` → `f64` → `str`, never the other way), existing values converted.
+Both are published by `editSchema` at edit time, so a downstream picker offers a column somebody
+invented thirty seconds ago without waiting for a run.
+
+The filter is deliberately outside that decision. It is the part being typed, and a column
+blinking in and out of every downstream picker between two keystrokes of a regex is worse than a
+column that exists slightly too early. So a rule with a broken filter still contributes its
+column; it simply changes no rows and says so.
+
+Widening in one direction is what makes it safe to apply *before* anything is written: no
+existing value can fail to convert, so there is no order in which the halves could disagree.
+`""` writes an empty cell — a real edit, clearing a status somebody disputes — and does **not**
+widen, because null fits every dtype. A blank value field is a row somebody is still filling in,
+and does nothing at all.
+
+### Rules run in order, each seeing what the ones above it did
+
+`.loc` lines in a script read that way and this is the same object, so the second rule's filter is
+matched against the table the first one left — which is what lets one rule create a column and the
+next narrow on it. The cost is that reordering the rows changes the answer, which is equally true
+of the script.
+
+### The `?`, and what it forced
+
+`src/help/nodes/core.editTable.md` — the filter grammar as a table, four worked rules, and the
+two cases that switch a rule off. Writing it was the occasion to *shorten* the node's `guide`
+from 612 characters to 338, which is what `help.test.ts`'s 400-character ceiling is for: the
+overlay prints the guide above the document under a **TL;DR** label, and a nine-sentence
+paragraph labelled TL;DR is a lie about itself.
+
+It also turned up a wrong claim one document over. `neuron.explore.md` said the search box
+"combines multiple clauses with `AND` and `OR`, and uses parentheses to group them", with
+`type==DNp02 AND (hemilineage==A OR hemilineage==B)` as the example. `parseSearch` has no such
+grammar: it splits on whitespace and ANDs, so that query parses to a field term, the *literal
+word* `and`, the bare text `(hemilineage==a`, the literal word `or`, and a term matching
+`hemilineage` against `B)` — and finds nothing. Checked by running the parser rather than by
+reading it, and corrected there. Which is the argument for one grammar rather than two: the
+correction had to be made once, and every surface that borrows it is now describing the same
+thing.
+
+### The card, and the one number edit time cannot produce
+
+Three fields to a line and `RenameBody`'s two rules: a blank row is component state rather than a
+param, and a half-typed row is kept because it is inert. The column is a **text field with a
+`datalist`**, not a picker — naming a column the table lacks is the gesture that adds one, and a
+`select` makes it unreachable.
+
+The foot line says *rows changed*, and it costs a pass over the input table. It is the only thing
+on the card that can tell a rule that worked from a rule whose filter parses perfectly and matches
+nothing, which is this node's characteristic failure and is invisible to `validate`. `evaluate`
+raises the same thing as a `ctx.warn` per rule.
+
+One trap the card ran into, which `FindNeuronsBody` had already written down: **a card mounts
+before the graph it belongs to has loaded**, so seeding the blank-row count in `useState` computes
+it against whichever node was there a moment ago and never revisits. Loading a graph whose Edit
+Table has no rules, into a session that had one with three, drew a card with no rows at all — no
+shape, just an Add button. The count is `undefined` until the first interaction and derived from
+the store until then.
+
+`RenameBody` had the same bug, live, on the same `+ Add` list, and it is fixed there too rather
+than left as a third copy that had already drifted — which is the case `paramPairs.ts` cites as
+this codebase's second-consumer rule. `renameBody.test.tsx` pins it with a load-a-second-graph
+case, which fails against the seeded version. The three cards still each write their own list
+machinery; that is the next thing to share, and the drift is the argument for it.
+
+### Both emitters
+
+`.loc[mask, "col"] = value` and `mutate("col" := replace(.data[["col"]], pred, value))`, over the
+masks and predicates `out.table`'s header filters already compile. Two steps precede the
+assignments in both languages and neither is optional, because the libraries would otherwise
+differ from Coda about the **dtype** rather than about the values:
+
+- **A widened column is cast first.** pandas 2 emits a `FutureWarning` and upcasts to `object`
+  for an incompatible `.loc` assignment, and pandas 3 raises; `astype("string")` names the dtype
+  the port publishes. Not `astype(str)`, which turns a missing value into the four characters
+  `"nan"`.
+- **An added column is created with its dtype.** In R that means a typed `NA` — bare `NA` is
+  *logical*, so `mutate(group = NA)` gives a column whose type depends on whether any row matched.
+
+R takes `replace()` rather than `if_else()`, which is not a style choice: `dplyr::if_else`
+requires both arms to share a type and errors when they do not, which is precisely the case this
+node exists for. `replace(x, i, v)` is `x[i] <- v` and coerces the vector exactly as Coda widens
+the column. The target is written `"name" := …`, because a Coda column can be called anything an
+uploaded CSV's header can be; dplyr re-exports rlang's `:=`, so nothing new is loaded.
+
+A rule Coda disabled is left out of both documents and gets a `NOTE` saying so — translating it
+into something that runs would edit more rows than the graph does.
+
+**Verified by running it, in both languages.** The three-rule chain above was run against pandas
+2.3.3 and against dplyr, on a frame with a null in it, and the two agree with each other and with
+Coda: `LC4 → LC4a` on the one matching row, `group` created as `reviewed`/`<NA>`, `pre` carrying
+`"1"`, `"unknown"`, `"3"` as text. The pandas run was made with `-W error::FutureWarning`, which
+is the assertion that matters — it is what says the explicit `astype` is doing its job rather than
+the assignment silently upcasting to `object` on the way to becoming an error in pandas 3.
+
 ## Select One: stepping through a collection
 
 `core.selectOne`, `Add ▸ Transform ▸ Select One`. Forward and back through a table's rows, a

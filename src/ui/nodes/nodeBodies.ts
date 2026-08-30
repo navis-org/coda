@@ -31,6 +31,7 @@ import { InputIdsBody } from './InputIdsBody'
 import { LabelsToNeuronsBody } from './LabelsToNeuronsBody'
 import { PathsBody } from './PathsBody'
 import { FindNeuronsBody } from './FindNeuronsBody'
+import { EditTableBody } from './EditTableBody'
 import { RenameBody } from './RenameBody'
 import { SelectOneBody } from './SelectOneBody'
 import { ForEachBody } from './ForEachBody'
@@ -186,6 +187,17 @@ export const NODE_BODIES: Record<string, NodeBodyEntry> = {
    * widget, and a fullscreen panel of four of them is whitespace.
    */
   'neuron.findNeurons': { Component: FindNeuronsBody, width: 360 },
+  /*
+   * The widest of the list cards, because a rule is three fields on a line rather than two or
+   * one: a filter, a column and a value. Measured in a browser rather than guessed, since a
+   * six-track grid is exactly what jsdom cannot see — at 400px the filter field is 134px and
+   * `type==LC4 status==Traced` cuts to `type==LC4 status==Tra`, so the card is 440 and all
+   * three fields carry their value in a `title`. Truncation is not avoidable at any width a
+   * canvas can hold, which is why the tooltip is the fix and the extra 40px only makes the
+   * common case fit. Not `expandable`, for Rename's reason: the rows are the whole widget and
+   * a fullscreen panel of four of them is whitespace.
+   */
+  'core.editTable': { Component: EditTableBody, width: 440 },
 }
 
 export function nodeBody(type: string): NodeBodyEntry | undefined {

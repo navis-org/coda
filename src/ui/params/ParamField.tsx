@@ -367,6 +367,24 @@ export interface TextFieldProps {
   mono?: boolean
   /** Render a textarea. Enter then inserts a newline instead of committing. */
   multiline?: boolean
+  /**
+   * Native tooltip, for a field narrow enough to truncate what it holds. `SelectField` already
+   * takes one for the same reason — a 130px control cutting `cellBodyFiber (missing)` mid-word
+   * is worse than no marker at all, which `RenameBody` records.
+   */
+  title?: string
+  /**
+   * The id of a `<datalist>` the **caller** renders, offering completions for a field that takes
+   * free text but usually takes one of a known set — `Edit Table`'s column, which is a picker
+   * except that naming a column the table lacks is how you create one.
+   *
+   * A `datalist` rather than a `select` beside a text input: the value is one thing, so it should
+   * be one control, and the browser's own popup cannot disagree with what the field holds. The
+   * list stays the caller's because a card draws several of these fields over **one** set of
+   * options — rendering the `<option>` elements per field multiplies a wide pivot's few thousand
+   * columns by the number of rows on the card. Single-line only; a textarea takes no `list`.
+   */
+  list?: string
   onChange: (value: string) => void
 }
 
@@ -375,7 +393,16 @@ export interface TextFieldProps {
  * downstream node updates as you type without every keystroke becoming an undo step
  * (the store coalesces those by param id).
  */
-export function TextField({ label, value, placeholder, mono, multiline, onChange }: TextFieldProps) {
+export function TextField({
+  label,
+  value,
+  placeholder,
+  mono,
+  multiline,
+  title,
+  list,
+  onChange,
+}: TextFieldProps) {
   const [text, setText] = useState(value)
   const [focused, setFocused] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -396,6 +423,7 @@ export function TextField({ label, value, placeholder, mono, multiline, onChange
 
   const shared = {
     'aria-label': label,
+    title,
     value: text,
     placeholder,
     spellCheck: false,
@@ -432,6 +460,7 @@ export function TextField({ label, value, placeholder, mono, multiline, onChange
       {...shared}
       className={`field nodrag${mono ? ' field--mono' : ''}`}
       type="text"
+      list={list}
       onKeyDown={(e) => {
         if (e.key === 'Enter') e.currentTarget.blur()
         if (e.key === 'Escape') {

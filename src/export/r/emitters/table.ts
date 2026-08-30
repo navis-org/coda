@@ -6,7 +6,12 @@
  * if missed are the same three, and each is marked where it is handled.
  */
 
+import type { CellValue } from '../../../core/values'
+import type { DType } from '../../../core/types'
 import { isNumericDType } from '../../../core/types'
+import { decodeSetters, disabledEditNote, editPlan } from '../../../nodes/lib/tableEdits'
+import { usesRegex } from '../../../nodes/lib/tableFilter'
+import { filterPredicates } from './tableFilters'
 import type { AggFn } from '../../../nodes/lib/tableOps'
 import {
   aggColumnName,
@@ -732,4 +737,138 @@ registerEmitter('core.qualifyIds', (ctx) => {
     ...(direction === 'remove' && into ? [`into = ${rStr(into)}`] : []),
   ]
   return [`${ctx.output('out')} <- coda_qualify_ids(${args.join(', ')})`]
+})
+
+// ---------------------------------------------------------------------------
+// Edit Table
+// ---------------------------------------------------------------------------
+
+/** R's typed `NA`, so an added column and a cleared cell carry the dtype the port publishes. */
+const R_NA: Record<DType, string> = {
+  i64: 'NA_integer_',
+  f64: 'NA_real_',
+  str: 'NA_character_',
+  bool: 'NA',
+}
+
+/** The cast that puts a widened column into the dtype Coda widened it to. */
+const R_CAST: Record<DType, string> = {
+  i64: 'as.integer',
+  f64: 'as.numeric',
+  str: 'as.character',
+  bool: 'as.logical',
+}
+
+/**
+ * One edited cell as an R literal.
+ *
+ * `rValue` for everything but the null, which is the only arm that differs: `rValue` answers
+ * `NULL`, and assigning that into a vector *removes* the element rather than emptying it. A
+ * typed `NA` is what an absent cell is in R. Quoting and number formatting stay in `r.ts`.
+ */
+function rCell(cell: CellValue, dtype: DType): string {
+  return cell === null ? R_NA[dtype] : rValue(cell)
+}
+
+/**
+ * The dplyr half of `.loc[rows, column] = value`. The counterpart of the pandas emitter, and a
+ * **copy** rather than a shared module for `tableFilters.ts`’ stated reason.
+ *
+ * Three things about R make this more than a transcription, and each would produce a wrong
+ * dtype rather than an error:
+ *
+ *  - **`replace()` rather than `if_else()`.** `dplyr::if_else` requires both arms to have the
+ *    same type and errors when they do not, which is precisely the case this node exists for —
+ *    writing text into a numeric column. `replace(x, i, value)` is `x[i] <- value`, which
+ *    coerces the vector exactly as Coda widens the column.
+ *  - **`"name" := …`,** because a Coda column can be called anything an uploaded CSV’s header
+ *    can be, including something that is not a syntactic R identifier. dplyr re-exports rlang’s
+ *    `:=`, so this needs no library beyond the one already loaded.
+ *  - **A typed `NA` for an added column.** Bare `NA` is *logical*, so `mutate(group = NA)` gives
+ *    a logical column that the first `replace` then coerces — a dtype that depends on whether
+ *    any row matched, which is the kind of difference that surfaces two joins later.
+ *
+ * A rule whose filter Coda could not resolve is skipped here too: same rule and same direction,
+ * since a term dropped rather than refused widens what gets overwritten.
+ */
+registerEmitter('core.editTable', (ctx) => {
+  const src = ctx.wired('in')
+  const out = ctx.output('out')
+  const plan = editPlan(ctx.schema('in'), decodeSetters(ctx.params.edits))
+
+  // An unconfigured Edit Table is a pass-through on the canvas, so it is one here.
+  if (plan.noop) return [`${out} <- ${src}`]
+
+  ctx.library('dplyr')
+
+  /*
+   * One `mutate` per step, each already indented, so the assembly below only has to decide
+   * where the pipe goes. A comment rides with its step rather than being a step of its own —
+   * a `|>` has to land on the last *code* line of a stage, and a trailing comment would take it.
+   */
+  const steps: Array<{ comment?: string; lines: string[] }> = []
+
+  for (const entry of plan.widened) {
+    steps.push({ lines: [`  mutate(${rStr(entry.column)} := ${R_CAST[entry.to]}(${col(entry.column)}))`] })
+  }
+  for (const entry of plan.added) {
+    steps.push({ lines: [`  mutate(${rStr(entry.column)} := ${R_NA[entry.dtype]})`] })
+  }
+  for (const target of plan.active) {
+    // Against the *output* schema, which is what Coda matches against too: a column widened to
+    // text compares as text on both sides, and a column an earlier rule added exists on both.
+    const predicates = filterPredicates(target.terms, plan.schema)
+    const value = rCell(target.cell, target.dtype)
+    const comment = target.setter.where.trim() ? `where ${target.setter.where.trim()}` : undefined
+    if (predicates.length === 0) {
+      steps.push({ comment, lines: [`  mutate(${rStr(target.column)} := ${value})`] })
+      continue
+    }
+    /*
+     * `.data[[…]]` inside `mutate` as well as inside `filter` — the predicates come from the
+     * shared compiler and the pronoun is valid in both, which is what lets one column reference
+     * serve the mask and the vector being written.
+     *
+     * The `&` sits at the *end* of each line rather than the start of the next. Inside the
+     * parentheses either parses, but a reader commenting one clause out gets a syntax error
+     * from the leading form and a working document from this one.
+     */
+    steps.push({
+      comment,
+      lines: [
+        `  mutate(${rStr(target.column)} := replace(`,
+        `    .data[[${rStr(target.column)}]],`,
+        ...predicates.map((predicate, i) => `    ${predicate}${i < predicates.length - 1 ? ' &' : ','}`),
+        `    ${value}`,
+        `  ))`,
+      ],
+    })
+  }
+
+  const lines = [`${out} <- ${src} |>`]
+  steps.forEach((step, i) => {
+    if (step.comment) lines.push(`  # ${step.comment}`)
+    const body = [...step.lines]
+    if (i < steps.length - 1) body[body.length - 1] = `${body[body.length - 1]} |>`
+    lines.push(...body)
+  })
+
+  /*
+   * The regex flavour note, which the R Table viewer's chunk also attaches. `grepl(perl = TRUE)`
+   * is the closer of R's two engines to JavaScript's, not the same one — and leaving it off here
+   * while `out.table` carries it would say the difference applies to a filter and not to an edit.
+   */
+  if (usesRegex(plan.active.flatMap((target) => target.terms))) {
+    lines.push(
+      ...ctx.note(
+        'Coda matches these regexes with JavaScript semantics and R uses PCRE via ' +
+          '`grepl(perl = TRUE)`. They agree on everything these rules use; named groups and ' +
+          'lookbehind differ.',
+      ),
+    )
+  }
+  for (const target of plan.targets) {
+    if (target.problems.length > 0) lines.push(...ctx.note(disabledEditNote(target)))
+  }
+  return lines
 })
