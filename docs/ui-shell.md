@@ -557,9 +557,30 @@ does nothing.
 
 ## Start page
 
-The first thing anyone sees: a modal over the canvas with the alpha blurb, two rails of
+The first thing anyone sees: a modal over the canvas with the alpha blurb, the rails of
 starting points, the repo link and a "Don't show again" checkbox. `StartPage.tsx`,
 `startCards.ts`, and the `.start*` block at the end of `editor.css`.
+
+**Four rails, and the order is how often each is what somebody came for:** the user's own saved
+workflows (only when the shelf has something on it), **Browse Workflows**, **Examples**,
+**Datasets**.
+
+**The Zoo is a rail of one card, not a card on the Examples rail.** Everything under Examples is
+bundled, runs on synthetic data and opens instantly; the Zoo card goes to a public repository
+over the network and opens somebody else's document. That is the same line the toolbar's
+Examples menu draws with a rule, and the rail label is what draws it here. It is also the one
+card that opens a *surface* instead of loading a graph, which is why `pick` returns early on
+`kind: 'zoo'` before the replace-confirm: `ZooBrowser` asks that question itself, over the
+preview of the workflow being opened, which is where it can be answered. Asking on the rail
+would ask it twice, the first time about a graph nobody has chosen yet. `openZoo` closes the
+start page on its way in — two full-screen modals is one too many.
+
+Its tile is the **one hand-drawn glyph on the page**, and the exception is bounded: the
+"derived, never per-card" rule below exists so a rail that grows never ships a blank tile, and
+this rail has exactly one card and cannot grow. `ZOO_CARD` is a constant rather than a builder
+for the same reason, and `ZOO_CARDS` is hoisted out of the render because `Deck`'s scroll effect
+keys on its `cards` array. The tint is `--accent`, not a `--cat-*`: the card stands for a
+surface, and any category would be a claim about what is inside the Zoo.
 
 **A fresh visit now lands on an empty canvas.** `graphStore` used to auto-load `EXAMPLES[0]`
 when there was no autosave. That works against the start page twice: the start page _is_ the

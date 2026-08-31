@@ -28,7 +28,7 @@ import { datasetGlyph } from '../nodes/DatasetPreview'
 import { nodeGlyph } from './NodeThumbnail'
 import { REPLACE_GRAPH_QUESTION } from '../replaceConfirm'
 import type { DatasetCard, ExampleCard, StartCard, WorkflowCard } from './startCards'
-import { datasetCards, exampleCards, workflowCards } from './startCards'
+import { ZOO_CARD, datasetCards, exampleCards, workflowCards } from './startCards'
 import { shortcutKeys } from '../shortcuts'
 import { TOURS, startTour } from '../tour/tourState'
 
@@ -66,6 +66,15 @@ const OVERVIEW_URL = `${import.meta.env.BASE_URL}overview.html`
  */
 const ANALYTICS_URL = 'https://coda-science.goatcounter.com/'
 
+/**
+ * The Zoo rail's contents, hoisted out of the render.
+ *
+ * `Deck`'s scroll effect keys on `cards`, so a fresh `[ZOO_CARD]` each render would tear down
+ * and re-attach its listener and its ResizeObserver on every keystroke elsewhere in the page.
+ * The other three rails already hand over a memoised array.
+ */
+const ZOO_CARDS = [ZOO_CARD]
+
 export function StartPage() {
   const open = useGraphStore((s) => s.startPageOpen)
   const dismissed = useGraphStore((s) => s.startPageDismissed)
@@ -73,6 +82,7 @@ export function StartPage() {
   const setStartPageDismissed = useGraphStore((s) => s.setStartPageDismissed)
   const requestFeedback = useGraphStore((s) => s.requestFeedback)
   const loadExample = useGraphStore((s) => s.loadExample)
+  const openZoo = useGraphStore((s) => s.openZoo)
   const loadStarter = useGraphStore((s) => s.loadStarter)
   const openFromLibrary = useGraphStore((s) => s.openFromLibrary)
   const library = useGraphStore((s) => s.library)
@@ -114,6 +124,15 @@ export function StartPage() {
    * put a browser chrome dialog in front of a page explaining the app.
    */
   const pick = (card: StartCard) => {
+    /*
+     * The Zoo card replaces nothing, so it skips the question: it hands over to a browser that
+     * asks its own, over the preview of the workflow being opened — which is where the question
+     * can actually be answered. `openZoo` closes this page on its way in.
+     */
+    if (card.kind === 'zoo') {
+      openZoo()
+      return
+    }
     if (hasWork && confirming !== card.id) {
       setConfirming(card.id)
       return
@@ -198,6 +217,21 @@ export function StartPage() {
             />
           )}
 
+          {/*
+           * Its own rail rather than a card at the head of Examples, and the label is the whole
+           * argument: everything below is bundled, runs on synthetic data and opens instantly,
+           * while this one goes to a public repository over the network and opens somebody
+           * else's document. The toolbar's Examples menu draws the same line with a rule.
+           */}
+          <Deck
+            label="Browse Workflows"
+            note="the Coda Zoo · workflows shared by other users · fetched when you open it"
+            cards={ZOO_CARDS}
+            confirming={confirming}
+            onPick={pick}
+            onCancel={() => setConfirming(undefined)}
+          />
+
           <Deck
             label="Examples"
             note="these use built-in mock data · no token needed · swap in a real dataset"
@@ -208,8 +242,8 @@ export function StartPage() {
           />
 
           <Deck
-            label="Datasets"
-            note="real datasets · add credentials under Connections, the branch icon in the toolbar"
+            label="Preconfigured Datasets"
+            note="real data · add credentials under Connections, the branch icon in the toolbar"
             cards={datasets}
             confirming={confirming}
             onPick={pick}
@@ -504,7 +538,16 @@ interface CardProps {
 }
 
 function Card({ card, confirming, onPick, onCancel }: CardProps) {
-  const tint = card.kind === 'dataset' ? 'var(--cat-dataset)' : `var(--cat-${card.category})`
+  /*
+   * The Zoo card takes the accent rather than a category tint: it stands for a surface, not for
+   * a kind of node, and there is no category that would not be a claim about what is in there.
+   */
+  const tint =
+    card.kind === 'zoo'
+      ? 'var(--accent)'
+      : card.kind === 'dataset'
+        ? 'var(--cat-dataset)'
+        : `var(--cat-${card.category})`
 
   return (
     <div className="start-card" style={{ ['--tint' as string]: tint }}>
@@ -540,6 +583,25 @@ function Card({ card, confirming, onPick, onCancel }: CardProps) {
 /** The picture, when one exists; otherwise the art the app already draws for that thing. */
 function CardTile({ card }: { card: StartCard }) {
   if (card.image) return <img className="start-card__img" src={card.image} alt="" />
+  /*
+   * Hand-drawn, and the one place on this page that is. The "art is derived, never per-card"
+   * rule exists so that a rail which grows never ships a blank tile; this rail has exactly one
+   * card and cannot grow, and neither `nodeGlyph` nor `datasetGlyph` has anything to say about
+   * a browser of other people's workflows. A graph under a lens is the picture.
+   */
+  if (card.kind === 'zoo') {
+    return (
+      <GlyphSvg viewBox="0 0 24 24">
+        <circle cx={10.5} cy={10.5} r={7} />
+        <path d="M15.6 15.6 L20.5 20.5" />
+        <circle cx={8} cy={8.4} r={1.5} />
+        <circle cx={13.4} cy={8.4} r={1.5} />
+        <circle cx={10.7} cy={13.4} r={1.5} />
+        <path d="M9.1 9.6 L9.9 12.1" />
+        <path d="M12.4 9.7 L11.5 12.2" />
+      </GlyphSvg>
+    )
+  }
   if (card.kind === 'dataset') {
     return <GlyphSvg viewBox="0 0 52 46">{datasetGlyph((card as DatasetCard).glyph)}</GlyphSvg>
   }

@@ -25,7 +25,7 @@ import { loadStartPageDismissed } from '../../store/persistence'
 import { clearStorage, installJsdomStubs, installStorageStub } from '../../test/jsdomStubs'
 import { StartPage } from './StartPage'
 import { buildCommandItems } from './paletteItems'
-import { datasetCards, exampleCards } from './startCards'
+import { ZOO_CARD, datasetCards, exampleCards } from './startCards'
 
 beforeAll(() => {
   installJsdomStubs({ width: 900, height: 600 })
@@ -40,7 +40,7 @@ beforeEach(() => {
   act(() => {
     // The store is a module singleton, so state set by one case would otherwise decide the
     // next one's answer.
-    useGraphStore.setState({ startPageOpen: true, startPageDismissed: false })
+    useGraphStore.setState({ startPageOpen: true, startPageDismissed: false, zooOpen: false })
     useGraphStore.getState().newGraph()
   })
 })
@@ -69,7 +69,27 @@ describe('Start page', () => {
       for (const family of starterFamilies().filter((f) => f.sourceId !== 'mock')) {
         expect(titles).toContain(family.label)
       }
-      expect(titles).toHaveLength(exampleCards().length + datasetCards().length)
+      // Plus the one card that is not a graph at all — see the Zoo rail below.
+      expect(titles).toHaveLength(exampleCards().length + datasetCards().length + 1)
+    })
+
+    /*
+     * A rail of its own rather than a card among the examples, because the two differ in the
+     * one way a first-time reader cares about: everything on the Examples rail is bundled and
+     * opens offline, and this one is a fetch of somebody else's work.
+     */
+    it('offers the Zoo on its own rail, as a single card', () => {
+      render(<StartPage />)
+      const deck = [...document.querySelectorAll('.start__deck')].find((el) =>
+        el.querySelector('.start__deck-label')?.textContent?.startsWith('Browse Workflows'),
+      )
+      expect(deck).toBeTruthy()
+      const names = [...(deck?.querySelectorAll('.start-card__name') ?? [])].map(
+        (el) => el.textContent,
+      )
+      expect(names).toEqual([ZOO_CARD.title])
+      // And it is not also sitting on the Examples rail.
+      expect(exampleCards().map((c) => c.title)).not.toContain(ZOO_CARD.title)
     })
 
     it('keeps the synthetic dataset off the live rail', () => {
@@ -268,6 +288,26 @@ describe('Start page', () => {
       const { graph } = useGraphStore.getState()
       expect(graph.nodes.map((n) => n.type)).toContain('dataset.hemibrain')
       expect(graph.nodes.map((n) => n.type)).toContain('neuron.explore')
+    })
+
+    /*
+     * The Zoo replaces nothing until somebody picks a workflow inside it, and it asks there —
+     * over the preview, which is where the question is answerable. Asking twice, the first time
+     * about a graph nobody has chosen yet, is the regression this guards.
+     */
+    it('opens the Zoo without asking, even over a graph that has nodes', () => {
+      act(() => {
+        useGraphStore.getState().loadExample('partners')
+        useGraphStore.getState().openStartPage()
+      })
+      render(<StartPage />)
+
+      fireEvent.click(card(ZOO_CARD.title))
+      expect(screen.queryByText(/Replace the current graph/)).toBeNull()
+      expect(useGraphStore.getState().zooOpen).toBe(true)
+      // `openZoo` closes this page on the way in: two full-screen modals is one too many.
+      expect(useGraphStore.getState().startPageOpen).toBe(false)
+      expect(useGraphStore.getState().graph.meta?.name).toBe('Fetch and group connectivity by type')
     })
 
     it('does not ask before replacing an empty canvas', () => {
