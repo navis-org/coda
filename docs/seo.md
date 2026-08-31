@@ -76,6 +76,48 @@ entry already carries both, written for that page. A second copy is a second spe
 that drifts is the one nobody sees — `og:description` is invisible until it is wrong in somebody
 else's timeline.
 
+### The titles are query-shaped, not brand-shaped
+
+They used to be `Coda Overview`, `Coda Field Guide`, `Coda Node Guide`. Each spent its whole
+title tag — the strongest on-page signal there is — on a word with no search volume, because
+nobody searches for `Coda`: not knowing it exists is the problem this file is about. They now read
+`Coda <page> — <what somebody would actually type>`:
+
+| | |
+|---|---|
+| `/` | Coda — Connectome Data Analysis in the Browser |
+| `/overview.html` | Coda Overview — connectome analysis for neuPrint, CAVE, CATMAID |
+| `/tutorial.html` | Coda Field Guide — build a connectome analysis pipeline |
+| `/nodes.html` | Coda Node Guide — every dataset, query, transform and viewer |
+
+Three rules held them to that shape. **The brand goes first**, because Google truncates around 60
+characters and cuts the *tail* — a title front-loaded with query terms loses its own name on the
+results page. **All four stay under 60**, which is why the overview names three backends and not
+five. And **they must differ from each other in the first few words**: four titles opening `Coda —`
+read as one page duplicated, which is a thing Google actively discounts.
+
+`og:title`, `twitter:title` and the JSON-LD `name` all follow automatically, since the plugin reads
+them off the page.
+
+The root page's **description** was rewritten on the same reasoning. It read `Node-graph analysis
+pipelines for connectomic data.` — 51 characters where Google shows about 155, so the most
+important page in the set was throwing away two thirds of its snippet. It now names the backends
+and makes the two claims the title cannot fit:
+
+> A browser-based node editor for connectome data: query neuPrint, CAVE, CATMAID and FlyWire,
+> traverse connectivity, plot the result. No install, no code.
+
+152 characters, with the weight in the first 120 because that is where a phone truncates. The
+other three pages' descriptions were already the right length and say the right things.
+
+**`manifest.webmanifest` deliberately did *not* follow, in either field.** Its `name` is the label
+under an installed app's icon, where a search-shaped title is simply too long; `short_name` is
+`Coda` and the full name stays the plain expansion. Its `description` is read in an install prompt
+by somebody who has already decided, so it is not competing for a click and has no reason to carry
+backend names. Both look like they should agree with the page and are answering a different
+question — which is why the divergence is recorded here rather than left to look like drift. Same for the `document.title` fixture in `src/ui/notify.test.ts`, which is
+about `flashTitle` restoring whatever it captured and does not care what the string is.
+
 ## The social image
 
 `public/og.png`, 1200×630, cut from `scripts/og-card.svg` with `pnpm og:card` (rsvg-convert). PNG

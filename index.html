@@ -3,10 +3,20 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Coda — Connectome Data Analysis</title>
+    <title>Coda — Connectome Data Analysis in the Browser</title>
+    <!--
+      Also the `og:description`, the `twitter:description` and the JSON-LD `description` — see
+      vite/seo.ts, which reads them off this tag rather than keeping a second copy.
+
+      Length is the constraint nobody sees: Google shows about 155 characters and cuts the tail,
+      so this is written to fit rather than trimmed to fit, and the first 120 carry the weight
+      because that is where a phone truncates. What it says is deliberately what the <title>
+      does not — the backends by name, and the two claims that separate this from every other
+      way of asking a connectome a question.
+    -->
     <meta
       name="description"
-      content="Node-graph analysis pipelines for connectomic data."
+      content="A browser-based node editor for connectome data analysis: neuPrint (MaleCNS, hemibrain, MANC), CAVE (FlyWire/FAFB, BANC), or CATMAID. No install, no code."
     />
 
     <!--
