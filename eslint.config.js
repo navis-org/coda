@@ -6,7 +6,9 @@ import tseslint from 'typescript-eslint'
 export default tseslint.config(
   // `.vite` is vite's dependency pre-bundle. It is gitignored but can appear at the repo
   // root, and linting a few megabytes of transpiled vendor code buries every real finding.
-  { ignores: ['dist', 'node_modules', 'coverage', '.vite'] },
+  // `*.local` is already the gitignored spelling for a working directory that is nobody else's
+  // business; lint agreeing with git is what keeps `pnpm lint` clean while one is in the tree.
+  { ignores: ['dist', 'node_modules', 'coverage', '.vite', '*.local'] },
 
   js.configs.recommended,
   ...tseslint.configs.recommended,

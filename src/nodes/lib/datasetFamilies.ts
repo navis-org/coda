@@ -162,8 +162,22 @@ export function backendName(id: string): string {
   return BACKENDS[id]?.label || id
 }
 
-/** Which silhouette the node's thumbnail placeholder draws. Falls back to `specimen`. */
-export type DatasetGlyph = 'brain' | 'vnc' | 'cns' | 'optic' | 'specimen'
+/**
+ * Which silhouette the node's thumbnail placeholder draws. Falls back to `specimen`.
+ *
+ * Species first, then the coarse anatomical kind: a bare `brain` reads as "any brain", which is
+ * how a mouse cortex volume came to wear the fly one. The drawings are in
+ * `ui/nodes/DatasetPreview.tsx`, and the rule for adding to this list is there too.
+ */
+export type DatasetGlyph =
+  | 'fly_brain'
+  | 'fly_vnc'
+  | 'fly_cns'
+  | 'fly_optic'
+  | 'fly_hemibrain'
+  | 'mouse_brain'
+  | 'fly_larva'
+  | 'specimen'
 
 export interface DatasetFamily {
   /** Node type suffix and stable id: `dataset.<key>`. Never change one that has shipped. */
@@ -284,7 +298,7 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
       'Whole central nervous system of an adult male fly — brain and ventral nerve cord.',
     guide:
       'The largest fly connectome published so far: 168k proofread neurons across brain and nerve cord, so a circuit can be followed from a sensory neuron to the motor neurons driving muscles.',
-    glyph: 'cns',
+    glyph: 'fly_cns',
   },
   {
     key: 'hemibrain',
@@ -297,7 +311,7 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     description: 'Approximately half a central brain of an adult female fly.',
     guide:
       'Approximately one hemisphere of the central brain (with bits of the right optic lobe). Rich annotations: cell type, class, cell body fibre, soma radius, hemilineage, etc.',
-    glyph: 'brain',
+    glyph: 'fly_hemibrain',
   },
   {
     key: 'manc',
@@ -309,7 +323,7 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     description: 'Nerve cord of a male adult fly.',
     guide:
       'The ventral nerve cord on its own: motor neurons, the premotor circuits driving them, and the descending neurons arriving from the brain.',
-    glyph: 'vnc',
+    glyph: 'fly_vnc',
   },
   {
     key: 'opticlobe',
@@ -322,7 +336,7 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
       'The right optic lobe: medulla, lobula and lobula plate with bits of the central brain and the lamina',
     guide:
       'One optic lobe: medulla, lobula and lobula plate with bits of the central brain and the lamina. This is part of the MaleCNS dataset and was released before the full dataset. Mostly kept as reference for the early papers that used it.',
-    glyph: 'optic',
+    glyph: 'fly_optic',
     // Superseded by MaleCNS: reached for deliberately, not started from. See `starter`.
     starter: false,
   },
@@ -337,7 +351,7 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
       'Partial reconstruction of a female fly`s visual system: medulla, lobula and lobula plate.',
     guide:
       'A partial reconstruction covering portions of the fly medulla, lobula, and lobula plate to reveal connectivity patterns in the visual motion detection pathway.',
-    glyph: 'brain',
+    glyph: 'fly_optic',
     starter: false,
   },
   {
@@ -350,7 +364,7 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     description: 'Reconstruction of the mushroom body`s alpha lobe.',
     guide:
       'Dense reconstruction of the alpha (vertical) lobe of the mushroom body in a male Drosophila. One of the earliest fly connectomes, contains 983 neurons.',
-    glyph: 'brain',
+    glyph: 'specimen',
     // One structure rather than a brain. See `starter`.
     starter: false,
   },
@@ -370,7 +384,7 @@ const MOCK_FAMILIES: DatasetFamily[] = [
       'Synthetic optic-lobe-like connectome generated in the browser. No token needed.',
     guide:
       'A synthetic optic lobe, generated in the browser with the columnar repetition a real one has. Nothing is fetched and no token is needed — it is deterministic from a seed, so a graph built on it gives the same answer on any machine. This is the dataset the bundled examples run on and the right place to try a pipeline before pointing it at a real volume.',
-    glyph: 'optic',
+    glyph: 'fly_optic',
     synthetic: true,
   },
 ]
@@ -397,7 +411,7 @@ const CAVE_FAMILIES: DatasetFamily[] = [
     description: 'Whole adult female fly brain (optic lobes + central brain).',
     guide:
       'Public FlyWire segmentation read through CAVE, so version is a materialization number. Cell annotations download once per dataset and search locally—first query waits, rest are instant. Skeletons, meshes, synapses, paths and per-region counts are not wired up; nodes that need them decline rather than fail.',
-    glyph: 'brain',
+    glyph: 'fly_brain',
     /*
      * Python only. `caveclient` is a faithful route in — the dataset cell is a real `CAVEclient`
      * pinned to the materialization the node resolved — where R's would be `fafbseg`, which wraps
@@ -414,7 +428,7 @@ const CAVE_FAMILIES: DatasetFamily[] = [
     description: 'Adult male fly brain and ventral nerve cord.',
     guide:
       'The public BANC segmentation read through CAVE. It exposes the full brain-and-nerve-cord volume, and the neuron table is the public cell list published alongside the stack.',
-    glyph: 'cns',
+    glyph: 'fly_cns',
     notebook: { python: 'caveclient' },
   },
   {
@@ -426,7 +440,7 @@ const CAVE_FAMILIES: DatasetFamily[] = [
     description: 'A public mouse visual cortex volume from the MICrONS collaboration.',
     guide:
       'The public MICrONS Minnie65 segmentation read through CAVE. Version is a materialization number, and the neuron table is the stack’s published cell list.',
-    glyph: 'brain',
+    glyph: 'mouse_brain',
     notebook: { python: 'caveclient' },
   },
 ]
@@ -467,7 +481,7 @@ const CATMAID_FAMILIES: DatasetFamily[] = [
       'Early manual reconstructions in an female fly brain. Published data hosted by VFB.',
     guide:
       'A few thousand hand-traced neurons on the same image volume as FlyWire. Hosted by the Virtual Fly Brain at https://catmaid-fafb.virtualflybrain.org/.',
-    glyph: 'brain',
+    glyph: 'fly_brain',
   },
   {
     // `catmaid.l1` for `catmaid.fafb`'s reason: the key is a permanent flat namespace, and `l1`
@@ -481,7 +495,7 @@ const CATMAID_FAMILIES: DatasetFamily[] = [
       'Whole central nervous system of a first-instar fly larva. Published data hosted by VFB.',
     guide:
       'The larval connectome: 5,013 hand-traced neurons across the whole first-instar central nervous system, brain to abdominal neuromeres, hosted by Virtual Fly Brain at https://l1em.catmaid.virtualflybrain.org/. Unlike FAFB this instance meta-annotates nothing, so a neuron\u2019s type is its own name and its large bag of annotations shows as Additional tags.',
-    glyph: 'cns',
+    glyph: 'fly_larva',
   },
 ]
 
