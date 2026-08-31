@@ -173,7 +173,7 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
                */}
               <div className="dropdown__note dropdown__note--heads-up" style={{ fontSize: 9 }}>
                 Examples below use mocked-up data - no account or token needed. Replace demo node
-                with a real dataset node to run on an actual dataset.
+                with a actual dataset to run on real data.
               </div>
               {EXAMPLES.map((example) => (
                 <button
