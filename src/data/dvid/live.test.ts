@@ -21,6 +21,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 
 import { THUMBNAIL_MAX_BYTES, fetchCoarseMesh, fetchMeshes } from '../precomputed/index'
 import { meshSourceFromState } from '../neuprint/nglayers'
+import { parseNgSource } from '../neuroglancer/sourceUrl'
 import { readInstanceInfo } from './client'
 import { openDvidMeshSource, readNgMesh } from './meshes'
 import { openDvidSkeletonSource, readDvidSkeleton } from './skeletons'
@@ -226,4 +227,55 @@ live('DVID skeletons, live', () => {
       /does not say what bodies121714's voxels measure/,
     )
   }, 60_000)
+})
+
+/**
+ * A deployment whose published state is the *only* place its mesh source is named, whose node is
+ * branch-qualified, and whose segmentation source carries a query.
+ *
+ * Gated on a token rather than skipped with the rest, because this instance — unlike the public
+ * Janelia one — answers `/api/npexplorer/nglayers/…` with **401**. Nothing about the deployment
+ * is written down here: the dataset is named, the credential comes from the environment, and the
+ * DVID address is read out of the response at run time. That is deliberate — these servers are
+ * commonly reachable by anyone holding the address, so the address does not belong in a public
+ * repository.
+ */
+const withToken = process.env.NEUPRINT_TEST_APPLICATION_CREDENTIALS ? describe : describe.skip
+
+withToken('a published state as the only mesh source, live', () => {
+  const SERVER = 'https://neuprint-fish2.janelia.org'
+  const DATASET = 'fish2'
+
+  async function publishedState() {
+    const response = await fetch(`${SERVER}/api/npexplorer/nglayers/${DATASET}.json`, {
+      headers: { Authorization: `Bearer ${process.env.NEUPRINT_TEST_APPLICATION_CREDENTIALS}` },
+    })
+    return (await response.json()) as Parameters<typeof meshSourceFromState>[0]
+  }
+
+  it('resolves a dvid segmentation whose node names a branch and carries a query', async () => {
+    /*
+     * Two shapes that each refused this dataset outright until they were measured. The node is
+     * `<uuid>:master` — a branch head rather than a fixed version, which is what a dataset still
+     * being proofread publishes — and the source carries a `dvid-service=` parameter that is a
+     * hint for a different client, not part of the address.
+     */
+    const picked = meshSourceFromState(await publishedState(), DATASET)
+    expect(picked?.scheme).toBe('dvid')
+    const ref = parseDvidRef(parseNgSource(picked!.url)!.location)
+    expect(ref).toBeTruthy()
+    expect(ref!.node).toContain(':')
+  }, 60_000)
+
+  it('reads real bodies, and counts one that is not there as missing', async () => {
+    const picked = meshSourceFromState(await publishedState(), DATASET)!
+    const source = await openDvidMeshSource(parseDvidRef(parseNgSource(picked.url)!.location)!)
+    expect(source.format).toBe('dvid-ngmesh')
+    const result = await fetchMeshes(source, ['110913816', '110916137', '999999999'], {
+      refresh: true,
+    })
+    expect(result.meshes).toHaveLength(2)
+    expect(result.missing).toEqual(['999999999'])
+    expect(result.meshes[0]!.positions.length / 3).toBeGreaterThan(1000)
+  }, 180_000)
 })

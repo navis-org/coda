@@ -1020,7 +1020,10 @@ on mount. What lands is the polyline above, cached, so the second open has no bu
 male-CNS and MANC publish `neuroglancer_legacy_mesh`, single-resolution, ~128 MB. There is no
 uniform win, so the OBJ endpoint is the route and hemibrain's bucket is a fast path if it is ever
 worth the special case. Worth knowing that `/api/npexplorer/nglayers/…` answers **unauthenticated**
-and names the ROI layer outright for MANC, male-CNS and optic-lobe.
+and names the ROI layer outright for MANC, male-CNS and optic-lobe — **on the public deployment**.
+That is a fact about that server rather than about the endpoint: another Janelia instance answers
+401 on the same path. Nothing depends on it, since `client.ts` sends the token on every neuPrint
+request regardless, but do not build anything on the endpoint being open.
 
 **A byte budget is the wrong lever, which is counter-intuitive.** Fetching cheapest-first would
 drop `ME(R)`, `LO(R)` and `LOP(R)`: the largest files are the largest *structures*, so a budget

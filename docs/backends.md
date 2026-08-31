@@ -1904,6 +1904,19 @@ skeletons — and reads them because certain datasets have no other source: `mus
 `fib19:v1.0` name a `dvid://` segmentation in their published neuPrint state and no object store
 at all, which is why both used to answer *"does not publish a mesh source"*.
 
+**The published state is already the primary source, and always was.** `fetchNgState` reads
+`/api/npexplorer/nglayers/<dataset>.json` and `meshSourceFor` resolves the mesh source out of it;
+`Meta` is deliberately not consulted, for the reason recorded further down. So a dataset whose
+`Meta` names no mesh source is not a dataset Coda cannot see one for — nothing needs to be added
+as a fallback. Where such a dataset fails, the cause is in what the state *names* and whether
+this reader accepts that shape, which is what the two rules below exist for.
+
+**Two facts about deployments other than the public one**, both met on the same instance: its
+`/api/npexplorer/nglayers/…` answers **401** where Janelia's public deployment answers
+unauthenticated, and its segmentation is anisotropic at 16×16×15 nm. Neither needs code — Coda
+sends the token on every neuPrint path anyway — but both falsify a sentence written when the
+public deployment was the only one in view.
+
 **A `dvid://` source names the segmentation, not the geometry.**
 
     dvid://https://flyem.dvid.io/babdf6dbc23e44a69953a66e2260ff0a/groundtruth
@@ -1917,8 +1930,20 @@ Geometry lives in sibling keyvalue instances named by convention, `<instance>_me
 `segmentation`, so a search would find them and neuroglancer does not — and Coda showing
 skeletons neuroglancer says are absent is a worse answer than showing none.
 
-**The node is not validated as a full uuid**, because DVID accepts an abbreviated one and a
-published source uses it: `fib19:v1.0` names `/93f08/segmentation`, five hex characters.
+**The node is not validated as a full uuid**, because two published shapes are not one. DVID
+accepts an **abbreviated** node — `fib19:v1.0` names `/93f08/segmentation`, five hex characters —
+and a node may be **branch-qualified**, `<uuid>:master`, naming that branch's head rather than a
+fixed version, which is what a dataset still being proofread publishes. The rule is hex, plus an
+optional `:branch`. A wrong node costs nothing here; it fails at the first request with the
+server's own words.
+
+**A query string on the source is dropped, not refused.** A published source may carry a
+`dvid-service=` parameter naming a shim that neuroglancer can route through. It is not part of
+the address: measured on a live dataset, both `info` and a 92 kB body come back **byte-identical**
+with the query and without it, because the host in the URL is a real DVID that answers on its own.
+Refusing the source over it — the first rule here — threw away a whole dataset whose meshes are
+perfectly readable. Appending it to every request is worse than useless: `fetchInfo` builds
+`${base}/info`, so a carried query puts the path segment after it and every probe 404s.
 
 ### Discovery is one narrow question, deliberately
 

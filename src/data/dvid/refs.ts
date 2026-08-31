@@ -26,6 +26,19 @@
  * `<instance>_meshes/info` instead is one narrow question about the one node somebody already
  * has the address of. See `docs/backends.md`.
  *
+ * ## A query string is dropped, not refused
+ *
+ * A published source may carry one — a `dvid-service=` parameter naming a shim neuroglancer can
+ * route through. It is **not part of the address**: the host in the URL is a real DVID that
+ * answers on its own, measured both ways on a live dataset, `info` and a 92 kB body, byte for
+ * byte identical with the query and without it. So it is a hint for a different client, and the
+ * useful thing to do with it is nothing.
+ *
+ * Refusing the whole source over it — which is what this did first — threw away a dataset whose
+ * meshes are perfectly readable, for a parameter that changes nothing. Appending it to every
+ * request is worse than useless: `fetchInfo` builds `${base}/info`, so a carried query puts the
+ * path segment *after* it and every probe 404s.
+ *
  * ## Why the node is not validated as a uuid
  *
  * DVID accepts an **abbreviated** node — `neuprint.janelia.org` publishes
@@ -42,14 +55,22 @@ export interface DvidRef {
    * sits under. Kept whole rather than reduced to an origin, so a DVID behind `/dvid/` works.
    */
   server: string
-  /** The node (version) uuid, possibly abbreviated. */
+  /** The node (version) uuid: possibly abbreviated, possibly `<uuid>:branch`. */
   node: string
   /** The data instance the source named: a segmentation, not a geometry store. */
   instance: string
 }
 
-/** Hex, non-empty, no length rule — see the header on abbreviated nodes. */
-const NODE = /^[0-9a-f]+$/i
+/**
+ * Hex, non-empty, optionally `:branch`.
+ *
+ * No length rule, because DVID accepts an **abbreviated** node and a published source uses one —
+ * `fib19:v1.0` names five hex characters. And a node may be **branch-qualified**, `<uuid>:master`
+ * meaning that branch's head rather than a fixed version, which is what a still-proofreading
+ * dataset publishes. Rejecting either shape refuses a real source; a wrong node costs nothing
+ * here, since it fails at the first request with the server's own words.
+ */
+const NODE = /^[0-9a-f]+(?::[\w.-]+)?$/i
 
 /**
  * Split a `dvid://` location — the part after the scheme — into its three pieces.

@@ -31,6 +31,27 @@ describe('parseDvidRef', () => {
     })
   })
 
+  it('accepts a branch-qualified node and ignores a query string', () => {
+    /*
+     * Two shapes a real published source uses that the first rule refused. A node may name a
+     * branch head rather than a fixed version — `<uuid>:master`, what a dataset still being
+     * proofread publishes — and a source may carry a `dvid-service=` query naming a shim. The
+     * query is a hint for a different client, not part of the address: measured on a live
+     * dataset, `info` and a 92 kB body come back byte-identical with it and without. Refusing
+     * over it threw away a whole dataset's meshes.
+     */
+    const ref = parseDvidRef(
+      'https://example.org/634ee:master/segmentation?dvid-service=https://d.example',
+    )!
+    expect(ref.node).toBe('634ee:master')
+    expect(instanceUrl(ref, meshInstance(ref))).toBe(
+      'https://example.org/api/node/634ee:master/segmentation_meshes',
+    )
+    expect(keyUrl(instanceUrl(ref, meshInstance(ref)), '1.ngmesh')).toBe(
+      'https://example.org/api/node/634ee:master/segmentation_meshes/key/1.ngmesh',
+    )
+  })
+
   it('keeps a path prefix on the server, so a DVID under a path works', () => {
     // The node and instance are the *last* two segments; everything before them is the server.
     expect(parseDvidRef('https://lab.example/dvid/api-front/abc123/seg')).toEqual({
