@@ -542,6 +542,84 @@ describe('transport', () => {
     ).toEqual({ 'other.example': 'direct' })
   })
 
+  it('abandons a body past maxBytes, reporting 413', async () => {
+    /*
+     * For a store that publishes no size in advance. DVID answers `HEAD` with no
+     * `Content-Length` and ignores `Range` (200, not 206), both measured, so a body's size is
+     * unknowable until the bytes arrive — and one body can be 107 MB with no coarser level. The
+     * bound has to be on the download, not on what comes back from it.
+     */
+    let cancelled = false
+    globalThis.fetch = (() =>
+      Promise.resolve({
+        ok: true,
+        headers: new Headers(),
+        body: new ReadableStream<Uint8Array>({
+          pull(controller) {
+            controller.enqueue(new Uint8Array(64))
+          },
+          cancel() {
+            cancelled = true
+          },
+        }),
+      } as unknown as Response)) as typeof fetch
+
+    const error = await fetchBytes('https://h.example/big', { maxBytes: 256 }).catch(
+      (e: unknown) => e,
+    )
+    expect((error as PrecomputedFetchError).status).toBe(413)
+    // Cancelling is what stops the transfer rather than merely ignoring the rest of it.
+    expect(cancelled).toBe(true)
+  })
+
+  it('refuses for free when the store does declare a size', async () => {
+    // A bucket sends `Content-Length`, so the refusal costs nothing; the stream above is for the
+    // stores that do not. Asserted on `getReader` rather than on a `pull` spy, because a
+    // `ReadableStream` pulls once at construction to fill its queue whether anybody reads or not.
+    let opened = false
+    let cancelled = false
+    globalThis.fetch = (() =>
+      Promise.resolve({
+        ok: true,
+        headers: new Headers({ 'content-length': '9999' }),
+        body: {
+          getReader: () => {
+            opened = true
+            return { read: () => Promise.resolve({ done: true }), cancel: () => {} }
+          },
+          cancel: () => {
+            cancelled = true
+            return Promise.resolve()
+          },
+        },
+      } as unknown as Response)) as typeof fetch
+
+    const error = await fetchBytes('https://h.example/big', { maxBytes: 256 }).catch(
+      (e: unknown) => e,
+    )
+    expect((error as PrecomputedFetchError).status).toBe(413)
+    expect(opened).toBe(false)
+    expect(cancelled).toBe(true)
+  })
+
+  it('returns the whole body when it fits', async () => {
+    globalThis.fetch = (() =>
+      Promise.resolve({
+        ok: true,
+        headers: new Headers(),
+        body: new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new Uint8Array([1, 2, 3]))
+            controller.enqueue(new Uint8Array([4, 5]))
+            controller.close()
+          },
+        }),
+      } as unknown as Response)) as typeof fetch
+
+    const bytes = await fetchBytes('https://h.example/small', { maxBytes: 256 })
+    expect([...new Uint8Array(bytes)]).toEqual([1, 2, 3, 4, 5])
+  })
+
   it('does not retry a 404 through the proxy', async () => {
     // The request plainly arrived; a missing object is missing by either route, and retrying
     // would double every lookup for a body that simply has no mesh.

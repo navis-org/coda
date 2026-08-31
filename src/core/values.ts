@@ -194,7 +194,7 @@ export interface NetworkValue {
  * What a geometry value's coordinates are in.
  *
  * Everything drawn in one scene is nanometres, converted at the source seam — see
- * `data/neuprint/units.ts` for why that is the common space rather than voxels. This field is
+ * `data/units.ts` for why that is the common space rather than voxels. This field is
  * that invariant made checkable: it travels with the value, so a consumer whose answer depends
  * on physical scale can ask instead of assuming.
  *
@@ -681,7 +681,7 @@ export function boundsOf(buffers: readonly Float32Array[]): Bounds3 {
  * Summed straight-line distance between connected points, in the skeleton's own units.
  *
  * Shared so the mock and the real decoder cannot disagree: geometry is normalised to
- * nanometres (see `data/neuprint/units.ts`), and a traversal fix applied to one copy would
+ * nanometres (see `data/units.ts`), and a traversal fix applied to one copy would
  * silently make the fixtures stop standing in for the thing they replace.
  */
 const CABLE_LENGTH = new WeakMap<SkeletonGeometry, number>()

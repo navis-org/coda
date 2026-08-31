@@ -16,6 +16,7 @@ import type { ColumnSchema, DType, TableSchema } from '../../core/types'
 import { column, tableSchema } from '../../core/types'
 import type { CellValue, ColumnData, SkeletonGeometry, TableValue } from '../../core/values'
 import { makeTable } from '../../core/values'
+import { skeletonFromRows } from '../swc'
 
 export interface CypherResponse {
   columns: string[]
@@ -201,16 +202,15 @@ export interface SwcResponse {
 }
 
 /**
- * SWC rows to a Coda skeleton.
+ * neuPrint's SWC result to a Coda skeleton.
  *
- * neuPrint returns `[rowId, x, y, z, radius, link]` in arbitrary order, with `link` naming a
- * *rowId*, not an index. Coda's `parents` are indices, and everything that walks a skeleton
- * (cable length, downstream morphometrics) is written expecting a parent to appear before
- * its child — so the points are re-emitted in traversal order from each root rather than
- * passed through in file order.
+ * neuPrint returns `[rowId, x, y, z, radius, link]` in arbitrary column order, so what belongs
+ * here is the column mapping and nothing else. The walk that turns `link` — which names a *row
+ * id*, not an index — into parent-before-child `parents` is `data/swc.ts`'s, shared with the
+ * DVID reader, because two implementations of that traversal is two chances to leave a cycle in
+ * and every consumer that walks to a root then loops forever.
  *
- * Defensive about real files: a `link` pointing at a missing row becomes a root, and a
- * cycle terminates because a point is only ever visited once.
+ * No scaling: these are dataset voxels, and `NeuPrintSource` applies `scaleFor`.
  */
 export function skeletonFromSwc(id: NeuronId, response: SwcResponse): SkeletonGeometry {
   const index = new Map<string, number>()
@@ -221,65 +221,17 @@ export function skeletonFromSwc(id: NeuronId, response: SwcResponse): SkeletonGe
     const n = typeof value === 'number' ? value : Number(value)
     return Number.isFinite(n) ? n : fallback
   }
-
-  const rows = response.data
-  const count = rows.length
-  const rowIdToSlot = new Map<number, number>()
-  rows.forEach((row, slot) => rowIdToSlot.set(at(row, 'rowid', slot + 1), slot))
-
-  // Children per slot, so a traversal can go root -> leaf.
-  const children: number[][] = Array.from({ length: count }, () => [])
-  const roots: number[] = []
-  rows.forEach((row, slot) => {
-    const link = at(row, 'link', -1)
-    const parent = rowIdToSlot.get(link)
-    if (parent === undefined || parent === slot) roots.push(slot)
-    else children[parent]!.push(slot)
-  })
-
-  const positions = new Float32Array(count * 3)
-  const radii = new Float32Array(count)
-  const parents = new Int32Array(count)
-
-  let emitted = 0
-  const slotToPoint = new Map<number, number>()
-  const stack: Array<{ slot: number; parentPoint: number }> = roots.map((slot) => ({
-    slot,
-    parentPoint: -1,
-  }))
-
-  while (stack.length) {
-    const { slot, parentPoint } = stack.pop()!
-    if (slotToPoint.has(slot)) continue // a cycle, or a row linked twice
-    const row = rows[slot]!
-    const point = emitted++
-    slotToPoint.set(slot, point)
-    positions[point * 3] = at(row, 'x', 0)
-    positions[point * 3 + 1] = at(row, 'y', 0)
-    positions[point * 3 + 2] = at(row, 'z', 0)
-    radii[point] = at(row, 'radius', 0)
-    parents[point] = parentPoint
-    for (const child of children[slot]!) stack.push({ slot: child, parentPoint: point })
-  }
-
-  // Anything left is in a cycle with no root. Emit it as its own tree rather than drop it —
-  // silently losing half a neuron is worse than an arbitrary root.
-  for (let slot = 0; slot < count; slot++) {
-    if (slotToPoint.has(slot)) continue
-    const row = rows[slot]!
-    const point = emitted++
-    slotToPoint.set(slot, point)
-    positions[point * 3] = at(row, 'x', 0)
-    positions[point * 3 + 1] = at(row, 'y', 0)
-    positions[point * 3 + 2] = at(row, 'z', 0)
-    radii[point] = at(row, 'radius', 0)
-    parents[point] = -1
-  }
-
-  return {
+  return skeletonFromRows(
     id,
-    positions: positions.subarray(0, emitted * 3),
-    radii: radii.subarray(0, emitted),
-    parents: parents.subarray(0, emitted),
-  }
+    response.data.map((row, slot) => ({
+      // A response with no `rowId` column is numbered by position, which is what makes `link`
+      // resolvable at all in that case.
+      rowId: at(row, 'rowid', slot + 1),
+      x: at(row, 'x', 0),
+      y: at(row, 'y', 0),
+      z: at(row, 'z', 0),
+      radius: at(row, 'radius', 0),
+      link: at(row, 'link', -1),
+    })),
+  )
 }

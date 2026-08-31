@@ -45,8 +45,8 @@ import { decimateMesh } from '../meshDecimate'
 import type { MeshGeometry } from '../../core/values'
 import type { RequestOptions } from './client'
 import { NeuPrintError, getText } from './client'
-import type { VoxelScale } from './units'
-import { scalePositions } from './units'
+import type { VoxelScale } from '../units'
+import { scalePositions } from '../units'
 
 /**
  * How many region requests are in flight at once.

@@ -993,7 +993,7 @@ export const CANONICAL_SCHEMAS: SourceSchemas = {
     column('size', 'i64', 'voxels'),
     column('points', 'i64'),
     // Nanometres, not voxels: geometry is normalised to physical units so meshes and
-    // skeletons share a scene. See `neuprint/units.ts`.
+    // skeletons share a scene. See `data/units.ts`.
     column('cableLength', 'f64', 'nm'),
   ),
   synapses: tableSchema(

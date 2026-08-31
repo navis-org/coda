@@ -12,6 +12,7 @@
 
 import { decodeDracoFragment } from './draco'
 import { concatMeshes, readLegacyMesh } from './legacy'
+import type { RawMesh } from './legacy'
 import type { MultiResInfo, MultiResManifest } from './multires'
 import {
   chooseLod,
@@ -26,7 +27,42 @@ import { PrecomputedFetchError, fetchBytes, fetchInfo } from './transport'
 import { mapWithConcurrency } from '../concurrency'
 import { byteLengthOf, cachedGeometry } from '../geometryCache'
 
-export type MeshFormat = 'multilod-draco' | 'legacy'
+/**
+ * How a mesh store addresses a body.
+ *
+ * `dvid-ngmesh` is not a precomputed format and is here anyway, because the *difference* between
+ * it and `legacy` is one line — where a body's bytes live — while everything around that line
+ * (per-body concurrency, the geometry cache, partial delivery, progress, `missing`) is the same
+ * machinery and was not worth a second copy. `data/dvid/meshes.ts` owns the format itself; what
+ * this name buys is the fetch loop below. See `fetchMeshes`.
+ */
+export type MeshFormat = 'multilod-draco' | 'legacy' | 'dvid-ngmesh'
+
+/**
+ * How one body's geometry is read out of a flat mesh store.
+ *
+ * A port rather than a `switch` in `fetchMeshes`, and the direction is the point: `data/dvid`
+ * knows about precomputed, and precomputed must not know about DVID. A `switch` would have put
+ * a `data/dvid` import in this file and stood the layering on its head for one line.
+ *
+ * **It takes the whole source, not `source.base`.** Handing the reader one field back off the
+ * object it is already attached to fits DVID's meshes, which need only the URL, and stops fitting
+ * immediately after: a DVID *skeleton* store carries a voxel scale as well, and a credential is a
+ * third thing a reader will have to reach. Passing the source is what lets the same signature be
+ * the skeleton port too, instead of the mirror hitting that wall on its first call site.
+ *
+ * `options` is plain `FetchOptions` — `maxBytes` lives there now, so an intersection restating it
+ * would be two spellings of one field.
+ *
+ * A module-level function, never a closure — `MeshSource` is held for the life of a dataset in
+ * `NeuPrintSource`'s state, and a reader capturing a scope would pin whatever that scope held.
+ * Taking the source keeps it stateless as well as module-level; the two are not in tension.
+ */
+export type MeshBodyReader = (
+  source: MeshSource,
+  neuronId: string,
+  options: FetchOptions,
+) => Promise<RawMesh | undefined>
 
 export interface MeshSource {
   /** Absolute URL of the mesh directory. */
@@ -36,7 +72,26 @@ export interface MeshSource {
   info?: MultiResInfo
   /** Number of detail levels available; 1 for legacy sources. */
   levels: number
+  /**
+   * How to read one body, for a flat store that is not precomputed's own.
+   *
+   * Absent means `neuroglancer_legacy_mesh`, which this module reads itself. Set by
+   * `openDvidMeshSource`; see `MeshBodyReader`.
+   */
+  readBody?: MeshBodyReader
 }
+
+/**
+ * The reader for precomputed's own flat format: a JSON manifest, then its fragments.
+ *
+ * It **drops `maxBytes`**, and does so explicitly rather than by not looking: the option now
+ * reaches every reader, and forwarding it here would silently give a path that has never had a
+ * ceiling one that bites per *fragment* — a body abandoned halfway having already spent most of
+ * itself. That is a behaviour change rather than a refactor and no caller asks for it. The DVID
+ * reader honours it because a DVID body is one key and can be 107 MB.
+ */
+const readLegacyBody: MeshBodyReader = (source, neuronId, { maxBytes: _maxBytes, ...rest }) =>
+  readLegacyMesh(source.base, BigInt(neuronId), rest)
 
 interface RawInfo {
   '@type'?: string
@@ -307,19 +362,34 @@ export async function fetchMeshes(
     options.onPartial &&
     ((pairs: ReadonlyArray<[string, MeshBody]>) => options.onPartial?.(named(pairs)))
 
-  if (source.format === 'legacy') {
+  /*
+   * The two flat formats share this loop, because they differ only in how one body is addressed:
+   * a precomputed legacy body is a JSON manifest naming fragment files, a DVID body is a single
+   * `<id>.ngmesh` key. Everything else here — the cache, the concurrency, the partials, the
+   * `missing` accounting — is about there being no pyramid, which is true of both.
+   *
+   * `maxBytesPerBody` reaches the DVID reader and not the legacy one, and that asymmetry is the
+   * honest one: it is enforced *after* the download here, since DVID publishes no size to
+   * refuse on, where the multi-resolution branch below refuses from a manifest for free. A DVID
+   * body can be 107 MB (`data/dvid/meshes.ts` has the measurement), so a caller that set a
+   * ceiling wants it applied even at the cost of the transfer.
+   */
+  if (source.format === 'legacy' || source.format === 'dvid-ngmesh') {
+    const readBody = source.readBody ?? readLegacyBody
     let done = 0
     const { ordered, missing } = await cachedGeometry<MeshBody>({
       ids: neuronIds,
-      key: (id) => `mesh:${source.base}:legacy:${id}`,
+      key: (id) => `mesh:${source.base}:${source.format}:${id}`,
       bytes: (m) => byteLengthOf(m.positions, m.indices),
       refresh: options.refresh,
       onFetched: options.onFetched,
       onPartial: forwardPartial,
       readyBefore: options.readyBefore,
+      // Built once rather than per body: it does not depend on the neuron.
       fetch: async (want, deliver) => {
+        const readOptions: FetchOptions = { ...options, maxBytes: options.maxBytesPerBody }
         await mapWithConcurrency(want, concurrency, async (neuronId) => {
-          const mesh = await readLegacyMesh(source.base, BigInt(neuronId), options)
+          const mesh = await readBody(source, neuronId, readOptions)
           options.onProgress?.(++done, want.length, 'fragments')
           if (mesh) deliver(neuronId, mesh)
         })
@@ -483,7 +553,22 @@ export async function fetchCoarseMesh(
   neuronId: string,
   options: FetchOptions = {},
 ): Promise<MeshBody | undefined> {
-  if (source.format !== 'multilod-draco') return undefined
+  /*
+   * `legacy` is still refused and `dvid-ngmesh` is not, which is not an inconsistency: the
+   * question is whether the *download* can be bounded, not whether the format has levels.
+   *
+   * Neither has a pyramid, so neither can answer with a cheaper version — but a DVID body is a
+   * single key read through `FetchOptions.maxBytes`, which abandons the transfer past the
+   * ceiling, so the worst case is `THUMBNAIL_MAX_BYTES` and a placeholder. A `legacy` body is a
+   * manifest plus N fragments assembled into one mesh, where a ceiling can only be applied per
+   * fragment and a body abandoned halfway has already spent most of itself; that path keeps its
+   * refusal until somebody wants it enough to bound the whole assembly.
+   *
+   * Worth having rather than theoretical: mushroombody's meshes are a median of 16 kB and a p90
+   * of 92 kB over 40 sampled bodies, so a page of 25 is about 0.4 MB — less than hemibrain's
+   * coarsest precomputed level costs. See `data/dvid/meshes.ts`.
+   */
+  if (source.format === 'legacy') return undefined
   const result = await fetchMeshes(source, [neuronId], {
     ...options,
     triangleBudget: 1,

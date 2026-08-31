@@ -254,10 +254,80 @@ export interface FetchOptions {
   /** Inclusive byte range, as `[start, end]`. Omit for the whole object. */
   range?: readonly [number, number] | undefined
   signal?: AbortSignal | undefined
+  /**
+   * Extra request headers.
+   *
+   * Empty for every object store here — a public bucket takes none, and sending one would turn
+   * a simple cross-origin GET into a preflight. It exists because `data/dvid` reads through this
+   * transport and DVID deployments are moving towards requiring a credential: those servers are
+   * plain HTTPS hosts with CORS, so they want this file's routing and error handling and differ
+   * only in carrying an `Authorization`. A second byte-fetching stack for one header is how the
+   * CORS fallback comes to exist twice and disagree once.
+   */
+  headers?: Readonly<Record<string, string>> | undefined
+  /**
+   * Abandon the response past this many bytes, reporting **413**.
+   *
+   * For a store that publishes no size in advance. A precomputed pyramid names each level's byte
+   * count in its manifest, so `fetchMeshes` refuses an over-large body for free — but DVID
+   * publishes no manifest, answers `HEAD` with no `Content-Length`, and ignores `Range` (200, not
+   * 206), all measured against `flyem.dvid.io`. So there is nothing to ask, and the only way to
+   * bound the cost is to stop reading.
+   *
+   * The bound is on the **download**, not on the decoded result, and that is the whole point: a
+   * check after `arrayBuffer()` has already spent the bytes, and one DVID body can be 107 MB with
+   * no coarser level to fall back to.
+   *
+   * 413 because it means exactly this, and because callers already switch on status — a body that
+   * is too big to want is unavailable in the same way a 404 body is, and neither is worth another
+   * route. Streaming only happens when this is set, so the ordinary path is untouched.
+   */
+  maxBytes?: number | undefined
+}
+
+/**
+ * Read a response body, giving up past `maxBytes`.
+ *
+ * `Content-Length` first, because a store that sends one lets the refusal cost nothing; the
+ * stream is for the stores that do not. Cancelling the reader is what actually stops the
+ * transfer rather than merely ignoring it.
+ */
+async function readCapped(
+  response: Response,
+  url: string,
+  maxBytes: number,
+): Promise<ArrayBuffer> {
+  const declared = Number(response.headers.get('content-length'))
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    void response.body?.cancel()
+    throw new PrecomputedFetchError(`${url} is ${declared} bytes, over ${maxBytes}`, url, 413)
+  }
+  const reader = response.body?.getReader()
+  if (!reader) return response.arrayBuffer()
+
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (total > maxBytes) {
+      void reader.cancel()
+      throw new PrecomputedFetchError(`${url} is over ${maxBytes} bytes`, url, 413)
+    }
+    chunks.push(value)
+  }
+  const out = new Uint8Array(total)
+  let at = 0
+  for (const chunk of chunks) {
+    out.set(chunk, at)
+    at += chunk.byteLength
+  }
+  return out.buffer
 }
 
 async function attempt(url: string, options: FetchOptions): Promise<ArrayBuffer> {
-  const headers: Record<string, string> = {}
+  const headers: Record<string, string> = { ...options.headers }
   if (options.range) headers['Range'] = `bytes=${options.range[0]}-${options.range[1]}`
   const response = await fetch(url, {
     headers,
@@ -266,6 +336,7 @@ async function attempt(url: string, options: FetchOptions): Promise<ArrayBuffer>
   if (!response.ok) {
     throw new PrecomputedFetchError(`${response.status} from ${url}`, url, response.status)
   }
+  if (options.maxBytes !== undefined) return readCapped(response, url, options.maxBytes)
   return response.arrayBuffer()
 }
 

@@ -88,6 +88,8 @@ import {
   runCypher,
 } from './client'
 import { roiCompletenessFromResponse, roiConnectivityFromResponse } from './roiSummary'
+import { openDvidMeshSource } from '../dvid/meshes'
+import { parseDvidRef } from '../dvid/refs'
 import { DEFAULT_SERVER, normaliseServer, serverLabel, sourceIdForServer } from './servers'
 import {
   adjacencyCypher,
@@ -121,14 +123,14 @@ import { probePrecomputed } from '../precomputed/probe'
 import { SKELETON_ROUTES, route } from '../skeletonRoutes'
 import type { DiscoveredSchema } from './schema'
 import { discoverNeuronSchema, schemasFor } from './schema'
-import type { VoxelScale } from './units'
+import type { VoxelScale } from '../units'
 import {
   IDENTITY_SCALE,
   geometryUnitsFor,
   scalePositions,
   scaleRadii,
   voxelScale,
-} from './units'
+} from '../units'
 import { mapWithConcurrency } from '../concurrency'
 
 /**
@@ -663,7 +665,11 @@ export class NeuPrintSource implements DataSource {
   async fetchCoarseGeometry(req: CoarseGeometryRequest): Promise<CoarseGeometry | undefined> {
     const source = await this.meshSourceFor(req.datasetId, req.signal)
     if (!source) return undefined
-    const mesh = await fetchCoarseMesh(source, req.neuronId, req.signal ? { signal: req.signal } : {})
+    const mesh = await fetchCoarseMesh(
+      source,
+      req.neuronId,
+      req.signal ? { signal: req.signal } : {},
+    )
     return mesh && { kind: 'mesh', ...mesh }
   }
 
@@ -989,7 +995,10 @@ export class NeuPrintSource implements DataSource {
   /**
    * neuPrint's own SWC: one request per body, a few at a time.
    */
-  private async swcSkeletons(req: GeometryRequest, schema: TableSchema): Promise<SkeletonsValue> {
+  private async swcSkeletons(
+    req: GeometryRequest,
+    schema: TableSchema,
+  ): Promise<SkeletonsValue> {
     const scale = this.scaleFor(req.datasetId)
 
     /*
@@ -1052,7 +1061,10 @@ export class NeuPrintSource implements DataSource {
              * Fractions rather than counts, because the node calling this does not know how many
              * bodies were asked for.
              */
-            req.onProgress?.(++fetched / missing.length, `${fetched}/${missing.length} skeletons`)
+            req.onProgress?.(
+              ++fetched / missing.length,
+              `${fetched}/${missing.length} skeletons`,
+            )
             deliver(neuronId, skeleton)
           })
         },
@@ -1101,7 +1113,10 @@ export class NeuPrintSource implements DataSource {
       fetchPublishedSkeletons(
         source,
         req.neuronIds,
-        skeletonFetchOptions(req, req.onPartial && ((items) => req.onPartial?.(assemble(items)))),
+        skeletonFetchOptions(
+          req,
+          req.onPartial && ((items) => req.onPartial?.(assemble(items))),
+        ),
       ),
     ])
 
@@ -1351,7 +1366,18 @@ export class NeuPrintSource implements DataSource {
       const published = await this.ngState(datasetId, signal)
       const ref = published ? meshSourceFromState(published, datasetId) : undefined
       if (!ref) return null
-      return openMeshSource(ref.url, { ...(signal ? { signal } : {}) }).catch(() => null)
+      const options = { ...(signal ? { signal } : {}) }
+      /*
+       * Two readers, chosen by what the layer said it was rather than by probing. `mushroombody`
+       * and `fib19:v1.0` name a `dvid://` segmentation and no object store, which is why they
+       * used to report "does not publish a mesh source" — see `data/dvid/meshes.ts`.
+       */
+      if (ref.scheme === 'dvid') {
+        const dvid = parseDvidRef(ref.url)
+        if (!dvid) return null
+        return openDvidMeshSource(dvid, options).catch(() => null)
+      }
+      return openMeshSource(ref.url, options).catch(() => null)
     })()
       .then((resolved) => {
         state.meshSource = resolved
@@ -1392,7 +1418,6 @@ export class NeuPrintSource implements DataSource {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
 
 /** `hemibrain:v1.2.1` -> label "hemibrain", version "v1.2.1". */
 export function splitDatasetId(id: string): [string, string | undefined] {

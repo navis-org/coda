@@ -47,7 +47,7 @@ export function listProjects(
  * Not derived from the stack resolution, which is nm-per-*voxel* and describes the image stack
  * rather than the annotations on it. Verified by cross-check: skeleton 16 spans x[326111,495041]
  * and the `LAL_L` volume x[538898,626985], both inside the FAFB extent of 253952 x 4 nm — one
- * frame, no scaling. This is why nothing here does what `neuprint/units.ts` has to, and why
+ * frame, no scaling. This is why nothing here does what `data/units.ts` has to, and why
  * every geometry this source builds declares `units: 'nm'`.
  */
 

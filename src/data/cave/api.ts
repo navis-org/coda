@@ -23,7 +23,7 @@
  *  - **`count=true` answers the same query as a `COUNT`, and it is the only honest tell that a
  *    result was truncated.** See `countTable`.
  *  - **`desired_resolution` is where geometry gets its units**, and it is why nothing on this
- *    source scales coordinates the way `neuprint/units.ts` does.
+ *    source scales coordinates the way `data/units.ts` does.
  *  - **`table/{t}/metadata` is the mirror image: v3 where `tables` is v2**, and the two answer
  *    *different names*. v2 reports `table_name: "nuclei_v1__fly_v31"` — the materialized table —
  *    where v3 reports `nuclei_v1`, which is the name `tables` listed and the name a query takes.

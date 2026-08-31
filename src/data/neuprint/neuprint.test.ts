@@ -34,7 +34,7 @@ import {
   scalePositions,
   scaleRadii,
   voxelScale,
-} from './units'
+} from '../units'
 import { resetCredentials, setToken, subscribeAuthFailure } from './credentials'
 import connectivityFixture from './__fixtures__/connectivity.json'
 import metaMancFixture from './__fixtures__/metaManc.json'
@@ -282,9 +282,9 @@ describe('query building', () => {
     })
 
     it('carries case per row, both ways', () => {
-      expect(
-        clause({ field: 'type', op: 'is', values: ['LC4'], ignoreCase: true }),
-      ).toContain("toLower(n.`type`) = 'lc4'")
+      expect(clause({ field: 'type', op: 'is', values: ['LC4'], ignoreCase: true })).toContain(
+        "toLower(n.`type`) = 'lc4'",
+      )
       // `(?i)` is Java's inline flag, which is what Neo4j's regex engine reads.
       expect(
         clause({ field: 'type', op: 'matches', values: ['lc.*'], ignoreCase: true }),
@@ -439,7 +439,11 @@ describe('query building', () => {
     // The `notEmpty` operator's own spelling, so a checkbox and the equivalent filter row cannot
     // answer two different sets.
     it('compiles superclass to a non-empty test, not merely a null test', () => {
-      const query = findNeuronsCypher({ datasetId: 'x', population: ['superclass'] }, [], SCHEMA)
+      const query = findNeuronsCypher(
+        { datasetId: 'x', population: ['superclass'] },
+        [],
+        SCHEMA,
+      )
       expect(query).toContain("(n.`superclass` IS NOT NULL AND n.`superclass` <> '')")
     })
 
@@ -504,7 +508,9 @@ describe('query building', () => {
         findNeuronsCypher({ datasetId: 'x', population: ['superclass'] }, [], bare),
       ).not.toContain('WHERE')
       // And with no schema to resolve against, which is a source that has not discovered yet.
-      expect(findNeuronsCypher({ datasetId: 'x', population: ['traced'] })).not.toContain('WHERE')
+      expect(findNeuronsCypher({ datasetId: 'x', population: ['traced'] })).not.toContain(
+        'WHERE',
+      )
     })
 
     /*
@@ -605,7 +611,9 @@ describe('query building', () => {
     // The threshold sits above the UNWIND, so a split is a decomposition of exactly what the
     // unsplit query would have returned and cannot change which partners a traversal expands.
     expect(query.indexOf('WHERE weight >= 10')).toBeLessThan(query.indexOf('UNWIND parts'))
-    expect(query).toContain('RETURN n.bodyId, n.type, p.bodyId, p.type, part.weight AS weight, part.roi AS roi')
+    expect(query).toContain(
+      'RETURN n.bodyId, n.type, p.bodyId, p.type, part.weight AS weight, part.roi AS roi',
+    )
   })
 
   it('enumerates the connection\u2019s own regions when none were named', () => {
@@ -668,10 +676,22 @@ describe('query building', () => {
   it('restricts only the partner end for the connected basis', () => {
     // 9,324 against 23,423 on body 10005 — the whole reason the control exists.
     expect(
-      synapseTotalsCypher({ datasetId: 'x', neuronIds: ['1'], side: 'outputs', basis: 'connected' }),
-    ).toContain('MATCH (n:Segment)-[w:ConnectsTo]->(p:Neuron)\nWHERE n.bodyId IN [1]\nRETURN n.bodyId, sum(w.weight)')
+      synapseTotalsCypher({
+        datasetId: 'x',
+        neuronIds: ['1'],
+        side: 'outputs',
+        basis: 'connected',
+      }),
+    ).toContain(
+      'MATCH (n:Segment)-[w:ConnectsTo]->(p:Neuron)\nWHERE n.bodyId IN [1]\nRETURN n.bodyId, sum(w.weight)',
+    )
     expect(
-      synapseTotalsCypher({ datasetId: 'x', neuronIds: ['1'], side: 'inputs', basis: 'connected' }),
+      synapseTotalsCypher({
+        datasetId: 'x',
+        neuronIds: ['1'],
+        side: 'inputs',
+        basis: 'connected',
+      }),
     ).toContain('MATCH (p:Neuron)-[w:ConnectsTo]->(n:Segment)')
   })
 
@@ -1579,7 +1599,13 @@ describe('mesh source resolution', () => {
     )
   })
 
-  it('returns nothing when a dataset publishes only dvid', () => {
+  it('takes dvid when a dataset publishes nothing else', () => {
+    /*
+     * This used to answer undefined, and that exclusion is what made `mushroombody` and
+     * `fib19:v1.0` report "does not publish a mesh source" — both name a `dvid://` segmentation
+     * and no object store. DVID serves meshes through a different API rather than none, so the
+     * answer carries `scheme` and `NeuPrintSource` opens it with the DVID reader.
+     */
     const state = {
       layers: [
         {
@@ -1589,7 +1615,45 @@ describe('mesh source resolution', () => {
         },
       ],
     }
-    expect(meshSourceFromState(state, 'manc:v1.0')).toBeUndefined()
+    expect(meshSourceFromState(state, 'manc:v1.0')).toEqual({
+      url: 'https://emdata5.janelia.org/8e29f/segmentation',
+      source: 'dvid://https://emdata5.janelia.org/8e29f/segmentation',
+      scheme: 'dvid',
+    })
+  })
+
+  it('prefers an object store over dvid, because dvid has one level of detail', () => {
+    /*
+     * Order, not availability. A DVID body is a single `.ngmesh` with no pyramid and can run to
+     * 107 MB (`data/dvid/meshes.ts` has the measurement), so a dataset publishing both should
+     * keep taking the precomputed one — and the preference among the precomputed candidates is
+     * itself measured, see `nglayers.ts`.
+     */
+    const state = {
+      layers: [
+        {
+          type: 'segmentation',
+          name: 'x:v1',
+          source: 'dvid://https://emdata5.janelia.org/8e29f/segmentation',
+        },
+        { type: 'segmentation', name: 'x:v1', source: 'precomputed://gs://b/v1/segmentation' },
+      ],
+    }
+    expect(meshSourceFromState(state, 'x:v1')?.scheme).toBe('precomputed')
+  })
+
+  it('refuses a dvid source whose location is not an address', () => {
+    // A node has to be hex and an instance has to be named; otherwise there is nothing to ask.
+    const state = {
+      layers: [
+        {
+          type: 'segmentation',
+          name: 'x:v1',
+          source: 'dvid://https://emdata5.janelia.org/only',
+        },
+      ],
+    }
+    expect(meshSourceFromState(state, 'x:v1')).toBeUndefined()
   })
 })
 
@@ -1769,7 +1833,9 @@ describe('warming what inference reads', () => {
     const urls = countingFetch()
     const source = new NeuPrintSource()
     expect(source.skeletonSourcesFor!('male-cns:v1.0')).toBeUndefined()
-    expect(urls.some((u) => u.includes('/api/npexplorer/nglayers/male-cns:v1.0.json'))).toBe(true)
+    expect(urls.some((u) => u.includes('/api/npexplorer/nglayers/male-cns:v1.0.json'))).toBe(
+      true,
+    )
   })
 
   it('asks once however many times inference runs', () => {
@@ -1798,7 +1864,9 @@ describe('warming what inference reads', () => {
           json: () => Promise.resolve(doc),
           text: () => Promise.resolve(JSON.stringify(doc)),
           arrayBuffer: () =>
-            Promise.resolve(new TextEncoder().encode(JSON.stringify(doc)).buffer as ArrayBuffer),
+            Promise.resolve(
+              new TextEncoder().encode(JSON.stringify(doc)).buffer as ArrayBuffer,
+            ),
         } as Response)
       if (url.includes('/nglayers/'))
         return json({
@@ -1819,7 +1887,11 @@ describe('warming what inference reads', () => {
         })
       if (url.endsWith('/skeletons-precomputed/info'))
         return json({ '@type': 'neuroglancer_skeletons' })
-      return Promise.resolve({ ok: false, status: 404, text: () => Promise.resolve('') } as Response)
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        text: () => Promise.resolve(''),
+      } as Response)
     }) as typeof fetch
 
     const source = new NeuPrintSource()

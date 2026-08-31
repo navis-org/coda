@@ -30,6 +30,7 @@
 import type { NgScene } from '../neuroglancer/scene'
 import { objectStoreUrl } from '../precomputed/transport'
 import { parseNgSource } from '../neuroglancer/sourceUrl'
+import { parseDvidRef } from '../dvid/refs'
 import type { RequestOptions } from './client'
 import { get } from './client'
 
@@ -108,15 +109,24 @@ function urls(layer: NgLayer): string[] {
 export function meshCandidateUrl(source: string): string | undefined {
   const ref = parseNgSource(source)
   if (!ref?.stated) return undefined
-  if (ref.scheme !== 'precomputed' && ref.scheme !== 'zarr' && ref.scheme !== 'n5') return undefined
+  if (ref.scheme !== 'precomputed' && ref.scheme !== 'zarr' && ref.scheme !== 'n5')
+    return undefined
   return objectStoreUrl(ref.location)
 }
 
 export interface MeshSourceRef {
   /** HTTP URL of a mesh directory, or of a segmentation volume that names one. */
   url: string
-  /** The raw `precomputed://…` string, for display and provenance. */
+  /** The raw `precomputed://…` or `dvid://…` string, for display and provenance. */
   source: string
+  /**
+   * Which reader opens it.
+   *
+   * Carried rather than re-derived, so the one decision about what a layer *is* is made here and
+   * `NeuPrintSource` dispatches on the answer. Re-parsing at the far end would be cheap and
+   * would be a second place that can disagree.
+   */
+  scheme: 'precomputed' | 'dvid'
 }
 
 /**
@@ -143,7 +153,23 @@ export function meshSourceFromState(
   for (const source of [multires, volume, hinted]) {
     if (!source) continue
     const url = meshCandidateUrl(source)
-    if (url) return { url, source }
+    if (url) return { url, source, scheme: 'precomputed' }
+  }
+
+  /*
+   * DVID last, and only once no object store answered.
+   *
+   * Last because the preference order above is measured (see the header — preferring the wrong
+   * precomputed candidate downloaded male-CNS at full resolution with nothing failing), and a
+   * dataset that publishes both should keep taking the pyramid: DVID has one level and its
+   * bodies run to 107 MB. Separate from `meshCandidateUrl` rather than folded into it because
+   * that function's rule — the location must be an object store — is still exactly right, and
+   * it is what stops a `dvid://` being mapped onto a bucket host and reported as every neuron
+   * missing. `mushroombody` and `fib19:v1.0` are the two neuPrint datasets this reaches.
+   */
+  const dvid = candidates.map(parseNgSource).find((ref) => ref?.scheme === 'dvid')
+  if (dvid && parseDvidRef(dvid.location)) {
+    return { url: dvid.location, source: dvid.canonical, scheme: 'dvid' }
   }
   return undefined
 }
@@ -182,7 +208,10 @@ export function volumeSourceFromState(
 ): MeshSourceRef | undefined {
   const source = volumeCandidate(segmentationCandidates(state, datasetId))
   const url = source ? meshCandidateUrl(source) : undefined
-  return url && source ? { url, source } : undefined
+  // Precomputed only, deliberately: this answers "which volume names a skeleton directory in its
+  // `info`", and a DVID node has no such document. DVID skeletons live in a sibling keyvalue
+  // instance and are found by name — see `data/dvid/refs.ts`.
+  return url && source ? { url, source, scheme: 'precomputed' } : undefined
 }
 
 /**

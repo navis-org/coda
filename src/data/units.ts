@@ -11,9 +11,17 @@
  * they make `cableLength` a real length, and they let two datasets with different voxel sizes
  * share a scene. The cost is that skeleton coordinates no longer match the numbers neuPrint
  * returned, which is why this is a named, documented conversion instead of a stray `* 8`.
+ *
+ * **Under `data/` rather than `data/neuprint/`, because DVID made it a second backend** — and
+ * DVID splits the same way inside one repo, which is the sharpest illustration of why this is
+ * named: `AL-VA1v` body 1010 has a mesh in nanometres and a skeleton in voxels, and the two
+ * differ by exactly the factor below. `voxelScale` reads DVID's `Extended.VoxelSize` as
+ * happily as neuPrint's `Meta.voxelSize`; nothing here was ever neuPrint-specific but its
+ * address. Four other files cite this path in prose as the canonical statement of the rule, and
+ * they were updated with it.
  */
 
-import type { GeometryUnits } from '../../core/values'
+import type { GeometryUnits } from '../core/values'
 
 /** Scale factors that take dataset voxels to nanometres, per axis. */
 export type VoxelScale = readonly [number, number, number]
