@@ -1097,3 +1097,135 @@ button.setting__row[aria-expanded='true'] .setting__name {
     transform: none;
   }
 }
+
+/* --------------------------------------------------------------------------
+   The static index — `src/nodeguide/appendix.ts`
+
+   Everything above this point is drawn after load from the registry dump; this
+   section is in the HTML file itself, which is the whole point of it (see that
+   module for why). Two consequences for the styling:
+
+     - it must look finished with no script having run, so nothing here is gated
+       on a class the page claims at runtime — the trap `tutorial/main.ts`
+       records, where every section stayed invisible under jsdom;
+     - it is read, not scanned, so a measure is capped at 68ch — about eleven
+       words a line, against paragraphs three or four sentences long. Columns
+       flow at whatever count that measure allows, which on a wide screen is
+       three: 97 entries in one 68ch column is a page nobody reaches the end of,
+       and stretching the measure to fill the width is the other way to make it
+       unreadable.
+   -------------------------------------------------------------------------- */
+.appendix {
+  border-top: 1px solid var(--border);
+  padding-block: 3rem 3.5rem;
+  margin-top: 1rem;
+}
+.appendix__title {
+  font-size: clamp(1.5rem, 3vw, 2rem);
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  margin: 0 0 0.6rem;
+}
+.appendix__lede {
+  max-width: 68ch;
+  margin: 0 0 2.6rem;
+  color: var(--text-secondary);
+  font-size: 0.98rem;
+  line-height: 1.6;
+}
+
+.appendix__group {
+  margin-bottom: 2.8rem;
+}
+.appendix__h {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  font-size: 1.1rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  margin: 0 0 0.35rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+.appendix__n {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+/* The categories folded into this section, so the mapping the grid makes
+   silently — `analysis` sitting under Transform — is stated once in text. */
+.appendix__cats {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+.appendix__note {
+  max-width: 68ch;
+  margin: 0 0 1.6rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+/* Grid rather than `columns`, which would break an entry across a column
+   boundary — a node's name in one column and its paragraph in the next. */
+.appendix__entries {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 26rem), 1fr));
+  gap: 1.8rem 3rem;
+  align-items: start;
+}
+.entry {
+  max-width: 68ch;
+  /* An anchored entry must not land under the sticky bar. */
+  scroll-margin-top: 5rem;
+}
+.entry__name {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  font-size: 1rem;
+  font-weight: 650;
+  margin: 0 0 0.2rem;
+}
+.entry__type {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+.entry__sig {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  align-items: baseline;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 0 0 0.5rem;
+}
+/* A `?` after a socket name is what an optional port is spelled as here — the
+   grid says it with a hollow pip, and a page with no script has no pips. */
+.entry__ports {
+  color: var(--text-secondary);
+}
+.entry__cost::before {
+  content: '·';
+  margin-right: 0.55rem;
+}
+.entry__desc {
+  margin: 0 0 0.4rem;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: var(--text-primary);
+}
+.entry__guide {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.65;
+  color: var(--text-secondary);
+}

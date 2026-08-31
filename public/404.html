@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Not found — Coda</title>
+    <!--
+      GitHub Pages serves /404.html for anything it cannot resolve, so without this a mistyped
+      or rotted link to coda.science lands on GitHub's own page — which carries their branding,
+      no way back into the site, and nothing telling a crawler this is a 404 about *us*.
+
+      `noindex` is the load-bearing tag. A 404 body served under a URL that looks like a real
+      page is how a soft-404 gets indexed, and an indexed error page competes with the pages
+      that should rank.
+
+      It lives in `public/` rather than being a fifth vite entry, and is therefore copied byte
+      for byte with no bundling. Two consequences, both deliberate: it has no hashed stylesheet
+      to reference, so the CSS is inline; and `vite/seo.ts` never sees it, which is right —
+      nothing here belongs in a sitemap.
+
+      The links here are the one place in this repo that are **absolute**, inverting the rule the
+      four vite entries follow. Those are relative because `base` is './' and the site has to work
+      from a subpath; this page is served for a request at *any* depth — /a/b/c gets it just the
+      same as /typo — so a relative href would resolve against a directory that does not exist and
+      the way out of a 404 would itself 404. The cost is that this page alone assumes the domain
+      root, which is the trade a fork on a subpath would have to unpick.
+    -->
+    <meta name="robots" content="noindex, follow" />
+    <link rel="icon" href="/logo.svg" type="image/svg+xml" />
+    <meta name="theme-color" content="#171716" />
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-content: center;
+        gap: 1rem;
+        padding: 2rem 1.5rem;
+        background: #171716;
+        color: #c3c2b7;
+        font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+        line-height: 1.6;
+        text-align: center;
+      }
+      svg {
+        justify-self: center;
+        color: #fff;
+      }
+      h1 {
+        margin: 0;
+        font-size: 1.65rem;
+        font-weight: 650;
+        letter-spacing: -0.02em;
+        color: #fff;
+      }
+      p {
+        margin: 0;
+        max-width: 34rem;
+      }
+      nav {
+        margin-top: 0.75rem;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem 1.25rem;
+        justify-content: center;
+      }
+      a {
+        color: #3987e5;
+      }
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.9em;
+        color: #898781;
+      }
+    </style>
+  </head>
+  <body>
+    <svg width="44" height="44" viewBox="0 0 64 64" fill="currentColor" aria-hidden="true">
+      <path
+        fill-rule="evenodd"
+        d="M32 12a18 20 0 1 0 0 40 18 20 0 1 0 0-40Zm0 3.6a12.24 16.4 0 1 1 0 32.8 12.24 16.4 0 1 1 0-32.8Z"
+      />
+      <rect x="30" y="5" width="4" height="54" rx="2" />
+      <rect x="7" y="30" width="50" height="4" rx="2" />
+    </svg>
+
+    <h1>There is nothing at this address</h1>
+
+    <p>
+      The page may have moved, or the link may have lost a piece. A shared Coda workflow keeps the
+      whole graph after the <code>#</code> in its URL, so a link truncated by a chat client or an
+      email wrapper is the usual reason for landing here.
+    </p>
+
+    <nav>
+      <a href="/">Open the editor</a>
+      <a href="/overview.html">Overview</a>
+      <a href="/tutorial.html">Field guide</a>
+      <a href="/nodes.html">Node guide</a>
+      <a href="https://github.com/navis-org/coda">GitHub</a>
+    </nav>
+  </body>
+</html>

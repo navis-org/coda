@@ -37,6 +37,63 @@
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#171716" />
   </head>
   <body>
+    <!--
+      The editor is the URL everybody links, and until this block it was a `div` and a script —
+      no heading, no sentence, nothing saying what the thing is. Google renders JavaScript and
+      would have found the start page eventually; nothing else does. Not Bing's fast path, not a
+      single link unfurler, and not one of the crawlers that feed language models — which for a
+      research tool is now a first-class way of being found, since "which browser tool reads
+      neuPrint" gets asked of an assistant as often as of a search box.
+
+      So: `noscript` rather than markup inside `#root`. `createRoot().render()` clears the
+      container's children, so a static hero in there would be a flash of unstyled content on
+      every load, paid by every real visitor, to serve a crawler. This costs nobody anything and
+      is also the honest version of the claim — it *is* what this page offers with no script.
+
+      Inline styles rather than classes: the app's stylesheet is a `<link>` in a production
+      build but is injected by JavaScript in dev, so a class-based version would look correct in
+      one and be unstyled in the other. Self-contained is the only form that is right in both.
+      Values are theme.css's dark block, matching the `data-theme` pinned on <html> above.
+
+      The three links are the pages that carry the actual prose. Keep them relative: `base` is
+      './' so the whole site works from a subpath, and an absolute '/overview.html' would 404
+      everywhere but the domain root.
+    -->
+    <noscript>
+      <div
+        style="
+          max-width: 46rem;
+          margin: 0 auto;
+          padding: 4rem 1.5rem;
+          font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+          color: #c3c2b7;
+          line-height: 1.6;
+        "
+      >
+        <h1 style="color: #fff; font-size: 2.25rem; line-height: 1.15; margin: 0 0 0.75rem">
+          Coda — connectome data analysis in the browser
+        </h1>
+        <p style="font-size: 1.15rem; margin: 0 0 1.5rem">
+          A node-graph editor for querying and analysing connectomic data. Wire up the steps —
+          query, traverse, filter, aggregate, plot — and each one shows its result where it sits.
+          No install and no notebook.
+        </p>
+        <p>
+          Coda reads <strong>neuPrint</strong> (hemibrain, MANC, optic-lobe, male-CNS),
+          <strong>CAVE</strong> (FlyWire, MICrONS), <strong>CATMAID</strong>, precomputed
+          Neuroglancer sources and your own CSV or Parquet files. Results export as CSV, SWC,
+          images and Neuroglancer links, or as a Python or R script that runs the same pipeline
+          locally.
+        </p>
+        <p><strong>Coda needs JavaScript and WebGL.</strong> These pages do not:</p>
+        <ul>
+          <li><a href="./overview.html" style="color: #3987e5">Feature overview</a> — what Coda is, in one scroll.</li>
+          <li><a href="./tutorial.html" style="color: #3987e5">Field guide</a> — a ten-minute introduction that builds a real pipeline.</li>
+          <li><a href="./nodes.html" style="color: #3987e5">Node guide</a> — every node, what it takes and what it hands on.</li>
+          <li><a href="https://github.com/navis-org/coda" style="color: #3987e5">Source on GitHub</a> — MIT licensed.</li>
+        </ul>
+      </div>
+    </noscript>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

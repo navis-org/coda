@@ -125,6 +125,22 @@ Cross-cutting — these bite in code that is not obviously "about" the area:
   counting page loads and watching what somebody builds are different propositions, and the
   second contradicts what `SourcesPanel` promises four times over.
   See [docs/analytics.md](docs/analytics.md).
+- **A page whose content arrives with the script is a page most crawlers never read, and a sitemap
+  does not fix it.** Google renders JavaScript; Bing's fast path, every link unfurler and every
+  crawler that feeds a language model do not — and for a tool nobody has heard of that last group
+  is a discovery channel, not a footnote. So the two pages that had nothing in the file got
+  something: `index.html` a `<noscript>` hero (**not** markup in `#root` — `createRoot().render()`
+  clears it, so that is a flash of unstyled content charged to every real visitor to serve a
+  crawler), and `nodes.html` a **visible** static index of every node's prose, built from the
+  registry through `nodeGuideData`'s existing SSR server. Visible because hidden text keyed to a
+  crawler is cloaking; the shared `SECTIONS` table is what stops it and the grid disagreeing.
+  `vite/seo.ts` does the rest — and derives its page list from `build.rollupOptions.input`, the
+  same rule `goatcounter.ts` follows, so a fifth entry cannot arrive with no canonical and no
+  sitemap row. **`lastmod` is git's or absent, never a wall clock**: restamping four pages every
+  deploy is how a sitemap stops being read. And `SITE_URL` is deliberately **not** gated on an env
+  var the way analytics is — the analytics gate protects a fork's *readers* from a third party,
+  whereas a wrong canonical is contained entirely within the fork.
+  See [docs/seo.md](docs/seo.md).
 - **A generated file that is committed must not carry a wall clock.** `ZooIndex.updatedAt` is
   the newest entry's commit date, not `Date.now()`, so `zoo-index --check` can byte-compare it.
 - **A buffer handed to `callPython` is detached the moment the call is posted**, so read
@@ -490,6 +506,8 @@ in a CLAUDE.md *imports* the file, pulling all 1.2 MB back into every session.
   than an API listing. Read before changing `ZooIndex`.
 - [docs/analytics.md](docs/analytics.md) — the GoatCounter beacon: what it collects, the two
   gates that keep it off every build but the deploy, and why the canvas is not instrumented.
+- [docs/seo.md](docs/seo.md) — being found: the static content two pages needed before a sitemap
+  was worth anything, the per-page tags, and why `SITE_URL` is *not* gated the way analytics is.
 - [docs/ui-shell.md](docs/ui-shell.md) — panels, fullscreen and the manifest, the run
   indicator, the start page, keyboard shortcuts.
 - [docs/dashboard.md](docs/dashboard.md) — the grid view: the cell model, the mode that unmounts

@@ -204,8 +204,24 @@ change under `src/nodes`, `src/core` or `src/examples`, or dev would keep servin
 registry said when the page first loaded — the one failure that would make this worse than a
 committed file.
 
-Verify with `pnpm build`: `nodes-*.js` is ~86 kB of which ~80 kB is the inlined registry, so the
-page's own logic is around 6 kB; `dist/nodes.html` must reference no `main-*` chunk.
+Verify with `pnpm build`: `nodes-*.js` is **198.8 kB (49.2 kB gzipped)**, almost all of it the
+inlined registry, so the page's own logic is a few kB of that; `dist/nodes.html` must reference no
+`main-*` chunk. (An earlier figure here said ~86 kB; the registry has roughly doubled since, and
+the number was re-measured rather than reasoned forward.)
+
+### The static index at the foot of the page
+
+Everything above is drawn *after load*, and what the tiles carry is a **label** — a node's
+paragraph enters the DOM only when somebody clicks its tile. So the page's actual substance was in
+the shipped file nowhere, which is invisible to every crawler that does not run scripts.
+`src/nodeguide/appendix.ts` renders it as static markup, spliced into `nodes.html` at build time in
+place of a `<!--@node-appendix-->` marker, through the same SSR server `nodeGuideData` already runs
+the registry dump on. It is deliberately **visible** content rather than something hidden for a
+crawler, and `SECTIONS`/`CAT_LABEL` moved to `src/nodeguide/sections.ts` so the grid and the index
+cannot disagree about which section a node is in. Cost: `dist/nodes.html` 5.4 kB → 87.8 kB raw,
+2.1 kB → 22.2 kB gzipped, with `nodes-*.js` unchanged — which is the number to re-check after any
+edit here, since importing `appendix.ts` from `main.ts` would land the whole registry in the page.
+See [seo.md](seo.md).
 
 ### Smaller decisions, each of which was wrong first
 

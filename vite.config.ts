@@ -7,6 +7,7 @@ import type { PluginOption } from 'vite'
 import { defineConfig } from 'vitest/config'
 import { goatCounter } from './vite/goatcounter'
 import { nodeGuideData } from './vite/nodeGuideData'
+import { seo } from './vite/seo'
 
 /**
  * Where neuPrint lives. Override with NEUPRINT_HOST to point at another deployment.
@@ -293,7 +294,7 @@ function reactTracksOff(): PluginOption {
 }
 
 export default defineConfig({
-  plugins: [react(), reactTracksOff(), deploymentProxy(), nodeGuideData(), goatCounter()],
+  plugins: [react(), reactTracksOff(), deploymentProxy(), nodeGuideData(), goatCounter(), seo()],
   define: { __APP_VERSION__: JSON.stringify(version) },
   // Relative base so the built bundle works from a subpath (GitHub Pages) as well as root.
   base: './',

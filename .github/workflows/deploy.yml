@@ -25,7 +25,14 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      # Full history, not the default shallow clone. `vite/seo.ts` derives each page's
+      # `<lastmod>` in sitemap.xml from the last commit touching that page's sources; at
+      # depth 1 `git log` has nothing to answer with, so every entry would ship without one.
+      # A missing lastmod is a fact rather than a lie — see that file — but it is still a
+      # fact worth not having.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       # pnpm's version comes from `packageManager` in package.json, so it cannot drift from
       # what the lockfile was written with.

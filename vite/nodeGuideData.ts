@@ -1,5 +1,6 @@
 /**
- * `virtual:node-guide-data` — the node registry, read at build time.
+ * `virtual:node-guide-data` — the node registry, read at build time — and the static index it
+ * also feeds into `nodes.html`.
  *
  * The node guide draws every card, socket and setting from the real `NodeDefinition`s, which
  * leaves the question of how a static page gets at them. Three routes, and only one survives:
@@ -16,14 +17,23 @@
  *
  * Measured at ~250 ms, once per build.
  *
+ * ## Two consumers, one server
+ *
+ * The virtual module is the page's; `src/nodeguide/appendix.ts` is the other, and it renders
+ * every node's prose as static markup that `transformIndexHtml` splices into `nodes.html` in
+ * place of `<!--@node-appendix-->`. That is here rather than in `vite/seo.ts` because it is the
+ * same concern — the registry, read in Node during a build — and the alternative was a second
+ * copy of the throwaway-server dance below. Which is also why the build's server is created
+ * once and closed in `closeBundle` rather than per call: the two consumers then share one module
+ * graph and the registry is evaluated once, not twice.
+ *
  * ## Dev and build take different servers, and that is not an oversight
  *
  * In dev the running server is already there and `configureServer` hands it over, so the guide
  * picks up an edit to a node definition on reload like any other source change. A production
- * build has no server, so one is created for the length of the call and closed again.
- * `configFile: false` on that one is deliberate: loading this config from inside itself would
- * recurse, and nothing in `src/nodes` uses the `@` alias — checked, and the reason `data.ts`
- * imports by relative path.
+ * build has none, so one is created on first use and closed in `closeBundle`. `configFile: false`
+ * on that one is deliberate: loading this config from inside itself would recurse, and nothing in
+ * `src/nodes` uses the `@` alias — checked, and the reason `data.ts` imports by relative path.
  */
 
 import type { Plugin, ViteDevServer } from 'vite'
@@ -41,42 +51,57 @@ type GuideData = Record<string, unknown>
 
 const VIRTUAL_ID = 'virtual:node-guide-data'
 const RESOLVED_ID = '\0' + VIRTUAL_ID
-const ENTRY = '/src/nodeguide/data.ts'
+const DATA_ENTRY = '/src/nodeguide/data.ts'
+const APPENDIX_ENTRY = '/src/nodeguide/appendix.ts'
 
-async function readRegistry(server: ViteDevServer | undefined): Promise<GuideData> {
-  if (server) {
-    const mod = (await server.ssrLoadModule(ENTRY)) as { guideData: () => GuideData }
-    return mod.guideData()
-  }
-  const own = await createServer({
-    configFile: false,
-    logLevel: 'error',
-    server: { middlewareMode: true, hmr: false, watch: null },
-    optimizeDeps: { noDiscovery: true },
-  })
-  try {
-    const mod = (await own.ssrLoadModule(ENTRY)) as { guideData: () => GuideData }
-    return mod.guideData()
-  } finally {
-    await own.close()
-  }
-}
+/** The marker `nodes.html` carries where the static index goes. */
+const APPENDIX_SLOT = '<!--@node-appendix-->'
 
 export function nodeGuideData(): Plugin {
+  /** The dev server, when there is one. */
   let server: ViteDevServer | undefined
+  /** The build's own, created on first use and closed in `closeBundle`. */
+  let owned: ViteDevServer | undefined
+
+  async function ssr<T>(entry: string): Promise<T> {
+    if (server) return (await server.ssrLoadModule(entry)) as T
+    owned ??= await createServer({
+      configFile: false,
+      logLevel: 'error',
+      server: { middlewareMode: true, hmr: false, watch: null },
+      optimizeDeps: { noDiscovery: true },
+    })
+    return (await owned.ssrLoadModule(entry)) as T
+  }
 
   return {
     name: 'coda:node-guide-data',
     configureServer(devServer) {
       server = devServer
     },
+    async closeBundle() {
+      await owned?.close()
+      owned = undefined
+    },
+
+    /**
+     * The static index, spliced into `nodes.html`.
+     *
+     * Returns the html untouched when the marker is absent, which is every other entry — and is
+     * also what makes removing the marker a way to turn this off without touching the plugin.
+     */
+    async transformIndexHtml(html) {
+      if (!html.includes(APPENDIX_SLOT)) return
+      const mod = await ssr<{ appendixHTML: () => string }>(APPENDIX_ENTRY)
+      return html.replace(APPENDIX_SLOT, mod.appendixHTML())
+    },
     resolveId(id) {
       return id === VIRTUAL_ID ? RESOLVED_ID : undefined
     },
     async load(id) {
       if (id !== RESOLVED_ID) return undefined
-      const data = await readRegistry(server)
-      return `export default ${JSON.stringify(data)}`
+      const mod = await ssr<{ guideData: () => GuideData }>(DATA_ENTRY)
+      return `export default ${JSON.stringify(mod.guideData())}`
     },
     /*
      * In dev, a change to any node definition has to invalidate the virtual module — otherwise
