@@ -160,6 +160,21 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
               <span>Search the Coda Zoo — real workflows shared by other users.</span>
             </button>
             <div className="dropdown__group">
+              {/*
+               * Opens the section it is about, which is why it is inside the group rather than
+               * at the head of the menu — above the rule it would read as a note on Browse
+               * Workflows, whose graphs run on whatever their author pointed them at.
+               *
+               * Two facts, and the order is deliberate: mock data is what stops somebody reading
+               * a result off these graphs, and no-credentials is what a reader scanning the menu
+               * actually wants to know. Neither is a warning about anything going wrong, so it is
+               * gold rather than an error colour, and quiet rather than a banner. Each example's
+               * own overview note carries the longer version once the graph is open.
+               */}
+              <div className="dropdown__note dropdown__note--heads-up" style={{ fontSize: 9 }}>
+                Examples below use mocked-up data - no account or token needed. Replace demo node
+                with a real dataset node to run on an actual dataset.
+              </div>
               {EXAMPLES.map((example) => (
                 <button
                   key={example.id}
@@ -174,20 +189,6 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
                   <span>{example.summary}</span>
                 </button>
               ))}
-              {/*
-               * Closes the section it is about, which is why it is inside the group rather than
-               * at the foot of the menu — above the rule it would read as a note on Browse
-               * Workflows, whose graphs run on whatever their author pointed them at.
-               *
-               * Two facts, and the order is deliberate: mock data is what stops somebody reading
-               * a result off these graphs, and no-credentials is what a reader scanning the menu
-               * actually wants to know. Neither is a warning about anything going wrong, so it is
-               * gold rather than an error colour, and quiet rather than a banner. Each example's
-               * own overview note carries the longer version once the graph is open.
-               */}
-              <div className="dropdown__note dropdown__note--heads-up" style={{ fontSize: 9 }}>
-                Examples use mocked-up data and require no account or token.
-              </div>
             </div>
           </>
         )}
