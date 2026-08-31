@@ -152,7 +152,7 @@ export const matchTypesNode = registerNode({
   category: 'analysis',
   description: 'Work out which cell types correspond between two or more connectomes.',
   guide:
-    'Builds the correspondence that every cross-brain comparison needs: which cell types in one connectome are the same cells as which in another, given that type names are revised per dataset and not backported. Emits one labels table per dataset — that dataset’s own neuron ids against a shared label — plus a report, which is the part to actually read: a label with four neurons in one brain and forty in another is a mapping error rather than a finding, and the report is the only place that shows. A type present in one brain and genuinely absent from the other — anything sex-specific — is dropped by default, because nothing in the data tells it apart from a naming artifact; wire a table of those type names into Pass Through to keep them, and the report’s “matched” column marks what came through that way. Wire every dataset you mean to compare into one node rather than chaining two, because the answer genuinely depends on how many are in it: two subtypes stay distinct across two hemispheres that both name them and collapse the moment a third dataset knows only the coarse name.',
+    'Builds the correspondence every cross-brain comparison needs: which cell types in one connectome are the same cells as which in another, given that type names are revised per dataset and not backported. Emits one labels table per dataset plus a report — and the report is the part to read, since a mapping error looks exactly like a finding.',
   cost: 'expensive',
   dataCache: true,
 
@@ -312,7 +312,11 @@ export const matchTypesNode = registerNode({
             `in — see the node's guide.`,
         )
       }
-      return { dataset, source, columns: ctx.columns(repeatParamId('types', port.group!.index)) }
+      return {
+        dataset,
+        source,
+        columns: ctx.columns(repeatParamId('types', port.group!.index)),
+      }
     })
     const names = wanted.map(({ dataset }) => dataset.datasetId)
 
@@ -391,7 +395,8 @@ export const matchTypesNode = registerNode({
 
     return Object.fromEntries(
       ctx.outputPorts().map((port) => {
-        if (port.group) return [port.id, mapperLabelsTable(mapping.labels[port.group.index - 1]!)]
+        if (port.group)
+          return [port.id, mapperLabelsTable(mapping.labels[port.group.index - 1]!)]
         if (port.id === 'network') return [port.id, mapperNetwork(mapping.graph, names)]
         return [port.id, mapperReportTable(mapping.report, names)]
       }),

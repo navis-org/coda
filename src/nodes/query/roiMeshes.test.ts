@@ -78,7 +78,12 @@ function graph(params: Record<string, unknown> = {}): CodaGraph {
   let g = emptyGraph('roi-mesh-test')
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: DATASET }))
   g = addNode(g, node('roi', 'neuron.roiMeshes', params))
-  g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'roi', targetHandle: 'dataset' })
+  g = addEdge(g, {
+    source: 'ds',
+    sourceHandle: 'dataset',
+    target: 'roi',
+    targetHandle: 'dataset',
+  })
   return g
 }
 

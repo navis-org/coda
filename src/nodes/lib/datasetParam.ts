@@ -70,7 +70,8 @@ export function sourceSupports(
   // The two an edge set *removes*, for the reasons written at each predicate: a file of
   // `pre, post, weight` carries no regions, and its weights are not the population the backend's
   // synapse totals count.
-  if (capability === 'connectivityRois') return canSplitConnectivityByRoi(source, datasetId, edges)
+  if (capability === 'connectivityRois')
+    return canSplitConnectivityByRoi(source, datasetId, edges)
   if (capability === 'synapseTotals') return canTotalSynapses(source, datasetId, edges)
   return capabilityOf(source, datasetId, capability)
 }
@@ -190,7 +191,9 @@ export function roiOptions(
 ): EnumOption[] {
   const info = datasetInfoFromType(type)
   const names = options.primaryOnly ? (info?.primaryRois ?? []) : (info?.rois ?? [])
-  return [...names].sort((a, b) => a.localeCompare(b)).map((roi) => ({ value: roi, label: roi }))
+  return [...names]
+    .sort((a, b) => a.localeCompare(b))
+    .map((roi) => ({ value: roi, label: roi }))
 }
 
 /** Resolve the `source` param, falling back to the first registered source. */

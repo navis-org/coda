@@ -119,8 +119,10 @@ export interface RepeatSlot {
  * `fromPort` replaces `from`, and `schemaOf` replaces `schemaFrom`, so that neither can name a
  * port: both are derived from the one base below.
  */
-type RepeatedColumnParam = (Omit<ColumnParam, 'from' | 'schemaFrom' | 'visibleIf'> |
-  Omit<ColumnsParam, 'from' | 'schemaFrom' | 'visibleIf'>) & {
+type RepeatedColumnParam = (
+  | Omit<ColumnParam, 'from' | 'schemaFrom' | 'visibleIf'>
+  | Omit<ColumnsParam, 'from' | 'schemaFrom' | 'visibleIf'>
+) & {
   /** The port base this picker reads — `edges` resolves to `edges2` at index 2. */
   fromPort: string
   /** The schema behind that port, where it is not the port's own attribute schema. */
@@ -181,7 +183,12 @@ export function repeatParams(options: RepeatParamsOptions): ParamDef[] {
         group: slot.group,
         ...rest,
         from: portId,
-        ...(schemaOf ? { schemaFrom: (inputs: Readonly<Record<string, CodaType | undefined>>) => schemaOf(inputs[portId]) } : {}),
+        ...(schemaOf
+          ? {
+              schemaFrom: (inputs: Readonly<Record<string, CodaType | undefined>>) =>
+                schemaOf(inputs[portId]),
+            }
+          : {}),
         visibleIf,
       } as ParamDef
     })

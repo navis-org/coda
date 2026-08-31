@@ -56,10 +56,7 @@ import {
  * picker and every Filter downstream with it. With views off the column reads `table` on every
  * row, which is a column saying something dull rather than a column that was not there.
  */
-const LISTING_SCHEMA: TableSchema = tableSchema(
-  column('table', 'str'),
-  column('kind', 'str'),
-)
+const LISTING_SCHEMA: TableSchema = tableSchema(column('table', 'str'), column('kind', 'str'))
 
 export const caveTablesNode = registerNode({
   type: 'cave.tables',

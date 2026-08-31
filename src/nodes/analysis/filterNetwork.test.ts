@@ -28,7 +28,11 @@ const NODE_SCHEMA = tableSchema(
   column('kind', 'str'),
   column('nNeurons', 'i64'),
 )
-const EDGE_SCHEMA = tableSchema(column('source', 'str'), column('target', 'str'), column('weight', 'i64'))
+const EDGE_SCHEMA = tableSchema(
+  column('source', 'str'),
+  column('target', 'str'),
+  column('weight', 'i64'),
+)
 
 /**
  * `a → b → c → d`, plus `b → x` hanging off, plus an unattached `lone`.
@@ -58,13 +62,15 @@ const links = (net: NetworkValue) => {
 }
 
 const walk = (seeds: string[], over: Partial<Parameters<typeof expandSelection>[1]> = {}) =>
-  [...expandSelection(NET, {
-    seeds: new Set(seeds),
-    expand: 'hops',
-    hops: 1,
-    direction: 'any',
-    ...over,
-  })].sort()
+  [
+    ...expandSelection(NET, {
+      seeds: new Set(seeds),
+      expand: 'hops',
+      hops: 1,
+      direction: 'any',
+      ...over,
+    }),
+  ].sort()
 
 describe('expanding a selection', () => {
   it('keeps only the seeds when asked for nothing more', () => {
@@ -112,12 +118,14 @@ describe('expanding a selection', () => {
   it('ignores direction on an undirected network', () => {
     const undirected = { ...NET, directed: false }
     const reach = (direction: 'any' | 'downstream' | 'upstream') =>
-      [...expandSelection(undirected, {
-        seeds: new Set(['b']),
-        expand: 'hops',
-        hops: 1,
-        direction,
-      })].sort()
+      [
+        ...expandSelection(undirected, {
+          seeds: new Set(['b']),
+          expand: 'hops',
+          hops: 1,
+          direction,
+        }),
+      ].sort()
     for (const direction of ['any', 'downstream', 'upstream'] as const) {
       expect(reach(direction)).toEqual(['a', 'b', 'c', 'x'])
     }
@@ -163,8 +171,16 @@ describe('inducing the subgraph', () => {
     const rolled: NetworkValue = {
       ...NET,
       nodes: makeTable(
-        tableSchema(column('id', 'str'), column('degreeOut', 'i64'), column('weightOut', 'i64')),
-        { id: ['a', 'b', 'c', 'd', 'x', 'lone'], degreeOut: [1, 2, 1, 0, 0, 0], weightOut: [1, 6, 3, 0, 0, 0] },
+        tableSchema(
+          column('id', 'str'),
+          column('degreeOut', 'i64'),
+          column('weightOut', 'i64'),
+        ),
+        {
+          id: ['a', 'b', 'c', 'd', 'x', 'lone'],
+          degreeOut: [1, 2, 1, 0, 0, 0],
+          weightOut: [1, 6, 3, 0, 0, 0],
+        },
       ),
     }
     const cut = induceSubnetwork(rolled, new Set(['a', 'b', 'c']))
@@ -261,8 +277,9 @@ describe('what it says on the card', () => {
   })
 
   it('refuses an operator the column type does not offer', () => {
-    expect(issues({ column: 'nNeurons', op: 'contains', value: 'x' }, { in: network }).join(' '))
-      .toMatch(/does not apply to a i64 column/)
+    expect(
+      issues({ column: 'nNeurons', op: 'contains', value: 'x' }, { in: network }).join(' '),
+    ).toMatch(/does not apply to a i64 column/)
   })
 
   /*
@@ -272,16 +289,18 @@ describe('what it says on the card', () => {
    * something to change.
    */
   it('says a non-numeric value on a numeric column will not do, before Run', () => {
-    expect(issues({ column: 'nNeurons', op: 'ge', value: 'abc' }, { in: network }).join(' '))
-      .toMatch(/"abc" is not a number/)
+    expect(
+      issues({ column: 'nNeurons', op: 'ge', value: 'abc' }, { in: network }).join(' '),
+    ).toMatch(/"abc" is not a number/)
     expect(issues({ column: 'nNeurons', op: 'ge', value: '4' }, { in: network })).toEqual([])
     // On a text column the same value is an ordinary comparison, not a problem.
     expect(issues({ column: 'kind', op: 'eq', value: 'abc' }, { in: network })).toEqual([])
   })
 
   it('still asks for a value when the operator needs one', () => {
-    expect(issues({ column: 'kind', op: 'eq', value: '' }, { in: network }).join(' '))
-      .toMatch(/Comparison value is empty/)
+    expect(issues({ column: 'kind', op: 'eq', value: '' }, { in: network }).join(' ')).toMatch(
+      /Comparison value is empty/,
+    )
   })
 
   /* Filtering is a subgraph, so both schemas come through unchanged and a picker downstream

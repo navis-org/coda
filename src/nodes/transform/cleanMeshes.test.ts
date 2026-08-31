@@ -56,9 +56,11 @@ const OFF: MeshCleanParams = {
 /** Two tetrahedra and an empty mesh — the third being the case the item-count rule is about. */
 function meshesFixture(detail = false): MeshesValue {
   const tetra = (offset: number) =>
-    new Float32Array([0, 0, 0, 1000, 0, 0, 0, 1000, 0, 0, 0, 1000].map((v, i) =>
-      i % 3 === 0 ? v + offset : v,
-    ))
+    new Float32Array(
+      [0, 0, 0, 1000, 0, 0, 0, 1000, 0, 0, 0, 1000].map((v, i) =>
+        i % 3 === 0 ? v + offset : v,
+      ),
+    )
   const faces = new Uint32Array([0, 1, 2, 0, 1, 3, 0, 2, 3, 1, 2, 3])
   return {
     kind: 'meshes',
@@ -182,7 +184,11 @@ describe('cleanOps — the scattering', () => {
     const value = meshesFixture()
     const short = passThrough(meshRequestFrom(value, OFF))
     expect(() =>
-      meshesFromResult(value, { ...short, vertexOffsets: short.vertexOffsets.slice(0, 3) }, true),
+      meshesFromResult(
+        value,
+        { ...short, vertexOffsets: short.vertexOffsets.slice(0, 3) },
+        true,
+      ),
     ).toThrow(/no longer line up/)
   })
 
@@ -324,8 +330,9 @@ describe('neuron.cleanMeshes — types and params', () => {
   // context stub is ten fields that go stale the moment `InferContext` gains one.
   const validate = (params: ParamValues) => {
     const def = requireNodeDef('neuron.cleanMeshes')
-    return (def.validate?.(makeInferContext(def, { ...defaultParams(def), ...params }, {})) ?? [])
-      .join(' ')
+    return (
+      def.validate?.(makeInferContext(def, { ...defaultParams(def), ...params }, {})) ?? []
+    ).join(' ')
   }
 
   it('says so when nothing is switched on', () => {
@@ -361,7 +368,11 @@ describe('neuron.cleanMeshes — running', () => {
         const to = request.faceOffsets[m + 1]!
         let kept = 0
         for (let f = from; f < to; f += 2) {
-          indices.push(request.indices[f * 3]!, request.indices[f * 3 + 1]!, request.indices[f * 3 + 2]!)
+          indices.push(
+            request.indices[f * 3]!,
+            request.indices[f * 3 + 1]!,
+            request.indices[f * 3 + 2]!,
+          )
           kept += 1
         }
         faceOffsets[m + 1] = faceOffsets[m]! + kept

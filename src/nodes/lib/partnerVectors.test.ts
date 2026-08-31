@@ -192,7 +192,10 @@ describe('weighting', () => {
 describe('the schema half and the value half', () => {
   it('agree, column for column', () => {
     const table = vectors()
-    const declared = partnerVectorSchema(EDGES.schema, { weighting: 'raw', weightColumn: 'weight' })
+    const declared = partnerVectorSchema(EDGES.schema, {
+      weighting: 'raw',
+      weightColumn: 'weight',
+    })
     expect(table.schema.columns.map((c) => c.name)).toEqual(declared.columns.map((c) => c.name))
     for (const col of declared.columns) expect(table.data[col.name]).toBeDefined()
   })
@@ -231,8 +234,10 @@ describe('the schema half and the value half', () => {
 
   it('drop the weight’s unit under fractions, since a share is not synapses', () => {
     expect(
-      findColumn(partnerVectorSchema(EDGES.schema, { weighting: 'raw', weightColumn: 'weight' }), 'weight')
-        ?.unit,
+      findColumn(
+        partnerVectorSchema(EDGES.schema, { weighting: 'raw', weightColumn: 'weight' }),
+        'weight',
+      )?.unit,
     ).toBe('synapses')
     expect(
       findColumn(

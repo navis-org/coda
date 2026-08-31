@@ -346,7 +346,10 @@ export function expandSelection(
  * to a node that is not drawn is an arrow into nothing. The roll-ups are recomputed for the
  * reason `recomputeRollups` records: they describe the graph, and this is a different graph.
  */
-export function induceSubnetwork(network: NetworkValue, keep: ReadonlySet<string>): NetworkValue {
+export function induceSubnetwork(
+  network: NetworkValue,
+  keep: ReadonlySet<string>,
+): NetworkValue {
   const ids = nodeIds(network)
   const nodeRows: number[] = []
   ids.forEach((id, row) => {

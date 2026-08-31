@@ -60,7 +60,10 @@ import { decodeSetters, editPlan, editTable } from '../lib/tableEdits'
  */
 const PLANS = new WeakMap<object, { schema: TableSchema | undefined; plan: EditPlan }>()
 
-function planFor(ctx: { inputs: Record<string, CodaType | undefined>; params: ParamValues }): EditPlan {
+function planFor(ctx: {
+  inputs: Record<string, CodaType | undefined>
+  params: ParamValues
+}): EditPlan {
   const schema = attributeSchema(ctx.inputs.in)
   const raw = ctx.params.edits
   if (!Array.isArray(raw)) return editPlan(schema, decodeSetters(raw))
@@ -114,8 +117,7 @@ export const editTableNode = registerNode({
     // Neurons-ness survives by construction — no column is ever dropped — so the kind comes
     // straight off the input.
     return {
-      out:
-        ctx.inputs.in?.kind === 'neurons' ? T.neurons(plan.schema) : T.table(plan.schema),
+      out: ctx.inputs.in?.kind === 'neurons' ? T.neurons(plan.schema) : T.table(plan.schema),
     }
   },
 

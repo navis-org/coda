@@ -231,7 +231,13 @@ describe('neuron.inputIds — the wired IDs table', () => {
   async function unioned(typed: string): Promise<number[]> {
     let g = emptyGraph('union')
     g = addNode(g, node('ds', 'neuron.dataset', { dataset: DATASET }))
-    g = addNode(g, node('find', 'neuron.findNeurons', { rows: [{ field: 'type', op: 'matches', values: ['LC4'] }], status: 'Traced' }))
+    g = addNode(
+      g,
+      node('find', 'neuron.findNeurons', {
+        rows: [{ field: 'type', op: 'matches', values: ['LC4'] }],
+        status: 'Traced',
+      }),
+    )
     g = addNode(g, node('ids', 'neuron.inputIds', { ids: typed }))
     g = addEdge(g, {
       source: 'ds',

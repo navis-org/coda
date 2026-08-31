@@ -267,8 +267,13 @@ export const ngSourceNode = registerNode({
     const segments = parsed.ids
 
     const layer = {
-      type: layerTypeFor(String(ctx.params.layerType ?? 'auto'), described.kind, described.volumeType),
-      name: String(ctx.params.layerName ?? '').trim() || source.label.split('/').pop() || 'layer',
+      type: layerTypeFor(
+        String(ctx.params.layerType ?? 'auto'),
+        described.kind,
+        described.volumeType,
+      ),
+      name:
+        String(ctx.params.layerName ?? '').trim() || source.label.split('/').pop() || 'layer',
       // The canonical spelling, which is why `parseNgSource` keeps the location in its own
       // scheme: neuroglancer wants `precomputed://gs://…` back, not the storage.googleapis.com
       // URL Coda fetches through.
@@ -291,7 +296,9 @@ export const ngSourceNode = registerNode({
 })
 
 /** Layers arriving on the chaining input, or none. */
-function layersFrom(value: Value | undefined): ReadonlyArray<Readonly<Record<string, unknown>>> {
+function layersFrom(
+  value: Value | undefined,
+): ReadonlyArray<Readonly<Record<string, unknown>>> {
   return value?.kind === 'layers' ? value.items : []
 }
 

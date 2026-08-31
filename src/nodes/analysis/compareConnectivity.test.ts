@@ -29,7 +29,11 @@ import { tableFromRows } from '../../core/values'
 import type { TableValue } from '../../core/values'
 import '../index'
 
-const EDGES = tableSchema(column('preId', 'str'), column('postId', 'str'), column('weight', 'i64'))
+const EDGES = tableSchema(
+  column('preId', 'str'),
+  column('postId', 'str'),
+  column('weight', 'i64'),
+)
 const LABELS = tableSchema(column('neuronId', 'str'), column('label', 'str'))
 
 const def = requireNodeDef('compare.connectivity')
@@ -114,8 +118,19 @@ describe('the sockets', () => {
     // Invariant 4: hidden params are outside the provenance key. A picker for a dataset nobody
     // has connected must not re-run everything downstream when it resolves differently.
     const params = { ...defaultParams(def), datasetCount: 2 }
-    const hidden = def.params?.filter((p) => p.visibleIf && !p.visibleIf(params)).map((p) => p.id)
-    expect(hidden).toEqual(['name3', 'pre3', 'post3', 'weight3', 'name4', 'pre4', 'post4', 'weight4'])
+    const hidden = def.params
+      ?.filter((p) => p.visibleIf && !p.visibleIf(params))
+      .map((p) => p.id)
+    expect(hidden).toEqual([
+      'name3',
+      'pre3',
+      'post3',
+      'weight3',
+      'name4',
+      'pre4',
+      'post4',
+      'weight4',
+    ])
   })
 })
 
@@ -130,7 +145,9 @@ describe('the published schema', () => {
         tables[`labels${i}`] = WIRED.labels2
       }
       const out = run(params, tables)
-      expect(columnNames(schemaOf(inferred?.comparison))).toEqual(columnNames(out.comparison.schema))
+      expect(columnNames(schemaOf(inferred?.comparison))).toEqual(
+        columnNames(out.comparison.schema),
+      )
     }
   })
 
@@ -150,9 +167,9 @@ describe('the published schema', () => {
   it('publishes counts from its declared type rather than deriving it twice', () => {
     // Long form, so this half is a constant whatever the arity — the trade `edgeComparison.ts`
     // records. `inferOutputs` deliberately says nothing about it.
-    expect(def.inferOutputs?.(makeInferContext(def, defaultParams(def), inputsFor()))).not.toHaveProperty(
-      'counts',
-    )
+    expect(
+      def.inferOutputs?.(makeInferContext(def, defaultParams(def), inputsFor())),
+    ).not.toHaveProperty('counts')
     const published = inferGraph(pipeline()).nodes.cmp?.outputs.counts
     expect(columnNames(schemaOf(published))).toEqual([
       'label',
@@ -182,7 +199,9 @@ describe('duplicate names', () => {
       'present_A_2',
     ])
     const inferred = def.inferOutputs?.(makeInferContext(def, params, inputsFor()))
-    expect(columnNames(schemaOf(inferred?.comparison))).toEqual(columnNames(out.comparison.schema))
+    expect(columnNames(schemaOf(inferred?.comparison))).toEqual(
+      columnNames(out.comparison.schema),
+    )
   })
 
   it('says so on the card, since the name somebody typed is not the one they got', () => {
@@ -230,7 +249,10 @@ describe('the run', () => {
   it('refuses where an id column is not selected rather than comparing nothing', () => {
     // Reachable only before the schemas arrive; with one in hand `resolveColumn` falls back to a
     // first column, which is what a picker on a known table must do.
-    const blind: Record<string, CodaType | undefined> = { edges1: T.table(), labels1: T.table() }
+    const blind: Record<string, CodaType | undefined> = {
+      edges1: T.table(),
+      labels1: T.table(),
+    }
     const all = defaultParams(def)
     const ctx = {
       params: all,
@@ -240,7 +262,10 @@ describe('the run', () => {
       warn: () => {},
     }
     // `preId` is the declared default and resolves; `weight` is optional. Blank the required one.
-    const blanked = { ...ctx, column: (id: string) => (id === 'pre1' ? undefined : ctx.column(id)) }
+    const blanked = {
+      ...ctx,
+      column: (id: string) => (id === 'pre1' ? undefined : ctx.column(id)),
+    }
     expect(() => (def.evaluate as (c: unknown) => unknown)(blanked)).toThrow(/pre and post/)
   })
 

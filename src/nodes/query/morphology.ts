@@ -78,7 +78,7 @@ export const skeletonsNode = registerNode({
   category: 'query',
   description: 'Fetch branching morphologies for the incoming neurons.',
   guide:
-    'Branching morphologies for the incoming neurons — the wire-frame shape of the cell, ready for the 3D View. Each skeleton arrives with an attribute row of its own, so colouring by cell type is a column picker rather than a special case in the viewer. Coordinates come out in nanometres, converted from the dataset’s voxels, so a skeleton and a mesh of the same neuron sit in the same space.\n\nMany datasets have more than one place to get a skeleton from, and they are not the same product: male-CNS publishes a precomputed layer beside its segmentation as well as serving neuPrint’s traced SWC, and a FlyWire-style chunk-graph skeleton is a few hundred nodes where a traced one is thousands. **Source** is where you choose; leave it on Automatic for the best one this dataset has. Whichever answered is named on the card and in the 3D View’s caption, because cable length means something different down each route.',
+    'Branching morphologies for the incoming neurons — the wire-frame shape of the cell, ready for the 3D View. Coordinates come out in nanometres, so a skeleton and a mesh of the same neuron sit in the same space. Most datasets have more than one place to get a skeleton from and they are not the same product, so **Source** is a real choice; whichever route answered is named on the card.',
   cost: 'expensive',
   inputs: [
     { id: 'dataset', label: 'Dataset', type: T.dataset() },
@@ -181,7 +181,7 @@ export const meshesNode = registerNode({
   category: 'query',
   description: 'Fetch surface meshes for the incoming neurons.',
   guide:
-    'Surface meshes for the incoming neurons: the filled shape rather than the wire frame, which is what you want for a figure and for seeing where a neurite actually thickens. Meshes come from public object stores rather than from neuPrint, so they need no token and work in a static deploy. Detail picks the finest level of the published multi-resolution mesh that fits a triangle budget across the whole batch — the caption says which level it settled on.',
+    'Surface meshes for the incoming neurons: the filled shape rather than the wire frame, which is what you want for a figure. They come from public object stores rather than from neuPrint, so they need no token. **Detail** is a triangle budget for the whole batch, so asking for more neurons gets you coarser ones.',
   cost: 'expensive',
   inputs: [
     { id: 'dataset', label: 'Dataset', type: T.dataset() },

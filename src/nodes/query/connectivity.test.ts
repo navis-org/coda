@@ -37,7 +37,10 @@ function node(id: string, type: string, params: Record<string, unknown> = {}): G
 function pipeline(params: Record<string, unknown> = {}, seedType = 'LC4'): CodaGraph {
   let g = emptyGraph('connectivity-test')
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: 'optic-lobe-mini' }))
-  g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: seedType, status: 'Traced' }))
+  g = addNode(
+    g,
+    node('find', 'neuron.findNeurons', { typePattern: seedType, status: 'Traced' }),
+  )
   g = addNode(g, node('conn', 'neuron.connectivity', params))
   const wire = (source: string, handle: string, target: string, into: string) => {
     g = addEdge(g, { source, sourceHandle: handle, target, targetHandle: into })
@@ -63,7 +66,9 @@ async function connections(params: Record<string, unknown> = {}, seedType?: stri
 /** What the card promises before a Run, which every shape test compares against. */
 function advertised(params: Record<string, unknown> = {}): string[] | undefined {
   const declared = inferGraph(pipeline(params)).nodes.conn?.outputs.connections
-  return declared && 'schema' in declared ? declared.schema?.columns.map((c) => c.name) : undefined
+  return declared && 'schema' in declared
+    ? declared.schema?.columns.map((c) => c.name)
+    : undefined
 }
 
 describe('Connectivity output shape', () => {

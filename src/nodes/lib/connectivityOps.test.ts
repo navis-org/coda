@@ -408,7 +408,9 @@ describe('split by region', () => {
   })
 
   it('advertises `roi` only when splitting', () => {
-    expect(connectivityOutputSchema(SOURCE_SCHEMA).columns.map((c) => c.name)).not.toContain('roi')
+    expect(connectivityOutputSchema(SOURCE_SCHEMA).columns.map((c) => c.name)).not.toContain(
+      'roi',
+    )
     expect(ROI_OUT_SCHEMA.columns.map((c) => c.name)).toContain('roi')
   })
 })

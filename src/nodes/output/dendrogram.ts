@@ -62,7 +62,8 @@ export const dendrogramNode = registerNode({
   label: 'Dendrogram',
   category: 'visualisation',
   description: 'Draw a merge tree, and select branches of it.',
-  guide: 'A diagram of the hierarchical relationship between objects. Typically an output from hierarchical clustering (see linkage).',
+  guide:
+    'A diagram of the hierarchical relationship between objects. Typically an output from hierarchical clustering (see linkage).',
   cost: 'cheap',
   defaultSize: { width: 560, height: 420 },
   inputs: [{ id: 'in', label: 'Tree', type: T.linkage() }],

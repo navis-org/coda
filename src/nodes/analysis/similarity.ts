@@ -49,15 +49,7 @@ export const similarityNode = registerNode({
   description:
     'Compare every observation with every other over its features, as a similarity or distance matrix.',
   guide:
-    'Turns a table of features into the square matrix a Linkage or a Heatmap takes — ' +
-    'connectivity similarity is the case it was written for, but it takes any features, ' +
-    'including an uploaded embedding. It reads the long form directly rather than pivoting ' +
-    'first, which is what makes it scale: a thousand neurons against their partners is a ' +
-    'million connections and a hundred and fifty million empty cells, and only the connections ' +
-    'are ever touched. It says on the output whether the cells are similarities or distances, ' +
-    'so Linkage downstream needs nothing set. The matrix itself is the ceiling: it is square in ' +
-    'the number of observations, so low thousands is the scale this works at — “compare these ' +
-    'three hundred neurons across two brains”, not “co-cluster two connectomes”.',
+    'Turns a table of features into the square matrix a Linkage or a Heatmap takes — connectivity similarity is the case it was written for, but any features work, including an uploaded embedding. It reads the long form directly rather than pivoting first, which is what makes it scale, and it says on the output whether the cells are similarities or distances.',
   cost: 'expensive',
 
   inputs: [{ id: 'in', label: 'Features', type: T.table() }],
@@ -141,7 +133,8 @@ export const similarityNode = registerNode({
       label: 'Cells are',
       default: 'similarity',
       options: SIMILARITY_OUTPUT_OPTIONS,
-      visibleIf: (params) => hasSimilarityForm(String(params.metric ?? 'cosine') as SimilarityMetric),
+      visibleIf: (params) =>
+        hasSimilarityForm(String(params.metric ?? 'cosine') as SimilarityMetric),
       help: 'Distance is 1 − the similarity. Either works into Linkage, which reads which one this is off the matrix; a Heatmap is usually easier to read as similarities.',
     },
   ],

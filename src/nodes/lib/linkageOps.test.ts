@@ -370,11 +370,26 @@ describe('cutting so every group draws from both datasets', () => {
   const mixed = (): LinkageValue =>
     makeLinkage(
       new Float64Array([
-        0, 3, 0.1, 2, // a1 + b1
-        1, 4, 0.2, 2, // a2 + b2
-        2, 5, 0.3, 2, // a3 + a4  ← both from A
-        6, 7, 0.8, 4,
-        9, 8, 0.9, 6,
+        0,
+        3,
+        0.1,
+        2, // a1 + b1
+        1,
+        4,
+        0.2,
+        2, // a2 + b2
+        2,
+        5,
+        0.3,
+        2, // a3 + a4  ← both from A
+        6,
+        7,
+        0.8,
+        4,
+        9,
+        8,
+        0.9,
+        6,
       ]),
       ['A:1', 'A:2', 'A:3', 'B:1', 'B:2', 'A:4'],
       new Int32Array([0, 3, 1, 4, 2, 5]),
@@ -413,10 +428,7 @@ describe('cutting so every group draws from both datasets', () => {
   it('lets a lopsided group through once the share allows it', () => {
     // Both datasets present and the largest holds 2/3 — kept at 0.8, split at 0.6.
     const skewed = makeLinkage(
-      new Float64Array([
-        0, 1, 0.1, 2,
-        3, 2, 0.5, 3,
-      ]),
+      new Float64Array([0, 1, 0.1, 2, 3, 2, 0.5, 3]),
       ['A:1', 'A:2', 'B:1'],
       new Int32Array([0, 1, 2]),
     )

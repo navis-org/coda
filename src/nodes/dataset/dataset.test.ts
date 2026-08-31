@@ -617,7 +617,9 @@ describe('the population checkboxes', () => {
   it('reach the inferred type, so surfaces that never run can read them', () => {
     const def = requireNodeDef('dataset.hemibrain')
     const on = def.inferOutputs!(ctxFor('dataset.hemibrain', { tracedOnly: true }))
-    const off = def.inferOutputs!(ctxFor('dataset.hemibrain', { tracedOnly: false, typedOnly: false }))
+    const off = def.inferOutputs!(
+      ctxFor('dataset.hemibrain', { tracedOnly: false, typedOnly: false }),
+    )
     expect(datasetRef(on['dataset'])?.population).toEqual(['traced', 'typed'])
     expect(datasetRef(off['dataset'])?.population).toBeUndefined()
   })

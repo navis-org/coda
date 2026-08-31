@@ -184,20 +184,35 @@ describe('matchOps — the schema half and the value half', () => {
     // Invariant 3: `valueLabel` is data, so a schema named from it could not be inferred and
     // would break every downstream picker the moment somebody pressed Run.
     const odd = makeMatrix(['a'], ['x'], Float64Array.from([1]), 'connections', 'count')
-    const table = matchTable(odd, {
-      mode: 'top',
-      idx: Int32Array.from([0]),
-      values: Float64Array.from([1]),
-      groups: 1,
-      n: 1,
-    }, 0)
-    expect(table.schema.columns.map((c) => c.name)).toEqual(['query', 'target', 'rank', 'score'])
+    const table = matchTable(
+      odd,
+      {
+        mode: 'top',
+        idx: Int32Array.from([0]),
+        values: Float64Array.from([1]),
+        groups: 1,
+        n: 1,
+      },
+      0,
+    )
+    expect(table.schema.columns.map((c) => c.name)).toEqual([
+      'query',
+      'target',
+      'rank',
+      'score',
+    ])
   })
 
   it('names the group and the match from the right axes', () => {
     const table = matchTable(
       labelled,
-      { mode: 'top', idx: Int32Array.from([0, 1, 1, 2]), values: Float64Array.from([0.9, 0.5, 0.8, 0.4]), groups: 2, n: 2 },
+      {
+        mode: 'top',
+        idx: Int32Array.from([0, 1, 1, 2]),
+        values: Float64Array.from([0.9, 0.5, 0.8, 0.4]),
+        groups: 2,
+        n: 2,
+      },
       0,
     )
     expect(getColumn(table, 'query')).toEqual(['a', 'a', 'b', 'b'])
@@ -209,7 +224,13 @@ describe('matchOps — the schema half and the value half', () => {
     // The one thing `axis` controls, and the one that is invisible on a square matrix.
     const table = matchTable(
       labelled,
-      { mode: 'top', idx: Int32Array.from([0, 1, 0]), values: Float64Array.from([0.9, 0.8, 0.1]), groups: 3, n: 1 },
+      {
+        mode: 'top',
+        idx: Int32Array.from([0, 1, 0]),
+        values: Float64Array.from([0.9, 0.8, 0.1]),
+        groups: 3,
+        n: 1,
+      },
       1,
     )
     expect(getColumn(table, 'query')).toEqual(['x', 'y', 'z'])
@@ -232,7 +253,13 @@ describe('matchOps — the schema half and the value half', () => {
   it('drops a non-finite score even where the index survived', () => {
     const table = matchTable(
       labelled,
-      { mode: 'top', idx: Int32Array.from([0, 1]), values: Float64Array.from([0.9, -Infinity]), groups: 1, n: 2 },
+      {
+        mode: 'top',
+        idx: Int32Array.from([0, 1]),
+        values: Float64Array.from([0.9, -Infinity]),
+        groups: 1,
+        n: 2,
+      },
       0,
     )
     expect(table.length).toBe(1)
@@ -241,14 +268,24 @@ describe('matchOps — the schema half and the value half', () => {
   it('ranks each group from 1, restarting per group', () => {
     const table = matchTable(
       labelled,
-      { mode: 'above', offsets: Int32Array.from([0, 2, 3]), idx: Int32Array.from([0, 1, 1]), values: Float64Array.from([0.9, 0.5, 0.8]), groups: 2 },
+      {
+        mode: 'above',
+        offsets: Int32Array.from([0, 2, 3]),
+        idx: Int32Array.from([0, 1, 1]),
+        values: Float64Array.from([0.9, 0.5, 0.8]),
+        groups: 2,
+      },
       0,
     )
     expect(getColumn(table, 'rank')).toEqual([1, 2, 1])
   })
 
   it('gives a count table one row per group, cutoff or no cutoff', () => {
-    const table = matchTable(labelled, { mode: 'count', counts: Int32Array.from([2, 0]), groups: 2 }, 0)
+    const table = matchTable(
+      labelled,
+      { mode: 'count', counts: Int32Array.from([2, 0]), groups: 2 },
+      0,
+    )
     expect(getColumn(table, 'query')).toEqual(['a', 'b'])
     expect(getColumn(table, 'matches')).toEqual([2, 0])
   })
@@ -256,12 +293,15 @@ describe('matchOps — the schema half and the value half', () => {
 
 describe('matchOps — edit-time issues', () => {
   it('catches a percentage typed as a percent', () => {
-    expect(matchIssues({ ...PARAMS, mode: 'above', cutoff: 'percentage', percentage: 5 })
-      .join(' ')).toMatch(/fraction/)
+    expect(
+      matchIssues({ ...PARAMS, mode: 'above', cutoff: 'percentage', percentage: 5 }).join(' '),
+    ).toMatch(/fraction/)
   })
 
   it('says nothing about a percentage that is one', () => {
-    expect(matchIssues({ ...PARAMS, mode: 'above', cutoff: 'percentage', percentage: 0.05 })).toEqual([])
+    expect(
+      matchIssues({ ...PARAMS, mode: 'above', cutoff: 'percentage', percentage: 0.05 }),
+    ).toEqual([])
     expect(matchIssues(PARAMS)).toEqual([])
   })
 })
@@ -275,16 +315,12 @@ describe('neuron.nblastMatches — the definition', () => {
       def.inferOutputs?.(makeInferContext(def, { ...defaultParams(def), mode }, {}))
     const top = infer('top')?.matches
     const count = infer('count')?.matches
-    expect(top && 'schema' in top && top.schema ? top.schema.columns.map((c) => c.name) : []).toEqual([
-      'query',
-      'target',
-      'rank',
-      'score',
-    ])
-    expect(count && 'schema' in count && count.schema ? count.schema.columns.map((c) => c.name) : []).toEqual([
-      'query',
-      'matches',
-    ])
+    expect(
+      top && 'schema' in top && top.schema ? top.schema.columns.map((c) => c.name) : [],
+    ).toEqual(['query', 'target', 'rank', 'score'])
+    expect(
+      count && 'schema' in count && count.schema ? count.schema.columns.map((c) => c.name) : [],
+    ).toEqual(['query', 'matches'])
     // Derivable, so it must be derived rather than read back off the last run.
     expect(def.observesOutputSchema).toBeFalsy()
   })

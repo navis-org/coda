@@ -24,7 +24,10 @@ const LABEL_COLUMN_DEFAULT = 'label'
  * written out three times is three chances for the published schema and the produced one to
  * disagree.
  */
-function specOf(ctx: { params: ParamValues; column: (id: string) => string | undefined }): RelabelSpec {
+function specOf(ctx: {
+  params: ParamValues
+  column: (id: string) => string | undefined
+}): RelabelSpec {
   return {
     // Through `ctx.column`, never `ctx.params` — invariant 5.
     column: ctx.column('column') ?? '',

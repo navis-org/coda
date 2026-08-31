@@ -101,7 +101,9 @@ export const renameNode = registerNode({
       seen.add(to)
     }
     if (clashes.size > 0) {
-      issues.push(`Renamed to the same name: ${[...clashes].join(', ')} — the later one is suffixed`)
+      issues.push(
+        `Renamed to the same name: ${[...clashes].join(', ')} — the later one is suffixed`,
+      )
     }
 
     // The demotion, said out loud. It is correct — the column is gone — but a Neurons table

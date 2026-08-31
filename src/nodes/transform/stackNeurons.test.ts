@@ -60,7 +60,9 @@ describe('stackGeometry', () => {
     // A roll-up, like every other bounds in this codebase. Kept from one side, a viewer frames
     // half the scene and the other half sits outside the camera.
     const out = stackGeometry(skeletons(['1']), skeletons(['2', '3']))
-    expect(out.bounds.max[0]).toBeGreaterThan(stackGeometry(skeletons(['1']), skeletons(['1'])).bounds.max[0] - 1)
+    expect(out.bounds.max[0]).toBeGreaterThan(
+      stackGeometry(skeletons(['1']), skeletons(['1'])).bounds.max[0] - 1,
+    )
     expect(out.bounds.min).toEqual([0, 0, 0])
   })
 
@@ -87,11 +89,11 @@ describe('stackGeometry', () => {
      * selection back as those keys and `rowsWithIds` matches them against `neuronId`, which is
      * the identity and cannot be respelled. A suffixed key matches no row.
      */
-    const out = stackGeometry(
-      skeletons(['1', '2']),
-      skeletons(['1', '2']),
-      { sourceColumn: 'side', topLabel: 'Original', bottomLabel: 'Mirrored' },
-    )
+    const out = stackGeometry(skeletons(['1', '2']), skeletons(['1', '2']), {
+      sourceColumn: 'side',
+      topLabel: 'Original',
+      bottomLabel: 'Mirrored',
+    })
     if (out.kind !== 'skeletons') throw new Error('kind')
     expect(out.items.map((i) => i.id)).toEqual(['1', '2', '1', '2'])
     // Told apart by the column instead, which is what a colour encoding reads.
@@ -141,8 +143,14 @@ describe('checkStackable', () => {
   it('refuses two different kinds, pointing at the viewer that takes both', () => {
     const meshes: MeshesValue = {
       kind: 'meshes',
-      items: [{ id: '1', positions: new Float32Array([0, 0, 0]), indices: new Uint32Array([0]) }],
-      attributes: makeTable(tableSchema(column('neuronId', 'str')), { neuronId: ['1'] }, 'neurons'),
+      items: [
+        { id: '1', positions: new Float32Array([0, 0, 0]), indices: new Uint32Array([0]) },
+      ],
+      attributes: makeTable(
+        tableSchema(column('neuronId', 'str')),
+        { neuronId: ['1'] },
+        'neurons',
+      ),
       bounds: boundsOf([new Float32Array([0, 0, 0])]),
       units: 'nm',
     }
@@ -182,7 +190,9 @@ describe('checkStackable', () => {
     // Absent means unknown, not wrong — `checkNblastUnits`' rule. The mock connectome and every
     // Custom dataset produce spaceless geometry, and refusing on a fact nobody stated would
     // break every bundled example.
-    expect(() => checkStackable(skeletons(['1'], { space: 'FLYWIRE' }), skeletons(['2']))).not.toThrow()
+    expect(() =>
+      checkStackable(skeletons(['1'], { space: 'FLYWIRE' }), skeletons(['2'])),
+    ).not.toThrow()
     expect(() => checkStackable(skeletons(['1']), skeletons(['2']))).not.toThrow()
   })
 
@@ -191,8 +201,18 @@ describe('checkStackable', () => {
     // caption claiming none.
     const mesh = (lod: number): MeshesValue => ({
       kind: 'meshes',
-      items: [{ id: String(lod), positions: new Float32Array([0, 0, 0]), indices: new Uint32Array([0]) }],
-      attributes: makeTable(tableSchema(column('neuronId', 'str')), { neuronId: [String(lod)] }, 'neurons'),
+      items: [
+        {
+          id: String(lod),
+          positions: new Float32Array([0, 0, 0]),
+          indices: new Uint32Array([0]),
+        },
+      ],
+      attributes: makeTable(
+        tableSchema(column('neuronId', 'str')),
+        { neuronId: [String(lod)] },
+        'neurons',
+      ),
       bounds: boundsOf([new Float32Array([0, 0, 0])]),
       units: 'nm',
       detail: { lod, levels: 3, triangles: 10 },

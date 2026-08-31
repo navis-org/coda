@@ -35,7 +35,8 @@ const source: DataSource = new MockSource({ latencyMs: 0 })
 
 function landmarkCsv(rows: number): string {
   const lines = ['x,y,z,jrc2018u_x,jrc2018u_y,jrc2018u_z']
-  for (let i = 0; i < rows; i++) lines.push(`${i},${i},${i},${i / 1000},${i / 1000},${i / 1000}`)
+  for (let i = 0; i < rows; i++)
+    lines.push(`${i},${i},${i},${i / 1000},${i / 1000},${i / 1000}`)
   return lines.join('\n')
 }
 
@@ -56,7 +57,10 @@ function landmarksFor(url: string): string {
 
 beforeEach(() => {
   resetLandmarks()
-  vi.stubGlobal('fetch', async (url: string) => new Response(landmarksFor(url), { status: 200 }))
+  vi.stubGlobal(
+    'fetch',
+    async (url: string) => new Response(landmarksFor(url), { status: 200 }),
+  )
   mockedWarp.mockImplementation(async (_pairs, points) => ({
     positions: points.slice(),
     fitMs: 0,
@@ -85,9 +89,24 @@ function pipeline(params: Record<string, unknown> = {}): CodaGraph {
   g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC4', status: 'Traced' }))
   g = addNode(g, node('geo', 'neuron.skeletons', { limit: 100 }))
   g = addNode(g, node('xf', 'neuron.xform', params))
-  g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'find', targetHandle: 'dataset' })
-  g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'geo', targetHandle: 'dataset' })
-  g = addEdge(g, { source: 'find', sourceHandle: 'neurons', target: 'geo', targetHandle: 'neurons' })
+  g = addEdge(g, {
+    source: 'ds',
+    sourceHandle: 'dataset',
+    target: 'find',
+    targetHandle: 'dataset',
+  })
+  g = addEdge(g, {
+    source: 'ds',
+    sourceHandle: 'dataset',
+    target: 'geo',
+    targetHandle: 'dataset',
+  })
+  g = addEdge(g, {
+    source: 'find',
+    sourceHandle: 'neurons',
+    target: 'geo',
+    targetHandle: 'neurons',
+  })
   g = addEdge(g, { source: 'geo', sourceHandle: 'skeletons', target: 'xf', targetHandle: 'in' })
   return g
 }
@@ -239,7 +258,10 @@ describe('neuron.xform — out through the hub and back', () => {
   })
 
   it('lands in the space that was asked for', async () => {
-    const value = (await run(pipeline({ space: 'MANC', target: 'FLYWIRE' }))).output('xf', 'out')
+    const value = (await run(pipeline({ space: 'MANC', target: 'FLYWIRE' }))).output(
+      'xf',
+      'out',
+    )
     if (!isSkeletonsValue(value)) throw new Error('not skeletons')
     expect(value.space).toBe('FLYWIRE')
   })
@@ -290,7 +312,9 @@ describe('neuron.xform — out through the hub and back', () => {
     // MANC → FlyWire routes through JRC2018U, where a VNC is *placed* rather than registered —
     // but the return leg undoes exactly that placement, so it is not what is wrong here, and a
     // message naming a brain template the user did not pick would send them looking at it.
-    expect(issuesFor({ space: 'MANC', target: 'FLYWIRE' }).join(' ')).not.toMatch(/placed beside/)
+    expect(issuesFor({ space: 'MANC', target: 'FLYWIRE' }).join(' ')).not.toMatch(
+      /placed beside/,
+    )
   })
 
   it('refuses a target that is also the source', () => {
@@ -312,8 +336,18 @@ describe('neuron.xform — a registration Coda does not ship', () => {
     g = addNode(g, node('lm', 'core.landmarkTransform'))
     // Any table will do: `runSeeded` replaces what the node makes of it. What has to be real is
     // the *wiring*, since an unconnected input is refused by the scheduler before evaluate runs.
-    g = addEdge(g, { source: 'find', sourceHandle: 'neurons', target: 'lm', targetHandle: 'in' })
-    g = addEdge(g, { source: 'lm', sourceHandle: 'transform', target: 'xf', targetHandle: 'transform' })
+    g = addEdge(g, {
+      source: 'find',
+      sourceHandle: 'neurons',
+      target: 'lm',
+      targetHandle: 'in',
+    })
+    g = addEdge(g, {
+      source: 'lm',
+      sourceHandle: 'transform',
+      target: 'xf',
+      targetHandle: 'transform',
+    })
     seeded = transform
     return g
   }

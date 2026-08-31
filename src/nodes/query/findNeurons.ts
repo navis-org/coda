@@ -169,7 +169,9 @@ export const findNeuronsNode = registerNode({
 
     if (ctx.params.roi && !sourceSupports(ctx.inputs.dataset, 'roiFilter')) {
       const label = sourceLabel(ctx.inputs.dataset) ?? 'This source'
-      issues.push(`${label} cannot filter neurons by region — clear "In ROI" to search this dataset`)
+      issues.push(
+        `${label} cannot filter neurons by region — clear "In ROI" to search this dataset`,
+      )
     }
     return issues
   },

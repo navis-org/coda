@@ -168,7 +168,9 @@ export const landmarkTransformNode = registerNode({
       return ['Landmark Transform takes a table.']
     }
 
-    const chosen = LANDMARK_SIDES.flatMap((side) => LANDMARK_AXES.map((axis) => ctx.column(landmarkParamId(side, axis))))
+    const chosen = LANDMARK_SIDES.flatMap((side) =>
+      LANDMARK_AXES.map((axis) => ctx.column(landmarkParamId(side, axis))),
+    )
     if (chosen.some((name) => !name)) {
       return ['Pick all six coordinate columns — three before the transform, three after.']
     }

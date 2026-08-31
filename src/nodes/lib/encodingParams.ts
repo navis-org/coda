@@ -559,7 +559,14 @@ export const SHAPE_OPTIONS: EnumOption[] = ALL_SHAPES.map((value) => ({
  * set of six marks and no second ordering of them worth offering.
  */
 export function shapeParams(options: ShapeParamOptions): ParamDef[] {
-  const { prefix, from, part, label, defaultMode = 'constant', defaultShape = 'circle' } = options
+  const {
+    prefix,
+    from,
+    part,
+    label,
+    defaultMode = 'constant',
+    defaultShape = 'circle',
+  } = options
   const modeId = `${prefix}ShapeMode`
   const base = {
     presentational: options.presentational !== false,

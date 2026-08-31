@@ -169,19 +169,30 @@ describe('nblastOps — the flattening', () => {
 
   it('refuses coordinates that are not nanometres, naming the side', () => {
     const voxels: SkeletonsValue = { ...skeletonsFixture(), units: 'voxels' }
-    expect(() => checkNblastUnits('Query', voxels, 'skeletons', 'Skeletons')).toThrow(/Query skeletons are in voxels/)
+    expect(() => checkNblastUnits('Query', voxels, 'skeletons', 'Skeletons')).toThrow(
+      /Query skeletons are in voxels/,
+    )
     // The message has to point at where the fact is visible, since nothing about the scores
     // would have shown it.
-    expect(() => checkNblastUnits('Query', voxels, 'skeletons', 'Skeletons')).toThrow(/Skeletons node's footer/)
+    expect(() => checkNblastUnits('Query', voxels, 'skeletons', 'Skeletons')).toThrow(
+      /Skeletons node's footer/,
+    )
   })
 
   it('lets nanometres and unknown through, which are not the same thing', () => {
     // Unknown is what a value built before units existed says, and no source produces it
     // today. Refusing on it would refuse on a fact nobody stated.
     expect(() =>
-      checkNblastUnits('Query', { ...skeletonsFixture(), units: 'nm' }, 'skeletons', 'Skeletons'),
+      checkNblastUnits(
+        'Query',
+        { ...skeletonsFixture(), units: 'nm' },
+        'skeletons',
+        'Skeletons',
+      ),
     ).not.toThrow()
-    expect(() => checkNblastUnits('Query', skeletonsFixture(), 'skeletons', 'Skeletons')).not.toThrow()
+    expect(() =>
+      checkNblastUnits('Query', skeletonsFixture(), 'skeletons', 'Skeletons'),
+    ).not.toThrow()
   })
 
   it('says what an oversized comparison will cost, naming both sides, and scores it anyway', () => {
@@ -234,8 +245,9 @@ describe('neuron.nblast — types and params', () => {
     // `makeInferContext` rather than a hand-rolled literal, so a new member on `InferContext`
     // is one edit rather than ten — the rule `nblastMatches.test.ts` already records.
     const issues =
-      nblast.validate?.(makeInferContext(nblast, { ...defaultParams(nblast), resample: 0 }, {})) ??
-      []
+      nblast.validate?.(
+        makeInferContext(nblast, { ...defaultParams(nblast), resample: 0 }, {}),
+      ) ?? []
     expect(issues.join(' ')).toMatch(/traced/)
   })
 })
@@ -294,9 +306,9 @@ describe('neuron.nblast — running', () => {
     const fetched = scheduler.output('skel', 'skeletons')
     if (!isSkeletonsValue(fetched)) throw new Error('expected skeletons')
     expect(fetched.units).toBe('nm')
-    expect(() => checkNblastUnits('Query', { ...fetched, units: 'voxels' }, 'skeletons', 'Skeletons')).toThrow(
-      /wrong scale/,
-    )
+    expect(() =>
+      checkNblastUnits('Query', { ...fetched, units: 'voxels' }, 'skeletons', 'Skeletons'),
+    ).toThrow(/wrong scale/)
   })
 
   it('warns above Warn above, naming the side that is large, and scores it', async () => {

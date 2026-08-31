@@ -174,7 +174,10 @@ export const mirrorNode = registerNode({
       throw new Error('Mirror takes skeletons, meshes or points.')
     }
 
-    const { space: spaceId, conflict } = resolveSpace(String(ctx.params.space ?? ''), value.space)
+    const { space: spaceId, conflict } = resolveSpace(
+      String(ctx.params.space ?? ''),
+      value.space,
+    )
     if (conflict) {
       const [carried, override] = conflict
       throw new Error(
@@ -210,10 +213,10 @@ export const mirrorNode = registerNode({
       throw new Error(
         isTransformValue(supplied)
           ? `A supplied Warp replaces the correction, not the flip — and Coda has no midline ` +
-            `for ${spaceName(spaceId)} (${spaceId}) to flip about. Transform Neurons is the ` +
-            'node for a space this build does not know.'
+              `for ${spaceName(spaceId)} (${spaceId}) to flip about. Transform Neurons is the ` +
+              'node for a space this build does not know.'
           : `Coda ships no mirror landmarks for ${spaceName(spaceId)} (${spaceId}), and there ` +
-            'is no route to one that works in a browser.',
+              'is no route to one that works in a browser.',
       )
     }
 

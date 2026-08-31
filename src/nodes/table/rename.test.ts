@@ -60,7 +60,9 @@ function run(p: Record<string, unknown>, table: TableValue = base()) {
 describe('the node', () => {
   it('publishes exactly the table it evaluates', () => {
     const p = params(['root_id', 'neuronId'], ['cell_type', 'type'])
-    const inferred = def.inferOutputs?.(makeInferContext(def, p as never, { in: T.table(FOREIGN) }))
+    const inferred = def.inferOutputs?.(
+      makeInferContext(def, p as never, { in: T.table(FOREIGN) }),
+    )
     const out = run(p)
 
     expect(columnNames(schemaOf(inferred?.out))).toEqual(columnNames(out.schema))
@@ -79,8 +81,9 @@ describe('the node', () => {
   it('passes the table through untouched when nothing is configured', () => {
     const out = run(defaultParams(def) as Record<string, unknown>)
     expect(out.schema).toEqual(FOREIGN)
-    expect(def.validate?.(makeInferContext(def, defaultParams(def), { in: T.table(FOREIGN) })))
-      .toEqual([])
+    expect(
+      def.validate?.(makeInferContext(def, defaultParams(def), { in: T.table(FOREIGN) })),
+    ).toEqual([])
   })
 })
 
@@ -106,9 +109,9 @@ describe('the kind', () => {
       makeInferContext(def, p as never, { in: T.neurons(neurons) }),
     )
     expect(inferred?.out?.kind).toBe('table')
-    expect(run(p, tableFromRows(neurons, [{ neuronId: '1', type: 'LC4' }], 'neurons')).kind).toBe(
-      'table',
-    )
+    expect(
+      run(p, tableFromRows(neurons, [{ neuronId: '1', type: 'LC4' }], 'neurons')).kind,
+    ).toBe('table')
     // And says so, because a socket that stops accepting a wire two nodes later needs a cause.
     const issues = def.validate?.(makeInferContext(def, p as never, { in: T.neurons(neurons) }))
     expect(issues?.join(' ')).toMatch(/no longer a Neurons table/)
@@ -123,7 +126,8 @@ describe('the kind', () => {
     const carries = tableSchema(column('neuronId', 'str'), column('cell_type', 'str'))
     const p = params(['cell_type', 'type'])
     expect(
-      def.inferOutputs?.(makeInferContext(def, p as never, { in: T.table(carries) }))?.out?.kind,
+      def.inferOutputs?.(makeInferContext(def, p as never, { in: T.table(carries) }))?.out
+        ?.kind,
     ).toBe('table')
   })
 
@@ -133,7 +137,8 @@ describe('the kind', () => {
     const carries = tableSchema(column('neuronId', 'str'))
     const p = params(['gone', 'neuronId'])
     expect(
-      def.inferOutputs?.(makeInferContext(def, p as never, { in: T.table(carries) }))?.out?.kind,
+      def.inferOutputs?.(makeInferContext(def, p as never, { in: T.table(carries) }))?.out
+        ?.kind,
     ).toBe('table')
   })
 })
@@ -187,12 +192,8 @@ describe('in a graph', () => {
 
     const inf = inferGraph(g)
     expect(
-      checkConnection(
-        g,
-        inf,
-        { nodeId: 'url', portId: 'out' },
-        { nodeId: 'rn', portId: 'in' },
-      ).ok,
+      checkConnection(g, inf, { nodeId: 'url', portId: 'out' }, { nodeId: 'rn', portId: 'in' })
+        .ok,
     ).toBe(true)
     /*
      * The URL node publishes no schema on a cold session, so nothing here can *know* the rename

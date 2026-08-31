@@ -43,7 +43,11 @@ function ctx(input: Value | undefined, accumulated?: Record<string, Value>): Eva
 }
 
 const A = tableSchema(column('neuronId', 'str'))
-const rows = (...ids: string[]) => tableFromRows(A, ids.map((neuronId) => ({ neuronId })))
+const rows = (...ids: string[]) =>
+  tableFromRows(
+    A,
+    ids.map((neuronId) => ({ neuronId })),
+  )
 
 /** Run several passes through the fold, exactly as the scheduler threads them. */
 function fold(values: Value[]): Value | undefined {
@@ -79,7 +83,11 @@ describe('Collect', () => {
 
   it('stacks every pass rather than keeping the last', () => {
     const out = fold([rows('1'), rows('2'), rows('3')])
-    expect(isTableValue(out) ? (out as TableValue).data['neuronId'] : []).toEqual(['1', '2', '3'])
+    expect(isTableValue(out) ? (out as TableValue).data['neuronId'] : []).toEqual([
+      '1',
+      '2',
+      '3',
+    ])
   })
 
   /*

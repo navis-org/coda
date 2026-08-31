@@ -150,9 +150,10 @@ export const compareConnectivityNode = registerNode({
   type: 'compare.connectivity',
   label: 'Compare Connectivity',
   category: 'analysis',
-  description: 'Put the same type-to-type connection side by side across two or more connectomes.',
+  description:
+    'Put the same type-to-type connection side by side across two or more connectomes.',
   guide:
-    'Takes each dataset’s edge list plus its labels from Match Cell Types, rewrites both ends into the shared label space and sums per type pair, so one row reads “LC4 to DNp01 is 30 synapses here and 6 there”. Read the present columns before the weights: a weight of 0 means that dataset holds both types and has no such connection — a real absence, often the finding — while an empty weight means one of the types is missing there, so nothing was asked. Weights are raw synapse counts and are not comparable between brains of different completeness; the counts output carries the neuron numbers and directional totals a normalisation needs.',
+    'Takes each dataset’s edge list plus its labels from Match Cell Types, rewrites both ends into the shared label space and sums per type pair, so one row reads “LC4 to DNp01 is 30 synapses here and 6 there”. Read the present columns before the weights: 0 is a real absence, empty means the type is missing there.',
   cost: 'cheap',
 
   inputs: [

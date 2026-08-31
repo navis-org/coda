@@ -59,7 +59,10 @@ function pipeline(params: Record<string, unknown> = {}): CodaGraph {
   let g = emptyGraph('similarity-pipeline')
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: 'optic-lobe-mini' }))
   g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC.*', status: 'Traced' }))
-  g = addNode(g, node('conn', 'neuron.connectivity', { direction: 'both', hops: 1, minWeight: 1 }))
+  g = addNode(
+    g,
+    node('conn', 'neuron.connectivity', { direction: 'both', hops: 1, minWeight: 1 }),
+  )
   g = addNode(g, node('vec', 'neuron.partnerVectors', { partnerBy: 'type' }))
   g = addNode(
     g,
@@ -106,7 +109,9 @@ describe('a real connectivity result, through to a matrix', () => {
       expect(queried.has(id)).toBe(true)
     }
     expect(matrix.rowLabels).toEqual(matrix.colLabels)
-    expect(matrix.rowLabels.length).toBe(new Set(getColumn(vectors, 'neuronId').map(String)).size)
+    expect(matrix.rowLabels.length).toBe(
+      new Set(getColumn(vectors, 'neuronId').map(String)).size,
+    )
   })
 
   it('keeps both directions in the feature space', async () => {
@@ -182,7 +187,8 @@ describe('the params, at edit time', () => {
     const def = requireNodeDef('core.similarity')
     const schema = tableSchema(column('a', 'str'), column('b', 'str'), column('n', 'f64'))
     const issues = (params: Record<string, unknown>) =>
-      def.validate?.(makeInferContext(def, params as ParamValues, { in: T.table(schema) })) ?? []
+      def.validate?.(makeInferContext(def, params as ParamValues, { in: T.table(schema) })) ??
+      []
 
     /*
      * Both pickers unset resolve to the *first compatible column* — the same one — so a node

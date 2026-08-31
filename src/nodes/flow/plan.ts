@@ -94,7 +94,8 @@ export function loopPlanFor(
     return {
       count: keys.length,
       label: (i) => keys[i] ?? '',
-      size: (i) => (keys[i] === undefined ? 0 : elementCount(groupOf(at.value, at.column!, keys[i]!))),
+      size: (i) =>
+        keys[i] === undefined ? 0 : elementCount(groupOf(at.value, at.column!, keys[i]!)),
     }
   }
 

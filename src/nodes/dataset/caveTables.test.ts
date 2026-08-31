@@ -61,9 +61,7 @@ function run(
 /** The edit-time half, with only the two things these nodes read off it. */
 function issues(type: string, params: ParamValues, dataset?: CodaType): string[] {
   const def = requireNodeDef(type)
-  return (
-    def.validate?.(makeInferContext(def, params, { dataset })) ?? []
-  )
+  return def.validate?.(makeInferContext(def, params, { dataset })) ?? []
 }
 
 beforeEach(() => {
@@ -114,11 +112,13 @@ describe('List CAVE tables', () => {
 
   it('takes the datastack from a wired Dataset over its own field', async () => {
     installCaveFetch()
-    const out = (await run(
-      'cave.tables',
-      { datastack: 'not_a_datastack:1', includeViews: false },
-      { dataset: { kind: 'dataset', sourceId: 'cave', datasetId: DATASET, label: DATASET } },
-    )).out as TableValue
+    const out = (
+      await run(
+        'cave.tables',
+        { datastack: 'not_a_datastack:1', includeViews: false },
+        { dataset: { kind: 'dataset', sourceId: 'cave', datasetId: DATASET, label: DATASET } },
+      )
+    ).out as TableValue
     expect(out.length).toBe(6)
   })
 
@@ -164,11 +164,13 @@ describe('CAVE table info', () => {
   it('warns before sampling a view, and samples it anyway', async () => {
     installCaveFetch()
     const warnings: string[] = []
-    const out = (await run(
-      'cave.tableInfo',
-      { datastack: DATASET, table: 'valid_connection_v2' },
-      { warn: (m) => warnings.push(m) },
-    )).columns as TableValue
+    const out = (
+      await run(
+        'cave.tableInfo',
+        { datastack: DATASET, table: 'valid_connection_v2' },
+        { warn: (m) => warnings.push(m) },
+      )
+    ).columns as TableValue
     expect(warnings.join(' ')).toMatch(/view.*row limit/s)
     expect(out.length).toBeGreaterThan(0)
   })
@@ -176,11 +178,13 @@ describe('CAVE table info', () => {
   it('says so rather than inventing columns for a table that answers no rows', async () => {
     installCaveFetch({ overrides: { '/query': '[]' } })
     const warnings: string[] = []
-    const out = (await run(
-      'cave.tableInfo',
-      { datastack: DATASET, table: 'nuclei_v1' },
-      { warn: (m) => warnings.push(m) },
-    )).columns as TableValue
+    const out = (
+      await run(
+        'cave.tableInfo',
+        { datastack: DATASET, table: 'nuclei_v1' },
+        { warn: (m) => warnings.push(m) },
+      )
+    ).columns as TableValue
     expect(out.length).toBe(0)
     expect(warnings.join(' ')).toMatch(/no rows/)
   })

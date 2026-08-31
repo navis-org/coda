@@ -100,7 +100,11 @@ describe('the node', () => {
     // Not a refusal — it is the intended output. But a neuron table whose ids stopped working
     // is exactly the thing somebody needs told while they can still see the node.
     const issues = def.validate?.(
-      makeInferContext(def, { ...defaultParams(def), direction: 'add', prefix: 'flywire' }, inputs),
+      makeInferContext(
+        def,
+        { ...defaultParams(def), direction: 'add', prefix: 'flywire' },
+        inputs,
+      ),
     )
     expect(issues?.join(' ')).toMatch(/not a valid neuron id/)
   })

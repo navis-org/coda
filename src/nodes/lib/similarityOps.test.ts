@@ -87,7 +87,9 @@ function pairs(
     options.ctx ?? SILENT,
   )
   const at = (x: string, y: string) =>
-    matrix.values[matrix.rowLabels.indexOf(x) * matrix.rowLabels.length + matrix.colLabels.indexOf(y)]!
+    matrix.values[
+      matrix.rowLabels.indexOf(x) * matrix.rowLabels.length + matrix.colLabels.indexOf(y)
+    ]!
   return { matrix, ab: at('a', 'b'), ac: at('a', 'c'), bc: at('b', 'c'), aa: at('a', 'a') }
 }
 
@@ -284,9 +286,7 @@ describe('what it refuses and what it merely says', () => {
       /not defined over negative values/,
     )
     // Cosine, Euclidean and Pearson all take them.
-    expect(() =>
-      similarityMatrix(features, 'cosine', 'similarity', SILENT),
-    ).not.toThrow()
+    expect(() => similarityMatrix(features, 'cosine', 'similarity', SILENT)).not.toThrow()
   })
 
   /*
@@ -302,7 +302,9 @@ describe('what it refuses and what it merely says', () => {
     ])
     const said: string[] = []
     const features = featuresFromLong(table, 'obs', 'feat', 'w')
-    const matrix = similarityMatrix(features, 'cosine', 'distance', { warn: (m) => said.push(m) })
+    const matrix = similarityMatrix(features, 'cosine', 'distance', {
+      warn: (m) => said.push(m),
+    })
     const n = matrix.rowLabels.length
     expect(matrix.rowLabels).toContain('empty')
     expect(matrix.values[matrix.rowLabels.indexOf('empty') * (n + 1)]).toBe(0)

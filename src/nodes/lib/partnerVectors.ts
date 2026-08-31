@@ -223,7 +223,9 @@ export function partnerVectorIssues(
   if (partnerBy === 'type') {
     const types = [PRE_TYPE, POST_TYPE].filter((name) => !findColumn(input, name))
     if (types.length > 0) {
-      return [`Grouping partners by cell type needs ${types.join(' and ')}, which this table has no`]
+      return [
+        `Grouping partners by cell type needs ${types.join(' and ')}, which this table has no`,
+      ]
     }
   }
   if (!hasNeurons && !findColumn(input, DIRECTION_COLUMN)) {

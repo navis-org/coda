@@ -39,7 +39,6 @@ function readBasis(raw: unknown): SynapseTotalsBasis {
   return raw === 'connected' ? 'connected' : 'all'
 }
 
-
 /**
  * Synaptic partners of a set of neurons, one or more hops out.
  *
@@ -135,7 +134,9 @@ export const connectivityNode = registerNode({
       default: [],
       options: (ctx) =>
         sourceSupports(ctx.inputs.dataset, 'connectivityRois')
-          ? roiOptions(ctx.inputs.dataset, { primaryOnly: regionOptions(ctx.params).primaryOnly })
+          ? roiOptions(ctx.inputs.dataset, {
+              primaryOnly: regionOptions(ctx.params).primaryOnly,
+            })
           : [],
     },
     {
@@ -232,7 +233,9 @@ export const connectivityNode = registerNode({
       issues.push(`${label} cannot break a connection down by region`)
     }
     if (ctx.params.normalize === true && !sourceSupports(ctx.inputs.dataset, 'synapseTotals')) {
-      issues.push(`${label} does not publish the per-neuron synapse totals Normalize divides by`)
+      issues.push(
+        `${label} does not publish the per-neuron synapse totals Normalize divides by`,
+      )
     }
 
     /*

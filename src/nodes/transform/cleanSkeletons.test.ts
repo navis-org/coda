@@ -354,8 +354,9 @@ describe('neuron.cleanSkeletons — types and params', () => {
   // context stub is ten fields that go stale the moment `InferContext` gains one.
   const validate = (params: ParamValues) => {
     const def = requireNodeDef('neuron.cleanSkeletons')
-    return (def.validate?.(makeInferContext(def, { ...defaultParams(def), ...params }, {})) ?? [])
-      .join(' ')
+    return (
+      def.validate?.(makeInferContext(def, { ...defaultParams(def), ...params }, {})) ?? []
+    ).join(' ')
   }
 
   it('says so when nothing is switched on', () => {
@@ -408,7 +409,11 @@ describe('neuron.cleanSkeletons — running', () => {
         const to = request.offsets[n + 1]!
         let kept = 0
         for (let i = from; i < to; i += 2) {
-          points.push(request.points[i * 3]!, request.points[i * 3 + 1]!, request.points[i * 3 + 2]!)
+          points.push(
+            request.points[i * 3]!,
+            request.points[i * 3 + 1]!,
+            request.points[i * 3 + 2]!,
+          )
           parents.push(kept === 0 ? -1 : kept - 1)
           radii.push(request.radii[i]!)
           kept += 1
@@ -427,7 +432,8 @@ describe('neuron.cleanSkeletons — running', () => {
     await s.run(pipeline({ method: 'downsample', factor: 2 }), { mode: 'full' })
     const before = s.output('skel', 'skeletons')
     const after = s.output('clean', 'out')
-    if (!isSkeletonsValue(before) || !isSkeletonsValue(after)) throw new Error('expected skeletons')
+    if (!isSkeletonsValue(before) || !isSkeletonsValue(after))
+      throw new Error('expected skeletons')
 
     expect(after.items.length).toBe(before.items.length)
     expect(after.attributes.length).toBe(after.items.length)

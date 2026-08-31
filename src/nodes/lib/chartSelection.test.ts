@@ -76,7 +76,10 @@ describe('rowsWithLabels', () => {
 
 describe('range codec', () => {
   it('round-trips, closed flag and all', () => {
-    for (const range of [{ lo: 0, hi: 1 }, { lo: -2.5, hi: 3.25, closed: true }]) {
+    for (const range of [
+      { lo: 0, hi: 1 },
+      { lo: -2.5, hi: 3.25, closed: true },
+    ]) {
       expect(decodeRange(encodeRange(range))).toEqual(range)
     }
   })
@@ -92,7 +95,9 @@ describe('range codec', () => {
 
   it('skips a malformed entry rather than throwing on it', () => {
     // A selection is whatever was last saved, including by a build that spelled it differently.
-    expect(decodeRanges(['1:2', 'nonsense', '', '5:4', '3:4:x', null])).toEqual([{ lo: 1, hi: 2 }])
+    expect(decodeRanges(['1:2', 'nonsense', '', '5:4', '3:4:x', null])).toEqual([
+      { lo: 1, hi: 2 },
+    ])
   })
 })
 
@@ -120,7 +125,9 @@ describe('rowsInRanges', () => {
   })
 
   it('counts a row once even when two selected ranges overlap it', () => {
-    expect(rowsInRanges(table(), 'pre', ['0:60', '40:120:c']).data.neuronId).toEqual([1, 2, 3, 4])
+    expect(rowsInRanges(table(), 'pre', ['0:60', '40:120:c']).data.neuronId).toEqual([
+      1, 2, 3, 4,
+    ])
   })
 
   it('leaves out a row with no usable number', () => {

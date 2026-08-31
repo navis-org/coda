@@ -56,7 +56,12 @@ function pipeline(type: string, params: Record<string, unknown> = {}): CodaGraph
     target: 'find',
     targetHandle: 'dataset',
   })
-  g = addEdge(g, { source: 'find', sourceHandle: 'neurons', target: 'chart', targetHandle: 'in' })
+  g = addEdge(g, {
+    source: 'find',
+    sourceHandle: 'neurons',
+    target: 'chart',
+    targetHandle: 'in',
+  })
   return g
 }
 
@@ -65,10 +70,18 @@ function pivoted(type: string): CodaGraph {
   let g = emptyGraph('chart-pivot')
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: 'optic-lobe-mini' }))
   g = addNode(g, node('find', 'neuron.findNeurons', { status: 'Traced' }))
-  g = addNode(g, node('grp', 'core.groupBy', { by: ['type', 'status'], agg: 'sum', value: 'pre' }))
   g = addNode(
     g,
-    node('piv', 'core.pivot', { rows: 'type', columns: 'status', agg: 'sum', value: 'sum_pre' }),
+    node('grp', 'core.groupBy', { by: ['type', 'status'], agg: 'sum', value: 'pre' }),
+  )
+  g = addNode(
+    g,
+    node('piv', 'core.pivot', {
+      rows: 'type',
+      columns: 'status',
+      agg: 'sum',
+      value: 'sum_pre',
+    }),
   )
   g = addNode(g, node('chart', type))
   g = addEdge(g, {
@@ -97,9 +110,9 @@ describe.each(TYPES)('%s — the tap', (type) => {
   })
 
   it('advertises the incoming schema before anything has run', () => {
-    const names = schemaOf(inferGraph(pipeline(type)).nodes['chart']?.outputs['out'])?.columns.map(
-      (c) => c.name,
-    )
+    const names = schemaOf(
+      inferGraph(pipeline(type)).nodes['chart']?.outputs['out'],
+    )?.columns.map((c) => c.name)
     expect(names).toContain('pre')
   })
 
@@ -165,44 +178,47 @@ describe.each([
     style: ['style', 'box', 'violin'],
     drawing: ['value', 'style', 'points', 'whiskers', 'logAxis', 'maxGroups'],
   },
-] as const)('$type — what is presentational', ({ type, resolving, from, to, style, drawing }) => {
-  const def = requireNodeDef(type)
-  const param = (id: string) => def.params?.find((p) => p.id === id)
+] as const)(
+  '$type — what is presentational',
+  ({ type, resolving, from, to, style, drawing }) => {
+    const def = requireNodeDef(type)
+    const param = (id: string) => def.params?.find((p) => p.id === id)
 
-  it(`keeps "${resolving}" out of the presentational set — it decides which rows Selected carries`, () => {
-    expect(param(resolving)?.presentational).not.toBe(true)
-  })
+    it(`keeps "${resolving}" out of the presentational set — it decides which rows Selected carries`, () => {
+      expect(param(resolving)?.presentational).not.toBe(true)
+    })
 
-  it('marks every drawing knob presentational, so restyling stales nothing', () => {
-    for (const id of drawing) expect([id, param(id)?.presentational]).toEqual([id, true])
-  })
+    it('marks every drawing knob presentational, so restyling stales nothing', () => {
+      for (const id of drawing) expect([id, param(id)?.presentational]).toEqual([id, true])
+    })
 
-  it('leaves the selection itself out of the presentational set', () => {
-    expect(param('selection')?.presentational).not.toBe(true)
-  })
+    it('leaves the selection itself out of the presentational set', () => {
+      expect(param('selection')?.presentational).not.toBe(true)
+    })
 
-  /*
-   * The end-to-end version of the two claims above, which is the one that would actually
-   * catch a mistake: the cache key is built inside the scheduler, so asserting on the flags
-   * alone would pass a definition whose flag never reached it.
-   */
-  it('re-uses the cached result across a restyle, and not across a column change', async () => {
-    const scheduler = makeScheduler()
-    const base = setNodeParam(
-      setNodeParam(pipeline(type, { value: 'pre' }), 'chart', resolving, from),
-      'chart',
-      style[0],
-      style[1],
-    )
-    await scheduler.run(base, { mode: 'full' })
+    /*
+     * The end-to-end version of the two claims above, which is the one that would actually
+     * catch a mistake: the cache key is built inside the scheduler, so asserting on the flags
+     * alone would pass a definition whose flag never reached it.
+     */
+    it('re-uses the cached result across a restyle, and not across a column change', async () => {
+      const scheduler = makeScheduler()
+      const base = setNodeParam(
+        setNodeParam(pipeline(type, { value: 'pre' }), 'chart', resolving, from),
+        'chart',
+        style[0],
+        style[1],
+      )
+      await scheduler.run(base, { mode: 'full' })
 
-    const restyled = setNodeParam(base, 'chart', style[0], style[2])
-    expect((await scheduler.run(restyled, { mode: 'full' })).executed).not.toContain('chart')
+      const restyled = setNodeParam(base, 'chart', style[0], style[2])
+      expect((await scheduler.run(restyled, { mode: 'full' })).executed).not.toContain('chart')
 
-    const recolumned = setNodeParam(base, 'chart', resolving, to)
-    expect((await scheduler.run(recolumned, { mode: 'full' })).executed).toContain('chart')
-  })
-})
+      const recolumned = setNodeParam(base, 'chart', resolving, to)
+      expect((await scheduler.run(recolumned, { mode: 'full' })).executed).toContain('chart')
+    })
+  },
+)
 
 describe('out.histogram — a selection of ranges', () => {
   it('carries the rows inside the selected bars, and nothing else', async () => {
@@ -267,8 +283,10 @@ describe.each([
     const scheduler = makeScheduler()
     await scheduler.run(g, { mode: 'full' })
     expect(scheduler.info('chart').state).toBe('ok')
-    expect(isTableValue(scheduler.output('chart', 'selected')) &&
-      (scheduler.output('chart', 'selected') as { length: number }).length).toBe(0)
+    expect(
+      isTableValue(scheduler.output('chart', 'selected')) &&
+        (scheduler.output('chart', 'selected') as { length: number }).length,
+    ).toBe(0)
   })
 })
 
@@ -278,7 +296,12 @@ describe('the warnings', () => {
     // twice on one badge.
     let g = pipeline('out.histogram')
     g = addNode(g, node('sel', 'core.select', { columns: ['type'] }))
-    g = addEdge(g, { source: 'find', sourceHandle: 'neurons', target: 'sel', targetHandle: 'in' })
+    g = addEdge(g, {
+      source: 'find',
+      sourceHandle: 'neurons',
+      target: 'sel',
+      targetHandle: 'in',
+    })
     g = { ...g, edges: g.edges.filter((e) => e.target !== 'chart') }
     g = addEdge(g, { source: 'sel', sourceHandle: 'out', target: 'chart', targetHandle: 'in' })
     expect(issues(g, 'chart')).toEqual(['No columns of type i64/f64 available for "Value"'])

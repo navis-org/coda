@@ -636,7 +636,10 @@ describe('annotation nodes — refusals', () => {
     let g = emptyGraph('x')
     g = addNode(
       g,
-      node('cave', 'annotation.caveTable', { datastack: 'flywire_fafb_public', table: 'nuclei' }),
+      node('cave', 'annotation.caveTable', {
+        datastack: 'flywire_fafb_public',
+        table: 'nuclei',
+      }),
     )
     // Names the fix with the datastack already in it, rather than restating the grammar: the help
     // on the field states it and the placeholder is the only thing that shows the colon.
@@ -773,11 +776,7 @@ describe('the Google Sheet node', () => {
   })
 
   it('publishes what the provider answers, and nothing before it has answered', () => {
-    expect(columnNames(published(sheetGraph(), 'sheet'))).toEqual([
-      'neuronId',
-      'type',
-      'side',
-    ])
+    expect(columnNames(published(sheetGraph(), 'sheet'))).toEqual(['neuronId', 'type', 'side'])
     sheetKnown = false
     expect(published(sheetGraph(), 'sheet')).toBeUndefined()
   })

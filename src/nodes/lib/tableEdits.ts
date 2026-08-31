@@ -295,10 +295,7 @@ interface ResolvedWhere {
  * perfectly well configured. The terms are lowered unchecked in that case; `evaluate` always
  * has a real schema and is where the check actually bites.
  */
-function resolveWhere(
-  schema: TableSchema | undefined,
-  where: string,
-): ResolvedWhere {
+function resolveWhere(schema: TableSchema | undefined, where: string): ResolvedWhere {
   const parsed = parseSearch(where)
   const problems = [...parsed.errors]
   const terms: FieldTerm[] = []
@@ -484,7 +481,10 @@ export function editPlan(
                 // dropping it here would change a header two viewers away for no visible reason.
                 return { ...column, dtype: entry.dtype }
               }),
-              ...added.map((entry): ColumnSchema => ({ name: entry.column, dtype: entry.dtype })),
+              ...added.map((entry): ColumnSchema => ({
+                name: entry.column,
+                dtype: entry.dtype,
+              })),
             ],
           }
   }

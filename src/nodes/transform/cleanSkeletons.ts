@@ -171,12 +171,15 @@ export const cleanSkeletonsNode = registerNode({
   validate: (ctx) => {
     const params = skeletonCleanParamsFrom(ctx.params)
     const issues: string[] = []
-    if (isNoOp(params)) issues.push('Nothing is switched on, so this passes the skeletons through')
+    if (isNoOp(params))
+      issues.push('Nothing is switched on, so this passes the skeletons through')
     if (params.method === 'resample' && params.spacing > 0 && params.spacing < 0.1) {
       // Not a refusal — `checkResampleSize` handles the case that would actually fail — but a
       // spacing this fine is nearly always a µm/nm mix-up, and saying so at edit time is
       // cheaper than saying it after the wait.
-      issues.push(`Spacing is ${params.spacing} µm; this control is micrometres, not nanometres`)
+      issues.push(
+        `Spacing is ${params.spacing} µm; this control is micrometres, not nanometres`,
+      )
     }
     return issues
   },

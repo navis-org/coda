@@ -63,7 +63,12 @@ describe('shape', () => {
   it('summarises a table with no rows as a table with no values', () => {
     const summary = describeTable(emptyTable(SCHEMA))
     expect(summary.length).toBe(4)
-    expect(row(summary, 'weight')).toMatchObject({ non_nulls: 0, nulls: 0, unique: 0, min: null })
+    expect(row(summary, 'weight')).toMatchObject({
+      non_nulls: 0,
+      nulls: 0,
+      unique: 0,
+      min: null,
+    })
   })
 
   it('summarises a table with no columns as no rows at all', () => {
@@ -100,9 +105,9 @@ describe('counts', () => {
     const input = table()
     const summary = describeTable(input)
     for (let i = 0; i < summary.length; i++) {
-      expect(
-        Number(summary.data['non_nulls']![i]) + Number(summary.data['nulls']![i]),
-      ).toBe(input.length)
+      expect(Number(summary.data['non_nulls']![i]) + Number(summary.data['nulls']![i])).toBe(
+        input.length,
+      )
     }
   })
 })
@@ -132,7 +137,12 @@ describe('numeric columns', () => {
     const summary = describeTable(tableFromRows(schema, [{ x: null }, { x: null }]))
     // A count over nothing is zero; a minimum over nothing is not a number, and saying `0`
     // there would put a value into the range of a column that has none.
-    expect(row(summary, 'x')).toMatchObject({ non_nulls: 0, non_zero: 0, min: null, mean: null })
+    expect(row(summary, 'x')).toMatchObject({
+      non_nulls: 0,
+      non_zero: 0,
+      min: null,
+      mean: null,
+    })
   })
 
   it('keeps a NaN out of the sort while still counting it as present', () => {
@@ -142,7 +152,13 @@ describe('numeric columns', () => {
     )
     // Present and distinct — it arrived — but it takes no part in the spread, where it would
     // land wherever the comparator left it and drag a quartile with it.
-    expect(row(summary, 'x')).toMatchObject({ non_nulls: 3, non_zero: 2, min: 1, max: 3, mean: 2 })
+    expect(row(summary, 'x')).toMatchObject({
+      non_nulls: 3,
+      non_zero: 2,
+      min: 1,
+      max: 3,
+      mean: 2,
+    })
   })
 })
 

@@ -42,16 +42,7 @@ export const partnerVectorsNode = registerNode({
   description:
     'Turn a connectivity edge list into one feature vector per query neuron, ready to compare.',
   guide:
-    'Reshapes a Connectivity result from an edge list into the long form Similarity Matrix ' +
-    'reads: one row per neuron and partner, with upstream and downstream kept apart as ' +
-    'separate features so a neuron that receives from a type is not counted as alike to one ' +
-    'that projects to it. It aggregates as it goes, so no Group By and no Pivot in between — ' +
-    'the long table already is the feature matrix, and the wide one would be mostly zeroes. ' +
-    'The surprise is untyped partners: they fall back to their own ids rather than pooling ' +
-    'into one bucket, because a shared "untyped" feature makes strangers look similar. Wire ' +
-    'Labels from Match Cell Types to compare across brains: partners are then named by their ' +
-    'shared label and anything unmapped is dropped, so read cnFrac — it says how much of each ' +
-    'neuron survived that.',
+    'Reshapes a Connectivity result into the long form Similarity Matrix reads: one row per neuron and partner, with upstream and downstream kept apart as separate features. It aggregates as it goes, so no Group By and no Pivot in between. Wire Labels from Match Cell Types to compare across brains.',
   cost: 'cheap',
 
   inputs: [

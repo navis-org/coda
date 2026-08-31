@@ -44,7 +44,10 @@ describe('the card stays a picture', () => {
     const inPanel = (def().params ?? []).filter((p) => !p.visibleIf || p.visibleIf(params))
     expect(inPanel.length).toBeGreaterThan(10)
     for (const id of ['skeletonColorMode', 'skeletonWidth', 'background', 'meshOpacity']) {
-      expect(inPanel.map((p) => p.id), id).toContain(id)
+      expect(
+        inPanel.map((p) => p.id),
+        id,
+      ).toContain(id)
     }
   })
 })
@@ -120,8 +123,14 @@ describe('colour defaults', () => {
       if (mode.kind !== 'enum' || typeof mode.options === 'function') {
         throw new Error('expected static options')
       }
-      expect(mode.options.map((o) => o.value), prefix).toContain('hash')
-      expect(mode.options.map((o) => o.value), prefix).toContain('categorical')
+      expect(
+        mode.options.map((o) => o.value),
+        prefix,
+      ).toContain('hash')
+      expect(
+        mode.options.map((o) => o.value),
+        prefix,
+      ).toContain('categorical')
     }
   })
 

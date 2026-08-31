@@ -78,7 +78,9 @@ export const collectNode = registerNode({
     const input = ctx.inputs.in
     if (!input) return []
     if (input.kind !== 'any' && !isCollectableKind(input.kind)) {
-      return [`Collect stacks Tables, Skeletons, Meshes or Points. A ${input.kind} cannot be stacked.`]
+      return [
+        `Collect stacks Tables, Skeletons, Meshes or Points. A ${input.kind} cannot be stacked.`,
+      ]
     }
     return []
   },

@@ -49,11 +49,7 @@ import { SEATABLE_HOSTS } from '../../data/annotations/credentials'
 import { peekBases, resolveWorkspace } from '../../data/annotations/seaTable'
 
 import { joinAnnotations, joinedSchema } from '../lib/annotationOps'
-import {
-  CAVE_DATASET_INPUT,
-  caveDatastackIssues,
-  caveDatastackParam,
-} from '../lib/caveParams'
+import { CAVE_DATASET_INPUT, caveDatastackIssues, caveDatastackParam } from '../lib/caveParams'
 import { ANNOTATIONS_INPUT, annotationSchemaFrom } from '../lib/annotationParams'
 import { datasetRef } from '../../core/types'
 
@@ -383,7 +379,6 @@ export const seaTableNode = buildSeaTableNode({
     'than the LMB’s deployment — two unrelated accounts, so each needs its own token. Use this ' +
     'for a base of your own; use FlyTable for the community annotations.',
 })
-
 
 // ---------------------------------------------------------------------------
 // Google Sheet

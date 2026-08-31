@@ -144,11 +144,15 @@ describe('relabelling and summing one dataset', () => {
   it('reads the pool from the mapping, not from the edges', () => {
     // The distinction the whole 0-vs-null rule rests on: a label nothing connected to is still a
     // label this dataset could have answered about.
-    const a = dataset('A', [['1', '3', 5]], [
-      ['1', 'LC4'],
-      ['3', 'DNp01'],
-      ['7', 'LPLC1'],
-    ])
+    const a = dataset(
+      'A',
+      [['1', '3', 5]],
+      [
+        ['1', 'LC4'],
+        ['3', 'DNp01'],
+        ['7', 'LPLC1'],
+      ],
+    )
     expect(a.pool.has('LPLC1')).toBe(true)
     expect(a.labels.has('LPLC1')).toBe(false)
   })
@@ -160,11 +164,13 @@ describe('relabelling and summing one dataset', () => {
         ['1', '3', 99],
         ['2', '3', 99],
       ]),
-      labelsByNeuron(labels([
-        ['1', 'LC4'],
-        ['2', 'LC4'],
-        ['3', 'DNp01'],
-      ])),
+      labelsByNeuron(
+        labels([
+          ['1', 'LC4'],
+          ['2', 'LC4'],
+          ['3', 'DNp01'],
+        ]),
+      ),
       { pre: 'pre', post: 'post' },
     )
     expect([...plain.weights.values()].map((pair) => pair.weight)).toEqual([2])
@@ -211,11 +217,15 @@ describe('absent versus unsampled', () => {
       ],
     )
   const b = () =>
-    dataset('B', [['12', '13', 6]], [
-      ['11', 'LC4'],
-      ['12', 'PLP001'],
-      ['13', 'DNp01'],
-    ])
+    dataset(
+      'B',
+      [['12', '13', 6]],
+      [
+        ['11', 'LC4'],
+        ['12', 'PLP001'],
+        ['13', 'DNp01'],
+      ],
+    )
 
   const compared = () => rowsOf(compareEdges([a(), b()], ['A', 'B']).comparison, ['A', 'B'])
 
@@ -293,10 +303,14 @@ describe('minWeight', () => {
   })
 
   it('drops a pair no dataset reaches', () => {
-    const quiet = dataset('A', [['1', '3', 2]], [
-      ['1', 'LC4'],
-      ['3', 'DNp01'],
-    ])
+    const quiet = dataset(
+      'A',
+      [['1', '3', 2]],
+      [
+        ['1', 'LC4'],
+        ['3', 'DNp01'],
+      ],
+    )
     expect(compareEdges([quiet], ['A'], 10).comparison.length).toBe(0)
     expect(compareEdges([quiet], ['A'], 2).comparison.length).toBe(1)
   })
@@ -484,10 +498,14 @@ describe('schema and value halves agree', () => {
     // after params, so the two halves have a real chance to disagree.
     for (const names of [['A'], ['A', 'B'], ['A', 'B', 'C', 'D']]) {
       const sources = names.map((name) =>
-        dataset(name, [['1', '3', 5]], [
-          ['1', 'LC4'],
-          ['3', 'DNp01'],
-        ]),
+        dataset(
+          name,
+          [['1', '3', 5]],
+          [
+            ['1', 'LC4'],
+            ['3', 'DNp01'],
+          ],
+        ),
       )
       const built = compareEdges(sources, names).comparison
       expect(built.schema.columns).toEqual(comparisonSchema(names).columns)

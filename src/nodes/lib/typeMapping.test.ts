@@ -463,10 +463,9 @@ describe('labels passed through without a counterpart', () => {
   })
 
   it('splits a compound, so listing one part catches a neuron typed with two', () => {
-    const mapping = matchCellTypes(
-      [dataset({ m1: ['pMP2,pMP3'] }), dataset({ f1: ['LC4'] })],
-      { keepLabels: ['pMP2'] },
-    )
+    const mapping = matchCellTypes([dataset({ m1: ['pMP2,pMP3'] }), dataset({ f1: ['LC4'] })], {
+      keepLabels: ['pMP2'],
+    })
     expect(labelsOf(mapping, 0)).toEqual({ m1: 'pMP2' })
   })
 
@@ -477,19 +476,17 @@ describe('labels passed through without a counterpart', () => {
    * which holds that string verbatim. Testing only the parts dropped it silently.
    */
   it('takes the whole compound when that is what was listed', () => {
-    const mapping = matchCellTypes(
-      [dataset({ m1: ['pMP2,pMP3'] }), dataset({ f1: ['LC4'] })],
-      { keepLabels: ['pMP2,pMP3'] },
-    )
+    const mapping = matchCellTypes([dataset({ m1: ['pMP2,pMP3'] }), dataset({ f1: ['LC4'] })], {
+      keepLabels: ['pMP2,pMP3'],
+    })
     expect(labelsOf(mapping, 0)).toEqual({ m1: 'pMP2,pMP3' })
   })
 
   /* Both listed: the shorter, non-compound name wins, which is `chooseLabel`'s ordering. */
   it('prefers the part over the compound when both are listed', () => {
-    const mapping = matchCellTypes(
-      [dataset({ m1: ['pMP2,pMP3'] }), dataset({ f1: ['LC4'] })],
-      { keepLabels: ['pMP2,pMP3', 'pMP2'] },
-    )
+    const mapping = matchCellTypes([dataset({ m1: ['pMP2,pMP3'] }), dataset({ f1: ['LC4'] })], {
+      keepLabels: ['pMP2,pMP3', 'pMP2'],
+    })
     expect(labelsOf(mapping, 0)).toEqual({ m1: 'pMP2' })
   })
 
@@ -794,16 +791,21 @@ describe('the graph the answer was read off', () => {
     const { nodes } = MAPPING.graph
     // `m1` and `m2` share a label set, so they are one node weighing 2 — cocoa's
     // `collapse_neuron_nodes`, done at construction. Four groups would mean it stopped.
-    expect(nodes.filter((n) => n.kind === 'neurons').map((n) => n.nNeurons).sort()).toEqual([
-      1, 1, 2,
-    ])
-    expect(nodes.filter((n) => n.kind === 'label').map((n) => n.name).sort()).toEqual([
-      'LC4',
-      'pMP2',
-    ])
+    expect(
+      nodes
+        .filter((n) => n.kind === 'neurons')
+        .map((n) => n.nNeurons)
+        .sort(),
+    ).toEqual([1, 1, 2])
+    expect(
+      nodes
+        .filter((n) => n.kind === 'label')
+        .map((n) => n.name)
+        .sort(),
+    ).toEqual(['LC4', 'pMP2'])
   })
 
-  it("gives a label node the neurons that carry it, so one size encoding reads on both kinds", () => {
+  it('gives a label node the neurons that carry it, so one size encoding reads on both kinds', () => {
     const lc4 = MAPPING.graph.nodes.find((n) => n.name === 'LC4')
     expect(lc4?.nNeurons).toBe(3)
   })
@@ -824,7 +826,9 @@ describe('the graph the answer was read off', () => {
     // Sorted ends, because the pair is undirected and which index came first is an artifact of
     // construction order rather than something a drawing should depend on.
     const drawn = edges
-      .map((e) => [nodes[e.source]!.name, nodes[e.target]!.name].sort().join('-') + `:${e.weight}`)
+      .map(
+        (e) => [nodes[e.source]!.name, nodes[e.target]!.name].sort().join('-') + `:${e.weight}`,
+      )
       .sort()
     // `m1` names the group holding m1 and m2, so its edge to LC4 weighs 2 — the group's size,
     // which is the number `collapse_neuron_nodes` gets by summing. Once per pair, not twice.
@@ -855,7 +859,8 @@ describe('the graph the answer was read off', () => {
     expect(net.directed).toBe(false)
     const ids = new Set((net.nodes.data['id'] as unknown[]).map(String))
     for (const end of ['source', 'target']) {
-      for (const cell of net.edges.data[end] as unknown[]) expect(ids.has(String(cell))).toBe(true)
+      for (const cell of net.edges.data[end] as unknown[])
+        expect(ids.has(String(cell))).toBe(true)
     }
     expect(net.edges.data['kind']).toEqual(['membership', 'membership', 'membership'])
   })

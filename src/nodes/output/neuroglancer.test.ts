@@ -583,7 +583,11 @@ describe('which viewer the segmentation is authenticated for', () => {
 })
 
 describe('extra layers', () => {
-  const SHELL = { type: 'segmentation', name: 'brain shell', source: 'precomputed://gs://b/shell' }
+  const SHELL = {
+    type: 'segmentation',
+    name: 'brain shell',
+    source: 'precomputed://gs://b/shell',
+  }
 
   /** The scene the node emits, with a layer set on the Extra layers socket. */
   async function sceneWithExtras(

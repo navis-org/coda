@@ -30,7 +30,12 @@ import { T } from '../../core/types'
 import type { NblastSymmetry } from '../../pyodide/nblast'
 import { runSynblast } from '../../pyodide/nblast'
 import { SYMMETRY_OPTIONS, nblastMatrix } from '../lib/nblastOps'
-import { hasPolarity, synapseLabels, synapseSetFrom, synblastSidesFrom } from '../lib/synblastOps'
+import {
+  hasPolarity,
+  synapseLabels,
+  synapseSetFrom,
+  synblastSidesFrom,
+} from '../lib/synblastOps'
 import { warnAboveParam } from '../lib/limitParams'
 import { MAX_NEURONS } from '../query/morphology'
 

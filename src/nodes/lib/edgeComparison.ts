@@ -194,7 +194,10 @@ export function labelledEdgesFrom(
     pool: new Set(labels.values()),
     // The public shape, built once per label — `ids` is an implementation detail of the count.
     labels: new Map(
-      Array.from(totals, ([label, t]) => [label, { neurons: t.ids.size, out: t.out, in: t.in }]),
+      Array.from(totals, ([label, t]) => [
+        label,
+        { neurons: t.ids.size, out: t.out, in: t.in },
+      ]),
     ),
   }
 }
@@ -444,7 +447,9 @@ export function compareConnectivity(
   const ratio = totalsRatio(compared.totals)
   if (ratio > EDGE_TOTAL_RATIO_WARN) {
     const spread = datasets
-      .map((dataset, i) => `${dataset.name} ${Math.round(compared.totals[i]!).toLocaleString()}`)
+      .map(
+        (dataset, i) => `${dataset.name} ${Math.round(compared.totals[i]!).toLocaleString()}`,
+      )
       .join(', ')
     warn.warn(
       `Totals over the shared labels differ by a factor of ${ratio.toFixed(1)} (${spread}). ` +

@@ -28,7 +28,8 @@ export const dedupeNode = registerNode({
   label: 'Deduplicate',
   category: 'transform',
   description: 'Drop repeated rows, comparing on the chosen columns.',
-  guide: 'Drop rows that repeat. Name the columns to compare on, or leave empty to compare whole rows for exact duplicates. Keep decides which row survives: first, last, or none at all—only rows nobody disagrees about. Keeps whole rows unchanged; unlike Group By, nothing is aggregated.',
+  guide:
+    'Drop rows that repeat. Name the columns to compare on, or leave empty to compare whole rows for exact duplicates. Keep decides which row survives: first, last, or none at all—only rows nobody disagrees about. Keeps whole rows unchanged; unlike Group By, nothing is aggregated.',
   cost: 'cheap',
   inputs: [{ id: 'in', label: 'Table', type: T.table() }],
   outputs: [{ id: 'out', label: 'Table', type: T.table() }],

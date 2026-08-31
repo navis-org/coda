@@ -30,7 +30,15 @@ import {
   qualifyId,
   unqualifyId,
 } from '../../core/ids'
-import { T, column, findColumn, isTabular, schemaOf, tableSchema, uniqueName } from '../../core/types'
+import {
+  T,
+  column,
+  findColumn,
+  isTabular,
+  schemaOf,
+  tableSchema,
+  uniqueName,
+} from '../../core/types'
 import type { TableSchema } from '../../core/types'
 import type { CellValue, ColumnData } from '../../core/values'
 import { getColumn, isTableValue, makeTable } from '../../core/values'
@@ -63,7 +71,10 @@ interface QualifySpec {
  * is right there (naming the column you are rewriting means rewriting it in place) and wrong
  * here (this always appends).
  */
-export function qualifyTarget(schema: TableSchema | undefined, into: string): string | undefined {
+export function qualifyTarget(
+  schema: TableSchema | undefined,
+  into: string,
+): string | undefined {
   const name = into.trim()
   if (!name) return undefined
   return uniqueName(new Set((schema?.columns ?? []).map((c) => c.name)), name)
@@ -80,8 +91,11 @@ export function qualifyTarget(schema: TableSchema | undefined, into: string): st
 function qualifyLayout(schema: TableSchema, spec: QualifySpec) {
   const source = findColumn(schema, spec.column)
   if (!source) return undefined
-  const columns = schema.columns.map((c) => (c.name === source.name ? column(c.name, 'str') : c))
-  const dataset = spec.direction === 'remove' ? qualifyTarget({ columns }, spec.into) : undefined
+  const columns = schema.columns.map((c) =>
+    c.name === source.name ? column(c.name, 'str') : c,
+  )
+  const dataset =
+    spec.direction === 'remove' ? qualifyTarget({ columns }, spec.into) : undefined
   if (!dataset) return { columns, dataset: undefined }
   return { columns: [...columns, column(dataset, 'str')], dataset }
 }

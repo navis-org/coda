@@ -11,7 +11,13 @@ import { describe, expect, it } from 'vitest'
 import { column, tableSchema } from '../../core/types'
 import type { NetworkValue } from '../../core/values'
 import { getColumn, tableFromRows } from '../../core/values'
-import { NO_FILTER, connectedComponents, expandSelection, filterNetwork, isFiltering } from './networkOps'
+import {
+  NO_FILTER,
+  connectedComponents,
+  expandSelection,
+  filterNetwork,
+  isFiltering,
+} from './networkOps'
 
 const NODE_SCHEMA = tableSchema(
   column('id', 'str'),

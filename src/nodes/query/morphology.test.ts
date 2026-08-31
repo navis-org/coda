@@ -230,16 +230,18 @@ describe('the Source control', () => {
       throw new Error('Skeletons has no dynamic Source enum')
     }
     return param.options(
-      makeInferContext(def, { ...defaultParams(def), skeletonSource: chosen }, { dataset: type }),
+      makeInferContext(
+        def,
+        { ...defaultParams(def), skeletonSource: chosen },
+        { dataset: type },
+      ),
     )
   }
 
   it('names the route Automatic will take, even where there is only one', () => {
     // This is the whole of what the control does on a single-route dataset, and it is the point:
     // "Automatic" on its own is a provenance question mark on every graph anyone shares.
-    const type = withRoutes('one-route', [
-      { id: 'neuprint', label: 'neuPrint SWC' },
-    ])
+    const type = withRoutes('one-route', [{ id: 'neuprint', label: 'neuPrint SWC' }])
     expect(optionsFor(type)).toEqual([{ value: '', label: 'Automatic (neuPrint SWC)' }])
   })
 

@@ -151,12 +151,7 @@ describe('columns that did not exist', () => {
     // The other half: the column exists and is numeric, so the value has to widen it.
     const setters = [setter('type==LC4', 'pre', '864691135463487579')]
     const out = editTable(neurons(), setters)
-    expect(out.table.data.pre).toEqual([
-      '864691135463487579',
-      '864691135463487579',
-      '40',
-      '5',
-    ])
+    expect(out.table.data.pre).toEqual(['864691135463487579', '864691135463487579', '40', '5'])
     expectSchemaAgreement(editSchema(NEURONS, setters), out.table)
   })
 
@@ -191,7 +186,9 @@ describe('dtypes', () => {
     const setters = [setter('type=LPLC2', 'pre', '1.5')]
     const out = editTable(neurons(), setters)
     expect(out.table.data.pre).toEqual([120, 80, 1.5, 5])
-    expect(editSchema(NEURONS, setters)!.columns.find((c) => c.name === 'pre')!.dtype).toBe('f64')
+    expect(editSchema(NEURONS, setters)!.columns.find((c) => c.name === 'pre')!.dtype).toBe(
+      'f64',
+    )
   })
 
   it('decides a column dtype once for every setter writing it', () => {
@@ -294,7 +291,10 @@ describe('what it says out loud', () => {
   it('names the applied rules and the pass-through on the plan itself', () => {
     // `active` and `noop` are read by `editTable` and by both export emitters — two of those
     // across the seam, where a disagreement emits a pass-through for a node that edits.
-    const plan = editPlan(NEURONS, [setter('LC4', 'type', 'x'), setter('type==LC4', 'side', 'l')])
+    const plan = editPlan(NEURONS, [
+      setter('LC4', 'type', 'x'),
+      setter('type==LC4', 'side', 'l'),
+    ])
     expect(plan.active.map((t) => t.index)).toEqual([1])
     expect(plan.noop).toBe(false)
     expect(editPlan(NEURONS, []).noop).toBe(true)

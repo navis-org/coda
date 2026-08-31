@@ -56,10 +56,7 @@ function skeletonRoutesFromType(
  * about a version dropdown's blank entry, one node over. The named routes are listed only when
  * there is a choice to make; a lone route is already the whole of what Automatic says.
  */
-function skeletonSourceOptions(
-  type: CodaType | undefined,
-  chosen: string,
-): EnumOption[] {
+function skeletonSourceOptions(type: CodaType | undefined, chosen: string): EnumOption[] {
   const routes = skeletonRoutesFromType(type)
   const best = routes?.[0]
   const options: EnumOption[] = [
@@ -93,7 +90,10 @@ export function skeletonSourceParam(): ParamDef {
       'best one this dataset has; the result says which it used.',
     default: '',
     options: (ctx: InferContext) =>
-      skeletonSourceOptions(ctx.inputs.dataset, String(ctx.params[SKELETON_SOURCE_PARAM] ?? '')),
+      skeletonSourceOptions(
+        ctx.inputs.dataset,
+        String(ctx.params[SKELETON_SOURCE_PARAM] ?? ''),
+      ),
   }
 }
 

@@ -894,10 +894,7 @@ function chooseLabel(texts: readonly string[], s: Settings): string {
  * ([invariant 8](../../../docs/invariants.md)), and "lowest" among rounded ids is a different
  * neuron's.
  */
-function resolveIdLabels(
-  labels: Map<NeuronId, string>[],
-  named: Map<number, string>,
-): void {
+function resolveIdLabels(labels: Map<NeuronId, string>[], named: Map<number, string>): void {
   const duplicated = new Set<NeuronId>()
   const seen = new Set<NeuronId>()
   const groups = new Map<string, NeuronId[]>()
@@ -1251,7 +1248,10 @@ export function mapperDatasetFrom(
  * them is the thing that goes wrong. `typed: undefined` because the pass-through list arrives
  * only by wire — a typed twin of `badLabels` was considered and declined.
  */
-export function keepLabelsFrom(value: Value | undefined, labelColumn: string | undefined): string[] {
+export function keepLabelsFrom(
+  value: Value | undefined,
+  labelColumn: string | undefined,
+): string[] {
   if (!isTableValue(value)) return []
   return collectLabels({ typed: undefined, table: value, column: labelColumn })
 }

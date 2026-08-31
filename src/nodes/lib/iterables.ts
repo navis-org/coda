@@ -26,7 +26,13 @@
 
 import { ID_COLUMN_NAME, idText } from '../../core/ids'
 import type { CodaType } from '../../core/types'
-import type { CellValue, MeshesValue, SkeletonsValue, TableValue, Value } from '../../core/values'
+import type {
+  CellValue,
+  MeshesValue,
+  SkeletonsValue,
+  TableValue,
+  Value,
+} from '../../core/values'
 import { EMPTY_BOUNDS, boundsOf, getRow, isTableValue, selectRows } from '../../core/values'
 
 /** The value kinds `Select One` can step through. */

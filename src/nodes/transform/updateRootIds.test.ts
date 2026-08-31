@@ -350,7 +350,10 @@ describe('a Dataset from another backend', () => {
   }
 
   it('refuses at edit time, naming the backend rather than the grammar', () => {
-    const message = issues(wired(node('np', 'dataset.neuprint', { dataset: 'male-cns:v1.0' })), 'upd')
+    const message = issues(
+      wired(node('np', 'dataset.neuprint', { dataset: 'male-cns:v1.0' })),
+      'upd',
+    )
     expect(message).toContain('neuPrint')
     expect(message).toContain('CAVE')
     // Not the sentence `evaluate` used to produce, which was about a colon.

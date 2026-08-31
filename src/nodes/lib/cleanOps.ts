@@ -235,7 +235,11 @@ export function skeletonsFromResult(
 const RESAMPLE_NODES_WARN = 5_000_000
 const BYTES_PER_NODE = 20
 
-export function checkResampleSize(ctx: Warner, skeletons: SkeletonsValue, spacingNm: number): void {
+export function checkResampleSize(
+  ctx: Warner,
+  skeletons: SkeletonsValue,
+  spacingNm: number,
+): void {
   if (spacingNm <= 0) return
 
   let cable = 0
@@ -322,7 +326,10 @@ export function changesFaces(params: MeshCleanParams): boolean {
  *
  * Buffers are built rather than borrowed, `cleanRequestFrom`'s reason.
  */
-export function meshRequestFrom(meshes: MeshesValue, params: MeshCleanParams): CleanMeshesRequest {
+export function meshRequestFrom(
+  meshes: MeshesValue,
+  params: MeshCleanParams,
+): CleanMeshesRequest {
   const positions = new Float32Array(geometryPointCount(meshes) * 3)
   const indices = new Uint32Array(meshTriangleCount(meshes) * 3)
   const vertexOffsets = new Int32Array(meshes.items.length + 1)
@@ -386,7 +393,10 @@ export function meshesFromResult(
 
   const items: MeshGeometry[] = original.items.map((item, n) => ({
     id: item.id,
-    positions: result.positions.slice(result.vertexOffsets[n]! * 3, result.vertexOffsets[n + 1]! * 3),
+    positions: result.positions.slice(
+      result.vertexOffsets[n]! * 3,
+      result.vertexOffsets[n + 1]! * 3,
+    ),
     indices: result.indices.slice(result.faceOffsets[n]! * 3, result.faceOffsets[n + 1]! * 3),
   }))
 
@@ -415,7 +425,11 @@ export function meshesFromResult(
  */
 const RAY_CASTS_WARN = 2e8
 
-export function checkDropInternalsSize(ctx: Warner, meshes: MeshesValue, params: MeshCleanParams): void {
+export function checkDropInternalsSize(
+  ctx: Warner,
+  meshes: MeshesValue,
+  params: MeshCleanParams,
+): void {
   if (!params.dropInternals) return
   const triangles = meshTriangleCount(meshes)
   const casts = triangles * params.rays * params.passes

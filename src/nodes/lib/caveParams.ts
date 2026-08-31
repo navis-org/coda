@@ -116,7 +116,9 @@ export function caveDatastackIssues(
    * a wire makes the field inert and a stale value in an inert field is not worth reporting.
    */
   if (!inputType && !splitDatasetId(datastack)) {
-    return [`"${datastack}" names no materialization — CAVE numbers them, e.g. ${datastack}:783`]
+    return [
+      `"${datastack}" names no materialization — CAVE numbers them, e.g. ${datastack}:783`,
+    ]
   }
   return []
 }

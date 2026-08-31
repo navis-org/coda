@@ -94,22 +94,50 @@ function node(id: string, type: string, params: Record<string, unknown> = {}): G
 }
 
 /** dataset → find(LC4) → skeletons → mirror, or → mirror straight off the table. */
-function pipeline(params: Record<string, unknown> = {}, from: 'skeletons' | 'table' = 'skeletons'): CodaGraph {
+function pipeline(
+  params: Record<string, unknown> = {},
+  from: 'skeletons' | 'table' = 'skeletons',
+): CodaGraph {
   let g = emptyGraph('mirror-test')
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: 'optic-lobe-mini' }))
   g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC4', status: 'Traced' }))
   g = addNode(g, node('mirror', 'neuron.mirror', params))
-  g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'find', targetHandle: 'dataset' })
+  g = addEdge(g, {
+    source: 'ds',
+    sourceHandle: 'dataset',
+    target: 'find',
+    targetHandle: 'dataset',
+  })
 
   if (from === 'table') {
-    g = addEdge(g, { source: 'find', sourceHandle: 'neurons', target: 'mirror', targetHandle: 'in' })
+    g = addEdge(g, {
+      source: 'find',
+      sourceHandle: 'neurons',
+      target: 'mirror',
+      targetHandle: 'in',
+    })
     return g
   }
 
   g = addNode(g, node('geo', 'neuron.skeletons', { limit: 100 }))
-  g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'geo', targetHandle: 'dataset' })
-  g = addEdge(g, { source: 'find', sourceHandle: 'neurons', target: 'geo', targetHandle: 'neurons' })
-  g = addEdge(g, { source: 'geo', sourceHandle: 'skeletons', target: 'mirror', targetHandle: 'in' })
+  g = addEdge(g, {
+    source: 'ds',
+    sourceHandle: 'dataset',
+    target: 'geo',
+    targetHandle: 'dataset',
+  })
+  g = addEdge(g, {
+    source: 'find',
+    sourceHandle: 'neurons',
+    target: 'geo',
+    targetHandle: 'neurons',
+  })
+  g = addEdge(g, {
+    source: 'geo',
+    sourceHandle: 'skeletons',
+    target: 'mirror',
+    targetHandle: 'in',
+  })
   return g
 }
 
@@ -133,9 +161,9 @@ describe('neuron.mirror — types', () => {
     // `schemaOf` only answers for tabular types, so read the geometry type's schema directly.
     const type = inferGraph(pipeline()).nodes['mirror']?.outputs['out']
     expect(schema).toBeUndefined()
-    expect(
-      type && 'schema' in type ? type.schema?.columns.map((c) => c.name) : [],
-    ).toContain(MIRRORED_COLUMN)
+    expect(type && 'schema' in type ? type.schema?.columns.map((c) => c.name) : []).toContain(
+      MIRRORED_COLUMN,
+    )
   })
 
   it('says any for an unresolved input rather than guessing a kind', () => {
@@ -188,7 +216,8 @@ describe('neuron.mirror — the override, which is the only way through here', (
     expect(scheduler.info('mirror').error).toBeUndefined()
     const source = scheduler.output('geo', 'skeletons')
     const mirrored = scheduler.output('mirror', 'out')
-    if (!isSkeletonsValue(source) || !isSkeletonsValue(mirrored)) throw new Error('not skeletons')
+    if (!isSkeletonsValue(source) || !isSkeletonsValue(mirrored))
+      throw new Error('not skeletons')
 
     const x = source.items[0]!.positions[0]!
     /*
@@ -382,7 +411,8 @@ describe('neuron.mirror — the spline half', () => {
      * changes an answer without changing anything visible.
      */
     mockedWarp.mockRejectedValue(new Error('worker died'))
-    const error = (await run(pipeline({ space: 'MANC', warp: true }))).info('mirror').error ?? ''
+    const error =
+      (await run(pipeline({ space: 'MANC', warp: true }))).info('mirror').error ?? ''
     expect(error).toMatch(/worker died/)
   })
 

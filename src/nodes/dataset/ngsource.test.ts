@@ -73,7 +73,9 @@ describe('inference', () => {
     const def = requireNodeDef(TYPE)
     const out = def.inferOutputs?.(ctxFor({ url: SPEC }))
     const ref = datasetRef(out?.dataset)
-    expect(ref?.sourceId).toBe(`precomputed:precomputed://gs://flyem-male-cns/v1.0/segmentation`)
+    expect(ref?.sourceId).toBe(
+      `precomputed:precomputed://gs://flyem-male-cns/v1.0/segmentation`,
+    )
     expect(ref?.datasetId).toBe('precomputed://gs://flyem-male-cns/v1.0/segmentation')
     expect(() => requireSource(ref!.sourceId!)).not.toThrow()
   })
@@ -116,14 +118,17 @@ describe('inference', () => {
       [`${BASE}/info`]: volumeInfo({ mesh: 'meshes', segmentProperties: 'props' }),
       [`${BASE}/props/info`]: {
         '@type': 'neuroglancer_segment_properties',
-        inline: { ids: ['1', '2'], properties: [{ id: 'label', type: 'label', values: ['EB', 'FB'] }] },
+        inline: {
+          ids: ['1', '2'],
+          properties: [{ id: 'label', type: 'label', values: ['EB', 'FB'] }],
+        },
       },
     })
     await probePrecomputed(BASE)
     // Through the source, which is what the picker's own peek starts — one path, one download.
-    await requireSource(`precomputed:precomputed://gs://flyem-male-cns/v1.0/segmentation`).neuronIndex?.(
-      { datasetId: 'precomputed://gs://flyem-male-cns/v1.0/segmentation' },
-    )
+    await requireSource(
+      `precomputed:precomputed://gs://flyem-male-cns/v1.0/segmentation`,
+    ).neuronIndex?.({ datasetId: 'precomputed://gs://flyem-male-cns/v1.0/segmentation' })
 
     let graph = addNode(emptyGraph('t'), node('src', TYPE, { url: SPEC }))
     graph = addNode(graph, node('r', 'neuron.roiMeshes'))
@@ -142,9 +147,10 @@ describe('inference', () => {
       defaultParams(requireNodeDef('neuron.roiMeshes')),
       { dataset: result.nodes['src']?.outputs['dataset'] },
     )
-    const options = param?.kind === 'multiEnum' && typeof param.options === 'function'
-      ? param.options(ctx)
-      : []
+    const options =
+      param?.kind === 'multiEnum' && typeof param.options === 'function'
+        ? param.options(ctx)
+        : []
     expect(options.map((o) => o.value)).toEqual(['EB', 'FB'])
   })
 
@@ -225,9 +231,9 @@ describe('validate', () => {
 
   it('names the format when it is one Coda cannot read', () => {
     // A graphene source is a CAVE datastack, and the message says where to go instead.
-    expect(issues({ url: 'graphene://middleauth+https://cave.example.org/seg/table/x' })[0]).toMatch(
-      /CAVE dataset node/,
-    )
+    expect(
+      issues({ url: 'graphene://middleauth+https://cave.example.org/seg/table/x' })[0],
+    ).toMatch(/CAVE dataset node/)
   })
 
   it('names a location it cannot fetch from', () => {
@@ -272,7 +278,9 @@ describe('evaluate', () => {
     expect(value.datasetId).toBe('precomputed://gs://flyem-male-cns/v1.0/segmentation')
     // The label is the whole of what a downstream card can show: there is no version dropdown
     // and no Description companion to say what is at the other end.
-    expect(value.label).toBe('flyem-male-cns/segmentation · segmentation · multi-resolution meshes')
+    expect(value.label).toBe(
+      'flyem-male-cns/segmentation · segmentation · multi-resolution meshes',
+    )
   })
 
   it('fails with the transport\u2019s reason rather than an empty dataset', async () => {

@@ -15,11 +15,7 @@ import { inferGraph } from '../../core/inference'
 import { defaultParams } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
 import { column, tableSchema } from '../../core/types'
-import {
-  MIN_LANDMARKS,
-  checkLandmarkCount,
-  landmarkTriple,
-} from '../lib/transformOps'
+import { MIN_LANDMARKS, checkLandmarkCount, landmarkTriple } from '../lib/transformOps'
 import { scaleFor } from '../../data/transforms/landmarks'
 import { makeTable } from '../../core/values'
 import type { TableValue } from '../../core/values'
@@ -137,11 +133,15 @@ describe('reading landmarks off a table', () => {
     const table = landmarks(4)
     const holed = makeTable(table.schema, { ...table.data, y: [0, null, 2, 3] })
     expect(() => landmarkTriple(holed, ['x', 'y', 'z'], 1)).toThrow(/Row 2 of "y"/)
-    expect(() => landmarkTriple(holed, ['x', 'y', 'z'], 1)).toThrow(/interpolates its landmarks/)
+    expect(() => landmarkTriple(holed, ['x', 'y', 'z'], 1)).toThrow(
+      /interpolates its landmarks/,
+    )
   })
 
   it('names a column that is not there', () => {
-    expect(() => landmarkTriple(landmarks(4), ['x', 'nope', 'z'], 1)).toThrow(/no column called/)
+    expect(() => landmarkTriple(landmarks(4), ['x', 'nope', 'z'], 1)).toThrow(
+      /no column called/,
+    )
   })
 
   it('refuses fewer landmarks than a 3-D spline can be fitted from', () => {

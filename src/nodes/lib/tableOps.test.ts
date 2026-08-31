@@ -556,7 +556,10 @@ describe('join', () => {
   it('agrees with its declared schema in every direction', () => {
     for (const how of ['left', 'inner', 'outer', 'right'] as const) {
       const spec = { ...LEFT, how }
-      expectSchemaAgreement(joinSchema(CONNECTIVITY, WIDER, spec), joinTables(conn(), wider(), spec))
+      expectSchemaAgreement(
+        joinSchema(CONNECTIVITY, WIDER, spec),
+        joinTables(conn(), wider(), spec),
+      )
     }
   })
 })
@@ -616,11 +619,9 @@ describe('rename', () => {
   })
 
   it('ignores a rename naming a column the table does not carry', () => {
-    expect(renameSchema(FOREIGN, [{ from: 'gone', to: 'x' }])!.columns.map((c) => c.name)).toEqual([
-      'root_id',
-      'cell_type',
-      'w',
-    ])
+    expect(
+      renameSchema(FOREIGN, [{ from: 'gone', to: 'x' }])!.columns.map((c) => c.name),
+    ).toEqual(['root_id', 'cell_type', 'w'])
   })
 
   describe('the kind', () => {
@@ -878,7 +879,9 @@ describe('unpivot', () => {
     // Text and a number cannot reconcile, so the value column keeps every value as text —
     // `combinedDType`'s widening, the same call the coalesce makes.
     const clash = tableSchema(column('n', 'i64'), column('label', 'str'))
-    expect(unpivotSchema(clash, spec({ columns: ['n', 'label'] }))!.columns[1]!.dtype).toBe('str')
+    expect(unpivotSchema(clash, spec({ columns: ['n', 'label'] }))!.columns[1]!.dtype).toBe(
+      'str',
+    )
   })
 
   it('stringifies into a text value column without inventing the word "null"', () => {
@@ -978,10 +981,7 @@ describe('unpivot', () => {
     ]
     const data: Record<string, ColumnData> = {}
     for (const name of names) data[name] = new Array(rows).fill(1)
-    return makeTable(
-      tableSchema(...names.map((n) => column(n, 'i64'))),
-      data,
-    )
+    return makeTable(tableSchema(...names.map((n) => column(n, 'i64'))), data)
   }
 
   const foldedNames = (n: number) => Array.from({ length: n }, (_, i) => `c${i}`)
@@ -1017,9 +1017,9 @@ describe('unpivot', () => {
       'No columns to fold — the table passes through unchanged',
     ])
     expect(unpivotIssues(WIDE, spec({ nameInto: '' }))[0]).toContain('need a name')
-    expect(unpivotIssues(WIDE, spec({ columns: ['neuronId', 'type', 'DNp02', 'PLP003'] }))).toEqual(
-      ['Nothing is kept, so the values cannot be traced back to their rows'],
-    )
+    expect(
+      unpivotIssues(WIDE, spec({ columns: ['neuronId', 'type', 'DNp02', 'PLP003'] })),
+    ).toEqual(['Nothing is kept, so the values cannot be traced back to their rows'])
     // A schema that has not arrived is not a schema without these columns: nothing to say.
     expect(unpivotIssues(undefined, spec())).toEqual([])
   })
@@ -1400,8 +1400,15 @@ describe('relabel', () => {
     // The case that decides the dtype: numbers put back into a column of text.
     const numeric = tableSchema(column('from', 'str'), column('cluster', 'i64'))
     const numbers = tableFromRows(numeric, [{ from: 'LC4', cluster: 7 }])
-    const kept = relabelTable(edges(), numbers, spec({ valueColumn: 'cluster', unmatched: 'keep' }))
-    expectSchemaAgreement(relabelSchema(EDGES, numeric, spec({ valueColumn: 'cluster', unmatched: 'keep' })), kept)
+    const kept = relabelTable(
+      edges(),
+      numbers,
+      spec({ valueColumn: 'cluster', unmatched: 'keep' }),
+    )
+    expectSchemaAgreement(
+      relabelSchema(EDGES, numeric, spec({ valueColumn: 'cluster', unmatched: 'keep' })),
+      kept,
+    )
     expect(kept.schema.columns[0]!.dtype).toBe('str')
     // …and where nothing is put back, the column simply *is* the mapping's values.
     const nulled = relabelTable(edges(), numbers, spec({ valueColumn: 'cluster' }))
@@ -1429,10 +1436,9 @@ describe('relabel', () => {
 
     // Except the column's own name, which means what leaving the field empty means.
     expect(relabelTarget(EDGES, 'preType', 'preType')).toBe('preType')
-    expect(columnNames(relabelTable(edges(), mapping(), spec({ into: 'preType' })).schema)).toEqual([
-      'preType',
-      'weight',
-    ])
+    expect(
+      columnNames(relabelTable(edges(), mapping(), spec({ into: 'preType' })).schema),
+    ).toEqual(['preType', 'weight'])
   })
 
   it('uses a repeated key once and never multiplies rows', () => {
@@ -1466,9 +1472,16 @@ describe('relabel', () => {
     const mapped = relabelSchema(EDGES, measured, spec({ valueColumn: 'length' }))
     expect(mapped!.columns[0]).toEqual(column('preType', 'f64', 'nm'))
     // With `keep`, half the column is type names — nanometres would be a claim about those too.
-    const kept = relabelSchema(EDGES, measured, spec({ valueColumn: 'length', unmatched: 'keep' }))
+    const kept = relabelSchema(
+      EDGES,
+      measured,
+      spec({ valueColumn: 'length', unmatched: 'keep' }),
+    )
     expect(kept!.columns[0]).toEqual(column('preType', 'str'))
-    expectSchemaAgreement(mapped, relabelTable(edges(), lengths, spec({ valueColumn: 'length' })))
+    expectSchemaAgreement(
+      mapped,
+      relabelTable(edges(), lengths, spec({ valueColumn: 'length' })),
+    )
   })
 
   it('passes the schema through rather than blanking it while a picker is unresolved', () => {

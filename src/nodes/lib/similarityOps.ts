@@ -57,11 +57,7 @@ import { labelOf, uniqueLabels } from './tableOps'
 // ---------------------------------------------------------------------------
 
 export type SimilarityMetric =
-  | 'cosine'
-  | 'jaccard'
-  | 'jaccardWeighted'
-  | 'euclidean'
-  | 'pearson'
+  'cosine' | 'jaccard' | 'jaccardWeighted' | 'euclidean' | 'pearson'
 
 export type SimilarityOutput = 'similarity' | 'distance'
 
@@ -95,7 +91,13 @@ interface MetricSpec {
 }
 
 const METRICS: Record<SimilarityMetric, MetricSpec> = {
-  cosine: { label: 'Cosine', noun: 'cosine', accumulation: 'dot', natural: 'similarity', signed: true },
+  cosine: {
+    label: 'Cosine',
+    noun: 'cosine',
+    accumulation: 'dot',
+    natural: 'similarity',
+    signed: true,
+  },
   jaccard: {
     label: 'Jaccard (presence)',
     noun: 'Jaccard',
@@ -117,7 +119,13 @@ const METRICS: Record<SimilarityMetric, MetricSpec> = {
     natural: 'distance',
     signed: true,
   },
-  pearson: { label: 'Pearson', noun: 'Pearson r', accumulation: 'dot', natural: 'similarity', signed: true },
+  pearson: {
+    label: 'Pearson',
+    noun: 'Pearson r',
+    accumulation: 'dot',
+    natural: 'similarity',
+    signed: true,
+  },
 }
 
 export const SIMILARITY_METRIC_OPTIONS: Array<{ value: SimilarityMetric; label: string }> = (

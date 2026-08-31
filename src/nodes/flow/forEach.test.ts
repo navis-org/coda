@@ -98,7 +98,9 @@ describe('For Each, element by element', () => {
   })
 
   it('falls back to a name where there is no id to use', () => {
-    const clusters = tableFromRows(tableSchema(column('label', 'str')), [{ label: 'cluster-a' }])
+    const clusters = tableFromRows(tableSchema(column('label', 'str')), [
+      { label: 'cluster-a' },
+    ])
     // An uploaded CSV of clusters has no `neuronId`, and a name beats a bare ordinal there.
     expect(def.loopPlan!(ctx(clusters)).label(0)).toBe('cluster-a')
   })

@@ -184,7 +184,12 @@ export function synblastSidesFrom(
   queryValue: Value | undefined,
   targetValue: Value | undefined,
   limit: number,
-): { query: PointsValue; queryGroups: SynapseGroup[]; target?: PointsValue; targetGroups?: SynapseGroup[] } {
+): {
+  query: PointsValue
+  queryGroups: SynapseGroup[]
+  target?: PointsValue
+  targetGroups?: SynapseGroup[]
+} {
   if (!isPointsValue(queryValue)) {
     throw new Error('Query input is not a set of points — wire a Synapses node into it.')
   }
@@ -243,6 +248,9 @@ export function synblastSidesFrom(
  * group 0 and the type test passes for every pair, which is exactly `by_type=False` wearing a
  * label that says otherwise. The node hides the control rather than leaving it on and inert.
  */
-export function hasPolarity(attributes: TableValue | undefined, column: string | undefined): boolean {
+export function hasPolarity(
+  attributes: TableValue | undefined,
+  column: string | undefined,
+): boolean {
   return Boolean(column && attributes && column in attributes.data)
 }

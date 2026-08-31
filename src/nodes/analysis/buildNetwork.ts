@@ -103,7 +103,7 @@ export const buildNetworkNode = registerNode({
   category: 'analysis',
   description: 'Turn an edge table into a network of nodes and links.',
   guide:
-    'Turn an edge table into a network: nodes, links and the roll-ups a node-link drawing needs — in and out degree, in and out weight. Both halves carry an ordinary attribute table, so colouring nodes by cell type works exactly as a column picker anywhere else does. Where several rows merge into one link the weights add, but no other number does: nothing in a column’s type separates a measure from an identifier, and summing preId produced noise offered to the size pickers. A value survives a merge only when every merged row agrees on it.',
+    'Turn an edge table into a network: nodes, links and the roll-ups a node-link drawing needs — in and out degree, in and out weight. Both halves carry an ordinary attribute table, so colouring by cell type is a column picker. Where several rows merge into one link the weights add and nothing else does.',
   cost: 'cheap',
   inputs: [
     { id: 'edges', label: 'Edges', type: T.table() },

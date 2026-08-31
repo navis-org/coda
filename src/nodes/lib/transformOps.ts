@@ -73,7 +73,13 @@ export function isGeometryValue(v: unknown): v is GeometryValue {
  * is the ordinary state before anything upstream has run.
  */
 export function isGeometryKind(kind: string | undefined): boolean {
-  return kind === undefined || kind === 'any' || kind === 'skeletons' || kind === 'meshes' || kind === 'points'
+  return (
+    kind === undefined ||
+    kind === 'any' ||
+    kind === 'skeletons' ||
+    kind === 'meshes' ||
+    kind === 'points'
+  )
 }
 
 /** What one item of a value is called, for a message that reads. */
@@ -493,8 +499,8 @@ export function stackGeometry(
   // either side's answer is the collection's. Built without the key rather than with an
   // explicit `undefined`, for `geometryFrame`'s structured-clone reason.
   const frame = {
-    ...(top.units ?? bottom.units ? { units: top.units ?? bottom.units } : {}),
-    ...(top.space ?? bottom.space ? { space: top.space ?? bottom.space } : {}),
+    ...((top.units ?? bottom.units) ? { units: top.units ?? bottom.units } : {}),
+    ...((top.space ?? bottom.space) ? { space: top.space ?? bottom.space } : {}),
   }
 
   if (top.kind === 'points' && bottom.kind === 'points') {

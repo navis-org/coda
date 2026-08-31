@@ -281,7 +281,9 @@ describe('neuron.synblast — running', () => {
 
     const points = scheduler.output('syn', 'points') as PointsValue
     // Every synapse crosses, and exactly once — the group boundaries partition the cloud.
-    expect(request.query.offsets[request.query.offsets.length - 1]).toBe(points.attributes.length)
+    expect(request.query.offsets[request.query.offsets.length - 1]).toBe(
+      points.attributes.length,
+    )
     const nm = Math.max(...Array.from(points.positions).map(Math.abs))
     const um = Math.max(...Array.from(request.query.points).map(Math.abs))
     expect(um).toBeCloseTo(nm / NM_PER_UM, 2)

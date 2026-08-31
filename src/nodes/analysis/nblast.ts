@@ -70,7 +70,7 @@ export const nblastNode = registerNode({
       step: 0.5,
       help:
         'Space the points evenly before comparing, in micrometres. Too fine and your NBLAST will ' +
-        'take forever. Too coarse and your scores will be meaningless. 1 µm is the convention, and the default. '+
+        'take forever. Too coarse and your scores will be meaningless. 1 µm is the convention, and the default. ' +
         ' Setting it to 0 leaves each skeleton exactly as it was traced.',
     },
     {

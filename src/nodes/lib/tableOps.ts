@@ -1671,7 +1671,11 @@ export function relabelSchema(
  * failure comparative connectomics exists to avoid. `keep` is right for a deliberately partial
  * mapping, and `drop` is cocoa's `ignore_unlabeled=True`.
  */
-export function relabelTable(table: TableValue, map: TableValue, spec: RelabelSpec): TableValue {
+export function relabelTable(
+  table: TableValue,
+  map: TableValue,
+  spec: RelabelSpec,
+): TableValue {
   if (!findColumn(table.schema, spec.column)) {
     throw new Error(`Column "${spec.column}" not found`)
   }
@@ -2179,7 +2183,11 @@ export function unpivotTable(
    * kind is a claim about what the ids are, not about how many times each appears. Fold the id
    * column itself and the claim is gone with it.
    */
-  return makeTable(plan.schema, data, plan.neurons && table.kind === 'neurons' ? 'neurons' : 'table')
+  return makeTable(
+    plan.schema,
+    data,
+    plan.neurons && table.kind === 'neurons' ? 'neurons' : 'table',
+  )
 }
 
 /**

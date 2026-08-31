@@ -35,7 +35,12 @@ import type { TableSchema } from '../../core/types'
 import { column, tableSchema } from '../../core/types'
 import type { CellValue, MatrixValue, TableValue } from '../../core/values'
 import { makeTable } from '../../core/values'
-import type { MatchCutoff, MatchMode, MatchesRequest, MatchesResult } from '../../pyodide/matches'
+import type {
+  MatchCutoff,
+  MatchMode,
+  MatchesRequest,
+  MatchesResult,
+} from '../../pyodide/matches'
 
 /** Which way round the scores run, and where the answer comes from when nobody said. */
 export type MatchDirection = 'auto' | 'higher' | 'lower'
@@ -243,7 +248,11 @@ export function matchSchema(mode: MatchMode): TableSchema {
  *
  * `rank` is 1-based, so the best match reads as rank 1.
  */
-export function matchTable(matrix: MatrixValue, result: MatchesResult, axis: 0 | 1): TableValue {
+export function matchTable(
+  matrix: MatrixValue,
+  result: MatchesResult,
+  axis: 0 | 1,
+): TableValue {
   // The group is whichever axis was scanned and the match is the other one — which is the one
   // thing about `axis` that has to be right in two places at once, so it is derived here from
   // the same expression the request used.

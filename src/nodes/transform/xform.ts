@@ -280,7 +280,10 @@ export const xformNode = registerNode({
       }
     }
 
-    const { space: spaceId, conflict } = resolveSpace(String(ctx.params.space ?? ''), value.space)
+    const { space: spaceId, conflict } = resolveSpace(
+      String(ctx.params.space ?? ''),
+      value.space,
+    )
     if (conflict) {
       const [carried, override] = conflict
       throw new Error(
@@ -334,7 +337,10 @@ export const xformNode = registerNode({
     }
 
     const count = value.kind === 'points' ? geometryPointCount(value) : value.items.length
-    ctx.progress(0.05, `${count.toLocaleString()} ${geometryNoun(value)} · ${spaceId} → ${target}`)
+    ctx.progress(
+      0.05,
+      `${count.toLocaleString()} ${geometryNoun(value)} · ${spaceId} → ${target}`,
+    )
 
     /*
      * Both files requested together rather than the return leg waiting on the outbound *warp*

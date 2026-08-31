@@ -123,7 +123,11 @@ describe('the reflection', () => {
      * survive the round trip exactly and would make this pass for the wrong reason.
      */
     const start = new Float32Array([1604.12451171875, 30000.3125, 9000.1, 522943, 1, 2])
-    const back = flipPositions(flipPositions(start, spec.axis, spec.flipAt), spec.axis, spec.flipAt)
+    const back = flipPositions(
+      flipPositions(start, spec.axis, spec.flipAt),
+      spec.axis,
+      spec.flipAt,
+    )
     const worst = Math.max(...[...back].map((v, i) => Math.abs(v - start[i]!)))
     expect(worst).toBeGreaterThan(0)
     expect(worst).toBeLessThanOrEqual(0.0625)
@@ -301,11 +305,11 @@ describe('against the real manifest', () => {
     const spec = spaceById('FLYWIRE')!.mirror!
     expect(spec.flipAt).toBe(1045886)
     const midline = spec.flipAt / 2
-    expect([...flipPositions(new Float32Array([midline, 0, 0]), spec.axis, spec.flipAt)]).toEqual(
-      [midline, 0, 0],
-    )
-    expect([...flipPositions(new Float32Array([192200, 0, 0]), spec.axis, spec.flipAt)]).toEqual(
-      [853686, 0, 0],
-    )
+    expect([
+      ...flipPositions(new Float32Array([midline, 0, 0]), spec.axis, spec.flipAt),
+    ]).toEqual([midline, 0, 0])
+    expect([
+      ...flipPositions(new Float32Array([192200, 0, 0]), spec.axis, spec.flipAt),
+    ]).toEqual([853686, 0, 0])
   })
 })

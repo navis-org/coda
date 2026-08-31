@@ -159,7 +159,9 @@ export const stackNeuronsNode = registerNode({
       ['Second', bottom],
     ] as const) {
       if (type && !isGeometryKind(type.kind)) {
-        issues.push(`${label} is not geometry — Stack Neurons takes skeletons, meshes or points.`)
+        issues.push(
+          `${label} is not geometry — Stack Neurons takes skeletons, meshes or points.`,
+        )
       }
     }
 

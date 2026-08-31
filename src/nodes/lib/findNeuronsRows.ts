@@ -70,7 +70,8 @@ export function legacyRows(params: ParamValues): FilterRow[] {
   if (typePattern) rows.push({ field: 'type', op: 'matches', values: [typePattern] })
 
   const instancePattern = text('instancePattern')
-  if (instancePattern) rows.push({ field: 'instance', op: 'matches', values: [instancePattern] })
+  if (instancePattern)
+    rows.push({ field: 'instance', op: 'matches', values: [instancePattern] })
 
   const status = text('status')
   if (status) rows.push({ field: 'status', op: 'is', values: [status] })

@@ -46,14 +46,22 @@ function pipeline(): CodaGraph {
     target: 'find',
     targetHandle: 'dataset',
   })
-  g = addEdge(g, { source: 'find', sourceHandle: 'neurons', target: 'desc', targetHandle: 'in' })
+  g = addEdge(g, {
+    source: 'find',
+    sourceHandle: 'neurons',
+    target: 'desc',
+    targetHandle: 'in',
+  })
   return g
 }
 
 describe('out.describe — types', () => {
   /* A link dragged off the node starts at the pass-through, as it does on `out.table`. */
   it('keeps Table as the first output', () => {
-    expect(defaultOutputPorts(requireNodeDef('out.describe')).map((p) => p.id)).toEqual(['out', 'summary'])
+    expect(defaultOutputPorts(requireNodeDef('out.describe')).map((p) => p.id)).toEqual([
+      'out',
+      'summary',
+    ])
   })
 
   it('passes neurons-ness along the tap and never along the summary', () => {

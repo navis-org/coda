@@ -85,7 +85,10 @@ describe('which columns answer "typed"', () => {
   // Declaration order, not the caller's, so two nodes asking for the same set produce the same
   // clause and the same provenance key whichever way the boxes were ticked.
   it('answers in declaration order rather than the order asked', () => {
-    expect(resolvePopulation(['superclass', 'traced'], NEURONS)).toEqual(['traced', 'superclass'])
+    expect(resolvePopulation(['superclass', 'traced'], NEURONS)).toEqual([
+      'traced',
+      'superclass',
+    ])
   })
 })
 
@@ -149,7 +152,11 @@ describe('the warnings', () => {
   })
 
   it('names the filter that cannot apply, and says the others still do', () => {
-    const issues = populationIssues(BARE, { tracedOnly: true, superclassOnly: true }, 'male-cns')
+    const issues = populationIssues(
+      BARE,
+      { tracedOnly: true, superclassOnly: true },
+      'male-cns',
+    )
     expect(issues).toHaveLength(1)
     expect(issues[0]).toContain('Superclass only')
     expect(issues[0]).toContain('only the other filters apply')

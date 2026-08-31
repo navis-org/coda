@@ -46,7 +46,10 @@ const labels = () =>
 
 const def = requireNodeDef('core.relabel')
 
-const inputsOf = (map: CodaType | undefined = T.table(LABELS), input: CodaType = T.table(EDGES)) => ({
+const inputsOf = (
+  map: CodaType | undefined = T.table(LABELS),
+  input: CodaType = T.table(EDGES),
+) => ({
   in: input,
   map,
 })
@@ -168,13 +171,15 @@ describe('the node', () => {
       'weight_2',
     ])
     // The column's own name is the one that is not a collision — it means what empty means.
-    expect(def.validate?.(
-      makeInferContext(
-        def,
-        { ...defaultParams(def), column: 'preType', into: 'preType' },
-        inputsOf(),
+    expect(
+      def.validate?.(
+        makeInferContext(
+          def,
+          { ...defaultParams(def), column: 'preType', into: 'preType' },
+          inputsOf(),
+        ),
       ),
-    )).toEqual([])
+    ).toEqual([])
   })
 
   it('refuses at run time rather than relabelling nothing', () => {
