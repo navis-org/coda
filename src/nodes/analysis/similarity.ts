@@ -49,7 +49,7 @@ export const similarityNode = registerNode({
   description:
     'Compare every observation with every other over its features, as a similarity or distance matrix.',
   guide:
-    'Turns a table of features into the square matrix a Linkage or a Heatmap takes — connectivity similarity is the case it was written for, but any features work, including an uploaded embedding. It reads the long form directly rather than pivoting first, which is what makes it scale, and it says on the output whether the cells are similarities or distances.',
+    'Turns a table of features, calculates similarities or distances between them and returns it as a square similarity matrix for e.g. Linkage or Heatmap takes.',
   cost: 'expensive',
 
   inputs: [{ id: 'in', label: 'Features', type: T.table() }],

@@ -76,9 +76,9 @@ export const skeletonsNode = registerNode({
   type: 'neuron.skeletons',
   label: 'Skeletons',
   category: 'query',
-  description: 'Fetch branching morphologies for the incoming neurons.',
+  description: 'Fetch centerline tracings for the incoming neurons.',
   guide:
-    'Branching morphologies for the incoming neurons — the wire-frame shape of the cell, ready for the 3D View. Coordinates come out in nanometres, so a skeleton and a mesh of the same neuron sit in the same space. Most datasets have more than one place to get a skeleton from and they are not the same product, so **Source** is a real choice; whichever route answered is named on the card.',
+    'Centerline tracings for the incoming neurons — encode both the 3D shape and topology of the cell. Coordinates come out in nanometres, so a skeleton and a mesh of the same neuron sit in the same space. Some datasets have more than one place to get a skeleton.',
   cost: 'expensive',
   inputs: [
     { id: 'dataset', label: 'Dataset', type: T.dataset() },
@@ -181,7 +181,7 @@ export const meshesNode = registerNode({
   category: 'query',
   description: 'Fetch surface meshes for the incoming neurons.',
   guide:
-    'Surface meshes for the incoming neurons: the filled shape rather than the wire frame, which is what you want for a figure. They come from public object stores rather than from neuPrint, so they need no token. **Detail** is a triangle budget for the whole batch, so asking for more neurons gets you coarser ones.',
+    'Neuron surface meshes. Where they come from and the level(s) of detail available varies by source. **Detail** is a triangle budget for the whole batch, so asking for more neurons gets you coarser ones.',
   cost: 'expensive',
   inputs: [
     { id: 'dataset', label: 'Dataset', type: T.dataset() },

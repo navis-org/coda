@@ -366,7 +366,7 @@ export const viewer3dNode = registerNode({
       label: 'Point size',
       default: 60,
       min: 5,
-      max: 500,
+      max: 2000,
       step: 5,
       presentational: true,
       advanced: true,

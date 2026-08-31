@@ -103,7 +103,7 @@ export const buildNetworkNode = registerNode({
   category: 'analysis',
   description: 'Turn an edge table into a network of nodes and links.',
   guide:
-    'Turn an edge table into a network: nodes, links and the roll-ups a node-link drawing needs — in and out degree, in and out weight. Both halves carry an ordinary attribute table, so colouring by cell type is a column picker. Where several rows merge into one link the weights add and nothing else does.',
+    'Turn an edge table into a network: nodes, links plus associated properties including derived ones such as in and out degree/weight. Both halves carry an ordinary attribute table, so colouring by cell type is a column picker.',
   cost: 'cheap',
   inputs: [
     { id: 'edges', label: 'Edges', type: T.table() },

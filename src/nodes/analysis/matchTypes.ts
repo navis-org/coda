@@ -152,7 +152,7 @@ export const matchTypesNode = registerNode({
   category: 'analysis',
   description: 'Work out which cell types correspond between two or more connectomes.',
   guide:
-    'Builds the correspondence every cross-brain comparison needs: which cell types in one connectome are the same cells as which in another, given that type names are revised per dataset and not backported. Emits one labels table per dataset plus a report — and the report is the part to read, since a mapping error looks exactly like a finding.',
+    'Builds the type-to-type correspondence needed for cross-brain comparison: which cell types in one connectome are the same cells as which in another.',
   cost: 'expensive',
   dataCache: true,
 
