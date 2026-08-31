@@ -4,9 +4,15 @@
  * A browser reports a refused cross-origin read and a dead host identically — an opaque
  * `TypeError` — so "can this deployment be called directly?" is only answerable by trying. Two
  * backends now try: neuPrint's deployments (`data/neuprint/client.ts`) and SeaTable's
- * (`data/annotations/seaTable.ts`), with `data/precomputed/transport.ts` doing the same for the
- * mesh buckets in memory only. Written a third time by hand, the rules below existed in three
- * places at once — and they are exactly the kind whose violation is invisible.
+ * (`data/annotations/seaTable.ts`). Written a third time by hand, the rules below existed in
+ * three places at once — and they are exactly the kind whose violation is invisible.
+ *
+ * **`data/precomputed/transport.ts` is a fourth and does not use this**, which is worth saying
+ * out loud rather than leaving as an apparent oversight. It keys by *bucket* rather than host,
+ * persists under its own key with a migration that drops entries the host-keyed version wrote,
+ * carries a third route kind (`gcs-api`) and a non-persisted `unreachable`, and uses a
+ * remembered route *exclusively* where `prefer` only puts it first. Folding it in means widening
+ * this module on four axes at once; until somebody does, the rules live in two places.
  *
  * The **loop** deliberately stays with each caller: what a status means, which errors travel on
  * the auth channel and what a failure should say are per-backend. What is shared is the memory

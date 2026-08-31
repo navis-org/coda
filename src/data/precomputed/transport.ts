@@ -4,25 +4,73 @@
  * Mesh buckets are inconsistent about CORS, and it is decided per bucket rather than per
  * provider: `neuroglancer-janelia-flyem-hemibrain`, `manc-seg-v1p2` and `flyem-optic-lobe`
  * all answer `Access-Control-Allow-Origin: *`, while `flyem-male-cns` sends no CORS headers
- * at all. So a direct fetch is tried first — which keeps hemibrain, MANC and optic-lobe
- * working with no proxy, including from a plain static deploy — and only the buckets that
- * actually refuse get routed through one.
+ * at all — to anybody. That was re-probed against six origins including
+ * `neuroglancer-demo.appspot.com` and `clio-ng.janelia.org`, so it is an absent policy rather
+ * than an allow-list Coda is missing from.
  *
  * A browser reports a CORS refusal as an opaque `TypeError`, indistinguishable from the
  * network being down, so "did direct work?" can only be answered by trying. The answer is
  * cached so that costs one request per bucket per session rather than one per fetch — and it
  * is cached against the *bucket*, not the host, which all four of those share. See
  * `PATH_STYLE_HOSTS` for what keying it by host cost.
+ *
+ * ## Three routes, and the order is what makes the deployed site work
+ *
+ * `direct` → `gcs-api` → `proxy`, each tried only after the one before it throws.
+ *
+ * **`gcs-api` is why a refusing GCS bucket is readable at all in production.** Google serves the
+ * same object under two endpoints and only one of them consults the bucket's CORS policy:
+ *
+ *     XML / direct   storage.googleapis.com/<bucket>/<key>
+ *     JSON API       storage.googleapis.com/storage/v1/b/<bucket>/o/<urlencoded key>?alt=media
+ *
+ * The JSON API answers `Access-Control-Allow-Origin: <the request's origin>` whatever the bucket
+ * says, which is how neuroglancer reads male-CNS — its `gs://` driver builds exactly this URL
+ * (`src/kvstore/gcs/index.ts`), and that is the whole of the difference. Measured against
+ * `flyem-male-cns/v1.0/segmentation/info` from `Origin: https://coda.science`: 200 with the
+ * header, 206 with `Content-Range` under a `Range` request, and an `OPTIONS` preflight allowing
+ * `range` with `max-age: 3600`. So it carries everything the sharded reader needs.
+ *
+ * **It goes before the proxy, not after**, for two reasons that point the same way. It works in
+ * a static deploy, where `/gcs` is a path on this origin that nothing serves — `coda.science`
+ * answers it with GitHub Pages' 404 page. And it is a real cross-origin host, so it multiplexes:
+ * the proxy is one same-origin HTTP/1.1 hop, measured at 30.5 s against 3.1 s direct on a
+ * 300-body hemibrain fetch. The proxy stays as the third route because it is not GCS-specific
+ * and is the only thing left for some other host that refuses.
+ *
+ * **The cache-busting parameter neuroglancer appends is deliberately not copied.** Its comment
+ * cites [crbug 1214563](https://bugs.chromium.org/p/chromium/issues/detail?id=1214563) — GCS
+ * omitting an updated `Access-Control-Allow-Origin` on the 304 answering a cache revalidation,
+ * which would make a warm cache fail CORS about an hour in, intermittently. That was re-measured
+ * here rather than assumed, and it no longer reproduces: a conditional GET with `If-None-Match`
+ * returns 304 carrying `Vary: …,Origin,X-Origin` and the *requesting* origin's header, including
+ * after the edge was primed from a different origin. Since the objects are served
+ * `public, max-age=3600, must-revalidate`, a unique URL per request would throw away every
+ * revalidation for a bug that is fixed. If it ever comes back the symptom is a CORS failure that
+ * only appears on a second visit, and the fix is one query parameter.
  */
 
 const MODE_KEY = 'coda.precomputed.transport'
+
+/**
+ * Google's object host, which three separate rules below are each about.
+ *
+ * One name rather than four literals: it is the host that proxies through `/gcs`, the one host
+ * here that puts the bucket in the path, the one `objectStoreUrl` emits for `gs://`, and the one
+ * whose JSON API `gcsJsonApiUrl` restates. Four spellings of one fact is how a change reaches
+ * three of them.
+ */
+const GCS_HOST = 'storage.googleapis.com'
+
+/** The JSON API's own prefix — both the guard against rewriting twice and half the rewrite. */
+const GCS_API_PREFIX = '/storage/v1/'
 
 /**
  * Same-origin prefixes that proxy a remote host. Kept as a table because a proxy rule has
  * to exist on the server side too — see `vite.config.ts`.
  */
 const PROXY_PREFIXES: ReadonlyArray<{ host: string; prefix: string }> = [
-  { host: 'storage.googleapis.com', prefix: '/gcs' },
+  { host: GCS_HOST, prefix: '/gcs' },
 ]
 
 /**
@@ -45,9 +93,52 @@ const PROXY_PREFIXES: ReadonlyArray<{ host: string; prefix: string }> = [
  * S3 needs no entry: `objectStoreUrl` emits virtual-hosted style, so there the bucket *is* the
  * host and the host key is already the right one.
  */
-const PATH_STYLE_HOSTS = new Set(['storage.googleapis.com'])
+const PATH_STYLE_HOSTS = new Set([GCS_HOST])
 
-type Mode = 'direct' | 'proxy' | 'unreachable'
+/**
+ * The fallback routes, in the order they are tried after a direct read throws.
+ *
+ * A table rather than statements inside `fetchBytes`, because three separate things are facts
+ * *about a route* and were otherwise spread across the function: its name in the persisted
+ * memory, how it rewrites a URL, and what to tell somebody when it is the one that failed. The
+ * `Mode` union derives from this, so a fourth route cannot arrive half-registered.
+ *
+ * The order is load-bearing and the file header argues it: `gcs-api` before `proxy` because it
+ * works in a static deploy, where `/gcs` is a path on this origin that nothing serves, and
+ * because it is a real cross-origin host that multiplexes rather than queueing behind one
+ * same-origin HTTP/1.1 hop.
+ *
+ * `rewrite` answering undefined means "this route has no form of that URL" — an S3 object has no
+ * JSON API address and no proxy prefix — which is also what makes a remembered mode safe to look
+ * up here: one that does not apply simply finds nothing and the container re-probes.
+ */
+const ROUTES = [
+  { mode: 'gcs-api', rewrite: gcsJsonApiUrl, hint: undefined },
+  {
+    mode: 'proxy',
+    rewrite: proxied,
+    /*
+     * Kept on the route rather than in the failure message, which is where it used to live and
+     * how it nearly got lost when that message was generalised to N routes. It is the likeliest
+     * local failure of this whole path, and `neuprint/client.ts` carries the same sentence for
+     * the same reason.
+     */
+    hint: 'In development that proxy comes from vite.config.ts, so this needs `pnpm dev` or `pnpm preview`.',
+  },
+] as const
+
+/**
+ * How a container is reached. Persisted, so a value here is also a name in `localStorage`.
+ *
+ * `direct` and `unreachable` are the two ends and belong to no route; everything between them is
+ * a fallback, so the union is **derived from `ROUTES`** rather than restated. A fifth route added
+ * to that table without being added here would otherwise be dropped by `load` on the next
+ * session — silently, and by the very check written to prevent that class of thing.
+ */
+type Mode = 'direct' | 'unreachable' | (typeof ROUTES)[number]['mode']
+
+/** Every mode `load` will honour. Derived, for the reason on `Mode`. */
+const MODES: readonly string[] = ['direct', 'unreachable', ...ROUTES.map((route) => route.mode)]
 
 const modes = new Map<string, Mode>()
 let loaded = false
@@ -67,6 +158,14 @@ function load(): void {
        * profile that read male-CNS once.
        */
       if (PATH_STYLE_HOSTS.has(key)) continue
+      /*
+       * A route name from some other build. It is *harmless* to the lookup below — an unknown
+       * mode matches no entry in `ROUTES`, so the container simply re-probes — so this is not
+       * load-bearing for correctness. What it stops is the weaker thing: a dead name sitting in
+       * `modes` for the session, being re-persisted by every `remember`, and being reported by
+       * `transportModes()` as though it were a route somebody could act on.
+       */
+      if (!MODES.includes(mode)) continue
       modes.set(key, mode)
     }
   } catch {
@@ -75,6 +174,14 @@ function load(): void {
 }
 
 function remember(container: string, mode: Mode): void {
+  /*
+   * A burst of concurrent reads all reach the fallback loop before any of them has remembered
+   * anything, so without this a refusing bucket at `BUCKET_CONCURRENCY` 100 does 100 identical
+   * writes — each one a spread, a filter, an `Object.fromEntries`, a `JSON.stringify` of a
+   * string that grows with every container seen this session, and a synchronous disk-backed
+   * `setItem`. Measured at 100 writes of 5.1 kB for one bucket.
+   */
+  if (modes.get(container) === mode) return
   modes.set(container, mode)
   try {
     // 'unreachable' is deliberately not persisted — it is usually transient (offline,
@@ -97,6 +204,39 @@ export function proxied(url: string): string | undefined {
   const rule = PROXY_PREFIXES.find((p) => p.host === parsed.host)
   if (!rule) return undefined
   return `${rule.prefix}${parsed.pathname}${parsed.search}`
+}
+
+/**
+ * A path-style GCS object URL restated through the JSON API, which always answers CORS.
+ *
+ * `storage.googleapis.com/<bucket>/<key>` → `…/storage/v1/b/<bucket>/o/<key>?alt=media`, with
+ * the key percent-encoded **whole**: it is one path segment there, so every `/` in it becomes
+ * `%2F`. `encodeURIComponent` is exactly that rule and is what neuroglancer uses.
+ *
+ * Three refusals, each of which would otherwise produce a confidently wrong URL:
+ *
+ *  - **Not this host** — S3 and everything else. The JSON API is Google's.
+ *  - **Already a JSON API URL.** Rewriting one again would ask for an object literally named
+ *    `storage/v1/b/…` in a bucket called `storage`, which 404s and reads as a missing mesh.
+ *  - **A query string.** The rewrite owns `?alt=media`, and merging somebody else's parameters
+ *    into it risks colliding with the API's own. Nothing under `objectStoreUrl` emits one, so
+ *    this refuses rather than guessing; such a URL simply falls through to the proxy, which is
+ *    what it did before this route existed.
+ */
+export function gcsJsonApiUrl(url: string): string | undefined {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return undefined
+  }
+  if (parsed.host !== GCS_HOST) return undefined
+  if (parsed.pathname.startsWith(GCS_API_PREFIX)) return undefined
+  if (parsed.search) return undefined
+  const [bucket, ...rest] = parsed.pathname.split('/').filter(Boolean)
+  const key = rest.join('/')
+  if (!bucket || !key) return undefined
+  return `https://${GCS_HOST}${GCS_API_PREFIX}b/${bucket}/o/${encodeURIComponent(key)}?alt=media`
 }
 
 export class PrecomputedFetchError extends Error {
@@ -145,7 +285,7 @@ export function objectStoreUrl(uri: string): string | undefined {
   if (!match) return undefined
   const [, scheme, path] = match
   const clean = path!.replace(/\/+$/, '')
-  if (scheme === 'gs') return `https://storage.googleapis.com/${clean}`
+  if (scheme === 'gs') return `https://${GCS_HOST}/${clean}`
   // Virtual-hosted style: the path-style endpoint 301-redirects, and fetch will not follow a
   // redirect that drops CORS headers.
   const [bucket, ...rest] = clean.split('/')
@@ -153,11 +293,26 @@ export function objectStoreUrl(uri: string): string | undefined {
 }
 
 /**
- * Fetch bytes, falling back to a proxy for hosts that refuse cross-origin reads.
+ * Is this the opaque failure a browser reports for a CORS refusal, rather than an answer?
  *
- * A non-2xx response is *not* retried through the proxy: the request plainly arrived, and
- * a 404 means the object is missing whichever route it took. Only a thrown fetch — CORS or
- * transport — triggers the fallback.
+ * The distinction is the whole basis of the fallback chain. A `PrecomputedFetchError` means a
+ * response *arrived* and said no — a 404 is a missing object down every route, so retrying it
+ * three ways would triple every lookup for a body that simply has no mesh. A bare `TypeError`
+ * means nothing came back, and only that is worth another route.
+ */
+function isRoutable(error: unknown): boolean {
+  if (error instanceof PrecomputedFetchError) return false
+  if (error instanceof DOMException && error.name === 'AbortError') return false
+  return true
+}
+
+/**
+ * Fetch bytes, falling back for hosts that refuse cross-origin reads.
+ *
+ * Direct first, then each of `ROUTES` in turn — and only ever when the one before it *threw*.
+ * A non-2xx response is not retried, because the request plainly arrived and a 404 means the
+ * object is missing whichever way it was asked for; `isRoutable` is that distinction and the
+ * file header argues the order.
  */
 export async function fetchBytes(
   url: string,
@@ -166,41 +321,56 @@ export async function fetchBytes(
   load()
   const container = containerOf(url)
   const mode = container ? modes.get(container) : undefined
-  const viaProxy = proxied(url)
 
-  if (mode === 'proxy' && viaProxy) return attempt(viaProxy, options)
+  /*
+   * Which routes this URL actually has a form of, in `ROUTES` order. A remembered mode is looked
+   * up in the same list, so it can never name a route the URL cannot take — a stored `gcs-api`
+   * against an S3 bucket finds nothing here and the container re-probes.
+   */
+  const fallbacks = ROUTES.flatMap((route) => {
+    const rewritten = route.rewrite(url)
+    return rewritten === undefined ? [] : [{ ...route, url: rewritten }]
+  })
+
+  const remembered = fallbacks.find((route) => route.mode === mode)
+  if (remembered) return attempt(remembered.url, options)
 
   try {
     const result = await attempt(url, options)
     if (container && mode !== 'direct') remember(container, 'direct')
     return result
   } catch (error) {
-    if (error instanceof PrecomputedFetchError) throw error
-    if (error instanceof DOMException && error.name === 'AbortError') throw error
-    if (!viaProxy) {
-      if (container) remember(container, 'unreachable')
-      throw new PrecomputedFetchError(
-        `Could not read ${url}. The host is unreachable or refuses cross-origin reads, and ` +
-          `no proxy is configured for it.`,
-        url,
-        0,
-      )
+    if (!isRoutable(error)) throw error
+
+    // Direct failed with nothing coming back — very likely CORS. Try each route in turn.
+    let last: unknown
+    for (const route of fallbacks) {
+      try {
+        const result = await attempt(route.url, options)
+        if (container) remember(container, route.mode)
+        return result
+      } catch (routeError) {
+        // A route that *answered* settles it, exactly as a direct answer would — see `isRoutable`.
+        if (!isRoutable(routeError)) throw routeError
+        last = routeError
+      }
     }
-    // Direct failed and a proxy route exists — very likely CORS.
-    const result = await attempt(viaProxy, options).catch((proxyError: unknown) => {
-      if (container) remember(container, 'unreachable')
-      throw proxyError instanceof PrecomputedFetchError
-        ? proxyError
-        : new PrecomputedFetchError(
-            `${container ?? url} refuses cross-origin reads and the ${viaProxy} proxy is not ` +
-              `answering either. In development that proxy comes from vite.config.ts, so this ` +
-              `needs \`pnpm dev\` or \`pnpm preview\`.`,
-            url,
-            0,
-          )
-    })
-    if (container) remember(container, 'proxy')
-    return result
+
+    if (container) remember(container, 'unreachable')
+    const tried = fallbacks.length
+      ? `Tried ${fallbacks.map((route) => route.url).join(', ')}. ` +
+        `${fallbacks
+          .map((route) => route.hint)
+          .filter(Boolean)
+          .join(' ')} ` +
+        `The last said: ${last instanceof Error ? last.message : String(last)}`
+      : 'No fallback route is configured for it.'
+    throw new PrecomputedFetchError(
+      `Could not read ${url}: ${container ?? 'the host'} is unreachable or refuses ` +
+        `cross-origin reads. ${tried}`.replace(/\s+/g, ' ').trim(),
+      url,
+      0,
+    )
   }
 }
 

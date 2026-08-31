@@ -1728,10 +1728,50 @@ path's four-fifths.
 **Meshes need no token and usually no proxy.** They come from public object stores, not from
 neuPrintHTTP. `neuroglancer-janelia-flyem-hemibrain`, `manc-seg-v1p2` and `flyem-optic-lobe`
 all send `Access-Control-Allow-Origin: *`, so they are fetched directly and work in a static
-deploy even where the Cypher API cannot reach. `flyem-male-cns` sends no CORS headers at all,
-so `transport.ts` retries it through the `/gcs` proxy and remembers which route worked. A
+deploy even where the Cypher API cannot reach. `flyem-male-cns` sends no CORS headers at all. A
 browser reports a CORS refusal as an opaque `TypeError`, so trying is the only way to find out —
 which is why the answer is cached rather than probed each time.
+
+**male-CNS is read through the GCS JSON API, and that is why the deployed site can show it.**
+Google serves the same object under two endpoints, and only one of them consults the bucket's
+CORS policy:
+
+    XML / direct   storage.googleapis.com/<bucket>/<key>
+    JSON API       storage.googleapis.com/storage/v1/b/<bucket>/o/<urlencoded key>?alt=media
+
+The JSON API answers `Access-Control-Allow-Origin: <the requesting origin>` whatever the bucket
+says. That is the whole of how neuroglancer reads male-CNS — its `gs://` driver builds exactly
+this URL in `src/kvstore/gcs/index.ts` — and it was the missing piece here. The absence is not an
+allow-list Coda is off: re-probed from six origins including `neuroglancer-demo.appspot.com`,
+`clio-ng.janelia.org` and `neuprint.janelia.org`, the bucket returns no header to any of them.
+
+Measured against the real bucket from `Origin: https://coda.science`: `info` 200 with the header;
+a 32-byte `Range` out of the 1.24 GB `000.shard` returns **206** with `Content-Range` both present
+and listed in `access-control-expose-headers`; and the `OPTIONS` preflight allows `range` with
+`max-age: 3600`. So it carries the sharded reader's actual workload, not just the metadata.
+
+**The order is `direct` → `gcs-api` → `proxy`**, each tried only when the one before it *threw*.
+`gcs-api` goes ahead of the proxy for two reasons pointing the same way. It works in a static
+deploy, where `/gcs` is a path on this origin that nothing serves — `coda.science` answers it with
+GitHub Pages' 404 page, which is a `PrecomputedFetchError` rather than a route failure, so before
+this the bucket was simply unreadable in production and said so as *"male-cns:v1.0 does not
+publish a mesh source"* three layers up. And it is a real cross-origin host, so it multiplexes
+instead of queueing behind the single-origin hop the 30.5 s below measures. The proxy stays third
+because it is not GCS-specific and is all that is left for some other host that refuses.
+
+**A route that answered settles it, whichever route that was.** Only a thrown fetch moves to the
+next one: `skeletons.ts` and `readRawInfo` both read `status === 404` as "this object is absent",
+and a refusing bucket must not turn that into a different verdict from a CORS-open one.
+
+**The cache-busting parameter neuroglancer appends is deliberately not copied.** Its comment cites
+[crbug 1214563](https://bugs.chromium.org/p/chromium/issues/detail?id=1214563) — GCS omitting an
+updated `Access-Control-Allow-Origin` on the 304 that answers a cache revalidation, which would
+make a warm cache fail CORS about an hour in, intermittently. Re-measured rather than assumed, and
+it no longer reproduces: a conditional GET with `If-None-Match` returns 304 carrying
+`Vary: …,Origin,X-Origin` and the *requesting* origin's header, including after the edge was
+primed from a different origin. The objects are `public, max-age=3600, must-revalidate`, so a
+unique URL per request would throw away every revalidation for a bug that is fixed. If it returns,
+the symptom is a CORS failure that appears only on a second visit, and the fix is one parameter.
 
 **That answer is cached per _bucket_, and it used to be per host.** All four of those buckets are
 `storage.googleapis.com`, but CORS is configured per bucket — so a host key meant one male-CNS

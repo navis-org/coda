@@ -28,6 +28,7 @@ import { locate } from './sharded'
 import {
   PrecomputedFetchError,
   fetchBytes,
+  gcsJsonApiUrl,
   proxied,
   resetTransport,
   transportModes,
@@ -319,6 +320,55 @@ describe('transport', () => {
     resetTransport()
   })
 
+  /** A 200 carrying `bytes` bytes — `fetchBytes` reads `arrayBuffer`, never `json`. */
+  const ok = (bytes: number) =>
+    ({ ok: true, arrayBuffer: () => Promise.resolve(new ArrayBuffer(bytes)) }) as Response
+
+  /**
+   * Stub `fetch` so every URL matching `refuses` fails the way a browser reports a CORS refusal
+   * — an opaque `TypeError`, indistinguishable from the network being down — and everything else
+   * gets `answer`. Returns the URLs seen, live and in order, which is what the route assertions
+   * are actually about.
+   *
+   * Local rather than in `test/precomputedStubs.ts`: its `serveBytes` is a URL-to-bytes map that
+   * 404s everything else, and "refuse this prefix, answer the rest" is a different shape that
+   * only this describe wants. Second consumer lifts it.
+   */
+  function stubFetch(refuses: RegExp, answer: Response): string[] {
+    const seen: string[] = []
+    globalThis.fetch = ((url: string) => {
+      seen.push(url)
+      if (refuses.test(url)) return Promise.reject(new TypeError('Failed to fetch'))
+      return Promise.resolve(answer)
+    }) as typeof fetch
+    return seen
+  }
+
+  /** `transportModes()` read back from a stubbed `localStorage` holding `stored`. */
+  function modesFromStorage(stored: Record<string, string>): Record<string, string> {
+    // The node test env has no `window` at all, and the module guards every storage access — so
+    // a stub is what makes the persisted half reachable here.
+    const store = new Map([[MODE_KEY, JSON.stringify(stored)]])
+    vi.stubGlobal('window', {
+      localStorage: {
+        getItem: (k: string) => store.get(k) ?? null,
+        setItem: (k: string, v: string) => store.set(k, v),
+        removeItem: (k: string) => store.delete(k),
+      },
+    })
+    try {
+      return transportModes()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  }
+
+  /** Where `transport.ts` persists its route memory. */
+  const MODE_KEY = 'coda.precomputed.transport'
+
+  /** The one bucket with no CORS policy — the reason the JSON API route exists. */
+  const MALE_CNS = /^https:\/\/storage\.googleapis\.com\/flyem-male-cns\//
+
   it('maps a Google Storage URL onto the same-origin proxy prefix', () => {
     expect(proxied('https://storage.googleapis.com/bucket/a/b/info')).toBe(
       '/gcs/bucket/a/b/info',
@@ -326,40 +376,133 @@ describe('transport', () => {
     expect(proxied('https://example.org/x')).toBeUndefined()
   })
 
-  it('falls back to the proxy when a host refuses cross-origin reads', async () => {
+  it('restates a Google Storage URL through the JSON API, encoding the key whole', () => {
+    // The key is one path segment on the JSON API, so every slash in it is `%2F`. Getting this
+    // wrong asks for an object in a bucket named `storage` and 404s, which reads as a missing
+    // mesh rather than as a malformed URL.
+    expect(gcsJsonApiUrl('https://storage.googleapis.com/bucket/a/b/info')).toBe(
+      'https://storage.googleapis.com/storage/v1/b/bucket/o/a%2Fb%2Finfo?alt=media',
+    )
+  })
+
+  it('refuses to restate what the JSON API cannot represent', () => {
+    // Not Google's.
+    expect(gcsJsonApiUrl('https://example.org/bucket/info')).toBeUndefined()
+    expect(gcsJsonApiUrl('https://b.s3.amazonaws.com/info')).toBeUndefined()
+    // Already a JSON API URL — rewriting twice would ask for an object literally called
+    // `storage/v1/b/…`, which is the confidently-wrong-URL failure this whole module avoids.
+    expect(
+      gcsJsonApiUrl('https://storage.googleapis.com/storage/v1/b/bucket/o/info?alt=media'),
+    ).toBeUndefined()
+    // The rewrite owns `?alt=media`; merging somebody else's parameters could collide with the
+    // API's own, so such a URL keeps the proxy as its only fallback.
+    expect(
+      gcsJsonApiUrl('https://storage.googleapis.com/bucket/info?generation=1'),
+    ).toBeUndefined()
+    // A bucket with no key is a listing, not an object.
+    expect(gcsJsonApiUrl('https://storage.googleapis.com/bucket')).toBeUndefined()
+  })
+
+  it('reads a refusing GCS bucket through the JSON API, without the proxy', async () => {
+    /*
+     * The measured reason this route exists. `flyem-male-cns` has no CORS policy for anybody —
+     * re-probed from six origins including `neuroglancer-demo.appspot.com` — but Google serves
+     * the same object under `/storage/v1/b/…?alt=media`, which answers
+     * `Access-Control-Allow-Origin` whatever the bucket says. That is exactly how neuroglancer
+     * reads it. It matters because `/gcs` is a dev-server path: on a static deploy it is 404
+     * HTML, so before this the bucket was unreadable in production.
+     */
+    const seen = stubFetch(MALE_CNS, ok(16))
+
+    const result = await fetchBytes(
+      'https://storage.googleapis.com/flyem-male-cns/v1.0/segmentation/info',
+    )
+    expect(result.byteLength).toBe(16)
+    // The proxy is never reached.
+    expect(seen).toEqual([
+      'https://storage.googleapis.com/flyem-male-cns/v1.0/segmentation/info',
+      'https://storage.googleapis.com/storage/v1/b/flyem-male-cns/o/v1.0%2Fsegmentation%2Finfo?alt=media',
+    ])
+    expect(transportModes()['storage.googleapis.com/flyem-male-cns']).toBe('gcs-api')
+  })
+
+  it('goes straight to the JSON API once that is what answered', async () => {
+    const seen = stubFetch(MALE_CNS, ok(4))
+
+    await fetchBytes('https://storage.googleapis.com/flyem-male-cns/a')
+    seen.length = 0
+    await fetchBytes('https://storage.googleapis.com/flyem-male-cns/b')
+    expect(seen).toEqual([
+      'https://storage.googleapis.com/storage/v1/b/flyem-male-cns/o/b?alt=media',
+    ])
+  })
+
+  it('keeps a 404 from the JSON API meaning the object is absent', async () => {
+    /*
+     * `skeletons.ts` and `readRawInfo` both read `status === 404` as "there is none of this
+     * here". A bucket that refuses CORS must not turn that into a different verdict from a
+     * CORS-open one — a neuron with no skeleton would become an error instead of a `undefined`.
+     */
+    stubFetch(MALE_CNS, { ok: false, status: 404 } as Response)
+
+    const error = await fetchBytes(
+      'https://storage.googleapis.com/flyem-male-cns/missing',
+    ).catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(PrecomputedFetchError)
+    expect((error as PrecomputedFetchError).status).toBe(404)
+  })
+
+  it('drops a persisted mode this build does not recognise', () => {
+    // A route name from some other build would pin a bucket to something this one cannot take,
+    // and the bucket would never re-probe. Same reasoning as the host-keyed entries below.
+    expect(modesFromStorage({ 'a.example': 'quic-relay', 'b.example': 'gcs-api' })).toEqual({
+      'b.example': 'gcs-api',
+    })
+  })
+
+  it('falls back to the proxy when every cross-origin route refuses', async () => {
     // A CORS refusal reaches JS as an opaque TypeError, indistinguishable from the network
-    // being down — trying is the only way to find out.
-    const seen: string[] = []
-    globalThis.fetch = ((url: string) => {
-      seen.push(url)
-      if (url.startsWith('https://')) return Promise.reject(new TypeError('Failed to fetch'))
-      return Promise.resolve({
-        ok: true,
-        arrayBuffer: () => Promise.resolve(new ArrayBuffer(8)),
-      } as Response)
-    }) as typeof fetch
+    // being down — trying is the only way to find out. The proxy is the *third* route: this
+    // stub refuses every `https://` URL, so the JSON API is refused along with the direct read.
+    const seen = stubFetch(/^https:/, ok(8))
 
     const result = await fetchBytes('https://storage.googleapis.com/private/info')
     expect(result.byteLength).toBe(8)
-    expect(seen).toEqual(['https://storage.googleapis.com/private/info', '/gcs/private/info'])
+    expect(seen).toEqual([
+      'https://storage.googleapis.com/private/info',
+      'https://storage.googleapis.com/storage/v1/b/private/o/info?alt=media',
+      '/gcs/private/info',
+    ])
   })
 
   it('remembers that a host needs the proxy and stops retrying direct', async () => {
-    const seen: string[] = []
-    globalThis.fetch = ((url: string) => {
-      seen.push(url)
-      if (url.startsWith('https://')) return Promise.reject(new TypeError('Failed to fetch'))
-      return Promise.resolve({
-        ok: true,
-        arrayBuffer: () => Promise.resolve(new ArrayBuffer(4)),
-      } as Response)
-    }) as typeof fetch
+    const seen = stubFetch(/^https:/, ok(4))
 
     await fetchBytes('https://storage.googleapis.com/private/one')
     await fetchBytes('https://storage.googleapis.com/private/two')
-    // Three requests, not four: the second fetch goes straight to the proxy.
-    expect(seen).toHaveLength(3)
-    expect(seen[2]).toBe('/gcs/private/two')
+    // Four requests, not six: the first read probes all three routes, the second goes straight
+    // to the one that answered.
+    expect(seen).toHaveLength(4)
+    expect(seen[3]).toBe('/gcs/private/two')
+  })
+
+  it('keeps the vite.config.ts hint on the failure that needs it', async () => {
+    /*
+     * The hint rides on the `proxy` entry in `ROUTES` rather than in the message, because it was
+     * nearly lost when that message was generalised from "the proxy" to N routes — and it names
+     * the likeliest local failure of this whole path. `neuprint/client.ts` carries the same
+     * sentence for the same reason.
+     */
+    // Every route refuses, including the proxy — which is what a static deploy does to `/gcs`.
+    stubFetch(/./, ok(4))
+    const error = await fetchBytes('https://storage.googleapis.com/private/info').catch(
+      (e: unknown) => e,
+    )
+    const message = (error as Error).message
+    expect(message).toContain('pnpm dev')
+    // Both routes named, in the order they were tried.
+    expect(message).toContain('/storage/v1/b/private/o/info?alt=media')
+    expect(message).toContain('/gcs/private/info')
   })
 
   it('does not let one refusing bucket route another bucket on the same host', async () => {
@@ -371,57 +514,32 @@ describe('transport', () => {
      * too, for somebody who never opened male-CNS again. On a 300-body fetch that is 3.1 s
      * against 30.5 s, with nothing on screen to attribute it to.
      */
-    const seen: string[] = []
-    globalThis.fetch = ((url: string) => {
-      seen.push(url)
-      // Only male-CNS refuses.
-      if (url.startsWith('https://') && url.includes('flyem-male-cns')) {
-        return Promise.reject(new TypeError('Failed to fetch'))
-      }
-      return Promise.resolve({
-        ok: true,
-        arrayBuffer: () => Promise.resolve(new ArrayBuffer(4)),
-      } as Response)
-    }) as typeof fetch
+    // Only male-CNS refuses.
+    const seen = stubFetch(/^https:\/\/.*flyem-male-cns/, ok(4))
 
     await fetchBytes('https://storage.googleapis.com/flyem-male-cns/mesh/a')
     expect(transportModes()['storage.googleapis.com/flyem-male-cns']).toBe('proxy')
 
     seen.length = 0
-    await fetchBytes('https://storage.googleapis.com/neuroglancer-janelia-flyem-hemibrain/mesh/b')
+    await fetchBytes(
+      'https://storage.googleapis.com/neuroglancer-janelia-flyem-hemibrain/mesh/b',
+    )
     // Direct, first try — not `/gcs/...`.
     expect(seen).toEqual([
       'https://storage.googleapis.com/neuroglancer-janelia-flyem-hemibrain/mesh/b',
     ])
-    expect(transportModes()['storage.googleapis.com/neuroglancer-janelia-flyem-hemibrain']).toBe(
-      'direct',
-    )
+    expect(
+      transportModes()['storage.googleapis.com/neuroglancer-janelia-flyem-hemibrain'],
+    ).toBe('direct')
   })
 
   it('drops a mode written by the host-keyed version rather than honouring it', () => {
     // Otherwise every profile that read male-CNS once stays poisoned across the upgrade, which
     // is the whole failure it is being upgraded out of. A bare host key cannot be migrated: it
     // stood for whichever bucket happened to be read first.
-    // The node test env has no `window` at all, and the module guards every storage access —
-    // so a stub is what makes the persisted half reachable here.
-    const store = new Map<string, string>([
-      [
-        'coda.precomputed.transport',
-        JSON.stringify({ 'storage.googleapis.com': 'proxy', 'other.example': 'direct' }),
-      ],
-    ])
-    vi.stubGlobal('window', {
-      localStorage: {
-        getItem: (k: string) => store.get(k) ?? null,
-        setItem: (k: string, v: string) => store.set(k, v),
-        removeItem: (k: string) => store.delete(k),
-      },
-    })
-    try {
-      expect(transportModes()).toEqual({ 'other.example': 'direct' })
-    } finally {
-      vi.unstubAllGlobals()
-    }
+    expect(
+      modesFromStorage({ 'storage.googleapis.com': 'proxy', 'other.example': 'direct' }),
+    ).toEqual({ 'other.example': 'direct' })
   })
 
   it('does not retry a 404 through the proxy', async () => {
