@@ -2,9 +2,7 @@
 
 # Coda
 
-**Co**nnectome **d**ata **a**nalysis — node-graph analysis pipelines for connectomic data.
-
-Browser-based, node editor for querying and analyzing connectomic data.
+**Co**nnectome **d**ata **a**nalysis — Browser-based, node editor for querying and analyzing connectomic data.
 
 > [!TIP]
 > **Alpha.** The core functionality is there, including support for (almost) all major connectome datasets. We're still adding features, improving the UI, and fixing bugs. Bug reports and feature requests are very welcome!
@@ -19,14 +17,14 @@ Browser-based, node editor for querying and analyzing connectomic data.
 
 ## Quickstart
 
-Just open the [**Coda app**](https://navis-org.github.io/coda/).
+Just go to https://coda.science/.
 
 Other useful links:
-- ["Feature Overview"](https://navis-org.github.io/coda/overview.html)
-- ["Field Guide"](https://navis-org.github.io/coda/tutorial.html)
-- ["Node Guide"](https://navis-org.github.io/coda/nodes.html)
+- ["Feature Overview"](https://coda.science/overview.html)
+- ["Field Guide"](https://coda.science/tutorial.html)
+- ["Node Guide"](https://coda.science/nodes.html)
 
-Proper tutorials are coming soon but in the meantime, here are some quick instructions for working with the app:
+Check out `?` ▶ `Guides` for in-app tutorials and `Examples` for pre-built workflows.
 
 - add credentials to access neuPrint/CAVE/CATMAID datasets via `Connections` icon in the top toolbar
 - `New` to create a new graph, optionally preconfigured for a specific datastack
@@ -41,7 +39,7 @@ Proper tutorials are coming soon but in the meantime, here are some quick instru
 
 Codex and neuPrint are great for initial exploration of the datasets but if you want to do more than just look at a few neurons, you quickly hit a wall and have to start writing code. CATMAID (the oldest of these tools) has actually a lot of analysis tools, but hasn't made the transition to modern (segmentation + meshes) connectomics.
 
-Coda is designed to fill the gap between exploration-only and full-on coding. Because we don't play favourites, you can combine data from multiple sources in one workflow. And if you do want to write code, Coda can help you get started by generate Python or R code from your workflow.
+Coda is designed to fill the gap between exploration-only and full-on coding. Also: because we don't play favourites, you can combine data from multiple sources in one workflow! And if you do want to write code, Coda can help you get started by generate Python or R code from your workflow.
 
 ## Development
 

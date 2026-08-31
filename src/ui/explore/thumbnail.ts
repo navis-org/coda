@@ -62,14 +62,16 @@ const DEPTH_FLOOR = 70
 /**
  * Stroke width as a fraction of the tile, so a skeleton drawn at two sizes is one drawing.
  *
- * The same rule `padding` follows and for the same reason. At the 152px raster behind a 76px
- * tile it is 3 pixels, which the browser downsamples to about 1.5.
+ * The same rule `padding` follows and for the same reason. At the 304px raster behind a 76px
+ * tile it is 6 pixels, which the browser downsamples to about 1.5 — the same drawing the 152px
+ * raster made at 3, which is what makes `RASTER_SCALE` a free parameter here.
  *
  * Chosen by rasterising four real BANC L2 skeletons and printing the mask as ASCII, which is the
  * only way to look at one of these outside a browser — jsdom has no canvas. Coverage on a
- * 2,684-node descending neuron, and what the picture does:
+ * 2,684-node descending neuron — widths as they were at the 152px raster it was chosen on, which
+ * is the same fraction either way — and what the picture does:
  *
- *     1 px   3.3%   the axon is the faintest step of the ramp; it does not survive the 2× down
+ *     1 px   3.3%   the axon is the faintest step of the ramp; it does not survive the down
  *     3 px   6.6%   arbor structure and axon both legible
  *     5 px   8.9%   the arbor fills in solid — the neuron is a blob with a tail
  *

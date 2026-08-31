@@ -134,10 +134,11 @@ differently in the same list.
 
 **`STROKE_FRACTION` is 0.02, and both failure modes are real.** It is a fraction of the tile
 rather than pixels, the same rule `padding` follows, so a skeleton drawn at two sizes is one
-drawing — 3 raster pixels at the 152px raster behind a 76px tile. Chosen by rasterising four BANC
-L2 skeletons and printing the mask as ASCII, the only way to look at one outside a browser.
-Coverage on a 2,684-node descending neuron: **1 px → 3.3%**, and the descending axon is the
-faintest step of the ramp and does not survive the 2× downsample; **3 px → 6.6%**, arbor structure
+drawing — 6 raster pixels at the 304px raster behind a 76px tile, and 3 at the 152px raster it
+was chosen against. Chosen by rasterising four BANC L2 skeletons and printing the mask as ASCII,
+the only way to look at one outside a browser. Coverage on a 2,684-node descending neuron, at the
+widths as they were then: **1 px → 3.3%**, and the descending axon is the faintest step of the
+ramp and does not survive the downsample; **3 px → 6.6%**, arbor structure
 and axon both legible; **5 px → 8.9%**, and the arbor fills in solid — a blob with a tail.
 
 Re-checked on FAFB, since one constant now serves a ~1,300-node chunk-graph skeleton and a
@@ -155,12 +156,66 @@ centre, so a thin diagonal quad drops pixels wherever no centre lands inside it,
 comes out dotted. Its `thickness` is a diameter, so an even width is honest rather than rounding
 down to a single pixel the way a radius would.
 
-**Rasterised at 2× the box it is drawn in** (`RASTER_SCALE`), because the mesh has more detail
-than a 76px tile can hold — at 1:1 a thin neurite either landed on a pixel or vanished, and a
-HiDPI screen was upscaling the result. The browser downsamples, which is what turns the surplus
-samples into antialiasing, so `image-rendering` must stay `auto`. The cost is 4× per cached mask
-(23 kB, not 5.8 kB), which is the reason not to go to 3×. The raster size is part of the cache
-key, so masks stored at the old resolution are a miss rather than a tile at the wrong scale.
+**Rasterised at 4× the box it is drawn in** (`RASTER_SCALE`), because the mesh has more detail
+than a 76px tile can hold — at 1:1 a thin neurite either landed on a pixel or vanished. The
+browser downsamples, which is what turns the surplus samples into antialiasing, so
+`image-rendering` must stay `auto`. The raster size is part of the cache key, so masks stored at
+an older resolution are a miss rather than a tile at the wrong scale.
+
+**It was 2×, and 2× is 1:1 on the screens this is used on.** A 76px tile at `devicePixelRatio` 2
+is 152 device pixels, which is exactly what the 2× raster produced — so every HiDPI display was
+getting no supersampling whatsoever, and only a 1× one ever saw the effect the constant existed
+for. That is not visible as a bug; it looks like the constant working. Four restores 2×
+supersampling on a Retina screen. It is deliberately **not** `devicePixelRatio`-derived: dpr
+would enter the cache key, fragmenting the store across displays and re-fetching every neuron
+when a window moves to another monitor.
+
+What 4× costs, measured rather than reasoned:
+
+- **Bytes, 4× again** — 90 kB per mask at a 76px tile against 23 kB, and 49 kB against 12 kB at
+  Explore's 56px rows. `cache.ts` evicts nothing, so it accumulates until the Sources panel
+  clears it: order 90 MB per thousand neurons browsed.
+- **Rasterisation is not the constraint** — a 2,684-node skeleton 0.95 → 5.06 ms, a 310-node one
+  0.16 → 0.83 ms, a 600-triangle mesh 0.20 → 0.64 ms; and the synthetic skeleton behind those
+  numbers sits at 40% coverage where a real one is 3–12%, so they are ceilings. Behind
+  `MAX_CONCURRENT` and two round trips it does not show.
+- **One refetch of everything, once** — the raster size is in the key, so every mask stored at 2×
+  misses and its geometry is fetched again. That is the actual price, and it is network.
+
+It buys **no detail**: the geometry is coarse by construction and `STROKE_FRACTION` is a
+fraction, so a skeleton's stroke is 6 raster pixels rather than 3 and lands at the same 1.5 CSS
+pixels. Antialiasing is the entire product. The refusal floor is unaffected for the same reason —
+coverage fraction is flat across the scales (0.399 / 0.413 / 0.406 / 0.418 at 112 / 152 / 224 /
+304 for one skeleton), so 0.002 still means what it meant.
+
+**The ink is `CHART_INK[mode].primary`, and the reason is the ramp rather than the near end.**
+A silhouette is mostly *not* full coverage — `DEPTH_FLOOR` shades the far surfaces to 70/255 —
+so most of a neuron is painted through an alpha well under one and the contrast a hex reaches on
+its own is not the contrast on screen. Composited over each mode's tile (`--surface-3`), the
+`secondary` ink this used to take was worse in light at every step of the ramp: 6.90:1 against
+dark's 9.72:1 at full coverage, and **1.52:1 against 1.90:1 at the floor** — a fifth of the
+contrast where the picture is faintest, on the mode that had less to give, which is the reported
+"light grey on white". `primary` closes it: 17.1:1 against 17.4:1 near, and 1.88:1 at the floor
+against dark's *previous* 1.90:1 — so the far end of a light thumbnail now reads exactly as the
+dark one already did, which was the half said to look right. Doing it at paint rather than by
+lifting `DEPTH_FLOOR` is what keeps every stored mask valid: the floor is baked into the coverage
+bytes and would need `MASK_FORMAT` bumped, refetching geometry for every neuron anybody has ever
+looked at.
+
+**A thumbnail is the one surface where a stale theme does not heal, so it observes the flip.**
+The mask carries no colour, so a theme change alters only which ink goes through it — but the
+paint is an effect keyed on the mask, and nothing re-renders a row: Explore fetches for itself
+and its rows subscribe to no graph state. The chart viewers read `currentMode()` during render
+and go stale on a flip too, and there the next edit repaints them
+([viewers.md](viewers.md) records that as pre-existing); here there is no next edit, so a list
+rendered in dark mode kept `#c3c2b7` on a light card for as long as it stayed open — which is the
+other, larger half of "too faint", and not about the palette at all. `useThemeMode` watches both
+inputs, because the preference has three values and only two are stamped: `data-theme` carries an
+explicit light or dark and is *absent* for `system`, where the OS media query is the whole answer.
+It is local to `NeuronThumbnail.tsx` on the second-consumer rule; the viewers all want it, and
+that is one lift rather than eleven. The test flips `data-theme` and asserts the second frame's
+ink, recording `putImageData` for that one case — real RGBA bytes, not a transcript of calls into
+the 2D stub, which is deliberately not a spy.
 
 **No visual verification exists for the thumbnails either** — jsdom has no canvas. What _was_
 done once, by hand: rasterising real hemibrain, MANC and male-CNS neurons and printing the mask

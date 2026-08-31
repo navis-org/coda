@@ -401,9 +401,12 @@ describe('ExploreBody', () => {
   })
 
   it('rasterises thumbnails above the size they are drawn at', async () => {
-    // Supersampling: the backing store is 2x the CSS box, so the downscale antialiases and a
-    // HiDPI screen is not upscaling a 76px tile. jsdom paints nothing — there is no 2D context
-    // — but the two sizes are exactly the part that has to disagree, and by how much.
+    // Supersampling: the backing store is 4x the CSS box, so the downscale antialiases. Four
+    // rather than two because two *is* the device resolution at `devicePixelRatio` 2 — the tile
+    // was 1:1 on every Retina screen, which looks exactly like the constant working. The literal
+    // is deliberate: a test that read `RASTER_SCALE` back would assert nothing about its value.
+    // jsdom cannot show what was drawn, but the two sizes are the part that has to disagree,
+    // and by how much.
     setup({ pageSize: 5 })
     await ready()
 
@@ -412,8 +415,8 @@ describe('ExploreBody', () => {
       expect(found).not.toBeNull()
       return found!
     })
-    expect(canvas.width).toBe(2 * parseFloat(canvas.style.width))
-    expect(canvas.height).toBe(2 * parseFloat(canvas.style.height))
+    expect(canvas.width).toBe(4 * parseFloat(canvas.style.width))
+    expect(canvas.height).toBe(4 * parseFloat(canvas.style.height))
   })
 
   it('adopts a query changed from outside, such as by undo', async () => {
@@ -598,10 +601,92 @@ describe('an annotated dataset', () => {
   })
 })
 
+/**
+ * Capture what actually reaches the canvas.
+ *
+ * The 2D stub is deliberately not a recording spy (`jsdomStubs.ts` says why), so the recorder
+ * is put on for this one describe and taken off again. What it records is real output — the
+ * RGBA bytes `silhouetteToRgba` produced — rather than a transcript of calls into a fake.
+ */
+function recordPaints(): { frames: ImageData[]; restore: () => void } {
+  const frames: ImageData[] = []
+  const original = HTMLCanvasElement.prototype.getContext
+  Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
+    configurable: true,
+    value(this: HTMLCanvasElement, kind: string) {
+      const context = (original as (kind: string) => CanvasRenderingContext2D | null).call(
+        this,
+        kind,
+      )
+      if (!context) return null
+      return Object.assign(context, {
+        putImageData: (image: ImageData) => frames.push(image),
+      })
+    },
+  })
+  return {
+    frames,
+    restore: () => {
+      Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
+        configurable: true,
+        value: original,
+      })
+    },
+  }
+}
+
+describe('thumbnail ink', () => {
+  const BODY = getConnectome(DATASET)!.neurons[0]!.neuronId
+
+  afterEach(() => {
+    delete document.documentElement.dataset.theme
+  })
+
+  /** The first painted pixel's colour, which is the ink — the mask supplies only its alpha. */
+  function inkOf(frame: ImageData): [number, number, number] {
+    for (let i = 0; i < frame.data.length; i += 4) {
+      if (frame.data[i + 3]! > 0) {
+        return [frame.data[i]!, frame.data[i + 1]!, frame.data[i + 2]!]
+      }
+    }
+    throw new Error('nothing painted')
+  }
+
+  it('repaints on a theme flip, because nothing else ever re-renders a row', async () => {
+    document.documentElement.dataset.theme = 'dark'
+    const paints = recordPaints()
+    try {
+      render(
+        <NeuronThumbnail
+          sourceId="mock"
+          datasetId={DATASET}
+          neuronId={String(BODY)}
+          size={76}
+        />,
+      )
+      await waitFor(() => expect(paints.frames.length).toBe(1))
+      // White on the dark card — `CHART_INK.dark.primary`.
+      expect(inkOf(paints.frames[0]!)).toEqual([255, 255, 255])
+
+      // The flip the user makes from the toolbar. Explore fetches for itself and its rows
+      // subscribe to no graph state, so without the observer this is the last paint there is
+      // and dark-mode ink stays on a light card for as long as the list is open.
+      act(() => {
+        document.documentElement.dataset.theme = 'light'
+      })
+      await waitFor(() => expect(paints.frames.length).toBe(2))
+      // Inverted, from the one mask — `CHART_INK.light.primary`.
+      expect(inkOf(paints.frames[1]!)).toEqual([11, 11, 11])
+    } finally {
+      paints.restore()
+    }
+  })
+})
+
 describe('thumbnail caching', () => {
   const BODY = getConnectome(DATASET)!.neurons[0]!.neuronId
-  /** Displayed at 76, rasterised at 2x — the key carries the raster size. */
-  const KEY = `thumb:mock:${DATASET}:${BODY}:152`
+  /** Displayed at 76, rasterised at `RASTER_SCALE` — the key carries the raster size. */
+  const KEY = `thumb:mock:${DATASET}:${BODY}:304`
 
   function renderThumb(sourceId = 'mock') {
     render(
@@ -617,7 +702,7 @@ describe('thumbnail caching', () => {
   it('ignores an entry written by an older encoder, refusals included', async () => {
     // Exactly what the old code left in a real browser: an empty mask, no fingerprint, no
     // expiry. Read back verbatim it is indistinguishable from "this neuron has no thumbnail".
-    await cacheSet(KEY, { size: 152, coverage: new Uint8Array(0) })
+    await cacheSet(KEY, { size: 304, coverage: new Uint8Array(0) })
 
     renderThumb()
     // A canvas means it went and fetched rather than trusting what it found.
@@ -647,7 +732,7 @@ describe('thumbnail caching', () => {
 
     renderThumb('mock-refuses')
     await waitFor(() => expect(document.querySelector('.explore-thumb--empty')).not.toBeNull())
-    expect(await cacheGet(`thumb:mock-refuses:${DATASET}:${BODY}:152`)).toBeUndefined()
+    expect(await cacheGet(`thumb:mock-refuses:${DATASET}:${BODY}:304`)).toBeUndefined()
   })
 })
 
