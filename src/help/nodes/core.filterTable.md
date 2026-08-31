@@ -21,6 +21,6 @@ The operator list in `Condition` follows the column's type:
 
 ## One condition only
 
-For `AND`, chain two of these. For `OR`, use one `matches regex` — `^(LC4|LC6)$`, combine two filter results using [Stack Tables](#out.stackTables), or [Find Neurons](#neuron.findNeurons), which builds several rows against the backend.
+For `AND`, chain two of these. For `OR`, use one `matches regex` — `^(LC4|LC6)$`, combine two filter results using [Stack Tables](#core.stack), or [Find Neurons](#neuron.findNeurons), which builds several rows against the backend.
 
 Filtering never changes the schema, and a table of neurons stays a table of neurons.
