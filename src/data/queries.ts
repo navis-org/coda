@@ -44,8 +44,9 @@ import type {
   DataSource,
   PathStepRequest,
   SourceSchemas,
+  SynapseTotalsRequest,
 } from './source'
-import { canTracePaths, capabilityOf } from './source'
+import { canSplitConnectivityByRoi, canTotalSynapses, canTracePaths, capabilityOf } from './source'
 
 /**
  * The attached set, or a refusal naming it.
@@ -129,6 +130,30 @@ export async function connectivityFor(
   source: DataSource,
   req: ConnectivityRequest,
 ): Promise<TableValue> {
+  /*
+   * The region options are gated here rather than only on the card, and that is the same call
+   * `pathStepFor` makes below: a `validate` issue is a **warning**, so a graph repointed at a
+   * backend that cannot answer still runs. A source that cannot split simply ignores the two
+   * fields — `CaveSource.fetchConnectivity` does — so without this the node would advertise a
+   * `roi` column, fill it with nothing, and put whole-connection weights under it. A wrong
+   * number wearing the right name, which is precisely what `canSplitConnectivityByRoi` exists
+   * to prevent.
+   *
+   * One predicate for both arms, so the edge-set case reads as what it is: a dataset answering
+   * from a file of `pre, post, weight` has no regions either, whatever its backend could do.
+   */
+  if (req.rois?.length || req.splitByRoi) {
+    if (req.edges) {
+      throw new Error(
+        `This dataset's connectivity comes from the edge set "${req.edges.name}", which records ` +
+          `pre, post and weight and nothing about regions. Turn off the region options on this ` +
+          `node, or detach the edge set under Edge data on the dataset card.`,
+      )
+    }
+    if (!canSplitConnectivityByRoi(source, req.datasetId, false)) {
+      throw new Error(`${source.label} cannot break a connection down by region`)
+    }
+  }
   if (!req.edges) return source.fetchConnectivity(req)
   /*
    * Together, because they are independent and both are slow on a first run: the set is up to a
@@ -162,6 +187,38 @@ export async function connectivityFor(
       }
     }),
   )
+}
+
+/**
+ * Per-neuron synapse totals, or a refusal naming why there are none.
+ *
+ * A funnel like the three above, though this one has nothing to answer from: an edge set is the
+ * *reason* the answer is unavailable rather than an alternative source for it. See
+ * `canTotalSynapses` — a file's weights and a backend's published totals count different
+ * populations, and a fraction built from one over the other is plausible and meaningless.
+ *
+ * Nodes call this rather than `source.fetchSynapseTotals` for `connectivityFor`'s reason: a
+ * reader that skips the funnel skips the gate, and both halves would type-check.
+ */
+export async function synapseTotalsFor(
+  source: DataSource,
+  req: SynapseTotalsRequest,
+): Promise<TableValue> {
+  if (req.edges) {
+    throw new Error(
+      `This dataset's connectivity comes from the edge set "${req.edges.name}", so its weights ` +
+        `are the file's rather than the server's — normalising them against the backend's ` +
+        `published synapse totals would divide one connectome by another. Turn off Normalize, ` +
+        `or detach the edge set under Edge data on the dataset card.`,
+    )
+  }
+  // The same predicate the node asks, rather than a third spelling — `pathStepFor`'s rule, and
+  // it is that function's recorded incident: a funnel checking only that a method existed
+  // accepted a source the node had already refused.
+  if (!canTotalSynapses(source, req.datasetId, false)) {
+    throw new Error(`${source.label} does not publish per-neuron synapse totals`)
+  }
+  return source.fetchSynapseTotals!(req)
 }
 
 export async function adjacencyFor(

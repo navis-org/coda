@@ -29,7 +29,13 @@
 import { registerNode } from '../../core/registry'
 import { T } from '../../core/types'
 import { ROI_MESH_SCHEMA } from '../../data/source'
-import { datasetInfoFromType, datasetRequest, requireDataset, sourceSupports } from '../lib/datasetParam'
+import {
+  datasetInfoFromType,
+  datasetRequest,
+  requireDataset,
+  roiOptions,
+  sourceSupports,
+} from '../lib/datasetParam'
 
 /**
  * Where an explicit region list starts being worth a sentence.
@@ -67,20 +73,9 @@ export const roiMeshesNode = registerNode({
       emptyLabel: 'the primary set',
       help: 'Which neuropils to fetch. Empty means the set that tiles the volume — the regions that do not sit inside one another.',
       default: [],
-      options: (ctx) => {
-        const info = datasetInfoFromType(ctx.inputs.dataset)
-        /*
-         * Alphabetical, overriding the source's own order.
-         *
-         * `DatasetInfo.rois` arrives "in a sensible display order", which is the right default
-         * for a list somebody *reads* — it groups a hierarchy the way the dataset thinks about
-         * it. This is a list somebody *searches*, one name at a time, in a dropdown of 144, and
-         * the only order that helps there is the one the eye can binary-search.
-         */
-        return [...(info?.rois ?? [])]
-          .sort((a, b) => a.localeCompare(b))
-          .map((roi) => ({ value: roi, label: roi }))
-      },
+      // Shared with Connectivity's region picker, which is where the alphabetical rule and the
+      // reason for it now live — see `roiOptions`.
+      options: (ctx) => roiOptions(ctx.inputs.dataset),
     },
   ],
 

@@ -11,7 +11,8 @@
  * `bodyId_pre`/`bodyId_post` would break every column picker in the rest of the notebook.
  */
 
-import { pyStr } from '../py'
+import { pyList, pyStr } from '../py'
+import { regionOptions } from '../../../nodes/lib/connectivityOps'
 import { registerEmitter, registerHelper } from '../registry'
 import { neuronIds } from './common'
 
@@ -42,6 +43,35 @@ registerEmitter('neuron.connectivity', (ctx) => {
   const minWeight = Math.max(1, Number(ctx.params.minWeight ?? 1))
   const ids = neuronIds(neurons)
 
+  // The node's own decoder rather than a second reading of the same params — the route
+  // `readUnpivotSpec` and `decodeRenames` already take. `primaryRoisOnly !== false` in
+  // particular is a claim about what an *absent* key means on a stored document, and a copy of
+  // it here is a copy nobody would edit alongside the node.
+  const { rois, splitByRoi, primaryOnly, used: usesRois } = regionOptions(ctx.params)
+
+  /*
+   * Normalisation is refused rather than approximated, and the reason is the `connected` basis:
+   * neuprint-python has no equivalent of it. `fetch_neurons` can supply the `all` denominators —
+   * they are the `upstream`/`downstream` properties — but a denominator counting only synapses
+   * onto partners neuPrint labels `:Neuron` needs its own aggregate query, and the two bases
+   * differ by a factor of two and a half on male-CNS. Emitting the reachable half under a
+   * control that names both would put a number in the notebook that is not the number on the
+   * canvas, which is exactly the substitution the node itself refuses to make.
+   */
+  if (ctx.params.normalize === true) {
+    return ctx.todo(
+      'Normalize has no neuprint-python equivalent for the "reconstructed partners only" denominator, and emitting only the "all synapses" one would answer a different question from the canvas. The all-synapses denominators are the upstream/downstream columns of fetch_neurons; weightNorm is weight divided by those.',
+    )
+  }
+  if (hops > 1 && usesRois) {
+    // The traversal goes through a generated helper written against one row per pair. Splitting
+    // inside it is a different dedupe key and a different frontier, and a helper that got that
+    // subtly wrong would be worse than a cell saying so.
+    return ctx.todo(
+      'The region options are written against the one-hop fetch_adjacencies call; the multi-hop traversal helper works one row per pair. Set Hops to 1, or drop the region options.',
+    )
+  }
+
   ctx.require('neuprint', 'NeuronCriteria', 'fetch_adjacencies', 'merge_neuron_properties')
 
   if (hops > 1) {
@@ -63,24 +93,81 @@ registerEmitter('neuron.connectivity', (ctx) => {
    * returns one row *per ROI per pair*, so a pair innervating four neuropils arrives as four
    * rows — and everything downstream that sums a weight double-counts. Coda's connectivity
    * fetch answers one row per pair, so this is what agrees with it.
+   *
+   * Which is also why the region options are the *same* argument turned off. `fetch_adjacencies`
+   * already answers per-ROI, already restricts to the primary set by default, and already takes
+   * an explicit `rois` list — so Coda's Split by region, Regions and Primary regions only map
+   * onto three arguments of a call this cell was making anyway, rather than onto a helper.
+   *
+   * One difference is worth knowing and is written into the cell below: `min_total_weight` is
+   * applied across **all** ROIs, where Coda applies Min weight to the restricted total. With a
+   * `rois` list set the two can therefore disagree about a connection sitting either side of
+   * the threshold.
    */
+  /*
+   * Built once: every one of these is fixed before `call` exists, and Python kwargs are
+   * order-free, so there is nothing for the closure to decide per invocation.
+   */
+  const roiArgs: string[] = []
+  if (rois.length) roiArgs.push(`    rois=${pyList(rois)},`)
+  if (!usesRois) roiArgs.push(`    omit_rois=True,`)
+  else if (!primaryOnly) roiArgs.push(`    include_nonprimary=True,`)
+
   const call = (sources: string, targets: string): string[] => [
     `fetch_adjacencies(`,
     `    ${sources},`,
     `    ${targets},`,
     `    min_total_weight=${minWeight},`,
-    `    omit_rois=True,`,
+    ...roiArgs,
     `    client=${c},`,
+    `)`,
+  ]
+
+  /** Regions chosen, but the rows are wanted per pair — so the sum is ours. */
+  const regroupNeeded = rois.length > 0 && !splitByRoi
+
+  /**
+   * Fold the per-ROI rows back to one row per pair, for Regions without Split by region.
+   *
+   * `fetch_adjacencies` has no mode that restricts to regions *and* totals across them, so the
+   * restriction is its argument and the totalling is ours. Summing `weight` per pair is exactly
+   * what Coda's unsplit region query does in Cypher, one `reduce` above the `UNWIND`.
+   */
+  const regroup = (frame: string): string[] => [
+    `${frame} = (`,
+    `    ${frame}`,
+    `    .groupby(['bodyId_pre', 'bodyId_post'], as_index=False)['weight']`,
+    `    .sum()`,
     `)`,
   ]
 
   const criteria = `NeuronCriteria(bodyId=${ids}, client=${c})`
 
+  /*
+   * The dedupe key, and the region is part of it exactly when a region is part of a row —
+   * `traverseConnectivity`'s rule. Keyed on the pair alone over a split result, a `both`
+   * traversal keeps whichever region of an internal edge arrived first and discards the rest of
+   * the connection, which is a table that looks fine and is missing synapses.
+   */
+  const dedupe = splitByRoi
+    ? `['bodyId_pre', 'bodyId_post', 'roi']`
+    : `['bodyId_pre', 'bodyId_post']`
+
+  const note = rois.length
+    ? [
+        `# NOTE: fetch_adjacencies applies min_total_weight across every ROI, where Coda's`,
+        `# Min weight applies to the total *inside* the regions you named. A connection sitting`,
+        `# either side of ${minWeight} can therefore differ between this cell and the canvas.`,
+      ]
+    : []
+
   if (direction === 'both') {
     ctx.require('pandas')
     return [
+      ...note,
       `_down_neurons, _down = ${call(criteria, 'None').join('\n')}`,
       `_up_neurons, _up = ${call('None', criteria).join('\n')}`,
+      ...(regroupNeeded ? [...regroup('_down'), ...regroup('_up')] : []),
       `_down = merge_neuron_properties(_down_neurons, _down, ['type']).assign(direction='downstream')`,
       `_up = merge_neuron_properties(_up_neurons, _up, ['type']).assign(direction='upstream')`,
       ``,
@@ -89,7 +176,7 @@ registerEmitter('neuron.connectivity', (ctx) => {
       // the picture rather than a cosmetic repeat.
       `${out} = (`,
       `    pd.concat([_down, _up], ignore_index=True)`,
-      `    .drop_duplicates(subset=['bodyId_pre', 'bodyId_post'])`,
+      `    .drop_duplicates(subset=${dedupe})`,
       `    .rename(columns={`,
       ...renameLines('        '),
       `    })`,
@@ -102,7 +189,9 @@ registerEmitter('neuron.connectivity', (ctx) => {
   const label = direction === 'inputs' ? 'upstream' : 'downstream'
 
   return [
+    ...note,
     `_neurons, _conn = ${call(sources, targets).join('\n')}`,
+    ...(regroupNeeded ? regroup('_conn') : []),
     `${out} = (`,
     `    merge_neuron_properties(_neurons, _conn, ['type'])`,
     `    .rename(columns={`,

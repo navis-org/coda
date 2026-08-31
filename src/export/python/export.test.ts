@@ -29,6 +29,15 @@ const CAVE_GOLDEN = new URL('./__fixtures__/cave.ipynb', import.meta.url).pathna
 /** Fixed, so the golden file does not change every time it is written. */
 const OPTIONS = { now: '2026-01-01', appVersion: '0.0.0-test' }
 
+/** Every code cell of an export, joined — what the assertions below search. */
+function notebookText(graph: Parameters<typeof exportNotebook>[0]): string {
+  const result = exportNotebook(graph, OPTIONS)
+  if (!result.ok) throw new Error(result.reason)
+  return (result.notebook.cells as Array<{ source: string[] }>)
+    .map((cell) => cell.source.join(''))
+    .join('\n')
+}
+
 function exportFixture(graph = everythingGraph()): string {
   const result = exportNotebook(graph, OPTIONS)
   if (!result.ok) throw new Error(`refused: ${result.reason}`)
@@ -214,6 +223,110 @@ describe('notebook export', () => {
  * that is 186,061 rows against a fraction of them, which reads as a fact about the dataset rather
  * than as a gap in the translation — so it is checked per emitter rather than once.
  */
+/**
+ * The region and normalisation options, which the two exporters answer differently.
+ *
+ * The Python one translates the region half onto three arguments of the `fetch_adjacencies`
+ * call the cell was already making, and refuses normalisation because neuprint-python has no
+ * equivalent of the reconstructed-partners-only denominator. Both halves are worth pinning:
+ * `omit_rois` flipping the wrong way is the failure the existing comment on it describes —
+ * one row per ROI per pair, double counted by everything downstream — and a refusal that
+ * quietly became an emission would put a different number in the notebook from the canvas.
+ */
+describe('the region and normalisation options', () => {
+  function connectivityCell(params: ParamValues): string {
+    let g = emptyGraph('regions')
+    g = addNode(g, {
+      id: 'ds',
+      type: 'dataset.hemibrain',
+      position: { x: 0, y: 0 },
+      params: { version: 'v1.2.1' },
+    })
+    g = addNode(g, {
+      id: 'find',
+      type: 'neuron.findNeurons',
+      position: { x: 260, y: 0 },
+      params: { typePattern: 'LC4' },
+    })
+    g = addNode(g, { id: 'c', type: 'neuron.connectivity', position: { x: 520, y: 0 }, params })
+    g = { ...g, edges: [
+      { id: 'e1', source: 'ds', sourceHandle: 'dataset', target: 'find', targetHandle: 'dataset' },
+      { id: 'e2', source: 'ds', sourceHandle: 'dataset', target: 'c', targetHandle: 'dataset' },
+      { id: 'e3', source: 'find', sourceHandle: 'neurons', target: 'c', targetHandle: 'neurons' },
+    ] }
+    return notebookText(g)
+  }
+
+  it('keeps omit_rois on when no region option is set', () => {
+    const text = connectivityCell({ direction: 'outputs', hops: 1, minWeight: 1 })
+    expect(text).toContain('omit_rois=True')
+  })
+
+  it('turns omit_rois off to split, and leaves the primary default alone', () => {
+    const text = connectivityCell({
+      direction: 'outputs',
+      hops: 1,
+      minWeight: 1,
+      splitByRoi: true,
+    })
+    expect(text).not.toContain('omit_rois=True')
+    // fetch_adjacencies restricts to the primary set by default, which is the node's default
+    // too — so the faithful translation of "Primary regions only: on" is no argument at all.
+    expect(text).not.toContain('include_nonprimary')
+  })
+
+  it('adds the region to the dedupe key, so a `both` split keeps every part', () => {
+    // Only the `both` branch dedupes — one direction of fetch_adjacencies returns unique rows.
+    // Keyed on the pair alone, an edge internal to the seed set would keep whichever region
+    // arrived first and drop the rest of the connection: a table that looks fine and is short.
+    const split = connectivityCell({ direction: 'both', hops: 1, minWeight: 1, splitByRoi: true })
+    expect(split).toContain("drop_duplicates(subset=['bodyId_pre', 'bodyId_post', 'roi'])")
+    const whole = connectivityCell({ direction: 'both', hops: 1, minWeight: 1 })
+    expect(whole).toContain("drop_duplicates(subset=['bodyId_pre', 'bodyId_post'])")
+  })
+
+  it('asks for the non-primary regions only when the toggle is off', () => {
+    const text = connectivityCell({
+      direction: 'outputs',
+      hops: 1,
+      minWeight: 1,
+      splitByRoi: true,
+      primaryRoisOnly: false,
+    })
+    expect(text).toContain('include_nonprimary=True')
+  })
+
+  it('names the regions and sums them back when Split by region is off', () => {
+    const text = connectivityCell({
+      direction: 'outputs',
+      hops: 1,
+      minWeight: 1,
+      rois: ['LO(R)', 'ME(R)'],
+    })
+    expect(text).toContain("rois=['LO(R)', 'ME(R)']")
+    // Restricting is fetch_adjacencies' argument; totalling across the named regions is ours,
+    // because it has no mode that does both.
+    expect(text).toContain("groupby(['bodyId_pre', 'bodyId_post'], as_index=False)['weight']")
+    // And the one place the two genuinely disagree is said in the cell rather than left to be
+    // discovered from a row count.
+    expect(text).toContain('min_total_weight across every ROI')
+  })
+
+  it('refuses normalisation rather than emitting the reachable half of it', () => {
+    const text = connectivityCell({
+      direction: 'outputs',
+      hops: 1,
+      minWeight: 1,
+      normalize: true,
+      normalizeBasis: 'connected',
+    })
+    expect(text).toContain('TODO')
+    expect(text).toMatch(/no neuprint-python equivalent/)
+    // The refusal has to say what to write instead, or it reads as the feature being broken.
+    expect(text).toContain('upstream/downstream')
+  })
+})
+
 describe('the population filters', () => {
   const graphWith = (params: ParamValues, query: string, queryParams: ParamValues = {}) =>
     twoNodeGraph('dataset.hemibrain', params, query, queryParams)

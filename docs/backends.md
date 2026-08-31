@@ -198,6 +198,50 @@ because errors cross the scheduler as strings and matching on message text rots 
 **Tests use recorded fixtures** in `__fixtures__/`, all real trimmed responses. The
 transport is not covered — it cannot be without a network — but it fails loudly.
 
+### A connection's regions, and what a weight is a fraction of
+
+Two facts about neuPrint's data that the Connectivity node's region and normalisation controls
+are built on. Both were probed live against `neuprint.janelia.org` and both are pinned in
+`live.test.ts`, because a fixture proves the decoder works and proves nothing about whether the
+server's own arithmetic still holds. The design record is in
+[nodes.md](nodes.md#normalizing-a-weight-two-ends-two-denominators-and-both-said-out-loud); what
+belongs here is what the database does.
+
+**`ConnectsTo` carries `roiInfo`.** A JSON blob per relationship — `{"LAL(L)": {"post": 112}, …}`
+— present on every dataset the deployment lists (fib19's is `{}`, which splits into nothing and is
+a dataset with no regions rather than a failure). The per-region number to read is **`post`**: it
+counts postsynaptic densities, which is what `w.weight` counts for the connection as a whole, and
+hemibrain writes a `pre` beside it that is a different measure. `apoc.convert.fromJsonMap` is
+available in custom Cypher on every deployment checked — neuPrint's own cached
+`/api/cached/roiconnectivity` endpoint is built on it — so the split and the restriction are done
+in the query rather than by shipping every blob.
+
+Summing `post` over the **primary** set reproduces `w.weight`: exactly on male-CNS (400 of 400
+sampled edges, and 23,423 over all 11,287 out-edges of body 10005) and MANC, and to within a
+percent on hemibrain and optic-lobe, where a few synapses sit in no primary region at all. The
+per-dataset numbers are on `ConnectivityRequest.splitByRoi`. Summing over **all** keys double
+counts, because regions nest.
+
+**Every body is a `:Segment`; `:Neuron` is the subset above the synapse threshold**, and both
+carry `pre`, `post`, `upstream` and `downstream`. `bodyId` is indexed on `:Segment` — 500 ids in
+168 ms, 20,000 in 2.2 s — which is why `synapseTotalsCypher` matches that label on the queried
+end: a fragment that turned up on the far end of somebody's edge still gets a denominator, where
+`:Neuron` would return no row and read downstream as "no answer" rather than as "not a neuron".
+
+The numbers that decide which property is which, on male-cns:v1.0 body 10005:
+
+```
+n.post = n.upstream ..... 31,981     Sigma in-weight, all partners ...... 31,981
+n.downstream ............ 23,423     Sigma out-weight, all partners ..... 23,423
+n.pre (T-bars) ..........  2,837     Sigma out-weight, :Neuron only .....  9,324
+```
+
+So the published total and the sum over every relationship are **the same number** in both
+directions, and `n.pre` is not that number for the outgoing side — it is the T-bar count, eight
+times smaller. `synapseTotalsCypher` therefore falls back `coalesce(n.upstream, n.post)` on the
+incoming side, where the two are measured equal, and has deliberately **no** fallback on the
+outgoing one.
+
 ## CAVE
 
 `src/data/cave/`, and the second backend. FlyWire and everything else served by CAVE — the

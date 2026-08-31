@@ -11,6 +11,7 @@
 import { rStr } from '../r'
 import { registerEmitter, registerHelper } from '../registry'
 import { neuronIds } from './common'
+import { regionOptions } from '../../../nodes/lib/connectivityOps'
 
 registerEmitter('neuron.connectivity', (ctx) => {
   const conn = ctx.wired('dataset')
@@ -22,6 +23,30 @@ registerEmitter('neuron.connectivity', (ctx) => {
   const direction = String(ctx.params.direction ?? 'outputs')
   const hops = Math.max(1, Number(ctx.params.hops ?? 1))
   const minWeight = Math.max(1, Number(ctx.params.minWeight ?? 1))
+
+  /*
+   * The region and normalisation options are refused here where the Python emitter translates
+   * the region half, and the asymmetry is about what could be *checked* rather than about what
+   * neuprintr can do. `fetch_adjacencies`' signature, its defaults and its `"NotPrimary"`
+   * bucket were read off the installed neuprint-python 0.6.3 by introspection; neuprintr was
+   * not installed, and its argument names are exactly the kind of thing this codebase has been
+   * bitten by recalling — `Client.fetch_roi_hierarchy` does not exist, to take the case already
+   * written down in `roiHierarchy.ts`. A cell that names an argument neuprintr does not have
+   * fails at the reader's console, which is worse than a cell that says what to write.
+   */
+  // The node's own decoder, shared with the notebook emitter. Written by hand here, this test
+  // read `rois.length > 0` without filtering empty strings — so a stored `rois: ['']` refused
+  // the export while the node and the notebook treated it as no regions at all.
+  if (regionOptions(ctx.params).used) {
+    return ctx.todo(
+      'The region options are not translated. neuprint_connection_table() can break a connection down by region; the argument names were not verified against an installed neuprintr, and guessing them produces a cell that fails at your console.',
+    )
+  }
+  if (ctx.params.normalize === true) {
+    return ctx.todo(
+      'Normalize is not translated. The all-synapses denominators are the upstream/downstream columns of neuprint_get_meta(); the reconstructed-partners-only denominator needs its own aggregate query, and the two differ by a factor of two and a half on male-CNS.',
+    )
+  }
 
   if (hops > 1) {
     ctx.helper('coda_traverse_connectivity')

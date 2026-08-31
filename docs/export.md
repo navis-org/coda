@@ -38,6 +38,33 @@ the thing to watch — an emitter can quietly stop agreeing with the `evaluate` 
 nothing type-checks the pair. `coverage.test.ts` is the tripwire: every registered type either
 has an emitter or is named in `NO_EMITTER` with a reason.
 
+### One node exported asymmetrically, and why that is the honest answer
+
+`Connectivity`'s region options are translated in the notebook and refused in the R Markdown, and
+its `Normalize` is refused in both. The split is not about what each library can do — neuprintr can
+break a connection down by region perfectly well — it is about **what could be checked here**.
+
+`fetch_adjacencies`' signature, its defaults and its `"NotPrimary"` bucket were read off the
+installed neuprint-python 0.6.3 by introspection, and they map onto Coda's controls almost exactly:
+it already answers one row per ROI per pair, already restricts to the primary set unless
+`include_nonprimary=True`, and already takes an explicit `rois` list. So the region half is three
+arguments of a call the cell was already making, and the one place the two genuinely disagree —
+`min_total_weight` is applied across every ROI, where Coda's `Min weight` applies to the total
+inside the named regions — is written into the cell as a `NOTE` rather than papered over.
+
+neuprintr was not installed. Its argument names would have been recalled rather than checked, and
+this codebase has already paid for that once: `Client.fetch_roi_hierarchy` does not exist, it is a
+module-level function, and the obvious spelling is a well-bound name and an `AttributeError` (see
+`neuprint/roiHierarchy.ts`). A cell naming an argument neuprintr does not have fails at the
+reader's console, which is worse than a cell saying what to write.
+
+`Normalize` is refused in both languages for a different reason, and it is the one the refusal
+policy exists for: neuprint-python has **no equivalent of the reconstructed-partners-only
+denominator**. The `all` basis is reachable — it is the `upstream`/`downstream` columns of
+`fetch_neurons` — and emitting only that half under a control that names both would put a number in
+the notebook that is not the number on the canvas, differing by a factor of two and a half on
+male-CNS. That is the substitution the node itself refuses to make, arriving one layer out.
+
 ### The softer half: warning that an export will have gaps in it
 
 A refusal says the export is not worth making. Beside it, both surfaces now say how much of a

@@ -8,6 +8,7 @@
  */
 
 import type { CodaType, PopulationFilter } from '../../core/types'
+import type { EnumOption } from '../../core/node'
 import { datasetRef } from '../../core/types'
 import type { DatasetValue, Value } from '../../core/values'
 import { isDatasetValue } from '../../core/values'
@@ -25,6 +26,8 @@ import {
   CANONICAL_SCHEMAS,
   allSources,
   backendOf,
+  canSplitConnectivityByRoi,
+  canTotalSynapses,
   canTracePaths,
   capabilityOf,
   getSource,
@@ -64,6 +67,11 @@ export function sourceSupports(
   // are required methods rather than capabilities, so there is nothing there to unlock.
   const edges = type?.kind === 'dataset' && type.edges === true
   if (capability === 'paths') return canTracePaths(source, datasetId, edges)
+  // The two an edge set *removes*, for the reasons written at each predicate: a file of
+  // `pre, post, weight` carries no regions, and its weights are not the population the backend's
+  // synapse totals count.
+  if (capability === 'connectivityRois') return canSplitConnectivityByRoi(source, datasetId, edges)
+  if (capability === 'synapseTotals') return canTotalSynapses(source, datasetId, edges)
   return capabilityOf(source, datasetId, capability)
 }
 
@@ -157,6 +165,32 @@ export function datasetInfoFromType(type: CodaType | undefined): DatasetInfo | u
   const ref = datasetRef(type)
   if (!ref?.sourceId || !ref.datasetId) return undefined
   return getSource(ref.sourceId)?.peekDataset(ref.datasetId)
+}
+
+/**
+ * The region names a Dataset socket offers a picker, alphabetically.
+ *
+ * Two nodes ask — the ROI Viewer and Connectivity — and they are the only region pickers in the
+ * app. Written per node, both carried their own copy of the rule *and* of the reason for it,
+ * which is the shape a third one would have inherited.
+ *
+ * **Alphabetical, overriding the source's own order.** `DatasetInfo.rois` arrives "in a sensible
+ * display order", which is right for a list somebody *reads* — it groups a hierarchy the way the
+ * dataset thinks about it. This is a list somebody *searches*, one name at a time, in a dropdown
+ * of a hundred and forty-four, and the only order that helps there is the one the eye can
+ * binary-search.
+ *
+ * `primaryOnly` picks the vocabulary: the subset that tiles the volume, or everything published.
+ * The two differ by a lot — male-CNS lists 5,619 regions against 144 that tile — so this is not
+ * a filter over a list of roughly the same size.
+ */
+export function roiOptions(
+  type: CodaType | undefined,
+  options: { primaryOnly?: boolean } = {},
+): EnumOption[] {
+  const info = datasetInfoFromType(type)
+  const names = options.primaryOnly ? (info?.primaryRois ?? []) : (info?.rois ?? [])
+  return [...names].sort((a, b) => a.localeCompare(b)).map((roi) => ({ value: roi, label: roi }))
 }
 
 /** Resolve the `source` param, falling back to the first registered source. */

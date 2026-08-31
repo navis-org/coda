@@ -132,6 +132,14 @@ const CATMAID_CAPABILITIES: SourceCapabilities = {
   // The volume list is real and drawable; narrowing a *query* by one is not — see the
   // capability note. These two came apart here, which is why the flag exists.
   roiFilter: false,
+  // A CATMAID connector carries a location, not a region, and `volumeList` answers with meshes
+  // rather than with an assignment — so splitting a connection by region means a point-in-mesh
+  // test per synapse, client-side. `skeleton_connectivity` already answers every partner of the
+  // queried skeletons, so a `connected` total is one sum away; the `all` basis has no source at
+  // all, and a capability that could only honour half of `SynapseTotalsBasis` is the control
+  // meaning two things per dataset that `synapseTotals` documents.
+  connectivityRois: false,
+  synapseTotals: false,
   roiMeshes: true,
 }
 

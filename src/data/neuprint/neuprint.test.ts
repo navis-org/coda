@@ -48,6 +48,7 @@ import skeletonFixture from './__fixtures__/skeleton.json'
 import {
   adjacencyCypher,
   connectivityCypher,
+  synapseTotalsCypher,
   escapeIdentifier,
   escapeString,
   findNeuronsCypher,
@@ -568,6 +569,110 @@ describe('query building', () => {
     expect(
       connectivityCypher({ datasetId: 'x', neuronIds: ['1'], direction: 'outputs' }),
     ).toContain('->(p)\n')
+  })
+
+  /*
+   * The region arm and the totals, both verified live against male-cns:v1.0 before they were
+   * written — the numbers in these comments are measured, not derived. Query text is what is
+   * asserted because every failure mode here compiles and returns a plausible table: an
+   * un-parenthesised region list returns the whole neuron, `n.pre` in place of `n.downstream`
+   * returns fractions eight times too large, and `(p:Neuron)` where `(p)` was meant halves the
+   * denominator without changing a column name.
+   */
+  it('restricts weights to the named regions rather than filtering whole connections', () => {
+    const query = connectivityCypher({
+      datasetId: 'x',
+      neuronIds: ['1'],
+      direction: 'outputs',
+      rois: ['LAL(L)', 'VES(L)'],
+    })
+    expect(query).toContain('apoc.convert.fromJsonMap(w.roiInfo)')
+    // Weight is rebuilt from the region parts, never `w.weight`: on body 10005 the edges
+    // *touching* LAL(L) carry 13,071 synapses of which 9,344 are in it.
+    expect(query).toContain("[r IN ['LAL(L)','VES(L)'] WHERE coalesce(ri[r].post, 0) > 0")
+    expect(query).toContain('reduce(total = 0, x IN parts | total + x.weight) AS weight')
+    expect(query).not.toContain('w.weight >=')
+  })
+
+  it('applies Min weight to the connection, before the split', () => {
+    const query = connectivityCypher({
+      datasetId: 'x',
+      neuronIds: ['1'],
+      direction: 'outputs',
+      splitByRoi: true,
+      minWeight: 10,
+    })
+    // The threshold sits above the UNWIND, so a split is a decomposition of exactly what the
+    // unsplit query would have returned and cannot change which partners a traversal expands.
+    expect(query.indexOf('WHERE weight >= 10')).toBeLessThan(query.indexOf('UNWIND parts'))
+    expect(query).toContain('RETURN n.bodyId, n.type, p.bodyId, p.type, part.weight AS weight, part.roi AS roi')
+  })
+
+  it('enumerates the connection\u2019s own regions when none were named', () => {
+    const query = connectivityCypher({
+      datasetId: 'x',
+      neuronIds: ['1'],
+      direction: 'outputs',
+      splitByRoi: true,
+    })
+    expect(query).toContain('[r IN keys(ri) WHERE')
+  })
+
+  it('leaves the plain query untouched when no region option is set', () => {
+    const query = connectivityCypher({ datasetId: 'x', neuronIds: ['1'], direction: 'outputs' })
+    expect(query).not.toContain('apoc')
+    expect(query).toContain('RETURN n.bodyId, n.type, p.bodyId, p.type, w.weight')
+  })
+
+  it('totals outgoing synapses from downstream, never from pre', () => {
+    const query = synapseTotalsCypher({
+      datasetId: 'x',
+      neuronIds: ['1'],
+      side: 'outputs',
+      basis: 'all',
+    })
+    // `pre` is the T-bar count and `downstream` the synapses those T-bars drive: 2,837 against
+    // 23,423 on male-cns body 10005. Normalising by `pre` puts a plausible fraction eight times
+    // too large in the column with nothing failing.
+    expect(query).toContain('RETURN n.bodyId, n.downstream')
+    expect(query).not.toContain('n.pre')
+  })
+
+  it('totals incoming synapses from upstream, falling back to post', () => {
+    const query = synapseTotalsCypher({
+      datasetId: 'x',
+      neuronIds: ['1'],
+      side: 'inputs',
+      basis: 'all',
+    })
+    // Measured equal on every dataset checked — 31,981 either way on body 10005 — so the
+    // fallback is safe here in a way it is not on the outgoing side.
+    expect(query).toContain('RETURN n.bodyId, coalesce(n.upstream, n.post)')
+  })
+
+  it('queries the Segment label, so a fragment on the far end still gets a denominator', () => {
+    for (const basis of ['all', 'connected'] as const) {
+      const query = synapseTotalsCypher({
+        datasetId: 'x',
+        neuronIds: ['1'],
+        side: 'outputs',
+        basis,
+      })
+      // Every body is a `:Segment`; `:Neuron` is the subset above the synapse threshold. Asking
+      // about `:Neuron` returns no row for a fragment, which reads as "no answer" rather than
+      // as "not a neuron".
+      expect(query).toContain('(n:Segment)')
+    }
+  })
+
+  it('restricts only the partner end for the connected basis', () => {
+    // 9,324 against 23,423 on body 10005 — the whole reason the control exists.
+    expect(
+      synapseTotalsCypher({ datasetId: 'x', neuronIds: ['1'], side: 'outputs', basis: 'connected' }),
+    ).toContain('MATCH (n:Segment)-[w:ConnectsTo]->(p:Neuron)\nWHERE n.bodyId IN [1]\nRETURN n.bodyId, sum(w.weight)')
+    expect(
+      synapseTotalsCypher({ datasetId: 'x', neuronIds: ['1'], side: 'inputs', basis: 'connected' }),
+    ).toContain('MATCH (p:Neuron)-[w:ConnectsTo]->(n:Segment)')
   })
 
   it('constrains both ends for adjacency', () => {

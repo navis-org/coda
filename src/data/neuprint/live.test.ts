@@ -117,3 +117,151 @@ live('neuPrint, live — where a skeleton comes from', () => {
     ).rejects.toThrow(/publishes no precomputed skeleton layer/)
   }, 120_000)
 })
+
+/**
+ * The region split and the two denominators, against the server they were designed from.
+ *
+ * Every claim in `ConnectivityRequest.splitByRoi`, `SynapseTotalsBasis` and
+ * `synapseTotalsCypher` is a claim about male-CNS's data rather than about this code, and none
+ * of them can be checked from a fixture — a recorded response proves the decoder works and
+ * proves nothing about whether `roiInfo` still sums to `w.weight`, or whether `downstream` is
+ * still the number a connection weight is a fraction of. Those are facts about somebody's
+ * database, they are what every number this feature emits is built on, and they would change
+ * silently.
+ *
+ * The reference values, measured on **male-cns:v1.0, body 10005** (AOTU019, Traced) when this
+ * was written. Ratios rather than bare numbers wherever a re-export could legitimately move
+ * them; the identities are asserted exactly, because those are structural.
+ *
+ *   n.post = n.upstream ....... 31,981      n.pre (T-bars) ........  2,837
+ *   n.downstream .............. 23,423      Sigma out-weight, all partners ... 23,423
+ *   Sigma out-weight, :Neuron partners ...  9,324
+ *   Sigma in-weight, all partners ....... 31,981   :Neuron partners ... 31,389
+ *
+ * Out of CI like every other live file here: it needs a credential and somebody else's
+ * database, and it reads only.
+ */
+live('neuPrint, live — what a weight is a fraction of', () => {
+  const DATASET = 'male-cns:v1.0'
+  const BODY = '10005'
+
+  const sum = (t: { data: Record<string, unknown[]> }): number =>
+    (t.data.weight ?? []).reduce((total: number, w) => total + Number(w), 0)
+  const total = (t: { data: Record<string, unknown[]> }): number => Number(t.data.total?.[0])
+
+  it('splits a connection over the primary regions without adding or losing a synapse', async () => {
+    setToken(TOKEN!)
+    const source = new NeuPrintSource()
+    await source.listDatasets()
+    const primaryRois = source.peekDataset(DATASET)?.primaryRois
+    expect(primaryRois?.length).toBeGreaterThan(100)
+
+    const request = { datasetId: DATASET, neuronIds: [BODY], direction: 'outputs' as const }
+    const whole = await source.fetchConnectivity(request)
+    const split = await source.fetchConnectivity({
+      ...request,
+      rois: primaryRois!,
+      splitByRoi: true,
+    })
+
+
+    /*
+     * The decomposition promise, and the only place it can actually be tested. 23,423 either
+     * way when this was written: male-CNS's 144 primary regions tile, so every synapse of every
+     * connection lands in exactly one of them. If neuPrint ever publishes a primary set that
+     * does not tile, or a `roiInfo` that omits regions, this is where it shows up — and
+     * everywhere else it would show up as a total that is quietly wrong.
+     */
+    expect(sum(split)).toBe(sum(whole))
+    expect(split.length).toBeGreaterThan(whole.length)
+    expect(new Set(split.data.roi).size).toBeGreaterThan(1)
+  }, 120_000)
+
+  it('loses the sub-percent of hemibrain that sits in no primary region, and no more', async () => {
+    /*
+     * The other half of the same fact, pinned rather than left as prose on `splitByRoi`. The
+     * primary set does **not** tile every dataset: over 20,000 sampled connections hemibrain
+     * puts 1,104 of 274,844 synapses (0.4%) outside every primary region, and optic-lobe 0.9%.
+     * A split over that set drops them — nothing here invents a `NotPrimary` bucket the way
+     * neuprint-python does — so this asserts both that the loss is real and that it is small.
+     * A split that started losing a tenth of a connectome would be a change in the data or a
+     * bug in the region list, and either is worth failing over.
+     */
+    setToken(TOKEN!)
+    const source = new NeuPrintSource()
+    await source.listDatasets()
+    const dataset = 'hemibrain:v1.2.1'
+    const primaryRois = source.peekDataset(dataset)?.primaryRois
+    expect(primaryRois?.length).toBe(63)
+
+    const seeds = ['1671631407', '5813069064', '1158187240']
+    const request = { datasetId: dataset, neuronIds: seeds, direction: 'outputs' as const }
+    const whole = await source.fetchConnectivity(request)
+    const split = await source.fetchConnectivity({
+      ...request,
+      rois: primaryRois!,
+      splitByRoi: true,
+    })
+    expect(sum(split)).toBeLessThanOrEqual(sum(whole))
+    expect(sum(split)).toBeGreaterThan(sum(whole) * 0.97)
+  }, 120_000)
+
+  it('restricts a weight to the region rather than passing the whole connection', async () => {
+    setToken(TOKEN!)
+    const source = new NeuPrintSource()
+    const request = { datasetId: DATASET, neuronIds: [BODY], direction: 'outputs' as const }
+    const restricted = await source.fetchConnectivity({ ...request, rois: ['LAL(L)'] })
+    // 9,344 in LAL(L), out of 13,071 carried by the connections that touch it. A filter that
+    // kept whole connections would answer the larger number, and both are plausible.
+    expect(sum(restricted)).toBeLessThan(11_000)
+    expect(sum(restricted)).toBeGreaterThan(8_000)
+  }, 120_000)
+
+  it('publishes a total that the all-partner weights sum to exactly', async () => {
+    setToken(TOKEN!)
+    const source = new NeuPrintSource()
+    for (const side of ['outputs', 'inputs'] as const) {
+      const edges = await source.fetchConnectivity({
+        datasetId: DATASET,
+        neuronIds: [BODY],
+        direction: side,
+      })
+      const totals = await source.fetchSynapseTotals({
+        datasetId: DATASET,
+        neuronIds: [BODY],
+        side,
+        basis: 'all',
+      })
+      const summed = sum(edges)
+      /*
+       * The identity the `all` basis rests on: `n.downstream` (23,423) and `n.upstream`
+       * (31,981) are exactly the sums of the connection weights over *every* partner. That is
+       * what makes "all synapses" a denominator the fractions of a full partner list sum to 1
+       * under — and it is also why `n.pre` is not it, at 2,837.
+       */
+      expect(total(totals)).toBe(summed)
+    }
+  }, 180_000)
+
+  it('leaves out the fragments for the connected basis, which is most of the outputs', async () => {
+    setToken(TOKEN!)
+    const source = new NeuPrintSource()
+    const request = { datasetId: DATASET, neuronIds: [BODY] }
+    const [allOut, connectedOut] = await Promise.all([
+      source.fetchSynapseTotals({ ...request, side: 'outputs', basis: 'all' }),
+      source.fetchSynapseTotals({ ...request, side: 'outputs', basis: 'connected' }),
+    ])
+    /*
+     * 23,423 against 9,324 — the gap the control exists for, and the asymmetry the user of this
+     * node has to be told about: outputs land on dendrites, which are hard to reconstruct, so
+     * only about 40% of them reach a named neuron. Inputs come from axons and lose 2%.
+     */
+    expect(total(connectedOut)).toBeLessThan(total(allOut) * 0.6)
+
+    const [allIn, connectedIn] = await Promise.all([
+      source.fetchSynapseTotals({ ...request, side: 'inputs', basis: 'all' }),
+      source.fetchSynapseTotals({ ...request, side: 'inputs', basis: 'connected' }),
+    ])
+    expect(total(connectedIn)).toBeGreaterThan(total(allIn) * 0.95)
+  }, 180_000)
+})

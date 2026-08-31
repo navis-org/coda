@@ -15,6 +15,7 @@
 import type { TableSchema } from '../../core/types'
 import type {
   ColumnData,
+  CellValue,
   GeometryUnits,
   MatrixValue,
   MeshesValue,
@@ -33,6 +34,7 @@ import {
   makeTable,
   tableFromRows,
 } from '../../core/values'
+import { ID_COLUMN_NAME } from '../../core/ids'
 import type {
   AdjacencyRequest,
   CoarseGeometry,
@@ -51,11 +53,14 @@ import type {
   SourceCapabilities,
   SourceSchemas,
   SynapseRequest,
+  SynapseTotalsRequest,
   ViewerSceneRequest,
 } from '../source'
 import {
   CANONICAL_SCHEMAS,
   PATH_STEP_SCHEMA,
+  connectivitySchemaWithRoi,
+  synapseTotalsSchema,
   ROI_CONNECTIVITY_SCHEMA,
   ROI_MESH_SCHEMA,
   reportSourceLearned,
@@ -94,6 +99,7 @@ import {
   roiCountsCypher,
   sampleNeuronsCypher,
   sampleStatusesCypher,
+  synapseTotalsCypher,
   synapsesCypher,
 } from './cypher'
 import type { CypherResponse } from './decode'
@@ -154,6 +160,15 @@ const PUBLISHED_ROUTE = route(
  * fifty sockets against a server other people are using.
  */
 const SKELETON_CONCURRENCY = 6
+
+/**
+ * How many ids one `fetchSynapseTotals` query names.
+ *
+ * Measured on male-cns:v1.0 against `MATCH (n:Segment) WHERE n.bodyId IN […]`: 5,000 ids in
+ * 668 ms over a 37 kB query, 20,000 in 2.2 s over 147 kB. Set where the curve is still flat —
+ * the point is to keep any one request explicable, not to find the server's ceiling.
+ */
+const SYNAPSE_TOTALS_BATCH = 5_000
 
 /**
  * The neuron columns a morphology attribute row carries, named once.
@@ -261,6 +276,13 @@ export class NeuPrintSource implements DataSource {
     roiCounts: true,
     roiSummary: true,
     roiFilter: true,
+    // `ConnectsTo.roiInfo` is a per-region breakdown stored on the relationship itself, so a
+    // split costs no extra round trip — present on every dataset the deployment lists, though
+    // fib19's is `{}`, which splits into nothing and is a dataset with no regions rather than a
+    // failure. Totals come from `upstream`/`downstream` for the `all` basis and from one
+    // aggregate over `ConnectsTo` for `connected`.
+    connectivityRois: true,
+    synapseTotals: true,
     roiMeshes: true,
   }
   readonly schemas: SourceSchemas = CANONICAL_SCHEMAS
@@ -646,7 +668,12 @@ export class NeuPrintSource implements DataSource {
   }
 
   async fetchConnectivity(req: ConnectivityRequest): Promise<TableValue> {
-    const schema = schemasFor(emptyDiscovered()).connectivity
+    const base = schemasFor(emptyDiscovered()).connectivity
+    // The region column is part of the schema exactly when the query returns it, so the two
+    // halves of invariant 3 are decided by the same expression rather than by two readings of
+    // the same param. `tableFromCypher` maps columns positionally and throws on a count
+    // mismatch, which is what would catch the pair coming apart.
+    const schema = req.splitByRoi ? connectivitySchemaWithRoi(base) : base
     if (req.neuronIds.length === 0) return emptyTable(schema)
     const response = await runCypher(
       connectivityCypher(req),
@@ -654,6 +681,49 @@ export class NeuPrintSource implements DataSource {
       this.options(req.signal),
     )
     return tableFromCypher(response, schema)
+  }
+
+  /**
+   * Per-neuron synapse totals, in batches.
+   *
+   * **Chunked, unlike every other query here**, and the asymmetry is the point: a connectivity
+   * fetch names the neurons somebody asked about, where this names the neurons that came
+   * *back* — one hop from a hundred neurons can be fifty thousand partners, and a Cypher
+   * literal of fifty thousand ids is a third of a megabyte of query text. Measured on
+   * male-cns: 5,000 ids answered in 668 ms and 20,000 in 2.2 s, so the batch is set where the
+   * curve is still flat rather than at whatever the server would tolerate.
+   *
+   * Serial rather than concurrent. These are aggregates over a shared production server and the
+   * node has already told the user what it is doing; four of them at once buys a second and
+   * spends somebody else's database.
+   */
+  async fetchSynapseTotals(req: SynapseTotalsRequest): Promise<TableValue> {
+    const schema = synapseTotalsSchema('i64')
+    if (req.neuronIds.length === 0) return emptyTable(schema)
+
+    // Straight into the two column arrays rather than through `tableFromRows`, whose own note
+    // says it is not for hot paths: this function exists for the case where one hop from a
+    // hundred neurons is fifty thousand partners, and the row-object form would allocate one
+    // throwaway object each and then walk them all again.
+    const ids: CellValue[] = []
+    const totals: CellValue[] = []
+    for (let at = 0; at < req.neuronIds.length; at += SYNAPSE_TOTALS_BATCH) {
+      const batch = req.neuronIds.slice(at, at + SYNAPSE_TOTALS_BATCH)
+      const response = await runCypher(
+        synapseTotalsCypher({ ...req, neuronIds: batch }),
+        req.datasetId,
+        this.options(req.signal),
+      )
+      for (const row of response.data ?? []) {
+        const total = row[1]
+        // A body with no synapses on this side aggregates to null, and null is what it stays:
+        // see `fetchSynapseTotals` on the seam — a zero here would divide into an infinity.
+        if (typeof total !== 'number') continue
+        ids.push(Number(row[0]))
+        totals.push(total)
+      }
+    }
+    return makeTable(schema, { [ID_COLUMN_NAME]: ids, total: totals })
   }
 
   async fetchPathStep(req: PathStepRequest): Promise<TableValue> {

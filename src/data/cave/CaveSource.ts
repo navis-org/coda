@@ -171,6 +171,11 @@ const CAVE_CAPABILITIES: SourceCapabilities = {
   roiSummary: false,
   // A CAVE datastack publishes no regions at all.
   roiFilter: false,
+  // FlyWire's neuropil assignments are a reference table on *synapses*, so both of these mean
+  // reading every synapse of every queried neuron — which is the work the connection roll-up
+  // exists to avoid. The same reason `roiCounts` is false here.
+  connectivityRois: false,
+  synapseTotals: false,
   roiMeshes: false,
 }
 

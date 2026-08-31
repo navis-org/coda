@@ -17,8 +17,12 @@ import { column, tableSchema } from '../../core/types'
 import type { TableValue } from '../../core/values'
 import { tableFromRows } from '../../core/values'
 import type { ConnectionDirection } from '../../data/source'
+import { connectivitySchemaWithRoi } from '../../data/source'
 import {
   connectivityOutputSchema,
+  normalizeConnectivity,
+  normalizeTargets,
+  totalsLookup,
   traverseConnectivity,
   type TraversalDirection,
 } from './connectivityOps'
@@ -45,6 +49,19 @@ const TYPES: Record<number, string> = {
   9: 'X',
 }
 
+/** One query-relative row, which is the half both fakes share. */
+function row(pre: number, post: number, weight: number, direction: ConnectionDirection) {
+  const body = direction === 'outputs' ? pre : post
+  const partner = direction === 'outputs' ? post : pre
+  return {
+    neuronId: body,
+    neuronType: TYPES[body] ?? null,
+    partnerId: partner,
+    partnerType: TYPES[partner] ?? null,
+    weight,
+  }
+}
+
 /**
  * A fake source answering query-relative, exactly as `fetchConnectivity` does: `neuronId` is
  * always the neuron asked about, whichever way the arrow points.
@@ -64,17 +81,7 @@ function fakeSource(edges: Edge[], minWeight = 0) {
         ([pre, post, weight]) =>
           weight >= minWeight && wanted.has(direction === 'outputs' ? pre : post),
       )
-      .map(([pre, post, weight]) => {
-        const body = direction === 'outputs' ? pre : post
-        const partner = direction === 'outputs' ? post : pre
-        return {
-          neuronId: body,
-          neuronType: TYPES[body] ?? null,
-          partnerId: partner,
-          partnerType: TYPES[partner] ?? null,
-          weight,
-        }
-      })
+      .map(([pre, post, weight]) => row(pre, post, weight, direction))
     return tableFromRows(SOURCE_SCHEMA, rows)
   }
   return { fetch, calls }
@@ -338,5 +345,145 @@ describe('traversal edges', () => {
       onHop: (hop, hops, frontier) => seen.push(`${hop}/${hops}:${frontier}`),
     })
     expect(seen).toEqual(['1/2:1', '2/2:1'])
+  })
+})
+
+/**
+ * The region split and the normalisation, which fail in ways a valid table hides.
+ *
+ * A dedupe still keyed on the pair alone keeps one region per connection and silently discards
+ * the rest; a denominator lookup comparing a number to a string misses every row and looks like
+ * a dataset that publishes no totals; a missing denominator substituted with zero divides to
+ * `Infinity`, which a chart draws as a bar off the top of the axis.
+ */
+
+// The same helper the source uses, so the column has one spelling here too.
+const ROI_SOURCE_SCHEMA = connectivitySchemaWithRoi(SOURCE_SCHEMA)
+const ROI_OUT_SCHEMA = connectivityOutputSchema(SOURCE_SCHEMA, { splitByRoi: true })
+
+/** `fakeSource` with a region on each edge: one row per (connection, region). */
+function fakeRoiSource(edges: Array<[number, number, number, string]>) {
+  return async (neuronIds: string[], direction: ConnectionDirection): Promise<TableValue> => {
+    const wanted = new Set(neuronIds.map(Number))
+    const rows = edges
+      .filter(([pre, post]) => wanted.has(direction === 'outputs' ? pre : post))
+      .map(([pre, post, weight, roi]) => ({ ...row(pre, post, weight, direction), roi }))
+    return tableFromRows(ROI_SOURCE_SCHEMA, rows)
+  }
+}
+
+describe('split by region', () => {
+  it('keeps every region of a connection rather than the first one', async () => {
+    const table = await traverseConnectivity({
+      seeds: ['1'],
+      direction: 'outputs',
+      hops: 1,
+      schema: ROI_OUT_SCHEMA,
+      fetch: fakeRoiSource([
+        [1, 2, 30, 'LO(R)'],
+        [1, 2, 20, 'ME(R)'],
+      ]),
+    })
+    expect(table.length).toBe(2)
+    expect([...table.data.roi!]).toEqual(['LO(R)', 'ME(R)'])
+    // The promise the whole feature rests on: the parts sum to the connection.
+    expect([...table.data.weight!].reduce((a, b) => Number(a) + Number(b), 0)).toBe(50)
+  })
+
+  it('still dedupes a region seen from both ends of a `both` traversal', async () => {
+    const table = await traverseConnectivity({
+      seeds: ['1', '2'],
+      direction: 'both',
+      hops: 1,
+      schema: ROI_OUT_SCHEMA,
+      fetch: fakeRoiSource([
+        [1, 2, 30, 'LO(R)'],
+        [1, 2, 20, 'ME(R)'],
+      ]),
+    })
+    // Two rows, not four: the edge is internal to the seed set, so each region comes back from
+    // each end. Doubling here is a doubled synapse count everywhere downstream.
+    expect(table.length).toBe(2)
+    expect([...table.data.direction!]).toEqual(['both', 'both'])
+  })
+
+  it('advertises `roi` only when splitting', () => {
+    expect(connectivityOutputSchema(SOURCE_SCHEMA).columns.map((c) => c.name)).not.toContain('roi')
+    expect(ROI_OUT_SCHEMA.columns.map((c) => c.name)).toContain('roi')
+  })
+})
+
+describe('normalisation', () => {
+  const schema = connectivityOutputSchema(SOURCE_SCHEMA, { normalize: true })
+
+  async function edgeTable() {
+    return traverseConnectivity({
+      seeds: ['1'],
+      direction: 'outputs',
+      hops: 1,
+      schema: OUT_SCHEMA,
+      fetch: fakeSource([
+        [1, 2, 30],
+        [1, 3, 10],
+      ]).fetch,
+    })
+  }
+
+  it('divides by the end the mode names, not by the query neuron', async () => {
+    const table = await edgeTable()
+    // Postsynaptic: each row is divided by *its own target's* total, so the two rows have
+    // different denominators. Dividing by the query neuron would give one.
+    const post = normalizeConnectivity(
+      table,
+      'postsynaptic',
+      new Map([
+        ['2', 300],
+        ['3', 40],
+      ]),
+      schema,
+    )
+    expect([...post.table.data.weightNorm!]).toEqual([0.1, 0.25])
+    expect([...post.table.data.weightTotal!]).toEqual([300, 40])
+
+    const pre = normalizeConnectivity(table, 'presynaptic', new Map([['1', 100]]), schema)
+    expect([...pre.table.data.weightNorm!]).toEqual([0.3, 0.1])
+  })
+
+  it('leaves a missing or zero denominator null, and counts it', async () => {
+    const table = await edgeTable()
+    const result = normalizeConnectivity(
+      table,
+      'postsynaptic',
+      // 3 is absent entirely, 2 totals zero — a neuron with no synapses on this side.
+      new Map([['2', 0]]),
+      schema,
+    )
+    expect([...result.table.data.weightNorm!]).toEqual([null, null])
+    expect(result.missingRows).toBe(2)
+    expect(result.missingNeurons).toBe(2)
+  })
+
+  it('does not clamp a fraction above 1', async () => {
+    const table = await edgeTable()
+    // Legitimate under the `connected` basis: the denominator counts only reconstructed
+    // partners while the numerator is whatever the connection carries.
+    const result = normalizeConnectivity(table, 'postsynaptic', new Map([['2', 20]]), schema)
+    expect(result.table.data.weightNorm![0]).toBe(1.5)
+  })
+
+  it('asks for totals per row-end rather than per seed', async () => {
+    const table = await edgeTable()
+    expect(normalizeTargets(table, 'postsynaptic')).toEqual(['2', '3'])
+    expect(normalizeTargets(table, 'presynaptic')).toEqual(['1'])
+  })
+
+  it('reads a totals table through idText, so an i64 id column still matches', () => {
+    const totals = tableFromRows(
+      tableSchema(column('neuronId', 'i64'), column('total', 'i64', 'synapses')),
+      [{ neuronId: 2, total: 300 }],
+    )
+    // The ids arrive as numbers and the edge list keys on text. A `Map<number>` here would miss
+    // every row and read as a dataset with no totals at all.
+    expect(totalsLookup(totals).get('2')).toBe(300)
   })
 })

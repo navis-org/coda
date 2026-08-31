@@ -38,6 +38,7 @@ import type { FilterRow } from './filterRows'
 export type { NeuronIndexRequest } from './neuronIndex'
 
 import type { NeuronId } from '../core/ids'
+import { ID_COLUMN_NAME } from '../core/ids'
 
 export interface DatasetInfo {
   id: string
@@ -232,8 +233,77 @@ export interface ConnectivityRequest extends EdgeAnswerableRequest {
   neuronIds: NeuronId[]
   direction: ConnectionDirection
   minWeight?: number
+  /**
+   * Restrict every weight to these regions, and drop a connection left with nothing.
+   *
+   * Absent means the whole neuron, which is what every caller before this asked for. Present,
+   * a row's `weight` is the number of synapses **inside** the named regions rather than the
+   * connection's total — measured on male-cns body 10005, whose edges touching `LAL(L)` carry
+   * 13,071 synapses of which 9,344 are actually in it, so the two readings differ by a third
+   * and only one of them can be called "connectivity in LAL(L)".
+   *
+   * Gated by `capabilities.connectivityRois`. A source that cannot answer it must not silently
+   * return whole-neuron weights: that is a wrong number wearing the right column name.
+   */
+  rois?: readonly string[]
+  /**
+   * One row per (pair, region) instead of one row per pair, with a `roi` column naming it.
+   *
+   * Meant as a **decomposition** — the rows are the connection taken apart, not new rows added
+   * beside it — and `minWeight` is applied to the connection *before* the split for that reason
+   * (see `connectivityCypher`), so turning this on never changes which partners are found.
+   *
+   * **How exact that is depends on the dataset, and it was measured rather than assumed.** Over
+   * 20,000 sampled connections per dataset, summing the primary-region parts against the
+   * connection's own weight:
+   *
+   *   male-cns:v1.0      256,276 synapses, 0 outside every primary region
+   *   manc:v1.2.1        385,947 synapses, 7
+   *   hemibrain:v1.2.1   274,844 synapses, 1,104   (0.4%, on 2.2% of connections)
+   *   optic-lobe:v1.1    317,276 synapses, 2,746   (0.9%, on 4.7% of connections)
+   *
+   * So the primary set tiles male-CNS and MANC and very nearly tiles the other two: a small
+   * number of synapses sit in no primary region at all and are **dropped** by a split over that
+   * set. neuprint-python meets the same gap and buckets it under a synthetic `"NotPrimary"`
+   * name; nothing here invents a region, so the shortfall is a documented loss rather than a row
+   * claiming to be somewhere. Below a percent, and in the other direction from the failure that
+   * matters — regions that *nest*, which double count, and which is what `rois` carrying a
+   * non-overlapping set is for.
+   */
+  splitByRoi?: boolean
   signal?: AbortSignal
 }
+
+/**
+ * How many synapses a neuron has in total, for turning a connection weight into a fraction.
+ *
+ * **The denominator is the whole question here, and the two available answers differ by more
+ * than a factor of two.** On male-cns body 10005 (AOTU019, Traced) the outgoing weights sum to
+ * 23,423 over every partner and to 9,324 over partners neuPrint labels `:Neuron` — the rest
+ * goes to unnamed fragments below the segmentation threshold. Both are correct answers to
+ * different questions, so the basis rides on the request and the node says which it used.
+ *
+ * Gated by `capabilities.synapseTotals`, and one `side` per request rather than both at once
+ * because a normalisation only ever needs one: dividing by the postsynaptic neuron's input
+ * total never asks what its outputs were.
+ */
+export interface SynapseTotalsRequest extends EdgeAnswerableRequest {
+  neuronIds: NeuronId[]
+  /** `inputs` totals incoming synapses, `outputs` outgoing. The same word `direction` uses. */
+  side: ConnectionDirection
+  basis: SynapseTotalsBasis
+  signal?: AbortSignal
+}
+
+/**
+ * Which synapses the denominator counts.
+ *
+ * `all` is every synapse the neuron makes, whether or not the thing on the other end was ever
+ * reconstructed. `connected` counts only synapses onto partners the dataset considers real
+ * neurons, which is the denominator used to compare edge weights **across** connectomes with
+ * different proofreading rates — the whole reason this is a choice rather than a constant.
+ */
+export type SynapseTotalsBasis = 'all' | 'connected'
 
 /**
  * One hop of a path traversal, over neurons or over cell types.
@@ -510,6 +580,27 @@ export interface SourceCapabilities {
    */
   roiFilter: boolean
   /**
+   * Whether a connectivity query can be restricted to regions, and split by them.
+   *
+   * Separate from `roiCounts`, which breaks one *neuron's* synapses down by region. This is the
+   * same question asked of a *connection*, and the two come from different places: neuPrint
+   * stores the per-region breakdown on the `ConnectsTo` relationship itself (`w.roiInfo`), so a
+   * split costs nothing extra, while a source whose regions live on synapses would have to read
+   * every synapse to answer. Declining is therefore the honest answer for CAVE and CATMAID, not
+   * a gap — and it has to be declined rather than approximated, because returning whole-neuron
+   * weights under a `roi` column is a wrong number with the right name on it.
+   */
+  connectivityRois: boolean
+  /**
+   * Whether the source can report a neuron's total synapse count, for normalising weights.
+   *
+   * Both bases of `SynapseTotalsBasis` or neither: a source that can only answer one of them
+   * would make `Normalize by` a control whose options silently mean different things per
+   * dataset. neuPrint answers both from properties it already publishes and from one aggregate
+   * over the relationships it already has.
+   */
+  synapseTotals: boolean
+  /**
    * Whether the source publishes a *mesh* per region — the neuropil shells themselves.
    *
    * Separate from `roiSummary`, which is the numbers, because the two are published in
@@ -563,6 +654,17 @@ export interface DataSource {
    */
   neuronIndex?(req: NeuronIndexRequest): Promise<TableValue>
   fetchConnectivity(req: ConnectivityRequest): Promise<TableValue>
+  /**
+   * Per-neuron synapse totals, to `SYNAPSE_TOTALS_SCHEMA`.
+   *
+   * Optional and gated by `capabilities.synapseTotals`. Asked about the ids that appear in a
+   * connectivity result rather than about the ones that were queried, so an id here may be
+   * something the source does not consider a neuron at all — a fragment on the far end of an
+   * edge. Such an id gets a **null** total rather than a zero: zero is a neuron with no
+   * synapses, and dividing by it would silently produce an infinity where the honest answer is
+   * "this denominator is not known".
+   */
+  fetchSynapseTotals?(req: SynapseTotalsRequest): Promise<TableValue>
   /**
    * One hop of a path traversal, aggregated to `PATH_STEP_SCHEMA`.
    *
@@ -722,6 +824,42 @@ export function pathStepSchema(idDType: 'i64' | 'str'): TableSchema {
  * reads both ends through `idText` and so takes either.
  */
 export const PATH_STEP_SCHEMA: TableSchema = pathStepSchema('i64')
+
+/**
+ * The region column a split connectivity result carries, and the one spelling of its name.
+ *
+ * Shared rather than written at each end: the source builds the table and
+ * `connectivityOutputSchema` advertises it, and a node that advertised `roi` while a source
+ * filled `ROI` would leave every column picker downstream pointing at nothing — the failure
+ * invariant 3 exists to prevent, one layer further out.
+ */
+export const CONNECTIVITY_ROI_COLUMN = 'roi'
+
+/**
+ * A connectivity schema with the region column appended.
+ *
+ * Appended rather than inserted so the columns a caller already addresses keep their positions;
+ * nothing here is positional, but a decoder somewhere else is (`tableFromCypher` maps by index),
+ * and a column that moves is the kind of change that type-checks.
+ */
+export function connectivitySchemaWithRoi(schema: TableSchema): TableSchema {
+  if (schema.columns.some((c) => c.name === CONNECTIVITY_ROI_COLUMN)) return schema
+  return tableSchema(...schema.columns, column(CONNECTIVITY_ROI_COLUMN, 'str'))
+}
+
+/**
+ * What `fetchSynapseTotals` returns: one row per neuron asked about, or none.
+ *
+ * A row per neuron **that has an answer**, and a caller is expected to read it as a lookup
+ * rather than positionally — an id the source has never heard of is simply absent, which is how
+ * "not known" is said without a sentinel that arithmetic would happily consume.
+ *
+ * The id dtype is the source's, `pathStepSchema`'s rule and invariant 8's reason: an
+ * eighteen-digit CAVE root id in an `i64` column is a different neuron.
+ */
+export function synapseTotalsSchema(idDType: 'i64' | 'str'): TableSchema {
+  return tableSchema(column(ID_COLUMN_NAME, idDType), column('total', 'i64', 'synapses'))
+}
 
 /**
  * What either ROI summary needs: a dataset, and nothing else.
@@ -1021,6 +1159,51 @@ export function canTracePaths(
    */
   if (!source) return true
   return Boolean(source.fetchPathStep) && capabilityOf(source, datasetId, 'paths')
+}
+
+/**
+ * Whether a connectivity query on this dataset can be restricted to regions and split by them.
+ *
+ * `canTracePaths`'s shape with the edge-set arm **inverted**, and that is the substance rather
+ * than an omission. An attached edge set *replaces* the query — `connectivityFor` answers from
+ * it and never asks the backend — and a file of `pre, post, weight` says nothing about where
+ * along either neuron those synapses are. So the set does not add the capability the way it
+ * adds `paths`; it removes it, whatever the backend behind the dataset could have done.
+ *
+ * Refusing is the only safe answer there. Falling through to the backend would put the
+ * *server's* region breakdown under the *file's* weights, which is two connectomes in one table
+ * with nothing on the card to say so — the failure `connectivityFor`'s "it refuses; it never
+ * falls back" exists to prevent, arriving through a different door.
+ */
+export function canSplitConnectivityByRoi(
+  source: DataSource | undefined,
+  datasetId: string | undefined,
+  hasEdgeSet: boolean,
+): boolean {
+  if (hasEdgeSet) return false
+  // An unresolved source refuses nothing — `capabilityOf`'s rule, applied before the flag for
+  // `canTracePaths`'s reason: a cold Dataset socket is invariant 2's ordinary state, not a no.
+  if (!source) return true
+  return capabilityOf(source, datasetId, 'connectivityRois')
+}
+
+/**
+ * Whether this dataset can supply the denominators that turn a weight into a fraction.
+ *
+ * The same three arms as `canSplitConnectivityByRoi`, and the edge-set one refuses for a sharper
+ * reason: an edge set could perfectly well total its own weights, but its numerator and the
+ * backend's denominator are counts of different things. A file holding one lab's curated subset
+ * of hemibrain, normalised against hemibrain's published synapse totals, produces fractions that
+ * are individually plausible and collectively meaningless.
+ */
+export function canTotalSynapses(
+  source: DataSource | undefined,
+  datasetId: string | undefined,
+  hasEdgeSet: boolean,
+): boolean {
+  if (hasEdgeSet) return false
+  if (!source) return true
+  return Boolean(source.fetchSynapseTotals) && capabilityOf(source, datasetId, 'synapseTotals')
 }
 
 export function reportSourceLearned(sourceId: string): void {

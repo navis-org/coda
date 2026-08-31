@@ -1478,6 +1478,128 @@ list, so a hop-2 frontier of tens of thousands of neurons builds a very large Cy
 chunked, because chunking is only worth writing once a real query has actually failed on it — but
 it is the first thing to suspect if a deep traversal errors at the transport rather than timing out.
 
+### Normalizing a weight: two ends, two denominators, and both said out loud
+
+`Normalize` appends two columns — `weightNorm`, the fraction, and `weightTotal`, the denominator
+it was divided by. **The second one is the feature.** A normalised weight is only readable if you
+know what it is a fraction of, and there are two controls deciding that: which end of the
+connection the denominator belongs to, and which synapses it counts. Publishing the denominator
+per row means the reading is checkable from the table alone.
+
+**The two denominators differ by more than a factor of two, and it is not noise.** Measured on
+male-cns:v1.0 body 10005 (AOTU019, Traced) — every number here was read off the server, and the
+identities are asserted in `neuprint/live.test.ts`:
+
+| | inputs | outputs |
+| --- | --- | --- |
+| `n.post` = `n.upstream` / `n.downstream` | 31,981 | 23,423 |
+| Σ weight over **all** partners | 31,981 | 23,423 |
+| Σ weight over `:Neuron` partners | 31,389 | **9,324** |
+| `n.pre` (T-bars) | — | 2,837 |
+
+Three things fall out of that table and each is load-bearing.
+
+**The metadata total and the sum over every `ConnectsTo` edge are the same number**, to the unit,
+in both directions. So there is no third "published versus computed" discrepancy to reconcile:
+the `all` basis reads properties because that is cheaper, not because it answers differently.
+
+**The output denominator is `downstream`, never `pre`.** `pre` counts T-bars and `downstream`
+counts the synapses those T-bars drive — 2,837 against 23,423 on the same neuron. Normalising by
+`pre` puts a plausible fraction eight times too large in the column with nothing failing, which
+is why `synapseTotalsCypher` has a `coalesce` fallback on the incoming side (`upstream` and `post`
+are measured equal everywhere) and deliberately none on the outgoing one.
+
+**Only ~40% of this neuron's outputs reach a named neuron, against 98% of its inputs.** That
+asymmetry is reconstruction rather than biology — outputs land on dendrites, which are hard to
+trace — and it is why the basis has to be a control rather than a constant. `connected` is what
+neuprint-python and the neuPrint website report and what anyone comparing edge weights **across**
+connectomes proofread to different depths needs; `all` is what the dataset publishes for the
+neuron and what makes a full partner list's fractions sum to at most 1.
+
+Worth knowing when the numbers do not match somebody else's: **Coda's connectivity query matches a
+bare node at the far end** (`connectivityCypher`, on purpose, so a sub-threshold `Segment` still
+counts), so its unsplit table sums to the `all` total where the same question in neuprint-python
+sums to the `connected` one.
+
+**The totals are asked about the ids in the *result*, not the seeds.** Past one hop the neuron
+whose denominator is wanted is generally not one anybody named, and at one hop `outputs` it is
+every partner that came back. Hence `normalizeTargets`, and hence `fetchSynapseTotals` being the
+one query here that **chunks** — a hop-1 fetch from a hundred neurons can be fifty thousand
+partners, where the connectivity query only ever names the frontier. 5,000 ids per batch: measured
+at 668 ms against 20,000 ids at 2.2 s, set where the curve is still flat.
+
+**A missing or zero denominator is null, and counted.** A fragment on the far end of an edge has
+no `connected` total, and a zero would divide to `Infinity`, which every chart draws as a bar off
+the top of the axis. `ctx.warn` says how many rows and how many neurons. And a fraction **above 1**
+is left alone: under `connected` the numerator includes connections to fragments that the
+denominator does not, and clamping would hide exactly the case the basis exists for.
+
+### Split and restrict by region, which are one operation
+
+`ConnectsTo` carries its own `roiInfo` in neuPrint — the connection's synapses broken down by
+region — so both controls are answered in the query rather than by reading synapses.
+`connectivityRois` gates them, and CAVE and CATMAID decline: their region assignments live on
+*synapses*, so answering means reading every synapse of every queried neuron, which is the work
+their connection roll-ups exist to avoid.
+
+**They are the same operation with the sum in a different place.** `Regions` restricts each weight
+to the named regions and re-totals; `Split by region` stops before the re-total and emits the
+parts. So the pipeline is: restrict → threshold → split, and `minWeight` sits in the middle
+deliberately. Applying it per region instead would let a split silently prune the frontier, and
+the whole claim is that **turning the split on cannot change which partners are found**.
+
+Restricting is not the same as filtering, and the gap is a third: body 10005's connections that
+*touch* `LAL(L)` carry 13,071 synapses, of which 9,344 are in it. Keeping the whole connection
+would have been the other reading and would answer "which partners does this neuron talk to in
+LAL" rather than "how much traffic is in LAL".
+
+**How exact the decomposition is depends on the dataset, and was measured** over 20,000 sampled
+connections each:
+
+| dataset | synapses | in no primary region |
+| --- | --- | --- |
+| male-cns:v1.0 | 256,276 | 0 |
+| manc:v1.2.1 | 385,947 | 7 |
+| hemibrain:v1.2.1 | 274,844 | 1,104 (0.4%) |
+| optic-lobe:v1.1 | 317,276 | 2,746 (0.9%) |
+
+The primary set tiles male-CNS and MANC exactly; elsewhere a fraction of a percent of synapses sit
+in no primary region and a split over that set **drops** them. neuprint-python meets the same gap
+and buckets it under a synthetic `"NotPrimary"` name; nothing here invents a region, so this is a
+documented loss rather than a row claiming to be somewhere it is not. `neuprint/live.test.ts` pins
+both halves — exact on male-CNS, and within 3% on hemibrain, so a split that started losing a tenth
+of a connectome fails rather than reads as data.
+
+**`Primary regions only` is a vocabulary, not a post-filter.** It decides which names the picker
+offers and what an empty picker means, and it deliberately does not narrow a selection somebody
+already made — the column picker's rule about keeping a chosen value rather than substituting.
+Turning it off is a real question ("how much of this connection is in the optic lobe") that simply
+cannot also be a decomposition: regions nest, so a synapse in `LAL(L)` is counted again in `LX(L)`
+and again in `CentralBrain`. Said at edit time *and* at run time, because it changes what the
+numbers mean and `ctx.warn` is only seen by whoever pressed Run.
+
+**The three new columns are the deliberate exception to "`hop` and `direction` are always
+present".** Each has a control of its own, so a picker clearing when Split by region goes off is
+that switch doing what it says — not the silent schema churn that rule is about. A `roi` column
+of nulls on an unsplit result, or a `weightNorm` of nulls a chart plots as zeroes, is worse.
+
+**An attached edge set removes both capabilities rather than adding one.** This inverts
+`canTracePaths`, where a local edge list *unlocks* a hop CAVE cannot answer. A file of
+`pre, post, weight` says nothing about regions, and its weights count a different population from
+the backend's published totals — so normalising one against the other produces fractions that are
+individually plausible and collectively meaningless. `canSplitConnectivityByRoi` and
+`canTotalSynapses` refuse; `connectivityFor` and `synapseTotalsFor` refuse again at run time, for
+the graph whose dataset gained an edge set after the node was set up.
+
+**Exported asymmetrically, and for a checkable reason.** The notebook translates the region half
+onto three arguments of the `fetch_adjacencies` call the cell was already making — it answers
+per-ROI, restricts to the primary set by default and takes an explicit `rois` list, all of which
+was read off the installed neuprint-python 0.6.3 by introspection. It refuses normalisation,
+because `connected` has no neuprint-python equivalent and emitting only the reachable half would
+put a different number in the notebook from the one on the canvas. R Markdown refuses both:
+neuprintr was not installed to check its argument names against, and this codebase has been bitten
+by recalling that API before (`Client.fetch_roi_hierarchy` does not exist — see `roiHierarchy.ts`).
+
 ## Paths: how does this reach that?
 
 `neuron.paths`, added from `Add ▸ Query ▸ Paths`. `Connectivity` answers "what is wired to

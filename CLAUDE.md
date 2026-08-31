@@ -242,6 +242,23 @@ Area-specific — the rule, then the doc that holds why:
   settling half-processed; a `Collect` is the one node a cache hit must never answer for
   mid-pass; and `RunSummary.executed` is a set of node ids, so per-pass files come through the
   awaited `SchedulerHost.onIteration`, bounded by `loopNodes`. See [docs/loops.md](docs/loops.md).
+- **A normalised weight is meaningless without its denominator, and there are two of them.** The
+  Connectivity node's `Normalize` emits `weightTotal` beside `weightNorm` because the same 0.04
+  means two things: on male-cns body 10005 the outgoing weights sum to **23,423** over every
+  partner and **9,324** over partners neuPrint labels `:Neuron` — only ~40% of a neuron's outputs
+  reach a named neuron, against 98% of its inputs, because outputs land on dendrites. Three rules
+  fall out. The outgoing denominator is **`downstream`, never `pre`** (2,837 T-bars against 23,423
+  synapses — `pre` gives a plausible fraction eight times too large); the totals query matches
+  **`:Segment`** on the queried end, so a fragment on the far end of an edge gets a denominator
+  rather than silence; and a missing or zero denominator is **null and counted**, never zero,
+  because zero divides to an `Infinity` every chart draws off the top of the axis. Region split and
+  restriction are one operation with the sum in a different place, so `minWeight` applies to the
+  restricted connection **before** the split — turning the split on cannot change which partners
+  are found. The primary set tiles male-CNS and MANC exactly and loses under 1% on hemibrain and
+  optic-lobe, which is a documented drop rather than a `NotPrimary` bucket. And an attached edge
+  set **removes** both capabilities where it *adds* `paths`: a file of `pre, post, weight` has no
+  regions, and its weights are not the population the backend's totals count.
+  See [docs/nodes.md](docs/nodes.md) and [docs/backends.md](docs/backends.md).
 - **A dataset-level filter is not a filter row, the row wins, and the filters OR.** The
   population checkboxes on a neuPrint dataset node are **OR-ed** — a second ticked box lets
   *more* rows through. `typed` matches column names **ending** in `type`. `findNeuronsCypher`

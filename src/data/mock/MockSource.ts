@@ -18,7 +18,7 @@ import type {
   SkeletonsValue,
   TableValue,
 } from '../../core/values'
-import { numericIds } from '../../core/ids'
+import { ID_COLUMN_NAME, numericIds } from '../../core/ids'
 import type { CellValue } from '../../core/values'
 import { boundsOf, cableLength, makeMatrix, selectRows, tableFromRows } from '../../core/values'
 import { geometryFrame } from '../transforms/spaces'
@@ -39,6 +39,7 @@ import type {
   SourceCapabilities,
   SourceSchemas,
   SynapseRequest,
+  SynapseTotalsRequest,
 } from '../source'
 import {
   CANONICAL_SCHEMAS,
@@ -46,7 +47,9 @@ import {
   ROI_COMPLETENESS_SCHEMA,
   ROI_MESH_SCHEMA,
   ROI_CONNECTIVITY_SCHEMA,
+  connectivitySchemaWithRoi,
   delay,
+  synapseTotalsSchema,
   requireSkeletonRoute,
   throwIfAborted,
 } from '../source'
@@ -99,6 +102,12 @@ export class MockSource implements DataSource {
     roiCounts: true,
     roiSummary: true,
     roiFilter: true,
+    // Implemented rather than declined, for the reason above: the generated connectome already
+    // carries per-ROI counts per neuron and a weight per connection, and a connection's regions
+    // are derivable from where its two ends overlap. Nothing is stored for it — see
+    // `connectionRoiSplit` — so the connectome and every golden built from it are unchanged.
+    connectivityRois: true,
+    synapseTotals: true,
     roiMeshes: true,
   }
   readonly schemas: SourceSchemas = CANONICAL_SCHEMAS
@@ -267,6 +276,12 @@ export class MockSource implements DataSource {
     const minWeight = req.minWeight ?? 1
     const wanted = new Set(numericIds(req.neuronIds))
 
+    const restrictTo = req.rois?.length ? new Set(req.rois) : undefined
+    const split = req.splitByRoi === true
+    const schema = split
+      ? connectivitySchemaWithRoi(this.schemas.connectivity)
+      : this.schemas.connectivity
+
     const rows: Array<Record<string, number | string>> = []
     for (const neuronId of wanted) {
       throwIfAborted(req.signal)
@@ -277,16 +292,34 @@ export class MockSource implements DataSource {
           ? connectome.out.get(neuronId)
           : connectome.in.get(neuronId)) ?? []
       for (const edge of edges) {
-        if (edge.weight < minWeight) continue
+        // Cheapest test first, and on the plain path it is the *only* test — the region arms
+        // have to split before they know the restricted weight, but this one does not, and
+        // building a row object for an edge about to be discarded is what it used to cost.
+        if (!restrictTo && !split && edge.weight < minWeight) continue
+
+        /*
+         * `minWeight` against the *restricted* total and before the split, which is
+         * `connectivityCypher`'s rule rather than a convenience — it is what makes a split a
+         * decomposition of whatever the unsplit query would have returned, so turning the
+         * toggle on cannot change which partners a traversal goes on to expand.
+         */
+        const parts = restrictTo || split ? connectionRoiSplit(connectome, edge, restrictTo) : []
+        const weight =
+          restrictTo || split ? parts.reduce((sum, part) => sum + part.weight, 0) : edge.weight
+        if (weight < minWeight) continue
+
         const partnerId = req.direction === 'outputs' ? edge.post : edge.pre
-        const partner = connectome.byId.get(partnerId)
-        rows.push({
+        const common = {
           neuronId,
           neuronType: self.type,
           partnerId,
-          partnerType: partner?.type ?? 'unknown',
-          weight: edge.weight,
-        })
+          partnerType: connectome.byId.get(partnerId)?.type ?? 'unknown',
+        }
+        if (!split) {
+          rows.push({ ...common, weight })
+          continue
+        }
+        for (const part of parts) rows.push({ ...common, weight: part.weight, roi: part.roi })
       }
     }
 
@@ -295,7 +328,42 @@ export class MockSource implements DataSource {
         (b.weight as number) - (a.weight as number) ||
         (a.neuronId as number) - (b.neuronId as number),
     )
-    return tableFromRows(this.schemas.connectivity, rows)
+    return tableFromRows(schema, rows)
+  }
+
+  /**
+   * Per-neuron synapse totals, from the two numbers the generator already keeps.
+   *
+   * **The two bases return the same number here, and that is a fact about the mock rather than
+   * a shortcut.** `generate.ts` seeds every neuron at `pre: 0, post: 0` and accumulates the
+   * weight of each connection it makes, so a synthetic connectome contains no synapse that is
+   * not on a connection between two neurons it knows — it has no unreconstructed fragments for
+   * the `all` basis to count and the `connected` basis to leave out. On male-cns that gap is
+   * 14,091 of body 10005's 23,423 outgoing synapses; here it is structurally zero. Both arms are
+   * still computed the way they mean, from the properties and from the edges respectively, so
+   * the *equality* is the assertion worth making rather than one arm standing in for the other.
+   *
+   * An id the connectome does not hold contributes **no row**, which is the seam's contract:
+   * absent means "not known", where a zero would divide into an infinity.
+   */
+  async fetchSynapseTotals(req: SynapseTotalsRequest): Promise<TableValue> {
+    await delay(this.latencyMs, req.signal)
+    const connectome = this.require(req.datasetId)
+    const rows: Array<Record<string, number>> = []
+    for (const neuronId of numericIds(req.neuronIds)) {
+      const neuron = connectome.byId.get(neuronId)
+      if (!neuron) continue
+      if (req.basis === 'all') {
+        rows.push({ [ID_COLUMN_NAME]: neuronId, total: req.side === 'inputs' ? neuron.post : neuron.pre })
+        continue
+      }
+      const edges = (req.side === 'inputs' ? connectome.in : connectome.out).get(neuronId) ?? []
+      rows.push({
+        [ID_COLUMN_NAME]: neuronId,
+        total: edges.reduce((sum, edge) => sum + edge.weight, 0),
+      })
+    }
+    return tableFromRows(synapseTotalsSchema('i64'), rows)
   }
 
   /**
@@ -799,4 +867,102 @@ function mockRoiSuper(rois: readonly string[]): Record<string, string> {
     if (group) groups[roi] = group
   }
   return groups
+}
+
+/**
+ * A connection's synapses, distributed over regions.
+ *
+ * **Derived, never stored.** `MockConnection` carries a weight and nothing else, and adding a
+ * region breakdown to `generate.ts` would change the connectome — every golden, every bundled
+ * example and every seeded expectation built from it. Deriving it here changes nothing and is
+ * still deterministic, which is the only property the mock actually owes anyone.
+ *
+ * The rule is the one neuPrint's own `roiInfo` follows: a connection's weight counts
+ * **postsynaptic densities**, so a synapse sits where the *receiving* neuron's arbour is. The
+ * weight is therefore split in proportion to the postsynaptic neuron's own per-region `post`
+ * counts, restricted to regions the presynaptic neuron reaches at all — and falling back to the
+ * receiver's distribution alone where the two share no region, so a connection is never split
+ * into nothing.
+ *
+ * The last region absorbs the rounding remainder, `generate.ts`'s own rule for the same reason:
+ * the parts have to sum to exactly the weight, or a split stops being a decomposition and
+ * `minWeight` starts dropping connections the unsplit query returns.
+ */
+function connectionRoiSplit(
+  connectome: MockConnectome,
+  edge: MockConnection,
+  restrictTo: ReadonlySet<string> | undefined,
+): Array<{ roi: string; weight: number }> {
+  const byNeuron = roiCountIndex(connectome)
+  const receiver = byNeuron.get(edge.post)
+  if (!receiver?.size) return []
+  const sender = byNeuron.get(edge.pre)
+
+  /*
+   * One pass over the receiver's regions, collecting both candidate sets at once: the ones the
+   * sender also reaches, and — as the fallback for a connection whose ends share no region —
+   * every region the receiver receives in. Written this way rather than as
+   * `[...receiver].filter(...)` twice because this runs once per connection per hop, and the
+   * spread materialises a fresh pair per region before anything has been decided.
+   */
+  const shared: Array<[string, number]> = []
+  const any: Array<[string, number]> = []
+  let sharedTotal = 0
+  let anyTotal = 0
+  for (const [roi, counts] of receiver) {
+    // The receiver's *post* counts are the distribution; the sender is only asked whether it
+    // reaches the region at all, which its total innervation answers.
+    if (counts.post <= 0) continue
+    any.push([roi, counts.post])
+    anyTotal += counts.post
+    if ((sender?.get(roi)?.total ?? 0) > 0) {
+      shared.push([roi, counts.post])
+      sharedTotal += counts.post
+    }
+  }
+  const scored = shared.length > 0 ? shared : any
+  const total = shared.length > 0 ? sharedTotal : anyTotal
+  if (total <= 0) return []
+
+  const parts: Array<{ roi: string; weight: number }> = []
+  let assigned = 0
+  scored.forEach(([roi, count], index) => {
+    const last = index === scored.length - 1
+    const weight = last ? edge.weight - assigned : Math.round((edge.weight * count) / total)
+    assigned += weight
+    // The restriction is applied while emitting rather than as a trailing filter, so a narrow
+    // region list does not first build the parts it is about to drop. The apportionment above
+    // still runs over the whole set, which is the point — a region's share is its share of the
+    // connection, not of whatever subset was asked for.
+    if (weight > 0 && (!restrictTo || restrictTo.has(roi))) parts.push({ roi, weight })
+  })
+  return parts
+}
+
+/**
+ * Per-neuron, per-region presynaptic counts, memoised on the connectome's identity.
+ *
+ * `typesOf`'s idiom, and worth it for its reason: `getConnectome` hands back one object per
+ * dataset for the session, and `connectionRoiSplit` is called once per connection per hop.
+ */
+interface RoiPresence {
+  /** Postsynaptic densities, which is what a connection weight counts. */
+  post: number
+  /** pre + post — whether the neuron is in the region at all, whichever way its synapses face. */
+  total: number
+}
+
+const roiCountMemo = new WeakMap<MockConnectome, Map<number, Map<string, RoiPresence>>>()
+
+function roiCountIndex(connectome: MockConnectome): Map<number, Map<string, RoiPresence>> {
+  const cached = roiCountMemo.get(connectome)
+  if (cached) return cached
+  const index = new Map<number, Map<string, RoiPresence>>()
+  for (const count of connectome.roiCounts) {
+    const entry = index.get(count.neuronId) ?? new Map<string, RoiPresence>()
+    entry.set(count.roi, { post: count.post, total: count.pre + count.post })
+    index.set(count.neuronId, entry)
+  }
+  roiCountMemo.set(connectome, index)
+  return index
 }

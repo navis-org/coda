@@ -20,6 +20,7 @@ import type {
   PathStepRequest,
   RoiCountsRequest,
   SynapseRequest,
+  SynapseTotalsRequest,
 } from '../source'
 import { isNeuronId } from '../../core/ids'
 import type { PopulationFilter, TableSchema } from '../../core/types'
@@ -360,6 +361,32 @@ export function findNeuronsCypher(
  * The far end is matched as a bare node rather than `:Neuron` on purpose: a partner may be
  * a `Segment` below the neuron threshold, and excluding those would quietly under-report
  * total output weight.
+ *
+ * ## The region arm
+ *
+ * `ConnectsTo` carries its own `roiInfo` — the connection's synapses broken down by region,
+ * `{"LAL(L)": {"post": 112}, …}` — so both restricting to regions and splitting by them are
+ * answered here rather than by reading synapses. Three things about it are decisions:
+ *
+ * **The per-region number is `post`.** It is the count of postsynaptic densities in that
+ * region, which is what `w.weight` counts for the connection as a whole; hemibrain also writes
+ * a `pre` beside it and it is not the same measure. Summing `post` over the primary set
+ * reproduces `w.weight` exactly on male-CNS — 400 of 400 sampled edges, and 23,423 over all
+ * 11,287 out-edges of body 10005, which is what `n.downstream` publishes — and to within a
+ * percent elsewhere, because a few synapses sit in no primary region. The per-dataset numbers
+ * are on `ConnectivityRequest.splitByRoi`.
+ *
+ * **`minWeight` is applied to the restricted total, before the `UNWIND`.** So a split is a pure
+ * decomposition of whatever the unsplit query would have returned, and turning the toggle on
+ * cannot change which partners a traversal goes on to expand. Applying it per region instead
+ * would silently prune the frontier.
+ *
+ * **`ORDER BY` is dropped on the region arm**, because ordering by the restricted weight would
+ * cost a sort over a projection Neo4j cannot serve from the relationship index, and
+ * `traverseConnectivity` re-sorts everything it merges anyway.
+ *
+ * Uses apoc, which every neuPrint deployment checked has installed — its own cached
+ * `/api/cached/roiconnectivity` endpoint is built on `apoc.convert.fromJsonMap`.
  */
 export function connectivityCypher(req: ConnectivityRequest): string {
   const ids = idList(req.neuronIds)
@@ -368,13 +395,76 @@ export function connectivityCypher(req: ConnectivityRequest): string {
       ? `MATCH (n:Neuron)-[w:ConnectsTo]->(p)\nWHERE n.bodyId IN ${ids}`
       : `MATCH (p)-[w:ConnectsTo]->(n:Neuron)\nWHERE n.bodyId IN ${ids}`
 
-  const where =
-    req.minWeight && req.minWeight > 0 ? `\nAND w.weight >= ${Math.floor(req.minWeight)}` : ''
+  const min = req.minWeight && req.minWeight > 0 ? Math.floor(req.minWeight) : 0
+  if (req.rois?.length || req.splitByRoi) return roiConnectivityCypher(req, pattern, min)
+
+  const where = min > 0 ? `\nAND w.weight >= ${min}` : ''
   return [
     pattern + where,
     'RETURN n.bodyId, n.type, p.bodyId, p.type, w.weight',
     'ORDER BY w.weight DESC',
   ].join('\n')
+}
+
+/**
+ * The region arm of `connectivityCypher`. Not exported: `rois`/`splitByRoi` is the way in.
+ *
+ * An empty `rois` with `splitByRoi` set is a caller that wants every region the connection
+ * mentions, which is the one shape here that can double count — the node is what decides
+ * whether that set tiles, and it warns with a measured ratio when it does not.
+ */
+function roiConnectivityCypher(req: ConnectivityRequest, pattern: string, min: number): string {
+  // `keys(ri)` where no region list was given, so an unrestricted split still sees everything
+  // the connection mentions rather than silently answering for nothing.
+  const wanted = req.rois?.length ? stringList(req.rois) : 'keys(ri)'
+  return [
+    pattern,
+    'WITH n, p, w, apoc.convert.fromJsonMap(w.roiInfo) AS ri',
+    // `coalesce(…, 0)`: a region entry may carry only `pre`, and `null > 0` is null, not false.
+    `WITH n, p, [r IN ${wanted} WHERE coalesce(ri[r].post, 0) > 0 | {roi: r, weight: ri[r].post}] AS parts`,
+    'WITH n, p, parts, reduce(total = 0, x IN parts | total + x.weight) AS weight',
+    `WHERE weight >= ${Math.max(1, min)}`,
+    ...(req.splitByRoi
+      ? [
+          'UNWIND parts AS part',
+          'RETURN n.bodyId, n.type, p.bodyId, p.type, part.weight AS weight, part.roi AS roi',
+        ]
+      : ['RETURN n.bodyId, n.type, p.bodyId, p.type, weight']),
+  ].join('\n')
+}
+
+/**
+ * How many synapses each of these bodies has, on one side.
+ *
+ * Two bases, two queries, and the gap between them is the reason the control exists: on
+ * male-cns body 10005 the `all` arm answers 23,423 outgoing and the `connected` arm 9,324,
+ * because 14,091 of those synapses land on fragments neuPrint never labelled `:Neuron`.
+ *
+ * **The queried end is `:Segment`, both times.** Every body carries that label — a `:Neuron` is
+ * a `:Segment` that cleared the synapse threshold — and `bodyId` is indexed on it, so a fragment
+ * that turned up on the far end of somebody's edge still gets a denominator. Matching `:Neuron`
+ * here would return no row for it, which reads downstream as "no answer" rather than as "not a
+ * neuron", and those are the same thing only by accident.
+ *
+ * **`all` reads `upstream`/`downstream`, never `post`/`pre`.** `upstream` and `post` are equal on
+ * every dataset checked, but `pre` is the *T-bar* count and `downstream` is the number of
+ * synapses those T-bars drive: 2,837 against 23,423 on body 10005. Normalising by `pre` would
+ * put a plausible fraction eight times too large in the column, with nothing failing.
+ */
+export function synapseTotalsCypher(req: SynapseTotalsRequest): string {
+  const ids = idList(req.neuronIds)
+  if (req.basis === 'all') {
+    // `coalesce(n.upstream, n.post)`: the two are equal wherever both exist, and a dataset
+    // publishing only one of them should still answer. There is deliberately no fallback on the
+    // outgoing side — see above, `pre` is a different measure and would answer wrongly.
+    const total = req.side === 'inputs' ? 'coalesce(n.upstream, n.post)' : 'n.downstream'
+    return [`MATCH (n:Segment)`, `WHERE n.bodyId IN ${ids}`, `RETURN n.bodyId, ${total}`].join('\n')
+  }
+  const pattern =
+    req.side === 'inputs'
+      ? 'MATCH (p:Neuron)-[w:ConnectsTo]->(n:Segment)'
+      : 'MATCH (n:Segment)-[w:ConnectsTo]->(p:Neuron)'
+  return [pattern, `WHERE n.bodyId IN ${ids}`, 'RETURN n.bodyId, sum(w.weight)'].join('\n')
 }
 
 /**

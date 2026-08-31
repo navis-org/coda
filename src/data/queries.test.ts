@@ -16,7 +16,7 @@ import type { TableValue } from '../core/values'
 import { makeMatrix, tableFromRows } from '../core/values'
 import { EdgeSetBuilder } from './edges/encode'
 import { resetEdgeSets, saveEdgeSet } from './edges/store'
-import { adjacencyFor, connectivityFor, pathStepFor } from './queries'
+import { adjacencyFor, connectivityFor, pathStepFor, synapseTotalsFor } from './queries'
 import type { DataSource, SourceSchemas } from './source'
 import { CANONICAL_SCHEMAS } from './source'
 
@@ -98,6 +98,83 @@ describe('with nothing attached', () => {
     expect(source.fetchConnectivity).toHaveBeenCalledOnce()
     expect(source.fetchAdjacency).toHaveBeenCalledOnce()
     expect(source.fetchPathStep).toHaveBeenCalledOnce()
+  })
+})
+
+/**
+ * The region gate, which has to live here rather than only on the card.
+ *
+ * A `validate` issue is a **warning**, so a graph repointed at a backend that cannot split still
+ * runs — and a source that cannot split does not fail, it *ignores* the two request fields. So
+ * without this the node would advertise a `roi` column, the source would return whole-connection
+ * weights, and the column would be filled with nothing. A wrong number wearing the right name,
+ * which is what these two capabilities exist to prevent.
+ */
+describe('the region options against a source that cannot answer them', () => {
+  const cannot = () =>
+    stubSource({
+      capabilities: {
+        neuronIndex: true,
+        connectivityRois: false,
+        synapseTotals: false,
+      } as DataSource['capabilities'],
+    })
+
+  it('refuses rather than returning whole-connection weights under a roi column', async () => {
+    const source = cannot()
+    await expect(
+      connectivityFor(source, {
+        datasetId: 'd',
+        neuronIds: ['1'],
+        direction: 'outputs',
+        splitByRoi: true,
+      }),
+    ).rejects.toThrow(/cannot break a connection down by region/)
+    // And it refused *before* asking, rather than filtering an answer afterwards.
+    expect(source.fetchConnectivity).not.toHaveBeenCalled()
+  })
+
+  it('refuses a region restriction too, not only the split', async () => {
+    await expect(
+      connectivityFor(cannot(), {
+        datasetId: 'd',
+        neuronIds: ['1'],
+        direction: 'outputs',
+        rois: ['LO(R)'],
+      }),
+    ).rejects.toThrow(/cannot break a connection down by region/)
+  })
+
+  it('lets a node with the region controls untouched straight through', async () => {
+    // Every graph written before these controls existed is in this state, and it must not
+    // acquire an error it did not ask for.
+    const source = cannot()
+    await connectivityFor(source, { datasetId: 'd', neuronIds: ['1'], direction: 'outputs' })
+    expect(source.fetchConnectivity).toHaveBeenCalledOnce()
+  })
+
+  it('refuses synapse totals through the same predicate the node asks', async () => {
+    await expect(
+      synapseTotalsFor(cannot(), {
+        datasetId: 'd',
+        neuronIds: ['1'],
+        side: 'inputs',
+        basis: 'all',
+      }),
+    ).rejects.toThrow(/does not publish per-neuron synapse totals/)
+  })
+
+  it('refuses a source declaring the capability but supplying no method', async () => {
+    // The pair is one claim — `pathStepFor`'s recorded incident, where a funnel checking only
+    // for the method accepted a source the node had already refused.
+    await expect(
+      synapseTotalsFor(
+        stubSource({
+          capabilities: { neuronIndex: true, synapseTotals: true } as DataSource['capabilities'],
+        }),
+        { datasetId: 'd', neuronIds: ['1'], side: 'inputs', basis: 'all' },
+      ),
+    ).rejects.toThrow(/does not publish per-neuron synapse totals/)
   })
 })
 

@@ -152,6 +152,9 @@ const PRECOMPUTED_CAPABILITIES: SourceCapabilities = {
   roiSummary: false,
   roiCounts: false,
   roiFilter: false,
+  // A precomputed layer publishes geometry. There is no connectivity here to restrict or total.
+  connectivityRois: false,
+  synapseTotals: false,
   roiMeshes: true,
 }
 
