@@ -107,7 +107,7 @@ export const LEARN_TO_BUILD: readonly TourStep[] = [
     body:
       'This guide will teach you how to build a simple analysis pipeline in Coda: find a set of ' +
       'neurons, pull everything they connect to, and add up the synapses per partner type. ' +
-      'We will use demo data to illustrate the process, so you do not an account. Just replace the ' +
+      'We will use demo data to illustrate the process, so you do not need an account. Just replace the ' +
       'demo dataset node with an actual dataset to see real data.',
   },
   {
