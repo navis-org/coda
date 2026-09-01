@@ -101,14 +101,34 @@ them off the page.
 
 The root page's **description** was rewritten on the same reasoning. It read `Node-graph analysis
 pipelines for connectomic data.` — 51 characters where Google shows about 155, so the most
-important page in the set was throwing away two thirds of its snippet. It now names the backends
-and makes the two claims the title cannot fit:
+important page in the set was throwing away two thirds of its snippet.
 
-> A browser-based node editor for connectome data: query neuPrint, CAVE, CATMAID and FlyWire,
-> traverse connectivity, plot the result. No install, no code.
+It has since been rewritten once more, for a reader the first pass did not have in mind. It now
+reads:
 
-152 characters, with the weight in the first 120 because that is where a phone truncates. The
-other three pages' descriptions were already the right length and say the right things.
+> A scientific web application for browser-based analysis and visualisation of public connectome
+> data: neuPrint, CAVE (FlyWire, MICrONS) and CATMAID.
+
+147 characters, with the weight in the first 120 because that is where a phone truncates. What
+changed and why: a search engine wants the backends by name, since those are the words somebody
+types, and the previous copy was written for that reader alone. But this field is also close to
+the *only* thing the engines that categorise a domain — is this a research tool, or a parked page,
+or something to be filtered — have to go on, and for them the load-bearing words are `scientific`,
+`web application` and above all **`public`**. Coda reads published connectome data; a description
+that does not say so leaves somebody vetting the domain to guess, and the guess is not reliably
+generous. One sentence now carries both readers, institutional framing first and backends second.
+The cost is `No install, no code`, which did not fit and which the `<noscript>` hero says anyway.
+
+The other three pages' descriptions were already the right length and say the right things.
+
+**Each of the four is pinned onto one line by a `<!-- prettier-ignore -->`,** which is not
+cosmetic. Prettier wraps a `<meta>` past its print width across four lines, and at that point the
+string `meta name="description"` does not appear in the file at all — so the ordinary hand-check,
+`curl -s https://coda.science/ | grep 'meta name="description"'`, reports the tag missing on a
+page that has always had one. That is how it was actually read: every real consumer parses HTML
+and was perfectly happy, including `pageText` in the plugin, whose regex uses `\s+` between the
+attributes. A false negative only a human hits is still a false negative, and the people who
+hand-check this page are the ones whose opinion of the domain is being formed.
 
 **`manifest.webmanifest` deliberately did *not* follow, in either field.** Its `name` is the label
 under an installed app's icon, where a search-shaped title is simply too long; `short_name` is
@@ -117,6 +137,40 @@ by somebody who has already decided, so it is not competing for a click and has 
 backend names. Both look like they should agree with the page and are answering a different
 question — which is why the divergence is recorded here rather than left to look like drift. Same for the `document.title` fixture in `src/ui/notify.test.ts`, which is
 about `flashTitle` restoring whatever it captured and does not care what the string is.
+
+## The design notes do not ship
+
+The entry documents carry their reasoning inline, next to the tag it explains — the convention the
+rest of the repo follows. What nobody checked is that **vite does not strip HTML comments**. All of
+it was being served.
+
+The measurement, before the fix:
+
+| page | total | comment prose |
+| --- | ---: | ---: |
+| `index.html` | 6,225 B | 3,338 B (54%) |
+| `overview.html` | 45,603 B | 3,572 B |
+| `tutorial.html` | 44,387 B | 2,450 B |
+| `nodes.html` | 5,764 B | 951 B |
+| `public/404.html` | 3,806 B | 1,401 B (37%) |
+
+Run the naive text extraction a reviewer reaches for — `sed 's/<[^>]*>//g'` — and the root page
+yielded 5,402 characters, most of them working notes. It is not a payload problem at that size; it
+is a first-impression problem, and it was reported as one. The same text is what a text-extracting
+crawler takes for page content, which is precisely the audience the `<noscript>` block above exists
+to serve properly. After stripping, that extraction yields 2,086 characters and all of it is the
+hero.
+
+`vite/stripComments.ts` has the reasoning; the one decision worth repeating here, because it is
+about this document's own subject, is **why it is a sweep of `dist/` rather than a
+`transformIndexHtml` hook**. The hook fires once per `build.rollupOptions.input` entry — so the
+first version of this covered exactly the four pages that appear in `PAGES` above and silently
+missed `public/404.html`, which is copied byte-for-byte. That page is what GitHub Pages serves for
+every mistyped and every rotted link, so it meets more strangers per visit than `nodes.html` does,
+and it was still 37% design notes while the check reported four of four clean. A hook keyed to the
+entry list can only state "no *entry* carries design notes". The invariant worth having is
+"nothing we publish does", and the only place that is true is the directory about to be uploaded —
+which also means no page list to keep, where the two plugins above both keep one.
 
 ## The social image
 
@@ -203,7 +257,13 @@ against a directory that does not exist and the way out of a 404 would itself 40
 cat dist/robots.txt dist/sitemap.xml
 grep -c 'class="entry"' dist/nodes.html      # must equal the listable node count
 grep -o 'rel="canonical" href="[^"]*"' dist/*.html
+grep -c -- '<!--' dist/*.html                 # 0 each, 404.html included
+grep -c 'meta name="description"' dist/*.html # 1 each; 404.html has none and needs none
 ```
+
+Both of those have been wrong in a deployed build while the source read correctly, which is why
+neither is only a checklist item: `stripComments` guarantees the first by construction, and warns
+during the build if a page carries a description the second cannot find.
 
 `src/nodeguide/appendix.test.ts` asserts coverage against the real registry and the escaping;
 `nodeGuide.test.ts` continues to assert that every node has a paragraph worth printing. The

@@ -8,6 +8,7 @@ import { defineConfig } from 'vitest/config'
 import { goatCounter } from './vite/goatcounter'
 import { nodeGuideData } from './vite/nodeGuideData'
 import { seo } from './vite/seo'
+import { stripComments } from './vite/stripComments'
 
 /**
  * Where neuPrint lives. Override with NEUPRINT_HOST to point at another deployment.
@@ -294,7 +295,15 @@ function reactTracksOff(): PluginOption {
 }
 
 export default defineConfig({
-  plugins: [react(), reactTracksOff(), deploymentProxy(), nodeGuideData(), goatCounter(), seo()],
+  plugins: [
+    react(),
+    reactTracksOff(),
+    deploymentProxy(),
+    nodeGuideData(),
+    goatCounter(),
+    seo(),
+    stripComments(),
+  ],
   define: { __APP_VERSION__: JSON.stringify(version) },
   // Relative base so the built bundle works from a subpath (GitHub Pages) as well as root.
   base: './',
@@ -340,7 +349,13 @@ export default defineConfig({
   preview: { proxy: NEUPRINT_PROXY },
   test: {
     environment: 'node',
-    include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+    /*
+     * `vite/` as well as `src/`: the build plugins there are ordinary pure functions with a thin
+     * hook around them, and `stripHtmlComments` is the kind that is silent when wrong — its
+     * raw-text-element arm deletes live code if the ordering is ever broken, and the result still
+     * parses. Nothing else in `vite/` has a test yet; this is what lets one exist.
+     */
+    include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'vite/**/*.test.ts'],
     // Module-level caches that outlive a test but not a file — see the file's own header.
     setupFiles: ['src/test/setup.ts'],
   },

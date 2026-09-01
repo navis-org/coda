@@ -6,18 +6,30 @@
     <title>Coda — Connectome Data Analysis in the Browser</title>
     <!--
       Also the `og:description`, the `twitter:description` and the JSON-LD `description` — see
-      vite/seo.ts, which reads them off this tag rather than keeping a second copy.
+      vite/seo.ts, which reads them off this tag rather than keeping a second copy. None of the
+      notes in this file ship — vite/stripComments.ts sweeps them out of everything the build
+      publishes — which is the only reason one this long is affordable here.
 
       Length is the constraint nobody sees: Google shows about 155 characters and cuts the tail,
       so this is written to fit rather than trimmed to fit, and the first 120 carry the weight
-      because that is where a phone truncates. What it says is deliberately what the <title>
-      does not — the backends by name, and the two claims that separate this from every other
-      way of asking a connectome a question.
+      because that is where a phone truncates.
+
+      What it says is deliberately what the title tag does not, in two registers, because two
+      different readers arrive at this string. A search engine wants the backends by name — they
+      are the query somebody actually types. The categorisation engines that decide whether a
+      domain is a research tool or a parked page lean on this field almost alone, and for them
+      the load-bearing words are `scientific`, `web application` and above all `public`: the
+      data Coda reads is published connectome data, and a sentence that does not say so leaves
+      a reviewer to guess. Hence one sentence carrying both, in that order.
     -->
-    <meta
-      name="description"
-      content="A browser-based node editor for connectome data analysis: neuPrint (MaleCNS, hemibrain, MANC), CAVE (FlyWire/FAFB, BANC), or CATMAID. No install, no code."
-    />
+    <!--
+      One line, and `prettier-ignore` is what keeps it one line: Prettier wraps a `<meta>` past
+      its print width onto four, at which point `grep 'meta name="description"'` finds nothing on
+      a page that has always had one. That is how this file was read as lacking a description.
+      vite/stripComments.ts warns if the pin is ever lost; docs/seo.md has the rest.
+    -->
+    <!-- prettier-ignore -->
+    <meta name="description" content="A scientific web application for browser-based analysis and visualisation of public connectome data: neuPrint, CAVE (FlyWire, MICrONS) and CATMAID." />
 
     <!--
       The mark is the musical coda sign — see docs/logo.md. Two files, because they fail
