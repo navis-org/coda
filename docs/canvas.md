@@ -665,6 +665,58 @@ reads fine — arguably better — but the two states genuinely differ, and anyo
 the other should know why. `collapsedPorts.test.tsx` still pins only the DOM and the
 declarations, since jsdom performs no layout.
 
+### Hitting a socket
+
+**A socket is an 11px disc and a 20px target, and the two numbers answer different halves of
+the gesture.** `connectionRadius: 26` on `<ReactFlow>` decides where an in-flight link *snaps
+to* — generous, and it always was. But *starting* a link needs a pointerdown on the handle
+element itself, and nothing about the drop radius helps with that: the target was the disc, 8px
+for a scalar dot, which is what people reported as fiddly. `.socket.react-flow__handle::before`
+in `editor.css` is an invisible circle over each handle. It paints nothing and listens to
+nothing — it widens what the handle catches, so React Flow's own pointer handling, the
+`connectionindicator` class included, is untouched, and a handle that cannot accept the
+in-flight link takes its enlarged area down with it when React Flow sets `pointer-events: none`.
+Hover reaches through it deliberately: the ring lighting up a few pixels out is the only thing
+on screen saying the target is bigger than the dot.
+
+**A circle, because one of the shapes is rotated.** `[data-shape='diamond']` is a square under
+`transform: rotate(45deg)`, and a rectangular hit box inherits that — arriving as a lozenge
+whose corners reach ~15px into the row above and the row below. A circle centred on the disc is
+rotation-invariant, so one rule covers all six shapes. Centred with margins rather than a
+`translate` for the same reason: a transform there would compose with the rotation instead of
+replacing it.
+
+**20px is the port pitch, and that is the whole constraint.** `.port-row`'s `min-height` is
+20px, so each target fills its own row and two neighbours abut without overlapping. Overlap is
+the failure that matters and it is silent: stacked handles mean whichever one the DOM paints last
+takes every pointer event, and aiming at a particular input stops working — the same thing the
+fanned folded band above exists to avoid. Scanning `elementFromPoint` around a socket in Chrome
+shows the two regions meeting on the pixel, with no gap either.
+
+**Sideways it grows inwards only, and that is the card's clip rather than a choice.**
+`.coda-node` clips with `overflow: hidden` — which is why an expanded card's discs render as
+half circles, above — and hit-testing follows that clip exactly as the paint does, so the half
+of the circle hanging over the canvas is simply cut off. Nothing is taken from the
+`reconnectRadius: 14` anchors that pull a wire off its socket, which sit outside the card; those
+were measured to be above the handles in the paint order anyway.
+
+**The other half of the input target was the state bar.** `.coda-node::before` is 3px wide with
+`z-index: 1`, and an input handle sits on it — so hit-testing gave the bar the left half of every
+input disc, leaving 5px of catchable width. `pointer-events: none` on the bar separates the paint
+from the hit: the strip still draws over the socket, which keeps it continuous down the card, and
+a point on it with no socket under lands on the card itself, so dragging a card by its left edge
+is unchanged.
+
+**Measured in Chrome at zoom 1, per handle**: 5×11px catchable before, 12×20 for an input and
+9×19 for an output after — 50px² of target to 233 and 148. And a pointer 9px above and 4px inside
+an output socket's centre, dead space before, now starts a link: `.react-flow__connection-path`
+in flight, anchored at the real socket rather than at the grab point.
+
+**Folded, the enlargement is off** (`content: none`). The pitch there is 8px and the discs
+already overlap by 3, so a 20px target would put every socket on the card under whichever one
+paints last — losing the thing the fan was built to keep. A folded header keeps the hit area it
+has always had, which is a cost of that state rather than a new one, alongside the port labels.
+
 **A band sized by an arity param goes into tabs** (`NodeDefinition.paramGroups`, a param's
 `group`). The fold below answers "this card is configured, get the rows out of the way"; this
 answers a different question — a band that is *linear in a number the user sets*.

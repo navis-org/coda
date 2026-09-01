@@ -279,6 +279,15 @@
   --header-h: 28px;
 }
 
+/*
+ * The state bar down the card's left edge. `z-index: 1` puts it over the input sockets, which
+ * sit on it by a couple of pixels — and hit-testing follows the paint, so the left half of every
+ * input handle was dead: 5x11px of catchable disc, measured in Chrome. `pointer-events: none`
+ * separates the two, leaving the paint order alone (the bar is a continuous strip and a socket
+ * drawn whole over it would dash it). Nothing here was ever meant to be clicked, and a point on
+ * the bar with no socket under it still lands on `.coda-node` itself, so dragging a card by its
+ * left edge is unchanged.
+ */
 .coda-node::before {
   content: '';
   position: absolute;
@@ -286,6 +295,7 @@
   width: var(--state-bar);
   background: transparent;
   z-index: 1;
+  pointer-events: none;
 }
 .coda-node[data-state='ok']::before {
   background: var(--status-ok);
@@ -703,6 +713,55 @@
 .socket[data-shape='dot'] {
   width: 8px;
   height: 8px;
+}
+
+/*
+ * The grab target is a 20px circle, not the 11px disc.
+ *
+ * `connectionRadius` (Editor.tsx) decides where an in-flight link *snaps to*; it does nothing
+ * for the gesture that starts one, which still needs a pointerdown on the handle element
+ * itself — an 11px disc, or 8px for a scalar dot, which is what people reported as fiddly. The
+ * pseudo-element paints nothing and adds no listener: it only widens what the handle catches,
+ * so React Flow's own pointer handling is untouched, `pointer-events` included (a handle that
+ * cannot accept the in-flight link is set to `none` and takes its hit area down with it).
+ * Hover reaches through it on purpose — the ring appearing a few pixels out is the only thing
+ * on screen that says the target is bigger than the dot.
+ *
+ * A *circle*, and centred, because `[data-shape='diamond']` rotates the handle 45deg: any hit box
+ * that is not rotation-invariant arrives as a lozenge reaching into the rows above and below.
+ * Centred with margins rather than a `translate`, for the same reason — a transform here would
+ * compose with that rotation.
+ *
+ * 20px is `.port-row`'s `min-height`, the port pitch, so a target fills its own row and two
+ * neighbours abut without overlapping. Overlap is the failure that matters: stacked handles
+ * mean the one the DOM paints last takes every pointer event, and aiming at a particular input
+ * stops working. Which is why the folded band opts out below rather than shrinking to its pitch.
+ *
+ * Sideways it grows inwards only: `.coda-node` clips with `overflow: hidden`, and hit-testing
+ * follows that clip exactly as the paint does, so the half of the circle hanging over the canvas
+ * is cut off at the card's edge — the same cut the disc itself already takes. Nothing is
+ * therefore taken from the `reconnectRadius: 14` anchor that pulls a wire off its socket, which
+ * lives outside the card. Measured in Chrome at zoom 1, per handle: 5x11px catchable before,
+ * 12x20 for an input and 9x19 for an output after — 50px2 of target to 233 and 148.
+ */
+.socket.react-flow__handle::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 20px;
+  height: 20px;
+  margin: -10px 0 0 -10px;
+  border-radius: 50%;
+}
+
+/*
+ * Folded, the pitch is 8px and the discs already overlap by 3 (see the band above): a 20px
+ * target would put every socket on the card under whichever one paints last. The header keeps
+ * the hit area it has always had, which is a cost of that state rather than a new one.
+ */
+.coda-node[data-ports-folded] .socket.react-flow__handle::before {
+  content: none;
 }
 
 .socket.react-flow__handle:hover {

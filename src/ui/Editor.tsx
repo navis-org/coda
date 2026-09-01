@@ -1043,7 +1043,11 @@ function EditorCanvas() {
         defaultViewport={graph.viewport ?? { x: 0, y: 0, zoom: 0.85 }}
         minZoom={0.15}
         maxZoom={2.5}
-        // Generous snapping radius so 11px sockets are easy to hit.
+        /*
+         * Where an in-flight link snaps to. It is only half of "easy to hit": starting a
+         * drag needs a pointerdown on the handle element, which is why `.socket::before` in
+         * editor.css widens that to a 20px circle.
+         */
         connectionRadius={26}
         /*
          * Navigation model: left-drag on empty canvas pans; Shift+left-drag draws a
