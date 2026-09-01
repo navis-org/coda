@@ -1,17 +1,17 @@
 /**
  * What the start page puts on its rails.
  *
- * The groups are not interchangeable, and the split is what the rail labels are for.
- * **Browse Workflows** is one card that opens the Zoo browser — the only thing here that goes
- * to the network before it can show anything, and the only one whose graphs belong to somebody
- * else. **Examples** run on the synthetic sources
- * generated in the browser, so they open, run and draw with no token and no network — which is
- * what makes them safe to hand a first-time visitor. **Datasets** build a starter graph pointed
- * at a live server, which is the real tool and needs a token before Run does anything.
+ * The groups are not interchangeable, and the split is what the rail labels are for. The **doors**
+ * open a surface rather than handing over a graph: the Workflow Wizard builds one from four
+ * answers, a tour runs over the canvas, and the Zoo is the only thing here that goes to the
+ * network before it can show anything — and the only one whose graphs belong to somebody else.
+ * **Datasets** build a starter graph pointed at a live server, which is the real tool and needs a
+ * token before Run does anything. A rail of four bundled examples sat between them until the
+ * wizard replaced them; see `docs/wizard.md`.
  *
- * Both card kinds carry an optional `image`. Nothing sets it yet and the tile falls back to a
- * glyph, so a screenshot can drop in later without the layout moving — and, more importantly,
- * an example added next year is never blank. Same rule as `NodeThumbnail`, same reason.
+ * Every card kind carries an optional `image`. Nothing sets it yet and the tile falls back to a
+ * glyph, so a screenshot can drop in later without the layout moving — and, more importantly, a
+ * workflow saved next year is never blank. Same rule as `NodeThumbnail`, same reason.
  *
  * Built on demand rather than at module load: resolving a node type requires the node pack to
  * be registered, and a module-level constant here would make import order in `App.tsx`
@@ -20,7 +20,6 @@
 
 import type { NodeCategory } from '../../core/node'
 import { getNodeDef } from '../../core/registry'
-import { EXAMPLES } from '../../examples'
 import type { StarterSpec } from '../../examples/starters'
 import type { DatasetGlyph } from '../../nodes/lib/datasetFamilies'
 import { starterFamilies } from '../../nodes/lib/datasetFamilies'
@@ -28,6 +27,7 @@ import type { WorkflowSummary } from '../../store/library'
 import { formatAgo, plural } from '../format'
 import type { TourId } from '../tour/tourState'
 import { TOURS } from '../tour/tourState'
+import { WIZARD_BLURB, WIZARD_LABEL } from '../../wizard/options'
 
 interface CardBase {
   id: string
@@ -35,13 +35,6 @@ interface CardBase {
   blurb: string
   /** A real picture of the result. Unset today; the tile draws a glyph instead. */
   image?: string
-}
-
-export interface ExampleCard extends CardBase {
-  kind: 'example'
-  /** Node type whose glyph the tile draws. */
-  nodeType: string
-  category: NodeCategory
 }
 
 export interface DatasetCard extends CardBase {
@@ -68,6 +61,17 @@ export interface TourCard extends CardBase {
   tour: TourId
 }
 
+/**
+ * The Workflow Wizard: a card that opens a dialog rather than handing over a graph.
+ *
+ * Like the Zoo card in every way that matters here — it carries no graph and asks no replace
+ * question on the rail, because the wizard asks its own on its summary screen, over the chain it
+ * is about to build. That is where the question can actually be answered.
+ */
+export interface WizardCard extends CardBase {
+  kind: 'wizard'
+}
+
 /** A graph the user saved in this browser. See `store/library.ts`. */
 export interface WorkflowCard extends CardBase {
   kind: 'workflow'
@@ -76,13 +80,29 @@ export interface WorkflowCard extends CardBase {
   category: NodeCategory
 }
 
-export type StartCard = ExampleCard | DatasetCard | WorkflowCard | ZooCard | TourCard
+export type StartCard = DatasetCard | WorkflowCard | ZooCard | TourCard | WizardCard
 
 /**
- * The node an example's tile stands for: the last visualisation node in its graph.
+ * A card that opens a *surface* rather than handing over a graph.
  *
- * Derived from `build()` rather than declared on the example, so a new example gets a correct
- * tile for free. Falls back to the last node of any kind and then to the table viewer, because
+ * One predicate, because two renderers ask: the tint (a door takes the accent, not a category
+ * colour) and the tile (a door's art is hand-drawn, everything else derives its own). Asked as a
+ * three-way union in each of them, a fourth door means editing two boolean expressions in a
+ * shared component and getting one wrong draws a card with a category tint and a blank tile —
+ * the failure `startGlyphs.tsx`'s own header is about.
+ *
+ * A type predicate, so the *other* branch narrows too: what is left is a card standing for a
+ * graph, which is the branch that reads `category` and a node type off it.
+ */
+export function isDoor(card: StartCard): card is ZooCard | TourCard | WizardCard {
+  return card.kind === 'zoo' || card.kind === 'tour' || card.kind === 'wizard'
+}
+
+/**
+ * The node a saved workflow's tile stands for: the last visualisation node in its graph.
+ *
+ * Derived from the graph rather than declared beside it, so a workflow saved next year gets a
+ * correct tile for free. Falls back to the last node of any kind and then to the table viewer, because
  * a tile that throws is worse than a tile that is merely generic.
  */
 function tileNode(types: string[]): { nodeType: string; category: NodeCategory } {
@@ -91,16 +111,6 @@ function tileNode(types: string[]): { nodeType: string; category: NodeCategory }
     .find((type) => getNodeDef(type)?.category === 'visualisation')
   const type = viewer ?? types.at(-1) ?? 'out.table'
   return { nodeType: type, category: getNodeDef(type)?.category ?? 'visualisation' }
-}
-
-export function exampleCards(): ExampleCard[] {
-  return EXAMPLES.map((example) => ({
-    kind: 'example',
-    id: example.id,
-    title: example.name,
-    blurb: example.summary,
-    ...tileNode(example.build().nodes.map((node) => node.type)),
-  }))
 }
 
 /**
@@ -141,6 +151,23 @@ export function datasetCards(): DatasetCard[] {
  * this is one card rather than a rail of community workflows: the index is a network fetch, and
  * the start page opens on every launch (see `ZooGate` for the two deferrals that keeps).
  */
+/**
+ * The wizard's card, and the first thing on the rail.
+ *
+ * What used to be here was a rail of four bundled examples — graphs on synthetic data that could
+ * only ever be somebody else's question. This is the same offer made properly: name your dataset
+ * and get a pipeline pointed at it.
+ *
+ * Named from `WIZARD_LABEL` rather than here, for the reason that constant records: four surfaces
+ * offer this and each had written its own words for it.
+ */
+export const WIZARD_CARD: WizardCard = {
+  kind: 'wizard',
+  id: 'wizard',
+  title: WIZARD_LABEL,
+  blurb: WIZARD_BLURB,
+}
+
 export const ZOO_CARD: ZooCard = {
   kind: 'zoo',
   id: 'zoo',
@@ -173,7 +200,12 @@ const TOUR_CARDS: TourCard[] = TOURS.map((tour) => ({
   tour: tour.id,
 }))
 
-export const DOOR_CARDS: StartCard[] = [...TOUR_CARDS, ZOO_CARD]
+/**
+ * The doors, in the order a first-time reader wants them: build something, be shown around,
+ * borrow somebody else's. The wizard leads because it is the one that produces *their* graph —
+ * the tours explain the app and the Zoo opens a stranger's workflow.
+ */
+export const DOOR_CARDS: StartCard[] = [WIZARD_CARD, ...TOUR_CARDS, ZOO_CARD]
 
 /**
  * One card per workflow saved in this browser, newest first — the order `listWorkflows` returns.

@@ -31,6 +31,7 @@ import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import '../../nodes'
 import { useGraphStore } from '../../store/graphStore'
+import { demoWorkflow } from '../../wizard/build'
 import { clearStorage, installJsdomStubs } from '../../test/jsdomStubs'
 import { NodeBrowser } from './NodeBrowser'
 import { NodeThumbnail } from './NodeThumbnail'
@@ -43,7 +44,7 @@ beforeAll(() => {
 beforeEach(() => {
   clearStorage()
   act(() => {
-    useGraphStore.getState().loadExample('partners')
+    useGraphStore.getState().loadGraph(demoWorkflow('partners'))
   })
 })
 

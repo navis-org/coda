@@ -29,6 +29,7 @@ import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import { listWorkflows, resetLibrary, saveWorkflow } from '../../store/library'
 import { useGraphStore } from '../../store/graphStore'
+import { demoWorkflow } from '../../wizard/build'
 import { clearStorage, installJsdomStubs } from '../../test/jsdomStubs'
 
 beforeAll(() => {
@@ -45,7 +46,7 @@ beforeEach(() => {
     // Past the first-run guides dialog, which is the launch sequence's first stage and would
     // otherwise be what `openStartPage` puts on screen. See `guides.test.tsx`.
     useGraphStore.setState({ library: [], libraryLoaded: false, guidesOpen: false })
-    useGraphStore.getState().loadExample('partners')
+    useGraphStore.getState().loadGraph(demoWorkflow('partners'))
   })
 })
 

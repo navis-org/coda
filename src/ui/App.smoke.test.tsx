@@ -25,6 +25,7 @@ import { isAnnotation } from '../core/registry'
 import { MockSource } from '../data/mock/MockSource'
 import { registerSource } from '../data/source'
 import { useGraphStore } from '../store/graphStore'
+import { demoWorkflow } from '../wizard/build'
 import { clearStorage, installJsdomStubs } from '../test/jsdomStubs'
 
 beforeAll(() => {
@@ -48,7 +49,7 @@ beforeEach(() => {
     // would sit in front of every assertion below. One test opens it deliberately instead.
     useGraphStore.getState().closeStartPage()
     // Start from a known graph rather than whatever the previous test left behind.
-    useGraphStore.getState().loadExample('partners')
+    useGraphStore.getState().loadGraph(demoWorkflow('partners'))
   })
 })
 
@@ -100,20 +101,24 @@ describe('App', () => {
     render(<App />)
     await waitFor(() => expect(screen.getByText('Group By')).toBeTruthy())
 
-    // The Filter node's column dropdown should list connectivity's columns, which only
-    // exist because the query node declared them statically.
-    // `hidden: true` because React Flow marks nodes `visibility: hidden` until it has
-    // measured them, which it cannot do in jsdom.
+    /*
+     * Group By's pickers should list connectivity's columns, which only exist because the query
+     * node declared them statically. Two pickers rather than one, because they are filtered by
+     * what they can accept — `value` aggregates and so offers the numeric columns, `by` groups
+     * and offers the categorical ones — so a single dropdown holding both would be the wrong
+     * assertion to make.
+     *
+     * `hidden: true` because React Flow marks nodes `visibility: hidden` until it has measured
+     * them, which it cannot do in jsdom.
+     */
     const selects = screen.getAllByRole('combobox', { hidden: true })
     const optionSets = selects.map((s) =>
       within(s)
         .queryAllByRole('option', { hidden: true })
         .map((o) => (o as HTMLOptionElement).value),
     )
-    const hasConnectivityColumns = optionSets.some(
-      (opts) => opts.includes('weight') && opts.includes('postType'),
-    )
-    expect(hasConnectivityColumns).toBe(true)
+    expect(optionSets.some((opts) => opts.includes('weight'))).toBe(true)
+    expect(optionSets.some((opts) => opts.includes('postType'))).toBe(true)
   })
 
   it('defers expensive nodes until Run, then produces results', async () => {
@@ -151,18 +156,24 @@ describe('App', () => {
     await act(async () => {
       await useGraphStore.getState().runAll()
     })
-    const rowsBefore = tableLength('filter')
+    const rowsBefore = tableLength('sort')
+    expect(rowsBefore).toBeGreaterThan(2)
 
-    // Raise the weight threshold; the query stays cached, the filter recomputes.
+    /*
+     * Cap the ranked table; the query stays cached and only the cheap tail recomputes. A cheap
+     * node's param, deliberately: that is the whole distinction being tested, and the generated
+     * workflow puts its weight threshold on the *expensive* Connectivity node, where the server
+     * applies it rather than the browser.
+     */
     await act(async () => {
-      useGraphStore.getState().setParam('filter', 'value', '30')
+      useGraphStore.getState().setParam('sort', 'limit', 2)
     })
     await waitFor(() => {
-      expect(useGraphStore.getState().nodeInfo('filter').state).toBe('ok')
+      expect(useGraphStore.getState().nodeInfo('sort').state).toBe('ok')
     })
 
     expect(useGraphStore.getState().nodeInfo('find').state).toBe('ok')
-    expect(tableLength('filter')).toBeLessThan(rowsBefore)
+    expect(tableLength('sort')).toBeLessThan(rowsBefore)
   })
 
   it('shows an error on the node when a param is invalid', async () => {
@@ -186,7 +197,7 @@ describe('App', () => {
       const ok = useGraphStore.getState().connect({
         source: 'ds',
         sourceHandle: 'dataset',
-        target: 'filter',
+        target: 'group',
         targetHandle: 'in',
       })
       expect(ok).toBe(false)
@@ -274,7 +285,7 @@ describe('App', () => {
     await waitFor(() => expect(screen.getByText('Find Neurons')).toBeTruthy())
 
     await act(async () => {
-      useGraphStore.getState().loadExample('matrix')
+      useGraphStore.getState().loadGraph(demoWorkflow('matrix'))
     })
 
     await waitFor(() => expect(screen.getByText('Adjacency')).toBeTruthy())

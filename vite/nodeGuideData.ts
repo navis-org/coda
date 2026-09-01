@@ -109,7 +109,7 @@ export function nodeGuideData(): Plugin {
      * the one failure mode that would make this worse than a committed file.
      */
     handleHotUpdate(ctx) {
-      if (!/\/src\/(nodes|core|examples)\//.test(ctx.file)) return
+      if (!/\/src\/(nodes|core|examples|wizard)\//.test(ctx.file)) return
       const mod = ctx.server.moduleGraph.getModuleById(RESOLVED_ID)
       if (mod) ctx.server.moduleGraph.invalidateModule(mod)
     },

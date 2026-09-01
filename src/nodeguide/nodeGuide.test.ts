@@ -13,7 +13,8 @@ import { describe, expect, it } from 'vitest'
 import { guideData } from './data'
 import '../nodes'
 import { listableNodeDefs } from '../core/registry'
-import { EXAMPLES } from '../examples'
+import { DEMO_DATASET, buildWorkflow } from '../wizard/build'
+import { analysisOption, everyCombination } from '../wizard/options'
 
 const DATA = guideData()
 const byType = new Map(DATA.nodes.map((n) => [n.type, n]))
@@ -113,31 +114,44 @@ describe('settings', () => {
   })
 })
 
-describe('the examples cross-reference', () => {
-  it('names the examples a node actually appears in', () => {
-    const filter = byType.get('core.filterTable')!
-    expect(filter.examples.length).toBeGreaterThan(0)
-    for (const name of filter.examples) expect(DATA.examples).toContain(name)
+describe('the workflow cross-reference', () => {
+  it('names the workflows a node actually appears in', () => {
+    // Group By is in three of the five arms, so it is the one to ask: a node that appears in
+    // exactly one would pass this while the derivation returned a constant.
+    const group = byType.get('core.groupBy')!
+    expect(group.workflows.length).toBeGreaterThan(1)
+    for (const name of group.workflows) expect(DATA.workflows).toContain(name)
   })
 
   /*
-   * Derived from `build()` rather than from a list, so this is really asserting that the
-   * derivation runs — a node in an example and absent from its own cross-reference is the
+   * Derived from the built graphs rather than from a list, so this is really asserting that the
+   * derivation runs — a node in a workflow and absent from its own cross-reference is the
    * failure, and it is silent.
    */
   it('agrees with the graphs themselves', () => {
-    for (const example of EXAMPLES) {
-      for (const node of example.build().nodes) {
+    for (const answers of everyCombination(DEMO_DATASET)) {
+      const name = analysisOption(answers.analysis)!.label
+      for (const node of buildWorkflow({ ...answers, notes: false }).nodes) {
         const entry = byType.get(node.type)
         if (!entry || entry.annotation) continue
-        expect(entry.examples, `${node.type} in ${example.name}`).toContain(example.name)
+        expect(entry.workflows, `${node.type} in ${name}`).toContain(name)
       }
     }
   })
 
-  /* Every example carries several notes, so "seen in all five" would be true and useless. */
+  /*
+   * The viewers only one answer reaches are the whole reason this is derived from *every*
+   * combination rather than from a handful of canonical graphs — four hand-written examples
+   * credited whichever viewers they happened to contain.
+   */
+  it('credits a viewer that only one answer reaches', () => {
+    expect(byType.get('out.pie')!.workflows.length).toBeGreaterThan(0)
+    expect(byType.get('net.metrics')!.workflows.length).toBeGreaterThan(0)
+  })
+
+  /* Every workflow carries several notes, so "seen in all of them" would be true and useless. */
   it('says nothing about a text note', () => {
-    expect(byType.get('note.text')!.examples).toEqual([])
+    expect(byType.get('note.text')!.workflows).toEqual([])
     expect(byType.get('note.text')!.annotation).toBe(true)
   })
 })

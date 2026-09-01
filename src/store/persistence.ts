@@ -42,6 +42,22 @@ const START_PAGE_KEY = 'coda.startPage.v1'
  * lifetime. The first is written once, on the first visit, and never read for anything else;
  * the second grows as guides are completed and outlives the dialog that shows it.
  */
+/**
+ * Whether the Workflow Wizard writes explanatory notes onto the canvas.
+ *
+ * On unless somebody has said otherwise, so the key holds only the opt-out — a statement about
+ * how this reader likes their canvas rather than about any one workflow, which is why it is
+ * remembered at all.
+ */
+const WIZARD_NOTES_KEY = 'coda.wizardNotes.v1'
+/**
+ * Whether a generated workflow opens on the dashboard rather than the canvas.
+ *
+ * Its own key rather than a field beside the notes one, for the reason the two keys next to it
+ * are separate: a preference is read once at init and cached, and one key holding two answers
+ * means a tab that writes one clobbers the other's in-flight value.
+ */
+const WIZARD_DASHBOARD_KEY = 'coda.wizardDashboard.v1'
 const GUIDES_SEEN_KEY = 'coda.guidesSeen.v1'
 const GUIDES_DONE_KEY = 'coda.guidesDone.v1'
 const LAYOUT_KEY = 'coda.layout.v1'
@@ -672,6 +688,42 @@ export function saveStartPageDismissed(dismissed: boolean): void {
   } catch {
     /* ignore */
   }
+}
+
+// ---------------------------------------------------------------------------
+// The Workflow Wizard
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether generated workflows arrive with their notes.
+ *
+ * `!== 'false'` rather than `=== 'true'`, the same spelling `loadAutoRun` uses and for the same
+ * reason: nothing is stored until the checkbox is touched, so absence has to read as the default
+ * rather than as a deliberate no.
+ */
+export function loadWizardNotes(): boolean {
+  return readLocal(WIZARD_NOTES_KEY) !== 'false'
+}
+
+export function saveWizardNotes(enabled: boolean): void {
+  writeLocal(WIZARD_NOTES_KEY, String(enabled))
+}
+
+/**
+ * Whether a generated workflow opens into the grid.
+ *
+ * `=== 'true'` — off until asked for, which is the opposite spelling to the notes above and the
+ * opposite default for a reason. A note explains the graph somebody just generated and costs
+ * nothing to ignore; the dashboard *replaces the view they are in*, and a first workflow that
+ * opened somewhere other than the canvas would be answering a question about the app before the
+ * reader had one.
+ */
+export function loadWizardDashboard(): boolean {
+  return readLocal(WIZARD_DASHBOARD_KEY) === 'true'
+}
+
+export function saveWizardDashboard(enabled: boolean): void {
+  writeLocal(WIZARD_DASHBOARD_KEY, String(enabled))
 }
 
 // ---------------------------------------------------------------------------

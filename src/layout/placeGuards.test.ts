@@ -19,7 +19,9 @@ import { describe, expect, it } from 'vitest'
 
 import type { GraphNode } from '../core/graph'
 import { getNodeDef } from '../core/registry'
-import { EXAMPLES } from '../examples'
+import { registerBuiltinSources } from '../data/builtins'
+import { DEMO_DATASET, buildWorkflow } from '../wizard/build'
+import { everyCombination } from '../wizard/options'
 import '../nodes'
 import { NODE_BODIES } from '../ui/nodes/nodeBodies'
 
@@ -48,10 +50,22 @@ function sharesRow(a: GraphNode, b: GraphNode): boolean {
   return Math.abs(a.position.y - b.position.y) < 100
 }
 
-describe('the bundled graphs', () => {
-  for (const example of EXAMPLES) {
-    it(`lays "${example.id}" out with no card on top of another`, () => {
-      const nodes = example.build().nodes
+/*
+ * Every graph the Workflow Wizard can build, rather than the four bundled examples this used to
+ * walk. The check is worth more here: an example was laid out by hand once and looked at, while
+ * a generated chain's geometry is arithmetic — `xOf` plus a per-analysis column index — and the
+ * combination nobody tried is exactly the one that overlaps. The Explore card is 520px against a
+ * 416px column, which is what `EXPLORE_SHIFT` exists for and what this would catch if it went.
+ */
+// The option space is gated on `capabilityOf`, which needs the sources registered — and this is
+// read at *collection* time, before any hook runs. `wizard.test.ts` records what goes wrong.
+registerBuiltinSources({ mockLatencyMs: 0 })
+
+describe('the generated graphs', () => {
+  for (const answers of everyCombination(DEMO_DATASET)) {
+    const name = `${answers.start}/${answers.analysis}/${answers.visualisations.join('+')}`
+    it(`lays "${name}" out with no card on top of another`, () => {
+      const nodes = buildWorkflow(answers).nodes
       const clashes: string[] = []
 
       for (let i = 0; i < nodes.length; i++) {

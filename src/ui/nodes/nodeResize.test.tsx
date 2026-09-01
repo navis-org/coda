@@ -18,6 +18,7 @@ import { allNodeDefs } from '../../core/registry'
 import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import { useGraphStore } from '../../store/graphStore'
+import { demoWorkflow } from '../../wizard/build'
 import { clearStorage, installJsdomStubs } from '../../test/jsdomStubs'
 import { isViewer } from './CodaNodeView'
 
@@ -29,7 +30,7 @@ beforeAll(() => {
 beforeEach(() => {
   clearStorage()
   act(() => {
-    useGraphStore.getState().loadExample('partners')
+    useGraphStore.getState().loadGraph(demoWorkflow('partners'))
   })
 })
 
@@ -72,10 +73,10 @@ describe('resize handles', () => {
   })
 
   it('leaves nodes whose height their params decide alone', async () => {
-    // A drag handle on a Filter would promise a control that does nothing: its height is
+    // A drag handle on a Sort card would promise a control that does nothing: its height is
     // whatever its fields need.
     render(<App />)
-    const filter = nodeIdOfType('core.filterTable')
+    const filter = nodeIdOfType('core.sort')
     select(filter)
 
     const card = await cardFor(filter)

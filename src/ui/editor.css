@@ -4507,6 +4507,222 @@ a.viewer-actions__btn {
 }
 
 /*
+ * The Workflow Wizard.
+ *
+ * One column of option rows, a little wider than the guides dialog because a dataset row carries
+ * a two-line description, and a fixed-height panel because the questions are of different
+ * lengths: a dialog that changed size between "which dataset" (nine rows) and "how should it
+ * look" (two) would move the buttons under the cursor between clicks.
+ *
+ * **Its rows are the guides dialog's rows**, so the two share those rules rather than restating
+ * them — the idiom `.node-row, .zoo-row` above already uses. Written out twice, five of the
+ * rules were byte-identical and three more differed by one declaration, which is how one dialog
+ * comes to be restyled and the other not. What genuinely differs is overridden per dialog: a
+ * wizard row carries a glyph, a guides row carries a mark and a badge.
+ */
+.wizard {
+  max-width: 600px;
+  height: min(84vh, 660px);
+}
+
+.wizard__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 16px 6px;
+}
+
+.wizard__question h3 {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.wizard__hint {
+  margin: 0 0 12px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+/* --- the pick-one row, shared with the guides dialog ---------------------- */
+
+.wizard__options,
+.guides__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/*
+ * The whole row is the button. A row with a Start button in it puts a small target inside a
+ * large one that does nothing, which on a dialog whose only job is "pick one of these" is the
+ * wrong way round — so `.guides__go` is a label on the row rather than a control in it.
+ */
+.wizard__option,
+.guides__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  text-align: left;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+/* A glyph on the left wants a little more room beside it than a mark does. */
+.wizard__option {
+  padding-inline: 11px;
+}
+
+.wizard__option:hover,
+.wizard__option:focus-visible,
+.guides__row:hover,
+.guides__row:focus-visible {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.wizard__text,
+.guides__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wizard__blurb,
+.guides__blurb {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.wizard__foot,
+.guides__foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+}
+/* Two children and no spacer between them, where the wizard's bar has three. */
+.guides__foot {
+  justify-content: space-between;
+}
+
+.wizard__progress,
+.guides__note {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+/* --- and what is the wizard's alone --------------------------------------- */
+
+/*
+ * The answer already given, marked so a reader who pressed Back can see where they were. A left
+ * bar rather than a fill: the hover state is already a fill, and two fills on one row is a row
+ * that looks pressed when the pointer is merely over it.
+ */
+.wizard__option[data-selected] {
+  border-left: 3px solid var(--accent);
+  padding-left: 9px;
+}
+
+.wizard__glyph {
+  flex: none;
+  width: 34px;
+  height: 30px;
+  color: var(--text-secondary);
+}
+
+.wizard__label {
+  font-size: 12px;
+  font-weight: 600;
+}
+/* Which backend serves a dataset, beside its name: a qualifier, so it is not part of the name. */
+.wizard__where {
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+/*
+ * The tick on a question that takes a set. At the right end of the row rather than in front of
+ * the name, where a glyph already sits on the dataset question — a control that moves from one
+ * side to the other between questions reads as two different controls.
+ */
+.wizard__tick {
+  flex: none;
+  width: 14px;
+  text-align: right;
+  font-size: 12px;
+  color: var(--accent);
+}
+
+/*
+ * The chain, as a row of node labels with arrows between them. `::after` on every item but the
+ * last, so the separator cannot fall out of step with the list — and it wraps, because a
+ * morphology workflow is six cards and the panel is 600px.
+ */
+.wizard__chain {
+  margin: 0 0 14px;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+.wizard__chain li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  white-space: nowrap;
+}
+.wizard__chain li:not(:last-child)::after {
+  content: '→';
+  margin-right: -2px;
+  color: var(--text-muted);
+}
+
+.wizard__notes {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.wizard__notes em {
+  display: block;
+  font-style: normal;
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+.wizard__confirm {
+  margin: 12px 0 0;
+  padding: 8px 10px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  background: var(--accent-soft);
+  border-radius: var(--radius-sm);
+}
+
+/*
  * The first-run guides dialog.
  *
  * Narrower than the shortcuts card and about as wide as the privacy notice, for the same reason:
@@ -4530,39 +4746,6 @@ a.viewer-actions__btn {
   color: var(--text-secondary);
 }
 
-.guides__list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-/*
- * The whole row is the button. A row with a Start button in it puts a small target inside a
- * large one that does nothing, which on a dialog whose only job is "pick one of these" is the
- * wrong way round — so `.guides__go` is a label on the row rather than a control in it.
- */
-.guides__row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 9px 10px;
-  text-align: left;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-}
-.guides__row:hover,
-.guides__row:focus-visible {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-}
 
 /* The step number, and the slot the checkmark takes over once the guide is finished. */
 .guides__mark {
@@ -4589,13 +4772,6 @@ a.viewer-actions__btn {
   font-size: 13px;
 }
 
-.guides__text {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
 
 .guides__name {
   display: flex;
@@ -4623,11 +4799,6 @@ a.viewer-actions__btn {
   color: var(--text-secondary);
 }
 
-.guides__blurb {
-  font-size: 11px;
-  line-height: 1.45;
-  color: var(--text-secondary);
-}
 
 .guides__go {
   flex: none;
@@ -4636,19 +4807,6 @@ a.viewer-actions__btn {
   color: var(--accent);
 }
 
-.guides__foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 10px 14px;
-  border-top: 1px solid var(--border);
-}
-
-.guides__note {
-  font-size: 11px;
-  color: var(--text-secondary);
-}
 
 /*
  * `columns` rather than a grid, so the groups flow into whichever column has room. A grid would

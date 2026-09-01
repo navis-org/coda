@@ -39,11 +39,10 @@
 
 import type { CodaGraph, GraphNode } from '../core/graph'
 import { addNodeWithCompanion } from '../core/companion'
-import { addEdge, emptyGraph } from '../core/graph'
-import type { ParamValues } from '../core/node'
-import { defaultParams } from '../core/node'
+import { addEdge } from '../core/graph'
+import type { Link } from './assemble'
+import { assembleGraph as assemble, graphNode as node } from './assemble'
 import { ID_COLUMN_NAME } from '../core/ids'
-import { requireNodeDef } from '../core/registry'
 import { findColumn } from '../core/types'
 import { aggColumnName } from '../nodes/lib/tableOps'
 import { capabilityOf, getSource } from '../data/source'
@@ -63,27 +62,7 @@ export interface StarterSpec {
 /** Explore is 520px wide, so columns are spaced for it rather than for a default node. */
 const COLUMNS = [60, 340, 940]
 
-type Link = [from: string, fromPort: string, to: string, toPort: string]
-
-/** A node at an absolute position, its params being the definition's own plus any overrides. */
-function node(
-  id: string,
-  type: string,
-  position: { x: number; y: number },
-  params?: Record<string, unknown>,
-  size?: { width: number; height: number },
-): GraphNode {
-  const def = requireNodeDef(type)
-  return {
-    id,
-    type,
-    position,
-    params: { ...defaultParams(def), ...params } as ParamValues,
-    ...(size ? { size } : {}),
-  }
-}
-
-/** The same, on the generic starter's three-column grid. */
+/** The same node helper on the generic starter's three-column grid. */
 function place(
   id: string,
   type: string,
@@ -92,28 +71,6 @@ function place(
   y = 90,
 ): GraphNode {
   return node(id, type, { x: COLUMNS[column] ?? 60, y }, params)
-}
-
-/**
- * Nodes and wires into a graph.
- *
- * Every node goes in through `addNodeWithCompanion`, so a dataset node here opens with its
- * Description card exactly as it does when somebody adds one by hand. A starter is the first
- * graph most people see, which makes it the least defensible place to leave the credit out.
- */
-function assemble(
-  name: string,
-  description: string,
-  nodes: GraphNode[],
-  links: Link[],
-): CodaGraph {
-  let graph = emptyGraph(name)
-  graph = { ...graph, meta: { ...graph.meta, name, description } }
-  for (const spec of nodes) graph = addNodeWithCompanion(graph, spec)
-  for (const [source, sourceHandle, target, targetHandle] of links) {
-    graph = addEdge(graph, { source, sourceHandle, target, targetHandle })
-  }
-  return graph
 }
 
 /**

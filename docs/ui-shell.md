@@ -409,31 +409,53 @@ it is the newest run's completion that means the wait is over. The ref holding t
 summary is **mount-seeded**, the same guard the store's request counters use, so a remount with a
 run already in the store does not announce it twice.
 
-## The Examples menu
+## The New menu
 
-Two kinds of thing, in this order: **Browse Workflows…** first, then a rule, then the four
-bundled graphs. The rule is the statement — the top row goes to a public repository over the
-network, the rows under it are bundled, run on synthetic data and open instantly. Mixing the
-fetch into the list would make one remote thing and four local ones read as five of a kind. It
-used to be the other way round, with the Zoo last; the order is now pinned in
-`panels.test.tsx` rather than left to be read off the JSX.
+Everything that starts something which is not a file, in one menu, ordered by how much the app
+decides for you:
 
-**The gold note closes the bundled group, and it is inside `.dropdown__group` on purpose.**
-Above the rule it would sit under Browse Workflows, whose graphs run on whatever their author
-pointed them at, so a "no token needed" promise there would be false. It says two things: the
-data is mock, which is what stops somebody reading a result off these graphs, and no credentials
-are needed, which is what a reader scanning the menu actually wants to know. The longer version
-lives in each example's own overview note, once the graph is open.
+| | |
+|---|---|
+| **Empty** | nothing decided |
+| **Workflow Wizard…**, **Browse Workflows…** | a whole pipeline decided |
+| **neuPrint ▸**, **CAVE ▸**, **CATMAID ▸** | a dataset decided, the rest yours |
 
-`--status-warn` **straight, not mixed towards the surface** the way `.dropdown__note--caveat`
-gets its quiet. That token is per-mode precisely because no single gold clears 4.5:1 on both
-panels — the bright `#fab219` is 1.74:1 on the light one — and 5.41:1 light / 9.78:1 dark is
-what buys it back; mixing it 85% into `--surface-1` would put it back under the floor. The
-quiet comes from 9.5px and italic instead. It also **wraps**, unlike the caveat: that one is
-`nowrap` because the Save menu's longest row is 307px and its sentence measures 291px, so a
-line was free. This menu is narrower and its rows are example summaries that already wrap, so
-pinning the note to one line would widen the whole menu to hold its own footnote. Measured in
-Chrome in both themes: the panel is 260px with and without it.
+The rules between the three are that statement, and the order within the middle pair is the one
+the Zoo has always drawn: the wizard builds locally and instantly, the row under it goes to a
+public repository over the network. Pinned in `panels.test.tsx` rather than left to be read off
+the JSX.
+
+**Those two rows were a `Workflows` menu of their own for about an hour.** A top-level button
+holding two rows, beside a "New" that means the same thing — *where do I begin* — is one menu too
+many; and before that they were an `Examples` menu holding the Zoo plus four bundled graphs, which
+the Workflow Wizard replaced (see [wizard.md](wizard.md)).
+
+**The datasets are submenus, one per backend, and that is what made the rest possible.** Flat they
+were a dozen rows under four headings and the panel needed a scrollbar — the state where a heading
+is something you scroll past rather than something you choose. Folded, the menu is six rows and
+316px tall (measured in Chrome), which is what lets it take `flyouts`: opting out of the panel's
+`overflow-y` is only safe for a menu short enough never to need it, and `overflow-y` on a box makes
+`overflow-x` compute to `auto` as well, so a flyout at `left: 100%` would otherwise render inside a
+scrollbar or not at all. The two facts are the same change.
+
+**A backend is a real choice**, which is why it gets a row rather than a heading: it decides what a
+dataset node can *do* — the `SourceCapabilities` question the wizard's own gating turns on. The
+row's blurb lists what is inside it (`MaleCNS · Hemibrain · MANC`), derived from the same table the
+flyout is built from, so a family added to that table cannot leave the row claiming something else.
+
+**One submenu per backend, not per source**, and the difference only shows on CATMAID: FAFB and L1
+are two servers and therefore two `CatmaidSource`s, so grouping on the source put a second row in
+the menu spelled as a hostname. The key list is the **union** of the family table and
+`CUSTOM_DATASET_NODES`, so a backend with no starter family still gets its escape hatch under its
+own name rather than in a trailing "Other" — and a backend with neither is dropped, which is what
+removing the synthetic dataset does to the mock one.
+
+**The synthetic dataset is not offered here.** It is the Workflow Wizard's first answer instead: a
+demo dataset is worth reaching for when you want a *pipeline* to look at, and `New ▸ Demo Data`
+offered it as though it were somewhere to begin real work. The gold "no token needed" heads-up
+that used to close the Examples menu went with that menu; its contrast finding — `--status-warn`
+straight rather than mixed towards the surface, because no single gold clears 4.5:1 on both panels
+— is recorded on the token itself in `theme.css`, which is where it survives being useful.
 
 ## The `?` menu's submenus
 
@@ -677,15 +699,19 @@ end of `editor.css`. It stands down while the guides dialog above is up — `use
 where the two agree — and is otherwise unchanged by it, including the tour cards on its own
 doors rail: this page is where the guides live for every visit after the first.
 
-**Four rails, and the order is how often each is what somebody came for:** the user's own saved
-workflows (only when the shelf has something on it), **Learn & browse**, **Examples**,
-**Datasets**.
+**Three rails, and the order is how often each is what somebody came for:** the user's own saved
+workflows (only when the shelf has something on it), **Start & learn**, **Datasets**. There was a
+fourth — a rail of four bundled example graphs — until the Workflow Wizard replaced them; see
+[wizard.md](wizard.md).
 
-**"Learn & browse" is the doors rail: the three tours, then the Zoo.** The line it draws is the
-one the toolbar's Examples menu draws with a rule — everything below is bundled, runs on
-synthetic data and replaces the canvas the moment it is clicked, and nothing on this rail does.
-So `pick` returns early on both kinds, *before* the replace-confirm, and for a different reason
-each: `ZooBrowser` asks that question itself over the preview of the workflow being opened,
+**"Start & learn" is the doors rail: the wizard, the three tours, then the Zoo.** The line it
+draws is the one the toolbar's Workflows menu draws with a rule — the Datasets rail below builds
+a graph and replaces the canvas the moment a card is clicked, and nothing on this rail does. The
+wizard leads because it is the one that produces *their* graph; the tours explain the app and the
+Zoo opens a stranger's workflow.
+So `pick` returns early on all three kinds, *before* the replace-confirm, and for a different
+reason each: the wizard asks that question on its own summary screen, over the chain it is about
+to build; `ZooBrowser` asks it over the preview of the workflow being opened,
 which is where it can be answered (asking on the rail asks it twice, the first time about a
 graph nobody has chosen yet); a tour that touches the canvas announces it in its own first step
 and goes through `setGraph`, so it is warned *and* undoable, which is more than a yes/no here

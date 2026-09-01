@@ -67,14 +67,14 @@ than a second parser. That module exists because a blurb from a foreign deployme
 able to become markup, and text pasted into a graph that is then shared has exactly the same
 property — raw HTML stays text by construction.
 
-**Every example carries notes** (`placeNote` in `examples/index.ts`), an overview above the chain
-and two or three step notes under it. They are placed absolutely rather than through `place`,
+**Every generated workflow carries notes** (`wizard/build.ts`, and the bundled examples did the
+same before it), an overview above the chain and one per stage under it. They are placed absolutely rather than through `place`,
 because the node grid is a row of pipeline steps while a note spans several of them. Their source
 runs through `dedent`: the markdown parser only recognises a heading at the start of a line, so a
 `###` indented to match the surrounding code is a paragraph beginning with three hashes.
 
 Two existing tests had to learn what an annotation is, and the change is the assertion rather
-than an accommodation: `examples.test.ts` now expects `executed` to match the _dataflow_ nodes
+than an accommodation: `wizard.test.ts` now expects `executed` to match the _dataflow_ nodes
 and `graph.nodes` to be strictly longer, and `App.smoke.test.tsx` counts Run buttons against the
 same subset. Counting a note as work is counting the comments in a program as statements.
 

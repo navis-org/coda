@@ -32,6 +32,7 @@ import { decodePacked, parseShareFragment } from '../data/share/fragment'
 import { resetGithubCredentials, setGithubToken } from '../data/share/credentials'
 import { shareAdvisories } from './shareAdvisories'
 import { useGraphStore } from '../store/graphStore'
+import { demoWorkflow } from '../wizard/build'
 import { clearStorage, installJsdomStubs } from '../test/jsdomStubs'
 
 beforeAll(() => {
@@ -45,7 +46,7 @@ beforeEach(() => {
   window.history.replaceState(null, '', '/')
   act(() => {
     useGraphStore.getState().closeStartPage()
-    useGraphStore.getState().loadExample('partners')
+    useGraphStore.getState().loadGraph(demoWorkflow('partners'))
   })
 })
 
@@ -313,7 +314,7 @@ describe('the gist half', () => {
     // site, so the gist and the download cannot come to disagree about what a graph is called.
     const post = fetchCalls.find(([, init]) => init?.method === 'POST')?.[1]?.body
     expect(Object.keys(JSON.parse(String(post)).files)).toEqual([
-      'fetch-and-group-connectivity-by-type.coda.json',
+      'demo-data-connectivity-partners.coda.json',
     ])
     // In the document, which is what lets a second Share update this gist rather than litter a
     // new one — and what a recipient's copy deliberately does not carry.

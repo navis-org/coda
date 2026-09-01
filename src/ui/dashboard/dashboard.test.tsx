@@ -36,6 +36,7 @@ import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import '../../nodes'
 import { useGraphStore } from '../../store/graphStore'
+import { demoWorkflow } from '../../wizard/build'
 import { clearStorage, installJsdomStubs, installStorageStub } from '../../test/jsdomStubs'
 
 beforeAll(() => {
@@ -47,7 +48,7 @@ beforeAll(() => {
 beforeEach(() => {
   clearStorage()
   act(() => {
-    useGraphStore.getState().loadExample('partners')
+    useGraphStore.getState().loadGraph(demoWorkflow('partners'))
   })
 })
 
@@ -116,7 +117,7 @@ describe('entering the dashboard', () => {
     })
     expect(store().dashboardOpen).toBe(true)
     // An example carries no dashboard, so opening one lands on the canvas.
-    act(() => store().loadExample('partners'))
+    act(() => store().loadGraph(demoWorkflow('partners')))
     expect(store().dashboardOpen).toBe(false)
 
     // A graph whose author saved it from the grid opens into the grid.

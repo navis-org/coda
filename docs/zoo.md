@@ -101,7 +101,7 @@ The line is whether a *reader* would be misled.
 - **A `deserializeGraph` warning is an error here.** In the app it means "we saved what we could
   of your file"; in a repository it means the entry as committed is not the entry that will
   open.
-- **Inference errors and warnings are both errors**, the same bar `examples.test.ts` holds the
+- **Inference errors and warnings are both errors**, the same bar `wizard.test.ts` holds the
   bundled examples to. A zoo entry is documentation, and "it mostly works" is not something a
   reader can evaluate from a card.
 - **A param the node no longer declares is a warning.** This is the drift detector:

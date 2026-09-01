@@ -26,6 +26,7 @@ import { MockSource } from '../data/mock/MockSource'
 import { registerSource } from '../data/source'
 import '../nodes'
 import { useGraphStore } from '../store/graphStore'
+import { demoWorkflow } from '../wizard/build'
 import { clearStorage, installFullscreenStub, installJsdomStubs } from '../test/jsdomStubs'
 
 let fullscreen: ReturnType<typeof installFullscreenStub>
@@ -45,7 +46,7 @@ beforeEach(() => {
     // The start page renders over everything, which is its job — and would sit in front of
     // the toolbar this file is about.
     useGraphStore.getState().closeStartPage()
-    useGraphStore.getState().loadExample('partners')
+    useGraphStore.getState().loadGraph(demoWorkflow('partners'))
   })
 })
 

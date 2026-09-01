@@ -184,6 +184,23 @@ Area-specific — the rule, then the doc that holds why:
   and the pointer events went to a 28px icon behind the dialog and the form stayed inert. Both
   halves were A/B'd in a real browser. **`TourStep.when` is asked once, at start**, because `go`
   indexes into the filtered list. See [docs/ui-shell.md](docs/ui-shell.md).
+- **The Workflow Wizard replaced the bundled examples, and its option space is gated rather than
+  offered.** Four questions — dataset, how to pick neurons, analysis, view — and `buildWorkflow`
+  assembles the chain. Every question narrows against what came before: on `capabilityOf`
+  (browsing needs `neuronIndex`, 3D needs `skeletons`, a Neuroglancer cell needs `viewerScene`)
+  and on what the analysis *produces*, since a heatmap wants a matrix and a table wants a table —
+  `VIEWS` is that pairing **and** the node each pair ends on, one table read by both halves, after
+  three tables of which two were already wrong. The fourth question takes a **set**: several
+  viewers hang off one chain, side by side and stepped by `cardWidth`, because a viewer's height is
+  its content (a run Table card is 387px) and stacking them overlapped the moment the graph ran. Three consequences worth knowing. **`capabilityOf` answers `true` for a
+  source nobody registered**, so anything enumerating combinations at module-init or SSR time
+  (`nodeguide/data.ts`, a `describe.each`) must `registerBuiltinSources()` first or it silently
+  offers more than the app does. **A generated search is capped** — `SEARCH_LIMIT` on a published
+  dataset because auto-run is on by default, and `GEOMETRY_LIMIT` on the *search* of a morphology
+  workflow because a skeleton node's `Limit` is a warn-above threshold and not a cap. And the
+  examples' fixture standing moved with them: `demoWorkflow()` is what the tour's empty canvas and
+  thirty test files load, so the graph the suites exercise is the graph the app ships. See
+  [docs/wizard.md](docs/wizard.md).
 - **The launch sequence is one boolean and a stage, and the guides dialog is the first stop.** A
   first visit opens on `GuidesDialog` — the three `TOURS`, first one badged — and the start page
   waits behind it. `startPageOpen` means the sequence is showing, `guidesOpen` that it is still at
@@ -574,6 +591,9 @@ in a CLAUDE.md *imports* the file, pulling all 1.2 MB back into every session.
   packages, which is the finding rather than a coincidence.
 - [docs/persistence.md](docs/persistence.md) — share links, the autosave across tabs, the
   browser shelf.
+- [docs/wizard.md](docs/wizard.md) — the Workflow Wizard: the option space, what removing the
+  bundled examples cost, and the three numbers a generated graph carries. Read before changing
+  what it can build.
 - [docs/zoo.md](docs/zoo.md) — the Coda Zoo, and why its index is a committed file rather
   than an API listing. Read before changing `ZooIndex`.
 - [docs/analytics.md](docs/analytics.md) — the GoatCounter beacon: what it collects, the two

@@ -64,7 +64,7 @@ entry that says nothing. `nodeGuide.test.ts` fails a node that ships without a `
 whose `guide` merely repeats its `description`.
 
 Everything else on the guide page is derived — sockets, settings, defaults, the preview card, the
-"seen in" cross-reference against the bundled examples. Adding a node is these two strings and
+"seen in" cross-reference against the workflows the wizard can build. Adding a node is these two strings and
 nothing else; see `src/nodeguide/data.ts`.
 
 **A third length exists and is optional.** A node whose behaviour genuinely needs pages — NBLAST,

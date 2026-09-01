@@ -327,8 +327,8 @@ function renderDetail(): void {
   const ts = termsOf(qEl.value)
   panelEl.style.setProperty('--cat', `var(--cat-${n.category})`)
 
-  const seen = n.examples.length
-    ? `<div class="sub"><p class="sub__h">Seen in</p><div class="seen">${n.examples
+  const seen = n.workflows.length
+    ? `<div class="sub"><p class="sub__h">Seen in</p><div class="seen">${n.workflows
         .map((e) => `<a href="./index.html">${esc(e)}</a>`)
         .join('')}</div></div>`
     : ''

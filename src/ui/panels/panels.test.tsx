@@ -14,10 +14,10 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 
 import { App } from '../../App'
 import { MockSource } from '../../data/mock/MockSource'
-import { EXAMPLES } from '../../examples'
 import { registerSource } from '../../data/source'
 import '../../nodes'
 import { useGraphStore } from '../../store/graphStore'
+import { demoWorkflow } from '../../wizard/build'
 import { DEFAULT_PANELS, loadPanels, savePanels } from '../../store/persistence'
 import { clearStorage, installJsdomStubs, installStorageStub } from '../../test/jsdomStubs'
 
@@ -35,7 +35,7 @@ beforeEach(() => {
     // The store is a module singleton, so a toggle in one case would otherwise leak into the
     // next and the "closed by default" assertions would pass or fail by test order.
     useGraphStore.setState({ panels: { ...DEFAULT_PANELS } })
-    useGraphStore.getState().loadExample('partners')
+    useGraphStore.getState().loadGraph(demoWorkflow('partners'))
   })
 })
 
@@ -383,54 +383,72 @@ describe('the New menu', () => {
     return panel
   }
 
+  /**
+   * The flyout for one backend, from an already-open menu. Hover is what opens a `Submenu`.
+   *
+   * Takes the panel rather than opening one, because a test that reads two backends would
+   * otherwise render a second `App` and every query would then find two of everything.
+   */
+  function openBackend(panel: HTMLElement, label: string): HTMLElement {
+    const row = [...panel.querySelectorAll('.dropdown__item--parent')].find(
+      (el) => el.querySelector('strong')?.textContent === label,
+    )
+    if (!(row instanceof HTMLElement)) throw new Error(`no "${label}" row in the New menu`)
+    fireEvent.pointerEnter(row.parentElement!)
+    const flyout = row.parentElement!.querySelector('.dropdown__flyout')
+    if (!(flyout instanceof HTMLElement)) throw new Error(`"${label}" did not open`)
+    return flyout
+  }
+
   const itemTitles = (panel: HTMLElement) =>
     [...panel.querySelectorAll('.dropdown__item strong')].map((el) => el.textContent)
 
-  /**
-   * The heading an item sits under: headings and items in document order, so an item's group is
-   * the last heading before it. The `expect` is what makes a renamed item fail *here* rather
-   * than resolving `slice(0, -1)` to the last heading in the menu and reading as a wrong group.
+  /*
+   * One submenu per backend, not per source. CATMAID is the only backend where those differ —
+   * FAFB and L1 are two servers and therefore two `CatmaidSource`s — and grouping on the source
+   * put a second row in the menu spelled as a hostname. Nothing about that fails loudly.
    */
-  const groupOf = (panel: HTMLElement, label: string) => {
-    const rows = [...panel.querySelectorAll('.dropdown__heading, .dropdown__item strong')]
-    const at = rows.findIndex((el) => el.textContent === label)
-    expect(at, `no menu row called "${label}"`).toBeGreaterThan(-1)
-    return rows
-      .slice(0, at)
-      .reverse()
-      .find((el) => el.classList.contains('dropdown__heading'))?.textContent
-  }
-
-  it('offers a custom node for every backend, under that backend’s heading', () => {
+  it('folds the datasets into one submenu per backend', () => {
     const panel = openNew()
-    expect(groupOf(panel, 'Custom neuPrint')).toBe('neuPrint')
-    expect(groupOf(panel, 'Custom CAVE')).toBe('CAVE')
-    expect(groupOf(panel, 'Custom CATMAID')).toBe('CATMAID')
+    const parents = [...panel.querySelectorAll('.dropdown__item--parent strong')].map(
+      (el) => el.textContent,
+    )
+    expect(parents).toEqual(['neuPrint', 'CAVE', 'CATMAID'])
+  })
+
+  it('offers a custom node for every backend, inside that backend’s submenu', () => {
+    const panel = openNew()
+    expect(itemTitles(openBackend(panel, 'neuPrint'))).toContain('Custom neuPrint')
+    expect(itemTitles(openBackend(panel, 'CAVE'))).toContain('Custom CAVE')
+    expect(itemTitles(openBackend(panel, 'CATMAID'))).toContain('Custom CATMAID')
+  })
+
+  it('puts both CATMAID datasets in the one submenu', () => {
+    const titles = itemTitles(openBackend(openNew(), 'CATMAID'))
+    expect(titles).toContain('FAFB')
+    expect(titles).toContain('L1')
   })
 
   /*
-   * One heading per backend, not per source. CATMAID is the only backend where those differ —
-   * FAFB and L1 are two servers and therefore two `CatmaidSource`s — and grouping on the source
-   * put a second heading in the menu spelled as a hostname. Nothing about that fails loudly.
+   * The synthetic dataset is the Workflow Wizard's first answer instead — a demo dataset is worth
+   * reaching for when you want a pipeline to look at, not as somewhere to begin real work. It was
+   * the only entry the mock backend had, so its group goes with it rather than becoming a row
+   * with nothing under it.
    */
-  it('puts both CATMAID datasets under one heading', () => {
+  it('offers no synthetic dataset, and no empty group where it was', () => {
     const panel = openNew()
-    const headings = [...panel.querySelectorAll('.dropdown__heading')].map(
-      (el) => el.textContent,
-    )
-    expect(headings.filter((text) => text?.startsWith('CATMAID'))).toEqual(['CATMAID'])
-    expect(groupOf(panel, 'FAFB')).toBe('CATMAID')
-    expect(groupOf(panel, 'L1')).toBe('CATMAID')
-  })
-
-  // The synthetic backend's node-name suffix is deliberately empty, so its heading comes from
-  // `DatasetBackend.heading` instead. Empty would be a group with no title at all.
-  it('still heads the synthetic group', () => {
-    expect(groupOf(openNew(), 'Demo Data')).toBe('Mock connectome')
+    expect(itemTitles(panel)).not.toContain('Demo Data')
+    expect(
+      [...panel.querySelectorAll('.dropdown__item--parent strong')].map((el) => el.textContent),
+    ).not.toContain('Mock connectome')
   })
 
   it('keeps the datasets people start from and drops the specialist volumes', () => {
-    const titles = itemTitles(openNew())
+    const panel = openNew()
+    const titles = [
+      ...itemTitles(openBackend(panel, 'neuPrint')),
+      ...itemTitles(openBackend(panel, 'CAVE')),
+    ]
     for (const kept of ['MaleCNS', 'Hemibrain', 'MANC', 'FlyWire FAFB public']) {
       expect(titles).toContain(kept)
     }
@@ -439,9 +457,22 @@ describe('the New menu', () => {
     }
   })
 
-  it('builds a starter from a custom entry', () => {
+  /* The row says what is inside it, derived from the same table the flyout is built from. */
+  it('names the datasets on the row that holds them', () => {
     const panel = openNew()
-    const item = [...panel.querySelectorAll('.dropdown__item')].find(
+    const row = [...panel.querySelectorAll('.dropdown__item--parent')].find(
+      (el) => el.querySelector('strong')?.textContent === 'neuPrint',
+    )
+    expect(row?.querySelector('span')?.textContent).toBe(
+      itemTitles(openBackend(panel, 'neuPrint'))
+        .filter((title) => !title?.startsWith('Custom'))
+        .join(' · '),
+    )
+  })
+
+  it('builds a starter from a custom entry', () => {
+    const flyout = openBackend(openNew(), 'CATMAID')
+    const item = [...flyout.querySelectorAll('.dropdown__item')].find(
       (el) => el.querySelector('strong')?.textContent === 'Custom CATMAID',
     )
     if (!(item instanceof HTMLElement)) throw new Error('No Custom CATMAID entry')
@@ -453,47 +484,27 @@ describe('the New menu', () => {
     // The generic starter: a dataset, a browser and somewhere for the picks to land.
     expect(types).toContain('neuron.explore')
   })
-})
 
-describe('the Examples menu', () => {
-  function openExamples(): HTMLElement {
-    render(<App />)
-    fireEvent.click(screen.getByRole('button', { name: /^Examples/ }))
-    const panel = document.querySelector('.dropdown__panel')
-    if (!(panel instanceof HTMLElement)) throw new Error('Examples menu did not open')
-    return panel
-  }
-
-  it('puts the Zoo first, above the rule, and the bundled graphs under it', () => {
-    /*
-     * The order is the statement, which is why it is asserted rather than left to read: the top
-     * row goes to a public repository over the network and the rest are bundled, run on
-     * synthetic data and open instantly. `.dropdown__group` is what draws the rule, so the Zoo
-     * row being outside it and every example inside it is the whole arrangement.
-     */
-    const panel = openExamples()
-    const titles = [...panel.querySelectorAll('.dropdown__item strong')].map(
-      (el) => el.textContent,
-    )
-    expect(titles[0]).toBe('Browse Workflows…')
-    expect(titles.slice(1)).toEqual(EXAMPLES.map((e) => e.name))
-
-    const group = panel.querySelector('.dropdown__group')
-    expect(group?.querySelectorAll('.dropdown__item')).toHaveLength(EXAMPLES.length)
-    expect(group?.querySelector('strong')?.textContent).not.toBe('Browse Workflows…')
+  /*
+   * The two rows that produce a whole workflow, which used to be a `Workflows` menu of their own.
+   * A top-level button for two rows, beside a "New" that means the same thing — where do I begin
+   * — was one menu too many. The rule between them and Empty is the statement: Empty decides
+   * nothing for you, these two decide a whole pipeline.
+   */
+  it('offers the wizard and the Zoo under Empty, in that order', () => {
+    const panel = openNew()
+    const titles = itemTitles(panel).slice(0, 3)
+    expect(titles).toEqual(['Empty', 'Workflow Wizard…', 'Browse Workflows…'])
   })
 
-  it('closes the bundled section with the demo-data heads-up, inside the group', () => {
-    /*
-     * Inside `.dropdown__group` is the assertion, not decoration: above the rule the note would
-     * sit under Browse Workflows, whose graphs run on whatever their author pointed them at, and
-     * a "no token needed" promise there would be false.
-     */
-    const panel = openExamples()
-    const note = panel.querySelector('.dropdown__note--heads-up')
-    // Both facts, matched loosely: the wording is the author's, the two claims are the contract.
-    expect(note?.textContent).toMatch(/mock|demo|synthetic/i)
-    expect(note?.textContent).toMatch(/no account or token/i)
-    expect(panel.querySelector('.dropdown__group')?.contains(note!)).toBe(true)
+  it('opens the wizard rather than building anything on the spot', () => {
+    const panel = openNew()
+    const wizard = [...panel.querySelectorAll('.dropdown__item')].find(
+      (el) => el.querySelector('strong')?.textContent === 'Workflow Wizard…',
+    )
+    fireEvent.click(wizard!)
+    expect(useGraphStore.getState().wizardOpen).toBe(true)
+    // Nothing was loaded: the wizard asks its four questions first.
+    expect(useGraphStore.getState().graph.nodes.length).toBeGreaterThan(0)
   })
 })

@@ -17,15 +17,15 @@ import { App } from '../../App'
 import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import { getNodeDef } from '../../core/registry'
-import { EXAMPLES } from '../../examples'
 import { starterFamilies } from '../../nodes/lib/datasetFamilies'
 import '../../nodes'
 import { useGraphStore } from '../../store/graphStore'
+import { demoWorkflow } from '../../wizard/build'
 import { loadStartPageDismissed } from '../../store/persistence'
 import { clearStorage, installJsdomStubs, installStorageStub } from '../../test/jsdomStubs'
 import { StartPage } from './StartPage'
 import { buildCommandItems } from './paletteItems'
-import { DOOR_CARDS, ZOO_CARD, datasetCards, exampleCards } from './startCards'
+import { DOOR_CARDS, WIZARD_CARD, ZOO_CARD, datasetCards } from './startCards'
 import type * as TourState from '../tour/tourState'
 import { TOURS } from '../tour/tourState'
 
@@ -69,6 +69,9 @@ beforeEach(() => {
       guidesOpen: false,
       startPageDismissed: false,
       zooOpen: false,
+      // The wizard is a module-singleton flag like the other three: one case opens it, and
+      // without this the next case renders with a dialog nobody in it asked for.
+      wizardOpen: false,
     })
     useGraphStore.getState().newGraph()
   })
@@ -100,34 +103,35 @@ function card(title: string): HTMLElement {
 
 describe('Start page', () => {
   describe('what it offers', () => {
-    it('shows every example and every live dataset worth starting from', () => {
+    it('shows every live dataset worth starting from', () => {
       render(<StartPage />)
       const titles = cardTitles()
-      for (const example of EXAMPLES) expect(titles).toContain(example.name)
       for (const family of starterFamilies().filter((f) => f.sourceId !== 'mock')) {
         expect(titles).toContain(family.label)
       }
-      // Plus the doors, which are not graphs at all — see the rail below.
-      expect(titles).toHaveLength(
-        exampleCards().length + datasetCards().length + DOOR_CARDS.length,
-      )
+      // Plus the doors, which are not graphs at all — see the rail below. The rail of bundled
+      // examples that used to sit here is gone: the wizard on the doors rail replaced it.
+      expect(titles).toHaveLength(datasetCards().length + DOOR_CARDS.length)
     })
 
     /*
-     * A rail of its own rather than cards among the examples, because the two differ in the one
-     * way a first-time reader cares about: an example is bundled, opens offline and replaces the
-     * canvas on the click. Nothing on this rail does — which is what its label says, and what
-     * `pick` implements by returning before the replace-confirm.
+     * A rail of its own rather than cards among the datasets, because the two differ in the one
+     * way a first-time reader cares about: a dataset card builds a graph and replaces the canvas
+     * on the click. Nothing on this rail does — the wizard and the Zoo each ask their own
+     * question where it can be answered, and a tour announces itself in its first step.
+     *
+     * The wizard leads, because it is the one that produces *their* graph.
      */
-    it('gathers the doors on one rail: every tour, then the Zoo', () => {
+    it('gathers the doors on one rail: the wizard, the tours, then the Zoo', () => {
       render(<StartPage />)
-      expect(deckNames('Learn & browse')).toEqual([
+      expect(deckNames('Start & learn')).toEqual([
+        WIZARD_CARD.title,
         ...TOURS.map((tour) => tour.label),
         ZOO_CARD.title,
       ])
-      // And none of them is also sitting on the Examples rail.
-      const examples = exampleCards().map((c) => c.title)
-      for (const door of DOOR_CARDS) expect(examples).not.toContain(door.title)
+      // And none of them is also sitting on a rail that loads a graph.
+      const datasets = datasetCards().map((c) => c.title)
+      for (const door of DOOR_CARDS) expect(datasets).not.toContain(door.title)
     })
 
     /*
@@ -191,14 +195,6 @@ describe('Start page', () => {
           expect(art.childElementCount).toBeGreaterThan(0)
         }
       }
-    })
-
-    it('derives an example tile from its terminal viewer, not from a hand-drawn list', () => {
-      // Every example ends in a different viewer, so five distinct glyph sources.
-      const nodeTypes = exampleCards().map((c) => c.nodeType)
-      expect(new Set(nodeTypes).size).toBe(nodeTypes.length)
-      expect(nodeTypes).toContain('out.network')
-      expect(nodeTypes).toContain('out.viewer3d')
     })
 
     it('says which build it is', () => {
@@ -334,14 +330,26 @@ describe('Start page', () => {
   })
 
   describe('picking something', () => {
-    it('loads an example and closes', () => {
+    /*
+     * The wizard card opens a dialog and touches nothing, which is the whole difference between
+     * it and the four example cards it replaced: those loaded a graph on the click, so the page
+     * had to ask about replacing one first. The wizard asks on its own summary screen, over the
+     * chain it is about to build.
+     */
+    it('opens the wizard without touching the graph', () => {
+      act(() => {
+        useGraphStore.getState().loadGraph(demoWorkflow('partners'))
+        useGraphStore.getState().openStartPage()
+      })
       render(<StartPage />)
-      fireEvent.click(card('Draw connectivity as a network diagram'))
+      const before = useGraphStore.getState().graph.meta?.name
 
-      const { graph, startPageOpen } = useGraphStore.getState()
-      expect(startPageOpen).toBe(false)
-      expect(graph.meta?.name).toBe('Draw connectivity as a network diagram')
-      expect(graph.nodes.some((n) => n.type === 'net.build')).toBe(true)
+      fireEvent.click(card(WIZARD_CARD.title))
+      expect(screen.queryByText(/Replace the current graph/)).toBeNull()
+      expect(useGraphStore.getState().wizardOpen).toBe(true)
+      // `openWizard` closes this page on the way in: two full-screen modals is one too many.
+      expect(useGraphStore.getState().startPageOpen).toBe(false)
+      expect(useGraphStore.getState().graph.meta?.name).toBe(before)
     })
 
     it('loads a dataset starter pointed at that dataset', () => {
@@ -360,7 +368,7 @@ describe('Start page', () => {
      */
     it('opens the Zoo without asking, even over a graph that has nodes', () => {
       act(() => {
-        useGraphStore.getState().loadExample('partners')
+        useGraphStore.getState().loadGraph(demoWorkflow('partners'))
         useGraphStore.getState().openStartPage()
       })
       render(<StartPage />)
@@ -370,7 +378,7 @@ describe('Start page', () => {
       expect(useGraphStore.getState().zooOpen).toBe(true)
       // `openZoo` closes this page on the way in: two full-screen modals is one too many.
       expect(useGraphStore.getState().startPageOpen).toBe(false)
-      expect(useGraphStore.getState().graph.meta?.name).toBe('Fetch and group connectivity by type')
+      expect(useGraphStore.getState().graph.nodes.some((n) => n.id === 'conn')).toBe(true)
     })
 
     /*
@@ -381,7 +389,7 @@ describe('Start page', () => {
      */
     it('starts a tour and closes, without asking about the graph', () => {
       act(() => {
-        useGraphStore.getState().loadExample('partners')
+        useGraphStore.getState().loadGraph(demoWorkflow('partners'))
         useGraphStore.getState().openStartPage()
       })
       render(<StartPage />)
@@ -396,40 +404,42 @@ describe('Start page', () => {
 
     it('does not ask before replacing an empty canvas', () => {
       render(<StartPage />)
-      fireEvent.click(card('Draw connectivity as a network diagram'))
+      fireEvent.click(card('Hemibrain'))
       expect(useGraphStore.getState().startPageOpen).toBe(false)
     })
 
     it('asks before replacing a graph that has nodes', () => {
       act(() => {
-        useGraphStore.getState().loadExample('partners')
+        useGraphStore.getState().loadGraph(demoWorkflow('partners'))
         useGraphStore.getState().openStartPage()
       })
       render(<StartPage />)
 
-      fireEvent.click(card('Draw connectivity as a network diagram'))
+      fireEvent.click(card('Hemibrain'))
       expect(screen.getByText(/Replace the current graph/)).toBeTruthy()
       // Nothing has happened yet — the question is the whole point.
-      expect(useGraphStore.getState().graph.meta?.name).toBe('Fetch and group connectivity by type')
+      expect(useGraphStore.getState().graph.nodes.some((n) => n.id === 'conn')).toBe(true)
       expect(useGraphStore.getState().startPageOpen).toBe(true)
 
       fireEvent.click(screen.getByRole('button', { name: 'Replace' }))
-      expect(useGraphStore.getState().graph.meta?.name).toBe('Draw connectivity as a network diagram')
+      expect(useGraphStore.getState().graph.nodes.map((n) => n.type)).toContain(
+        'dataset.hemibrain',
+      )
       expect(useGraphStore.getState().startPageOpen).toBe(false)
     })
 
     it('cancel leaves the graph and the page alone', () => {
       act(() => {
-        useGraphStore.getState().loadExample('partners')
+        useGraphStore.getState().loadGraph(demoWorkflow('partners'))
         useGraphStore.getState().openStartPage()
       })
       render(<StartPage />)
 
-      fireEvent.click(card('Draw connectivity as a network diagram'))
+      fireEvent.click(card('Hemibrain'))
       fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
 
       expect(screen.queryByText(/Replace the current graph/)).toBeNull()
-      expect(useGraphStore.getState().graph.meta?.name).toBe('Fetch and group connectivity by type')
+      expect(useGraphStore.getState().graph.nodes.some((n) => n.id === 'conn')).toBe(true)
       expect(useGraphStore.getState().startPageOpen).toBe(true)
     })
   })

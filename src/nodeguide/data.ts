@@ -23,7 +23,16 @@
  */
 
 import '../nodes'
-import { EXAMPLES } from '../examples'
+/*
+ * The sources too, not only the node pack — the trap `CLAUDE.md` records under module init order.
+ * The wizard's option space is gated on `capabilityOf`, which answers *true* for a source nobody
+ * registered, so this module SSR'd on its own would enumerate combinations the app never offers
+ * and credit a Neuroglancer cell to the synthetic dataset. `registerBuiltinSources` is idempotent
+ * and the browser never loads this file, which is what makes a side effect here affordable.
+ */
+import { registerBuiltinSources } from '../data/builtins'
+import { DEMO_DATASET, buildWorkflow } from '../wizard/build'
+import { analysisOption, analysisOptions, everyCombination } from '../wizard/options'
 import type { NodeCategory, NodeDefinition, ParamDef, ResolvedPort } from '../core/node'
 import { listableNodeDefs } from '../core/registry'
 import { defaultInputPorts, defaultOutputPorts } from '../core/ports'
@@ -74,14 +83,14 @@ export interface GuideNode {
   inputs: GuidePort[]
   outputs: GuidePort[]
   params: GuideParam[]
-  /** Names of the bundled examples whose graph contains this type. */
-  examples: string[]
+  /** Wizard workflows whose graph contains this type, by the question they answer. */
+  workflows: string[]
 }
 
 export interface GuideData {
   nodes: GuideNode[]
-  /** Every example name, so the page can say how many graphs the cross-reference covers. */
-  examples: string[]
+  /** Every workflow name, so the page can say how many graphs the cross-reference covers. */
+  workflows: string[]
 }
 
 /**
@@ -118,26 +127,49 @@ function portsOf(ports: readonly ResolvedPort[]): GuidePort[] {
 }
 
 /**
- * Which bundled examples use each type, derived rather than listed.
+ * Which wizard workflows use each type, derived rather than listed.
  *
- * The examples are built programmatically, so this is one pass over `build()` and cannot go
- * stale — an example rewritten to drop a node loses its mention here on the next build. Text
- * notes are skipped: every example carries several, and "seen in all five" says nothing.
+ * This was a pass over the four bundled examples. They are gone, and the replacement is better
+ * for the same reason the wizard is: it enumerates **every combination the wizard can build** on
+ * the synthetic dataset, so a viewer that only one answer reaches — the pie chart, the graph
+ * metrics card — is credited, where four hand-written graphs mentioned whatever they happened to
+ * contain.
+ *
+ * Named by the *analysis* rather than by the combination, because "Who they connect to" is a
+ * question a reader recognises and "Demo Data / browse / partners / pie" is a row of settings.
+ * Several combinations therefore collapse onto one name, which is what makes the list short
+ * enough to read.
+ *
+ * Notes are built too and then not indexed: `note.text` would otherwise be "seen in" every
+ * workflow there is, which says nothing.
  */
-function exampleIndex(): Map<string, string[]> {
-  const index = new Map<string, string[]>()
-  for (const example of EXAMPLES) {
-    for (const node of example.build().nodes) {
-      const seen = index.get(node.type) ?? []
-      if (!seen.includes(example.name)) seen.push(example.name)
+function workflowIndex(): Map<string, Set<string>> {
+  const index = new Map<string, Set<string>>()
+  for (const answers of everyCombination(DEMO_DATASET)) {
+    const name = analysisOption(answers.analysis)?.label ?? answers.analysis
+    for (const node of buildWorkflow({ ...answers, notes: false }).nodes) {
+      const seen = index.get(node.type) ?? new Set<string>()
+      seen.add(name)
       index.set(node.type, seen)
     }
   }
   return index
 }
 
+/**
+ * The workflow names, in the order the wizard offers them.
+ *
+ * Asked of the analyses directly rather than by walking the combinations a second time and
+ * deduping their labels — which is the same list by construction, since every analysis is
+ * reachable (`wizard.test.ts`: "never offers a question with nothing in it").
+ */
+function workflowNames(): string[] {
+  return analysisOptions(DEMO_DATASET).map((option) => option.label)
+}
+
 export function guideData(): GuideData {
-  const usedIn = exampleIndex()
+  registerBuiltinSources()
+  const usedIn = workflowIndex()
   const nodes = listableNodeDefs()
     .map((def): GuideNode => ({
       type: def.type,
@@ -152,9 +184,9 @@ export function guideData(): GuideData {
       inputs: portsOf(defaultInputPorts(def)),
       outputs: portsOf(defaultOutputPorts(def)),
       params: paramsOf(def),
-      examples: def.annotation ? [] : (usedIn.get(def.type) ?? []),
+      workflows: def.annotation ? [] : [...(usedIn.get(def.type) ?? [])],
     }))
     .sort((a, b) => a.label.localeCompare(b.label))
 
-  return { nodes, examples: EXAMPLES.map((e) => e.name) }
+  return { nodes, workflows: workflowNames() }
 }

@@ -46,6 +46,7 @@ import 'driver.js/dist/driver.css'
 import './tour.css'
 
 import { useGraphStore } from '../../store/graphStore'
+import { demoWorkflow } from '../../wizard/build'
 import { BUILD_SPEC } from './build'
 import { DASHBOARD_SPEC } from './dashboard'
 import type { TourSpec, TourStep } from './steps'
@@ -56,11 +57,17 @@ import { setTourHandle } from './tourState'
 /**
  * What the tour opens on an empty canvas.
  *
- * The mock optic-lobe example, so a tour taken before any dataset is connected still has cards,
- * sockets and a run state to point at, and reaches no network doing it. A tour of an empty
- * canvas would spend a third of its stops explaining chrome that has nothing to act on.
+ * A wizard workflow on the synthetic dataset, so a tour taken before any dataset is connected
+ * still has cards, sockets, a wire and a run state to point at, and reaches no network doing it.
+ * A tour of an empty canvas would spend a third of its stops explaining chrome that has nothing
+ * to act on.
+ *
+ * It used to be a bundled example. The examples are gone — the wizard replaced them — and this is
+ * the honest replacement rather than a fixture kept alive for the tour: the graph the tour points
+ * at is one a reader can produce for themselves from four answers, which is the thing the tour is
+ * ultimately teaching.
  */
-const FALLBACK_EXAMPLE = 'partners'
+const fallbackGraph = () => demoWorkflow('partners')
 
 /**
  * How long a step waits for an element its `before` is bringing into existence.
@@ -203,8 +210,8 @@ function toDriveStep(step: TourStep, index: number, total: number): DriveStep {
  */
 function ensureGraph(): string {
   if (useGraphStore.getState().graph.nodes.length > 0) return ''
-  useGraphStore.getState().loadExample(FALLBACK_EXAMPLE)
-  return ' The canvas was empty, so an example graph has been opened to point at.'
+  useGraphStore.getState().loadGraph(fallbackGraph())
+  return ' The canvas was empty, so a small workflow has been opened to point at.'
 }
 
 async function drive(id: TourId, spec: TourSpec): Promise<void> {

@@ -26,6 +26,7 @@ import { requireNodeDef } from '../../core/registry'
 import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import { useGraphStore } from '../../store/graphStore'
+import { demoWorkflow } from '../../wizard/build'
 import { clearStorage, installJsdomStubs } from '../../test/jsdomStubs'
 import { defaultInputPorts, defaultOutputPorts } from '../../core/ports'
 
@@ -38,7 +39,7 @@ beforeEach(() => {
   clearStorage()
   act(() => {
     useGraphStore.getState().closeStartPage()
-    useGraphStore.getState().loadExample('morphology')
+    useGraphStore.getState().loadGraph(demoWorkflow('morphology'))
   })
 })
 

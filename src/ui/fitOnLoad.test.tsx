@@ -41,6 +41,7 @@ const { App } = await import('../App')
 const { MockSource } = await import('../data/mock/MockSource')
 const { registerSource } = await import('../data/source')
 const { useGraphStore } = await import('../store/graphStore')
+const { demoWorkflow } = await import('../wizard/build')
 const { clearStorage, installJsdomStubs } = await import('../test/jsdomStubs')
 
 beforeAll(() => {
@@ -63,21 +64,21 @@ describe('framing a graph that was just opened', () => {
   it('asks for the fit even though nothing reports the nodes as measured', () => {
     render(<App />)
     fitView.mockClear()
-    act(() => useGraphStore.getState().loadExample('partners'))
+    act(() => useGraphStore.getState().loadGraph(demoWorkflow('partners')))
     expect(fitView).toHaveBeenCalled()
   })
 
   it('asks again for the next one, so two opens in a row both land', () => {
     render(<App />)
-    act(() => useGraphStore.getState().loadExample('partners'))
+    act(() => useGraphStore.getState().loadGraph(demoWorkflow('partners')))
     fitView.mockClear()
-    act(() => useGraphStore.getState().loadExample('matrix'))
+    act(() => useGraphStore.getState().loadGraph(demoWorkflow('matrix')))
     expect(fitView).toHaveBeenCalled()
   })
 
   it('does not fit an ordinary edit', () => {
     render(<App />)
-    act(() => useGraphStore.getState().loadExample('partners'))
+    act(() => useGraphStore.getState().loadGraph(demoWorkflow('partners')))
     fitView.mockClear()
     act(() => useGraphStore.getState().setParam(nodeId(), 'page', 1))
     expect(fitView).not.toHaveBeenCalled()

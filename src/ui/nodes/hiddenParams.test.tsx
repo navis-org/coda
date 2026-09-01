@@ -23,6 +23,7 @@ import { allNodeDefs, requireNodeDef } from '../../core/registry'
 import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import { useGraphStore } from '../../store/graphStore'
+import { demoWorkflow } from '../../wizard/build'
 import { clearStorage, installJsdomStubs } from '../../test/jsdomStubs'
 
 beforeAll(() => {
@@ -34,15 +35,17 @@ beforeEach(() => {
   clearStorage()
   act(() => {
     useGraphStore.getState().closeStartPage()
-    useGraphStore.getState().loadExample('morphology')
+    useGraphStore.getState().loadGraph(demoWorkflow('morphology'))
   })
 })
 
 afterEach(cleanup)
 
-function nodeIdOfType(type: string): string {
-  const found = useGraphStore.getState().graph.nodes.find((n) => n.type === type)
-  if (!found) throw new Error(`no ${type} in the example`)
+/** The first node of a type, or `-1` for the last — a freshly added one is at the end. */
+function nodeIdOfType(type: string, which = 0): string {
+  const all = useGraphStore.getState().graph.nodes.filter((n) => n.type === type)
+  const found = which < 0 ? all.at(which) : all[which]
+  if (!found) throw new Error(`no ${type} in the graph`)
   return found.id
 }
 
@@ -173,14 +176,23 @@ describe('the hint on the card', () => {
     // — readable so that older graphs keep working, `advanced` so they stay off the card, and
     // deliberately *not* `visibleIf`-hidden, which would drop them from the provenance key.
     render(<App />)
-    const card = await cardFor(nodeIdOfType('neuron.findNeurons'))
+    /*
+     * A freshly added node rather than the one in the graph: a generated morphology workflow caps
+     * its search (`GEOMETRY_LIMIT`), so the Find Neurons on the canvas legitimately carries one
+     * changed advanced param — which is the *other* case, two tests down.
+     */
+    act(() => useGraphStore.getState().addNode('neuron.findNeurons', { x: 0, y: 900 }))
+    const card = await cardFor(nodeIdOfType('neuron.findNeurons', -1))
     expect(hintOf(card)!.textContent).toBe('… 6 more')
   })
 
   it('adds the changed clause when one carries a value somebody chose', async () => {
-    // The morphology example lowers Warn above on both geometry nodes. "More" rather than
-    // "hidden" because Skeletons draws its `Source` dropdown, so there is something else there.
+    // Lower Warn above here rather than relying on the graph carrying it: the wizard caps the
+    // *search* instead, since a geometry node's Limit warns rather than capping. "More" rather
+    // than "hidden" because Skeletons draws its `Source` dropdown, so there is something else
+    // on the card.
     render(<App />)
+    act(() => useGraphStore.getState().setParam(nodeIdOfType('neuron.skeletons'), 'limit', 30))
     const card = await cardFor(nodeIdOfType('neuron.skeletons'))
     expect(hintOf(card)!.textContent).toBe('… 1 more (1 changed)')
     expect(hintOf(card)!.getAttribute('title')).toContain('Warn above (changed)')

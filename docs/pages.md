@@ -233,11 +233,13 @@ See [seo.md](seo.md).
 - **Filtering dims in place and never removes a tile.** The grid is a map of the whole registry,
   so a search that reflowed it would throw away the one thing worth looking at — where in a
   pipeline the answer sits.
-- **Example names are not in the search haystack, and that was measured.** One bundled example is
-  called `Build an adjacency matrix from two searches`, so including them had a search for `matrix`
-  light every node in that graph — the dataset, both Find Neurons, the heatmap — beside the five
-  that genuinely carry one. A graph lends its title to every node in it. (The example has been
-  renamed since the measurement; it still carries `matrix`, so the finding is untouched.)
+- **Workflow names are not in the search haystack, and that was measured.** One bundled example
+  was called `Build an adjacency matrix from two searches`, so including them had a search for
+  `matrix` light every node in that graph — the dataset, both Find Neurons, the heatmap — beside
+  the five that genuinely carry one. A graph lends its title to every node in it. The examples
+  have since been replaced by the wizard's workflows, which are *shorter* names on *more* nodes
+  (`How they connect to each other` covers every node of every combination in that arm), so the
+  finding holds with more force than when it was measured.
 - **An enum's default prints its option's _label_.** The app's picker says `downstream (outputs)`
   where the stored value is `outputs`, and a guide naming the other one describes a control that
   is not on screen. Where `options` is a _function_ of the resolved input types (Filter's operator

@@ -280,6 +280,12 @@ describe('every store action is on one side of the lock', () => {
     // Connections is a dialog about credentials, which are not in the document at all.
     'openSources',
     'closeSources',
+    // The wizard opens a dialog and remembers a preference; it only touches the canvas through
+    // `loadGraph`, which is a document load and is classified as one.
+    'openWizard',
+    'closeWizard',
+    'setWizardNotes',
+    'setWizardDashboard',
     'setStartPageDismissed',
     'expandNode',
     // The dock is the same kind of thing as the overlay — looking at a result, not editing the
@@ -305,7 +311,6 @@ describe('every store action is on one side of the lock', () => {
     'setGraphGist',
     'newGraph',
     'loadGraph',
-    'loadExample',
     'loadStarter',
     'refreshLibrary',
     'saveToLibrary',

@@ -3,23 +3,24 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { deserializeGraph, serializeGraph, topoSort } from '../core/graph'
 import { inferGraph } from '../core/inference'
 import { ID_COLUMN_NAME } from '../core/ids'
-import { isAnnotation } from '../core/registry'
 import type { AggFn } from '../nodes/lib/tableOps'
 import { aggColumnName } from '../nodes/lib/tableOps'
-import { parseMarkdown } from '../ui/markdown'
 import { Scheduler } from '../core/scheduler'
-import { isMatrixValue, isTableValue } from '../core/values'
+import { isTableValue } from '../core/values'
 import { registerBuiltinSources } from '../data/builtins'
 import { requireSource } from '../data/source'
 import { L1_CATMAID_SOURCE_ID } from '../data/catmaid/registry'
 import '../nodes'
-import { EXAMPLES } from './index'
 import type { StarterSpec } from './starters'
 import { buildStarter } from './starters'
 
 /**
- * The examples double as end-to-end fixtures: if one of them stops inferring cleanly or
- * stops running, something in the engine, the node set, or the mock source regressed.
+ * Starter graphs — what the New menu and the start page's dataset rail build.
+ *
+ * The examples this file used to cover are gone: the Workflow Wizard replaced them, and their
+ * fixture standing went with them to `wizard/wizard.test.ts`. What is left here is the other
+ * hand-built graph in the app, held to the same bar for the same reason — a starter is the first
+ * thing a new user sees, and one that reports a type error on open is worse than an empty canvas.
  */
 beforeAll(() => {
   /*
@@ -36,171 +37,7 @@ function scheduler(): Scheduler {
   return new Scheduler({ resolveSource: (id) => requireSource(id) })
 }
 
-describe.each(EXAMPLES.map((e) => [e.id, e] as const))('example: %s', (_id, example) => {
-  it('builds with no type errors', () => {
-    const inference = inferGraph(example.build())
-    const errors = Object.entries(inference.nodes).flatMap(([nodeId, node]) =>
-      node.issues.filter((i) => i.severity === 'error').map((i) => `${nodeId}: ${i.message}`),
-    )
-    expect(errors).toEqual([])
-    expect(inference.cyclic).toEqual([])
-    expect(inference.ok).toBe(true)
-  })
 
-  it('has no validation warnings', () => {
-    const inference = inferGraph(example.build())
-    const warnings = Object.entries(inference.nodes).flatMap(([nodeId, node]) =>
-      node.issues.filter((i) => i.severity === 'warning').map((i) => `${nodeId}: ${i.message}`),
-    )
-    expect(warnings).toEqual([])
-  })
-
-  it('runs to completion and produces output at every terminal node', async () => {
-    const graph = example.build()
-    const sched = scheduler()
-    const summary = await sched.run(graph, { mode: 'full' })
-
-    expect(summary.failed).toEqual([])
-    expect(summary.cancelled).toBe(false)
-    /*
-     * Annotations are excluded on both counts, and the exclusion is the assertion: a text note
-     * is not work, so it must appear in neither `executed` nor `deferred`, and it is terminal in
-     * the graph-theoretic sense while producing nothing. Counting it here would be counting the
-     * comments in a program as statements.
-     */
-    const dataflow = graph.nodes.filter((n) => !isAnnotation(n.type))
-    expect(dataflow.length).toBeLessThan(graph.nodes.length)
-    expect(summary.executed.length).toBe(dataflow.length)
-
-    // Terminal nodes are the ones nothing consumes — the graph's actual answers.
-    const consumed = new Set(graph.edges.map((e) => e.source))
-    const terminals = dataflow.filter((n) => !consumed.has(n.id))
-    expect(terminals.length).toBeGreaterThan(0)
-
-    for (const node of terminals) {
-      const outputs = sched.outputs(node.id)
-      expect(outputs, `${node.id} produced no outputs`).toBeDefined()
-      const entries = Object.entries(outputs!)
-      const [portId, value] = entries[0]!
-      expect(value, `${node.id} output is empty`).toBeDefined()
-
-      // A viewer's `selected` port is empty until someone clicks in it — that is the
-      // correct state for a freshly-run graph, not a failure.
-      if (portId === 'selected') continue
-
-      if (isTableValue(value)) {
-        expect(value.length, `${node.id} returned an empty table`).toBeGreaterThan(0)
-      } else if (isMatrixValue(value)) {
-        expect(value.rowLabels.length, `${node.id} returned an empty matrix`).toBeGreaterThan(0)
-        expect(
-          [...value.values].some((v) => v > 0),
-          `${node.id} matrix is all zeros`,
-        ).toBe(true)
-      }
-    }
-  })
-
-  it('carries notes whose markdown actually parses', () => {
-    const notes = example
-      .build()
-      .nodes.filter((n) => isAnnotation(n.type))
-      .map((n) => String(n.params.text ?? ''))
-    expect(notes.length).toBeGreaterThan(1)
-
-    for (const text of notes) {
-      const blocks = parseMarkdown(text)
-      expect(blocks.length).toBeGreaterThan(0)
-      /*
-       * The dedent trap: the parser only recognises a heading or a bullet at the *start* of a
-       * line, so a note left at its source indentation degrades to paragraphs beginning with
-       * three hashes. It renders, it looks wrong, and nothing else notices.
-       */
-      for (const block of blocks) {
-        if (block.kind !== 'paragraph') continue
-        const [first] = block.children
-        expect(first?.kind === 'text' ? first.text.trimStart() : '').not.toMatch(/^[#*-] /)
-      }
-    }
-    // Each example opens with an overview headed by a heading, not with a wall of prose.
-    expect(parseMarkdown(notes[0]!)[0]?.kind).toBe('heading')
-  })
-
-  it('survives a save/load round trip unchanged', () => {
-    const original = example.build()
-    const { graph, warnings } = deserializeGraph(serializeGraph(original))
-    expect(warnings).toEqual([])
-    expect(graph.nodes).toEqual(original.nodes)
-    expect(
-      graph.edges.map((e) => `${e.source}:${e.sourceHandle}→${e.target}:${e.targetHandle}`),
-    ).toEqual(
-      original.edges.map((e) => `${e.source}:${e.sourceHandle}→${e.target}:${e.targetHandle}`),
-    )
-  })
-})
-
-describe('example results', () => {
-  it('aggregates LC outputs onto central-brain targets, ranked by weight', async () => {
-    const example = EXAMPLES.find((e) => e.id === 'partners')!
-    const graph = example.build()
-    const sched = scheduler()
-    await sched.run(graph, { mode: 'full' })
-
-    const table = sched.output('view', 'out')
-    if (!isTableValue(table)) throw new Error('expected a table')
-
-    const partnerTypes = table.data.postType as string[]
-    const weights = table.data.sum_weight as number[]
-
-    expect(partnerTypes.length).toBeGreaterThan(2)
-    // Sort node ran: descending by aggregate weight, no exceptions.
-    for (let i = 1; i < weights.length; i++) {
-      expect(weights[i]!).toBeLessThanOrEqual(weights[i - 1]!)
-    }
-    // Every partner is a type the generator's rules actually give LC neurons — this is
-    // guaranteed by the wiring, unlike any particular *ranking*, which depends on how
-    // many neurons each target type has.
-    const expected = new Set([
-      'DNp02',
-      'DNp11',
-      'PVLP002',
-      'PVLP008',
-      'PLP003',
-      'AOTU008',
-      'LT1',
-    ])
-    for (const type of partnerTypes)
-      expect(expected.has(type), `unexpected partner ${type}`).toBe(true)
-    expect(partnerTypes).toContain('DNp02')
-    // `n` (rows per group) always travels with the aggregate.
-    expect(table.schema.columns.map((c) => c.name)).toEqual(['postType', 'n', 'sum_weight'])
-  })
-
-  it('row-normalises the adjacency matrix to sum to 1 per row', async () => {
-    const example = EXAMPLES.find((e) => e.id === 'matrix')!
-    const sched = scheduler()
-    await sched.run(example.build(), { mode: 'full' })
-
-    const matrix = sched.output('norm', 'out')
-    if (!isMatrixValue(matrix)) throw new Error('expected a matrix')
-
-    const cols = matrix.colLabels.length
-    for (let r = 0; r < matrix.rowLabels.length; r++) {
-      let total = 0
-      for (let c = 0; c < cols; c++) total += matrix.values[r * cols + c] ?? 0
-      // A row of all-zeros stays zero; anything else must normalise to 1.
-      expect(
-        total === 0 || Math.abs(total - 1) < 1e-9,
-        `row ${matrix.rowLabels[r]} = ${total}`,
-      ).toBe(true)
-    }
-  })
-})
-
-/**
- * Starter graphs — what the New menu builds. Held to the same bar as the examples, because
- * they are the first thing a new user sees and a starter that reports a type error on open is
- * worse than an empty canvas.
- */
 describe('starters', () => {
   const spec = { nodeType: 'dataset.mock.opticlobe', label: 'Demo Data' }
 

@@ -26,6 +26,7 @@ import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import '../../nodes'
 import { useGraphStore } from '../../store/graphStore'
+import { demoWorkflow } from '../../wizard/build'
 import {
   DEFAULT_DOCK_FRACTION,
   DOCK_MAX_FRACTION,
@@ -44,7 +45,7 @@ beforeEach(() => {
   act(() => {
     // `loadExample` goes through `loadGraph`, which clears both full-size surfaces itself — so
     // the graph is the whole reset, and the width is the one thing storage does not carry back.
-    useGraphStore.getState().loadExample('partners')
+    useGraphStore.getState().loadGraph(demoWorkflow('partners'))
     useGraphStore.getState().setDockFraction(DEFAULT_DOCK_FRACTION)
   })
 })
@@ -138,7 +139,7 @@ describe('ViewerDock', () => {
     expect(useGraphStore.getState().pinnedNodeId).toBeUndefined()
 
     act(() => useGraphStore.getState().pinNode('table'))
-    act(() => useGraphStore.getState().loadExample('matrix'))
+    act(() => useGraphStore.getState().loadGraph(demoWorkflow('matrix')))
     expect(useGraphStore.getState().pinnedNodeId).toBeUndefined()
     expect(dock()).toBeNull()
   })

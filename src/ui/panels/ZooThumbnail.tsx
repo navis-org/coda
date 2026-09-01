@@ -14,7 +14,7 @@
  * **Three decisions that each look like a detail:**
  *
  * *Notes are excluded.* A workflow's text notes sit above and below the pipeline and are wider
- * than it — `examples/index.ts` places them across several columns on purpose. Included in the
+ * than it — a generated workflow places them across several columns on purpose. Included in the
  * bounds, they push the actual chain into a thin band across the middle, so the picture becomes
  * mostly empty rectangle. The card is about the pipeline; the README is where the prose is.
  *

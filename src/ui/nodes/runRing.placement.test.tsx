@@ -22,6 +22,7 @@ import { App } from '../../App'
 import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import { useGraphStore } from '../../store/graphStore'
+import { demoWorkflow } from '../../wizard/build'
 import { clearStorage, installJsdomStubs } from '../../test/jsdomStubs'
 
 beforeAll(() => {
@@ -33,7 +34,7 @@ beforeAll(() => {
 beforeEach(() => {
   clearStorage()
   act(() => {
-    useGraphStore.getState().loadExample('partners')
+    useGraphStore.getState().loadGraph(demoWorkflow('partners'))
   })
 })
 

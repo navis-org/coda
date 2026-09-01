@@ -32,9 +32,9 @@ import lmbLight from '../logos/lmb-light.png?url'
 import { datasetGlyph } from '../nodes/DatasetPreview'
 import { nodeGlyph } from './NodeThumbnail'
 import { REPLACE_GRAPH_QUESTION } from '../replaceConfirm'
-import type { DatasetCard, ExampleCard, StartCard, WorkflowCard } from './startCards'
-import { DOOR_CARDS, datasetCards, exampleCards, workflowCards } from './startCards'
-import { doorGlyph } from './startGlyphs'
+import type { DatasetCard, StartCard, WorkflowCard } from './startCards'
+import { DOOR_CARDS, datasetCards, isDoor, workflowCards } from './startCards'
+import { GlyphSvg, doorGlyph } from './startGlyphs'
 import { useLaunchStage } from './launchStage'
 import { shortcutKeys } from '../shortcuts'
 import { startTour } from '../tour/tourState'
@@ -85,7 +85,7 @@ export function StartPage() {
   const closeStartPage = useGraphStore((s) => s.closeStartPage)
   const setStartPageDismissed = useGraphStore((s) => s.setStartPageDismissed)
   const requestFeedback = useGraphStore((s) => s.requestFeedback)
-  const loadExample = useGraphStore((s) => s.loadExample)
+  const openWizard = useGraphStore((s) => s.openWizard)
   const openZoo = useGraphStore((s) => s.openZoo)
   const loadStarter = useGraphStore((s) => s.loadStarter)
   const openFromLibrary = useGraphStore((s) => s.openFromLibrary)
@@ -98,7 +98,6 @@ export function StartPage() {
   const [confirming, setConfirming] = useState<string | undefined>(undefined)
   const closeRef = useRef<HTMLButtonElement>(null)
 
-  const examples = useMemo(() => exampleCards(), [])
   const datasets = useMemo(() => datasetCards(), [])
   const workflows = useMemo(() => workflowCards(library), [library])
 
@@ -141,6 +140,15 @@ export function StartPage() {
       openZoo()
       return
     }
+    /*
+     * The wizard asks its own replace question, on its summary screen and over the chain it is
+     * about to build — which is where it can be answered, the same argument the Zoo card makes.
+     * `openWizard` closes this page on its way in.
+     */
+    if (card.kind === 'wizard') {
+      openWizard()
+      return
+    }
     if (card.kind === 'tour') {
       closeStartPage()
       void startTour(card.tour)
@@ -150,8 +158,7 @@ export function StartPage() {
       setConfirming(card.id)
       return
     }
-    if (card.kind === 'example') loadExample(card.id)
-    else if (card.kind === 'workflow') void openFromLibrary(card.id)
+    if (card.kind === 'workflow') void openFromLibrary(card.id)
     else loadStarter(card.starter)
     setConfirming(undefined)
     closeStartPage()
@@ -232,24 +239,15 @@ export function StartPage() {
           )}
 
           {/*
-           * The doors, above the two rails of graphs and below the reader's own work. The label
-           * carries the same line the toolbar's Examples menu draws with a rule: everything
-           * below is bundled, runs on synthetic data and replaces the canvas on the click, and
-           * nothing here does. See `DOOR_CARDS` for the order.
+           * The doors, above the dataset rail and below the reader's own work. Nothing here
+           * replaces the canvas on the click: the wizard and the Zoo each ask their own question
+           * where it can be answered, and a tour announces what it will do in its first step.
+           * See `DOOR_CARDS` for the order.
            */}
           <Deck
-            label="Learn & browse"
-            note="tours run here, over the editor · the Zoo fetches workflows other people shared"
+            label="Start & learn"
+            note="the wizard builds a graph here · tours run in place · the Zoo fetches what others shared"
             cards={DOOR_CARDS}
-            confirming={confirming}
-            onPick={pick}
-            onCancel={() => setConfirming(undefined)}
-          />
-
-          <Deck
-            label="Examples"
-            note="these use built-in mock data · no token needed · swap in a real dataset"
-            cards={examples}
             confirming={confirming}
             onPick={pick}
             onCancel={() => setConfirming(undefined)}
@@ -544,12 +542,11 @@ function Card({ card, confirming, onPick, onCancel }: CardProps) {
    * of node, and there is no category that would not be a claim about what is behind it. It is
    * also what makes the doors read as one rail at a glance, against four tints below them.
    */
-  const tint =
-    card.kind === 'zoo' || card.kind === 'tour'
-      ? 'var(--accent)'
-      : card.kind === 'dataset'
-        ? 'var(--cat-dataset)'
-        : `var(--cat-${card.category})`
+  const tint = isDoor(card)
+    ? 'var(--accent)'
+    : card.kind === 'dataset'
+      ? 'var(--cat-dataset)'
+      : `var(--cat-${card.category})`
 
   return (
     <div className="start-card" style={{ ['--tint' as string]: tint }}>
@@ -587,34 +584,22 @@ function CardTile({ card }: { card: StartCard }) {
   if (card.image) return <img className="start-card__img" src={card.image} alt="" />
   // The doors are the one hand-drawn set on this page; `startGlyphs.tsx` says why they have to
   // be, and each glyph is keyed by the card id it belongs to.
-  if (card.kind === 'zoo' || card.kind === 'tour') {
-    return <GlyphSvg viewBox="0 0 24 24">{doorGlyph(card.id)}</GlyphSvg>
+  if (isDoor(card)) {
+    return (
+      <GlyphSvg className="start-card__glyph" viewBox="0 0 24 24">
+        {doorGlyph(card.id)}
+      </GlyphSvg>
+    )
   }
   if (card.kind === 'dataset') {
-    return <GlyphSvg viewBox="0 0 52 46">{datasetGlyph((card as DatasetCard).glyph)}</GlyphSvg>
+    return <GlyphSvg className="start-card__glyph" viewBox="0 0 52 46">{datasetGlyph((card as DatasetCard).glyph)}</GlyphSvg>
   }
-  // Examples and saved workflows both stand for a graph, so both take the art of their own
-  // terminal viewer node — the same drawing that node wears on the canvas.
-  const graphCard = card as ExampleCard | WorkflowCard
+  // A saved workflow stands for a graph, so it takes the art of its own terminal viewer node —
+  // the same drawing that node wears on the canvas.
+  const graphCard = card as WorkflowCard
   return (
-    <GlyphSvg viewBox="0 0 24 24">{nodeGlyph(graphCard.nodeType, graphCard.category)}</GlyphSvg>
+    <GlyphSvg className="start-card__glyph" viewBox="0 0 24 24">{nodeGlyph(graphCard.nodeType, graphCard.category)}</GlyphSvg>
   )
 }
 
-function GlyphSvg({ viewBox, children }: { viewBox: string; children: React.ReactNode }) {
-  return (
-    <svg
-      className="start-card__glyph"
-      viewBox={viewBox}
-      aria-hidden="true"
-      focusable="false"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.4}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      {children}
-    </svg>
-  )
-}
+

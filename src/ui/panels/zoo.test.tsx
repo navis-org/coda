@@ -20,6 +20,7 @@ import { resetCache } from '../../data/cache'
 import type { ZooEntry } from '../../data/zoo/format'
 import '../../nodes'
 import { useGraphStore } from '../../store/graphStore'
+import { demoWorkflow } from '../../wizard/build'
 import { REPLACE_GRAPH_QUESTION } from '../replaceConfirm'
 import { clearStorage, installJsdomStubs } from '../../test/jsdomStubs'
 import { ZooBrowser } from './ZooBrowser'
@@ -208,7 +209,7 @@ describe('opening one', () => {
 
   it('asks before replacing work already there', async () => {
     zoo()
-    act(() => useGraphStore.getState().loadExample('partners'))
+    act(() => useGraphStore.getState().loadGraph(demoWorkflow('partners')))
     const before = useGraphStore.getState().graph.nodes.length
     open()
     await listed('LC circuit network')
@@ -253,7 +254,7 @@ describe('when the Zoo cannot be reached', () => {
   })
 
   it('leaves the canvas alone', async () => {
-    act(() => useGraphStore.getState().loadExample('partners'))
+    act(() => useGraphStore.getState().loadGraph(demoWorkflow('partners')))
     const before = useGraphStore.getState().graph.nodes.length
     vi.stubGlobal('fetch', () => Promise.reject(new TypeError('offline')))
     open()

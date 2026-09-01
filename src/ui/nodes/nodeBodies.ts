@@ -18,6 +18,8 @@
 import type { ComponentType } from 'react'
 
 import type { GraphNode } from '../../core/graph'
+import { getNodeDef } from '../../core/registry'
+import { FALLBACK_NODE_SIZE } from '../../layout/elkGraph'
 import type { Value } from '../../core/values'
 import type { InferContext, ParamValue } from '../../core/node'
 import { DATASET_FAMILIES } from '../../nodes/lib/datasetFamilies'
@@ -91,6 +93,32 @@ export interface NodeBodyEntry {
  * actually draws overlaps its neighbour.
  */
 export const WIDE_CARD_WIDTH = 360
+
+/**
+ * The widest a card of this type can draw, from every source that can decide it.
+ *
+ * A fixed column pitch does not work, because these cards are not one width: the default is
+ * `FALLBACK_NODE_SIZE.width`, `NODE_BODIES` gives Find Neurons 360 for its filter rows and the
+ * dataset card 248, and a **viewer** declares neither yet still reaches `WIDE_CARD_WIDTH` the
+ * moment it has a value to draw, because `showPreview` puts `.coda-node--wide` on it. Missing
+ * that third source is what had the Table card, which declares nothing at all and renders at
+ * 360, sitting 38px inside Group By. Measured in a browser.
+ *
+ * Here rather than in a graph builder because three of them ask now — "Learn to Build" laying out
+ * its chain, the Workflow Wizard spacing several viewers, and `placeGuards.test.ts` checking that
+ * neither overlaps — and this module is where two of the three width sources already live. The
+ * fourth (`defaultSize`) is on the definition, and `isViewer` is `category === 'visualisation'`,
+ * spelled out rather than imported so this file keeps its one-way dependency on the registry.
+ */
+export function cardWidth(type: string): number {
+  const def = getNodeDef(type)
+  return Math.max(
+    def?.defaultSize?.width ?? 0,
+    NODE_BODIES[type]?.width ?? 0,
+    def?.category === 'visualisation' ? WIDE_CARD_WIDTH : 0,
+    FALLBACK_NODE_SIZE.width,
+  )
+}
 
 const DATASET_CARD_WIDTH = 248
 

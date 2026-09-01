@@ -23,6 +23,7 @@ import { App } from '../../App'
 import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import { useGraphStore } from '../../store/graphStore'
+import { demoWorkflow } from '../../wizard/build'
 import { clearStorage, installDownloadCapture, installJsdomStubs } from '../../test/jsdomStubs'
 
 beforeAll(() => {
@@ -37,7 +38,7 @@ beforeEach(() => {
     // Both halves of this feature's subject in one graph: `net.build`, which has no viewer and
     // is the reason the button exists, and `out.network`, which has one and must not grow a
     // second.
-    useGraphStore.getState().loadExample('network')
+    useGraphStore.getState().loadGraph(demoWorkflow('network'))
   })
 })
 

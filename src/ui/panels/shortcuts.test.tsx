@@ -25,6 +25,7 @@ import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import '../../nodes'
 import { useGraphStore } from '../../store/graphStore'
+import { demoWorkflow } from '../../wizard/build'
 import { DEFAULT_PANELS } from '../../store/persistence'
 import { clearStorage, installJsdomStubs, installStorageStub } from '../../test/jsdomStubs'
 import {
@@ -46,7 +47,7 @@ beforeEach(() => {
   clearStorage()
   act(() => {
     useGraphStore.setState({ panels: { ...DEFAULT_PANELS } })
-    useGraphStore.getState().loadExample('partners')
+    useGraphStore.getState().loadGraph(demoWorkflow('partners'))
     useGraphStore.getState().closeStartPage()
   })
 })

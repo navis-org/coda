@@ -3,10 +3,10 @@
  *
  * Every other tile on that page derives its picture from something the app already draws:
  * `nodeGlyph` for a graph's terminal viewer, `datasetGlyph` for a family. That rule exists so a
- * rail which *grows* never ships a blank tile — add an example next year and it gets a correct
- * picture for free. This rail cannot grow on its own: it is three tours from a fixed table plus
- * one Zoo, and none of them is a node or a dataset, so there is nothing to derive from. A door
- * added here arrives with its own drawing or it does not arrive.
+ * rail which *grows* never ships a blank tile — a workflow saved next year gets a correct picture
+ * for free. This rail cannot grow on its own: it is the wizard, three tours from a fixed table
+ * and one Zoo, and none of them is a node or a dataset, so there is nothing to derive from. A
+ * door added here arrives with its own drawing or it does not arrive.
  *
  * Drawn to `GlyphSvg`'s conventions in `StartPage.tsx`: a 24-unit box, `currentColor` stroke at
  * 1.4, round caps and joins, no fill. So the tint the card sets is the whole of their colour.
@@ -15,7 +15,45 @@
 import type { ReactNode } from 'react'
 
 /**
- * The picture for a door, by card id — `tour:<id>` or `zoo`.
+ * The box every glyph in the app is drawn in: 24 units (or whatever the `viewBox` says),
+ * `currentColor` at 1.4, round caps and joins, no fill. So the tint its caller sets is the whole
+ * of its colour, and `aria-hidden` keeps it out of the accessibility tree — the label beside it
+ * is the name.
+ *
+ * Here rather than in `StartPage.tsx`, where it was, because the wizard's dataset rows want the
+ * same box and had transcribed the seven attributes by hand. This file's header already named
+ * "`GlyphSvg`'s conventions" as the one reference for how a glyph is drawn; a second
+ * transcription of them is exactly what that note guards against.
+ */
+export function GlyphSvg({
+  viewBox,
+  className,
+  children,
+}: {
+  viewBox: string
+  /** Sizing is the caller's — a start card's tile and a wizard row's glyph are different sizes. */
+  className: string
+  children: ReactNode
+}) {
+  return (
+    <svg
+      className={className}
+      viewBox={viewBox}
+      aria-hidden="true"
+      focusable="false"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.4}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {children}
+    </svg>
+  )
+}
+
+/**
+ * The picture for a door, by card id — `wizard`, `tour:<id>` or `zoo`.
  *
  * Keyed by the id the card already carries rather than by a field on it, so a new tour in
  * `TOURS` needs one entry here and nothing else. The fallback is the Zoo's mark rather than
@@ -27,6 +65,20 @@ export function doorGlyph(id: string): ReactNode {
 }
 
 const GLYPHS: Record<string, ReactNode> = {
+  /*
+   * A chain of three nodes drawn by somebody else's hand: two placed and wired, the third being
+   * added. It has to read as *a pipeline arriving* against the Learn-to-Build door right below
+   * it, which is the same idea from the reader's side — so this one is a funnel around the
+   * chain, the shape a wizard has worn since dialogs had wizards in them.
+   */
+  wizard: (
+    <>
+      <path d="M3.5 3.5 H20.5 L14 11 V20 L10 17.6 V11 Z" />
+      <circle cx={8.6} cy={7.4} r={1.3} />
+      <circle cx={14.4} cy={7.4} r={1.3} />
+      <path d="M9.9 7.4 H13.1" />
+    </>
+  ),
   /*
    * A signpost. The Guided Tour points at things in place, which is what a signpost is for —
    * and its silhouette shares nothing with the other three, which is the property that matters

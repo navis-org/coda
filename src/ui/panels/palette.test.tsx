@@ -18,7 +18,9 @@ import { T } from '../../core/types'
 import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import '../../nodes'
+import { isAnnotation } from '../../core/registry'
 import { useGraphStore } from '../../store/graphStore'
+import { demoWorkflow } from '../../wizard/build'
 import { clearStorage, installJsdomStubs } from '../../test/jsdomStubs'
 import {
   peekExportWarnings,
@@ -38,7 +40,7 @@ beforeEach(() => {
   clearStorage()
   resetExportWarnings()
   act(() => {
-    useGraphStore.getState().loadExample('partners')
+    useGraphStore.getState().loadGraph(demoWorkflow('partners'))
   })
 })
 
@@ -64,13 +66,15 @@ describe('buildCommandItems', () => {
     expect(ids).toContain('cmd:run-all')
     expect(ids).toContain('cmd:clear-results')
     expect(ids).toContain('cmd:fit')
-    expect(ids).toContain('example:matrix')
+    // The two ways to get a workflow that is not a file: generate one, or fetch one.
+    expect(ids).toContain('wizard:open')
+    expect(ids).toContain('zoo:browse')
   })
 
   it('disables Undo until there is history, then enables it', () => {
     expect(byId(commands(), 'cmd:undo').disabled).toBe(true)
     act(() => {
-      useGraphStore.getState().setParam('filter', 'value', '25')
+      useGraphStore.getState().setParam('sort', 'limit', 25)
     })
     expect(byId(commands(), 'cmd:undo').disabled).toBe(false)
   })
@@ -226,7 +230,7 @@ describe('buildCommandItems', () => {
     expect(byId(withoutSelection, 'cmd:run-selected').disabled).toBe(true)
 
     act(() => {
-      useGraphStore.getState().setSelection(['filter'])
+      useGraphStore.getState().setSelection(['sort'])
     })
     const withSelection = commands()
     expect(byId(withSelection, 'cmd:duplicate').disabled).toBe(false)
@@ -234,9 +238,16 @@ describe('buildCommandItems', () => {
   })
 
   it('offers no evaluation commands for a selected text note', () => {
-    // The example carries notes of its own; select one and the Run/Expand pair must go inert,
-    // while the editing commands stay live — a note is an ordinary node to move and delete.
-    act(() => useGraphStore.getState().setSelection(['step1']))
+    /*
+     * A generated workflow carries notes of its own; select one and the Run/Expand pair must go
+     * inert, while the editing commands stay live — a note is an ordinary node to move and
+     * delete. Found by *being* an annotation rather than by its id: note ids come from the note
+     * array's index, a detail of how the wizard stacks them, and naming one here would make this
+     * case select a node that does not exist the day a note is added — quietly, since most of
+     * these assertions also hold for an empty selection.
+     */
+    const note = useGraphStore.getState().graph.nodes.find((n) => isAnnotation(n.type))!
+    act(() => useGraphStore.getState().setSelection([note.id]))
     const withNote = commands()
     expect(byId(withNote, 'cmd:run-selected').disabled).toBe(true)
     expect(byId(withNote, 'cmd:run-selected').hint).toMatch(/never evaluated/)
@@ -288,9 +299,9 @@ describe('buildCommandItems', () => {
   })
 
   it('labels Mute/Unmute according to the selected node', () => {
-    act(() => useGraphStore.getState().setSelection(['filter']))
+    act(() => useGraphStore.getState().setSelection(['sort']))
     expect(byId(commands(), 'cmd:mute').label).toBe('Mute Selection')
-    act(() => useGraphStore.getState().toggleDisabled(['filter']))
+    act(() => useGraphStore.getState().toggleDisabled(['sort']))
     expect(byId(commands(), 'cmd:mute').label).toBe('Unmute Selection')
   })
 

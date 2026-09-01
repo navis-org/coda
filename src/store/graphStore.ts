@@ -57,7 +57,6 @@ import { subscribeUploadLearned } from '../data/uploads'
 import { subscribeEdgeSetsLearned } from '../data/edges/store'
 import { subscribeAnnotationsLearned } from '../data/annotations'
 import { subscribeRootCheck } from '../data/cave/rootIds'
-import { getExample } from '../examples'
 import type { StarterSpec } from '../examples/starters'
 import { buildStarter } from '../examples/starters'
 import type { WorkflowSummary } from './library'
@@ -92,6 +91,8 @@ import {
   loadPanels,
   loadGuidesDone,
   loadGuidesSeen,
+  loadWizardDashboard,
+  loadWizardNotes,
   loadStartPageDismissed,
   loadTheme,
   saveAutoRun,
@@ -102,6 +103,8 @@ import {
   saveAutosave,
   saveGuidesDone,
   saveStartPageDismissed,
+  saveWizardDashboard,
+  saveWizardNotes,
   watchTabIdentity,
 } from './persistence'
 // Side-effect import: the store resolves node types the moment it loads the autosaved
@@ -377,7 +380,7 @@ export interface GraphState {
    * What it records is that this guide was launched *from the dialog*, which is the only thing
    * `finishGuide` needs in order to know whether to bring the dialog back.
    */
-  beginGuide(id: TourId): void
+  beginGuide(): void
   /**
    * A guide ended. `completed` is true only for one walked to its last step.
    *
@@ -389,7 +392,7 @@ export interface GraphState {
    * Whether the Zoo browser is up.
    *
    * A plain boolean owned by the store, like `startPageOpen` and unlike the palette's request
-   * counter, because two unrelated surfaces open it — the toolbar's Examples menu and the
+   * counter, because two unrelated surfaces open it — the toolbar's New menu and the
    * command palette — and neither is an ancestor of the other or of where it mounts.
    */
   zooOpen: boolean
@@ -408,6 +411,34 @@ export interface GraphState {
   sourcesOpen: boolean
   openSources(): void
   closeSources(): void
+  /**
+   * Whether the Workflow Wizard is up.
+   *
+   * A plain boolean owned by the store, like `zooOpen`: three unrelated surfaces open it — the
+   * start page, the toolbar menu and the command palette — and none is an ancestor of the
+   * others.
+   */
+  wizardOpen: boolean
+  openWizard(): void
+  closeWizard(): void
+  /**
+   * Whether a generated workflow arrives with its explanatory notes.
+   *
+   * A remembered preference (`coda.wizardNotes.v1`) rather than a fifth question, because it is a
+   * statement about how this reader likes their canvas and not about the workflow being built —
+   * the same standing `startPageDismissed` has.
+   */
+  wizardNotes: boolean
+  setWizardNotes(enabled: boolean): void
+  /**
+   * Whether a generated workflow opens into the dashboard grid rather than onto the canvas.
+   *
+   * Remembered beside `wizardNotes` and for the same reason — a statement about how this reader
+   * likes to be handed a workflow, not about the workflow. Off by default: see
+   * `loadWizardDashboard`.
+   */
+  wizardDashboard: boolean
+  setWizardDashboard(enabled: boolean): void
   setStartPageDismissed(dismissed: boolean): void
   /**
    * Node whose output is open in the full-size viewer overlay, if any. In the store because
@@ -512,7 +543,6 @@ export interface GraphState {
   setGraphGist(gist: { id: string; owner?: string } | undefined): void
   newGraph(): void
   loadGraph(graph: CodaGraph, warnings?: string[]): void
-  loadExample(id: string): void
   /** New graph pre-wired to browse one dataset. What the New menu's dataset entries build. */
   loadStarter(spec: StarterSpec): void
 
@@ -1264,7 +1294,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     zooOpen: false,
-    // Closes the start page on the way in: both are full-screen modals, and the Examples menu
+    // Closes the start page on the way in: both are full-screen modals, and the New menu
     // is reachable from behind one.
     openZoo: () => set({ zooOpen: true, startPageOpen: false }),
     closeZoo: () => set({ zooOpen: false }),
@@ -1272,6 +1302,22 @@ export const useGraphStore = create<GraphState>((set, get) => {
     sourcesOpen: false,
     openSources: () => set({ sourcesOpen: true }),
     closeSources: () => set({ sourcesOpen: false }),
+
+    // Closes the start page on the way in, for `openZoo`'s reason: two full-screen modals is one
+    // too many, and the wizard is reached *from* that page.
+    wizardOpen: false,
+    openWizard: () => set({ wizardOpen: true, startPageOpen: false }),
+    closeWizard: () => set({ wizardOpen: false }),
+    wizardNotes: loadWizardNotes(),
+    setWizardNotes: (enabled) => {
+      saveWizardNotes(enabled)
+      set({ wizardNotes: enabled })
+    },
+    wizardDashboard: loadWizardDashboard(),
+    setWizardDashboard: (enabled) => {
+      saveWizardDashboard(enabled)
+      set({ wizardDashboard: enabled })
+    },
     setStartPageDismissed: (dismissed) => {
       saveStartPageDismissed(dismissed)
       set({ startPageDismissed: dismissed })
@@ -1415,15 +1461,6 @@ export const useGraphStore = create<GraphState>((set, get) => {
        * next, which is worse than not fitting at all.
        */
       if (graph.nodes.length > 0) get().requestFitView()
-    },
-
-    loadExample: (id) => {
-      const example = getExample(id)
-      if (!example) {
-        set({ notice: `No example "${id}"` })
-        return
-      }
-      get().loadGraph(example.build())
     },
 
     loadStarter: (spec) => {

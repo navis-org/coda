@@ -33,8 +33,8 @@ import { DEFAULT_ROW_SPAN } from '../../core/dashboard'
 import { requireNodeDef } from '../../core/registry'
 import { getToken } from '../../data/neuprint/credentials'
 import { useGraphStore } from '../../store/graphStore'
+import { demoWorkflow } from '../../wizard/build'
 import { clearStorage, installJsdomStubs } from '../../test/jsdomStubs'
-import { EXAMPLES } from '../../examples'
 import { BUILD_SPEC, LEARN_TO_BUILD, PARAMS } from './build'
 import { BUILD_A_DASHBOARD, DASHBOARD_SPEC } from './dashboard'
 import { GUIDED_TOUR, TOUR_ANCHORS, byTour } from './steps'
@@ -52,7 +52,7 @@ beforeEach(() => {
     useGraphStore.getState().closeStartPage()
     // The tour loads this example itself when the canvas is empty; loading it here means the
     // assertions are about the anchors rather than about `loadExample`.
-    useGraphStore.getState().loadExample('partners')
+    useGraphStore.getState().loadGraph(demoWorkflow('partners'))
   })
 })
 
@@ -458,24 +458,32 @@ describe('Learn to Build', () => {
    *
    * Comparing `PARAMS` against the example is what turns the module note's claim into a fact.
    */
-  it('sets the same parameters the partners example does', () => {
-    const example = EXAMPLES.find((entry) => entry.id === 'partners')
-    expect(example, 'the example this tour was built from is gone').toBeTruthy()
-    const graph = example!.build()
+  it('sets the same parameters the generated connectivity workflow does', () => {
+    // The pipeline this tour narrates is the one the Workflow Wizard builds for "who they
+    // connect to" — which is what the four bundled examples were replaced by, and what a reader
+    // gets when they answer its questions rather than take the tour.
+    const graph = demoWorkflow('partners', false)
 
     let compared = 0
     for (const [type, params] of Object.entries(PARAMS)) {
+      /*
+       * The search is where the two differ on purpose. The tour types a pattern in, because it
+       * needs something on screen to talk about; the wizard leaves Find Neurons empty, because
+       * which neurons somebody wants is the one thing four questions cannot answer for them.
+       * Everything downstream of it is a claim about the *pipeline*, and that has to agree.
+       */
+      if (type === 'neuron.findNeurons') continue
       const node = graph.nodes.find((candidate) => candidate.type === type)
-      // The Bar Chart is the tour's own ending — the example finishes at a Table — so it has no
-      // counterpart to compare against, and that is a difference on purpose rather than drift.
+      // The Bar Chart is the tour's own ending — the generated workflow finishes at a Table — so
+      // it has no counterpart to compare against, a difference on purpose rather than drift.
       if (!node) continue
       compared += 1
       for (const [key, value] of Object.entries(params)) {
-        expect(node.params[key], `${type}.${key} disagrees with the example`).toEqual(value)
+        expect(node.params[key], `${type}.${key} disagrees with the workflow`).toEqual(value)
       }
     }
     // A guard on the guard: a renamed node type would make every lookup miss and the loop pass
     // by comparing nothing at all.
-    expect(compared, 'nothing was actually compared').toBeGreaterThanOrEqual(3)
+    expect(compared, 'nothing was actually compared').toBeGreaterThanOrEqual(2)
   })
 })

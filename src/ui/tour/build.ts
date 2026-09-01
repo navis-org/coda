@@ -22,12 +22,12 @@
  * session. The first step's body says both halves of that, and Escape at step 0 has not touched
  * anything yet.
  *
- * **Its parameters are the `partners` example's, and a test holds them there.** The Field Guide
- * walks the same pipeline and `src/examples/index.ts` builds it; this file is a third statement
+ * **Its parameters are the wizard's connectivity workflow's, and a test holds them there.** The Field Guide
+ * walks the same pipeline and `src/wizard/build.ts` builds it; this file is a third statement
  * of it, and an earlier version of the note below claimed the three shared a source when they
  * did not. They still do not — the tour needs its own ordering and its own copy — but `PARAMS`
  * gathers every value that has to agree into one place and `tour.test.tsx` compares it against
- * the example, which is the difference between a claim and a fact.
+ * the generated workflow, which is the difference between a claim and a fact.
  *
  * **The dataset is the mock one, not hemibrain.** The Field Guide can name hemibrain freely
  * because it is a document. A tour cannot: the public neuPrint deployment wants a token, so a
@@ -52,9 +52,9 @@ import type { TourSpec, TourStep } from './steps'
 import { byTour } from './steps'
 
 /**
- * The chain, in the order it gets built. Types are the `partners` example's, which is the same
- * pipeline the Field Guide walks; see `PARAMS` for the values and the module note for what keeps
- * the two in step.
+ * The chain, in the order it gets built. Types are the wizard's connectivity workflow's, which is
+ * the same pipeline the Field Guide walks; see `PARAMS` for the values and the module note for
+ * what keeps the two in step.
  */
 const DATASET = 'dataset.mock.opticlobe'
 const FIND = 'neuron.findNeurons'
@@ -69,12 +69,12 @@ const CHAIN = [DATASET, FIND, CONNECTIVITY, TABLE, GROUP, CHART] as const
 /**
  * The parameters the tour sets, per node.
  *
- * Lifted out of the steps so there is one place to compare them against `src/examples/index.ts`,
- * which builds the same pipeline as the `partners` example and is the thing they were copied
- * from. **`tour.test.tsx` asserts the two agree** — an earlier version of this file claimed in
- * prose to be reading from a single source and was in fact a second, unchecked copy, which is
- * the arrangement where the example's own test stays green while the tour quietly narrates a
- * pipeline it is no longer building.
+ * Lifted out of the steps so there is one place to compare them against the wizard's own
+ * connectivity workflow (`demoWorkflow('partners')`), which builds the same pipeline and is what
+ * these were copied from. **`tour.test.tsx` asserts the two agree** — an earlier version of this
+ * file claimed in prose to be reading from a single source and was in fact a second, unchecked
+ * copy, which is the arrangement where the builder's own test stays green while the tour quietly
+ * narrates a pipeline it is no longer building.
  */
 export const PARAMS: Record<string, Record<string, unknown>> = {
   [FIND]: {

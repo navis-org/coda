@@ -557,7 +557,7 @@ CAVE table (codex_annotations) ─▸ Dataset ▸ Annotations
 
 It is **composed** rather than written out — `bancStarter` calls `genericStarter` and adds to what
 it returns — because everything downstream of the dataset genuinely is the generic shape, and a
-copy of it would only ever *happen* to still agree. `examples.test.ts` compares the two edge sets
+copy of it would only ever *happen* to still agree. `starters.test.ts` compares the two edge sets
 to keep that true.
 
 **`Pivot on` is the whole configuration.** `codex_annotations` is long-format — one row per
@@ -572,7 +572,7 @@ is also why the Description card on a plain BANC dataset says "Annotations — n
 starter is where the wiring lives, and the canvas is where it is visible.
 
 Each step answers a question somebody would otherwise have to discover, and every one is pinned
-by `examples.test.ts`:
+by `starters.test.ts`:
 
 - **`raw.githubusercontent.com`, not the `github.com/…/raw/…` address the repository's own UI
   hands you.** That one answers `302` with `access-control-allow-origin:` **present and empty**,
@@ -651,7 +651,7 @@ column picker on a CAVE dataset until the first Run, where today they offer the 
 columns — which on this graph largely **are** the right names, since the published TSV and the
 datastack agree on `cell_class`, `super_class` and the rest. Telling the two states apart needs
 the dataset type to say "a chain is wired" separately from carrying its schema, which is a change
-to a seam every CAVE graph reads. `examples.test.ts` pins the warning *exactly*, so a second
+to a seam every CAVE graph reads. `starters.test.ts` pins the warning *exactly*, so a second
 issue fails the test rather than hiding behind this one.
 
 `examples/notes.ts` holds `dedent` and `noteNode`, shared with the bundled examples rather than

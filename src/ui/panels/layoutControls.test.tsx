@@ -29,6 +29,7 @@ import { registerSource } from '../../data/source'
 import { DEFAULT_LAYOUT_OPTIONS } from '../../layout/options'
 import '../../nodes'
 import { useGraphStore } from '../../store/graphStore'
+import { demoWorkflow } from '../../wizard/build'
 import { loadLayoutPrefs } from '../../store/persistence'
 import { clearStorage, installJsdomStubs, installStorageStub } from '../../test/jsdomStubs'
 
@@ -50,7 +51,7 @@ beforeEach(() => {
       layoutOptions: { ...DEFAULT_LAYOUT_OPTIONS },
       edgeRouting: 'curved',
     })
-    useGraphStore.getState().loadExample('partners')
+    useGraphStore.getState().loadGraph(demoWorkflow('partners'))
     useGraphStore.getState().closeStartPage()
   })
 })
@@ -548,13 +549,13 @@ describe('routes in the real editor', () => {
     expect(routed).toBeGreaterThan(0)
     const before = pathsById()
 
-    const target = useGraphStore.getState().graph.nodes.find((n) => n.type === 'core.filterTable')
+    const target = useGraphStore.getState().graph.nodes.find((n) => n.type === 'core.sort')
     // Asserted rather than guarded: an `if (target)` around the rest would let this test go
-    // quietly vacuous the day the example is rewritten, while still reporting a pass.
+    // quietly vacuous the day the generated workflow changes shape, while still reporting a pass.
     expect(target).toBeDefined()
 
     await act(async () => {
-      useGraphStore.getState().setParam(target!.id, 'expr', 'pre > 3')
+      useGraphStore.getState().setParam(target!.id, 'limit', 5)
     })
     await new Promise((resolve) => setTimeout(resolve, 0))
     // Every route still in use, and every wire drawn exactly where it was.

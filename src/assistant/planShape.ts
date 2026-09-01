@@ -8,7 +8,8 @@
  * things. A plan is checked whole and applied in one `commit`, so the canvas only ever holds
  * a graph the type system already accepted, and ⌘Z takes the entire edit back.
  *
- * The shape is `examples/index.ts`'s `place`/`link` grown a delete and a rewire: refs rather
+ * The shape is a hand-built graph's `place`/`link` (`examples/assemble.ts`) grown a delete and
+ * a rewire: refs rather
  * than ids, ports named rather than positional, and no coordinates.
  */
 

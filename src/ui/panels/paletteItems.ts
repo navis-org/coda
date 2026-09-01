@@ -20,10 +20,10 @@ import { peekExportWarnings } from '../exportWarnings'
 import { appElement, toggleFullscreen } from '../fullscreen'
 import { TOURS, startTour } from '../tour/tourState'
 import { LOCKED_HINT } from '../lockCopy'
-import { EXAMPLES } from '../../examples'
 import { plural } from '../format'
 import { shortcutKeys } from '../shortcuts'
 import { defaultInputPorts, defaultOutputPorts } from '../../core/ports'
+import { WIZARD_BLURB, WIZARD_LABEL } from '../../wizard/options'
 
 /**
  * Actions double as the palette's filter prefixes: typing `Add:` narrows the list to node
@@ -35,7 +35,9 @@ export const PALETTE_ACTIONS = [
   'Edit',
   'Graph',
   'View',
-  'Example',
+  // Was `Example`, when the two rows under it were bundled example graphs. Both rows now *get*
+  // a workflow — one generated, one fetched — and the prefix somebody types should say so.
+  'Workflow',
   'Help',
 ] as const
 export type PaletteAction = (typeof PALETTE_ACTIONS)[number]
@@ -630,23 +632,27 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
     },
   )
 
+  /*
+   * The two ways to get a workflow that is not a file. What used to sit here as well was one row
+   * per bundled example; the wizard replaced them, and it is one row rather than five because the
+   * question it asks first is which dataset — which is exactly what those five rows could not
+   * answer.
+   */
+  items.push({
+    id: 'wizard:open',
+    label: WIZARD_LABEL,
+    action: 'Workflow',
+    hint: WIZARD_BLURB,
+    perform: () => store.openWizard(),
+  })
+
   items.push({
     id: 'zoo:browse',
     label: 'Browse Community Workflows',
-    action: 'Example',
+    action: 'Workflow',
     hint: 'Search the Coda Zoo — workflows shared by other people.',
     perform: () => store.openZoo(),
   })
-
-  for (const example of EXAMPLES) {
-    items.push({
-      id: `example:${example.id}`,
-      label: example.name,
-      action: 'Example',
-      hint: example.summary,
-      perform: () => store.loadExample(example.id),
-    })
-  }
 
   return items
 }

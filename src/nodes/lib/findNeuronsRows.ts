@@ -10,7 +10,7 @@
  *
  * Find Neurons used to carry five named params — `typePattern`, `instancePattern`, `status`,
  * `minSize`, `roi` — and four of them are rows now. Every saved graph still holds them, and so do
- * the six starter graphs in `examples/index.ts`, the export golden in `export/fixture.ts`, and
+ * the starter graphs in `examples/starters.ts`, the export golden in `export/fixture.ts`, and
  * some fifty tests that build a node by writing `{ typePattern: 'LC.*' }` directly.
  *
  * A load-time migration would have caught the first of those and none of the rest: `addNode` and

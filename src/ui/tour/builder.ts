@@ -17,40 +17,12 @@
  * `ranClean`. They are questions about the store, and both tours ask them identically.
  */
 
-import { getNodeDef } from '../../core/registry'
-import { FALLBACK_NODE_SIZE } from '../../layout/elkGraph'
 import { useGraphStore } from '../../store/graphStore'
-import { isViewer } from '../nodes/CodaNodeView'
-import { NODE_BODIES, WIDE_CARD_WIDTH } from '../nodes/nodeBodies'
+import { cardWidth } from '../nodes/nodeBodies'
 import { cardOf, clearSpan, frameNodes, spanCards } from './steps'
 
 /** Clear space between one card's right edge and the next card's left. */
 const GAP = 90
-
-/**
- * The widest a card of this type can draw, from every source that can decide it.
- *
- * A fixed column pitch does not work, because these cards are not one width: the default is
- * `FALLBACK_NODE_SIZE.width` but `NODE_BODIES` gives Find Neurons 360 for its filter rows and the
- * dataset card 248 for its preview. At a flat 340 the two widest overlapped their neighbours by
- * the end of the chain — which is the graph the reader is handed as the payoff, so it reading as
- * a pile is not a cosmetic problem. Seen in a browser before this existed.
- *
- * `defaultSize` sizes React Flow's wrapper, `NODE_BODIES.width` sizes the card, and a **viewer**
- * declares neither yet still reaches `WIDE_CARD_WIDTH` the moment it has a value to draw, because
- * `showPreview` puts `.coda-node--wide` on it. Missing that third source is what had the Table
- * card, which declares nothing at all and renders at 360, sitting 38px inside Group By. Measured
- * in a browser.
- */
-function cardWidth(type: string): number {
-  const def = getNodeDef(type)
-  return Math.max(
-    def?.defaultSize?.width ?? 0,
-    NODE_BODIES[type]?.width ?? 0,
-    def && isViewer(def) ? WIDE_CARD_WIDTH : 0,
-    FALLBACK_NODE_SIZE.width,
-  )
-}
 
 export interface BuilderOptions {
   /**

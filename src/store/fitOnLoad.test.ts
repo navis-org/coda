@@ -22,6 +22,7 @@ import { MockSource } from '../data/mock/MockSource'
 import { registerSource } from '../data/source'
 import '../nodes'
 import { clearStorage } from '../test/jsdomStubs'
+import { demoWorkflow } from '../wizard/build'
 import { useGraphStore } from './graphStore'
 
 beforeAll(() => {
@@ -61,7 +62,7 @@ describe('framing what was just opened', () => {
 
   it('covers examples and starters, which load through the same path', () => {
     const before = fits()
-    useGraphStore.getState().loadExample('partners')
+    useGraphStore.getState().loadGraph(demoWorkflow('partners'))
     expect(fits()).toBe(before + 1)
     useGraphStore
       .getState()

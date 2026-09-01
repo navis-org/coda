@@ -25,6 +25,7 @@ import { T } from '../../core/types'
 import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import { useGraphStore } from '../../store/graphStore'
+import { demoWorkflow } from '../../wizard/build'
 import { clearStorage, installJsdomStubs } from '../../test/jsdomStubs'
 import { ValuePreview } from './ValuePreview'
 import '../../nodes'
@@ -134,7 +135,7 @@ describe('a card does not draw while the overlay owns its node', () => {
   beforeEach(() => {
     clearStorage()
     act(() => {
-      useGraphStore.getState().loadExample('partners')
+      useGraphStore.getState().loadGraph(demoWorkflow('partners'))
     })
   })
 

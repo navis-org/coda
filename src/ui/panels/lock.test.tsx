@@ -22,6 +22,7 @@ import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import '../../nodes'
 import { useGraphStore } from '../../store/graphStore'
+import { demoWorkflow } from '../../wizard/build'
 import { clearStorage, installJsdomStubs, installStorageStub } from '../../test/jsdomStubs'
 import { buildCommandItems, buildNodeItems } from './paletteItems'
 
@@ -36,7 +37,7 @@ beforeEach(() => {
   act(() => {
     useGraphStore.setState({ locked: false, autoLayout: false })
     useGraphStore.getState().closeStartPage()
-    useGraphStore.getState().loadExample('partners')
+    useGraphStore.getState().loadGraph(demoWorkflow('partners'))
     useGraphStore.getState().setSelection([])
   })
 })

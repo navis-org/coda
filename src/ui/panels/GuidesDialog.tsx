@@ -75,7 +75,7 @@ function Dialog() {
   const next = TOURS.find((tour) => !completed.includes(tour.id))
 
   const start = (id: (typeof TOURS)[number]['id']) => {
-    beginGuide(id)
+    beginGuide()
     // Not awaited: `startTour` is a dynamic import of driver.js, every caller of it is a click
     // handler, and the failure worth reporting is a chunk that will not load.
     void startTour(id)

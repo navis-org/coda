@@ -6,7 +6,6 @@ import type { ExportLanguage } from '../../nodes/lib/datasetFamilies'
 import { CodaMark } from '../CodaMark'
 import { peekExportWarnings, requestExportWarnings, useExportWarnings } from '../exportWarnings'
 import { AssistantIcon, BellIcon, InspectorIcon, ShareIcon } from '../Icons'
-import { EXAMPLES } from '../../examples'
 import type { CustomDatasetNode } from '../../nodes/lib/datasetFamilies'
 import {
   BACKENDS,
@@ -14,6 +13,7 @@ import {
   starterFamilies,
 } from '../../nodes/lib/datasetFamilies'
 import { getNodeDef } from '../../core/registry'
+import { WIZARD_BLURB, WIZARD_LABEL } from '../../wizard/options'
 import type { StarterSpec } from '../../examples/starters'
 import type { WorkflowSummary } from '../../store/library'
 import { findByName } from '../../store/library'
@@ -52,7 +52,7 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
   const clearResults = useGraphStore((s) => s.clearResults)
   const setGraphName = useGraphStore((s) => s.setGraphName)
   const newGraph = useGraphStore((s) => s.newGraph)
-  const loadExample = useGraphStore((s) => s.loadExample)
+  const openWizard = useGraphStore((s) => s.openWizard)
   const openZoo = useGraphStore((s) => s.openZoo)
   const refreshLibrary = useGraphStore((s) => s.refreshLibrary)
   const loadStarter = useGraphStore((s) => s.loadStarter)
@@ -113,7 +113,13 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
         title="Graph name — used as the filename when saving"
       />
 
-      <Dropdown label="New">
+      {/*
+       * `flyouts` — the panel must not clip, because the datasets are submenus now. Safe here for
+       * the reason that note gives: opting out of the scroll is only safe for a menu short enough
+       * never to need it, and folding a dozen dataset rows into three took this menu from about
+       * twenty rows to six. The two facts are the same change.
+       */}
+      <Dropdown label="New" flyouts>
         {(close) => (
           <NewMenu
             onEmpty={() => {
@@ -122,6 +128,14 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
             }}
             onDataset={(spec) => {
               loadStarter(spec)
+              close()
+            }}
+            onWizard={() => {
+              openWizard()
+              close()
+            }}
+            onZoo={() => {
+              openZoo()
               close()
             }}
           />
@@ -137,61 +151,6 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
       </Dropdown>
       <Dropdown label="Save" onOpen={() => void refreshLibrary()}>
         {(close) => <SaveMenu close={close} />}
-      </Dropdown>
-
-      <Dropdown label="Examples">
-        {(close) => (
-          <>
-            {/*
-             * First, above a rule, and the rule is the whole statement: this row goes to a public
-             * repository over the network, while the ones below it are bundled, run on synthetic
-             * data and open instantly. Mixing the fetch into that list would make one remote thing
-             * and four local things look like five of the same kind.
-             */}
-            <button
-              type="button"
-              className="dropdown__item"
-              onClick={() => {
-                openZoo()
-                close()
-              }}
-            >
-              <strong>Browse Workflows…</strong>
-              <span>Search the Coda Zoo — real workflows shared by other users.</span>
-            </button>
-            <div className="dropdown__group">
-              {/*
-               * Opens the section it is about, which is why it is inside the group rather than
-               * at the head of the menu — above the rule it would read as a note on Browse
-               * Workflows, whose graphs run on whatever their author pointed them at.
-               *
-               * Two facts, and the order is deliberate: mock data is what stops somebody reading
-               * a result off these graphs, and no-credentials is what a reader scanning the menu
-               * actually wants to know. Neither is a warning about anything going wrong, so it is
-               * gold rather than an error colour, and quiet rather than a banner. Each example's
-               * own overview note carries the longer version once the graph is open.
-               */}
-              <div className="dropdown__note dropdown__note--heads-up" style={{ fontSize: 9 }}>
-                Examples below use mocked-up data - no account or token needed. Replace demo node
-                with a actual dataset to run on real data.
-              </div>
-              {EXAMPLES.map((example) => (
-                <button
-                  key={example.id}
-                  type="button"
-                  className="dropdown__item"
-                  onClick={() => {
-                    loadExample(example.id)
-                    close()
-                  }}
-                >
-                  <strong>{example.name}</strong>
-                  <span>{example.summary}</span>
-                </button>
-              ))}
-            </div>
-          </>
-        )}
       </Dropdown>
 
       {/*
@@ -705,40 +664,68 @@ function NotifyToggle() {
  * the menu no longer fires a request at a shared production server for anyone who was only
  * looking.
  */
+/**
+ * The New menu: the three ways to start something that is not a file.
+ *
+ * **Empty, then the two that produce a workflow, then the datasets.** The order is how much the
+ * app decides for you — nothing, a whole pipeline, or a dataset to browse — and the rules between
+ * them are that statement. The wizard and the Zoo used to be a `Workflows` menu of their own,
+ * which put two rows behind a top-level button while "New" sat beside it meaning the same thing:
+ * where do I begin.
+ *
+ * **The datasets are submenus, one per backend.** Flat, they were a dozen rows under four
+ * headings and the menu needed a scrollbar — the state where a heading is a thing you scroll past
+ * rather than a thing you choose. A backend is a real choice (it decides what a dataset node can
+ * *do*, which is what `SourceCapabilities` is about), so it is worth a row of its own, and the
+ * blurb lists what is inside so the choice can be made without opening it.
+ *
+ * **Nothing here offers the synthetic dataset.** It is what the Workflow Wizard's first question
+ * opens on, which is a better place for it: a demo dataset is worth reaching for when you want a
+ * *pipeline* to look at, and "New ▸ Demo Data" was offering it as though it were somewhere to
+ * begin real work. Dropping it empties the mock backend's group, which is why the groups are
+ * filtered — a heading with nothing under it is worse than no heading.
+ */
 function NewMenu({
   onEmpty,
   onDataset,
+  onWizard,
+  onZoo,
 }: {
   onEmpty: () => void
   onDataset: (spec: StarterSpec) => void
+  onWizard: () => void
+  onZoo: () => void
 }) {
   const groups = useMemo(() => {
     /*
      * Grouped by **backend**, not by source id, and the difference only shows on CATMAID.
      * Everywhere else the two coincide — every neuPrint family is on the `neuprint` source — but
      * a CATMAID source is keyed on the *server*, so FAFB and L1 are two sources and grouping on
-     * that put a second heading in the menu reading `CATMAID (l1em.catmaid.virtualflybrain.org)`
-     * beside the first. What the heading answers is "which backend am I looking at".
+     * that put a second submenu reading `CATMAID (l1em.catmaid.virtualflybrain.org)` beside the
+     * first. What the row answers is "which backend am I looking at".
      *
-     * Only the families offered as a starting point — see `DatasetFamily.starter`. Every dataset
-     * node stays in `Add ▸ Dataset`; what this list decides is where somebody *begins*.
+     * Only the families offered as a starting point — see `DatasetFamily.starter` — and not the
+     * synthetic ones, which the wizard opens on instead. Every dataset node stays in
+     * `Add ▸ Dataset`; what this list decides is where somebody *begins*.
      *
      * The key list is the **union** of both tables rather than the families' alone, which is
-     * what gives a backend with no starter family a heading of its own: the state any backend is
-     * in before its family table has an entry, and the state one lands in if every family it has
-     * is later marked `starter: false`. A backend's escape hatch then goes under that backend's
-     * own heading rather than into a trailing "Other", which is what it used to be when there
-     * was one of them — three collected under a heading of their own would sort every custom
-     * node away from the datasets it is a custom version *of*.
+     * what gives a backend with no starter family a row of its own: the state any backend is in
+     * before its family table has an entry, and the state one lands in if every family it has is
+     * later marked `starter: false`. A backend's escape hatch then goes under that backend's own
+     * row rather than into a trailing "Other", which would sort every custom node away from the
+     * datasets it is a custom version *of*. A backend with neither is dropped, which is what
+     * removing the synthetic dataset does to the mock one.
      */
-    const families = starterFamilies()
+    const families = starterFamilies().filter((family) => !family.synthetic)
     const backends = [...new Set([...families, ...CUSTOM_DATASET_NODES].map((e) => e.backend))]
-    return backends.map((backend) => ({
-      backend,
-      label: BACKENDS[backend]?.heading || BACKENDS[backend]?.label || backend,
-      families: families.filter((family) => family.backend === backend),
-      custom: CUSTOM_DATASET_NODES.filter((entry) => entry.backend === backend),
-    }))
+    return backends
+      .map((backend) => ({
+        backend,
+        label: BACKENDS[backend]?.heading || BACKENDS[backend]?.label || backend,
+        families: families.filter((family) => family.backend === backend),
+        custom: CUSTOM_DATASET_NODES.filter((entry) => entry.backend === backend),
+      }))
+      .filter((group) => group.families.length + group.custom.length > 0)
   }, [])
 
   return (
@@ -748,32 +735,59 @@ function NewMenu({
         <span>Start building on an empty canvas</span>
       </button>
 
-      {groups.map((group) => (
-        <div key={group.backend} className="dropdown__group">
-          <div className="dropdown__heading">{group.label}</div>
-          {group.families.map((family) => (
-            <button
-              key={family.key}
-              type="button"
-              className="dropdown__item"
-              title={family.description}
-              onClick={() =>
-                onDataset({
-                  nodeType: `dataset.${family.key}`,
-                  label: family.label,
-                  sourceId: family.sourceId,
-                })
-              }
-            >
-              <strong>{family.label}</strong>
-              <span>{family.description}</span>
-            </button>
-          ))}
-          {group.custom.map((custom) => (
-            <CustomDatasetItem key={custom.type} custom={custom} onDataset={onDataset} />
-          ))}
-        </div>
-      ))}
+      {/*
+       * Both rows produce a whole workflow, which is what separates them from Empty above and
+       * from a dataset below. Within the pair the order is the same rule the Zoo has always
+       * drawn: the wizard builds locally and instantly, the row under it goes to a public
+       * repository over the network.
+       */}
+      <div className="dropdown__group">
+        <button type="button" className="dropdown__item" onClick={onWizard}>
+          {/* The `…` is this surface's convention for a row that opens a dialog; the name and
+              the blurb come from `WIZARD_LABEL`/`WIZARD_BLURB`, so the four surfaces offering
+              the same thing cannot drift apart — which they already had. */}
+          <strong>{WIZARD_LABEL}…</strong>
+          <span>{WIZARD_BLURB}</span>
+        </button>
+        <button type="button" className="dropdown__item" onClick={onZoo}>
+          <strong>Browse Workflows…</strong>
+          <span>Search the Coda Zoo — real workflows shared by other users.</span>
+        </button>
+      </div>
+
+      <div className="dropdown__group">
+        {groups.map((group) => (
+          <Submenu
+            key={group.backend}
+            label={group.label}
+            /* The contents, listed. Derived rather than described, so a family added to the
+               table cannot leave this row claiming something else. */
+            blurb={group.families.map((family) => family.label).join(' · ')}
+          >
+            {group.families.map((family) => (
+              <button
+                key={family.key}
+                type="button"
+                className="dropdown__item"
+                title={family.description}
+                onClick={() =>
+                  onDataset({
+                    nodeType: `dataset.${family.key}`,
+                    label: family.label,
+                    sourceId: family.sourceId,
+                  })
+                }
+              >
+                <strong>{family.label}</strong>
+                <span>{family.description}</span>
+              </button>
+            ))}
+            {group.custom.map((custom) => (
+              <CustomDatasetItem key={custom.type} custom={custom} onDataset={onDataset} />
+            ))}
+          </Submenu>
+        ))}
+      </div>
     </>
   )
 }
@@ -1214,7 +1228,7 @@ function Dropdown({
  * currently unreachable, and not because of anything here:** `Editor.tsx` binds Tab globally to
  * the node browser and exempts only text fields, so Tab inside any toolbar menu opens the
  * browser rather than moving through the rows — measured in a browser against the untouched
- * Examples menu, so it is app-wide and predates submenus. The handling stays because it is
+ * Examples menu (since replaced), so it is app-wide and predates submenus. The handling stays because it is
  * correct and becomes live the moment that guard learns about open menus.
  */
 function Submenu({

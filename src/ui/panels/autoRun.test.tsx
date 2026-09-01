@@ -18,6 +18,7 @@ import { MockSource } from '../../data/mock/MockSource'
 import { getSource, registerSource } from '../../data/source'
 import '../../nodes'
 import { useGraphStore } from '../../store/graphStore'
+import { demoWorkflow } from '../../wizard/build'
 import { loadAutoRun, saveAutoRun } from '../../store/persistence'
 import { clearStorage, installJsdomStubs, installStorageStub } from '../../test/jsdomStubs'
 
@@ -32,7 +33,7 @@ beforeEach(() => {
   act(() => {
     // Module singleton: without this, one case's setting decides the next one's default.
     useGraphStore.setState({ autoRun: false })
-    useGraphStore.getState().loadExample('partners')
+    useGraphStore.getState().loadGraph(demoWorkflow('partners'))
   })
 })
 

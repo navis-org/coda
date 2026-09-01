@@ -32,6 +32,7 @@ const { App } = await import('../../App')
 const { MockSource } = await import('../../data/mock/MockSource')
 const { registerSource } = await import('../../data/source')
 const { useGraphStore } = await import('../../store/graphStore')
+const { demoWorkflow } = await import('../../wizard/build')
 const { clearStorage, installJsdomStubs, installStorageStub } =
   await import('../../test/jsdomStubs')
 const { buildCommandItems } = await import('./paletteItems')
@@ -48,7 +49,7 @@ beforeEach(() => {
   fitView.mockClear()
   act(() => {
     useGraphStore.getState().closeStartPage()
-    useGraphStore.getState().loadExample('partners')
+    useGraphStore.getState().loadGraph(demoWorkflow('partners'))
     useGraphStore.getState().setSelection([])
   })
 })

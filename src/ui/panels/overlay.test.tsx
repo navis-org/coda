@@ -24,6 +24,8 @@ import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import '../../nodes'
 import { useGraphStore } from '../../store/graphStore'
+import { demoWorkflow } from '../../wizard/build'
+import type { AnalysisId } from '../../wizard/options'
 import { MEASURED_WIDTH, expandedWidth } from './expandedWidth'
 import {
   clearStorage,
@@ -45,16 +47,16 @@ beforeEach(() => {
   clearStorage()
   act(() => {
     useGraphStore.getState().expandNode(undefined)
-    useGraphStore.getState().loadExample('partners')
+    useGraphStore.getState().loadGraph(demoWorkflow('partners'))
   })
 })
 
 afterEach(cleanup)
 
-/** Load a graph, run it, and open the overlay on `nodeId`. */
-async function openOverlay(example: string, nodeId: string) {
+/** Build a workflow, run it, and open the overlay on `nodeId`. */
+async function openOverlay(analysis: AnalysisId, nodeId: string) {
   act(() => {
-    useGraphStore.getState().loadExample(example)
+    useGraphStore.getState().loadGraph(demoWorkflow(analysis))
   })
   render(<App />)
   await act(async () => {
@@ -135,7 +137,7 @@ describe('ViewerOverlay', () => {
   })
 
   it('exposes the viewer params in the rail and applies them live', async () => {
-    const dialog = await openOverlay('matrix', 'heat')
+    const dialog = await openOverlay('matrix', 'view')
 
     // Heatmap declares scale + showValues as presentational, so both belong in the rail.
     const scale = within(dialog).getByLabelText('Colour scale') as HTMLSelectElement
@@ -144,27 +146,27 @@ describe('ViewerOverlay', () => {
 
     fireEvent.change(scale, { target: { value: 'diverging' } })
     expect(
-      useGraphStore.getState().graph.nodes.find((n) => n.id === 'heat')?.params.scale,
+      useGraphStore.getState().graph.nodes.find((n) => n.id === 'view')?.params.scale,
     ).toBe('diverging')
 
     fireEvent.click(showValues)
     expect(
-      useGraphStore.getState().graph.nodes.find((n) => n.id === 'heat')?.params.showValues,
+      useGraphStore.getState().graph.nodes.find((n) => n.id === 'view')?.params.showValues,
     ).toBe(false)
   })
 
   it('editing a presentational param does not stale the node', async () => {
-    await openOverlay('matrix', 'heat')
-    expect(useGraphStore.getState().nodeInfo('heat').state).toBe('ok')
+    await openOverlay('matrix', 'view')
+    expect(useGraphStore.getState().nodeInfo('view').state).toBe('ok')
 
     act(() => {
-      useGraphStore.getState().setParam('heat', 'scale', 'diverging')
+      useGraphStore.getState().setParam('view', 'scale', 'diverging')
     })
 
     // The whole point: inspecting and restyling a result must not invalidate it.
     const store = useGraphStore.getState()
-    expect(store.nodeInfo('heat').state).toBe('ok')
-    expect(store.nodeOutput('heat', 'out')).toBeDefined()
+    expect(store.nodeInfo('view').state).toBe('ok')
+    expect(store.nodeOutput('view', 'out')).toBeDefined()
   })
 
   it('does not show non-presentational params in the rail', async () => {
@@ -179,10 +181,9 @@ describe('ViewerOverlay', () => {
       const dialog = await openOverlay('partners', 'view')
       fireEvent.click(within(dialog).getByLabelText('Download CSV data'))
       expect(capture.downloads).toHaveLength(1)
-      // Filename combines the graph name and the node label.
-      expect(capture.downloads[0]!.filename).toBe(
-        'fetch-and-group-connectivity-by-type_table.csv',
-      )
+      // Filename combines the graph name and the node label. The wizard names a workflow after
+      // the dataset and the analysis, so the slug is that name rather than an example's title.
+      expect(capture.downloads[0]!.filename).toBe('demo-data-connectivity-partners_table.csv')
     } finally {
       capture.restore()
     }
@@ -205,7 +206,7 @@ describe('ViewerOverlay', () => {
   it('closes when a different graph is loaded', async () => {
     await openOverlay('partners', 'view')
     act(() => {
-      useGraphStore.getState().loadExample('matrix')
+      useGraphStore.getState().loadGraph(demoWorkflow('matrix'))
     })
     expect(useGraphStore.getState().expandedNodeId).toBeUndefined()
   })
@@ -330,7 +331,7 @@ describe('the styling sidebar', () => {
 
   it('leaves an ungrouped node on the flat rail', async () => {
     // The heatmap declares no groups, so it must be untouched by any of this.
-    const dialog = await openOverlay('matrix', 'heat')
+    const dialog = await openOverlay('matrix', 'view')
     expect(within(dialog).queryByRole('tablist')).toBeNull()
     expect(within(dialog).queryByRole('button', { name: 'Style' })).toBeNull()
     expect(dialog.querySelector('.overlay__rail')).toBeTruthy()
