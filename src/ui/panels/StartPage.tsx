@@ -3,7 +3,7 @@
  *
  * A large centred modal over the canvas, shown on every launch until the user ticks
  * "Don't show again". Three jobs, in order of how often they matter: say what this is and that
- * it is alpha, offer somewhere to start that is not an empty canvas, and point at the issue
+ * it is beta, offer somewhere to start that is not an empty canvas, and point at the issue
  * tracker. The backdrop is lighter than the one under `NodeBrowser` — a welcome, not a wall.
  *
  * **Nothing here sits on raw image pixels.** The image is one layer, `.start__scrim` covers it
@@ -189,7 +189,7 @@ export function StartPage() {
                 C<CodaMark size={38} className="start__o" />
                 da
               </h1>
-              <span className="start__badge">Alpha</span>
+              <span className="start__badge">Beta</span>
               <span className="start__version">v{__APP_VERSION__}</span>
             </div>
             <p className="start__lede">
@@ -197,8 +197,9 @@ export function StartPage() {
               <strong>Build an analysis out of nodes</strong>, wire them together, and see the
               result at every step.
             </p>
-            <p className="start__alpha">
-              Coda is in alpha. Expect rough edges. Feedback & feature requests are very welcome!
+            <p className="start__stage">
+              Coda is in beta. Expect the odd rough edge. Feedback & feature requests are very
+              welcome!
             </p>
           </header>
 

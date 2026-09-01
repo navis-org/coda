@@ -557,7 +557,7 @@ does nothing.
 
 ## Start page
 
-The first thing anyone sees: a modal over the canvas with the alpha blurb, the rails of
+The first thing anyone sees: a modal over the canvas with the release-stage blurb, the rails of
 starting points, the repo link and a "Don't show again" checkbox. `StartPage.tsx`,
 `startCards.ts`, and the `.start*` block at the end of `editor.css`.
 
@@ -667,6 +667,6 @@ equal heights make its wordmark read smaller. Those numbers bring both to ~136px
 what actually looks like a matched pair.
 
 **The version comes from `package.json` through a vite `define`** (`__APP_VERSION__`), not a
-JSON import, which would land the whole manifest in the bundle. An alpha that cannot say which
-alpha it is makes every bug report ambiguous — so bump `package.json` when the build changes
+JSON import, which would land the whole manifest in the bundle. A build that cannot say which
+build it is makes every bug report ambiguous — so bump `package.json` when the build changes
 meaningfully.

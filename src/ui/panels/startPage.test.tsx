@@ -190,10 +190,10 @@ describe('Start page', () => {
       expect(nodeTypes).toContain('out.viewer3d')
     })
 
-    it('says which alpha it is', () => {
+    it('says which build it is', () => {
       render(<StartPage />)
       expect(screen.getByText(`v${__APP_VERSION__}`)).toBeTruthy()
-      expect(screen.getByText('Alpha')).toBeTruthy()
+      expect(screen.getByText('Beta')).toBeTruthy()
     })
 
     it('points at the repository without an issue tracker link', () => {

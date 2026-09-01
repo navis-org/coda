@@ -5,7 +5,7 @@
 `Co`nnectome `d`ata `a`nalysis — Browser-based, node editor for querying and analyzing connectomic data.
 
 > [!TIP]
-> **Alpha.** The core functionality is there, including support for (almost) all major connectome datasets. We're still adding features, improving the UI, and fixing bugs. Bug reports and feature requests are very welcome!
+> **Beta.** The core functionality is there, including support for (almost) all major connectome datasets. We're still adding features, improving the UI, and fixing bugs — but from here on we aim to keep saved workflows opening in later builds. Bug reports and feature requests are very welcome!
 
 **Highlights**
 - node-based editor for building analysis/exploration pipelines

@@ -18,8 +18,8 @@ const NEUPRINT_HOST = process.env.NEUPRINT_HOST ?? 'https://neuprint.janelia.org
  * The version the start page shows.
  *
  * Read from package.json here rather than imported in app code: a JSON import would land the
- * whole manifest in the bundle, and `define` substitutes a literal at build time. An alpha that
- * cannot say which alpha it is makes every bug report ambiguous.
+ * whole manifest in the bundle, and `define` substitutes a literal at build time. A build that
+ * cannot say which build it is makes every bug report ambiguous.
  */
 const { version } = JSON.parse(
   readFileSync(new URL('./package.json', import.meta.url), 'utf8'),

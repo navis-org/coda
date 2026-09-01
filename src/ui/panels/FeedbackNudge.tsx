@@ -1,11 +1,11 @@
 /**
- * The alpha's periodic nudge — a small dismissible card asking for feedback roughly once a week.
+ * The beta's periodic nudge — a small dismissible card asking for feedback roughly once a week.
  *
  * Not a modal: nothing is being asked that blocks the canvas, and a dialog that appears
  * unprompted over somebody's graph is the wrong tone for "got a minute?". A fixed card in the
  * corner, closeable without a click hitting the graph underneath, matches `.share-gate`.
  *
- * `ALPHA_NUDGES` is the single switch for the whole feature. Once Coda leaves alpha this stops
+ * `BETA_NUDGES` is the single switch for the whole feature. Once Coda is out of beta this stops
  * being wanted at all — turning it off here is one line, rather than a date compared against
  * `Date.now()` that somebody has to remember to update.
  */
@@ -16,7 +16,7 @@ import { loadFeedbackNudgeAt, saveFeedbackNudgeAt } from '../../store/persistenc
 import { useGraphStore } from '../../store/graphStore'
 
 /** Flip to `false` when Coda is no longer soliciting feedback on a schedule. */
-const ALPHA_NUDGES = true
+const BETA_NUDGES = true
 const NUDGE_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000
 /** Let the canvas settle before asking for anything — not the first thing on screen. */
 const SHOW_DELAY_MS = 4000
@@ -27,7 +27,7 @@ export function FeedbackNudge() {
   const [visible, setVisible] = useState(false)
 
   useEffect(() => {
-    if (!ALPHA_NUDGES) return
+    if (!BETA_NUDGES) return
     const last = loadFeedbackNudgeAt()
     if (last !== undefined && Date.now() - last < NUDGE_INTERVAL_MS) return
     const timer = window.setTimeout(() => setVisible(true), SHOW_DELAY_MS)
@@ -45,7 +45,7 @@ export function FeedbackNudge() {
 
   return (
     <div className="feedback-nudge" role="note">
-      <p>Coda is in alpha — got a minute for feedback? It shapes what we build next.</p>
+      <p>Coda is in beta — got a minute for feedback? It shapes what we build next.</p>
       <div className="feedback-nudge__actions">
         <button
           type="button"
