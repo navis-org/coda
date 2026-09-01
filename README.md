@@ -2,7 +2,7 @@
 
 # Coda
 
-**Co**nnectome **d**ata **a**nalysis — Browser-based, node editor for querying and analyzing connectomic data.
+`Co`nnectome `d`ata `a`nalysis — Browser-based, node editor for querying and analyzing connectomic data.
 
 > [!TIP]
 > **Alpha.** The core functionality is there, including support for (almost) all major connectome datasets. We're still adding features, improving the UI, and fixing bugs. Bug reports and feature requests are very welcome!
@@ -40,6 +40,10 @@ Check out `?` ▶ `Guides` for in-app tutorials and `Examples` for pre-built wor
 Codex and neuPrint are great for initial exploration of the datasets but if you want to do more than just look at a few neurons, you quickly hit a wall and have to start writing code. CATMAID (the oldest of these tools) has actually a lot of analysis tools, but hasn't made the transition to modern (segmentation + meshes) connectomics.
 
 Coda is designed to fill the gap between exploration-only and full-on coding. Also: because we don't play favourites, you can combine data from multiple sources in one workflow! And if you do want to write code, Coda can help you get started by generate Python or R code from your workflow.
+
+## Why "Coda"?
+
+The neat acronym aside, a *coda* symbol in musical notation is a marker used for navigating through a complex piece - similar to what `Coda` does for connectomics data. Furthermore, the plural of *coda* (Italian for "tail") is *code* which is strangely fitting.
 
 ## Development
 
