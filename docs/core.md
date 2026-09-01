@@ -213,13 +213,21 @@ on the geometry's identity through a `WeakMap`, which is sound for the same reas
 
 ## Auto-run
 
-A checkbox beside Run. On, every change re-runs the **whole** graph, expensive nodes included;
-off (the default), the existing hybrid model applies. Persisted in `localStorage`
+A checkbox beside Run. On (the default), every change re-runs the **whole** graph, expensive
+nodes included; off, the existing hybrid model applies. Persisted in `localStorage`
 (`coda.autorun.v1`), so an expensive workflow can be left on manual.
 
-**Off is a safety default, not a taste one.** Expensive nodes hit a shared production Neo4j, and
-invariant 6 exists precisely so a reactive editor does not fire a query per keystroke. Auto-run
-is an explicit opt-out of that.
+**On is the default, and absence in storage is what carries it.** `loadAutoRun` tests for
+`!== 'false'` rather than the `=== 'true'` its neighbouring preferences use, because the key is
+only ever written by the checkbox: a profile that has never touched it has nothing stored, and
+that nothing has to read as on while a deliberate opt-out reads as off. The two are the same
+absent value under the `=== 'true'` spelling.
+
+**What that default costs is invariant 6's.** Expensive nodes hit a shared production Neo4j, and
+the hybrid evaluation model exists precisely so a reactive editor does not fire a query per
+keystroke. On by default means the debounce below is what stands between an edit and that server —
+one full pass per `AUTO_FULL_RUN_DELAY_MS`, not one per keystroke — and the checkbox is the
+opt-out for a graph where even that is too much.
 
 **One timer, not two.** With auto-run on, `afterGraphChange` schedules _only_ the full pass, at
 `AUTO_FULL_RUN_DELAY_MS` (700ms, against 180ms for the cheap pass). Scheduling the cheap pass as

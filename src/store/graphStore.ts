@@ -70,6 +70,14 @@ import {
   saveWorkflow,
 } from './library'
 import { hasShareFragment } from '../data/share/fragment'
+/*
+ * Type only, and that is the whole of the coupling: `TourId` is a union of three string
+ * literals, so it erases at build time and the store links against nothing in `src/ui`. The
+ * store holds which guides are finished because it is what persists them and what `tour.ts`
+ * reports into; naming them `string` here would put the one place a typo could not be caught
+ * next to the one place it would be silent.
+ */
+import type { TourId } from '../ui/tour/tourState'
 import type { EdgeRouting, LayoutOptions } from '../layout/options'
 import { EDGE_ROUTINGS } from '../layout/options'
 import type { PanelState, ThemePreference } from './persistence'
@@ -82,6 +90,8 @@ import {
   loadAutosave,
   loadLayoutPrefs,
   loadPanels,
+  loadGuidesDone,
+  loadGuidesSeen,
   loadStartPageDismissed,
   loadTheme,
   saveAutoRun,
@@ -90,6 +100,7 @@ import {
   savePanels,
   saveDockFraction,
   saveAutosave,
+  saveGuidesDone,
   saveStartPageDismissed,
   watchTabIdentity,
 } from './persistence'
@@ -337,6 +348,44 @@ export interface GraphState {
   openStartPage(): void
   closeStartPage(): void
   /**
+   * Whether the launch sequence is at its first stage — the guides dialog rather than the
+   * welcome page.
+   *
+   * A stage *within* `startPageOpen`, not a second modal beside it, and the two are read
+   * together by `useLaunchStage`. That composition is what makes the sequence one thing to
+   * close: everything that already closed the welcome page — the toolbar, a share link, the
+   * Zoo, every test that wants the canvas — closes the guides dialog too, without having
+   * learned that it exists.
+   *
+   * True until the reader has been shown it once (`coda.guidesSeen.v1`); it is deliberately
+   * *not* set false while a guide runs, because it is what brings the dialog back at the end.
+   */
+  guidesOpen: boolean
+  /**
+   * Guides finished to their last step, in the order they were finished, as `TOURS` spells the
+   * ids. Written only through `finishGuide`, which takes a `TourId`, and read by asking whether
+   * a given guide is in it — so nothing validates what came back from storage: a guide renamed
+   * later leaves an entry that matches nothing, which is invisible rather than wrong.
+   */
+  completedGuides: string[]
+  /** Leave the guides dialog for the welcome page behind it. */
+  closeGuides(): void
+  /**
+   * Take the launch sequence off screen for a guide that is about to run over the canvas.
+   *
+   * Does not itself start the guide — `startTour` is a dynamic import and belongs to the UI.
+   * What it records is that this guide was launched *from the dialog*, which is the only thing
+   * `finishGuide` needs in order to know whether to bring the dialog back.
+   */
+  beginGuide(id: TourId): void
+  /**
+   * A guide ended. `completed` is true only for one walked to its last step.
+   *
+   * Called for every guide however it was launched, so the checkmark is earned from the `?`
+   * menu too; the return to the dialog is not, and hangs on `beginGuide` having run.
+   */
+  finishGuide(id: TourId, completed: boolean): void
+  /**
    * Whether the Zoo browser is up.
    *
    * A plain boolean owned by the store, like `startPageOpen` and unlike the palette's request
@@ -346,6 +395,19 @@ export interface GraphState {
   zooOpen: boolean
   openZoo(): void
   closeZoo(): void
+  /**
+   * Whether the Connections dialog is up.
+   *
+   * Here for `zooOpen`'s reason — two unrelated surfaces open it and neither is an ancestor of
+   * the other. It was the panel's own `useState` while the toolbar button and a backend's
+   * auth-failure channel were the only two ways in; the third is a tour, which has to be able to
+   * *close* it again as well, and a step's `after` has nothing to call on a component's state.
+   * A tour that could open it and not close it is the wedge this was added to fix: driver makes
+   * everything but the spotlit element inert, so a dialog left up mid-tour cannot be dismissed.
+   */
+  sourcesOpen: boolean
+  openSources(): void
+  closeSources(): void
   setStartPageDismissed(dismissed: boolean): void
   /**
    * Node whose output is open in the full-size viewer overlay, if any. In the store because
@@ -672,6 +734,16 @@ export const useGraphStore = create<GraphState>((set, get) => {
    * make every card re-render for a fact no card shows.
    */
   let looping = false
+
+  /**
+   * Whether the guide now running was launched from the guides dialog, and so should hand back
+   * to it when it ends.
+   *
+   * A closure variable rather than store state, on the same terms as `looping`: nothing renders
+   * from it, and it answers a question only `finishGuide` asks. It is also the whole difference
+   * between the dialog's own guides and one started from the `?` menu, which ends on the canvas.
+   */
+  let guidesReturn = false
 
   const scheduler = new Scheduler({
     resolveSource: (id) => requireSource(id),
@@ -1154,11 +1226,52 @@ export const useGraphStore = create<GraphState>((set, get) => {
     openStartPage: () => set({ startPageOpen: true }),
     closeStartPage: () => set({ startPageOpen: false }),
 
+    /*
+     * A share link wins over the guides for the same reason it wins over the welcome page, and
+     * the flag is left unwritten rather than set: somebody whose first arrival is a link
+     * somebody sent them has not been introduced to anything, so their next ordinary visit is
+     * still a first one.
+     */
+    guidesOpen: !loadGuidesSeen() && !sharedLinkPresent,
+    completedGuides: loadGuidesDone(),
+    closeGuides: () => set({ guidesOpen: false }),
+    /*
+     * `guidesOpen` stays true on purpose — see its note. Closing the *sequence* is what takes
+     * the dialog off screen for the duration of the guide, and re-opening it is the whole of
+     * what `finishGuide` has to do.
+     */
+    beginGuide: () => {
+      guidesReturn = true
+      set({ startPageOpen: false })
+    },
+    finishGuide: (id, completed) => {
+      const state = get()
+      const returning = guidesReturn
+      guidesReturn = false
+      // A new array only when the list actually changes, or invariant 7 has a fresh snapshot
+      // to compare on every tour that ends.
+      const done =
+        completed && !state.completedGuides.includes(id)
+          ? [...state.completedGuides, id]
+          : state.completedGuides
+      if (done !== state.completedGuides) saveGuidesDone(done)
+      set({
+        completedGuides: done,
+        // Only for a guide the dialog launched. One started from the `?` menu ends on the
+        // canvas the reader was working on, which is where they were.
+        ...(returning ? { startPageOpen: true } : {}),
+      })
+    },
+
     zooOpen: false,
     // Closes the start page on the way in: both are full-screen modals, and the Examples menu
     // is reachable from behind one.
     openZoo: () => set({ zooOpen: true, startPageOpen: false }),
     closeZoo: () => set({ zooOpen: false }),
+
+    sourcesOpen: false,
+    openSources: () => set({ sourcesOpen: true }),
+    closeSources: () => set({ sourcesOpen: false }),
     setStartPageDismissed: (dismissed) => {
       saveStartPageDismissed(dismissed)
       set({ startPageDismissed: dismissed })

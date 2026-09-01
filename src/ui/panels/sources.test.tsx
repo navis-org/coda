@@ -13,7 +13,7 @@
  */
 
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   reportAuthFailure as reportAiAuthFailure,
@@ -37,6 +37,8 @@ import {
 import { reportAuthFailure, resetCredentials } from '../../data/neuprint/credentials'
 import { registerSource } from '../../data/source'
 import { installJsdomStubs } from '../../test/jsdomStubs'
+import { useGraphStore } from '../../store/graphStore'
+import { setTourHandle } from '../tour/tourState'
 import { SourcesPanel } from './SourcesPanel'
 
 beforeAll(() => {
@@ -44,8 +46,21 @@ beforeAll(() => {
   registerSource(new MockSource({ latencyMs: 0 }))
 })
 
+/*
+ * Whether the dialog is open is store state now, and the store is a module singleton that
+ * outlives a `cleanup()` — so a case that opened it would otherwise decide the next one's
+ * starting position. The same reason `startPage.test.tsx` pins its own flags.
+ */
+beforeEach(() => {
+  act(() => {
+    useGraphStore.setState({ sourcesOpen: false, notice: undefined })
+  })
+  setTourHandle(undefined)
+})
+
 afterEach(() => {
   cleanup()
+  setTourHandle(undefined)
   resetCredentials()
   resetCaveCredentials()
   resetCatmaidCredentials()
@@ -131,6 +146,32 @@ describe('source tabs', () => {
 
     expect(screen.getByRole('dialog')).not.toBeNull()
     expect(tab('neuPrint').getAttribute('aria-selected')).toBe('true')
+  })
+
+  /*
+   * The one case where opening itself is the wrong move. driver.js makes every element but the
+   * one it is spotlighting `pointer-events: none`, so a dialog that arrives mid-step can be
+   * neither filled in nor dismissed: the reader is stuck behind a form. Reported from the
+   * dashboard tour, whose third step adds a MaleCNS node and draws a 401 on the spot.
+   *
+   * The failure is not swallowed — it goes to the status bar, and the reason is still recorded,
+   * so opening Connections by hand afterwards lands on the tab that failed with the message
+   * above it.
+   */
+  it('holds back while a tour is running, and says it in the status bar instead', () => {
+    render(<SourcesPanel />)
+    setTourHandle({ refresh: () => {} })
+
+    act(() => reportAuthFailure('neuPrint rejected the token (401)'))
+
+    expect(screen.queryByRole('dialog'), 'a modal the tour has made inert').toBeNull()
+    expect(useGraphStore.getState().notice).toContain('rejected the token')
+
+    // And the reason is kept, so opening it by hand still lands on the right tab.
+    setTourHandle(undefined)
+    open()
+    expect(tab('neuPrint').getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByText(/rejected the token/)).not.toBeNull()
   })
 })
 

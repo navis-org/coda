@@ -31,6 +31,7 @@ import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import { DEFAULT_ROW_SPAN } from '../../core/dashboard'
 import { requireNodeDef } from '../../core/registry'
+import { getToken } from '../../data/neuprint/credentials'
 import { useGraphStore } from '../../store/graphStore'
 import { clearStorage, installJsdomStubs } from '../../test/jsdomStubs'
 import { EXAMPLES } from '../../examples'
@@ -90,11 +91,13 @@ describe('the Guided Tour', () => {
   it('publishes every anchor name it declares', () => {
     render(<App />)
 
-    // The inspector panel is the one anchor that does not exist until a step opens it, which is
-    // the whole reason `TourStep.anchor` is a function rather than a selector string.
+    // Two anchors do not exist until a step opens the thing they are on, which is the whole
+    // reason `TourStep.anchor` is a function rather than a selector string: the inspector panel,
+    // and the Connections dialog the dashboard tour asks for a token in.
     act(() => {
       if (!useGraphStore.getState().panels.inspector)
         useGraphStore.getState().togglePanel('inspector')
+      useGraphStore.getState().openSources()
     })
 
     for (const anchor of TOUR_ANCHORS) {
@@ -232,15 +235,50 @@ describe('Build a Dashboard', () => {
     render(<App />)
     const preamble = DASHBOARD_SPEC.prepare?.() ?? ''
     expect(preamble).toContain('neuPrint')
-    // It has to predict the panel opening, not merely mention where the token goes: the dataset
-    // node peeks on creation, so a 401 — and the panel — arrives at step 3 whatever the tour does.
-    expect(preamble).toContain('Connections panel will open')
     // Said in `prepare`, which runs before the first step's body is shown — so a reader without
     // credentials finds out while Escape still leaves their canvas untouched.
     expect(
       BUILD_A_DASHBOARD[0]?.before,
       'the first step must not touch the graph',
     ).toBeUndefined()
+  })
+
+  /**
+   * The token step, and the four properties that make it a way *past* the credential rather than
+   * a second wall.
+   *
+   * It exists because the dataset node peeks on creation and draws a 401, and the app's answer to
+   * a 401 used to be a dialog nobody could touch — driver makes everything but the spotlit
+   * element inert. Each of these was a way the fix could have shipped broken: shown to somebody
+   * who already has a token, spotlit but not typeable, needing a Next press after Save, or
+   * leaving the panel up over the rest of the tour.
+   */
+  it('asks for the token in a live step, only when there is none', () => {
+    const step = BUILD_A_DASHBOARD.find((s) => s.id === 'token')
+    expect(step, 'the dashboard tour no longer asks for a token').toBeTruthy()
+    if (!step) return
+
+    expect(step.when?.(), 'asked for a token this browser already has').toBe(!getToken())
+    expect(step.interactive, 'a form under the spotlight is inert without this').toBe(true)
+    expect(step.advanceWhen, 'saving a token has to move the tour on by itself').toBeTruthy()
+    expect(step.after, 'the panel would stay up over the rest of the tour').toBeTruthy()
+
+    render(<App />)
+    act(() => step.before?.())
+    expect(useGraphStore.getState().sourcesOpen, 'the step opens Connections').toBe(true)
+    /*
+     * The *panel*, and nothing that could stand in for it. An anchor that fell back to the
+     * toolbar's Connections button resolved instantly — before React had committed the dialog —
+     * which ends driver's `waitForElement` poll, spotlights a 28px icon behind the dialog and
+     * grants the pointer events to that instead: the form stays inert, which is the whole bug
+     * this step exists to fix. Measured in a browser; the token field computed to
+     * `pointer-events: none`.
+     */
+    expect(step.anchor?.(), 'it points at the form, not at the button').toBe(
+      document.querySelector('.sources'),
+    )
+    act(() => step.after?.())
+    expect(useGraphStore.getState().sourcesOpen, 'Next leaves it closed').toBe(false)
   })
 })
 

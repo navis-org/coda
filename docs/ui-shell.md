@@ -555,11 +555,127 @@ findable there.
 which is a refusal rather than a shortcut. A row for it would be the card teaching a key that
 does nothing.
 
+## The guided tours, where they touch the rest of the app
+
+The tours themselves are documented where they live — `steps.ts` for what a stop is, `tour.ts`
+for the lifecycle and driver.js, `builder.ts` for a tour that builds a graph. Two things about
+them are *not* local to those files, and both are here because they bite code that is not about
+tours at all.
+
+**A dialog that opens itself while a tour is running is a dialog nobody can use.** driver.js
+makes every element but the one it is spotlighting `pointer-events: none`, so a modal that
+arrives mid-step can be neither typed into nor dismissed: the reader is stuck behind a form with
+the tour still going underneath it. Reported from "Build a Dashboard", whose third step adds a
+MaleCNS node — a neuPrint dataset node peeks at the deployment the moment it is created, so a
+browser with no token draws a 401 out of the server on the spot, and the app's answer to a 401
+is to open Connections over everything. So `SourcesPanel` asks `isTourActive()` and sends the
+message to the status bar instead, keeping `reason` recorded so opening Connections by hand
+afterwards still lands on the tab that failed. That rule is about the *dialog*, not about
+neuPrint: any surface that opens itself in response to something asynchronous is one tour step
+away from the same wedge. Verified by A/B in a real browser — with the check disabled the panel
+appears over step 3, with it enabled the same 401 surfaces on the card and in the status bar.
+
+**A tour that needs a credential asks for it in a step, not in a sentence.** `TOKEN_STEP` in
+`dashboard.ts` opens Connections through the store, spotlights the form, and advances by itself
+when a token is saved. Four properties make it a way *past* the credential rather than a second
+wall — `when`, `interactive`, `advanceWhen`, and an `after` that closes the panel so Next is a
+real way out — and `tour.test.tsx` asserts each, because each is a way the fix could have
+shipped broken.
+
+**`TourStep.when` is asked once, when the tour starts.** `tour.ts` filters the step list before
+driver is handed anything: `go` indexes into that array, so a list that could change mid-tour
+would move the reader to a different step than the one it counted, and the `prepare` preamble is
+appended to `steps[0]`, which has to be the step that actually shows first. It is for a step
+that would be *wrong* to show — the token step for somebody who already has a token — and not
+for one whose anchor happens to be missing: `tour.ts` is explicit that a stop which quietly
+vanished leaves the copy referring to something the reader never saw. Measured in a browser: 13
+stops with a token, 14 without.
+
+**An anchor that can fall back resolves too early.** `before` opens the panel through the store,
+but React has not committed by the time driver resolves the step's element — so
+`byTour('connections-panel') ?? byTour('connections')` handed driver the toolbar *button*, which
+ends its `waitForElement` poll on the spot. The step then spotlit a 28px icon behind the dialog
+and granted the pointer events to that, leaving the form inert: the bug the step exists to fix,
+reproduced by the fix. Returning null keeps the poll alive. Same trap `spanCards` records from
+the other direction, and the general form is: **an anchor for something a step is bringing into
+existence must answer null until it is there.**
+
+**The span that covers two cards is `spanCards` in `steps.ts`**, shared by the Guided Tour's
+wire step and every builder tour's "notice the wire" step. It was `Builder.span`'s private
+implementation while only a tour that *builds* wanted one; the Guided Tour spans two cards it
+merely found, so the arithmetic moved and `Builder.span` is now the same call with the ids looked
+up by node type.
+
+## The first-run guides dialog
+
+What a first-time visitor actually opens on, in front of the start page: three rows, one per
+entry in `TOURS`, with the first one badged. `GuidesDialog.tsx`, `launchStage.ts`, the guides
+half of the store slice beside `startPageOpen`, and the `.guides*` block in `editor.css`.
+
+**Why it goes in front of a page that is already an introduction.** The start page is a good
+page and it offers eleven ways in — which is the problem it has on the one visit where the
+reader has no basis for choosing between them. This asks one question with a recommended answer
+and hands over to the page behind it either way. It is also the only surface that can say "take
+this one first"; a rail cannot, because a rail is a row of equals.
+
+**The launch sequence is one boolean and a stage, not two modals.** `startPageOpen` means the
+sequence is on screen; `guidesOpen` means it is still at its first stop. `useLaunchStage`
+composes the two and both surfaces read it — nothing else may ask the question, or the two
+answers drift and you get either a stack of two modals or a first visit with nothing on it.
+That composition is also what keeps the sequence closable from one place: the toolbar, a share
+link, `openZoo` and thirty-odd tests already ended it through `startPageOpen`, and every one of
+them ends it from either stage without having learned that a second dialog exists. A second
+independent boolean would have needed each of those callers to say so again — which is a change
+that fails silently in tests, because a modal nobody closed is not an assertion anybody wrote.
+
+**Shown once, ever, and the flag is written on sight.** `coda.guidesSeen.v1`, from the dialog's
+mount effect — not on close and not when the guides are finished, either of which would bring it
+back for somebody who closed it on purpose. That is what earns it the front slot: a modal that
+recurs has to be quiet, and this one is not. Every guide stays reachable afterwards from the `?`
+menu, the palette and the doors rail, none of which this changes.
+
+**A guide taken from here comes back here, and one taken from anywhere else does not.**
+`beginGuide` takes the whole sequence off screen (`startPageOpen: false`, `guidesOpen` left
+*true* — it is what brings the dialog back), the tour runs over the canvas, and `tour.ts`'s
+`onDestroyed` calls `finishGuide`. The return hangs on a closure flag `beginGuide` sets, because
+`finishGuide` runs at the end of *every* tour: one started from the `?` menu ends on the canvas
+the reader was working on, which is where they were. Ordered after `restore`, so the state the
+tour borrowed is back before a modal goes over the canvas again.
+
+**A checkmark means finished, not started.** `drive` sets `completed` in the one place that can
+tell the difference — `go` walking off the end of the step list, which is what both the Done
+button and a Right arrow on the last step do. The ×, Escape and any other `destroy` reach
+`onDestroyed` too and none of them is a guide somebody read. An abandoned guide still returns to
+the dialog, unticked, which is the honest reading and leaves it inviting rather than crossed off.
+Completions are kept in `coda.guidesDone.v1` as ids, so a guide added later starts unticked
+instead of arriving already marked; nothing validates them against `TOURS`, because the dialog
+iterates the table and asks whether each id is in the list — an entry left by a renamed guide is
+invisible rather than wrong.
+
+**The tick is green and the word beside it is not.** `--status-ok` is 3.18:1 on the light panel:
+over the 3:1 floor for a graphical mark, under the 4.5:1 one for 11px prose — the same trap
+`--status-warn` and `.zoo-row__requires` are both recorded against. So the colour is on the
+glyph, "Completed" takes `--text-secondary`, and the state is carried by the glyph swapping from
+a step number to a tick rather than by hue.
+
+**Keyboard focus lands on the first guide not yet taken**, which is the Basics on the first
+visit and the next one along on the way back from it, so Enter always does what the dialog is
+currently suggesting.
+
+**Driven in a real browser, because the round trip is the feature.** `guides.test.tsx` covers
+the sequence with `startTour` stubbed — driver.js is the half `tour.test.tsx` deliberately never
+loads. The full loop (first visit → Guided Tour → Done → dialog back with a tick and
+`coda.guidesDone.v1` written) was walked in headless Chrome over CDP, which is the only place
+`onDestroyed` and the real library are in the picture at all.
+
 ## Start page
 
-The first thing anyone sees: a modal over the canvas with the release-stage blurb, the rails of
-starting points, the repo link and a "Don't show again" checkbox. `StartPage.tsx`,
-`startCards.ts`, and the `.start*` block at the end of `editor.css`.
+The second thing a first-time visitor sees and the first thing everyone else does: a modal over
+the canvas with the release-stage blurb, the rails of starting points, the repo link and a
+"Don't show again" checkbox. `StartPage.tsx`, `startCards.ts`, and the `.start*` block at the
+end of `editor.css`. It stands down while the guides dialog above is up — `useLaunchStage` is
+where the two agree — and is otherwise unchanged by it, including the tour cards on its own
+doors rail: this page is where the guides live for every visit after the first.
 
 **Four rails, and the order is how often each is what somebody came for:** the user's own saved
 workflows (only when the shelf has something on it), **Learn & browse**, **Examples**,
@@ -633,7 +749,10 @@ implement it, and browser chrome in front of a page explaining the app reads as 
 **Tests that mount the real `App` must close it first.** It renders over everything, which is
 its job; `App.smoke.test.tsx` and `explore.test.tsx` call `closeStartPage()` in `beforeEach`
 and one test opens it deliberately. A new App-mounting test that starts failing on
-`getByText('Coda')` or `findByRole('dialog')` is hitting exactly this.
+`getByText('Coda')` or `findByRole('dialog')` is hitting exactly this. A suite that wants this
+page *open* needs `guidesOpen: false` as well, because the store made its first-visit decision
+once, when the module was imported: `startPage.test.tsx`, `library.test.tsx` and the one
+`App.smoke.test.tsx` case that opens it all say so.
 
 **The funder logos ship in both inks, and CSS picks.** `src/ui/logos/` holds a light and a dark
 variant of each mark, imported with `?url` so vite hashes them and emits

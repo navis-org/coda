@@ -14,6 +14,7 @@ import { ShareDialog } from './ui/panels/ShareDialog'
 import { PrivacyDialog } from './ui/panels/PrivacyDialog'
 import { ShortcutsDialog } from './ui/panels/ShortcutsDialog'
 import { SharedLinkGate } from './ui/panels/SharedLinkGate'
+import { GuidesDialog } from './ui/panels/GuidesDialog'
 import { StartPage } from './ui/panels/StartPage'
 import { ZooGate } from './ui/panels/ZooGate'
 import { StatusBar } from './ui/panels/StatusBar'
@@ -94,6 +95,13 @@ export function App() {
       <FeedbackDialog />
       {/* Last, and on top: it can be reopened over an expanded viewer. */}
       <StartPage />
+      {/*
+       * The first visit's first screen, in front of the welcome page it hands over to. Never
+       * both — `useLaunchStage` gives the two one answer between them — so the order here only
+       * decides which wins if that ever stops being true, and being asked to take the Basics is
+       * the more useful thing to be looking at on the visit where it can happen.
+       */}
+      <GuidesDialog />
       {/*
        * Under the start page rather than over it: `openZoo` closes the start page on the way in,
        * so the two are never both up, and the ordering only decides which wins if that ever

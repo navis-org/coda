@@ -4448,6 +4448,150 @@ a.viewer-actions__btn {
 }
 
 /*
+ * The first-run guides dialog.
+ *
+ * Narrower than the shortcuts card and about as wide as the privacy notice, for the same reason:
+ * it is three rows and two sentences, and a dialog sized for its container rather than for its
+ * content reads as a page with something missing from it.
+ */
+.guides {
+  max-width: 520px;
+  height: auto;
+  max-height: min(88vh, 640px);
+}
+
+.guides__body {
+  padding: 12px 14px 4px;
+}
+
+.guides__lede {
+  margin: 0 0 12px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.guides__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/*
+ * The whole row is the button. A row with a Start button in it puts a small target inside a
+ * large one that does nothing, which on a dialog whose only job is "pick one of these" is the
+ * wrong way round — so `.guides__go` is a label on the row rather than a control in it.
+ */
+.guides__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  text-align: left;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.guides__row:hover,
+.guides__row:focus-visible {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* The step number, and the slot the checkmark takes over once the guide is finished. */
+.guides__mark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+/*
+ * `--status-ok` on the glyph and nowhere else, which is the distinction theme.css draws: at
+ * 3.18:1 on the light panel it clears the 3:1 floor for a graphical mark and misses the 4.5:1
+ * one for text. So the tick is green and the word "Completed" beside it is not — and the state
+ * is carried by the glyph swapping, not by the colour, for a reader who sees neither.
+ */
+.guides__row[data-done] .guides__mark {
+  border-color: var(--status-ok);
+  color: var(--status-ok);
+  font-size: 13px;
+}
+
+.guides__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.guides__name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* The nudge. `--accent-soft` behind body text is the pairing `.zoo-row__requires` measured. */
+.guides__badge {
+  padding: 1px 6px;
+  border-radius: 9px;
+  background: var(--accent-soft);
+  color: var(--text-primary);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.guides__done {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+}
+
+.guides__blurb {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.guides__go {
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.guides__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+}
+
+.guides__note {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+/*
  * `columns` rather than a grid, so the groups flow into whichever column has room. A grid would
  * need the split chosen in advance, and the split goes lopsided the moment a group gains a row.
  * `break-inside: avoid` on the group is what keeps a heading from being orphaned at a column

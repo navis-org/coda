@@ -207,7 +207,7 @@ function ensureGraph(): string {
   return ' The canvas was empty, so an example graph has been opened to point at.'
 }
 
-async function drive(spec: TourSpec): Promise<void> {
+async function drive(id: TourId, spec: TourSpec): Promise<void> {
   /*
    * **Before `prepare`, and that ordering is the whole of whether `restore` works.**
    *
@@ -222,10 +222,27 @@ async function drive(spec: TourSpec): Promise<void> {
    */
   const held = borrow()
   const preamble = spec.prepare?.() ?? ''
-  const steps = spec.steps
+  /*
+   * `when` is asked here and nowhere else: once, after `prepare` and before driver has been
+   * handed anything. `go` indexes into this array, so a list that could change while the tour
+   * runs would move the reader to a different step than the one it counted; and the preamble
+   * below is appended to `steps[0]`, which has to be the step that actually shows first.
+   */
+  const steps = spec.steps.filter((step) => step.when?.() ?? true)
 
   /** Undoes the class pinning and the completion poll of whichever step is showing. */
   let releaseStep: (() => void) | undefined
+
+  /**
+   * Whether the reader reached the end, as against leaving part-way through.
+   *
+   * Set in the one place that can tell the difference: `go` walking off the end of the step
+   * list, which is what both the Done button and a Right arrow on the last step do. driver's ×,
+   * Escape and a `destroy` from anywhere else all arrive at `onDestroyed` too, and none of them
+   * is a guide somebody finished — the checkmark in `GuidesDialog` is only worth having if it
+   * means the whole thing was read.
+   */
+  let completed = false
 
   const endStep = (): void => {
     releaseStep?.()
@@ -251,6 +268,7 @@ async function drive(spec: TourSpec): Promise<void> {
     const to = from + delta
     if (to < 0) return
     if (to >= steps.length) {
+      completed = true
       tour.destroy()
       return
     }
@@ -345,6 +363,12 @@ async function drive(spec: TourSpec): Promise<void> {
       endStep()
       setTourHandle(undefined)
       restore(held, spec.restoreSelection)
+      /*
+       * Last, and after `restore`: this is what brings the guides dialog back for a guide
+       * launched from it, and the borrowed state has to be back where the reader left it before
+       * a modal goes over the canvas they are about to look at again.
+       */
+      useGraphStore.getState().finishGuide(id, completed)
     },
   }
 
@@ -370,5 +394,5 @@ const SPECS: Record<TourId, TourSpec> = {
 }
 
 export async function runTour(id: TourId): Promise<void> {
-  await drive(SPECS[id])
+  await drive(id, SPECS[id])
 }

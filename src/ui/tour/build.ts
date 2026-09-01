@@ -106,9 +106,9 @@ export const LEARN_TO_BUILD: readonly TourStep[] = [
     title: "Let's build something",
     body:
       'This guide will teach you how to build a simple analysis pipeline in Coda: find a set of ' +
-      'neurons, pull everything they connect to, and add up the synapses per partner type. It is ' +
-      'the shape most connectivity questions take — point it at a real dataset afterwards and the ' +
-      'chain does not change.',
+      'neurons, pull everything they connect to, and add up the synapses per partner type. ' +
+      'We will use demo data to illustrate the process, so you do not an account. Just replace the ' +
+      'demo dataset node with an actual dataset to see real data.',
   },
   {
     id: 'blank',
@@ -351,7 +351,7 @@ export const BUILD_SPEC: TourSpec = {
     const notes: string[] = []
     if (store.graph.nodes.length) {
       notes.push(
-        'Heads up: this needs a blank canvas, so the graph you have open will be replaced ' +
+        '<br></br><b>Heads up</b>: this needs a blank canvas, so the graph you have open will be replaced ' +
           'when you press Next. ⌘Z brings it back, but if it matters, press Escape and save ' +
           'it first.',
       )

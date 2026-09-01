@@ -58,7 +58,18 @@ beforeEach(() => {
   act(() => {
     // The store is a module singleton, so state set by one case would otherwise decide the
     // next one's answer.
-    useGraphStore.setState({ startPageOpen: true, startPageDismissed: false, zooOpen: false })
+    /*
+     * `guidesOpen: false` is the second visit onwards, which is every visit this file is about:
+     * the launch sequence shows the guides dialog first and this page behind it, and the two
+     * read the same pair of booleans through `useLaunchStage`. `guides.test.tsx` owns the
+     * first-visit half.
+     */
+    useGraphStore.setState({
+      startPageOpen: true,
+      guidesOpen: false,
+      startPageDismissed: false,
+      zooOpen: false,
+    })
     useGraphStore.getState().newGraph()
   })
 })

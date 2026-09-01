@@ -3,10 +3,11 @@
 /**
  * Auto-run: re-run the whole graph after every change.
  *
- * The behaviour worth pinning is the part that is *not* "it runs": that it stays off unless asked,
- * that a burst of edits produces one run rather than one per keystroke, and that overlapping runs
- * cannot leave the UI claiming to be idle while a run is still going. Auto-run opts out of the
- * hybrid evaluation model, so the guard rails around it are the feature.
+ * The behaviour worth pinning is the part that is *not* "it runs": that an explicit opt-out
+ * survives a reload where a fresh profile gets the default, that a burst of edits produces one run
+ * rather than one per keystroke, and that overlapping runs cannot leave the UI claiming to be idle
+ * while a run is still going. Auto-run opts out of the hybrid evaluation model, so the guard rails
+ * around it are the feature.
  */
 
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
@@ -88,11 +89,14 @@ function editWeight(value: number) {
 }
 
 describe('the checkbox', () => {
-  it('is off by default, next to Run', () => {
-    // Expensive nodes hit a shared production database; opting into a query per edit has to be
-    // a decision, not a default.
+  it('is on by default, next to Run', () => {
+    // A new profile has nothing stored, and absence is what carries the default — so this reads
+    // the preference rather than the store, which `beforeEach` pins for every other case here.
+    clearStorage()
+    expect(loadAutoRun()).toBe(true)
+    act(() => useGraphStore.setState({ autoRun: loadAutoRun() }))
     render(<App />)
-    expect(checkbox().checked).toBe(false)
+    expect(checkbox().checked).toBe(true)
   })
 
   it('turns on and is remembered', () => {
@@ -102,7 +106,9 @@ describe('the checkbox', () => {
     expect(loadAutoRun()).toBe(true)
   })
 
-  it('reads the stored preference back', () => {
+  it('reads the stored preference back, an opt-out included', () => {
+    // The other half of "absence means on": an explicit `false` has to survive a reload, so it
+    // cannot be stored as the same nothing a fresh profile has.
     saveAutoRun(true)
     expect(loadAutoRun()).toBe(true)
     saveAutoRun(false)

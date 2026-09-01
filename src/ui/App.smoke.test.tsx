@@ -36,6 +36,14 @@ beforeAll(() => {
 beforeEach(() => {
   clearStorage()
   act(() => {
+    // Auto-run is on by default and is an opt-out of the hybrid model two cases below are about,
+    // so it is pinned off here rather than left to whatever the module singleton was built with.
+    // `autoRun.test.tsx` is where the default itself is pinned.
+    useGraphStore.setState({ autoRun: false })
+    // Past the guides dialog, the launch sequence's first stage — what a *returning* visitor
+    // opens on is the welcome page, and that is what the case below is about. The first-visit
+    // ordering is `guides.test.tsx`'s.
+    useGraphStore.setState({ guidesOpen: false })
     // The start page opens over everything on a fresh visit, which is its whole job — but it
     // would sit in front of every assertion below. One test opens it deliberately instead.
     useGraphStore.getState().closeStartPage()
@@ -60,8 +68,8 @@ describe('App', () => {
     })
     render(<App />)
 
-    // The real mount, not the component in isolation: the start page is the first thing a
-    // new visitor sees, and it is the last child of the app for exactly that reason.
+    // The real mount, not the component in isolation: the welcome page is what the launch
+    // sequence lands on, and it is among the last children of the app for exactly that reason.
     const dialog = screen.getByRole('dialog')
     // By accessible name, not text: the heading renders as "C", the mark, "da", and the
     // dialog takes its own name from it.

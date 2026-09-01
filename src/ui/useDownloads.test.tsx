@@ -184,9 +184,16 @@ describe('the auto-run warning', () => {
   it('appears only when auto-run and On run are both on', async () => {
     // The one thing only the card can say: a node definition cannot read the store, so this
     // cannot live in `validate` — and it is what stops somebody ending up with four hundred
-    // files from a burst of edits.
+    // files from a burst of edits. Auto-run is on by default, so the warning is what a fresh
+    // profile sees; both directions are driven here because either one alone would pass against
+    // a card that ignored the store.
     const body = await open()
-    expect(body.textContent).not.toContain('Auto-run is on')
+    await waitFor(() => expect(body.textContent).toContain('Auto-run is on'))
+
+    act(() => {
+      useGraphStore.getState().setAutoRun(false)
+    })
+    await waitFor(() => expect(body.textContent).not.toContain('Auto-run is on'))
 
     act(() => {
       useGraphStore.getState().setAutoRun(true)

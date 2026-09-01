@@ -14,6 +14,11 @@
  * **Closing is not dismissing.** Only the checkbox writes to storage; Esc, the ✕, the Close
  * button and a click on the backdrop all just close. Ticking the box does not close either, so
  * it stays undoable in the same visit — and reopening from the toolbar's ? shows it ticked.
+ *
+ * **On the very first visit it is the second thing shown, not the first.** `GuidesDialog` takes
+ * that slot, and this page waits behind it — `useLaunchStage` is where the two agree about
+ * whose turn it is. Everything else here is unchanged, including the tour cards on the doors
+ * rail: this page is where the guides live for every visit after the first.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -30,6 +35,7 @@ import { REPLACE_GRAPH_QUESTION } from '../replaceConfirm'
 import type { DatasetCard, ExampleCard, StartCard, WorkflowCard } from './startCards'
 import { DOOR_CARDS, datasetCards, exampleCards, workflowCards } from './startCards'
 import { doorGlyph } from './startGlyphs'
+import { useLaunchStage } from './launchStage'
 import { shortcutKeys } from '../shortcuts'
 import { startTour } from '../tour/tourState'
 
@@ -69,7 +75,12 @@ const ANALYTICS_URL = 'https://coda-science.goatcounter.com/'
 
 
 export function StartPage() {
-  const open = useGraphStore((s) => s.startPageOpen)
+  /*
+   * `'welcome'` rather than `startPageOpen`: on the first visit the sequence is open and it is
+   * the guides dialog's turn. Read through the shared hook so the two surfaces cannot come to
+   * different conclusions from the same two booleans.
+   */
+  const open = useLaunchStage() === 'welcome'
   const dismissed = useGraphStore((s) => s.startPageDismissed)
   const closeStartPage = useGraphStore((s) => s.closeStartPage)
   const setStartPageDismissed = useGraphStore((s) => s.setStartPageDismissed)

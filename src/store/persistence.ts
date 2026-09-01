@@ -35,6 +35,15 @@ const PANELS_KEY = 'coda.panels.v1'
 const AUTORUN_KEY = 'coda.autorun.v1'
 const NOTIFY_KEY = 'coda.notify.v1'
 const START_PAGE_KEY = 'coda.startPage.v1'
+/**
+ * The first-run guides dialog: whether it has ever been shown, and which guides were finished.
+ *
+ * Two keys rather than one object, because the two have nothing to do with each other's
+ * lifetime. The first is written once, on the first visit, and never read for anything else;
+ * the second grows as guides are completed and outlives the dialog that shows it.
+ */
+const GUIDES_SEEN_KEY = 'coda.guidesSeen.v1'
+const GUIDES_DONE_KEY = 'coda.guidesDone.v1'
 const LAYOUT_KEY = 'coda.layout.v1'
 /** When the feedback nudge was last shown or dismissed, so it can wait a week before the next. */
 const FEEDBACK_NUDGE_KEY = 'coda.feedbackNudge.v1'
@@ -508,16 +517,21 @@ export function saveDockFraction(fraction: number): void {
 /**
  * Whether every edit re-runs the whole graph.
  *
- * **Off by default, and that is a safety default rather than a taste one.** Expensive nodes hit a
- * shared production Neo4j, and the hybrid evaluation model exists precisely so a reactive editor
- * does not fire a query per keystroke. Turning this on opts out of that; it is the user's call to
- * make per session, and it is remembered.
+ * **On by default, and absence is what carries that.** The key is only ever written by the
+ * checkbox, so a profile that has never touched it has nothing stored — which is the new-profile
+ * case and reads as on. Only an explicit `'false'` turns it off, which is why this cannot be the
+ * `=== 'true'` test its neighbours use: that spelling would make a fresh profile and a deliberate
+ * opt-out indistinguishable.
+ *
+ * The cost is real and is invariant 6's: expensive nodes hit a shared production Neo4j, so on
+ * means a query per edit (debounced to one per `AUTO_FULL_RUN_DELAY_MS`) rather than one per Run.
+ * The checkbox beside Run is the opt-out, and it is remembered.
  */
 export function loadAutoRun(): boolean {
   try {
-    return localStorage.getItem(AUTORUN_KEY) === 'true'
+    return localStorage.getItem(AUTORUN_KEY) !== 'false'
   } catch {
-    return false
+    return true
   }
 }
 
@@ -658,6 +672,56 @@ export function saveStartPageDismissed(dismissed: boolean): void {
   } catch {
     /* ignore */
   }
+}
+
+// ---------------------------------------------------------------------------
+// The guides dialog
+// ---------------------------------------------------------------------------
+
+/**
+ * Has the first-run guides dialog ever been on screen?
+ *
+ * The one thing that makes it a *first-run* dialog: written the moment it is shown, and never
+ * cleared. Not "dismissed" and not "all guides done" — either of those would have it come back
+ * for somebody who closed it on purpose, which is the whole difference from the start page.
+ *
+ * Storage disabled reads as never shown, so the dialog appears on every visit instead of never —
+ * the same bargain `loadStartPageDismissed` makes, and the same reason: suppressing an
+ * introduction for somebody who never asked us to is the worse of the two failures.
+ */
+export function loadGuidesSeen(): boolean {
+  return readLocal(GUIDES_SEEN_KEY) === 'seen'
+}
+
+export function saveGuidesSeen(): void {
+  writeLocal(GUIDES_SEEN_KEY, 'seen')
+}
+
+/**
+ * The guides finished to their last step, as the ids `TOURS` uses.
+ *
+ * Ids rather than a count, so a guide added later starts unticked instead of arriving already
+ * marked done. Nothing here validates them against `TOURS`: the dialog iterates the table and
+ * asks whether each id is in this list, so an entry left behind by a renamed guide is invisible
+ * rather than wrong — and this module has no business importing the tour table to find out.
+ *
+ * Anything that is not an array of strings reads as none. A corrupt key means unticked
+ * checkmarks, which is a cosmetic loss; throwing here would take the store's creation with it.
+ */
+export function loadGuidesDone(): string[] {
+  const raw = readLocal(GUIDES_DONE_KEY)
+  if (!raw) return []
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((id): id is string => typeof id === 'string')
+  } catch {
+    return []
+  }
+}
+
+export function saveGuidesDone(ids: readonly string[]): void {
+  writeLocal(GUIDES_DONE_KEY, JSON.stringify(ids))
 }
 
 /**

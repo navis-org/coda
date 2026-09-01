@@ -19,18 +19,13 @@
 
 import { getNodeDef } from '../../core/registry'
 import { FALLBACK_NODE_SIZE } from '../../layout/elkGraph'
-import type { NodeSize } from '../../layout/elkGraph'
-import { boundsOf } from '../../layout/place'
 import { useGraphStore } from '../../store/graphStore'
 import { isViewer } from '../nodes/CodaNodeView'
 import { NODE_BODIES, WIDE_CARD_WIDTH } from '../nodes/nodeBodies'
-import { cardOf, frameNodes } from './steps'
+import { cardOf, clearSpan, frameNodes, spanCards } from './steps'
 
 /** Clear space between one card's right edge and the next card's left. */
 const GAP = 90
-
-/** The id the tour's own spanning element carries, so there is only ever one of them. */
-const SPAN_ID = 'coda-tour-span'
 
 /**
  * The widest a card of this type can draw, from every source that can decide it.
@@ -208,72 +203,20 @@ export function makeBuilder(
     card: (type) => cardOf(built.get(type)),
 
     /**
-     * An invisible element covering several cards at once, for a step that highlights more than
-     * one.
+     * The cards this tour built, spanned by one invisible element — `spanCards` does the work,
+     * and its note has the reasoning. What is here is the only part that is the builder's: the
+     * lookup from node *type*, which is the key every other method on this object takes.
      *
-     * driver spotlights exactly one element, and the step that says *"notice the wire"* is about
-     * two cards and what runs between them — a cut-out around either one alone contradicts the
-     * sentence.
-     *
-     * **It is placed inside React Flow's viewport, in world coordinates, and that is the whole
-     * trick.** The viewport carries the pan and zoom as a CSS transform, so a child positioned in
-     * world units is moved by the browser along with the cards, and `getBoundingClientRect` —
-     * which is all driver ever asks — returns the right screen rectangle at every zoom with
-     * nothing recomputing it. Positioning it in screen pixels instead would need re-measuring on
-     * every frame of the camera animation the step starts.
-     *
-     * The rectangle itself is `boundsOf`, which is the module that owns this arithmetic; the
-     * sizes handed to it are read off the DOM exactly as `useArrange`'s `measure` reads them,
-     * because `offsetWidth` is pre-transform (world units, the distinction the field guide's
-     * `offsetParent` note records) while a `getBoundingClientRect` here would be screen pixels.
-     *
-     * `pointer-events: none`, so it cannot intercept anything even though driver will mark it the
-     * active element; and removed by the step's `after`, since it is scaffolding rather than part
-     * of the graph.
+     * All the types, or none, for `spanCards`' reason: a card that has not landed yet must keep
+     * driver's `waitForElement` poll alive rather than resolving to a span around its neighbour.
      */
     span(...types) {
-      const viewport = document.querySelector('.react-flow__viewport')
-      if (!viewport) return null
-
-      const nodes = []
-      const measured = new Map<string, NodeSize>()
-      for (const type of types) {
-        const id = built.get(type)
-        const node = id
-          ? useGraphStore.getState().graph.nodes.find((n) => n.id === id)
-          : undefined
-        const card = id ? cardOf(id) : null
-        /*
-         * **All the cards, or none.** Skipping a card that has not been rendered yet looks like
-         * tolerance and is the opposite: the step that adds a node resolves its anchor in the
-         * same tick, so the new card is reliably absent — and returning a span around the *other*
-         * card hands driver a perfectly good element, which ends its `waitForElement` poll on the
-         * spot. The step then spotlights one card for a sentence about two, with nothing to
-         * recompute it, because `refresh` re-reads the stored element rather than re-resolving
-         * the anchor.
-         *
-         * Answering `null` keeps the poll alive; driver watches the document for mutations, and
-         * the card landing is one. Measured before this: the span came out `left: 60px;
-         * width: 248px`, exactly the dataset card, with Find Neurons sitting 338px to its right.
-         */
-        if (!node || !(card instanceof HTMLElement)) return null
-        nodes.push(node)
-        measured.set(node.id, { width: card.offsetWidth, height: card.offsetHeight })
-      }
-
-      const bounds = boundsOf(nodes, measured)
-      if (!bounds) return null
-
-      const span = document.getElementById(SPAN_ID) ?? document.createElement('div')
-      span.id = SPAN_ID
-      span.style.cssText = `position:absolute;pointer-events:none;left:${bounds.x}px;top:${bounds.y}px;width:${bounds.width}px;height:${bounds.height}px`
-      if (span.parentElement !== viewport) viewport.appendChild(span)
-      return span
+      const ids = types.map((type) => built.get(type))
+      if (ids.some((id) => !id)) return null
+      return spanCards(ids as string[])
     },
 
-    clearSpan() {
-      document.getElementById(SPAN_ID)?.remove()
-    },
+    clearSpan,
 
     setParams(type) {
       const id = built.get(type)
@@ -285,7 +228,7 @@ export function makeBuilder(
 
     reset() {
       built.clear()
-      document.getElementById(SPAN_ID)?.remove()
+      clearSpan()
     },
   }
 }

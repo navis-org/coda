@@ -25,6 +25,20 @@
  * you when you learn that. One channel per credential store; each section names its own, which
  * is why nothing here has to guess from the text of the failure.
  *
+ * **Except while a tour is running, where it says the same thing in the status bar instead.**
+ * driver.js makes every element but the one it is spotlighting `pointer-events: none`, so a
+ * dialog that arrives *during* a step cannot be typed into, dismissed or clicked away — the
+ * reader is left with a form they cannot use over a tour they cannot see. Reported from the
+ * dashboard tour, whose third step adds a MaleCNS node and draws a 401 out of the deployment on
+ * the spot. The failure is not swallowed: `reason` is still recorded, so opening Connections by
+ * hand afterwards lands on the tab that failed with the message above it, and that tour now asks
+ * for a token in a step of its own before it builds anything.
+ *
+ * **Whether it is open lives in the store** (`sourcesOpen`). It was `useState` here while the
+ * button and the failure channel were the only two ways in; a tour is the third, and it has to
+ * be able to close it again from a step's `after` — which has nothing to call on a component's
+ * state.
+ *
  * Within Data sources the *tab* is named by whoever subscribes, because `reportAuthFailure`
  * carries no source id and there is one channel per credential store. It used to be a single
  * `authTab` on the section, hardcoded to neuPrint — harmless while neuPrint was the only
@@ -97,6 +111,12 @@ import {
 import { githubLogin } from '../../data/share/gist'
 import { getSource } from '../../data/source'
 import { useGraphStore } from '../../store/graphStore'
+/*
+ * The static half of the tour — four functions over a nullable handle, no driver.js. Importing
+ * it here costs nothing and is what `tourState.ts` exists for; a static import of `tour.ts`
+ * would put the library in the main chunk.
+ */
+import { isTourActive } from '../tour/tourState'
 import { errorMessage } from '../../core/errors'
 
 /**
@@ -352,7 +372,9 @@ const SECTIONS: readonly [Section, ...Section[]] = [
 ]
 
 export function SourcesPanel() {
-  const [open, setOpen] = useState(false)
+  const open = useGraphStore((s) => s.sourcesOpen)
+  const openPanel = useGraphStore((s) => s.openSources)
+  const closePanel = useGraphStore((s) => s.closeSources)
   const [token, setTokenField] = useState(() => getToken() ?? '')
   const [server, setServerField] = useState(() => getBaseUrlOverride() ?? '')
   const [probe, setProbe] = useState<Probe>({ state: 'idle' })
@@ -369,22 +391,28 @@ export function SourcesPanel() {
     const stops = SECTIONS.map((section) =>
       section.subscribe((message, tab) => {
         setReason({ section: section.id, message, ...(tab ? { tab } : {}) })
-        setOpen(true)
+        /*
+         * A tour is on screen and everything under it is inert — see the module note. The
+         * message still has to arrive somewhere, and the status bar is the one surface a tour
+         * leaves usable, so it goes there and the panel waits until somebody opens it.
+         */
+        if (isTourActive()) notify(message)
+        else openPanel()
       }),
     )
     return () => stops.forEach((stop) => stop())
-  }, [])
+  }, [notify, openPanel])
 
   useEffect(() => {
     if (!open) return
     setTokenField(getToken() ?? '')
     setServerField(getBaseUrlOverride() ?? '')
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false)
+      if (event.key === 'Escape') closePanel()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open])
+  }, [open, closePanel])
 
   const test = useCallback(async () => {
     setProbe({ state: 'testing' })
@@ -419,8 +447,8 @@ export function SourcesPanel() {
       ?.listDatasets()
       .then((datasets) => notify(`neuPrint connected — ${datasets.length} datasets`))
       .catch(() => undefined)
-    setOpen(false)
-  }, [token, server, notify])
+    closePanel()
+  }, [token, server, notify, closePanel])
 
   return (
     <>
@@ -428,7 +456,7 @@ export function SourcesPanel() {
         type="button"
         className="btn btn--ghost btn--icon"
         data-tour="connections"
-        onClick={() => setOpen(true)}
+        onClick={openPanel}
         title="Connections — data sources, API keys and sharing"
         aria-label="Connections"
       >
@@ -436,7 +464,7 @@ export function SourcesPanel() {
       </button>
       {open && (
         <Dialog
-          onClose={() => setOpen(false)}
+          onClose={closePanel}
           reason={reason}
           token={token}
           server={server}
@@ -522,6 +550,10 @@ function Dialog({ onClose, reason, ...tabProps }: DialogProps) {
     <div className="overlay" role="presentation" onPointerDown={onClose}>
       <div
         className="overlay__panel sources"
+        /* The tour's own name for the dialog, as `inspector-panel` is for the inspector: a step
+           that asks the reader to paste a token has to spotlight the form, not the button that
+           opens it. */
+        data-tour="connections-panel"
         role="dialog"
         aria-modal="true"
         aria-label="Connections"

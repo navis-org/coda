@@ -42,7 +42,9 @@ beforeEach(() => {
   resetLibrary()
   act(() => {
     useGraphStore.getState().closeStartPage()
-    useGraphStore.setState({ library: [], libraryLoaded: false })
+    // Past the first-run guides dialog, which is the launch sequence's first stage and would
+    // otherwise be what `openStartPage` puts on screen. See `guides.test.tsx`.
+    useGraphStore.setState({ library: [], libraryLoaded: false, guidesOpen: false })
     useGraphStore.getState().loadExample('partners')
   })
 })

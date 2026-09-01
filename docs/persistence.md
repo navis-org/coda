@@ -376,9 +376,11 @@ with the change stashed out.
 Everything else in `localStorage` is a preference read once at init and cached in a module
 variable, so tabs drift rather than losing anything. Three are worth knowing about:
 
-- **Auto-run is one key and its default is a safety default** (invariant 6). Turn it on in one
-  tab and a tab opened or reloaded afterwards inherits it — with expensive nodes and a shared
-  production Neo4j behind them, and nothing on screen saying where the setting came from.
+- **Auto-run is one key, and its default lives in the key's absence** (invariant 6). Nothing
+  stored means on, so a new profile edits reactively; only an explicit `false` turns it off. Which
+  makes the drift asymmetric: switch it off in one tab and a tab opened or reloaded afterwards
+  inherits that, with nothing on screen saying where the setting came from — and the same in
+  reverse, over expensive nodes and a shared production Neo4j.
 - **Credentials cache behind a `loaded` flag.** Paste a token in one tab and the other keeps
   401ing while its Connections panel shows the old value; touching that field then overwrites the
   fix. A `storage` listener re-running `load()` and firing the existing `changed` channel would

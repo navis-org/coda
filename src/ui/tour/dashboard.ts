@@ -23,23 +23,25 @@
  * whose whole subject is *what a dashboard looks like* cannot spend a third of its grid on a
  * blank. So it uses **MaleCNS on neuPrint**, which does publish one.
  *
- * The credentials wall is answered rather than ignored, and in the one place that works: `prepare`
- * checks for a token and, if there is none, says so in the **first step's own body** — before
- * anything has been built, while Escape still leaves the canvas untouched. `TourSpec.prepare`
- * exists for exactly this ("how a tour owns up to what it just did in the paragraph the reader is
- * about to read"), and it is the difference between finding out at step 1 and finding out at step
- * 6 with a half-built graph. The tour still runs without one — every node, wire and cell is made,
- * and the layout is the thing being taught — the cells are simply empty until a token arrives.
+ * The credentials wall is answered rather than ignored, in two places that work together and
+ * before anything has been built. `prepare` checks for a token and, if there is none, says so in
+ * the **first step's own body** — while Escape still leaves the canvas untouched. Then
+ * `TOKEN_STEP` puts the Connections form itself in front of the reader, spotlit and live, and
+ * advances by itself when they save. The tour still runs without one: every node, wire and cell
+ * is made, and the layout is the thing being taught, so the cells are simply empty.
  *
- * **The warning predicts an event rather than describing a state**, and it has to. A neuPrint
- * dataset node peeks at the deployment the moment it is created (`peekDatasets`, the once-per-
- * instance fetch `CLAUDE.md` records), so step 3 draws a 401 out of the server whatever the tour
- * does, and the app answers a 401 by opening the Connections panel over everything. That is the
- * right thing for the app to do and the wrong thing to be surprised by mid-tour, so the first
- * step says it is coming. Seen in a browser; the earlier copy said only "add one under
- * Connections" and the panel arriving unannounced read as the tour having broken.
+ * **The token step exists because the warning alone was not enough**, and the way it failed is
+ * worth keeping. A neuPrint dataset node peeks at the deployment the moment it is created
+ * (`peekDatasets`, the once-per-instance fetch `CLAUDE.md` records), so step 3 draws a 401 out of
+ * the server whatever the tour does — and the app answered a 401 by opening Connections over
+ * everything. Under a tour that dialog is inert: driver makes every element but the spotlit one
+ * `pointer-events: none`, so it could be neither typed into nor closed, and the tour was stuck
+ * behind a form the reader had not asked for. Announcing it, which is what the copy used to do,
+ * described the wedge rather than avoiding it. Both halves are now fixed: `SourcesPanel` sends an
+ * auth failure to the status bar instead while a tour is running, and this tour asks for the
+ * credential itself, up front, where saving one costs nothing.
  *
- * What the tour *can* avoid is causing a **second** one, which `runIfPossible` does.
+ * What the tour *can* still avoid is causing a **second** 401, which `runIfPossible` does.
  *
  * ## What it hands over
  *
@@ -137,14 +139,14 @@ function celled(): number {
 /**
  * Catch a reader up who pressed Next instead of Run — but only if the run can succeed.
  *
- * Without a token neuPrint answers 401, and the app's own response to that is to open the
- * Connections dialog with an explanation. That is exactly right when *somebody pressed Run*, and
- * exactly wrong when the tour did: it is a modal over the dashboard the next four steps are
- * about, so a reader who was told "every step still works and the cells stay empty" watches the
- * payoff disappear behind a credentials form. Seen in a browser.
+ * Without a token neuPrint answers 401, and a tour that fires one it knows will fail spends the
+ * reader's next four steps on a failure it chose to cause. It is now a red node and a line in the
+ * status bar rather than a modal — `SourcesPanel` holds the dialog back while a tour is up — but
+ * the run is still pointless, and the payoff steps read better without a failed node in the
+ * corner of them.
  *
  * So the tour never runs a graph it knows will fail. If the *reader* presses Run on the step
- * before, they get the dialog and the explanation, which is the right outcome for a deliberate
+ * before, they get the failure and the explanation, which is the right outcome for a deliberate
  * act — and this step's `before` then has nothing left to catch up.
  */
 function runIfPossible(): void {
@@ -165,15 +167,66 @@ function cell(type: string): Element | null {
   return id ? document.querySelector(`.dash-cell[data-node="${id}"]`) : null
 }
 
+/**
+ * Ask for the token before anything is built, and only when there is none.
+ *
+ * The reason it has to be a step rather than a sentence in the intro: step 3 adds a MaleCNS node,
+ * which peeks at the deployment on creation and draws a 401 — and the app's answer to a 401 is to
+ * open Connections over everything. Under a tour that dialog is `pointer-events: none` like the
+ * rest of the page, so it could be neither filled in nor dismissed and the tour was stuck behind
+ * a form. `SourcesPanel` no longer opens itself while a tour is running, which closes the wedge;
+ * this closes the hole it was covering, which is that the tour wanted a credential and had no way
+ * to ask for one.
+ *
+ * Four properties, each load-bearing:
+ *
+ *  - **`when`**, so a reader who already has a token never sees it. Asked once, when the tour
+ *    starts — the token cannot arrive before that except through this step.
+ *  - **`interactive`**, or the form under the spotlight is inert for the same reason the
+ *    unannounced dialog was. `markElement` is what grants it back.
+ *  - **`advanceWhen`**, so Save moves the tour on by itself. Saving also closes the panel, so
+ *    without this the reader is left looking at a step pointing at nothing.
+ *  - **`after` closing the panel**, which is what makes Next a real way past this step. A reader
+ *    with no token has to be able to carry on — the tour still builds every node, wire and cell,
+ *    and the copy has always said the cells stay empty — and a panel left open would then be the
+ *    wedge again, this time put there by the tour.
+ *
+ * **The anchor is the panel and nothing else**, which is the trap `spanCards` already records in
+ * the other direction. `before` opens it through the store, but React has not committed by the
+ * time driver resolves the element, so the first resolve finds nothing — and an anchor that fell
+ * back to the toolbar's Connections *button* handed driver a perfectly good element, which ends
+ * its `waitForElement` poll on the spot. The step then spotlit a 28px icon behind the dialog,
+ * `markElement` granted pointer events to *that*, and the form stayed inert: the exact bug this
+ * step exists to fix, reproduced by the fix. Returning null keeps the poll alive until the panel
+ * lands. Seen in a browser — the computed `pointer-events` on the token field said `none`.
+ */
+const TOKEN_STEP: TourStep = {
+  id: 'token',
+  title: 'This one needs a neuPrint token',
+  body:
+    'MaleCNS lives on Janelia’s neuPrint, and this browser has no token for it. Get one from ' +
+    'neuprint.janelia.org/account — sign in with Google, copy the auth token — then paste it in ' +
+    'here and press Save; the tour carries on by itself. No token is fine too: press Next and ' +
+    'every step still works, the three cells simply stay empty.',
+  when: () => !getToken(),
+  before: () => useGraphStore.getState().openSources(),
+  after: () => useGraphStore.getState().closeSources(),
+  anchor: () => byTour('connections-panel'),
+  interactive: true,
+  advanceWhen: () => Boolean(getToken()),
+  side: 'left',
+  align: 'start',
+}
+
 export const BUILD_A_DASHBOARD: readonly TourStep[] = [
   {
     id: 'intro',
     title: "Let's build a dashboard",
     body:
-      'A pipeline is for building; a dashboard is for looking. We will make a small graph — ' +
-      'browse a dataset, show what you picked as a table, and draw the same neurons in ' +
-      'Neuroglancer — and then arrange those three on a grid you could hand to somebody else.',
+      'Once you built your pipeline, you may realize that only a small set of nodes are actually interesting - ' +
+      'the rest is just supporting infrastructure. This when you want to create a dashboard for your workflow!',
   },
+  TOKEN_STEP,
   {
     id: 'blank',
     title: 'Starting from a blank canvas',
@@ -390,14 +443,14 @@ export const DASHBOARD_SPEC: TourSpec = {
     if (!getToken()) {
       notes.push(
         'One thing first: this tour uses MaleCNS on neuPrint, and this browser has no token for ' +
-          'it — so the Connections panel will open by itself in a moment. Paste a token in and ' +
-          'carry on, or close it: every step still works and the cells simply stay empty, since ' +
-          'what is being taught here is the layout.',
+          'it — so the next step opens Connections so you can paste one in. Skipping it is fine: ' +
+          'every step still works and the three cells simply stay empty, since what is being ' +
+          'taught here is the layout.',
       )
     }
     if (store.graph.nodes.length) {
       notes.push(
-        'Heads up: this needs a blank canvas, so the graph you have open will be replaced when ' +
+        '<br></br><b>Heads up</b>: this needs a blank canvas, so the graph you have open will be replaced when ' +
           'you press Next. ⌘Z brings it back, but if it matters, press Escape and save it first.',
       )
     }

@@ -267,10 +267,19 @@ describe('every store action is on one side of the lock', () => {
     'attachEdgeSet',
     'openStartPage',
     'closeStartPage',
+    // The first-run guides dialog is the launch sequence's other stage, so all three sit
+    // beside the two above. `beginGuide` takes it off screen for a tour and `finishGuide`
+    // brings it back; neither is a canvas gesture, and the tour they wrap is not one either.
+    'closeGuides',
+    'beginGuide',
+    'finishGuide',
     // Opening a *browser* of workflows is a panel. Opening one of them is `loadGraph`, which
     // is a document load and is on the same side as opening a file.
     'openZoo',
     'closeZoo',
+    // Connections is a dialog about credentials, which are not in the document at all.
+    'openSources',
+    'closeSources',
     'setStartPageDismissed',
     'expandNode',
     // The dock is the same kind of thing as the overlay — looking at a result, not editing the

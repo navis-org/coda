@@ -170,6 +170,34 @@ Area-specific — the rule, then the doc that holds why:
   scrollbar. And **a shortcut's glyph is stored by meaning, not as text** — `src/ui/shortcuts.ts`
   is the one table, `formatChord` the only place that knows ⌘ from Ctrl, and four surfaces read
   it. `Editor.tsx` still owns the *bindings*. See [docs/ui-shell.md](docs/ui-shell.md).
+- **A dialog that opens itself while a tour is running is a dialog nobody can use**, and an
+  anchor that can fall back resolves before the thing it names exists. driver.js makes everything
+  but the spotlit element `pointer-events: none`, so a modal arriving mid-step can be neither
+  typed into nor dismissed — which is what a neuPrint 401 did to "Build a Dashboard", whose third
+  step creates a dataset node that peeks on creation. `SourcesPanel` asks `isTourActive()` and
+  sends the message to the status bar instead, keeping `reason` so opening it by hand still lands
+  on the failing tab; the tour asks for the token in a step of its own first (`when`,
+  `interactive`, `advanceWhen`, and an `after` that closes the panel — Next has to be a way out).
+  The rule is about self-opening dialogs, not about neuPrint. Second half: that step's anchor must
+  be the panel and **nothing that could stand in for it** — `?? byTour('connections')` resolved
+  instantly, ending driver's `waitForElement` poll before React had committed, so the spotlight
+  and the pointer events went to a 28px icon behind the dialog and the form stayed inert. Both
+  halves were A/B'd in a real browser. **`TourStep.when` is asked once, at start**, because `go`
+  indexes into the filtered list. See [docs/ui-shell.md](docs/ui-shell.md).
+- **The launch sequence is one boolean and a stage, and the guides dialog is the first stop.** A
+  first visit opens on `GuidesDialog` — the three `TOURS`, first one badged — and the start page
+  waits behind it. `startPageOpen` means the sequence is showing, `guidesOpen` that it is still at
+  its first stop, and `useLaunchStage` is the only place the two are read together: a second
+  independent boolean would have meant teaching the toolbar, the share link, `openZoo` and thirty
+  tests about a modal they close today for free, and a modal nobody closed is not an assertion
+  anybody wrote. Shown **once ever** (`coda.guidesSeen.v1`, written on sight, not on close), which
+  is what earns it the front slot. A guide taken from it comes back to it — `beginGuide` leaves
+  `guidesOpen` true and `tour.ts`'s `onDestroyed` calls `finishGuide` after `restore` — while one
+  from the `?` menu ends on the canvas, the difference being a closure flag rather than anything
+  the tour knows. A **checkmark means finished**: only `go` walking off the end of the step list
+  sets it, since ×, Escape and every other `destroy` reach the same hook. And the tick is green
+  where the word beside it is not — `--status-ok` clears 3:1 for a mark and misses 4.5:1 for 11px
+  prose. See [docs/ui-shell.md](docs/ui-shell.md).
 - **A run notification is opt-in, but the tab title is not, and the fallback is the feature.**
   `Notification.requestPermission()` is refused outside a user gesture, so the bell's *click* is
   the prompt — there is nowhere else to ask. **`denied` is terminal**: a page can never ask twice
