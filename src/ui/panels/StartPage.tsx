@@ -28,9 +28,10 @@ import { datasetGlyph } from '../nodes/DatasetPreview'
 import { nodeGlyph } from './NodeThumbnail'
 import { REPLACE_GRAPH_QUESTION } from '../replaceConfirm'
 import type { DatasetCard, ExampleCard, StartCard, WorkflowCard } from './startCards'
-import { ZOO_CARD, datasetCards, exampleCards, workflowCards } from './startCards'
+import { DOOR_CARDS, datasetCards, exampleCards, workflowCards } from './startCards'
+import { doorGlyph } from './startGlyphs'
 import { shortcutKeys } from '../shortcuts'
-import { TOURS, startTour } from '../tour/tourState'
+import { startTour } from '../tour/tourState'
 
 const REPO_URL = 'https://github.com/navis-org/coda'
 /** The group that develops Coda, named in the credits line. */
@@ -66,14 +67,6 @@ const OVERVIEW_URL = `${import.meta.env.BASE_URL}overview.html`
  */
 const ANALYTICS_URL = 'https://coda-science.goatcounter.com/'
 
-/**
- * The Zoo rail's contents, hoisted out of the render.
- *
- * `Deck`'s scroll effect keys on `cards`, so a fresh `[ZOO_CARD]` each render would tear down
- * and re-attach its listener and its ResizeObserver on every keystroke elsewhere in the page.
- * The other three rails already hand over a memoised array.
- */
-const ZOO_CARDS = [ZOO_CARD]
 
 export function StartPage() {
   const open = useGraphStore((s) => s.startPageOpen)
@@ -125,12 +118,21 @@ export function StartPage() {
    */
   const pick = (card: StartCard) => {
     /*
-     * The Zoo card replaces nothing, so it skips the question: it hands over to a browser that
-     * asks its own, over the preview of the workflow being opened — which is where the question
-     * can actually be answered. `openZoo` closes this page on its way in.
+     * The doors skip the question, and each for its own reason rather than as a group. The Zoo
+     * hands over to a browser that asks its own, over the preview of the workflow being opened —
+     * which is where it can be answered; `openZoo` closes this page on its way in. A tour that
+     * touches the canvas says so in its first step and goes through `setGraph`, so it is
+     * announced *and* undoable, which is more than a yes/no here would buy. Each tour closes the
+     * page itself, because a tour whose first stop is the canvas cannot begin with a modal over
+     * it — the same reason the credits row's buttons do.
      */
     if (card.kind === 'zoo') {
       openZoo()
+      return
+    }
+    if (card.kind === 'tour') {
+      closeStartPage()
+      void startTour(card.tour)
       return
     }
     if (hasWork && confirming !== card.id) {
@@ -218,15 +220,15 @@ export function StartPage() {
           )}
 
           {/*
-           * Its own rail rather than a card at the head of Examples, and the label is the whole
-           * argument: everything below is bundled, runs on synthetic data and opens instantly,
-           * while this one goes to a public repository over the network and opens somebody
-           * else's document. The toolbar's Examples menu draws the same line with a rule.
+           * The doors, above the two rails of graphs and below the reader's own work. The label
+           * carries the same line the toolbar's Examples menu draws with a rule: everything
+           * below is bundled, runs on synthetic data and replaces the canvas on the click, and
+           * nothing here does. See `DOOR_CARDS` for the order.
            */}
           <Deck
-            label="Browse Workflows"
-            note="the Coda Zoo · workflows shared by other users · fetched when you open it"
-            cards={ZOO_CARDS}
+            label="Learn & browse"
+            note="tours run here, over the editor · the Zoo fetches workflows other people shared"
+            cards={DOOR_CARDS}
             confirming={confirming}
             onPick={pick}
             onCancel={() => setConfirming(undefined)}
@@ -329,26 +331,13 @@ export function StartPage() {
                 </button>{' '}
                 ·{' '}
                 {/*
-                 * Buttons, not links, and the only ones in this row — the tours happen *here*,
-                 * over the editor this page is sitting on top of, rather than in a new tab. Each
-                 * closes the start page on the way, because a tour whose first stop is the
-                 * canvas cannot begin with a modal over it.
+                 * The tours used to be three buttons in this row and are now the first three
+                 * cards on the doors rail, which is a card each with the blurb `TOURS` already
+                 * carries — offering both would be the same three things twice in one dialog.
+                 * What is left here is what the rail cannot hold: a new tab each, and the
+                 * feedback dialog. The `?` menu still lists the tours for the visit somebody
+                 * ticked "Don't show again" on.
                  */}
-                {TOURS.map((tour) => (
-                  <span key={tour.id}>
-                    <button
-                      type="button"
-                      className="start__link-button"
-                      onClick={() => {
-                        closeStartPage()
-                        void startTour(tour.id)
-                      }}
-                    >
-                      {tour.label}
-                    </button>{' '}
-                    ·{' '}
-                  </span>
-                ))}
                 <a href={OVERVIEW_URL} target="_blank" rel="noreferrer noopener">
                   Overview
                 </a>{' '}
@@ -539,11 +528,12 @@ interface CardProps {
 
 function Card({ card, confirming, onPick, onCancel }: CardProps) {
   /*
-   * The Zoo card takes the accent rather than a category tint: it stands for a surface, not for
-   * a kind of node, and there is no category that would not be a claim about what is in there.
+   * A door takes the accent rather than a category tint: it stands for a surface, not for a kind
+   * of node, and there is no category that would not be a claim about what is behind it. It is
+   * also what makes the doors read as one rail at a glance, against four tints below them.
    */
   const tint =
-    card.kind === 'zoo'
+    card.kind === 'zoo' || card.kind === 'tour'
       ? 'var(--accent)'
       : card.kind === 'dataset'
         ? 'var(--cat-dataset)'
@@ -583,24 +573,10 @@ function Card({ card, confirming, onPick, onCancel }: CardProps) {
 /** The picture, when one exists; otherwise the art the app already draws for that thing. */
 function CardTile({ card }: { card: StartCard }) {
   if (card.image) return <img className="start-card__img" src={card.image} alt="" />
-  /*
-   * Hand-drawn, and the one place on this page that is. The "art is derived, never per-card"
-   * rule exists so that a rail which grows never ships a blank tile; this rail has exactly one
-   * card and cannot grow, and neither `nodeGlyph` nor `datasetGlyph` has anything to say about
-   * a browser of other people's workflows. A graph under a lens is the picture.
-   */
-  if (card.kind === 'zoo') {
-    return (
-      <GlyphSvg viewBox="0 0 24 24">
-        <circle cx={10.5} cy={10.5} r={7} />
-        <path d="M15.6 15.6 L20.5 20.5" />
-        <circle cx={8} cy={8.4} r={1.5} />
-        <circle cx={13.4} cy={8.4} r={1.5} />
-        <circle cx={10.7} cy={13.4} r={1.5} />
-        <path d="M9.1 9.6 L9.9 12.1" />
-        <path d="M12.4 9.7 L11.5 12.2" />
-      </GlyphSvg>
-    )
+  // The doors are the one hand-drawn set on this page; `startGlyphs.tsx` says why they have to
+  // be, and each glyph is keyed by the card id it belongs to.
+  if (card.kind === 'zoo' || card.kind === 'tour') {
+    return <GlyphSvg viewBox="0 0 24 24">{doorGlyph(card.id)}</GlyphSvg>
   }
   if (card.kind === 'dataset') {
     return <GlyphSvg viewBox="0 0 52 46">{datasetGlyph((card as DatasetCard).glyph)}</GlyphSvg>

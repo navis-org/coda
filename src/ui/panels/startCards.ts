@@ -26,6 +26,8 @@ import type { DatasetGlyph } from '../../nodes/lib/datasetFamilies'
 import { starterFamilies } from '../../nodes/lib/datasetFamilies'
 import type { WorkflowSummary } from '../../store/library'
 import { formatAgo, plural } from '../format'
+import type { TourId } from '../tour/tourState'
+import { TOURS } from '../tour/tourState'
 
 interface CardBase {
   id: string
@@ -49,7 +51,7 @@ export interface DatasetCard extends CardBase {
 }
 
 /**
- * The one card that opens something instead of loading something: the Coda Zoo browser.
+ * The Zoo browser: a card that opens something instead of loading something.
  *
  * It carries no graph and no starter, which is the whole of what distinguishes it — the Zoo
  * asks its own replace question over its own preview, so this card must not ask one on the
@@ -60,6 +62,12 @@ export interface ZooCard extends CardBase {
   kind: 'zoo'
 }
 
+/** A tour, launched over the editor this page is sitting on top of. */
+export interface TourCard extends CardBase {
+  kind: 'tour'
+  tour: TourId
+}
+
 /** A graph the user saved in this browser. See `store/library.ts`. */
 export interface WorkflowCard extends CardBase {
   kind: 'workflow'
@@ -68,7 +76,7 @@ export interface WorkflowCard extends CardBase {
   category: NodeCategory
 }
 
-export type StartCard = ExampleCard | DatasetCard | WorkflowCard | ZooCard
+export type StartCard = ExampleCard | DatasetCard | WorkflowCard | ZooCard | TourCard
 
 /**
  * The node an example's tile stands for: the last visualisation node in its graph.
@@ -126,11 +134,11 @@ export function datasetCards(): DatasetCard[] {
 }
 
 /**
- * The Zoo rail: one card, and it is a door rather than a graph.
+ * The Zoo browser's card.
  *
  * A constant rather than a builder because nothing about it is derived — there is one Zoo, and
  * what it holds is not known until the browser has fetched its index. That is also the reason
- * it does not try to be a rail of community workflows here: the index is a network fetch, and
+ * this is one card rather than a rail of community workflows: the index is a network fetch, and
  * the start page opens on every launch (see `ZooGate` for the two deferrals that keeps).
  */
 export const ZOO_CARD: ZooCard = {
@@ -139,6 +147,33 @@ export const ZOO_CARD: ZooCard = {
   title: 'Browse the Coda Zoo',
   blurb: 'Search workflows other people shared, each with a README and a preview.',
 }
+
+/**
+ * The doors: the rail of cards that open a surface rather than handing over a graph.
+ *
+ * The rail is what keeps the label below it honest. Everything on **Examples** is bundled, runs
+ * on synthetic data and replaces the canvas the moment it is clicked; nothing here does. The
+ * three tours announce what they will do to the canvas in their own first step and are undoable
+ * by the ordinary means, and the Zoo asks its replace question over the workflow being opened.
+ *
+ * Tours first, because "show me how" outranks "open somebody else's workflow" on a first visit,
+ * and in `TOURS`' own order — which puts the dashboard tour last, the one whose blurb already
+ * admits it wants a neuPrint token.
+ *
+ * Built from `TOURS` rather than restated: three surfaces launch these and each used to carry
+ * its own wording, which is what the table was introduced to stop. A module constant, unlike
+ * the other three rails, because none of it is derived from the node registry — see the note at
+ * the top of this file for why that matters there and not here.
+ */
+const TOUR_CARDS: TourCard[] = TOURS.map((tour) => ({
+  kind: 'tour',
+  id: `tour:${tour.id}`,
+  title: tour.label,
+  blurb: tour.blurb,
+  tour: tour.id,
+}))
+
+export const DOOR_CARDS: StartCard[] = [...TOUR_CARDS, ZOO_CARD]
 
 /**
  * One card per workflow saved in this browser, newest first — the order `listWorkflows` returns.

@@ -11,7 +11,7 @@
  */
 
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { App } from '../../App'
 import { MockSource } from '../../data/mock/MockSource'
@@ -25,7 +25,24 @@ import { loadStartPageDismissed } from '../../store/persistence'
 import { clearStorage, installJsdomStubs, installStorageStub } from '../../test/jsdomStubs'
 import { StartPage } from './StartPage'
 import { buildCommandItems } from './paletteItems'
-import { ZOO_CARD, datasetCards, exampleCards } from './startCards'
+import { DOOR_CARDS, ZOO_CARD, datasetCards, exampleCards } from './startCards'
+import type * as TourState from '../tour/tourState'
+import { TOURS } from '../tour/tourState'
+
+/*
+ * `startTour` is stubbed, and only `startTour`. It is the one call on this page that would
+ * `import()` driver.js — which `tour.test.tsx` deliberately never loads, since the steps are
+ * data and the library is the half that cannot go stale. `TOURS` comes through untouched,
+ * because the rail's copy is the thing being asserted.
+ */
+const tours = vi.hoisted(() => ({ started: [] as string[] }))
+vi.mock('../tour/tourState', async (importOriginal) => ({
+  ...(await importOriginal<typeof TourState>()),
+  startTour: (id: string) => {
+    tours.started.push(id)
+    return Promise.resolve()
+  },
+}))
 
 beforeAll(() => {
   installJsdomStubs({ width: 900, height: 600 })
@@ -37,6 +54,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   clearStorage()
+  tours.started.length = 0
   act(() => {
     // The store is a module singleton, so state set by one case would otherwise decide the
     // next one's answer.
@@ -49,6 +67,15 @@ afterEach(cleanup)
 
 const cardTitles = () =>
   [...document.querySelectorAll('.start-card__name')].map((el) => el.textContent)
+
+/** The card names on one rail, in the order they are drawn, found by the rail's label. */
+function deckNames(label: string): string[] {
+  const deck = [...document.querySelectorAll('.start__deck')].find((el) =>
+    el.querySelector('.start__deck-label')?.textContent?.startsWith(label),
+  )
+  if (!deck) throw new Error(`No rail called "${label}"`)
+  return [...deck.querySelectorAll('.start-card__name')].map((el) => el.textContent ?? '')
+}
 
 /** The clickable half of a card, found by the name it shows. */
 function card(title: string): HTMLElement {
@@ -69,27 +96,52 @@ describe('Start page', () => {
       for (const family of starterFamilies().filter((f) => f.sourceId !== 'mock')) {
         expect(titles).toContain(family.label)
       }
-      // Plus the one card that is not a graph at all — see the Zoo rail below.
-      expect(titles).toHaveLength(exampleCards().length + datasetCards().length + 1)
+      // Plus the doors, which are not graphs at all — see the rail below.
+      expect(titles).toHaveLength(
+        exampleCards().length + datasetCards().length + DOOR_CARDS.length,
+      )
     })
 
     /*
-     * A rail of its own rather than a card among the examples, because the two differ in the
-     * one way a first-time reader cares about: everything on the Examples rail is bundled and
-     * opens offline, and this one is a fetch of somebody else's work.
+     * A rail of its own rather than cards among the examples, because the two differ in the one
+     * way a first-time reader cares about: an example is bundled, opens offline and replaces the
+     * canvas on the click. Nothing on this rail does — which is what its label says, and what
+     * `pick` implements by returning before the replace-confirm.
      */
-    it('offers the Zoo on its own rail, as a single card', () => {
+    it('gathers the doors on one rail: every tour, then the Zoo', () => {
       render(<StartPage />)
-      const deck = [...document.querySelectorAll('.start__deck')].find((el) =>
-        el.querySelector('.start__deck-label')?.textContent?.startsWith('Browse Workflows'),
-      )
-      expect(deck).toBeTruthy()
-      const names = [...(deck?.querySelectorAll('.start-card__name') ?? [])].map(
-        (el) => el.textContent,
-      )
-      expect(names).toEqual([ZOO_CARD.title])
-      // And it is not also sitting on the Examples rail.
-      expect(exampleCards().map((c) => c.title)).not.toContain(ZOO_CARD.title)
+      expect(deckNames('Learn & browse')).toEqual([
+        ...TOURS.map((tour) => tour.label),
+        ZOO_CARD.title,
+      ])
+      // And none of them is also sitting on the Examples rail.
+      const examples = exampleCards().map((c) => c.title)
+      for (const door of DOOR_CARDS) expect(examples).not.toContain(door.title)
+    })
+
+    /*
+     * The blurbs are `TOURS`' own. Three surfaces launch these — this rail, the `?` menu and the
+     * palette — and each used to carry its own wording, which had already drifted before the
+     * table existed. A card that restates one is that drift starting again.
+     */
+    it('takes the tour copy from the one table, not a second spelling of it', () => {
+      render(<StartPage />)
+      for (const tour of TOURS) {
+        expect(card(tour.label).textContent).toContain(tour.blurb)
+      }
+    })
+
+    /*
+     * The rail is the offer now, so the row under it is not. Both together is the same three
+     * things twice in one dialog — the `?` menu is what still lists them for the visit somebody
+     * ticked "Don't show again" on.
+     */
+    it('drops the tours from the credits row, keeping the links a rail cannot hold', () => {
+      render(<StartPage />)
+      const credits = document.querySelector('.start__credits')
+      expect(credits?.textContent).not.toContain('Guided Tour')
+      expect(credits?.textContent).toContain('Give feedback')
+      expect(credits?.textContent).toContain('Node guide')
     })
 
     it('keeps the synthetic dataset off the live rail', () => {
@@ -308,6 +360,27 @@ describe('Start page', () => {
       // `openZoo` closes this page on the way in: two full-screen modals is one too many.
       expect(useGraphStore.getState().startPageOpen).toBe(false)
       expect(useGraphStore.getState().graph.meta?.name).toBe('Fetch and group connectivity by type')
+    })
+
+    /*
+     * A tour is announced and undoable — the two that touch the canvas say so in their first
+     * step and go through `setGraph` — so a yes/no here would ask about something the tour has
+     * not done yet and will explain before it does. The page has to close either way: a tour
+     * whose first stop is the canvas cannot begin under a modal.
+     */
+    it('starts a tour and closes, without asking about the graph', () => {
+      act(() => {
+        useGraphStore.getState().loadExample('partners')
+        useGraphStore.getState().openStartPage()
+      })
+      render(<StartPage />)
+
+      fireEvent.click(card('Learn to Build'))
+      expect(screen.queryByText(/Replace the current graph/)).toBeNull()
+      expect(tours.started).toEqual(['build'])
+      expect(useGraphStore.getState().startPageOpen).toBe(false)
+      // The tour empties the canvas itself, a step later and with a warning. Not here.
+      expect(useGraphStore.getState().graph.nodes.length).toBeGreaterThan(0)
     })
 
     it('does not ask before replacing an empty canvas', () => {

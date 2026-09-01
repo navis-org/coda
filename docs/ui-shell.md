@@ -562,25 +562,39 @@ starting points, the repo link and a "Don't show again" checkbox. `StartPage.tsx
 `startCards.ts`, and the `.start*` block at the end of `editor.css`.
 
 **Four rails, and the order is how often each is what somebody came for:** the user's own saved
-workflows (only when the shelf has something on it), **Browse Workflows**, **Examples**,
+workflows (only when the shelf has something on it), **Learn & browse**, **Examples**,
 **Datasets**.
 
-**The Zoo is a rail of one card, not a card on the Examples rail.** Everything under Examples is
-bundled, runs on synthetic data and opens instantly; the Zoo card goes to a public repository
-over the network and opens somebody else's document. That is the same line the toolbar's
-Examples menu draws with a rule, and the rail label is what draws it here. It is also the one
-card that opens a *surface* instead of loading a graph, which is why `pick` returns early on
-`kind: 'zoo'` before the replace-confirm: `ZooBrowser` asks that question itself, over the
-preview of the workflow being opened, which is where it can be answered. Asking on the rail
-would ask it twice, the first time about a graph nobody has chosen yet. `openZoo` closes the
-start page on its way in — two full-screen modals is one too many.
+**"Learn & browse" is the doors rail: the three tours, then the Zoo.** The line it draws is the
+one the toolbar's Examples menu draws with a rule — everything below is bundled, runs on
+synthetic data and replaces the canvas the moment it is clicked, and nothing on this rail does.
+So `pick` returns early on both kinds, *before* the replace-confirm, and for a different reason
+each: `ZooBrowser` asks that question itself over the preview of the workflow being opened,
+which is where it can be answered (asking on the rail asks it twice, the first time about a
+graph nobody has chosen yet); a tour that touches the canvas announces it in its own first step
+and goes through `setGraph`, so it is warned *and* undoable, which is more than a yes/no here
+would buy. Both close the page on the way — `openZoo` because two full-screen modals is one too
+many, a tour because its first stop is the canvas.
 
-Its tile is the **one hand-drawn glyph on the page**, and the exception is bounded: the
-"derived, never per-card" rule below exists so a rail that grows never ships a blank tile, and
-this rail has exactly one card and cannot grow. `ZOO_CARD` is a constant rather than a builder
-for the same reason, and `ZOO_CARDS` is hoisted out of the render because `Deck`'s scroll effect
-keys on its `cards` array. The tint is `--accent`, not a `--cat-*`: the card stands for a
-surface, and any category would be a claim about what is inside the Zoo.
+**The tours are cards here and no longer links in the credits row.** Offering both is the same
+three things twice in one dialog, and a card is what a first-time reader clicks: `TOURS` already
+carries a `label` and a `blurb` each, which is exactly a card. The row keeps what a rail cannot
+hold — the new-tab documents and the feedback dialog — and the `?` menu still lists the tours
+for the visit somebody ticked "Don't show again" on. `DOOR_CARDS` is built from `TOURS` rather
+than restating it, which is what that table was introduced to stop; the tour order is the
+table's, which leaves the dashboard tour last, the one whose blurb already admits it wants a
+neuPrint token.
+
+**Their art is the one hand-drawn set in the app** (`startGlyphs.tsx`), and the exception is
+bounded rather than a repeal: the "derived, never per-card" rule below exists so a rail that
+*grows* never ships a blank tile, and this rail is a fixed table of three tours plus one Zoo,
+none of them a node or a dataset with anything to derive from. `doorGlyph` is keyed by card id
+so a new tour needs one entry and nothing else, and it falls back to the Zoo's mark rather than
+to `undefined` — an empty `<svg>` wearing the right class is exactly the blank tile the rule is
+about. `DOOR_CARDS` is a module constant, unlike the other three rails, because none of it is
+derived from the node registry. The tint is `--accent`, not a `--cat-*`: a door stands for a
+surface, any category would be a claim about what is behind it, and one tint is what makes the
+rail read as a group against the four below it.
 
 **A fresh visit now lands on an empty canvas.** `graphStore` used to auto-load `EXAMPLES[0]`
 when there was no autosave. That works against the start page twice: the start page _is_ the
