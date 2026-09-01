@@ -116,6 +116,52 @@ const EMPTY: Histogram = {
 }
 
 /**
+ * Mean, median and the ends of one numeric column.
+ *
+ * Beside the binning because it is what a histogram is read *with*: a picture of a heavy-tailed
+ * column says "most of them are small" and cannot say how small, and the three numbers cannot
+ * say there is a tail. Both or neither.
+ *
+ * Only the column asked for. `describeTable` answers the same question and is memoised, but it
+ * summarises **every** column — building a `Set` of distinct printed labels for each, which on a
+ * million-link edge table is a million string allocations to read four numbers off one column.
+ * The quantile is still `boxStats`', so this and a Describe node downstream cannot come to quote
+ * two different medians of one column.
+ *
+ * Values in value space, always — the caller's log axis is a fact about the drawing, and a
+ * geometric mean printed as `mean` would be a different statistic wearing the same word.
+ */
+export interface ColumnStats {
+  count: number
+  min: number
+  median: number
+  mean: number
+  max: number
+}
+
+export function columnStats(table: TableValue, valueColumn: string): ColumnStats | undefined {
+  const data = table.data[valueColumn]
+  if (!data) return undefined
+  const numbers: number[] = []
+  let sum = 0
+  for (let row = 0; row < table.length; row++) {
+    const value = numericCell(data[row])
+    if (value === undefined) continue
+    numbers.push(value)
+    sum += value
+  }
+  if (numbers.length === 0) return undefined
+  numbers.sort((a, b) => a - b)
+  return {
+    count: numbers.length,
+    min: numbers[0]!,
+    median: quantileSorted(numbers, 0.5),
+    mean: sum / numbers.length,
+    max: numbers[numbers.length - 1]!,
+  }
+}
+
+/**
  * Freedman–Diaconis, with Sturges as the fallback it needs.
  *
  * FD sizes a bin from the interquartile range, so a column whose middle half is one value —

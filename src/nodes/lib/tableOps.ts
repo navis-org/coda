@@ -1901,6 +1901,71 @@ export function pivotTable(
 }
 
 /**
+ * The `source, target, weight` triple a matrix's non-zero cells make.
+ *
+ * A constant — the shape is decided by "a matrix has two axes and a value" rather than by the
+ * data — which is what lets a node declare this port exactly before anything has run, the same
+ * property `describeSchema` has and `matrixToTable`'s wide half deliberately does not.
+ *
+ * The names are `ROI_CONNECTIVITY_SCHEMA`'s, so the two nodes that emit a connection table long
+ * agree on what its columns are called, and they are the words `Build Network`'s own pickers use.
+ * Worth knowing that this does **not** make the wire zero-configuration: those pickers declare
+ * `default: ''`, which means "first compatible column" rather than "the one with my name", so
+ * `Source` and `Target` both resolve to `source` and `Weight` — being `optional` — stays unset.
+ * Matching names make the two dropdowns obvious rather than unnecessary.
+ *
+ * No unit, for `matrixToTable`'s reason: `MatrixValue.valueLabel` conflates a real unit
+ * ("synapses") with a fallback aggregate name ("sum_weight"), and an honest blank beats the
+ * second one sitting in a unit slot.
+ */
+export function matrixLinksSchema(): TableSchema {
+  return tableSchema(column('source', 'str'), column('target', 'str'), column('weight', 'f64'))
+}
+
+/**
+ * A matrix as a long edge list — one row per **non-zero** cell, row-major.
+ *
+ * The other direction from `matrixToTable` above, and the one a graph wants: `Build Network`
+ * reads `source`, `target` and `weight` off a table, and until this existed a connection matrix
+ * was a dead end for every node that thinks in links.
+ *
+ * **Zero cells are dropped, and that is the whole judgement in this function.** It looks like it
+ * contradicts `core.unpivot`, which keeps zeros on the stated grounds that "0 is a value somebody
+ * may have measured" — and the two really are answering different questions. Unpivot is handed an
+ * arbitrary wide table and cannot know what a zero meant. Here the zero was *manufactured*: a
+ * matrix cell has to hold something, so absence became 0 on the way in, which is exactly what
+ * `neuron.roiConnectivity` says as it does the reshape in the other direction ("in a *table*
+ * those rows are rightly absent — nothing was measured — but a matrix cell has to hold something,
+ * and 0 is what 'no connection found' means once a grid exists"). Dropping them going back is
+ * restoring the form the data had, not discarding measurements.
+ *
+ * The size argument is the same fact from the other end. A matrix is dense by construction, so
+ * keeping the zeros would emit `rows × cols` rows — 250,000 for a 500 × 500 adjacency, nearly all
+ * of them zero — and `Build Network` would turn that into a complete graph with a zero-weight
+ * link between every pair. That is not a large answer; it is a different one.
+ *
+ * Row-major and in the matrix's own axis order, so the result is deterministic: this value
+ * reaches a provenance key (invariant 4), and rows that reshuffled between runs would invalidate
+ * everything downstream for nothing.
+ */
+export function matrixToLinks(matrix: MatrixValue): TableValue {
+  const source: ColumnData = []
+  const target: ColumnData = []
+  const weight: ColumnData = []
+  const width = matrix.colLabels.length
+  for (let r = 0; r < matrix.rowLabels.length; r++) {
+    for (let c = 0; c < width; c++) {
+      const value = matrix.values[r * width + c] ?? 0
+      if (value === 0) continue
+      source.push(matrix.rowLabels[r] ?? '')
+      target.push(matrix.colLabels[c] ?? '')
+      weight.push(value)
+    }
+  }
+  return makeTable(matrixLinksSchema(), { source, target, weight })
+}
+
+/**
  * A matrix as an ordinary wide table: the row labels in `labelColumn`, then one numeric
  * column per column label, in the matrix's own order.
  *

@@ -26,7 +26,8 @@
  * of that, reached by both.
  */
 
-import type { TableSchema } from '../../core/types'
+import type { ColumnSchema, TableSchema } from '../../core/types'
+import { column, findColumn, tableSchema } from '../../core/types'
 import type { ColumnData, NetworkValue, TableValue } from '../../core/values'
 import { getColumn, makeTable, selectRows } from '../../core/values'
 
@@ -66,7 +67,54 @@ export const NO_FILTER: NetworkFilter = { minWeight: 0, topNodes: 0, hideIsolate
  * Fixing it properly means `NetworkValue` carrying which of its columns are graph-derived, and
  * it has no field for that today.
  */
-const ROLLUPS = ['degreeIn', 'degreeOut', 'weightIn', 'weightOut'] as const
+export const ROLLUPS = ['degreeIn', 'degreeOut', 'weightIn', 'weightOut'] as const
+
+/**
+ * A node table's schema with derived columns folded in — kept where they already are, appended
+ * where they are new.
+ *
+ * The generalisation of `recomputeRollups` below, which does the same thing for a fixed list of
+ * four and only where they are already present. `net.metrics` and `net.centrality` both need the
+ * appending half, and written per node it was the same four lines twice with a different column
+ * list — the kind of pair that drifts silently, because invariant 3's schema/value agreement is
+ * exactly what it holds.
+ *
+ * **Position matters more than it looks.** A column that moves to the end on every run is a table
+ * whose columns reorder when nothing about it changed, which a reader reads as the data having
+ * changed. And a name is written *over*, never beside: two `degreeIn` columns give a picker
+ * downstream two answers to one question, and the second is the stale one.
+ *
+ * With no incoming schema the answer is `id` plus the derived columns, which is what a node whose
+ * input has not arrived can honestly promise.
+ */
+export function foldNodeColumns(
+  nodes: TableSchema | undefined,
+  wanted: readonly ColumnSchema[],
+): TableSchema {
+  if (!nodes) return tableSchema(column('id', 'str'), ...wanted)
+  return tableSchema(
+    ...nodes.columns.map((existing) => wanted.find((c) => c.name === existing.name) ?? existing),
+    ...wanted.filter((c) => !findColumn(nodes, c.name)),
+  )
+}
+
+/**
+ * The value half of `foldNodeColumns`, which invariant 3 requires to travel with it.
+ *
+ * `id` is deliberately never among the folded columns. The values were *read* from that column,
+ * so writing them back is a no-op on a well-formed network and a silent rewrite of somebody's
+ * join key on one whose ids are not strings — the conversion invariant 8 exists to stop happening
+ * quietly.
+ */
+export function withNodeColumns(
+  nodes: TableValue,
+  wanted: readonly ColumnSchema[],
+  values: Record<string, ColumnData>,
+): TableValue {
+  const data: Record<string, ColumnData> = { ...nodes.data }
+  for (const col of wanted) data[col.name] = values[col.name]!
+  return makeTable(foldNodeColumns(nodes.schema, wanted), data, nodes.kind)
+}
 
 function hasColumn(schema: TableSchema, name: string): boolean {
   return schema.columns.some((c) => c.name === name)
@@ -424,7 +472,26 @@ export function componentsOfEdges(
     near[from]!.push(to)
     near[to]!.push(from)
   }
+  return componentsOfNeighbours(count, (u) => near[u]!)
+}
 
+/**
+ * The same walk and the same ordering, over a neighbour lookup somebody already has.
+ *
+ * Split out when `net.metrics` arrived, because that node holds an undirected CSR of exactly
+ * this graph by the time it wants components — and reaching `connectedComponents` from there
+ * rebuilt the id list, a second `Map`, and one two-element array per link, all to arrive at the
+ * adjacency it was already sitting on. On a million-link network that is the most expensive
+ * thing on a `cheap` node.
+ *
+ * A second *entry point*, deliberately not a second implementation: the ordering contract above
+ * is what makes "colour by component" and the prefuse packing agree, and it was written out
+ * twice once before and they disagreed. Everything below this line runs for both callers.
+ */
+export function componentsOfNeighbours(
+  count: number,
+  neighbours: (node: number) => Iterable<number>,
+): number[] {
   // Breadth-first from every unvisited node. Iterative rather than recursive: a connectome
   // component is routinely tens of thousands of nodes deep, which is a stack overflow.
   const raw = new Array<number>(count).fill(-1)
@@ -437,7 +504,7 @@ export function componentsOfEdges(
     const queue = [start]
     for (let head = 0; head < queue.length; head++) {
       found++
-      for (const other of near[queue[head]!]!) {
+      for (const other of neighbours(queue[head]!)) {
         if (raw[other] !== -1) continue
         raw[other] = id
         queue.push(other)

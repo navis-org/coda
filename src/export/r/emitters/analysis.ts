@@ -3,7 +3,7 @@
 // An emitter may reach `src/ui` — see the notebook emitter for why the palette lives there.
 import { MAX_SERIES } from '../../../ui/colors'
 import { clusterColor } from '../../../ui/encoding'
-import { rCol as col, rStr, rVector } from '../r'
+import { rCol as col, rStr, rValue, rVector } from '../r'
 import type { LANDMARK_SIDES } from '../../../nodes/transform/landmarkTransform'
 import { LANDMARK_AXES, landmarkParamId } from '../../../nodes/transform/landmarkTransform'
 import { matchParamsFrom } from '../../../nodes/lib/matchOps'
@@ -14,6 +14,7 @@ import { portIdAt } from '../../../core/ports'
 import { compareParamsFrom } from '../../../nodes/lib/edgeComparison'
 import { repeatParamId } from '../../../nodes/lib/repeatParams'
 import { resolveDatasetNames } from '../../../nodes/analysis/compareConnectivity'
+import { centralityOptions } from '../../../nodes/analysis/networkCentrality'
 import { registerEmitter, registerHelper } from '../registry'
 import type { EmitContext } from '../types'
 import { neuronIds, selectionIds } from './common'
@@ -57,6 +58,107 @@ registerEmitter('net.build', (ctx) => {
     `)`,
   )
   return lines
+})
+
+// ---------------------------------------------------------------------------
+// Network Metrics
+// ---------------------------------------------------------------------------
+
+/**
+ * The graph statistics, out of `coda_network_metrics`.
+ *
+ * A helper rather than inline lines, on `out.describe`'s model: the work is a projection and a
+ * dozen igraph calls, and a generated cell is not where somebody should have to read why the
+ * self-loops leave before the triangles are counted.
+ *
+ * The pass-through gets the columns written onto it — that is what the node does on the canvas,
+ * and what makes a downstream encoding a column picker rather than a second node. Assigned
+ * positionally against `V(g)`, because the helper built its rows by walking that same order.
+ */
+registerEmitter('net.metrics', (ctx) => {
+  const src = ctx.wired('in')
+  ctx.library('igraph')
+  ctx.helper('coda_network_metrics')
+
+  const out = ctx.output('out')
+  const nodes = ctx.output('nodes')
+  const summary = ctx.output('summary')
+
+  return [
+    `${out} <- ${src}`,
+    `.metrics <- coda_network_metrics(${out})`,
+    `${nodes} <- .metrics$nodes`,
+    `${summary} <- .metrics$summary`,
+    `for (.col in setdiff(names(${nodes}), "id")) {`,
+    `  ${out} <- set_vertex_attr(${out}, .col, value = ${nodes}[[.col]])`,
+    `}`,
+    // A bare name on the last line prints the frame, and it is the summary rather than the
+    // pass-through, because the summary is what this node is for.
+    summary,
+  ]
+})
+
+// ---------------------------------------------------------------------------
+// Network Centrality
+// ---------------------------------------------------------------------------
+
+/**
+ * Betweenness, closeness, PageRank, eigenvector and Louvain, out of `coda_network_centrality`.
+ *
+ * Two `NOTE`s, and both are about something igraph cannot do rather than about a preference.
+ * Sampling has no equivalent — igraph's `cutoff` bounds path *length* rather than drawing
+ * pivots — so a document exported with Sample set runs the exact sweep, which is slower than
+ * the canvas and more precise than it. And igraph's Louvain is undirected only, so a directed
+ * graph is collapsed for the community pass; the modularity that comes back is the undirected
+ * one, which is a different number from the canvas's rather than a rounding of it.
+ */
+registerEmitter('net.centrality', (ctx) => {
+  const src = ctx.wired('in')
+  const options = centralityOptions(ctx.params)
+  ctx.library('igraph')
+  ctx.helper('coda_network_centrality')
+
+  const out = ctx.output('out')
+  const nodes = ctx.output('nodes')
+  const summary = ctx.output('summary')
+  // Every option but `samples`: igraph has no pivot sampling, which the NOTE below says out loud.
+  const passed = Object.entries(options).filter(([key]) => key !== 'samples')
+
+  return [
+    ...(options.samples > 0 && (options.betweenness || options.closeness)
+      ? ctx.note(
+          `The canvas sampled ${options.samples} source nodes for the shortest-path sweep. ` +
+            'igraph has no pivot sampling — its `cutoff` bounds path length instead — so this ' +
+            'runs the exact sweep: a more precise answer, and a considerably slower one on a ' +
+            'large graph.',
+        )
+      : []),
+    ...(options.communities
+      ? ctx.note(
+          'igraph`s Louvain is undirected only, so the community pass runs on the collapsed ' +
+            'graph. The partition and the modularity are the undirected ones.',
+        )
+      : []),
+    `${out} <- ${src}`,
+    `.central <- coda_network_centrality(`,
+    `  ${out},`,
+    /*
+     * The arguments are `CentralityOptions`' own keys rather than nine hand-written lines that
+     * happen to match them — see the Python twin. `rValue` knows how a boolean is spelled, and
+     * the trailing comma has to go on the last one only, which is what the index test is for.
+     */
+    ...passed.map(
+      ([key, value], i) =>
+        `  ${key} = ${rValue(value)}${i === passed.length - 1 ? '' : ','}`,
+    ),
+    `)`,
+    `${nodes} <- .central$nodes`,
+    `${summary} <- .central$summary`,
+    `for (.col in setdiff(names(${nodes}), "id")) {`,
+    `  ${out} <- set_vertex_attr(${out}, .col, value = ${nodes}[[.col]])`,
+    `}`,
+    nodes,
+  ]
 })
 
 // ---------------------------------------------------------------------------

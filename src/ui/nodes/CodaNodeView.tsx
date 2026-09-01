@@ -90,6 +90,10 @@ const SELF_DRAWING_NODE_TYPES = new Set([
   'out.viewer3d',
   'out.neuroglancer',
   'out.profile',
+  // Draws its input's topology, so it has a card one scheduler step before its own value —
+  // and reading the input rather than the output is also what makes the card share the run's
+  // memoised metrics instead of computing a second set. See `ValuePreview`'s branch.
+  'net.metrics',
   // The two with no outputs at all, so they could never draw from anything else.
   'out.datasetSummary',
   'out.rois',

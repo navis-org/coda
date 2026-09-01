@@ -382,6 +382,7 @@ registerEmitter('neuron.adjacency', (ctx) => {
   const targets = ctx.wired('targets')
   ctx.library('neuprintr')
   const out = ctx.output('matrix')
+  const links = ctx.output('links')
 
   const lines = [
     `${out} <- neuprint_get_adjacency_matrix(`,
@@ -389,6 +390,13 @@ registerEmitter('neuron.adjacency', (ctx) => {
     `  outputids = ${neuronIds(targets)},`,
     `  conn = ${conn}`,
     `)`,
+    ``,
+    // The long half, melted off the matrix and stripped of its zeros — `matrixToLinks`' rule,
+    // for its reason: a matrix cell is 0 where nothing was found, and keeping those would make
+    // a complete graph of zero-weight links. `as.table` names the axes Var1/Var2/Freq.
+    `${links} <- as.data.frame(as.table(as.matrix(${out})), stringsAsFactors = FALSE)`,
+    `names(${links}) <- c("source", "target", "weight")`,
+    `${links} <- ${links}[${links}$weight != 0, ]`,
   ]
   if (ctx.params.groupByType !== false) {
     lines.push(

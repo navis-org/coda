@@ -6516,6 +6516,47 @@ details[open] > summary.tile__label {
   cursor: pointer;
 }
 
+/*
+ * The orientation switch, beside the bin count.
+ *
+ * A word next to the box rather than the box alone: a heading already holding two dropdowns and
+ * a number field has no room for a control whose meaning is only in its tooltip.
+ */
+.tile__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 9px;
+  color: var(--text-muted);
+  text-transform: none;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+.tile__toggle input {
+  margin: 0;
+  cursor: pointer;
+}
+
+/*
+ * The bin count, beside the distribution's column picker.
+ *
+ * Sized for three digits and no more: the ceiling is 80, and a field wide enough for a date is
+ * a field a reader expects to hold one. The spinner is left on — this is a value somebody
+ * nudges rather than types, and one step is one bar.
+ */
+.tile__bins {
+  width: 40px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-3);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 9px;
+  text-transform: none;
+  letter-spacing: 0;
+  padding: 1px 2px;
+}
+
 /* --- key/value facts --- */
 
 .tile__facts {
@@ -6633,6 +6674,57 @@ details[open] > summary.tile__label {
 
 .tile__bar-detail {
   color: var(--text-muted);
+}
+
+/* --- the metrics card's scatter --- */
+
+/*
+ * A fixed height rather than an aspect ratio, with `preserveAspectRatio="none"` on the element.
+ *
+ * The two axes are unrelated quantities — degree against clustering, betweenness against
+ * strength — so there is no square to preserve, and forcing one would leave most of a full-width
+ * tile as margin. Height in px because this tile sits in a grid whose rows are content-sized:
+ * a percentage would resolve against a track the SVG is itself defining.
+ */
+/*
+ * `Columns` as a histogram rather than as a completeness chart.
+ *
+ * Three of its numbers are sized for six named regions and are wrong for forty bins, and all
+ * three are the shared primitive's defaults rather than mistakes in it — which is why this is a
+ * wrapper class here and not a prop there.
+ *
+ * **Bars touch.** `max-width` on the cell and on the fill keeps six regions a bar's width apart
+ * instead of six slivers across a metre of tile; a histogram's bars are contiguous by
+ * convention, and separated ones read as a bar chart of unrelated categories. 1px of gap, which
+ * is the surface showing through rather than a space.
+ *
+ * **Shorter, because the tile is the last thing on a scrolling card.** The band and the rotated
+ * label track come to about 200px against the rows' 140, which put the axis labels below the
+ * fold — an axis nobody can see is worse than a shorter plot.
+ */
+.metrics__columns .tile__column-cell,
+.metrics__columns .tile__column-fill {
+  max-width: none;
+}
+.metrics__columns .tile__columns-row,
+.metrics__columns .tile__columns-band {
+  gap: 1px;
+}
+.metrics__columns .tile__column-fill {
+  border-radius: 1px 1px 0 0;
+}
+.metrics__columns .tile__columns-band {
+  height: 88px;
+}
+.metrics__columns .tile__column-key {
+  height: 44px;
+}
+
+.metrics__scatter {
+  display: block;
+  width: 100%;
+  height: 120px;
+  margin: 2px 0 6px;
 }
 
 /* --- split meter --- */

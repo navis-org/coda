@@ -259,6 +259,33 @@ Area-specific — the rule, then the doc that holds why:
   set **removes** both capabilities where it *adds* `paths`: a file of `pre, post, weight` has no
   regions, and its weights are not the population the backend's totals count.
   See [docs/nodes.md](docs/nodes.md) and [docs/backends.md](docs/backends.md).
+- **The graph metrics are two nodes because `cost` is a property of a node type.** `net.metrics`
+  is `cheap` and every measure on it is O(V + E); `net.centrality` is `expensive` and runs only on
+  Run. One node holding both would have to be `expensive`, and then reading a graph's node count
+  and density would need a Run — the one thing about this pair that has to be instant. They
+  compose: Centrality writes its columns onto the network, so a Metrics card downstream plots
+  betweenness beside degree. Four rules, each of which the obvious version gets wrong.
+  **A self-loop counts towards degree and towards nothing else** — it cannot close a triangle,
+  cannot join two components, and in density would let a graph exceed 1 — so every structural
+  measure runs on the undirected simple projection; that is also where Coda and networkx part
+  company, and *both* places it bites were found by running the emitted helpers rather than
+  reading them (`overall_reciprocity` divides by every edge, `eigenvector_centrality` keeps loops,
+  so one heavy autapse scores 1.0 while every real hub rounds to zero). The metric columns are
+  written **over** the ones a network already had, never beside, because `degreeIn_1` next to
+  `degreeIn` gives a picker two answers and the second is the stale one. **Sampling estimates a
+  mean and refuses to estimate a maximum**: `meanPathLength` is scaled by `n/k`, `diameter` is
+  null, because a sampled maximum is a lower bound with no error bar. And **parallel links are
+  merged, summing weights, before any path is counted** — Brandes adds `sigma` once per copy, so
+  four rows for one pair inflate every betweenness downstream with nothing looking unusual. The
+  numbers are pinned against networkx by a checked-in fixture and the exporters by
+  `pnpm probe:netexport`, which runs Coda and both generated helpers over one graph. One trap in
+  the wiring, because it cost nothing to write and would have shipped silent: **`networkMetrics`
+  is memoised and the card calls it too**, from the node's input — so a warning raised *inside*
+  it goes to whichever caller arrived first, which on the ordinary chain is the card, with no
+  warner. The cost and the drop count ride on the result and `evaluate` warns from them, which is
+  `out.describe`'s arrangement.
+  See [docs/nodes.md](docs/nodes.md), [docs/viewers.md](docs/viewers.md) and
+  [docs/export.md](docs/export.md).
 - **A dataset-level filter is not a filter row, the row wins, and the filters OR.** The
   population checkboxes on a neuPrint dataset node are **OR-ed** — a second ticked box lets
   *more* rows through. `typed` matches column names **ending** in `type`. `findNeuronsCypher`

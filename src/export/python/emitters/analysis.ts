@@ -7,7 +7,7 @@
 // transcribed into two exporters — the same licence `out.scatter`'s emitter takes.
 import { MAX_SERIES } from '../../../ui/colors'
 import { clusterColor } from '../../../ui/encoding'
-import { pyList, pyStr } from '../py'
+import { pyList, pyStr, pyValue } from '../py'
 import type { LANDMARK_SIDES } from '../../../nodes/transform/landmarkTransform'
 import { LANDMARK_AXES, landmarkParamId } from '../../../nodes/transform/landmarkTransform'
 import { matchParamsFrom } from '../../../nodes/lib/matchOps'
@@ -20,6 +20,7 @@ import { portIdAt } from '../../../core/ports'
 import { compareParamsFrom } from '../../../nodes/lib/edgeComparison'
 import { repeatParamId } from '../../../nodes/lib/repeatParams'
 import { resolveDatasetNames } from '../../../nodes/analysis/compareConnectivity'
+import { centralityOptions } from '../../../nodes/analysis/networkCentrality'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
 import { pySelection, selectionIds } from './common'
@@ -81,6 +82,113 @@ registerEmitter('net.build', (ctx) => {
   }
 
   return lines
+})
+
+// ---------------------------------------------------------------------------
+// Network Metrics
+// ---------------------------------------------------------------------------
+
+/**
+ * The graph statistics, out of `coda_network_metrics`.
+ *
+ * A helper rather than inline lines, on `out.describe`'s model and for its reason: the work is
+ * a projection and a dozen networkx calls, and a notebook cell is not where somebody should
+ * have to read why self-loops leave before the triangles are counted.
+ *
+ * The pass-through gets the columns written onto it, which is what the node does on the canvas
+ * — that is what makes `size by clustering` in a viewer downstream a column picker rather than
+ * a second node. `zip` against `G.nodes()` rather than a join on the `id` column, because the
+ * helper built its rows by walking that same iterator: a node id in networkx is whatever object
+ * the frame was built from, and matching on the string form would miss every integer id.
+ */
+registerEmitter('net.metrics', (ctx) => {
+  const src = ctx.wired('in')
+
+  ctx.require('networkx')
+  ctx.require('pandas')
+  ctx.helper('coda_network_metrics')
+
+  const out = ctx.output('out')
+  const nodes = ctx.output('nodes')
+  const summary = ctx.output('summary')
+
+  return [
+    `${out} = ${src}`,
+    `${nodes}, ${summary} = coda_network_metrics(${out})`,
+    `nx.set_node_attributes(`,
+    `    ${out},`,
+    `    dict(zip(${out}.nodes(), ${nodes}.drop(columns=['id']).to_dict('records'))),`,
+    `)`,
+    // A bare name on the last line is how a notebook displays a frame — the summary rather
+    // than the pass-through, because the summary is what this node is for.
+    summary,
+  ]
+})
+
+// ---------------------------------------------------------------------------
+// Network Centrality
+// ---------------------------------------------------------------------------
+
+/**
+ * Betweenness, closeness, PageRank, eigenvector and Louvain, out of `coda_network_centrality`.
+ *
+ * Every measure is networkx's own, and that is the whole reason this emitter is short:
+ * `scripts/probe-network-metrics.py` pins Coda's implementations against these exact functions,
+ * so the notebook is the thing the canvas was checked against rather than a second
+ * implementation that could drift from it.
+ *
+ * The two `NOTE`s are the differences that would otherwise be silent. Under sampling, the
+ * summary's path statistics are absent here and present on the canvas — networkx's `k` does not
+ * expose the distances its pivots visited, and computing them exactly is the cost sampling was
+ * chosen to avoid. And communities come from a different Louvain implementation, so the
+ * partition can differ while the modularity matches.
+ */
+registerEmitter('net.centrality', (ctx) => {
+  const src = ctx.wired('in')
+  const options = centralityOptions(ctx.params)
+
+  ctx.require('networkx')
+  ctx.require('pandas')
+  ctx.helper('coda_network_centrality')
+
+  const out = ctx.output('out')
+  const nodes = ctx.output('nodes')
+  const summary = ctx.output('summary')
+
+  return [
+    ...(options.samples > 0 && (options.betweenness || options.closeness)
+      ? ctx.note(
+          'Betweenness is sampled from ' +
+            `${options.samples} source nodes, as on the canvas. The summary's mean path ` +
+            'length and diameter are left empty here: networkx does not hand back the ' +
+            'distances its pivots visited, and sweeping every pair to get them is the cost ' +
+            'sampling was chosen to avoid.',
+        )
+      : []),
+    ...(options.communities
+      ? ctx.note(
+          "Communities come from networkx's Louvain rather than graphology's, so the " +
+            'partition can differ from the canvas while scoring the same modularity.',
+        )
+      : []),
+    `${out} = ${src}`,
+    `${nodes}, ${summary} = coda_network_centrality(`,
+    `    ${out},`,
+    /*
+     * The kwargs are `CentralityOptions`' own keys, not ten hand-written lines that happen to
+     * match them. The helper's signature is that interface by construction, so an option added
+     * to the node and forgotten here is the failure this spelling removes — and `pyValue`
+     * already knows how a boolean and a number are written, which is where `True`/`False` came
+     * from before it was a local `flag`.
+     */
+    ...Object.entries(options).map(([key, value]) => `    ${key}=${pyValue(value)},`),
+    `)`,
+    `nx.set_node_attributes(`,
+    `    ${out},`,
+    `    dict(zip(${out}.nodes(), ${nodes}.drop(columns=['id']).to_dict('records'))),`,
+    `)`,
+    nodes,
+  ]
 })
 
 // ---------------------------------------------------------------------------

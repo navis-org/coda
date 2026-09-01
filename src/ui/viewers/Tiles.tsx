@@ -128,7 +128,18 @@ export function Facts({ rows }: { rows: Array<[string, CellValue | undefined]> }
 }
 
 export interface BarRow {
+  /**
+   * Identity, and the label unless `label` says otherwise.
+   *
+   * The two were one field until the metrics card wanted histogram bins, where they genuinely
+   * differ: two adjacent bins of a heavy-tailed column round to the same printed range at the
+   * low end, so the text repeats while the rows are distinct. React reuses a row's DOM for
+   * whatever shares its key, so one bin was drawing another's count — and disambiguating the
+   * *key* put `3:` in front of every label on screen.
+   */
   key: string
+  /** What to print, where that is not the key. */
+  label?: string
   title?: string
   /** 0..1 of the tile's width. */
   fraction: number
@@ -142,7 +153,7 @@ export function Bars({ rows, color }: { rows: BarRow[]; color: string }) {
     <div className="tile__bars">
       {rows.map((row) => (
         <div key={row.key} className="tile__bar" title={row.title ?? row.key}>
-          <span className="tile__bar-key">{row.key}</span>
+          <span className="tile__bar-key">{row.label ?? row.key}</span>
           <span className="tile__bar-track">
             <span
               className="tile__bar-fill"
@@ -250,8 +261,15 @@ const CIRCUMFERENCE = 2 * Math.PI * RADIUS
 // ---------------------------------------------------------------------------
 
 export interface ColumnBar {
+  /**
+   * Identity, not text — `BarRow`'s split, for `BarRow`'s reason. Two adjacent histogram bins
+   * round to the same printed range at the low end of a heavy tail, and React reuses a cell's
+   * DOM for whatever shares its key, so one bin would draw another's count.
+   */
   key: string
-  /** 0..1 of the axis. The axis is the *scale*, not the largest bar — see below. */
+  /** What to print under the column, where that is not the key. */
+  label?: string
+  /** 0..1 of the axis. What the axis *is* is the caller's — see below. */
   fraction: number
   value: string
   title?: string
@@ -266,13 +284,18 @@ export interface ColumnReference {
 }
 
 /**
- * A vertical bar chart on a fixed 0–100% axis.
+ * A vertical bar chart on an axis the caller decides.
  *
- * Fixed rather than scaled to the tallest bar, which is the whole reason this is not `Bars`
- * rotated. Completeness is a *fraction of something*, so 90% has to look like nine tenths of the
- * plot — normalising against the best region would draw the best one full height whether it were
- * 90% or 9%, and a reader comparing two datasets would be comparing two different scales with
- * nothing on screen saying so.
+ * **A quantity with a ceiling is drawn against its ceiling.** Completeness is a *fraction of
+ * something*, so 90% has to look like nine tenths of the plot — normalising against the best
+ * region would draw the best one full height whether it were 90% or 9%, and a reader comparing
+ * two datasets would be comparing two different scales with nothing on screen saying so. That is
+ * the rule, and it is why this is not `Bars` rotated.
+ *
+ * A **count** has no such ceiling, so the Network Metrics histogram scales its bars against the
+ * tallest one — which is not the same mistake, because there is no external scale left to
+ * misrepresent and the tallest bar is the only thing a count can be a fraction of. The rule
+ * forbids inventing a scale for a quantity that already has one, not having a scale at all.
  *
  * **Three aligned bands, not one element per column**, and that structure is load-bearing twice
  * over. Values, tracks and labels are three flex rows of equally-sized cells, so the tracks all
@@ -339,8 +362,12 @@ export function Columns({
 
         <div className="tile__columns-row">
           {bars.map((bar) => (
-            <span key={bar.key} className="tile__column-cell tile__column-key" title={bar.key}>
-              {bar.key}
+            <span
+              key={bar.key}
+              className="tile__column-cell tile__column-key"
+              title={bar.title ?? bar.label ?? bar.key}
+            >
+              {bar.label ?? bar.key}
             </span>
           ))}
         </div>

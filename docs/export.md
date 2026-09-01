@@ -391,6 +391,58 @@ one that needed the branch.
 makes below and for the same reason — the column says what the frame in front of the reader
 actually holds.
 
+### The graph metrics, and the probe that runs both languages
+
+`net.metrics` and `net.centrality` export real cells rather than a `TODO`, and they are the easiest
+case in this file to justify: the graph is already a networkx `DiGraph` by the time either is
+reached (`net.build`'s emitter builds one), igraph is already the R side's graph library, and every
+measure on both nodes exists in both packages. Nothing had to be reimplemented — Coda's own
+implementations are *pinned against networkx* by a checked-in fixture, so the notebook is the thing
+the canvas was checked against rather than a second implementation that could drift from it.
+
+One helper per node per language, for `coda_describe`'s reason: the work is a projection and a
+dozen library calls, and a generated cell is not where somebody should have to read why the
+self-loops leave before the triangles are counted.
+
+**Three of igraph's answers are converted rather than copied**, and each would be a plausible wrong
+number if it were not. `normalized = TRUE` divides an undirected graph's betweenness by
+`(n-1)(n-2)/2` where Coda and networkx divide by `(n-1)(n-2)`, so the helper asks for the raw score
+and scales it — doubling on an undirected graph, because igraph counts each pair once where Brandes
+counts it twice. `eigen_centrality` scales the vector to a maximum of 1 where the other two scale to
+unit L2. And `reciprocity()` counts self-loops in its denominator, which Coda does not.
+
+**Two differences are real and are `NOTE`s in the document rather than papered over.** Sampling has
+no igraph equivalent — its `cutoff` bounds path *length* rather than drawing pivots — so an R
+document exported with `Sample` set runs the exact sweep, which is slower than the canvas and more
+precise than it; and under sampling the Python document leaves the summary's path statistics empty,
+because networkx will not say which distances its pivots visited and sweeping every pair to get
+them is the cost sampling was chosen to avoid. Communities are a third: both documents use their
+own Louvain, so a partition can differ from the canvas while scoring the same modularity.
+
+**`pnpm probe:netexport` is what makes any of that a fact rather than a claim.** Three steps:
+`scripts/probe-network-export.ts` runs Coda's own implementation over one seeded graph and writes
+its answers to JSON; `probe-network-export.py` execs the helper cell *out of the golden notebook*
+and compares; `probe-network-export.R` does the same with the golden `.Rmd`. 586 comparisons each,
+aligned on `id` rather than by position — `from_pandas_edgelist` orders a graph's nodes by the edge
+list, so a positional comparison would report forty mismatches for a graph the two agree about
+completely.
+
+It earned its place on the first run. The Python helper disagreed with the canvas on two numbers,
+both because networkx and Coda part company over self-loops: `overall_reciprocity` divides by every
+edge including the loops, and `eigenvector_centrality` keeps them — so one heavy autapse became an
+eigenvector of its own, scoring 1.0 while every real hub in the graph rounded to zero. Reading the
+emitter did not catch either. Hence the probe graph's shape: a self-loop, an isolated node,
+reciprocal pairs, two components, weights over two orders of magnitude — and deliberately **no**
+parallel links, because the notebook's graph comes out of `from_pandas_edgelist` over grouped links
+and cannot hold them, so a probe graph with parallels would be comparing two different graphs and
+calling the difference a bug.
+
+The third finding was smaller and worth recording anyway: `nx.pagerank` stops at `tol=1e-6` by
+default, about five decimal places short of converged. Close enough for a ranking, not close enough
+to pin an implementation against — so both the fixture and the helper pass an explicit `tol`, and
+the probe's tolerance for the two power iterations is 1e-8, which is where the two stopping rules
+actually land rather than a number anybody picked.
+
 ### The CAVE half of the notebook exporter
 
 `src/export/python/emitters/cave.ts` and `caveHelpers.ts`. A FlyWire graph now exports as a

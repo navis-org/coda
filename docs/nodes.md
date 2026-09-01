@@ -338,6 +338,195 @@ hover to tell apart. The type id moved with the label, which broke every stored 
 acceptable only because Coda is pre-release with one user, and the last time it will be: a rename
 after this needs a load-time alias kept forever.
 
+## Adjacency: a matrix, and the same connections as links
+
+`neuron.adjacency` emits **two outputs describing one fetch**, which is `neuron.roiConnectivity`'s
+arrangement and `core.pivot`'s before it. `Matrix` is what the Heatmap takes; `Links` is the same
+connections long — `source`, `target`, `weight` — so they sort, filter, join and export.
+
+The `Links` port was added because a connection matrix was otherwise a **dead end for everything
+that thinks in links**. Of the ten nodes that touch a `Matrix`, the four that consume one produce
+a matrix (`Normalize`, `Heatmap`), a tree (`Linkage`), or a thresholded top-N table
+(`NBLAST Matches`) — none an edge list. So `Adjacency → Build Network` was unreachable, and with
+it every graph metric, every network layout and the whole `net.metrics` / `net.centrality` pair.
+
+**`Links` is derived from the matrix rather than fetched again**, so the two cannot disagree about
+labels, grouping or weights — ROI Connectivity's rule, applied in the opposite direction (it
+reshapes its long fetch *into* a matrix; this reshapes its matrix fetch *into* long).
+
+**Only the non-zero cells**, and that is the whole judgement in `matrixToLinks`. It looks like it
+contradicts `core.unpivot`, which keeps zeros because "0 is a value somebody may have measured" —
+and the two are answering different questions. Unpivot is handed an arbitrary wide table and
+cannot know what a zero meant. Here the zero was *manufactured*: a matrix cell has to hold
+something, so absence became 0 on the way in, which is exactly what ROI Connectivity says as it
+does the reshape the other way ("in a *table* those rows are rightly absent — nothing was measured
+— but a matrix cell has to hold something"). Dropping them going back restores the form the data
+had. The size argument is the same fact from the other end: a matrix is dense by construction, so
+keeping the zeros would emit `rows × cols` rows — 250,000 for a 500 × 500 adjacency, nearly all
+zero — and `Build Network` would turn that into a complete graph with a zero-weight link between
+every pair. That is not a large answer; it is a different one.
+
+**Matching column names buy recognition, not resolution**, and this is worth knowing because the
+opposite assumption costs a wrong graph rather than an error. `net.build`'s `Source` and `Target`
+declare `default: ''`, which the resolver reads as "first compatible column" and not as "the
+column with my name" — so on this table both land on `source`, every link becomes a self-loop, and
+the network comes out with no edges between anything. `Weight` is `optional`, so empty stays empty
+and every link weighs 1 rather than its synapse count. Set Target and Weight on Build Network.
+`adjacency.test.ts` pins that behaviour, so if `net.build` ever gains named defaults the test is
+what says the wire became zero-configuration.
+
+**The exporters bind both ports**, and the two languages get there differently. Python emits the
+long half from `_conn` — `fetch_adjacencies`' own connection table, grouped by the same key —
+rather than melting the matrix back down, and the two agree because a connection table has no zero
+rows to drop. R melts `neuprint_get_adjacency_matrix`'s result and strips the zeros, which is
+`matrixToLinks` transcribed.
+
+## Network Metrics and Network Centrality: two nodes because cost is a node property
+
+`net.metrics` answers "what shape is this graph?" and `net.centrality` answers "which node
+matters?". They are one subject and two nodes, and the split is not tidiness — it is invariant 6
+read literally. `cost` is a property of a node **type**, not of a run, so a single node holding
+both halves would have to be `expensive`, and then reading a graph's node count, link count and
+density would need a Run. Those are the numbers somebody wants *before* deciding whether the graph
+is worth running anything over.
+
+So: `net.metrics` is `cheap` and everything on it is O(V + E) or measured and warned about;
+`net.centrality` is `expensive` and runs only on Run. They compose — Centrality writes its columns
+onto the network, so a Metrics card downstream plots betweenness beside degree without either node
+knowing about the other.
+
+**Three ports each, and the middle one is the interesting choice.** `Network` is the input carrying
+on with the metric columns written onto its node table; `Node stats` is the same numbers as a plain
+table; `Summary` is the graph-level row. The network port is what makes `size by clustering` in a
+viewer a column picker rather than a second node — `values.ts` anticipated exactly this ("a future
+Centrality node can simply append a column") — and the table port exists because "which neurons are
+the hubs" is a question with an answer worth sorting, joining and exporting, not just looking at.
+
+### The summary is one wide row
+
+Long form — one row per metric — reads better on the card and is worse everywhere else. The useful
+thing to do with this port is run it inside a `For Each` over five datasets and `Collect` the
+results: wide gives five rows whose columns line up, so a bar chart of density across connectomes
+is a column picker. Long would need a Pivot first, and a pivot's columns are named by its data,
+which is the one shape `inferOutputs` cannot derive.
+
+Both table schemas are **constants**, for `describeSchema`'s reason: a picker downstream fills the
+moment the wire is drawn. The one asymmetry is deliberate — Centrality's *node* columns follow its
+switches (a metric turned off is a column that is not offered, rather than a column of nulls a
+picker would offer and never fill), while its *summary* is constant-width with nulls, because its
+whole use is being stacked across runs and a Collect of five summaries whose columns depend on each
+run's settings is five different tables.
+
+### Self-loops count towards degree and towards nothing else
+
+An autapse is a real link, and `recomputeRollups` already counts it in both `degreeIn` and
+`degreeOut`, so this does too. But it is not a neighbour of itself: it cannot close a triangle, it
+cannot join two components, and counting it in density would let a graph exceed 1 — which is not a
+large number, it is a wrong one. Every structural measure therefore runs on the **undirected simple
+projection** (unique unordered pairs, no self-loops) and the summary reports `selfLoops`
+separately rather than hiding the discrepancy.
+
+That rule is where Coda and networkx part company, and both places it happens were found by
+running the exporters rather than by reading them: `nx.overall_reciprocity` divides by every edge
+including the loops, and `nx.eigenvector_centrality` keeps them — so one heavy autapse becomes an
+eigenvector all of its own, scoring 1.0 while every real hub in the graph rounds to zero. The
+emitted helpers strip loops first and say so.
+
+### The guard rails are raised in `evaluate`, and that is not a style choice
+
+`networkMetrics` is memoised on the network object, and the **card calls it too** — from the
+node's *input*, deliberately, so that the run and the card share one triangle count. The two
+warnings started out inside that function, which looked equivalent and was not: the card draws as
+soon as the upstream value exists, so on the ordinary chain it primes the memo first, with no
+warner, and `evaluate` then gets a cache hit and warns about nothing. A guard rail whose firing
+depends on which caller arrived first is not a guard rail.
+
+So the library returns `triangleWork` and `dangling` on its result and the node warns from them —
+`out.describe`'s arrangement, which computes its own cell count and warns before calling the
+memoised `describeTable`. `net.centrality` matches it: `sweepSources(options, nodes) * links` is
+computed in `evaluate` before the await, off the tables rather than off an index the node would
+build only to discard. Both are still stated before the cost is paid, which is the rule that
+matters ([limits.md](limits.md)).
+
+### The metric columns are written over, never beside
+
+`net.build` emits `degreeIn`, `degreeOut`, `weightIn` and `weightOut` itself, so a network arriving
+here usually already has four of these names. Adding `degreeIn_1` beside `degreeIn` would give a
+column picker two answers to one question, and the second would be the **stale** one — a network
+narrowed by `mapperNetwork` or `pathsToNetwork` carries roll-ups neither of those recomputes.
+Overwriting is `recomputeRollups`' own rule applied to a longer list — and it *is* that rule:
+`foldNodeColumns` / `withNodeColumns` in [networkOps.ts](../src/nodes/lib/networkOps.ts) are the
+generalisation, taking the column list as an argument, so both new nodes and the older roll-up
+recomputation state the "keep position, write over" decision once. `net.metrics` says so with a
+`ctx.warn` when the collision is on a name it does not own (a joined `component`, say), and stays
+quiet for the four `net.build` always writes — reading `ROLLUPS` from `networkOps` rather than
+retyping the four names, because a second spelling is how the exemption comes to disagree with
+the set it names.
+
+### The numbers are pinned against networkx, in a checked-in fixture
+
+Every definition here has a plausible variant one line away — assortativity over excess degree
+rather than degree, transitivity averaged per node rather than summed, betweenness normalised by
+unordered pairs, clustering counting a reciprocal pair twice — and each variant produces a column
+that looks entirely reasonable and is not the number anybody else's tool would print.
+
+So `scripts/probe-network-metrics.py` builds one seeded graph, asks networkx for every metric, and
+writes both to `src/nodes/lib/__fixtures__/networkx.json`. The two lib tests read that file, which
+means the comparison runs in CI on a machine with no Python. Three departures are deliberate and
+each is asserted rather than skipped: `clustering` is null rather than 0 on a node with fewer than
+two neighbours (0 makes `meanClustering` a count of the leaves), `assortativity` is null rather
+than `nan` where the correlation is 0/0, and the self-loop rule above.
+
+Two definitions worth knowing because they are choices among standards:
+
+- **Closeness is harmonic and incoming** — `Σ 1/d(u,v)` over everything that reaches `v`, over
+  `n - 1`. Classical closeness is `1/∞` for any node that cannot reach everything, which on a real
+  connectome is most of them, and the usual workaround (restrict to the reachable set) makes a node
+  in a two-node island outscore a hub. Incoming because that is how networkx defines
+  `harmonic_centrality`, and because it is the direction a sampled sweep can estimate: a walk from
+  a pivot yields `d(pivot, ·)` for everything, which accumulates into the *target's* score.
+  Backwards, and the exact and sampled columns would be two measures wearing one name.
+- **Betweenness is networkx's normalisation exactly**, `(n-1)(n-2)` for directed and undirected
+  alike — the undirected sum is *not* halved first, because that denominator counts ordered pairs
+  and the double count is what makes it the right one. igraph disagrees, which is why the R helper
+  scales by hand; off by a factor of two in a column of small numbers is not something anybody
+  spots.
+
+### Sampling estimates a mean and refuses to estimate a maximum
+
+`Sample` sweeps from `k` seeded-random source nodes and scales by `n / k`, which is the standard
+estimator and is unbiased for betweenness and harmonic closeness alike. `meanPathLength` comes off
+the same pivots and is an estimate too. `diameter` is **null** whenever the sweep was sampled: a
+maximum is not a mean, and a sampled maximum is a lower bound with no error bar — a number that
+reads like an answer and is not one.
+
+Every random draw is seeded (invariant 4): the pivots, and Louvain's random walk, which is why the
+`rng` option is passed to `graphology-communities-louvain` rather than left at `Math.random`.
+Communities are renumbered **largest-first**, exactly as `componentsOfEdges` numbers components, so
+that "colour by community" and `resolveColor`'s frequency ranking agree by construction — otherwise
+the biggest community gets whichever colour fell out of the merge order, and two runs of the same
+data are two different pictures.
+
+### Parallel links are merged before any path is counted
+
+`net.build`'s "Merge parallel links" can be turned off, and a connectivity table then arrives with
+one row per synapse group, so a pair can appear four times. Brandes counts *shortest paths*, and a
+duplicated neighbour adds `sigma[u]` to `sigma[v]` once per copy — the same single path counted
+four times, inflating every betweenness downstream of it, with nothing about the output looking
+unusual. The merge **sums the weights and then inverts**: four 30-synapse links between a pair are
+one 120-synapse connection, which is what merging upstream would have produced, so a weighted path
+is the same length whether or not somebody left that box ticked.
+
+### Both nodes export, and the exporters are checked by running them
+
+networkx and igraph have all of this, so both emit real cells rather than a `TODO` — through
+`coda_network_metrics` / `coda_network_centrality`, a helper per language. `pnpm probe:netexport`
+runs Coda's implementation and both generated helpers over one graph and compares column by
+column: 586 comparisons each, aligned on `id`. Three things are compared loosely and each is said
+out loud rather than skipped — the two power iterations stop by different rules (1e-8, measured),
+and a Louvain partition from a different implementation can disagree about every label while
+scoring the same modularity. See [export.md](export.md).
+
 ## Deduplicate
 
 `core.dedupe`, `Add ▸ Transform ▸ Deduplicate`. `pandas.drop_duplicates`: name the columns to

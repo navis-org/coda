@@ -2283,6 +2283,157 @@ overlay. Three things it caught, all of them invisible to a green suite:
   (`formatCompact(126.4)` is five glyphs at ~5.6px). All three numbers are measured now, and
   `sortSlices` moved to the inspector to buy the ring its rows back.
 
+## Network Metrics: a card of numbers, and the two plots they cannot stand in for
+
+Tiles rather than a chart, sharing `DatasetSummaryViewer`'s primitives — a `Tile`, a `Facts` list,
+a `Bars` row set — because the subject is the same shape: twenty unrelated quantities, each read on
+its own, none comparable with the one beside it. A chart of "density, reciprocity, transitivity" is
+three bars sharing an axis that means nothing.
+
+**Why any plots at all.** Because several of those numbers are summaries of a distribution that is
+not remotely normal, and the summary is where connectomics goes wrong. A mean degree of 14
+describes a lattice and a graph with four 3,000-partner hubs equally well; a median link weight of 3
+says nothing about whether the top percent of links carries a third of the synapses; and a
+component count of 11,936 does not say whether that is one big graph with dust around it or genuine
+fragmentation. So the card draws a histogram of whichever column is asked for, and a scatter of any
+two per-node columns — the plot that answers "do the hubs cluster?" without another node.
+
+**One histogram with a picker, not three fixed ones.** The card drew degree, link weight and
+component size: the right three to look at first, and an arbitrary three to be able to look at
+*only* — `clustering`, `coreness`, `strength` and every column `net.centrality` writes are
+distributions too, and none of them had a picture. Three tiles that cannot answer a fourth question
+is worse than one that answers any. The three sets of numbers stayed, as fact tiles: pointed at
+`clustering`, a single plot would otherwise take the card's only mean degree with it, and a figure
+a reader compares across graphs should not depend on which plot happens to be open.
+
+The picker's vocabulary is a **`source:column` pair**, not a column name, and it lives in
+`networkMetrics.ts` beside the schemas rather than in the viewer. Nodes, links and components are
+three tables with three different row counts — one row per node, per link, per component — so there
+is no single schema for a `column` param to resolve against, which is why `histColumn` is an `enum`
+with an options *function*. Two parties need exactly the same list: the node builds it from the
+input's schema before anything runs, and the card builds it from the tables in hand.
+`histogramChoices` is that one function. Link and component entries are prefixed because `weight`
+is a word both the node table and the edge table use.
+
+**The controls are on the tiles they change**, which is `CompletenessTile`'s arrangement for its
+reason: a control that changes what a plot *says* belongs where the plot is, not in a band above a
+card where the plot is off the bottom. That is also why all five params are `advanced` — being
+inspector-only is what stops the card carrying two copies of each. `ValuePreview` passes the four
+writers **as a spread**, absent when `onParamChange` is: an `onParamChange?.(…)` arrow is still a
+function, so the card would see a writer on every surface and draw live-looking controls that do
+nothing on the one surface that cannot store them.
+
+**The card reads the node's *input*, not its output.** Both carry the same topology, but
+`networkMetrics` is memoised on the network object and `evaluate` was handed the input — so reading
+the input is a cache hit and reading the output is a second triangle count on every render. That
+also puts the branch **above** `ValuePreview`'s `!value` guard, which is the failure
+`out.datasetSummary` shipped once: below the guard it showed "No result yet" permanently, with a
+green suite, because every test rendered the viewer directly and so never reached the dispatcher.
+`net.metrics` is in `SELF_DRAWING_NODE_TYPES` for the same reason, and `networkMetrics.test.tsx`
+renders through `ValuePreview` with no value at all.
+
+**One log switch, and it does two things, because on this data they are one thing.** A connectome's
+degree, weight and component-size distributions defeat a linear histogram twice over: linear *bins*
+put nine tenths of the rows in the first bar and leave four of the ten empty, and linear *bar
+lengths* then draw everything past the second bar as an invisible sliver. Fixing one and not the
+other still reads as "there is nothing out there", which is the opposite of what the tail says. So
+`logScale` bins in log10 (`buildHistogram`'s own `log`) and scales the bars by `log1p` together —
+and the tile's qualifier says how many rows a log axis had nothing to say about, because a degree
+of 0 has no logarithm and an isolated node is exactly the sort of row that should not leave a
+picture silently.
+
+**Three things were measured in a real browser, and two of them were wrong first.**
+
+- **`BarRow` needed a `label` separate from its `key`.** `Bars` printed `row.key`, so
+  disambiguating the key — which histogram bins need, since two adjacent bins of a heavy-tailed
+  column round to the same printed range at the low end — put `3:` in front of every bin on screen.
+  The component had conflated identity with text; splitting the two is the fix, and
+  `DatasetSummaryViewer`'s rows are unchanged because `label` falls back to `key`.
+- **The scatter sits above the histogram.** Three distribution tiles at ten bins each was about
+  900px of card, so below them the scatter started off the bottom of the 620px default and stayed
+  there. A plot nobody scrolls to is a plot that is not on the card. One histogram makes that less
+  acute and not untrue — at forty bins it is still the taller of the two.
+- **A scatter point is a zero-length round-capped subpath, not a `<circle>`, and all 3,000 are one
+  `<path>`.** The box is `preserveAspectRatio="none"`, because the two axes are unrelated
+  quantities and squaring them would waste most of a wide tile — but that scales x and y by
+  different factors, so a circle of radius r draws as an ellipse five times wider than it is tall.
+  `vector-effect="non-scaling-stroke"` is the one thing there measured in screen pixels, and a
+  zero-length subpath with a round cap under it is a dot of a fixed size whatever the tile's
+  aspect. One path rather than 3,000 elements because the marks were being built in the render
+  body: every store tick created 3,000 elements and reconciled them against 3,000 fibers,
+  including ticks that changed nothing about this node. The path string is built inside the memo
+  that already computes the points. None of this is visible in jsdom, which performs no layout.
+
+**Three more, measured in Chrome when the histogram became one plot.** All three are height, and
+none is visible to a green suite.
+
+- **The stats moved from a `Facts` block into the heading line.** Four rows is about 70px, and it
+  bought a *duplicate*: pointed at `degree` or `link weight` — two of the three things anybody
+  opens this on — every one of those numbers is already on a tile a few inches up. What the block
+  was for is the third case, a column the card holds no summary of. One line does that, and the
+  70px is the difference between ten bars clearing the fold and two.
+- **`defaultSize` went from 620 to 700 high.** Five fact tiles are two grid rows at 620 wide
+  (~250px), the scatter with its axis readout is ~190, and ten bars with a heading is ~175.
+- **Bin labels are rounded on screen and exact in the tooltip.** The label track is 4.5em of
+  monospace; `11.4–16.6` is nine characters and arrives as `11.4–16…`, which has stopped
+  distinguishing itself from the bin below it. Every column with a bin wider than 1 here is a count
+  of something, so the tenths are an artefact of dividing an integer range into ten. Below that
+  width — `clustering`, `density` — the decimals are the whole number and are kept.
+
+**The histogram scans once and re-bins per keystroke.** `histogramBins` splits `scanValues` (the
+only O(rows) half) from `binScan` (per-bar) precisely so the bin field — which fires on every
+keystroke, not on commit — reshapes bars instead of re-walking rows. Keyed together, a link-weight
+distribution re-scanned every link in the network on every one, and since `bins` is
+`presentational` the node does not re-run, so that scan *was* the whole cost of the edit. Three
+memos: the scan, the bins, and `columnStats`.
+
+**`columnStats` rather than `describeTable`, and the reason is the `Set`.** The heading needs a
+mean, a median and a maximum for one column. `describeTable` answers exactly that and is memoised
+— but it summarises *every* column, and its per-column pass builds a set of distinct printed
+labels, which on a million-link edge table is a million string allocations to read three numbers
+off one column. The quantile is still `boxStats`', so this and a Describe node downstream cannot
+come to quote two different medians.
+
+**Vertical is a checkbox, and horizontal is the default because of the labels.** A bin's label is
+a *range* — `11–17` — where a completeness column's is a region name, and `Columns` sets its keys
+in rotated text: ten of those are legible and forty are a picket fence, while as rows they are a
+fixed-width track that stays readable at any bin count. So the shape that survives the control
+above it is the default. One row set feeds both — `ColumnBar` is `BarRow` minus the fields the
+rows use — which is also why `ColumnBar` gained the same `key`/`label` split `BarRow` has, for the
+same reason: two adjacent bins of a heavy tail round to one printed range, and React would reuse
+one bin's cell for another's count.
+
+`Columns` is **restyled through a wrapper class**, not given a prop — the dashboard's rule, that
+density is CSS's and a frame restyles the inside without the shared component learning a caller by
+name. Three of its numbers are sized for six named regions: the `max-width` caps that keep six
+bars a bar's width apart instead of six slivers across a metre of tile, which for a histogram
+separate bars that are contiguous by convention; and a band and label track coming to about 200px
+against the rows' 140, which put the axis below the fold of a card whose last tile this is.
+`.metrics__columns` sets all three, measured at 620 wide.
+
+The primitive's docstring also had to grow a second half. It says the axis is fixed rather than
+scaled to the tallest bar, and that is right for what it was written for: completeness is a
+*fraction of something*, and normalising to the best region would draw it full height whether it
+were 90% or 9%. A **count** has no such ceiling, so this caller does normalise against the tallest
+bar — not the same mistake, because there is no external scale left to misrepresent. The rule
+forbids inventing a scale for a quantity that already has one, not having a scale at all.
+
+**0 bins is the automatic rule.** One number rather than `out.histogram`'s `binMode` enum plus a
+count: two controls for one decision is one too many on a tile heading, and there is no bin count
+of zero for the sentinel to collide with. The param's `max` is `MAX_AUTO_BINS` (80), so the
+hand-set range and the range the automatic rule can reach are the same range.
+
+**The scatter subsamples by stride and says so**, capped at 3,000 points — a stride is
+deterministic, which a random draw in a render function would not be, and the tile names what was
+drawn against what exists. A null on either axis is a point with no *position*, not a point at
+zero, so those rows are dropped and counted too: on a graph with many leaves, `clustering` is null
+for every one of them and "278 of 320 nodes" is the honest caption.
+
+**CSV of the summary, and no SVG.** The per-node numbers are a port an inch away and export like
+any other table, so offering them here as well would be two routes to one file. There is no vector
+export because the card is a grid of tiles, several drawing their own picture, and an SVG would
+have to invent a composite nothing renders — `DatasetSummaryViewer`'s call, for its reason.
+
 ## Heatmap: more cells than pixels
 
 `out.heatmap` used to refuse above **20,000 cells**, and that number was a fact about SVG rather

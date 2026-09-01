@@ -96,8 +96,15 @@ export interface GroupedValues {
   grouped: boolean
 }
 
-/** Linear-interpolated quantile — the type-7 definition numpy and R default to. */
-export function quantileSorted(sorted: number[], p: number): number {
+/**
+ * Linear-interpolated quantile — the type-7 definition numpy and R default to.
+ *
+ * `ArrayLike` rather than `number[]`: it only indexes and reads `.length`, and `net.metrics`
+ * sorts its degree and weight columns as `Float64Array`s. Converting a million weights to a
+ * boxed array to satisfy a signature would be the tail wagging the dog — and the alternative,
+ * a second median beside this one, is what `describeOps` reaches over here to avoid.
+ */
+export function quantileSorted(sorted: ArrayLike<number>, p: number): number {
   const n = sorted.length
   if (n === 0) return NaN
   if (n === 1) return sorted[0]!

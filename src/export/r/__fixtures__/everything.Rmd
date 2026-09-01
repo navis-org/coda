@@ -286,6 +286,185 @@ coda_join_annotations <- function(left, right) {
 }
 
 
+# Centrality columns -- Coda's Network Centrality node.
+#
+# Returns list(nodes = <data.frame>, summary = <one-row data.frame>). Weighted paths use
+# 1/weight as a distance, so a strong connection is a short path. `closeness` is harmonic
+# centrality over incoming distances, divided by n - 1: classical closeness is undefined
+# for any node that cannot reach everything, which on a connectome is most of them.
+coda_network_centrality <- function(g, betweenness = TRUE, closeness = TRUE,
+                                    pagerank = TRUE, eigenvector = FALSE,
+                                    communities = TRUE, weighted = FALSE,
+                                    seed = 1, resolution = 1, damping = 0.85) {
+  directed <- is_directed(g)
+  n <- vcount(g)
+  ids <- V(g)$name
+  if (is.null(ids)) ids <- as.character(seq_len(n))
+  w <- E(g)$weight
+  if (is.null(w)) w <- rep(1, ecount(g))
+  # NA is igraph for "unweighted"; a non-positive weight cannot become a length, so it
+  # falls back to one hop rather than making every path through it free.
+  d <- if (weighted) ifelse(w > 0, 1 / w, 1) else NA
+  # Self-loops leave first, which is Coda's rule throughout: a self-loop counts towards
+  # degree and towards nothing else. It matters most for eigenvector centrality, where one
+  # heavy autapse is an eigenvector all of its own.
+  if (any(which_loop(g))) {
+    keep <- !which_loop(g)
+    d <- if (weighted) d[keep] else NA
+    w <- w[keep]
+    g <- delete_edges(g, E(g)[!keep])
+  }
+
+  out <- data.frame(id = as.character(ids), stringsAsFactors = FALSE)
+  if (betweenness) {
+    raw <- igraph::betweenness(g, directed = directed, weights = d, normalized = FALSE)
+    scale <- if (directed) 1 else 2
+    out$betweenness <- if (n > 2) raw * scale / ((n - 1) * (n - 2)) else rep(0, n)
+  }
+  if (closeness) {
+    out$closeness <- harmonic_centrality(g, mode = "in", weights = d, normalized = TRUE)
+  }
+  if (pagerank) {
+    out$pagerank <- page_rank(g, damping = damping, weights = w)$vector
+  }
+  if (eigenvector) {
+    vec <- eigen_centrality(g, directed = directed, weights = w)$vector
+    # igraph scales to a maximum of 1; Coda and networkx scale to unit L2.
+    norm <- sqrt(sum(vec^2))
+    out$eigenvector <- if (norm > 0) vec / norm else vec
+  }
+
+  cl <- NULL
+  if (communities) {
+    set.seed(seed)
+    # igraph's Louvain is undirected only, so a directed graph is collapsed for this pass.
+    u <- simplify(as_undirected(g, mode = "collapse", edge.attr.comb = list(weight = "sum")),
+                  remove.multiple = TRUE, remove.loops = TRUE)
+    cl <- cluster_louvain(u, weights = E(u)$weight, resolution = resolution)
+    # Largest first, as Coda numbers both communities and components.
+    sizes <- as.integer(table(membership(cl)))
+    by_size <- order(-sizes, seq_along(sizes))
+    rank <- integer(length(sizes))
+    rank[by_size] <- seq_along(sizes)
+    out$community <- as.integer(rank[membership(cl)])
+  }
+
+  swept <- betweenness || closeness
+  reach <- if (swept) mean_distance(g, weights = d, directed = directed,
+                                    unconnected = TRUE, details = TRUE) else NULL
+
+  summary <- data.frame(
+    sources = if (swept) n else NA_integer_,
+    meanPathLength = if (swept) reach$res else NA_real_,
+    diameter = if (swept) diameter(g, directed = directed, weights = d,
+                                   unconnected = TRUE) else NA_real_,
+    reachable = if (swept && n > 1) 1 - reach$unconnected / (n * (n - 1)) else NA_real_,
+    communities = if (communities) length(sizes) else NA_integer_,
+    modularity = if (communities) modularity(cl) else NA_real_,
+    stringsAsFactors = FALSE
+  )
+
+  list(nodes = out, summary = summary)
+}
+
+
+# Per-node and graph-level statistics -- Coda's Network Metrics node.
+#
+# Returns list(nodes = <data.frame>, summary = <one-row data.frame>). Structural measures
+# are taken over the undirected simple projection, so a reciprocal pair is one neighbour
+# relationship and a self-loop counts towards degree and nothing else. `clustering` is NA
+# rather than 0 where a node has fewer than two neighbours: it has no pair of them to
+# close, and calling that 0 makes the mean a count of the leaves.
+coda_network_metrics <- function(g) {
+  directed <- is_directed(g)
+  n <- vcount(g)
+  ids <- V(g)$name
+  if (is.null(ids)) ids <- as.character(seq_len(n))
+  w <- E(g)$weight
+  if (is.null(w)) w <- rep(1, ecount(g))
+
+  u <- simplify(as_undirected(g, mode = "collapse"),
+                remove.multiple = TRUE, remove.loops = TRUE)
+  deg_u <- degree(u)
+
+  in_mode <- if (directed) "in" else "all"
+  out_mode <- if (directed) "out" else "all"
+  deg_in <- degree(g, mode = in_mode)
+  deg_out <- degree(g, mode = out_mode)
+  w_in <- strength(g, mode = in_mode, weights = w)
+  w_out <- strength(g, mode = out_mode, weights = w)
+
+  local <- transitivity(u, type = "local")
+  local[deg_u < 2] <- NA_real_
+
+  # Largest component first, ties by the earliest vertex -- the ordering Coda gives these,
+  # so that colouring by component ranks the same way in both.
+  cmp <- components(u)
+  by_size <- order(-cmp$csize, seq_along(cmp$csize))
+  rank <- integer(length(cmp$csize))
+  rank[by_size] <- seq_along(cmp$csize)
+
+  nodes <- data.frame(
+    id = as.character(ids),
+    degreeIn = as.integer(deg_in),
+    degreeOut = as.integer(deg_out),
+    degree = as.integer(deg_in + deg_out),
+    weightIn = as.numeric(w_in),
+    weightOut = as.numeric(w_out),
+    strength = as.numeric(w_in + w_out),
+    clustering = as.numeric(local),
+    coreness = as.integer(coreness(u)),
+    component = as.integer(rank[cmp$membership]),
+    componentSize = as.integer(cmp$csize[cmp$membership]),
+    stringsAsFactors = FALSE
+  )
+
+  loops <- sum(which_loop(g))
+  observed <- if (directed) ecount(g) - loops else ecount(u)
+  possible <- if (directed) n * (n - 1) else n * (n - 1) / 2
+  triples <- sum(deg_u * (deg_u - 1) / 2)
+  # NaN is igraph saying the coefficient is 0/0 -- a regular graph has no variation in the
+  # degrees at its link ends. NA says the question does not apply; 0 would say "no
+  # preference", which is a different and wrong claim.
+  na_if_nan <- function(x) if (length(x) != 1 || is.nan(x)) NA_real_ else as.numeric(x)
+
+  summary <- data.frame(
+    nodes = n,
+    links = ecount(g),
+    directed = directed,
+    selfLoops = as.integer(loops),
+    # Always 0 here, and kept so the column set matches Coda's: the graph was built from
+    # grouped links, which cannot hold two edges between one pair.
+    parallelLinks = 0L,
+    isolated = as.integer(sum(nodes$degree == 0)),
+    density = if (possible > 0) observed / possible else NA_real_,
+    meanDegree = if (n > 0) mean(nodes$degree) else NA_real_,
+    medianDegree = if (n > 0) stats::median(nodes$degree) else NA_real_,
+    maxDegree = if (n > 0) max(nodes$degree) else 0L,
+    # Undirected reciprocity is 1 by construction, so reporting it would be reporting the
+    # value of `directed` in a column nobody would read that way.
+    # Not igraph's `reciprocity()` default, which counts self-loops in its denominator.
+    # Coda counts a self-loop towards degree and nothing else, so `ignore.loops` is what
+    # makes the two agree on a graph with autapses.
+    reciprocity = if (directed && ecount(g) > 0)
+                    reciprocity(g, ignore.loops = TRUE) else NA_real_,
+    components = length(cmp$csize),
+    largestComponent = if (length(cmp$csize)) max(cmp$csize) else 0L,
+    meanClustering = if (any(!is.na(local))) mean(local, na.rm = TRUE) else NA_real_,
+    transitivity = if (triples > 0) na_if_nan(transitivity(u, type = "global")) else NA_real_,
+    assortativity = if (ecount(u) > 0) na_if_nan(assortativity_degree(u, directed = FALSE))
+                    else NA_real_,
+    totalWeight = sum(w),
+    meanWeight = if (length(w)) mean(w) else NA_real_,
+    medianWeight = if (length(w)) stats::median(w) else NA_real_,
+    maxWeight = if (length(w)) max(w) else NA_real_,
+    stringsAsFactors = FALSE
+  )
+
+  list(nodes = nodes, summary = summary)
+}
+
+
 coda_neurons <- function(df) {
   # neuprintr publishes `bodyid`; Coda calls the id column `neuronId` everywhere.
   # `df$neuronId` on a tibble is NULL rather than an error, so an unrenamed frame
@@ -1257,11 +1436,15 @@ edit_table <- find_neurons |>
 
 ```{r adjacency}
 # ── Adjacency ──
-adjacency <- neuprint_get_adjacency_matrix(
+adjacency_matrix_df <- neuprint_get_adjacency_matrix(
   inputids = find_neurons$neuronId,
   outputids = ids_from_label$neuronId,
   conn = hemibrain_neuprint
 )
+
+adjacency_links <- as.data.frame(as.table(as.matrix(adjacency_matrix_df)), stringsAsFactors = FALSE)
+names(adjacency_links) <- c("source", "target", "weight")
+adjacency_links <- adjacency_links[adjacency_links$weight != 0, ]
 # NOTE: Coda groups this matrix by cell type. neuprint_get_adjacency_matrix
 # is per body, so the roll-up is done here rather than in the query.
 ```
@@ -1868,12 +2051,54 @@ keep <- names(parts)[parts %in% parts[keep]]
 filter_network_2 <- induced_subgraph(build_network, keep)
 ```
 
+```{r network-centrality}
+# ── Network Centrality ──
+# NOTE: The canvas sampled 200 source nodes for the shortest-path sweep.
+# igraph has no pivot sampling — its `cutoff` bounds path length instead —
+# so this runs the exact sweep: a more precise answer, and a considerably
+# slower one on a large graph.
+# NOTE: igraph`s Louvain is undirected only, so the community pass runs on
+# the collapsed graph. The partition and the modularity are the undirected
+# ones.
+network_centrality_out <- build_network
+.central <- coda_network_centrality(
+  network_centrality_out,
+  betweenness = TRUE,
+  closeness = TRUE,
+  pagerank = TRUE,
+  eigenvector = TRUE,
+  communities = TRUE,
+  weighted = TRUE,
+  seed = 7,
+  resolution = 1.2,
+  damping = 0.85
+)
+network_centrality_nodes <- .central$nodes
+network_centrality_summary <- .central$summary
+for (.col in setdiff(names(network_centrality_nodes), "id")) {
+  network_centrality_out <- set_vertex_attr(network_centrality_out, .col, value = network_centrality_nodes[[.col]])
+}
+network_centrality_nodes
+```
+
 ```{r stack-tables}
 # ── Stack Tables ──
 stack_tables <- bind_rows(
   join |> mutate(`origin` = "Direct"),
   connectivity_2 |> mutate(`origin` = "Indirect")
 )
+```
+
+```{r network-metrics}
+# ── Network Metrics ──
+network_metrics_out <- network_centrality_out
+.metrics <- coda_network_metrics(network_metrics_out)
+network_metrics_nodes <- .metrics$nodes
+network_metrics_summary <- .metrics$summary
+for (.col in setdiff(names(network_metrics_nodes), "id")) {
+  network_metrics_out <- set_vertex_attr(network_metrics_out, .col, value = network_metrics_nodes[[.col]])
+}
+network_metrics_summary
 ```
 
 ```{r pivot}

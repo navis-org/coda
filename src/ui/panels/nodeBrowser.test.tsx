@@ -141,7 +141,7 @@ describe('NodeBrowser layout', () => {
       (r) => r.querySelector('.node-row__name')?.textContent === 'Adjacency',
     )!
     expect(adjacencyRow.querySelector('.node-row__signature')?.textContent).toBe(
-      'Dataset + Neurons + Neurons → Matrix',
+      'Dataset + Neurons + Neurons → Matrix + Table',
     )
     // Expensive nodes advertise that they wait for Run.
     expect(adjacencyRow.querySelector('.node-row__cost')?.textContent).toBe('needs run')
@@ -169,6 +169,7 @@ describe('NodeBrowser filtering', () => {
       'Describe Table',
       'Heatmap',
       'Histogram',
+      'Network Metrics',
       'Network Viewer',
       'Neuroglancer',
       'Neuron Profile',
@@ -177,7 +178,7 @@ describe('NodeBrowser filtering', () => {
       'Scatter Plot',
       'Table',
     ])
-    expect(screen.getByText('15 nodes')).toBeTruthy()
+    expect(screen.getByText('16 nodes')).toBeTruthy()
   })
 
   it('fuzzy-searches across every category, best match first', () => {
@@ -308,13 +309,13 @@ describe('NodeBrowser selection', () => {
 describe('NodeThumbnail', () => {
   it('draws one dot per port, using the socket colour and shape grammar', () => {
     const { container } = render(<NodeThumbnail def={requireNodeDef('neuron.adjacency')} />)
-    // 3 inputs (Dataset square, 2× Neurons circle) + 1 output (Matrix diamond).
+    // 3 inputs (Dataset square, 2× Neurons circle) + 2 outputs (Matrix diamond, Links table).
     const dots = [...container.querySelectorAll('circle, rect')].filter((el) => {
       const fill = el.getAttribute('fill') ?? ''
       const stroke = el.getAttribute('stroke') ?? ''
       return fill.includes('--socket-') || stroke.includes('--socket-')
     })
-    expect(dots).toHaveLength(4)
+    expect(dots).toHaveLength(5)
     const colours = dots.map((d) => d.getAttribute('fill') ?? d.getAttribute('stroke'))
     expect(colours).toContain('var(--socket-dataset)')
     expect(colours).toContain('var(--socket-table)')

@@ -34,6 +34,8 @@ import type { BackgroundChoice, SkeletonWidthMode } from './viewer3dScene'
 import { NeuroglancerViewer } from './NeuroglancerViewer'
 import { chosenViewerKind } from '../../nodes/output/neuroglancer'
 import { DatasetSummaryViewer } from './DatasetSummaryViewer'
+import { NetworkMetricsViewer } from './NetworkMetricsViewer'
+import { DEFAULT_HISTOGRAM_CHOICE } from '../../nodes/lib/networkMetrics'
 import { RoisViewer } from './RoisViewer'
 import type { RoiColorMode, RoiLabelMode } from './RoisViewer'
 import type { RoiView } from './roiProjection'
@@ -296,6 +298,55 @@ function ValuePreviewInner({
         selection={selection}
         onSelectionChange={onSelectionChange}
         {...(onParamChange ? { onParamChange } : {})}
+        {...shared}
+      />
+    )
+  }
+
+  /*
+   * Above the `!value` guard, on `out.viewer3d`'s terms: the card is drawn from the *input*
+   * network, so it has something to show the moment the node upstream has run rather than one
+   * scheduler step later. Reading the input is also what makes the card free — `networkMetrics`
+   * is memoised on the network object, and the input is the object `evaluate` was handed, so
+   * the card and the run share one triangle count. Drawing the node's own `out` network would
+   * be a different object and therefore a second one.
+   *
+   * Gated on the input actually being a network, so a graph that has never run says "No result
+   * yet" instead of rendering an empty tile grid.
+   */
+  if (node.type === 'net.metrics' && isNetworkValue(inputValues?.in)) {
+    return (
+      <NetworkMetricsViewer
+        network={inputValues.in}
+        plotX={ctx.column('plotX')}
+        plotY={ctx.column('plotY')}
+        // Every fallback here has to equal the node's declared default: a graph saved before a
+        // param existed has no key for it, and this is the value it then gets.
+        histColumn={
+          typeof node.params.histColumn === 'string'
+            ? node.params.histColumn
+            : DEFAULT_HISTOGRAM_CHOICE
+        }
+        bins={Number(node.params.bins ?? 10)}
+        histVertical={node.params.histVertical === true}
+        logScale={node.params.logScale === true}
+        /*
+         * The param ids stay in the dispatcher, where every other node's are — the card knows
+         * it is changing an axis, not which key that is stored under.
+         *
+         * Spread rather than four `onParamChange?.(…)` arrows, because an arrow that swallows
+         * the call is still a function: the card would see a writer on every surface and draw
+         * live-looking controls that do nothing on the one surface that cannot store them.
+         */
+        {...(onParamChange
+          ? {
+              onPlotX: (next: string) => onParamChange('plotX', next),
+              onPlotY: (next: string) => onParamChange('plotY', next),
+              onHistColumn: (next: string) => onParamChange('histColumn', next),
+              onBins: (next: number) => onParamChange('bins', next),
+              onHistVertical: (next: boolean) => onParamChange('histVertical', next),
+            }
+          : {})}
         {...shared}
       />
     )

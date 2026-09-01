@@ -23,6 +23,8 @@ import {
   renameMapping,
   renameSchema,
   renameTable,
+  matrixLinksSchema,
+  matrixToLinks,
   matrixToTable,
   normalizeMatrix,
   PIVOT_CELLS_WARN,
@@ -777,6 +779,52 @@ describe('pivot', () => {
    * than pivoted again — so these assertions are what stop the two halves of one node from
    * describing different pivots.
    */
+  it('reshapes the same pivot into a long edge list, non-zero cells only', () => {
+    const m = pivotTable(conn(), 'neuronId', 'partnerType', 'weight', 'sum', SILENT)
+    const links = matrixToLinks(m)
+
+    // The half `matrixToTable` does not do, and the one a graph wants: `Build Network` reads
+    // these three names off a table, which is why they are these three names.
+    expect(links.schema).toEqual(matrixLinksSchema())
+
+    // One row per non-zero cell, row-major in the matrix's own axis order — deterministic,
+    // because this value reaches a provenance key.
+    const expected: Array<[string, string, number]> = []
+    for (let r = 0; r < m.rowLabels.length; r++) {
+      for (let c = 0; c < m.colLabels.length; c++) {
+        const value = m.values[r * m.colLabels.length + c]!
+        if (value !== 0) expected.push([m.rowLabels[r]!, m.colLabels[c]!, value])
+      }
+    }
+    expect(links.length).toBe(expected.length)
+    expect(links.data.source).toEqual(expected.map((e) => e[0]))
+    expect(links.data.target).toEqual(expected.map((e) => e[1]))
+    expect(links.data.weight).toEqual(expected.map((e) => e[2]))
+  })
+
+  it('drops the zeros a reshape manufactured, rather than emitting a complete graph', () => {
+    /*
+     * The one judgement in `matrixToLinks`, and the one that looks like a contradiction:
+     * `core.unpivot` keeps zeros on the grounds that 0 may have been measured. Here the zero was
+     * *manufactured* — a matrix cell has to hold something, so absence became 0 on the way in —
+     * so dropping it going back restores the form the data had. The size argument is the same
+     * fact from the other end: a 500 × 500 adjacency kept whole is 250,000 rows, nearly all zero,
+     * and `Build Network` would make a complete graph of zero-weight links out of it.
+     */
+    const m = makeMatrix(['a', 'b'], ['x', 'y'], Float64Array.from([3, 0, 0, 5]))
+    const links = matrixToLinks(m)
+    expect(links.length).toBe(2)
+    expect(links.data.source).toEqual(['a', 'b'])
+    expect(links.data.target).toEqual(['x', 'y'])
+    expect(links.data.weight).toEqual([3, 5])
+  })
+
+  it('has nothing to say about an all-zero matrix, and says it with the right columns', () => {
+    const empty = matrixToLinks(makeMatrix(['a'], ['x'], Float64Array.from([0])))
+    expect(empty.length).toBe(0)
+    expect(empty.schema).toEqual(matrixLinksSchema())
+  })
+
   it('reshapes the same pivot into a wide table', () => {
     const m = pivotTable(conn(), 'neuronId', 'partnerType', 'weight', 'sum', SILENT)
     const wide = matrixToTable(m, 'neuronId')

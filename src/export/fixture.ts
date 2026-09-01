@@ -846,6 +846,43 @@ export function everythingGraph(): CodaGraph {
       params: { column: 'id', op: 'matches', value: '^LC[0-9]+$', expand: 'component' },
     },
 
+    /*
+     * The metrics pair, chained the way they compose on the canvas: Centrality writes its
+     * columns onto the network and Metrics reads the result, so the golden records both the
+     * helper calls and the vertex-attribute writeback that puts them back on the graph.
+     *
+     * `samples` is deliberately non-zero. It is the one setting where the two documents differ
+     * from the canvas *and from each other* — Python drops the summary's path statistics,
+     * because networkx will not say which distances its pivots saw, and R runs the exact sweep,
+     * because igraph has no pivot sampling at all — and both emitters say so in a `NOTE`. A
+     * golden with sampling off would record neither sentence.
+     */
+    {
+      id: 'central',
+      type: 'net.centrality',
+      col: 9,
+      row: 2,
+      params: {
+        betweenness: true,
+        closeness: true,
+        pagerank: true,
+        eigenvector: true,
+        communities: true,
+        weighted: true,
+        samples: 200,
+        seed: 7,
+        resolution: 1.2,
+        damping: 0.85,
+      },
+    },
+    {
+      id: 'netmetrics',
+      type: 'net.metrics',
+      col: 10,
+      row: 2,
+      params: { plotX: 'degree', plotY: 'betweenness', bins: 12, logScale: true },
+    },
+
     { id: 'table', type: 'out.table', col: 12 },
     /*
      * A second Table, filtered, for the same reason there are two Select One nodes: the first
@@ -1136,6 +1173,8 @@ export function everythingGraph(): CodaGraph {
     ['net', 'network', 'netview', 'in'],
     ['net', 'network', 'netfilter', 'in'],
     ['net', 'network', 'netregex', 'in'],
+    ['net', 'network', 'central', 'in'],
+    ['central', 'out', 'netmetrics', 'in'],
     ['syn', 'points', 'synblast', 'query'],
     ['skel', 'skeletons', 'cleanskel', 'in'],
     ['skel', 'skeletons', 'cleanskeldown', 'in'],

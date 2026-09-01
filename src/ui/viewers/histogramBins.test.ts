@@ -11,7 +11,13 @@ import { describe, expect, it } from 'vitest'
 
 import { column, tableSchema } from '../../core/types'
 import { tableFromRows } from '../../core/values'
-import { MAX_AUTO_BINS, buildHistogram, chooseBinCount, normalizeLabel } from './histogramBins'
+import {
+  MAX_AUTO_BINS,
+  buildHistogram,
+  chooseBinCount,
+  columnStats,
+  normalizeLabel,
+} from './histogramBins'
 
 const SCHEMA = tableSchema(column('pre', 'f64'), column('type', 'str'))
 
@@ -154,5 +160,29 @@ describe('normalizeLabel', () => {
   it('never says cumulative density, which is not a quantity', () => {
     expect(normalizeLabel('density', true)).toBe('density')
     expect(normalizeLabel('count', true)).toBe('cumulative rows')
+  })
+})
+
+describe('columnStats', () => {
+  it('reports the four numbers a histogram is read with', () => {
+    const stats = columnStats(tableOf([1, 2, 3, 4]), 'pre')
+    expect(stats).toEqual({ count: 4, min: 1, median: 2.5, mean: 2.5, max: 4 })
+  })
+
+  it('skips the nulls rather than counting them as zero', () => {
+    // A mean of 2 and a mean of 1 are the two answers here, and only one of them is about the
+    // rows that have a value.
+    expect(columnStats(tableOf([1, null, 3]), 'pre')).toMatchObject({ count: 2, mean: 2 })
+  })
+
+  it('answers nothing for a column that is absent or holds no numbers', () => {
+    expect(columnStats(tableOf([1, 2]), 'nosuch')).toBeUndefined()
+    expect(columnStats(tableOf([null, null]), 'pre')).toBeUndefined()
+  })
+
+  it('takes its median from the same place a Describe node does', () => {
+    // Nine quantile definitions, and two of them differ on an even-length run. `boxStats` is
+    // the one this and `describeOps` share; a second copy here is how they come to disagree.
+    expect(columnStats(tableOf([1, 2, 3, 4, 5, 6]), 'pre')?.median).toBe(3.5)
   })
 })

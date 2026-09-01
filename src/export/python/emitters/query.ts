@@ -514,6 +514,7 @@ registerEmitter('neuron.adjacency', (ctx) => {
     'connection_table_to_matrix',
   )
   const out = ctx.output('matrix')
+  const links = ctx.output('links')
   const byType = ctx.params.groupByType !== false
   // neuprint-python's own vocabulary, not Coda's: `connection_table_to_matrix` appends
   // `_pre`/`_post` to this itself, and the columns it is indexing are `fetch_adjacencies`'
@@ -528,6 +529,22 @@ registerEmitter('neuron.adjacency', (ctx) => {
     `)`,
     `_conn = merge_neuron_properties(_neurons, _conn, ['type'])`,
     `${out} = connection_table_to_matrix(_conn, ${pyStr(group)}, sort_by=${pyStr(group)})`,
+    ``,
+    /*
+     * The long half, from `_conn` rather than by melting the matrix back down.
+     *
+     * They agree, and that is worth saying because the canvas does it the other way round:
+     * `matrixToLinks` drops the zero cells, and `_conn` has no zero rows to drop — a connection
+     * table only holds connections that exist. `fetch_adjacencies` answers one row per
+     * (pre, post, ROI), so the sum is across regions, which is exactly what
+     * `connection_table_to_matrix` collapses into a cell.
+     */
+    `${links} = (`,
+    `    _conn`,
+    `    .groupby([${pyStr(`${group}_pre`)}, ${pyStr(`${group}_post`)}], as_index=False)['weight']`,
+    `    .sum()`,
+    `    .rename(columns={${pyStr(`${group}_pre`)}: 'source', ${pyStr(`${group}_post`)}: 'target'})`,
+    `)`,
   ]
 })
 

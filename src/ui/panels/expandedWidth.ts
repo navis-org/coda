@@ -41,6 +41,7 @@ const EXPANDED_WIDTHS: Record<string, ExpandedWidth> = {
   // Tile grids.
   'out.profile': MEASURED_WIDTH,
   'out.datasetSummary': MEASURED_WIDTH,
+  'net.metrics': MEASURED_WIDTH,
   // Prose, and a list of rows.
   'dataset.description': MEASURED_WIDTH,
   'cave.tableInfo': MEASURED_WIDTH,
