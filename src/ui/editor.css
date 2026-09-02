@@ -73,6 +73,16 @@
   stroke-dasharray: 5 4;
 }
 
+/*
+ * The rail's width, on the pane rather than on the rail: the minimap sits beside the rail and
+ * has to clear it, and the two are *siblings* — a custom property on `.react-flow__controls`
+ * would fall through to the fallback and read as if it were shared when it is not. React Flow
+ * gives every `<Panel>` `margin: 15px`, and both are `bottom-left` panels, so the map's own
+ * `margin-left` is what keeps them off each other.
+ */
+.react-flow {
+  --rail-width: 26px;
+}
 .react-flow__controls {
   box-shadow: none;
   gap: 1px;
@@ -84,7 +94,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
-  width: 26px;
+  width: var(--rail-width);
   height: 26px;
 }
 .react-flow__controls-button:hover {
@@ -247,10 +257,72 @@
   padding: 0 10px;
 }
 
+/*
+ * Bottom-left, beside the controls rail rather than in the opposite corner — the map and every
+ * button that governs the view are one group now. Cleared by the rail's own width plus React
+ * Flow's 15px panel margin and a gap; `--rail-width` is declared on `.react-flow` above, so a
+ * rail that changes width takes the map with it. Bottom-aligned with the rail's last button
+ * (both panels are `.bottom`), which is why the map's height needs no arithmetic here.
+ *
+ * The right of the canvas is deliberately left clear: that is where the pinned viewer dock opens
+ * and where a wide card is least likely to be under something.
+ */
 .react-flow__minimap {
   background: var(--surface-1);
   border: 1px solid var(--border);
   border-radius: var(--radius);
+}
+.react-flow__minimap.left {
+  margin-left: calc(15px + var(--rail-width) + 8px);
+}
+
+/* --------------------------------------------------------------------------
+ * Add a node
+ * -------------------------------------------------------------------------- */
+
+/*
+ * The bottom-right corner the minimap left, and the one place on the canvas that is reliably
+ * empty: the rail and the map are down the other side, the dock is a grid column outside this
+ * element, and a card dropped here is a card somebody put here.
+ *
+ * A circle, and the only accented round control in the app — that is what makes it findable
+ * without a word beside it, which is the whole trade a wordless button makes. Sized past the
+ * 26px rail buttons on purpose: this is the one control a first-time canvas needs.
+ */
+.add-fab {
+  position: absolute;
+  right: 20px;
+  bottom: 20px;
+  z-index: 5;
+  width: 42px;
+  height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 50%;
+  /* `#fff` rather than a token, exactly as `.btn--primary` does: the accent is one colour in
+     both themes, so the ink over it is one colour too. */
+  color: #fff;
+  box-shadow: var(--shadow-panel);
+  cursor: pointer;
+}
+.add-fab:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+.add-fab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+/*
+ * Locked. Dimmed rather than hidden, for the rail's reason: an absence with no visible cause
+ * reads as the app having lost the button.
+ */
+.add-fab:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 .react-flow__minimap-mask {
   fill: color-mix(in srgb, var(--canvas) 70%, transparent);
@@ -5118,10 +5190,19 @@ p.sources__hint {
  * A standing card, not a dialog — bottom-right so it never sits over the toolbar or the
  * status bar's own hints, and out of the way of the canvas it is asking about.
  */
+/*
+ * Above the canvas's Add button, not over it: the status bar (~28px, `auto` in the grid, so
+ * there is no token to read) plus the button's own 20px + 42px, plus a gap. A plain number
+ * rather than a `calc`, because the two are measured against different boxes — this is `fixed`
+ * to the window, the button is positioned inside the canvas column — so a calc would be
+ * arithmetic that only looks exact. Measured at 4px of overlap before this; erring high costs a
+ * gap nobody sees, erring low covers the one control a first session needs with a beta nudge,
+ * and both are at their most likely on a first visit.
+ */
 .feedback-nudge {
   position: fixed;
   right: 16px;
-  bottom: 40px;
+  bottom: 106px;
   z-index: 50;
   max-width: 280px;
   padding: 10px 12px;
@@ -5733,43 +5814,6 @@ p.sources__hint {
 .markdown__missing {
   color: var(--text-muted);
   font-style: italic;
-}
-
-/* --------------------------------------------------------------------------
- * Minimap toggle
- * -------------------------------------------------------------------------- */
-
-/*
- * Bottom-right, where the minimap itself sits, and rendered outside `<ReactFlow>` so it keeps
- * that corner whether or not the minimap is mounted. When the minimap is open it moves up and
- * left onto the map's top edge, which is the only place it does not cover data.
- */
-.minimap-toggle {
-  position: absolute;
-  right: 12px;
-  bottom: 12px;
-  z-index: 5;
-  width: 26px;
-  height: 26px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--text-secondary);
-  cursor: pointer;
-}
-.minimap-toggle:hover {
-  background: var(--surface-hover);
-  color: var(--text-primary);
-  border-color: var(--border-strong);
-}
-.minimap-toggle[data-open] {
-  /* Above the map, not over it: the map is the thing you opened it to look at. */
-  bottom: calc(12px + var(--minimap-height) + 6px);
-  color: var(--text-primary);
 }
 
 /* --------------------------------------------------------------------------

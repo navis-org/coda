@@ -848,7 +848,7 @@ graph then means reading the titles and the wires.
 
 **The button lives in the header, and that is what makes the fold safe on a card with nothing
 under the rows.** It survives the band it hides, so there is always something to press — the same
-rule the minimap's corner button and the overlay's Style button follow, and the reason the
+rule the minimap's rail button and the overlay's Style button follow, and the reason the
 viewers-only restriction this shipped with was dropped rather than worked around. Its glyph does
 not change with the state and does not need to: the rows are either on the card or they are not,
 which says it louder than a pair of arrows. The pressed style carries that fact for a pointer that
@@ -930,10 +930,27 @@ button meaning "show me" must not close an inspector that is already open.
 There are **two** add-node surfaces, on purpose:
 
 - `NodeBrowser` — big centred modal with thumbnails and category chips, for browsing. Opened
-  by Tab / ⇧A / the + Add button / the `Add ▶ Browse All Nodes…` command.
+  by Tab / ⇧A / the round **+** button in the canvas's bottom-right corner / the
+  `Add ▶ Browse All Nodes…` command.
 - `CommandPalette` — compact keyboard list, for people who know the name. Opened by Space
   (everything), by canvas double-click / pane right-click (prefilled `Add:`), and by
   dragging a link into empty canvas (filtered to compatible types, and it wires the pick up).
+
+**Only one of the two has a button, and that is the split.** Both had one in the toolbar — a
+`+ Add Tab` and a `Commands Space` — which spent two of the toolbar's widest slots saying what
+the status bar's hint strip already says, and offered a beginner a choice between two doors into
+the same room. The browser is the one worth pointing at, so it became the round **+** on the
+canvas; the palette keeps Space, which is where it was always going to be reached from. The
+status bar still advertises `Space commands`.
+
+**The + asks for `canvasAnchor`, not the pointer.** Every other route in is a gesture *at* a
+point — Tab and ⇧A use the pointer, a double-click uses the click, a dropped link uses where it
+was dropped — and the card lands there. A button is not: the pointer is on the button. That is
+the bug `anchorPoint` was written for when the button was in the toolbar (it falls back to the
+canvas's upper-middle when the pointer is outside the pane), and moving the button *into* the
+pane is the same bug with the inside-the-bounds test now passing — the card would land in the
+bottom-right corner, half under the thing that made it. So `canvasAnchor` is split out and the
+button asks for it directly.
 
 `NodeThumbnail` derives everything from the `NodeDefinition` — header tint from category,
 dots from real ports. The centre glyph is keyed to the **category** so six drawings cover

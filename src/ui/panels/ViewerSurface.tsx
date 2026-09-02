@@ -216,7 +216,7 @@ export function ViewerSurface({
         {tabs.length > 0 && (
           /*
            * Lives in the header, outside the sidebar it controls. A toggle that vanishes
-           * when used cannot be undone — the same rule the minimap's corner button follows.
+           * when used cannot be undone — the same rule the minimap's rail button follows.
            */
           <button
             type="button"

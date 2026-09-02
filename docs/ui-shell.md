@@ -41,15 +41,36 @@ along the right edge of the canvas, which reads as a dead strip.
 
 Each panel has an affordance where you would look for it: the inspector has a toolbar toggle
 (the lens icon; and `I`, unqualified — unlike `m`/`h` it is worth pressing with nothing selected)
-plus a chevron in its own header; the minimap has a button in the corner it occupies. That button is rendered
-**outside `<ReactFlow>`** so it keeps its corner whether or not the map is mounted — a toggle
-that disappears when used cannot be undone.
+plus a chevron in its own header; the minimap has `MinimapControl` in the **canvas controls rail**,
+with the view buttons.
+
+**The map and its toggle are both bottom-left now, and the toggle moved first.** It began in the
+bottom-right corner beside the map, rendered outside `<ReactFlow>` so it kept that corner whether
+or not the map was mounted, and stepping up over the map's top edge when open — a toggle that
+disappears when used cannot be undone, so it had to survive the thing it shows. In the rail it
+still does, and it costs neither a second copy of the map's height in CSS nor a lone icon in the
+corner opposite every other canvas control. Two consequences: it reads as **view** rather than
+layout, so it sits directly under Fit Selected and above the layout group; and it is the **one
+button in the rail that stays live under the lock**, because opening a map moves nothing and
+restructures nothing — the map it opens is `pannable`/`zoomable` only while the canvas is
+unlocked, which is where the lock means something. `LockControl`'s "the whole rail dims except
+this one" is now "except these two".
+
+**The map then followed it, and the clearance is one number.** Both are `<Panel position=
+"bottom-left">`, and React Flow gives every panel `margin: 15px` — so left to itself the map
+would open *on top of* the rail. `.react-flow__minimap.left` takes a `margin-left` of the panel
+margin plus the rail's width plus an 8px gap, which puts the map at x=49 against the rail's
+15..41 (measured in a browser, since jsdom lays nothing out). `--rail-width` is declared on
+**`.react-flow`**, not on `.react-flow__controls`: the rail and the map are *siblings*, so a
+property on the rail would silently fall through to `var()`'s fallback and read as shared when it
+is not. Both panels are `.bottom`, so the two are bottom-aligned with no arithmetic about the
+map's height. What this buys is that the right of the canvas is clear — which is the side the
+pinned viewer dock opens on.
 
 **The minimap's size goes through its `style` prop, not CSS.** React Flow reads
 `style.width`/`style.height` to compute the map's viewBox, so sizing it in the stylesheet leaves
 it drawing a 200×150 projection into whatever box CSS produced: it renders, and is silently
-wrong. `MINIMAP_SIZE` in `Editor.tsx` is the single constant; `.canvas-area` publishes its height
-as a CSS variable inline so the toggle can clear it without a second copy of the number.
+wrong. `MINIMAP_SIZE` in `Editor.tsx` is the single constant.
 
 **The map draws from React Flow's node lookup, and skips any card it has no size for** — the
 size on the _user_ node, which in a controlled flow is whatever the app put there. That is why
@@ -64,6 +85,37 @@ and has no coverage. Opt in per suite: with storage present, autosaves leak betw
 It stubs `sessionStorage` too, because the autosave needs both to mean anything: the graph goes
 in one and the tab identity that decides *which* graph in the other, so stubbing only the first
 exercises the degraded single-slot path while looking like it covers the feature.
+
+### The toolbar's run group, and the two buttons that left it
+
+Reading order after the icon cluster is **Run · Auto-run · Clear**, then the bell. Run leads: it
+is the only primary button on the bar and the one thing on it reached for repeatedly, so it gets
+the position, and its two neighbours are both statements about it — Auto-run whether it happens on
+its own, Clear the same action from the other end (Run brings the stale nodes up to date, Clear
+makes every node stale again). Clear read *before* Run once, which put a destructive verb in front
+of the button people are aiming for; both neighbours are ghost or checkbox against Run's primary,
+so none of the three reads as an equal choice to it.
+
+**The brand is the name alone.** `connectome data analysis` sat beside it on a shared baseline,
+which is what `.toolbar__brandText` existed for — the mark has to centre on a one-line name rather
+than on a block that goes two lines whenever the descriptor wraps. One line needs no wrapper, so
+the rule and `.toolbar__brand span` went with the words. The descriptor still leads `index.html`,
+`overview.html` and `tutorial.html`, which is where somebody who has not seen the app is reading;
+in the toolbar it was a subtitle shown only to people already inside.
+
+**Two buttons left the toolbar, and only one of them moved.** `+ Add Tab` became the round **+**
+in the canvas's bottom-right corner (see [canvas.md](canvas.md) for why it asks for the canvas
+anchor rather than the pointer); `Commands Space` was deleted outright, keeping the key. Both were
+wide word-plus-shortcut buttons for things the status bar's hint strip already advertises, and
+`Commands` in particular offered a beginner a choice between two doors into the same room.
+
+Two consequences worth knowing. `Toolbar` now takes **no props at all** — it had `onOpenPalette`
+and `onOpenBrowser`, relayed through the store because the toolbar sits outside the React Flow
+provider and cannot convert screen coordinates; the canvas's own button converts them itself, so
+the relay went with the button. `requestPalette` stays on the store, since the Save menu and the
+tour still open the palette. And the button now **goes away with the canvas** while the dashboard
+is up, which the toolbar version did not — where it was a *dead* control, since `NodeBrowser` and
+the Tab binding both live in `Editor`.
 
 ### The toolbar's icon cluster
 

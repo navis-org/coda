@@ -640,7 +640,7 @@ function CodaNodeViewImpl({
           )}
           {/* Stays in the header rather than on the band it controls: folded, the band is not
             rendered at all, so a toggle living inside it would have nothing left to press —
-            the same rule the minimap's corner button and the overlay's Style button follow. */}
+            the same rule the minimap's rail button and the overlay's Style button follow. */}
           {foldable && (
             <button
               type="button"

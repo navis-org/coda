@@ -55,6 +55,7 @@ import { LoopLayer } from './LoopLayer'
 import { CommandPalette } from './panels/CommandPalette'
 import { LayoutControls } from './panels/LayoutControls'
 import { LockControl } from './panels/LockControl'
+import { MinimapControl } from './panels/MinimapControl'
 import { ViewControls } from './panels/ViewControls'
 import { EdgeContextMenu } from './panels/EdgeContextMenu'
 import { NodeBrowser } from './panels/NodeBrowser'
@@ -70,7 +71,7 @@ import { isTourActive, refreshTour } from './tour/tourState'
 // do. Both listeners share the two guards below.
 import { TOUR_DECLINES, isTypingTarget } from './appShortcuts'
 import { useClipboardShortcuts } from './clipboard'
-import { LOCKED_NOTICE } from './lockCopy'
+import { LOCKED_HINT, LOCKED_NOTICE } from './lockCopy'
 import { typeColorVar } from './socketStyle'
 import { useArrange } from './useArrange'
 import { useDownloads } from './useDownloads'
@@ -148,10 +149,9 @@ function EditorCanvas() {
   const inference = useGraphStore((s) => s.inference)
   const notice = useGraphStore((s) => s.notice)
   const setNotice = useGraphStore((s) => s.setNotice)
-  // Primitives, not the panels object: snapshots are compared by identity and `togglePanel`
-  // returns a fresh one each call.
+  // A primitive, not the panels object: snapshots are compared by identity and `togglePanel`
+  // returns a fresh one each call. The button that flips it is `MinimapControl`, in the rail.
   const minimapOpen = useGraphStore((s) => s.panels.minimap)
-  const togglePanel = useGraphStore((s) => s.togglePanel)
 
   const { screenToFlowPosition } = useReactFlow()
   const fitAll = useFitAll()
@@ -968,12 +968,6 @@ function EditorCanvas() {
       // The Guided Tour's anchor for "the canvas is the document" — see `tour/steps.ts` for why
       // the tour addresses elements by `data-tour` rather than by class or by accessible name.
       data-tour="canvas"
-      /*
-       * The minimap's height, published to CSS so the toggle button — which lives outside the
-       * minimap's subtree and has to sit clear of it — reads the same number the component was
-       * given. One constant, two consumers.
-       */
-      style={{ '--minimap-height': `${MINIMAP_SIZE.height}px` } as React.CSSProperties}
       onPointerMove={(e) => {
         pointerRef.current = { x: e.clientX, y: e.clientY }
       }}
@@ -1139,7 +1133,9 @@ function EditorCanvas() {
         {/*
          * Every button in the rail is ours — see `ViewControls` for why React Flow's own zoom
          * and fit are switched off rather than left to sit above them. Reading order is view,
-         * then layout, then the lock that governs both.
+         * then layout, then the lock that governs both. The minimap toggle counts as view: it
+         * governs what you can see rather than where anything is, and it is the one button here
+         * that stays live under the lock — see `MinimapControl`.
          */}
         <Controls
           showZoom={false}
@@ -1148,6 +1144,7 @@ function EditorCanvas() {
           position="bottom-left"
         >
           <ViewControls />
+          <MinimapControl />
           <LayoutControls onArrange={arrange} />
           <LockControl />
         </Controls>
@@ -1156,7 +1153,7 @@ function EditorCanvas() {
             // The minimap moves the viewport too, which is the whole of what it is for.
             pannable={!locked}
             zoomable={!locked}
-            position="bottom-right"
+            position="bottom-left"
             nodeColor={(node) => {
               const graphNode = (node.data as CodaNodeData | undefined)?.node
               const def = graphNode ? getNodeDef(graphNode.type) : undefined
@@ -1170,32 +1167,39 @@ function EditorCanvas() {
       </ReactFlow>
 
       {/*
-       * Outside `<ReactFlow>`, so it keeps its corner whether or not the minimap is mounted —
-       * a toggle that moved when you pressed it would be a target that runs away. `nodrag` and
-       * the stopped pointer event keep the click off the pane behind it.
+       * Add a node.
+       *
+       * A circle in the corner rather than a word in the toolbar, and outside `<ReactFlow>` for
+       * the reason the minimap's toggle used to be: a control that has to keep its corner
+       * whatever the pane is doing. `nodrag` and the stopped pointer event keep the click off
+       * the pane behind it.
+       *
+       * **It asks for `canvasAnchor`, not the pointer.** Every other route in — Tab, ⇧A, a
+       * drag into space — is a gesture *at* a point, and the node lands there. This one is a
+       * button, and the pointer is on the button: `anchorPoint` would find it inside the canvas
+       * bounds and drop the card in the bottom-right corner, under the thing that made it.
+       *
+       * Gone with the canvas while the dashboard is up, which the toolbar version was not — and
+       * there it was a dead control, since `NodeBrowser` and the Tab binding both live here.
        */}
       <button
         type="button"
-        className="minimap-toggle nodrag"
-        data-open={minimapOpen || undefined}
-        aria-pressed={minimapOpen}
-        title={minimapOpen ? 'Hide the minimap' : 'Show the minimap'}
-        aria-label={minimapOpen ? 'Hide minimap' : 'Show minimap'}
+        className="add-fab nodrag"
+        data-tour="add"
+        onClick={() => openBrowser(canvasAnchor(wrapperRef.current))}
+        disabled={locked}
+        title={locked ? LOCKED_HINT : 'Add a node — browse everything (Tab)'}
+        aria-label="Add a node"
         onPointerDown={(event) => event.stopPropagation()}
-        onClick={() => togglePanel('minimap')}
       >
-        <svg viewBox="0 0 16 12" width="15" height="11" aria-hidden="true" focusable="false">
-          <rect
-            x="0.75"
-            y="0.75"
-            width="14.5"
-            height="10.5"
-            rx="1.5"
+        <svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true" focusable="false">
+          <path
+            d="M12 5v14M5 12h14"
             fill="none"
             stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
           />
-          <rect x="3" y="3" width="4" height="3" fill="currentColor" />
-          <rect x="9" y="6" width="4" height="3" fill="currentColor" />
         </svg>
       </button>
 
@@ -1267,6 +1271,21 @@ function EditorCanvas() {
 }
 
 /**
+ * Where an insertion lands when the pointer is not a place: the upper-middle of the canvas.
+ *
+ * Split out of `anchorPoint` for the Add button, which is *on* the canvas and so would pass the
+ * inside-the-bounds test with the pointer sitting on the button itself — dropping the new card
+ * in the bottom-right corner, half under the button that made it. The toolbar version of that
+ * bug is the one `anchorPoint` was written for; a control inside the pane is the same bug with
+ * the test passing. So a surface where the pointer means "the button" asks for this directly.
+ */
+function canvasAnchor(wrapper: HTMLElement | null): { x: number; y: number } {
+  const bounds = wrapper?.getBoundingClientRect()
+  if (!bounds) return { x: 0, y: 0 }
+  return { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 3 }
+}
+
+/**
  * Where a toolbar-triggered insertion should land: the pointer when it is over the canvas,
  * otherwise the upper-middle of the canvas. Clicking a toolbar button leaves the pointer on
  * the toolbar, and dropping the node under the cursor there would put it off-screen.
@@ -1282,9 +1301,7 @@ function anchorPoint(
     pointer.x <= bounds.right &&
     pointer.y >= bounds.top &&
     pointer.y <= bounds.bottom
-  return inside
-    ? pointer
-    : { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 3 }
+  return inside ? pointer : canvasAnchor(wrapper)
 }
 
 /** Static type of a port, used when a drag starts so the palette can filter. */

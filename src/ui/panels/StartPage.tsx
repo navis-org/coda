@@ -211,9 +211,8 @@ export function StartPage() {
               <span className="start__version">v{__APP_VERSION__}</span>
             </div>
             <p className="start__lede">
-              Next-generation connectome analysis.{' '}
-              <strong>Build an analysis out of nodes</strong>, wire them together, and see the
-              result at every step.
+              Next-Generation <strong style={{ color: '#ffffff' }}>Co</strong>nnectome <strong style={{ color: '#ffffff' }}>D</strong>ata <strong style={{ color: '#ffffff' }}>A</strong>nalysis.{' '}
+              Build a workflow out of nodes, wire them up, and inspect the results.
             </p>
             <p className="start__stage">
               Coda is in beta. Expect the odd rough edge. Feedback & feature requests are very

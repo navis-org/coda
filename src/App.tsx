@@ -24,8 +24,6 @@ import { ViewerDock } from './ui/panels/ViewerDock'
 import { ViewerOverlay } from './ui/panels/ViewerOverlay'
 
 export function App() {
-  const requestPalette = useGraphStore((s) => s.requestPalette)
-  const requestNodeBrowser = useGraphStore((s) => s.requestNodeBrowser)
   const theme = useGraphStore((s) => s.theme)
   /*
    * The dock's column is declared on `.app`, so `.app` is what has to know about it. Both reads
@@ -60,7 +58,7 @@ export function App() {
       data-dock={docked ? 'open' : undefined}
       style={{ '--dock-width': `${dockFraction * 100}%` } as React.CSSProperties}
     >
-      <Toolbar onOpenPalette={requestPalette} onOpenBrowser={requestNodeBrowser} />
+      <Toolbar />
       {dashboardOpen ? <DashboardView /> : <Editor />}
       {/*
        * Between the canvas and the inspector, and before it in the DOM so tab order runs left to

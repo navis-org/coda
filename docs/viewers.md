@@ -456,7 +456,7 @@ the minimap, whose closed default is a canvas argument that does not apply insid
 nobody opens by accident. Note the inverted read in `loadPanels`: an absent key means open, so
 a preference written before the key existed is not read as the user having closed it. The
 toggle is in the overlay header, _outside_ the panel it controls, for the same reason the
-minimap's button is outside the minimap.
+minimap's button is outside the minimap — it has to survive the thing it hides.
 
 **The panel still shows presentational params only.** That filter is what makes the surface
 safe to touch, and it is passed into `groupParams` rather than baked into it — which is the

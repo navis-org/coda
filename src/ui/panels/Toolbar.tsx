@@ -21,7 +21,7 @@ import { useErrorCount, useGraphStore, useStaleCount } from '../../store/graphSt
 import { pickGraphFile } from '../../store/persistence'
 import { downloadGraph, downloadNotebook, downloadRmd } from '../export'
 import { formatAgo, plural } from '../format'
-import { LOCKED_HINT, lockedTitle } from '../lockCopy'
+import { lockedTitle } from '../lockCopy'
 import { appElement, toggleFullscreen, useIsFullscreen } from '../fullscreen'
 import type { NotifyState } from '../notify'
 import {
@@ -37,14 +37,14 @@ import type { TourAnchor } from '../tour/steps'
 import { TOURS, startTour } from '../tour/tourState'
 import { useDismissOnOutside } from '../useDismiss'
 
-export interface ToolbarProps {
-  /** Opens the command palette, which lives inside the canvas. */
-  onOpenPalette: (initialQuery?: string) => void
-  /** Opens the large add-node browser. */
-  onOpenBrowser: () => void
-}
-
-export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
+/*
+ * No props. It had two — `onOpenPalette` and `onOpenBrowser`, routed through the store because
+ * the toolbar sits outside the React Flow provider and cannot convert screen coordinates. Both
+ * buttons are gone: Add is a circle on the canvas itself (`Editor.tsx`), which can convert
+ * coordinates and so needs no relay, and Commands was a second, wordier way to press Space.
+ * `requestPalette` stays on the store — the Save menu and the tour still open the palette.
+ */
+export function Toolbar() {
   const graph = useGraphStore((s) => s.graph)
   const busy = useGraphStore((s) => s.busy)
   const theme = useGraphStore((s) => s.theme)
@@ -96,13 +96,12 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
         {/* currentColor, not --accent: an accent-blue mark here is the same blue as a Table
             socket, and would read as a typed port rather than as chrome. */}
         <CodaMark size={17} />
-        {/* The name and its descriptor share a baseline; the mark centres on the pair. Without
-            this wrapper the mark centres on a block that is two lines tall whenever the
-            descriptor wraps, and sits visibly low against the name. */}
-        <div className="toolbar__brandText">
-          <strong>Coda</strong>
-          <span>connectome data analysis</span>
-        </div>
+        {/* Just the name. It used to carry `connectome data analysis` beside it on a shared
+            baseline, which is what `.toolbar__brandText` was for — a mark centred on a
+            one-line name rather than on a block that went two lines whenever the descriptor
+            wrapped. One line needs no wrapper, so both went. The descriptor still leads the
+            static pages, which is where somebody who has not seen the app is reading. */}
+        <strong>Coda</strong>
       </div>
 
       <input
@@ -426,58 +425,6 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
         ▦
       </button>
 
-      <button
-        type="button"
-        className="btn btn--ghost"
-        onClick={clearResults}
-        disabled={busy}
-        title="Drop every cached result so the next run re-fetches from scratch"
-      >
-        Clear
-      </button>
-
-      <button
-        type="button"
-        className="btn"
-        data-tour="add"
-        onClick={onOpenBrowser}
-        disabled={locked}
-        title={locked ? LOCKED_HINT : 'Browse nodes (Tab)'}
-      >
-        + Add <span className="btn__kbd">Tab</span>
-      </button>
-
-      <button
-        type="button"
-        className="btn"
-        onClick={() => onOpenPalette()}
-        title="Commands and nodes (Space)"
-      >
-        Commands <span className="btn__kbd">Space</span>
-      </button>
-
-      {/*
-       * Next to Run because it is a statement about the same action: whether it happens on its
-       * own. A real checkbox rather than a toggle button — this is a persistent setting with an
-       * on and an off, not a command.
-       */}
-      <label
-        className="autorun"
-        data-tour="autorun"
-        title={
-          autoRun
-            ? 'Re-running the whole graph after every change. Uncheck for expensive workflows.'
-            : 'Re-run the whole graph after every change. Expensive nodes will query on every edit.'
-        }
-      >
-        <input
-          type="checkbox"
-          checked={autoRun}
-          onChange={(e) => setAutoRun(e.target.checked)}
-        />
-        <span>Auto-run</span>
-      </label>
-
       {busy ? (
         <button
           type="button"
@@ -515,6 +462,44 @@ export function Toolbar({ onOpenPalette, onOpenBrowser }: ToolbarProps) {
           <span className="btn__kbd">⇧R</span>
         </button>
       )}
+
+      {/*
+       * Next to Run because it is a statement about the same action: whether it happens on its
+       * own. A real checkbox rather than a toggle button — this is a persistent setting with an
+       * on and an off, not a command.
+       */}
+      <label
+        className="autorun"
+        data-tour="autorun"
+        title={
+          autoRun
+            ? 'Re-running the whole graph after every change. Uncheck for expensive workflows.'
+            : 'Re-run the whole graph after every change. Expensive nodes will query on every edit.'
+        }
+      >
+        <input
+          type="checkbox"
+          checked={autoRun}
+          onChange={(e) => setAutoRun(e.target.checked)}
+        />
+        <span>Auto-run</span>
+      </label>
+
+      {/*
+       * Clear is *after* Run because it is about the same thing from the other end — Run brings
+       * the stale nodes up to date, Clear makes every node stale again — and reading it before
+       * Run put a destructive verb in front of the button people are aiming for. Ghost, not
+       * primary, so the pair does not read as two equal choices.
+       */}
+      <button
+        type="button"
+        className="btn btn--ghost"
+        onClick={clearResults}
+        disabled={busy}
+        title="Drop every cached result so the next run re-fetches from scratch"
+      >
+        Clear
+      </button>
 
       <NotifyToggle />
 

@@ -245,7 +245,7 @@ describe('the inspector', () => {
 })
 
 describe('the minimap', () => {
-  it('opens and closes from its own corner button', () => {
+  it('opens and closes from its button in the controls rail', () => {
     render(<App />)
     fireEvent.click(screen.getByLabelText('Show minimap'))
     expect(minimap()).not.toBeNull()

@@ -432,10 +432,12 @@ export const GUIDED_TOUR: readonly TourStep[] = [
     id: 'add',
     title: 'Adding new nodes is easy',
     body:
-      'Press this button or hit `Tab` to open the node browser. Alernatively, hit Space ' +
+      'Press this button or hit `Tab` to open the node browser. Alternatively, hit Space ' +
       'to open the command palette, which works for both nodes and commands.',
     anchor: () => byTour('add'),
-    side: 'bottom',
+    // `top`, not `bottom`: the button is in the canvas's bottom-right corner, so a popover
+    // below it is a popover off the bottom of the window.
+    side: 'top',
     align: 'end',
   },
   {

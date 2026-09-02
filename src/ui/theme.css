@@ -440,22 +440,12 @@ button {
   flex: none;
   color: var(--text-primary);
 }
-/* The baseline row moved in here so the mark outside it centres on the name rather than on a
-   two-line block. A div, not a span: `.toolbar__brand span` below would otherwise match this
-   wrapper too and drag the name down to the descriptor's size and colour. */
-.toolbar__brandText {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 7px;
-}
+/* One line, so no baseline-row wrapper and no descriptor rule: `.toolbar__brandText` and
+   `.toolbar__brand span` both existed only to hold `connectome data analysis` beside the name
+   without dragging the mark off its centre. */
 .toolbar__brand strong {
   font-size: 14px;
   letter-spacing: 0.2px;
-}
-.toolbar__brand span {
-  font-size: 11px;
-  color: var(--text-muted);
 }
 
 .toolbar__spacer {

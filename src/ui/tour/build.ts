@@ -145,7 +145,8 @@ export const LEARN_TO_BUILD: readonly TourStep[] = [
     title: 'Your turn: open the node browser',
     body: 'Press `+ Add` — or hit `Tab`. (If you would rather watch, Next does it for you.)',
     anchor: () => byTour('add'),
-    side: 'bottom',
+    // See the `add` step in `steps.ts`: the button is at the bottom of the canvas now.
+    side: 'top',
     align: 'end',
     interactive: true,
     advanceWhen: () => Boolean(document.querySelector('.node-browser')),

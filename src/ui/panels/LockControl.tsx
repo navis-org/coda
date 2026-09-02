@@ -8,7 +8,8 @@
  *
  * Last in the rail, below the layout buttons, because it governs them: while it is on, every
  * other button in the rail is disabled, which is the strongest signal on screen that the canvas
- * is frozen — the whole rail dims except this one.
+ * is frozen — the whole rail dims except this one and `MinimapControl`, which shows a panel
+ * rather than touching the graph and so stays live for the reason `styleGroup` does.
  *
  * What the lock covers is written up on `GraphState.locked`, and the copy every refusing surface
  * shows is in `ui/lockCopy.ts`.
