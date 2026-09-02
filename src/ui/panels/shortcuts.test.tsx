@@ -27,7 +27,12 @@ import '../../nodes'
 import { useGraphStore } from '../../store/graphStore'
 import { demoWorkflow } from '../../wizard/build'
 import { DEFAULT_PANELS } from '../../store/persistence'
-import { clearStorage, installJsdomStubs, installStorageStub } from '../../test/jsdomStubs'
+import {
+  clearStorage,
+  clipboardEvent,
+  installJsdomStubs,
+  installStorageStub,
+} from '../../test/jsdomStubs'
 import {
   SHORTCUT_GROUPS,
   STATUS_BAR_HINTS,
@@ -209,16 +214,54 @@ describe('the keys the card advertises', () => {
     act(() => useGraphStore.getState().setSelection([first]))
 
     act(() => press('mute'))
-    expect(useGraphStore.getState().graph.nodes.find((n) => n.id === first)?.disabled).toBe(true)
+    expect(useGraphStore.getState().graph.nodes.find((n) => n.id === first)?.disabled).toBe(
+      true,
+    )
 
     act(() => press('collapse'))
-    expect(useGraphStore.getState().graph.nodes.find((n) => n.id === first)?.collapsed).toBe(true)
+    expect(useGraphStore.getState().graph.nodes.find((n) => n.id === first)?.collapsed).toBe(
+      true,
+    )
+  })
+
+  /**
+   * The three rows `press` cannot reach, and why they get a route of their own.
+   *
+   * ⌘C, ⌘X and ⌘V are bound to the browser's `copy`/`cut`/`paste` events rather than to keydown —
+   * see `ui/clipboard.ts` for why that is the design and not an accident — so dispatching the
+   * chord proves nothing about them. Left at that, three rows on the card would advertise keys
+   * with nothing in this suite standing behind them, which is the exact failure this file exists
+   * to prevent. `ui/clipboard.test.tsx` covers the handlers; what is checked here is that they
+   * are *mounted in the app*, which is the half the card is really claiming.
+   *
+   * jsdom has no `ClipboardEvent`, hence `clipboardEvent` from `test/jsdomStubs.ts`.
+   */
+  it('copies and pastes, through the clipboard events rather than the keydown listener', () => {
+    render(<App />)
+    const before = useGraphStore.getState().graph.nodes.length
+    act(() =>
+      useGraphStore.getState().setSelection([useGraphStore.getState().graph.nodes[0]!.id]),
+    )
+
+    const copied = clipboardEvent('copy')
+    act(() => {
+      window.dispatchEvent(copied)
+    })
+    const text = copied.clipboardData.getData('text/plain')
+    expect(JSON.parse(text).nodes).toHaveLength(1)
+
+    act(() => {
+      window.dispatchEvent(clipboardEvent('paste', text))
+    })
+    expect(useGraphStore.getState().graph.nodes.length).toBe(before + 1)
   })
 
   it('duplicates, and undoes', () => {
     render(<App />)
     const before = useGraphStore.getState().graph.nodes.length
-    act(() => useGraphStore.getState().setSelection([useGraphStore.getState().graph.nodes[0]!.id]))
+    act(() =>
+      useGraphStore.getState().setSelection([useGraphStore.getState().graph.nodes[0]!.id]),
+    )
 
     act(() => press('duplicate'))
     expect(useGraphStore.getState().graph.nodes.length).toBe(before + 1)

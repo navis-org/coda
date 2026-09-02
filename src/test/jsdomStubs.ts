@@ -404,3 +404,30 @@ export function clearStorage(): void {
     /* ignore */
   }
 }
+
+/**
+ * A `copy`, `cut` or `paste` event carrying text, for the canvas clipboard handlers.
+ *
+ * jsdom implements neither `ClipboardEvent` nor `DataTransfer`, so this fabricates the two
+ * methods the handlers actually call and nothing else. Here rather than in either test file
+ * because there are two — `ui/clipboard.test.tsx` drives the handlers through a harness, and
+ * `ui/panels/shortcuts.test.tsx` proves they are mounted in the real `App` — and a stub for a
+ * missing browser API copied per suite is how the two quietly stop agreeing about what a
+ * clipboard event looks like.
+ *
+ * Read what a handler wrote back with `event.clipboardData.getData('text/plain')`.
+ */
+export function clipboardEvent(
+  type: 'copy' | 'cut' | 'paste',
+  text = '',
+): Event & { clipboardData: { getData(kind: string): string } } {
+  const data = new Map<string, string>([['text/plain', text]])
+  const event = new Event(type, { bubbles: true, cancelable: true })
+  Object.defineProperty(event, 'clipboardData', {
+    value: {
+      getData: (kind: string) => data.get(kind) ?? '',
+      setData: (kind: string, value: string) => data.set(kind, value),
+    },
+  })
+  return event as Event & { clipboardData: { getData(kind: string): string } }
+}

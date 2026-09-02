@@ -94,10 +94,12 @@ export function slugify(text: string, fallback: string): string {
 /**
  * Put text on the clipboard, or reject with a sentence saying why not.
  *
- * One copy, because there are two callers and the failure modes are not obvious: the API is
- * absent in jsdom *and* on any page not served from a secure origin, and a browser can refuse
- * the write outright. Both callers report through the app's own notice channel rather than
- * inventing a place to put the message.
+ * One copy, because the failure modes are not obvious: the API is absent in jsdom *and* on any
+ * page not served from a secure origin, and a browser can refuse the write outright. The two
+ * callers that copy *for* the user — a share link, a snippet — report through the app's own
+ * notice channel rather than inventing a place to put the message. The third, `ui/clipboard.ts`,
+ * deliberately swallows the rejection: the fragment is already in `store.clipboard`, so the
+ * gesture worked and only the crossing to another tab was lost.
  */
 export async function copyText(text: string): Promise<void> {
   const clipboard = navigator.clipboard

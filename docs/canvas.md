@@ -535,6 +535,102 @@ frame painting *behind* the cards, and the title staying legible over the dot gr
 checks have not been run against this implementation yet.** `ui/panels/groupMenu.test.tsx` covers
 the DOM the frame draws, the menu, the keys and the palette rows.
 
+## Copy, cut and paste
+
+⌘C / ⌘X / ⌘V on the canvas, plus three rows on the node menu and three commands in the palette.
+The selection leaves as text, and text is what comes back — which is the whole point, and the one
+thing `duplicateSelection` (⌘D, and unchanged) cannot do: a fragment copied here pastes into
+another tab, another window, a colleague's chat, or a text editor, where it is a readable
+`.coda.json` fragment.
+
+Three files. `core/clipboard.ts` is headless — the fragment, the read and the merge;
+`ui/clipboard.ts` owns the browser's clipboard and the gestures; the store holds three thin
+actions and one field.
+
+**A fragment is a graph file plus a marker, and the marker is not what makes it readable.**
+Everything that can go wrong with a pasted fragment — an unknown node type, an edge naming a
+socket that is not there, a param that predates its control — is what `deserializeGraph` was
+written to survive, and a second lenient reader is where those repairs quietly stop happening. So
+`readFragment` *is* `deserializeGraph`, with one cheap gate in front (a `{` prefix, so a pasted
+column of ten thousand ids is never parsed) and one question after (**nothing survived** reads the
+same as "not ours", or a document from a build with other nodes would swallow the keystroke and
+add nothing). It asks nothing in between: valid JSON, an object, `nodes` and `edges` arrays are
+all things `deserializeGraph` already throws on, and asking first meant parsing the payload twice
+to reach the same three answers. The marker only records which shape of document was copied — the
+useful consequence being that a whole `.coda.json` somebody was sent pastes onto the canvas,
+because there was never a separate format to refuse it.
+
+**`duplicateSelection` is this, with the clipboard taken out of the middle.** ⌘D was written
+first and longhand, and the paste then needed every one of its rules again — internal edges only,
+whole frames only, `+28`. Restating them was the arrangement for about an hour, which is exactly
+the shape `fetchText` and `canHaveCell` are in the docs to warn about, so the store's action is
+now `subgraphOf` + `insertFragment` and the offset has one name (`PASTE_OFFSET`). What that buys
+is one clone path: the next field on the document that references a node id has one place to be
+handled rather than two that agree by restatement.
+
+**Bound to the `copy`/`cut`/`paste` events, not to keydown.** A clipboard event carries a
+`clipboardData` a page may read and write inside the browser's own gesture;
+`navigator.clipboard.readText` is the other route and it is gated — a permission prompt in
+Chrome, refused outright in Firefox — which is no basis for a keystroke that has to work every
+time. Binding the events also means the shortcut is whatever that platform calls it. The cost is
+that `ui/panels/shortcuts.test.tsx`'s `press()` cannot reach these three rows, so they get a test
+of their own there that fabricates the event against the mounted app; jsdom implements neither
+`ClipboardEvent` nor `DataTransfer`.
+
+Three rules keep it out of the way of ordinary text, and each exists because its failure is
+silent:
+
+- **A paste that is not a graph is not touched.** Most of what is on a clipboard is prose, a URL
+  or a column of neuron ids. `readFragment` runs *before* `preventDefault`, so text the canvas
+  cannot use falls through to whatever else wanted it — including, on a locked canvas, without a
+  lock notice, since nothing there was addressed to the canvas.
+- **A live text selection wins.** With prose selected in a dialog, ⌘C is about that prose even
+  though three cards are also selected behind it.
+- **A field being typed in is exempt**, through the same `isTypingTarget` both keydown listeners
+  share.
+
+**Where a paste lands is a decision, and "wherever it was copied from" is the wrong one.** A
+fragment carries absolute positions, so pasting into a graph it did not come from can put the
+cards an entire screen from anything on view — a paste that worked, selected the new nodes, and
+looks exactly like a paste that did nothing. So the canvas answers with a point, and that answer
+is `anchorPoint` — the pointer when it is over the canvas, a point in the middle of it when the
+pointer is on a toolbar or a panel — which the toolbar's insertions already ask for. The palette
+has no viewport of its own, so `pastePoint` rides on `CommandContext` beside `fitView` and
+`fitSelected`, which is what that context is for; the node menu takes the click instead, since by
+the time a row is clicked the pointer is on the menu.
+
+The second half of that: **a repeat of the same paste at the same point steps by `PASTE_OFFSET`.**
+⌘D cascades for free because it offsets from the selection it just made; a paste is placed
+absolutely, so ⌘V twice without moving the pointer put the second stack exactly over the first,
+with the new selection covering it. The counter is keyed on the text and the point, lives in the
+store's closure, and is neither in the document nor in history.
+
+**Copy is live under the lock; cut and paste are not.** The asymmetry is deliberate and is the
+one place the trio splits: copying takes nothing away and changes nothing, and a frozen canvas is
+exactly the one somebody wants to lift a piece out of to use elsewhere. `store/lock.test.ts`
+classifies all three and `ui/panels/lock.test.tsx` pins the visible half on both surfaces.
+
+**Two clipboards, and neither can stand in for the other.** The system one is primary and is what
+crosses to another tab. `store.clipboard` is this app's own memory of the last copy, and it is
+what a *menu row* pastes from — a row cannot read the system clipboard to decide whether to grey
+itself out without asking for the permission that would prompt on opening a menu. The click
+itself still tries the system clipboard first (`pasteFromClipboard`), so a fragment copied in
+another tab pastes even though the row could not know it was there.
+
+Paste is on the **node** menu rather than a pane menu because there is no pane menu: a right-click
+on empty canvas opens the add-node palette, and paste lands at the click, which is where that
+palette would have put a node.
+
+**The trio is canvas-only, deliberately.** The listeners are `Editor`'s, by `appShortcuts.ts`'s
+own rule — copy and cut act on the canvas selection and paste needs a viewport point — so they are
+dead on the dashboard, which unmounts `Editor`. That is the right answer there (no selection on
+screen, nowhere visible to paste) rather than the bug `F`, `I` and `/` once had for the same
+structural reason.
+
+**Not checked in a real browser yet.** The event path is exercised in jsdom with fabricated
+events, which is honest about the handlers and says nothing about how a real ⌘X behaves inside a
+card's text, or about what Safari puts on the pasteboard.
+
 ## Canvas interaction
 
 Set explicitly on `<ReactFlow>` in `Editor.tsx`, and each one matters:

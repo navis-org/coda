@@ -16,6 +16,7 @@ import type { GraphState } from '../../store/graphStore'
 import { pickGraphFile } from '../../store/persistence'
 import { downloadGraph, downloadNotebook, downloadRmd } from '../export'
 import { canExportNotebook } from '../../export/canExport'
+import { copySelectionToSystem, cutSelectionToSystem, pasteFromClipboard } from '../clipboard'
 import { peekExportWarnings } from '../exportWarnings'
 import { appElement, toggleFullscreen } from '../fullscreen'
 import { TOURS, startTour } from '../tour/tourState'
@@ -80,6 +81,14 @@ export interface CommandContext {
   fitView: () => void
   /** Frames the current selection; does nothing with nothing selected. See `ui/fitView.ts`. */
   fitSelected: () => void
+  /**
+   * Where Paste puts the cards, in flow coordinates — the canvas's own answer, since a command
+   * list built from the store has no viewport of its own.
+   *
+   * Optional because a surface without a canvas can still build this list, which is what the
+   * palette's tests do; a paste with no point falls back to the fragment's own coordinates.
+   */
+  pastePoint?: () => { x: number; y: number }
 }
 
 /**
@@ -277,6 +286,42 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
       ...(locked ? { hint: LOCKED_HINT } : {}),
       disabled: locked || selection.length === 0,
       perform: () => store.duplicateSelection(),
+    },
+    {
+      id: 'cmd:copy',
+      label: 'Copy Selection',
+      action: 'Edit',
+      hint: 'Onto the system clipboard, so it pastes into another tab too',
+      shortcut: shortcutKeys('copy'),
+      // Not disabled by the lock: copying takes nothing away — see the same row on the node menu.
+      disabled: selection.length === 0,
+      perform: copySelectionToSystem,
+    },
+    {
+      id: 'cmd:cut',
+      label: 'Cut Selection',
+      action: 'Edit',
+      shortcut: shortcutKeys('cut'),
+      ...(locked ? { hint: LOCKED_HINT } : {}),
+      disabled: locked || selection.length === 0,
+      perform: cutSelectionToSystem,
+    },
+    {
+      id: 'cmd:paste',
+      label: 'Paste',
+      action: 'Edit',
+      hint: locked
+        ? LOCKED_HINT
+        : 'The copied cards, with the wires and frames that came with them',
+      shortcut: shortcutKeys('paste'),
+      /*
+       * Enabled from this app's own memory of the last copy, never from the system clipboard:
+       * reading that to grey out a row means a permission prompt for *opening the palette*. The
+       * command itself still tries the system one first, so a fragment copied in another tab
+       * pastes even though the row could not know it was there.
+       */
+      disabled: locked || !store.clipboard,
+      perform: () => void pasteFromClipboard(ctx.pastePoint?.()),
     },
     {
       id: 'cmd:group',

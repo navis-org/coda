@@ -37,7 +37,15 @@ import {
   setColumns as setDashboardTracks,
   setSpan as setCellSpan,
 } from '../core/dashboard'
-import { cloneGroups, createGroup, removeGroups, updateGroup } from '../core/groups'
+import { createGroup, removeGroups, updateGroup } from '../core/groups'
+import type { Point } from '../core/clipboard'
+import {
+  PASTE_OFFSET,
+  fragmentFrom,
+  insertFragment,
+  readFragment,
+  subgraphOf,
+} from '../core/clipboard'
 import { autoWireDataset } from '../core/autowire'
 import { addNodeWithCompanion } from '../core/companion'
 import type { InferenceResult } from '../core/inference'
@@ -606,6 +614,37 @@ export interface GraphState {
   toggleParamRows(nodeIds: string[]): void
   duplicateSelection(): void
   /**
+   * The selection as clipboard text, remembered here as well as returned.
+   *
+   * Two answers because there are two clipboards and neither can stand in for the other. The
+   * returned string is what the caller puts on the *system* one, which is the copy that survives
+   * a second tab and a text editor; `clipboard` is this app's own memory of it, which is what a
+   * menu row can be enabled from and what a paste falls back to on a browser that will not let a
+   * page read the system clipboard outside a paste event — Firefox, and Chrome without the
+   * permission. See `ui/clipboard.ts` for which route each gesture takes.
+   *
+   * **Not refused by the lock.** Copying takes nothing away and changes nothing; the frozen
+   * canvas is about edits landing on *this* graph, and the usual reason to copy off a locked one
+   * is to paste it somewhere else.
+   */
+  copySelection(): string | undefined
+  /** Copy, then delete. Refused by the lock, because the deletion half is an edit. */
+  cutSelection(): string | undefined
+  /**
+   * Paste clipboard text onto the canvas, and say how many nodes landed.
+   *
+   * `text` omitted means this app's own `clipboard`. `at` is where the fragment's top-left corner
+   * goes — the pointer, usually; see `insertFragment` for what a paste with no `at` does.
+   *
+   * Zero is the answer for everything that did not paste: a locked canvas, an empty clipboard,
+   * and text that was not a graph. The last is not an error and says nothing — most of what is on
+   * a clipboard is not ours. Warnings from the read *are* surfaced: a dropped node type is
+   * something the user has to know about, because the hole is in what they just pasted.
+   */
+  pasteFragment(text?: string, at?: Point): number
+  /** The last thing copied or cut here, as clipboard text. See `copySelection`. */
+  clipboard: string | undefined
+  /**
    * Draw a frame around the selected cards, and return its id.
    *
    * A *canvas* edit rather than a document one in every sense that matters here: it changes no
@@ -976,6 +1015,12 @@ export const useGraphStore = create<GraphState>((set, get) => {
   let gestureStart: { tag: string; graph: CodaGraph } | undefined
 
   /**
+   * Where the last paste landed, so a repeat of it can step rather than stack. See
+   * `pasteFragment`, which is the only reader and the only writer.
+   */
+  let lastPaste: { key: string; count: number } = { key: '', count: 0 }
+
+  /**
    * Whether the canvas is locked, and therefore whether a structural or geometric edit may land.
    *
    * Asked by every action `locked` names, and by none of the others — the lock is about the
@@ -1130,6 +1175,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     past: [],
     future: [],
     notice: initial?.warnings.length ? initial.warnings.join(' · ') : undefined,
+    clipboard: undefined,
     lastRun: undefined,
     busy: false,
     paletteRequest: { seq: 0, initialQuery: '' },
@@ -1695,49 +1741,90 @@ export const useGraphStore = create<GraphState>((set, get) => {
       )
     },
 
+    /*
+     * Duplicate is Copy and Paste with the clipboard taken out of the middle.
+     *
+     * Written out longhand first — mint the ids, copy the internal edges, clone the whole frames,
+     * offset by 28 — and then written a second time, in `core/clipboard.ts`, when a paste needed
+     * every one of those rules again. Two spellings of "what comes along with a selection" is the
+     * shape this repo keeps paying for (`fetchText`, `canHaveCell`, `bucketParams`), and the
+     * comments here claimed to *share* rules they in fact restated. So it composes the pair now:
+     * `subgraphOf` is the taking and `insertFragment` the putting back, with `PASTE_OFFSET` the
+     * one place the 28 lives.
+     */
     duplicateSelection: () => {
       if (frozen()) return
       const { graph, selection } = get()
-      if (selection.length === 0) return
-      const selected = new Set(selection)
-      const idMap = new Map<string, string>()
-      const clones: GraphNode[] = []
-      for (const node of graph.nodes) {
-        if (!selected.has(node.id)) continue
-        const id = newId('n')
-        idMap.set(node.id, id)
-        clones.push({
-          ...node,
-          id,
-          position: { x: node.position.x + 28, y: node.position.y + 28 },
-          params: { ...node.params },
-        })
-      }
-      // Only internal edges are copied — a clone should not silently steal external
-      // inputs, and duplicating a subgraph is the common case.
-      const cloneEdges: GraphEdge[] = graph.edges
-        .filter((e) => idMap.has(e.source) && idMap.has(e.target))
-        .map((e) => ({
-          ...e,
-          id: newId('e'),
-          source: idMap.get(e.source)!,
-          target: idMap.get(e.target)!,
-        }))
+      const clipping = subgraphOf(graph, selection)
+      if (!clipping) return
+      let clones: string[] = []
+      commit((g) => {
+        const result = insertFragment(g, clipping)
+        clones = result.nodeIds
+        return result.graph
+      })
+      set({ selection: clones })
+    },
+
+    copySelection: () => {
+      const { graph, selection } = get()
+      const text = fragmentFrom(graph, selection)
+      if (text) set({ clipboard: text })
+      return text
+    },
+
+    cutSelection: () => {
+      // Silent under the lock, like every other refusal here: the sentence a reader sees is the
+      // UI's (`LOCKED_NOTICE`), and the store's own refusal strings are addressed to a model.
+      if (frozen()) return undefined
+      const text = get().copySelection()
+      if (!text) return undefined
+      get().deleteNodes([...get().selection])
+      return text
+    },
+
+    pasteFragment: (text, at) => {
+      if (frozen()) return 0
+      const payload = text ?? get().clipboard
+      if (!payload) return 0
+      const read = readFragment(payload)
+      if (!read) return 0
 
       /*
-       * A frame is copied only when the *whole* of it was duplicated — the rule the edge copy
-       * above already follows, for the same reason: a frame around three of six cards is a
-       * claim about a set nobody selected. See `cloneGroups`.
+       * A repeated paste at the same point is stepped, rather than landing on top of itself.
+       *
+       * ⌘D cascades for free — it offsets from the selection, which is the copy it just made — but
+       * a paste is placed absolutely, so pressing ⌘V twice without moving the pointer put the
+       * second stack exactly over the first, with the new selection covering it. That reads as
+       * nothing having happened, which is the one outcome a paste must never look like.
+       *
+       * Keyed on the text *and* the point, so moving the pointer or copying something else starts
+       * the cascade again. Deliberately not part of the document, and deliberately not history:
+       * where the last paste went is a fact about this session's pointer.
        */
-      const groupClones = cloneGroups(graph, idMap)
+      let target: Point | undefined
+      if (at) {
+        // Keyed on the payload's *length* rather than the payload: the counter outlives the
+        // paste, and a module-scoped string built from a 200 KB fragment is a copy of it held
+        // for the session. Two different fragments of exactly equal length at exactly one point
+        // continue each other's cascade, which steps a paste 28px — the harmless direction.
+        const key = `${payload.length}@${Math.round(at.x)},${Math.round(at.y)}`
+        const step = key === lastPaste.key ? lastPaste.count + 1 : 0
+        lastPaste = { key, count: step }
+        target = { x: at.x + step * PASTE_OFFSET, y: at.y + step * PASTE_OFFSET }
+      }
 
-      commit((g) => ({
-        ...g,
-        nodes: [...g.nodes, ...clones],
-        edges: [...g.edges, ...cloneEdges],
-        ...(groupClones.length ? { groups: [...(g.groups ?? []), ...groupClones] } : {}),
-      }))
-      set({ selection: clones.map((n) => n.id) })
+      let pasted: string[] = []
+      commit((g) => {
+        const result = insertFragment(g, read.graph, target)
+        pasted = result.nodeIds
+        return result.graph
+      })
+      set({
+        selection: pasted,
+        ...(read.warnings.length ? { notice: read.warnings.join(' · ') } : {}),
+      })
+      return pasted.length
     },
 
     groupSelection: () => {

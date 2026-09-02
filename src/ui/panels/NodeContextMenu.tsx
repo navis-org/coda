@@ -5,6 +5,7 @@ import { groupsTouching } from '../../core/groups'
 import { getNodeDef, isAnnotation } from '../../core/registry'
 import { hasHelp } from '../../help/registry'
 import { useGraphStore } from '../../store/graphStore'
+import { copySelectionToSystem, cutSelectionToSystem, pasteFromClipboard } from '../clipboard'
 import { LOCKED_HINT } from '../lockCopy'
 import { shortcutKeys } from '../shortcuts'
 import { useDismissOnOutside } from '../useDismiss'
@@ -12,11 +13,25 @@ import { AlignTools } from './AlignTools'
 
 export interface NodeContextMenuProps {
   screenPosition: { x: number; y: number }
+  /**
+   * The same click in flow coordinates — where Paste puts the cards.
+   *
+   * Passed in rather than converted here: `screenToFlowPosition` is React Flow's, and reaching
+   * for it would tie this menu to a provider it is otherwise independent of — `nodeMenu.test.tsx`
+   * renders it on its own. Optional for that reason too; without one, the fragment lands at its
+   * own absolute coordinates, offset, which is what `insertFragment` does with no point.
+   */
+  flowPosition?: { x: number; y: number }
   nodeId: string
   onClose: () => void
 }
 
-export function NodeContextMenu({ screenPosition, nodeId, onClose }: NodeContextMenuProps) {
+export function NodeContextMenu({
+  screenPosition,
+  flowPosition,
+  nodeId,
+  onClose,
+}: NodeContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null)
   const store = useGraphStore()
   const node = store.graph.nodes.find((n) => n.id === nodeId)
@@ -158,6 +173,54 @@ export function NodeContextMenu({ screenPosition, nodeId, onClose }: NodeContext
         title={store.locked ? LOCKED_HINT : undefined}
       >
         Duplicate <kbd>{shortcutKeys('duplicate')}</kbd>
+      </button>
+      {/*
+       * Copy acts on `targets` like mute and delete — a right-click on an unselected card is
+       * about that card — so it selects them first, since the clipboard is cut from the
+       * *selection*. And it is live under the lock: copying takes nothing away, and a frozen
+       * canvas is exactly the one somebody wants to lift a piece out of.
+       */}
+      <button
+        type="button"
+        className="context-menu__item"
+        title="Onto the system clipboard, so it pastes into another tab too"
+        onClick={act(() => {
+          store.setSelection(targets)
+          copySelectionToSystem()
+        })}
+      >
+        Copy <kbd>{shortcutKeys('copy')}</kbd>
+      </button>
+      <button
+        type="button"
+        className="context-menu__item"
+        onClick={act(() => {
+          store.setSelection(targets)
+          cutSelectionToSystem()
+        })}
+        disabled={store.locked}
+        title={store.locked ? LOCKED_HINT : undefined}
+      >
+        Cut <kbd>{shortcutKeys('cut')}</kbd>
+      </button>
+      {/*
+       * Paste is here rather than on a pane menu because there is no pane menu: a right-click on
+       * empty canvas opens the add-node palette. It lands at the click, which is the same place
+       * that palette would have put a node.
+       *
+       * Enabled from `store.clipboard` alone — this app's own memory of the last copy. Whether
+       * the *system* clipboard holds a fragment cannot be known without reading it, and reading
+       * it to grey out a menu row would mean a permission prompt for opening a menu. The click
+       * itself still tries the system one first; see `pasteFromClipboard`.
+       */}
+      <button
+        type="button"
+        className="context-menu__item"
+        onClick={act(() => void pasteFromClipboard(flowPosition))}
+        disabled={store.locked}
+        title={store.locked ? LOCKED_HINT : 'Put the copied cards down here'}
+      >
+        Paste <kbd>{shortcutKeys('paste')}</kbd>
       </button>
       {/*
        * Grouping acts on `targets` for the reason mute and delete do — a right-click on an

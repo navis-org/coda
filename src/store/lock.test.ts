@@ -209,6 +209,22 @@ describe('a locked canvas', () => {
     expect(store().selection).toEqual(['view'])
   })
 
+  it('refuses a cut and a paste, and copies all the same', () => {
+    /*
+     * The one asymmetry in the clipboard trio, and it is deliberate: cutting and pasting are
+     * structural edits, while copying takes nothing away and changes nothing. A locked canvas is
+     * exactly the one somebody wants to lift a piece out of to use elsewhere, so refusing the
+     * copy would be refusing the reason the graph was frozen.
+     */
+    store().setSelection(['src'])
+    expect(store().cutSelection()).toBeUndefined()
+    expect(graph().nodes).toHaveLength(2)
+    const text = store().copySelection()
+    expect(text).toBeTruthy()
+    expect(store().pasteFragment(text)).toBe(0)
+    expect(graph().nodes).toHaveLength(2)
+  })
+
   it('still opens another graph — a document load is not a canvas gesture', () => {
     store().loadGraph(emptyGraph('another'))
     expect(graph().meta?.name).toBe('another')
@@ -234,6 +250,10 @@ describe('every store action is on one side of the lock', () => {
     'moveNodes',
     'resizeNodes',
     'duplicateSelection',
+    // Copy's two structural halves. `copySelection` is on the live side below — see the case
+    // above, which is where that split is argued.
+    'cutSelection',
+    'pasteFragment',
     'groupSelection',
     'ungroup',
     'deleteNodes',
@@ -341,6 +361,7 @@ describe('every store action is on one side of the lock', () => {
     'nodeFetchedAt',
     'nodeWarning',
     'setNotice',
+    'copySelection',
   ]
 
   it('is classified, so a new one cannot slip past the lock unnoticed', () => {

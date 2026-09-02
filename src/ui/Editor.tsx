@@ -69,6 +69,7 @@ import { isTourActive, refreshTour } from './tour/tourState'
 // panel and which view is up, and none of them needs the canvas. This handler keeps the keys that
 // do. Both listeners share the two guards below.
 import { TOUR_DECLINES, isTypingTarget } from './appShortcuts'
+import { useClipboardShortcuts } from './clipboard'
 import { LOCKED_NOTICE } from './lockCopy'
 import { typeColorVar } from './socketStyle'
 import { useArrange } from './useArrange'
@@ -228,6 +229,8 @@ function EditorCanvas() {
   const [browserAt, setBrowserAt] = useState<{ x: number; y: number } | null>(null)
   const [contextMenu, setContextMenu] = useState<{
     screenPosition: { x: number; y: number }
+    /** The same click in flow units, converted here rather than in render — as `MenuState` does. */
+    flowPosition: { x: number; y: number }
     nodeId: string
   } | null>(null)
   const [edgeMenu, setEdgeMenu] = useState<{
@@ -633,6 +636,24 @@ function EditorCanvas() {
     if (menu) requestExportWarnings(useGraphStore.getState().graph)
   }, [menu])
 
+  /**
+   * Where a paste lands, in flow coordinates.
+   *
+   * `anchorPoint` is the same question the toolbar's insertions already ask — the pointer when it
+   * is over the canvas, a point in the middle of it when the pointer is on a toolbar or a panel —
+   * so this converts its answer rather than re-deriving the geometry. What it must never be is
+   * "wherever the cards were when they were copied": a fragment carries absolute positions, and
+   * pasting into a *different* graph is the case this exists for, so that answer can be a screen
+   * away from anything on view — a paste that worked, selected the new cards, and looks exactly
+   * like a paste that did nothing.
+   *
+   * Declared above the palette's memo because that memo reads it while it renders.
+   */
+  const pastePoint = useCallback(
+    () => screenToFlowPosition(anchorPoint(wrapperRef.current, pointerRef.current)),
+    [screenToFlowPosition],
+  )
+
   const paletteItems = useMemo<PaletteItem[]>(() => {
     // Read so the dependency is a real one: `buildCommandItems` calls `peekExportWarnings`,
     // which answers differently once a walk has landed and is invisible to the lint rule.
@@ -645,6 +666,7 @@ function EditorCanvas() {
         store: liveStore ?? useGraphStore.getState(),
         fitView: fitAll,
         fitSelected,
+        pastePoint,
       }),
       ...buildNodeItems(undefined, locked),
     ]
@@ -652,7 +674,7 @@ function EditorCanvas() {
     // whenever anything changes — which is what keeps `disabled` flags honest. The revision is
     // in the list for the same reason: an export warning that lands after the palette opened
     // has to reach the row it is about.
-  }, [menu, liveStore, locked, fitAll, fitSelected, exportWarningsRevision])
+  }, [menu, liveStore, locked, fitAll, fitSelected, pastePoint, exportWarningsRevision])
 
   /** Run a command, or insert a node and wire it to the drag origin. */
   const handlePick = useCallback(
@@ -774,6 +796,10 @@ function EditorCanvas() {
     handledFit.current = fitRequest
     fitAll()
   }, [fitRequest, fitAll])
+
+  // --- clipboard ----------------------------------------------------------
+
+  useClipboardShortcuts({ pastePoint, refuseIfLocked })
 
   // --- keyboard -----------------------------------------------------------
 
@@ -1000,6 +1026,7 @@ function EditorCanvas() {
           setGroupMenu(null)
           setContextMenu({
             screenPosition: { x: event.clientX, y: event.clientY },
+            flowPosition: screenToFlowPosition({ x: event.clientX, y: event.clientY }),
             nodeId: node.id,
           })
         }}
@@ -1204,6 +1231,7 @@ function EditorCanvas() {
       {contextMenu && (
         <NodeContextMenu
           screenPosition={contextMenu.screenPosition}
+          flowPosition={contextMenu.flowPosition}
           nodeId={contextMenu.nodeId}
           onClose={() => setContextMenu(null)}
         />

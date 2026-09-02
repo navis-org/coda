@@ -55,8 +55,7 @@ const card = (id: string) => {
 const lockButton = () => button('Lock canvas')
 // Named precisely rather than by prefix: a node card can carry its own "+ Add" button —
 // Rename's rows, Find Neurons' filters — and `/\+ Add/` matches those too.
-const addButton = () =>
-  screen.getByRole('button', { name: /\+ Add Tab/ }) as HTMLButtonElement
+const addButton = () => screen.getByRole('button', { name: /\+ Add Tab/ }) as HTMLButtonElement
 const browser = () => screen.queryByRole('dialog', { name: 'Add a node' })
 const lock = () => act(() => useGraphStore.setState({ locked: true }))
 
@@ -140,6 +139,8 @@ describe('the palette', () => {
     for (const id of [
       'cmd:undo',
       'cmd:duplicate',
+      'cmd:cut',
+      'cmd:paste',
       'cmd:group',
       'cmd:delete',
       'cmd:browse-nodes',
@@ -149,8 +150,16 @@ describe('the palette', () => {
       expect(command(id)?.disabled, id).toBe(true)
       expect(command(id)?.hint, id).toMatch(/locked/i)
     }
-    // Running, muting, collapsing, expanding and saving are not canvas edits.
-    for (const id of ['cmd:mute', 'cmd:collapse', 'cmd:expand', 'cmd:save', 'cmd:lock']) {
+    // Running, muting, collapsing, expanding, saving — and copying, which takes nothing away and
+    // is most wanted on precisely the graph somebody froze to lift a piece out of.
+    for (const id of [
+      'cmd:mute',
+      'cmd:collapse',
+      'cmd:expand',
+      'cmd:save',
+      'cmd:lock',
+      'cmd:copy',
+    ]) {
       expect(command(id)?.disabled ?? false, id).toBe(false)
     }
   })
@@ -184,8 +193,12 @@ describe('the context menus', () => {
     // The alignment grid moves cards, so it is on the frozen side with Duplicate and Delete.
     expect((button('Align left edges') as HTMLButtonElement).disabled).toBe(true)
     expect(button('Align left edges').title).toMatch(/locked/i)
-    // Muting and collapsing are not canvas edits, so the same menu still offers them.
+    expect((button(/^Cut/) as HTMLButtonElement).disabled).toBe(true)
+    expect((button(/^Paste/) as HTMLButtonElement).disabled).toBe(true)
+    // Muting and collapsing are not canvas edits, so the same menu still offers them — and
+    // neither is copying, which is the one row of the clipboard trio that stays lit.
     expect((button(/^(Mute|Unmute)/) as HTMLButtonElement).disabled).toBe(false)
+    expect((button(/^Copy/) as HTMLButtonElement).disabled).toBe(false)
   })
 })
 

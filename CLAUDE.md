@@ -159,6 +159,20 @@ Area-specific — the rule, then the doc that holds why:
   node that only wants to be wider sets `NODE_BODIES[type].width`.
 - **Two wires between the same pair of nodes are not a cycle.** `topoSort` derives indegree
   from the same index that decrements it, so the two cannot disagree again.
+- **Copy is bound to the clipboard *events*, and a paste that is not a graph must fall through.**
+  ⌘C/⌘X/⌘V ride `copy`/`cut`/`paste` rather than keydown, because `clipboardData` is readable
+  inside the browser's own gesture where `navigator.clipboard.readText` is a permission prompt in
+  Chrome and a refusal in Firefox. So `readFragment` runs *before* `preventDefault`: most of what
+  is on a clipboard is prose or a column of ids, and swallowing one is invisible from inside the
+  app. A fragment **is** a graph file plus a marker — `readFragment` is `deserializeGraph` with a
+  `{`-prefix gate before and a "nothing survived" test after, so a `.coda.json` pastes too and no
+  second lenient reader can forget a repair. `duplicateSelection` is the same pair (`subgraphOf` +
+  `insertFragment`) with the clipboard taken out. Three more: a live
+  text selection wins over the canvas selection; a paste is placed at a point the canvas supplies
+  (the pointer, or the middle of the pane) because a fragment's absolute positions can be a screen
+  away in another graph; and a repeat at that same point **steps**, since ⌘D cascades off its own
+  selection and a paste does not. **Copy is live under the lock** where cut and paste are not.
+  See [docs/canvas.md](docs/canvas.md).
 - **A group frame is not a React Flow node**, and three viewport properties keep it honest:
   `ViewportPortal` at `z-index: -1`, `pointer-events: stroke` on the rect alone (the interior
   must stay click-through), and `nopan`, because panning is d3-zoom's *native* listener and

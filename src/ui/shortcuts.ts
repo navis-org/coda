@@ -153,7 +153,10 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
     items: [
       {
         id: 'run-all',
-        chords: [{ shift: true, key: 'R' }, { mod: true, key: '⏎' }],
+        chords: [
+          { shift: true, key: 'R' },
+          { mod: true, key: '⏎' },
+        ],
         label: 'Run everything stale',
         hint: 'Only what an edit actually invalidated',
         short: 'run',
@@ -162,7 +165,7 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
   },
   {
     title: 'Editing',
-    note: 'These are the ones the canvas lock refuses; the rest carry on while it is on.',
+    note: 'These are the ones the canvas lock refuses; the rest carry on while it is on. Copy is the exception here — it takes nothing away.',
     items: [
       { id: 'undo', chords: [{ mod: true, key: 'Z' }], label: 'Undo', short: 'undo' },
       { id: 'redo', chords: [{ mod: true, shift: true, key: 'Z' }], label: 'Redo' },
@@ -170,6 +173,23 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
         id: 'duplicate',
         chords: [{ mod: true, key: 'D' }],
         label: 'Duplicate the selection',
+      },
+      {
+        id: 'copy',
+        chords: [{ mod: true, key: 'C' }],
+        label: 'Copy the selection',
+        hint: 'Onto the system clipboard, so it pastes into another tab — or into a text editor, as JSON',
+      },
+      {
+        id: 'cut',
+        chords: [{ mod: true, key: 'X' }],
+        label: 'Cut the selection',
+      },
+      {
+        id: 'paste',
+        chords: [{ mod: true, key: 'V' }],
+        label: 'Paste at the pointer',
+        hint: 'Wires and frames come too, where both ends of them were copied',
       },
       {
         id: 'delete',
