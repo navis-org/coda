@@ -145,6 +145,55 @@ export const inputIdsNode = registerNode({
     }
 
     /*
+     * Two warnings that `validate` structurally cannot raise, both about the *wire*.
+     *
+     * `validate` runs at edit time against types, so the wired table's contents do not exist
+     * when it is asked — it can only ever see `ctx.params.ids`. Everything below is a fact about
+     * values, which makes `evaluate` the only place it can be said. Raised at the top, before
+     * the query, which is what `EvalContext.warn` asks for.
+     */
+    if (collected.dropped > 0) {
+      const n = collected.dropped
+      ctx.warn(
+        n === 1
+          ? 'One value in the wired ID column was not an ID and was skipped.'
+          : `${n} values in the wired ID column were not IDs and were skipped.`,
+      )
+    }
+
+    /*
+     * The half of the width check `validate` can only do for typed ids.
+     *
+     * With no Dataset the ids *are* the output, and that table's `neuronId` is an `i64` — a JS
+     * number — so an id past `Number.MAX_SAFE_INTEGER` comes back out as a *different neuron*.
+     * That is invariant 8's failure exactly, and until this it was silent for anything arriving
+     * on the wire: `validate` warns about the ids somebody typed, and an 18-digit root id
+     * pasted into an Upload node upstream reached `Number()` with nothing said anywhere.
+     *
+     * Warned rather than dropped, and that is the deliberate half. Dropping would quietly
+     * shorten a list whose entire purpose is that it is the one the user handed over, and it
+     * would contradict what `validate` promises a keystroke earlier — the two have to describe
+     * the same behaviour or they read as two different problems. `docs/limits.md`: a guard rail
+     * warns; it does not refuse.
+     */
+    if (!dataset) {
+      // `id.length` *is* the digit count — `parseIdList` has stripped leading zeros and refused
+      // signs — so any id of 15 digits or fewer is under the ceiling and never reaches
+      // `numericId`, which is what keeps this off the common path.
+      const wide = collected.ids.filter((id) => id.length >= 16 && numericId(id) === undefined)
+      if (wide.length > 0) {
+        ctx.warn(
+          wide.length === 1
+            ? `${wide[0]} is too wide to hold exactly in this node’s own table, and has been ` +
+                `rounded to a different neuron. Wire a Dataset to carry it as text.`
+            : `${wide.length} IDs are too wide to hold exactly in this node’s own table, and ` +
+                `have been rounded to different neurons — ${wide[0]} is the first. Wire a ` +
+                `Dataset to carry them as text.`,
+        )
+      }
+    }
+
+    /*
      * The schema `inferOutputs` promised, resolved the same way. Read before the empty check so
      * that an unconfigured node still advertises the shape it is about to have — which is what
      * lets a column picker downstream be set up before a single id has been typed.
@@ -174,7 +223,8 @@ export const inputIdsNode = registerNode({
       return {
         // `Number`, because `ID_ONLY_SCHEMA` declares `neuronId` as `i64` and invariant 3 is
         // that the schema half and the value half agree. Exact for every id this branch can
-        // usefully carry; `validate` warns about the ones it cannot.
+        // usefully carry; the two above say so for the ones it cannot — `validate` at edit time
+        // for what was typed, and the `ctx.warn` above for those *and* whatever arrived wired.
         neurons: tableFromRows(
           ID_ONLY_SCHEMA,
           collected.ids.map((neuronId) => ({ neuronId: Number(neuronId) })),

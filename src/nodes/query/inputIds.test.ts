@@ -23,10 +23,13 @@ import { addEdge, addNode, emptyGraph } from '../../core/graph'
 import type { CodaGraph, GraphNode } from '../../core/graph'
 import { inferGraph } from '../../core/inference'
 import { defaultParams } from '../../core/node'
+import type { EvalContext, ParamValues } from '../../core/node'
+import { inputPorts, outputPorts } from '../../core/ports'
 import { requireNodeDef } from '../../core/registry'
 import { Scheduler } from '../../core/scheduler'
-import { columnNames, schemaOf } from '../../core/types'
-import { isTableValue } from '../../core/values'
+import { columnNames, schemaOf, column, tableSchema } from '../../core/types'
+import type { TableValue, Value } from '../../core/values'
+import { isTableValue, tableFromRows } from '../../core/values'
 import { MockSource } from '../../data/mock/MockSource'
 import type { DataSource, FindNeuronsRequest } from '../../data/source'
 
@@ -332,5 +335,141 @@ describe('neuron.inputIds — refusals', () => {
     g = addEdge(g, { source: 'src', sourceHandle: 'out', target: 'ids', targetHandle: 'ids' })
     const reported = (inferGraph(g).nodes['ids']?.issues ?? []).map((i) => i.message)
     expect(reported.join(' ')).not.toContain('No IDs yet')
+  })
+})
+
+/*
+ * The width warning, and why it needs a describe of its own.
+ *
+ * `validate` covers the ids somebody *typed* — asserted above, at edit time. It cannot cover the
+ * ids arriving on the `ids` wire, because it runs against types and the table's contents do not
+ * exist yet. So the wired half is only sayable from `evaluate`, and it went unsaid: an 18-digit
+ * root id pasted into an Upload node upstream reached `Number()` and came out as a different
+ * neuron with nothing anywhere to mention it — invariant 8's failure exactly.
+ *
+ * Driven through `evaluate` directly rather than through the scheduler, because the point is a
+ * table carrying an *exact* 18-digit id, and the only honest way to hold one is a `str` column —
+ * which is what an Upload of a CSV, or CAVE's `pt_root_id`, actually hands over.
+ */
+describe('neuron.inputIds — a wide id on the wire', () => {
+  const def = requireNodeDef('neuron.inputIds')
+
+  /** A FlyWire root id: `Number()` of it is a different integer. */
+  const WIDE = '720575940379279312'
+
+  /** Ids as text, the shape every source that has wide ones publishes. */
+  const idTable = (...ids: string[]): TableValue =>
+    tableFromRows(
+      tableSchema(column('neuronId', 'str')),
+      ids.map((neuronId) => ({ neuronId })),
+      'neurons',
+    )
+
+  function run(options: {
+    inputs?: Record<string, Value | undefined>
+    params?: Record<string, unknown>
+  }): { warnings: string[]; result: Promise<Record<string, Value>> } {
+    const warnings: string[] = []
+    const params: ParamValues = {
+      ...defaultParams(def),
+      ids: '',
+      column: 'neuronId',
+      ...options.params,
+    }
+    const context = {
+      params,
+      refresh: false,
+      input: (portId: string) => options.inputs?.[portId],
+      inputKey: () => undefined,
+      column: (id: string) => String(params[id] ?? '') || undefined,
+      columns: (id: string) => (params[id] as string[]) ?? [],
+      inputPorts: () => inputPorts(def, params),
+      outputPorts: () => outputPorts(def, params),
+      // The file's own `MockSource`, so the Dataset-wired case below takes the real lookup path
+      // rather than a stub that cannot answer `schemasForDataset`.
+      resolveSource: () => source,
+      signal: new AbortController().signal,
+      progress: () => {},
+      warn: (message: string) => warnings.push(message),
+      publish: () => {},
+      reportFetched: () => {},
+    } as unknown as EvalContext
+    return { warnings, result: def.evaluate!(context) as Promise<Record<string, Value>> }
+  }
+
+  it('says so when a wide id arrives wired, which validate never could', async () => {
+    // The regression. Before this, the only mention of a rounded id was `validate`'s, and
+    // `validate` reads `ctx.params.ids` — so a wire carried one past every surface in silence.
+    const { warnings, result } = run({ inputs: { ids: idTable(WIDE) } })
+    await result
+    expect(warnings.join(' ')).toContain(WIDE)
+    expect(warnings.join(' ')).toContain('rounded')
+  })
+
+  it('names the fix, not just the problem', async () => {
+    const { warnings, result } = run({ inputs: { ids: idTable(WIDE) } })
+    await result
+    // Wiring a Dataset is the whole remedy — the id then crosses as text and nothing rounds.
+    expect(warnings.join(' ')).toContain('Wire a Dataset')
+  })
+
+  it('counts them and names one, rather than repeating itself per id', async () => {
+    const { warnings, result } = run({
+      inputs: { ids: idTable(WIDE, '720575940379279313', '720575940379279314') },
+    })
+    await result
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('3 IDs')
+    expect(warnings[0]).toContain(WIDE)
+  })
+
+  it('still warns for a typed id, so a Run says it and not only the badge', async () => {
+    // `validate` says this at edit time; an export or a headless run never asks `validate`, so
+    // the same fact has to survive into the run's own warning channel.
+    const { warnings, result } = run({ params: { ids: WIDE } })
+    await result
+    expect(warnings.join(' ')).toContain(WIDE)
+  })
+
+  it('is silent about ids that fit', async () => {
+    const { warnings, result } = run({ inputs: { ids: idTable('1234', '5678') } })
+    await result
+    expect(warnings).toEqual([])
+  })
+
+  it('says nothing once a Dataset is wired, because nothing rounds there', async () => {
+    // The id crosses the seam as text and the source publishes its own dtype, so the ceiling
+    // this warns about does not exist on that path. Warning anyway would be a false alarm on
+    // the one configuration that is entirely correct.
+    const { warnings, result } = run({
+      inputs: {
+        ids: idTable(WIDE),
+        dataset: { kind: 'dataset', sourceId: 'mock', datasetId: DATASET, label: DATASET },
+      },
+    })
+    await result
+    expect(warnings.join(' ')).not.toContain('rounded')
+  })
+
+  it('reports the wired values that were not ids at all', async () => {
+    // `collectIds` counted these all along and the node dropped the count on the floor, so a
+    // headless run lost them entirely — the card was the only place it was ever said.
+    const { warnings, result } = run({ inputs: { ids: idTable('1234', 'LC4', 'not-an-id') } })
+    await result
+    expect(warnings.join(' ')).toContain('2 values')
+    expect(warnings.join(' ')).toContain('skipped')
+  })
+
+  it('rounds rather than dropping, so the list stays the length it was given', async () => {
+    /*
+     * The deliberate half. Dropping would shorten a list whose entire point is that it is the
+     * one the user handed over, and it would contradict `validate`'s "will be rounded" a
+     * keystroke earlier. The warning is what makes rounding honest; it is not a licence to
+     * quietly do something else instead.
+     */
+    const { result } = run({ inputs: { ids: idTable(WIDE, '1234') } })
+    const out = (await result)['neurons']
+    if (!isTableValue(out)) throw new Error('expected a table')
+    expect(out.data['neuronId']).toHaveLength(2)
   })
 })
