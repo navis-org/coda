@@ -14,7 +14,96 @@
 import { pyList, pyStr } from '../py'
 import { regionOptions } from '../../../nodes/lib/connectivityOps'
 import { registerEmitter, registerHelper } from '../registry'
-import { neuronIds } from './common'
+import { codaNeurons, neuronIds } from './common'
+import { populationFromType } from '../../../nodes/lib/populationParams'
+import type { EmitContext } from '../types'
+
+/**
+ * The far end of the connection, as a `NeuronCriteria`.
+ *
+ * **`None` is not "no restriction", and that is the finding.** `@neuroncriteria_args` turns a
+ * `None` into `NeuronCriteria()`, whose `label` is `'Neuron'` when no `bodyId` is given, and
+ * `fetch_adjacencies` interpolates it straight into `MATCH (n:{sources.label})-[e:ConnectsTo]->
+ * (m:{targets.label})` — read off the installed neuprint-python 0.6.3 rather than assumed. So
+ * this cell has always restricted the far end to published neurons, where the node until now
+ * matched a bare node: on `male-cns:v1.0`, 496 partners against 4,252 for five LC4 seeds. The
+ * `Include fragments` control is what makes the two agree, and `label='Segment'` is what the
+ * ticked box needs — exactly the bare match, measured: `(m)` and `(m:Segment)` both answer 4,252 partners and
+ * 11,898 synapses, because every `:Neuron` in neuPrint is also a `:Segment`.
+ */
+function farEnd(ctx: EmitContext, client: string): string {
+  return ctx.params.includeFragments === true
+    ? `NeuronCriteria(label='Segment', client=${client})`
+    : 'None'
+}
+
+/**
+ * What the notebook's restriction does *not* carry, when there is anything.
+ *
+ * `NeuronCriteria` takes values, so `traced` is expressible as `status='Traced'` and the other two
+ * — a type column that is set, a superclass that is set — are not; the find emitters meet the same
+ * wall and answer it with a mask on the result, which is not available here because
+ * `fetch_adjacencies` returns `type` and `instance` for the partner and nothing else. Small and
+ * said rather than large and silent: on male-CNS the label alone keeps 496 partners and the
+ * label plus superclass keeps 492.
+ */
+function populationNote(ctx: EmitContext): string[] {
+  if (ctx.params.includeFragments === true) return []
+  const population = populationFromType(ctx.inputType('dataset'))
+  if (population.length === 0) return []
+  return ctx.note(
+    'Partners here are restricted to bodies neuPrint labels :Neuron, which is what ' +
+      'fetch_adjacencies does with an unconstrained far end. The Dataset node narrows the ' +
+      'population further (' +
+      population.join(', ') +
+      '), and NeuronCriteria cannot express that on a partner — so this cell can return a few ' +
+      'more partners than the canvas did.',
+  )
+}
+
+/**
+ * The `Neuron Set` port, appended to whichever branch produced the edge list.
+ *
+ * Emitted **unconditionally**, the way `neuron.adjacency` emits both of its outputs: an emitter
+ * cannot see which of its ports the graph downstream actually reads, so a port left unassigned
+ * is a `NameError` in somebody's notebook rather than a cell that is merely longer than it
+ * needed to be.
+ *
+ * `full` is a second query, exactly as it is on the canvas — and it is `fetch_neurons` rather
+ * than a `merge_neuron_properties` off the frames already in hand, because those carry `type`
+ * and nothing else. The point of the control is the columns an edge list has no room for.
+ */
+function endpointLines(
+  ctx: EmitContext,
+  edges: string,
+  seeds: string,
+  client: string,
+): string[] {
+  ctx.require('pandas')
+  ctx.helper('coda_endpoint_neurons')
+  const out = ctx.output('neuronSet')
+  if (ctx.params.neuronRows !== 'full') {
+    return ['', `${out} = coda_endpoint_neurons(${edges}, ${seeds})`]
+  }
+  ctx.require('neuprint', 'NeuronCriteria', 'fetch_neurons')
+  return [
+    '',
+    `_endpoints = coda_endpoint_neurons(${edges}, ${seeds})`,
+    `${out}, _ = fetch_neurons(`,
+    `    NeuronCriteria(bodyId=${neuronIds('_endpoints')}, client=${client}),`,
+    `    client=${client},`,
+    `)`,
+    codaNeurons(ctx, out),
+    /*
+     * The same hole the node warns about, in the one place a notebook can carry it. A partner
+     * can be a `Segment` below the dataset's neuron threshold — a real row in the edge list with
+     * no row at all in the neuron table — so this frame is legitimately shorter than the
+     * endpoint list it was built from.
+     */
+    `# NOTE: fetch_neurons has no row for a partner below the dataset's neuron threshold, so`,
+    `# this frame can be shorter than _endpoints. The edge list still counts those synapses.`,
+  ]
+}
 
 /**
  * neuprint's adjacency columns → Coda's edge-list names. Both paths share it.
@@ -78,13 +167,16 @@ registerEmitter('neuron.connectivity', (ctx) => {
     ctx.require('pandas')
     ctx.helper('coda_traverse_connectivity')
     return [
+      ...populationNote(ctx),
       `${out} = coda_traverse_connectivity(`,
       `    ${ids},`,
       `    direction=${pyStr(direction)},`,
       `    hops=${hops},`,
       `    min_weight=${minWeight},`,
+      `    all_segments=${ctx.params.includeFragments === true ? 'True' : 'False'},`,
       `    client=${c},`,
       `)`,
+      ...endpointLines(ctx, out, ids, c),
     ]
   }
 
@@ -108,6 +200,8 @@ registerEmitter('neuron.connectivity', (ctx) => {
    * Built once: every one of these is fixed before `call` exists, and Python kwargs are
    * order-free, so there is nothing for the closure to decide per invocation.
    */
+  const far = farEnd(ctx, c)
+
   const roiArgs: string[] = []
   if (rois.length) roiArgs.push(`    rois=${pyList(rois)},`)
   if (!usesRois) roiArgs.push(`    omit_rois=True,`)
@@ -165,8 +259,9 @@ registerEmitter('neuron.connectivity', (ctx) => {
     ctx.require('pandas')
     return [
       ...note,
-      `_down_neurons, _down = ${call(criteria, 'None').join('\n')}`,
-      `_up_neurons, _up = ${call('None', criteria).join('\n')}`,
+      ...populationNote(ctx),
+      `_down_neurons, _down = ${call(criteria, far).join('\n')}`,
+      `_up_neurons, _up = ${call(far, criteria).join('\n')}`,
       ...(regroupNeeded ? [...regroup('_down'), ...regroup('_up')] : []),
       `_down = merge_neuron_properties(_down_neurons, _down, ['type']).assign(direction='downstream')`,
       `_up = merge_neuron_properties(_up_neurons, _up, ['type']).assign(direction='upstream')`,
@@ -182,14 +277,16 @@ registerEmitter('neuron.connectivity', (ctx) => {
       `    })`,
       `    .assign(hop=1)`,
       `)`,
+      ...endpointLines(ctx, out, ids, c),
     ]
   }
 
-  const [sources, targets] = direction === 'inputs' ? ['None', criteria] : [criteria, 'None']
+  const [sources, targets] = direction === 'inputs' ? [far, criteria] : [criteria, far]
   const label = direction === 'inputs' ? 'upstream' : 'downstream'
 
   return [
     ...note,
+    ...populationNote(ctx),
     `_neurons, _conn = ${call(sources, targets).join('\n')}`,
     ...(regroupNeeded ? regroup('_conn') : []),
     `${out} = (`,
@@ -199,7 +296,57 @@ registerEmitter('neuron.connectivity', (ctx) => {
     `    })`,
     `    .assign(hop=1, direction=${pyStr(label)})`,
     `)`,
+    ...endpointLines(ctx, out, ids, c),
   ]
+})
+
+/**
+ * The `Neuron Set` port's derivation, transcribed from `endpointNeurons` in
+ * `nodes/lib/connectivityOps.ts`.
+ *
+ * Two rules in it are easy to drop and both produce a plausible wrong answer: the **seeds are
+ * in the result** whether or not any edge survived `min_weight` — both ends of an edge list only
+ * cover the seeds that turned out to be wired — and the row that decides a neuron's *order* is
+ * not the row that decides its *type*, since a neuron can arrive as an untyped seed and be typed
+ * by an edge several rows later.
+ */
+registerHelper({
+  name: 'coda_endpoint_neurons',
+  requires: [['pandas']],
+  source: [
+    'def coda_endpoint_neurons(connections, seed_ids=None):',
+    '    """The neurons an edge list is about: the seeds, then every partner, one row each.',
+    '',
+    "    Coda's Connectivity node emits this beside the edge list so a partner set can go",
+    '    straight back into an adjacency query without being reassembled from two columns.',
+    '',
+    '    The seeds are included whether or not any edge survived min_weight. Both ends of the',
+    '    edge list only cover the seeds that turned out to be wired to something, and a seed',
+    '    dropping out of the set in silence is what this exists to avoid.',
+    '    """',
+    '    frames = []',
+    '    if seed_ids is not None:',
+    "        frames.append(pd.DataFrame({'neuronId': list(seed_ids), 'type': None}))",
+    "    for id_col, type_col in (('preId', 'preType'), ('postId', 'postType')):",
+    '        frames.append(',
+    '            connections[[id_col, type_col]].rename(',
+    "                columns={id_col: 'neuronId', type_col: 'type'}",
+    '            )',
+    '        )',
+    '',
+    '    rows = pd.concat(frames, ignore_index=True)',
+    "    rows['type'] = rows['type'].replace('', None)",
+    '    # First appearance decides the order; the first non-empty type wins, which need not be',
+    '    # the same row -- a neuron can arrive as an untyped seed and be typed by an edge later.',
+    '    typed = (',
+    "        rows.dropna(subset=['type'])",
+    "        .drop_duplicates(subset='neuronId')",
+    "        .set_index('neuronId')['type']",
+    '    )',
+    "    out = rows.drop_duplicates(subset='neuronId').reset_index(drop=True)",
+    "    out['type'] = out['neuronId'].map(typed)",
+    '    return out',
+  ],
 })
 
 /**
@@ -218,7 +365,7 @@ registerHelper({
     ['neuprint', 'NeuronCriteria', 'fetch_adjacencies', 'merge_neuron_properties'],
   ],
   source: [
-    'def coda_traverse_connectivity(seed_ids, direction, hops, min_weight, client):',
+    'def coda_traverse_connectivity(seed_ids, direction, hops, min_weight, all_segments, client):',
     '    """Coda\'s Connectivity node: a breadth-first walk returning an edge list.',
     '',
     '    Columns are preId/preType -> postId/postType, weight, hop, direction. Every row is',
@@ -233,17 +380,23 @@ registerHelper({
     '      so the label says something about the graph rather than about the walk order.',
     '    * direction="both" expands both ways at every hop -- the undirected ball, not two',
     '      cones. That is what finds the neurons sharing input with a seed.',
+    '',
+    '    all_segments=False keeps only partners neuPrint labels :Neuron, which is what an',
+    "    unconstrained NeuronCriteria already means and what bounds the next hop's frontier.",
+    '    True matches :Segment instead -- every body, fragments included.',
     '    """',
+    '    far = NeuronCriteria(label="Segment", client=client) if all_segments else None',
+    '',
     '    def one_hop(ids, way):',
     '        criteria = NeuronCriteria(bodyId=list(ids), client=client)',
     '        if way == "downstream":',
     '            neurons, conn = fetch_adjacencies(',
-    '                criteria, None, min_total_weight=min_weight,',
+    '                criteria, far, min_total_weight=min_weight,',
     '                omit_rois=True, client=client,',
     '            )',
     '        else:',
     '            neurons, conn = fetch_adjacencies(',
-    '                None, criteria, min_total_weight=min_weight,',
+    '                far, criteria, min_total_weight=min_weight,',
     '                omit_rois=True, client=client,',
     '            )',
     '        if conn.empty:',

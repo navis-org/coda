@@ -301,6 +301,28 @@ Area-specific — the rule, then the doc that holds why:
   settling half-processed; a `Collect` is the one node a cache hit must never answer for
   mid-pass; and `RunSummary.executed` is a set of node ids, so per-pass files come through the
   awaited `SchedulerHost.onIteration`, bounded by `loopNodes`. See [docs/loops.md](docs/loops.md).
+- **A synaptic partner is usually not a neuron, and a node emitting an edge list has to say which
+  it meant.** Connectivity matches its far end as a bare node, which is right for a weight total
+  and was wrong as the only option: on `male-cns:v1.0`, five LC4 neurons downstream at weight 1
+  reach **4,252** distinct partners of which **496** carry `:Neuron` and **492** survive that
+  dataset's own `superclass` default — 88% of the result being bodies nothing downstream can look
+  up. `Include fragments` is the control, off is the default, and three rules hang off it.
+  It is asked as a **`findNeurons` lookup per hop**, not as a clause compiled into five backends,
+  so "published" means exactly what `Find Neurons` means on the same card and the `Neuron Set`
+  port beside it cannot disagree; **seeds are exempt**, since a body somebody pasted in is not a
+  body to filter away; and it bounds the **frontier** as well as the rows, so a hop-2 result is
+  not the unrestricted one with rows removed. `absentMeans: 'all'` — a stored graph queried every
+  partner and keeps doing so, which is the case `ParamBase.absentMeans` exists for. Both
+  exporters already restricted the far end and had **always** silently disagreed with the canvas:
+  `fetch_adjacencies` turns a `None` into `NeuronCriteria()` whose label is `Neuron`, and
+  neuprintr's `neuprint_connection_table` builds `(a:{node})->(b:{node})` from
+  `ifelse(all_segments, "Segment", "Neuron")` — both read off the installed package and the
+  published source, and `:Segment` measured as exactly the bare match. So the new default is the
+  text they already emitted, and `all` is what needed writing. Last trap, the one a golden file
+  cannot see: `Neuron Set` under full meta data is a **left join**, because `findNeurons` answers only
+  about published neurons and a lookup keyed by an endpoint list comes back shorter than the list
+  — the two ports being the same set is the property the port exists to have.
+  See [docs/nodes.md](docs/nodes.md).
 - **A normalised weight is meaningless without its denominator, and there are two of them.** The
   Connectivity node's `Normalize` emits `weightTotal` beside `weightNorm` because the same 0.04
   means two things: on male-cns body 10005 the outgoing weights sum to **23,423** over every
@@ -350,7 +372,9 @@ Area-specific — the rule, then the doc that holds why:
   *more* rows through. `typed` matches column names **ending** in `type`. `findNeuronsCypher`
   drops the `traced` disjunct when a filter row names `status`, and all four emitter spellings
   repeat that. Defaults are per **family**. Which queries they reach is `neuronSetRequest`, kept
-  separate from `datasetRequest`: never a lookup by id, never the far end of a `ConnectsTo`. The
+  separate from `datasetRequest`: never a lookup by id, and never the far end of a `ConnectsTo`
+  **except** through Connectivity's `Include fragments` control, which asks it as a separate `findNeurons`
+  lookup rather than as a clause in five backends' connectivity queries. The
   neuron index is cached whole and narrowed on load. And a schema that has not arrived is not a
   schema without these columns — compare `discoveredNeuronSchema` by **identity** before greying
   a box. See [docs/datasets.md](docs/datasets.md).

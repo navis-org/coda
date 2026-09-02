@@ -21,7 +21,9 @@ import type {
   SourceSchemas,
 } from '../../data/source'
 import { withAnnotations } from '../../data/annotations/schema'
+import type { NeuronId } from '../../core/ids'
 import { backendName } from './datasetFamilies'
+import { idColumn } from './tableOps'
 import {
   CANONICAL_SCHEMAS,
   allSources,
@@ -276,9 +278,24 @@ export function connectivityRequest(dataset: DatasetValue): EdgeAnswerableReques
  *  - **`Input IDs`** looks up ids somebody pasted. Narrowing that to Traced deletes the rows they
  *    named, and reports the deletion as neurons the dataset does not have.
  *  - **The three morphology fetches** are keyed by id as well, one step further downstream.
- *  - **Connectivity, Paths, Adjacency** go through `connectivityRequest`, and their far end is
- *    matched as a bare node on purpose: a partner may be a `Segment` below the neuron threshold,
- *    and excluding those under-reports total synapse weight. See `connectivityCypher`.
+ *  - **Paths and Adjacency** go through `connectivityRequest`, and their far end is matched as a
+ *    bare node on purpose: a partner may be a `Segment` below the neuron threshold, and excluding
+ *    those under-reports total synapse weight. See `connectivityCypher`.
+ *  - **Connectivity** was in that list and is now a **third** case, which is the one exception
+ *    worth reading before adding a fourth. Its far end is still matched bare — the fetch has not
+ *    changed — but its `Include fragments` control asks this question *separately*, as an
+ *    ordinary `findNeurons` lookup keyed by the ids a hop reached, keeping only the edges both of
+ *    whose ends came back. So the population does reach the far end of a `ConnectsTo` now, and it does
+ *    so through the same call `Find Neurons` makes rather than through a second definition
+ *    compiled into five backends' connectivity queries.
+ *
+ *    The reason it earned an exception: matching bare was defensible as *the* answer only while
+ *    it was the only answer. Measured on `male-cns:v1.0`, five `LC4` neurons downstream at weight
+ *    1 reach 4,252 distinct partners of which 496 are `:Neuron` and 492 survive that dataset's
+ *    own `superclass` default — so the bare match spent 88% of the result on bodies the `Neuron
+ *    Set` port beside it could not find a single row for. The under-reported weight is still real
+ *    and still available: it is what "every partner, fragments included" returns, and what
+ *    `Normalize`'s `all synapses` basis is measured against.
  *  - **The neuron index** is never filtered on the wire at all. It is downloaded and cached
  *    whole, and `narrowPopulation` narrows it on load — so Explore, Match Cell Types and a
  *    Dataset Summary share one 26 MB table instead of one per reading of the same dataset.
@@ -297,4 +314,36 @@ export function neuronSetRequest(
     ...datasetRequest(dataset),
     ...(dataset.population?.length ? { population: dataset.population } : {}),
   }
+}
+
+/**
+ * "Which of these ids does this dataset publish?", as a callback a traversal can be handed.
+ *
+ * A named factory rather than a closure written at the call site, because the one choice inside it
+ * is the choice this file exists to keep straight — and it is the *opposite* of the one made a
+ * hundred lines away in the same node. The filter takes `neuronSetRequest`, so the Dataset card's
+ * population narrows it; the `Neuron Set` port's row lookup takes `datasetRequest`, because those
+ * ids are already decided and narrowing them a second time would delete rows the edge list still
+ * counts. Two spellings, one letter apart in the reading, with nothing that type-checks the
+ * difference.
+ *
+ * `neuron.paths` has the same bare-far-end problem and `traversePaths` takes an injected fetch the
+ * same way, so the second caller is a matter of when rather than whether. This is what it should
+ * call.
+ */
+export function publishedNeurons(
+  source: DataSource,
+  dataset: DatasetValue,
+  signal?: AbortSignal,
+): (ids: readonly NeuronId[]) => Promise<Set<NeuronId>> {
+  return async (ids) =>
+    new Set(
+      idColumn(
+        await source.findNeurons({
+          ...neuronSetRequest(dataset),
+          neuronIds: ids,
+          ...(signal ? { signal } : {}),
+        }),
+      ),
+    )
 }

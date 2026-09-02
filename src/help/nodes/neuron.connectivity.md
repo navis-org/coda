@@ -11,6 +11,90 @@ queried. Can be wired straight into Build Network with `Source: preId, Target: p
 > For large queries, consider providing a local edge table via the `Edge data` button on the dataset card.
 
 
+
+## Include fragments
+
+A synaptic partner is very often **not a neuron**. Segmentation produces far more fragments than it
+does reconstructed cells, and a connectivity query finds every one of them. Measured on
+`male-cns:v1.0`, five `LC4` neurons downstream at `Min weight` 1:
+
+| far end | partners | connections | synapses |
+| --- | --- | --- | --- |
+| proofread neurons only (default) | 492 | 1,032 | 6,503 |
+| fragments included | 4,252 | 4,889 | 11,898 |
+
+So **88% of the partners are fragments**, carrying 45% of the synapses.
+
+Left off, only proofread neurons come back — and **what counts as proofread is set on the Dataset
+node**, by the same population checkboxes `Find Neurons` obeys. Every partner then has a row you can
+look up, so the `Neuron Set` port is complete and `Skeletons`, `Meshes` and `Neuron Profile` all
+work on it.
+
+Tick it to get everything the query finds, small neuron fragments included. That is the whole truth
+about where the synapses go, and it is what a total weight has to be measured against — it is the
+population `Normalize`'s *all synapses* denominator counts.
+
+**The neurons you asked about are never filtered out.** Only the far end is tested, so a body you
+named by ID stays in the result whether or not the dataset calls it proofread.
+
+> [!NOTE]
+> Past one hop the setting also decides **what gets expanded**, so a two-hop result with fragments
+> included is not the default one with rows added — it is a different traversal, and a far larger
+> one. In the measurement above the second hop would start from 4,252 neurons rather than 492.
+
+A workflow saved before this control existed included fragments and still does, so opening an old
+graph does not change its numbers.
+
+```coda-params
+neuron.connectivity: includeFragments
+```
+
+## The Neuron Set port
+
+Beside the edge list, the node emits `Neuron Set` — the neurons that edge list is **about**: the
+ones you asked for, plus every partner it reached, one row each. It is called a *set* rather than
+`Neurons` because the input port is already `Neurons`, and a node with the same name on both sides
+means a pass-through everywhere else in Coda.
+
+It exists because an edge list is the wrong *type* for the node that most obviously comes next.
+`Adjacency` takes two neuron sets and answers the connections between them, which is how you close
+a set of partners into the graph among themselves — and a table of `preId`/`postId` cannot be
+plugged into it. Assembling one by hand meant renaming a column, stacking it onto the other,
+deduplicating and feeding that through `Input IDs`: four nodes to say "the neurons I just found".
+
+```coda-graph
+caption: Pull the partners, then close the set into the graph among themselves
+neuron.connectivity as conn { direction: both, hops: 1 }
+neuron.adjacency as adj
+out.heatmap as heat
+conn:neuronSet -> adj:sources
+conn:neuronSet -> adj:targets
+adj -> heat
+```
+
+**The seeds are in it whether or not anything was wired to them.** Both ends of the edge list
+already cover every seed that had a partner above `Min weight`; one that had none would vanish from
+the set with nothing to say so. This node is the only place that holds both the neurons you asked
+about and the ones it found, which is why the port lives here rather than in a downstream node.
+
+`Neuron Set` decides how much each row carries:
+
+- **minimal (IDs + types)** — free, and enough for anything keyed by id: `Adjacency`, `Skeletons`,
+  `Meshes`, `Synapses`, `ROI Counts` all read the id column and nothing else.
+- **full meta data** — looks every neuron up for the columns an edge list has no room for:
+  `status`, `size`, `instance`. That is a second query over every neuron the result touched, and it
+  runs whether or not the port is wired.
+
+> [!NOTE]
+> Under **full meta data** with `Include fragments` ticked, some neurons have no row to look up
+> — a fragment is a real row in `Connections` and no row at all in the neuron table. They stay in
+> the port with their ID and type and the rest of their columns empty, so the two outputs are
+> always the same set of neurons. The node says how many that happened to.
+
+```coda-params
+neuron.connectivity: neuronRows
+```
+
 ## Normalizing a weight
 
 `Normalize` adds two columns: **`weightNorm`**, the connection as a fraction, and

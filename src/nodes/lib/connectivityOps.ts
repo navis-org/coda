@@ -23,7 +23,7 @@
 import type { TableSchema } from '../../core/types'
 import type { ParamValues } from '../../core/node'
 import { column, tableSchema } from '../../core/types'
-import type { CellValue, TableValue } from '../../core/values'
+import type { CellValue, ColumnData, TableValue } from '../../core/values'
 import { makeTable, tableFromRows } from '../../core/values'
 import { idColumn } from './tableOps'
 import { ID_COLUMN_NAME, compareIds, idText } from '../../core/ids'
@@ -130,6 +130,172 @@ export function connectivityOutputSchema(
   )
 }
 
+/** The name the `Neuron Set` port gives the type it carries over from the edge list. */
+const ENDPOINT_TYPE_COLUMN = 'type'
+/** The source-relative name `connectivityOutputSchema` renames to `preType`/`postType`. */
+const SOURCE_TYPE_COLUMN = 'neuronType'
+
+/**
+ * The schema of the neurons an edge list is *about*: `neuronId` and `type`.
+ *
+ * Derived from the same source connectivity schema `connectivityOutputSchema` reads, and both
+ * columns are carried over **whole** — dtype and unit included, renamed and nothing else. That is
+ * what keeps a CAVE root id a `str` here exactly as it is in `preId`, and it is the reason this
+ * takes the connectivity schema rather than the neuron one: the values this table holds are the
+ * cells of `preId`/`postId`, so its declared dtype has to be theirs. Taking the dataset's own
+ * `neurons` schema would declare an `i64` over cells that are text on half the backends.
+ *
+ * Two columns and no more. `hop` looks derivable and is not: `traverseConnectivity` records the
+ * hop an *edge* was found at, and which of its two ends was the frontier is only knowable on the
+ * first round — `partnerVectors.ts` records the same limit about `direction`. A per-neuron
+ * distance column would be right at hop 1 and quietly wrong past it.
+ */
+export function endpointSchema(source: TableSchema | undefined): TableSchema {
+  const columns = source?.columns ?? []
+  const id = columns.find((c) => c.name === ID_COLUMN_NAME) ?? column(ID_COLUMN_NAME, 'i64')
+  const type =
+    columns.find((c) => c.name === SOURCE_TYPE_COLUMN) ?? column(ENDPOINT_TYPE_COLUMN, 'str')
+  return tableSchema(id, { ...type, name: ENDPOINT_TYPE_COLUMN })
+}
+
+/**
+ * The distinct neurons an edge list touches, seeds first, as a `Neurons` table.
+ *
+ * **The seeds are in it, and that is the half a downstream transform could not do.** Both ends of
+ * a hop-1 edge list already cover every seed that had a partner above `minWeight`; a seed that had
+ * none disappears from it entirely. Only this node holds both the seed set and the result, so only
+ * here can the port mean "the neurons this result is about" rather than "the ones that turned out
+ * to be wired". They come first, in the order they were asked about, and the partners follow in
+ * first-appearance order — deterministic either way, which invariant 4 needs of anything that
+ * reaches a provenance key.
+ *
+ * **Cells are copied, never rebuilt.** An id goes in as the very cell it came out of, so nothing
+ * here parses, rounds or re-renders one — invariant 8's failure mode is a `Number()` on an
+ * 18-digit root id, and the way to not have it is to not convert. `idText` is used for the
+ * *key* only, which is what makes a seed table carrying `i64` cells match a `str` edge list.
+ *
+ * A neuron reached as both a pre and a post end gets **one** row. The first non-empty type wins,
+ * `labelsByNeuron`'s rule: an edge list that disagrees with itself about a neuron's type is not
+ * grounds to prefer whichever copy came last.
+ */
+export function endpointNeurons(
+  connections: TableValue,
+  schema: TableSchema,
+  seeds?: TableValue,
+): TableValue {
+  const ids: ColumnData = []
+  const types: ColumnData = []
+  const rowOf = new Map<NeuronId, number>()
+
+  const add = (cell: CellValue, type: CellValue) => {
+    const id = idText(cell)
+    if (id === null) return
+    const row = rowOf.get(id)
+    if (row === undefined) {
+      rowOf.set(id, ids.length)
+      ids.push(cell)
+      types.push(type)
+      return
+    }
+    const held = types[row]
+    if (held === null || held === undefined || held === '') types[row] = type
+  }
+
+  if (seeds) {
+    // Read off `data` rather than through `getColumn`, which throws: a seed table is whatever
+    // somebody wired, and `Input IDs` unwired emits ids and no type at all.
+    const seedIds = seeds.data[ID_COLUMN_NAME]
+    const seedTypes = seeds.data[ENDPOINT_TYPE_COLUMN]
+    if (seedIds) {
+      for (let i = 0; i < seeds.length; i++) add(seedIds[i] ?? null, seedTypes?.[i] ?? null)
+    }
+  }
+
+  const pre = connections.data[PRE_ID]
+  const preType = connections.data[PRE_TYPE]
+  const post = connections.data[POST_ID]
+  const postType = connections.data[POST_TYPE]
+  for (let i = 0; i < connections.length; i++) {
+    if (pre) add(pre[i] ?? null, preType?.[i] ?? null)
+    if (post) add(post[i] ?? null, postType?.[i] ?? null)
+  }
+
+  return makeTable(schema, { [ID_COLUMN_NAME]: ids, [ENDPOINT_TYPE_COLUMN]: types }, 'neurons')
+}
+
+/**
+ * The endpoint list wearing the dataset's neuron columns — a **left** join, not a lookup result.
+ *
+ * `findNeurons` answers only about bodies the dataset calls a neuron, and a synaptic partner very
+ * often is not one: on `male-cns:v1.0`, five LC4 neurons have 4,252 distinct downstream partners
+ * of which 496 carry the `:Neuron` label. Returning what came back would make the `Neuron Set`
+ * port a different length from the edge list it was derived from, which is the one property the
+ * port exists to have — a set you can hand to `Adjacency` and get the graph among *these* neurons.
+ *
+ * So every derived row survives, in its order, and an unmatched one keeps the two things the edge
+ * list already knew: its id, and whatever type the connection carried. The rest of the columns are
+ * null, which is the honest answer — nobody published a status for a fragment. That is
+ * `joinTables`' rule about the key column ("filled from whichever side had the row") applied to
+ * one column more, because here the left side genuinely knows a second thing.
+ *
+ * The schema is the dataset's own rather than the fetched table's: `inferOutputs` promised that
+ * one (invariant 3), and a source returning a column it did not advertise would otherwise land it
+ * in a table nothing downstream can see.
+ */
+export function neuronRowsFor(
+  derived: TableValue,
+  rows: TableValue,
+  schema: TableSchema,
+): TableValue {
+  const rowOf = new Map<NeuronId, number>()
+  const fetchedIds = rows.data[ID_COLUMN_NAME]
+  if (fetchedIds) {
+    for (let i = 0; i < rows.length; i++) {
+      const id = idText(fetchedIds[i] ?? null)
+      // First wins, `firstByKey`'s rule — a lookup that answered twice for one id is not grounds
+      // to prefer the later row.
+      if (id !== null && !rowOf.has(id)) rowOf.set(id, i)
+    }
+  }
+
+  const derivedIds = derived.data[ID_COLUMN_NAME] ?? []
+  const derivedTypes = derived.data[ENDPOINT_TYPE_COLUMN]
+  const data: Record<string, ColumnData> = {}
+  /*
+   * Source and destination resolved once per column rather than once per cell. The schema can be
+   * fifty columns wide — that is measured, not hypothetical: `male-cns:v1.0` publishes fifty —
+   * and the endpoint list runs to thousands, so the two `data[name]` lookups this removes were
+   * being paid a hundred thousand times per run.
+   */
+  const plan = schema.columns.map((col) => {
+    const out: ColumnData = []
+    data[col.name] = out
+    return {
+      out,
+      src: rows.data[col.name],
+      /** The two the edge list already knew, so the join can fill them from the left. */
+      known:
+        col.name === ID_COLUMN_NAME ? 'id' : col.name === ENDPOINT_TYPE_COLUMN ? 'type' : '',
+    }
+  })
+
+  for (let i = 0; i < derived.length; i++) {
+    const at = rowOf.get(idText(derivedIds[i] ?? null) ?? '')
+    for (const col of plan) {
+      // `neuronId` unconditionally, so the id is never the cell the lookup failed to return;
+      // `type` only where nothing came back, so a dataset publishing a better one still wins.
+      if (col.known === 'id') {
+        col.out.push(derivedIds[i] ?? null)
+        continue
+      }
+      const cell: CellValue = at === undefined ? null : (col.src?.[at] ?? null)
+      col.out.push(cell === null && col.known === 'type' ? (derivedTypes?.[i] ?? null) : cell)
+    }
+  }
+
+  return makeTable(schema, data, 'neurons')
+}
+
 /** One hop's worth of fetching, in one direction. Injected so the BFS stays headless. */
 export type HopFetch = (
   neuronIds: NeuronId[],
@@ -145,6 +311,28 @@ export interface TraverseOptions {
   /** Output schema, from `connectivityOutputSchema`. */
   schema: TableSchema
   fetch: HopFetch
+  /**
+   * Which of the neurons a round reached the dataset actually **publishes**.
+   *
+   * Absent means every partner is kept, which is what this traversal did before the `Include
+   * fragments` control existed and is still what that box ticked asks for.
+   *
+   * Present, it is asked once per hop with the ids that round reached for the first time, and its
+   * answer decides two things at once: which edges survive, and what the next hop expands. That
+   * pairing is the point. A connectivity query matches its far end as a bare node, so on
+   * `male-cns:v1.0` five LC4 neurons reach 4,252 distinct downstream partners of which 496 are
+   * published neurons — expanding the other 3,756 is a hop-2 frontier nine times larger than the
+   * question deserves.
+   *
+   * **The seeds are exempt.** They were named explicitly, and dropping every edge of a body
+   * somebody pasted in because the dataset does not publish it would be the same substitution
+   * `Input IDs` refuses when it declines to apply a status filter.
+   *
+   * An edge survives only if **both** ends are kept. Either end alone leaves a row whose other
+   * half is a body nothing downstream can look up — and with `direction: 'both'` an edge can
+   * arrive from the unpublished side first, so testing only the far end is not the same rule.
+   */
+  published?: (ids: NeuronId[]) => Promise<Set<NeuronId>>
   /** Called before each round, so a node can report progress that moves. */
   onHop?: (hop: number, hops: number, frontier: number) => void
   signal?: AbortSignal
@@ -188,20 +376,51 @@ export async function traverseConnectivity(opts: TraverseOptions): Promise<Table
 
   const edges = new Map<string, EdgeRow>()
   const expanded = new Set<string>(opts.seeds)
+  /** Seeds, plus every id `published` has said yes to. Unread when there is no filter. */
+  const kept = new Set<string>(opts.seeds)
+  /*
+   * "Unfiltered means everything is kept", said once. Written three times inline it was three
+   * different spellings of one invariant — a `&&` short-circuit, a ternary, and an absence — and
+   * the fourth use of `kept` would have had to rediscover which of them it meant.
+   */
+  const keep = opts.published ? (id: string) => kept.has(id) : () => true
   let frontier = [...new Set(opts.seeds)]
 
   for (let hop = 1; hop <= hops && frontier.length > 0; hop++) {
     opts.onHop?.(hop, hops, frontier.length)
     const next = new Set<string>()
 
+    /*
+     * The round is accumulated apart from `edges` and merged below, because the filter needs the
+     * whole round before it can decide anything: an edge is kept only if both ends are, and with
+     * two directions the far end of one is the near end of the other.
+     *
+     * Within the round the accumulator is the same `Map` the merged one is, so `collect`'s
+     * `both`-at-the-same-hop rule still resolves against the other direction — it just resolves
+     * inside the round rather than across the whole traversal, which is the only place that rule
+     * was ever about.
+     */
+    const round = new Map<string, EdgeRow>()
     for (const direction of directions) {
       if (opts.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
       const table = await opts.fetch(frontier, direction)
-      collect(table, direction, hop, edges, expanded, next)
+      collect(table, direction, hop, round, edges, expanded, next)
+    }
+
+    if (opts.published && next.size > 0) {
+      // `next` already excludes everything expanded, so nothing is asked about twice.
+      for (const id of await opts.published([...next])) kept.add(id)
+    }
+
+    for (const [key, edge] of round) {
+      if (!keep(edge.preId) || !keep(edge.postId)) continue
+      edges.set(key, edge)
     }
 
     for (const id of next) expanded.add(id)
-    frontier = [...next]
+    // Only a kept neuron is worth expanding: an unpublished body's own partners cannot appear in
+    // a result that has just dropped every edge touching it.
+    frontier = [...next].filter(keep)
   }
 
   /*
@@ -232,12 +451,25 @@ export async function traverseConnectivity(opts: TraverseOptions): Promise<Table
   )
 }
 
-/** Fold one fetched table into the accumulator, reoriented pre→post. */
+/**
+ * Fold one fetched table into this round's accumulator, reoriented pre→post.
+ *
+ * `committed` is what earlier hops already settled, and it is read-only here. An edge in it keeps
+ * the hop and direction it was **first** given, so there is nothing for this round to decide about
+ * it — which makes materialising its `values` record pure waste, and not a rare one: hop *N*
+ * queries hop *N−1*'s partners, so the fetch hands back essentially all of the previous round's
+ * edges again, and twice over under `direction: 'both'`.
+ *
+ * Skipping it cannot lose the `both` upgrade, because that fires only on `existing.hop === hop`
+ * and a committed edge is by definition from an earlier one. Same-hop resolution still happens,
+ * inside `round`.
+ */
 function collect(
   table: TableValue,
   direction: ConnectionDirection,
   hop: number,
   edges: Map<string, EdgeRow>,
+  committed: ReadonlyMap<string, EdgeRow>,
   expanded: Set<string>,
   next: Set<string>,
 ): void {
@@ -265,6 +497,13 @@ function collect(
     const postId = direction === 'outputs' ? partnerId : neuronId
     const roi = rois ? String(rois[row] ?? '') : ''
     const key = `${preId}\u0000${postId}\u0000${roi}`
+
+    // Settled by an earlier hop: nothing to decide, and nothing to build. The `next.add` below
+    // still runs — a committed edge's far end is still somewhere the walk can go on from.
+    if (committed.has(key)) {
+      if (!expanded.has(partnerId)) next.add(partnerId)
+      continue
+    }
 
     const existing = edges.get(key)
     if (existing) {

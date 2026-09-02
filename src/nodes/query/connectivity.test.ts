@@ -9,7 +9,7 @@
 
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 
-import { addEdge, addNode, emptyGraph } from '../../core/graph'
+import { addEdge, addNode, deserializeGraph, emptyGraph } from '../../core/graph'
 import type { CodaGraph, GraphNode } from '../../core/graph'
 import { inferGraph } from '../../core/inference'
 import { defaultParams } from '../../core/node'
@@ -341,5 +341,197 @@ describe('normalize', () => {
     if (!isTableValue(plain) || !isTableValue(scaled)) throw new Error('expected tables')
     expect(plain.schema.columns.map((c) => c.name)).not.toContain('weightNorm')
     expect(scaled.schema.columns.map((c) => c.name)).toContain('weightNorm')
+  })
+})
+
+/**
+ * The `Neuron Set` port.
+ *
+ * `connectivityOps.test.ts` pins the derivation against a hand-written edge list. What is left
+ * for here is what only the real node and the real scheduler can answer: that the card
+ * advertises the schema it builds under both settings (invariant 3), that `full` actually
+ * reaches the source, and that the setting reaches the provenance key — a control that changed
+ * the output without re-keying would serve the derived table for a graph asking for full rows.
+ */
+describe('the Neuron Set port', () => {
+  async function neurons(params: Record<string, unknown> = {}) {
+    const sched = scheduler()
+    await sched.run(pipeline(params), { mode: 'full' })
+    const table = sched.output('conn', 'neuronSet')
+    if (!isTableValue(table)) throw new Error(`expected a table, got ${JSON.stringify(table)}`)
+    return table
+  }
+
+  function advertisedNeurons(params: Record<string, unknown> = {}): string[] | undefined {
+    const declared = inferGraph(pipeline(params)).nodes.conn?.outputs.neuronSet
+    return declared && 'schema' in declared
+      ? declared.schema?.columns.map((c) => c.name)
+      : undefined
+  }
+
+  it('advertises the columns it builds, derived', async () => {
+    expect(advertisedNeurons()).toEqual(['neuronId', 'type'])
+    const table = await neurons()
+    expect(table.schema.columns.map((c) => c.name)).toEqual(advertisedNeurons())
+    expect(table.kind).toBe('neurons')
+  })
+
+  it('advertises the columns it builds, full', async () => {
+    const columns = advertisedNeurons({ neuronRows: 'full' })
+    expect(columns).toContain('status')
+    expect(columns?.length).toBeGreaterThan(2)
+
+    const table = await neurons({ neuronRows: 'full' })
+    expect(table.schema.columns.map((c) => c.name)).toEqual(columns)
+    expect(table.kind).toBe('neurons')
+  })
+
+  it('holds both ends of the edge list, and the seeds', async () => {
+    const edges = await connections()
+    const table = await neurons()
+    const ids = new Set((table.data.neuronId ?? []).map(String))
+
+    for (const end of ['preId', 'postId'] as const) {
+      for (const cell of edges.data[end] ?? []) expect(ids.has(String(cell))).toBe(true)
+    }
+    expect(ids.size).toBe(table.length)
+
+    // The seeds are in it whether or not they are in the edges — here they are, since a
+    // downstream traversal puts every seed on a `preId`.
+    const sched = scheduler()
+    await sched.run(pipeline(), { mode: 'full' })
+    const seeds = sched.output('find', 'neurons')
+    if (!isTableValue(seeds)) throw new Error('expected the seed table')
+    for (const cell of seeds.data.neuronId ?? []) expect(ids.has(String(cell))).toBe(true)
+  })
+
+  /*
+   * The left join, which is the property the port is for: `findNeurons` answers only about
+   * published neurons, so a lookup keyed by an endpoint list comes back shorter than the list.
+   * Asserted with fragments included as well, because that is the setting under which the two
+   * can differ — unticked, the filter has already removed everything the lookup would miss.
+   */
+  it('is the same neuron set either way — full only changes the columns', async () => {
+    for (const includeFragments of [false, true]) {
+      const derived = await neurons({ includeFragments })
+      const full = await neurons({ includeFragments, neuronRows: 'full' })
+      expect(full.length).toBe(derived.length)
+      expect(full.data.neuronId).toEqual(derived.data.neuronId)
+    }
+  })
+
+  it('changes the cache key, so switching to full does not serve the derived table', async () => {
+    const sched = scheduler()
+    await sched.run(pipeline(), { mode: 'full' })
+    const first = sched.output('conn', 'neuronSet')
+    await sched.run(pipeline({ neuronRows: 'full' }), { mode: 'full' })
+    const second = sched.output('conn', 'neuronSet')
+    if (!isTableValue(first) || !isTableValue(second)) throw new Error('expected tables')
+    expect(first.schema.columns.map((c) => c.name)).toEqual(['neuronId', 'type'])
+    expect(second.schema.columns.map((c) => c.name)).toContain('status')
+  })
+})
+
+/**
+ * `Partners`: which bodies on the far end of an edge count as partners.
+ *
+ * The mock connectome publishes every body it wires, so the *result* is the same either way here
+ * and nothing about the filtering itself can be asserted against it — `connectivityOps.test.ts`
+ * owns that, against a hand-written graph. What only this layer can show is that the setting
+ * reaches the source at all, and that it reaches the provenance key.
+ */
+describe('include fragments', () => {
+  /*
+   * Lookups **by id**, which is what the filter issues. The `Find Neurons` node upstream calls
+   * the same method on the same source with a pattern instead, and counting those too would make
+   * every assertion here about a different node.
+   */
+  function idLookups(spy: { mock: { calls: Array<[{ neuronIds?: readonly string[] }]> } }) {
+    return spy.mock.calls.filter((call) => call[0]?.neuronIds !== undefined)
+  }
+
+  it('looks the far end up by default, and does not when asked for every partner', async () => {
+    const source = requireSource('mock')
+    const spy = vi.spyOn(source, 'findNeurons')
+
+    spy.mockClear()
+    await connections()
+    // Once per hop. `Neuron Set` is derived by default, so this is the filter and nothing else.
+    expect(idLookups(spy).length).toBeGreaterThan(0)
+
+    spy.mockClear()
+    await connections({ includeFragments: true })
+    expect(idLookups(spy)).toEqual([])
+    spy.mockRestore()
+  })
+
+  it('asks about the partners rather than the seeds', async () => {
+    const source = requireSource('mock')
+    const spy = vi.spyOn(source, 'findNeurons')
+    spy.mockClear()
+    const edges = await connections()
+    const seeds = new Set((edges.data.preId ?? []).map(String))
+
+    const asked = idLookups(spy).flatMap((call) => [...(call[0].neuronIds ?? [])].map(String))
+    expect(asked.length).toBeGreaterThan(0)
+    // A seed was named explicitly; narrowing it would delete a neuron somebody asked for.
+    for (const id of asked) expect(seeds.has(id)).toBe(false)
+    spy.mockRestore()
+  })
+
+  it('changes the cache key, so widening it does not serve the restricted result', async () => {
+    const sched = scheduler()
+    const source = requireSource('mock')
+    const spy = vi.spyOn(source, 'findNeurons')
+
+    await sched.run(pipeline(), { mode: 'full' })
+    spy.mockClear()
+    await sched.run(pipeline({ includeFragments: true }), { mode: 'full' })
+    // Re-run rather than answered from the cache under the old key — and this time with no
+    // lookup, which is what says the second run actually took the other branch.
+    expect(idLookups(spy)).toEqual([])
+    spy.mockRestore()
+  })
+
+  /*
+   * The third state. A graph saved before this control existed queried every partner, which is
+   * *not* the default — so absence has to be written in on load or every stored workflow silently
+   * returns a different number of partners after an update. `graph.test.ts` owns the mechanism;
+   * this is the claim about this param.
+   */
+  it('reads a stored node with no key for it as every partner', () => {
+    const { graph } = deserializeGraph(
+      JSON.stringify({
+        version: 1,
+        nodes: [
+          {
+            id: 'c',
+            type: 'neuron.connectivity',
+            position: { x: 0, y: 0 },
+            params: { hops: 1 },
+          },
+        ],
+        edges: [],
+      }),
+    )
+    expect(graph.nodes[0]!.params.includeFragments).toBe(true)
+  })
+
+  it('leaves a stored value alone', () => {
+    const { graph } = deserializeGraph(
+      JSON.stringify({
+        version: 1,
+        nodes: [
+          {
+            id: 'c',
+            type: 'neuron.connectivity',
+            position: { x: 0, y: 0 },
+            params: { includeFragments: false },
+          },
+        ],
+        edges: [],
+      }),
+    )
+    expect(graph.nodes[0]!.params.includeFragments).toBe(false)
   })
 })

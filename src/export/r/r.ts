@@ -227,6 +227,23 @@ export function rIdent(text: string, fallback = 'step'): string {
 }
 
 /**
+ * A **port id** as an identifier, which is not the same rule as a node label.
+ *
+ * camelCase is a word boundary here: `neuronSet` has to bind `..._neuron_set`, not
+ * `..._neuronset`. It cannot go in `rIdent` itself, and that is a measurement rather than a
+ * preference — the same helper turns node *labels* into identifiers, and the neuPrint dataset
+ * node is labelled `neuPrint`, so the rule applied there spells `hemibrain_neuprint` as
+ * `hemibrain_neu_print` in every document ever exported.
+ *
+ * So the caller has to say which kind of string it holds, and it says it by choosing a function
+ * rather than by inlining a regex at the call site — `r.ts`'s own header is that nothing
+ * outside it builds an identifier.
+ */
+export function rPortIdent(portId: string): string {
+  return rIdent(portId.replace(/([a-z0-9])([A-Z])/g, '$1 $2'), 'out')
+}
+
+/**
  * A knitr chunk label.
  *
  * Deliberately not `rIdent`: knitr **errors on a duplicate label**, and its labels are

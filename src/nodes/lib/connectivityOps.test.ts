@@ -20,6 +20,9 @@ import type { ConnectionDirection } from '../../data/source'
 import { connectivitySchemaWithRoi } from '../../data/source'
 import {
   connectivityOutputSchema,
+  endpointNeurons,
+  endpointSchema,
+  neuronRowsFor,
   normalizeConnectivity,
   normalizeTargets,
   totalsLookup,
@@ -487,5 +490,307 @@ describe('normalisation', () => {
     // The ids arrive as numbers and the edge list keys on text. A `Map<number>` here would miss
     // every row and read as a dataset with no totals at all.
     expect(totalsLookup(totals).get('2')).toBe(300)
+  })
+})
+
+/**
+ * The `Neurons` port's derivation.
+ *
+ * Every case here is one the obvious version answers with a plausible table. Dropping the
+ * seeds loses only the neurons that turned out to have no partners — which is a hole nothing
+ * on screen names. Keying the type off the same row that decided the order gets it right for
+ * every neuron that arrived typed and wrong for the ones that did not. And rebuilding an id
+ * instead of copying its cell is invariant 8 with no symptom at all until a CAVE root id.
+ */
+describe('endpoint neurons', () => {
+  const SCHEMA = endpointSchema(SOURCE_SCHEMA)
+
+  it('carries the id and type columns over whole, renamed and nothing else', () => {
+    expect(SCHEMA.columns).toEqual([
+      { name: 'neuronId', dtype: 'i64' },
+      { name: 'type', dtype: 'str' },
+    ])
+  })
+
+  it('takes the id dtype from the connectivity schema, not from a canonical neuron table', () => {
+    const text = tableSchema(
+      column('neuronId', 'str'),
+      column('neuronType', 'str'),
+      column('partnerId', 'str'),
+      column('partnerType', 'str'),
+      column('weight', 'i64', 'synapses'),
+    )
+    // A CAVE root id is text in `preId`, so it has to be text here — this table holds the
+    // very same cells.
+    expect(endpointSchema(text).columns[0]).toEqual({ name: 'neuronId', dtype: 'str' })
+  })
+
+  it('is a Neurons value, not a table — the port declares one and `selectTable` branches on it', async () => {
+    const { table } = await run([[1, 2, 5]], { seeds: [1], direction: 'outputs' })
+    expect(endpointNeurons(table, SCHEMA).kind).toBe('neurons')
+  })
+
+  it('lists both ends of every edge once, in first-appearance order', async () => {
+    const { table } = await run(
+      [
+        [1, 2, 5],
+        [1, 3, 5],
+        [2, 3, 5],
+      ],
+      { seeds: [1], direction: 'outputs', hops: 2 },
+    )
+    const out = endpointNeurons(table, SCHEMA)
+    expect(out.data.neuronId).toEqual([1, 2, 3])
+    expect(out.data.type).toEqual(['A', 'B', 'C'])
+  })
+
+  it('keeps a seed that no surviving edge mentions, which is the half a downstream node could not do', async () => {
+    // 9 is a real seed with a partner below the cut; the traversal returns nothing for it, so
+    // both ends of the edge list cover 1 and 2 alone.
+    const { table } = await run(
+      [
+        [1, 2, 20],
+        [9, 3, 1],
+      ],
+      { seeds: [1, 9], direction: 'outputs', minWeight: 10 },
+    )
+    expect(shape(table)).toEqual(['1>2@1:downstream'])
+
+    const seeds = tableFromRows(
+      tableSchema(column('neuronId', 'i64'), column('type', 'str')),
+      [
+        { neuronId: 1, type: 'A' },
+        { neuronId: 9, type: 'X' },
+      ],
+      'neurons',
+    )
+    const out = endpointNeurons(table, SCHEMA, seeds)
+    expect(out.data.neuronId).toEqual([1, 9, 2])
+    expect(out.data.type).toEqual(['A', 'X', 'B'])
+  })
+
+  it('takes the first non-empty type, which need not be the row that fixed the order', async () => {
+    const { table } = await run([[1, 2, 5]], { seeds: [1], direction: 'outputs' })
+    // A seed table with no type at all: `Input IDs` unwired emits exactly this, and the edge
+    // list is where the type then comes from.
+    const seeds = tableFromRows(
+      tableSchema(column('neuronId', 'i64')),
+      [{ neuronId: 1 }],
+      'neurons',
+    )
+    const out = endpointNeurons(table, SCHEMA, seeds)
+    expect(out.data.neuronId).toEqual([1, 2])
+    expect(out.data.type).toEqual(['A', 'B'])
+  })
+
+  it('copies the id cell rather than rebuilding it, so a wide root id survives', () => {
+    const text = tableSchema(
+      column('neuronId', 'str'),
+      column('neuronType', 'str'),
+      column('partnerId', 'str'),
+      column('partnerType', 'str'),
+      column('weight', 'i64', 'synapses'),
+    )
+    const wide = '720575940628857210'
+    const edges = tableFromRows(connectivityOutputSchema(text), [
+      { preId: wide, preType: 'A', postId: '720575940628857211', postType: 'B', weight: 5 },
+    ])
+    const out = endpointNeurons(edges, endpointSchema(text))
+    expect(out.data.neuronId?.[0]).toBe(wide)
+  })
+
+  it('answers seeds alone when the traversal found nothing', async () => {
+    const { table } = await run([], { seeds: [1], direction: 'outputs' })
+    const seeds = tableFromRows(
+      tableSchema(column('neuronId', 'i64')),
+      [{ neuronId: 1 }],
+      'neurons',
+    )
+    expect(endpointNeurons(table, SCHEMA, seeds).data.neuronId).toEqual([1])
+    expect(endpointNeurons(table, SCHEMA).length).toBe(0)
+  })
+})
+
+/**
+ * The `Partners` filter, and the two things it decides at once.
+ *
+ * Both are cases the obvious implementation answers with a plausible table. Dropping only the
+ * far end of an edge leaves a row whose other half is a body nothing can look up; filtering the
+ * edges but not the frontier expands through neurons the result has just dropped, so hop 2 finds
+ * partners of a fragment that is not in the answer.
+ */
+describe('published partners', () => {
+  /** Keeps the ids given, records what it was asked. */
+  function filter(publishedIds: number[]) {
+    const asked: number[][] = []
+    const set = new Set(publishedIds.map(String))
+    return {
+      asked,
+      published: async (ids: string[]) => {
+        asked.push(ids.map(Number))
+        return new Set(ids.filter((id) => set.has(id)))
+      },
+    }
+  }
+
+  function runFiltered(
+    edges: Edge[],
+    opts: {
+      seeds: number[]
+      direction: TraversalDirection
+      hops?: number
+      published: number[]
+    },
+  ) {
+    const source = fakeSource(edges, 0)
+    const keep = filter(opts.published)
+    return traverseConnectivity({
+      seeds: opts.seeds.map(String),
+      direction: opts.direction,
+      hops: opts.hops ?? 1,
+      schema: OUT_SCHEMA,
+      fetch: source.fetch,
+      published: keep.published,
+    }).then((table) => ({ table, calls: source.calls, asked: keep.asked }))
+  }
+
+  it('drops an edge whose partner the dataset does not publish', async () => {
+    const { table, asked } = await runFiltered(
+      [
+        [1, 2, 5],
+        [1, 3, 5],
+      ],
+      { seeds: [1], direction: 'outputs', published: [2] },
+    )
+    expect(shape(table)).toEqual(['1>2@1:downstream'])
+    // Asked once, about the partners and not about the seed — a seed was named explicitly.
+    expect(asked).toEqual([[2, 3]])
+  })
+
+  it('keeps a seed the dataset does not publish, and its edges', async () => {
+    // 9 is seeded and unpublished; 2 is published. The edge between them survives because a
+    // seed is exempt — dropping it would delete a neuron somebody asked for by id.
+    const { table } = await runFiltered([[9, 2, 5]], {
+      seeds: [9],
+      direction: 'outputs',
+      published: [2],
+    })
+    expect(shape(table)).toEqual(['9>2@1:downstream'])
+  })
+
+  it('does not expand through a partner it dropped', async () => {
+    const { table, calls } = await runFiltered(
+      [
+        [1, 2, 5],
+        [1, 3, 5],
+        [3, 4, 5],
+      ],
+      { seeds: [1], direction: 'outputs', hops: 2, published: [2] },
+    )
+    // 3 was dropped, so 4 is never reached and the second hop asks only about 2.
+    expect(shape(table)).toEqual(['1>2@1:downstream'])
+    expect(calls.map((c) => c.neuronIds)).toEqual([[1], [2]])
+  })
+
+  it('still labels an internal edge `both` when it survives', async () => {
+    const { table } = await runFiltered(
+      [
+        [1, 2, 5],
+        [2, 1, 5],
+      ],
+      { seeds: [1, 2], direction: 'both', published: [] },
+    )
+    // Both ends are seeds, so nothing is dropped and the round's two directions still resolve
+    // against each other — the rule the per-round accumulator had to preserve.
+    expect(shape(table).sort()).toEqual(['1>2@1:both', '2>1@1:both'])
+  })
+
+  it('changes nothing when no filter is given', async () => {
+    const plain = await run(
+      [
+        [1, 2, 5],
+        [1, 3, 5],
+      ],
+      { seeds: [1], direction: 'outputs' },
+    )
+    const filtered = await runFiltered(
+      [
+        [1, 2, 5],
+        [1, 3, 5],
+      ],
+      { seeds: [1], direction: 'outputs', published: [2, 3] },
+    )
+    expect(shape(filtered.table)).toEqual(shape(plain.table))
+  })
+})
+
+/**
+ * The left join that keeps the two ports the same set.
+ *
+ * `findNeurons` answers only about published neurons, so a lookup keyed by an endpoint list is
+ * shorter than the list — which would make `Neuron Set` a different length from the edge list it
+ * was derived from, the one property the port exists to have.
+ */
+describe('neuron rows for the endpoint list', () => {
+  const NEURON_SCHEMA = tableSchema(
+    column('neuronId', 'i64'),
+    column('type', 'str'),
+    column('status', 'str'),
+  )
+  const derived = tableFromRows(
+    tableSchema(column('neuronId', 'i64'), column('type', 'str')),
+    [
+      { neuronId: 1, type: 'A' },
+      { neuronId: 2, type: 'B' },
+      { neuronId: 3, type: null },
+    ],
+    'neurons',
+  )
+
+  it('keeps every endpoint, in its order, with the found rows filled in', () => {
+    const rows = tableFromRows(
+      NEURON_SCHEMA,
+      [{ neuronId: 3, type: 'C', status: 'Traced' }],
+      'neurons',
+    )
+    const out = neuronRowsFor(derived, rows, NEURON_SCHEMA)
+    expect(out.length).toBe(3)
+    expect(out.data.neuronId).toEqual([1, 2, 3])
+    expect(out.data.status).toEqual([null, null, 'Traced'])
+    expect(out.kind).toBe('neurons')
+  })
+
+  it('leaves an unmatched row its id and the type the edge carried', () => {
+    const out = neuronRowsFor(
+      derived,
+      tableFromRows(NEURON_SCHEMA, [], 'neurons'),
+      NEURON_SCHEMA,
+    )
+    expect(out.data.neuronId).toEqual([1, 2, 3])
+    expect(out.data.type).toEqual(['A', 'B', null])
+    expect(out.data.status).toEqual([null, null, null])
+  })
+
+  it('lets the dataset win the type where it published one', () => {
+    const rows = tableFromRows(
+      NEURON_SCHEMA,
+      [{ neuronId: 1, type: 'renamed', status: 'Traced' }],
+      'neurons',
+    )
+    expect(neuronRowsFor(derived, rows, NEURON_SCHEMA).data.type).toEqual([
+      'renamed',
+      'B',
+      null,
+    ])
+  })
+
+  it('builds the schema it was handed, not the one the lookup returned', () => {
+    const wider = tableFromRows(
+      tableSchema(...NEURON_SCHEMA.columns, column('size', 'i64')),
+      [{ neuronId: 1, type: 'A', status: 'Traced', size: 10 }],
+      'neurons',
+    )
+    const out = neuronRowsFor(derived, wider, NEURON_SCHEMA)
+    expect(out.schema.columns.map((c) => c.name)).toEqual(['neuronId', 'type', 'status'])
   })
 })

@@ -1667,6 +1667,172 @@ list, so a hop-2 frontier of tens of thousands of neurons builds a very large Cy
 chunked, because chunking is only worth writing once a real query has actually failed on it — but
 it is the first thing to suspect if a deep traversal errors at the transport rather than timing out.
 
+### `Include fragments`, and why the far end stopped being bare
+
+`Include fragments` chooses between the neurons a dataset publishes and every body a synapse
+lands on. **A checkbox rather than a two-option enum**, because the two are not peers: one is what
+nearly everybody wants and the other is an addition to it. What "proofread" means is deliberately
+not restated on the card — it is whatever the Dataset node's population says, which is the point of
+asking `findNeurons` rather than compiling a predicate of our own.
+Measured on `male-cns:v1.0`, five `LC4` neurons downstream at weight 1 — read off the server, not
+estimated:
+
+| far end | distinct partners | edges | synapses |
+| --- | --- | --- | --- |
+| bare node — what the query always did | **4,252** | 4,889 | 11,898 |
+| `:Segment` | 4,252 | — | 11,898 |
+| `:Neuron` | 496 | 1,043 | 6,533 |
+| `superclass IS NOT NULL` (male-CNS's own default) | 492 | 1,032 | 6,503 |
+
+**Matching bare was right and was the wrong *only* option.** `connectivityCypher` matches the far
+end as a bare node because a partner may be a `Segment` below the neuron threshold, and excluding
+those under-reports the weight — which is exactly what `Normalize`'s two bases exist to measure.
+What that reasoning never justified was having no other setting: 88% of the result was bodies the
+`Neuron Set` port beside it could not find a single row for, and 45% of the weight went to them.
+
+**It is a `findNeurons` lookup, not a clause.** The filter does not reach `ConnectivityRequest` at
+all. `traverseConnectivity` takes a `published` callback, the node implements it as an ordinary
+`findNeurons` keyed by the ids a hop reached, and an edge survives only if **both** ends came back.
+Three things fall out, and each is why this shape beat compiling a predicate into the connectivity
+query:
+
+- **"Published" means exactly what `Find Neurons` means**, on every backend, because it is the
+  same call. A `ConnectivityRequest` field would have been a second definition of one set, lowered
+  five times — and the `Neuron Set` port beside it is precisely the thing that would then disagree.
+- **No capability matrix.** `findNeurons` is required on `DataSource`; `fetchConnectivity` is not
+  uniform enough to have carried this. Even the attached-edge-set arm works, since the dataset
+  behind it still has a neuron table.
+- **The dataset card's population reaches it**, through `neuronSetRequest`. That is the documented
+  rule this deliberately amends — see `neuronSetRequest`'s own comment for the exception and its
+  measurement.
+
+The price is a round trip per hop and a connectivity response that still carries every fragment
+before they are dropped. The saving is the hop after: a frontier of 492 rather than 4,252.
+
+**Seeds are exempt.** They were named explicitly, and dropping every edge of a body somebody pasted
+in is the substitution `Input IDs` refuses when it declines to apply a status filter.
+
+**It bounds the frontier, not just the rows**, so a two-hop restricted result is not the
+unrestricted one with rows removed — it is a different and much cheaper traversal.
+
+**`absentMeans: true`.** A stored node written before this control queried every partner, which is
+not the default, so absence is written in on load. Contrast the region params, whose absence and
+default agree and which therefore carry no such key.
+
+**No warning when the box is unticked**, deliberately. A badge on every Connectivity run is a badge
+nobody reads by the third one, and the unticked box is already on the card. The asymmetry runs the other way: opting *into* fragments is what leaves the `Neuron Set`
+port with empty columns, and that is warned about where it happens.
+
+#### Both exporters had always disagreed with the canvas
+
+Reading the libraries rather than the docs turned up a translation bug older than this change:
+
+- neuprint-python's `@neuroncriteria_args` turns a `None` far end into `NeuronCriteria()`, whose
+  `label` is `'Neuron'` when no `bodyId` is given, and `fetch_adjacencies` interpolates it into
+  `MATCH (n:{sources.label})-[e:ConnectsTo]->(m:{targets.label})` (read off the installed 0.6.3).
+- neuprintr's `neuprint_connection_table` builds `MATCH (a:{node})-[c:ConnectsTo]->(b:{node})` with
+  `node = ifelse(all_segments, "Segment", "Neuron")` (read off natverse/neuprintr).
+
+So the notebook and the R document have always returned the 496-partner answer for a canvas showing
+4,252 — silently, in both languages. The new default is the text they already emitted; what needed
+writing is the *other* setting, and `:Segment` is an exact translation of the bare match rather than
+an approximation (4,252 partners and 11,898 synapses either way, because every `:Neuron` in neuPrint
+is also a `:Segment`).
+
+One difference survives and is written into the generated R rather than only here: neuprintr applies
+the label to **both** ends, so with `all_segments = FALSE` a queried body that is not itself a
+published neuron returns nothing, where the canvas always keeps the neurons you named.
+
+What is *not* translated is the population narrowing on the far end — `NeuronCriteria` takes values,
+so a superclass that is merely *set* is not expressible, and `fetch_adjacencies` returns only `type`
+and `instance` for a partner to post-filter on. Both emitters carry a `note` naming it when the
+dataset has a population. Small and said rather than large and silent: 496 against 492.
+
+### The Neuron Set port: an edge list is the wrong type for the node that comes next
+
+The node has a second output — the distinct neurons its result is about, as a `Neurons` table.
+
+**The gap it closes is a type wall, not a missing query.** The obvious workflow is: start with a
+set of neurons, pull their partners, then get all the connections *among that whole set* and run
+network statistics over it. Step three is `Adjacency` with the same set on both inputs — and
+`Adjacency` takes two `T.neurons()`, while `Connections` is a `T.table()` of `preId`/`postId`.
+`isSubtype` allows `neurons → table` and deliberately not the reverse, so the wire is refused.
+Assembling the set by hand meant `Rename` → `Stack` → `Dedupe` → `Input IDs`: four nodes to say
+"the neurons I just found", none of which is about connectomics.
+
+**Not called `Neurons`, though that is what it holds.** The input port is already `Neurons`, and a
+node carrying one label on both sides means a *pass-through* everywhere else in the registry —
+`out.profile` is literally one (`out: table`), and so is `Labels to Neurons`. The port **id**
+differs for the same reason one level down: `ctx.input('neurons')` beside `ctx.output('neurons')`
+in one `evaluate` is a typo with no type error behind it. It is also the only camelCase port id in
+the registry, which is why `outputName` splits camelCase — and why it does so on the *port id*
+rather than in `pyIdent`/`rIdent`, whose other caller is the node label and would spell the
+neuPrint dataset node `neu_print` in every document ever exported.
+
+**Two outputs describing one traversal**, which is `neuron.adjacency`'s arrangement (`Matrix` and
+`Links`) and `neuron.roiConnectivity`'s before it. `Connections` stays first, so a link dragged off
+the card starts there and every graph saved before this port existed keeps its wiring —
+`neuron.explore` appended `all` on the same rule.
+
+**The seeds are in the port, and that is the half a downstream transform could not have done.**
+Both ends of a hop-1 edge list already cover every seed that had a partner above `Min weight`; a
+seed that had none disappears from the union entirely, silently. This node is the only place
+holding both the seed set (on its own input) and the result, so only here can the port mean "the
+neurons this result is about" rather than "the ones that turned out to be wired". That is also the
+argument against solving this with a generic `Neurons from Connections` transform: such a node is
+worth having for the other edge-list producers — `Adjacency ▸ Links`, `Paths`, an uploaded edge
+set — but it structurally cannot see the seeds.
+
+**Derived by default, full rows on request.** `Neuron Set` picks between two schemas:
+
+- `derived` reads `neuronId` and `type` straight off the `preId`/`preType` and `postId`/`postType`
+  columns already in hand. No query, and enough for everything keyed by id — `Adjacency`,
+  `Skeletons`, `Meshes`, `Synapses`, `ROI Counts` all reach their ids through `idColumn` and read
+  nothing else off the row.
+- `full` looks every neuron up with `findNeurons` for the columns an edge list has no room for.
+
+`inferOutputs` declares whichever of the two `evaluate` will build (invariant 3), which is the same
+split `neuron.inputIds` makes between its wired and unwired Dataset. The param carries **no
+`absentMeans`**: a stored node written before the port existed emitted no neuron table and issued no
+lookup, which is exactly what `derived` does, so absence and the default already agree.
+
+Three things about the derivation that a reasonable implementation gets wrong:
+
+- **The schema comes from the *connectivity* schema, not the dataset's neuron schema.** The cells
+  in this table are the cells of `preId`/`postId`, so the declared dtype has to be theirs — a CAVE
+  root id is `str` there and would be declared `i64` by the neuron schema, which is invariant 8
+  with no symptom until an 18-digit id.
+- **Cells are copied, never rebuilt.** `idText` is used for the dedupe *key* only; the value that
+  goes into the column is the cell that came out. Nothing parses, rounds or re-renders an id.
+- **The row that fixes a neuron's order is not the row that fixes its type.** First appearance
+  decides the order and the first non-empty type wins, because a neuron can arrive as an untyped
+  seed and be typed by an edge several rows later.
+
+**No `hop` column, though it looks free.** `traverseConnectivity` records the hop an *edge* was
+found at, and which of its two ends was the frontier is only knowable on the first round —
+`partnerVectors.ts` writes down the same limit about `direction`. A per-neuron distance column
+would be right at hop 1 and quietly wrong past it.
+
+**Under `full` the lookup is a left join, and that is the port's whole point.** `findNeurons`
+answers only about published neurons, so a lookup keyed by an endpoint list comes back *shorter*
+than the list — 496 rows for 4,252 endpoints with fragments included. Returning what came back would
+make this port a different length from the edge list it was derived from, which is the one property
+it exists to have. So every endpoint survives in its order, an unmatched one keeps its id and the
+type the edge carried, and the rest of its columns are null. Verified end to end against
+`male-cns:v1.0`: 492/492 and 4,252/4,252 rows both ways.
+
+The lookup itself goes through `datasetRequest`, not `neuronSetRequest` — these ids were already
+decided, and narrowing them by the population a second time would reintroduce the very mismatch
+this removes. The narrowing belongs on the *traversal*, which is where `Include fragments` puts it.
+
+**Both exporters emit the port unconditionally**, the way `neuron.adjacency` emits both of its
+outputs: an emitter cannot see which of its outputs the graph downstream reads, so a port left
+unassigned is a `NameError` in somebody's notebook. Adding the port also *renamed* the emitted
+variable — a single-output node takes the node's name unadorned and a multi-output one suffixes the
+port — so `connectivity` became `connectivity_connections` in both goldens. That rename is
+`emit.ts`'s rule working, not a regression, but it is the reason adding an output port to a shipped
+node type touches the export fixtures.
+
 ### Normalizing a weight: two ends, two denominators, and both said out loud
 
 `Normalize` appends two columns — `weightNorm`, the fraction, and `weightTotal`, the denominator

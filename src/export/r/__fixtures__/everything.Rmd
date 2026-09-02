@@ -182,12 +182,19 @@ coda_describe <- function(df) {
 }
 
 
-coda_edge_list <- function(ids, prepost, min_weight, conn) {
+coda_edge_list <- function(ids, prepost, min_weight, all_segments, conn) {
   # Coda's Connectivity output: preId -> postId, always oriented the way the synapse
   # points, whichever way the traversal travelled.
+  #
+  # all_segments = FALSE keeps only bodies neuPrint labels :Neuron, which is this
+  # function's own default; TRUE matches :Segment instead -- every body, fragments
+  # included. Note that it applies to BOTH ends, so with FALSE a queried body that is
+  # not itself a published neuron returns nothing, where Coda's canvas always keeps the
+  # neurons you asked about.
   one <- function(side) {
     tbl <- neuprint_connection_table(
-      ids, prepost = side, threshold = min_weight, details = TRUE, conn = conn
+      ids, prepost = side, threshold = min_weight, details = TRUE,
+      all_segments = all_segments, conn = conn
     )
     if (is.null(tbl) || nrow(tbl) == 0) return(NULL)
     # prepost = "PRE" means the *partner* is presynaptic, so the queried body is post.
@@ -219,6 +226,35 @@ coda_edge_list <- function(ids, prepost, min_weight, conn) {
   # weight of every row joining a pair -- so a duplicate is a doubled synapse count in
   # the picture rather than a cosmetic repeat.
   dplyr::distinct(out, preId, postId, .keep_all = TRUE)
+}
+
+
+coda_endpoint_neurons <- function(connections, seed_ids = NULL) {
+  # The neurons an edge list is about: the seeds, then every partner, one row each.
+  #
+  # The seeds are included whether or not any edge survived min_weight -- both ends of
+  # the edge list only cover the seeds that turned out to be wired to something.
+  parts <- list()
+  if (!is.null(seed_ids)) {
+    parts[[length(parts) + 1]] <- tibble::tibble(
+      neuronId = seed_ids, type = NA_character_
+    )
+  }
+  parts[[length(parts) + 1]] <- tibble::tibble(
+    neuronId = connections$preId, type = connections$preType
+  )
+  parts[[length(parts) + 1]] <- tibble::tibble(
+    neuronId = connections$postId, type = connections$postType
+  )
+
+  rows <- dplyr::bind_rows(parts)
+  rows$type[!is.na(rows$type) & rows$type == ""] <- NA_character_
+  # First appearance decides the order; the first non-empty type wins, which need not be
+  # the same row -- a neuron can arrive as an untyped seed and be typed by an edge later.
+  typed <- dplyr::distinct(rows[!is.na(rows$type), ], neuronId, .keep_all = TRUE)
+  out <- dplyr::distinct(rows, neuronId, .keep_all = TRUE)
+  out$type <- typed$type[match(out$neuronId, typed$neuronId)]
+  out
 }
 
 
@@ -932,7 +968,8 @@ coda_similarity_wide <- function(df, id_column, columns, metric = "cosine",
 }
 
 
-coda_traverse_connectivity <- function(seed_ids, direction, hops, min_weight, conn) {
+coda_traverse_connectivity <- function(seed_ids, direction, hops, min_weight,
+                                       all_segments, conn) {
   # Coda's Connectivity node past one hop: a breadth-first walk returning an edge list.
   #
   # Three rules worth keeping, each of which silently changes the answer if dropped:
@@ -954,7 +991,7 @@ coda_traverse_connectivity <- function(seed_ids, direction, hops, min_weight, co
     if (length(todo) == 0) break
     expanded <- union(expanded, todo)
 
-    step <- coda_edge_list(todo, prepost, min_weight, conn)
+    step <- coda_edge_list(todo, prepost, min_weight, all_segments, conn)
     if (nrow(step) == 0) break
     step$hop <- hop
 
@@ -972,7 +1009,7 @@ coda_traverse_connectivity <- function(seed_ids, direction, hops, min_weight, co
   }
 
   if (is.null(found)) {
-    return(coda_edge_list(numeric(0), prepost, min_weight, conn))
+    return(coda_edge_list(numeric(0), prepost, min_weight, all_segments, conn))
   }
   found
 }
@@ -1233,23 +1270,29 @@ rename_columns <- table_from_url |>
 
 ```{r connectivity}
 # ── Connectivity ──
-connectivity <- coda_edge_list(
+connectivity_connections <- coda_edge_list(
   find_neurons$neuronId,
   prepost = "POST",
   min_weight = 5,
+  all_segments = FALSE,
   conn = hemibrain_neuprint
 )
+
+connectivity_neuron_set <- coda_endpoint_neurons(connectivity_connections, find_neurons$neuronId)
 ```
 
 ```{r connectivity-2}
 # ── Connectivity ──
-connectivity_2 <- coda_traverse_connectivity(
+connectivity_2_connections <- coda_traverse_connectivity(
   find_neurons$neuronId,
   direction = "both",
   hops = 3,
   min_weight = 10,
+  all_segments = FALSE,
   conn = hemibrain_neuprint
 )
+
+connectivity_2_neuron_set <- coda_endpoint_neurons(connectivity_2_connections, find_neurons$neuronId)
 ```
 
 ```{r roi-counts}
@@ -1465,13 +1508,13 @@ paths_paths <- neuprint_get_paths(
 
 ```{r filter-table}
 # ── Filter Table ──
-filter_table <- connectivity |> filter(`weight` >= 10)
+filter_table <- connectivity_connections |> filter(`weight` >= 10)
 ```
 
 ```{r partner-vectors}
 # ── Partner Vectors ──
 partner_vectors <- coda_partner_vectors(
-  connectivity,
+  connectivity_connections,
   neurons = find_neurons,
   partner_by = "type",
   untyped = "id",
@@ -1483,7 +1526,7 @@ partner_vectors <- coda_partner_vectors(
 ```{r partner-vectors-2}
 # ── Partner Vectors ──
 partner_vectors_2 <- coda_partner_vectors(
-  connectivity_2,
+  connectivity_2_connections,
   partner_by = "id",
   weight = "weight",
   weighting = "fraction"
@@ -1641,8 +1684,8 @@ relabel <- coda_relabel(find_neurons, "type", combine_columns, "type", "label", 
 ```{r compare-connectivity}
 # ── Compare Connectivity ──
 cmp_compare_connectivity_comparison <- coda_compare_connectivity(list(
-  list(name = "flywire", edges = connectivity, labels = combine_columns, pre = "preId", post = "postId", weight = "weight", id_column = "neuronId", label_column = "label"),
-  list(name = "hemibrain", edges = connectivity_2, labels = combine_columns, pre = "preId", post = "postId", id_column = "neuronId", label_column = "label")
+  list(name = "flywire", edges = connectivity_connections, labels = combine_columns, pre = "preId", post = "postId", weight = "weight", id_column = "neuronId", label_column = "label"),
+  list(name = "hemibrain", edges = connectivity_2_connections, labels = combine_columns, pre = "preId", post = "postId", id_column = "neuronId", label_column = "label")
 ), min_weight = 2)
 compare_connectivity_comparison <- cmp_compare_connectivity_comparison$comparison
 compare_connectivity_counts <- cmp_compare_connectivity_comparison$counts
@@ -1651,7 +1694,7 @@ compare_connectivity_counts <- cmp_compare_connectivity_comparison$counts
 ```{r partner-vectors-3}
 # ── Partner Vectors ──
 partner_vectors_3 <- coda_partner_vectors(
-  connectivity,
+  connectivity_connections,
   neurons = find_neurons,
   labels = combine_columns,
   label_id = "neuronId",
@@ -2085,7 +2128,7 @@ network_centrality_nodes
 # ── Stack Tables ──
 stack_tables <- bind_rows(
   join |> mutate(`origin` = "Direct"),
-  connectivity_2 |> mutate(`origin` = "Indirect")
+  connectivity_2_connections |> mutate(`origin` = "Indirect")
 )
 ```
 

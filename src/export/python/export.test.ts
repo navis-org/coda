@@ -249,13 +249,99 @@ describe('the region and normalisation options', () => {
       params: { typePattern: 'LC4' },
     })
     g = addNode(g, { id: 'c', type: 'neuron.connectivity', position: { x: 520, y: 0 }, params })
-    g = { ...g, edges: [
-      { id: 'e1', source: 'ds', sourceHandle: 'dataset', target: 'find', targetHandle: 'dataset' },
-      { id: 'e2', source: 'ds', sourceHandle: 'dataset', target: 'c', targetHandle: 'dataset' },
-      { id: 'e3', source: 'find', sourceHandle: 'neurons', target: 'c', targetHandle: 'neurons' },
-    ] }
+    g = {
+      ...g,
+      edges: [
+        {
+          id: 'e1',
+          source: 'ds',
+          sourceHandle: 'dataset',
+          target: 'find',
+          targetHandle: 'dataset',
+        },
+        {
+          id: 'e2',
+          source: 'ds',
+          sourceHandle: 'dataset',
+          target: 'c',
+          targetHandle: 'dataset',
+        },
+        {
+          id: 'e3',
+          source: 'find',
+          sourceHandle: 'neurons',
+          target: 'c',
+          targetHandle: 'neurons',
+        },
+      ],
+    }
     return notebookText(g)
   }
+
+  /*
+   * `Include fragments`, and the finding behind it: `fetch_adjacencies` turns a `None` far end into
+   * `NeuronCriteria()`, whose label is `Neuron` — read off the installed neuprint-python 0.6.3 —
+   * so this cell has always restricted the far end where the node until now did not. The default
+   * is therefore *unchanged text* that is now correct, and the other setting is what needed
+   * writing.
+   */
+  it('leaves the far end unconstrained for published neurons, which is what None means', () => {
+    const text = connectivityCell({ direction: 'outputs', hops: 1, minWeight: 1 })
+    expect(text).toContain('fetch_adjacencies(\n    NeuronCriteria(bodyId=')
+    expect(text).not.toContain("label='Segment'")
+  })
+
+  it('names Segment on the far end for every partner', () => {
+    const text = connectivityCell({
+      direction: 'outputs',
+      hops: 1,
+      minWeight: 1,
+      includeFragments: true,
+    })
+    expect(text).toContain("NeuronCriteria(label='Segment', client=hemibrain_neuprint)")
+  })
+
+  it('carries it into the traversal helper, which is where the frontier is bounded', () => {
+    const restricted = connectivityCell({ direction: 'outputs', hops: 2, minWeight: 1 })
+    expect(restricted).toContain('all_segments=False')
+    const every = connectivityCell({
+      direction: 'outputs',
+      hops: 2,
+      minWeight: 1,
+      includeFragments: true,
+    })
+    expect(every).toContain('all_segments=True')
+    expect(every).toContain('far = NeuronCriteria(label="Segment", client=client)')
+  })
+
+  /*
+   * The `Neuron Set` port, which is emitted whether or not anything downstream reads it — an
+   * emitter cannot see which of its outputs the graph consumes, and a port left unassigned is
+   * a NameError in somebody's notebook rather than a cell that is merely longer.
+   */
+  it('binds the Neuron Set port from the edge list and the seeds', () => {
+    const text = connectivityCell({ direction: 'outputs', hops: 1, minWeight: 1 })
+    expect(text).toContain('def coda_endpoint_neurons(')
+    expect(text).toContain(
+      "connectivity_neuron_set = coda_endpoint_neurons(connectivity_connections, find_neurons['neuronId'].tolist())",
+    )
+    // The derived form binds the port directly; only `full` needs a lookup in between.
+    expect(text).not.toContain('_endpoints = ')
+  })
+
+  it('looks the rows up for full, and says what that call cannot answer for', () => {
+    const text = connectivityCell({
+      direction: 'outputs',
+      hops: 1,
+      minWeight: 1,
+      neuronRows: 'full',
+    })
+    expect(text).toContain('_endpoints = coda_endpoint_neurons(')
+    expect(text).toContain('connectivity_neuron_set, _ = fetch_neurons(')
+    expect(text).toContain("bodyId=_endpoints['neuronId'].tolist()")
+    expect(text).toContain('connectivity_neuron_set = coda_neurons(connectivity_neuron_set)')
+    expect(text).toContain("below the dataset's neuron threshold")
+  })
 
   it('keeps omit_rois on when no region option is set', () => {
     const text = connectivityCell({ direction: 'outputs', hops: 1, minWeight: 1 })
@@ -279,7 +365,12 @@ describe('the region and normalisation options', () => {
     // Only the `both` branch dedupes — one direction of fetch_adjacencies returns unique rows.
     // Keyed on the pair alone, an edge internal to the seed set would keep whichever region
     // arrived first and drop the rest of the connection: a table that looks fine and is short.
-    const split = connectivityCell({ direction: 'both', hops: 1, minWeight: 1, splitByRoi: true })
+    const split = connectivityCell({
+      direction: 'both',
+      hops: 1,
+      minWeight: 1,
+      splitByRoi: true,
+    })
     expect(split).toContain("drop_duplicates(subset=['bodyId_pre', 'bodyId_post', 'roi'])")
     const whole = connectivityCell({ direction: 'both', hops: 1, minWeight: 1 })
     expect(whole).toContain("drop_duplicates(subset=['bodyId_pre', 'bodyId_post'])")
@@ -372,7 +463,7 @@ describe('the population filters', () => {
    */
   it.each(QUERIES)('masks a filter NeuronCriteria cannot express, in %s', (type, params) => {
     const source = exportFixture(graphWith({ ...NONE, typedOnly: true }, type, params))
-    expect(source).toContain(".notna() & (")
+    expect(source).toContain('.notna() & (')
     expect(source).toContain("['type']")
     // An empty string is absent, the same rule the `notEmpty` operator applies — so a checkbox
     // and the equivalent filter row cannot answer two different sets.
@@ -383,7 +474,7 @@ describe('the population filters', () => {
     const source = exportFixture(
       graphWith({ ...NONE, tracedOnly: true, typedOnly: true }, 'neuron.explore', {}),
     )
-    expect(source).toContain("| (")
+    expect(source).toContain('| (')
     // A lone traced would have gone into the criteria; with a second filter it must not.
     expect(source).not.toContain('status=')
   })

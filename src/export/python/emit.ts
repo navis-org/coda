@@ -21,7 +21,7 @@ import type { ExportRefusal, TodoStep } from '../canExport'
 import { canExportNotebook, nodeLabel } from '../canExport'
 import type { Notebook } from './notebook'
 import { buildNotebook } from './notebook'
-import { pyComment, pyIdent } from './py'
+import { pyComment, pyIdent, pyPortIdent } from './py'
 import { emitterBackends, getEmitter, resolveHelpers } from './registry'
 import type { Cell, EmitContext, PyModule } from './types'
 import { MODULES } from './types'
@@ -83,6 +83,9 @@ function assignNames(order: string[], nodes: Map<string, GraphNode>): Map<string
  * A single-output node takes the node's name unadorned, which is the overwhelming majority
  * and the readable case. A node with several outputs suffixes the port — `paths_network`,
  * `paths_layout` — because `paths[0]`, `paths[1]` says nothing about which is which.
+ *
+ * The suffix goes through `pyPortIdent` rather than `pyIdent`, because a port id may be camelCase where
+ * a node label may not — see there.
  */
 function outputName(
   base: string,
@@ -92,7 +95,7 @@ function outputName(
 ): string {
   const outputs = outputPorts(def, params)
   if (outputs.length <= 1) return base
-  return `${base}_${pyIdent(portId, 'out')}`
+  return `${base}_${pyPortIdent(portId)}`
 }
 
 /**

@@ -842,6 +842,46 @@ check("describe: an empty frame keeps the summary's shape",
       list(empty.columns)[:4] == ["column", "dtype", "non_nulls", "nulls"] and len(empty) == 0,
       str(list(empty.columns)))
 
+# ---- coda_endpoint_neurons --------------------------------------------------
+#
+# The `Neuron Set` port's derivation. Two rules in it produce a plausible wrong answer rather
+# than an error, which is exactly what a golden file cannot see: the seeds are in the result
+# whether or not any edge survived, and the row that fixes a neuron's *order* is not the row
+# that fixes its *type*.
+ens = load_cell(FIXTURES / "everything.ipynb", "def coda_endpoint_neurons(", {"pd": pd})
+
+conn = pd.DataFrame({
+    "preId": [1, 1, 2],
+    "preType": ["A", "A", "B"],
+    "postId": [2, 3, 3],
+    "postType": ["B", "", "C"],
+    "weight": [5, 5, 5],
+})
+
+eps = ens["coda_endpoint_neurons"](conn, [1, 9])
+check("endpoints: seeds first, then partners in first-appearance order",
+      list(eps["neuronId"]) == [1, 9, 2, 3], str(list(eps["neuronId"])))
+check("endpoints: one row per neuron", len(eps) == eps["neuronId"].nunique(), str(len(eps)))
+# 9 was seeded and no edge mentions it, so it is here with nothing known about it. Dropping it
+# is the silent hole the port exists to avoid.
+check("endpoints: a seed no edge mentions survives, untyped",
+      pd.isna(eps.loc[eps["neuronId"] == 9, "type"].iloc[0]))
+# 3 arrives first as an untyped post ('' is no type, not a type named blank) and is typed by a
+# later row. Keying the type off the row that fixed the order would leave it empty.
+check("endpoints: the first non-empty type wins, not the first row",
+      eps.loc[eps["neuronId"] == 3, "type"].iloc[0] == "C",
+      str(eps.loc[eps["neuronId"] == 3, "type"].iloc[0]))
+check("endpoints: a type from either end is picked up",
+      list(eps.loc[eps["neuronId"].isin([1, 2]), "type"]) == ["A", "B"],
+      str(list(eps.loc[eps["neuronId"].isin([1, 2]), "type"])))
+
+bare = ens["coda_endpoint_neurons"](conn)
+check("endpoints: no seeds is the edges alone", list(bare["neuronId"]) == [1, 2, 3],
+      str(list(bare["neuronId"])))
+empty = ens["coda_endpoint_neurons"](conn.iloc[0:0], [7])
+check("endpoints: an empty edge list is the seeds", list(empty["neuronId"]) == [7],
+      str(list(empty["neuronId"])))
+
 print()
 print(f'{len(fails)} failed' if fails else 'all passed')
 sys.exit(1 if fails else 0)

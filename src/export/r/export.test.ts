@@ -83,6 +83,173 @@ describe('R Markdown export', () => {
   })
 })
 
+/**
+ * `Include fragments`. neuprintr's `neuprint_connection_table` builds
+ * `MATCH (a:{node})-[c:ConnectsTo]->(b:{node})` with `node = ifelse(all_segments, "Segment",
+ * "Neuron")`, read off natverse/neuprintr rather than guessed — so the argument exists and the
+ * default was already the restricted set.
+ */
+describe('include fragments', () => {
+  function chunk(params: ParamValues): string {
+    let g = emptyGraph('partners')
+    g = addNode(g, {
+      id: 'ds',
+      type: 'dataset.hemibrain',
+      position: { x: 0, y: 0 },
+      params: { version: 'v1.2.1' },
+    })
+    g = addNode(g, {
+      id: 'find',
+      type: 'neuron.findNeurons',
+      position: { x: 260, y: 0 },
+      params: { typePattern: 'LC4' },
+    })
+    g = addNode(g, { id: 'c', type: 'neuron.connectivity', position: { x: 520, y: 0 }, params })
+    g = {
+      ...g,
+      edges: [
+        {
+          id: 'e1',
+          source: 'ds',
+          sourceHandle: 'dataset',
+          target: 'find',
+          targetHandle: 'dataset',
+        },
+        {
+          id: 'e2',
+          source: 'ds',
+          sourceHandle: 'dataset',
+          target: 'c',
+          targetHandle: 'dataset',
+        },
+        {
+          id: 'e3',
+          source: 'find',
+          sourceHandle: 'neurons',
+          target: 'c',
+          targetHandle: 'neurons',
+        },
+      ],
+    }
+    const result = exportRmd(g, OPTIONS)
+    if (!result.ok) throw new Error(`refused: ${result.reason}`)
+    return result.source
+  }
+
+  it('names the argument both ways', () => {
+    expect(chunk({ direction: 'outputs', hops: 1, minWeight: 1 })).toContain(
+      'all_segments = FALSE',
+    )
+    expect(
+      chunk({ direction: 'outputs', hops: 1, minWeight: 1, includeFragments: true }),
+    ).toContain('all_segments = TRUE')
+  })
+
+  it('threads it through the traversal helper, which is where the frontier is bounded', () => {
+    const source = chunk({
+      direction: 'outputs',
+      hops: 2,
+      minWeight: 1,
+      includeFragments: true,
+    })
+    expect(source).toContain('all_segments = TRUE')
+    expect(source).toContain(
+      'step <- coda_edge_list(todo, prepost, min_weight, all_segments, conn)',
+    )
+  })
+
+  /*
+   * The one place the two languages differ, said in the generated document rather than only
+   * here: neuprintr applies the label to **both** ends, so a queried body that is not itself a
+   * published neuron returns nothing — where the canvas always keeps the neurons you named.
+   */
+  it('says that the restriction reaches the queried end too', () => {
+    expect(chunk({ direction: 'outputs', hops: 1, minWeight: 1 })).toContain(
+      'it applies to BOTH ends',
+    )
+  })
+})
+
+/**
+ * The `Neuron Set` port, emitted whether or not anything downstream reads it — an emitter cannot
+ * see which of its outputs the graph consumes, and a port left unassigned is an "object not
+ * found" at the reader's console rather than a chunk that is merely longer.
+ */
+describe('the Neuron Set port', () => {
+  function connectivityChunk(params: ParamValues): string {
+    let g = emptyGraph('endpoints')
+    g = addNode(g, {
+      id: 'ds',
+      type: 'dataset.hemibrain',
+      position: { x: 0, y: 0 },
+      params: { version: 'v1.2.1' },
+    })
+    g = addNode(g, {
+      id: 'find',
+      type: 'neuron.findNeurons',
+      position: { x: 260, y: 0 },
+      params: { typePattern: 'LC4' },
+    })
+    g = addNode(g, { id: 'c', type: 'neuron.connectivity', position: { x: 520, y: 0 }, params })
+    g = {
+      ...g,
+      edges: [
+        {
+          id: 'e1',
+          source: 'ds',
+          sourceHandle: 'dataset',
+          target: 'find',
+          targetHandle: 'dataset',
+        },
+        {
+          id: 'e2',
+          source: 'ds',
+          sourceHandle: 'dataset',
+          target: 'c',
+          targetHandle: 'dataset',
+        },
+        {
+          id: 'e3',
+          source: 'find',
+          sourceHandle: 'neurons',
+          target: 'c',
+          targetHandle: 'neurons',
+        },
+      ],
+    }
+    const result = exportRmd(g, OPTIONS)
+    if (!result.ok) throw new Error(`refused: ${result.reason}`)
+    return result.source
+  }
+
+  it('binds it from the edge list and the seeds', () => {
+    const source = connectivityChunk({ direction: 'outputs', hops: 1, minWeight: 1 })
+    expect(source).toContain('coda_endpoint_neurons <- function(')
+    expect(source).toContain(
+      'connectivity_neuron_set <- coda_endpoint_neurons(connectivity_connections, find_neurons$neuronId)',
+    )
+    // The derived form binds the port directly; only `full` needs a lookup in between.
+    expect(source).not.toContain('.endpoints <-')
+  })
+
+  it('looks the rows up for full, and says what that call cannot answer for', () => {
+    const source = connectivityChunk({
+      direction: 'outputs',
+      hops: 1,
+      minWeight: 1,
+      neuronRows: 'full',
+    })
+    expect(source).toContain('.endpoints <- coda_endpoint_neurons(')
+    expect(source).toContain(
+      'connectivity_neuron_set <- neuprint_get_meta(.endpoints$neuronId, conn = hemibrain_neuprint) |> coda_neurons()',
+    )
+    expect(source).toContain("below the dataset's neuron threshold")
+    // The helper the pipe calls has to be declared, not merely called: `resolveHelpers` only
+    // writes out what was asked for, and a chunk calling an undefined function knits and fails.
+    expect(source).toContain('coda_neurons <- function(')
+  })
+})
+
 /*
  * The same per-emitter check the notebook exporter makes, and it has to be made twice: the two
  * languages express the narrowing four different ways between them — a `NeuronCriteria`
@@ -133,11 +300,9 @@ describe('the population filters', () => {
    * and in a knitted document nobody re-derives precedence before trusting a row count.
    */
   it('ORs the disjuncts rather than ANDing them', () => {
-    const source = emit(
-      { ...NONE, tracedOnly: true, typedOnly: true },
-      'neuron.findNeurons',
-      { typePattern: 'LC.*' },
-    )
+    const source = emit({ ...NONE, tracedOnly: true, typedOnly: true }, 'neuron.findNeurons', {
+      typePattern: 'LC.*',
+    })
     expect(source).toContain('(status == "Traced") | (!is.na(type) & type != "")')
   })
 

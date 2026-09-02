@@ -25,7 +25,7 @@ import type { CodaType } from '../../core/types'
 import type { ExportRefusal, TodoStep } from '../canExport'
 import { canExportNotebook, nodeLabel } from '../canExport'
 import { renderRmd } from './rmarkdown'
-import { chunkLabel, rComment, rIdent } from './r'
+import { chunkLabel, rComment, rIdent, rPortIdent } from './r'
 import { getEmitter, resolveHelpers } from './registry'
 import type { Cell, EmitContext, RPackage } from './types'
 import { PACKAGES } from './types'
@@ -87,6 +87,9 @@ function assignNames(order: string[], nodes: Map<string, GraphNode>): Map<string
  * A single-output node takes the node's name unadorned, which is the overwhelming majority
  * and the readable case. A node with several outputs suffixes the port — `paths_network`,
  * `paths_layout` — because `paths[0]`, `paths[1]` says nothing about which is which.
+ *
+ * The suffix goes through `rPortIdent` rather than `rIdent`, because a port id may be camelCase where
+ * a node label may not — see there.
  */
 function outputName(
   base: string,
@@ -96,7 +99,7 @@ function outputName(
 ): string {
   const outputs = outputPorts(def, params)
   if (outputs.length <= 1) return base
-  return `${base}_${rIdent(portId, 'out')}`
+  return `${base}_${rPortIdent(portId)}`
 }
 
 // ---------------------------------------------------------------------------
