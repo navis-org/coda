@@ -410,7 +410,7 @@ const CAVE_FAMILIES: DatasetFamily[] = [
     label: 'FlyWire FAFB public',
     description: 'Whole adult female fly brain (optic lobes + central brain).',
     guide:
-      'Public FlyWire segmentation read through CAVE, so version is a materialization number. Cell annotations download once per dataset and search locally—first query waits, rest are instant. Skeletons, meshes, synapses, paths and per-region counts are not wired up; nodes that need them decline rather than fail.',
+      'Public FlyWire segmentation read through CAVE, so version is a materialization number. Cell annotations download once per dataset and search locally—first query waits, rest are instant. Meshes, synapses and skeletons work, the skeletons only on materialization 783, which is the one that publishes them. Paths and per-region counts do not; nodes that need them decline rather than fail.',
     glyph: 'fly_brain',
     /*
      * Python only. `caveclient` is a faithful route in — the dataset cell is a real `CAVEclient`

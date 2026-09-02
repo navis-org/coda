@@ -200,13 +200,21 @@ Area-specific — the rule, then the doc that holds why:
   indexes into the filtered list. See [docs/ui-shell.md](docs/ui-shell.md).
 - **The Workflow Wizard replaced the bundled examples, and its option space is gated rather than
   offered.** Four questions — dataset, how to pick neurons, analysis, view — and `buildWorkflow`
-  assembles the chain. Every question narrows against what came before: on `capabilityOf`
+  assembles the chain. Every question narrows against what came before: on `capabilityAnywhere`
   (browsing needs `neuronIndex`, 3D needs `skeletons`, a Neuroglancer cell needs `viewerScene`)
   and on what the analysis *produces*, since a heatmap wants a matrix and a table wants a table —
   `VIEWS` is that pairing **and** the node each pair ends on, one table read by both halves, after
   three tables of which two were already wrong. The fourth question takes a **set**: several
   viewers hang off one chain, side by side and stepped by `cardWidth`, because a viewer's height is
-  its content (a run Table card is 387px) and stacking them overlapped the moment the graph ran. Three consequences worth knowing. **`capabilityOf` answers `true` for a
+  its content (a run Table card is 387px) and stacking them overlapped the moment the graph ran. Four consequences worth knowing. **It asks the ceiling, not the
+  floor** — `capabilityAnywhere`, because a wizard answer is a *family* and no dataset id exists
+  yet, where `capabilityOf(source, undefined, …)` gives `source.capabilities` and CAVE's
+  `skeletons` is a deliberately safe `false` there: that hid Morphology and NBLAST for all three
+  CAVE families, each of which has skeletons. The ceiling names **only keys that vary** (`paths`
+  stays false at both ends), the node still reads the floor so a real absence lands a message
+  rather than a silent un-offer, and the test asserts both directions **per backend** — the
+  existing positive check covered one capability on one neuPrint family, so nothing pinned
+  `skeletons` on CAVE and an over-refusal shows the reader nothing. **`capabilityOf` answers `true` for a
   source nobody registered**, so anything enumerating combinations at module-init or SSR time
   (`nodeguide/data.ts`, a `describe.each`) must `registerBuiltinSources()` first or it silently
   offers more than the app does. **A generated search is capped** — `SEARCH_LIMIT` on a published

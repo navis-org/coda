@@ -772,6 +772,22 @@ export interface DataSource {
    * opposite one. Only the keys that differ need be returned.
    */
   capabilitiesFor?(datasetId: string): Partial<SourceCapabilities> | undefined
+  /**
+   * What **some** dataset of this source can do — the ceiling, read by `capabilityAnywhere`.
+   *
+   * A different question from the two above, and that is the whole reason it is a third member
+   * rather than a tweak to either. `capabilities` and `capabilitiesFor` answer *"can this dataset
+   * do X"*, which is live, per-dataset, and allowed to be unknown. This answers *"is X worth
+   * offering for this source at all"* — asked by a surface choosing what to put in front of
+   * somebody, so it has to be answerable with no dataset id and no probe. Static for that reason:
+   * a property rather than a method, because there is nothing it could vary with.
+   *
+   * **Declare only the keys where some dataset can do more than `capabilities` claims**, and
+   * never a key no dataset can serve — that is the one way to get this wrong, and it makes a
+   * surface offer something that will never work. Absent means the source does not vary this way,
+   * which is true of every source but CAVE; see `CAVE_CEILING` for the case it was written for.
+   */
+  readonly capabilitiesAnywhere?: Partial<SourceCapabilities>
   fetchMeshes?(req: GeometryRequest): Promise<MeshesValue>
   fetchSynapses?(req: SynapseRequest): Promise<PointsValue>
 
@@ -1080,6 +1096,37 @@ export function capabilityOf(
   if (!source) return true
   const forDataset = datasetId ? source.capabilitiesFor?.(datasetId) : undefined
   return forDataset?.[capability] ?? source.capabilities[capability]
+}
+
+/**
+ * Whether **any** dataset of this source can do something — `capabilitiesAnywhere`'s reader.
+ *
+ * The question a surface asks when it is choosing what to *offer* rather than what to run, and
+ * it is deliberately a separate function from `capabilityOf` rather than a third argument to it.
+ * `capabilityOf` has about fifteen callers in `validate` and `evaluate`, every one of which wants
+ * the per-dataset answer: a node that refuses is right to refuse on the dataset in front of it.
+ * Passing a flag would put the wrong answer one typo away from all of them, where a name says
+ * which question was asked.
+ *
+ * **A maximum, not an override**, which is why this is `||` and not `??`. `capabilitiesAnywhere`
+ * is documented as naming only keys some dataset can do *more* of, and written as `??` that stayed
+ * a convention nothing enforced: an entry saying `false` would have silently un-offered something
+ * the source can serve, under a name promising the opposite. As a max it cannot, whatever anyone
+ * declares.
+ *
+ * The fallback is `capabilities`, which is each source's **default** answer rather than a floor in
+ * general: CAVE narrows it down to the safe answer and raises it per dataset, where precomputed
+ * starts optimistic and narrows down (`PrecomputedSource`). Either way it is the right thing to
+ * fall through to, since a source that declares no ceiling does not vary.
+ *
+ * Same rule as `capabilityOf` for an unresolved source: refuse nothing.
+ */
+export function capabilityAnywhere(
+  source: DataSource | undefined,
+  capability: keyof SourceCapabilities,
+): boolean {
+  if (!source) return true
+  return Boolean(source.capabilitiesAnywhere?.[capability]) || source.capabilities[capability]
 }
 
 /**

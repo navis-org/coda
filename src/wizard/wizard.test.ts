@@ -109,6 +109,38 @@ describe('the option space', () => {
     ).toContain('neuroglancer')
   })
 
+  /*
+   * The second half of the gate, on the backend that needed it.
+   *
+   * The test above checks both directions already — but for **one capability on one family**:
+   * `viewerScene`, on whichever published family comes first, which is a neuPrint one. Nothing
+   * pinned `skeletons` on CAVE, and that is the gap the wizard shipped through: it hid "View
+   * morphology in 3D" and "NBLAST clustering" for every CAVE family, all three of which have
+   * skeletons. Worth its own test rather than a broadened one because an over-refusal is the
+   * *silent* direction — an over-offer lands a message on the Skeletons card, where this left a
+   * reader looking at a question two answers short with nothing to see.
+   *
+   * `paths` is the control, and it matters as much as the first assertion: a ceiling that raised
+   * every flag rather than the one that genuinely varies would ship a workflow the Paths node
+   * correctly refuses, and nothing downstream of here would notice. CAVE aggregates no hop
+   * server-side at any datastack.
+   */
+  it('offers the skeleton workflows on CAVE, and still not the paths one', () => {
+    // Derived, so a fourth CAVE datastack is covered the day it is specced rather than the day
+    // somebody remembers this list. The skeletons are real but arrive by different routes:
+    // FlyWire's are the bucket published beside materialization 783, BANC's and minnie65's are
+    // built from the level-2 cache.
+    const cave = starterFamilies().filter((family) => family.sourceId === 'cave')
+    expect(cave.length, 'no CAVE family to check the gate against').toBeGreaterThan(0)
+    for (const { key } of cave) {
+      const analyses = analysisOptions(key).map((o) => o.id)
+      expect(analyses, `${key}: skeletons are per dataset, and every CAVE family has them`).toEqual(
+        expect.arrayContaining(['morphology', 'nblast']),
+      )
+      expect(analyses, `${key}: CAVE aggregates no hop server-side`).not.toContain('paths')
+    }
+  })
+
   it('never offers a question with nothing in it', () => {
     for (const family of starterFamilies()) {
       expect(startOptions(family.key).length, family.key).toBeGreaterThan(0)

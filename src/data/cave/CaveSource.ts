@@ -132,8 +132,9 @@ import {
  * What CAVE can do today, and every `false` is a node that refuses cleanly rather than a
  * feature quietly missing.
  *
- * Meshes and synapses are live; skeletons are not, and the reason is recorded on the flag
- * itself because it is a fact about the *service* rather than about this code. `paths` is a
+ * Meshes and synapses are live. Skeletons are **not a `false` of the same kind**: this is the
+ * floor of a range, raised per dataset by `capabilitiesFor` and per source by `CAVE_CEILING`,
+ * because which routes a datastack has is a fact about its chunkedgraph. `paths` is a
  * real absence: it needs a hop aggregated server-side, which CAVE has no endpoint for. So are
  * all three ROI flags — FlyWire's neuropil assignments are a reference table on *synapses*, so
  * there is no per-region completeness table to read and a per-neuron breakdown would mean
@@ -142,20 +143,16 @@ import {
  */
 const CAVE_CAPABILITIES: SourceCapabilities = {
   rawQuery: false,
-  /**
-   * Skeletons are the one morphology CAVE has and Coda cannot use yet, and the blocker is the
-   * service rather than the format. `skeleton_source` is a standard `neuroglancer_skeletons`
-   * precomputed endpoint declaring `radius` and `compartment` — but it is a *cache that
-   * generates on demand*, and for `flywire_fafb_public` it is empty: 100 proofread root ids
-   * sampled from two places in the table, across skeleton versions 0 through 4, came back
-   * `exists: false` for every one, and a queued generation had not landed after five minutes.
-   * A fetch therefore blocks on generation, per neuron, against a node whose ceiling is 500.
-   * Claiming the capability would make every Skeletons run hang instead of decline.
-   */
   /*
    * Per **dataset**, through `capabilitiesFor`. `false` is the source-level answer because it is
    * the safe one for a datastack nothing is known about yet; six of the thirteen the info
-   * service lists have a level-2 cache and override this to true.
+   * service lists have a level-2 cache and override this to true, and `flywire_fafb_public` has
+   * a published bucket instead.
+   *
+   * **Read the floor and the ceiling as two different answers**, which is what `CAVE_CEILING`
+   * exists to keep apart. A node in front of a dataset wants this one — refusing until a peek
+   * says otherwise is what stops a Skeletons run hanging on a datastack that has no route. A
+   * surface choosing what to *offer* has no dataset to ask about and wants the other.
    */
   skeletons: false,
   meshes: true,
@@ -178,6 +175,44 @@ const CAVE_CAPABILITIES: SourceCapabilities = {
   synapseTotals: false,
   roiMeshes: false,
 }
+
+/**
+ * The one capability whose *ceiling* is higher than the floor above — see `capabilitiesAnywhere`.
+ *
+ * `CAVE_CAPABILITIES.skeletons` is `false` because that is the safe answer for a datastack
+ * nothing has been peeked about yet, and `capabilitiesFor` raises it per dataset once a route
+ * lands. Both are right for the question they answer, and both are the wrong answer to *"is a
+ * morphology workflow worth offering on CAVE"* — which is asked with no dataset id, before any
+ * peek, by the Workflow Wizard. It hid "View morphology in 3D" and "NBLAST clustering" for all three
+ * CAVE families, every one of which has skeletons: FlyWire through the flat bucket
+ * (`gs://flywire_v141_m783/skeletons_mip_1`, the only route it has, since it has no L2 cache),
+ * BANC and minnie65 through the level-2 cache, minnie65 also through a populated service.
+ *
+ * **Only `skeletons`.** `paths` stays false at both ends and that is not an oversight: CAVE has
+ * no endpoint that aggregates a hop server-side, for any datastack, so a ceiling raising it would
+ * make the wizard offer a workflow the Paths node correctly refuses. The rule this table follows
+ * is that a key belongs here when *some* dataset can serve it, never when none can.
+ *
+ * **Not derived, because there is nothing synchronous to derive it from** — unlike
+ * `capabilitiesFor`, which reads `skeletonSourcesFor`. Both routes are discovered by probe:
+ * `DatastackSpec.flat` names buckets and not which of them publish skeletons (FlyWire lists 630
+ * and 783 and only 783 has any), and the level-2 cache that answers for BANC and minnie65 is not
+ * in the spec table at all. A ceiling has no dataset to peek and may not await one, so a
+ * derivation would be both unsound and blind to two of the three families.
+ *
+ * **Not the shape `PrecomputedSource` uses, and the polarity is the reason.** That source declares
+ * its capabilities optimistically and narrows down per dataset, which needs no ceiling. CAVE
+ * cannot: `capabilitiesFor` answers `undefined` until a probe lands, so an optimistic floor would
+ * let a Skeletons run *hang* on an unpeeked datastack rather than decline — which is what the
+ * comment on `skeletons` above is guarding.
+ *
+ * **What one flag per source costs, accepted knowingly:** a specced datastack that turns out to
+ * have no skeletons at all gets the two morphology workflows offered anyway, and `wclee_aedes_brain`
+ * is already named as a candidate. Per-datastack would be three hand-maintained facts drifting
+ * three times as fast, for a failure whose whole cost is a message on the Skeletons card — where
+ * the over-refusal this replaced was silent.
+ */
+const CAVE_CEILING: Partial<SourceCapabilities> = { skeletons: true }
 
 /** Nanometres, which is what every geometry value in Coda is in. */
 const NANOMETRES = [1, 1, 1] as const
@@ -300,6 +335,7 @@ export class CaveSource implements DataSource {
   readonly description =
     'FlyWire and other CAVE-hosted connectomes. Needs a CAVE token; every dataset is pinned to a materialization.'
   readonly capabilities = CAVE_CAPABILITIES
+  readonly capabilitiesAnywhere = CAVE_CEILING
   readonly schemas: SourceSchemas = defaultSchemas()
 
   private datasets: DatasetInfo[] | undefined

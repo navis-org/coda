@@ -246,7 +246,7 @@ export function StartPage() {
            */}
           <Deck
             label="Start & learn"
-            note="the wizard builds a graph here · tours run in place · the Zoo fetches what others shared"
+            note="the wizard builds a graph to your question · tours run in place · the Zoo fetches what others shared"
             cards={DOOR_CARDS}
             confirming={confirming}
             onPick={pick}

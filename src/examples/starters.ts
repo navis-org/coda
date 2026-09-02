@@ -45,7 +45,7 @@ import { assembleGraph as assemble, graphNode as node } from './assemble'
 import { ID_COLUMN_NAME } from '../core/ids'
 import { findColumn } from '../core/types'
 import { aggColumnName } from '../nodes/lib/tableOps'
-import { capabilityOf, getSource } from '../data/source'
+import { capabilityAnywhere, getSource } from '../data/source'
 import { noteNode } from './notes'
 
 export interface StarterSpec {
@@ -100,12 +100,18 @@ function tagColumnFor(sourceId: string | undefined): string | undefined {
 function genericStarter(spec: StarterSpec): CodaGraph {
   /*
    * No dataset id: a starter is a node type and some params, and which dataset that resolves to
-   * is not known until the node runs. So this gets the source-level answer, which is the honest
-   * one here — through `capabilityOf` rather than `capabilities.viewerScene` so it picks up a
-   * per-dataset override the day a starter can name its dataset.
+   * is not known until the node runs. So this is an *offer* question — is a scene cell worth
+   * putting in the graph — and it takes the ceiling, exactly as the wizard's own gating does.
+   *
+   * It read `capabilityOf(…, undefined, …)` on the theory that it would pick up a per-dataset
+   * override the day a starter could name its dataset. That day cannot arrive through this call:
+   * with no id, `capabilityOf` never consults `capabilitiesFor` at all, so it was the source-level
+   * answer spelled the long way. Nothing observable changes here today — no source declares a
+   * `viewerScene` ceiling — but two surfaces asking one question two ways is what put the wizard
+   * two answers short of what CAVE can do.
    */
   const withScene = spec.sourceId
-    ? capabilityOf(getSource(spec.sourceId), undefined, 'viewerScene')
+    ? capabilityAnywhere(getSource(spec.sourceId), 'viewerScene')
     : false
   const tagColumn = tagColumnFor(spec.sourceId)
 

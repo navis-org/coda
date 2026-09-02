@@ -19,6 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { column, tableSchema } from '../../core/types'
 import { makeTable } from '../../core/values'
 import type { DataSource } from '../source'
+import { capabilityAnywhere } from '../source'
 import { resetCache } from '../cache'
 import { resetIndexLoads } from '../neuronIndex'
 import { DRACO_INFO } from '../../test/precomputedStubs'
@@ -1534,12 +1535,32 @@ describe('what it declines', () => {
     expect(capabilities.synapses).toBe(true)
     expect(capabilities.neuronIndex).toBe(true)
     /*
-     * Skeletons are the one morphology CAVE has and this cannot use: the format is standard, but
-     * the service is a cache that generates on demand and is empty for this datastack — 100
-     * proofread root ids across skeleton versions 0 to 4 all answered `exists: false`. Claiming
-     * it would make every Skeletons run hang rather than decline.
+     * The **floor**, and the one flag here that is the bottom of a range rather than a settled
+     * answer: which routes a datastack has depends on its chunkedgraph, so a node in front of one
+     * refuses until a peek says otherwise. `capabilitiesFor` raises it per dataset and
+     * `capabilitiesAnywhere` per source — the two tests below.
      */
     expect(capabilities.skeletons).toBe(false)
+  })
+
+  /*
+   * The ceiling, which is a different question from both of the answers above: not "can this
+   * dataset serve skeletons" but "is a morphology workflow worth offering on CAVE at all". It
+   * exists because the Workflow Wizard has no dataset id to ask about — an answer there is a
+   * family, and the version resolves to "Latest" off a listing that has not landed — so asking
+   * the floor hid the two skeleton workflows for every CAVE family, all three of which have them.
+   *
+   * `paths` is the assertion that matters as much as the first: a ceiling that lifted every flag
+   * rather than the one that varies would make the wizard offer a workflow the Paths node
+   * correctly refuses, and no test downstream of here would notice.
+   */
+  it('raises only skeletons above the floor, and only for a surface with no dataset', () => {
+    const source: DataSource = new CaveSource()
+    expect(source.capabilitiesAnywhere).toEqual({ skeletons: true })
+    expect(capabilityAnywhere(source, 'skeletons')).toBe(true)
+    // Undeclared keys fall through to the source's own answer, in both directions.
+    expect(capabilityAnywhere(source, 'paths'), 'no datastack aggregates a hop').toBe(false)
+    expect(capabilityAnywhere(source, 'meshes')).toBe(true)
   })
 
   it('names the datastack when a dataset id has no wiring', async () => {

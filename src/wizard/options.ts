@@ -11,8 +11,11 @@
  * than no wizard: the reader has no way to tell a bad answer from a bad tool. So each question
  * narrows against what came before. Browsing needs a source that publishes a whole neuron table
  * (`neuronIndex`); 3D morphology needs skeletons; a Neuroglancer cell needs a published scene,
- * which the synthetic source has no bucket for. Those are `SourceCapabilities` questions, asked
- * through `capabilityOf` so a per-dataset override is picked up the day one exists.
+ * which the synthetic source has no bucket for.
+ *
+ * Those are `SourceCapabilities` questions, asked through **`capabilityAnywhere`** — the ceiling
+ * rather than the floor, because this is the one surface with no dataset id to ask about. See
+ * `familyCan` for what asking the floor cost.
  *
  * The visualisations narrow on the *analysis* instead, and for a harder reason: a heatmap wants a
  * matrix, a network diagram wants a network, and a table wants a table. Which viewer can end a
@@ -29,7 +32,7 @@
  */
 
 import type { SourceCapabilities } from '../data/source'
-import { capabilityOf, getSource } from '../data/source'
+import { capabilityAnywhere, getSource } from '../data/source'
 import type { DatasetFamily } from '../nodes/lib/datasetFamilies'
 import { datasetFamily, starterFamilies } from '../nodes/lib/datasetFamilies'
 
@@ -113,7 +116,7 @@ export interface WizardOption<Id extends string> {
    * The source capability this answer needs, if any.
    *
    * Declared on the option rather than tested at each question, which is where it started: three
-   * `option.id !== '<literal>' || can(dataset, '<literal>')` filters, one per question, each
+   * `option.id !== '<literal>' || familyCan(dataset, '<literal>')` filters, one per question, each
    * pairing an id with a capability somewhere other than where the option is written. A gated
    * option added without its filter is offered and then builds a graph nobody can fetch.
    */
@@ -125,7 +128,7 @@ function available<Id extends string>(
   dataset: string,
   options: readonly WizardOption<Id>[],
 ): WizardOption<Id>[] {
-  return options.filter((option) => !option.requires || can(dataset, option.requires))
+  return options.filter((option) => !option.requires || familyCan(dataset, option.requires))
 }
 
 // ---------------------------------------------------------------------------
@@ -150,16 +153,34 @@ function familyOf(key: string): DatasetFamily | undefined {
   return datasetFamily(key)
 }
 
-/** Whether the source behind a family can do something. Unknown family reads as "yes". */
-function can(key: string, capability: keyof SourceCapabilities): boolean {
+/**
+ * Whether the source behind a family can do something. Unknown family reads as "yes".
+ *
+ * Exported because `build.ts` asks it too — whether to build the synapse-points node on the
+ * morphology arm is the same question with the same three steps, and it was written out longhand
+ * there. Two spellings of one question is how the two halves of the wizard came to disagree about
+ * which reading they wanted, with nothing type-checking the pair.
+ */
+export function familyCan(key: string, capability: keyof SourceCapabilities): boolean {
   const family = familyOf(key)
   if (!family) return true
   /*
-   * No dataset id, because a wizard answer is a *family* — which dataset that resolves to is not
-   * known until the node runs. `capabilityOf` with `undefined` gives the source-level answer,
-   * which is the honest one here and the same call `genericStarter` makes.
+   * `capabilityAnywhere`, not `capabilityOf` with an undefined dataset id, and the difference is
+   * the whole reason that function exists.
+   *
+   * A wizard answer is a *family*: which dataset it resolves to is not known until the node runs,
+   * and the version dropdown defaults to "Latest" off a listing that has not landed when this
+   * dialog opens. So the question here is not "can this dataset do X" but "is X worth offering
+   * for this source at all" — the ceiling rather than the floor.
+   *
+   * Asking `capabilityOf(source, undefined, …)` gave the floor, which is `source.capabilities`,
+   * and CAVE's is a deliberately safe `false` for `skeletons` — the right answer for a datastack
+   * nothing is known about, and the wrong one here. It hid "View morphology in 3D" and "NBLAST
+   * clustering" for all three CAVE families, every one of which has skeletons. The floor is still
+   * what the Skeletons node's own `validate` reads, which is why a dataset that really has none
+   * says so on the card rather than being silently un-offered two screens earlier.
    */
-  return capabilityOf(getSource(family.sourceId), undefined, capability)
+  return capabilityAnywhere(getSource(family.sourceId), capability)
 }
 
 // ---------------------------------------------------------------------------
@@ -245,7 +266,7 @@ const ANALYSES: WizardOption<AnalysisId>[] = [
   {
     id: 'morphology',
     requires: 'skeletons',
-    label: 'Morphology in 3D',
+    label: 'View morphology in 3D',
     blurb: 'Skeletons and synapse locations, drawn in one scene.',
     note: 'Two queries off one search: the arbours and the synapse points, drawn in the same scene.',
   },

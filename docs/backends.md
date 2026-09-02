@@ -1172,6 +1172,19 @@ go through the resolver now. `starters.ts` passes no dataset id and gets the sou
 which is honest there: a starter is a node type and some params, and which dataset it resolves to
 is not known until the node runs.
 
+**And `capabilityAnywhere(source, key)` is the third reading, which is a different question
+rather than a laxer one.** `capabilities` is the floor and `capabilitiesFor` raises it per
+dataset; both answer *"can this dataset do X"*, which is what a node in front of one wants —
+refusing until a peek says otherwise is what stops a Skeletons run hanging on a datastack with no
+route. A surface choosing what to **offer** has no dataset to ask about and wants the ceiling:
+*"is X worth offering for this source at all"*. The Workflow Wizard is the caller and was the
+occasion — asking the floor with an undefined dataset id hid the two skeleton workflows for every
+CAVE family, all three of which have skeletons. `CAVE_CEILING` declares `skeletons` and nothing
+else: a key belongs there when *some* dataset can serve it, never when none can, which is why
+`paths` stays false at both ends. A separate function rather than a flag on `capabilityOf`,
+because that one has about fifteen callers who all want the floor and a name says which question
+was asked where an argument puts the wrong answer one typo away.
+
 **The skeleton is coarse and the docstring says so.** One node per level-2 chunk is tens to a few
 hundred for a whole neuron, where a traced skeleton is thousands. It is the right shape for
 NBLAST, a 3D overview and cable length; it is not a morphometric reconstruction.

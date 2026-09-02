@@ -48,9 +48,8 @@ import { COL_WIDTH, GRID_ORIGIN, ROW_HEIGHT } from '../layout/place'
 import { NODE_BODIES, cardWidth } from '../ui/nodes/nodeBodies'
 import { noteNode } from '../examples/notes'
 import { datasetFamily } from '../nodes/lib/datasetFamilies'
-import { capabilityOf, getSource } from '../data/source'
 import type { AnalysisId, VisualisationId, WizardAnswers } from './options'
-import { VIEWS, analysisOption, startOption, visualisationOption } from './options'
+import { VIEWS, analysisOption, familyCan, startOption, visualisationOption } from './options'
 
 /**
  * How many neurons a search on a published dataset comes back with until somebody says
@@ -630,13 +629,10 @@ function bodyOf(
        * both gets one set of skeletons and both viewers.
        */
       const drawn = chosen.includes('viewer3d')
-      const withSynapses =
-        drawn &&
-        capabilityOf(
-          getSource(datasetFamily(answers.dataset)?.sourceId ?? ''),
-          undefined,
-          'synapses',
-        )
+      // `familyCan`, the same reading `options.ts` gates the questions with: this is the *offer*
+      // half of one decision, and a builder asking a different question from the dialog that
+      // offered it is how a workflow comes to be built without a node it was shown with.
+      const withSynapses = drawn && familyCan(answers.dataset, 'synapses')
       const tail = views(drawn ? 3 : 2, drawn ? 0.5 : 0, (visualisation, id) =>
         visualisation === 'viewer3d'
           ? [

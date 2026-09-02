@@ -36,11 +36,33 @@ A wizard that offers every combination and produces a broken graph for some of t
 no wizard: the reader cannot tell a bad answer from a bad tool. So every question narrows against
 what came before, in two different ways.
 
-**On what the source can do**, through `capabilityOf`: browsing needs `neuronIndex`, 3D
+**On what the source can do**, through `capabilityAnywhere`: browsing needs `neuronIndex`, 3D
 morphology needs `skeletons`, a Neuroglancer cell needs `viewerScene` — which the synthetic
-source has no bucket for, so the synthetic dataset never offers it. Asked with no dataset id,
-which is the honest question here: a wizard answer is a *family*, and which dataset that resolves
-to is not known until the node runs. Same call `genericStarter` makes.
+source has no bucket for, so the synthetic dataset never offers it.
+
+**The ceiling, not the floor, and that distinction is the whole of it.** A wizard answer is a
+*family*: which dataset it resolves to is not known until the node runs, and the version dropdown
+defaults to "Latest" off a listing that has not landed when the dialog opens. So the question
+here is not "can this dataset do X" — the one `capabilityOf` answers for the fifteen `validate`
+sites — but "is X worth offering for this source at all". Asking the first of the second cost
+exactly what you would expect: `capabilityOf(source, undefined, …)` gives `source.capabilities`,
+CAVE's `skeletons` is a deliberately safe `false` there for a datastack nothing has been peeked
+about, and so the wizard hid **View morphology in 3D** and **NBLAST clustering** for all three CAVE
+families — every one of which has skeletons (FlyWire's published beside materialization 783, and
+BANC's and minnie65's built from the level-2 cache). `capabilitiesAnywhere` on `DataSource` is
+the ceiling and only CAVE declares one, for `skeletons` alone; see `docs/backends.md`.
+
+Two properties of that arrangement are load-bearing. **The floor is still what the node reads**,
+so a dataset that really has no skeletons says so on the Skeletons card — an over-offer lands a
+message where an over-refusal leaves a reader looking at a question two answers short with
+nothing to see. And **the ceiling names only the keys that vary**: `paths` stays false at both
+ends, because no CAVE datastack aggregates a hop server-side and a ceiling that lifted everything
+would offer a workflow the Paths node correctly refuses. `wizard.test.ts` asserts both directions
+on CAVE, which is what was missing while the bug was live — not the positive direction as such,
+which "offers only what the source can do" has always checked, but the positive direction on
+*this backend*: that test covers one capability (`viewerScene`) on one family (the first
+published one, a neuPrint dataset), so nothing anywhere pinned `skeletons` on CAVE. A gate that
+narrows too much is the failure a suite has to go looking for, because the app shows nothing.
 
 **On what the analysis produces**: a heatmap wants a matrix, a network diagram wants a network, a
 table wants a table. `VIEWS` is that pairing **and** the node each pair ends on — one table, read
