@@ -55,7 +55,7 @@ function chartGraph(): CodaGraph {
       filters: ['{"f":"type","op":"matches","v":["LC.*"]}'],
     }),
     place('roi', 'neuron.roiCounts', 2),
-    place('group', 'core.groupBy', 3, { by: ['roi', 'type'], agg: 'sum', value: 'post' }),
+    place('group', 'core.groupBy', 3, { by: ['roi', 'type'], agg: 'sum', value: ['post'] }),
     place('bar', 'out.barChart', 4, {
       category: 'roi',
       value: 'sum_post',

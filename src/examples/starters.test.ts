@@ -304,7 +304,7 @@ describe('the FlyWire starter', () => {
     const fold = buildStarter(spec).nodes.find((n) => n.id === 'foldTags')!
     expect(fold.params.by).toEqual([ID_COLUMN_NAME])
     expect(fold.params.agg).toBe('join')
-    expect(fold.params.value).toBe('tag')
+    expect(fold.params.value).toEqual(['tag'])
   })
 
   it('narrows the tag table, and points Explore at the column the fold produces', () => {

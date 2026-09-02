@@ -539,7 +539,7 @@ describe('what is left for the user', () => {
       id: newId('n'),
       type: 'core.groupBy',
       position: { x: 0, y: 0 },
-      params: { by: [], agg: 'sum', value: '' },
+      params: { by: [], agg: 'sum', value: [] },
     }
     const graph: CodaGraph = addNode(emptyGraph(), orphan)
     const result = expectOk(applyPlan(graph, plan({ add: [{ ref: 'n', type: 'note.text' }] })))

@@ -414,7 +414,7 @@ function bodyOf(
             id: 'group',
             type: 'core.groupBy',
             col: 3,
-            params: { by: ['postType'], agg: 'sum', value: 'weight' },
+            params: { by: ['postType'], agg: 'sum', value: ['weight'] },
           },
           {
             id: 'sort',
@@ -521,7 +521,7 @@ function bodyOf(
                   type: 'core.groupBy',
                   col: 3,
                   row: 1,
-                  params: { by: ['neuronId', 'type'], agg: 'sum', value: 'influence' },
+                  params: { by: ['neuronId', 'type'], agg: 'sum', value: ['influence'] },
                 },
                 {
                   id: 'sort',
@@ -678,7 +678,7 @@ function bodyOf(
             col: 3,
             // Both ends, because a network's edges are (source, target) pairs — grouping by the
             // partner alone would collapse every query neuron into one node.
-            params: { by: ['preType', 'postType'], agg: 'sum', value: 'weight' },
+            params: { by: ['preType', 'postType'], agg: 'sum', value: ['weight'] },
           },
           {
             id: 'net',

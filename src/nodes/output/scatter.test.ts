@@ -274,7 +274,7 @@ describe('out.scatter — an input whose schema is not known yet', () => {
     g = addNode(g, node('find', 'neuron.findNeurons', { status: 'Traced' }))
     g = addNode(
       g,
-      node('grp', 'core.groupBy', { by: ['type', 'status'], agg: 'sum', value: 'pre' }),
+      node('grp', 'core.groupBy', { by: ['type', 'status'], agg: 'sum', value: ['pre'] }),
     )
     g = addNode(
       g,

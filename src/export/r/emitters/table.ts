@@ -329,14 +329,19 @@ registerEmitter('core.groupBy', (ctx) => {
   ctx.library('dplyr')
   const out = ctx.output('out')
   const agg = String(ctx.params.agg ?? 'sum') as AggFn
-  const value = agg === 'count' ? undefined : ctx.column('value')
-  if (agg !== 'count' && !value) return ctx.todo(`"${agg}" needs a value column.`)
+  const values = agg === 'count' ? [] : ctx.columns('value')
+  if (agg !== 'count' && values.length === 0) {
+    return ctx.todo(`"${agg}" needs at least one value column.`)
+  }
   if (agg === 'join') ctx.helper('coda_join')
 
-  // `n` rides along with every aggregation, exactly as the node emits it.
+  // `n` rides along with every aggregation, exactly as the node emits it, and one summary per
+  // value column beside it. Written out rather than reached through `across()`: the names Coda
+  // publishes are `<agg>_<column>`, which is `.names = "{.fn}_{.col}"` only as long as the
+  // function is passed under exactly that name — a spelling `across` would silently vary.
   const aggs = ['n = n()']
-  if (agg !== 'count') {
-    aggs.push(`${col(aggColumnName(agg, value))} = ${AGG_FUNCS[agg]}(${col(value!)})`)
+  for (const value of values) {
+    aggs.push(`${col(aggColumnName(agg, value))} = ${AGG_FUNCS[agg]}(${col(value)})`)
   }
 
   return [

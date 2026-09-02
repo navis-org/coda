@@ -408,19 +408,25 @@ export function everythingGraph(): CodaGraph {
      * The `join` aggregation, which is the one that emits a generated helper rather than a
      * pandas method name — and the only route by which `coda_join` reaches a golden, where
      * `probe-py-helpers.py` can actually run it.
+     *
+     * **Two** value columns, which is the other thing only a golden shows: an aggregation over
+     * several columns is several *named* aggregations in one `.agg()` and several `summarise`
+     * arguments, and the shape that had to be checked is the second one, not the first. The
+     * numeric node further down stays single-column deliberately — one value column is still the
+     * ordinary case and the branch that would rot if nothing kept it.
      */
     {
       id: 'joined',
       type: 'core.groupBy',
       col: 4,
       row: 1,
-      params: { by: ['type'], agg: 'join', value: 'instance' },
+      params: { by: ['type'], agg: 'join', value: ['instance', 'status'] },
     },
     {
       id: 'group',
       type: 'core.groupBy',
       col: 7,
-      params: { by: ['preType', 'postType'], agg: 'sum', value: 'weight' },
+      params: { by: ['preType', 'postType'], agg: 'sum', value: ['weight'] },
     },
     {
       id: 'select',

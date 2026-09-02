@@ -239,7 +239,7 @@ describe('schema propagation', () => {
     graph = addNode(graph, node('conn', 'neuron.connectivity'))
     graph = addNode(
       graph,
-      node('grp', 'core.groupBy', { by: ['postType'], agg: 'sum', value: 'weight' }),
+      node('grp', 'core.groupBy', { by: ['postType'], agg: 'sum', value: ['weight'] }),
     )
     graph = addEdge(graph, {
       source: 'ds',

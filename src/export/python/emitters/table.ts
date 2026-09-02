@@ -340,19 +340,29 @@ registerEmitter('core.groupBy', (ctx) => {
   ctx.require('pandas')
   const out = ctx.output('out')
   const agg = String(ctx.params.agg ?? 'sum') as AggFn
-  const value = agg === 'count' ? undefined : ctx.column('value')
-  if (agg !== 'count' && !value) return ctx.todo(`"${agg}" needs a value column.`)
+  const values = agg === 'count' ? [] : ctx.columns('value')
+  if (agg !== 'count' && values.length === 0) {
+    return ctx.todo(`"${agg}" needs at least one value column.`)
+  }
 
-  // `n` rides along with every aggregation, exactly as the node emits it — you almost always
-  // want to know whether a mean came from 2 rows or 200.
-  const aggs = [`n=(${pyStr(value ?? by[0]!)}, 'size')`]
+  /*
+   * `n` rides along with every aggregation, exactly as the node emits it — you almost always
+   * want to know whether a mean came from 2 rows or 200. It counts rows, so *which* column it
+   * sizes cannot matter: the first value column when there is one, and a key column for `count`,
+   * which has none.
+   */
+  const aggs = [`n=(${pyStr(values[0] ?? by[0]!)}, 'size')`]
   if (agg === 'join') {
     // A callable, not a method name: pandas takes either in a named-aggregation tuple, and
     // Coda's rule about absences and empties is not one `', '.join` expresses.
     ctx.helper('coda_join')
-    aggs.push(`${aggColumnName(agg, value)}=(${pyStr(value!)}, coda_join)`)
-  } else if (agg !== 'count') {
-    aggs.push(`${aggColumnName(agg, value)}=(${pyStr(value!)}, ${pyStr(AGG_FUNCS[agg])})`)
+  }
+  // One named aggregation per value column, which is what `.agg(**kwargs)` is for — the
+  // alternative, `.agg({col: fn})`, produces a frame whose columns keep their *source* names
+  // and so disagrees with `<agg>_<column>` the moment there is more than one of them.
+  for (const value of values) {
+    const fn = agg === 'join' ? 'coda_join' : pyStr(AGG_FUNCS[agg as Exclude<AggFn, 'join'>])
+    aggs.push(`${aggColumnName(agg, value)}=(${pyStr(value)}, ${fn})`)
   }
 
   return [

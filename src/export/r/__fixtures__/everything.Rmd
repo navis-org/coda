@@ -1396,7 +1396,7 @@ combine_columns[["label_from"]] <- coda_combine(find_neurons, c("type", "instanc
 # ── Group By ──
 group_by_df <- find_neurons |>
   group_by(`type`) |>
-  summarise(n = n(), `join_instance` = coda_join(`instance`), .groups = "drop")
+  summarise(n = n(), `join_instance` = coda_join(`instance`), `join_status` = coda_join(`status`), .groups = "drop")
 ```
 
 ```{r neuron-profile}

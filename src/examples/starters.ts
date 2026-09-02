@@ -290,7 +290,7 @@ function flywireStarter(spec: StarterSpec): CodaGraph {
         {
           by: [ID_COLUMN_NAME],
           agg: 'join',
-          value: 'tag',
+          value: ['tag'],
         },
       ),
       node('join', 'core.join', { x: 530, y: TAG_ROW }, { leftKey: ID_COLUMN_NAME }),

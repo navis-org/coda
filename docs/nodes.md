@@ -640,6 +640,56 @@ out loud rather than skipped — the two power iterations stop by different rule
 and a Louvain partition from a different implementation can disagree about every label while
 scoring the same modularity. See [export.md](export.md).
 
+## Group By: one aggregation, several value columns
+
+`core.groupBy`, `Add ▸ Transform ▸ Group By`. Collapse rows onto their group keys and
+aggregate. Output is the group columns, `n`, and one aggregate per value column, each named
+`<agg>_<column>`.
+
+**`Of columns` is plural, `Aggregate` is not,** and the asymmetry is the design rather than an
+unfinished half. Several columns of the same *kind* of quantity is the case that recurs — `pre`
+beside `post`, an input count beside an output count — and it costs one pass and one enum in the
+provenance key. A different aggregation per column is a different node: it needs a list of
+`(column, aggregation)` rows, which is `core.rename`'s shape (an `ids` param of JSON pairs plus a
+card that draws them) and a differently-shaped cell in both exporters. `sum` of one column beside
+`mean` of another is two Group By nodes and a [Join](#join-four-directions-and-one-key-column) on the keys today, which also makes it
+visible on the canvas that both halves came from the same rows.
+
+**A bare `columns` param is safe here where it was not for Rename**, and the reason is worth
+keeping: nothing in this list is positional. Each name carries its own output name through
+`aggColumnName`, so removing the second of three columns removes exactly `<agg>_<that column>`.
+Rename's two parallel lists could not do that — deleting the second of three columns shifts every
+name after it onto the wrong column — which is why *its* rows carry both halves.
+
+**The value picker stopped picking for you, and that broke stored graphs on purpose.** `Of column`
+was a `column` param on the declared default `''`, which resolves to "the first compatible
+column", so a freshly-created Group By already had one chosen. `resolveColumns` has no such rule,
+so the picker now starts empty and `validate` says `"sum" needs at least one value column` — which
+is what `Group by` beside it has always done. It also means a graph saved by an earlier build
+loses its value column: it stored `value` as the bare string `"weight"`, and the plural resolver
+reads a non-array as nothing. Taken as a break rather than absorbed, because the alternative was
+teaching the *generic* resolver a second spelling for one param's history, which is the shim
+invariant 8 is about. It is loud — empty picker, warning on the card — rather than a wrong number.
+
+**A repeated value column is folded away, not aggregated twice.** Both copies would be called
+`sum_weight`, and a schema claiming two columns of one name is a table whose data has one; every
+picker downstream would offer the duplicate. `aggValueColumns` is that rule and is shared by both
+halves, which is also where `count` drops the value list entirely — `count` answers with `n`, and
+`n` rides along with every aggregation anyway.
+
+**A named-but-absent value column still throws**, where an absent *key* column is dropped. That
+asymmetry predates the plural and is kept: `resolveColumns` has already removed anything a known
+schema lacks, so a name reaching `evaluate` means the schema never arrived, and `getColumn`'s
+sentence naming the column beats a quiet success on whichever of the others happened to survive.
+
+**Both emitters write one named aggregation per column.** pandas' `.agg(**kwargs)` rather than
+`.agg({col: fn})`, because the dict form produces a frame whose columns keep their *source* names
+and so disagrees with `<agg>_<column>` the moment there is more than one; dplyr gets one
+`summarise` argument each rather than an `across()`, because `.names = "{.fn}_{.col}"` reproduces
+Coda's naming only as long as the function is passed under exactly that name. The golden's `join`
+node carries two value columns for this reason — the shape that needed checking is the second
+argument, not the first.
+
 ## Deduplicate
 
 `core.dedupe`, `Add ▸ Transform ▸ Deduplicate`. `pandas.drop_duplicates`: name the columns to

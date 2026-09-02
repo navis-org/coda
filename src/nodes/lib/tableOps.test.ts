@@ -360,8 +360,8 @@ describe('stack', () => {
 
 describe('groupBy', () => {
   it('sums by key and always reports the group size', () => {
-    const declared = groupBySchema(CONNECTIVITY, ['partnerType'], 'weight', 'sum')
-    const out = groupByTable(conn(), ['partnerType'], 'weight', 'sum')
+    const declared = groupBySchema(CONNECTIVITY, ['partnerType'], ['weight'], 'sum')
+    const out = groupByTable(conn(), ['partnerType'], ['weight'], 'sum')
     expectSchemaAgreement(declared, out)
 
     const rows = new Map(
@@ -376,8 +376,8 @@ describe('groupBy', () => {
   })
 
   it('produces f64 for mean and agrees with the declared schema', () => {
-    const declared = groupBySchema(CONNECTIVITY, ['partnerType'], 'weight', 'mean')
-    const out = groupByTable(conn(), ['partnerType'], 'weight', 'mean')
+    const declared = groupBySchema(CONNECTIVITY, ['partnerType'], ['weight'], 'mean')
+    const out = groupByTable(conn(), ['partnerType'], ['weight'], 'mean')
     expectSchemaAgreement(declared, out)
     expect(declared!.columns.at(-1)).toMatchObject({ name: 'mean_weight', dtype: 'f64' })
     const idx = (out.data.partnerType as string[]).indexOf('DNp02')
@@ -385,27 +385,112 @@ describe('groupBy', () => {
   })
 
   it('emits only n for count', () => {
-    const declared = groupBySchema(CONNECTIVITY, ['neuronId'], undefined, 'count')
-    const out = groupByTable(conn(), ['neuronId'], undefined, 'count')
+    const declared = groupBySchema(CONNECTIVITY, ['neuronId'], [], 'count')
+    const out = groupByTable(conn(), ['neuronId'], [], 'count')
     expectSchemaAgreement(declared, out)
     expect(out.schema.columns.map((c) => c.name)).toEqual(['neuronId', 'n'])
     expect(aggColumnName('count', 'weight')).toBe('n')
   })
 
   it('groups on multiple keys', () => {
-    const out = groupByTable(conn(), ['neuronId', 'partnerType'], 'weight', 'sum')
+    const out = groupByTable(conn(), ['neuronId', 'partnerType'], ['weight'], 'sum')
     expect(out.length).toBe(5)
   })
 
   it('counts distinct values', () => {
-    const out = groupByTable(conn(), ['neuronId'], 'partnerType', 'countDistinct')
+    const out = groupByTable(conn(), ['neuronId'], ['partnerType'], 'countDistinct')
     const idx = (out.data.neuronId as number[]).indexOf(1)
     expect((out.data.countDistinct_partnerType as number[])[idx]).toBe(2)
   })
 
   it('carries the unit through to the aggregate column', () => {
-    const declared = groupBySchema(CONNECTIVITY, ['partnerType'], 'weight', 'sum')
+    const declared = groupBySchema(CONNECTIVITY, ['partnerType'], ['weight'], 'sum')
     expect(declared!.columns.at(-1)?.unit).toBe('synapses')
+  })
+
+  /*
+   * Several value columns, one aggregation. The pair has to agree about the *set* of output
+   * columns as well as their dtypes now, which is why every case here goes through
+   * `expectSchemaAgreement` rather than reading `out.data` alone.
+   */
+  it('aggregates several value columns in one pass', () => {
+    const schema = tableSchema(
+      column('type', 'str'),
+      column('pre', 'i64', 'synapses'),
+      column('post', 'i64', 'synapses'),
+    )
+    const table = tableFromRows(schema, [
+      { type: 'LC4', pre: 1, post: 10 },
+      { type: 'LC4', pre: 2, post: 20 },
+      { type: 'LC6', pre: 4, post: 40 },
+    ])
+    const declared = groupBySchema(schema, ['type'], ['pre', 'post'], 'sum')
+    const out = groupByTable(table, ['type'], ['pre', 'post'], 'sum')
+    expectSchemaAgreement(declared, out)
+    expect(out.schema.columns.map((c) => c.name)).toEqual(['type', 'n', 'sum_pre', 'sum_post'])
+    const idx = (out.data.type as string[]).indexOf('LC4')
+    expect((out.data.n as number[])[idx]).toBe(2)
+    expect((out.data.sum_pre as number[])[idx]).toBe(3)
+    expect((out.data.sum_post as number[])[idx]).toBe(30)
+    // The unit is per column, not per node: both are synapses here, and each got its own.
+    expect(out.schema.columns.map((c) => c.unit)).toEqual([
+      undefined,
+      undefined,
+      'synapses',
+      'synapses',
+    ])
+  })
+
+  it('keeps each column independent, which is what a mean over ragged absences shows', () => {
+    // `mean` divides by the group size rather than by the count of finite values, which is the
+    // node's existing rule — the point here is that one column's nulls cannot reach another's.
+    const schema = tableSchema(column('k', 'str'), column('a', 'f64'), column('b', 'f64'))
+    const table = tableFromRows(schema, [
+      { k: 'x', a: 2, b: null },
+      { k: 'x', a: null, b: 6 },
+    ])
+    const out = groupByTable(table, ['k'], ['a', 'b'], 'min')
+    expect((out.data.min_a as number[])[0]).toBe(2)
+    expect((out.data.min_b as number[])[0]).toBe(6)
+  })
+
+  it('folds a repeated value column away rather than emitting the name twice', () => {
+    // Both copies would be called `sum_weight`, and a schema claiming two columns of one name
+    // is a table whose data has one — every downstream picker would offer a duplicate.
+    const declared = groupBySchema(CONNECTIVITY, ['partnerType'], ['weight', 'weight'], 'sum')
+    const out = groupByTable(conn(), ['partnerType'], ['weight', 'weight'], 'sum')
+    expectSchemaAgreement(declared, out)
+    expect(out.schema.columns.map((c) => c.name)).toEqual(['partnerType', 'n', 'sum_weight'])
+  })
+
+  it('ignores the value list entirely for count', () => {
+    const out = groupByTable(conn(), ['neuronId'], ['weight', 'partnerType'], 'count')
+    expect(out.schema.columns.map((c) => c.name)).toEqual(['neuronId', 'n'])
+  })
+
+  it('names a value column the table does not have, rather than dropping it', () => {
+    // `resolveColumns` drops a name a *known* schema lacks, so this is reachable only where the
+    // schema never arrived — and there the honest answer is the sentence naming the column.
+    expect(() => groupByTable(conn(), ['partnerType'], ['weight', 'nope'], 'sum')).toThrow(/nope/)
+  })
+
+  it('joins several text columns at once', () => {
+    const schema = tableSchema(
+      column('k', 'str'),
+      column('tag', 'str'),
+      column('side', 'str'),
+    )
+    const table = tableFromRows(schema, [
+      { k: 'a', tag: 'big', side: 'L' },
+      { k: 'a', tag: 'big', side: 'R' },
+      { k: 'a', tag: 'dim', side: null },
+    ])
+    const declared = groupBySchema(schema, ['k'], ['tag', 'side'], 'join')
+    const out = groupByTable(table, ['k'], ['tag', 'side'], 'join')
+    expectSchemaAgreement(declared, out)
+    // Distinct and in first-appearance order, per column.
+    expect(out.data.join_tag?.[0]).toBe(`big${JOIN_SEPARATOR}dim`)
+    expect(out.data.join_side?.[0]).toBe(`L${JOIN_SEPARATOR}R`)
   })
 })
 
@@ -1325,7 +1410,7 @@ describe('the join aggregation', () => {
       { neuronId: '3', tag: 'putative giant fibre' },
     ])
 
-  const joined = (t = tags()) => groupByTable(t, ['neuronId'], 'tag', 'join')
+  const joined = (t = tags()) => groupByTable(t, ['neuronId'], ['tag'], 'join')
 
   it('folds a repeat away, and skips both kinds of absence', () => {
     const out = joined()
@@ -1373,7 +1458,7 @@ describe('the join aggregation', () => {
   })
 
   it('agrees with its schema half, and produces text whatever it was given', () => {
-    const declared = groupBySchema(TAGS, ['neuronId'], 'tag', 'join')
+    const declared = groupBySchema(TAGS, ['neuronId'], ['tag'], 'join')
     expectSchemaAgreement(declared, joined())
     expect(declared!.columns.at(-1)!.dtype).toBe('str')
 
@@ -1386,10 +1471,10 @@ describe('the join aggregation', () => {
         { k: 'a', len: 2 },
       ]),
       ['k'],
-      'len',
+      ['len'],
       'join',
     )
-    expectSchemaAgreement(groupBySchema(nm, ['k'], 'len', 'join'), out)
+    expectSchemaAgreement(groupBySchema(nm, ['k'], ['len'], 'join'), out)
     expect(out.data.join_len?.[0]).toBe(`1${JOIN_SEPARATOR}2`)
     expect(out.schema.columns.at(-1)!.unit).toBeUndefined()
   })

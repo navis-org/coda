@@ -1133,10 +1133,23 @@ function aggDType(agg: AggFn, source: DType | undefined): DType {
   return source && isNumericDType(source) ? source : 'f64'
 }
 
+/**
+ * The value columns an aggregation actually reads, in order and without repeats.
+ *
+ * `count` reads none — its answer is `n`, which rides along with every aggregation anyway — and
+ * a repeat is dropped rather than aggregated twice, because both copies would be named
+ * `sum_weight` and a schema claiming two columns of one name is a table whose data has one.
+ * Shared by both halves so they cannot disagree about how many columns come out.
+ */
+function aggValueColumns(values: readonly string[], agg: AggFn): string[] {
+  if (agg === 'count') return []
+  return [...new Set(values.filter((name) => name !== ''))]
+}
+
 export function groupBySchema(
   schema: TableSchema | undefined,
   by: string[],
-  valueColumn: string | undefined,
+  values: readonly string[],
   agg: AggFn,
 ): TableSchema | undefined {
   if (!schema) return undefined
@@ -1144,15 +1157,15 @@ export function groupBySchema(
     .map((n) => schema.columns.find((c) => c.name === n))
     .filter((c): c is ColumnSchema => !!c)
   const out: ColumnSchema[] = [...keyColumns, column('n', 'i64')]
-  if (agg !== 'count') {
-    const src = valueColumn ? findColumn(schema, valueColumn) : undefined
+  for (const name of aggValueColumns(values, agg)) {
+    const src = findColumn(schema, name)
     // A unit belongs to a quantity: `join` produces text, so nanometres joined with semicolons
     // are no longer nanometres — the call `textColumns` makes one op over.
     const unit = agg === 'join' ? undefined : src?.unit
     out.push(
       unit
-        ? column(aggColumnName(agg, valueColumn), aggDType(agg, src?.dtype), unit)
-        : column(aggColumnName(agg, valueColumn), aggDType(agg, src?.dtype)),
+        ? column(aggColumnName(agg, name), aggDType(agg, src?.dtype), unit)
+        : column(aggColumnName(agg, name), aggDType(agg, src?.dtype)),
     )
   }
   return { columns: out }
@@ -1161,30 +1174,53 @@ export function groupBySchema(
 export function groupByTable(
   table: TableValue,
   by: string[],
-  valueColumn: string | undefined,
+  values: readonly string[],
   agg: AggFn,
 ): TableValue {
   const keyColumns = by.filter((n) => findColumn(table.schema, n))
   if (keyColumns.length === 0) {
     throw new Error('Group by needs at least one existing key column')
   }
-  if (agg !== 'count' && !valueColumn) {
+  const valueColumns = aggValueColumns(values, agg)
+  if (agg !== 'count' && valueColumns.length === 0) {
     throw new Error(`Aggregation "${agg}" needs a value column`)
   }
 
   const keyData = keyColumns.map((n) => getColumn(table, n))
-  const valueData = agg === 'count' || !valueColumn ? undefined : getColumn(table, valueColumn)
+  /*
+   * Not filtered against the schema the way the keys are: a value column that is named and
+   * absent gets `getColumn`'s sentence naming it and listing what the table does have, which is
+   * `resolveColumn`'s bargain — a loud failure about the column you picked beats a quiet success
+   * on whichever of the others happened to survive.
+   */
+  const valueData = valueColumns.map((n) => getColumn(table, n))
+  const width = valueData.length
 
+  /**
+   * A bucket is a key row, a count and an **ordinal**, and the accumulators are flat arrays
+   * indexed `at * width + v` rather than a row of arrays hanging off each bucket.
+   *
+   * Written the obvious way — `sum: number[]` on the bucket — the plural costs three array
+   * objects *per group* where the singular cost three number fields, which is 300,000
+   * allocations on the ordinary "group by neuron id" shape and a regression the single-column
+   * case never asked for. Flat, one value column costs exactly what it used to: three doubles,
+   * unboxed, in three arrays that already exist. Measured over 500,000 rows in 100,000 groups —
+   * 30 ms for one value column both before and after this change, 45 ms for three.
+   *
+   * The `Set`s stay separate and conditional for the reason they always were — one per group per
+   * column is the expensive thing here, and only `countDistinct` and `join` need any.
+   */
   interface Bucket {
     keys: CellValue[]
     n: number
-    sum: number
-    min: number
-    max: number
-    distinct?: Set<string>
-    texts?: Set<string>
+    at: number
   }
   const buckets = new Map<string, Bucket>()
+  const sum: number[] = []
+  const min: number[] = []
+  const max: number[] = []
+  const sets: Array<Set<string>> = []
+  const needsSets = agg === 'countDistinct' || agg === 'join'
 
   for (let i = 0; i < table.length; i++) {
     // `keys` is only ever read when a *new* bucket appears, so it is materialised in that
@@ -1192,22 +1228,22 @@ export function groupByTable(
     const hash = rowKey(keyData, i)
     let bucket = buckets.get(hash)
     if (!bucket) {
-      bucket = {
-        keys: keyData.map((col) => col[i] ?? null),
-        n: 0,
-        sum: 0,
-        min: Number.POSITIVE_INFINITY,
-        max: Number.NEGATIVE_INFINITY,
-        ...(agg === 'countDistinct' ? { distinct: new Set<string>() } : {}),
-        ...(agg === 'join' ? { texts: new Set<string>() } : {}),
-      }
+      bucket = { keys: keyData.map((col) => col[i] ?? null), n: 0, at: buckets.size }
       buckets.set(hash, bucket)
+      for (let v = 0; v < width; v++) {
+        sum.push(0)
+        min.push(Number.POSITIVE_INFINITY)
+        max.push(Number.NEGATIVE_INFINITY)
+        if (needsSets) sets.push(new Set<string>())
+      }
     }
     bucket.n += 1
-    if (valueData) {
-      const raw = valueData[i]
+    const base = bucket.at * width
+    for (let v = 0; v < width; v++) {
+      const raw = valueData[v]![i]
+      const slot = base + v
       if (agg === 'countDistinct') {
-        bucket.distinct!.add(raw === null || raw === undefined ? '\u0000' : String(raw))
+        sets[slot]!.add(raw === null || raw === undefined ? '\u0000' : String(raw))
       } else if (agg === 'join') {
         /*
          * **Distinct**, in first-appearance order, absences skipped.
@@ -1222,57 +1258,62 @@ export function groupByTable(
          *
          * JS `Set` iterates in insertion order, which is what keeps "first appearance" true.
          */
-        if (raw !== null && raw !== undefined && raw !== '') bucket.texts!.add(String(raw))
+        if (raw !== null && raw !== undefined && raw !== '') sets[slot]!.add(String(raw))
       } else if (raw !== null && raw !== undefined) {
-        const v = Number(raw)
-        if (Number.isFinite(v)) {
-          bucket.sum += v
-          if (v < bucket.min) bucket.min = v
-          if (v > bucket.max) bucket.max = v
+        const value = Number(raw)
+        if (Number.isFinite(value)) {
+          sum[slot]! += value
+          if (value < min[slot]!) min[slot] = value
+          if (value > max[slot]!) max[slot] = value
         }
       }
     }
   }
 
-  const schema = groupBySchema(table.schema, keyColumns, valueColumn, agg)!
+  const schema = groupBySchema(table.schema, keyColumns, valueColumns, agg)!
   const data: Record<string, ColumnData> = {}
   for (const col of schema.columns) data[col.name] = []
 
-  const outName = aggColumnName(agg, valueColumn)
-  /** Loop-invariant: one lookup, not one per output row. */
-  const outDtype = schema.columns.find((c) => c.name === outName)?.dtype
+  const outNames = valueColumns.map((name) => aggColumnName(agg, name))
+  /** Loop-invariant: one lookup per output column, not one per output row. */
+  const outDtypes = outNames.map((name) => schema.columns.find((c) => c.name === name)?.dtype)
   for (const bucket of buckets.values()) {
     keyColumns.forEach((name, idx) => {
       data[name]!.push(bucket.keys[idx] ?? null)
     })
     data['n']!.push(bucket.n)
-    if (agg === 'join') {
-      // Empty rather than an empty string: a neuron nobody tagged has no tags, which is an
-      // absence, and `String(null)` is the four-letter word every picker downstream would read
-      // as a value.
-      data[outName]!.push(bucket.texts!.size ? [...bucket.texts!].join(JOIN_SEPARATOR) : null)
-    } else if (agg !== 'count') {
+    const base = bucket.at * width
+    for (let v = 0; v < width; v++) {
+      const slot = base + v
+      if (agg === 'join') {
+        // Empty rather than an empty string: a neuron nobody tagged has no tags, which is an
+        // absence, and `String(null)` is the four-letter word every picker downstream would read
+        // as a value.
+        const texts = sets[slot]!
+        data[outNames[v]!]!.push(texts.size ? [...texts].join(JOIN_SEPARATOR) : null)
+        continue
+      }
       let value: number
       switch (agg) {
         case 'sum':
-          value = bucket.sum
+          value = sum[slot]!
           break
         case 'mean':
-          value = bucket.n > 0 ? bucket.sum / bucket.n : 0
+          value = bucket.n > 0 ? sum[slot]! / bucket.n : 0
           break
         case 'min':
-          value = Number.isFinite(bucket.min) ? bucket.min : 0
+          value = Number.isFinite(min[slot]!) ? min[slot]! : 0
           break
         case 'max':
-          value = Number.isFinite(bucket.max) ? bucket.max : 0
+          value = Number.isFinite(max[slot]!) ? max[slot]! : 0
           break
         case 'countDistinct':
-          value = bucket.distinct?.size ?? 0
+          value = sets[slot]?.size ?? 0
           break
         default:
           value = 0
       }
-      data[outName]!.push(outDtype === 'i64' ? Math.round(value) : value)
+      data[outNames[v]!]!.push(outDtypes[v] === 'i64' ? Math.round(value) : value)
     }
   }
 

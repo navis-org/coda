@@ -84,7 +84,7 @@ export const PARAMS: Record<string, Record<string, unknown>> = {
     ],
   },
   [CONNECTIVITY]: { direction: 'outputs' },
-  [GROUP]: { by: ['postType'], agg: 'sum', value: 'weight' },
+  [GROUP]: { by: ['postType'], agg: 'sum', value: ['weight'] },
   [CHART]: { category: 'postType', value: 'sum_weight' },
 }
 

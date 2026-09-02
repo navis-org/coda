@@ -12,17 +12,46 @@ import { AGG_OPTIONS, groupBySchema, groupByTable } from '../lib/tableOps'
  *
  * Always emits `n` (rows per group) alongside the aggregate — you almost always want to
  * know whether a mean came from 2 rows or 200.
+ *
+ * ## One aggregation, several value columns
+ *
+ * `Of columns` is a `columns` picker, so one node can produce `sum_pre` beside `sum_post`.
+ * What it deliberately does *not* offer is a different aggregation per column: that needs a
+ * list of `(column, aggregation)` rows — `core.rename`'s shape — and a stored list of pairs is
+ * a different param, a different card and a different cell in both exporters. The narrow
+ * version covers the case that actually recurs, which is several columns of the same *kind* of
+ * quantity, and it stays one enum in the provenance key.
+ *
+ * Nothing about the value list is positional, which is what keeps it safe as a bare
+ * `columns` param where `core.rename`'s rows could not be: each name carries its own output
+ * name through `aggColumnName`, so removing the second of three columns removes exactly
+ * `<agg>_<that column>` and leaves the others where they were.
+ *
+ * ## The picker no longer picks for you
+ *
+ * `Of column` was a `column` param on its declared default `''`, which resolves to "the first
+ * compatible column" — so a freshly-created Group By already had a value column chosen. A
+ * `columns` param has no such rule (`resolveColumns` returns the stored list or nothing), so a
+ * new node now starts with the picker empty and `validate` says so. That matches `Group by`
+ * beside it, which has always started empty and always warned; the node was never usable
+ * without configuring that one either.
+ *
+ * The same change is why a graph saved by an earlier build loses its value column: it stored
+ * `value` as the bare string `"weight"`, and `resolveColumns` reads a non-array as nothing.
+ * Taken deliberately rather than absorbed — teaching the generic resolver a second spelling for
+ * one param's history is invariant 8's shim — and it is loud: the picker is visibly empty and
+ * the node carries `"sum" needs at least one value column` until it is re-picked.
  */
 export const groupByNode = registerNode({
   type: 'core.groupBy',
   label: 'Group By',
   category: 'transform',
   description:
-    'Collapse rows into groups and aggregate a value column. The result carries the group ' +
-    'columns, a row count named `n`, and the aggregate renamed `<agg>_<column>` — so ' +
-    'summing `weight` gives `sum_weight`, not `weight`.',
+    'Collapse rows into groups and aggregate one or more value columns. The result carries the ' +
+    'group columns, a row count named `n`, and one aggregate per value column renamed ' +
+    '`<agg>_<column>` — so summing `weight` gives `sum_weight`, not `weight`.',
   guide:
-    'Collapse rows into groups and aggregate a value — synapses per cell type, mean size per class. The output schema is computed rather than copied, so switching sum to mean renames the column and every picker downstream follows before anything re-runs. It always emits n alongside the aggregate, because you nearly always want to know whether a mean came from two rows or two hundred.',
+    'Collapse rows into groups and aggregate — synapses per cell type, mean size per class. Pick several value columns and you get one aggregate each, sum_pre beside sum_post; the aggregation itself is one choice for all of them. The output schema is computed rather than copied, so switching sum to mean renames every aggregate and downstream pickers follow before anything re-runs. n rides along.',
   cost: 'cheap',
   inputs: [{ id: 'in', label: 'Table', type: T.table() }],
   outputs: [{ id: 'out', label: 'Table', type: T.table() }],
@@ -37,8 +66,8 @@ export const groupByNode = registerNode({
     },
     {
       id: 'value',
-      kind: 'column',
-      label: 'Of column',
+      kind: 'columns',
+      label: 'Of columns',
       from: 'in',
       /*
        * Numeric for every aggregation but `join`, which takes text — a rule rather than a list,
@@ -47,8 +76,8 @@ export const groupByNode = registerNode({
        * a value column" while `validate` here still said "numeric".
        */
       dtypes: (params) => (params.agg === 'join' ? undefined : NUMERIC_DTYPES),
-      help: 'For "join text": distinct values, joined with "; " in the order they first appear. Absences are skipped and a repeat is folded away — this cell is meant to be read.',
-      default: '',
+      help: 'One aggregate per column, named `<agg>_<column>`. For "join text": distinct values, joined with "; " in the order they first appear. Absences are skipped and a repeat is folded away — this cell is meant to be read.',
+      default: [],
       visibleIf: (params) => params.agg !== 'count',
     },
   ],
@@ -56,8 +85,7 @@ export const groupByNode = registerNode({
   inferOutputs: (ctx) => {
     const agg = String(ctx.params.agg ?? 'sum') as AggFn
     const by = ctx.columns('by')
-    const value = agg === 'count' ? undefined : ctx.column('value')
-    const schema = groupBySchema(ctx.schema('in'), by, value, agg)
+    const schema = groupBySchema(ctx.schema('in'), by, ctx.columns('value'), agg)
     return { out: schema ? T.table(schema) : T.table() }
   },
 
@@ -66,8 +94,8 @@ export const groupByNode = registerNode({
       return ['Pick at least one column to group by']
     }
     const agg = String(ctx.params.agg ?? 'sum') as AggFn
-    if (agg !== 'count' && !ctx.column('value')) {
-      return [`"${agg}" needs a value column`]
+    if (agg !== 'count' && ctx.columns('value').length === 0) {
+      return [`"${agg}" needs at least one value column`]
     }
     return []
   },
@@ -78,8 +106,6 @@ export const groupByNode = registerNode({
     const agg = String(ctx.params.agg ?? 'sum') as AggFn
     const by = ctx.columns('by')
     if (by.length === 0) throw new Error('No group-by columns selected')
-    return {
-      out: groupByTable(table, by, agg === 'count' ? undefined : ctx.column('value'), agg),
-    }
+    return { out: groupByTable(table, by, ctx.columns('value'), agg) }
   },
 })
