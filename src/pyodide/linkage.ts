@@ -76,3 +76,43 @@ export async function runLinkage(
   }
   return { merges, count, order }
 }
+
+// ---------------------------------------------------------------------------
+// The Heatmap node's cluster order
+// ---------------------------------------------------------------------------
+
+/**
+ * A clustermap's axis order: each row (or column) as a vector, clustered by the distance
+ * between those vectors. The same `.py` as the linkage above, since it is the same wheel and
+ * the same leaf-order call; a different *question*, since here the matrix is the data rather
+ * than the distances. See `coda_cluster_order`.
+ */
+export type ClusterOrderRequest = {
+  /** Row-major `rows * cols` — **a copy**, for the reason `LinkageRequest.scores` gives. */
+  values: Float64Array
+  rows: number
+  cols: number
+  /** Which lines are the vectors. `columns` transposes on the far side. */
+  axis: 'rows' | 'columns'
+  /** One of `LINKAGE_METHODS`. */
+  method: string
+  /** `euclidean`, `correlation` or `cosine` — `matrixOrder.ts`'s list. */
+  metric: string
+}
+
+/** Leaf order of the clustered axis: a permutation of `0..n-1`. */
+export async function runClusterOrder(
+  request: ClusterOrderRequest,
+  options: CallOptions = {},
+): Promise<Int32Array> {
+  const result = await callPython(
+    { module: 'linkage', fn: 'coda_cluster_order', args: [request] },
+    options,
+  )
+  const count = numberFrom(result, 'count')
+  const order = int32From(result, 'order')
+  if (order.length !== count) {
+    throw new Error(`Cluster order returned ${order.length} positions for ${count} observations`)
+  }
+  return order
+}

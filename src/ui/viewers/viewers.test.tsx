@@ -293,6 +293,42 @@ describe('HeatmapViewer', () => {
     expect(screen.getByText('large matrix')).toBeTruthy()
   })
 
+  it('zooms on the wheel where the card is the surface, and fits again on ⤢', async () => {
+    /*
+     * The gesture is a native listener the stub box can receive: a wheel with negative deltaY
+     * zooms in about the pointer, the caption admits the magnification, and Fit clears it. Only
+     * off the canvas — the compact card is a preview React Flow already zooms.
+     */
+    const { container } = render(<HeatmapViewer matrix={matrix()} />)
+    const box = container.querySelector('.heatmap-plot')!
+    // The magnification note, as distinct from the "2 × 3" shape the caption always prints.
+    const zoomNote = () =>
+      [...container.querySelectorAll('.viewer__note')].find((n) => n.textContent?.startsWith('×'))
+    expect(screen.getByLabelText('Fit to view')).toBeTruthy()
+    expect(zoomNote()).toBeUndefined()
+
+    // A raw dispatch, because the listener is native rather than React's — under `act`, and
+    // waiting a frame, because wheel events are coalesced to one update per animation frame.
+    await act(async () => {
+      box.dispatchEvent(
+        new WheelEvent('wheel', { deltaY: -600, clientX: 300, clientY: 200, bubbles: true }),
+      )
+      await new Promise<void>((resolve) => {
+        if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => resolve())
+        else setTimeout(resolve, 20)
+      })
+    })
+    expect(zoomNote()?.textContent).toBe('×2.5')
+
+    fireEvent.click(screen.getByLabelText('Fit to view'))
+    expect(zoomNote()).toBeUndefined()
+  })
+
+  it('offers no zoom on the compact card', () => {
+    render(<HeatmapViewer matrix={matrix()} compact />)
+    expect(screen.queryByLabelText('Fit to view')).toBeNull()
+  })
+
   it('still refuses the one shape a browser cannot hold as a grid', () => {
     /*
      * Built by hand rather than through `makeMatrix`, which checks that the values are all

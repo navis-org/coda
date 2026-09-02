@@ -643,3 +643,25 @@ They divide the work with the vitest files rather than duplicating them: the pro
 fastcore resampled correctly and whether the marshalling survived the trip, and the `.test.ts`
 owns whether the right buffers went over and the right neurons came back. Neither can do the
 other's job — vitest has no Pyodide, and a probe has no scheduler.
+
+## A seventh function, not a seventh module
+
+The Heatmap node's `clustering` order is `coda_cluster_order` in `linkage.py` — the same file,
+the same two packages, a new function beside `coda_linkage_run`. It is not that function with a
+different matrix: Linkage reads its input *as* the distances, where this reads each row as a
+vector across the columns and clusters rows by the distance between vectors — seaborn's
+clustermap, and what "sort a connectivity matrix by clustering" means. The three metrics are
+written in numpy because scipy is not among the packages the bridge loads, and that is the part
+that needed checking: `scripts/probe-heatmap-order.py` runs the file in plain CPython (the
+first probe that needs no Pyodide, so it is a `.py` beside the `.mjs` ones) and compares against
+`pdist` to 1e-9 and `leaves_list(linkage(pdist(x)))` for identity, both axes, five methods,
+three metrics.
+
+Two deliberate departures, both recorded in [nodes.md](nodes.md): a non-finite cell is read as
+zero, and a constant or zero vector — no correlation, no cosine — goes to distance 1 from
+everything rather than the `NaN` that makes scipy's `linkage` refuse the whole matrix.
+
+The call sits in a **`cheap`** node, which invariant 6 says has to be a decision. It is: the call
+is local, it runs only when `clustering` is chosen, and the boot is paid once a session. What a
+cancelled call costs is the same as everywhere on the bridge — `engine.ts` tears the worker down
+on abort, so the next call re-boots.

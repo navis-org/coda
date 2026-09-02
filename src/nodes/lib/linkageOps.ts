@@ -12,13 +12,15 @@ import { CRASH_FLOOR_CELLS, refuseIfOverCrashFloor, warnOverThreshold } from '..
 import type { TableSchema } from '../../core/types'
 import { column, tableSchema } from '../../core/types'
 import type { CellValue, LinkageValue, MatrixValue, TableValue } from '../../core/values'
-import { linkageMergeCount, makeLinkage, makeMatrix, tableFromRows } from '../../core/values'
+import { linkageMergeCount, makeLinkage, tableFromRows } from '../../core/values'
 import type {
   LinkageRequest,
   LinkageResult,
   LinkageSymmetry,
   LinkageTransform,
 } from '../../pyodide/linkage'
+import type { MatrixAxis } from './matrixOrder'
+import { labelsOf, permuteMatrix } from './matrixOrder'
 import { SYMMETRY_OPTIONS } from './nblastOps'
 
 /**
@@ -256,15 +258,9 @@ export function linkageValueFrom(
  * wants to look at is the matrix they have, arranged so its structure shows.
  */
 export function orderedMatrix(matrix: MatrixValue, order: Int32Array): MatrixValue {
-  const n = matrix.rowLabels.length
-  const values = new Float64Array(n * n)
-  for (let r = 0; r < n; r++) {
-    const from = order[r]! * n
-    const to = r * n
-    for (let c = 0; c < n; c++) values[to + c] = matrix.values[from + order[c]!]!
-  }
-  const labels = Array.from(order, (i) => matrix.rowLabels[i]!)
-  return makeMatrix(labels, labels.slice(), values, matrix.valueLabel, matrix.measure)
+  // The same order down both axes — `matrixOrder.ts` owns the permutation, and carrying a
+  // second copy of that loop here is how the two come to disagree about labels or NaNs.
+  return permuteMatrix(matrix, order, order)
 }
 
 /**
@@ -552,4 +548,54 @@ export function cutHomogeneous(
 
   const singletons = roots.filter((root) => root < n).length
   return { clusters, datasets: width, singletons }
+}
+
+// ---------------------------------------------------------------------------
+// The Heatmap node's clustering
+// ---------------------------------------------------------------------------
+
+/**
+ * Say what clustering one axis of a matrix will cost, and refuse only what cannot be allocated.
+ *
+ * Here rather than in `matrixOrder.ts` because it is the third of this module's "before you
+ * cluster" guards — `checkLinkageInput` and `checkLinkageDistances` are the other two — and
+ * because the threshold it reads is this module's own. The distance matrix is `n x n` float64
+ * in one allocation on the far side, so that is the floor, and above
+ * `LINKAGE_OBSERVATIONS_WARN` the warning is the Linkage node's, since it is the same
+ * single-threaded clustering.
+ */
+export function checkClusterInput(ctx: Warner, matrix: MatrixValue, axis: MatrixAxis): void {
+  const n = labelsOf(matrix, axis).length
+  refuseIfOverCrashFloor(`Clustering ${n.toLocaleString()} ${axis}`, n * n * 8)
+  if (n > LINKAGE_OBSERVATIONS_WARN) {
+    warnOverThreshold(ctx, {
+      count: n,
+      threshold: LINKAGE_OBSERVATIONS_WARN,
+      unit: axis,
+      control: 'the clustering warn-above',
+      cost:
+        'Clustering is single-threaded and grows with the square of that; the distances ' +
+        'between the vectors are computed first and grow with the other axis too.',
+    })
+  }
+}
+
+/**
+ * Say how many cells the clustering will read as zero.
+ *
+ * Once per run rather than once per axis, which is what makes it its own function: it walks
+ * every cell, and the answer does not depend on which axis is being clustered — asked from
+ * inside the per-axis guard it scanned a four-million-cell matrix twice to say the same
+ * sentence twice. The Python side substitutes zero, and a silent substitution is the thing
+ * this codebase exists to avoid.
+ */
+export function warnUnrecordedCells(ctx: Warner, matrix: MatrixValue): void {
+  let unrecorded = 0
+  for (const v of matrix.values) if (!Number.isFinite(v)) unrecorded++
+  if (unrecorded === 0) return
+  ctx.warn(
+    `${unrecorded.toLocaleString()} cells are empty or not a number and are read as 0 for ` +
+      `the clustering — a cell nobody recorded is not a partner. The cells themselves are ` +
+      `left as they are.`,
+  )
 }

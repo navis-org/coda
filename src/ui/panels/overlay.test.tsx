@@ -136,10 +136,11 @@ describe('ViewerOverlay', () => {
     expect(fullscreen.requests).toEqual([dialog])
   })
 
-  it('exposes the viewer params in the rail and applies them live', async () => {
+  it('exposes the viewer params in the panel and applies them live', async () => {
     const dialog = await openOverlay('matrix', 'view')
 
-    // Heatmap declares scale + showValues as presentational, so both belong in the rail.
+    // Heatmap declares scale + showValues as presentational, on its Colour tab — the first
+    // one, so it is open by default.
     const scale = within(dialog).getByLabelText('Colour scale') as HTMLSelectElement
     const showValues = within(dialog).getByLabelText('Show values') as HTMLInputElement
     expect(scale.value).toBe('sequential')
@@ -330,12 +331,53 @@ describe('the styling sidebar', () => {
   })
 
   it('leaves an ungrouped node on the flat rail', async () => {
-    // The heatmap declares no groups, so it must be untouched by any of this.
-    const dialog = await openOverlay('matrix', 'view')
+    // The table declares no groups, so it must be untouched by any of this.
+    const dialog = await openOverlay('partners', 'view')
     expect(within(dialog).queryByRole('tablist')).toBeNull()
     expect(within(dialog).queryByRole('button', { name: 'Style' })).toBeNull()
     expect(dialog.querySelector('.overlay__rail')).toBeTruthy()
-    expect(within(dialog).getByLabelText('Colour scale')).toBeTruthy()
+    expect(within(dialog).getByLabelText('Show filter row')).toBeTruthy()
+  })
+
+  it("puts the heatmap's order on a tab that admits to changing the data", async () => {
+    /*
+     * The heatmap's sort reorders the matrix it outputs, which is the point — a Table beside
+     * it shows what the picture shows — so those params are in the key and the tab says so,
+     * where the Colour tab beside it says nothing.
+     */
+    const dialog = await openOverlay('matrix', 'view')
+    expect(within(dialog).getByRole('tab', { name: 'Colour' })).toBeTruthy()
+    expect(within(dialog).queryByText(/downstream nodes go stale/i)).toBeNull()
+    expect(within(dialog).getByLabelText('Palette')).toBeTruthy()
+
+    fireEvent.click(within(dialog).getByRole('tab', { name: 'Order' }))
+    expect(within(dialog).getByText(/downstream nodes go stale/i)).toBeTruthy()
+    const sortBy = within(dialog).getByLabelText('Order by') as HTMLSelectElement
+    expect(sortBy.value).toBe('none')
+    // The details are hidden until an order is chosen, and shown once it is.
+    expect(within(dialog).queryByLabelText('Apply to')).toBeNull()
+
+    expect(useGraphStore.getState().nodeInfo('view').state).toBe('ok')
+    fireEvent.change(sortBy, { target: { value: 'total' } })
+    expect(within(dialog).getByLabelText('Apply to')).toBeTruthy()
+    expect(within(dialog).getByLabelText('Other axis follows')).toBeTruthy()
+    expect(useGraphStore.getState().nodeInfo('view').state).toBe('stale')
+  })
+
+  it('swaps the palette list with the scale, keeping each choice', async () => {
+    const dialog = await openOverlay('matrix', 'view')
+    const palette = () => within(dialog).getByLabelText('Palette') as HTMLSelectElement
+    fireEvent.change(palette(), { target: { value: 'viridis' } })
+
+    fireEvent.change(within(dialog).getByLabelText('Colour scale'), { target: { value: 'diverging' } })
+    // A different param now: the diverging list, at its own default.
+    expect(palette().value).toBe('coda')
+    expect([...palette().options].map((o) => o.value)).toContain('RdBu')
+
+    fireEvent.change(within(dialog).getByLabelText('Colour scale'), { target: { value: 'sequential' } })
+    expect(palette().value).toBe('viridis')
+    // Restyling never invalidates the result.
+    expect(useGraphStore.getState().nodeInfo('view').state).toBe('ok')
   })
 })
 

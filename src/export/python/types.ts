@@ -46,6 +46,7 @@ export type Cell = MarkdownCell | CodeCell
  */
 export type PyModule =
   | 'os'
+  | 're'
   | 'pandas'
   | 'numpy'
   | 'neuprint'
@@ -74,6 +75,7 @@ export interface ModuleSpec {
 /** Declaration order is the order the setup cell reads in. See `setupCell`. */
 export const MODULES: Record<PyModule, ModuleSpec> = {
   os: { statement: 'import os' },
+  re: { statement: 'import re' },
   pandas: { statement: 'import pandas as pd', pip: 'pandas' },
   numpy: { statement: 'import numpy as np', pip: 'numpy' },
   networkx: { statement: 'import networkx as nx', pip: 'networkx' },

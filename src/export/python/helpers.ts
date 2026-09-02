@@ -998,3 +998,26 @@ registerHelper({
     '    return nodes, summary',
   ],
 })
+
+/**
+ * Coda's label order: `LC4` before `LC10`, case ignored.
+ *
+ * `matrixOrder.ts` sorts labels with `Intl.Collator({ numeric: true, sensitivity: 'base' })`,
+ * and a plain `sorted()` disagrees with it on every label carrying a number — which is every
+ * cell type and every neuron id. The key splits a label into digit runs and the text between
+ * them, compares the runs as integers (arbitrary precision, so an 18-digit id is exact) and the
+ * text case-folded, with a digit run sorting before text as ICU's numeric collation does.
+ */
+registerHelper({
+  name: 'coda_natural_key',
+  requires: [['re']],
+  source: [
+    'def coda_natural_key(label):',
+    '    """Sort key giving Coda\'s label order: LC4 before LC10, case ignored."""',
+    '    return [',
+    '        (0, int(part)) if part.isdigit() else (1, part.lower())',
+    "        for part in re.split(r'(\\d+)', str(label))",
+    "        if part != ''",
+    '    ]',
+  ],
+})

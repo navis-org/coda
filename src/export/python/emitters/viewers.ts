@@ -18,8 +18,12 @@ import {
   readSizeSpec,
 } from '../../../nodes/lib/encodingParams'
 import { decodeClauses, resolveFilters, usesRegex } from '../../../nodes/lib/tableFilter'
+import { heatmapPaletteOf } from '../../../nodes/lib/heatmapParams'
+import type { MatrixAxis } from '../../../nodes/lib/matrixOrder'
+import { orderPlan, readOrderOptions } from '../../../nodes/lib/matrixOrder'
 import { pyList, pyStr } from '../py'
 import { registerEmitter } from '../registry'
+import type { Emitter } from '../types'
 import { decodeRanges } from '../../../nodes/lib/chartSelection'
 import { codaNeurons, pySelection, selectionIds } from './common'
 import { filterMasks } from './tableFilters'
@@ -387,27 +391,131 @@ registerEmitter('out.heatmap', (ctx) => {
   ctx.require('matplotlib')
   const out = ctx.output('out')
   const showValues = ctx.params.showValues === true
-  const scale = String(ctx.params.scale ?? '')
+  const diverging = ctx.params.scale === 'diverging'
+  const palette = heatmapPaletteOf(ctx.params)
 
-  const lines = [`${out} = ${src}`]
-  if (scale === 'log') {
-    ctx.require('numpy')
+  const lines = [`${out} = ${src}`, ...heatmapOrderLines(ctx, out)]
+
+  /*
+   * Coda's own ramps have no matplotlib name, so the nearest published ones stand in: `Blues`
+   * for the sequential blue and `RdBu_r` for the blue-negative pair. Every other name is the
+   * palette itself — that is what the list was chosen for — and the ColorBrewer sets run as
+   * published in both places, red at the negative end of `RdBu`.
+   */
+  const cmap = palette === 'coda' ? (diverging ? 'RdBu_r' : 'Blues') : palette
+  if (palette === 'coda') {
     lines.push(
-      ...ctx.note('The node draws this on a log scale; the values themselves are unchanged.'),
-      `_plot = np.log10(1 + ${out})`,
+      ...ctx.note(
+        `Coda draws this in its own ${diverging ? 'blue–red' : 'blue'} ramp, which has no ` +
+          `matplotlib name; ${cmap} is the nearest published one.`,
+      ),
     )
-  } else {
-    lines.push(`_plot = ${out}`)
   }
-
+  const args = [
+    `cmap=${pyStr(cmap)}`,
+    // seaborn's `center` makes the range symmetric about it, which is what Coda's diverging
+    // scale does; without it a matrix running -3..30 would put zero a tenth of the way along.
+    ...(diverging ? ['center=0'] : []),
+    ...(showValues ? ['annot=True', "fmt='.3g'"] : []),
+  ]
   lines.push(
     `plt.figure(figsize=(10, 8))`,
-    `sns.heatmap(_plot, cmap='rocket'${showValues ? ", annot=True, fmt='.3g'" : ''})`,
+    `sns.heatmap(${out}, ${args.join(', ')})`,
     `plt.tight_layout()`,
     `plt.show()`,
   )
   return lines
 })
+
+/**
+ * The Order tab, as pandas: one index per sorted axis, the follower derived from the leader,
+ * then one `.loc`. The order is applied to the frame the node *outputs*, which is the node's
+ * own rule — a Table cell downstream of this one sees the sorted frame here too.
+ */
+function heatmapOrderLines(ctx: Parameters<Emitter>[0], out: string): string[] {
+  const order = readOrderOptions(ctx.params)
+  if (order.by === 'none') return []
+  const plan = orderPlan(order)
+  const lines: string[] = []
+  const chosen: Partial<Record<MatrixAxis, string>> = {}
+
+  for (const axis of plan.lead) {
+    const name = axis === 'rows' ? '_rows' : '_cols'
+    const labels = axis === 'rows' ? `${out}.index` : `${out}.columns`
+    let expr: string | undefined
+    switch (order.by) {
+      case 'total':
+        expr = `${out}.sum(axis=${axis === 'rows' ? 1 : 0}).sort_values(ascending=False).index`
+        break
+      case 'label':
+        ctx.helper('coda_natural_key')
+        expr = `sorted(${labels}, key=coda_natural_key)`
+        break
+      case 'value':
+        if (!order.key) {
+          lines.push(
+            ...ctx.note(
+              `The ${axis} are to be ordered by one ${axis === 'rows' ? 'column' : 'row'} but ` +
+                `none is named, so they are left as they arrived.`,
+            ),
+          )
+          break
+        }
+        expr =
+          axis === 'rows'
+            ? `${out}[${pyStr(order.key)}].sort_values(ascending=False).index`
+            : `${out}.loc[${pyStr(order.key)}].sort_values(ascending=False).index`
+        break
+      case 'cluster': {
+        ctx.require('scipyCluster', 'leaves_list', 'linkage')
+        ctx.require('scipyDistance', 'pdist')
+        if (lines.length === 0) {
+          lines.push(
+            ...ctx.note(
+              'The clustering is seaborn’s clustermap: each row a vector across the columns, ' +
+                'clustered by the distance between vectors. Coda reads an empty cell as 0 for ' +
+                'this, hence the fillna, and puts a constant vector — no correlation, no cosine ' +
+                '— at distance 1 from everything rather than letting pdist’s NaN stop linkage.',
+            ),
+          )
+        }
+        const vectors = `${out}.fillna(0).values${axis === 'rows' ? '' : '.T'}`
+        let distances = `pdist(${vectors}, metric=${pyStr(order.metric)})`
+        if (order.metric !== 'euclidean') {
+          // A constant vector has no correlation and a zero vector no cosine: `pdist` answers
+          // NaN and `linkage` refuses the lot. Coda puts such a vector at distance 1 from
+          // everything — unlike everything, at the end of the tree — so the NaN is too.
+          ctx.require('numpy')
+          distances = `np.nan_to_num(${distances}, nan=1.0)`
+        }
+        expr = `${labels}[leaves_list(linkage(${distances}, method=${pyStr(order.method)}))]`
+        break
+      }
+      default:
+        break
+    }
+    if (!expr) continue
+    lines.push(`${name} = ${expr}${order.reverse ? '[::-1]' : ''}`)
+    chosen[axis] = name
+  }
+
+  if (plan.follower && plan.lead[0] && chosen[plan.lead[0]]) {
+    const lead = chosen[plan.lead[0]]!
+    const name = plan.follower === 'rows' ? '_rows' : '_cols'
+    const labels = plan.follower === 'rows' ? `${out}.index` : `${out}.columns`
+    // The leader's labels in the leader's order, where the follower has them, then the rest
+    // as they were — `followOrder` in `matrixOrder.ts`.
+    lines.push(
+      `${name} = [l for l in ${lead} if l in ${labels}] + [l for l in ${labels} if l not in set(${lead})]`,
+    )
+    chosen[plan.follower] = name
+  }
+
+  if (chosen.rows && chosen.columns) lines.push(`${out} = ${out}.loc[${chosen.rows}, ${chosen.columns}]`)
+  else if (chosen.rows) lines.push(`${out} = ${out}.loc[${chosen.rows}]`)
+  else if (chosen.columns) lines.push(`${out} = ${out}.loc[:, ${chosen.columns}]`)
+  return lines
+}
 
 // ---------------------------------------------------------------------------
 // Scatter

@@ -214,13 +214,13 @@ const ANALYSES: WizardOption<AnalysisId>[] = [
   {
     id: 'partners',
     label: 'Connectivity partners',
-    blurb: 'Connectivity → Group By → Sort: synapses summed per partner type, ranked.',
+    blurb: 'Fetch up- and/or downstream partners → aggregate by type and sort such that strongest partners appear first.',
     note: 'Connectivity → group → sort: the chain most connectivity questions are built from. `Min weight` drops the weak pairs at the server rather than after the download.',
   },
   {
     id: 'matrix',
     label: 'Adjacency matrix',
-    blurb: 'The set against itself on both axes, row-normalised.',
+    blurb: 'All-by-all connectivity. Can feed into heatmap, clustering or network visualization/analysis.',
     note: 'Adjacency between the same set on both axes. Row-normalising makes each row sum to 1, so rows with very different totals can still be compared.',
   },
   {
@@ -233,7 +233,7 @@ const ANALYSES: WizardOption<AnalysisId>[] = [
   {
     id: 'network',
     label: 'Network graph + stats',
-    blurb: 'Type-level edges as a node-link diagram, or the graph metrics over it.',
+    blurb: 'Type-level edges as a node-link network graph and/or the graph metrics over it.',
     note: 'Grouping by both ends turns neuron-to-neuron rows into a type-level edge list, which is what a network is built from.',
   },
   {
@@ -259,7 +259,7 @@ const ANALYSES: WizardOption<AnalysisId>[] = [
   {
     id: 'neurons',
     label: 'Neuron table only',
-    blurb: 'No analysis yet — the neuron table, and somewhere to build from.',
+    blurb: 'No analysis, just the data. Build on it with your own queries and viewers.',
     note: 'No analysis yet. Add nodes to the right of this one — press Tab for the node browser.',
   },
 ]

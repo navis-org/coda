@@ -443,6 +443,32 @@ to pin an implementation against — so both the fixture and the helper pass an 
 the probe's tolerance for the two power iterations is 1e-8, which is where the two stopping rules
 actually land rather than a number anybody picked.
 
+### The heatmap's order and palette, and the one thing both languages had to undo
+
+`out.heatmap`'s emitters used to draw every matrix in `rocket` and ignore the scale; now they
+**name** the palette somebody picked, which is why the list in `heatmapParams.ts` was chosen to
+be spelled the same way in matplotlib, seaborn, viridisLite and ColorBrewer. Coda's own two ramps
+have no name anywhere else, so `Blues` and `RdBu_r` (R: `scale_fill_distiller` with
+`direction = -1`) stand in, under a note. A diverging scale is centred: seaborn's `center=0`
+makes the range symmetric on its own; ggplot's does not, so the R side computes `lim_` and
+passes `limits = c(-lim_, lim_)`.
+
+**The Order tab exports as an order on the frame the node outputs**, which is the node's own
+rule — one index per sorted axis, the follower derived from the leader by label, one `.loc` (R:
+one subscript on the matrix). Two helpers carry Coda's natural label order (`coda_natural_key`,
+`coda_natural_order`), and the R one zero-pads digit runs rather than casting because an
+18-digit neuron id does not survive a double. The clustering is `pdist` + `linkage` +
+`leaves_list` in Python and `hclust(...)$order` in R with `R_METHODS` spelling the method; both
+write a `NaN` distance as 1 before clustering, because a constant vector has no correlation and
+scipy's `linkage` refuses the whole matrix over it where Coda puts that vector at the end of the
+tree. Both emitted chunks were **executed** on a toy matrix carrying a NaN cell, a constant row
+and a label starting with digits — which is how the `cor` refusal was found, and how a trailing
+comma inside `mutate(...)` was found to parse and still fail.
+
+**ggplot sorts a discrete axis alphabetically unless told otherwise**, so the R emitter now sets
+factor levels from the matrix's own row and column order — which also means an *unsorted* heatmap
+finally exports in the order the canvas shows, top row first, rather than A–Z.
+
 ### The CAVE half of the notebook exporter
 
 `src/export/python/emitters/cave.ts` and `caveHelpers.ts`. A FlyWire graph now exports as a

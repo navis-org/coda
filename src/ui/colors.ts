@@ -21,6 +21,7 @@
  */
 
 import type { PaletteName } from '../nodes/lib/encodingParams'
+import type { DivergingPalette, SequentialPalette } from '../nodes/lib/heatmapParams'
 
 export type Mode = 'light' | 'dark'
 
@@ -279,7 +280,14 @@ function lerpHex(a: string, b: string, t: number): string {
   return rgbToHex(mix(pa[0], pb[0]), mix(pa[1], pb[1]), mix(pa[2], pb[2]))
 }
 
-function parseHex(hex: string): [number, number, number] {
+/**
+ * `#rrggbb` to its three channels.
+ *
+ * Exported for the heatmap's pixel path, which turns a whole ramp into bytes — a second
+ * `parseInt(hex.slice(...), 16)` beside this one is how two readers come to disagree about a
+ * malformed colour.
+ */
+export function parseHex(hex: string): [number, number, number] {
   const h = hex.replace('#', '')
   return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)]
 }
@@ -386,6 +394,158 @@ export function divergingColor(t: number, mode: Mode): string {
           mode === 'light' ? 0.4 + magnitude * 0.55 : 0.6 - magnitude * 0.55,
         )
   return lerpHex(mid, pole, magnitude)
+}
+
+// ---------------------------------------------------------------------------
+// Heatmap palettes: published ramps, transcribed
+// ---------------------------------------------------------------------------
+
+/**
+ * The continuous colormaps the Heatmap node offers beside Coda's own, as 64 stops each.
+ *
+ * **Sampled from the installed matplotlib 3.11 / seaborn 0.13 by a script, not typed** — the
+ * same rule the categorical `PALETTES` follow, for the same reason: a published set is somebody
+ * else's validated work, and the one thing a transcription can add is an error. 64 stops
+ * rather than the 256 the packages hold, and the number was measured rather than chosen: the
+ * ramps are smooth, so linear interpolation between 64 of their entries reproduces all 256 to
+ * **within two channel values** (viridis, magma, inferno, plasma, rocket, mako at one or two,
+ * cividis at two) — the same tolerance `RAMP_STEPS` is held to in `heatmapPlot.ts`, and a
+ * quarter of the bytes. 32 stops measured three to six, which is where banding starts.
+ *
+ * **Not theme-tuned, and not flipped.** Coda's own ramp reverses with the theme so "nothing
+ * here" always recedes into the surface; these run as published — dark end low — on both
+ * surfaces, which is how every reader has seen them in a paper and is what makes the exported
+ * `cmap='viridis'` the picture on the card. On the light surface a low cell is therefore
+ * *dark*, exactly as in matplotlib on white.
+ */
+const HEATMAP_SEQUENTIAL: Record<Exclude<SequentialPalette, 'coda'>, string[]> = {
+  viridis: [
+    '#440154', '#46075a', '#470d60', '#471365', '#48186a', '#481d6f', '#482374', '#482878',
+    '#472d7b', '#46327e', '#453781', '#443b84', '#424086', '#404588', '#3e4989', '#3d4e8a',
+    '#3a538b', '#38588c', '#365c8d', '#34608d', '#32648e', '#31688e', '#2f6c8e', '#2d708e',
+    '#2c738e', '#2a778e', '#297b8e', '#277f8e', '#26828e', '#24868e', '#238a8d', '#218e8d',
+    '#20928c', '#1f968b', '#1f9a8a', '#1f9e89', '#1fa187', '#21a585', '#23a983', '#26ad81',
+    '#2ab07f', '#2fb47c', '#35b779', '#3bbb75', '#42be71', '#4ac16d', '#52c569', '#5ac864',
+    '#65cb5e', '#6ece58', '#77d153', '#81d34d', '#8bd646', '#95d840', '#a0da39', '#aadc32',
+    '#b5de2b', '#c0df25', '#cae11f', '#d5e21a', '#dfe318', '#eae51a', '#f4e61e', '#fde725',
+  ],
+  magma: [
+    '#000004', '#020109', '#030312', '#06051a', '#0a0822', '#0e0b2b', '#130d34', '#180f3d',
+    '#1d1147', '#221150', '#29115a', '#2f1163', '#36106b', '#3d0f71', '#440f76', '#4a1079',
+    '#52137c', '#59157e', '#5f187f', '#651a80', '#6b1d81', '#721f81', '#782281', '#7e2482',
+    '#842681', '#8b2981', '#912b81', '#982d80', '#9e2f7f', '#a5317e', '#ab337c', '#b2357b',
+    '#ba3878', '#c03a76', '#c73d73', '#cd4071', '#d3436e', '#d9466b', '#df4a68', '#e44f64',
+    '#e95462', '#ed5a5f', '#f1605d', '#f4675c', '#f66e5c', '#f8765c', '#fa7d5e', '#fb8560',
+    '#fc8e64', '#fd9668', '#fe9d6c', '#fea571', '#feac76', '#feb47b', '#febb81', '#fec287',
+    '#feca8d', '#fed194', '#fed89a', '#fde0a1', '#fde7a9', '#fceeb0', '#fcf6b8', '#fcfdbf',
+  ],
+  inferno: [
+    '#000004', '#02010a', '#040312', '#07051b', '#0b0724', '#10092d', '#150b37', '#1b0c41',
+    '#210c4a', '#280b53', '#2f0a5b', '#360961', '#3d0965', '#440a68', '#4a0c6b', '#510e6c',
+    '#59106e', '#5f136e', '#65156e', '#6c186e', '#721a6e', '#781c6d', '#7f1e6c', '#85216b',
+    '#8c2369', '#922568', '#982766', '#9f2a63', '#a52c60', '#ab2f5e', '#b1325a', '#b73557',
+    '#bf3952', '#c43c4e', '#ca404a', '#cf4446', '#d44842', '#d94d3d', '#de5238', '#e25734',
+    '#e65d2f', '#ea632a', '#ed6925', '#f06f20', '#f3761b', '#f57d15', '#f78410', '#f98b0b',
+    '#fa9407', '#fb9b06', '#fca309', '#fcaa0f', '#fcb216', '#fbba1f', '#fac228', '#f9c932',
+    '#f7d13d', '#f5d949', '#f4e156', '#f2e865', '#f1ef75', '#f3f586', '#f6fa96', '#fcffa4',
+  ],
+  plasma: [
+    '#0d0887', '#19068c', '#220690', '#2a0593', '#310597', '#38049a', '#3f049c', '#46039f',
+    '#4c02a1', '#5302a3', '#5901a5', '#6001a6', '#6600a7', '#6c00a8', '#7201a8', '#7801a8',
+    '#8004a8', '#8606a6', '#8b0aa5', '#910ea3', '#9613a1', '#9c179e', '#a11b9b', '#a62098',
+    '#ab2494', '#b02991', '#b42e8d', '#b83289', '#bd3786', '#c13b82', '#c5407e', '#c9447a',
+    '#cd4a76', '#d14e72', '#d5536f', '#d8576b', '#db5c68', '#de6164', '#e26561', '#e56a5d',
+    '#e76f5a', '#ea7457', '#ed7953', '#ef7e50', '#f1834c', '#f48849', '#f68d45', '#f79342',
+    '#f99a3e', '#fb9f3a', '#fca537', '#fdab33', '#fdb130', '#feb72d', '#febd2a', '#fdc328',
+    '#fdca26', '#fcd025', '#fbd724', '#f9dd25', '#f7e425', '#f5eb27', '#f2f227', '#f0f921',
+  ],
+  cividis: [
+    '#00224e', '#002554', '#00285b', '#002b62', '#002e6a', '#003070', '#053371', '#123570',
+    '#1a386f', '#213b6e', '#273e6e', '#2d416d', '#32436d', '#36466c', '#3b496c', '#3f4c6c',
+    '#444f6c', '#48526c', '#4c556c', '#50576c', '#545a6d', '#575d6d', '#5b606e', '#5e636f',
+    '#62656f', '#656870', '#696b71', '#6c6e72', '#707173', '#737475', '#777776', '#7a7a78',
+    '#7e7d78', '#828079', '#868379', '#8a8678', '#8e8978', '#928c78', '#958f77', '#999277',
+    '#9d9576', '#a19975', '#a59c74', '#a99f73', '#ada272', '#b1a570', '#b6a96f', '#baac6d',
+    '#bfb06b', '#c3b369', '#c7b767', '#ccba64', '#d0be62', '#d4c15f', '#d9c55c', '#ddc858',
+    '#e1cc55', '#e6d051', '#ead34c', '#efd748', '#f3db42', '#f8df3c', '#fde334', '#fee838',
+  ],
+  rocket: [
+    '#03051a', '#07071d', '#0d0a21', '#130d25', '#180f29', '#1e122d', '#241432', '#2a1636',
+    '#30173a', '#35193e', '#3c1a42', '#421b45', '#481c48', '#4e1d4b', '#541e4e', '#5b1e51',
+    '#631f53', '#691f55', '#701f57', '#761f58', '#7d1f5a', '#841e5a', '#8b1d5b', '#921c5b',
+    '#981b5b', '#9f1a5b', '#a6195a', '#ad1759', '#b41658', '#ba1656', '#c11754', '#c71951',
+    '#ce1d4e', '#d3214b', '#d82748', '#dd2c45', '#e13342', '#e53940', '#e8403e', '#eb483e',
+    '#ed503e', '#ef5840', '#f06043', '#f26747', '#f26f4c', '#f37651', '#f47d57', '#f4845d',
+    '#f58d64', '#f5946b', '#f69b71', '#f6a178', '#f6a880', '#f6ae87', '#f6b48f', '#f6bb97',
+    '#f6c19f', '#f7c7a8', '#f7cdb1', '#f8d3ba', '#f8d9c3', '#f9dfcb', '#f9e5d4', '#faebdd',
+  ],
+  mako: [
+    '#0b0405', '#10060a', '#140910', '#180d16', '#1c101c', '#201322', '#241628', '#28192e',
+    '#2b1c35', '#2e1e3b', '#312142', '#342548', '#37284f', '#392b56', '#3b2e5d', '#3d3164',
+    '#3f366d', '#403974', '#413d7b', '#414082', '#414488', '#40498e', '#3e4d93', '#3d5296',
+    '#3b5799', '#3a5c9b', '#38619d', '#37659e', '#366a9f', '#366fa0', '#3573a1', '#3578a2',
+    '#357da3', '#3482a4', '#3486a5', '#348ba6', '#348fa7', '#3493a8', '#3498a9', '#359caa',
+    '#35a1ab', '#37a5ac', '#38aaac', '#3aaead', '#3db3ad', '#40b7ad', '#44bcad', '#48c0ad',
+    '#4fc5ad', '#55caad', '#5ecdad', '#68d1ad', '#73d4ad', '#7fd7af', '#8bdab2', '#96ddb5',
+    '#a1dfb9', '#abe2be', '#b5e5c4', '#bee8ca', '#c6ebd1', '#ceeed7', '#d6f1de', '#def5e5',
+  ],
+}
+
+/**
+ * The diverging ones are ColorBrewer's eleven-class sets, and here the eleven **are** the
+ * definition: matplotlib holds exactly these anchors at 0, 0.1 … 1 and interpolates linearly
+ * between them, which `sampleRamp` does too, so this is the colormap rather than a sampling of
+ * it. Stored low-to-high as published — `RdBu` runs red at the negative end — so the name means
+ * what it means in every other tool; somebody who wants blue for negative has Coda's own.
+ */
+const HEATMAP_DIVERGING: Record<Exclude<DivergingPalette, 'coda'>, string[]> = {
+  RdBu: [
+    '#67001f', '#b2182b', '#d6604d', '#f4a582', '#fddbc7', '#f7f7f7',
+    '#d1e5f0', '#92c5de', '#4393c3', '#2166ac', '#053061',
+  ],
+  PuOr: [
+    '#7f3b08', '#b35806', '#e08214', '#fdb863', '#fee0b6', '#f7f7f7',
+    '#d8daeb', '#b2abd2', '#8073ac', '#542788', '#2d004b',
+  ],
+  BrBG: [
+    '#543005', '#8c510a', '#bf812d', '#dfc27d', '#f6e8c3', '#f5f5f5',
+    '#c7eae5', '#80cdc1', '#35978f', '#01665e', '#003c30',
+  ],
+}
+
+/**
+ * Sequential colour for a normalised magnitude under a named palette.
+ *
+ * `coda` is `sequentialColor` and keeps its theme flip; every other name is a published ramp
+ * read as published. One function rather than a branch at each caller, so the cells, the
+ * colour bar and the printed values' ink cannot resolve a name three ways.
+ */
+export function heatmapSequentialColor(
+  t: number,
+  mode: Mode,
+  palette: SequentialPalette = 'coda',
+): string {
+  if (palette === 'coda') return sequentialColor(t, mode)
+  return sampleRamp(HEATMAP_SEQUENTIAL[palette], Number.isFinite(t) ? t : 0)
+}
+
+/** Diverging colour for t ∈ [-1, 1] under a named palette; `coda` is `divergingColor`. */
+export function heatmapDivergingColor(
+  t: number,
+  mode: Mode,
+  palette: DivergingPalette = 'coda',
+): string {
+  if (palette === 'coda') return divergingColor(t, mode)
+  const clamped = Math.max(-1, Math.min(1, Number.isFinite(t) ? t : 0))
+  return sampleRamp(HEATMAP_DIVERGING[palette], (clamped + 1) / 2)
+}
+
+/** The transcribed stops of a published palette, for the test that pins the transcription. */
+export function heatmapPaletteStops(palette: SequentialPalette | DivergingPalette): string[] {
+  if (palette === 'coda') return []
+  return palette in HEATMAP_SEQUENTIAL
+    ? HEATMAP_SEQUENTIAL[palette as Exclude<SequentialPalette, 'coda'>]
+    : HEATMAP_DIVERGING[palette as Exclude<DivergingPalette, 'coda'>]
 }
 
 /** Ink that stays legible on top of a filled cell — the one place text takes the fill. */

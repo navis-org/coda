@@ -1026,3 +1026,28 @@ registerHelper({
     '}',
   ],
 })
+
+/**
+ * Coda's label order: `LC4` before `LC10`, case ignored — `labelOrder` in `matrixOrder.ts`.
+ *
+ * Base R's `order` is neither natural nor locale-stable, and the packages that are
+ * (`stringr::str_sort(numeric = TRUE)`, `gtools::mixedorder`) are two more dependencies for
+ * one sort. So each label becomes a key: digit runs zero-padded to twenty places, the rest
+ * lower-cased, compared byte-wise. Padding rather than `as.numeric`, because an 18-digit
+ * neuron id does not survive a double and the Python helper's `int()` is exact.
+ */
+registerHelper({
+  name: 'coda_natural_order',
+  source: [
+    'coda_natural_order <- function(labels) {',
+    '  # Positions that put the labels in Coda\'s order: LC4 before LC10, case ignored.',
+    '  key <- vapply(as.character(labels), function(label) {',
+    '    parts <- regmatches(label, gregexpr("[0-9]+|[^0-9]+", label))[[1]]',
+    '    digits <- grepl("^[0-9]+$", parts)',
+    '    parts[digits] <- paste0(strrep("0", pmax(0, 20 - nchar(parts[digits]))), parts[digits])',
+    '    tolower(paste(parts, collapse = ""))',
+    '  }, character(1), USE.NAMES = FALSE)',
+    '  order(key, seq_along(labels), method = "radix")',
+    '}',
+  ],
+})

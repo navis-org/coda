@@ -381,6 +381,90 @@ rather than melting the matrix back down, and the two agree because a connection
 rows to drop. R melts `neuprint_get_adjacency_matrix`'s result and strips the zeros, which is
 `matrixToLinks` transcribed.
 
+## Heatmap: the Order tab is data, the Colour tab is not
+
+`out.heatmap` grew two things at once, and the split between them is the design. **Colour** —
+scale, palette, printed values — is presentational: none of it enters the provenance key, so
+restyling a four-million-cell picture is a repaint. **Order** reorders the matrix the node
+*outputs*, so it is in the key, the tab says downstream nodes go stale, and a Table wired beside
+the heatmap, the CSV export and the notebook all show what the card shows. The obvious
+alternative — a sort that lives in the drawing — was rejected for exactly that reason: a picture
+sorted one way beside a table sorted another is two answers to one question.
+
+### Four criteria, one plan
+
+`nodes/lib/matrixOrder.ts` is the headless half. A criterion produces an order for one axis;
+`orderPlan` says which axes lead and which follows; `applyOrderPlan` permutes. Every criterion,
+including the one that comes back from Python, goes through the same three steps.
+
+- **`total`** is the plain sum of the finite cells, largest first. Not a magnitude, and that is
+  deliberate: `Colour scale` is presentational, so the output cannot be allowed to read it. A
+  matrix of log-ratios sorted by total is sorted by net sign, which the help says out loud.
+- **`label`** is natural order — `LC4` before `LC10` — through `Intl.Collator({ numeric: true,
+  sensitivity: 'base' })`. Both exporters carry a helper that agrees with it (`coda_natural_key`,
+  `coda_natural_order`), checked on a label that *starts* with digits, where all three put it
+  first, and on an 18-digit id, which the R helper zero-pads rather than casting because a double
+  does not hold one.
+- **`value`** is one row or column deciding the other axis. The key is **typed, not picked**: a
+  matrix's labels are data decided by the run, and `T.matrix()` deliberately carries none, so
+  an `enum` reading the schema has nothing to offer at edit time. A key the matrix does not have
+  is a `ctx.warn` and an axis left as it arrived — invariant 5's corollary applied to a typed
+  key, since an unmet control is not grounds for blocking the graph.
+- **`cluster`** is seaborn's clustermap, and **not the Linkage node's clustering**. Linkage reads
+  the matrix *as* the distances, which is right for an NBLAST score matrix and wrong for an
+  adjacency; this reads each row as a vector across the columns and clusters rows by the distance
+  between vectors, which is right for connectivity and meaningless for scores. The help says
+  which to use when. It is `coda_cluster_order` in `pyodide/linkage.py` — the same `.py`, the
+  same wheel, the same `leaf_order` call, a different question — and its three metrics are
+  numpy rather than scipy, because scipy is not among the packages the bridge loads. Checked
+  against `pdist` and `leaves_list(linkage(pdist(x)))` by `scripts/probe-heatmap-order.py`:
+  distances to 1e-9, leaf order identical, both axes, all five methods, three metrics.
+
+### "The other axis follows", and why by label
+
+An Adjacency is square over one population and usually **not symmetric**, so the request that
+motivated the tab was "sort the columns and put the rows in the same order" — otherwise the
+diagonal wanders off and the picture stops being readable as a connectome. `followOrder` gives the
+follower the leader's labels in the leader's new order, wherever the follower has them, then
+everything the leader did not name in the order it already had. **By label and never by index**:
+"the same order" means the same *neuron* in row 3 and column 3, and index-matching would silently
+do something else on any matrix whose axes are not the identical list. On a matrix whose axes
+share no labels — types down, regions across — following is a no-op, which is the honest answer
+and why the switch defaults to on.
+
+### A cheap node with a Pyodide call in it
+
+`cost` stays `cheap`, and invariant 6 says that is a decision to make on purpose. The call is
+local, it runs only when `clustering` is chosen, and a heatmap that needed a Run to sort itself
+would be a viewer that stopped being live the moment somebody asked it to be useful. What it
+costs: Pyodide's boot on the first use in a session, which any NBLAST or Linkage has already paid;
+the `n × n` distance matrix, refused past `CRASH_FLOOR_BYTES` and warned about past
+`LINKAGE_OBSERVATIONS_WARN` (the Linkage node's threshold, since it is the same single-threaded
+clustering); and the buffer is a **copy**, for the reason `LinkageRequest.scores` records —
+`callPython` transfers it, and the original is the upstream node's cached result.
+
+### Two divergences from scipy, both said out loud
+
+A cell nobody recorded is read as **zero** for the clustering, counted, and warned about — the
+cells themselves are untouched. And a constant vector, which has no correlation, and a zero
+vector, which has no cosine, are put at **distance 1 from everything**: unlike everything, at the
+end of the tree. scipy answers `NaN` there and `linkage` then refuses the whole matrix; R's `cor`
+answers `NA` and `hclust` does the same. Both exporters write the NaN as 1 before clustering
+rather than reproducing the refusal, and say so in a note, because a zero row in a connectivity
+matrix is a neuron with no partners among these columns — a thing with no profile, not an error.
+
+### The palettes
+
+Names in `nodes/lib/heatmapParams.ts`, hex in `ui/colors.ts`, which is `encodingParams.ts`'s
+arrangement for the categorical sets. Two lists because they are two kinds of thing — a diverging
+ramp has a middle — and two params so a choice survives toggling the scale and back;
+`heatmapPaletteOf` is the one reader, so a name from the wrong list degrades to Coda's ramp
+everywhere at once. The published ones are transcribed by a script from the installed matplotlib
+and seaborn, and how they were measured is in [viewers.md](viewers.md); what matters here is
+that every name was chosen to be spelled the same way in Python and in R's viridisLite or
+ColorBrewer, so the exporters **name** the palette somebody picked. Coda's own two have no name
+there, so `Blues` and `RdBu_r` stand in with a note saying so.
+
 ## Network Metrics and Network Centrality: two nodes because cost is a node property
 
 `net.metrics` answers "what shape is this graph?" and `net.centrality` answers "which node

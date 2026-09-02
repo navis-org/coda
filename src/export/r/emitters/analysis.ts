@@ -721,7 +721,7 @@ registerEmitter('neuron.nblastKnn', (ctx) =>
  * agree exactly. `ward.D` is the older variant of Ward's criterion and is **not** the match —
  * the two differ on the same data and neither errors.
  */
-const R_METHODS: Record<string, string> = {
+export const R_METHODS: Record<string, string> = {
   ward: 'ward.D2',
   average: 'average',
   complete: 'complete',

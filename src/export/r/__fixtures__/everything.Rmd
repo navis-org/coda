@@ -322,6 +322,18 @@ coda_join_annotations <- function(left, right) {
 }
 
 
+coda_natural_order <- function(labels) {
+  # Positions that put the labels in Coda's order: LC4 before LC10, case ignored.
+  key <- vapply(as.character(labels), function(label) {
+    parts <- regmatches(label, gregexpr("[0-9]+|[^0-9]+", label))[[1]]
+    digits <- grepl("^[0-9]+$", parts)
+    parts[digits] <- paste0(strrep("0", pmax(0, 20 - nchar(parts[digits]))), parts[digits])
+    tolower(paste(parts, collapse = ""))
+  }, character(1), USE.NAMES = FALSE)
+  order(key, seq_along(labels), method = "radix")
+}
+
+
 # Centrality columns -- Coda's Network Centrality node.
 #
 # Returns list(nodes = <data.frame>, summary = <one-row data.frame>). Weighted paths use
@@ -2173,6 +2185,83 @@ normalize <- pivot_matrix_df / rowSums(pivot_matrix_df)
 normalize[!is.finite(normalize)] <- 0
 ```
 
+```{r heatmap}
+# ── Heatmap ──
+heatmap <- as.matrix(pivot_matrix_df)
+# NOTE: The clustering is seaborn’s clustermap: each row a vector across the
+# columns, clustered by the distance between vectors. Coda reads an empty
+# cell as 0 for this, and puts a constant vector — no correlation, no cosine
+# — at distance 1 from everything rather than letting `cor`’s NA stop
+# `hclust`.
+x_ <- heatmap
+x_[!is.finite(x_)] <- 0
+d_ <- 1 - cor(t(x_))
+d_[!is.finite(d_)] <- 1
+diag(d_) <- 0
+rows_ <- rownames(heatmap)[hclust(as.dist(d_), method = "average")$order]
+cols_ <- c(intersect(rows_, colnames(heatmap)), setdiff(colnames(heatmap), rows_))
+heatmap <- heatmap[rows_, cols_, drop = FALSE]
+
+heatmap |>
+  as.data.frame() |>
+  tibble::rownames_to_column("row") |>
+  pivot_longer(-row, names_to = "column", values_to = "value") |>
+  mutate(
+    row = factor(row, levels = rev(rownames(heatmap))),
+    column = factor(column, levels = colnames(heatmap))
+  ) |>
+  ggplot(aes(column, row, fill = value)) +
+  geom_tile() +
+  scale_fill_viridis_c(option = "viridis") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r heatmap-2}
+# ── Heatmap ──
+heatmap_2 <- as.matrix(pivot_matrix_df)
+cols_ <- rev(names(sort(heatmap_2["LC4", ], decreasing = TRUE)))
+rows_ <- c(intersect(cols_, rownames(heatmap_2)), setdiff(rownames(heatmap_2), cols_))
+heatmap_2 <- heatmap_2[rows_, cols_, drop = FALSE]
+lim_ <- max(abs(heatmap_2), na.rm = TRUE)
+
+heatmap_2 |>
+  as.data.frame() |>
+  tibble::rownames_to_column("row") |>
+  pivot_longer(-row, names_to = "column", values_to = "value") |>
+  mutate(
+    row = factor(row, levels = rev(rownames(heatmap_2))),
+    column = factor(column, levels = colnames(heatmap_2))
+  ) |>
+  ggplot(aes(column, row, fill = value)) +
+  geom_tile() +
+  scale_fill_distiller(palette = "RdBu", direction = 1, limits = c(-lim_, lim_)) +
+  geom_text(aes(label = signif(value, 3)), size = 3) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r heatmap-3}
+# ── Heatmap ──
+heatmap_3 <- as.matrix(pivot_matrix_df)
+cols_ <- colnames(heatmap_3)[coda_natural_order(colnames(heatmap_3))]
+heatmap_3 <- heatmap_3[, cols_, drop = FALSE]
+
+heatmap_3 |>
+  as.data.frame() |>
+  tibble::rownames_to_column("row") |>
+  pivot_longer(-row, names_to = "column", values_to = "value") |>
+  mutate(
+    row = factor(row, levels = rev(rownames(heatmap_3))),
+    column = factor(column, levels = colnames(heatmap_3))
+  ) |>
+  ggplot(aes(column, row, fill = value)) +
+  geom_tile() +
+  scale_fill_viridis_c(option = "mako") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
 ```{r table-df-2}
 # ── Table ──
 table_df_2_out <- pivot_table_df
@@ -2190,17 +2279,23 @@ unpivot_2 <- pivot_table_df |>
   )
 ```
 
-```{r heatmap}
+```{r heatmap-4}
 # ── Heatmap ──
-heatmap <- normalize
+heatmap_4 <- as.matrix(normalize)
+# NOTE: Coda draws this in its own blue ramp, which has no name here; Blues
+# is the nearest published one.
 
-heatmap |>
+heatmap_4 |>
   as.data.frame() |>
   tibble::rownames_to_column("row") |>
   pivot_longer(-row, names_to = "column", values_to = "value") |>
+  mutate(
+    row = factor(row, levels = rev(rownames(heatmap_4))),
+    column = factor(column, levels = colnames(heatmap_4))
+  ) |>
   ggplot(aes(column, row, fill = value)) +
   geom_tile() +
-  scale_fill_viridis_c(option = "rocket") +
+  scale_fill_distiller(palette = "Blues", direction = 1) +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```

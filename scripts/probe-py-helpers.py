@@ -882,6 +882,24 @@ empty = ens["coda_endpoint_neurons"](conn.iloc[0:0], [7])
 check("endpoints: an empty edge list is the seeds", list(empty["neuronId"]) == [7],
       str(list(empty["neuronId"])))
 
+# --- the heatmap's label order --------------------------------------------------------------
+# `coda_natural_key` mirrors `labelOrder` in `matrixOrder.ts`: digit runs as integers, text
+# case-folded, a digit run before text. Three cases the plain `sorted()` gets wrong: LC10 after
+# LC4, a lower-case twin beside its upper-case one, and an id that starts with digits — which
+# sorts *first*, as ICU's numeric collation puts it and as the R helper agrees.
+import re
+
+nkns = load_cell(FIXTURES / "everything.ipynb", "def coda_natural_key(", {"re": re})
+labels = ["LC10", "LC4", "DNp02", "lc9", "720575940621234567"]
+got = sorted(labels, key=nkns["coda_natural_key"])
+check("natural: LC4 before LC10, ids first, case ignored",
+      got == ["720575940621234567", "DNp02", "LC4", "lc9", "LC10"], str(got))
+check("natural: an 18-digit id is compared exactly",
+      sorted(["720575940621234568", "720575940621234567"], key=nkns["coda_natural_key"])
+      == ["720575940621234567", "720575940621234568"])
+check("natural: a non-string label does not throw",
+      sorted([3, 10, 2], key=nkns["coda_natural_key"]) == [2, 3, 10])
+
 print()
 print(f'{len(fails)} failed' if fails else 'all passed')
 sys.exit(1 if fails else 0)

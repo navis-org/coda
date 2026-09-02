@@ -913,6 +913,43 @@ export function everythingGraph(): CodaGraph {
      */
     { id: 'describe', type: 'out.describe', col: 12, row: 3 },
     { id: 'heat', type: 'out.heatmap', col: 12, row: 1, params: { showValues: false } },
+    /*
+     * Three more, off the same pivot, so the Order tab and the palettes reach the goldens: the
+     * clustermap order with a viridis ramp, columns by name, and one row deciding the columns
+     * under a diverging ColorBrewer set. None changes what `heat` above emits, which is the
+     * unsorted default.
+     */
+    {
+      id: 'heatClustered',
+      type: 'out.heatmap',
+      col: 13,
+      row: 1,
+      params: { sortBy: 'cluster', clusterMetric: 'correlation', palette: 'viridis' },
+    },
+    {
+      id: 'heatByLabel',
+      type: 'out.heatmap',
+      col: 13,
+      row: 3,
+      // Independent columns by name, so the natural-order helper is in the goldens for the
+      // helper probes to run.
+      params: { sortBy: 'label', sortAxis: 'columns', sortFollow: false, palette: 'mako' },
+    },
+    {
+      id: 'heatByRow',
+      type: 'out.heatmap',
+      col: 13,
+      row: 2,
+      params: {
+        sortBy: 'value',
+        sortKey: 'LC4',
+        sortAxis: 'columns',
+        sortReverse: true,
+        scale: 'diverging',
+        divergingPalette: 'RdBu',
+        showValues: true,
+      },
+    },
     {
       id: 'bar',
       type: 'out.barChart',
@@ -1157,6 +1194,9 @@ export function everythingGraph(): CodaGraph {
     ['stack', 'out', 'pivot', 'in'],
     ['pivot', 'matrix', 'norm', 'in'],
     ['norm', 'out', 'heat', 'in'],
+    ['pivot', 'matrix', 'heatClustered', 'in'],
+    ['pivot', 'matrix', 'heatByRow', 'in'],
+    ['pivot', 'matrix', 'heatByLabel', 'in'],
     ['pivot', 'table', 'table', 'in'],
     ['find', 'neurons', 'unpivot', 'in'],
     ['pivot', 'table', 'unpivotWide', 'in'],

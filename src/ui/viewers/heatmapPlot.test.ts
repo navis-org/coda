@@ -10,20 +10,30 @@
 import { describe, expect, it } from 'vitest'
 
 import { makeMatrix } from '../../core/values'
-import { sequentialColor } from '../colors'
+import { heatmapPaletteStops, sequentialColor } from '../colors'
+import { DIVERGING_PALETTE_OPTIONS, SEQUENTIAL_PALETTE_OPTIONS } from '../../nodes/lib/heatmapParams'
 import {
   HEATMAP_CELLS_WARN,
   axisMarks,
   RAMP_STEPS,
+  axisMap,
   buildHeatmapSpec,
   bucketOf,
   cellAt,
+  cellRect,
   colorDomain,
+  fullWindow,
+  isFullWindow,
   labelTicks,
   matrixExtent,
+  panWindow,
+  pointToMatrix,
   rampColors,
   valueMarks,
+  windowScale,
+  zoomWindow,
 } from './heatmapPlot'
+import type { HeatmapWindow } from './heatmapPlot'
 
 const BOX = { width: 400, height: 300 }
 
@@ -35,7 +45,12 @@ function spec(
   rows: number,
   cols: number,
   values: Float64Array,
-  over: Partial<{ scale: 'sequential' | 'diverging'; width: number; height: number }> = {},
+  over: Partial<{
+    scale: 'sequential' | 'diverging'
+    width: number
+    height: number
+    window: HeatmapWindow
+  }> = {},
 ) {
   const matrix = makeMatrix(names('r', rows), names('c', cols), values)
   return buildHeatmapSpec({
@@ -44,6 +59,7 @@ function spec(
     width: over.width ?? BOX.width,
     height: over.height ?? BOX.height,
     showLabels: true,
+    ...(over.window ? { window: over.window } : {}),
   })
 }
 
@@ -178,7 +194,7 @@ describe('the hit test', () => {
 
 describe('axis labels', () => {
   it('thins to a legible pitch and reports what it dropped', () => {
-    const { ticks, thinned } = labelTicks(names('r', 100), 200, 2, 0)
+    const { ticks, thinned } = labelTicks(names('r', 100), axisMap(100, 0, 200, 0, 100), 0, 200)
     expect(ticks.length).toBeLessThan(100)
     expect(thinned).toBe(100 - ticks.length)
     // Every k-th, so what is left is spread across the axis rather than clustered at one end.
@@ -188,9 +204,140 @@ describe('axis labels', () => {
   })
 
   it('drops nothing while they all fit', () => {
-    const { ticks, thinned } = labelTicks(names('r', 8), 160, 20, 5)
+    const { ticks, thinned } = labelTicks(names('r', 8), axisMap(8, 5, 160, 0, 8), 5, 160)
     expect(ticks).toHaveLength(8)
     expect(thinned).toBe(0)
+  })
+
+  it('un-thins as a zoom gives each line the pixels it needs', () => {
+    // 100 lines in 200px is every ninth label; ten of them in the same 200px is every label.
+    const zoomed = labelTicks(names('r', 100), axisMap(100, 0, 200, 40, 10), 0, 200)
+    expect(zoomed.ticks.map((t) => t.index)).toEqual([40, 41, 42, 43, 44, 45, 46, 47, 48, 49])
+    expect(zoomed.thinned).toBe(0)
+  })
+
+  it('names a line part way off the plot over the part that is on it', () => {
+    // Four lines in 400px, the window starting 0.4 of a line in: line 40 has 60px on screen and
+    // is named over those 60px, not at its own centre 10px above the plot.
+    const { ticks, thinned } = labelTicks(names('r', 100), axisMap(100, 0, 400, 40.4, 4), 0, 400)
+    expect(ticks[0]).toMatchObject({ index: 40, label: 'r40' })
+    expect(ticks[0]!.center).toBeCloseTo(30, 6)
+    expect(ticks.every((t) => t.center >= 0 && t.center <= 400)).toBe(true)
+    expect(thinned).toBe(0)
+  })
+
+  it('names every k-th interior line, whatever the rounding of its edges', () => {
+    // 95 lines over 700px: 7.37px each, every second one named. The interior lines' visible
+    // extent is their own pitch computed two ways, and an exact comparison lost 29 of 47.
+    const { ticks, thinned } = labelTicks(names('r', 401), axisMap(401, 0, 700, 150.3, 95), 0, 700)
+    const gaps = ticks.slice(1).map((t, i) => t.index - ticks[i]!.index)
+    expect(new Set(gaps)).toEqual(new Set([2]))
+    // Lines 150 and 245 are slivers (0.7 and 0.3 of a line on screen); of the 94 between them
+    // the even-indexed 47 are named and the other 47 are what the thinning dropped.
+    expect(ticks).toHaveLength(47)
+    expect(thinned).toBe(47)
+  })
+
+  it('keeps the same lines named across a pan', () => {
+    const before = labelTicks(names('r', 401), axisMap(401, 0, 700, 150.3, 95), 0, 700)
+    const after = labelTicks(names('r', 401), axisMap(401, 0, 700, 151.1, 95), 0, 700)
+    const shared = before.ticks.filter((t) => after.ticks.some((u) => u.index === t.index))
+    // Every line still on screen keeps its name; only the ones that scrolled off changed.
+    expect(shared.length).toBeGreaterThanOrEqual(before.ticks.length - 1)
+  })
+
+  it('leaves a sliver unnamed and does not count it as thinned', () => {
+    // 0.95 of a line in on a 20px pitch: line 40 has 1px on screen, less than a label's pitch,
+    // so it is not named — and not reported as a dropped label either, which at ×15 on three
+    // visible lines read as "labels thinned" over a plot showing every name it could.
+    const { ticks, thinned } = labelTicks(names('r', 100), axisMap(100, 0, 200, 40.95, 10), 0, 200)
+    expect(ticks[0]!.index).toBe(41)
+    expect(thinned).toBe(0)
+  })
+})
+
+describe('the window', () => {
+  const full = { row0: 0, col0: 0, rows: 100, cols: 50 }
+
+  it('zooms about the anchor and stays inside the matrix', () => {
+    const half = zoomWindow(full, full, { row: 50, col: 25 }, 0.5)
+    expect(half).toEqual({ row0: 25, col0: 12.5, rows: 50, cols: 25 })
+    // Anchored in a corner, the window cannot leave the matrix — it slides instead.
+    const corner = zoomWindow(full, full, { row: 0, col: 0 }, 0.5)
+    expect(corner).toEqual({ row0: 0, col0: 0, rows: 50, cols: 25 })
+    // Zooming out past the whole matrix is the whole matrix, which the viewer reads as "fit".
+    const out = zoomWindow(half, full, { row: 50, col: 25 }, 4)
+    expect(isFullWindow(out, full)).toBe(true)
+    expect(windowScale(half, full)).toBe(2)
+  })
+
+  it('will not zoom below one line', () => {
+    const tiny = zoomWindow(full, full, { row: 10, col: 10 }, 0.001)
+    expect(tiny.rows).toBe(1)
+    expect(tiny.cols).toBe(1)
+  })
+
+  it('pans, clamped', () => {
+    const half = { row0: 25, col0: 12.5, rows: 50, cols: 25 }
+    expect(panWindow(half, full, 10, -5)).toEqual({ row0: 35, col0: 7.5, rows: 50, cols: 25 })
+    expect(panWindow(half, full, 1000, -1000)).toEqual({ row0: 50, col0: 0, rows: 50, cols: 25 })
+  })
+
+  it('is what the fold reads: zoomed in, a folded matrix shows its real cells', () => {
+    const rows = 1_000
+    const cols = 1_000
+    const values = new Float64Array(rows * cols)
+    values[500 * cols + 500] = 40
+    values[501 * cols + 500] = 20
+    const fitted = spec(rows, cols, values)
+    expect(fitted.folded).toBe(true)
+
+    // Twenty lines each way around the strong cell: every visible cell gets its own pixels.
+    const window = { row0: 490.5, col0: 490.5, rows: 20, cols: 20 }
+    const zoomed = spec(rows, cols, values, { window })
+    expect(zoomed.folded).toBe(false)
+    expect(zoomed.foldFactor).toBe(1)
+    expect([zoomed.rowMap.first, zoomed.rowMap.visible]).toEqual([490, 21])
+    expect(zoomed.buckets.length).toBe(21 * 21)
+    // The grid starts half a line before the plot's edge — the painter clips.
+    expect(zoomed.colMap.origin).toBeLessThan(zoomed.plot.x)
+    expect(zoomed.plot.x - zoomed.colMap.origin).toBeCloseTo(zoomed.cellWidth / 2, 6)
+
+    // The strong cell is where the hit test and the ring agree it is, by matrix index.
+    const box = cellRect(zoomed, 500, 500)
+    const hit = cellAt(zoomed, box.x + box.width / 2, box.y + box.height / 2)
+    expect(hit).toEqual({ row: 500, col: 500, index: 500 * cols + 500 })
+    // …and both neighbours are distinct cells now, where the fit folded them into one block.
+    expect(cellAt(zoomed, box.x + box.width / 2, box.y + box.height * 1.5)?.row).toBe(501)
+    // The colour domain is the whole matrix's, not the window's: a zoom changes no colour.
+    expect(zoomed.domain).toEqual(fitted.domain)
+    expect(Math.max(...zoomed.buckets)).toBe(RAMP_STEPS - 1)
+  })
+
+  it('folds only the visible block when still past 1:1', () => {
+    const rows = 4_000
+    const cols = 4_000
+    const window = { row0: 1000, col0: 1000, rows: 2000, cols: 2000 }
+    const zoomed = spec(rows, cols, new Float64Array(rows * cols), { window })
+    expect(zoomed.folded).toBe(true)
+    expect(zoomed.rowMap.visible).toBe(2000)
+    expect(zoomed.foldFactor).toBeLessThan(spec(rows, cols, new Float64Array(rows * cols)).foldFactor)
+    // The last visible line lands in the last grid cell, never past it.
+    expect(cellRect(zoomed, 2999, 2999).x + zoomed.cellWidth).toBeLessThanOrEqual(
+      zoomed.plot.x + zoomed.plot.width + 1e-6,
+    )
+  })
+
+  it('maps a plot pixel back to a fractional matrix coordinate', () => {
+    const s = spec(10, 10, new Float64Array(100))
+    const centre = pointToMatrix(s, s.plot.x + s.plot.width / 2, s.plot.y + s.plot.height / 2)
+    expect(centre).toEqual({ row: 5, col: 5 })
+    expect(fullWindow(makeMatrix(['a'], ['b', 'c'], new Float64Array(2)))).toEqual({
+      row0: 0,
+      col0: 0,
+      rows: 1,
+      cols: 2,
+    })
   })
 })
 
@@ -256,6 +403,9 @@ describe('the chrome placements', () => {
     expect(rows.every((m) => m.baseline === 'central')).toBe(true)
     expect(cols.every((m) => m.baseline === undefined)).toBe(true)
     expect(cols.every((m) => m.transform?.startsWith('rotate(-90'))).toBe(true)
+    // Each gutter's labels clip to their own gutter; a printed value clips to the plot.
+    expect(rows.every((m) => m.zone === 'rows')).toBe(true)
+    expect(cols.every((m) => m.zone === 'cols')).toBe(true)
   })
 
   it("resolves a printed value's ink once, so the card and the file cannot disagree", () => {
@@ -266,5 +416,45 @@ describe('the chrome placements', () => {
     const marks = valueMarks({ ...s, labelsFit: true }, Float64Array.from([1, 2, 3, 4]), ramp)
     expect(marks).toHaveLength(4)
     expect(marks.every((m) => /^#[0-9a-f]{6}$/i.test(m.fill))).toBe(true)
+  })
+})
+
+describe('the published palettes', () => {
+  /*
+   * Transcribed by a script from the installed matplotlib and seaborn, so what a test can pin
+   * is the transcription's *shape* and the two facts a reader would check against a paper: the
+   * endpoints, and that the ramp is read low-to-high as published in both themes.
+   */
+  it('carries 64 stops for a continuous ramp and eleven anchors for a ColorBrewer set', () => {
+    for (const { value } of SEQUENTIAL_PALETTE_OPTIONS) {
+      if (value === 'coda') continue
+      expect(heatmapPaletteStops(value), value).toHaveLength(64)
+    }
+    for (const { value } of DIVERGING_PALETTE_OPTIONS) {
+      if (value === 'coda') continue
+      expect(heatmapPaletteStops(value), value).toHaveLength(11)
+    }
+  })
+
+  it('runs viridis from purple to yellow on both surfaces, unlike Coda’s own', () => {
+    for (const mode of ['light', 'dark'] as const) {
+      const ramp = rampColors('sequential', mode, RAMP_STEPS, 'viridis')
+      expect(ramp[0]).toBe('#440154')
+      expect(ramp[ramp.length - 1]).toBe('#fde725')
+    }
+    // Coda's flips with the theme; that is the whole reason it stays the default.
+    expect(rampColors('sequential', 'light')[0]).not.toBe(rampColors('sequential', 'dark')[0])
+  })
+
+  it('puts RdBu’s red at the negative end, as published', () => {
+    const ramp = rampColors('diverging', 'dark', RAMP_STEPS, 'RdBu')
+    expect(ramp[0]).toBe('#67001f')
+    expect(ramp[ramp.length - 1]).toBe('#053061')
+    expect(ramp[Math.floor(RAMP_STEPS / 2)]).toBe('#f7f7f7')
+  })
+
+  it('falls back to Coda’s ramp for a name from the other scale’s list', () => {
+    expect(rampColors('sequential', 'dark', 9, 'RdBu')).toEqual(rampColors('sequential', 'dark', 9))
+    expect(rampColors('diverging', 'dark', 9, 'viridis')).toEqual(rampColors('diverging', 'dark', 9))
   })
 })

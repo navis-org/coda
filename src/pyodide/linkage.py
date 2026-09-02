@@ -67,3 +67,79 @@ def coda_linkage_run(request, report=None):
         "count": int(Z.shape[0]),
         "order": order,
     }
+
+
+# ---------------------------------------------------------------------------
+# The Heatmap node's cluster order
+# ---------------------------------------------------------------------------
+
+
+def _pairwise(x, metric):
+    """Distances between the rows of ``x``, as an ``n x n`` array with a zero diagonal.
+
+    The three metrics ``scipy.spatial.distance.pdist`` is usually asked for by a clustermap,
+    written in numpy rather than imported, because scipy is not among the packages the bridge
+    loads and this file's whole point is that it costs nothing once numpy and the wheel are in.
+    Checked against ``pdist`` rather than assumed — see ``scripts/probe-heatmap-order.py``.
+
+    **A vector with nothing in it gets distance 1 under correlation and cosine** — scipy
+    answers ``NaN`` for a constant row and ``linkage`` then refuses the whole matrix. Here a
+    zero row is a neuron with no partners among these columns, which is not an error but a
+    thing with no profile to compare, so it is "unlike everything" and lands at the end of the
+    tree rather than taking the picture down. The Coda side counts and says so.
+    """
+    x = np.asarray(x, dtype=np.float64)
+    if metric == "correlation":
+        x = x - x.mean(axis=1, keepdims=True)
+    if metric in ("correlation", "cosine"):
+        norms = np.sqrt((x * x).sum(axis=1))
+        with np.errstate(divide="ignore", invalid="ignore"):
+            sim = (x @ x.T) / np.outer(norms, norms)
+        d = 1.0 - np.nan_to_num(sim, nan=0.0)
+        d = np.clip(d, 0.0, 2.0)
+    elif metric == "euclidean":
+        sq = (x * x).sum(axis=1)
+        d2 = sq[:, None] + sq[None, :] - 2.0 * (x @ x.T)
+        d = np.sqrt(np.maximum(d2, 0.0))
+    else:
+        raise ValueError(f"Unknown metric {metric!r}")
+    # Symmetric by construction up to rounding, but fastcore reads the upper triangle and the
+    # diagonal must be exactly zero for a self-distance rather than 1e-9 of one.
+    d = (d + d.T) / 2.0
+    np.fill_diagonal(d, 0.0)
+    return d
+
+
+def coda_cluster_order(request, report=None):
+    """Rows (or columns) of a matrix in hierarchical-clustering leaf order — a clustermap's axis.
+
+    Not ``coda_linkage_run`` with a different matrix. That one reads its input *as* the
+    distances, which is right for an NBLAST score matrix; this one reads each row as a vector
+    across the columns and clusters rows by the distance between those vectors, which is what
+    ``seaborn.clustermap`` does and what "sort a connectivity matrix by clustering" means.
+    ``axis == "columns"`` transposes first and is otherwise the same question.
+
+    Non-finite cells are read as zero before anything is measured — a cell nobody recorded is
+    not a partner — and the Coda side has already counted them.
+    """
+    req = request.to_py()
+    rows = int(req["rows"])
+    cols = int(req["cols"])
+    values = np.frombuffer(req["values"], dtype=np.float64).reshape(rows, cols)
+    x = values if str(req["axis"]) == "rows" else values.T
+    x = np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
+    n = x.shape[0]
+
+    if report is not None:
+        report(0.1, f"distances between {n} vectors")
+    d = _pairwise(x, str(req["metric"]))
+
+    if report is not None:
+        report(0.5, f"clustering {n} observations")
+    Z = fc.linkage(d, method=str(req["method"]), symmetry="none", transform="none")
+
+    if report is not None:
+        report(0.9, "leaf order")
+    # int32 for the reason `coda_linkage_run` casts: int64 crosses as a BigInt64Array.
+    order = np.ascontiguousarray(fc.leaf_order(Z), dtype=np.int32)
+    return {"order": order, "count": int(n)}

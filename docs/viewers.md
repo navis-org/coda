@@ -2540,15 +2540,107 @@ previous build, since jsdom performs no layout and nothing else here can see a t
   longer made.
 
 `buckets` is **mode-independent** by construction, so a theme flip re-resolves the ramp's hex and
-repaints rather than re-folding the matrix — and `cornersByBucket` is memoised against the spec in
+repaints rather than re-folding the matrix — and the derived form is memoised against the spec in
 a `WeakMap` (`rowFields.ts`'s `slotCache` idiom), so that repaint does not re-walk 900,000 grid
-cells to change nothing but 512 `fillStyle` strings. Measured, it took the four-million-cell
-repaint from 46 ms to 27 ms and made an export cost no third walk.
+cells to change nothing but the colours. Measured, it took the four-million-cell repaint from
+46 ms to 27 ms and made an export cost no third walk. Two caches now, keyed the same way and for
+the same reason: `cornersByBucket` for the SVG's batched paths, `gridImage` for the canvas's
+pixels — the latter keyed on the ramp as well, since a theme flip changes the ramp and not the
+spec.
 
 **`Show values` is applied at render, never in the fold.** It reached `buildHeatmapSpec` only to
 decide one boolean, which put it in the dependency list of a pass that walks every cell — so
 toggling it on a four-million-cell matrix re-scanned the whole thing to compute `false`.
 `labelsFit` is now the size test alone and the param is `&&`-ed in beside it.
+
+### Zoom is a window, and the window is the fold's input
+
+Wheel zooms about the pointer, a drag pans, double-click or ⤢ fits — the scatter's gestures,
+and off the canvas only, where the card is not a preview React Flow already zooms. What was
+decided is what the state *is*: a `HeatmapWindow` in **matrix units** (fractional rows and
+columns), handed to `buildHeatmapSpec` as the thing to fold. A zoomed heatmap is therefore not a
+scaled picture of the fitted one. The visible lines are folded onto the plot's pixels, so zooming
+in on a four-million-cell matrix folds *fewer* cells than the fit did, and past 1:1 the real
+cells appear with their own labels and printed values where the fit showed blocks. Scaling the
+canvas would have kept the fitted fold's blocks and enlarged them, a picture claiming detail it
+does not have — and the labels would have scaled with it, which is the one thing they must not
+do.
+
+**The labels never scale.** The gutters are fixed, and `labelTicks` re-thins for the pitch the
+zoom gives each line, so a 2,000-row matrix that showed every ninth name at fit shows every name
+at ×10. A line part way off the plot is named over the part that is on it — at ×15 a line's own
+centre can be in the next gutter, naming nothing anyone can see — and a line with less than a
+label's pitch on screen goes unnamed *and uncounted*: it is not a label the thinning dropped,
+and counting it had the caption say `labels thinned` over a plot showing every name it could.
+Both found in the browser, not in jsdom.
+
+Each axis is an `AxisMap` — which lines the grid covers, how many grid cells, the pitch, and the
+pixel the grid starts at, which sits *before* the plot's edge by the fraction of a line the
+window starts into. One mapping, `gridIndexOf`, serves the fold, the hover ring, the printed
+values and the hit test, so a zoomed cell cannot be drawn in one place and hovered in another.
+Both renderers clip to three zones (`TextMark.zone`): the cells and values to the plot, each
+gutter's labels to its own gutter — so a zoomed export is the zoomed card, clipped the same way.
+
+**The canvas is an image now, and the reason was measured rather than guessed.** On a 401 × 401
+matrix the first wheel step took 264 ms and the gesture only became usable below about a hundred
+visible lines. Marks around every JavaScript stage said spec 3 ms, chrome 0 ms, paint 8 ms — the
+time was nowhere the code could see. A 2D context records commands and rasterises them at the
+frame, so the 160,000 anti-aliased rectangle edges the bucket-batched paths asked for cost the
+*frame* ~250 ms that no measure around `fill()` includes. The fit paid it once; a zoom paid it
+per event. `drawHeatmap` now writes one pixel per grid cell into an `ImageData`, puts it on a
+scratch canvas of the grid's own size and blits it to the plot with smoothing off — nearest
+neighbour is exactly the picture the rectangles drew — with the 1px separator drawn over it as
+one line per grid line. Re-measured: 60 ms on the first step and the Playwright round-trip floor
+(~40 ms) on every step after, at every zoom. The SVG export keeps the paths: a raster in a vector
+file is the one thing it exists not to be. Wheel events are also coalesced to one update per
+animation frame, since a trackpad delivers them faster than frames.
+
+**Two label bugs the same browser run found, neither visible in jsdom.** Every k-th line was
+chosen by its distance from the *first visible* line, so a pan or a zoom re-picked which lines
+were named on every step — labels blinking under the pointer; it is now `index % step`, so a line
+keeps its name until it scrolls off. And the sliver test compared a line's visible extent with
+`min(line, pitch)` exactly, which for an interior line is one number computed two ways: rounding
+dropped 29 of 47 row labels in a pattern that changed per step. A tolerance of 1e-6 fixed it, and
+`heatmapPlot.test.ts` now asserts the named lines are evenly spaced.
+
+Two things were separated on purpose. The **colour domain is memoised apart from the window**,
+so a pan does not rescan the matrix and a zoom cannot change what a colour means — the domain is
+the whole matrix's and is handed in. And the window is in matrix units so a **resize keeps the
+zoom** where a pixel viewport would keep the pixels; a new matrix, on the other hand, gets a new
+frame, since a zoom framed on one result says nothing about the next. Driven in a real browser
+on the 34 × 34 demo Adjacency: ×15 in six wheel steps, a drag that panned, ⤢ that fitted, no
+console errors.
+
+### The palettes are transcribed, and the stop count was measured
+
+Beside Coda's own two ramps the heatmap offers matplotlib's and seaborn's — viridis, magma,
+inferno, plasma, cividis, rocket, mako, and the ColorBrewer diverging sets RdBu, PuOr, BrBG. The
+categorical `PALETTES` rule applies unchanged: a published set is transcribed, never mixed, and
+here the transcription was done by a script against the installed packages rather than typed.
+
+**64 stops, not 256, and not 32.** The packages hold 256 entries per ramp; `sampleRamp`
+interpolates linearly between stops and the cells are quantised to `RAMP_STEPS` anyway, so the
+question was how few stops reproduce all 256 within the tolerance the lookup table is already
+held to. Measured, maximum channel error against the 256-entry table:
+
+| stops | viridis | magma | inferno | plasma | cividis | rocket | mako |
+| ----- | ------- | ----- | ------- | ------ | ------- | ------ | ---- |
+| 16    | 7       | 3     | 6       | 5      | 10      | 3      | 3    |
+| 32    | 2       | 2     | 2       | 3      | 6       | 1      | 1    |
+| 64    | 1       | 1     | 1       | 1      | 2       | 1      | 1    |
+
+So 64 is within two channel values everywhere — the same bound `RAMP_STEPS` clears for the
+diverging scale — and 32 is where cividis starts banding. The ColorBrewer sets are different:
+matplotlib holds exactly eleven anchors at 0, 0.1 … 1 and interpolates linearly between them,
+which `sampleRamp` does too, so storing the eleven **is** the colormap rather than a sampling of
+it. `heatmapPlot.test.ts` pins the shape (64 and 11) and the endpoints.
+
+**Not flipped with the theme.** Coda's own ramp reverses so "nothing here" recedes into whichever
+surface it is on; the published ones run as published, dark end low, on both — which is how every
+reader has seen them in a paper, and what makes `cmap='viridis'` in the exported notebook the
+picture on the card. On the light surface a low cell is therefore dark, exactly as in matplotlib
+on white. RdBu keeps red at the negative end for the same reason; somebody who wants blue there
+has Coda's pair.
 
 ### The export
 

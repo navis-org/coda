@@ -39,12 +39,31 @@
  *
  * The *winning cell's index* is kept too, so a tooltip over a folded block names a real row,
  * column and value rather than an average of things nobody can point at.
+ *
+ * ## Zoom is a window, and the window is the fold's input
+ *
+ * A zoomed heatmap is not a scaled picture of the fitted one. `HeatmapWindow` says which part
+ * of the matrix is on screen, in fractional rows and columns, and the spec is built for that
+ * part alone: the visible lines are folded onto the plot's pixels, so zooming *in* on a
+ * four-million-cell matrix folds fewer cells, not more, and past 1:1 the real cells appear with
+ * their own labels and printed values. Scaling a canvas would have kept the fitted fold's blocks
+ * and enlarged them — a picture claiming detail it does not have — and the labels would have
+ * scaled with it, which is the one thing they must not do. The window is in matrix units rather
+ * than pixels so a resize keeps the zoom rather than the pixels.
+ *
+ * Each axis is an `AxisMap`: which lines the grid covers, how many grid cells, the pitch, and
+ * the pixel the grid starts at — *before* the plot's edge when the window starts mid-cell, with
+ * the painter and the overlay clipping to the plot. One mapping (`gridIndexOf`) serves the
+ * fold, the hover ring, the printed values and the hit test, so a zoomed cell cannot be drawn
+ * in one place and hovered in another.
  */
 
 import type { MatrixValue } from '../../core/values'
 import { formatCompact, labelStep, truncateLabel } from '../format'
 import type { Mode } from '../colors'
-import { divergingColor, inkOn, sequentialColor } from '../colors'
+import { heatmapDivergingColor, heatmapSequentialColor, inkOn } from '../colors'
+import type { HeatmapPalette } from '../../nodes/lib/heatmapParams'
+import { isDivergingPalette, isSequentialPalette } from '../../nodes/lib/heatmapParams'
 
 /**
  * How many cells this viewer will fold, above which it says so instead.
@@ -61,8 +80,8 @@ import { divergingColor, inkOn, sequentialColor } from '../colors'
  * | 4,000,000 |   661x1358 | 4:1  | 23ms  | 41ms  | 27ms    |
  *
  * So the ceiling costs about 65 ms of one frame the first time it is laid out, and half that to
- * repaint — a theme flip, a scale change — because `cornersByBucket` is memoised against the
- * spec. On a resize and never on a hover, which is a stutter somebody notices once against a
+ * repaint — a theme flip, a scale change — because the grid's pixels are memoised against the
+ * spec (`gridImage` in `heatmapDraw.ts`). On a resize and never on a hover, which is a stutter somebody notices once against a
  * viewer that used to refuse the second row of that table outright. Note what the middle column
  * says: paint tracks the *grid* rather than the matrix, which is the whole design.
  *
@@ -149,14 +168,57 @@ export interface ColorDomain {
   neutral: number
 }
 
+/**
+ * The part of the matrix on screen, in fractional rows and columns.
+ *
+ * `row0`/`col0` is the top-left corner and `rows`/`cols` the span; the whole matrix is
+ * `fullWindow`. Fractional, because a zoom about the pointer lands wherever the pointer was and
+ * a pan moves by pixels — snapping to whole cells would make both gestures lurch.
+ */
+export interface HeatmapWindow {
+  row0: number
+  col0: number
+  rows: number
+  cols: number
+}
+
+/**
+ * One axis of the drawn grid: which matrix lines it covers and where they land in pixels.
+ *
+ * `folded` says whether a grid cell is one line or many. Unfolded, `pitch` is the pixels per
+ * matrix line and `origin` may sit before the plot's edge by the fraction of a line the window
+ * starts into; folded, the grid is one cell per pixel of the plot and `origin` is the plot's
+ * edge. `start`/`span` restate the window along this axis, for the proportional mapping.
+ */
+export interface AxisMap {
+  /** First matrix index the grid covers. */
+  first: number
+  /** How many matrix lines the grid covers, from `first`. */
+  visible: number
+  /** Grid cells along this axis. */
+  count: number
+  /** Pixels per grid cell. */
+  pitch: number
+  /** Pixel position of grid cell 0's leading edge. */
+  origin: number
+  folded: boolean
+  start: number
+  span: number
+}
+
 export interface HeatmapSpec {
   rows: number
   cols: number
   /** The plot rect, inside the label gutters, in CSS pixels. */
   plot: Rect
-  /** Columns and rows of the *drawn* grid — at most one per CSS pixel of the plot. */
+  /** What is on screen, clamped to the matrix. `fullWindow(matrix)` when nothing is zoomed. */
+  window: HeatmapWindow
+  rowMap: AxisMap
+  colMap: AxisMap
+  /** Columns and rows of the *drawn* grid — `colMap.count` and `rowMap.count`, restated. */
   gridCols: number
   gridRows: number
+  /** `colMap.pitch` and `rowMap.pitch`, restated. */
   cellWidth: number
   cellHeight: number
   /**
@@ -174,12 +236,12 @@ export interface HeatmapSpec {
   buckets: Int16Array
   /**
    * Index into `matrix.values` of the cell each grid cell is showing. Absent when the grid *is*
-   * the matrix, where it would be the identity.
+   * the visible block of the matrix, where it would be `(first + gy) * cols + first + gx`.
    */
   source?: Int32Array
-  /** True when more than one cell landed on a grid cell. */
+  /** True when more than one cell landed on a grid cell, on either axis. */
   folded: boolean
-  /** Cells per grid cell, for the caption's admission. 1 when nothing was folded. */
+  /** Visible cells per grid cell, for the caption's admission. 1 when nothing was folded. */
   foldFactor: number
   domain: ColorDomain
   rowTicks: LabelTick[]
@@ -238,6 +300,131 @@ export function bucketOf(value: number, domain: ColorDomain): number {
   return Math.round(normalize(value, domain) * (RAMP_STEPS - 1))
 }
 
+// ---------------------------------------------------------------------------
+// The window
+// ---------------------------------------------------------------------------
+
+/** The smallest span a zoom may reach on either axis: one line filling the plot. */
+const MIN_SPAN = 1
+
+export function fullWindow(matrix: Pick<MatrixValue, 'rowLabels' | 'colLabels'>): HeatmapWindow {
+  return { row0: 0, col0: 0, rows: matrix.rowLabels.length, cols: matrix.colLabels.length }
+}
+
+/** Whether a window shows everything — the state the viewer stores as "not zoomed". */
+export function isFullWindow(window: HeatmapWindow, full: HeatmapWindow): boolean {
+  return window.rows >= full.rows && window.cols >= full.cols
+}
+
+/** How far in, as the caption says it: the larger of the two axes' magnifications. */
+export function windowScale(window: HeatmapWindow, full: HeatmapWindow): number {
+  return Math.max(full.rows / Math.max(MIN_SPAN, window.rows), full.cols / Math.max(MIN_SPAN, window.cols))
+}
+
+/** Keep a window inside the matrix and above the one-line floor, on both axes. */
+export function clampWindow(window: HeatmapWindow, full: HeatmapWindow): HeatmapWindow {
+  const rows = Math.min(full.rows, Math.max(MIN_SPAN, window.rows))
+  const cols = Math.min(full.cols, Math.max(MIN_SPAN, window.cols))
+  return {
+    rows,
+    cols,
+    row0: Math.min(Math.max(0, window.row0), Math.max(0, full.rows - rows)),
+    col0: Math.min(Math.max(0, window.col0), Math.max(0, full.cols - cols)),
+  }
+}
+
+/**
+ * Zoom about a point of the matrix — the one that must not move — by a factor, where above 1
+ * zooms out. Both axes together: a heatmap's cells are not square, but its *magnification* is
+ * one number, and stretching an axis alone would make a block read as a different shape.
+ */
+export function zoomWindow(
+  window: HeatmapWindow,
+  full: HeatmapWindow,
+  anchor: { row: number; col: number },
+  factor: number,
+): HeatmapWindow {
+  return clampWindow(
+    {
+      rows: window.rows * factor,
+      cols: window.cols * factor,
+      row0: anchor.row - (anchor.row - window.row0) * factor,
+      col0: anchor.col - (anchor.col - window.col0) * factor,
+    },
+    full,
+  )
+}
+
+/** Move by some rows and columns, staying inside the matrix. */
+export function panWindow(
+  window: HeatmapWindow,
+  full: HeatmapWindow,
+  rows: number,
+  cols: number,
+): HeatmapWindow {
+  return clampWindow({ ...window, row0: window.row0 + rows, col0: window.col0 + cols }, full)
+}
+
+/** The matrix coordinate under a plot pixel, fractional and unclamped. */
+export function pointToMatrix(spec: HeatmapSpec, x: number, y: number): { row: number; col: number } {
+  const { plot, window } = spec
+  return {
+    row: window.row0 + ((y - plot.y) / Math.max(1, plot.height)) * window.rows,
+    col: window.col0 + ((x - plot.x) / Math.max(1, plot.width)) * window.cols,
+  }
+}
+
+/**
+ * One axis of the grid for a window along it.
+ *
+ * Unfolded while the visible lines each have a pixel: then the pitch is the pixels per line and
+ * the origin steps back before the plot's edge by the fraction of a line the window starts into.
+ * Folded otherwise, at one grid cell per pixel, with the proportional mapping `gridIndexOf`
+ * applies.
+ */
+export function axisMap(
+  total: number,
+  plotStart: number,
+  plotSize: number,
+  start: number,
+  span: number,
+): AxisMap {
+  const first = Math.max(0, Math.min(total, Math.floor(start)))
+  const last = Math.max(first, Math.min(total, Math.ceil(start + span)))
+  const visible = last - first
+  const pixels = Math.max(1, Math.floor(plotSize) || 1)
+  if (visible <= pixels) {
+    const pitch = plotSize / Math.max(MIN_SPAN, span)
+    return {
+      first,
+      visible,
+      count: Math.max(1, visible),
+      pitch,
+      origin: plotStart - (start - first) * pitch,
+      folded: false,
+      start,
+      span,
+    }
+  }
+  return {
+    first,
+    visible,
+    count: pixels,
+    pitch: plotSize / pixels,
+    origin: plotStart,
+    folded: true,
+    start,
+    span,
+  }
+}
+
+/** Which grid cell a matrix line lands in — the one mapping the fold, the ring and the hit test share. */
+export function gridIndexOf(map: AxisMap, index: number): number {
+  if (!map.folded) return index - map.first
+  const g = Math.floor(((index - map.start) * map.count) / Math.max(MIN_SPAN, map.span))
+  return Math.min(map.count - 1, Math.max(0, g))
+}
+
 /**
  * The ramp, resolved to hex.
  *
@@ -245,10 +432,21 @@ export function bucketOf(value: number, domain: ColorDomain): number {
  * describe a scale the cells are not drawn in — the two were separate samplings of the same
  * ramp before, which is exactly how that drifts.
  */
-export function rampColors(scale: HeatmapScale, mode: Mode, steps = RAMP_STEPS): string[] {
+export function rampColors(
+  scale: HeatmapScale,
+  mode: Mode,
+  steps = RAMP_STEPS,
+  palette: HeatmapPalette = 'coda',
+): string[] {
+  // A name from the other scale's list is not an error, just not an answer: Coda's own ramp
+  // stands in, which is also what `heatmapPaletteOf` hands a caller reading the params.
+  const sequential = isSequentialPalette(palette) ? palette : 'coda'
+  const diverging = isDivergingPalette(palette) ? palette : 'coda'
   return Array.from({ length: steps }, (_, i) => {
     const t = steps === 1 ? 0 : i / (steps - 1)
-    return scale === 'diverging' ? divergingColor(t * 2 - 1, mode) : sequentialColor(t, mode)
+    return scale === 'diverging'
+      ? heatmapDivergingColor(t * 2 - 1, mode, diverging)
+      : heatmapSequentialColor(t, mode, sequential)
   })
 }
 
@@ -287,17 +485,42 @@ function plotRect(
  */
 export function labelTicks(
   labels: string[],
-  room: number,
-  cellSize: number,
-  origin: number,
+  axis: AxisMap,
+  plotStart: number,
+  plotSize: number,
 ): { ticks: LabelTick[]; thinned: number } {
-  if (labels.length === 0 || cellSize <= 0) return { ticks: [], thinned: 0 }
-  const step = labelStep(labels.length, room, LABEL_PITCH)
+  if (axis.visible === 0 || plotSize <= 0) return { ticks: [], thinned: 0 }
+  // Pixels per *line*, which on a folded axis is less than a pixel and on an unfolded one is
+  // the pitch — the window decides, not the grid.
+  const line = plotSize / Math.max(MIN_SPAN, axis.span)
+  const origin = plotStart - (axis.start - axis.first) * line
+  const plotEnd = plotStart + plotSize
+  const step = labelStep(axis.visible, plotSize, LABEL_PITCH)
   const ticks: LabelTick[] = []
-  for (let i = 0; i < labels.length; i += step) {
-    ticks.push({ index: i, label: labels[i]!, center: origin + (i + 0.5) * cellSize })
+  let nameable = 0
+  const end = axis.first + axis.visible
+  for (let i = axis.first; i < end; i++) {
+    /*
+     * Zoomed, the first and last lines are usually part way off the plot. A label sits over
+     * the *visible* part of its line rather than the line's own centre — which at ×15 can be
+     * in the next gutter, naming nothing anyone can see — and a line with less than a label's
+     * pitch on screen is a sliver whose name would collide with its neighbour's, so it goes
+     * unnamed and uncounted: it is not a label the thinning dropped.
+     */
+    const from = Math.max(plotStart, origin + (i - axis.first) * line)
+    const to = Math.min(plotEnd, origin + (i - axis.first + 1) * line)
+    // With a tolerance: for an interior line `to - from` and `line` are one number computed
+    // two ways, and comparing them exactly dropped lines at random — 18 row labels of 47 on a
+    // 401-line matrix, in a pattern that changed with every step of the wheel.
+    if (to - from + 1e-6 < Math.min(line, LABEL_PITCH)) continue
+    nameable++
+    // Every k-th line by its *own* index, not by its distance from the first visible one: a
+    // pan or a zoom moves `first` continuously, and a modulus taken from it re-picked which
+    // lines were named on every step — labels blinking in and out under the pointer.
+    if (i % step !== 0) continue
+    ticks.push({ index: i, label: labels[i]!, center: (from + to) / 2 })
   }
-  return { ticks, thinned: labels.length - ticks.length }
+  return { ticks, thinned: nameable - ticks.length }
 }
 
 export interface HeatmapSpecOptions {
@@ -307,6 +530,15 @@ export interface HeatmapSpecOptions {
   height: number
   /** Hide the gutters entirely — a card too narrow to spend width on names. */
   showLabels: boolean
+  /** What is on screen. Absent means all of it. */
+  window?: HeatmapWindow
+  /**
+   * The colour range, when the caller already has it. The extent is one walk of every cell
+   * and does not depend on the window, so a viewer that pans keeps it in a memo of its own
+   * rather than rescanning four million cells per pointer step — and a zoom must not change
+   * what a colour means, which is what handing it in guarantees.
+   */
+  domain?: ColorDomain
 }
 
 /**
@@ -322,34 +554,40 @@ export function buildHeatmapSpec(options: HeatmapSpecOptions): HeatmapSpec {
   const cols = matrix.colLabels.length
   const plot = plotRect(options.width, options.height, matrix, options.showLabels)
 
-  const extent = matrixExtent(matrix.values)
-  const domain = colorDomain(extent, scale)
+  const full = fullWindow(matrix)
+  const window = clampWindow(options.window ?? full, full)
+  const domain = options.domain ?? colorDomain(matrixExtent(matrix.values), scale)
 
   // At most one grid cell per CSS pixel. Anything finer cannot be seen, and drawing it is the
-  // whole of what the old ceiling was protecting against.
-  const gridCols = Math.max(1, Math.min(cols, Math.floor(plot.width) || 1))
-  const gridRows = Math.max(1, Math.min(rows, Math.floor(plot.height) || 1))
-  const folded = gridCols < cols || gridRows < rows
+  // whole of what the old ceiling was protecting against. Per axis, over the window.
+  const rowMap = axisMap(rows, plot.y, plot.height, window.row0, window.rows)
+  const colMap = axisMap(cols, plot.x, plot.width, window.col0, window.cols)
+  const gridCols = colMap.count
+  const gridRows = rowMap.count
+  const folded = rowMap.folded || colMap.folded
 
-  const cellWidth = plot.width / gridCols
-  const cellHeight = plot.height / gridRows
+  const cellWidth = colMap.pitch
+  const cellHeight = rowMap.pitch
   const gap = cellWidth > 6 && cellHeight > 6 ? 1 : 0
 
   const { buckets, source } = folded
-    ? foldCells(matrix, domain, rows, cols, gridRows, gridCols)
-    : { buckets: bucketsOf(matrix.values, domain), source: undefined }
+    ? foldCells(matrix, domain, rowMap, colMap)
+    : { buckets: bucketsOf(matrix, domain, rowMap, colMap), source: undefined }
 
   const rowAxis = options.showLabels
-    ? labelTicks(matrix.rowLabels, plot.height, plot.height / rows, plot.y)
+    ? labelTicks(matrix.rowLabels, rowMap, plot.y, plot.height)
     : { ticks: [], thinned: 0 }
   const colAxis = options.showLabels
-    ? labelTicks(matrix.colLabels, plot.width, plot.width / cols, plot.x)
+    ? labelTicks(matrix.colLabels, colMap, plot.x, plot.width)
     : { ticks: [], thinned: 0 }
 
   return {
     rows,
     cols,
     plot,
+    window,
+    rowMap,
+    colMap,
     gridCols,
     gridRows,
     cellWidth,
@@ -358,7 +596,10 @@ export function buildHeatmapSpec(options: HeatmapSpecOptions): HeatmapSpec {
     buckets,
     ...(source ? { source } : {}),
     folded,
-    foldFactor: Math.max(1, Math.round((rows * cols) / (gridRows * gridCols))),
+    foldFactor: Math.max(
+      1,
+      Math.round((rowMap.visible * colMap.visible) / Math.max(1, gridRows * gridCols)),
+    ),
     domain,
     rowTicks: rowAxis.ticks,
     colTicks: colAxis.ticks,
@@ -370,7 +611,8 @@ export function buildHeatmapSpec(options: HeatmapSpecOptions): HeatmapSpec {
      * dependency list of a pass that walks every cell, so toggling it on a four-million-cell
      * matrix re-scanned the whole thing to compute `false`.
      */
-    labelsFit: cellHeight >= 14 && cellWidth >= 26 && rows * cols <= 400,
+    labelsFit:
+      !folded && cellHeight >= 14 && cellWidth >= 26 && rowMap.visible * colMap.visible <= 400,
   }
 }
 
@@ -390,13 +632,24 @@ function bucketScale(domain: ColorDomain): (value: number) => number {
   }
 }
 
-/** One bucket per cell, for a grid that *is* the matrix. */
-function bucketsOf(values: Float64Array, domain: ColorDomain): Int16Array {
-  const buckets = new Int16Array(values.length)
+/** One bucket per cell, for a grid that *is* the visible block of the matrix. */
+function bucketsOf(
+  matrix: MatrixValue,
+  domain: ColorDomain,
+  rowMap: AxisMap,
+  colMap: AxisMap,
+): Int16Array {
+  const cols = matrix.colLabels.length
+  const buckets = new Int16Array(rowMap.count * colMap.count).fill(-1)
   const bucket = bucketScale(domain)
-  for (let i = 0; i < values.length; i++) {
-    const v = values[i]!
-    buckets[i] = Number.isFinite(v) ? bucket(v) : -1
+  const values = matrix.values
+  for (let gy = 0; gy < rowMap.visible; gy++) {
+    const from = (rowMap.first + gy) * cols + colMap.first
+    const to = gy * colMap.count
+    for (let gx = 0; gx < colMap.visible; gx++) {
+      const v = values[from + gx]!
+      buckets[to + gx] = Number.isFinite(v) ? bucket(v) : -1
+    }
   }
   return buckets
 }
@@ -411,12 +664,12 @@ function bucketsOf(values: Float64Array, domain: ColorDomain): Int16Array {
 function foldCells(
   matrix: MatrixValue,
   domain: ColorDomain,
-  rows: number,
-  cols: number,
-  gridRows: number,
-  gridCols: number,
+  rowMap: AxisMap,
+  colMap: AxisMap,
 ): { buckets: Int16Array; source: Int32Array } {
-  const size = gridRows * gridCols
+  const cols = matrix.colLabels.length
+  const gridCols = colMap.count
+  const size = rowMap.count * gridCols
   const buckets = new Int16Array(size).fill(-1)
   const source = new Int32Array(size).fill(-1)
   const strength = new Float64Array(size).fill(Number.NEGATIVE_INFINITY)
@@ -424,20 +677,21 @@ function foldCells(
   const { neutral } = domain
   const bucket = bucketScale(domain)
 
-  // Row and column mappings are hoisted: `Math.floor(c * gridCols / cols)` inside the inner
-  // loop is one multiply and one floor per cell, which at four million cells is the pass.
-  const colOf = new Int32Array(cols)
-  for (let c = 0; c < cols; c++)
-    colOf[c] = Math.min(gridCols - 1, Math.floor((c * gridCols) / cols))
+  // The column mapping is hoisted: `gridIndexOf` inside the inner loop is a multiply, a divide
+  // and a floor per cell, which at four million cells is the pass. Only the visible block is
+  // walked, which is what makes zooming in cheaper than the fit rather than dearer.
+  const colOf = new Int32Array(colMap.visible)
+  for (let i = 0; i < colMap.visible; i++) colOf[i] = gridIndexOf(colMap, colMap.first + i)
 
-  for (let r = 0; r < rows; r++) {
-    const gr = Math.min(gridRows - 1, Math.floor((r * gridRows) / rows))
-    const gridRowStart = gr * gridCols
+  const rowEnd = rowMap.first + rowMap.visible
+  for (let r = rowMap.first; r < rowEnd; r++) {
+    const gridRowStart = gridIndexOf(rowMap, r) * gridCols
     const rowStart = r * cols
-    for (let c = 0; c < cols; c++) {
+    for (let i = 0; i < colMap.visible; i++) {
+      const c = colMap.first + i
       const v = values[rowStart + c]!
       if (!Number.isFinite(v)) continue
-      const g = gridRowStart + colOf[c]!
+      const g = gridRowStart + colOf[i]!
       const s = Math.abs(v - neutral)
       if (s <= strength[g]!) continue
       strength[g] = s
@@ -469,10 +723,13 @@ export function cellAt(spec: HeatmapSpec, x: number, y: number): CellHit | null 
   if (x < plot.x || y < plot.y || x >= plot.x + plot.width || y >= plot.y + plot.height) {
     return null
   }
-  const gx = Math.min(spec.gridCols - 1, Math.floor((x - plot.x) / spec.cellWidth))
-  const gy = Math.min(spec.gridRows - 1, Math.floor((y - plot.y) / spec.cellHeight))
+  const gx = Math.floor((x - spec.colMap.origin) / spec.cellWidth)
+  const gy = Math.floor((y - spec.rowMap.origin) / spec.cellHeight)
+  if (gx < 0 || gy < 0 || gx >= spec.gridCols || gy >= spec.gridRows) return null
   const g = gy * spec.gridCols + gx
-  const index = spec.source ? spec.source[g]! : g
+  const index = spec.source
+    ? spec.source[g]!
+    : (spec.rowMap.first + gy) * spec.cols + spec.colMap.first + gx
   if (index < 0 || index >= spec.rows * spec.cols) return null
   return { row: Math.floor(index / spec.cols), col: index % spec.cols, index }
 }
@@ -498,11 +755,11 @@ export function drawnCellSize(spec: HeatmapSpec): { width: number; height: numbe
  * *block* that is outlined rather than the cell, because the block is what is on screen.
  */
 export function cellRect(spec: HeatmapSpec, row: number, col: number): Rect {
-  const gx = Math.min(spec.gridCols - 1, Math.floor((col * spec.gridCols) / spec.cols))
-  const gy = Math.min(spec.gridRows - 1, Math.floor((row * spec.gridRows) / spec.rows))
+  const gx = gridIndexOf(spec.colMap, col)
+  const gy = gridIndexOf(spec.rowMap, row)
   return {
-    x: spec.plot.x + gx * spec.cellWidth,
-    y: spec.plot.y + gy * spec.cellHeight,
+    x: spec.colMap.origin + gx * spec.cellWidth,
+    y: spec.rowMap.origin + gy * spec.cellHeight,
     ...drawnCellSize(spec),
   }
 }
@@ -537,10 +794,33 @@ export interface TextMark {
   baseline?: 'central'
   /** Composed here rather than in each renderer, so the two cannot rotate differently. */
   transform?: string
+  /**
+   * Which region clips it: the row gutter, the column gutter or the plot. Zoomed, a line half
+   * scrolled off the plot has its value and its ring clipped with its cells, and a gutter's
+   * labels never cross into the other gutter's corner. Both renderers clip by this.
+   */
+  zone: 'rows' | 'cols' | 'plot'
 }
 
 const AXIS_FONT = 10
 const VALUE_FONT = 9.5
+
+/**
+ * The three regions a mark is clipped to: the plot, the row gutter beside it and the column
+ * gutter above it.
+ *
+ * Here rather than in the painter because it is `plotRect` arithmetic and nothing else, and
+ * because both back-ends clip by it — the overlay as `<clipPath>` elements and the export as
+ * the same, so a zoomed file is the zoomed card.
+ */
+export function clipZones(spec: HeatmapSpec): Record<TextMark['zone'], Rect> {
+  const { plot } = spec
+  return {
+    plot: { x: plot.x, y: plot.y, width: plot.width, height: plot.height },
+    rows: { x: 0, y: plot.y, width: plot.x, height: plot.height },
+    cols: { x: plot.x, y: 0, width: plot.width, height: plot.y },
+  }
+}
 
 /** The row and column names, truncated to their gutters and thinned to what fits. */
 export function axisMarks(spec: HeatmapSpec, ink: string): TextMark[] {
@@ -555,6 +835,7 @@ export function axisMarks(spec: HeatmapSpec, ink: string): TextMark[] {
       size: AXIS_FONT,
       anchor: 'end',
       baseline: 'central',
+      zone: 'rows',
     })
   }
   for (const tick of spec.colTicks) {
@@ -570,6 +851,7 @@ export function axisMarks(spec: HeatmapSpec, ink: string): TextMark[] {
       anchor: 'start',
       // Rotated so long type names do not collide; -90 keeps reading order.
       transform: `rotate(-90 ${round(x)} ${round(y)})`,
+      zone: 'cols',
     })
   }
   return marks
@@ -579,8 +861,8 @@ export function axisMarks(spec: HeatmapSpec, ink: string): TextMark[] {
  * The value printed inside each cell, where the cells are big enough to carry one.
  *
  * Zero is skipped rather than printed: a "0" in every empty pair is chart noise. `labelsFit`
- * already implies an unfolded grid — it caps at 400 cells on cells of at least 26x14 px — so
- * the matrix's own stride indexes the buckets.
+ * already implies an unfolded grid — it caps at 400 visible cells of at least 26x14 px — so
+ * the grid's stride indexes the buckets and the maps say which matrix cell each one is.
  */
 export function valueMarks(
   spec: HeatmapSpec,
@@ -589,11 +871,13 @@ export function valueMarks(
 ): TextMark[] {
   if (!spec.labelsFit) return []
   const marks: TextMark[] = []
-  for (let r = 0; r < spec.rows; r++) {
-    for (let c = 0; c < spec.cols; c++) {
+  for (let gy = 0; gy < spec.rowMap.visible; gy++) {
+    const r = spec.rowMap.first + gy
+    for (let gx = 0; gx < spec.colMap.visible; gx++) {
+      const c = spec.colMap.first + gx
       const value = values[r * spec.cols + c]
       if (value === undefined || !Number.isFinite(value) || value === 0) continue
-      const bucket = spec.buckets[r * spec.cols + c] ?? 0
+      const bucket = spec.buckets[gy * spec.gridCols + gx] ?? 0
       const box = cellRect(spec, r, c)
       marks.push({
         key: `v-${r}-${c}`,
@@ -605,6 +889,7 @@ export function valueMarks(
         size: VALUE_FONT,
         anchor: 'middle',
         baseline: 'central',
+        zone: 'plot',
       })
     }
   }

@@ -13,8 +13,13 @@ import {
   readSizeSpec,
 } from '../../../nodes/lib/encodingParams'
 import { decodeClauses, resolveFilters, usesRegex } from '../../../nodes/lib/tableFilter'
+import { heatmapPaletteOf } from '../../../nodes/lib/heatmapParams'
+import type { MatrixAxis } from '../../../nodes/lib/matrixOrder'
+import { orderPlan, readOrderOptions } from '../../../nodes/lib/matrixOrder'
 import { rCol as col, rStr, rVector } from '../r'
+import { R_METHODS } from './analysis'
 import { registerEmitter } from '../registry'
+import type { Emitter } from '../types'
 import { decodeRanges } from '../../../nodes/lib/chartSelection'
 import { selectionIds, selectionLabels } from './common'
 import { filterPredicates } from './tableFilters'
@@ -125,30 +130,159 @@ registerEmitter('out.heatmap', (ctx) => {
   ctx.library('tidyr')
   ctx.library('dplyr')
   const out = ctx.output('out')
-  const scale = String(ctx.params.scale ?? '')
+  const diverging = ctx.params.scale === 'diverging'
+  const palette = heatmapPaletteOf(ctx.params)
 
-  const lines = [`${out} <- ${src}`]
-  if (scale === 'log') {
+  const lines = [`${out} <- as.matrix(${src})`, ...heatmapOrderLines(ctx, out)]
+
+  /*
+   * The fill scale, named for the palette rather than substituted: viridisLite spells the
+   * seven continuous ramps exactly as matplotlib does, and the ColorBrewer sets are what
+   * `scale_fill_distiller` reads — `direction = 1` keeps their published orientation, red at
+   * the negative end of RdBu. Coda's own two have no name here, so the nearest published one
+   * stands in, and for the diverging pair that is RdBu the other way round.
+   */
+  const fill = diverging
+    ? palette === 'coda'
+      ? `scale_fill_distiller(palette = "RdBu", direction = -1, limits = c(-lim_, lim_))`
+      : `scale_fill_distiller(palette = ${rStr(palette)}, direction = 1, limits = c(-lim_, lim_))`
+    : palette === 'coda'
+      ? `scale_fill_distiller(palette = "Blues", direction = 1)`
+      : `scale_fill_viridis_c(option = ${rStr(palette)})`
+  if (palette === 'coda') {
     lines.push(
-      ...ctx.note('The node draws this on a log scale; the values themselves are unchanged.'),
+      ...ctx.note(
+        `Coda draws this in its own ${diverging ? 'blue–red' : 'blue'} ramp, which has no ` +
+          `name here; ${diverging ? 'RdBu reversed' : 'Blues'} is the nearest published one.`,
+      ),
     )
   }
+  if (diverging) {
+    // Symmetric about zero, which is what Coda's diverging scale does and ggplot's does not.
+    lines.push(`lim_ <- max(abs(${out}), na.rm = TRUE)`)
+  }
+
   // A matrix has to be melted before ggplot can draw it; `pheatmap` would take it directly but
-  // is another dependency for one node.
+  // is another dependency for one node. The factor levels are the matrix's own order, top row
+  // first — without them ggplot sorts both axes alphabetically and the Order tab is undone.
   lines.push(
     ``,
     `${out} |>`,
     `  as.data.frame() |>`,
     `  tibble::rownames_to_column("row") |>`,
     `  pivot_longer(-row, names_to = "column", values_to = "value") |>`,
-    `  ggplot(aes(column, row, fill = ${scale === 'log' ? 'log10(1 + value)' : 'value'})) +`,
+    `  mutate(`,
+    `    row = factor(row, levels = rev(rownames(${out}))),`,
+    `    column = factor(column, levels = colnames(${out}))`,
+    `  ) |>`,
+    `  ggplot(aes(column, row, fill = value)) +`,
     `  geom_tile() +`,
-    `  scale_fill_viridis_c(option = "rocket") +`,
+    `  ${fill} +`,
+    ...(ctx.params.showValues === true
+      ? [`  geom_text(aes(label = signif(value, 3)), size = 3) +`]
+      : []),
     `  theme_minimal() +`,
     `  theme(axis.text.x = element_text(angle = 45, hjust = 1))`,
   )
   return lines
 })
+
+/**
+ * The Order tab, as base R over the matrix: one label vector per sorted axis, the follower
+ * derived from the leader, then one subscript. `hclust`'s `$order` is `leaves_list` — checked
+ * for the Linkage node — and `R_METHODS` is the same spelling of the methods.
+ */
+function heatmapOrderLines(ctx: Parameters<Emitter>[0], out: string): string[] {
+  const order = readOrderOptions(ctx.params)
+  if (order.by === 'none') return []
+  const plan = orderPlan(order)
+  const lines: string[] = []
+  const chosen: Partial<Record<MatrixAxis, string>> = {}
+
+  for (const axis of plan.lead) {
+    const name = axis === 'rows' ? 'rows_' : 'cols_'
+    const labels = axis === 'rows' ? `rownames(${out})` : `colnames(${out})`
+    let expr: string | undefined
+    switch (order.by) {
+      case 'total':
+        expr = `names(sort(${axis === 'rows' ? 'rowSums' : 'colSums'}(${out}, na.rm = TRUE), decreasing = TRUE))`
+        break
+      case 'label':
+        ctx.helper('coda_natural_order')
+        expr = `${labels}[coda_natural_order(${labels})]`
+        break
+      case 'value':
+        if (!order.key) {
+          lines.push(
+            ...ctx.note(
+              `The ${axis} are to be ordered by one ${axis === 'rows' ? 'column' : 'row'} but ` +
+                `none is named, so they are left as they arrived.`,
+            ),
+          )
+          break
+        }
+        expr =
+          axis === 'rows'
+            ? `names(sort(${out}[, ${rStr(order.key)}], decreasing = TRUE))`
+            : `names(sort(${out}[${rStr(order.key)}, ], decreasing = TRUE))`
+        break
+      case 'cluster': {
+        if (lines.length === 0) {
+          lines.push(
+            ...ctx.note(
+              'The clustering is seaborn’s clustermap: each row a vector across the columns, ' +
+                'clustered by the distance between vectors. Coda reads an empty cell as 0 for ' +
+                'this, and puts a constant vector — no correlation, no cosine — at distance 1 ' +
+                'from everything rather than letting `cor`’s NA stop `hclust`.',
+            ),
+            `x_ <- ${out}`,
+            `x_[!is.finite(x_)] <- 0`,
+          )
+        }
+        const vectors = axis === 'rows' ? 'x_' : 't(x_)'
+        const method = R_METHODS[order.method] ?? 'average'
+        if (order.metric === 'euclidean') {
+          expr = `${labels}[hclust(dist(${vectors}), method = ${rStr(method)})$order]`
+          break
+        }
+        // A constant vector has no correlation and a zero vector no cosine: `cor` answers NA
+        // and `hclust` refuses the lot. Coda puts such a vector at distance 1 from everything —
+        // unlike everything, at the end of the tree — so the NA is written as 1 here too.
+        lines.push(
+          `d_ <- 1 - ${
+            order.metric === 'correlation'
+              ? `cor(t(${vectors}))`
+              : `tcrossprod(${vectors} / sqrt(rowSums(${vectors}^2)))`
+          }`,
+          `d_[!is.finite(d_)] <- 1`,
+          `diag(d_) <- 0`,
+        )
+        expr = `${labels}[hclust(as.dist(d_), method = ${rStr(method)})$order]`
+        break
+      }
+      default:
+        break
+    }
+    if (!expr) continue
+    lines.push(`${name} <- ${order.reverse ? `rev(${expr})` : expr}`)
+    chosen[axis] = name
+  }
+
+  if (plan.follower && plan.lead[0] && chosen[plan.lead[0]]) {
+    const lead = chosen[plan.lead[0]]!
+    const name = plan.follower === 'rows' ? 'rows_' : 'cols_'
+    const labels = plan.follower === 'rows' ? `rownames(${out})` : `colnames(${out})`
+    // The leader's labels in the leader's order, where the follower has them, then the rest
+    // as they were — `followOrder` in `matrixOrder.ts`.
+    lines.push(`${name} <- c(intersect(${lead}, ${labels}), setdiff(${labels}, ${lead}))`)
+    chosen[plan.follower] = name
+  }
+
+  if (chosen.rows || chosen.columns) {
+    lines.push(`${out} <- ${out}[${chosen.rows ?? ''}, ${chosen.columns ?? ''}, drop = FALSE]`)
+  }
+  return lines
+}
 
 registerEmitter('out.scatter', (ctx) => {
   const src = ctx.wired('in')

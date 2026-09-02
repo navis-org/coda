@@ -507,5 +507,20 @@ empty <- coda_endpoint_neurons(conn[0, ], 7)
 check("endpoints: an empty edge list is the seeds",
       identical(empty$neuronId, 7), paste(empty$neuronId, collapse = " "))
 
+# --- the heatmap's label order --------------------------------------------------------------
+# `coda_natural_order` mirrors `labelOrder` in `matrixOrder.ts` and the Python helper: LC4
+# before LC10, case ignored, an id that starts with digits first. The 18-digit case is the one
+# R would get wrong through `as.numeric`, which is why the helper zero-pads instead.
+labels <- c("LC10", "LC4", "DNp02", "lc9", "720575940621234567")
+got <- labels[coda_natural_order(labels)]
+check("natural: LC4 before LC10, ids first, case ignored",
+      identical(got, c("720575940621234567", "DNp02", "LC4", "lc9", "LC10")),
+      paste(got, collapse = " "))
+ids <- c("720575940621234568", "720575940621234567")
+check("natural: an 18-digit id is compared exactly",
+      identical(ids[coda_natural_order(ids)], rev(ids)))
+check("natural: a tie keeps arrival order",
+      identical(coda_natural_order(c("b", "A", "a")), c(2L, 3L, 1L)))
+
 cat("\n", if (fails > 0L) paste(fails, "failed") else "all passed", "\n", sep = "")
 quit(status = if (fails > 0L) 1L else 0L)
