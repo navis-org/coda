@@ -1,17 +1,26 @@
 /**
- * Putting a matrix's rows and columns in an order — the Heatmap node's `Order` tab.
+ * Which of a matrix's rows and columns survive, and in what order — the Heatmap node's
+ * `Filter` and `Order` tabs.
  *
  * Headless, for `linkageOps.ts`'s reason: what is decidable without Python is decided here,
  * where a test can see it, and the one thing that is not — the clustering — arrives as an
  * `Int32Array` from the bridge and goes through exactly the same plan as every other order.
  *
- * ## Why this is a node operation and not a viewer setting
+ * ## Why these are node operations and not viewer settings
  *
- * The order **changes the matrix the node outputs**, on purpose. A sort that lived in the
- * drawing alone would leave a Table wired beside the heatmap showing a different order from
- * the picture, and a CSV export disagreeing with the SVG next to it. So the sort params are in
- * the provenance key, the tab that holds them says so, and a Linkage downstream sees the same
+ * Both **change the matrix the node outputs**, on purpose. A sort or a filter that lived in the
+ * drawing alone would leave a Table wired beside the heatmap showing something different from
+ * the picture, and a CSV export disagreeing with the SVG next to it. So both sets of params are
+ * in the provenance key, the tabs that hold them say so, and a Linkage downstream sees the same
  * matrix the card draws.
+ *
+ * ## A filter and a sort are one mechanism
+ *
+ * Each is a list of matrix indices per axis, and `takeMatrix` is the single place a new matrix
+ * is built from such a list — a filter keeps fewer lines, a sort keeps every line in another
+ * order, and either may be absent. **The filter runs first**, and the sort is then computed
+ * against the filtered matrix, because a row total taken over columns somebody has just
+ * excluded is not the number they asked for.
  *
  * ## Two axes, one order
  *
@@ -44,6 +53,130 @@
 import type { ParamValues } from '../../core/node'
 import type { MatrixValue } from '../../core/values'
 import { makeMatrix } from '../../core/values'
+import { bareRegex, regexError } from './neuronSearch'
+
+// ---------------------------------------------------------------------------
+// Filtering
+// ---------------------------------------------------------------------------
+
+/**
+ * One row or column filter, parsed.
+ *
+ * ## The grammar is Explore's, narrowed to one term
+ *
+ *   LC4              substring, case-insensitive
+ *   /^LC[0-9]+$      regular expression, case-insensitive; the closing `/` is optional
+ *   !LC4   -LC4      keep everything that does *not* match
+ *
+ * **A bare term is a literal and a pattern is opted into with `/`** — `neuronSearch.ts`'s rule,
+ * and `bareRegex` is imported from there rather than restated, because the fiddly half is where
+ * the pattern *ends*: `/^LC4$/` and `/^LC4$` are one filter, and a second reader of that rule is
+ * how one box comes to search for a trailing slash. The reason for the opt-in is the same too:
+ * cell-type labels are full of regex metacharacters — `LC4(R)`, `SMP001(a)` — so a box that
+ * compiled every term would quietly match `LC4R` as well, and widening a filter by one row with
+ * nothing on screen to say so is the failure this convention exists to prevent.
+ *
+ * There is deliberately **one term per axis**, where Explore's box takes several ANDed. Two
+ * substrings ANDed against a single short label is almost always empty — `LC4 LC6` matches
+ * nothing, which reads as a broken control — and the useful question there is an alternation,
+ * which the regex already spells: `/^(LC4|LC6)$`.
+ */
+export interface LabelFilter {
+  /** What was typed, for the message that says how much it removed. */
+  source: string
+  /**
+   * The needle or the pattern, with the slashes and the negation taken off.
+   *
+   * Carried beside `test` rather than left inside its closure because the notebook exporters
+   * have to render the same decision in pandas and in base R, and a second parse of the
+   * grammar in each of them is how three readers come to disagree about `/^LC4$/`.
+   */
+  pattern: string
+  /** Whether `pattern` is a regular expression rather than a literal substring. */
+  regex: boolean
+  negate: boolean
+  test: (label: string) => boolean
+}
+
+export interface ParsedLabelFilter {
+  /** Absent when nothing was typed, or when the pattern will not compile. */
+  filter?: LabelFilter
+  /** Why the pattern will not compile. The caller warns; the axis is then left whole. */
+  error?: string
+}
+
+export function parseLabelFilter(query: string): ParsedLabelFilter {
+  const source = query.trim()
+  if (!source) return {}
+
+  // A lone `!` or `-` narrows nothing, the way a lone `/` does: it is what the box holds while
+  // somebody types a negation, and one term is the whole filter here — so reading it as the
+  // literal Explore would read it empties the picture for a keystroke. A label that really does
+  // contain a hyphen is still reachable as `/-`.
+  if (source === '!' || source === '-') return {}
+
+  let body = source
+  let negate = false
+  if (body.startsWith('!') || body.startsWith('-')) {
+    negate = true
+    body = body.slice(1)
+  }
+
+  if (body.startsWith('/')) {
+    const pattern = bareRegex(body)
+    // `/` alone narrows nothing rather than erroring, exactly as it does in Explore's box.
+    if (!pattern) return {}
+    const bad = regexError(pattern)
+    if (bad) return { error: bad }
+    // Case-insensitive by flag rather than by lowercasing the pattern, which would turn
+    // `[A-Z]` into a different question.
+    const expression = new RegExp(pattern, 'i')
+    return {
+      filter: {
+        source,
+        pattern,
+        regex: true,
+        negate,
+        test: (label) => expression.test(label) !== negate,
+      },
+    }
+  }
+
+  const needle = body.toLowerCase()
+  return {
+    filter: {
+      source,
+      pattern: body,
+      regex: false,
+      negate,
+      test: (label) => label.toLowerCase().includes(needle) !== negate,
+    },
+  }
+}
+
+/** The indices of the labels a filter keeps, in their own order. */
+export function keptLabels(labels: string[], filter: LabelFilter): Int32Array {
+  const kept: number[] = []
+  for (let i = 0; i < labels.length; i++) if (filter.test(labels[i]!)) kept.push(i)
+  return Int32Array.from(kept)
+}
+
+export interface MatrixFilterOptions {
+  rows: string
+  columns: string
+}
+
+/** One reader of the two filter params, so the node, the exporters and the tests agree. */
+export function readFilterOptions(params: ParamValues): MatrixFilterOptions {
+  return {
+    rows: typeof params.rowFilter === 'string' ? params.rowFilter.trim() : '',
+    columns: typeof params.colFilter === 'string' ? params.colFilter.trim() : '',
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Ordering
+// ---------------------------------------------------------------------------
 
 export type MatrixSortBy = 'none' | 'total' | 'label' | 'value' | 'cluster'
 export type MatrixSortAxis = 'rows' | 'columns' | 'both'
@@ -293,38 +426,66 @@ export function orderAxis(
 // ---------------------------------------------------------------------------
 
 /**
- * The matrix with its rows and/or columns permuted. Either order may be absent, meaning that
- * axis stays put; labels travel with their lines, and `valueLabel` and `measure` ride through.
+ * The matrix rebuilt from a list of row indices and a list of column indices.
+ *
+ * **The one place a reshaped matrix is built**, which is what lets a filter and a sort be the
+ * same mechanism: an index list may keep every line in a new order (a sort), fewer lines in
+ * their own order (a filter), or both at once. Either list may be absent, meaning that axis is
+ * taken whole. Labels travel with their lines, and `valueLabel` and `measure` ride through.
+ *
+ * Returns the input untouched when neither list changes anything, so an unfiltered, unsorted
+ * pass allocates nothing.
  */
-export function permuteMatrix(
+export function takeMatrix(
   matrix: MatrixValue,
-  rowOrder?: Int32Array,
-  colOrder?: Int32Array,
+  rowIndices?: Int32Array,
+  colIndices?: Int32Array,
 ): MatrixValue {
-  const rows = matrix.rowLabels.length
-  const cols = matrix.colLabels.length
-  if (rowOrder && rowOrder.length !== rows) {
-    throw new Error(`permuteMatrix: ${rowOrder.length} row positions for ${rows} rows`)
-  }
-  if (colOrder && colOrder.length !== cols) {
-    throw new Error(`permuteMatrix: ${colOrder.length} column positions for ${cols} columns`)
-  }
-  if ((!rowOrder || isIdentityOrder(rowOrder)) && (!colOrder || isIdentityOrder(colOrder))) {
+  const sourceCols = matrix.colLabels.length
+  checkIndices(rowIndices, matrix.rowLabels.length, 'row')
+  checkIndices(colIndices, sourceCols, 'column')
+  if (isWholeAxis(rowIndices, matrix.rowLabels.length) && isWholeAxis(colIndices, sourceCols)) {
     return matrix
   }
+  const rows = rowIndices ? rowIndices.length : matrix.rowLabels.length
+  const cols = colIndices ? colIndices.length : sourceCols
   const values = new Float64Array(rows * cols)
   for (let r = 0; r < rows; r++) {
-    const from = (rowOrder ? rowOrder[r]! : r) * cols
+    const from = (rowIndices ? rowIndices[r]! : r) * sourceCols
     const to = r * cols
-    if (colOrder) {
-      for (let c = 0; c < cols; c++) values[to + c] = matrix.values[from + colOrder[c]!]!
+    if (colIndices) {
+      for (let c = 0; c < cols; c++) values[to + c] = matrix.values[from + colIndices[c]!]!
     } else {
       values.set(matrix.values.subarray(from, from + cols), to)
     }
   }
-  const rowLabels = rowOrder ? Array.from(rowOrder, (i) => matrix.rowLabels[i]!) : matrix.rowLabels
-  const colLabels = colOrder ? Array.from(colOrder, (i) => matrix.colLabels[i]!) : matrix.colLabels
+  const rowLabels = rowIndices
+    ? Array.from(rowIndices, (i) => matrix.rowLabels[i]!)
+    : matrix.rowLabels
+  const colLabels = colIndices
+    ? Array.from(colIndices, (i) => matrix.colLabels[i]!)
+    : matrix.colLabels
   return makeMatrix(rowLabels, colLabels, values, matrix.valueLabel, matrix.measure)
+}
+
+/**
+ * An index outside the matrix is a programming error rather than a user one, so it throws —
+ * left alone it reads `undefined` through a non-null assertion, i.e. a matrix quietly full of
+ * `NaN` with nothing to say where it came from.
+ */
+function checkIndices(indices: Int32Array | undefined, limit: number, what: string): void {
+  if (!indices) return
+  for (const i of indices) {
+    if (i < 0 || i >= limit) {
+      throw new Error(`takeMatrix: ${what} index ${i} is outside a matrix of ${limit}`)
+    }
+  }
+}
+
+/** Whether a list takes an axis exactly as it stands — every line, in order. */
+function isWholeAxis(indices: Int32Array | undefined, length: number): boolean {
+  if (!indices) return true
+  return indices.length === length && isIdentityOrder(indices)
 }
 
 /**
@@ -351,5 +512,5 @@ export function applyOrderPlan(
       chosen[plan.follower] = followOrder(leadLabels, labelsOf(matrix, plan.follower))
     }
   }
-  return permuteMatrix(matrix, chosen.rows, chosen.columns)
+  return takeMatrix(matrix, chosen.rows, chosen.columns)
 }

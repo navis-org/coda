@@ -19,8 +19,8 @@ import type {
   LinkageSymmetry,
   LinkageTransform,
 } from '../../pyodide/linkage'
-import type { MatrixAxis } from './matrixOrder'
-import { labelsOf, permuteMatrix } from './matrixOrder'
+import type { MatrixAxis } from './matrixShape'
+import { labelsOf, takeMatrix } from './matrixShape'
 import { SYMMETRY_OPTIONS } from './nblastOps'
 
 /**
@@ -258,9 +258,9 @@ export function linkageValueFrom(
  * wants to look at is the matrix they have, arranged so its structure shows.
  */
 export function orderedMatrix(matrix: MatrixValue, order: Int32Array): MatrixValue {
-  // The same order down both axes — `matrixOrder.ts` owns the permutation, and carrying a
+  // The same order down both axes — `matrixShape.ts` owns the permutation, and carrying a
   // second copy of that loop here is how the two come to disagree about labels or NaNs.
-  return permuteMatrix(matrix, order, order)
+  return takeMatrix(matrix, order, order)
 }
 
 /**
@@ -557,7 +557,7 @@ export function cutHomogeneous(
 /**
  * Say what clustering one axis of a matrix will cost, and refuse only what cannot be allocated.
  *
- * Here rather than in `matrixOrder.ts` because it is the third of this module's "before you
+ * Here rather than in `matrixShape.ts` because it is the third of this module's "before you
  * cluster" guards — `checkLinkageInput` and `checkLinkageDistances` are the other two — and
  * because the threshold it reads is this module's own. The distance matrix is `n x n` float64
  * in one allocation on the far side, so that is the floor, and above

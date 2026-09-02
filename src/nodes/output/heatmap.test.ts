@@ -104,11 +104,53 @@ describe('what reaches the provenance key', () => {
   it('declares the Order tab as changing data and the Colour tab as not', () => {
     expect(def().paramGroups).toEqual([
       { id: 'colour', label: 'Colour' },
+      { id: 'filter', label: 'Filter', affectsData: true },
       { id: 'order', label: 'Order', affectsData: true },
     ])
     for (const p of def().params ?? []) {
-      expect(p.group === 'order' ? !p.presentational : p.presentational === true, p.id).toBe(true)
+      const data = p.group === 'order' || p.group === 'filter'
+      expect(data ? !p.presentational : p.presentational === true, p.id).toBe(true)
     }
+  })
+})
+
+describe('the filter', () => {
+  it('keeps the rows and columns whose labels match', async () => {
+    const { out } = await run(square(), { rowFilter: 'lc', colFilter: '/^DN' })
+    expect(out.rowLabels).toEqual(['LC4', 'LC10'])
+    expect(out.colLabels).toEqual(['DNp02'])
+    // LC4 → DNp02 is 2 and LC10 → DNp02 is 3.
+    expect([...out.values]).toEqual([2, 3])
+  })
+
+  it('filters before it sorts, so a total is taken over what is left', async () => {
+    /*
+     * Over every column the row totals are LC4 12, DNp02 6, LC10 3. Over the DNp02 column alone
+     * they are LC10 3, LC4 2, DNp02 0 — a different order, and the one somebody who filtered to
+     * that column asked for.
+     */
+    const { out } = await run(square(), { colFilter: 'DNp02', sortBy: 'total', sortFollow: false })
+    expect(out.rowLabels).toEqual(['LC10', 'LC4', 'DNp02'])
+  })
+
+  it('is honest about a filter that matches nothing', async () => {
+    const { out, warnings } = await run(square(), { rowFilter: 'nobody' })
+    expect(out.rowLabels).toEqual([])
+    expect(out.colLabels).toEqual(['LC4', 'LC10', 'DNp02'])
+    expect(warnings.join('\n')).toContain('No rows match "nobody"')
+  })
+
+  it('keeps the axis whole for a pattern that will not compile, and says so', async () => {
+    // Half-typed, which is every regex on its way in: the picture must not empty for it.
+    const m = square()
+    const { out, warnings } = await run(m, { rowFilter: '/^LC[' })
+    expect(out).toBe(m)
+    expect(warnings.join('\n')).toContain('not a valid regular expression')
+  })
+
+  it('passes the matrix through when a filter matches everything', async () => {
+    const m = square()
+    expect((await run(m, { rowFilter: '/.' })).out).toBe(m)
   })
 })
 

@@ -1028,7 +1028,7 @@ registerHelper({
 })
 
 /**
- * Coda's label order: `LC4` before `LC10`, case ignored — `labelOrder` in `matrixOrder.ts`.
+ * Coda's label order: `LC4` before `LC10`, case ignored — `labelOrder` in `matrixShape.ts`.
  *
  * Base R's `order` is neither natural nor locale-stable, and the packages that are
  * (`stringr::str_sort(numeric = TRUE)`, `gtools::mixedorder`) are two more dependencies for

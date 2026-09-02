@@ -18,10 +18,13 @@ import {
   orderAxis,
   orderByScores,
   orderPlan,
-  permuteMatrix,
+  keptLabels,
+  parseLabelFilter,
+  readFilterOptions,
+  takeMatrix,
   readOrderOptions,
   reverseOrder,
-} from './matrixOrder'
+} from './matrixShape'
 
 /** A 3 x 3 over one population, deliberately not symmetric — an Adjacency, in shape. */
 function square() {
@@ -115,9 +118,9 @@ describe('following', () => {
   })
 })
 
-describe('permuting', () => {
+describe('taking rows and columns', () => {
   it('moves labels with their lines', () => {
-    const m = permuteMatrix(square(), Int32Array.from([2, 0, 1]), Int32Array.from([1, 0, 2]))
+    const m = takeMatrix(square(), Int32Array.from([2, 0, 1]), Int32Array.from([1, 0, 2]))
     expect(m.rowLabels).toEqual(['DNp02', 'LC4', 'LC10'])
     expect(m.colLabels).toEqual(['LC10', 'LC4', 'DNp02'])
     // DNp02's row was [5, 1, 0] over (LC4, LC10, DNp02); columns now read LC10, LC4, DNp02.
@@ -127,11 +130,83 @@ describe('permuting', () => {
 
   it('returns the very same value for an identity, so a cache key does not have to know', () => {
     const m = square()
-    expect(permuteMatrix(m, Int32Array.from([0, 1, 2]), undefined)).toBe(m)
+    expect(takeMatrix(m, Int32Array.from([0, 1, 2]), undefined)).toBe(m)
   })
 
-  it('refuses a permutation of the wrong length', () => {
-    expect(() => permuteMatrix(square(), Int32Array.from([0, 1]))).toThrow(/row positions/)
+  it('takes a subset, which is what makes a filter and a sort one mechanism', () => {
+    // Shorter than the axis: rows LC10 and DNp02, columns LC4 and DNp02.
+    const m = takeMatrix(square(), Int32Array.from([1, 2]), Int32Array.from([0, 2]))
+    expect(m.rowLabels).toEqual(['LC10', 'DNp02'])
+    expect(m.colLabels).toEqual(['LC4', 'DNp02'])
+    // LC10 → [0, 0, 3] and DNp02 → [5, 1, 0], keeping columns 0 and 2.
+    expect([...m.values]).toEqual([0, 3, 5, 0])
+    expect(m.valueLabel).toBe('synapses')
+  })
+
+  it('keeps nothing when the list is empty', () => {
+    const m = takeMatrix(square(), new Int32Array(0))
+    expect(m.rowLabels).toEqual([])
+    expect(m.colLabels).toEqual(['LC4', 'LC10', 'DNp02'])
+    expect(m.values).toHaveLength(0)
+  })
+
+  it('refuses an index outside the matrix rather than filling it with NaN', () => {
+    expect(() => takeMatrix(square(), Int32Array.from([0, 9]))).toThrow(/outside a matrix of 3/)
+  })
+})
+
+describe('the label filter', () => {
+  const labels = ['LC4', 'LC10', 'lc6', 'DNp02', 'SMP001(a)']
+  const keep = (query: string) => {
+    const { filter, error } = parseLabelFilter(query)
+    expect(error).toBeUndefined()
+    return filter ? Array.from(keptLabels(labels, filter), (i) => labels[i]) : labels
+  }
+
+  it('is nothing at all when nothing is typed', () => {
+    expect(parseLabelFilter('')).toEqual({})
+    expect(parseLabelFilter('   ')).toEqual({})
+  })
+
+  it('matches a bare term as a case-insensitive substring', () => {
+    expect(keep('lc')).toEqual(['LC4', 'LC10', 'lc6'])
+    expect(keep('LC1')).toEqual(['LC10'])
+  })
+
+  it('treats a bare term as a literal, metacharacters and all', () => {
+    // The reason the pattern is opted into: this is a label, not a group.
+    expect(keep('SMP001(a)')).toEqual(['SMP001(a)'])
+  })
+
+  it('compiles a term starting with a slash, closing slash optional', () => {
+    expect(keep('/^LC[0-9]+$')).toEqual(['LC4', 'LC10', 'lc6'])
+    expect(keep('/^LC[0-9]+$/')).toEqual(['LC4', 'LC10', 'lc6'])
+    // Case-insensitive by flag, so the pattern's own classes are left alone.
+    expect(keep('/^[A-Z]+4$')).toEqual(['LC4'])
+  })
+
+  it('negates on ! or -', () => {
+    expect(keep('!lc')).toEqual(['DNp02', 'SMP001(a)'])
+    expect(keep('-/^LC')).toEqual(['DNp02', 'SMP001(a)'])
+  })
+
+  it('narrows nothing for a lone slash or a lone negation, which is a box mid-typing', () => {
+    expect(parseLabelFilter('/')).toEqual({})
+    expect(keep('!')).toEqual(labels)
+  })
+
+  it('reports a pattern that will not compile rather than throwing', () => {
+    const bad = parseLabelFilter('/^LC[')
+    expect(bad.filter).toBeUndefined()
+    expect(bad.error).toBeTruthy()
+  })
+
+  it('reads both params, trimmed', () => {
+    expect(readFilterOptions({ rowFilter: '  LC  ', colFilter: '/^DN' })).toEqual({
+      rows: 'LC',
+      columns: '/^DN',
+    })
+    expect(readFilterOptions({})).toEqual({ rows: '', columns: '' })
   })
 })
 

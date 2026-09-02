@@ -14,8 +14,13 @@ import {
 } from '../../../nodes/lib/encodingParams'
 import { decodeClauses, resolveFilters, usesRegex } from '../../../nodes/lib/tableFilter'
 import { heatmapPaletteOf } from '../../../nodes/lib/heatmapParams'
-import type { MatrixAxis } from '../../../nodes/lib/matrixOrder'
-import { orderPlan, readOrderOptions } from '../../../nodes/lib/matrixOrder'
+import type { MatrixAxis } from '../../../nodes/lib/matrixShape'
+import {
+  orderPlan,
+  parseLabelFilter,
+  readFilterOptions,
+  readOrderOptions,
+} from '../../../nodes/lib/matrixShape'
 import { rCol as col, rStr, rVector } from '../r'
 import { R_METHODS } from './analysis'
 import { registerEmitter } from '../registry'
@@ -133,7 +138,11 @@ registerEmitter('out.heatmap', (ctx) => {
   const diverging = ctx.params.scale === 'diverging'
   const palette = heatmapPaletteOf(ctx.params)
 
-  const lines = [`${out} <- as.matrix(${src})`, ...heatmapOrderLines(ctx, out)]
+  const lines = [
+    `${out} <- as.matrix(${src})`,
+    ...heatmapFilterLines(ctx, out),
+    ...heatmapOrderLines(ctx, out),
+  ]
 
   /*
    * The fill scale, named for the palette rather than substituted: viridisLite spells the
@@ -186,6 +195,47 @@ registerEmitter('out.heatmap', (ctx) => {
   )
   return lines
 })
+
+/**
+ * The Filter tab, as base R: one logical vector per filtered axis, then one subscript.
+ *
+ * Emitted **before** the order lines, which is the node's own rule — an order is computed
+ * against what the filter left. A literal goes through `tolower` on both sides rather than
+ * `ignore.case`, because `grepl`'s `fixed = TRUE` ignores that argument.
+ */
+function heatmapFilterLines(ctx: Parameters<Emitter>[0], out: string): string[] {
+  const filters = readFilterOptions(ctx.params)
+  const lines: string[] = []
+  const masks: Partial<Record<MatrixAxis, string>> = {}
+
+  for (const axis of ['rows', 'columns'] as const) {
+    const query = axis === 'rows' ? filters.rows : filters.columns
+    const { filter, error } = parseLabelFilter(query)
+    if (error) {
+      lines.push(
+        ...ctx.note(
+          `The ${axis} filter "${query}" is not a valid regular expression, so Coda kept every ` +
+            `${axis === 'rows' ? 'row' : 'column'} and so does this.`,
+        ),
+      )
+      continue
+    }
+    if (!filter) continue
+
+    const name = axis === 'rows' ? 'keepRows_' : 'keepCols_'
+    const labels = `${axis === 'rows' ? 'rownames' : 'colnames'}(${out})`
+    const test = filter.regex
+      ? `grepl(${rStr(filter.pattern)}, ${labels}, ignore.case = TRUE)`
+      : `grepl(${rStr(filter.pattern.toLowerCase())}, tolower(${labels}), fixed = TRUE)`
+    lines.push(`${name} <- ${filter.negate ? `!${test}` : test}`)
+    masks[axis] = name
+  }
+
+  if (masks.rows || masks.columns) {
+    lines.push(`${out} <- ${out}[${masks.rows ?? ''}, ${masks.columns ?? ''}, drop = FALSE]`)
+  }
+  return lines
+}
 
 /**
  * The Order tab, as base R over the matrix: one label vector per sorted axis, the follower
@@ -273,7 +323,7 @@ function heatmapOrderLines(ctx: Parameters<Emitter>[0], out: string): string[] {
     const name = plan.follower === 'rows' ? 'rows_' : 'cols_'
     const labels = plan.follower === 'rows' ? `rownames(${out})` : `colnames(${out})`
     // The leader's labels in the leader's order, where the follower has them, then the rest
-    // as they were — `followOrder` in `matrixOrder.ts`.
+    // as they were — `followOrder` in `matrixShape.ts`.
     lines.push(`${name} <- c(intersect(${lead}, ${labels}), setdiff(${labels}, ${lead}))`)
     chosen[plan.follower] = name
   }

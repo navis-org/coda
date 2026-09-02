@@ -96,7 +96,7 @@ export type ClusterOrderRequest = {
   axis: 'rows' | 'columns'
   /** One of `LINKAGE_METHODS`. */
   method: string
-  /** `euclidean`, `correlation` or `cosine` — `matrixOrder.ts`'s list. */
+  /** `euclidean`, `correlation` or `cosine` — `matrixShape.ts`'s list. */
   metric: string
 }
 

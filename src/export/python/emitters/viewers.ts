@@ -19,8 +19,13 @@ import {
 } from '../../../nodes/lib/encodingParams'
 import { decodeClauses, resolveFilters, usesRegex } from '../../../nodes/lib/tableFilter'
 import { heatmapPaletteOf } from '../../../nodes/lib/heatmapParams'
-import type { MatrixAxis } from '../../../nodes/lib/matrixOrder'
-import { orderPlan, readOrderOptions } from '../../../nodes/lib/matrixOrder'
+import type { MatrixAxis } from '../../../nodes/lib/matrixShape'
+import {
+  orderPlan,
+  parseLabelFilter,
+  readFilterOptions,
+  readOrderOptions,
+} from '../../../nodes/lib/matrixShape'
 import { pyList, pyStr } from '../py'
 import { registerEmitter } from '../registry'
 import type { Emitter } from '../types'
@@ -394,7 +399,7 @@ registerEmitter('out.heatmap', (ctx) => {
   const diverging = ctx.params.scale === 'diverging'
   const palette = heatmapPaletteOf(ctx.params)
 
-  const lines = [`${out} = ${src}`, ...heatmapOrderLines(ctx, out)]
+  const lines = [`${out} = ${src}`, ...heatmapFilterLines(ctx, out), ...heatmapOrderLines(ctx, out)]
 
   /*
    * Coda's own ramps have no matplotlib name, so the nearest published ones stand in: `Blues`
@@ -426,6 +431,47 @@ registerEmitter('out.heatmap', (ctx) => {
   )
   return lines
 })
+
+/**
+ * The Filter tab, as pandas: one boolean mask per filtered axis, then one `.loc`.
+ *
+ * Emitted **before** the order lines, which is the node's own rule — an order is computed
+ * against what the filter left. `.astype(str)` because a pivot's index may be numeric where
+ * Coda's labels are always text, and `.str.contains` on an Int64Index raises.
+ */
+function heatmapFilterLines(ctx: Parameters<Emitter>[0], out: string): string[] {
+  const filters = readFilterOptions(ctx.params)
+  const lines: string[] = []
+  const masks: Partial<Record<MatrixAxis, string>> = {}
+
+  for (const axis of ['rows', 'columns'] as const) {
+    const query = axis === 'rows' ? filters.rows : filters.columns
+    const { filter, error } = parseLabelFilter(query)
+    if (error) {
+      lines.push(
+        ...ctx.note(
+          `The ${axis} filter "${query}" is not a valid regular expression, so Coda kept every ` +
+            `${axis === 'rows' ? 'row' : 'column'} and so does this.`,
+        ),
+      )
+      continue
+    }
+    if (!filter) continue
+
+    const name = axis === 'rows' ? '_keep_rows' : '_keep_cols'
+    const labels = `${out}.${axis === 'rows' ? 'index' : 'columns'}.astype(str)`
+    const test = `${labels}.str.contains(${pyStr(filter.pattern)}, case=False, regex=${
+      filter.regex ? 'True' : 'False'
+    })`
+    lines.push(`${name} = ${filter.negate ? `~${test}` : test}`)
+    masks[axis] = name
+  }
+
+  if (masks.rows && masks.columns) lines.push(`${out} = ${out}.loc[${masks.rows}, ${masks.columns}]`)
+  else if (masks.rows) lines.push(`${out} = ${out}.loc[${masks.rows}]`)
+  else if (masks.columns) lines.push(`${out} = ${out}.loc[:, ${masks.columns}]`)
+  return lines
+}
 
 /**
  * The Order tab, as pandas: one index per sorted axis, the follower derived from the leader,
@@ -504,7 +550,7 @@ function heatmapOrderLines(ctx: Parameters<Emitter>[0], out: string): string[] {
     const name = plan.follower === 'rows' ? '_rows' : '_cols'
     const labels = plan.follower === 'rows' ? `${out}.index` : `${out}.columns`
     // The leader's labels in the leader's order, where the follower has them, then the rest
-    // as they were — `followOrder` in `matrixOrder.ts`.
+    // as they were — `followOrder` in `matrixShape.ts`.
     lines.push(
       `${name} = [l for l in ${lead} if l in ${labels}] + [l for l in ${labels} if l not in set(${lead})]`,
     )

@@ -391,9 +391,38 @@ the heatmap, the CSV export and the notebook all show what the card shows. The o
 alternative — a sort that lives in the drawing — was rejected for exactly that reason: a picture
 sorted one way beside a table sorted another is two answers to one question.
 
+### The filter and the sort are one mechanism
+
+Each is a list of matrix indices per axis, and `takeMatrix` is the single place a new matrix is
+built from such a list — a filter keeps fewer lines, a sort keeps every line in another order,
+either may be absent, and `orderedMatrix` on the Linkage node is the same call with one order
+down both axes. That unification is what stopped the filter being a second matrix-rebuilding
+loop. **The filter runs first**, and the sort is computed against what it left, because a row
+total taken over columns somebody has just excluded is not the number they asked for; a test
+pins that ordering with a case where the two disagree.
+
+**The grammar is Explore's, narrowed to one term.** A plain term is a case-insensitive
+substring, `/` opts into a regular expression with an optional closing `/`, and `!` or `-`
+negates. `bareRegex` is imported from `neuronSearch.ts` rather than restated, because the fiddly
+half is where the pattern *ends* — a second reader of that rule is how one box comes to search
+for a trailing slash. The opt-in exists for the reason it exists there: cell-type labels are
+full of metacharacters (`LC4(R)`, `SMP001(a)`), so a box that compiled every term would widen
+itself silently. Verified by running the emitted R, where that label as a regex matches nothing
+and as a literal matches one row — which is why `fixed = TRUE` is not a detail.
+
+Only one term per axis, where Explore takes several ANDed: two substrings ANDed against a single
+short label is almost always empty, which reads as a broken control, and the useful question
+there is an alternation the regex already spells.
+
+**Two warnings, two different states.** A pattern that will not compile leaves that axis whole —
+a half-typed `/^LC[` must not empty the picture while somebody is still typing it. A filter that
+matches nothing is honoured and the result is empty, because that is the honest answer to what
+was asked; leaving the axis whole there would show a full matrix under a filter claiming to have
+narrowed it.
+
 ### Four criteria, one plan
 
-`nodes/lib/matrixOrder.ts` is the headless half. A criterion produces an order for one axis;
+`nodes/lib/matrixShape.ts` is the headless half. A criterion produces an order for one axis;
 `orderPlan` says which axes lead and which follows; `applyOrderPlan` permutes. Every criterion,
 including the one that comes back from Python, goes through the same three steps.
 

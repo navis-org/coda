@@ -348,6 +348,17 @@ Area-specific — the rule, then the doc that holds why:
   set **removes** both capabilities where it *adds* `paths`: a file of `pre, post, weight` has no
   regions, and its weights are not the population the backend's totals count.
   See [docs/nodes.md](docs/nodes.md) and [docs/backends.md](docs/backends.md).
+- **The Heatmap's row and column filters are one term each, and a pattern is opted into with `/`.**
+  Explore's grammar, narrowed: a plain term is a case-insensitive substring, `/^LC[0-9]+$` (closing
+  slash optional) is a regex, `!` or `-` negates. `bareRegex` is **imported** from
+  `neuronSearch.ts`, since where a pattern *ends* is the fiddly half. The opt-in is not taste:
+  `SMP001(a)` compiled as a pattern matches nothing, which is why both exporters emit
+  `regex=False` / `fixed = TRUE` for a literal — checked by running them. One term per axis
+  because two substrings ANDed against a short label is almost always empty. **An uncompilable
+  pattern leaves that axis whole** (a half-typed `/^LC[` must not empty the picture) where **a
+  filter matching nothing is honoured** and the result is empty. Filter runs *before* the sort,
+  and both are one mechanism — a list of indices per axis through `takeMatrix`, which is also
+  what `orderedMatrix` calls. See [docs/nodes.md](docs/nodes.md).
 - **The Heatmap's Order tab is data and its Colour tab is not, and the split is the node.** The
   sort — total, label, one row or column, clustering — reorders the matrix the node *outputs*, so
   a Table beside the heatmap, the CSV and the notebook show what the card shows; the params are

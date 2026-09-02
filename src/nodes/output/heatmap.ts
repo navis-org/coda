@@ -32,18 +32,22 @@ import {
   checkClusterInput,
   warnUnrecordedCells,
 } from '../lib/linkageOps'
-import type { MatrixAxis, MatrixOrderOptions } from '../lib/matrixOrder'
+import type { MatrixAxis, MatrixOrderOptions } from '../lib/matrixShape'
 import {
   CLUSTER_METRIC_OPTIONS,
   SORT_AXIS_OPTIONS,
   SORT_BY_OPTIONS,
   applyOrderPlan,
+  keptLabels,
   labelsOf,
   orderAxis,
   orderPlan,
+  parseLabelFilter,
+  readFilterOptions,
   readOrderOptions,
   reverseOrder,
-} from '../lib/matrixOrder'
+  takeMatrix,
+} from '../lib/matrixShape'
 
 /** Whether an order has been chosen at all — the four Order controls hang off this. */
 const ordering = (p: ParamValues): boolean => p.sortBy !== 'none'
@@ -60,6 +64,7 @@ export const heatmapNode = registerNode({
   outputs: [{ id: 'out', label: 'Matrix', type: T.matrix() }],
   paramGroups: [
     { id: 'colour', label: 'Colour' },
+    { id: 'filter', label: 'Filter', affectsData: true },
     { id: 'order', label: 'Order', affectsData: true },
   ],
   params: [
@@ -116,6 +121,41 @@ export const heatmapNode = registerNode({
       default: false,
       presentational: true,
       group: 'colour',
+    },
+
+    // --- filter -----------------------------------------------------------
+    /*
+     * Two boxes rather than one filter and an "apply to" selector: the axes of a heatmap are
+     * different questions even when they hold the same labels — "which neurons' outputs" and
+     * "onto which partners" — and the selector would have to grow a "both" that is only ever
+     * right on a square matrix. Somebody who wants both types the same expression twice, which
+     * is two seconds and unambiguous.
+     */
+    {
+      id: 'rowFilter',
+      kind: 'string',
+      label: 'Rows',
+      default: '',
+      placeholder: 'LC   or   /^LC[0-9]+$',
+      group: 'filter',
+      help:
+        'Keep only the rows whose label matches. A plain term matches anywhere in the label, ' +
+        'ignoring case; a term starting with / is a regular expression (the closing / is ' +
+        'optional), and one starting with ! or - keeps everything that does not match. Same ' +
+        'spelling as the search box on Explore Dataset. For several names at once, use a ' +
+        'pattern: /^(LC4|LC6|LPLC2)$',
+    },
+    {
+      id: 'colFilter',
+      kind: 'string',
+      label: 'Columns',
+      default: '',
+      placeholder: 'LC   or   /^LC[0-9]+$',
+      group: 'filter',
+      help:
+        'Keep only the columns whose label matches, with the same spelling as the row filter. ' +
+        'On a square matrix over one population, filtering both axes to the same expression is ' +
+        'what keeps it square.',
     },
 
     // --- order ------------------------------------------------------------
@@ -208,9 +248,12 @@ export const heatmapNode = registerNode({
   ],
 
   evaluate: async (ctx) => {
-    const matrix = ctx.input('in')
-    if (!isMatrixValue(matrix)) throw new Error('Input is not a matrix')
+    const input = ctx.input('in')
+    if (!isMatrixValue(input)) throw new Error('Input is not a matrix')
 
+    // Filter first: an order is computed against what is left, since a row total taken over
+    // columns somebody has just excluded is not the number they asked for.
+    const matrix = filterMatrix(ctx, input)
     const options = readOrderOptions(ctx.params)
     if (options.by === 'none') return { out: matrix }
 
@@ -231,6 +274,43 @@ export const heatmapNode = registerNode({
     return { out: applyOrderPlan(matrix, plan, orders) }
   },
 })
+
+/**
+ * The Filter tab applied, saying out loud anything it could not do.
+ *
+ * Two things are warnings rather than refusals, and they are different states. **A pattern that
+ * will not compile** leaves that axis whole — a half-typed `/^LC[` must not empty the picture
+ * while somebody is still typing it. **A filter that matches nothing** is honoured and the
+ * result is empty, because that is the honest answer to what was asked and the viewer already
+ * says "Matrix is empty"; leaving the axis whole there would show a full matrix under a filter
+ * that claims to have narrowed it.
+ */
+function filterMatrix(ctx: Pick<EvalContext, 'warn' | 'params'>, matrix: MatrixValue): MatrixValue {
+  const filters = readFilterOptions(ctx.params)
+  const kept: Partial<Record<MatrixAxis, Int32Array>> = {}
+
+  for (const axis of ['rows', 'columns'] as const) {
+    const { filter, error } = parseLabelFilter(axis === 'rows' ? filters.rows : filters.columns)
+    if (error) {
+      ctx.warn(
+        `The ${axis} filter is not a valid regular expression (${error}), so every ` +
+          `${axis === 'rows' ? 'row is' : 'column is'} kept.`,
+      )
+      continue
+    }
+    if (!filter) continue
+
+    const labels = labelsOf(matrix, axis)
+    const indices = keptLabels(labels, filter)
+    if (indices.length === labels.length) continue
+    if (indices.length === 0) {
+      ctx.warn(`No ${axis} match "${filter.source}", so the result is empty.`)
+    }
+    kept[axis] = indices
+  }
+
+  return takeMatrix(matrix, kept.rows, kept.columns)
+}
 
 /** One axis in clustermap order, or nothing to do for an axis with fewer than two lines. */
 async function clusterAxis(

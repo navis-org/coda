@@ -155,8 +155,12 @@ export function regexError(pattern: string): string | undefined {
  *
  * An empty pattern is not a term: `/` on its own is what the box holds for as long as somebody
  * is typing one, and an empty regex matches every row.
+ *
+ * Exported because the Heatmap's row and column filters offer the same opt-in on the same
+ * spelling (`matrixShape.ts`), and a second reader of "is this a regex, and where does it end"
+ * is how one box comes to accept `/^LC4$/` where the other searches for a trailing slash.
  */
-function bareRegex(token: string): string | undefined {
+export function bareRegex(token: string): string | undefined {
   if (!token.startsWith('/')) return undefined
   let pattern = token.slice(1)
   if (pattern.endsWith('/') && !pattern.endsWith('\\/')) pattern = pattern.slice(0, -1)

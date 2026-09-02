@@ -1002,7 +1002,7 @@ registerHelper({
 /**
  * Coda's label order: `LC4` before `LC10`, case ignored.
  *
- * `matrixOrder.ts` sorts labels with `Intl.Collator({ numeric: true, sensitivity: 'base' })`,
+ * `matrixShape.ts` sorts labels with `Intl.Collator({ numeric: true, sensitivity: 'base' })`,
  * and a plain `sorted()` disagrees with it on every label carrying a number — which is every
  * cell type and every neuron id. The key splits a label into digit runs and the text between
  * them, compares the runs as integers (arbitrary precision, so an 18-digit id is exact) and the

@@ -936,6 +936,15 @@ export function everythingGraph(): CodaGraph {
       params: { sortBy: 'label', sortAxis: 'columns', sortFollow: false, palette: 'mako' },
     },
     {
+      id: 'heatFiltered',
+      type: 'out.heatmap',
+      col: 13,
+      row: 4,
+      // A regex down one axis and a negated literal across the other, so both spellings of the
+      // filter and the `~`/`!` arm reach the goldens.
+      params: { rowFilter: '/^LC[0-9]+$', colFilter: '!DN', sortBy: 'total' },
+    },
+    {
       id: 'heatByRow',
       type: 'out.heatmap',
       col: 13,
@@ -1197,6 +1206,7 @@ export function everythingGraph(): CodaGraph {
     ['pivot', 'matrix', 'heatClustered', 'in'],
     ['pivot', 'matrix', 'heatByRow', 'in'],
     ['pivot', 'matrix', 'heatByLabel', 'in'],
+    ['pivot', 'matrix', 'heatFiltered', 'in'],
     ['pivot', 'table', 'table', 'in'],
     ['find', 'neurons', 'unpivot', 'in'],
     ['pivot', 'table', 'unpivotWide', 'in'],

@@ -22,6 +22,26 @@ Sequential for counts and fractions; diverging when zero is a meaningful middle,
 > [!NOTE] Put a [Normalize](#core.normalize) in front if one row dominates
 > A heatmap of raw synapse counts is usually a picture of which cell type is numerous.
 
+## Filter
+
+```coda-params
+out.heatmap: rowFilter, colFilter
+```
+
+Keep only the rows or columns whose label matches. **Same spelling as the search box on [Explore Dataset](#neuron.explore)**: a plain term matches anywhere in the label ignoring case, and a term starting with `/` is a regular expression, whose closing `/` is optional.
+
+| you type | you get |
+| --- | --- |
+| `LC` | every label containing `LC`, in any case |
+| `/^LC[0-9]+$` | `LC4` and `LC10`, but not `LPLC2` |
+| `/^(LC4\|LC6\|LPLC2)$` | exactly those three |
+| `!DN` or `-DN` | everything *except* labels containing `DN` |
+
+> [!NOTE] A plain term is a literal, on purpose
+> Cell-type labels are full of regex characters — `LC4(R)`, `SMP001(a)` — so a box that compiled everything would quietly match `LC4R` too. The `/` is how you ask for a pattern.
+
+One expression per axis, and the two axes are independent: on a square matrix over one population, filtering both to the same expression is what keeps it square. Like the order below, **the filter changes the matrix this node outputs**, so a Table wired beside the heatmap shows the same rows.
+
 ## Order
 
 ```coda-params

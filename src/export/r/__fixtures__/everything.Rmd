@@ -2283,6 +2283,33 @@ heatmap_3 |>
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
 
+```{r heatmap-4}
+# ── Heatmap ──
+heatmap_4 <- as.matrix(pivot_matrix_df)
+keepRows_ <- grepl("^LC[0-9]+$", rownames(heatmap_4), ignore.case = TRUE)
+keepCols_ <- !grepl("dn", tolower(colnames(heatmap_4)), fixed = TRUE)
+heatmap_4 <- heatmap_4[keepRows_, keepCols_, drop = FALSE]
+rows_ <- names(sort(rowSums(heatmap_4, na.rm = TRUE), decreasing = TRUE))
+cols_ <- c(intersect(rows_, colnames(heatmap_4)), setdiff(colnames(heatmap_4), rows_))
+heatmap_4 <- heatmap_4[rows_, cols_, drop = FALSE]
+# NOTE: Coda draws this in its own blue ramp, which has no name here; Blues
+# is the nearest published one.
+
+heatmap_4 |>
+  as.data.frame() |>
+  tibble::rownames_to_column("row") |>
+  pivot_longer(-row, names_to = "column", values_to = "value") |>
+  mutate(
+    row = factor(row, levels = rev(rownames(heatmap_4))),
+    column = factor(column, levels = colnames(heatmap_4))
+  ) |>
+  ggplot(aes(column, row, fill = value)) +
+  geom_tile() +
+  scale_fill_distiller(palette = "Blues", direction = 1) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
 ```{r table-df-2}
 # ── Table ──
 table_df_2_out <- pivot_table_df
@@ -2300,19 +2327,19 @@ unpivot_2 <- pivot_table_df |>
   )
 ```
 
-```{r heatmap-4}
+```{r heatmap-5}
 # ── Heatmap ──
-heatmap_4 <- as.matrix(normalize)
+heatmap_5 <- as.matrix(normalize)
 # NOTE: Coda draws this in its own blue ramp, which has no name here; Blues
 # is the nearest published one.
 
-heatmap_4 |>
+heatmap_5 |>
   as.data.frame() |>
   tibble::rownames_to_column("row") |>
   pivot_longer(-row, names_to = "column", values_to = "value") |>
   mutate(
-    row = factor(row, levels = rev(rownames(heatmap_4))),
-    column = factor(column, levels = colnames(heatmap_4))
+    row = factor(row, levels = rev(rownames(heatmap_5))),
+    column = factor(column, levels = colnames(heatmap_5))
   ) |>
   ggplot(aes(column, row, fill = value)) +
   geom_tile() +
