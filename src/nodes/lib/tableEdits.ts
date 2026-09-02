@@ -302,7 +302,14 @@ function resolveWhere(schema: TableSchema | undefined, where: string): ResolvedW
 
   for (const term of parsed.terms) {
     if (term.kind !== 'field') {
-      problems.push(`"${term.value}" would match any column — write it as column==value`)
+      // Named per kind, because the two are fixed differently: a word becomes `column==word`
+      // and a bare regex becomes `column~pattern`, which is the same pattern against one
+      // column rather than against all of them.
+      problems.push(
+        term.kind === 'regex'
+          ? `"/${term.value}" would match any column — write it as column~${term.value}`
+          : `"${term.value}" would match any column — write it as column==value`,
+      )
       continue
     }
     if (!schema) {

@@ -174,6 +174,18 @@ function searchBox() {
   return screen.getByLabelText('Search neurons') as HTMLInputElement
 }
 
+/**
+ * How many neurons the caption says matched.
+ *
+ * Synchronous, so it can be the body of a `waitFor` as well as a read after one: three tests
+ * were parsing this one caption with three regexes, and the widest of them accepted the
+ * *empty*-query wording too.
+ */
+function matched(): number {
+  const caption = screen.getByText(/[\d,]+ of [\d,]+/)
+  return Number(caption.textContent!.split(' of ')[0]!.replace(/,/g, ''))
+}
+
 /** Type into the search box and let the debounce elapse. */
 async function type(value: string) {
   fireEvent.change(searchBox(), { target: { value } })
@@ -210,9 +222,7 @@ describe('ExploreBody', () => {
     // Row count is the wrong measure — a full page stays a full page — so check the hit count
     // and that every row shown actually matches.
     await waitFor(() => {
-      const hits = Number(
-        /([\d,]+) of/.exec(screen.getByText(/of \d/).textContent ?? '')?.[1]?.replace(/,/g, ''),
-      )
+      const hits = matched()
       expect(hits).toBeLessThan(total)
       expect(hits).toBeGreaterThan(0)
     })
@@ -250,6 +260,23 @@ describe('ExploreBody', () => {
     // rather than silently reporting a hit count for a different question.
     await type('LPL1')
     await waitFor(() => expect(screen.queryByText(/showing similar/)).toBeTruthy())
+  })
+
+  it('anchors a slash-prefixed term where a plain one cannot', async () => {
+    /*
+     * The widget's own half of the bare-regex rule: the box hands `parseSearch` whatever was
+     * typed, so the thing worth pinning here is that a slash survives the debounce and the
+     * param write rather than being read as a stray character. `LC` is a substring of `LPLC1`
+     * and `/^LC` is not, which is a difference visible in the hit count.
+     */
+    setup()
+    await ready()
+    await type('LC')
+    const substring = matched()
+    await type('/^LC')
+    const anchored = matched()
+    expect(anchored).toBeGreaterThan(0)
+    expect(anchored).toBeLessThan(substring)
   })
 
   it('reports an empty result rather than an empty panel', async () => {
@@ -337,9 +364,7 @@ describe('ExploreBody', () => {
     const { writes } = setup({ pageSize: 5 })
     await ready()
     await type('LC')
-    const hits = Number(
-      /(\d+) of/.exec(screen.getByText(/of \d+ neurons|\d+ of \d+/).textContent ?? '')?.[1],
-    )
+    const hits = matched()
     expect(hits).toBeGreaterThan(5)
 
     fireEvent.click(screen.getByText('+ all'))

@@ -61,6 +61,23 @@ reported **4,389** hits against male-CNS instead of 2. The right ones ranked fir
 count off by three orders of magnitude is its own lie. As a fallback it still catches typos
 (`mechnosensory` → `mechanosensory`) without inflating every count.
 
+**A bare regex is opted into with a slash, and matched per field.** `^LC4$` typed on its own is
+the *literal* substring `^LC4$` and finds nothing; `/^LC4$` is the pattern. The opt-in is the
+feature rather than a syntax tax: a box that compiled every term reads `LC4(R)` as a group and
+returns `LC4R` beside it, which is exactly what `escapeRegex` exists to prevent, and a search
+widening itself by a row with nothing on screen to say so is the worst shape that bug takes. The
+slash is neuroglancer's convention for the same control; a closing `/` is optional, because sed
+and vim have taught everybody to write one and it would otherwise be a pattern ending in a slash
+that matches nothing. Three consequences: it runs against **each searchable field separately**
+(an anchored pattern cannot match a row's joined haystack — `"10 LC4 visual"` — so the haystack
+implementation passes every other test and fails only this one); it is **exempt from the fuzzy
+retry in both directions**, since a pattern is an exact question asked on purpose; and it reads
+the index's own field list, so the `Search tags` opt-out hides a column from a regex exactly as
+it hides it from free text. Measured at male-CNS size (165,122 rows × 11 fields, ~20-character
+values): **26 ms** for the literal substring pass against **29–38 ms** for a regex, worst case
+being a pattern that matches nothing and therefore tests every field of every row. Same order as
+the pass that was already there, so nothing is precomputed for it.
+
 **Ranking is a bucket partition, not a sort.** Five tiers (exact / prefix / substring in
 `type`|`instance`|`neuronId` / substring anywhere / subsequence), so it is O(n) and can rank
 _every_ hit. An earlier version gave up above a threshold, which left the real DNp01 neurons
@@ -69,7 +86,8 @@ thousands of rows deep in a 21k-row fuzzy set — i.e. "fuzzy search does not wo
 Non-obvious rules pinned by tests: a missing value satisfies `!=` and nothing else (so
 `status!=Traced` finds the untraced _and_ the unlabelled, where SQL's three-valued logic drops
 both, silently); regexes are **unanchored**, deliberately unlike neuPrint's `=~`, because this
-search is local and has no server semantic to match; and only `neuronId` and string columns join
+search is local and has no server semantic to match — which is what makes `^` and `$` yours to
+type; and only `neuronId` and string columns join
 the free-text haystack, so `1200` does not match a synapse count.
 
 **A thumbnail cache remembers masks and never refusals.** A mask is a fact about the geometry;

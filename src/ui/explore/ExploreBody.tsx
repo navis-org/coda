@@ -27,6 +27,7 @@ import {
   parseSearch,
   runSearch,
   searchIndexFor,
+  SEARCH_PLACEHOLDER,
   SEARCH_SYNTAX_HELP,
 } from '../../nodes/lib/neuronSearch'
 import type { NodeBodyProps } from '../nodes/nodeBodies'
@@ -331,7 +332,7 @@ export function ExploreBody({
           type="text"
           value={text}
           placeholder={
-            compact ? 'Search neurons…' : 'Search: DNp01   class==sensory   post>1000'
+            compact ? 'Search neurons…' : `Search: ${SEARCH_PLACEHOLDER}`
           }
           title={SEARCH_SYNTAX_HELP}
           aria-label="Search neurons"

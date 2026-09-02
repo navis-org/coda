@@ -10,6 +10,7 @@ import {
   sourceSupports,
 } from '../lib/datasetParam'
 import {
+  SEARCH_PLACEHOLDER,
   SEARCH_SYNTAX_HELP,
   parseSearch,
   runSearch,
@@ -124,7 +125,7 @@ export const exploreNode = registerNode({
       id: 'query',
       kind: 'string',
       label: 'Search',
-      placeholder: 'DNp01   class==sensory   post>1000',
+      placeholder: SEARCH_PLACEHOLDER,
       help: SEARCH_SYNTAX_HELP,
       default: '',
     },

@@ -29,6 +29,12 @@
  * which is what a bare term does in the Explore box, compiled as an *escaped* regex so a value
  * like `LC4(R)` matches itself rather than being read as a group.
  *
+ * That is also where the leading `/` of Explore's bare regex stops. A cell already knows its
+ * column, so the pattern form here is `~^LC4$` — one character shorter than the slash, and
+ * against the column somebody is typing under rather than against all of them. Adding a second
+ * spelling would buy nothing and would change what an existing cell holding a path-like value
+ * means; a cell keeps `/` a literal.
+ *
  * ## Nothing here ever throws
  *
  * `out.table` is a tap. A cell somebody is halfway through typing, a regex that does not
@@ -67,7 +73,7 @@ import { selectRows } from '../../core/values'
 import { decodePairs, encodePair } from './paramPairs'
 import type { CompareOp, FieldTerm } from '../../data/terms'
 import { escapeRegex, fieldTermsMatch, prepareFieldTerms } from '../../data/terms'
-import { leadingOperator, unquote } from './neuronSearch'
+import { leadingOperator, regexError, unquote } from './neuronSearch'
 
 /** One column's filter, as it is stored and as the header cell shows it. */
 export interface FilterClause {
@@ -247,12 +253,11 @@ export function resolveFilters(
     }
 
     if (parsed.op === 'match') {
-      try {
-        new RegExp(parsed.value)
-      } catch (error) {
+      const bad = regexError(parsed.value)
+      if (bad) {
         problems.push({
           column: column.name,
-          message: `Filter on "${column.name}": ${(error as Error).message}`,
+          message: `Filter on "${column.name}": ${bad}`,
         })
         continue
       }

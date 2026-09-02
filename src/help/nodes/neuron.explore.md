@@ -12,7 +12,9 @@ exp:selected -> ngl
 
 Where `Find Neurons` provides a structured search, `Explore Dataset` is more free-form: it searches the entire neuron table for whatever text you type, and returns a list of matching neurons.
 
-That said, the search field does allow a simple query syntax: `column==value` to target a specific column, `column!=value` to exclude a value, `pre>1000` to compare a number, `type~^LC[0-9]+$` for a regular expression, and `!term` to exclude. Comparisons are case-insensitive, and a regex is unanchored unless you anchor it yourself.
+That said, the search field does allow a simple query syntax: `column==value` to target a specific column, `column!=value` to exclude a value, `pre>1000` to compare a number, `type~^LC[0-9]+$` for a regular expression against one column, and `!term` to exclude. Comparisons are case-insensitive, and a regex is unanchored unless you anchor it yourself.
+
+A term starting with `/` is a regular expression over *every* column — `/^LC[0-9]+$` finds `LC4` and `LC6` but not `LPLC1`, and the closing slash is optional. Without the slash a term is a plain substring, so `^LC4$` on its own finds nothing: that is what keeps a type like `LC4(R)` matching itself rather than being read as a pattern.
 
 Terms are separated by spaces and **all of them must match**:
 

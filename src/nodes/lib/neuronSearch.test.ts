@@ -200,6 +200,43 @@ describe('parseSearch', () => {
     expect(parsed.errors[0]).toContain('Invalid regex')
   })
 
+  it('reads a leading slash as a regex, and does not lowercase the pattern', () => {
+    expect(parseSearch('/^LC[0-9]+$').terms).toEqual([
+      { kind: 'regex', value: '^LC[0-9]+$', negate: false },
+    ])
+  })
+
+  it('treats the closing slash as optional', () => {
+    // sed and vim have taught everybody to write both, and a pattern ending in a slash that
+    // silently matched nothing is the failure this whole feature exists to remove.
+    expect(parseSearch('/^LC4$/').terms).toEqual(parseSearch('/^LC4$').terms)
+  })
+
+  it('keeps an escaped closing slash, which is how a pattern ends in one', () => {
+    expect(parseSearch('/LC4\\/').terms).toEqual([
+      { kind: 'regex', value: 'LC4\\/', negate: false },
+    ])
+  })
+
+  it('negates a regex with either prefix', () => {
+    expect(parseSearch('-/^LC').terms).toEqual([{ kind: 'regex', value: '^LC', negate: true }])
+    expect(parseSearch('!/^LC').terms).toEqual([{ kind: 'regex', value: '^LC', negate: true }])
+  })
+
+  it('ignores a slash with no pattern yet', () => {
+    // The state the box is in the moment somebody presses `/`. An empty regex matches every
+    // row, so reading it as a term would flash the whole dataset back on screen.
+    expect(parseSearch('/').terms).toEqual([])
+    expect(parseSearch('//').terms).toEqual([])
+  })
+
+  it('reports an unparseable bare regex instead of throwing', () => {
+    const parsed = parseSearch('/^LC[')
+    expect(parsed.terms).toEqual([])
+    expect(parsed.errors).toHaveLength(1)
+    expect(parsed.errors[0]).toMatch(/regex/i)
+  })
+
   it('does not mistake a bare term containing punctuation for a field', () => {
     expect(parseSearch('>10').terms[0]).toMatchObject({ kind: 'text' })
   })
@@ -261,6 +298,66 @@ describe('runSearch', () => {
   })
 })
 
+/**
+ * A bare regex — the slash form, neuroglancer's convention.
+ *
+ * The pair that matters is the first two: a slash makes `^LC4$` a pattern, and its absence
+ * leaves it the literal it has always been. The second half is not a formality. A search box
+ * that compiled every term would read `LC4(R)` as a group and quietly return `LC4R` beside it,
+ * which is what `escapeRegex` exists to prevent, so the opt-in is the feature.
+ */
+describe('bare regex', () => {
+  it('anchors against one field, which is the whole point of asking for one', () => {
+    expect(types('/^LC4$')).toEqual(['LC4'])
+    expect(types('/^LC[0-9]+$')).toEqual(['LC4', 'LC6'])
+  })
+
+  it('leaves an unslashed pattern a literal', () => {
+    // Not "finds nothing" as a curiosity: this is the promise that a type with a paren or a
+    // dot in it still matches itself.
+    expect(ids('^LC4$')).toEqual([])
+    expect(ids('.Np01')).toEqual([])
+    expect(ids('/.Np01')).toEqual([10, 70])
+  })
+
+  it('runs per field rather than against the joined haystack', () => {
+    /*
+     * The implementation this replaces would pass every test above and fail this one: a row's
+     * searchable text is `"10 DNp01 DNp01_L Traced descending"`, so an anchored pattern can
+     * only ever match a *field*. `class` is not a primary field, which is also why these come
+     * back in table order.
+     */
+    expect(ids('/^descending$')).toEqual([10, 20, 60, 70])
+    expect(ids('/^Traced$')).toEqual([10, 20, 30, 50, 70])
+  })
+
+  it('is case-insensitive, like every other term here', () => {
+    expect(types('/^lc4$')).toEqual(['LC4'])
+  })
+
+  it('excludes with a negated pattern', () => {
+    expect(ids('-/^LC')).toEqual([10, 20, 50, 60, 70])
+  })
+
+  it('skips a missing value rather than matching it as empty', () => {
+    // Row 60 has no type and no status. A pattern that matches the empty string must not
+    // therefore claim to have found it — the same rule every positive term follows.
+    expect(ids('/^$')).toEqual([])
+  })
+
+  it('keeps a quoted pattern in one piece, spaces and all', () => {
+    // Tokenizing runs first, so a pattern with a space needs the same quotes a literal phrase
+    // does — unquoted, `/^visual projection$` is a pattern and a stray word.
+    expect(ids('"/^visual projection$"')).toEqual([30, 40])
+    expect(ids('/^visual projection$')).toEqual([])
+  })
+
+  it('ANDs with the rest of the query', () => {
+    expect(ids('/^LC[0-9]+$ post>50')).toEqual([30])
+    expect(ids('/^LC[0-9]+$ status==Anchor')).toEqual([40])
+  })
+})
+
 describe('fuzzy fallback', () => {
   it('does not fire when the query matches exactly', () => {
     const result = search('LC4')
@@ -285,6 +382,25 @@ describe('fuzzy fallback', () => {
     const result = search('post>99999')
     expect(result.rows).toEqual([])
     expect(result.fuzzy).toBe(false)
+  })
+
+  it('never approximates a regex, and is not triggered by one', () => {
+    // A pattern is an exact question somebody asked on purpose, so it neither loosens in the
+    // retry nor sets one off.
+    expect(search('/^LC44$')).toEqual({ rows: [], fuzzy: false })
+  })
+
+  it('keeps a regex exact while a literal beside it goes fuzzy', () => {
+    /*
+     * `dp01` is a substring of nothing and a subsequence of both row 10's text and row 70's,
+     * so on its own it goes fuzzy and returns both. With `/^DNp01$` beside it only row 10
+     * survives — which is the assertion: were the regex dropped or loosened in the second
+     * pass, row 70 would come back with it.
+     */
+    expect(ids('dp01')).toEqual([10, 70])
+    const result = search('/^DNp01$ dp01')
+    expect(result.rows.map((row) => NEURONS.data['neuronId']![row])).toEqual([10])
+    expect(result.fuzzy).toBe(true)
   })
 
   it('reports no fuzzy flag when even the fallback finds nothing', () => {
@@ -320,6 +436,24 @@ describe('ranking', () => {
     // 'descending' is a class value for 10/20/60/70; none has it in type or instance, so the
     // order is the table's own — this pins that ranking never *reorders* an equal-tier set.
     expect(ids('descending')).toEqual([10, 20, 60, 70])
+  })
+
+  it('ranks a regex by the same tiers, reading exact as a whole-value match', () => {
+    /*
+     * Row 50's type *is* `KCg`; rows 10 and 70 merely contain `Np01`. So the tiers reorder the
+     * hits away from table order, which is what pins that a regex is ranked at all — a `Max
+     * hits` cap decides which rows survive by exactly this order.
+     */
+    expect(ids('/^KCg$|Np01')).toEqual([50, 10, 70])
+  })
+
+  it('puts a primary-field hit above one in another column', () => {
+    /*
+     * Rows 30 and 40 match `^LC` in `type` (tier 1); rows 10, 20, 60 and 70 match only in
+     * `class`, which is not a primary field (tier 3). So the two LCs come first, where table
+     * order would interleave them — the reorder is the assertion.
+     */
+    expect(ids('/^descending$|^LC')).toEqual([30, 40, 10, 20, 60, 70])
   })
 
   it('ranks every hit rather than giving up on a large set', () => {
@@ -380,6 +514,11 @@ describe('completeSearch', () => {
 
   it('completes field names, with the operator attached', () => {
     expect(labels('clas')).toEqual(['class=='])
+  })
+
+  it('offers nothing inside a regex', () => {
+    // The field list would splice `type==` over the pattern being typed.
+    expect(completeSearch(NEURONS, '/^LC', 4).items).toEqual([])
   })
 
   it('completes values once a field and operator are present', () => {
@@ -466,6 +605,14 @@ describe('excluding a column from the free-text haystack', () => {
     expect(hits('giant', ['community'])).toEqual([])
     expect(hits('DNp01', ['community'])).toEqual([0])
   })
+
+  it('hides the column from a bare regex too', () => {
+    // The regex reads the index's own field list, so free text and a pattern see one set of
+    // columns. Two lists here would be an opt-out that half works.
+    expect(hits('/^checked$')).toEqual([1])
+    expect(hits('/^checked$', ['community'])).toEqual([])
+  })
+
 
   it('still answers a field term naming the column', () => {
     /*
