@@ -1,17 +1,26 @@
 /**
- * The loop against the real API. **Skipped unless `ANTHROPIC_API_KEY` is set.**
+ * The loop against the real API. **Skipped unless `ASSISTANT_LIVE=1`.**
  *
  * Everything else in this directory is tested against a stubbed `fetch`, which proves the
  * plumbing and proves nothing about the only question that matters: whether a model, given
  * this catalogue and these rules, emits plans the applier accepts and a person would recognise
- * as what they asked for. That cannot be stubbed, so it lives behind a key and stays out of CI
- * — the same standing `scripts/check-export.py` has when navis is not installed.
+ * as what they asked for. That cannot be stubbed, so it lives behind an opt-in and stays out of
+ * CI — the same standing `scripts/check-export.py` has when navis is not installed.
  *
  * Run it:
  *
- *   ANTHROPIC_API_KEY=sk-… pnpm vitest run src/assistant/live.test.ts
+ *   ASSISTANT_LIVE=1 ANTHROPIC_API_KEY=sk-… pnpm vitest run src/assistant/live.test.ts
  *
  * The key env var keeps its name whichever provider is chosen — see `PROVIDER` below.
+ *
+ * **The opt-in is separate from the key, and that is the whole point of it.** Every other live
+ * test here gates on the credential it needs — `CAVE_TOKEN`, `NEUPRINT_TOKEN`, `SEATABLE_TOKEN`
+ * — and that is safe because nobody exports those for any other reason. `ANTHROPIC_API_KEY` is
+ * the opposite: it is the standard name, so a developer with any Anthropic tooling configured
+ * has it set globally and `pnpm test` would spend their money without ever mentioning it. It
+ * did, and the failure does not read as one — an exhausted balance surfaces as five assertion
+ * failures in the default suite. So this file takes the shape `catmaid/live.test.ts` already
+ * uses for the same reason: a `*_LIVE` gate, with the credential beside it rather than as it.
  *
  * It spends real tokens: seven requests, a few cents. What it prints is the point — the plan's
  * summary, what the applier said, and the token cost per turn — so read the output rather than
@@ -57,23 +66,33 @@ const MODEL = process.env.CODA_ASSISTANT_MODEL
  * and drops what every setting *means*, keeping only what a plan can be refused for. Whether
  * that costs plan quality is a question about seven real answers, not about the diff.
  *
- *   CODA_ASSISTANT_CATALOGUE=lean CODA_ASSISTANT_PROVIDER=ollama \
+ *   ASSISTANT_LIVE=1 CODA_ASSISTANT_CATALOGUE=lean CODA_ASSISTANT_PROVIDER=ollama \
  *     CODA_ASSISTANT_MODEL=qwen3.8:latest pnpm vitest run src/assistant/live.test.ts
  */
 const CATALOGUE = (process.env.CODA_ASSISTANT_CATALOGUE ?? 'full') as CatalogueDetail
 
 /**
+ * The opt-in. Nothing in this file runs without it — see the header for why it is not the key.
+ *
+ * It gates the free Ollama arm too, which is deliberate: cost is not the only reason a suite
+ * should not wander into this file. A local 27B model spends three to five minutes per question
+ * and there are seven of them, so an un-gated Ollama run turns `pnpm test` into a forty-minute
+ * hang that looks exactly like a wedged process.
+ */
+const LIVE = Boolean(process.env.ASSISTANT_LIVE)
+
+/**
  * Whether there is anything to run against.
  *
  * A key for the providers that need one — and *nothing* for Ollama, which is the whole of what
- * it offers. Gating this file on `ANTHROPIC_API_KEY` regardless made the one loop that can be
- * run for free the one loop nobody could run, which is how a prompt grew past the context
- * window Ollama was being asked for without any of this noticing.
+ * it offers. Requiring `ANTHROPIC_API_KEY` regardless made the one loop that can be run for
+ * free the one loop nobody could run, which is how a prompt grew past the context window Ollama
+ * was being asked for without any of this noticing.
  *
- *   CODA_ASSISTANT_PROVIDER=ollama CODA_ASSISTANT_MODEL=qwen3.8:latest \
+ *   ASSISTANT_LIVE=1 CODA_ASSISTANT_PROVIDER=ollama CODA_ASSISTANT_MODEL=qwen3.8:latest \
  *     pnpm vitest run src/assistant/live.test.ts
  */
-const RUNNABLE = Boolean(KEY) || providerFor(PROVIDER)?.needsKey === false
+const RUNNABLE = LIVE && (Boolean(KEY) || providerFor(PROVIDER)?.needsKey === false)
 
 /**
  * Per-question ceiling.
@@ -90,7 +109,8 @@ const PER_QUESTION_MS = 900_000
  * overrides down through `runTurn`. That keeps the loop's signature about the conversation —
  * and it means this file can drive *any* provider, not just the one it was written against:
  *
- *   CODA_ASSISTANT_PROVIDER=openai ANTHROPIC_API_KEY=sk-… pnpm vitest run src/assistant/live.test.ts
+ *   ASSISTANT_LIVE=1 CODA_ASSISTANT_PROVIDER=openai ANTHROPIC_API_KEY=sk-… \
+ *     pnpm vitest run src/assistant/live.test.ts
  */
 beforeAll(() => {
   if (!RUNNABLE) return
