@@ -75,3 +75,72 @@ export function heatmapPaletteOf(params: ParamValues): HeatmapPalette {
   }
   return isSequentialPalette(params.palette) ? params.palette : 'coda'
 }
+
+// ---------------------------------------------------------------------------
+// The colour domain: manual ends, and a log mapping
+// ---------------------------------------------------------------------------
+
+/**
+ * Where the ramp starts and stops, when somebody has said rather than let the data say.
+ *
+ * **A limit is a `string` param, and empty means automatic.** A `number` param cannot express
+ * "unset": `ParamField` coerces anything unparseable back to the declared default, so a numeric
+ * field would have to invent a sentinel — and `0` is a perfectly ordinary limit. Empty-means-
+ * something is the idiom a dataset's `Version` already uses, and the cost is the scrub gesture,
+ * which nobody misses on a value they type once.
+ */
+export interface ColorLimits {
+  /** The value at the bottom of the ramp. Absent means the data decides. */
+  min?: number
+  /** The value at the top. On a diverging scale this is the magnitude of *both* arms. */
+  max?: number
+  /** Why what was typed is being ignored, for the caption to admit. */
+  problem?: string
+}
+
+function readLimit(value: unknown): { value?: number; problem?: string } {
+  if (typeof value === 'number' && Number.isFinite(value)) return { value }
+  if (typeof value !== 'string') return {}
+  const text = value.trim()
+  if (!text) return {}
+  const parsed = Number(text)
+  if (!Number.isFinite(parsed)) return { problem: `"${text}" is not a number` }
+  return { value: parsed }
+}
+
+/**
+ * The two limit params, parsed.
+ *
+ * One reader for the viewer, both exporters and the tests, so a limit that is being ignored is
+ * ignored everywhere rather than in whichever of the three remembered to check.
+ *
+ * **An inverted pair drops both.** A ramp running from 10 down to 1 has no meaning the rest of
+ * this module could honour — `normalize` would clamp every cell to one end — so the honest
+ * answer is the automatic domain plus a note saying why, rather than a picture of one colour.
+ */
+export function readColorLimits(params: ParamValues): ColorLimits {
+  const min = readLimit(params.colorMin)
+  const max = readLimit(params.colorMax)
+  const problem = min.problem ?? max.problem
+  if (problem) return { problem }
+  if (min.value !== undefined && max.value !== undefined && min.value >= max.value) {
+    return { problem: `the minimum (${min.value}) is not below the maximum (${max.value})` }
+  }
+  return {
+    ...(min.value !== undefined ? { min: min.value } : {}),
+    ...(max.value !== undefined ? { max: max.value } : {}),
+  }
+}
+
+/**
+ * Whether the colour runs on a log scale — the mapping only, never the numbers.
+ *
+ * Offered on a sequential scale alone. A diverging ramp is centred on zero and its two arms are
+ * a *signed* magnitude, which is already the shape a log is reached for; taking a log across it
+ * would compress the two arms differently on either side of the middle, which is a picture of
+ * nothing. `visibleIf` on the node keeps it off screen there, and this keeps it off in the
+ * exporters and on a hand-edited file.
+ */
+export function heatmapLogColor(params: ParamValues): boolean {
+  return params.logColor === true && params.scale !== 'diverging'
+}

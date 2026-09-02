@@ -2265,7 +2265,8 @@ heatmap_2 <- as.matrix(pivot_matrix_df)
 cols_ <- rev(names(sort(heatmap_2["LC4", ], decreasing = TRUE)))
 rows_ <- c(intersect(cols_, rownames(heatmap_2)), setdiff(rownames(heatmap_2), cols_))
 heatmap_2 <- heatmap_2[rows_, cols_, drop = FALSE]
-lim_ <- max(abs(heatmap_2), na.rm = TRUE)
+hi_ <- max(abs(heatmap_2), na.rm = TRUE)
+lo_ <- -hi_
 
 heatmap_2 |>
   as.data.frame() |>
@@ -2273,11 +2274,12 @@ heatmap_2 |>
   pivot_longer(-row, names_to = "column", values_to = "value") |>
   mutate(
     row = factor(row, levels = rev(rownames(heatmap_2))),
-    column = factor(column, levels = colnames(heatmap_2))
+    column = factor(column, levels = colnames(heatmap_2)),
+    fill_ = pmin(pmax(value, lo_), hi_)
   ) |>
-  ggplot(aes(column, row, fill = value)) +
+  ggplot(aes(column, row, fill = fill_)) +
   geom_tile() +
-  scale_fill_distiller(palette = "RdBu", direction = 1, limits = c(-lim_, lim_)) +
+  scale_fill_distiller(palette = "RdBu", direction = 1, limits = c(lo_, hi_)) +
   geom_text(aes(label = signif(value, 3)), size = 3) +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
@@ -2331,6 +2333,36 @@ heatmap_4 |>
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
 
+```{r heatmap-5}
+# ── Heatmap ──
+heatmap_5 <- as.matrix(pivot_matrix_df)
+# NOTE: Coda draws this in its own blue ramp, which has no name here; Blues
+# is the nearest published one.
+hi_ <- 50
+lo_ <- 0
+# NOTE: The colour runs on a log scale and the values do not: the fill is
+# log10(1 + value - low) and the label, where one is drawn, is the value
+# itself. A cell past either end is clipped to it, as on the card — note
+# that this leaves the legend labelled in the transformed units.
+
+heatmap_5 |>
+  as.data.frame() |>
+  tibble::rownames_to_column("row") |>
+  pivot_longer(-row, names_to = "column", values_to = "value") |>
+  mutate(
+    row = factor(row, levels = rev(rownames(heatmap_5))),
+    column = factor(column, levels = colnames(heatmap_5)),
+    fill_ = pmin(pmax(value, lo_), hi_),
+    fill_ = log10(1 + fill_ - lo_)
+  ) |>
+  ggplot(aes(column, row, fill = fill_)) +
+  geom_tile() +
+  scale_fill_distiller(palette = "Blues", direction = 1, limits = c(0, log10(1 + hi_ - lo_))) +
+  geom_text(aes(label = signif(value, 3)), size = 3) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
 ```{r table-df-2}
 # ── Table ──
 table_df_2_out <- pivot_table_df
@@ -2348,19 +2380,19 @@ unpivot_2 <- pivot_table_df |>
   )
 ```
 
-```{r heatmap-5}
+```{r heatmap-6}
 # ── Heatmap ──
-heatmap_5 <- as.matrix(normalize)
+heatmap_6 <- as.matrix(normalize)
 # NOTE: Coda draws this in its own blue ramp, which has no name here; Blues
 # is the nearest published one.
 
-heatmap_5 |>
+heatmap_6 |>
   as.data.frame() |>
   tibble::rownames_to_column("row") |>
   pivot_longer(-row, names_to = "column", values_to = "value") |>
   mutate(
-    row = factor(row, levels = rev(rownames(heatmap_5))),
-    column = factor(column, levels = colnames(heatmap_5))
+    row = factor(row, levels = rev(rownames(heatmap_6))),
+    column = factor(column, levels = colnames(heatmap_6))
   ) |>
   ggplot(aes(column, row, fill = value)) +
   geom_tile() +

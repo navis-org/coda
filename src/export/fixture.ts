@@ -973,6 +973,15 @@ export function everythingGraph(): CodaGraph {
       params: { rowFilter: '/^LC[0-9]+$', colFilter: '!DN', sortBy: 'total' },
     },
     {
+      id: 'heatLog',
+      type: 'out.heatmap',
+      col: 13,
+      row: 5,
+      // The log arm and a manual pair, so the transformed fill and the raw annotations both
+      // reach the goldens — and `showValues` with `log` is the case where they differ.
+      params: { logColor: true, colorMin: '0', colorMax: '50', showValues: true },
+    },
+    {
       id: 'heatByRow',
       type: 'out.heatmap',
       col: 13,
@@ -1242,6 +1251,7 @@ export function everythingGraph(): CodaGraph {
     ['pivot', 'matrix', 'heatByRow', 'in'],
     ['pivot', 'matrix', 'heatByLabel', 'in'],
     ['pivot', 'matrix', 'heatFiltered', 'in'],
+    ['pivot', 'matrix', 'heatLog', 'in'],
     ['pivot', 'table', 'table', 'in'],
     ['find', 'neurons', 'unpivot', 'in'],
     ['pivot', 'table', 'unpivotWide', 'in'],

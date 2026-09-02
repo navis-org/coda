@@ -19,6 +19,14 @@ out.heatmap: scale, palette, showValues
 
 Sequential for counts and fractions; diverging when zero is a meaningful middle, as it is after a log ratio. Each scale has its own palette list: `Coda blue` and `Coda blue–red` are the validated defaults and reverse with the theme, so an empty cell always recedes into the surface. The rest — viridis, magma, inferno, plasma, cividis, rocket, mako for a sequential scale; RdBu, PuOr, BrBG for a diverging one — are matplotlib's and seaborn's, drawn as published on both themes and named the same way in the exported notebook.
 
+```coda-params
+out.heatmap: colorMin, colorMax, logColor
+```
+
+**Min and Max** pin the two ends of the ramp; empty lets the data decide. Pin both on two heatmaps and they can be read against each other. A cell outside the range is drawn in the end colour it passed rather than dropped, and the caption says `values clipped` when that happens. On a diverging scale only Max is offered — it is the magnitude of *both* arms, since they have to match for the middle colour to keep meaning zero.
+
+**Log colour** spreads the ramp over a logarithm — the colour only. The printed cells, the tooltip and the two ends of the colour bar stay the values themselves. This is the setting for connectivity, where a handful of strong pairs otherwise paint the whole long tail as empty: against a maximum of 100, a weight of 1 is 1% of a linear ramp and 15% of a log one.
+
 > [!NOTE] Put a [Normalize](#core.normalize) in front if one row dominates
 > A heatmap of raw synapse counts is usually a picture of which cell type is numerous.
 

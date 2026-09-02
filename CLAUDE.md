@@ -404,6 +404,19 @@ Area-specific — the rule, then the doc that holds why:
   within two channel values of the 256-entry table; 32 bands on cividis) and **not flipped with
   the theme**, so `cmap='viridis'` in the notebook is the picture on the card. `total` is the
   plain sum: the output cannot read a presentational param. See [docs/nodes.md](docs/nodes.md).
+- **The heatmap's colour ends are manual-or-automatic and its log is on the colour alone.** One
+  `colorDomain` decides a value's ramp position, so `normalize`, the per-cell `bucketScale`, the
+  hit test and the SVG export cannot disagree. A limit is a **`string` param** because a `number`
+  has no unset state (`NumberField` coerces back to the default) and `0` is an ordinary limit;
+  an inverted or unreadable pair is **dropped whole**, since honouring half of it clamps every
+  cell to one end. Out-of-range clamps and the caption admits it. **Diverging offers one end**,
+  the magnitude of both arms, or the middle stops meaning zero. The log is
+  `log1p(v − lo) / log1p(span)` — labels, tooltip and bar ends stay the values, the shift by `lo`
+  is what makes it total on negative data, and it equals the exporters' `log10(1 + v)` because a
+  ratio of logs is base-independent. It stays **monotonic**, so the fold's strongest-cell rule
+  needed no case. seaborn's **`annot` takes a frame of its own** and ggplot gets a `fill_` column
+  beside the untouched `value`: that is how the numbers stay raw under a transformed fill, and
+  both were run. See [docs/viewers.md](docs/viewers.md).
 - **The heatmap's zoom is a window in matrix units, and the window is what gets folded.** Not a
   scaled canvas: scaling keeps the fitted fold's blocks and enlarges them, and scales the labels,
   which is the one thing they must not do. `HeatmapWindow` goes into `buildHeatmapSpec`, so

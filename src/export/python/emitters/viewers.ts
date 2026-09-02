@@ -18,7 +18,11 @@ import {
   readSizeSpec,
 } from '../../../nodes/lib/encodingParams'
 import { decodeClauses, resolveFilters, usesRegex } from '../../../nodes/lib/tableFilter'
-import { heatmapPaletteOf } from '../../../nodes/lib/heatmapParams'
+import {
+  heatmapLogColor,
+  heatmapPaletteOf,
+  readColorLimits,
+} from '../../../nodes/lib/heatmapParams'
 import type { MatrixAxis } from '../../../nodes/lib/matrixShape'
 import {
   orderPlan,
@@ -416,16 +420,64 @@ registerEmitter('out.heatmap', (ctx) => {
       ),
     )
   }
+  /*
+   * The colour ends and the log mapping, which is where the frame being drawn stops being the
+   * frame the node output. `_lo`/`_hi` are computed rather than inlined even when the limits
+   * are manual, so the log arm below has one expression to read them from.
+   */
+  const limits = readColorLimits(ctx.params)
+  const log = heatmapLogColor(ctx.params)
+  const manual = limits.min !== undefined || limits.max !== undefined
+  if (limits.problem) {
+    lines.push(
+      ...ctx.note(
+        `Coda is ignoring the colour limits because ${limits.problem}, so neither this nor the ` +
+          `card is using them.`,
+      ),
+    )
+  }
+
+  let drawn = out
+  if (manual || log) {
+    ctx.require('numpy')
+    lines.push(
+      diverging
+        ? `_hi = ${limits.max ?? `float(np.nanmax(np.abs(${out}.values)))`}`
+        : `_hi = ${limits.max ?? `float(np.nanmax(${out}.values))`}`,
+      diverging
+        ? `_lo = -_hi`
+        : `_lo = ${limits.min ?? `min(0.0, float(np.nanmin(${out}.values)))`}`,
+    )
+  }
+  if (log) {
+    drawn = '_plot'
+    lines.push(
+      ...ctx.note(
+        'The colour runs on a log scale and the values do not: Coda maps a cell through ' +
+          'log10(1 + value - low) and prints the value itself, so the annotations below come ' +
+          'from the untransformed frame. A cell past either end is clipped to it, as on the card.',
+      ),
+      `_plot = np.log10(1 + (${out}.clip(_lo, _hi) - _lo))`,
+    )
+  }
+
   const args = [
     `cmap=${pyStr(cmap)}`,
     // seaborn's `center` makes the range symmetric about it, which is what Coda's diverging
     // scale does; without it a matrix running -3..30 would put zero a tenth of the way along.
-    ...(diverging ? ['center=0'] : []),
-    ...(showValues ? ['annot=True', "fmt='.3g'"] : []),
+    ...(diverging && !log ? ['center=0'] : []),
+    ...(log
+      ? ['vmin=0', `vmax=float(np.log10(1 + _hi - _lo))`]
+      : manual
+        ? ['vmin=_lo', 'vmax=_hi']
+        : []),
+    // `annot` takes a frame of its own, which is what keeps the printed numbers the values
+    // where the colour is a logarithm of them.
+    ...(showValues ? [log ? `annot=${out}` : 'annot=True', "fmt='.3g'"] : []),
   ]
   lines.push(
     `plt.figure(figsize=(10, 8))`,
-    `sns.heatmap(${out}, ${args.join(', ')})`,
+    `sns.heatmap(${drawn}, ${args.join(', ')})`,
     `plt.tight_layout()`,
     `plt.show()`,
   )

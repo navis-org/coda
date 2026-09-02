@@ -2553,6 +2553,50 @@ decide one boolean, which put it in the dependency list of a pass that walks eve
 toggling it on a four-million-cell matrix re-scanned the whole thing to compute `false`.
 `labelsFit` is now the size test alone and the param is `&&`-ed in beside it.
 
+### The colour domain: two manual ends and a log mapping
+
+Both are presentational, so neither reaches the provenance key — and both go through
+`colorDomain`, which is the one place a value's position on the ramp is decided. That matters
+more than it sounds: `normalize`, the hoisted `bucketScale` the fold runs per cell, the hit
+test and the SVG export all read the same domain, so a log mapping could not be applied to the
+cells and missed by the export.
+
+**A limit is a `string` param and empty means automatic.** `NumberField` coerces anything
+unparseable back to the declared default, so a `number` param has no unset state and would need
+a sentinel — and `0` is an ordinary limit. `readColorLimits` parses both, and **drops an
+inverted or unreadable pair rather than honouring half of it**: a ramp running from 10 down to 1
+would clamp every cell to one end, which is a picture of one colour with no explanation, so the
+caption says `limits ignored` instead. Out-of-range cells clamp to the end they passed, as they
+do in matplotlib, and the caption admits that too (`values clipped`) — a cell silently painted
+the same as the maximum is the failure that admission exists to prevent.
+
+**On a diverging scale there is one end to set, not two.** The arms have to stay the same length
+or the neutral colour stops meaning zero, which is the only thing that ramp is read for, so
+`Max` is the magnitude of both and `Min` is not offered there.
+
+**The log is on the colour and on nothing else.** `log1p(v − lo) / log1p(span)`, so the printed
+cell values, the tooltip and the two ends of the colour bar are the numbers themselves — a log
+scale is a way of *looking* at a distribution, where a relabelled cell is a way of misreading
+one. The shift by `lo` is what makes it total: `lo` is the bottom of the ramp, so `v − lo` is
+never negative and the logarithm always exists, even on a matrix that goes below zero. With the
+usual `lo` of 0 it is exactly `log10(1 + v)`, which is what both exporters emit — natural logs
+here and base 10 there draw the same picture, since a ratio of two logs is base-independent, and
+a test pins that. It is offered on the sequential scale alone: a diverging ramp's two arms are
+already a signed magnitude, and taking a log across the middle compresses the two sides
+differently.
+
+Two things fall out for the rest of the module. The mapping stays **monotonic**, so the fold's
+"strongest cell in the block" rule is unaffected and needed no log-specific case. And `bucketScale`
+keeps one `Math.log1p` per cell — there is no algebraic way around it, and it measures at about
+8 ms over four million cells, inside the fold that was already the expensive pass.
+
+The exporters had to work for it. seaborn colours the transformed frame while **`annot` takes a
+frame of its own**, so `annot=heatmap` keeps the printed numbers raw where the fill is a
+logarithm of them; ggplot gets a `fill_` column clamped and transformed beside the untouched
+`value` the label reads, which is also how the clamp is expressed without reaching for
+`scales::oob_squish`. Both were run: the annotations come back as the raw values, `-3` and `200`
+included, and nothing goes NA at a limit.
+
 ### Zoom is a window, and the window is the fold's input
 
 Wheel zooms about the pointer, a drag pans, double-click or ⤢ fits — the scatter's gestures,

@@ -62,7 +62,7 @@ import type { MatrixValue } from '../../core/values'
 import { formatCompact, labelStep, truncateLabel } from '../format'
 import type { Mode } from '../colors'
 import { heatmapDivergingColor, heatmapSequentialColor, inkOn } from '../colors'
-import type { HeatmapPalette } from '../../nodes/lib/heatmapParams'
+import type { ColorLimits, HeatmapPalette } from '../../nodes/lib/heatmapParams'
 import { isDivergingPalette, isSequentialPalette } from '../../nodes/lib/heatmapParams'
 
 /**
@@ -166,6 +166,21 @@ export interface ColorDomain {
   lo: number
   hi: number
   neutral: number
+  /**
+   * Map a value to the ramp through `log(1 + v - lo)` rather than linearly.
+   *
+   * On the **colour only**: the printed cell values, the tooltip and the colour bar's two ends
+   * are the numbers themselves, because a log axis is a way of *looking* at a distribution and
+   * a relabelled cell is a way of misreading one. Connectivity is the case it exists for — a
+   * handful of strong pairs and a long tail of ones, where a linear ramp paints the tail as
+   * empty.
+   *
+   * Offered on a sequential scale alone (see `heatmapLogColor`), which is what makes the shift
+   * by `lo` safe: `lo` is the bottom of the ramp, so `v - lo` is never negative and the
+   * logarithm always exists. With the usual `lo` of 0 this is exactly `log10(1 + v)`, which is
+   * the expression both exporters emit.
+   */
+  log?: boolean
 }
 
 /**
@@ -278,21 +293,48 @@ export function matrixExtent(values: Float64Array): HeatmapExtent {
  * Sequential runs from zero (or lower, where the data goes negative) to the maximum, so an
  * all-positive matrix reads against a baseline of nothing rather than against its own smallest
  * cell. Diverging is symmetric about zero, or the two arms would encode different magnitudes.
+ *
+ * **A manual limit replaces one end, and on a diverging scale there is only one to replace.**
+ * The two arms of a diverging ramp have to stay the same length or the neutral colour stops
+ * meaning zero, which is the one thing that ramp is read for — so `max` there is the magnitude
+ * of both arms and `min` is not offered. Out-of-range cells clamp to the end they passed, as
+ * they do in matplotlib; the viewer's caption admits it rather than letting them vanish.
  */
-export function colorDomain(extent: HeatmapExtent, scale: HeatmapScale): ColorDomain {
+export function colorDomain(
+  extent: HeatmapExtent,
+  scale: HeatmapScale,
+  options: { limits?: ColorLimits; log?: boolean } = {},
+): ColorDomain {
+  const { limits = {}, log } = options
   if (scale === 'diverging') {
-    const magnitude = Math.max(Math.abs(extent.min), Math.abs(extent.max)) || 1
+    const magnitude =
+      limits.max ?? (Math.max(Math.abs(extent.min), Math.abs(extent.max)) || 1)
     return { lo: -magnitude, hi: magnitude, neutral: 0 }
   }
-  const lo = Math.min(0, extent.min)
-  return { lo, hi: extent.max, neutral: lo }
+  const lo = limits.min ?? Math.min(0, extent.min)
+  const hi = limits.max ?? extent.max
+  return { lo, hi, neutral: lo, ...(log ? { log: true } : {}) }
+}
+
+/**
+ * Ramp position of a value in [0, 1], the one place the linear and log mappings both live.
+ *
+ * The log arm is `log1p` of the distance from the bottom over `log1p` of the span — natural
+ * logs, because a ratio of two logs is the same in any base, so this and the exporters'
+ * `log10` draw the same picture.
+ */
+function rampPosition(value: number, domain: ColorDomain): number {
+  const span = domain.hi - domain.lo
+  if (!(span > 0)) return 0
+  const above = value - domain.lo
+  if (above <= 0) return 0
+  if (above >= span) return 1
+  return domain.log ? Math.log1p(above) / Math.log1p(span) : above / span
 }
 
 /** Ramp position of a value, clamped to [0, 1]. */
 export function normalize(value: number, domain: ColorDomain): number {
-  const span = domain.hi - domain.lo || 1
-  const t = (value - domain.lo) / span
-  return t < 0 ? 0 : t > 1 ? 1 : t
+  return rampPosition(value, domain)
 }
 
 /** Ramp bucket of a value. */
@@ -621,14 +663,28 @@ export function buildHeatmapSpec(options: HeatmapSpecOptions): HeatmapSpec {
  *
  * `bucketOf` is the readable single-value form and stays exported for callers holding one; this
  * is the same arithmetic for a loop that runs up to four million times, where recomputing
- * `hi - lo` and reloading three object properties per cell is most of the pass.
+ * `hi - lo` and reloading three object properties per cell is most of the pass. The log arm
+ * hoists `log1p(span)` for the same reason, and keeps `Math.log1p` per cell — there is no
+ * algebraic way around one logarithm per cell, and it is ~8 ms at four million.
  */
 function bucketScale(domain: ColorDomain): (value: number) => number {
   const lo = domain.lo
-  const k = (RAMP_STEPS - 1) / (domain.hi - domain.lo || 1)
+  const span = domain.hi - domain.lo
+  const top = RAMP_STEPS - 1
+  if (!(span > 0)) return () => 0
+  if (domain.log) {
+    const k = top / Math.log1p(span)
+    return (value: number) => {
+      const above = value - lo
+      if (above <= 0) return 0
+      if (above >= span) return top
+      return Math.round(Math.log1p(above) * k)
+    }
+  }
+  const k = top / span
   return (value: number) => {
     const t = (value - lo) * k
-    return t < 0 ? 0 : t > RAMP_STEPS - 1 ? RAMP_STEPS - 1 : Math.round(t)
+    return t < 0 ? 0 : t > top ? top : Math.round(t)
   }
 }
 

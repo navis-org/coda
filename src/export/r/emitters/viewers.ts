@@ -13,7 +13,11 @@ import {
   readSizeSpec,
 } from '../../../nodes/lib/encodingParams'
 import { decodeClauses, resolveFilters, usesRegex } from '../../../nodes/lib/tableFilter'
-import { heatmapPaletteOf } from '../../../nodes/lib/heatmapParams'
+import {
+  heatmapLogColor,
+  heatmapPaletteOf,
+  readColorLimits,
+} from '../../../nodes/lib/heatmapParams'
 import type { MatrixAxis } from '../../../nodes/lib/matrixShape'
 import {
   orderPlan,
@@ -151,13 +155,25 @@ registerEmitter('out.heatmap', (ctx) => {
    * the negative end of RdBu. Coda's own two have no name here, so the nearest published one
    * stands in, and for the diverging pair that is RdBu the other way round.
    */
+  const limits = readColorLimits(ctx.params)
+  const log = heatmapLogColor(ctx.params)
+  const manual = limits.min !== undefined || limits.max !== undefined
+  /*
+   * The ends are stated whenever they are not simply the data's: always on a diverging scale,
+   * where they hold the two arms the same length, and wherever a limit or the log was asked
+   * for. Under the log they are in the *transformed* units the fill is drawn in.
+   */
+  const scaled = diverging || manual || log
+  const ends = scaled
+    ? `, limits = ${log ? 'c(0, log10(1 + hi_ - lo_))' : 'c(lo_, hi_)'}`
+    : ''
   const fill = diverging
     ? palette === 'coda'
-      ? `scale_fill_distiller(palette = "RdBu", direction = -1, limits = c(-lim_, lim_))`
-      : `scale_fill_distiller(palette = ${rStr(palette)}, direction = 1, limits = c(-lim_, lim_))`
+      ? `scale_fill_distiller(palette = "RdBu", direction = -1${ends})`
+      : `scale_fill_distiller(palette = ${rStr(palette)}, direction = 1${ends})`
     : palette === 'coda'
-      ? `scale_fill_distiller(palette = "Blues", direction = 1)`
-      : `scale_fill_viridis_c(option = ${rStr(palette)})`
+      ? `scale_fill_distiller(palette = "Blues", direction = 1${ends})`
+      : `scale_fill_viridis_c(option = ${rStr(palette)}${ends})`
   if (palette === 'coda') {
     lines.push(
       ...ctx.note(
@@ -166,9 +182,32 @@ registerEmitter('out.heatmap', (ctx) => {
       ),
     )
   }
+  if (limits.problem) {
+    lines.push(
+      ...ctx.note(
+        `Coda is ignoring the colour limits because ${limits.problem}, so neither this nor the ` +
+          `card is using them.`,
+      ),
+    )
+  }
   if (diverging) {
     // Symmetric about zero, which is what Coda's diverging scale does and ggplot's does not.
-    lines.push(`lim_ <- max(abs(${out}), na.rm = TRUE)`)
+    lines.push(`hi_ <- ${limits.max ?? `max(abs(${out}), na.rm = TRUE)`}`, `lo_ <- -hi_`)
+  } else if (scaled) {
+    lines.push(
+      `hi_ <- ${limits.max ?? `max(${out}, na.rm = TRUE)`}`,
+      `lo_ <- ${limits.min ?? `min(0, ${out}, na.rm = TRUE)`}`,
+    )
+  }
+  if (log) {
+    lines.push(
+      ...ctx.note(
+        'The colour runs on a log scale and the values do not: the fill is ' +
+          'log10(1 + value - low) and the label, where one is drawn, is the value itself. A ' +
+          'cell past either end is clipped to it, as on the card — note that this leaves the ' +
+          'legend labelled in the transformed units.',
+      ),
+    )
   }
 
   // A matrix has to be melted before ggplot can draw it; `pheatmap` would take it directly but
@@ -182,9 +221,17 @@ registerEmitter('out.heatmap', (ctx) => {
     `  pivot_longer(-row, names_to = "column", values_to = "value") |>`,
     `  mutate(`,
     `    row = factor(row, levels = rev(rownames(${out}))),`,
-    `    column = factor(column, levels = colnames(${out}))`,
+    `    column = factor(column, levels = colnames(${out}))${scaled ? ',' : ''}`,
+    ...(scaled
+      ? [
+          // A column of its own rather than `oob = scales::squish` on the scale: clamping to
+          // the ends is what Coda does, and this keeps `value` itself for the label.
+          `    fill_ = pmin(pmax(value, lo_), hi_)${log ? ',' : ''}`,
+          ...(log ? [`    fill_ = log10(1 + fill_ - lo_)`] : []),
+        ]
+      : []),
     `  ) |>`,
-    `  ggplot(aes(column, row, fill = value)) +`,
+    `  ggplot(aes(column, row, fill = ${scaled ? 'fill_' : 'value'})) +`,
     `  geom_tile() +`,
     `  ${fill} +`,
     ...(ctx.params.showValues === true

@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 
 import type { MatrixValue } from '../../core/values'
-import type { HeatmapPalette } from '../../nodes/lib/heatmapParams'
+import type { ColorLimits, HeatmapPalette } from '../../nodes/lib/heatmapParams'
 import { CHART_INK, chartSurface, currentMode } from '../colors'
 import { exportBaseName as makeBaseName, matrixToCsv } from '../export'
 import { formatCompact, formatNumber } from '../format'
@@ -32,12 +32,17 @@ import { tooltipPoint } from './tooltipPoint'
 import type { ExportSource } from './ViewerActions'
 import { ViewerActions } from './ViewerActions'
 import { useElementSize } from './useElementSize'
+import { useStable } from './useStable'
 
 export interface HeatmapViewerProps {
   matrix: MatrixValue
   scale?: 'sequential' | 'diverging'
   /** A name from `heatmapParams.ts`; `coda` is the validated default. */
   palette?: HeatmapPalette
+  /** Manual ends of the ramp, already parsed — see `readColorLimits`. */
+  limits?: ColorLimits
+  /** Map the colour through a log, leaving every number on screen as it is. */
+  logColor?: boolean
   showValues?: boolean
   compact?: boolean
   /** Filename stem for CSV/SVG/PNG export. */
@@ -56,6 +61,9 @@ interface Hover {
 
 /** Steps in the caption's colour bar — a coarse sampling of the same ramp the cells use. */
 const BAR_STEPS = 9
+
+/** Stable identity, so an absent `limits` prop does not re-run the domain memo every render. */
+const EMPTY_LIMITS: ColorLimits = {}
 
 /** A pan in progress: where the pointer was last, in box coordinates. */
 interface Pan {
@@ -105,6 +113,8 @@ export function HeatmapViewer({
   matrix,
   scale = 'sequential',
   palette = 'coda',
+  limits: rawLimits = EMPTY_LIMITS,
+  logColor = false,
   showValues = false,
   compact = false,
   baseName,
@@ -139,7 +149,23 @@ export function HeatmapViewer({
    * The extent scan apart from the fold: one walk of every cell, independent of the window, so
    * a pan does not repeat it — and so a zoom cannot change what a colour means.
    */
-  const domain = useMemo(() => colorDomain(matrixExtent(matrix.values), scale), [matrix, scale])
+  /*
+   * By value, not by identity: `readColorLimits` parses two params into a fresh object on every
+   * render of the editor, and the domain is a dependency of the *fold* — so an unstable one
+   * would re-fold a four-million-cell matrix every time anything on the canvas re-rendered.
+   * `useStable` is the rule CLAUDE.md states for exactly this, and the network and scatter
+   * viewers were both bitten by it first.
+   */
+  const limits = useStable(rawLimits)
+
+  const extent = useMemo(() => matrixExtent(matrix.values), [matrix])
+  const domain = useMemo(
+    () => colorDomain(extent, scale, { limits, log: logColor }),
+    [extent, scale, limits, logColor],
+  )
+  // What the caption has to own up to: cells pushed onto an end, and a mapping that is not
+  // linear. Both are invisible in the picture itself, which is exactly why they are said.
+  const clipped = extent.min < domain.lo || extent.max > domain.hi
 
   /*
    * The fold behind one memo, keyed on what genuinely changes it. Not on the theme: `buckets`
@@ -516,6 +542,34 @@ export function HeatmapViewer({
             }
           >
             labels thinned
+          </span>
+        )}
+        {clipped && !compact && (
+          <span
+            className="viewer__note"
+            title={`The colour scale stops at ${formatCompact(domain.lo)} and ${formatCompact(
+              domain.hi,
+            )}, and this matrix runs ${formatCompact(extent.min)} to ${formatCompact(
+              extent.max,
+            )}. Cells outside are drawn in the end colour they passed, not dropped.`}
+          >
+            values clipped
+          </span>
+        )}
+        {domain.log && !compact && (
+          <span
+            className="viewer__note"
+            title="The colour runs on a log scale, so equal steps of colour are not equal steps of value. The numbers — the printed cells, the tooltip and the two ends of the bar — are the values themselves."
+          >
+            log colour
+          </span>
+        )}
+        {limits.problem && !compact && (
+          <span
+            className="viewer__note"
+            title={`The colour limits are being ignored because ${limits.problem}. The scale is the one the data gives.`}
+          >
+            limits ignored
           </span>
         )}
         {view && spec && (

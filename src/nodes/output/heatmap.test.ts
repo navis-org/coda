@@ -96,9 +96,22 @@ describe('what reaches the provenance key', () => {
     expect(clustered).not.toContain('sortKey')
     // Independent axes have nothing to follow.
     expect(ids({ ...base, sortBy: 'total', sortAxis: 'both' })).not.toContain('sortFollow')
-    // The card draws the order picker and the key, and keeps the details for the panel.
+    // The card draws the pickers somebody reaches for and keeps the rest for the panel: the
+    // colour ends and the log switch are settings you change once, not while reading.
     const advanced = hiddenParams(def(), { ...base, sortBy: 'value' }).map((p) => p.id)
-    expect(advanced).toEqual(['sortAxis', 'sortFollow', 'sortReverse'])
+    expect(advanced).toEqual([
+      'colorMin',
+      'colorMax',
+      'logColor',
+      'sortAxis',
+      'sortFollow',
+      'sortReverse',
+    ])
+    // Neither colour end nor the log switch is offered where it would not mean anything.
+    const diverging = configurableParams(def(), { ...base, scale: 'diverging' }).map((p) => p.id)
+    expect(diverging).not.toContain('colorMin')
+    expect(diverging).not.toContain('logColor')
+    expect(diverging).toContain('colorMax')
   })
 
   it('declares the Order tab as changing data and the Colour tab as not', () => {

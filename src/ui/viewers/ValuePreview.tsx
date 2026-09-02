@@ -29,7 +29,11 @@ import type { DistributionStyle } from './DistributionViewer'
 import { HistogramViewer } from './HistogramViewer'
 import { PieViewer } from './PieViewer'
 import { HeatmapViewer } from './HeatmapViewer'
-import { heatmapPaletteOf } from '../../nodes/lib/heatmapParams'
+import {
+  heatmapLogColor,
+  heatmapPaletteOf,
+  readColorLimits,
+} from '../../nodes/lib/heatmapParams'
 import { LazyNetworkViewer, LazyViewer3D } from './LazyViewers'
 import type { BackgroundChoice, SkeletonWidthMode } from './viewer3dScene'
 import { NeuroglancerViewer } from './NeuroglancerViewer'
@@ -491,6 +495,8 @@ function ValuePreviewInner({
         matrix={value}
         scale={node.params.scale === 'diverging' ? 'diverging' : 'sequential'}
         palette={heatmapPaletteOf(node.params)}
+        limits={readColorLimits(node.params)}
+        logColor={heatmapLogColor(node.params)}
         showValues={node.params.showValues === true}
         {...shared}
       />

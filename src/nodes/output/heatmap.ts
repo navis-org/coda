@@ -113,6 +113,57 @@ export const heatmapNode = registerNode({
         'Coda’s pair puts blue on the negative arm. The ColorBrewer sets run as published — ' +
         'RdBu has red at the negative end — so the name means what it means everywhere else.',
     },
+    /*
+     * The two ends of the ramp, and empty means "ask the data". `string` rather than `number`
+     * because a number param has no unset state — `ParamField` coerces anything unparseable
+     * back to the default, and 0 is an ordinary limit rather than a sentinel. See
+     * `readColorLimits`, which is where an inverted or unreadable pair is dropped.
+     */
+    {
+      id: 'colorMin',
+      kind: 'string',
+      label: 'Min',
+      default: '',
+      placeholder: 'auto',
+      presentational: true,
+      advanced: true,
+      group: 'colour',
+      visibleIf: (p) => p.scale !== 'diverging',
+      help:
+        'The value at the bottom of the colour ramp. Empty lets the data decide — zero, or the ' +
+        'lowest cell where the matrix goes negative. Cells below it are drawn in the end ' +
+        'colour rather than dropped, and the caption says so.',
+    },
+    {
+      id: 'colorMax',
+      kind: 'string',
+      label: 'Max',
+      default: '',
+      placeholder: 'auto',
+      presentational: true,
+      advanced: true,
+      group: 'colour',
+      help:
+        'The value at the top of the colour ramp; empty lets the data decide. Useful for ' +
+        'holding one scale across two heatmaps you mean to compare. On a diverging scale this ' +
+        'is the magnitude of both arms, since they have to match for the middle colour to keep ' +
+        'meaning zero.',
+    },
+    {
+      id: 'logColor',
+      kind: 'boolean',
+      label: 'Log colour',
+      default: false,
+      presentational: true,
+      advanced: true,
+      group: 'colour',
+      visibleIf: (p) => p.scale !== 'diverging',
+      help:
+        'Spread the colour over a log scale — the mapping only. The printed cells, the tooltip ' +
+        'and the two ends of the colour bar stay the values themselves. This is the setting ' +
+        'for connectivity, where a few strong pairs otherwise paint the whole tail as empty. ' +
+        'Not offered on a diverging scale, whose two arms are already a signed magnitude.',
+    },
     {
       id: 'showValues',
       kind: 'boolean',

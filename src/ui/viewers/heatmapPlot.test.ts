@@ -26,6 +26,7 @@ import {
   isFullWindow,
   labelTicks,
   matrixExtent,
+  normalize,
   panWindow,
   pointToMatrix,
   rampColors,
@@ -50,16 +51,21 @@ function spec(
     width: number
     height: number
     window: HeatmapWindow
+    log: boolean
   }> = {},
 ) {
   const matrix = makeMatrix(names('r', rows), names('c', cols), values)
+  const scale = over.scale ?? 'sequential'
   return buildHeatmapSpec({
     matrix,
-    scale: over.scale ?? 'sequential',
+    scale,
     width: over.width ?? BOX.width,
     height: over.height ?? BOX.height,
     showLabels: true,
     ...(over.window ? { window: over.window } : {}),
+    ...(over.log
+      ? { domain: colorDomain(matrixExtent(values), scale, { log: true }) }
+      : {}),
   })
 }
 
@@ -338,6 +344,103 @@ describe('the window', () => {
       rows: 1,
       cols: 2,
     })
+  })
+})
+
+describe('the colour domain', () => {
+  const extent = { min: -4, max: 20 }
+
+  it('takes its ends from the data by default', () => {
+    expect(colorDomain(extent, 'sequential')).toEqual({ lo: -4, hi: 20, neutral: -4 })
+    // An all-positive matrix reads against a baseline of nothing, not its own smallest cell.
+    expect(colorDomain({ min: 3, max: 20 }, 'sequential')).toEqual({ lo: 0, hi: 20, neutral: 0 })
+    expect(colorDomain(extent, 'diverging')).toEqual({ lo: -20, hi: 20, neutral: 0 })
+  })
+
+  it('lets a manual end replace either one', () => {
+    expect(colorDomain(extent, 'sequential', { limits: { min: 0, max: 5 } })).toMatchObject({
+      lo: 0,
+      hi: 5,
+    })
+    // One end alone leaves the other to the data.
+    expect(colorDomain(extent, 'sequential', { limits: { max: 5 } })).toMatchObject({
+      lo: -4,
+      hi: 5,
+    })
+  })
+
+  it('keeps a diverging ramp symmetric, so its middle still means zero', () => {
+    // `max` is the magnitude of both arms there — an asymmetric pair would put the neutral
+    // colour somewhere other than zero, which is the one thing that ramp is read for.
+    expect(colorDomain(extent, 'diverging', { limits: { min: 1, max: 5 } })).toEqual({
+      lo: -5,
+      hi: 5,
+      neutral: 0,
+    })
+  })
+
+  it('clamps a value past either end rather than dropping it', () => {
+    const domain = colorDomain(extent, 'sequential', { limits: { min: 0, max: 10 } })
+    expect(normalize(-99, domain)).toBe(0)
+    expect(normalize(99, domain)).toBe(1)
+    expect(normalize(5, domain)).toBeCloseTo(0.5, 12)
+  })
+})
+
+describe('the log colour mapping', () => {
+  const domain = (over: Partial<{ min: number; max: number }> = {}) =>
+    colorDomain({ min: 0, max: 100 }, 'sequential', { limits: over, log: true })
+
+  it('is log of the distance from the bottom of the ramp', () => {
+    const d = domain()
+    expect(d.log).toBe(true)
+    // Both ends are exactly the ends, whatever the mapping in between.
+    expect(normalize(0, d)).toBe(0)
+    expect(normalize(100, d)).toBe(1)
+    // log1p(v) / log1p(100) — which is `log10(1 + v) / log10(101)`, the exporters' expression.
+    expect(normalize(9, d)).toBeCloseTo(Math.log10(10) / Math.log10(101), 12)
+  })
+
+  it('lifts the long tail a linear ramp paints as empty', () => {
+    // The reason it exists: on connectivity a weight of 1 against a maximum of 100 is 1% of a
+    // linear ramp — indistinguishable from nothing — and 15% of a log one.
+    const linear = normalize(1, colorDomain({ min: 0, max: 100 }, 'sequential'))
+    const log = normalize(1, domain())
+    expect(linear).toBeCloseTo(0.01, 12)
+    expect(log).toBeGreaterThan(0.14)
+    expect(log).toBeLessThan(0.16)
+  })
+
+  it('is monotonic, so a fold still keeps the strongest cell of its block', () => {
+    const d = domain()
+    let last = -1
+    for (let v = 0; v <= 100; v += 0.5) {
+      const t = normalize(v, d)
+      expect(t).toBeGreaterThanOrEqual(last)
+      last = t
+    }
+  })
+
+  it('never asks for the log of a negative, whatever the data does', () => {
+    // `lo` is the bottom of the ramp, so `v - lo` cannot be negative — which is what makes the
+    // shift safe on a matrix that goes below zero.
+    const d = colorDomain({ min: -50, max: 50 }, 'sequential', { log: true })
+    for (const v of [-1000, -50, -1, 0, 50, 1000]) {
+      const t = normalize(v, d)
+      expect(Number.isFinite(t)).toBe(true)
+      expect(t).toBeGreaterThanOrEqual(0)
+      expect(t).toBeLessThanOrEqual(1)
+    }
+  })
+
+  it('paints the cells through the same mapping the ramp position gives', () => {
+    // The spec's buckets are the hoisted form of `normalize`; the two must not drift.
+    const values = Float64Array.from([0, 1, 9, 100])
+    const s = spec(1, 4, values, { log: true })
+    const d = s.domain
+    for (let i = 0; i < values.length; i++) {
+      expect(s.buckets[i]).toBe(Math.round(normalize(values[i]!, d) * (RAMP_STEPS - 1)))
+    }
   })
 })
 
